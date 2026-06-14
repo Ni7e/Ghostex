@@ -22,7 +22,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
   - Native pane focus follows the surface that actually owns keyboard input. Focused borders track the AppKit first responder, directional focus uses rendered pane geometry, and command panels plus project-editor companion panes avoid stale retargeting.
   - Sleeping panes behave like selected panes instead of empty gaps. Their tab chrome remains visible, placeholders show "Press Any Key to Wake", and normal key presses wake the sleeping terminal in place.
   - Sidebar tag filters can be reordered, hidden, disabled, and reset from Settings. Hidden or disabled tags are removed from active filtering so old filter state does not keep sessions invisible.
-  - Cross-platform Electron pane focus now follows split-layout geometry and retries terminal focus so keyboard navigation lands in the intended terminal.
 - Minor
   - Sparkle's titlebar update button now fades only while an accepted update is actively downloading.
   - App Shots is opt-in by default and marked as Beta in Settings.
@@ -57,7 +56,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
   - Project Board and Tickets cards are denser, placeholders are clearer, and bulk actions and group labels are easier to scan.
   - First-launch preferences and skill-install status rows are simpler, with status presented in the action area.
   - Claude Code and Codex terminal keybindings line up with the current prompt-editor and terminal shortcut model.
-  - Electron Previous Sessions now preserves previous-session identity to match the macOS sidebar behavior.
   - Android startup recovery handles empty-service startup more reliably.
 
 [Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.11.0)
@@ -84,7 +82,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
 - Agent support expands with Kiro CLI and OMP hook sidecars, mobile session status ingestion, Claude bare `/rename` staging for first-prompt titles, path-based live-process identity repair, and a default Accept All mode setting.
 - App Shots now stage captured desktop context in the focused or recent live agent session instead of being Codex-only, and create the configured default prompt-agent session only when no agent target is available.
 - Sidebar and settings polish includes a collapse command/hotkey, Copy Session Details, Ghostty settings folded into the main settings sections, and Agent Hub file contents loaded only when opened.
-- Android, iOS, Electron, TUI, and zehn integrations are refreshed for gxserver status, shared app toasts, status colors, grouped history search, and iOS refresh indicators that stay tied to active refresh requests.
 - Packaged macOS runtime validation now checks the bundled code-server Node 22 runtime, ripgrep, T3 Code native helpers, Beads, and source-map pruning without executing sealed native modules during validation.
 
 [Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.10.0)
@@ -101,7 +98,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <description sparkle:format="markdown"><![CDATA[# Ghostex 4.1.5
 
-- Installed agent hooks, gxserver resume lookup, native sidebar state helpers, and Electron command-pane updates now run through Ghostex-owned bundled runtimes instead of `/usr/bin/python3` or user-installed Node interpreters, so hook sidecars and command status updates keep working on machines without Python.
 - Claude sessions migrated from Ghostex 3.6 can wake more reliably because gxserver repair backfills transcript paths and saved resume commands, and wake resolves Claude's real session id before running `claude --resume` instead of trusting a sidebar title.
 - Context-menu Sleep no longer parks a row as sleeping while the zmx provider is still alive; Wake and intentional close flows still show immediate sleeping feedback until the host snapshot confirms the same state.
 - Project board ticket creation reconciles each project's Beads issue prefix before mutations, and local board actions send both project id and project path so gxserver can reject stale URL/id mismatches.
@@ -176,6 +172,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: 0p5I3qynuA3wQXZYiHVLS9yVbJZPnOR8u42fnq5jQUmPhYEN8L3joeF5MNTOjfLZRi44au7DS8M+Oi83e1MZBg==
-length: 18215
+edSignature: 1v7XDYSH+RBNDr3MxSr/1KQLysQq7cBJBPnz9Y5aosN/nj8hpVyqhnp2H0ZhXxRelUbJOSq0fkkVyaiuoOMsAA==
+length: 17424
 -->
