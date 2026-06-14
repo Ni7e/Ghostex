@@ -1,0 +1,27 @@
+[package]
+name = "ghostex-gpui"
+version = "0.1.0"
+edition = "2024"
+publish = false
+build = "build.rs"
+
+[dependencies]
+anyhow = "1"
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui-component = { path = "../../../_references/gpui-component/crates/ui" }
+raw-window-handle = "0.6"
+
+[build-dependencies]
+cc = "1"
+
+[patch."https://github.com/zed-industries/zed"]
+gpui = { path = "../../../_references/zed/crates/gpui" }
+gpui_macros = { path = "../../../_references/zed/crates/gpui_macros" }
+gpui_platform = { path = "../../../_references/zed/crates/gpui_platform" }
+gpui_shared_string = { path = "../../../_references/zed/crates/gpui_shared_string" }
+gpui_util = { path = "../../../_references/zed/crates/gpui_util" }
+
+[patch.crates-io]
+async-process = { git = "https://github.com/zed-industries/async-process.git", rev = "0b6d6713570af61806e1e5cb40e0f757cb93fd9d" }
+async-task = { git = "https://github.com/smol-rs/async-task.git", rev = "b4486cd71e4e94fbda54ce6302444de14f4d190e" }
