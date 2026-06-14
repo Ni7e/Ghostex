@@ -4314,9 +4314,9 @@ function TitlebarResourcesMenu({
         {processSnapshotReady ? (
           <>
             <div className="titlebar-resources-info-note">
-              This app uses native Ghostty terminals as they're lighter on CPU & RAM than electron/web terminals.<br />
-              The RAM use you see here is the lowest possible for the Agent CLI that you're using<br />
-              Keep in mind that each CLI uses more/less RAM based on a lot of factors.<br />
+              • This app uses native Ghostty terminals as they're lighter on CPU & RAM than electron/web terminals.<br />
+              • The RAM use you see here is the lowest possible for the Agent CLI that you're using.<br />
+              • Keep in mind that each CLI uses more/less RAM based on a lot of factors.<br />
               You can easily sleep all inactive terminals here (Auto-sleep can be configured in settings).
             </div>
             {visibleGroupViews.length > 0 ? (
