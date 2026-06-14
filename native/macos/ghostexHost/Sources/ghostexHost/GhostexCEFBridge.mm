@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -907,6 +908,14 @@ class GhostexCEFApp : public CefApp, public CefBrowserProcessHandler {
     command_line->AppendSwitch("disable-backgrounding-occluded-windows");
   }
 
+  void OnScheduleMessagePumpWork(int64_t delay_ms) override {
+    int64_t clampedDelayMs = std::max<int64_t>(0, delay_ms);
+    dispatch_time_t when = dispatch_time(DISPATCH_TIME_NOW, clampedDelayMs * NSEC_PER_MSEC);
+    dispatch_after(when, dispatch_get_main_queue(), ^{
+      CefDoMessageLoopWork();
+    });
+  }
+
  private:
   IMPLEMENT_REFCOUNTING(GhostexCEFApp);
   DISALLOW_COPY_AND_ASSIGN(GhostexCEFApp);
@@ -1097,6 +1106,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   BOOL canGoForward_;
   BOOL isLoading_;
   BOOL didCreateBrowser_;
+  BOOL didGiveInitialURLToBrowserCreate_;
   NSUInteger layoutPass_;
   NSUInteger internalGeometryDiagnosticSequence_;
   NSUInteger viewportDiagnosticSequence_;
@@ -1106,6 +1116,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   NSRect lastViewportDiagnosticBounds_;
 }
 - (void)ghostexCEFPinHostedViewToBoundsWithReason:(NSString*)reason;
+- (void)ghostexCEFDidCreateBrowser:(CefRefPtr<CefBrowser>)browser;
 @end
 
 @implementation GhostexCEFBrowserView
@@ -1153,11 +1164,31 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
 
 - (void)layout {
   [super layout];
+  if (self.window && !didCreateBrowser_) {
+    [self createBrowserIfNeeded];
+  }
   [self ghostexCEFPinHostedViewToBoundsWithReason:@"layout"];
 }
 
 - (void)pinHostedViewToBounds {
   [self ghostexCEFPinHostedViewToBoundsWithReason:@"explicit"];
+}
+
+- (void)ghostexCEFDidCreateBrowser:(CefRefPtr<CefBrowser>)browser {
+  if (!browser || browser_) {
+    return;
+  }
+  browser_ = browser;
+
+  CefWindowHandle handle = browser_->GetHost()->GetWindowHandle();
+  cefView_ = (__bridge NSView*)handle;
+  cefView_.autoresizingMask = NSViewNotSizable;
+  [self ghostexCEFPinHostedViewToBoundsWithReason:@"createBrowser"];
+  [self setNeedsLayout:YES];
+
+  if (initialURL_.length > 0 && !didGiveInitialURLToBrowserCreate_) {
+    [self loadURLString:initialURL_];
+  }
 }
 
 - (void)ghostexCEFPinHostedViewToBoundsWithReason:(NSString*)reason {
@@ -1469,7 +1500,23 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
 }
 
 - (void)createBrowserIfNeeded {
+  if (getenv("GHOSTEX_GPUI_TRACE")) {
+    fprintf(stderr,
+            "[ghostex-gpui-cef] createBrowserIfNeeded entered didCreate=%d initialized=%d hasWindow=%d width=%.0f height=%.0f\n",
+            didCreateBrowser_,
+            g_cefInitialized,
+            self.window ? 1 : 0,
+            self.bounds.size.width,
+            self.bounds.size.height);
+  }
   if (didCreateBrowser_ || !g_cefInitialized) {
+    return;
+  }
+  if (self.bounds.size.width <= 0 || self.bounds.size.height <= 0) {
+    /*
+    CDXC:GPUIPhase1 2026-06-14-13:16:
+    GPUI can attach the native CEF container to the NSWindow before its first layout pass assigns a non-zero frame. Wait for a real AppKit size and retry from layout so CEF receives a valid child-view host instead of permanently consuming the creation attempt with a zero-sized parent.
+    */
     return;
   }
   didCreateBrowser_ = YES;
@@ -1505,6 +1552,38 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   }
 
   client_ = new GhostexCEFBrowserClient(self);
+  bool runsUnderGPUI = NSApp && [NSStringFromClass([NSApp class]) isEqualToString:@"GPUIApplication"];
+  if (runsUnderGPUI) {
+    /*
+    CDXC:GPUIPhase1 2026-06-14-13:24:
+    GPUI integrates CEF through external_message_pump instead of CEF's blocking run loop. In that host, synchronous browser creation can fail even with a valid AppKit child frame, so use CEF's async CreateBrowser path and attach the returned native Chromium view from OnAfterCreated.
+
+    CDXC:GPUIPhase1 2026-06-14-13:15:
+    Async GPUI browser creation must receive the intended initial URL directly. Creating about:blank first and loading from OnAfterCreated can lose the first navigation while Chromium is still finishing browser-info wiring, leaving the main browser target blank even though later address-bar navigation works.
+    */
+    NSString* creationURL = initialURL_.length > 0 ? initialURL_ : @"about:blank";
+    didGiveInitialURLToBrowserCreate_ = initialURL_.length > 0;
+    bool started = CefBrowserHost::CreateBrowser(
+      windowInfo,
+      client_,
+      CefString([creationURL UTF8String]),
+      browserSettings,
+      nullptr,
+      requestContext);
+    if (getenv("GHOSTEX_GPUI_TRACE")) {
+      fprintf(stderr,
+              "[ghostex-gpui-cef] createBrowserIfNeeded asyncStarted=%d width=%d height=%d\n",
+              started ? 1 : 0,
+              rect.width,
+              rect.height);
+    }
+    if (!started) {
+      didGiveInitialURLToBrowserCreate_ = NO;
+      didCreateBrowser_ = NO;
+    }
+    return;
+  }
+
   browser_ = CefBrowserHost::CreateBrowserSync(
     windowInfo,
     client_,
@@ -1512,7 +1591,15 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
     browserSettings,
     nullptr,
     requestContext);
+  if (getenv("GHOSTEX_GPUI_TRACE")) {
+    fprintf(stderr,
+            "[ghostex-gpui-cef] createBrowserIfNeeded result hasBrowser=%d width=%d height=%d\n",
+            browser_ ? 1 : 0,
+            rect.width,
+            rect.height);
+  }
   if (!browser_) {
+    didCreateBrowser_ = NO;
     return;
   }
 
@@ -1926,7 +2013,12 @@ void GhostexCEFBrowserClient::OnFindResult(CefRefPtr<CefBrowser> browser,
   });
 }
 
-void GhostexCEFBrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {}
+void GhostexCEFBrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
+  CefRefPtr<CefBrowser> createdBrowser = browser;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [owner_ ghostexCEFDidCreateBrowser:createdBrowser];
+  });
+}
 
 bool GhostexCEFBrowserClient::DoClose(CefRefPtr<CefBrowser> browser) {
   if (closingFromGhostex_) {
@@ -2156,7 +2248,13 @@ bool GhostexCEFInitialize(int argc, char* _Nullable argv[]) {
   if (g_cefInitialized) {
     return true;
   }
-  if (![NSApp isKindOfClass:[GhostexCEFApplication class]]) {
+  NSString* appClassName = NSApp ? NSStringFromClass([NSApp class]) : @"";
+  bool runsUnderGPUI = [appClassName isEqualToString:@"GPUIApplication"];
+  if (![NSApp isKindOfClass:[GhostexCEFApplication class]] && !runsUnderGPUI) {
+    /*
+     CDXC:GPUIPhase1 2026-06-14-12:06:
+     The GPUI prototype owns NSApplication through GPUIApplication because GPUI stores its platform pointer as an Objective-C ivar. Allow CEF to initialize under that host after the gpui bridge installs CEF's sendEvent scope hook, while keeping other non-CEF application classes rejected so production Ghostex still starts Chromium in the intended app mode.
+     */
     return false;
   }
   if (!GhostexCEFIsRuntimeAvailable()) {
@@ -2170,6 +2268,11 @@ bool GhostexCEFInitialize(int argc, char* _Nullable argv[]) {
   CefSettings settings;
   settings.no_sandbox = true;
   settings.multi_threaded_message_loop = false;
+  /*
+   CDXC:GPUIPhase1 2026-06-14-13:22:
+   Production Ghostex lets CEF own the blocking browser loop through CefRunMessageLoop. The GPUI prototype keeps AppKit under GPUI, so initialize CEF with external_message_pump only for GPUIApplication and let the browser-process handler schedule CefDoMessageLoopWork on the main queue.
+   */
+  settings.external_message_pump = runsUnderGPUI;
   settings.windowless_rendering_enabled = false;
   g_remoteDebuggingPort = FindAvailableRemoteDebuggingPort();
   settings.remote_debugging_port = g_remoteDebuggingPort;
