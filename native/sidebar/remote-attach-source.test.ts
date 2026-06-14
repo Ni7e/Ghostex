@@ -59,8 +59,15 @@ describe("remote attach sidebar ownership", () => {
       "function createPresentationSidebarGroups",
       "function createRemotePresentationSidebarGroups",
     );
-    expect(presentationGroups).toContain("!isRemoteAttachCarrierProject(project)");
-    expect(presentationGroups).toContain("isRemoteAttachCarrierProject(localProject ?? project)");
+    expect(presentationGroups).toContain("remoteAttachCarrierProjectIds: createNativePresentationRemoteAttachCarrierProjectIds(presentation)");
+    expect(presentationGroups).toContain("isRemoteAttachCarrier: isRemoteAttachCarrierProject(project)");
+
+    const presentationProjectionSource = readFileSync(
+      new URL("./native-presentation-projection.ts", import.meta.url),
+      "utf8",
+    );
+    expect(presentationProjectionSource).toContain("localProjectsById.get(project.projectId)?.isRemoteAttachCarrier !== true");
+    expect(presentationProjectionSource).toContain("!input.remoteAttachCarrierProjectIds?.has(project.projectId)");
   });
 
   test("builds Android-compatible ssh attach commands", () => {

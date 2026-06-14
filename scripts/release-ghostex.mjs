@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { validateMacosAppBundle } from "./validate-macos-app-bundle.mjs";
 
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
@@ -23,6 +24,8 @@ const config = {
   sparklePublicKey: "AGWDPeMqfhmbjt8Pbk+VTC9fDfXAYq+cZoLGCYuGn70=",
   armFeed: "appcast.xml",
   installCommand: "brew install --cask maddada/tap/ghostex",
+  androidSigningEnvFile: "/Users/madda/.config/ghostex/android/release-signing.env",
+  androidApkAssetName: "ghostex-android.apk",
 };
 
 /*
@@ -37,6 +40,7 @@ const releaseTimeouts = {
   buildArchMs: 50 * 60 * 1000,
   notaryArchMs: 45 * 60 * 1000,
   brewFetchMs: 15 * 60 * 1000,
+  androidMs: 45 * 60 * 1000,
   overallMs: 150 * 60 * 1000,
   heartbeatMs: 60 * 1000,
 };
@@ -72,10 +76,12 @@ Usage:
   node scripts/release-ghostex.mjs <version> [options]
 
 Options:
-  --with-tests        Run bun run test before building.
+  --with-tests        Run release-safe Vitest and TUI checks before building.
   --skip-typecheck   Skip bun run typecheck.
   --skip-brew-fetch  Skip final brew fetch checks.
   --skip-sparkle     Do not update or validate Sparkle appcasts.
+  --skip-android     Do not build/upload the signed Android APK.
+  --resume [version] Resume an already-created release and finish missing Homebrew/Android/notes steps.
   --github-prerelease
                      Mark the GitHub release as a prerelease.
   --release-branch <branch>
@@ -117,6 +123,8 @@ function parseArgs(argv) {
     skipTypecheck: false,
     skipBrewFetch: false,
     skipSparkle: false,
+    skipAndroid: false,
+    resume: false,
     githubPrerelease: false,
     releaseBranch: "main",
     noPush: false,
@@ -136,6 +144,15 @@ function parseArgs(argv) {
       options.skipBrewFetch = true;
     } else if (arg === "--skip-sparkle") {
       options.skipSparkle = true;
+    } else if (arg === "--skip-android") {
+      options.skipAndroid = true;
+    } else if (arg === "--resume") {
+      options.resume = true;
+      const maybeVersion = argv[index + 1]?.trim();
+      if (maybeVersion && !maybeVersion.startsWith("-")) {
+        positional.push(maybeVersion);
+        index += 1;
+      }
     } else if (arg === "--github-prerelease") {
       options.githubPrerelease = true;
     } else if (arg === "--release-branch") {
@@ -590,6 +607,12 @@ function releaseCommandArgs(version, options, extraArgs = []) {
   if (options.skipSparkle) {
     args.push("--skip-sparkle");
   }
+  if (options.skipAndroid) {
+    args.push("--skip-android");
+  }
+  if (options.resume) {
+    args.push("--resume");
+  }
   if (options.githubPrerelease) {
     args.push("--github-prerelease");
   }
@@ -836,6 +859,106 @@ async function ensureReleaseMissing(version) {
   throw new ReleaseError(`GitHub release v${version} already exists.`);
 }
 
+async function ensureReleaseExists(version) {
+  const command = `gh release view ${shellQuote(`v${version}`)} --repo ${shellQuote(config.githubRepo)}`;
+  try {
+    await capture(command);
+  } catch {
+    throw new ReleaseError(`GitHub release v${version} does not exist; cannot resume release repair.`);
+  }
+}
+
+async function ensureTagExists(version) {
+  const localTag = await capture(`git tag --list ${shellQuote(`v${version}`)}`);
+  const remoteTag = await captureGitNetwork(`git ls-remote --tags origin ${shellQuote(`refs/tags/v${version}`)}`);
+  if (!localTag && !remoteTag) {
+    throw new ReleaseError(`Tag v${version} does not exist locally or remotely; cannot resume release repair.`);
+  }
+}
+
+async function verifyHomebrewReleaseReadiness(version) {
+  logStep("Preflight Homebrew cask rendering");
+  const tapDir = await mkdtemp(path.join(tmpdir(), `ghostex-${version}-homebrew-preflight-`));
+  try {
+    await run(`git clone ${shellQuote(config.tapRepo)} ${shellQuote(tapDir)}`);
+    const caskFile = path.join(tapDir, config.caskPath);
+    const currentCask = await readFile(caskFile, "utf8");
+    const placeholderSha = currentCask.match(/sha256\s+"([0-9a-f]{64})"/)?.[1] ?? "a".repeat(64);
+    const renderedCask = renderGhostexCaskForTap(currentCask, {
+      sha256: placeholderSha,
+      version,
+    });
+    await writeFile(caskFile, renderedCask);
+    await run(`ruby -c ${shellQuote(config.caskPath)}`, { cwd: tapDir });
+    /*
+     * CDXC:ReleaseAutomation 2026-06-14-09:07:
+     * Homebrew readiness must run before GitHub/Sparkle publication so a host
+     * with an unusable Homebrew/Xcode/CLT setup fails while the release is still
+     * reversible. Use a rendered placeholder cask and syntax/audit probes that
+     * do not depend on the future DMG URL already existing.
+     */
+    await run(`HOMEBREW_NO_INSTALL_FROM_API=1 brew audit --cask --skip-style ${shellQuote(config.caskPath)}`, {
+      cwd: tapDir,
+      timeoutMs: releaseTimeouts.brewFetchMs,
+    });
+  } finally {
+    await rm(tapDir, { recursive: true, force: true });
+  }
+}
+
+async function ensureAndroidReleaseReadiness(version, buildVersion, options) {
+  if (options.noPush || options.skipAndroid) {
+    return;
+  }
+  if (!existsSync(config.androidSigningEnvFile)) {
+    throw new ReleaseError(`Android signing env file is missing: ${config.androidSigningEnvFile}`);
+  }
+  const script = `
+set -euo pipefail
+set -a
+source ${shellQuote(config.androidSigningEnvFile)}
+set +a
+export GHOSTEX_ANDROID_VERSION_NAME=${shellQuote(version)}
+export GHOSTEX_ANDROID_VERSION_CODE=${shellQuote(String(buildVersion))}
+export GHOSTEX_ANDROID_APK_VERSION_TAG=${shellQuote(`v${version}`)}
+export GHOSTEX_ANDROID_REQUIRE_RELEASE_SIGNING=1
+: "\${GHOSTEX_ANDROID_SIGNING_STORE_FILE:?}"
+: "\${GHOSTEX_ANDROID_SIGNING_STORE_PASSWORD:?}"
+: "\${GHOSTEX_ANDROID_SIGNING_KEY_ALIAS:?}"
+: "\${GHOSTEX_ANDROID_SIGNING_KEY_PASSWORD:?}"
+test -f "$GHOSTEX_ANDROID_SIGNING_STORE_FILE"
+case "$GHOSTEX_ANDROID_SIGNING_STORE_FILE" in
+  "$PWD/android"|"$PWD/android"/*) exit 42 ;;
+esac
+android_tool_found() {
+  local tool="$1"
+  local root
+  for root in "\${ANDROID_HOME:-$HOME/Library/Android/sdk}" "$HOME/Library/Android/sdk" /opt/homebrew/share/android-commandlinetools; do
+    [[ -d "$root" ]] || continue
+    [[ -n "$(find "$root" -path "*/build-tools/*/$tool" -print -quit 2>/dev/null)" ]] && return 0
+  done
+  return 1
+}
+android_tool_found apksigner
+android_tool_found aapt
+`;
+  /*
+   * CDXC:AndroidRelease 2026-06-14-09:07:
+   * Android upload is now part of the standard release flow. Validate signing
+   * material and build-tool availability before macOS publication so a missing
+   * keystore or SDK tool does not leave the release needing manual APK repair.
+   */
+  try {
+    await run(`/bin/zsh -lc ${shellQuote(script)}`, { timeoutMs: 30_000 });
+  } catch (error) {
+    const message = String(error.message ?? error);
+    if (message.includes("exit 42")) {
+      throw new ReleaseError("Android signing keystore must live outside the Android checkout.");
+    }
+    throw error;
+  }
+}
+
 async function latestSparkleVersion() {
   let maxVersion = 0;
   const xml = await readFile(path.join(repoRoot, config.armFeed), "utf8");
@@ -891,8 +1014,11 @@ async function preflight(version, buildVersion, options) {
   await ensureCleanWorktree();
   await ensureReleaseBranchSynced(options.releaseBranch);
   await ensureTagMissing(version);
+  await extractChangelogSection(version);
   if (!options.noPush) {
     await ensureReleaseMissing(version);
+    await verifyHomebrewReleaseReadiness(version);
+    await ensureAndroidReleaseReadiness(version, buildVersion, options);
   }
 
   if (!options.skipSparkle) {
@@ -922,7 +1048,8 @@ async function preflight(version, buildVersion, options) {
     await run("bun run typecheck", { timeoutMs: releaseTimeouts.typecheckMs });
   }
   if (options.withTests) {
-    await run("bun run test", { timeoutMs: releaseTimeouts.testMs });
+    await run("bun run release:test", { timeoutMs: releaseTimeouts.testMs });
+    await run("scripts/ghostex-tui-test.sh", { timeoutMs: releaseTimeouts.testMs });
   }
 
   return {};
@@ -1355,26 +1482,61 @@ async function extractChangelogSection(version) {
   if (!notes || notes.includes("CDXC:") || notes.includes("<!--")) {
     throw new ReleaseError(`CHANGELOG.md section for ${version} is empty or contains comments.`);
   }
+  validateMajorMinorReleaseNotes(notes, version);
   return notes;
 }
 
-async function createGithubRelease(version, artifacts, options) {
-  logStep("Create GitHub release");
-  const notesPath = path.join(await mkdtemp(path.join(tmpdir(), `ghostex-${version}-notes-`)), "notes.md");
+function validateMajorMinorReleaseNotes(notes, version) {
+  /*
+   * CDXC:ReleaseNotes 2026-06-14-09:18:
+   * Public changelog sections must keep release notes scannable by using only
+   * Major and Minor top-level bullets, with concrete changes nested below each.
+   * Enforce this before publishing so GitHub and Sparkle notes stay consistent.
+   */
+  const lines = notes.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const majorIndex = lines.findIndex((line) => line === "- Major");
+  const minorIndex = lines.findIndex((line) => line === "- Minor");
+  if (majorIndex === -1 || minorIndex === -1 || majorIndex > minorIndex) {
+    throw new ReleaseError(`CHANGELOG.md section for ${version} must use Major and Minor top-level bullets.`);
+  }
+  const topLevelBullets = lines.filter((line) => line.startsWith("- "));
+  if (topLevelBullets.some((line) => line !== "- Major" && line !== "- Minor")) {
+    throw new ReleaseError(`CHANGELOG.md section for ${version} must keep Major and Minor as the only top-level bullets.`);
+  }
+  const majorSubBullets = lines.slice(majorIndex + 1, minorIndex).filter((line) => line.startsWith("  - "));
+  const minorSubBullets = lines.slice(minorIndex + 1).filter((line) => line.startsWith("  - "));
+  if (majorSubBullets.length === 0 || minorSubBullets.length === 0) {
+    throw new ReleaseError(`CHANGELOG.md section for ${version} must include sub-bullets under both Major and Minor.`);
+  }
+}
+
+async function buildGithubReleaseNotes(version, artifacts, { androidArtifact = null } = {}) {
   const changelogNotes = await extractChangelogSection(version);
   const arm = artifacts.find((entry) => entry.arch === "arm64");
   if (!arm) {
     throw new ReleaseError("arm64 release artifact is required.");
   }
-  const notes = [
+  const downloads = [
+    "- Apple Silicon",
+    `  - \`${path.basename(arm.finalDmg)}\``,
+    `  - SHA256: \`${arm.sha256}\``,
+  ];
+  if (androidArtifact) {
+    downloads.push(
+      "- Android",
+      `  - \`${androidArtifact.name}\``,
+      `  - SHA256: \`${androidArtifact.sha256}\``,
+    );
+  }
+
+  return [
     "## Changes",
     "",
     changelogNotes,
     "",
     "## Downloads",
     "",
-    `- Apple Silicon: ${path.basename(arm.finalDmg)}`,
-    `  SHA256: ${arm.sha256}`,
+    ...downloads,
     "",
     "## Install",
     "",
@@ -1383,6 +1545,12 @@ async function createGithubRelease(version, artifacts, options) {
     "```",
     "",
   ].join("\n");
+}
+
+async function createGithubRelease(version, artifacts, options) {
+  logStep("Create GitHub release");
+  const notesPath = path.join(await mkdtemp(path.join(tmpdir(), `ghostex-${version}-notes-`)), "notes.md");
+  const notes = await buildGithubReleaseNotes(version, artifacts);
 
   await writeFile(notesPath, notes);
   const assets = artifacts.map((entry) => shellQuote(entry.finalDmg)).join(" ");
@@ -1402,6 +1570,22 @@ async function createGithubRelease(version, artifacts, options) {
   );
 
   return `https://github.com/${config.githubRepo}/releases/tag/v${version}`;
+}
+
+async function updateGithubReleaseNotes(version, artifacts, releaseAssets) {
+  logStep("Update GitHub release notes");
+  const notesPath = path.join(await mkdtemp(path.join(tmpdir(), `ghostex-${version}-final-notes-`)), "notes.md");
+  await writeFile(notesPath, await buildGithubReleaseNotes(version, artifacts, releaseAssets));
+  await run(
+    [
+      "gh release edit",
+      shellQuote(`v${version}`),
+      "--repo",
+      shellQuote(config.githubRepo),
+      "--notes-file",
+      shellQuote(notesPath),
+    ].join(" "),
+  );
 }
 
 async function validateLiveSparkleAndAssets(version, buildVersion, sparkleBinDir) {
@@ -1429,33 +1613,233 @@ async function validateLiveSparkleAndAssets(version, buildVersion, sparkleBinDir
   await run(`gh release view ${shellQuote(`v${version}`)} --repo ${shellQuote(config.githubRepo)} --json tagName,name,url,assets --jq '{tagName,name,url,assets:[.assets[]|{name,size,digest,url}]}'`);
 }
 
+async function findAndroidBuildTool(tool) {
+  const roots = [
+    process.env.ANDROID_HOME,
+    process.env.ANDROID_SDK_ROOT,
+    path.join(process.env.HOME ?? "", "Library/Android/sdk"),
+    "/opt/homebrew/share/android-commandlinetools",
+  ].filter(Boolean);
+  const existingRoots = [...new Set(roots)].filter((root) => existsSync(root));
+  const output = existingRoots.length === 0
+    ? ""
+    : await capture(`find ${existingRoots.map(shellQuote).join(" ")} -path '*/build-tools/*/${tool}' -print 2>/dev/null`);
+  const toolPath = selectLatestAndroidBuildTool(output.split(/\r?\n/), tool);
+  if (!toolPath) {
+    throw new ReleaseError(`Could not find Android build tool: ${tool}`);
+  }
+  return toolPath;
+}
+
+function selectLatestAndroidBuildTool(paths, tool) {
+  const matches = paths
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.endsWith(`/build-tools/${androidBuildToolVersion(entry, tool)}/${tool}`));
+  matches.sort((left, right) => {
+    const leftVersion = androidBuildToolVersion(left, tool);
+    const rightVersion = androidBuildToolVersion(right, tool);
+    return (
+      leftVersion.localeCompare(rightVersion, undefined, { numeric: true, sensitivity: "base" }) ||
+      left.localeCompare(right)
+    );
+  });
+  return matches.at(-1) ?? "";
+}
+
+function androidBuildToolVersion(toolPath, tool) {
+  const marker = "/build-tools/";
+  const markerIndex = toolPath.lastIndexOf(marker);
+  if (markerIndex === -1 || !toolPath.endsWith(`/${tool}`)) {
+    return "";
+  }
+  const versionStart = markerIndex + marker.length;
+  const versionEnd = toolPath.indexOf("/", versionStart);
+  return versionEnd === -1 ? "" : toolPath.slice(versionStart, versionEnd);
+}
+
+async function buildAndUploadAndroidRelease(version, buildVersion) {
+  logStep("Build and upload Android APK");
+  const script = [
+    "set -euo pipefail",
+    "set -a",
+    `source ${shellQuote(config.androidSigningEnvFile)}`,
+    "set +a",
+    `export GHOSTEX_ANDROID_VERSION_NAME=${shellQuote(version)}`,
+    `export GHOSTEX_ANDROID_VERSION_CODE=${shellQuote(String(buildVersion))}`,
+    `export GHOSTEX_ANDROID_APK_VERSION_TAG=${shellQuote(`v${version}`)}`,
+    "export GHOSTEX_ANDROID_REQUIRE_RELEASE_SIGNING=1",
+    "scripts/ghostex-android-release-readiness.sh --local --skip-mac-check",
+  ].join("\n");
+  await run(`/bin/zsh -lc ${shellQuote(script)}`, { timeoutMs: releaseTimeouts.androidMs });
+
+  const apk = path.join(
+    repoRoot,
+    "android/app/build/outputs/apk/release",
+    `ghostex-android_v${version}_universal.apk`,
+  );
+  if (!existsSync(apk)) {
+    throw new ReleaseError(`Android release APK was not produced: ${apk}`);
+  }
+  const apksigner = await findAndroidBuildTool("apksigner");
+  const aapt = await findAndroidBuildTool("aapt");
+  await run(`/bin/bash -lc ${shellQuote(`set -o pipefail; ${shellQuote(apksigner)} verify --verbose --print-certs ${shellQuote(apk)} | sed -n '1,80p'`)}`);
+  await run(
+    `${shellQuote(aapt)} dump badging ${shellQuote(apk)} | rg ${shellQuote(`package: name='io.ghostex' versionCode='${buildVersion}' versionName='${version}'`)}`,
+  );
+  const sha256 = await capture(`shasum -a 256 ${shellQuote(apk)} | awk '{print $1}'`);
+  const stableApk = path.join(tmpdir(), config.androidApkAssetName);
+  /*
+   * CDXC:AndroidRelease 2026-06-14-09:07:
+   * GitHub CLI upload labels were not reliable for the Android APK asset name
+   * during the 4.12.0 release. Copy the signed universal APK to the stable
+   * filename first, then upload that file directly so the public URL remains
+   * ghostex-android.apk across releases.
+   */
+  await run(`cp ${shellQuote(apk)} ${shellQuote(stableApk)}`);
+  await run(
+    `gh release upload ${shellQuote(`v${version}`)} ${shellQuote(stableApk)} --repo ${shellQuote(config.githubRepo)} --clobber`,
+    { timeoutMs: releaseTimeouts.brewFetchMs },
+  );
+  return {
+    name: config.androidApkAssetName,
+    path: stableApk,
+    sha256,
+  };
+}
+
+async function readGithubRelease(version) {
+  const json = await capture(
+    `gh release view ${shellQuote(`v${version}`)} --repo ${shellQuote(config.githubRepo)} --json tagName,name,url,isDraft,isPrerelease,assets`,
+  );
+  return JSON.parse(json);
+}
+
+function parseGithubAssetSha(asset) {
+  const digest = asset?.digest;
+  if (typeof digest === "string" && digest.startsWith("sha256:")) {
+    return digest.slice("sha256:".length);
+  }
+  return null;
+}
+
+async function githubReleaseArtifactFromAssets(version, assets) {
+  const assetName = `ghostex-${version}-arm64.dmg`;
+  const asset = assets.find((entry) => entry.name === assetName);
+  if (!asset) {
+    throw new ReleaseError(`GitHub release v${version} is missing ${assetName}.`);
+  }
+  let sha256 = parseGithubAssetSha(asset);
+  if (!sha256) {
+    const downloadPath = path.join(tmpdir(), assetName);
+    await run(`curl -fsSL ${shellQuote(asset.url)} -o ${shellQuote(downloadPath)}`, {
+      timeoutMs: releaseTimeouts.brewFetchMs,
+    });
+    sha256 = await capture(`shasum -a 256 ${shellQuote(downloadPath)} | awk '{print $1}'`);
+  }
+  return {
+    ...releaseArchitectures[0],
+    finalDmg: assetName,
+    sha256,
+  };
+}
+
+async function androidArtifactFromAssets(assets) {
+  const asset = assets.find((entry) => entry.name === config.androidApkAssetName);
+  if (!asset) {
+    return null;
+  }
+  let sha256 = parseGithubAssetSha(asset);
+  if (!sha256 && asset.url) {
+    const downloadPath = path.join(tmpdir(), config.androidApkAssetName);
+    await run(`curl -fsSL ${shellQuote(asset.url)} -o ${shellQuote(downloadPath)}`, {
+      timeoutMs: releaseTimeouts.brewFetchMs,
+    });
+    sha256 = await capture(`shasum -a 256 ${shellQuote(downloadPath)} | awk '{print $1}'`);
+  }
+  return sha256
+    ? {
+        name: config.androidApkAssetName,
+        sha256,
+      }
+    : null;
+}
+
+async function ensureLiveSparkleMatches(version, buildVersion) {
+  if (isPrereleaseVersion(version)) {
+    return;
+  }
+  const output = path.join(tmpdir(), `ghostex-live-${version}-${config.armFeed}`);
+  await run(`curl -fsSL ${shellQuote(releaseArchitectures[0].feedUrl)} -o ${shellQuote(output)}`);
+  await run(`xmllint --noout ${shellQuote(output)}`);
+  await run(`xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='version'])[1])" ${shellQuote(output)} | grep -Fx ${shellQuote(String(buildVersion))}`);
+  await run(`xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='shortVersionString'])[1])" ${shellQuote(output)} | grep -Fx ${shellQuote(version)}`);
+  await run(`xmllint --xpath "string((//*[local-name()='item'][1]/*[local-name()='enclosure']/@url)[1])" ${shellQuote(output)} | grep -Fx ${shellQuote(`https://github.com/${config.githubRepo}/releases/download/v${version}/ghostex-${version}-arm64.dmg`)}`);
+}
+
+async function liveHomebrewCaskIsCurrent(version, sha256) {
+  try {
+    const liveCask = await capture(
+      `curl -fsSL ${shellQuote(`https://raw.githubusercontent.com/maddada/homebrew-tap/main/${config.caskPath}`)}`,
+      { timeoutMs: releaseTimeouts.brewFetchMs },
+    );
+    validateGhostexCask(liveCask, { version, sha256 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resumeRelease(version, buildVersion, options) {
+  logStep("Resume release");
+  await ensureGhAuthForRelease();
+  await ensureCleanWorktree();
+  await ensureReleaseBranchSynced(options.releaseBranch);
+  await ensureTagExists(version);
+  await ensureReleaseExists(version);
+  if (!options.skipSparkle) {
+    await ensureLiveSparkleMatches(version, buildVersion);
+  }
+
+  const release = await readGithubRelease(version);
+  const armArtifact = await githubReleaseArtifactFromAssets(version, release.assets);
+  const artifacts = [armArtifact];
+  let androidArtifact = await androidArtifactFromAssets(release.assets);
+
+  if (!(await liveHomebrewCaskIsCurrent(version, armArtifact.sha256))) {
+    await verifyHomebrewReleaseReadiness(version);
+    await updateHomebrew(version, artifacts, options);
+  } else {
+    console.log(`Homebrew cask is already current for ${version}.`);
+  }
+
+  if (!options.skipAndroid) {
+    if (androidArtifact) {
+      console.log(`Android release asset ${config.androidApkAssetName} is already present.`);
+    } else {
+      await ensureAndroidReleaseReadiness(version, buildVersion, options);
+      androidArtifact = await buildAndUploadAndroidRelease(version, buildVersion);
+    }
+  }
+  await updateGithubReleaseNotes(version, artifacts, { androidArtifact });
+
+  logStep("Resume complete");
+  console.log(`Release URL: https://github.com/${config.githubRepo}/releases/tag/v${version}`);
+}
+
 async function updateHomebrew(version, artifacts, options) {
   logStep("Update Homebrew tap");
   const tapDir = await mkdtemp(path.join(tmpdir(), `ghostex-${version}-homebrew-tap-`));
   await run(`git clone ${shellQuote(config.tapRepo)} ${shellQuote(tapDir)}`);
 
   const caskFile = path.join(tapDir, config.caskPath);
-  let cask = await readFile(caskFile, "utf8");
+  const existingCask = await readFile(caskFile, "utf8");
   const arm = artifacts.find((entry) => entry.arch === "arm64");
   if (!arm) {
     throw new ReleaseError("arm64 release artifact is required for the Homebrew cask.");
   }
 
-  cask = normalizeGhostexCliCask(cask)
-    .replace(/version\s+"[^"]+"/, `version "${version}"`)
-    .replace(/^  arch arm: "arm64", intel: "x86_64"\n\n/m, "")
-    .replace(/sha256 arm:\s+"[0-9a-f]+",\s*\n\s*intel:\s+"[0-9a-f]+"/, `sha256 "${arm.sha256}"`)
-    .replace(/sha256\s+"[0-9a-f]+"/, `sha256 "${arm.sha256}"`)
-    .replace(
-      /url "https:\/\/github\.com\/maddada\/Ghostex\/releases\/download\/v#\{version\}\/ghostex-#\{version\}-(?:#\{arch\}|arm64)\.dmg"/,
-      'url "https://github.com/maddada/Ghostex/releases/download/v#{version}/ghostex-#{version}-arm64.dmg"',
-    );
-
-  cask = normalizeArm64OnlyCask(cask);
-
-  if (!cask.includes(`version "${version}"`) || !cask.includes(arm.sha256) || cask.includes("x86_64")) {
-    throw new ReleaseError("Failed to update Homebrew cask version or checksums.");
-  }
+  let cask = renderGhostexCaskForTap(existingCask, { version, sha256: arm.sha256 });
+  validateGhostexCask(cask, { version, sha256: arm.sha256 });
 
   await writeFile(caskFile, cask);
   await run(`ruby -c ${shellQuote(config.caskPath)}`, { cwd: tapDir });
@@ -1474,12 +1858,7 @@ async function updateHomebrew(version, artifacts, options) {
   await run(`HOMEBREW_NO_INSTALL_FROM_API=1 brew style --fix --except-cops Homebrew/OSDependsOn ${shellQuote(config.caskPath)}`, { cwd: tapDir });
   await run(`HOMEBREW_NO_INSTALL_FROM_API=1 brew style --except-cops Homebrew/OSDependsOn ${shellQuote(config.caskPath)}`, { cwd: tapDir });
   cask = await readFile(caskFile, "utf8");
-  if (!cask.includes('depends_on macos: ">= :ventura"')) {
-    throw new ReleaseError('Ghostex cask must preserve the explicit macOS floor: depends_on macos: ">= :ventura".');
-  }
-  if (!cask.includes("depends_on arch: :arm64")) {
-    throw new ReleaseError("Ghostex cask must be arm64-only for future macOS releases.");
-  }
+  validateGhostexCask(cask, { version, sha256: arm.sha256 });
   await run(`git diff -- ${shellQuote(config.caskPath)}`, { cwd: tapDir });
   await run(`git add ${shellQuote(config.caskPath)}`, { cwd: tapDir });
   await run(`git commit -m ${shellQuote(`Update ghostex cask to ${version}`)}`, { cwd: tapDir });
@@ -1500,21 +1879,7 @@ async function updateHomebrew(version, artifacts, options) {
     const liveCask = await capture("HOMEBREW_NO_INSTALL_FROM_API=1 brew cat --cask maddada/tap/ghostex", {
       timeoutMs: releaseTimeouts.brewFetchMs,
     });
-    for (const required of [
-      `version "${version}"`,
-      `sha256 "${arm.sha256}"`,
-      'url "https://github.com/maddada/Ghostex/releases/download/v#{version}/ghostex-#{version}-arm64.dmg"',
-      "depends_on arch: :arm64",
-      'depends_on macos: ">= :ventura"',
-      "CDXC:CliInstall 2026-06-12-09:31",
-    ]) {
-      if (!liveCask.includes(required)) {
-        throw new ReleaseError(`Live Homebrew cask is missing required stanza: ${required}`);
-      }
-    }
-    if (liveCask.includes("x86_64") || liveCask.includes("#{arch}") || liveCask.includes("intel:")) {
-      throw new ReleaseError("Live Homebrew cask still contains Intel release distribution stanzas.");
-    }
+    validateGhostexCask(liveCask, { version, sha256: arm.sha256 });
     await run("HOMEBREW_NO_INSTALL_FROM_API=1 brew fetch --force --cask --arch=arm maddada/tap/ghostex", {
       timeoutMs: releaseTimeouts.brewFetchMs,
     });
@@ -1527,21 +1892,8 @@ async function updateHomebrew(version, artifacts, options) {
  * CDXC:CliBranding 2026-05-26-15:11:
  * Homebrew releases should install `ghostex` and the new `gx` short alias, not
  * the older `gtx` alias. Check for an existing non-Ghostex `gx` binary before
- * linking so setup does not silently claim a command name another tool owns.
- *
- * CDXC:MacRelease 2026-05-29-20:59:
- * The cask must require macOS Ventura as a minimum floor, matching the Sparkle
- * 13.0 appcast requirement.
- *
- * CDXC:MacRelease 2026-06-12-10:41:
- * Preserve `depends_on macos: ">= :ventura"` and run Homebrew style with the
- * OSDependsOn cop disabled because the symbolic shorthand can be interpreted as
- * an exact OS requirement by older Homebrew clients on newer macOS versions.
- *
- * CDXC:CliInstall 2026-06-07-13:53:
- * CLI resources now live under Contents/Resources/CLI. Normalize both old
- * Web/cli casks and already-updated CLI casks before inserting the current
- * ghostex/gx wrapper command block so the release script remains idempotent.
+ * installing wrappers so setup does not silently claim a command name another
+ * tool owns.
  *
  * CDXC:CliInstall 2026-06-12-09:31:
  * Homebrew must install ghostex/gx as wrapper files in HOMEBREW_PREFIX/bin,
@@ -1550,18 +1902,47 @@ async function updateHomebrew(version, artifacts, options) {
  * clear provenance/quarantine xattrs from the wrappers because replaced
  * symlinks can carry policy metadata into the new files on some macOS builds.
  *
- * CDXC:MacRelease 2026-06-10-09:47:
- * Homebrew must stop publishing new Intel release URLs. Normalize the current
- * cask to one arm64 DMG URL and one SHA while preserving the git history that
- * still contains v4.1.0 and older Intel cask revisions.
- *
- * CDXC:HomebrewRelease 2026-06-12-13:07:
- * Homebrew 6 style checks reject the wrapper block unless generated comments
- * and control flow are cask-style clean. Keep this block aligned with the live
- * 4.10.0 cask so manual Homebrew recovery is not repeated on the next release.
+ * CDXC:ReleaseAutomation 2026-06-14-09:07:
+ * The Ghostex tap cask is owned release output, so render it from this canonical
+ * template instead of regex-normalizing whatever shape is currently in the tap.
+ * This keeps arm64-only distribution, the explicit Ventura floor, and wrapper
+ * install hooks deterministic while still allowing the compatibility guard that
+ * recognizes old Web/cli Ghostex-owned commands.
  */
-function normalizeGhostexCliCask(cask) {
-  const cliCommandBlock = `  # CDXC:CliBranding 2026-05-26-15:11: Install gx only when another tool does not already own that command name.
+function renderGhostexCaskForTap(existingCask, release) {
+  if (!/^\s*cask "ghostex" do/m.test(existingCask)) {
+    throw new ReleaseError("Homebrew tap checkout does not contain the Ghostex cask.");
+  }
+  return renderGhostexCask(release);
+}
+
+function renderGhostexCask({ version, sha256 }) {
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new ReleaseError(`Cannot render Ghostex cask for invalid version: ${version}`);
+  }
+  if (!/^[0-9a-f]{64}$/.test(sha256)) {
+    throw new ReleaseError(`Cannot render Ghostex cask with invalid sha256: ${sha256}`);
+  }
+  const cask = `cask "ghostex" do
+  version "${version}"
+  sha256 "${sha256}"
+
+  url "https://github.com/maddada/Ghostex/releases/download/v#{version}/ghostex-#{version}-arm64.dmg"
+  name "Ghostex"
+  desc "Workspace and session UI for agent terminals"
+  homepage "https://github.com/maddada/Ghostex"
+
+  conflicts_with cask: "zmux"
+  # CDXC:MacRelease 2026-05-29-20:59: Keep the explicit >= form so older
+  # Homebrew clients treat macOS 13 Ventura as the minimum supported version,
+  # not the only supported version, while newer Homebrew still parses the same
+  # floor.
+  depends_on arch: :arm64
+  depends_on macos: ">= :ventura"
+
+  app "ghostex.app"
+
+  # CDXC:CliBranding 2026-05-26-15:11: Install gx only when another tool does not already own that command name.
   # CDXC:CliInstall 2026-06-12-09:31: Homebrew writes wrapper files in
   # HOMEBREW_PREFIX/bin instead of binary symlinks into Ghostex.app because
   # macOS can kill direct app-bundled script execution during policy assessment.
@@ -1585,8 +1966,7 @@ function normalizeGhostexCliCask(cask) {
         next if command_target.include?("ghostex.app/Contents/Resources/Web/cli/#{command}")
         next if command == "ghostex" && command_target.include?("ghostex.app/Contents/MacOS/ghostex")
 
-        raise "Ghostex cannot install the #{command} CLI because #{command_path} already exists. " \\
-              "Remove or rename the existing #{command} command, then reinstall Ghostex."
+        raise "Ghostex cannot install the #{command} CLI because #{command_path} already exists. Remove or rename the existing #{command} command, then reinstall Ghostex."
       end
     end
   end
@@ -1631,66 +2011,43 @@ function normalizeGhostexCliCask(cask) {
         command_path.delete
       end
     end
-  end`;
+  end
 
-  let next = cask
-    .replace(
-      /\n  # CDXC:CliBranding 2026-05-26-15:11: Install gx only when another tool does not already own that command name\.\n(?:  # CDXC:CliInstall 2026-06-07-13:53: Homebrew links the app-owned CLI from(?: Contents\/Resources\/CLI, matching direct DMG auto-linking\.|(?:\n  # Contents\/Resources\/CLI, matching direct DMG auto-linking\.))\n)?  preflight do[\s\S]*?\n  end(?=\n\n  zap trash:|\n  binary "#\{appdir\}\/ghostex\.app\/Contents\/Resources\/(?:Web\/cli|CLI)\/gx")/g,
-      "",
-    )
-    .replace(
-      /\n  # CDXC:CliBranding 2026-05-26-15:11: Install gx only when another tool does not already own that command name\.\n  # CDXC:CliInstall 2026-06-12-09:31: Homebrew writes wrapper files[\s\S]*?(?=\n\n  zap trash:)/g,
-      "",
-    )
-    .replace(/^  binary "#\{appdir\}\/ghostex\.app\/Contents\/Resources\/Web\/cli\/gtx"\n/gm, "")
-    .replace(/^  binary "#\{appdir\}\/ghostex\.app\/Contents\/Resources\/Web\/cli\/ghostex"\n/gm, "")
-    .replace(/^  binary "#\{appdir\}\/ghostex\.app\/Contents\/Resources\/Web\/cli\/gx"\n/gm, "")
-    .replace(/^  binary "#\{appdir\}\/ghostex\.app\/Contents\/Resources\/CLI\/ghostex"\n/gm, "")
-    .replace(/^  binary "#\{appdir\}\/ghostex\.app\/Contents\/Resources\/CLI\/gx"\n/gm, "");
-
-  next = next.replace(/\n{3,}(?=  zap trash:)/g, "\n\n");
-  next = next.replace(/\n  zap trash:/, `\n${cliCommandBlock}\n\n  zap trash:`);
-  next = next.replace(/\n{3,}(?=  zap trash:)/g, "\n\n");
-  if (
-    next.includes('/Resources/Web/cli') ||
-    next.includes('binary "#{appdir}/ghostex.app/Contents/Resources/CLI/ghostex"') ||
-    next.includes('binary "#{appdir}/ghostex.app/Contents/Resources/CLI/gx"') ||
-    !next.includes("CDXC:CliInstall 2026-06-12-09:31") ||
-    !next.includes("postflight do") ||
-    !next.includes("uninstall_preflight do")
-  ) {
-    throw new ReleaseError("Failed to normalize Ghostex cask CLI wrapper commands.");
-  }
-  if (!next.includes('depends_on macos: ">= :ventura"')) {
-    throw new ReleaseError('Ghostex cask must preserve the explicit macOS floor: depends_on macos: ">= :ventura".');
-  }
-  return next;
+  zap trash: [
+    "~/Library/Application Support/com.madda.zmux.host",
+    "~/Library/Preferences/com.madda.zmux.host.plist",
+    "~/Library/Saved Application State/com.madda.zmux.host.savedState",
+  ]
+end
+`;
+  validateGhostexCask(cask, { version, sha256 });
+  return cask;
 }
 
-function normalizeArm64OnlyCask(cask) {
-  let next = cask
-    .replace(/^  depends_on arch: (?::arm64|\[:intel, :arm64\])\n/gm, "")
-    .replace(/^  depends_on arch: :intel\n/gm, "")
-    .replace(/^  depends_on macos: :ventura$/m, '  depends_on macos: ">= :ventura"');
-
-  if (!next.includes("  depends_on arch: :arm64\n")) {
-    next = next.replace(
-      /^  depends_on macos: ">= :ventura"\n/m,
-      '  depends_on arch: :arm64\n  depends_on macos: ">= :ventura"\n',
-    );
+function validateGhostexCask(cask, { version, sha256 }) {
+  for (const required of [
+    `version "${version}"`,
+    `sha256 "${sha256}"`,
+    'url "https://github.com/maddada/Ghostex/releases/download/v#{version}/ghostex-#{version}-arm64.dmg"',
+    "depends_on arch: :arm64",
+    'depends_on macos: ">= :ventura"',
+    "preflight do",
+    "postflight do",
+    "uninstall_preflight do",
+    "CDXC:CliInstall 2026-06-12-09:31",
+    'exec /usr/bin/env node "#{cli_script}" "$@"',
+  ]) {
+    if (!cask.includes(required)) {
+      throw new ReleaseError(`Ghostex cask is missing required stanza: ${required}`);
+    }
   }
-
-  if (!next.includes("  depends_on arch: :arm64\n")) {
-    throw new ReleaseError("Failed to add arm64-only Homebrew cask dependency.");
+  if (/^\s*binary\s+"/m.test(cask)) {
+    throw new ReleaseError("Ghostex cask must install wrapper files, not Homebrew binary aliases.");
   }
-  if (!next.includes('  depends_on macos: ">= :ventura"\n')) {
-    throw new ReleaseError('Ghostex cask must preserve the explicit macOS floor: depends_on macos: ">= :ventura".');
-  }
-  if (next.includes('arch arm: "arm64", intel: "x86_64"') || next.includes("#{arch}") || next.includes("intel:")) {
+  if (cask.includes("x86_64") || cask.includes("#{arch}") || cask.includes("intel:")) {
     throw new ReleaseError("Ghostex cask still contains Intel release distribution stanzas.");
   }
-
-  return next;
+  return true;
 }
 
 async function main() {
@@ -1707,6 +2064,11 @@ async function main() {
   console.log(`Ghostex local release: ${version}`);
   console.log(`Sparkle build version: ${buildVersion}`);
   const releaseStartedAt = Date.now();
+
+  if (options.resume) {
+    await resumeRelease(version, buildVersion, options);
+    return;
+  }
 
   await ensureCleanWorktree();
 
@@ -1743,6 +2105,12 @@ async function main() {
     if (!options.skipSparkle) {
       await validateLiveSparkleAndAssets(version, buildVersion, sparkleBinDir);
     }
+    let androidArtifact = null;
+    if (!options.skipAndroid) {
+      assertReleaseWithinOverallBudget(releaseStartedAt, "android release");
+      androidArtifact = await buildAndUploadAndroidRelease(version, buildVersion);
+    }
+    await updateGithubReleaseNotes(version, artifacts, { androidArtifact });
     assertReleaseWithinOverallBudget(releaseStartedAt, "homebrew update");
     const brewResult = await updateHomebrew(version, artifacts, options);
     tapCommit = brewResult.tapCommit;
@@ -1762,8 +2130,21 @@ async function main() {
   console.log(`Install: ${config.installCommand}`);
 }
 
-main().catch((error) => {
-  console.error("");
-  console.error(error instanceof ReleaseError ? error.message : error);
-  process.exitCode = 1;
-});
+export {
+  ReleaseError,
+  buildGithubReleaseNotes,
+  releaseBuildVersion,
+  renderGhostexCask,
+  renderGhostexCaskForTap,
+  selectLatestAndroidBuildTool,
+  validateGhostexCask,
+  validateMajorMinorReleaseNotes,
+};
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error("");
+    console.error(error instanceof ReleaseError ? error.message : error);
+    process.exitCode = 1;
+  });
+}

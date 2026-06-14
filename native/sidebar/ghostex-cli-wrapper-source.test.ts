@@ -65,24 +65,26 @@ describe("Ghostex CLI command wrappers", () => {
      * Release automation must not reintroduce Homebrew binary stanzas for
      * ghostex/gx, because those stanzas create symlinks back into Ghostex.app.
      */
-    const normalizer = sourceBetween(
+    const renderer = sourceBetween(
       releaseGhostexSource,
-      "function normalizeGhostexCliCask",
-      "function normalizeArm64OnlyCask",
+      "function renderGhostexCaskForTap",
+      "async function main",
     );
 
-    expect(normalizer).toContain("postflight do");
-    expect(normalizer).toContain("command_path.write <<~EOS");
-    expect(normalizer).toContain('exec /usr/bin/env node "#{cli_script}" "$@"');
-    expect(normalizer).toContain('system "/usr/bin/xattr", "-d", attribute, command_path.to_s');
-    expect(normalizer).toContain("uninstall_preflight do");
-    expect(normalizer).toContain("Failed to normalize Ghostex cask CLI wrapper commands");
+    expect(renderer).toContain("function renderGhostexCask");
+    expect(renderer).toContain("function validateGhostexCask");
+    expect(renderer).toContain("postflight do");
+    expect(renderer).toContain("command_path.write <<~EOS");
+    expect(renderer).toContain('exec /usr/bin/env node "#{cli_script}" "$@"');
+    expect(renderer).toContain('system "/usr/bin/xattr", "-d", attribute, command_path.to_s');
+    expect(renderer).toContain("uninstall_preflight do");
+    expect(renderer).toContain("Ghostex cask must install wrapper files, not Homebrew binary aliases.");
     expect(releaseGhostexSource).toContain("--except-cops Homebrew/OSDependsOn");
     expect(releaseGhostexSource).toContain('depends_on macos: ">= :ventura"');
     expect(releaseGhostexSource).not.toContain(
       '.replace(/^  depends_on macos: ">= :ventura"$/m, "  depends_on macos: :ventura")',
     );
-    expect(normalizer).not.toContain("const ghostexBinary");
-    expect(normalizer).not.toContain("const gxBinary");
+    expect(renderer).not.toContain("const ghostexBinary");
+    expect(renderer).not.toContain("const gxBinary");
   });
 });
