@@ -3835,49 +3835,52 @@ export function SidebarApp({
                 shellClassName="recent-projects-search"
               />
               <div className="recent-projects-list">
-                  {filteredRecentProjects.length > 0 ? (
-                    filteredRecentProjects.map((project) => (
-                      <AppTooltip content={project.path} key={project.projectId}>
-                        <button
-                          className="recent-projects-row group-head"
-                          data-context-menu-open={String(
-                            recentProjectContextMenuPosition?.projectId === project.projectId,
-                          )}
-                          onClick={() => restoreRecentProject(project.projectId)}
-                          onContextMenu={(event) =>
-                            openRecentProjectContextMenu(event, project.projectId)
-                          }
-                          type="button"
-                        >
-                          <span className="group-title-wrap">
-                            <span className="group-title-row">
-                              <span
-                                aria-hidden="true"
-                                className="recent-projects-row-icon group-collapse-button section-titlebar-toggle"
-                              >
-                                <IconFolder size={16} stroke={1.8} />
-                              </span>
-                              <span className="group-title-handle">
-                                <span className="recent-projects-row-title group-title section-titlebar-label">
-                                  {project.title}
-                                </span>
-                              </span>
-                              <span className="group-title-spacer" />
-                              <span
-                                aria-label={`${project.sessionCount} preserved sessions`}
-                                className="recent-projects-session-count group-add-button"
-                              >
-                                {project.sessionCount}
-                              </span>
+                {filteredRecentProjects.length > 0 ? (
+                  filteredRecentProjects.map((project) => (
+                    <button
+                      className="recent-projects-row group-head"
+                      data-context-menu-open={String(
+                        recentProjectContextMenuPosition?.projectId === project.projectId,
+                      )}
+                      key={project.projectId}
+                      onClick={() => restoreRecentProject(project.projectId)}
+                      onContextMenu={(event) =>
+                        openRecentProjectContextMenu(event, project.projectId)
+                      }
+                      type="button"
+                    >
+                      {/*
+                       * CDXC:RecentProjects 2026-06-14-15:13:
+                       * Recent Project items should not show a hover tooltip; the row still restores on click and keeps its right-click parked-project menu.
+                       */}
+                      <span className="group-title-wrap">
+                        <span className="group-title-row">
+                          <span
+                            aria-hidden="true"
+                            className="recent-projects-row-icon group-collapse-button section-titlebar-toggle"
+                          >
+                            <IconFolder size={16} stroke={1.8} />
+                          </span>
+                          <span className="group-title-handle">
+                            <span className="recent-projects-row-title group-title section-titlebar-label">
+                              {project.title}
                             </span>
                           </span>
-                        </button>
-                      </AppTooltip>
-                    ))
-                  ) : (
-                    <div className="recent-projects-empty">No projects match that search.</div>
-                  )}
-                </div>
+                          <span className="group-title-spacer" />
+                          <span
+                            aria-label={`${project.sessionCount} preserved sessions`}
+                            className="recent-projects-session-count group-add-button"
+                          >
+                            {project.sessionCount}
+                          </span>
+                        </span>
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="recent-projects-empty">No projects match that search.</div>
+                )}
+              </div>
             </div>
             {recentProjectContextMenuPosition ? (
               <SidebarContextMenuPortal
