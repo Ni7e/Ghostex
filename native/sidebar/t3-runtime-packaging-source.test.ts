@@ -22,6 +22,10 @@ const buildGhostexHostSource = readFileSync(
   new URL("../macos/ghostexHost/build-ghostex-host.sh", import.meta.url),
   "utf8",
 );
+const codeSignGhostexHostSource = readFileSync(
+  new URL("../macos/ghostexHost/codesign-ghostex-host.sh", import.meta.url),
+  "utf8",
+);
 const codeServerBuildVscodeSource = readFileSync(
   new URL("../../code-server/ci/build/build-vscode.sh", import.meta.url),
   "utf8",
@@ -150,7 +154,34 @@ describe("T3 runtime packaging", () => {
     );
     expect(startGhostexSource).toContain("import { validateMacosAppBundle } from \"./validate-macos-app-bundle.mjs\"");
     expect(startGhostexSource).toContain("CONFIGURATION: configuration");
+    expect(startGhostexSource).toContain("resolveLocalStartCodeSignIdentity(startEnvironment)");
+    expect(startGhostexSource).toContain("GHOSTEX_CODE_SIGN_IDENTITY: localStartCodeSignIdentity");
+    expect(startGhostexSource).toContain('GHOSTEX_LOCAL_START: "1"');
     expect(configurationResolver).toContain('return "Release"');
+    const signingResolver = sourceBetween(
+      startGhostexSource,
+      "function resolveLocalStartCodeSignIdentity",
+      "function normalizeMacosArch",
+    );
+    expect(signingResolver).toContain('identity.name.startsWith("Apple Development: ")');
+    expect(signingResolver).toContain('identity.name.startsWith("Developer ID Application: ")');
+    expect(signingResolver).toContain("falling back to ad-hoc signing");
+    const installedSignatureSource = sourceBetween(
+      startGhostexSource,
+      "function hasReusableInstalledAppCodeSignature",
+      "function hasLinkerSignedBundledNativeModules",
+    );
+    expect(installedSignatureSource).toContain("function signatureDetailsMatchesExpectedIdentity");
+    expect(installedSignatureSource).toContain("Signature=adhoc");
+    expect(installedSignatureSource).toContain("Authority=${identity}");
+    expect(startGhostexSource).toContain('run(path.join(hostScriptDir, "codesign-ghostex-host.sh"), [appPath], { env: buildEnv })');
+    expect(buildGhostexHostSource).toContain("CDXC:MacOSPermissions 2026-06-16-02:27");
+    expect(buildGhostexHostSource).toContain("local_start_build_signing()");
+    expect(buildGhostexHostSource).toContain("local_start_build_cache_reusable");
+    expect(buildGhostexHostSource).toContain("signature_matches_requested_identity");
+    expect(codeSignGhostexHostSource).toContain("CDXC:MacOSPermissions 2026-06-16-02:27");
+    expect(codeSignGhostexHostSource).toContain("local_start_signing()");
+    expect(codeSignGhostexHostSource).toContain("can_reuse_local_signature");
     expect(startGhostexSource).toContain("await validateMacosAppBundle({ appName, appPath: installedApp, arch })");
     expect(startGhostexSource).toContain("CDXC:LocalStartGxserver 2026-06-12-09:58");
     expect(startGhostexSource).toContain("resolveBundledNodeForGxserverPreflight(appPath, runtime)");
@@ -203,5 +234,21 @@ describe("T3 runtime packaging", () => {
     expect(bundleValidatorSource).toContain('path.join(codeServerRoot, "lib", "vscode", "node_modules", "@vscode", "ripgrep", "bin", "rg")');
     expect(bundleValidatorSource).toContain("VS Code ripgrep --version smoke test");
     expect(bundleValidatorSource).toContain("Expected only");
+  });
+
+  test("native setup checks Cua Driver permissions without prompting", () => {
+    /*
+    CDXC:CuaPermissions 2026-06-16-02:27:
+    Rebuilding or opening Ghostex must not trigger macOS Screen Recording prompts through a passive Cua Driver status refresh. The native setup probe must pass prompt:false exactly like the bundled agent skill.
+    */
+    const cuaStatusSource = sourceBetween(
+      nativeSidebarSource,
+      "const cuaDriverPath = which(\"cua-driver\")",
+      "let detail;",
+    );
+
+    expect(cuaStatusSource).toContain("CDXC:CuaPermissions 2026-06-16-02:27");
+    expect(cuaStatusSource).toContain('["check_permissions", JSON.stringify({ prompt: false })]');
+    expect(cuaStatusSource).not.toContain('["check_permissions"],');
   });
 });

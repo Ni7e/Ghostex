@@ -83,6 +83,34 @@ export function removePreviousSessionByHistoryId(
   return previousSessions.filter((session) => session.historyId !== historyId);
 }
 
+export function getNextPreviousSessionsModalSelection({
+  currentHistoryId,
+  direction,
+  sessions,
+}: {
+  currentHistoryId: string | undefined;
+  direction: -1 | 1;
+  sessions: readonly SidebarPreviousSessionItem[];
+}): string | undefined {
+  /*
+  CDXC:PreviousSessions 2026-06-15-11:26:
+  Previous Sessions keyboard navigation is a search-owned selection model. Up/Down wraps through the currently visible result rows while DOM focus stays in the search input, so held arrows repeat and typing continues in the field.
+  */
+  if (sessions.length === 0) {
+    return undefined;
+  }
+
+  const currentIndex =
+    currentHistoryId === undefined
+      ? -1
+      : sessions.findIndex((session) => session.historyId === currentHistoryId);
+  if (currentIndex === -1) {
+    return direction === 1 ? sessions[0]?.historyId : sessions[sessions.length - 1]?.historyId;
+  }
+
+  return sessions[(currentIndex + direction + sessions.length) % sessions.length]?.historyId;
+}
+
 export function groupPreviousSessionsByDay(
   previousSessions: readonly SidebarPreviousSessionItem[],
 ): PreviousSessionsModalDayGroup[] {

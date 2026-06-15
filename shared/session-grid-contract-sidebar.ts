@@ -271,6 +271,17 @@ export type SidebarSessionItem = {
   isRunning: boolean;
   detail?: string;
   /**
+   * CDXC:CloseAfterDone 2026-06-15-21:00:
+   * Sidebar cards need both the armed Close After Done flag and countdown
+   * projection. The armed flag keeps the red clock visible before Done, while
+   * the deadline fields drive the fading countdown once the session remains
+   * Done long enough to be eligible for automatic close.
+   */
+  closeAfterDone?: boolean;
+  closeAfterDoneDeadlineAt?: string;
+  closeAfterDoneRemainingLabel?: string;
+  closeAfterDoneRemainingMs?: number;
+  /**
    * CDXC:DelayedSend 2026-05-17-03:14
    * Delayed Send timers must be visible before they fire. Carry both the
    * absolute deadline and the display countdown so sidebar cards, titlebar
@@ -481,6 +492,8 @@ export type SidebarHudState = {
   renameSessionOnDoubleClick: boolean;
   showCloseButtonOnSessionCards: boolean;
   theme:
+    | "dark-1"
+    | "dark-2"
     | "plain-dark"
     | "plain-light"
     | "dark-green"
@@ -1002,6 +1015,32 @@ export type SidebarToExtensionMessage =
     }
   | {
       /**
+       * CDXC:Mobile 2026-06-16-00:45:
+       * The top-sidebar Mobile entry opens Ghostex's download page as a Chromium
+       * browser pane under Chats, matching Plugins' fixed-destination
+       * projectless browser-chat behavior while avoiding the active project.
+       *
+       * CDXC:Mobile 2026-06-16-01:23:
+       * Mobile should use the canonical download URL rather than the GitHub
+       * README anchor so mobile setup starts from the product site.
+       */
+      type: "openMobileBrowserChat";
+    }
+  | {
+      /**
+       * CDXC:Automations 2026-06-16-00:47:
+       * The top-sidebar Automations entry is visible before the feature ships.
+       * Clicks must show a native app toast instead of opening a modal, browser,
+       * or project-scoped surface.
+       *
+       * CDXC:Automations 2026-06-16-01:23:
+       * The toast text must remain fully visible, so native owns a short title
+       * plus a description instead of one long truncating title string.
+       */
+      type: "showAutomationsComingSoonToast";
+    }
+  | {
+      /**
        * CDXC:AgentsHub 2026-05-12-09:21
        * Agents Hub runs in the full-window modal host, but profile/file actions
        * still need native filesystem affordances from the sidebar bridge.
@@ -1477,6 +1516,16 @@ export type SidebarToExtensionMessage =
        */
       sessionId: string;
       type: "cancelDelayedSend";
+    }
+  | {
+      /**
+       * CDXC:CloseAfterDone 2026-06-15-21:00:
+       * Session context menus toggle Close After Done without sending titles,
+       * commands, or terminal content. Native owns the actual three-minute Done
+       * stability timer and routes closure through the existing close path.
+       */
+      sessionId: string;
+      type: "toggleCloseAfterDone";
     }
   | {
       type: "forkSession";

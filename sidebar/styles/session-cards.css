@@ -876,6 +876,35 @@
   width: calc(17px * var(--sidebar-density-scale));
 }
 
+.session-close-after-done-agent-icon {
+  /*
+   * CDXC:CloseAfterDone 2026-06-15-21:00:
+   * Close After Done uses the same leading clock affordance as Delayed Send,
+   * but pastel red communicates that the armed timer will close the session
+   * after it remains Done for three minutes.
+   */
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #ff9aa2 !important;
+  justify-content: center;
+  line-height: 0;
+  margin: 0;
+  opacity: 1 !important;
+  padding: 0;
+  pointer-events: auto;
+}
+
+.session-close-after-done-agent-icon > svg {
+  display: block;
+  height: calc(17px * var(--sidebar-density-scale));
+  width: calc(17px * var(--sidebar-density-scale));
+}
+
+.session-close-after-done-agent-icon-countdown > svg {
+  animation: session-close-after-done-icon-fade 1.55s ease-in-out infinite;
+}
+
 .session-pinned-agent-icon {
   /*
    * CDXC:PinnedSessions 2026-05-28-12:04:
@@ -893,7 +922,8 @@
   rotate: 45deg;
 }
 
-.session-frame[data-dragging="true"] .session-delayed-send-agent-icon {
+.session-frame[data-dragging="true"] .session-delayed-send-agent-icon,
+.session-frame[data-dragging="true"] .session-close-after-done-agent-icon {
   opacity: 0 !important;
 }
 
@@ -901,13 +931,20 @@
   .session-frame[data-agent-icon-hover-only="true"]:not(:has(.session:hover)):not(
     :has(.session:focus-visible)
   ):not(:has(.session:focus-within))
-  .session-floating-agent-tabler-icon.session-delayed-send-agent-icon {
+  .session-floating-agent-tabler-icon.session-delayed-send-agent-icon,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session-frame[data-agent-icon-hover-only="true"]:not(:has(.session:hover)):not(
+    :has(.session:focus-visible)
+  ):not(:has(.session:focus-within))
+  .session-floating-agent-tabler-icon.session-close-after-done-agent-icon {
   display: inline-flex !important;
   opacity: 1 !important;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
-  .session-floating-agent-tabler-icon.session-delayed-send-agent-icon {
+  .session-floating-agent-tabler-icon.session-delayed-send-agent-icon,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session-floating-agent-tabler-icon.session-close-after-done-agent-icon {
   align-items: center;
   display: inline-flex !important;
   height: var(--reference-session-icon-size);
@@ -918,6 +955,9 @@
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .session-floating-agent-tabler-icon.session-delayed-send-agent-icon
+  > svg,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session-floating-agent-tabler-icon.session-close-after-done-agent-icon
   > svg {
   height: var(--reference-session-icon-size);
   width: var(--reference-session-icon-size);
@@ -1000,10 +1040,9 @@
 .session-title-generation-overlay {
   align-items: center;
   background: color-mix(in srgb, var(--app-card-active) 88%, #000000 12%);
-  border: 1px solid color-mix(in srgb, var(--app-button-background) 42%, var(--app-border));
-  border-inline-width: 0;
+  border: 0;
   border-radius: 0;
-  color: color-mix(in srgb, var(--app-foreground) 76%, #82b7ff 24%);
+  color: var(--app-foreground);
   display: flex;
   font-size: calc(13px * var(--sidebar-density-scale));
   font-weight: 600;
@@ -1022,6 +1061,10 @@
    * Automatic session rename loading chrome keeps only the horizontal top and
    * bottom separators, because the macOS sidebar row should not show left or
    * right borders while "Generating title..." is displayed.
+   *
+   * CDXC:SessionTitleLoading 2026-06-16-01:14
+   * The generating title label should use the same foreground as the active
+   * session button text and should not draw top or bottom separator borders.
    */
   justify-content: flex-start;
   line-height: 1.3;
@@ -1769,6 +1812,22 @@ body.native-sidebar-body[data-native-pointer-inside="false"]
   inset: 0;
 }
 
+/*
+ * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
+ * Custom sidebar/titlebar colors must own the sidebar row hover surface too.
+ * Keep this scoped to the reference sidebar so modal and dropdown rows retain
+ * the selected theme's normal hover color.
+ */
+body[data-custom-sidebar-titlebar-colors="true"]
+  .sidebar-reference-layout[data-reference-sidebar="true"]
+  .session::after {
+  background: color-mix(
+    in srgb,
+    var(--custom-sidebar-titlebar-foreground-color) 8%,
+    var(--custom-sidebar-titlebar-background-color) 92%
+  );
+}
+
 .sidebar-reference-layout[data-reference-sidebar="true"] .session:is(:hover, :focus-visible, [data-focused="true"], [data-search-selected="true"]) {
   border-color: transparent;
   box-shadow: none;
@@ -1821,7 +1880,7 @@ body.native-sidebar-body[data-native-pointer-inside="false"]
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .session-title-generation-overlay {
   border-radius: 0;
-  color: color-mix(in srgb, #d8d8d8 74%, #82b7ff 26%);
+  color: #d8d8d8;
   font-size: 15.55px;
   font-weight: 300 !important;
   inset: 0;
@@ -1855,6 +1914,12 @@ body.native-sidebar-body[data-native-pointer-inside="false"]
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .session[data-sleeping="true"]
   .session-alias-heading {
+  /*
+   * CDXC:SidebarTitlebarColors 2026-06-15-15:01:
+   * Custom sidebar contrast should not add a faint row surface or special
+   * sleeping-session treatment. Keep sleeping rows on the legacy dimmed title
+   * style so they do not gain extra background chrome.
+   */
   color: #5f646b;
   opacity: 0.42;
 }
@@ -1882,6 +1947,35 @@ body.native-sidebar-body[data-native-pointer-inside="false"]
   position: static;
   text-align: right;
   width: max-content;
+}
+
+/*
+ * CDXC:SidebarTitlebarColors 2026-06-15-15:15:
+ * The custom sidebar/titlebar Contrast slider can lighten the sidebar
+ * background to #2a2a2a. Derive sleeping titles and Last Active timestamps from
+ * the current custom foreground/background so they remain legible without
+ * adding a sleeping-row surface or changing modal/dropdown colors.
+ */
+body[data-custom-sidebar-titlebar-colors="true"]
+  .sidebar-reference-layout[data-reference-sidebar="true"]
+  .session[data-sleeping="true"]
+  .session-alias-heading {
+  color: color-mix(
+    in srgb,
+    var(--custom-sidebar-titlebar-foreground-color) 40%,
+    var(--custom-sidebar-titlebar-background-color) 60%
+  );
+  opacity: 1;
+}
+
+body[data-custom-sidebar-titlebar-colors="true"]
+  .sidebar-reference-layout[data-reference-sidebar="true"]
+  .session-last-interaction-time {
+  color: color-mix(
+    in srgb,
+    var(--custom-sidebar-titlebar-foreground-color) 34%,
+    var(--custom-sidebar-titlebar-background-color) 66%
+  );
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
@@ -2102,7 +2196,14 @@ body.native-sidebar-body[data-native-pointer-inside="false"]
   opacity: 1 !important;
 }
 
-.session-floating-agent-tabler-icon.session-delayed-send-agent-icon {
+.session-floating-agent-tabler-icon.session-close-after-done-agent-icon {
+  color: #ff9aa2 !important;
+  display: inline-flex !important;
+  opacity: 1 !important;
+}
+
+.session-floating-agent-tabler-icon.session-delayed-send-agent-icon,
+.session-floating-agent-tabler-icon.session-close-after-done-agent-icon {
   align-items: center;
   height: calc(18px * var(--sidebar-density-scale));
   justify-content: center;
@@ -2112,7 +2213,8 @@ body.native-sidebar-body[data-native-pointer-inside="false"]
   width: calc(18px * var(--sidebar-density-scale));
 }
 
-.session-floating-agent-tabler-icon.session-delayed-send-agent-icon > svg {
+.session-floating-agent-tabler-icon.session-delayed-send-agent-icon > svg,
+.session-floating-agent-tabler-icon.session-close-after-done-agent-icon > svg {
   height: calc(18px * var(--sidebar-density-scale));
   width: calc(18px * var(--sidebar-density-scale));
 }
@@ -2120,7 +2222,11 @@ body.native-sidebar-body[data-native-pointer-inside="false"]
 .session-frame[data-agent-icon-hover-only="true"]:not(:hover):not(:has(.session:hover)):not(
     :has(.session:focus-visible)
   ):not(:has(.session:focus-within))
-  .session-delayed-send-agent-icon {
+  .session-delayed-send-agent-icon,
+.session-frame[data-agent-icon-hover-only="true"]:not(:hover):not(:has(.session:hover)):not(
+    :has(.session:focus-visible)
+  ):not(:has(.session:focus-within))
+  .session-close-after-done-agent-icon {
   opacity: 1 !important;
 }
 
@@ -2136,7 +2242,9 @@ body.native-sidebar-body[data-native-pointer-inside="false"]
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
-  .session-floating-agent-tabler-icon.session-delayed-send-agent-icon {
+  .session-floating-agent-tabler-icon.session-delayed-send-agent-icon,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session-floating-agent-tabler-icon.session-close-after-done-agent-icon {
   align-items: center;
   display: inline-flex !important;
   height: 18px;
@@ -2151,9 +2259,23 @@ body.native-sidebar-body[data-native-pointer-inside="false"]
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .session-floating-agent-tabler-icon.session-delayed-send-agent-icon
+  > svg,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session-floating-agent-tabler-icon.session-close-after-done-agent-icon
   > svg {
   height: 18px;
   width: 18px;
+}
+
+@keyframes session-close-after-done-icon-fade {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.38;
+  }
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .session-pinned-agent-icon {

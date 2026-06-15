@@ -68,6 +68,29 @@ enum NativeLogPrivacyTests {
     assertTrue(!persistenceKillJson.contains("stdout\":\""), "persistence kill logs must not include stdout text")
     assertTrue(!persistenceKillJson.contains("P1.S2"), "persistence kill logs must not include raw zmx names")
 
+    /*
+     CDXC:ModeSwitcherDiagnostics 2026-06-15-00:21:
+     Mode-switch timings depend on small numeric values such as 0 ms elapsed,
+     one browser tab, and zero exit status. Keep those as numbers in sanitized
+     payloads while preserving real booleans so support can distinguish timing
+     from state without exposing user-owned content.
+     */
+    let numericTelemetryPayload = NativeLogPrivacy.sanitizePayload([
+      "browserTabCount": NSNumber(value: 1),
+      "elapsedMs": NSNumber(value: 0),
+      "event": "titlebarModeSwitch.browserSurfaceResolvedTabs",
+      "exitCode": NSNumber(value: 0),
+      "hasError": NSNumber(value: false),
+      "isAwakeTargetMode": NSNumber(value: true),
+    ])
+    let numericTelemetryJson = serializePrivacyTestPayload(numericTelemetryPayload)
+
+    assertTrue(numericTelemetryJson.contains("\"elapsedMs\":0"), "elapsed timing should remain numeric")
+    assertTrue(numericTelemetryJson.contains("\"browserTabCount\":1"), "counts should remain numeric")
+    assertTrue(numericTelemetryJson.contains("\"exitCode\":0"), "exit codes should remain numeric")
+    assertTrue(numericTelemetryJson.contains("\"hasError\":false"), "false booleans should remain boolean")
+    assertTrue(numericTelemetryJson.contains("\"isAwakeTargetMode\":true"), "true booleans should remain boolean")
+
     let hotkeyReproPayload = NativeLogPrivacy.sanitizePayload([
       "actionId": "focusNextSession",
       "commandText": "codex --ask private request",
@@ -385,7 +408,28 @@ enum NativeLogPrivacyTests {
       isNativePersistentLogImportantDiagnostic("nativeWorkspace.runtime.timeout"),
       "timeout native diagnostic events should persist in normal mode")
     assertTrue(
+      isNativePersistentLogImportantDiagnostic("nativeSidebar.gxserver.status.invalid"),
+      "invalid native diagnostic events should persist in normal mode")
+    assertTrue(
       !isNativePersistentLogImportantDiagnostic("nativeSidebar.gxserver.presentationDelta.applied"),
       "routine native diagnostic events should require debugging mode")
+    assertTrue(
+      !isNativePersistentLogImportantDiagnostic("nativeWorkspace.focusTerminal.missingSession"),
+      "missing-session focus probes should require debugging mode")
+    assertTrue(
+      !isNativePersistentLogImportantDiagnostic("nativeHotkeys.navigationRepro.domObserved"),
+      "hotkey repro breadcrumbs should require debugging mode")
+    assertTrue(
+      !isNativePersistentLogImportantDiagnostic("nativePaneLayoutTrace.layoutSync.focusOwnerMismatch"),
+      "pane-layout trace breadcrumbs should require debugging mode")
+    assertTrue(
+      !isNativePersistentLogImportantDiagnostic("nativePaneLayoutStartup.restoredWorkspaceSnapshot"),
+      "startup pane-layout breadcrumbs should require debugging mode")
+    assertTrue(
+      !isNativePersistentLogImportantDiagnostic("nativeSidebar.actionCrashTrace.titlebarClick"),
+      "action crash trace breadcrumbs should require debugging mode")
+    assertTrue(
+      isNativePersistentLogImportantDiagnostic("nativeSidebar.actionCrashTrace.titlebarCommandError"),
+      "actual action crash trace error phases should persist in normal mode")
   }
 }

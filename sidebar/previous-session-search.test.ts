@@ -3,6 +3,7 @@ import type { SidebarPreviousSessionItem } from "../shared/session-grid-contract
 import {
   filterPreviousSessions,
   filterPreviousSessionsModalItems,
+  getNextPreviousSessionsModalSelection,
   removePreviousSessionByHistoryId,
 } from "./previous-session-search";
 
@@ -173,6 +174,61 @@ describe("removePreviousSessionByHistoryId", () => {
       { historyId: "history-1" },
       { historyId: "history-3" },
     ]);
+  });
+});
+
+describe("getNextPreviousSessionsModalSelection", () => {
+  test("should select the first row when arrowing down without an active row", () => {
+    const previousSessions = [
+      createPreviousSession({ historyId: "history-1" }),
+      createPreviousSession({ historyId: "history-2" }),
+    ];
+
+    expect(
+      getNextPreviousSessionsModalSelection({
+        currentHistoryId: undefined,
+        direction: 1,
+        sessions: previousSessions,
+      }),
+    ).toBe("history-1");
+  });
+
+  test("should select the last row when arrowing up without an active row", () => {
+    const previousSessions = [
+      createPreviousSession({ historyId: "history-1" }),
+      createPreviousSession({ historyId: "history-2" }),
+    ];
+
+    expect(
+      getNextPreviousSessionsModalSelection({
+        currentHistoryId: undefined,
+        direction: -1,
+        sessions: previousSessions,
+      }),
+    ).toBe("history-2");
+  });
+
+  test("should wrap between visible modal rows", () => {
+    const previousSessions = [
+      createPreviousSession({ historyId: "history-1" }),
+      createPreviousSession({ historyId: "history-2" }),
+      createPreviousSession({ historyId: "history-3" }),
+    ];
+
+    expect(
+      getNextPreviousSessionsModalSelection({
+        currentHistoryId: "history-3",
+        direction: 1,
+        sessions: previousSessions,
+      }),
+    ).toBe("history-1");
+    expect(
+      getNextPreviousSessionsModalSelection({
+        currentHistoryId: "history-1",
+        direction: -1,
+        sessions: previousSessions,
+      }),
+    ).toBe("history-3");
   });
 });
 

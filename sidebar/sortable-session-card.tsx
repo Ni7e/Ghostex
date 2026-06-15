@@ -45,6 +45,10 @@ import {
   type SidebarSessionItem,
 } from "../shared/session-grid-contract";
 import { DEFAULT_ghostex_SETTINGS, type BrowserFeedbackTool } from "../shared/ghostex-settings";
+import {
+  getEnabledVisibleSidebarSessionTagSections,
+  type SidebarSessionTagListItem,
+} from "../shared/session-tags";
 import { buildSidebarSessionDetailsClipboardText } from "../shared/session-details-copy";
 import {
   getSessionCardTitleTooltip,
@@ -59,7 +63,7 @@ import {
   createSessionDropTargetData,
   createSessionDropTargetId,
 } from "./sidebar-dnd";
-import { openAppModal } from "./app-modal-host-bridge";
+import { closeAppModal, openAppModal } from "./app-modal-host-bridge";
 import { SidebarContextMenuPortal } from "./sidebar-context-menu-portal";
 import { postSidebarRefreshDebugLog } from "./sidebar-refresh-debug-log";
 import { useSidebarStore } from "./sidebar-store";
@@ -67,8 +71,6 @@ import {
   getEffectiveSessionTag,
   getSidebarSessionTagLabel,
   SessionTagIcon,
-  SIDEBAR_SESSION_TAG_OPTIONS,
-  SIDEBAR_SESSION_TAG_SECTIONS,
   type SidebarSessionTag,
 } from "./session-tag-ui";
 import type { WebviewApi } from "./webview-api";
@@ -153,6 +155,7 @@ export type SortableSessionCardProps = {
     count: number;
     onReveal: () => void;
   };
+  sessionTagListItems?: readonly SidebarSessionTagListItem[];
   sessionIdsBelow?: readonly string[];
   sessionId: string;
   showGroupDropTargetChrome?: boolean;
@@ -188,6 +191,25 @@ export function getSessionCardAccessibleLabel({
 }): string {
   const fallbackTitle = title.trim() || "Session";
   return isFocused ? `${fallbackTitle}, current session` : fallbackTitle;
+}
+
+export function getSessionTagSubmenuSections({
+  currentSessionTag,
+  sessionTagListItems,
+}: {
+  currentSessionTag?: SidebarSessionTag;
+  sessionTagListItems?: readonly SidebarSessionTagListItem[];
+}) {
+  /*
+   * CDXC:SessionTagFilters 2026-06-15-22:23:
+   * Session-card Tag as menus should use the same enabled-and-visible tag set
+   * as sidebar tag filters so default-off tags do not keep appearing in the
+   * assignment menu. Include the current tag even when it is hidden so older or
+   * custom-tagged sessions can still clear their selected marker.
+   */
+  return getEnabledVisibleSidebarSessionTagSections(sessionTagListItems, {
+    includeTags: currentSessionTag ? [currentSessionTag] : [],
+  });
 }
 
 export type SidebarBulkContextMenuScheduler = (operation: () => void) => void;
@@ -347,6 +369,7 @@ export function SortableSessionCard({
   isSearchSelected = false,
   onFocusRequested,
   projectSessionListMoreRow,
+  sessionTagListItems,
   sessionIdsBelow = [],
   sessionId,
   showGroupDropTargetChrome = true,
@@ -491,6 +514,7 @@ export function SortableSessionCard({
   const canDelayedSend = session
     ? !isProjectSessionListMoreRow && !isBrowserSession && !isT3Session
     : false;
+  const canCloseAfterDone = canDelayedSend;
   const canCopyResumeCommand = session
     ? showSessionCommandCopyActions &&
       !isProjectSessionListMoreRow &&
@@ -607,6 +631,14 @@ export function SortableSessionCard({
   }
 
   const currentSessionTag = getEffectiveSessionTag(session);
+  const sessionTagSubmenuSections = getSessionTagSubmenuSections({
+    currentSessionTag,
+    sessionTagListItems,
+  });
+  const sessionTagSubmenuItemCount = sessionTagSubmenuSections.reduce(
+    (count, section) => count + section.options.length,
+    0,
+  );
   const sessionTitleTooltip = getSessionCardTitleTooltip({
     session,
     showDebugSessionNumbers,
@@ -617,11 +649,18 @@ export function SortableSessionCard({
   });
   const lifecycleState = getSidebarSessionLifecycleState(session);
   const showTerminalSessionIcon = shouldShowTerminalSessionIcon(session);
+  const hasSessionTimerIcon = Boolean(
+    session.delayedSendRemainingLabel ||
+      session.delayedSendDeadlineAt ||
+      session.closeAfterDone ||
+      session.closeAfterDoneRemainingLabel ||
+      session.closeAfterDoneDeadlineAt,
+  );
   const hasSessionCardIcon =
     !isProjectSessionListMoreRow &&
     (session.isPinned === true ||
       Boolean(currentSessionTag) ||
-      Boolean(session.delayedSendRemainingLabel) ||
+      hasSessionTimerIcon ||
       Boolean(session.agentIcon) ||
       showTerminalSessionIcon ||
       session.isReloading === true);
@@ -912,7 +951,12 @@ export function SortableSessionCard({
      * CDXC:AppModals 2026-04-27-14:25
      * Rename must always use the full-window modal host. Missing host is an
      * error, not a reason to show the old squeezed sidebar dialog.
+     *
+     * CDXC:SettingsDismissal 2026-06-15-14:07:
+     * Opening Rename from a sidebar session row should replace any open
+     * Settings workspace modal instead of stacking the rename flow behind it.
      */
+    closeAppModal("SettingsDismissal:sessionRowRename");
     openAppModal({
       initialTitle: getSessionRenameInitialTitle(session),
       modal: "renameSession",
@@ -1030,6 +1074,24 @@ export function SortableSessionCard({
       sessionId: session.sessionId,
       title: getSessionRenameInitialTitle(session),
       type: "open",
+    });
+  };
+
+  const requestToggleCloseAfterDone = () => {
+    if (!canCloseAfterDone) {
+      return;
+    }
+
+    setContextMenuPosition(undefined);
+    /**
+     * CDXC:CloseAfterDone 2026-06-15-21:00:
+     * Session context menus expose Close After Done directly below Delayed
+     * Send. The sidebar sends only the session id; native owns the armed flag,
+     * the continuous three-minute Done timer, and the final close behavior.
+     */
+    vscode.postMessage({
+      sessionId: session.sessionId,
+      type: "toggleCloseAfterDone",
     });
   };
 
@@ -1278,9 +1340,8 @@ export function SortableSessionCard({
     const submenuWidth = 204;
     const submenuHeight =
       CONTEXT_MENU_VERTICAL_PADDING_PX +
-      SIDEBAR_SESSION_TAG_OPTIONS.length * CONTEXT_MENU_ITEM_HEIGHT_PX +
-      SIDEBAR_SESSION_TAG_SECTIONS.length * 18 +
-      Math.max(0, SIDEBAR_SESSION_TAG_SECTIONS.length - 1) * 10;
+      sessionTagSubmenuItemCount * CONTEXT_MENU_ITEM_HEIGHT_PX +
+      Math.max(0, sessionTagSubmenuSections.length - 1) * 10;
     setTagSubmenuPosition({
       x: getCenteredSidebarMenuX(submenuWidth),
       y: Math.max(
@@ -1341,7 +1402,7 @@ export function SortableSessionCard({
     label: session.isPinned ? "Unpin" : "Pin",
     onClick: () => requestSetPinned(!session.isPinned),
   });
-  if (canTagSession) {
+  if (canTagSession && sessionTagSubmenuItemCount > 0) {
     primaryActions.push({
       icon: (
         <IconTag aria-hidden="true" className="session-context-menu-icon" size={16} stroke={1.8} />
@@ -1541,6 +1602,27 @@ export function SortableSessionCard({
       key: "delayed-send",
       label: "Delayed Send",
       onClick: requestDelayedSend,
+    });
+  }
+  if (canCloseAfterDone) {
+    /*
+     * CDXC:CloseAfterDone 2026-06-15-21:00:
+     * Sidebar context menus should place Close After Done immediately below
+     * Delayed Send, but the menu glyph itself inherits the normal context-menu
+     * icon tint. Only the armed session-card status clock uses pastel red.
+     */
+    sessionActions.push({
+      icon: (
+        <IconClock
+          aria-hidden="true"
+          className="session-context-menu-icon"
+          size={16}
+          stroke={1.8}
+        />
+      ),
+      key: "close-after-done",
+      label: "Close After Done",
+      onClick: requestToggleCloseAfterDone,
     });
   }
   if (canForkSession) {
@@ -1918,12 +2000,16 @@ export function SortableSessionCard({
             {isProjectSessionListMoreRow ? null : (
               <SessionFloatingAgentIcon
                 agentIcon={session.agentIcon}
+                closeAfterDone={session.closeAfterDone}
+                closeAfterDoneDeadlineAt={session.closeAfterDoneDeadlineAt}
+                closeAfterDoneRemainingLabel={session.closeAfterDoneRemainingLabel}
                 delayedSendDeadlineAt={session.delayedSendDeadlineAt}
                 delayedSendRemainingLabel={session.delayedSendRemainingLabel}
                 faviconDataUrl={session.faviconDataUrl}
                 isFavorite={session.isFavorite}
                 isPinned={session.isPinned}
                 isReloading={session.isReloading}
+                onCloseAfterDoneClick={requestToggleCloseAfterDone}
                 onDelayedSendClick={requestDelayedSend}
                 sessionTag={session.sessionTag}
                 sessionPersistenceName={session.sessionPersistenceName}
@@ -2027,12 +2113,16 @@ export function SortableSessionCard({
               {/*
                * CDXC:SessionTags 2026-06-05-12:30:
                * The session context menu exposes `Tag as` as a submenu with the
-               * canonical session tag list. Choosing the current marker clears
+               * settings-visible tag list. Choosing the current marker clears
                * it so the old Favorite/Unfavorite workflow remains one click deep.
+               *
+               * CDXC:SessionTagFilters 2026-06-16-00:05:
+               * Tag context menus should not render Priority, Progress, or Type
+               * label rows. Keep the grouped sections and dividers for scan
+               * structure without spending vertical space on heading text.
                */}
-              {SIDEBAR_SESSION_TAG_SECTIONS.map((section) => (
+              {sessionTagSubmenuSections.map((section) => (
                 <div className="session-tag-menu-section" key={section.label}>
-                  <div className="session-tag-menu-section-label">{section.label}</div>
                   {section.options.map((option) => {
                     const isSelected = currentSessionTag === option.value;
                     return (

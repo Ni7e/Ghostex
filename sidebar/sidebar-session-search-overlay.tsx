@@ -1,11 +1,19 @@
 import { IconSearch, IconX } from "@tabler/icons-react";
-import { useEffect, type KeyboardEventHandler, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  type ComponentProps,
+  type KeyboardEventHandler,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import type { SidebarPreviousSessionItem } from "../shared/session-grid-contract";
 import { SessionHistoryCard } from "./session-history-card";
 
 export type SidebarSessionSearchFieldProps = {
   ariaLabel?: string;
+  autoCapitalize?: ComponentProps<"input">["autoCapitalize"];
   autoComplete?: string;
+  autoCorrect?: ComponentProps<"input">["autoCorrect"];
   clearLabel?: string;
   inputClassName?: string;
   inputRef: RefObject<HTMLInputElement | null>;
@@ -15,13 +23,16 @@ export type SidebarSessionSearchFieldProps = {
   query: string;
   shellClassName?: string;
   setQuery: (query: string) => void;
+  spellCheck?: ComponentProps<"input">["spellCheck"];
   toolbarClassName?: string;
   trailingControl?: ReactNode;
 };
 
 export function SidebarSessionSearchField({
   ariaLabel = "Search current and previous sessions",
+  autoCapitalize,
   autoComplete,
+  autoCorrect,
   clearLabel = "Clear session search",
   inputClassName,
   inputRef,
@@ -31,6 +42,7 @@ export function SidebarSessionSearchField({
   query,
   shellClassName,
   setQuery,
+  spellCheck,
   toolbarClassName,
   trailingControl,
 }: SidebarSessionSearchFieldProps) {
@@ -74,7 +86,9 @@ export function SidebarSessionSearchField({
       >
         <input
           aria-label={ariaLabel}
+          autoCapitalize={autoCapitalize}
           autoComplete={autoComplete}
+          autoCorrect={autoCorrect}
           className={["group-title-input session-search-input", inputClassName]
             .filter(Boolean)
             .join(" ")}
@@ -104,6 +118,7 @@ export function SidebarSessionSearchField({
           }}
           placeholder={placeholder}
           ref={inputRef}
+          spellCheck={spellCheck}
           type="text"
           value={query}
         />

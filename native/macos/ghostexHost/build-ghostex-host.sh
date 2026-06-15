@@ -10,6 +10,7 @@ CLI_DIR="$SCRIPT_DIR/CLI"
 GHOSTTY_ROOT="${GHOSTTY_ROOT:-}"
 ZMX_ROOT="${ZMX_ROOT:-$REPO_ROOT/zmx}"
 ZEHN_ROOT="${ZEHN_ROOT:-$REPO_ROOT/zehn}"
+GXSERVER_RS_ROOT="${GXSERVER_RS_ROOT:-$REPO_ROOT/gxserver-rs}"
 BEADS_ROOT="${BEADS_ROOT:-${GHOSTEX_BEADS_ROOT:-}}"
 TUI_ROOT="${TUI_ROOT:-$REPO_ROOT/tui}"
 CODE_SERVER_ROOT="${CODE_SERVER_ROOT:-${GHOSTEX_CODE_SERVER_ROOT:-$REPO_ROOT/code-server}}"
@@ -493,11 +494,11 @@ package_code_server_if_needed() {
 		--path "$CODE_SERVER_ROOT/package-lock.json" \
 		--path "$CODE_SERVER_ROOT/.node-version" \
 		--path "$CODE_SERVER_ROOT/src/browser")"
-	# CDXC:CodeServerRuntime 2026-06-08-12:17: The app bundle must contain a self-contained code-server runtime at Web/code-server and the single shared Node executable at Web/code-server/lib/node. gxserver rebuilds better-sqlite3 against this same Node, so missing code-server resources are build failures instead of installed-user Node prompts.
+	# CDXC:CodeServerRuntime 2026-06-08-12:17: The app bundle must contain a self-contained code-server runtime at Web/code-server and the single shared Node executable at Web/code-server/lib/node. Missing code-server resources are build failures instead of installed-user Node prompts.
 	if cache_matches "code-server-package-$GHOSTEX_MACOS_ARCH" "$package_digest" "$target_dir/out/node/entry.js" "$target_dir/lib/vscode/out/server-main.js" "$target_dir/lib/vscode/node_modules/@vscode/ripgrep/bin/rg" "$target_dir/lib/node" "$target_dir/node_modules" &&
 		binary_supports_macos_arch "$target_dir/lib/node" "$GHOSTEX_MACOS_ARCH" &&
 		binary_supports_macos_arch "$target_dir/lib/vscode/node_modules/@vscode/ripgrep/bin/rg" "$GHOSTEX_MACOS_ARCH"; then
-		# CDXC:CodeServerRuntime 2026-06-08-16:23: Web/code-server is a shared staging directory reused by arm64 and x86_64 release passes. A per-arch cache stamp is only valid when the staged Node executable still contains the requested CPU slice; otherwise restage the package so app validation and gxserver native modules use the matching runtime.
+		# CDXC:CodeServerRuntime 2026-06-08-16:23: Web/code-server is a shared staging directory reused by arm64 and x86_64 release passes. A per-arch cache stamp is only valid when the staged Node executable still contains the requested CPU slice; otherwise restage the package so app validation uses the matching runtime.
 		echo "code-server package is current; skipping package rebuild."
 		return 0
 	fi
@@ -670,6 +671,72 @@ build_tui_if_needed() {
 	write_cache_stamp "ghostex-tui-$GHOSTEX_MACOS_ARCH" "$build_digest"
 }
 
+gxserver_rust_cargo_target() {
+	case "$GHOSTEX_MACOS_ARCH" in
+		arm64)
+			printf 'aarch64-apple-darwin\n'
+			;;
+		x86_64)
+			printf 'x86_64-apple-darwin\n'
+			;;
+	esac
+}
+
+resolve_gxserver_rust_cargo() {
+	local cargo_bin="${GXSERVER_RUST_CARGO:-${CARGO:-}}"
+	if [[ -z "$cargo_bin" ]]; then
+		cargo_bin="$(command -v cargo || true)"
+	fi
+	if [[ -z "$cargo_bin" ]]; then
+		cat >&2 <<EOF
+Cargo is required to build bundled Rust gxserver.
+
+Install Rust, then rerun this script:
+  rustup toolchain install stable
+EOF
+		exit 1
+	fi
+	printf '%s\n' "$cargo_bin"
+}
+
+build_gxserver_rust_if_needed() {
+	local cargo_bin cargo_target output_path cargo_version build_digest
+	if [[ ! -f "$GXSERVER_RS_ROOT/Cargo.toml" ]]; then
+		cat >&2 <<EOF
+Rust gxserver source is missing:
+  $GXSERVER_RS_ROOT
+
+Initialize or provide gxserver-rs before building the app bundle.
+EOF
+		exit 1
+	fi
+	cargo_bin="$(resolve_gxserver_rust_cargo)"
+	cargo_target="$(gxserver_rust_cargo_target)"
+	output_path="$GXSERVER_RS_ROOT/target/$cargo_target/release/gxserver"
+	cargo_version="$("$cargo_bin" --version 2>/dev/null || true)"
+	build_digest="$(fingerprint_inputs \
+		--value "gxserver-rs-build-v1" \
+		--value "target=$cargo_target" \
+		--value "cargo=$cargo_version" \
+		--path "$GXSERVER_RS_ROOT/src" \
+		--path "$GXSERVER_RS_ROOT/Cargo.toml" \
+		--path "$GXSERVER_RS_ROOT/Cargo.lock")"
+	if cache_matches "gxserver-rs-$GHOSTEX_MACOS_ARCH" "$build_digest" "$output_path" &&
+		binary_supports_macos_arch "$output_path" "$GHOSTEX_MACOS_ARCH"; then
+		echo "Rust gxserver is current; skipping Cargo build." >&2
+		printf '%s\n' "$output_path"
+		return 0
+	fi
+
+	"$cargo_bin" build --release --manifest-path "$GXSERVER_RS_ROOT/Cargo.toml" --target "$cargo_target"
+	if ! binary_supports_macos_arch "$output_path" "$GHOSTEX_MACOS_ARCH"; then
+		echo "Rust gxserver binary does not contain $GHOSTEX_MACOS_ARCH: $output_path" >&2
+		exit 1
+	fi
+	write_cache_stamp "gxserver-rs-$GHOSTEX_MACOS_ARCH" "$build_digest"
+	printf '%s\n' "$output_path"
+}
+
 build_zehn_if_needed() {
 	local output_path="$ZEHN_ROOT/zig-out/bin/zehn"
 	local build_digest
@@ -782,10 +849,10 @@ gxserver_package_supports_macos_arch() {
 		return 1
 	fi
 	for binary_path in \
+		"$target_dir/bin/gxserver" \
 		"$target_dir/bin/zmx" \
 		"$target_dir/bin/zehn" \
-		"$WEB_DIR/bin/bd" \
-		"$target_dir/node_modules/better-sqlite3/build/Release/better_sqlite3.node"; do
+		"$WEB_DIR/bin/bd"; do
 		if ! binary_supports_macos_arch "$binary_path" "$GHOSTEX_MACOS_ARCH"; then
 			return 1
 		fi
@@ -796,40 +863,44 @@ gxserver_package_supports_macos_arch() {
 package_gxserver_if_needed() {
 	local package_dir="$REPO_ROOT/gxserver/dist/server-package"
 	local target_dir="$WEB_DIR/gxserver"
-	local package_digest
-	# CDXC:GxserverPackaging 2026-05-30-15:49: The macOS app bundles the same gxserver server package used by standalone installs. The app only starts/reuses gxserver through its app-owned Node runtime and does not own shutdown, so app resources must include compiled gxserver JS plus pinned zmx/zehn/bd artifacts.
+	local rust_bin package_digest
+	# CDXC:GxserverPackaging 2026-05-30-15:49: The macOS app bundles the same gxserver server package used by standalone installs. The app only starts/reuses gxserver through packaged resources and does not own shutdown, so app resources must include the gxserver daemon plus pinned zmx/zehn/bd artifacts.
 	#
-	# CDXC:LocalStartFast 2026-06-07-16:23: gxserver packaging copies production node_modules and rebuilds native better-sqlite3 for the selected Node ABI. Skip that work when gxserver runtime sources, package metadata, packager code, bundled zmx/zehn/bd binaries, and the selected Node ABI are unchanged.
+	# CDXC:LocalStartFast 2026-06-07-16:23: gxserver packaging should skip work when gxserver runtime sources, package metadata, packager code, bundled zmx/zehn/bd binaries, and generated protocol inputs are unchanged.
 	#
-	# CDXC:GxserverPackaging 2026-06-08-12:17: gxserver native modules are ABI-coupled to the Node runtime bundled inside Web/code-server. Include Web/code-server/lib/node in the package fingerprint so a code-server Node patch update rebuilds better-sqlite3 and refreshes native-runtime.json before the app launches.
+	# CDXC:GxserverPackaging 2026-06-08-12:17: gxserver used to couple app packaging to code-server's bundled Node runtime. Phase 8 keeps code-server as a separate app resource and removes gxserver's Node ABI from the daemon package fingerprint.
 	#
 	# CDXC:ProjectBoardBeads 2026-06-08-10:46: Package the full upstream Beads CLI with gxserver so Project/Kanban opens without PATH setup. The app build stages exactly one `bd` binary for GHOSTEX_MACOS_ARCH, keeping arm and Intel app artifacts arch-specific instead of shipping a universal Beads binary.
+	#
+	# CDXC:GxserverRustPackaging 2026-06-16-10:35: Phase 8 macOS builds now package the Rust gxserver daemon by default while preserving generated TypeScript protocol exports. Keep Node as a build-time protocol compiler only; the app gxserver package must not depend on Node ABI metadata or a JavaScript database addon at runtime.
+	rust_bin="$(build_gxserver_rust_if_needed)"
 	package_digest="$(fingerprint_inputs \
-		--value "gxserver-package-v4" \
+		--value "gxserver-package-v5" \
 		--value "arch=$GHOSTEX_MACOS_ARCH" \
-		--value "node=$GXSERVER_NODE_BIN:$GXSERVER_NODE_VERSION:$GXSERVER_NODE_MODULE_VERSION" \
-		--path "$REPO_ROOT/gxserver/src" \
+		--value "rust=$(path_identity "$rust_bin")" \
 		--path "$REPO_ROOT/gxserver/protocol" \
 		--path "$REPO_ROOT/gxserver/package.json" \
 		--path "$REPO_ROOT/gxserver/package-lock.json" \
 		--path "$REPO_ROOT/gxserver/tsconfig.json" \
 		--path "$REPO_ROOT/gxserver/scripts/package-gxserver.mjs" \
-		--path "$WEB_DIR/code-server/lib/node" \
+		--path "$GXSERVER_RS_ROOT/src" \
+		--path "$GXSERVER_RS_ROOT/Cargo.toml" \
+		--path "$GXSERVER_RS_ROOT/Cargo.lock" \
 		--path "$WEB_DIR/bin/zmx" \
 		--path "$WEB_DIR/bin/zehn" \
 		--path "$WEB_DIR/bin/bd")"
-	if cache_matches "gxserver-package-$GHOSTEX_MACOS_ARCH" "$package_digest" "$package_dir/build-identity.json" "$target_dir/build-identity.json" "$target_dir/native-runtime.json" &&
+	if cache_matches "gxserver-package-$GHOSTEX_MACOS_ARCH" "$package_digest" "$package_dir/build-identity.json" "$target_dir/build-identity.json" "$target_dir/bin/gxserver" "$target_dir/dist/protocol/index.js" "$target_dir/dist/protocol/index.d.ts" &&
 		gxserver_package_supports_macos_arch "$target_dir"; then
-		# CDXC:GxserverPackaging 2026-06-08-16:23: Web/gxserver is also shared across dual-architecture release passes. Do not accept a cache hit unless the staged zmx, zehn, bd, and better-sqlite3 binaries match the requested architecture, or Intel and arm64 DMGs can silently inherit the previous pass's native modules.
+		# CDXC:GxserverPackaging 2026-06-08-16:23: Web/gxserver is also shared across dual-architecture release passes. Do not accept a cache hit unless the staged gxserver, zmx, zehn, and bd binaries match the requested architecture, or Intel and arm64 DMGs can silently inherit the previous pass's native artifacts.
 		echo "gxserver package is current; skipping package rebuild."
 		return 0
 	fi
 
 	(
 		cd "$REPO_ROOT/gxserver"
-		echo "Packaging gxserver with $GXSERVER_NODE_BIN ($GXSERVER_NODE_VERSION, NODE_MODULE_VERSION $GXSERVER_NODE_MODULE_VERSION)"
+		echo "Packaging Rust gxserver with $rust_bin"
 		env PATH="$GXSERVER_NODE_DIR:$PATH" "$GXSERVER_NPM_BIN" run build
-		env PATH="$GXSERVER_NODE_DIR:$PATH" "$GXSERVER_NPM_BIN" run package:app -- --zmx-bin "$WEB_DIR/bin/zmx" --zehn-bin "$WEB_DIR/bin/zehn" --bd-bin "$WEB_DIR/bin/bd" --native-node "$GXSERVER_NODE_BIN" --native-npm "$GXSERVER_NPM_BIN"
+		env PATH="$GXSERVER_NODE_DIR:$PATH" "$GXSERVER_NODE_BIN" scripts/package-gxserver.mjs --rust-bin "$rust_bin" --zmx-bin "$WEB_DIR/bin/zmx" --zehn-bin "$WEB_DIR/bin/zehn" --bd-bin "$WEB_DIR/bin/bd"
 	)
 	rm -rf "$target_dir"
 	cp -R "$package_dir" "$target_dir"
@@ -837,7 +908,7 @@ package_gxserver_if_needed() {
 	write_cache_stamp "gxserver-package-$GHOSTEX_MACOS_ARCH" "$package_digest"
 }
 
-# CDXC:CodeServerRuntime 2026-06-08-12:17: code-server is the only bundled Node owner in the macOS app. Build code-server with Node 22, stage that runtime inside Web/code-server/lib/node, and make gxserver rebuild better-sqlite3 against the same executable so users never see a missing system Node prompt.
+# CDXC:CodeServerRuntime 2026-06-08-12:17: code-server is the only bundled Node owner in the macOS app. Build code-server with Node 22 and stage that runtime inside Web/code-server/lib/node; gxserver Phase 8 packaging uses Rust and no longer depends on this Node runtime at daemon startup.
 CODE_SERVER_NODE_BIN="$(prepare_code_server_app_node_runtime)"
 CODE_SERVER_NODE_DIR="$(cd "$(dirname "$CODE_SERVER_NODE_BIN")" && pwd)"
 CODE_SERVER_NPM_BIN="$CODE_SERVER_NODE_DIR/npm"
@@ -871,7 +942,6 @@ if [[ "$GXSERVER_NODE_MAJOR" != "$CODE_SERVER_APP_NODE_MAJOR" ]]; then
 	echo "Ghostex app gxserver packaging must use code-server's bundled Node.js $CODE_SERVER_APP_NODE_MAJOR, got $GXSERVER_NODE_VERSION at $GXSERVER_NODE_BIN." >&2
 	exit 1
 fi
-GXSERVER_NODE_MODULE_VERSION="$("$GXSERVER_NODE_BIN" -p 'process.versions.modules')"
 
 T3CODE_NODE_BIN="${T3CODE_NODE:-$(resolve_t3code_node || true)}"
 if [[ -z "$T3CODE_NODE_BIN" ]]; then
@@ -1089,11 +1159,17 @@ chmod 755 "$CLI_DIR/ghostex" "$CLI_DIR/gx"
 # the app CLI resources so agents can install project-board bead workflow
 # guidance from the same released Ghostex build that provides the other skills.
 mkdir -p "$CLI_DIR/skills"
-cp -R "$REPO_ROOT/scripts/skills/ghostex-browser-use" "$CLI_DIR/skills/ghostex-browser-use"
-cp -R "$REPO_ROOT/scripts/skills/ghostex-computer-use" "$CLI_DIR/skills/ghostex-computer-use"
-cp -R "$REPO_ROOT/scripts/skills/ghostex-agent-orchestration" "$CLI_DIR/skills/ghostex-agent-orchestration"
-cp -R "$REPO_ROOT/scripts/skills/ghostex-generate-title" "$CLI_DIR/skills/ghostex-generate-title"
-cp -R "$REPO_ROOT/scripts/skills/ghostex-manage-beads" "$CLI_DIR/skills/ghostex-manage-beads"
+# CDXC:LocalStart 2026-06-15-02:34: Local starts can rerun after the generated CLI skill folders already exist. Merge each bundled skill into its destination instead of copying the source directory onto an existing directory path, which makes `bun run start` idempotent without deleting generated output.
+copy_cli_skill() {
+	local skill_name="$1"
+	mkdir -p "$CLI_DIR/skills/$skill_name"
+	cp -R "$REPO_ROOT/scripts/skills/$skill_name/." "$CLI_DIR/skills/$skill_name/"
+}
+copy_cli_skill "ghostex-browser-use"
+copy_cli_skill "ghostex-computer-use"
+copy_cli_skill "ghostex-agent-orchestration"
+copy_cli_skill "ghostex-generate-title"
+copy_cli_skill "ghostex-manage-beads"
 # CDXC:ZmxPersistence 2026-05-20-09:57: zmx pane refresh is now a zmx IPC feature, so Ghostex must bundle the pinned submodule binary instead of depending on whichever zmx happens to be on PATH. Build the submodule for the requested macOS architecture and copy it into app resources where TerminalWorkspaceView can launch it directly.
 if [[ ! -f "$ZMX_ROOT/build.zig" ]]; then
 	cat >&2 <<EOF
@@ -1462,6 +1538,15 @@ export CEF_ROOT
 BUILT_PRODUCTS_DIR="$DERIVED_DATA/Build/Products/$CONFIGURATION"
 APP_PATH="$BUILT_PRODUCTS_DIR/$GHOSTEX_APP_NAME.app"
 
+remove_lid_sleep_helper_resources_copy() {
+	local app_path="$1"
+	local resources_helper="$app_path/Contents/Resources/$GHOSTEX_LID_SLEEP_HELPER_LABEL"
+	if [[ -e "$resources_helper" ]]; then
+		# CDXC:TitlebarKeepAwake 2026-05-29-19:12: Xcode copies the helper tool into Contents/Resources when ghostex depends on GhostexLidSleepHelper. Public releases install only the LaunchServices copy, and leaving the adhoc Resources binary breaks notarization.
+		rm -f "$resources_helper"
+	fi
+}
+
 copy_lid_sleep_helper() {
 	local app_path="$1"
 	local helper_source="$BUILT_PRODUCTS_DIR/$GHOSTEX_LID_SLEEP_HELPER_LABEL"
@@ -1470,11 +1555,7 @@ copy_lid_sleep_helper() {
 	mkdir -p "$helper_dir"
 	cp "$helper_source" "$helper_dir/$GHOSTEX_LID_SLEEP_HELPER_LABEL"
 	chmod 755 "$helper_dir/$GHOSTEX_LID_SLEEP_HELPER_LABEL"
-	local resources_helper="$app_path/Contents/Resources/$GHOSTEX_LID_SLEEP_HELPER_LABEL"
-	if [[ -e "$resources_helper" ]]; then
-		# CDXC:TitlebarKeepAwake 2026-05-29-19:12: Xcode copies the helper tool into Contents/Resources when ghostex depends on GhostexLidSleepHelper. Public releases install only the LaunchServices copy, and leaving the adhoc Resources binary breaks notarization.
-		rm -f "$resources_helper"
-	fi
+	remove_lid_sleep_helper_resources_copy "$app_path"
 }
 
 copy_cef_runtime() {
@@ -1529,6 +1610,34 @@ local_adhoc_build_signing() {
 	[[ "${GHOSTEX_CODE_SIGN_IDENTITY:--}" == "-" && "${GHOSTEX_CODE_SIGN_TIMESTAMP_FLAG:---timestamp=none}" == "--timestamp=none" ]]
 }
 
+local_start_build_signing() {
+	[[ "${GHOSTEX_LOCAL_START:-}" == "1" ]]
+}
+
+local_start_build_cache_reusable() {
+	local_start_build_signing || local_adhoc_build_signing
+}
+
+signature_matches_requested_identity() {
+	local code_path="$1"
+	local identity="${GHOSTEX_CODE_SIGN_IDENTITY:--}"
+	local signature_details
+	signature_details="$(codesign -dv --verbose=4 "$code_path" 2>&1 || true)"
+	if [[ "$identity" == "-" ]]; then
+		[[ "$signature_details" == *"Signature=adhoc"* ]]
+	elif [[ "$identity" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+		[[ "$signature_details" != *"Signature=adhoc"* && "$signature_details" != *"TeamIdentifier=not set"* ]]
+	else
+		[[ "$signature_details" == *"Authority=$identity"* ]]
+	fi
+}
+
+can_reuse_build_app_signature() {
+	local_start_build_cache_reusable &&
+		codesign --verify --deep --strict "$APP_PATH" >/dev/null 2>&1 &&
+		signature_matches_requested_identity "$APP_PATH"
+}
+
 build_native_app_digest() {
 	fingerprint_inputs \
 		--value "native-app-v1" \
@@ -1556,10 +1665,11 @@ sync_built_app_resources() {
 }
 
 sign_built_app_if_needed() {
-	if local_adhoc_build_signing && codesign --verify --deep --strict "$APP_PATH" >/dev/null 2>&1; then
+	if can_reuse_build_app_signature; then
 		echo "Built $GHOSTEX_APP_NAME signature is current; skipping build app re-sign."
 		return 0
 	fi
+	# CDXC:MacOSPermissions 2026-06-16-02:27: Local starts now use a stable Apple signing identity when available so Screen Recording grants survive Ghostex rebuilds. Reuse cached app shells only when their existing signature matches the requested identity; a valid ad-hoc cdhash signature is not reusable for this permission-sensitive launch path.
 	# CDXC:BetaDistribution 2026-06-06-01:04: The 4.0 beta release must run the Developer ID signing helper reliably from temporary release worktrees. Invoke the helper through bash explicitly because direct shebang execution can be killed by macOS provenance checks on this machine even though the same script succeeds under /bin/bash.
 	/bin/bash "$SCRIPT_DIR/codesign-ghostex-host.sh" "$APP_PATH"
 }
@@ -1567,8 +1677,10 @@ sign_built_app_if_needed() {
 NATIVE_APP_CACHE_KEY="native-app-$GHOSTEX_APP_VARIANT-$GHOSTEX_MACOS_ARCH-$CONFIGURATION"
 NATIVE_APP_DIGEST="$(build_native_app_digest)"
 NATIVE_APP_REBUILT=0
-if local_adhoc_build_signing && cache_matches "$NATIVE_APP_CACHE_KEY" "$NATIVE_APP_DIGEST" "$APP_PATH/Contents/MacOS/$GHOSTEX_APP_NAME" "$APP_PATH/Contents/Frameworks/Chromium Embedded Framework.framework" "$APP_PATH/Contents/Frameworks/ghostex Helper.app" "$APP_PATH/Contents/Library/LaunchServices/$GHOSTEX_LID_SLEEP_HELPER_LABEL"; then
+if local_start_build_cache_reusable && cache_matches "$NATIVE_APP_CACHE_KEY" "$NATIVE_APP_DIGEST" "$APP_PATH/Contents/MacOS/$GHOSTEX_APP_NAME" "$APP_PATH/Contents/Frameworks/Chromium Embedded Framework.framework" "$APP_PATH/Contents/Frameworks/ghostex Helper.app" "$APP_PATH/Contents/Library/LaunchServices/$GHOSTEX_LID_SLEEP_HELPER_LABEL"; then
 	# CDXC:LocalStartFast 2026-06-07-16:23: Debug/local starts should not invoke Xcode when native Swift/ObjC++, project metadata, CEF helper identity, and GhosttyKit identity are unchanged. Reuse the existing app shell, then sync current Web/CLI resources and let signature verification decide whether signing is needed.
+	# CDXC:LocalStartFast 2026-06-15-10:46: Cached app shells must satisfy the same lid-sleep-helper bundle layout as freshly rebuilt shells. Remove any stale Contents/Resources helper copy before signing so `bun run start` does not fail when the valid helper is already in Contents/Library/LaunchServices.
+	remove_lid_sleep_helper_resources_copy "$APP_PATH"
 	echo "Native app shell is current; skipping Xcode build."
 else
 	mkdir -p "$SCRIPT_DIR/build"

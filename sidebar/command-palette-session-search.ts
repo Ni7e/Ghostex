@@ -50,6 +50,46 @@ export function getCommandPaletteCommandQuery(value: string): string {
     : "";
 }
 
+export function getCommandPaletteQueryForRequestedMode(
+  currentValue: string,
+  requestedInitialQuery: string,
+): string {
+  const wantsCommandMode = isCommandPaletteCommandMode(requestedInitialQuery);
+  const isCurrentlyCommandMode = isCommandPaletteCommandMode(currentValue);
+  if (wantsCommandMode === isCurrentlyCommandMode) {
+    return currentValue;
+  }
+  /*
+   * CDXC:CommandPalette 2026-06-15-10:27:
+   * Repeat command-palette open requests should not close or recreate the
+   * native child window. When Cmd+P and Cmd+Shift+P cross modes while the
+   * palette is already open, keep the user's query text and only add or remove
+   * the leading `>` mode marker.
+   */
+  if (wantsCommandMode) {
+    return `${COMMAND_MODE_PREFIX}${currentValue}`;
+  }
+  const commandValue = currentValue.trimStart();
+  const valueWithoutPrefix = commandValue.startsWith(COMMAND_MODE_PREFIX)
+    ? commandValue.slice(COMMAND_MODE_PREFIX.length)
+    : commandValue;
+  return valueWithoutPrefix.startsWith(" ") ? valueWithoutPrefix.slice(1) : valueWithoutPrefix;
+}
+
+export function getCommandPaletteModeSwitchSelectionRange(value: string): {
+  end: number;
+  start: number;
+} {
+  if (!isCommandPaletteCommandMode(value)) {
+    return { end: value.length, start: 0 };
+  }
+  const commandPrefixIndex = value.indexOf(COMMAND_MODE_PREFIX);
+  const queryStart = value[commandPrefixIndex + 1] === " "
+    ? commandPrefixIndex + 2
+    : commandPrefixIndex + 1;
+  return { end: value.length, start: queryStart };
+}
+
 export function createCommandPaletteCurrentSessionItems({
   groupsById,
   sessionIdsByGroup,

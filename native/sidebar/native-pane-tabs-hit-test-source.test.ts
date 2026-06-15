@@ -9,6 +9,10 @@ const appDelegateSource = readFileSync(
   new URL("../macos/ghostexHost/Sources/ghostexHost/AppDelegate.swift", import.meta.url),
   "utf8",
 );
+const nativePaneReorderReproLogSource = readFileSync(
+  new URL("../macos/ghostexHost/Sources/ghostexHost/NativePaneReorderReproLog.swift", import.meta.url),
+  "utf8",
+);
 
 function sourceSection(source: string, startNeedle: string, endNeedle: string, fromIndex = 0): string {
   const startIndex = source.indexOf(startNeedle, fromIndex);
@@ -39,6 +43,18 @@ describe("native pane tab titlebar hit testing", () => {
     expect(rootSource).toContain("sidebarView.frame = frames.sidebar");
     expect(rootSource).toContain("divider.frame = frames.divider");
     expect(rootSource).toContain("workspaceView.frame = frames.workspace");
+  });
+
+  test("rotates pane-tab support logs while keeping Debugging Mode diagnostics", () => {
+    /*
+     * CDXC:GxserverLogs 2026-06-15-20:39:
+     * Pane-tab diagnostics can stay available under Debugging Mode, but the
+     * persistent file must rotate so support bundles remain bounded.
+     */
+    expect(nativePaneReorderReproLogSource).toContain("native-pane-tabs-debug.log");
+    expect(nativePaneReorderReproLogSource).toContain("NativePaneReproLogRotation.rotateIfNeeded");
+    expect(nativePaneReorderReproLogSource).toContain("25 * 1024 * 1024");
+    expect(nativePaneReorderReproLogSource).toContain("maxRotatedLogFiles = 3");
   });
 
   test("keeps sidebar and divider as non-overlapping native regions", () => {
@@ -73,6 +89,11 @@ describe("native pane tab titlebar hit testing", () => {
     expect(layoutSource).not.toContain("visualSidebarFrame");
     expect(layoutSource).not.toContain("resizeLayoutRecordExclusion");
     expect(appDelegateSource).not.toContain("sidebarResizeEdgeExtension");
+    expect(appDelegateSource).toContain("private static let dividerWidth: CGFloat = 1");
+    expect(appDelegateSource).not.toContain("private static let dividerWidth: CGFloat = 6");
+    expect(appDelegateSource).toContain(
+      "Keep the native divider frame to the visible 1pt\n   separator instead of reserving a 6pt transparent resize strip",
+    );
     expect(appDelegateSource).not.toContain("final class SidebarModalBackdropView");
     expect(appDelegateSource).not.toContain("NonInteractiveChromeLineView");
     expect(appDelegateSource).toContain("private let workareaTitlebarBorderLayer = CALayer()");

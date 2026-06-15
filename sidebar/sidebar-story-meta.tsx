@@ -73,7 +73,8 @@ export const SIDEBAR_STORY_ARG_TYPES: NonNullable<Meta<SidebarStoryArgs>["argTyp
   theme: {
     control: "select",
     options: [
-      "plain-dark",
+      "dark-1",
+      "dark-2",
       "plain-light",
       "dark-green",
       "dark-blue",

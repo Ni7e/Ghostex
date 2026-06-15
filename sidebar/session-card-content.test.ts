@@ -150,7 +150,30 @@ describe("getSessionCardTitleTooltip", () => {
     });
   });
 
-  test("should describe a live loaded session as active in app", () => {
+  test("should hide routed session ids when debugging mode is off", () => {
+    expect(
+      getSessionCardTitleTooltip({
+        session: {
+          activityLabel: undefined,
+          agentIcon: "codex",
+          alias: "Session 1",
+          detail: "OpenAI Codex",
+          isPrimaryTitleTerminalTitle: true,
+          primaryTitle: "Lost actions after migration",
+          sessionNumber: "05",
+          sessionRoutingId: "S7k-P3a91-G8v20",
+          terminalTitle: undefined,
+        },
+        showDebugSessionNumbers: false,
+      }),
+    ).toEqual({
+      headingText: "Lost actions after migration",
+      tooltip: undefined,
+      tooltipWhen: "overflow",
+    });
+  });
+
+  test("should hide session state metadata when debugging mode is off", () => {
     expect(
       getSessionCardTitleTooltip({
         session: {
@@ -172,12 +195,39 @@ describe("getSessionCardTitleTooltip", () => {
       }),
     ).toEqual({
       headingText: "Fix restore",
+      tooltip: undefined,
+      tooltipWhen: "overflow",
+    });
+  });
+
+  test("should describe a live loaded session as active in app when debugging mode is on", () => {
+    expect(
+      getSessionCardTitleTooltip({
+        session: {
+          activityLabel: undefined,
+          agentIcon: "codex",
+          alias: "Session 1",
+          detail: "OpenAI Codex",
+          isLive: true,
+          isPrimaryTitleTerminalTitle: true,
+          isRunning: true,
+          lifecycleState: "running",
+          nativePaneState: "mounted",
+          primaryTitle: "Fix restore",
+          providerSessionState: "exists",
+          sessionNumber: undefined,
+          terminalTitle: undefined,
+        },
+        showDebugSessionNumbers: true,
+      }),
+    ).toEqual({
+      headingText: "Fix restore",
       tooltip: "Fix restore\n\nState: Active in app",
       tooltipWhen: "always",
     });
   });
 
-  test("should describe a live unloaded provider session as active not loaded", () => {
+  test("should describe a live unloaded provider session as active not loaded when debugging mode is on", () => {
     expect(
       getSessionCardTitleTooltip({
         session: {
@@ -196,7 +246,7 @@ describe("getSessionCardTitleTooltip", () => {
           sessionPersistenceProvider: "zmx",
           terminalTitle: undefined,
         },
-        showDebugSessionNumbers: false,
+        showDebugSessionNumbers: true,
       }),
     ).toEqual({
       headingText: "Fix restore",
@@ -205,7 +255,7 @@ describe("getSessionCardTitleTooltip", () => {
     });
   });
 
-  test("should describe intentionally unloaded sessions as sleeping", () => {
+  test("should describe intentionally unloaded sessions as sleeping when debugging mode is on", () => {
     expect(
       getSessionCardTitleTooltip({
         session: {
@@ -225,7 +275,7 @@ describe("getSessionCardTitleTooltip", () => {
           sessionPersistenceProvider: "zmx",
           terminalTitle: undefined,
         },
-        showDebugSessionNumbers: false,
+        showDebugSessionNumbers: true,
       }),
     ).toEqual({
       headingText: "Fix restore",
@@ -344,7 +394,7 @@ describe("getSessionCardTitleTooltip", () => {
           sessionPersistenceProvider: "zmx",
           terminalTitle: undefined,
         },
-        showDebugSessionNumbers: false,
+        showDebugSessionNumbers: true,
       }),
     ).toEqual({
       headingText: "Fix restore",
@@ -353,7 +403,31 @@ describe("getSessionCardTitleTooltip", () => {
     });
   });
 
-  test("should include captured agent session ids in the tooltip", () => {
+  test("should hide persistence provider session names when debugging mode is off", () => {
+    expect(
+      getSessionCardTitleTooltip({
+        session: {
+          activityLabel: undefined,
+          agentIcon: "codex",
+          alias: "Session 1",
+          detail: "OpenAI Codex",
+          isPrimaryTitleTerminalTitle: true,
+          primaryTitle: "Fix restore",
+          sessionNumber: undefined,
+          sessionPersistenceName: "ghostex-session-1",
+          sessionPersistenceProvider: "zmx",
+          terminalTitle: undefined,
+        },
+        showDebugSessionNumbers: false,
+      }),
+    ).toEqual({
+      headingText: "Fix restore",
+      tooltip: undefined,
+      tooltipWhen: "overflow",
+    });
+  });
+
+  test("should include captured agent session ids only in debugging mode", () => {
     expect(
       getSessionCardTitleTooltip({
         session: {
@@ -368,6 +442,27 @@ describe("getSessionCardTitleTooltip", () => {
           terminalTitle: undefined,
         },
         showDebugSessionNumbers: false,
+      }),
+    ).toEqual({
+      headingText: "Fix restore",
+      tooltip: undefined,
+      tooltipWhen: "overflow",
+    });
+
+    expect(
+      getSessionCardTitleTooltip({
+        session: {
+          activityLabel: undefined,
+          agentIcon: "codex",
+          agentSessionId: "codex-session-123",
+          alias: "Session 1",
+          detail: "OpenAI Codex",
+          isPrimaryTitleTerminalTitle: true,
+          primaryTitle: "Fix restore",
+          sessionNumber: undefined,
+          terminalTitle: undefined,
+        },
+        showDebugSessionNumbers: true,
       }),
     ).toEqual({
       headingText: "Fix restore",
@@ -399,6 +494,30 @@ describe("getSessionCardTitleTooltip", () => {
     });
   });
 
+  test("should show close-after-done countdown directly below the tooltip title", () => {
+    expect(
+      getSessionCardTitleTooltip({
+        session: {
+          activityLabel: undefined,
+          agentIcon: "codex",
+          alias: "Session 1",
+          closeAfterDone: true,
+          closeAfterDoneRemainingLabel: "03:00",
+          detail: "OpenAI Codex",
+          isPrimaryTitleTerminalTitle: true,
+          primaryTitle: "Fix restore",
+          sessionNumber: undefined,
+          terminalTitle: undefined,
+        },
+        showDebugSessionNumbers: false,
+      }),
+    ).toEqual({
+      headingText: "Fix restore",
+      tooltip: "Fix restore\n\nClose After Done in 03:00",
+      tooltipWhen: "always",
+    });
+  });
+
   test("should include previous session restore details when requested", () => {
     expect(
       getSessionCardTitleTooltip({
@@ -422,7 +541,7 @@ describe("getSessionCardTitleTooltip", () => {
     ).toEqual({
       headingText: "Fix restore",
       tooltip:
-        "Fix restore\n\nAgent: Codex\n\nProject: ghostex (/Users/madda/dev/_active/ghostex)\n\nProvider: zmx\n\nzmx session: ghostex-session-1",
+        "Fix restore\n\nAgent: Codex\n\nProject: ghostex\n\nProvider: zmx",
       tooltipWhen: "always",
     });
   });
@@ -508,6 +627,50 @@ describe("SessionFloatingAgentIcon", () => {
     expect(markup).toContain('aria-label="Delayed Send scheduled"');
     expect(markup).not.toContain("session-tag-agent-icon");
     expect(markup).not.toContain('data-session-tag="favorite"');
+  });
+
+  test("should show close-after-done clock instead of a tag icon when armed", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SessionFloatingAgentIcon, {
+        agentIcon: "codex",
+        closeAfterDone: true,
+        sessionTag: "todo",
+      }),
+    );
+
+    expect(markup).toContain("session-close-after-done-agent-icon");
+    expect(markup).toContain('aria-label="Close After Done armed"');
+    expect(markup).not.toContain("session-tag-agent-icon");
+    expect(markup).not.toContain('data-session-tag="todo"');
+  });
+
+  test("should fade close-after-done clock while the done countdown is active", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SessionFloatingAgentIcon, {
+        agentIcon: "codex",
+        closeAfterDone: true,
+        closeAfterDoneRemainingLabel: "03:00",
+      }),
+    );
+
+    expect(markup).toContain("session-close-after-done-agent-icon");
+    expect(markup).toContain("session-close-after-done-agent-icon-countdown");
+    expect(markup).toContain('aria-label="Close After Done in 03:00"');
+  });
+
+  test("should keep delayed send above close-after-done in the leading icon slot", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SessionFloatingAgentIcon, {
+        agentIcon: "codex",
+        closeAfterDone: true,
+        closeAfterDoneRemainingLabel: "03:00",
+        delayedSendRemainingLabel: "04:32",
+      }),
+    );
+
+    expect(markup).toContain("session-delayed-send-agent-icon");
+    expect(markup).toContain('aria-label="Delayed Send in 04:32"');
+    expect(markup).not.toContain("session-close-after-done-agent-icon");
   });
 });
 
@@ -642,6 +805,26 @@ describe("getSessionTooltipSecondaryText", () => {
     ).toBe("visual diff / attention state");
   });
 
+  test("should suppress filesystem path details from tooltips", () => {
+    expect(
+      getSessionTooltipSecondaryText({
+        activityLabel: undefined,
+        agentIcon: "codex",
+        detail: "/Users/madda/dev/_active/zmux",
+        terminalTitle: undefined,
+      }),
+    ).toBeUndefined();
+
+    expect(
+      getSessionTooltipSecondaryText({
+        activityLabel: undefined,
+        agentIcon: "codex",
+        detail: "OpenAI Codex",
+        terminalTitle: "/Users/madda/dev/_active/zmux",
+      }),
+    ).toBeUndefined();
+  });
+
   test("should fall back to non-agent activity labels", () => {
     expect(
       getSessionTooltipSecondaryText({
@@ -714,7 +897,7 @@ describe("SessionCardContent", () => {
     expect(markup).not.toContain("session-header-agent-icon");
   });
 
-  test("should not duplicate delayed send clocks in the right-side header icon slot", () => {
+  test("should show delayed send remaining time in the trailing timestamp slot", () => {
     const floatingMarkup = renderToStaticMarkup(
       createElement(SessionFloatingAgentIcon, {
         agentIcon: "codex",
@@ -744,9 +927,105 @@ describe("SessionCardContent", () => {
     );
 
     expect(floatingMarkup).toContain('aria-label="Delayed Send in 04:32"');
-    expect(contentMarkup).toContain("session-header-agent-icon");
+    expect(contentMarkup).toContain('data-default-trailing-display="time"');
+    expect(contentMarkup).toContain('data-hover-trailing-display="time"');
+    expect(contentMarkup).toContain("session-last-interaction-time");
+    expect(contentMarkup).toContain(">04:32</div>");
+    expect(contentMarkup).not.toContain("session-header-agent-icon");
     expect(contentMarkup).not.toContain("session-header-agent-tabler-icon session-delayed-send-agent-icon");
     expect(contentMarkup).not.toContain('aria-label="Delayed Send in 04:32"');
+  });
+
+  test("should show delayed send remaining time even when last active is hidden", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SessionCardContent, {
+        session: {
+          activity: "idle",
+          activityLabel: undefined,
+          agentIcon: "codex",
+          alias: "00",
+          column: 0,
+          delayedSendRemainingLabel: "04:32",
+          isFocused: false,
+          isRunning: true,
+          isVisible: true,
+          lastInteractionAt: "2026-04-18T10:00:00.000Z",
+          row: 0,
+          sessionId: "session-1",
+          shortcutLabel: "1",
+        },
+        showCloseButton: false,
+        showDebugSessionNumbers: false,
+        showLastActiveTime: false,
+      }),
+    );
+
+    expect(markup).toContain('data-title-full-width="false"');
+    expect(markup).toContain('data-default-trailing-display="time"');
+    expect(markup).toContain(">04:32</div>");
+    expect(markup).not.toContain("session-header-agent-icon");
+  });
+
+  test("should show armed close-after-done time in the trailing timestamp slot", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SessionCardContent, {
+        onClose: () => undefined,
+        session: {
+          activity: "idle",
+          activityLabel: undefined,
+          agentIcon: "codex",
+          alias: "00",
+          closeAfterDone: true,
+          column: 0,
+          isFocused: false,
+          isRunning: true,
+          isVisible: true,
+          lastInteractionAt: "2026-04-18T10:00:00.000Z",
+          row: 0,
+          sessionId: "session-1",
+          shortcutLabel: "1",
+        },
+        showCloseButton: true,
+        showDebugSessionNumbers: false,
+        showLastActiveTime: false,
+      }),
+    );
+
+    expect(markup).toContain('data-title-full-width="false"');
+    expect(markup).toContain('data-default-trailing-display="time"');
+    expect(markup).toContain(">03:00</div>");
+    expect(markup).not.toContain("session-header-agent-icon");
+    expect(markup).not.toContain("session-card-close-button");
+  });
+
+  test("should show active close-after-done countdown in the trailing timestamp slot", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SessionCardContent, {
+        session: {
+          activity: "idle",
+          activityLabel: undefined,
+          agentIcon: "codex",
+          alias: "00",
+          closeAfterDone: true,
+          closeAfterDoneRemainingLabel: "02:12",
+          column: 0,
+          isFocused: false,
+          isRunning: true,
+          isVisible: true,
+          lastInteractionAt: "2026-04-18T10:00:00.000Z",
+          row: 0,
+          sessionId: "session-1",
+          shortcutLabel: "1",
+        },
+        showCloseButton: false,
+        showDebugSessionNumbers: false,
+      }),
+    );
+
+    expect(markup).toContain('data-default-trailing-display="time"');
+    expect(markup).toContain('data-hover-trailing-display="time"');
+    expect(markup).toContain(">02:12</div>");
+    expect(markup).not.toContain("session-header-agent-icon");
   });
 
   test("should allow previous-session rows to reserve the trailing slot for last active", () => {

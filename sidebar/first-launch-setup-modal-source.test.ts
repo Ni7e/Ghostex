@@ -58,4 +58,23 @@ describe("first launch setup modal source", () => {
       ".ghostex-settings-shadcn .first-launch-setup-checkbox:checked::after",
     );
   });
+
+  test("uses the latest-release redirect for Android APK downloads", () => {
+    /*
+    CDXC:FirstLaunchSetup 2026-06-16-01:04:
+    First-launch Android APK buttons must use a latest-release redirect instead
+    of a tagged APK URL so release updates do not leave onboarding pointed at an
+    older Android package.
+    */
+    const androidDownloadUrlDefinition = sourceBetween(
+      firstLaunchSetupModalSource,
+      "const FIRST_LAUNCH_ANDROID_APK_URL",
+      "const FIRST_LAUNCH_IOS_DISCORD_URL",
+    );
+
+    expect(androidDownloadUrlDefinition).toContain(
+      "https://github.com/maddada/Ghostex/releases/latest/download/ghostex-android.apk",
+    );
+    expect(androidDownloadUrlDefinition).not.toMatch(/releases\/download\/v\d/u);
+  });
 });

@@ -6,6 +6,7 @@ import { DEFAULT_SIDEBAR_AGENTS } from "../shared/sidebar-agents";
 import type {
   SidebarAgentHookStatusMessage,
   SidebarGhostexCliStatusMessage,
+  SidebarProjectSettingsItem,
 } from "../shared/session-grid-contract";
 
 const modalSettings: ghostexSettings = {
@@ -18,14 +19,51 @@ const modalSettings: ghostexSettings = {
   terminalLineHeight: 1.35,
 };
 
+const storyProjects: SidebarProjectSettingsItem[] = [
+  {
+    beadsDirectory: "",
+    beadsDisplayKey: "ZMX",
+    name: "Ghostex",
+    path: "/Users/you/dev/ghostex",
+    projectId: "project-ghostex",
+    worktreeCommand: "bun install",
+  },
+  {
+    beadsDirectory: "/Users/you/dev/infra/.beads",
+    beadsDisplayKey: "INF",
+    name: "Infra Control Plane",
+    path: "/Users/you/dev/platform/infra-control-plane",
+    projectId: "project-infra",
+    worktreeCommand: "pnpm install",
+  },
+  {
+    beadsDirectory: "",
+    beadsDisplayKey: "WEB",
+    name: "Customer Web",
+    path: "/Users/you/dev/products/customer-web-application",
+    projectId: "project-web",
+    worktreeCommand: "",
+  },
+  {
+    beadsDirectory: "",
+    beadsDisplayKey: "OPS",
+    name: "Operations Dashboard",
+    path: "/Users/you/dev/internal/tools/operations-dashboard",
+    projectId: "project-ops",
+    worktreeCommand: "bun run setup",
+  },
+];
+
 function SettingsModalStory({
   cuaPermissionsGranted,
   initialSettings = modalSettings,
   initialTab = "settings",
+  projects,
 }: {
   cuaPermissionsGranted?: boolean;
   initialSettings?: ghostexSettings;
   initialTab?: "settings" | "integrations" | "projects" | "agents" | "actions" | "openTargets" | "hotkeys";
+  projects?: SidebarProjectSettingsItem[];
 }) {
   const [settings, setSettings] = useState<ghostexSettings>(initialSettings);
   const [agentHookStatus, setAgentHookStatus] = useState<SidebarAgentHookStatusMessage>({
@@ -133,6 +171,7 @@ function SettingsModalStory({
         onOpenScreenRecordingPreferences={() => undefined}
         onRequestAgentHookStatus={() => undefined}
         onRequestGhostexCliStatus={() => undefined}
+        projects={projects}
         settings={settings}
         theme={settings.sidebarTheme === "light-orange" ? "light-orange" : "dark-blue"}
       />
@@ -171,6 +210,10 @@ export const AccessibilityOff: Story = {
 
 export const Integrations: Story = {
   render: () => <SettingsModalStory cuaPermissionsGranted={false} initialTab="integrations" />,
+};
+
+export const Projects: Story = {
+  render: () => <SettingsModalStory initialTab="projects" projects={storyProjects} />,
 };
 
 export const LightOrange: Story = {

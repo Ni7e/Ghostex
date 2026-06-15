@@ -1,6 +1,13 @@
 import AppKit
 import CoreGraphics
 
+enum SessionStatusIndicatorMenuAction {
+  case openApp
+  case quitApp
+  case quitFully
+  case restartApp
+}
+
 @MainActor
 final class SessionStatusIndicatorController {
   private static let defaultScreenMargin: CGFloat = 22
@@ -21,7 +28,8 @@ final class SessionStatusIndicatorController {
    */
   init(
     onActivationRequest: @escaping (String) -> Void,
-    onClick: @escaping (NativeSessionStatusIndicatorStatus) -> Void
+    onClick: @escaping (NativeSessionStatusIndicatorStatus) -> Void,
+    onMenuAction: @escaping (SessionStatusIndicatorMenuAction) -> Void
   ) {
     /**
      CDXC:SessionStatusIndicators 2026-05-09-15:48
@@ -38,11 +46,13 @@ final class SessionStatusIndicatorController {
       },
       onDrag: {})
     let menuBarStatusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    let menuBarClickTarget = MenuBarSessionStatusIndicatorTarget(onClick: { status in
-      onActivationRequest("menuBarStatusIndicatorClick.\(status.rawValue)")
-      NSApp.activate(ignoringOtherApps: true)
-      onClick(status)
-    })
+    let menuBarClickTarget = MenuBarSessionStatusIndicatorTarget(
+      onClick: { status in
+        onActivationRequest("menuBarStatusIndicatorClick.\(status.rawValue)")
+        NSApp.activate(ignoringOtherApps: true)
+        onClick(status)
+      },
+      onMenuAction: onMenuAction)
     let panel = NSPanel(
       contentRect: NSRect(origin: .zero, size: view.preferredSize),
       styleMask: [.borderless, .nonactivatingPanel],
@@ -71,6 +81,7 @@ final class SessionStatusIndicatorController {
     if let button = menuBarStatusItem.button {
       button.action = #selector(MenuBarSessionStatusIndicatorTarget.clicked(_:))
       button.imagePosition = .imageOnly
+      _ = button.sendAction(on: [.leftMouseUp, .rightMouseUp])
       button.target = menuBarClickTarget
     }
   }
@@ -106,20 +117,41 @@ final class SessionStatusIndicatorController {
     /**
      CDXC:SessionStatusIndicators 2026-05-05-19:47
      Attention and working counts are action states and should suppress the
-     idle available-session total whenever either exists. The idle square is
-     only a quiet all-available summary for the fully idle case.
+     idle available-session total whenever either exists. The idle chip is only
+     a quiet all-available summary for the fully idle case.
      CDXC:SessionStatusIndicators 2026-05-08-09:09
      Floating status badges draw directly on a transparent panel without a
-     shared backdrop, so status color must live on each individual badge.
+     shared backdrop, so each indicator owns its own visible chip.
      CDXC:SessionStatusIndicators 2026-05-09-15:53
      Working status badges are `working`, not `running`. Keep native naming
      aligned with app terminology so `running` remains reserved for live
      runtime state and the idle available-session count.
 
      CDXC:SessionStatusIndicators 2026-06-13-07:20:
-     Floating and menu bar status badges must use a single solid square fill
-     with no border radius. Use #a0622c for working, #0093fe for attention,
-     and #1e1e1e for the idle available-session summary.
+     Floating status badges used a single solid square fill with no border
+     radius until the later 2026-06-15-17:10 requirement made them match the
+     menu bar chip renderer.
+
+     CDXC:SessionStatusIndicators 2026-06-15-02:03:
+     Menu bar indicators temporarily drew count text with no badge fill behind
+     the numbers; the later 2026-06-15-12:42 requirement restores square
+     status backgrounds.
+
+     CDXC:SessionStatusIndicators 2026-06-15-02:24:
+     The menu bar idle number should use #e5e6e6 instead of the idle floating
+     badge fill, while attention and working numbers keep their status colors.
+
+     CDXC:SessionStatusIndicators 2026-06-15-12:42:
+     Working status initially used #e3b256 across floating and menu bar badges.
+
+     CDXC:SessionStatusIndicators 2026-06-15-15:24:
+     Working status is darkened to #c99643. Menu bar badges use a rounded native
+     control-background fill so the button background follows macOS light and
+     dark appearances while the count text carries the status color.
+
+     CDXC:SessionStatusIndicators 2026-06-15-17:10:
+     Floating indicators must match the menu bar indicator look: rounded native
+     control-background chips with status-colored count text.
      */
     if command.attentionCount > 0 || command.workingCount > 0 {
       return [
@@ -133,7 +165,7 @@ final class SessionStatusIndicatorController {
           ? SessionStatusIndicatorItem(
             status: .working,
             count: command.workingCount,
-            color: NSColor(calibratedRed: 0xA0 / 255, green: 0x62 / 255, blue: 0x2C / 255, alpha: 1))
+            color: NSColor(calibratedRed: 0xC9 / 255, green: 0x96 / 255, blue: 0x43 / 255, alpha: 1))
           : nil,
       ].compactMap { $0 }
     }
@@ -151,13 +183,12 @@ final class SessionStatusIndicatorController {
 
   private func applyMenuBarItems(_ items: [SessionStatusIndicatorItem], isHidden: Bool) {
     guard !items.isEmpty && !isHidden else {
-      menuBarClickTarget.items = []
       menuBarStatusItem.isVisible = false
       return
     }
 
     let sizeSetting = SessionStatusIndicatorView.menuBarSizeSetting
-    let preferredSize = SessionStatusIndicatorView.preferredSize(
+    let preferredSize = SessionStatusIndicatorView.menuBarPreferredSize(
       for: items,
       sizeSetting: sizeSetting)
     menuBarClickTarget.items = items
@@ -167,9 +198,9 @@ final class SessionStatusIndicatorController {
     guard let button = menuBarStatusItem.button else {
       return
     }
-    button.image = SessionStatusIndicatorView.image(for: items, sizeSetting: sizeSetting)
+    button.image = SessionStatusIndicatorView.menuBarImage(for: items, sizeSetting: sizeSetting)
     button.image?.isTemplate = false
-    button.toolTip = "Ghostex session status"
+    button.toolTip = NativeTooltip.text("Ghostex session status")
   }
 
   private static func defaultOrigin(size: NSSize) -> NSPoint {
@@ -231,17 +262,18 @@ private final class SessionStatusIndicatorView: NSView {
   private struct IndicatorMetrics {
     let scale: CGFloat
 
-    var badgeSide: CGFloat { 52 * scale }
-    var horizontalInset: CGFloat { 11 * scale }
-    var verticalInset: CGFloat { 8 * scale }
-    var itemGap: CGFloat { 6 * scale }
-    var minimumTextPadding: CGFloat { 20 * scale }
-    var countFont: NSFont {
-      NSFont.monospacedDigitSystemFont(ofSize: 25 * scale, weight: .bold)
+    var menuBarCountFont: NSFont {
+      NSFont.monospacedDigitSystemFont(ofSize: 25 * scale + 5, weight: .semibold)
     }
-
-    var badgeFillInset: CGFloat { 3.5 * scale }
-    var textBaselineOffset: CGFloat { 0.5 * scale }
+    var menuBarBadgeMinimumHeight: CGFloat { 20 }
+    var menuBarBadgeMinimumWidth: CGFloat { 26 }
+    var menuBarBadgeCornerRadius: CGFloat { 6 }
+    var menuBarBadgeTextHorizontalPadding: CGFloat { 10 }
+    var menuBarBadgeTextVerticalPadding: CGFloat { 2 }
+    var menuBarHorizontalInset: CGFloat { 1 }
+    var menuBarItemGap: CGFloat { max(1, 4 * scale) }
+    var menuBarVerticalInset: CGFloat { 1 }
+    var menuBarTextBaselineOffset: CGFloat { 0 }
   }
 
   static let menuBarSizeSetting: NativeSessionStatusIndicatorSize = .small
@@ -263,18 +295,18 @@ private final class SessionStatusIndicatorView: NSView {
    needs priority.
    CDXC:SessionStatusIndicators 2026-05-07-18:02
    A single visible status should remain easy to click and read. Keep explicit
-   view padding around each square badge so transparent NSPanel edges do not
-   crowd the count.
+   view padding around each badge so transparent NSPanel edges do not crowd the
+   count.
    CDXC:SessionStatusIndicators 2026-05-07-18:20
    Medium is the default and scales every drawing metric to 50% of X-Large;
    Large and Small are named settings values that reuse the same AppKit drawing
    path.
    CDXC:SessionStatusIndicators 2026-05-07-18:32
-   The indicator should fit the visible square badges tightly, including the
-   single-badge case, and numbers render as full white rather than tinted text.
+   The indicator should fit the visible badges tightly, including the
+   single-badge case.
    CDXC:SessionStatusIndicators 2026-05-08-09:09
    The floating indicator must not draw a shared background behind the badges.
-   Keep the NSPanel and NSView clear so only individual status squares render.
+   Keep the NSPanel and NSView clear so only individual status chips render.
    CDXC:SessionStatusIndicators 2026-05-08-09:17
    Status buttons should not have a gray outer ring. Use a flat colored badge
    so the control does not add extra background colors around the status token.
@@ -285,10 +317,45 @@ private final class SessionStatusIndicatorView: NSView {
    Repositioning must not require a Shift modifier. Track ordinary drags from
    mouse-down and reserve click activation for mouse-up without panel movement.
    CDXC:SessionStatusIndicators 2026-06-13-07:20
-   Floating and menu bar running-session indicators must render as solid,
-   fully square status backgrounds. Do not use rounded paths, gradients,
-   strokes, or shadow fills for the badge background because status color must
-   stay exactly #a0622c, #0093fe, or #1e1e1e.
+   Floating running-session indicators previously rendered as solid, fully
+   square status backgrounds. That status-fill design was retired by the
+   2026-06-15-17:10 menu-bar-match requirement.
+
+   CDXC:SessionStatusIndicators 2026-06-15-02:03:
+   Menu bar indicators temporarily drew text-only counts with no badge
+   background; the later 2026-06-15-12:42 requirement restores compact square
+   status backgrounds.
+
+   CDXC:SessionStatusIndicators 2026-06-15-02:24:
+   Menu bar counts should be 5pt larger than the prior small-count font and
+   slightly less bold than the earlier bold rendering. Idle menu bar counts use
+   #e5e6e6 because the dark idle badge fill is no longer visible behind them.
+
+   CDXC:SessionStatusIndicators 2026-06-15-03:08:
+   Text-only menu bar indicators should reserve only enough horizontal room for
+   the glyphs and a small click target. Use menu-bar-specific inset and gap
+   metrics so tightening the status item never shrinks floating badge padding.
+
+   CDXC:SessionStatusIndicators 2026-06-15-12:42:
+   Menu bar indicators returned to square status backgrounds after the
+   text-only pass. Keep the status item compact by sizing each square from the
+   count text plus menu-bar-specific padding instead of reusing floating badge
+   dimensions.
+
+   CDXC:SessionStatusIndicators 2026-06-15-15:24:
+   Menu bar indicator backgrounds are rounded native-control backgrounds, not
+   status-colored squares. Resolve the image at draw time so AppKit supplies the
+   correct light or dark background color for the current macOS appearance.
+
+   CDXC:SessionStatusIndicators 2026-06-15-15:34:
+   Menu bar badges should be rounded chips, not square badges with rounded
+   corners. Keep separate width and height metrics so one-digit counts still
+   render as a short rounded rectangle.
+
+   CDXC:SessionStatusIndicators 2026-06-15-17:10:
+   Floating status indicators should match the menu bar indicator exactly in
+   visual treatment. Use the same chip sizing, rounded native background, and
+   status-colored count text for the panel and the status item.
    */
   private static func metrics(for size: NativeSessionStatusIndicatorSize) -> IndicatorMetrics {
     switch size {
@@ -323,15 +390,7 @@ private final class SessionStatusIndicatorView: NSView {
     for items: [SessionStatusIndicatorItem],
     sizeSetting: NativeSessionStatusIndicatorSize
   ) -> NSSize {
-    let metrics = currentMetrics(for: sizeSetting)
-    let itemWidths = items.map { diameter(for: $0, sizeSetting: sizeSetting) }
-    let contentWidth =
-      itemWidths.reduce(0, +)
-      + CGFloat(max(items.count - 1, 0)) * metrics.itemGap
-      + metrics.horizontalInset * 2
-    let width = contentWidth
-    let height = (itemWidths.max() ?? metrics.badgeSide) + metrics.verticalInset * 2
-    return NSSize(width: width, height: height)
+    menuBarPreferredSize(for: items, sizeSetting: sizeSetting)
   }
 
   private var currentMetrics: IndicatorMetrics {
@@ -374,61 +433,119 @@ private final class SessionStatusIndicatorView: NSView {
 
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
-    Self.draw(items: items, in: bounds, sizeSetting: sizeSetting)
+    Self.drawMenuBarItems(items: items, in: bounds, sizeSetting: sizeSetting)
   }
 
   static func image(
     for items: [SessionStatusIndicatorItem],
     sizeSetting: NativeSessionStatusIndicatorSize
   ) -> NSImage {
-    let size = preferredSize(for: items, sizeSetting: sizeSetting)
+    let size = menuBarPreferredSize(for: items, sizeSetting: sizeSetting)
     let image = NSImage(size: size)
     image.lockFocus()
-    draw(items: items, in: NSRect(origin: .zero, size: size), sizeSetting: sizeSetting)
+    drawMenuBarItems(items: items, in: NSRect(origin: .zero, size: size), sizeSetting: sizeSetting)
     image.unlockFocus()
     return image
   }
 
-  private static func draw(
+  static func menuBarPreferredSize(
+    for items: [SessionStatusIndicatorItem],
+    sizeSetting: NativeSessionStatusIndicatorSize
+  ) -> NSSize {
+    let metrics = currentMetrics(for: sizeSetting)
+    let itemSizes = items.map { menuBarBadgeSize(for: $0, metrics: metrics) }
+    let contentWidth =
+      itemSizes.map(\.width).reduce(0, +)
+      + CGFloat(max(items.count - 1, 0)) * metrics.menuBarItemGap
+      + metrics.menuBarHorizontalInset * 2
+    let contentHeight = (itemSizes.map(\.height).max() ?? metrics.menuBarBadgeMinimumHeight)
+      + metrics.menuBarVerticalInset * 2
+    return NSSize(width: ceil(contentWidth), height: ceil(contentHeight))
+  }
+
+  static func menuBarStatus(
+    at point: NSPoint,
+    in bounds: NSRect,
+    items: [SessionStatusIndicatorItem],
+    sizeSetting: NativeSessionStatusIndicatorSize
+  ) -> NativeSessionStatusIndicatorStatus? {
+    menuBarItemRects(items: items, bounds: bounds, sizeSetting: sizeSetting)
+      .first { _, rect in rect.contains(point) }?.0.status
+      ?? items.first?.status
+  }
+
+  static func menuBarImage(
+    for items: [SessionStatusIndicatorItem],
+    sizeSetting: NativeSessionStatusIndicatorSize
+  ) -> NSImage {
+    let size = menuBarPreferredSize(for: items, sizeSetting: sizeSetting)
+    return NSImage(size: size, flipped: false) { rect in
+      drawMenuBarItems(items: items, in: rect, sizeSetting: sizeSetting)
+      return true
+    }
+  }
+
+  private static func drawMenuBarItems(
     items: [SessionStatusIndicatorItem],
     in bounds: NSRect,
     sizeSetting: NativeSessionStatusIndicatorSize
   ) {
     let metrics = currentMetrics(for: sizeSetting)
-    for (item, rect) in itemRects(items: items, bounds: bounds, sizeSetting: sizeSetting) {
-      drawBadge(item, in: rect, metrics: metrics)
-
+    for (item, rect) in menuBarItemRects(items: items, bounds: bounds, sizeSetting: sizeSetting) {
+      menuBarBadgeBackgroundColor().setFill()
+      NSBezierPath(
+        roundedRect: rect,
+        xRadius: metrics.menuBarBadgeCornerRadius,
+        yRadius: metrics.menuBarBadgeCornerRadius).fill()
       let label = NSAttributedString(
         string: "\(item.count)",
-        attributes: textAttributes(metrics: metrics))
+        attributes: menuBarTextAttributes(for: item, metrics: metrics))
       let labelSize = label.size()
       label.draw(
         at: NSPoint(
           x: rect.midX - labelSize.width / 2,
-          y: rect.midY - labelSize.height / 2 + metrics.textBaselineOffset))
+          y: rect.midY - labelSize.height / 2 + metrics.menuBarTextBaselineOffset))
     }
   }
 
-  private static func drawBadge(
-    _ item: SessionStatusIndicatorItem,
-    in rect: NSRect,
+  private static func menuBarTextAttributes(
+    for item: SessionStatusIndicatorItem,
     metrics: IndicatorMetrics
-  ) {
-    let badgeRect = rect.insetBy(dx: metrics.badgeFillInset, dy: metrics.badgeFillInset)
-    item.color.setFill()
-    NSBezierPath(rect: badgeRect).fill()
+  ) -> [NSAttributedString.Key: Any] {
+    [
+      .font: metrics.menuBarCountFont,
+      .foregroundColor: menuBarTextColor(for: item),
+    ]
   }
 
-  private static func textAttributes(metrics: IndicatorMetrics) -> [NSAttributedString.Key: Any] {
-    let shadow = NSShadow()
-    shadow.shadowBlurRadius = 2 * metrics.scale
-    shadow.shadowColor = NSColor.black.withAlphaComponent(0.58)
-    shadow.shadowOffset = NSSize(width: 0, height: -1 * metrics.scale)
-    return [
-      .font: metrics.countFont,
-      .foregroundColor: NSColor.white,
-      .shadow: shadow,
-    ]
+  private static func menuBarTextColor(for item: SessionStatusIndicatorItem) -> NSColor {
+    if item.status == .available {
+      return menuBarAvailableTextColor()
+    }
+    return item.color
+  }
+
+  private static func menuBarBadgeBackgroundColor() -> NSColor {
+    NSColor.controlBackgroundColor
+  }
+
+  private static func menuBarAvailableTextColor() -> NSColor {
+    NSColor(name: NSColor.Name("GhostexMenuBarAvailableText")) { appearance in
+      let darkMatch = appearance.bestMatch(from: [
+        .darkAqua,
+        .accessibilityHighContrastDarkAqua,
+        .aqua,
+        .accessibilityHighContrastAqua,
+      ])
+      if darkMatch == .darkAqua || darkMatch == .accessibilityHighContrastDarkAqua {
+        return NSColor(
+          calibratedRed: 0xE5 / 255,
+          green: 0xE6 / 255,
+          blue: 0xE6 / 255,
+          alpha: 1)
+      }
+      return NSColor(calibratedWhite: 0.08, alpha: 1)
+    }
   }
 
   override func mouseDown(with event: NSEvent) {
@@ -489,73 +606,110 @@ private final class SessionStatusIndicatorView: NSView {
     items: [SessionStatusIndicatorItem],
     sizeSetting: NativeSessionStatusIndicatorSize
   ) -> NativeSessionStatusIndicatorStatus? {
-    itemRects(items: items, bounds: bounds, sizeSetting: sizeSetting)
+    menuBarItemRects(items: items, bounds: bounds, sizeSetting: sizeSetting)
       .first { _, rect in rect.contains(point) }?.0.status
   }
 
   private func itemRects() -> [(SessionStatusIndicatorItem, NSRect)] {
-    Self.itemRects(items: items, bounds: bounds, sizeSetting: sizeSetting)
+    Self.menuBarItemRects(items: items, bounds: bounds, sizeSetting: sizeSetting)
   }
 
-  private static func itemRects(
+  private static func menuBarItemRects(
     items: [SessionStatusIndicatorItem],
     bounds: NSRect,
     sizeSetting: NativeSessionStatusIndicatorSize
   ) -> [(SessionStatusIndicatorItem, NSRect)] {
     let metrics = currentMetrics(for: sizeSetting)
     let centerY = bounds.midY
-    let itemWidths = items.map { diameter(for: $0, sizeSetting: sizeSetting) }
+    let itemSizes = items.map { menuBarBadgeSize(for: $0, metrics: metrics) }
     let groupWidth =
-      itemWidths.reduce(0, +)
-      + CGFloat(max(items.count - 1, 0)) * metrics.itemGap
+      itemSizes.map(\.width).reduce(0, +)
+      + CGFloat(max(items.count - 1, 0)) * metrics.menuBarItemGap
     var x = (bounds.width - groupWidth) / 2
-    return items.map { item in
-      let diameter = diameter(for: item, sizeSetting: sizeSetting)
+    return zip(items, itemSizes).map { item, size in
       let rect = NSRect(
         x: x,
-        y: centerY - diameter / 2,
-        width: diameter,
-        height: diameter)
-      x += diameter + metrics.itemGap
+        y: centerY - size.height / 2,
+        width: size.width,
+        height: size.height)
+      x += size.width + metrics.menuBarItemGap
       return (item, rect)
     }
   }
 
-  private func diameter(for item: SessionStatusIndicatorItem) -> CGFloat {
-    Self.diameter(for: item, sizeSetting: sizeSetting)
+  private static func menuBarTextSize(
+    for item: SessionStatusIndicatorItem,
+    metrics: IndicatorMetrics
+  ) -> NSSize {
+    NSAttributedString(
+      string: "\(item.count)",
+      attributes: [.font: metrics.menuBarCountFont]
+    ).size()
   }
 
-  private static func diameter(
+  private static func menuBarBadgeSize(
     for item: SessionStatusIndicatorItem,
-    sizeSetting: NativeSessionStatusIndicatorSize
-  ) -> CGFloat {
-    let metrics = currentMetrics(for: sizeSetting)
-    let label = NSAttributedString(
-      string: "\(item.count)",
-      attributes: [.font: metrics.countFont])
-    return max(metrics.badgeSide, ceil(label.size().width + metrics.minimumTextPadding))
+    metrics: IndicatorMetrics
+  ) -> NSSize {
+    let labelSize = menuBarTextSize(for: item, metrics: metrics)
+    return NSSize(
+      width: ceil(max(metrics.menuBarBadgeMinimumWidth, labelSize.width + metrics.menuBarBadgeTextHorizontalPadding)),
+      height: ceil(max(metrics.menuBarBadgeMinimumHeight, labelSize.height + metrics.menuBarBadgeTextVerticalPadding)))
   }
 }
 
 @MainActor
 private final class MenuBarSessionStatusIndicatorTarget: NSObject {
+  let menu: NSMenu
   var items: [SessionStatusIndicatorItem] = []
   var sizeSetting: NativeSessionStatusIndicatorSize = SessionStatusIndicatorView.menuBarSizeSetting
   private let onClick: (NativeSessionStatusIndicatorStatus) -> Void
+  private let onMenuAction: (SessionStatusIndicatorMenuAction) -> Void
 
-  init(onClick: @escaping (NativeSessionStatusIndicatorStatus) -> Void) {
+  init(
+    onClick: @escaping (NativeSessionStatusIndicatorStatus) -> Void,
+    onMenuAction: @escaping (SessionStatusIndicatorMenuAction) -> Void
+  ) {
     self.onClick = onClick
+    self.onMenuAction = onMenuAction
+    self.menu = NSMenu()
+    super.init()
+    /*
+     CDXC:SessionStatusIndicators 2026-06-15-03:16:
+     The number-only menu bar indicator exposes app lifecycle commands.
+
+     CDXC:SessionStatusIndicators 2026-06-15-11:34:
+     Left click must keep the same status-focus behavior as floating badges,
+     while right click opens the app lifecycle menu. Do not attach the menu to
+     NSStatusItem.menu because AppKit would show it for ordinary left clicks.
+     */
+    menu.autoenablesItems = false
+    menu.addItem(menuItem(title: "Open Ghostex", action: #selector(openGhostexApp(_:))))
+    menu.addItem(menuItem(title: "Restart Ghostex App", action: #selector(restartGhostexApp(_:))))
+    menu.addItem(menuItem(title: "Quit Ghostex App", action: #selector(quitGhostexApp(_:))))
+    menu.addItem(menuItem(title: "Quit Ghostex Fully", action: #selector(quitGhostexFully(_:))))
+  }
+
+  private func menuItem(title: String, action: Selector) -> NSMenuItem {
+    let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+    item.target = self
+    return item
   }
 
   @objc func clicked(_ sender: NSStatusBarButton) {
+    let event = NSApp.currentEvent
+    if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+      showMenu(from: sender, event: event)
+      return
+    }
     guard !items.isEmpty else {
       return
     }
     let point =
-      NSApp.currentEvent.map { sender.convert($0.locationInWindow, from: nil) }
+      event.map { sender.convert($0.locationInWindow, from: nil) }
       ?? NSPoint(x: sender.bounds.midX, y: sender.bounds.midY)
     guard
-      let status = SessionStatusIndicatorView.status(
+      let status = SessionStatusIndicatorView.menuBarStatus(
         at: point,
         in: sender.bounds,
         items: items,
@@ -564,5 +718,31 @@ private final class MenuBarSessionStatusIndicatorTarget: NSObject {
       return
     }
     onClick(status)
+  }
+
+  private func showMenu(from sender: NSStatusBarButton, event: NSEvent?) {
+    sender.highlight(true)
+    if let event {
+      NSMenu.popUpContextMenu(menu, with: event, for: sender)
+    } else {
+      menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.minY), in: sender)
+    }
+    sender.highlight(false)
+  }
+
+  @objc private func openGhostexApp(_ sender: NSMenuItem) {
+    onMenuAction(.openApp)
+  }
+
+  @objc private func restartGhostexApp(_ sender: NSMenuItem) {
+    onMenuAction(.restartApp)
+  }
+
+  @objc private func quitGhostexApp(_ sender: NSMenuItem) {
+    onMenuAction(.quitApp)
+  }
+
+  @objc private func quitGhostexFully(_ sender: NSMenuItem) {
+    onMenuAction(.quitFully)
   }
 }

@@ -11,13 +11,14 @@ const sparkleUserDriverSource = readFileSync(
 );
 const titlebarHostSource = readFileSync(new URL("./titlebar-host.tsx", import.meta.url), "utf8");
 
-describe("titlebar update download animation source", () => {
-  test("keeps the download button fade driven by Sparkle download state", () => {
+describe("titlebar update download state source", () => {
+  test("keeps the disabled spinner button driven by Sparkle download state", () => {
     /*
-     * CDXC:AutoUpdate 2026-06-13-17:52:
-     * The titlebar download button must fade only while Sparkle is downloading
-     * an accepted update. Keep the native callback, bootstrap/bridge boolean,
-     * and React data-driven CSS animation connected.
+     * CDXC:AutoUpdate 2026-06-15-16:39:
+     * The titlebar download button must become a disabled spinner button while
+     * Sparkle is downloading an accepted update. Keep the native callback,
+     * bootstrap/bridge boolean, React click guard, tooltip copy, and spinner
+     * CSS connected.
      */
     expect(sparkleUserDriverSource).toContain("var onDownloadActiveChanged: ((Bool) -> Void)?");
     expect(sparkleUserDriverSource).toMatch(
@@ -42,8 +43,12 @@ describe("titlebar update download animation source", () => {
     expect(titlebarHostSource).toContain("readInitialTitlebarUpdateDownloading(bootstrap)");
     expect(titlebarHostSource).toContain("state.updateDownloading ?? current.updateDownloading");
     expect(titlebarHostSource).toContain("projectState.updateAvailable || projectState.updateDownloading");
+    expect(titlebarHostSource).toContain("if (projectState.updateDownloading)");
+    expect(titlebarHostSource).toContain('aria-disabled={projectState.updateDownloading ? true : undefined}');
+    expect(titlebarHostSource).toContain('data-disabled={projectState.updateDownloading ? "true" : undefined}');
     expect(titlebarHostSource).toContain('data-downloading={projectState.updateDownloading ? "true" : undefined}');
-    expect(titlebarHostSource).toContain("titlebar-update-download-fade");
-    expect(titlebarHostSource).toContain('content={projectState.updateDownloading ? "Downloading update" : "Download update"}');
+    expect(titlebarHostSource).toContain("titlebar-update-spinner");
+    expect(titlebarHostSource).toContain("titlebar-update-download-spin");
+    expect(titlebarHostSource).toContain('content={projectState.updateDownloading ? "Downloading..." : "Download update"}');
   });
 });

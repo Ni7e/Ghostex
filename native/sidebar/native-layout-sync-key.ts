@@ -9,6 +9,7 @@ export type NativeLayoutSyncKeyInput = {
   commandsPanelLayout?: NativeTerminalLayout;
   commandsPanelMode?: "floating" | "pinned";
   layout?: NativeTerminalLayout;
+  mountingSessionIds?: string[];
   paneGap?: number;
 };
 
@@ -36,6 +37,7 @@ export function createNativeLayoutSyncKey(input: NativeLayoutSyncKeyInput): stri
       commandsPanelLayout: normalizeNativeLayoutGeometry(input.commandsPanelLayout),
       commandsPanelMode: input.commandsPanelMode,
       layout: normalizeNativeLayoutGeometry(input.layout),
+      mountingSessionIds: input.mountingSessionIds,
       paneGap: input.paneGap,
     }),
   );
@@ -57,6 +59,7 @@ export function createNativePaneOwnerSelectionKey(input: NativeLayoutSyncKeyInpu
       commandsPanelIsVisible: input.commandsPanelIsVisible,
       commandsPanelLayout: normalizeNativePaneOwnerSelection(input.commandsPanelLayout),
       layout: normalizeNativePaneOwnerSelection(input.layout),
+      mountingSessionIds: input.mountingSessionIds,
     }),
   );
 }

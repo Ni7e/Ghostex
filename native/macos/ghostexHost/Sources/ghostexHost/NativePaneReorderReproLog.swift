@@ -17,6 +17,11 @@ enum NativePaneReorderReproLog {
    isolated from normal focus, sidebar, T3, and browser diagnostics. Honor the
    same Settings debugging-mode gate as tab diagnostics so routine pane use does
    not write persistent logs.
+
+   CDXC:GxserverLogs 2026-06-15-20:39:
+   Pane reorder and pane-tab diagnostics are intentionally available while
+   Debugging Mode is enabled, but long debug sessions must still stay bounded in
+   support bundles. Rotate at the shared 25 MB/three-file limit before appends.
    */
   static func append(event: String, details: [String: Any] = [:]) {
     guard NativeDebugLogging.isEnabled else {
@@ -35,6 +40,7 @@ enum NativePaneReorderReproLog {
         try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
         didCreateLogsDirectory = true
       }
+      try NativePaneReproLogRotation.rotateIfNeeded(logURL: logURL, incomingByteCount: UInt64(line.lengthOfBytes(using: .utf8)))
       if FileManager.default.fileExists(atPath: logURL.path) {
         let handle = try FileHandle(forWritingTo: logURL)
         try handle.seekToEnd()
@@ -83,6 +89,11 @@ enum NativePaneTabDragReproLog {
    diagnostics so one repro captures both geometry and event ownership. Layout
    callers should dedupe snapshots before writing because AppKit can relayout
    title bars repeatedly during one visible resize.
+
+   CDXC:GxserverLogs 2026-06-15-20:39:
+   native-pane-tabs-debug can be high-volume while Debugging Mode is enabled.
+   Keep the diagnostics, but rotate the file at the same support-bundle limit
+   as other native debug logs.
    */
   static func append(event: String, details: [String: Any] = [:]) {
     guard NativeDebugLogging.isEnabled else {
@@ -101,6 +112,7 @@ enum NativePaneTabDragReproLog {
         try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
         didCreateLogsDirectory = true
       }
+      try NativePaneReproLogRotation.rotateIfNeeded(logURL: logURL, incomingByteCount: UInt64(line.lengthOfBytes(using: .utf8)))
       if FileManager.default.fileExists(atPath: logURL.path) {
         let handle = try FileHandle(forWritingTo: logURL)
         try handle.seekToEnd()
@@ -124,5 +136,40 @@ enum NativePaneTabDragReproLog {
       return "{\"event\":\"serializationFailed\"}"
     }
     return json
+  }
+}
+
+private enum NativePaneReproLogRotation {
+  private static let maxLogFileBytes: UInt64 = 25 * 1024 * 1024
+  private static let maxRotatedLogFiles = 3
+
+  static func rotateIfNeeded(logURL: URL, incomingByteCount: UInt64) throws {
+    let manager = FileManager.default
+    let size = (try? manager.attributesOfItem(atPath: logURL.path)[.size] as? NSNumber)?.uint64Value ?? 0
+    guard size + incomingByteCount > maxLogFileBytes else {
+      return
+    }
+    let oldest = rotatedLogURL(logURL, index: maxRotatedLogFiles)
+    if manager.fileExists(atPath: oldest.path) {
+      try manager.removeItem(at: oldest)
+    }
+    for index in stride(from: maxRotatedLogFiles - 1, through: 1, by: -1) {
+      let source = rotatedLogURL(logURL, index: index)
+      let destination = rotatedLogURL(logURL, index: index + 1)
+      if manager.fileExists(atPath: source.path) {
+        try manager.moveItem(at: source, to: destination)
+      }
+    }
+    let firstRotation = rotatedLogURL(logURL, index: 1)
+    if manager.fileExists(atPath: firstRotation.path) {
+      try manager.removeItem(at: firstRotation)
+    }
+    if manager.fileExists(atPath: logURL.path) {
+      try manager.moveItem(at: logURL, to: firstRotation)
+    }
+  }
+
+  private static func rotatedLogURL(_ logURL: URL, index: Int) -> URL {
+    logURL.deletingLastPathComponent().appendingPathComponent("\(logURL.lastPathComponent).\(index)")
   }
 }

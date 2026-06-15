@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Field,
@@ -28,6 +29,7 @@ import {
   getDefaultSidebarAgentByIcon,
   type SidebarAgentIcon,
 } from "../shared/sidebar-agents";
+import type { SidebarTheme } from "../shared/session-grid-contract";
 
 export type AgentConfigDraft = {
   acceptAllMode?: AgentAcceptAllMode;
@@ -42,6 +44,7 @@ export type AgentConfigModalProps = {
   isOpen: boolean;
   onCancel: () => void;
   onSave: (draft: AgentConfigDraft) => void;
+  theme?: SidebarTheme;
 };
 
 const AGENT_TYPE_SELECT_ITEMS = [
@@ -58,7 +61,13 @@ const AGENT_TYPE_SELECT_ITEMS = [
  * native and web modal hosts render consistent focus management, sizing, and
  * close behavior.
  */
-export function AgentConfigModal({ draft, isOpen, onCancel, onSave }: AgentConfigModalProps) {
+export function AgentConfigModal({
+  draft,
+  isOpen,
+  onCancel,
+  onSave,
+  theme = "dark-1",
+}: AgentConfigModalProps) {
   const [acceptAllMode, setAcceptAllMode] = useState<AgentAcceptAllMode>(draft.acceptAllMode ?? "inherit");
   const [command, setCommand] = useState(draft.command);
   const [icon, setIcon] = useState<SidebarAgentIcon | "custom">(draft.icon ?? "custom");
@@ -67,6 +76,7 @@ export function AgentConfigModal({ draft, isOpen, onCancel, onSave }: AgentConfi
   const agentTypeId = useId();
   const commandId = useId();
   const nameId = useId();
+  const isDarkTheme = getSidebarThemeVariant(theme) === "dark";
 
   useEffect(() => {
     if (!isOpen) {
@@ -109,7 +119,13 @@ export function AgentConfigModal({ draft, isOpen, onCancel, onSave }: AgentConfi
       }}
       open={isOpen}
     >
-      <DialogContent className="ghostex-settings-shadcn dark command-config-modal-shadcn">
+      <DialogContent
+        className={cn(
+          "ghostex-settings-shadcn command-config-modal-shadcn",
+          isDarkTheme && "dark",
+        )}
+        data-sidebar-theme={theme}
+      >
         <DialogHeader>
           <DialogTitle className="text-xl">Configure agent</DialogTitle>
           <DialogDescription className="text-sm">
@@ -270,4 +286,13 @@ export function AgentConfigModal({ draft, isOpen, onCancel, onSave }: AgentConfi
       </DialogContent>
     </Dialog>
   );
+}
+
+function getSidebarThemeVariant(theme: SidebarTheme): "dark" | "light" {
+  /**
+   * CDXC:SidebarTheme 2026-06-15-01:43:
+   * Agent editor modals share the app modal theme contract so Dark 1/Dark 2
+   * keep dark shadcn mode and Light uses shadcn's light component tokens.
+   */
+  return theme.startsWith("light-") || theme === "plain-light" ? "light" : "dark";
 }

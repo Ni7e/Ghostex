@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   formatProjectEditorDiffStatsLabel,
+  formatProjectTooltipGitStats,
+  getEmptyProjectNewSessionButtonLabel,
   getGroupContextMenuItemCount,
   getPinnedSessionDropGapKey,
   PINNED_SESSION_DROP_GAP_AFTER_LAST,
@@ -9,6 +12,11 @@ import {
   shouldShowOpenProjectFolderIcon,
   shouldShowProjectEditorDiffStats,
 } from "./session-group-section";
+
+const sessionGroupSectionSource = readFileSync(
+  new URL("./session-group-section.tsx", import.meta.url),
+  "utf8",
+);
 
 const originalElement = globalThis.Element;
 const hadOriginalElement = "Element" in globalThis;
@@ -104,7 +112,7 @@ function matchesGroupDragSelector(element: FakeElement, selector: string): boole
 }
 
 describe("shouldTreatProjectAsEmptySessionGroup", () => {
-  test("identifies an empty project group so expanding it can create a first terminal", () => {
+  test("identifies an empty project group so it can render a new-session row", () => {
     expect(
       shouldTreatProjectAsEmptySessionGroup({
         hasProjectContext: true,
@@ -129,17 +137,53 @@ describe("shouldTreatProjectAsEmptySessionGroup", () => {
   });
 });
 
+describe("empty project new-session row", () => {
+  test("uses the requested visible button label", () => {
+    expect(getEmptyProjectNewSessionButtonLabel()).toBe("New Session");
+  });
+
+  test("renders as a sleeping session-shaped button without a last-active timestamp", () => {
+    /*
+     * CDXC:ProjectGroups 2026-06-15-20:14:
+     * Closing the last terminal leaves an empty project row. Source coverage
+     * keeps that row session-shaped, timestamp-free, and wired to create a new
+     * terminal instead of restoring the closed session.
+     */
+    const rowStart = sessionGroupSectionSource.indexOf(
+      'data-empty-project-new-session-row="true"',
+    );
+    expect(rowStart).toBeGreaterThan(-1);
+    const rowSource = sessionGroupSectionSource.slice(
+      Math.max(0, rowStart - 600),
+      rowStart + 1400,
+    );
+
+    expect(rowSource).toContain("group-empty-project-session-button");
+    expect(rowSource).toContain('data-sleeping="true"');
+    expect(rowSource).toContain('data-title-full-width="true"');
+    expect(rowSource).toContain("getEmptyProjectNewSessionButtonLabel()");
+    expect(rowSource).toContain("requestCreateProjectTerminal();");
+    expect(rowSource).not.toContain("session-last-interaction-time");
+  });
+});
+
 describe("shouldShowOpenProjectFolderIcon", () => {
-  test("keeps empty expanded project rows visually closed", () => {
+  test("shows the open folder for empty expanded project rows", () => {
+    /*
+     * CDXC:ProjectHeaders 2026-06-16-02:27:
+     * Empty expanded projects still have a visible body because they render the
+     * New Session row, so the folder icon should show open even when the
+     * project has no terminal sessions.
+     */
     expect(
       shouldShowOpenProjectFolderIcon({
         isCollapsed: false,
         sessionCount: 0,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  test("shows the open folder only for expanded projects with sessions", () => {
+  test("uses collapsed state for project folder icons regardless of sessions", () => {
     expect(
       shouldShowOpenProjectFolderIcon({
         isCollapsed: false,
@@ -193,6 +237,44 @@ describe("formatProjectEditorDiffStatsLabel", () => {
         true,
       ),
     ).toBe("99 +9999 -9999");
+  });
+});
+
+describe("formatProjectTooltipGitStats", () => {
+  test("pluralizes changed files and changed lines in project and worktree tooltips", () => {
+    expect(
+      formatProjectTooltipGitStats({
+        additions: 2,
+        deletions: 6,
+        files: 2,
+        isLoading: false,
+        isRepo: true,
+      }),
+    ).toBe("2 files changed  +2  -6 lines");
+  });
+
+  test("uses singular copy for one changed file and one added line", () => {
+    expect(
+      formatProjectTooltipGitStats({
+        additions: 1,
+        deletions: 0,
+        files: 1,
+        isLoading: false,
+        isRepo: true,
+      }),
+    ).toBe("1 file changed  +1  -0 line");
+  });
+
+  test("uses singular line copy when the only changed line is a deletion", () => {
+    expect(
+      formatProjectTooltipGitStats({
+        additions: 0,
+        deletions: 1,
+        files: 4,
+        isLoading: false,
+        isRepo: true,
+      }),
+    ).toBe("4 files changed  +0  -1 line");
   });
 });
 

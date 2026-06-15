@@ -11,8 +11,12 @@
    * not keep shadcn's centered-dialog sizing or large vertical gap inside that
    * frame; pin it to the modal window so the main React component fills the
    * available width and height.
+   *
+   * CDXC:SidebarTheme 2026-06-15-01:43:
+   * Agents Hub is part of the native modal family, so its main shell follows
+   * --app-modal-background for Dark 1, Dark 2, and Light.
    */
-  background: #0e0e0e !important;
+  background: var(--app-modal-background) !important;
   border-color: var(--border) !important;
   display: flex !important;
   flex-direction: column !important;
@@ -121,7 +125,7 @@
 }
 
 .agents-hub-layout {
-  background: #0e0e0e;
+  background: var(--app-modal-background);
   border: 1px solid var(--border);
   border-radius: 0;
   display: grid;
@@ -288,7 +292,7 @@
 
 .agents-hub-agent-icon {
   align-items: center;
-  background: #0e0e0e;
+  background: var(--app-modal-background);
   border: 1px solid var(--border);
   border-radius: 0;
   color: var(--foreground);
@@ -327,10 +331,10 @@
 .agents-hub-agent-badge {
   align-items: center;
   background: var(--foreground);
-  border: 1px solid #0e0e0e;
+  border: 1px solid var(--app-modal-background);
   border-radius: 0;
   bottom: -0.25rem;
-  color: #0e0e0e;
+  color: var(--app-modal-background);
   display: flex;
   font-size: 0.5625rem;
   font-weight: 750;

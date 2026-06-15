@@ -59,12 +59,14 @@ function CommandDialog({
 
 function CommandInput({
   className,
+  clearOnEscape = true,
   clearLabel = "Clear search",
   onKeyDown,
   onValueChange,
   value,
   ...props
 }: React.ComponentProps<typeof CommandPrimitive.Input> & {
+  clearOnEscape?: boolean;
   clearLabel?: string;
 }) {
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -84,7 +86,10 @@ function CommandInput({
          * Command-backed search boxes, including Settings icon search, should match the sidebar search affordance by keeping the search icon on the right while empty and replacing it with a focused clear button after typing.
          *
          * CDXC:SearchInputs 2026-06-04-03:11:
-         * Escape on a focused non-empty command search must clear the query the same way as the X button instead of closing the surrounding popover first.
+         * Escape on a focused non-empty command search clears the query by default the same way as the X button instead of closing the surrounding popover first.
+         *
+         * CDXC:CommandPalette 2026-06-15-16:21:
+         * The app command palette must own Escape as a modal-close command, even when the query is non-empty. Keep clear-on-Escape opt-out at this shared input boundary so other command searches preserve their clear affordance without the palette clearing text before it closes.
          */}
         <CommandPrimitive.Input
           data-slot="command-input"
@@ -93,7 +98,7 @@ function CommandInput({
             className,
           )}
           onKeyDown={(event) => {
-            if (event.key === "Escape" && currentValue.length > 0) {
+            if (clearOnEscape && event.key === "Escape" && currentValue.length > 0) {
               event.preventDefault();
               event.stopPropagation();
               handleValueChange("");
@@ -111,7 +116,8 @@ function CommandInput({
           {hasQuery ? (
             <button
               aria-label={clearLabel}
-              className="flex size-6 items-center justify-center rounded-none border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
+              data-slot="command-input-clear"
+              className="flex size-6 appearance-none items-center justify-center rounded-none border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
               onClick={() => {
                 handleValueChange("");
                 inputRef.current?.focus();

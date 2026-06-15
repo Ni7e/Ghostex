@@ -214,6 +214,7 @@ export function ConfigureAgentsModal({ isOpen, onClose, vscode }: ConfigureAgent
         isOpen={isEditorOpen}
         onCancel={() => setEditorState(undefined)}
         onSave={saveAgent}
+        theme={theme}
       />
     </>,
     document.body,

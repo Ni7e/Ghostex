@@ -499,7 +499,12 @@ function normalizeViewMode(viewMode: unknown): TerminalViewMode {
 }
 
 function resolveSettingsSidebarTheme(sidebarTheme: unknown): SidebarTheme {
-  return sidebarTheme === "plain" ? "plain-dark" : "dark-blue";
+  if (sidebarTheme === "plain") {
+    return "dark-2";
+  }
+  return sidebarTheme === "dark-1" || sidebarTheme === "dark-2" || sidebarTheme === "plain-light"
+    ? sidebarTheme
+    : "dark-1";
 }
 
 function isNativeProjectsSnapshot(payload: unknown): payload is NativeProjectsSnapshot {

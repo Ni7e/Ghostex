@@ -31,6 +31,7 @@ import { DEFAULT_PET_ID } from "./pets";
 import {
   DEFAULT_SIDEBAR_SESSION_TAG_LIST_ITEMS,
   getEnabledVisibleSidebarSessionTags,
+  getEnabledVisibleSidebarSessionTagSections,
 } from "./session-tags";
 
 describe("normalizeghostexSettings", () => {
@@ -209,22 +210,77 @@ describe("normalizeghostexSettings", () => {
     });
   });
 
+  test("normalizes project jump expansion settings", () => {
+    /*
+    CDXC:ProjectHotkeys 2026-06-15-11:12:
+    Project jumps should reveal collapsed Projects rows by default, while the
+    narrower Show less side effect remains opt-in and hidden behind that setting
+    in the Hotkeys tab.
+    */
+    expect(normalizeghostexSettings({})).toMatchObject({
+      expandCollapsedProjectsOnJump: true,
+      showLessForExpandedProjectJumps: false,
+    });
+    expect(
+      normalizeghostexSettings({
+        expandCollapsedProjectsOnJump: false,
+        showLessForExpandedProjectJumps: true,
+      }),
+    ).toMatchObject({
+      expandCollapsedProjectsOnJump: false,
+      showLessForExpandedProjectJumps: true,
+    });
+  });
+
   test("normalizes sidebar tag filter list presentation", () => {
     /*
     CDXC:SessionTagFilters 2026-06-13-17:50:
     The sidebar tag filter list is configurable presentation chrome. Defaults
-    keep every tag and separator enabled, while persisted custom order,
+    keep every supported tag row recoverable, while persisted custom order,
     hidden-state, and disabled-state normalize without changing tag values.
+
+    CDXC:SessionTagFilters 2026-06-15-18:32:
+    First-run defaults reduce visible sidebar tag filters by hiding High
+    Priority, Low Priority, Todo, Bug, and Feature while keeping Testing,
+    Research, and Design visible.
+
+    CDXC:SessionTagFilters 2026-06-15-22:10:
+    Default-hidden tags are fully off: both disabled and hidden. The Settings
+    management list still carries those rows so users can turn them back on.
     */
     expect(DEFAULT_ghostex_SETTINGS.sidebarSessionTagListItems).toEqual(
       DEFAULT_SIDEBAR_SESSION_TAG_LIST_ITEMS,
     );
-    expect(
-      DEFAULT_ghostex_SETTINGS.sidebarSessionTagListItems.every((item) => item.enabled),
-    ).toBe(true);
     expect(normalizeghostexSettings({}).sidebarSessionTagListItems).toEqual(
       DEFAULT_SIDEBAR_SESSION_TAG_LIST_ITEMS,
     );
+    expect(
+      DEFAULT_SIDEBAR_SESSION_TAG_LIST_ITEMS.filter(
+        (item) => item.type === "tag" && !item.enabled && !item.visible,
+      ).map((item) => item.id),
+    ).toEqual(["high-priority", "low-priority", "todo", "bug", "feature"]);
+    expect(getEnabledVisibleSidebarSessionTags(DEFAULT_SIDEBAR_SESSION_TAG_LIST_ITEMS)).toEqual([
+      "favorite",
+      "in-progress",
+      "testing",
+      "blocked",
+      "on-hold",
+      "done",
+      "research",
+      "design",
+    ]);
+    expect(
+      getEnabledVisibleSidebarSessionTagSections(DEFAULT_SIDEBAR_SESSION_TAG_LIST_ITEMS).map(
+        (section) => ({
+          label: section.label,
+          tags: section.options.map((option) => option.value),
+        }),
+      ),
+    ).toEqual([
+      { label: "Priority", tags: ["favorite"] },
+      { label: "Progress", tags: ["in-progress", "testing", "blocked", "on-hold", "done"] },
+      { label: "Type", tags: ["research", "design"] },
+    ]);
     const normalizedCustomTags = normalizeghostexSettings({
       sidebarSessionTagListItems: [
         { enabled: false, id: "separator-progress-type", type: "separator", visible: true },
@@ -279,6 +335,11 @@ describe("normalizeghostexSettings", () => {
      * CDXC:SidebarSettingsPresets 2026-06-13-15:42:
      * Recommended also hides session-card Last Active timestamps so the default
      * sidebar stays compact without switching to the Minimal preset.
+     *
+     * CDXC:SessionStatusIndicators 2026-06-15-14:00:
+     * Sidebar presets intentionally omit the macOS floating badge toggle. This
+     * preset test should cover preset-owned sidebar chrome and menu bar
+     * indicator state without coupling the floating desktop surface.
      */
     expect(DEFAULT_ghostex_SETTINGS).toMatchObject(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended);
     expect(normalizeghostexSettings({})).toMatchObject(
@@ -296,6 +357,11 @@ describe("normalizeghostexSettings", () => {
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.detailed.hideBrowserFaviconUntilHover).toBe(false);
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideLastActiveTimeOnSessionCards).toBe(
       true,
+    );
+    expect("hideFloatingSessionStatusIndicators" in SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended)
+      .toBe(false);
+    expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideMenuBarSessionStatusIndicators).toBe(
+      false,
     );
     expect(
       normalizeghostexSettings({
@@ -316,6 +382,12 @@ describe("normalizeghostexSettings", () => {
      * Preset selection is derived from the controlled setting values. Any
      * controlled value that differs from all presets is Custom rather than a
      * persisted fourth preset state.
+     *
+     * CDXC:SessionStatusIndicators 2026-06-15-14:00:
+     * The floating status indicator is a macOS Status Indicators preference, not
+     * sidebar preset chrome. Changing presets must preserve the current floating
+     * badge visibility, and toggling that badge must not make the sidebar preset
+     * read as Custom.
      */
     expect(
       getSidebarSettingsPresetId(applySidebarSettingsPreset(DEFAULT_ghostex_SETTINGS, "codex")),
@@ -335,6 +407,23 @@ describe("normalizeghostexSettings", () => {
       true,
     );
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideProjectHeaderDiffStats).toBe(false);
+    const floatingIndicatorsEnabled = normalizeghostexSettings({
+      hideFloatingSessionStatusIndicators: false,
+    });
+    expect(getSidebarSettingsPresetId(floatingIndicatorsEnabled)).toBe("recommended");
+    for (const preset of SIDEBAR_SETTINGS_PRESETS) {
+      expect(
+        applySidebarSettingsPreset(floatingIndicatorsEnabled, preset.id)
+          .hideFloatingSessionStatusIndicators,
+      ).toBe(false);
+    }
+    const floatingIndicatorsHidden = normalizeghostexSettings({
+      hideFloatingSessionStatusIndicators: true,
+    });
+    expect(
+      applySidebarSettingsPreset(floatingIndicatorsHidden, "detailed")
+        .hideFloatingSessionStatusIndicators,
+    ).toBe(true);
     expect(
       getSidebarSettingsPresetId({
         ...DEFAULT_ghostex_SETTINGS,
@@ -410,10 +499,11 @@ describe("normalizeghostexSettings", () => {
     expect(DEFAULT_ghostex_SETTINGS.hideKeepAwakeTitlebarControl).toBe(false);
     expect(DEFAULT_ghostex_SETTINGS.keepAwakePreventLidSleep).toBe(false);
     expect(KEEP_AWAKE_DURATION_OPTIONS).toEqual([
-      { label: "", value: 0 },
+      { label: "Until turned off", value: 0 },
       { label: "2 hours", value: 120 },
       { label: "5 hours", value: 300 },
     ]);
+    expect(KEEP_AWAKE_DURATION_OPTIONS.every((option) => option.label.trim().length > 0)).toBe(true);
     expect(
       normalizeghostexSettings({
         keepAwakeAllowDisplaySleep: true,
@@ -464,8 +554,13 @@ describe("normalizeghostexSettings", () => {
   test("normalizes auto sleep settings separately for editors, Git, and agents", () => {
     /**
      * CDXC:AutoSleep 2026-05-28-08:06:
-     * Settings must preserve the existing editor/Git sleep defaults while
-     * making agent auto-sleep opt-in and bounded to visible idle-duration choices.
+     * Settings must normalize editor/Git sleep defaults while making agent
+     * auto-sleep opt-in and bounded to visible idle-duration choices.
+     *
+     * CDXC:AutoSleep 2026-06-15-18:31:
+     * Performance defaults should retire heavy editor, Project, Git/Browser,
+     * and browser-session surfaces after five idle minutes, with browser-session
+     * Auto Sleep enabled by default and agent terminal Auto Sleep still opt-in.
      *
      * CDXC:AutoSleep 2026-06-07-00:53:
      * Agent auto-sleep defaults to fifteen idle minutes once enabled, matching
@@ -487,15 +582,15 @@ describe("normalizeghostexSettings", () => {
     expect(normalizeghostexSettings({})).toMatchObject({
       autoSleepAgentIdleMinutes: 15,
       autoSleepAgentSessionsEnabled: false,
-      autoSleepBrowserIdleMinutes: 30,
-      autoSleepBrowserSessionsEnabled: false,
+      autoSleepBrowserIdleMinutes: 5,
+      autoSleepBrowserSessionsEnabled: true,
       autoSleepCodeEditorEnabled: true,
-      autoSleepCodeEditorIdleMinutes: 15,
+      autoSleepCodeEditorIdleMinutes: 5,
       autoSleepFavoriteAgentSessions: false,
       autoSleepGitEditorEnabled: true,
-      autoSleepGitEditorIdleMinutes: 15,
+      autoSleepGitEditorIdleMinutes: 5,
       autoSleepProjectEditorEnabled: true,
-      autoSleepProjectEditorIdleMinutes: 15,
+      autoSleepProjectEditorIdleMinutes: 5,
       autoSleepRequireAgentResumeCommand: true,
     });
     expect(
@@ -514,10 +609,10 @@ describe("normalizeghostexSettings", () => {
       autoSleepAgentSessionsEnabled: true,
       autoSleepBrowserIdleMinutes: 120,
       autoSleepBrowserSessionsEnabled: true,
-      autoSleepCodeEditorIdleMinutes: 15,
+      autoSleepCodeEditorIdleMinutes: 5,
       autoSleepGitEditorEnabled: false,
       autoSleepGitEditorIdleMinutes: 30,
-      autoSleepProjectEditorIdleMinutes: 15,
+      autoSleepProjectEditorIdleMinutes: 5,
     });
   });
 
@@ -613,38 +708,144 @@ describe("normalizeghostexSettings", () => {
     ]);
   });
 
-  test("defaults sidebar theme to Dark Gray and removes Auto from visible theme options", () => {
+  test("defaults sidebar theme to Dark Gray and keeps the theme option disabled", () => {
     /**
-     * CDXC:SidebarTheme 2026-05-08-11:14
-     * Auto is retired from user-facing sidebar themes while the full picker is
-     * hidden. Defaults and legacy Auto values normalize to Dark Gray so the
-     * sidebar starts in the requested palette without a transient auto theme.
+     * CDXC:SidebarTheme 2026-06-15-02:29:
+     * Theme selection is disabled while themes are coming soon. New installs,
+     * legacy Auto, old plain, and temporarily exposed theme values all resolve
+     * to Dark 2, whose disabled Settings label is Dark Gray.
      */
-    expect(DEFAULT_ghostex_SETTINGS.sidebarTheme).toBe("plain");
+    expect(DEFAULT_ghostex_SETTINGS.sidebarTheme).toBe("dark-2");
     expect(normalizeghostexSettings({})).toMatchObject({
-      sidebarTheme: "plain",
+      sidebarTheme: "dark-2",
     });
     expect(normalizeghostexSettings({ sidebarTheme: "auto" })).toMatchObject({
-      sidebarTheme: "plain",
+      sidebarTheme: "dark-2",
     });
-    expect(SIDEBAR_THEME_SETTING_OPTIONS).toEqual([{ label: "Dark Gray", value: "plain" }]);
+    expect(normalizeghostexSettings({ sidebarTheme: "plain" })).toMatchObject({
+      sidebarTheme: "dark-2",
+    });
+    expect(normalizeghostexSettings({ sidebarTheme: "dark-1" })).toMatchObject({
+      sidebarTheme: "dark-2",
+    });
+    expect(normalizeghostexSettings({ sidebarTheme: "plain-light" })).toMatchObject({
+      sidebarTheme: "dark-2",
+    });
+    expect(SIDEBAR_THEME_SETTING_OPTIONS).toEqual([
+      { label: "Dark Gray", value: "dark-2" },
+    ]);
   });
 
-  test("defaults session status indicators to Medium and keeps four selectable sizes", () => {
+  test("derives custom sidebar and titlebar background from the theming contrast slider", () => {
+    /**
+     * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
+     * Custom chrome colors default to Dark Gray-compatible values and persist
+     * only as six-digit hex strings.
+     *
+     * CDXC:SidebarTitlebarColors 2026-06-15-13:22:
+     * Settings no longer expose a foreground picker. Normalize legacy saved
+     * foreground values away and derive foreground from the custom background's
+     * luminance so light custom chrome stays readable.
+     *
+     * CDXC:SidebarTitlebarColors 2026-06-15-13:45:
+     * The background is no longer a freeform color picker. Settings exposes a
+     * contrast slider and stores a computed grayscale hex color for native
+     * protocol compatibility.
+     *
+     * CDXC:SidebarTitlebarColors 2026-06-15-15:01:
+     * The contrast slider is now limited to 85-100 so lower saved values clamp
+     * to the lightest allowed dark gray instead of a mid-gray sidebar.
+     *
+     * CDXC:SidebarTitlebarColors 2026-06-15-15:15:
+     * The persisted key still says darkness for compatibility, but Settings
+     * presents this control as background contrast.
+     *
+     * CDXC:SidebarTitlebarColors 2026-06-15-15:28:
+     * Background tint is chosen with a web picker and then folded into the
+     * computed background hex as a subtle hue offset. Neutral #808080 must keep
+     * existing Dark Gray output unchanged.
+     *
+     * CDXC:SettingsTheming 2026-06-15-21:35:
+     * The old custom contrast enable toggle is retired. Normalize the retained
+     * compatibility field to true so visible Theming controls always apply.
+     */
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarColorsEnabled).toBe(true);
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarForegroundColor).toBe("#d8d8d8");
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor).toBe("#808080");
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundDarknessPercent).toBe(95);
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundColor).toBe("#0e0e0e");
+    expect(normalizeghostexSettings({})).toMatchObject({
+      customSidebarTitlebarColorsEnabled: true,
+      customSidebarTitlebarForegroundColor: "#d8d8d8",
+      customSidebarTitlebarBackgroundTintColor: "#808080",
+      customSidebarTitlebarBackgroundDarknessPercent: 95,
+      customSidebarTitlebarBackgroundColor: "#0e0e0e",
+    });
+    expect(
+      normalizeghostexSettings({
+        customSidebarTitlebarColorsEnabled: true,
+        customSidebarTitlebarForegroundColor: "#ABCDEF",
+        customSidebarTitlebarBackgroundTintColor: "#336699",
+        customSidebarTitlebarBackgroundDarknessPercent: 85,
+        customSidebarTitlebarBackgroundColor: "#123456",
+      }),
+    ).toMatchObject({
+      customSidebarTitlebarColorsEnabled: true,
+      customSidebarTitlebarForegroundColor: "#d8d8d8",
+      customSidebarTitlebarBackgroundTintColor: "#336699",
+      customSidebarTitlebarBackgroundDarknessPercent: 85,
+      customSidebarTitlebarBackgroundColor: "#242a30",
+    });
+    expect(
+      normalizeghostexSettings({
+        customSidebarTitlebarColorsEnabled: false,
+        customSidebarTitlebarForegroundColor: "#ABCDEF",
+        customSidebarTitlebarBackgroundTintColor: "not-a-color",
+        customSidebarTitlebarBackgroundDarknessPercent: 20,
+      }),
+    ).toMatchObject({
+      customSidebarTitlebarColorsEnabled: true,
+      customSidebarTitlebarForegroundColor: "#d8d8d8",
+      customSidebarTitlebarBackgroundTintColor: "#808080",
+      customSidebarTitlebarBackgroundDarknessPercent: 85,
+      customSidebarTitlebarBackgroundColor: "#2a2a2a",
+    });
+    expect(
+      normalizeghostexSettings({
+        customSidebarTitlebarForegroundColor: "red",
+        customSidebarTitlebarBackgroundColor: "#fff",
+      }),
+    ).toMatchObject({
+      customSidebarTitlebarForegroundColor: "#d8d8d8",
+      customSidebarTitlebarBackgroundDarknessPercent: 95,
+      customSidebarTitlebarBackgroundColor: "#0e0e0e",
+    });
+  });
+
+  test("defaults floating session status indicators off and keeps four selectable sizes", () => {
     /**
      * CDXC:SessionStatusIndicators 2026-05-07-18:20
      * Medium is the default because it is 50% of the current approved X-Large
      * indicator size. Settings must expose all named scale points so users can
      * return to the larger visual or choose smaller indicators later.
+     *
      * CDXC:SessionStatusIndicators 2026-06-13-01:06:
-     * Floating and menu bar status badges are visible in the default Recommended
-     * preset while remaining independent from the selected indicator size.
+     * Menu bar status badges remain visible in the default Recommended preset
+     * while remaining independent from the selected indicator size.
+     *
+     * CDXC:SessionStatusIndicators 2026-06-15-02:01:
+     * Floating status badges are disabled by default so new installs do not show
+     * desktop floating session indicators unless the user enables that surface.
+     *
+     * CDXC:SessionStatusIndicators 2026-06-15-14:00:
+     * The floating status toggle remains an explicit Status Indicators setting,
+     * so normalization should preserve it without relying on sidebar preset data.
      */
-    expect(DEFAULT_ghostex_SETTINGS.hideFloatingSessionStatusIndicators).toBe(false);
+    expect(DEFAULT_ghostex_SETTINGS.hideFloatingSessionStatusIndicators).toBe(true);
     expect(DEFAULT_ghostex_SETTINGS.hideMenuBarSessionStatusIndicators).toBe(false);
     expect(DEFAULT_ghostex_SETTINGS.sessionStatusIndicatorSize).toBe("medium");
     expect(normalizeghostexSettings({})).toMatchObject({
-      hideFloatingSessionStatusIndicators: false,
+      hideFloatingSessionStatusIndicators: true,
       hideMenuBarSessionStatusIndicators: false,
       sessionStatusIndicatorSize: "medium",
     });

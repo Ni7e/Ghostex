@@ -14,6 +14,24 @@ const sidebarStylesSource = readFileSync(
   "utf8",
 );
 const modalHostSource = readFileSync(new URL("./modal-host.tsx", import.meta.url), "utf8");
+const nativeSidebarSource = readFileSync(new URL("./native-sidebar.tsx", import.meta.url), "utf8");
+const sidebarAppSource = readFileSync(
+  new URL("../../sidebar/sidebar-app.tsx", import.meta.url),
+  "utf8",
+);
+const sortableSessionCardSource = readFileSync(
+  new URL("../../sidebar/sortable-session-card.tsx", import.meta.url),
+  "utf8",
+);
+const titlebarHostSource = readFileSync(new URL("./titlebar-host.tsx", import.meta.url), "utf8");
+const commandPaletteSource = readFileSync(
+  new URL("../../sidebar/command-palette.tsx", import.meta.url),
+  "utf8",
+);
+const settingsModalSource = readFileSync(
+  new URL("../../sidebar/settings-modal.tsx", import.meta.url),
+  "utf8",
+);
 const worktreeCreateModalSource = readFileSync(
   new URL("../../sidebar/worktree-create-modal.tsx", import.meta.url),
   "utf8",
@@ -77,6 +95,9 @@ describe("native app modal window source", () => {
     CDXC:FirstLaunchSetup 2026-06-12-07:13:
     The macOS first-launch setup modal must open 90px taller than its old 1120x760 native child window so onboarding steps with hook status and footer actions are not clipped.
     Keep Agents Hub at the generic management-modal height while firstLaunchSetup and the legacy tipsAndTricks alias use the taller frame.
+
+    CDXC:DiscoverGhostex 2026-06-16-00:26:
+    Discover Ghostex uses the same 1120x850 native child-window footprint while keeping its own modal id and title.
     */
     const defaultSize = sourceBetween(
       appDelegateSource,
@@ -87,6 +108,206 @@ describe("native app modal window source", () => {
     expect(defaultSize).toContain("return CGSize(width: 1120, height: 760)");
     expect(defaultSize).toContain('case "firstLaunchSetup", "tipsAndTricks":');
     expect(defaultSize).toContain("return CGSize(width: 1120, height: 850)");
+    expect(defaultSize).toContain('case "discoverGhostex":');
+
+    const modalTitle = sourceBetween(
+      appDelegateSource,
+      "private func title(for modal: String) -> String",
+      "private final class TitlebarDropdownPanelController",
+    );
+    expect(modalTitle).toContain('case "discoverGhostex":');
+    expect(modalTitle).toContain('return "Discover Ghostex"');
+  });
+
+  test("opens Settings over the exact macOS workspace area", () => {
+    /*
+    CDXC:AppModals 2026-06-15-10:12:
+    Settings must cover the whole workspace area while leaving the sidebar,
+    divider, and titlebar owned by their existing native sibling frames.
+    */
+    const preferredFrame = sourceBetween(
+      appDelegateSource,
+      "private func preferredNativeAppModalContentFrame(",
+      "private func closeNativeAppModalWindow",
+    );
+    expect(preferredFrame).toContain('guard modal == "settings"');
+    expect(preferredFrame).toContain("let workspaceFrame = rootLayoutFrames().workspace");
+    expect(preferredFrame).toContain("parentWindow.convertToScreen(convert(workspaceFrame, to: nil))");
+
+    const openNativeModal = sourceBetween(
+      appDelegateSource,
+      "private func openNativeAppModalWindow(",
+      "private func preferredNativeAppModalContentFrame",
+    );
+    expect(openNativeModal).toContain("let resolvedPreferredContentFrame = preferredNativeAppModalContentFrame(");
+    expect(openNativeModal).toContain("preferredContentFrame: resolvedPreferredContentFrame");
+
+    const appModalWindowController = sourceBetween(
+      appDelegateSource,
+      "private final class AppModalWindowController",
+      "private final class TitlebarDropdownPanelController",
+    );
+    expect(appModalWindowController).toContain(
+      "panel.hasShadow = !shouldUseExactContentFrame(modal: modal)",
+    );
+    expect(appModalWindowController).toContain("if shouldUseExactContentFrame(modal: modal)");
+    expect(appModalWindowController).toContain("private func shouldUseExactContentFrame(modal: String?) -> Bool");
+    expect(appModalWindowController).toContain('modal == "settings"');
+    expect(appModalWindowController).toContain('case "settings":');
+    expect(appModalWindowController).toContain("return CGSize(width: 1, height: 1)");
+
+    const settingsStyles = sourceBetween(
+      sidebarStylesSource,
+      ".app-modal-host-native-window-body .ghostex-settings-shadcn.settings-modal-dialog {",
+      ".ghostex-settings-shadcn.settings-modal-dialog .ghostex-modal-heading-bar",
+    );
+    expect(settingsStyles).toContain("border-bottom: 1px solid #252525 !important;");
+    expect(settingsStyles).toContain("border-right: 1px solid #252525 !important;");
+    expect(settingsStyles).toContain("border-top: 1px solid #252525 !important;");
+    expect(settingsStyles).toContain("box-sizing: border-box;");
+    expect(settingsStyles).toContain("height: 100vh;");
+    expect(settingsStyles).toContain("max-height: 100vh;");
+    expect(settingsStyles).toContain("max-width: 100vw;");
+    expect(settingsStyles).toContain("width: 100vw;");
+  });
+
+  test("reframes Settings when workspace geometry changes", () => {
+    /*
+    CDXC:SettingsLayout 2026-06-15-14:07:
+    Settings is a full-workspace native child window. Main-window resize,
+    sidebar collapse, and sidebar side changes should reframe Settings to the
+    current workspace instead of closing it or keeping the old frame.
+    */
+    const resizeStart = sourceBetween(
+      appDelegateSource,
+      "func windowWillStartLiveResize(_ notification: Notification)",
+      "func windowDidResize(_ notification: Notification)",
+    );
+    expect(resizeStart).toContain("resizedWindow === mainWindow");
+    expect(resizeStart).toContain("updateSettingsModalWorkspaceFrameIfNeeded()");
+
+    const updateSettingsFrame = sourceBetween(
+      appDelegateSource,
+      "fileprivate func updateSettingsModalWorkspaceFrameIfNeeded()",
+      "private func closeNativeAppModalWindow",
+    );
+    expect(updateSettingsFrame).toContain('currentModalKind == "settings"');
+    expect(updateSettingsFrame).toContain("preferredNativeAppModalContentFrame(");
+    expect(updateSettingsFrame).toContain("nativeAppModalWindowController?.updateContentFrame(");
+    expect(updateSettingsFrame).not.toContain("closeNativeAppModalWindow(");
+
+    const rootChrome = sourceBetween(
+      appDelegateSource,
+      "func setSidebarSide(_ side: SidebarSide)",
+      "private func setTitlebarSidebarCollapsed",
+    );
+    expect(rootChrome).toContain("updateSettingsModalWorkspaceFrameIfNeeded()");
+
+    const appModalWindowController = sourceBetween(
+      appDelegateSource,
+      "private final class AppModalWindowController",
+      "private static func sidebarTheme",
+    );
+    expect(appModalWindowController).toContain("func updateContentFrame(");
+    expect(appModalWindowController).toContain("panel.setFrame(panel.frameRect(forContentRect: contentFrame), display: true)");
+  });
+
+  test("dismisses Settings from sidebar and titlebar navigation", () => {
+    /*
+    CDXC:SettingsDismissal 2026-06-15-14:07:
+    Settings should close when users navigate through sidebar sessions, sidebar
+    creation/search/modal actions, titlebar mode/action buttons, or native
+    create-session and rename hotkeys.
+
+    CDXC:SettingsDismissal 2026-06-16-02:12:
+    Quick-row creation actions replaced the old reference-session label.
+    Assert the current terminal, browser, and agent quick-create dismissal
+    markers so Settings still closes before those actions run.
+    */
+    expect(sidebarAppSource).toContain("dismissAppModalForSidebarNavigation");
+    expect(sidebarAppSource).toContain("SettingsDismissal:sessionClick");
+    expect(sidebarAppSource).toContain("SettingsDismissal:createQuickTerminal");
+    expect(sidebarAppSource).toContain("SettingsDismissal:createQuickBrowser");
+    expect(sidebarAppSource).toContain("SettingsDismissal:createQuickAgent");
+    expect(sidebarAppSource).toContain("SettingsDismissal:previousSessionsTextSearch");
+    expect(sidebarAppSource).toContain("SettingsDismissal:agentsHub");
+    expect(sidebarAppSource).toContain("SettingsDismissal:renameSession");
+
+    expect(sortableSessionCardSource).toContain("SettingsDismissal:sessionRowRename");
+    expect(titlebarHostSource).toContain("closeAppModalFromTitlebarNavigation");
+    expect(titlebarHostSource).toContain("SettingsDismissal:titlebarAction");
+    expect(titlebarHostSource).toContain("SettingsDismissal:titlebarAgentsMode");
+    expect(titlebarHostSource).toContain("SettingsDismissal:titlebarSourceMode");
+    expect(titlebarHostSource).toContain("SettingsDismissal:titlebarBrowserMode");
+    expect(titlebarHostSource).toContain("SettingsDismissal:titlebarKanbanMode");
+
+    expect(nativeSidebarSource).toContain("SettingsDismissal:nativeHotkeyCreateSession");
+    expect(nativeSidebarSource).toContain("SettingsDismissal:nativeHotkeyRename");
+    expect(nativeSidebarSource).toContain("SettingsDismissal:nativeSidebarCreateSession");
+  });
+
+  test("keeps titlebar action crash breadcrumbs behind Debugging Mode", () => {
+    /*
+    CDXC:GxserverLogs 2026-06-15-20:39:
+    Titlebar action crash traces are breadcrumbs from an isolated webview, not
+    normal-mode crash warnings. The titlebar host should only post them while
+    Debugging Mode is enabled.
+    */
+    expect(titlebarHostSource).toContain("function appendTitlebarActionCrashDebugLog(");
+    expect(titlebarHostSource).toContain("if (!debuggingMode) {");
+    expect(titlebarHostSource).toContain("projectState.debuggingMode");
+    expect(titlebarHostSource).toContain("nativeSidebar.actionCrashTrace.titlebarClick");
+  });
+
+  test("rotates AppDelegate-owned support logs", () => {
+    /*
+    CDXC:GxserverLogs 2026-06-15-20:39:
+    Shared AppDelegate log files such as native-host-lifecycle should rotate at
+    the common support-bundle limit instead of growing without bound during long
+    Debugging Mode sessions.
+    */
+    expect(appDelegateSource).toContain("sharedLogMaxFileBytes: UInt64 = 25 * 1024 * 1024");
+    expect(appDelegateSource).toContain("sharedLogMaxRotatedFiles = 3");
+    expect(appDelegateSource).toContain("rotateSharedLogIfNeeded(logURL: logURL");
+    expect(appDelegateSource).toContain("native-host-lifecycle.log");
+  });
+
+  test("ignores duplicate native app-modal opens except command-palette mode switches", () => {
+    /*
+    CDXC:AppModals 2026-06-15-10:27:
+    Opening the same native app modal again should be a no-op for Settings,
+    Rename Session, Previous Sessions, and the rest of the app-modal family.
+    Command Palette remains the exception because repeat Cmd+P/Cmd+Shift+P
+    requests switch the already-visible palette between files and commands.
+    */
+    const openNativeModal = sourceBetween(
+      appDelegateSource,
+      "private func openNativeAppModalWindow(",
+      "private func preferredNativeAppModalContentFrame",
+    );
+    expect(openNativeModal).toContain("shouldIgnoreDuplicateNativeAppModalOpen(");
+    expect(openNativeModal).toContain("if !isVisibleCommandPaletteModeSwitch(modal: modal)");
+
+    const duplicateGuard = sourceBetween(
+      appDelegateSource,
+      "private func shouldIgnoreDuplicateNativeAppModalOpen(",
+      "private func preferredNativeAppModalContentFrame",
+    );
+    expect(duplicateGuard).toContain('guard modal != "commandPalette"');
+    expect(duplicateGuard).toContain("isActiveOrPendingModal(modal)");
+    expect(duplicateGuard).toContain("nativeBridge.appModal.open.duplicateIgnored");
+    expect(duplicateGuard).toContain("private func isVisibleCommandPaletteModeSwitch(modal: String) -> Bool");
+
+    const appModalWindowController = sourceBetween(
+      appDelegateSource,
+      "private final class AppModalWindowController",
+      "private final class TitlebarDropdownPanelController",
+    );
+    expect(appModalWindowController).toContain("func isActiveOrPendingModal(_ modal: String) -> Bool");
+
+    expect(modalHostSource).toContain("commandPaletteOpenRequestSequence");
+    expect(modalHostSource).toContain("setCommandPaletteOpenRequestSequence((sequence) => sequence + 1)");
+    expect(modalHostSource).toContain("openRequestSequence={commandPaletteOpenRequestSequence}");
   });
 
   test("keeps Add Worktree fixed at 570x574 with exact native-window padding", () => {
@@ -143,6 +364,7 @@ describe("native app modal window source", () => {
       "<form",
     );
     expect(worktreeDialogContent).toContain("showCloseButton");
+    expect(worktreeDialogContent).toContain("initialFocus={focusInput}");
 
     const worktreeFooter = sourceBetween(
       worktreeCreateModalSource,
@@ -150,6 +372,71 @@ describe("native app modal window source", () => {
       "</DialogFooter>",
     );
     expect(worktreeFooter).not.toContain("Cancel");
+  });
+
+  test("retries Add Worktree first-prompt focus across native child-window focus", () => {
+    /*
+    CDXC:WorktreeModal 2026-06-15-11:30:
+    Add Worktree is presented from the hidden native app-modal host. Source
+    coverage keeps the first-prompt textarea focused for immediate typing,
+    retries across native window activation, and preserves user interaction by
+    stopping delayed focus after the user clicks or types in the modal.
+    */
+    expect(worktreeCreateModalSource).toContain("userInteractedAfterOpenRef.current = false;");
+    expect(worktreeCreateModalSource).toContain("input.focus({ preventScroll: true });");
+    expect(worktreeCreateModalSource).toContain(
+      "input.setSelectionRange(selectionIndex, selectionIndex);",
+    );
+    expect(worktreeCreateModalSource).toContain(
+      "const retryDelaysMs = [0, 16, 50, 100, 250, 500, 1000, 1600, 2400];",
+    );
+    expect(worktreeCreateModalSource).toContain('window.addEventListener("focus", handleWindowFocus);');
+    expect(worktreeCreateModalSource).toContain(
+      'window.removeEventListener("focus", handleWindowFocus);',
+    );
+    expect(worktreeCreateModalSource).toContain("onKeyDownCapture={markUserInteractedAfterOpen}");
+    expect(worktreeCreateModalSource).toContain("onPointerDownCapture={markUserInteractedAfterOpen}");
+
+    const enterHandler = sourceBetween(
+      worktreeCreateModalSource,
+      "const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {",
+      "const handlePaste =",
+    );
+    expect(enterHandler).toContain('event.key !== "Enter"');
+    expect(enterHandler).toContain("event.preventDefault();");
+    expect(enterHandler).toContain("event.stopPropagation();");
+    expect(enterHandler).toContain("onConfirm(createDraft(");
+  });
+
+  test("uses Settings search focus treatment for modal text controls", () => {
+    /*
+    CDXC:ModalTextFocus 2026-06-15-11:30:
+    Editable text fields and textareas in app modals should use the same focus
+    look as Settings search: white input border, no outer shadcn focus ring.
+    */
+    const modalTextFocusStyles = sourceBetween(
+      modalStylesSource,
+      '.command-config-modal-shadcn [data-slot="input"]:is(:focus, :focus-visible),',
+      ".command-config-textarea-shadcn {",
+    );
+    expect(modalTextFocusStyles).toContain(
+      '.command-config-modal-shadcn [data-slot="textarea"]:is(:focus, :focus-visible)',
+    );
+    expect(modalTextFocusStyles).toContain("border-color: #fff;");
+    expect(modalTextFocusStyles).toContain("box-shadow: none;");
+    expect(modalTextFocusStyles).toContain("outline: none;");
+
+    const settingsTextFocusStyles = sourceBetween(
+      sidebarStylesSource,
+      '.ghostex-settings-shadcn [data-slot="input"]:is(:focus, :focus-visible),',
+      ".ghostex-settings-shadcn .settings-modal-search-toolbar .session-search-input-icon",
+    );
+    expect(settingsTextFocusStyles).toContain(
+      '.ghostex-settings-shadcn [data-slot="textarea"]:is(:focus, :focus-visible)',
+    );
+    expect(settingsTextFocusStyles).toContain("border-color: #fff;");
+    expect(settingsTextFocusStyles).toContain("box-shadow: none;");
+    expect(settingsTextFocusStyles).toContain("outline: none;");
   });
 
   test("widens Git Commit 20px from the right side in the macOS app", () => {
@@ -215,6 +502,28 @@ describe("native app modal window source", () => {
     expect(renameStyles).toContain("max-width: min(540px, calc(100vw - 2rem));");
     expect(renameStyles).toContain("padding-left: 9px;");
     expect(renameStyles).toContain("padding-right: 9px;");
+  });
+
+  test("routes unconfigured action setup to Settings Actions", () => {
+    /*
+    CDXC:ProjectActions 2026-06-15-15:29:
+    The standalone Configure Action modal is removed. Empty or unconfigured
+    action clicks should open Settings on the Actions page, which also explains
+    that frequent commands can be run with one click or a hotkey.
+    */
+    expect(titlebarHostSource).toContain("openSidebarActionsSettings");
+    expect(titlebarHostSource).toContain('initialTab: "actions"');
+    expect(commandPaletteSource).toContain('initialTab: "actions"');
+    expect(nativeSidebarSource).toContain("openNativeSidebarActionsSettings");
+    expect(nativeSidebarSource).toContain('initialTab: "actions"');
+    expect(settingsModalSource).toContain("Set frequently used terminal or browser commands here");
+    expect(settingsModalSource).toContain("click or a hotkey.");
+    expect(settingsModalSource).toContain("isSidebarCommandConfigured");
+    expect(modalHostSource).not.toContain('"commandConfig"');
+    expect(modalHostSource).not.toContain("CommandConfigModal");
+    expect(titlebarHostSource).not.toContain('modal: "commandConfig"');
+    expect(commandPaletteSource).not.toContain('modal: "commandConfig"');
+    expect(nativeSidebarSource).not.toContain('modal: "commandConfig"');
   });
 
   test("keeps Delayed Send fixed at 472x269 in the macOS app", () => {
@@ -310,13 +619,19 @@ describe("native app modal window source", () => {
     expect(commandPaletteStyles).toContain("padding-right: 3px;");
   });
 
-  test("closes the macOS Command Palette from outside clicks and the repeat hotkey", () => {
+  test("closes compact macOS app modals from outside clicks but switches repeat hotkeys", () => {
     /*
     CDXC:CommandPalette 2026-06-12-05:45:
-    The native Command Palette is now a child window. AppKit must close it when the user clicks back into the parent Ghostex window, and the openCommandPalette hotkey must toggle the already-open native palette instead of reopening it.
+    The native Command Palette is now a child window. AppKit must close it when the user clicks back into the parent Ghostex window.
 
-    CDXC:CommandPalette 2026-06-13-22:18:
-    Command-mode and session-search-mode openers share the same native command-palette child window, so both action ids use the same visible-window toggle guard.
+    CDXC:CommandPalette 2026-06-15-10:27:
+    Repeat command-mode and session-search-mode hotkeys share the visible
+    child window and switch modes in-place instead of closing the palette.
+
+    CDXC:AppModals 2026-06-15-13:30:
+    Configure Action, Rename Session, and Previous Sessions are compact native
+    child-window modals too, so they must close on parent-window mouse-downs
+    outside their NSPanel.
     */
     const dispatchNativeHotkey = sourceBetween(
       appDelegateSource,
@@ -326,9 +641,9 @@ describe("native app modal window source", () => {
     expect(dispatchNativeHotkey).toContain(
       "if Self.isCommandPaletteHotkeyActionId(actionId), isCommandPaletteNativeModalOpenOrPending()",
     );
-    expect(dispatchNativeHotkey).toContain(
-      'closeNativeAppModalWindow(reason: "commandPaletteHotkeyToggle", sendReactClose: true)',
-    );
+    expect(dispatchNativeHotkey).toContain("nativeHotkeys.commandPaletteModeSwitch");
+    expect(dispatchNativeHotkey).not.toContain("commandPaletteHotkeyToggle");
+    expect(dispatchNativeHotkey).not.toContain("nativeHotkeys.commandPaletteToggleClose");
     expect(appDelegateSource).toContain(
       'actionId == "openCommandPalette" || actionId == "openSessionSearchPalette"',
     );
@@ -354,10 +669,17 @@ describe("native app modal window source", () => {
     );
     expect(appModalWindowController).toContain("private var outsideEventMonitor: Any?");
     expect(appModalWindowController).toContain("installOutsideEventMonitorIfNeeded(for: modal)");
-    expect(appModalWindowController).toContain('guard modal == "commandPalette"');
+    expect(appModalWindowController).toContain("guard shouldCloseFromOutsideMouseDown(modal: modal)");
+    expect(appModalWindowController).toContain(
+      'case "commandPalette", "renameSession", "previousSessions", "discoverGhostex":',
+    );
+    expect(appModalWindowController).toContain(
+      "Discover Ghostex uses the same compact native child-window pattern.",
+    );
     expect(appModalWindowController).toContain(
       "matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]",
     );
+    expect(appModalWindowController).toContain("currentModal == modal");
     expect(appModalWindowController).toContain("event.window === panel");
     expect(appModalWindowController).toContain("self.closeFromOutsideMouseDown()");
     expect(appModalWindowController).toContain('onClosed("outsideMouseDown", closedModal)');

@@ -50,6 +50,7 @@ import { useRelativeTimeTick } from "./use-relative-time-tick";
 const SESSION_HOVER_TOOLTIP_DELAY_MS = TOOLTIP_DELAY_MS + 1_000;
 const SESSION_TOOLTIP_VIEWPORT_MARGIN_PX = 8;
 const SESSION_TOOLTIP_TRIGGER_OFFSET_PX = 8;
+const CLOSE_AFTER_DONE_ARMED_REMAINING_LABEL = "03:00";
 
 const AGENT_SECONDARY_LABELS: Record<SidebarAgentIcon, readonly string[]> = {
   "amp-cli": ["amp", "amp cli"],
@@ -78,7 +79,8 @@ let activeOverflowTooltipClose: (() => void) | undefined;
 const TERMINAL_TITLE_MARKER = "∗";
 const UNSYNCED_TITLE_LABEL = "(Unsynced title)";
 const GHOST_PLACEHOLDER_TITLE_PATTERN = /^👻(?:\s+Terminal Session)?$/u;
-const SESSION_TOOLTIP_META_COLOR_COUNT = 6;
+const FILESYSTEM_PATH_TOOLTIP_PATTERN =
+  /(?:^|\s)(?:~\/|\/(?:Applications|Library|System|Users|Volumes|etc|home|opt|private|tmp|usr|var)\/|[A-Za-z]:[\\/]|file:\/\/)/u;
 
 type SessionTooltipStateInput = Partial<
   Pick<
@@ -123,11 +125,16 @@ export function SessionCardContent({
     session,
     showDebugSessionNumbers,
   });
-  const hasLastInteractionTime = showLastActiveTime && Boolean(session.lastInteractionAt);
+  const timerTrailingLabel = getSessionCardTimerTrailingLabel(session);
+  const hasLastInteractionTime =
+    timerTrailingLabel === undefined && showLastActiveTime && Boolean(session.lastInteractionAt);
   const showHeaderLoadingSpinner = session.isReloading === true || isGeneratingFirstPromptTitle;
   const showTerminalSessionIcon = !hideHeaderAgentIcon && shouldShowTerminalSessionIcon(session);
   const shouldAllowFullWidthTitle =
-    !showLastActiveTime && !showLastInteractionTime && !trailingPrefix;
+    timerTrailingLabel === undefined &&
+    !showLastActiveTime &&
+    !showLastInteractionTime &&
+    !trailingPrefix;
   /**
    * CDXC:DelayedSend 2026-05-30-08:33:
    * Active Delayed Send timers should show exactly one sidebar clock, in the
@@ -137,6 +144,7 @@ export function SessionCardContent({
    */
   const hasHeaderAgentIcon =
     !hideHeaderAgentIcon &&
+    timerTrailingLabel === undefined &&
     !shouldAllowFullWidthTitle &&
     (Boolean(session.agentIcon) || showTerminalSessionIcon || showHeaderLoadingSpinner);
   /*
@@ -151,6 +159,14 @@ export function SessionCardContent({
           nowMs: relativeTimeTick,
         }).value
       : undefined;
+  /**
+   * CDXC:SessionTimers 2026-06-16-01:48:
+   * Delayed Send and Close After Done countdowns use the same trailing slot as
+   * Last Active. Timer labels must stay visible even when Last Active is hidden;
+   * Close After Done shows 03:00 while armed and switches to the live native
+   * countdown after the session is actually Done/non-working.
+   */
+  const trailingTimeLabel = timerTrailingLabel ?? lastInteractionLabel;
   /**
    * CDXC:SidebarSessions 2026-04-28-05:18
    * Active session cards keep the icon slot as the default display and reveal
@@ -177,16 +193,13 @@ export function SessionCardContent({
    * full card width. Do not keep the header agent icon's trailing column in
    * that mode; the leading floating icon still carries session identity.
    */
-  const defaultTrailingDisplay = !showLastInteractionTime
-    ? "icon"
-    : lastInteractionLabel
-      ? "time"
-      : "icon";
+  const defaultTrailingDisplay =
+    timerTrailingLabel || (showLastInteractionTime && trailingTimeLabel) ? "time" : "icon";
   const shouldKeepLoadingIconVisible = showHeaderLoadingSpinner && hasHeaderAgentIcon;
   const hoverTrailingDisplay = shouldKeepLoadingIconVisible
     ? "icon"
     : defaultTrailingDisplay === "icon"
-      ? lastInteractionLabel
+      ? trailingTimeLabel
         ? "time"
         : "icon"
       : hasHeaderAgentIcon
@@ -203,10 +216,10 @@ export function SessionCardContent({
    * it aligns to the established right-side title affordance and can hide those
    * competing indicators as a single hover state.
    */
-  const canCloseFromCard = showCloseButton && Boolean(onClose);
+  const canCloseFromCard = showCloseButton && Boolean(onClose) && timerTrailingLabel === undefined;
   const hasSessionHeadTrailing =
     Boolean(trailingPrefix) ||
-    Boolean(lastInteractionLabel) ||
+    Boolean(trailingTimeLabel) ||
     hasHeaderAgentIcon ||
     canCloseFromCard;
 
@@ -229,8 +242,8 @@ export function SessionCardContent({
             data-hover-trailing-display={hoverTrailingDisplay}
           >
             {trailingPrefix}
-            {lastInteractionLabel ? (
-              <div className="session-last-interaction-time">{lastInteractionLabel}</div>
+            {trailingTimeLabel ? (
+              <div className="session-last-interaction-time">{trailingTimeLabel}</div>
             ) : null}
             {hasHeaderAgentIcon ? (
               <SessionHeaderAgentIcon
@@ -288,6 +301,49 @@ export function SessionCardContent({
   );
 }
 
+function getSessionCardTimerTrailingLabel(
+  session: Pick<
+    SidebarSessionItem,
+    | "closeAfterDone"
+    | "closeAfterDoneDeadlineAt"
+    | "closeAfterDoneRemainingLabel"
+    | "delayedSendDeadlineAt"
+    | "delayedSendRemainingLabel"
+  >,
+): string | undefined {
+  if (session.delayedSendRemainingLabel) {
+    return session.delayedSendRemainingLabel;
+  }
+  if (session.delayedSendDeadlineAt) {
+    return formatSessionTimerDeadlineCountdown(session.delayedSendDeadlineAt);
+  }
+  if (session.closeAfterDoneRemainingLabel) {
+    return session.closeAfterDoneRemainingLabel;
+  }
+  if (session.closeAfterDoneDeadlineAt) {
+    return formatSessionTimerDeadlineCountdown(session.closeAfterDoneDeadlineAt);
+  }
+  return session.closeAfterDone === true ? CLOSE_AFTER_DONE_ARMED_REMAINING_LABEL : undefined;
+}
+
+function formatSessionTimerDeadlineCountdown(deadlineAt: string): string | undefined {
+  const deadlineMs = Date.parse(deadlineAt);
+  return Number.isNaN(deadlineMs) ? undefined : formatSessionTimerCountdown(deadlineMs - Date.now());
+}
+
+function formatSessionTimerCountdown(delayMs: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(delayMs / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  const paddedMinutes = String(minutes).padStart(2, "0");
+  const paddedSeconds = String(seconds).padStart(2, "0");
+  if (hours > 0) {
+    return `${String(hours).padStart(2, "0")}:${paddedMinutes}:${paddedSeconds}`;
+  }
+  return `${paddedMinutes}:${paddedSeconds}`;
+}
+
 export function getSessionCardTitleTooltip({
   alwaysShowTitleTooltip = false,
   session,
@@ -301,6 +357,8 @@ export function getSessionCardTitleTooltip({
     | "agentIcon"
     | "agentSessionId"
     | "alias"
+    | "closeAfterDone"
+    | "closeAfterDoneRemainingLabel"
     | "delayedSendRemainingLabel"
     | "detail"
     | "displayTitle"
@@ -363,23 +421,30 @@ export function getSessionCardTitleTooltip({
    * title tooltip: archived agent, source project, and persistence provider
    * must be visible without exposing extra columns in the compact result row.
    *
-   * CDXC:SessionRestore 2026-05-22-23:59:
-   * Hook-captured agent session ids are the reliable resume key for agent CLIs. Show the captured id in the normal card hover tooltip so users can confirm the exact session Ghostex will target while the existing title-based resume fallback remains available when hooks have not captured an id.
-   *
-   * CDXC:SessionRestore 2026-05-23-00:25:
-   * The hover tooltip should show the captured session id directly, without a "captured session id" label, so the tooltip stays compact and copyable.
-   *
    * CDXC:SessionTooltips 2026-05-31-06:25:
    * macOS gxserver session-card tooltips should show the full routed session id
    * such as S7k-P3a91-G8v20 when available. The legacy two-digit display id is
    * only a visual row shortcut and should not replace the routed identity.
+   *
+   * CDXC:SessionTooltips 2026-06-14-16:26:
+   * Session identifiers and provider names are Debugging Mode-only tooltip
+   * metadata, and filesystem paths should not appear in session-card tooltips.
+   * Keep safe semantic details visible while suppressing routed ids, captured
+   * agent ids, provider session names, and project paths by default.
+   *
+   * CDXC:SessionTooltips 2026-06-14-16:56:
+   * Session status lines expose provider/surface internals, so show `State: ...`
+   * only while Debugging Mode is enabled.
    */
   const sessionIdTooltipValue = session.sessionRoutingId?.trim() || session.sessionNumber?.trim();
   const sessionIdTooltip =
     showDebugSessionNumbers && sessionIdTooltipValue
       ? `ID: ${sessionIdTooltipValue}`
       : undefined;
-  const agentSessionIdTooltip = getCapturedAgentSessionIdTooltipText(session);
+  const agentSessionIdTooltip = getCapturedAgentSessionIdTooltipText(
+    session,
+    showDebugSessionNumbers,
+  );
   const tooltipMetadata = [
     /*
      * CDXC:DelayedSend 2026-05-21-12:21:
@@ -390,16 +455,24 @@ export function getSessionCardTitleTooltip({
     session.delayedSendRemainingLabel
       ? `Delayed Send in ${session.delayedSendRemainingLabel}`
       : undefined,
-    getSessionStateTooltipText(session),
+    /*
+     * CDXC:CloseAfterDone 2026-06-15-21:00:
+     * Close After Done uses the same leading clock slot as Delayed Send, but
+     * the card tooltip must still expose whether it is merely armed or actively
+     * counting down after the session has stayed Done.
+     */
+    session.closeAfterDoneRemainingLabel
+      ? `Close After Done in ${session.closeAfterDoneRemainingLabel}`
+      : session.closeAfterDone
+        ? "Close After Done armed"
+        : undefined,
+    getSessionStateTooltipText(session, showDebugSessionNumbers),
     getSessionTooltipSecondaryText(session),
     ...(showSessionDetails ? getSessionDetailsTooltipLines(session) : []),
     agentSessionIdTooltip,
-    /*
-     * CDXC:SessionTooltips 2026-05-20-07:30:
-     * Sidebar session-card tooltips already expose the visible session ID, so
-     * omit duplicate provider session names such as `zmx session: g-0515-...`.
-     */
-    sessionIdTooltip ? undefined : getSessionPersistenceTooltipText(session),
+    sessionIdTooltip
+      ? undefined
+      : getSessionPersistenceTooltipText(session, showDebugSessionNumbers),
   ]
     .filter((value): value is string => Boolean(value))
     .join("\n");
@@ -422,7 +495,11 @@ export function getSessionCardTitleTooltip({
 
 function getCapturedAgentSessionIdTooltipText(
   session: Pick<SidebarSessionItem, "agentSessionId">,
+  showDebugSessionNumbers: boolean,
 ): string | undefined {
+  if (!showDebugSessionNumbers) {
+    return undefined;
+  }
   const agentSessionId = session.agentSessionId?.trim();
   return agentSessionId || undefined;
 }
@@ -630,7 +707,7 @@ export function getSessionTooltipSecondaryText(
   session: Pick<SidebarSessionItem, "activityLabel" | "agentIcon" | "detail" | "terminalTitle">,
 ): string | undefined {
   const detail = stripAgentTooltipText(session.detail, session.agentIcon);
-  if (detail) {
+  if (detail && !containsFilesystemPath(detail)) {
     return detail;
   }
 
@@ -638,14 +715,25 @@ export function getSessionTooltipSecondaryText(
   const terminalTitle = terminalHeadingTitle.isGhostPlaceholder
     ? undefined
     : stripAgentTooltipText(terminalHeadingTitle.text, session.agentIcon);
-  if (terminalTitle) {
+  if (terminalTitle && !containsFilesystemPath(terminalTitle)) {
     return terminalTitle;
   }
 
   return session.activityLabel?.trim() || undefined;
 }
 
-function getSessionStateTooltipText(session: SessionTooltipStateInput): string | undefined {
+function containsFilesystemPath(value: string): boolean {
+  return FILESYSTEM_PATH_TOOLTIP_PATTERN.test(value);
+}
+
+function getSessionStateTooltipText(
+  session: SessionTooltipStateInput,
+  showDebugSessionNumbers: boolean,
+): string | undefined {
+  if (!showDebugSessionNumbers) {
+    return undefined;
+  }
+
   const label = getSessionStateTooltipLabel(session);
   return label ? `State: ${label}` : undefined;
 }
@@ -734,6 +822,9 @@ export function getSessionTitleTooltipOptions({
 
 type SessionAgentIconProps = {
   agentIcon: SidebarSessionItem["agentIcon"];
+  closeAfterDone?: boolean;
+  closeAfterDoneDeadlineAt?: string;
+  closeAfterDoneRemainingLabel?: string;
   delayedSendDeadlineAt?: string;
   delayedSendRemainingLabel?: string;
   faviconDataUrl?: string;
@@ -850,19 +941,29 @@ function SessionAgentIconDecoration({
 
 export function SessionFloatingAgentIcon({
   agentIcon,
+  closeAfterDone,
+  closeAfterDoneDeadlineAt,
+  closeAfterDoneRemainingLabel,
   delayedSendDeadlineAt,
   delayedSendRemainingLabel,
   faviconDataUrl,
   isFavorite = false,
   isPinned = false,
+  onCloseAfterDoneClick,
   onDelayedSendClick,
   sessionTag,
   sessionPersistenceName,
   sessionPersistenceProvider,
   showTerminalIcon = false,
-}: SessionAgentIconProps & { onDelayedSendClick?: () => void }) {
+}: SessionAgentIconProps & { onCloseAfterDoneClick?: () => void; onDelayedSendClick?: () => void }) {
   const effectiveSessionTag = getEffectiveSessionTag({ isFavorite, sessionTag });
   const hasActiveDelayedSend = Boolean(delayedSendRemainingLabel || delayedSendDeadlineAt);
+  const hasActiveCloseAfterDone = Boolean(
+    closeAfterDone || closeAfterDoneRemainingLabel || closeAfterDoneDeadlineAt,
+  );
+  const isCloseAfterDoneCountingDown = Boolean(
+    closeAfterDoneRemainingLabel || closeAfterDoneDeadlineAt,
+  );
 
   if (hasActiveDelayedSend) {
     /*
@@ -874,6 +975,25 @@ export function SessionFloatingAgentIcon({
         className="session-floating-agent-tabler-icon session-delayed-send-agent-icon"
         onClick={onDelayedSendClick}
         remainingLabel={delayedSendRemainingLabel}
+      />
+    );
+  }
+
+  if (hasActiveCloseAfterDone) {
+    /*
+    CDXC:CloseAfterDone 2026-06-15-21:00:
+    Close After Done uses Delayed Send's leading clock affordance with a pastel
+    red color. Keep it below Delayed Send in precedence so a pending Enter key
+    remains the dominant active timer, then fade the red clock only while the
+    session is Done and the close countdown is active.
+    */
+    return (
+      <CloseAfterDoneSidebarIcon
+        className={`session-floating-agent-tabler-icon session-close-after-done-agent-icon${
+          isCloseAfterDoneCountingDown ? " session-close-after-done-agent-icon-countdown" : ""
+        }`}
+        onClick={onCloseAfterDoneClick}
+        remainingLabel={closeAfterDoneRemainingLabel}
       />
     );
   }
@@ -970,6 +1090,34 @@ function SessionHeaderAgentIcon({
   );
 }
 
+function CloseAfterDoneSidebarIcon({
+  className,
+  onClick,
+  remainingLabel,
+}: {
+  className: string;
+  onClick?: () => void;
+  remainingLabel?: string;
+}) {
+  const tooltip = remainingLabel
+    ? `Close After Done in ${remainingLabel}`
+    : "Close After Done armed";
+  return (
+    <button
+      aria-label={tooltip}
+      className={className}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick?.();
+      }}
+      title={tooltip}
+      type="button"
+    >
+      <IconClock aria-hidden="true" size={16} stroke={1.9} />
+    </button>
+  );
+}
+
 function DelayedSendSidebarIcon({
   className,
   onClick,
@@ -1056,27 +1204,21 @@ function getSessionDetailsAgentName(
 
 function getSessionDetailsProjectLabel({
   projectName,
-  projectPath,
 }: {
   projectName?: string;
   projectPath?: string;
 }): string {
   const normalizedProjectName = projectName?.trim();
-  const normalizedProjectPath = projectPath?.trim();
-  if (
-    normalizedProjectName &&
-    normalizedProjectPath &&
-    normalizedProjectName !== normalizedProjectPath
-  ) {
-    return `${normalizedProjectName} (${normalizedProjectPath})`;
-  }
-
-  return normalizedProjectName || normalizedProjectPath || "None";
+  return normalizedProjectName || "None";
 }
 
 function getSessionPersistenceTooltipText(
   session: Pick<SidebarSessionItem, "sessionPersistenceName" | "sessionPersistenceProvider">,
+  showDebugSessionNumbers: boolean,
 ): string | undefined {
+  if (!showDebugSessionNumbers) {
+    return undefined;
+  }
   if (!session.sessionPersistenceName || !session.sessionPersistenceProvider) {
     return undefined;
   }
@@ -1404,19 +1546,14 @@ function renderSessionLocalTooltipContent(content: string): ReactNode {
     return content;
   }
 
-  return lines.map((line, index) => {
-    const isTitle = index === 0;
-    const metaColorIndex = ((index - 1) % SESSION_TOOLTIP_META_COLOR_COUNT) + 1;
-    return (
-      <span
-        className={isTitle ? "session-local-tooltip-title" : "session-local-tooltip-meta"}
-        data-tooltip-meta-color={isTitle ? undefined : metaColorIndex}
-        key={`${index}-${line}`}
-      >
-        {line}
-      </span>
-    );
-  });
+  return lines.map((line, index) => (
+    <span
+      className={index === 0 ? "session-local-tooltip-title" : "session-local-tooltip-meta"}
+      key={`${index}-${line}`}
+    >
+      {line}
+    </span>
+  ));
 }
 
 function chainEventHandlers<Event>(

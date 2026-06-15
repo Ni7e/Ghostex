@@ -16,19 +16,23 @@
  *
  * CDXC:AppModals 2026-06-11-19:59:
  * Native child-window modals need their modal-host document background to
- * match the AppKit panel color (#0e0e0e) so the area behind reused React
- * components does not show a transparent or themed sidebar layer.
+ * match the AppKit panel color so the area behind reused React components does
+ * not show a transparent or themed sidebar layer.
  *
  * CDXC:AppModals 2026-06-11-20:28:
- * The native modal window background must be #0e0e0e across every web layer
+ * The native modal window background must be consistent across every web layer
  * behind React components. Apply it to html/body/root plus Radix and legacy
- * modal shells so older darker story/frame defaults cannot show through.
+ * modal shells so older story/frame defaults cannot show through.
  *
  * CDXC:AppModals 2026-06-11-20:43:
  * Native modal windows should not show a darker #050505 halo around the React
  * component. Paint the viewport gutter, overlay, outer dialog border, and
- * shadcn shadow/ring area as #0e0e0e so transparent pixels and default dialog
- * chrome are visually invisible against the AppKit window.
+ * shadcn shadow/ring area as the same background so transparent pixels and
+ * default dialog chrome are visually invisible against the AppKit window.
+ *
+ * CDXC:SidebarTheme 2026-06-15-01:43:
+ * Modal chrome follows --app-modal-background so Dark 1 uses #191919, Dark 2
+ * preserves #0e0e0e, and Light lets shadcn modal content use light surfaces.
  */
 .app-modal-host-body {
   background: transparent;
@@ -38,21 +42,21 @@
 
 html.app-modal-host-native-window-document,
 html:has(body.app-modal-host-native-window-body) {
-  background: #0e0e0e;
-  background-color: #0e0e0e;
+  background: var(--app-modal-background);
+  background-color: var(--app-modal-background);
   min-height: 100%;
 }
 
 .app-modal-host-native-window-body {
-  background: #0e0e0e;
-  background-color: #0e0e0e;
+  background: var(--app-modal-background);
+  background-color: var(--app-modal-background);
   margin: 0;
   min-height: 100vh;
 }
 
 .app-modal-host-native-window-body #root {
-  background: #0e0e0e;
-  background-color: #0e0e0e;
+  background: var(--app-modal-background);
+  background-color: var(--app-modal-background);
   min-height: 100vh;
 }
 
@@ -61,8 +65,8 @@ html:has(body.app-modal-host-native-window-body) {
 .app-modal-host-native-window-body .confirm-modal-root,
 .app-modal-host-native-window-body .confirm-modal-backdrop,
 .app-modal-host-native-window-body .confirm-modal {
-  background: #0e0e0e !important;
-  background-color: #0e0e0e !important;
+  background: var(--app-modal-background) !important;
+  background-color: var(--app-modal-background) !important;
 }
 
 .app-modal-host-native-window-body [data-slot="dialog-overlay"] {
@@ -72,11 +76,11 @@ html:has(body.app-modal-host-native-window-body) {
 
 .app-modal-host-native-window-body [data-slot="dialog-content"],
 .app-modal-host-native-window-body .confirm-modal {
-  border-color: #0e0e0e !important;
+  border-color: var(--app-modal-background) !important;
   box-shadow: none !important;
-  outline-color: #0e0e0e !important;
-  --tw-ring-color: #0e0e0e !important;
-  --tw-ring-offset-color: #0e0e0e !important;
+  outline-color: var(--app-modal-background) !important;
+  --tw-ring-color: var(--app-modal-background) !important;
+  --tw-ring-offset-color: var(--app-modal-background) !important;
 }
 
 .app-modal-host-body #root {
@@ -133,10 +137,10 @@ html:has(body.app-modal-host-native-window-body) {
 .floating-prompt-editor-panel {
   /*
    * CDXC:PromptEditor 2026-05-28-13:52:
-   * Floating prompt editor modal chrome should use the same #0e0e0e
+   * Floating prompt editor modal chrome should use the same var(--app-modal-background)
    * background as the rest of the app-modal family.
    */
-  background: #0e0e0e;
+  background: var(--app-modal-background);
   border: 1px solid rgb(255 255 255 / 18%);
   border-radius: 0;
   box-sizing: border-box;
@@ -156,7 +160,7 @@ html:has(body.app-modal-host-native-window-body) {
    * Fill that window instead of acting like a positioned overlay panel inside a
    * transparent full-workspace modal host.
    */
-  background: #0e0e0e;
+  background: var(--app-modal-background);
   pointer-events: auto;
   z-index: 0;
 }
@@ -178,7 +182,7 @@ html:has(body.app-modal-host-native-window-body) {
 
 .floating-prompt-editor-titlebar {
   align-items: center;
-  background: #0e0e0e;
+  background: var(--app-modal-background);
   box-sizing: border-box;
   cursor: grab;
   display: block;
@@ -565,7 +569,7 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .confirm-modal {
-  background: #0e0e0e;
+  background: var(--app-modal-background);
   border: 1px solid color-mix(in srgb, var(--app-border) 84%, transparent);
   /*
    * CDXC:AppModals 2026-05-16-08:10:
@@ -574,7 +578,7 @@ html:has(body.app-modal-host-native-window-body) {
    * dialogs share the same outer corner geometry as Radix dialogs.
    *
    * CDXC:AppModals 2026-05-28-13:52:
-   * All legacy confirm-modal shells should use #0e0e0e so previous-session,
+   * All legacy confirm-modal shells should use var(--app-modal-background) so previous-session,
    * pinned-prompt, first-message, T3, and confirmation dialogs match Settings.
    */
   border-radius: 0;
@@ -945,11 +949,11 @@ html:has(body.app-modal-host-native-window-body) {
 .daemon-sessions-modal {
   /*
    * CDXC:AppModals 2026-05-28-13:22:
-   * Running sessions should use the same #0e0e0e modal background as the
+   * Running sessions should use the same var(--app-modal-background) modal background as the
    * newer Settings-family surfaces while preserving row/card contrast inside
    * the operational list.
    */
-  background: #0e0e0e;
+  background: var(--app-modal-background);
   gap: 14px;
   max-height: calc(100vh - 24px);
   max-width: min(840px, 100%);
@@ -1449,6 +1453,17 @@ html:has(body.app-modal-host-native-window-body) {
   width: 100%;
 }
 
+.previous-sessions-search-input:focus,
+.previous-sessions-search-shell:focus-within .previous-sessions-search-input {
+  /*
+   * CDXC:PreviousSessions 2026-06-15-11:26:
+   * The Previous Sessions search box should use the Settings search focus treatment: a white input border with no outer ring. Keep the same color visible while child controls occupy focus so the modal still reads as search-focused.
+   */
+  border-color: #fff;
+  box-shadow: none;
+  outline: none;
+}
+
 .previous-sessions-search-shell[data-has-query="true"] .previous-sessions-search-input {
   padding-right: 66px;
 }
@@ -1781,11 +1796,11 @@ html:has(body.app-modal-host-native-window-body) {
 .scratch-pad-modal {
   /*
    * CDXC:ScratchPad 2026-05-28-13:22:
-   * Scratch Pad should visually belong to the #0e0e0e app-modal family. Keep
+   * Scratch Pad should visually belong to the var(--app-modal-background) app-modal family. Keep
    * both the shell and editable note surface on that background so the main
    * writing area does not read as a separate lighter modal.
    */
-  background: #0e0e0e;
+  background: var(--app-modal-background);
   gap: 14px;
   grid-template-rows: auto minmax(0, 1fr);
   height: min(90vh, calc(100vh - 24px));
@@ -1814,7 +1829,7 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .scratch-pad-textarea {
-  background: #0e0e0e;
+  background: var(--app-modal-background);
   border: 1px solid color-mix(in srgb, var(--app-button-background) 32%, var(--app-border));
   border-radius: 0;
   height: 100%;
@@ -1941,6 +1956,50 @@ html:has(body.app-modal-host-native-window-body) {
   min-width: 24px;
 }
 
+/*
+ * CDXC:SettingsDensity 2026-06-15-20:53:
+ * Main Settings rows should keep explanatory copy out of the default layout to reduce crowding. Reserve a small info target beside the label, reveal it on row hover or focus, and constrain the right-side tooltip to a readable 350px max width.
+ */
+.settings-row-info-button {
+  align-items: center;
+  border: 0;
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  opacity: 0;
+  outline: none;
+  pointer-events: none;
+  transition:
+    color 140ms ease,
+    opacity 140ms ease;
+  width: 18px;
+}
+
+.settings-row-info-button svg {
+  height: 15px;
+  width: 15px;
+}
+
+.settings-row:hover .settings-row-info-button,
+.settings-row:focus-within .settings-row-info-button {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.settings-row-info-button:is(:hover, :focus-visible) {
+  color: var(--foreground);
+}
+
+.settings-row-info-button:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 45%, transparent);
+}
+
+.settings-row-info-tooltip {
+  max-width: min(350px, calc(100vw - 32px));
+}
+
 .command-config-field {
   display: grid;
   gap: 6px;
@@ -1967,10 +2026,10 @@ html:has(body.app-modal-host-native-window-body) {
   /*
    * CDXC:AppModals 2026-05-28-13:52:
    * Shadcn editor/config dialogs that do not opt into ghostex-settings-shadcn
-   * still need the unified #0e0e0e modal background.
+   * still need the unified var(--app-modal-background) modal background.
    */
-  background: #0e0e0e;
-  background-color: #0e0e0e;
+  background: var(--app-modal-background);
+  background-color: var(--app-modal-background);
   color-scheme: dark;
   font-family: var(--app-font-family, var(--vscode-font-family, ui-sans-serif, system-ui));
   /* CDXC:AppModals 2026-05-08-11:26
@@ -2014,6 +2073,24 @@ html:has(body.app-modal-host-native-window-body) {
   letter-spacing: 0;
 }
 
+.command-config-modal-shadcn [data-slot="input"]:is(:focus, :focus-visible),
+.command-config-modal-shadcn [data-slot="textarea"]:is(:focus, :focus-visible),
+.command-config-modal-shadcn .command-config-input:is(:focus, :focus-visible),
+.command-config-modal-shadcn .command-config-textarea-shadcn:is(:focus, :focus-visible),
+.command-config-modal-shadcn .command-icon-color-text:is(:focus, :focus-visible),
+.command-config-modal-shadcn .command-icon-picker-search:is(:focus, :focus-visible),
+.command-config-modal-shadcn .command-icon-picker-trigger:is(:focus, :focus-visible) {
+  /*
+   * CDXC:ModalTextFocus 2026-06-15-11:30:
+   * Text fields and textareas in app modals should match Settings search focus:
+   * reuse the input border as a white focus outline and suppress the shadcn
+   * outer ring so editable text controls do not read as active terminal panes.
+   */
+  border-color: #fff;
+  box-shadow: none;
+  outline: none;
+}
+
 .command-config-textarea-shadcn {
   background: color-mix(in srgb, var(--input) 30%, transparent);
   border: 1px solid var(--input);
@@ -2032,11 +2109,6 @@ html:has(body.app-modal-host-native-window-body) {
 
 .command-config-textarea-shadcn::placeholder {
   color: var(--muted-foreground);
-}
-
-.command-config-textarea-shadcn:focus-visible {
-  border-color: var(--ring);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);
 }
 
 .command-config-modal-shadcn .command-icon-picker-fields {
@@ -3308,7 +3380,7 @@ html:has(body.app-modal-host-native-window-body) {
    * CDXC:SidebarRename 2026-06-13-12:00:
    * A disabled Generate Name/Rename action should not read as a half-faded
    * solid primary block. Use a quiet flat surface with muted text and border so
-   * the unavailable state looks intentional and legible on the #0e0e0e modal.
+   * the unavailable state looks intentional and legible on the var(--app-modal-background) modal.
    */
   background: color-mix(in srgb, var(--foreground) 7%, transparent);
   border-color: color-mix(in srgb, var(--border) 72%, transparent);
@@ -3615,25 +3687,118 @@ html:has(body.app-modal-host-native-window-body) {
   gap: 14px;
 }
 
-.projects-settings-list {
+/*
+ * CDXC:ProjectSettings 2026-06-14-17:29:
+ * Project-specific settings need a single top selector instead of a long
+ * always-visible project list. The trigger shows the current path, while the
+ * Popover/Command menu keeps all project paths searchable without taking over
+ * the tab layout.
+ *
+ * CDXC:ProjectSettings 2026-06-15-03:07:
+ * The selector menu should read as the same control as its trigger, so size the
+ * Popover/Command surface from Base UI's anchor width instead of a fixed menu
+ * cap that can appear narrower than the Settings dropdown.
+ */
+.projects-settings-selector {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
-.projects-settings-project {
+.projects-settings-selector-label {
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.projects-settings-selector-trigger {
   align-items: center;
-  background: color-mix(in srgb, var(--app-card-active) 38%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
-  border-radius: 0;
-  display: flex;
+  display: grid;
   gap: 10px;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  height: auto;
+  justify-content: stretch;
+  min-height: 54px;
+  padding: 8px 10px;
   text-align: left;
+  white-space: normal;
   width: 100%;
 }
 
-.projects-settings-project[data-selected="true"] {
-  background: color-mix(in srgb, var(--app-button-background) 12%, var(--app-card-active) 88%);
-  border-color: color-mix(in srgb, var(--app-button-background) 42%, var(--app-border) 58%);
+.projects-settings-selector-trigger[data-popup-open] {
+  background: color-mix(in srgb, var(--app-button-background) 10%, var(--app-card-active) 90%);
+  border-color: color-mix(in srgb, var(--app-button-background) 38%, var(--app-border) 62%);
+}
+
+.projects-settings-selector-icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--app-card-active) 66%, transparent);
+  color: color-mix(in srgb, var(--app-muted) 72%, var(--app-foreground) 28%);
+  display: flex;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.projects-settings-selector-copy,
+.projects-settings-selector-option-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.projects-settings-selector-name,
+.projects-settings-selector-option-name {
+  color: var(--app-foreground);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-settings-selector-path,
+.projects-settings-selector-option-path {
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-settings-selector-popover {
+  gap: 0;
+  max-width: calc(100vw - 2rem);
+  padding: 0;
+  width: var(--anchor-width);
+}
+
+.projects-settings-selector-command {
+  padding: 3px;
+}
+
+.projects-settings-selector-list {
+  max-height: min(342px, 52vh);
+}
+
+.projects-settings-selector-option[data-slot="command-item"] {
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 10px;
+}
+
+.projects-settings-selector-option[data-slot="command-item"] > svg:first-child {
+  color: color-mix(in srgb, var(--app-muted) 78%, var(--app-foreground) 22%);
+}
+
+.projects-settings-selector-option[data-checked="true"] .projects-settings-selector-option-name {
+  color: var(--app-foreground);
 }
 
 /*
@@ -3788,6 +3953,14 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .settings-project-command-card {
+  /*
+   * CDXC:ProjectSettings 2026-06-15-03:07:
+   * Dark 2 Settings should not show a separate card-colored rectangle behind
+   * the Projects editor; keep this repeated settings surface transparent like
+   * the main Settings section cards.
+   */
+  background: transparent !important;
+  background-color: transparent !important;
   border-radius: 0;
 }
 

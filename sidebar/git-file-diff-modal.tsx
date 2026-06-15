@@ -1,6 +1,7 @@
 import { IconColumns2, IconLayoutRows, IconPilcrow, IconTextWrap } from "@tabler/icons-react";
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -9,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { SidebarGitFileDiffDraft } from "../shared/sidebar-git";
+import type { SidebarTheme } from "../shared/session-grid-contract";
 import { AppTooltip } from "./app-tooltip";
 
 export type GitFileDiffModalDraft = SidebarGitFileDiffDraft;
@@ -17,6 +19,7 @@ export type GitFileDiffModalProps = {
   draft: GitFileDiffModalDraft;
   isOpen: boolean;
   onClose: () => void;
+  theme?: SidebarTheme;
 };
 
 type DiffLineKind = "addition" | "context" | "deletion" | "hunk" | "metadata" | "raw";
@@ -29,10 +32,11 @@ type DiffLine = {
 
 export type GitDiffViewMode = "split" | "unified";
 
-export function GitFileDiffModal({ draft, isOpen, onClose }: GitFileDiffModalProps) {
+export function GitFileDiffModal({ draft, isOpen, onClose, theme = "dark-1" }: GitFileDiffModalProps) {
   const descriptionId = useId();
   const titleId = useId();
   const hasStats = draft.additions !== undefined || draft.deletions !== undefined;
+  const isDarkTheme = getSidebarThemeVariant(theme) === "dark";
 
   /*
    * CDXC:TitlebarGit 2026-05-25-10:16:
@@ -50,8 +54,11 @@ export function GitFileDiffModal({ draft, isOpen, onClose }: GitFileDiffModalPro
       <DialogContent
         aria-describedby={descriptionId}
         aria-labelledby={titleId}
-        className="ghostex-settings-shadcn settings-modal-dialog git-file-diff-modal-shadcn dark flex flex-col gap-0 overflow-hidden p-0 font-sans"
-        data-sidebar-theme="plain-dark"
+        className={cn(
+          "ghostex-settings-shadcn settings-modal-dialog git-file-diff-modal-shadcn flex flex-col gap-0 overflow-hidden p-0 font-sans",
+          isDarkTheme && "dark",
+        )}
+        data-sidebar-theme={theme}
       >
         <DialogHeader className="git-file-diff-modal-header">
           <DialogTitle className="git-file-diff-modal-title" id={titleId}>
@@ -74,6 +81,15 @@ export function GitFileDiffModal({ draft, isOpen, onClose }: GitFileDiffModalPro
       </DialogContent>
     </Dialog>
   );
+}
+
+function getSidebarThemeVariant(theme: SidebarTheme): "dark" | "light" {
+  /**
+   * CDXC:SidebarTheme 2026-06-15-01:43:
+   * Git diff modals share the app modal theme contract: Dark 1/Dark 2 use
+   * dark shadcn mode, while Light removes the dark class and uses light tokens.
+   */
+  return theme.startsWith("light-") || theme === "plain-light" ? "light" : "dark";
 }
 
 type GitFileDiffPanelProps = {

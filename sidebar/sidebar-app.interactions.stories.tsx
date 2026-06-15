@@ -841,6 +841,24 @@ export const SessionCardActions: Story = {
       await expectMessage({ sessionId: "session-3", sessionTag: "favorite", type: "setSessionTag" });
     });
 
+    await step("close after done appears below delayed send", async () => {
+      resetSidebarStoryMessages();
+
+      const sessionCard = await findSessionCard();
+      await openContextMenu(sessionCard);
+      const menuItems = await body.findAllByRole("menuitem");
+      const delayedSendIndex = menuItems.findIndex((item) => item.textContent?.includes("Delayed Send"));
+      const closeAfterDoneIndex = menuItems.findIndex((item) =>
+        item.textContent?.includes("Close After Done"),
+      );
+
+      expect(delayedSendIndex).toBeGreaterThanOrEqual(0);
+      expect(closeAfterDoneIndex).toBe(delayedSendIndex + 1);
+      await userEvent.click(await body.findByRole("menuitem", { name: "Close After Done" }));
+
+      await expectMessage({ sessionId: "session-3", type: "toggleCloseAfterDone" });
+    });
+
     await step("fork through the session context menu", async () => {
       resetSidebarStoryMessages();
 

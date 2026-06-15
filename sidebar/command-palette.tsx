@@ -25,7 +25,7 @@ import {
   IconTerminal2,
   IconWindowMaximize,
 } from "@tabler/icons-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Command,
   CommandDialog,
@@ -37,10 +37,7 @@ import {
   CommandSeparator,
   CommandShortcut,
 } from "@/components/ui/command";
-import {
-  DEFAULT_BROWSER_ACTION_URL,
-  type SidebarCommandButton,
-} from "../shared/sidebar-commands";
+import type { SidebarCommandButton } from "../shared/sidebar-commands";
 import {
   DEFAULT_SIDEBAR_COMMAND_ICON,
   DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
@@ -59,7 +56,6 @@ import type {
   SidebarSessionItem,
 } from "../shared/session-grid-contract";
 import { openAppModal } from "./app-modal-host-bridge";
-import type { CommandConfigDraft } from "./command-config-modal";
 import { SidebarCommandIconGlyph } from "./sidebar-command-icon";
 import { formatSidebarHotkeyLabel } from "./hotkey-label";
 import { filterPreviousSessions, filterPreviousSessionsModalItems } from "./previous-session-search";
@@ -70,6 +66,8 @@ import {
   filterCommandPaletteCurrentSessionItems,
   filterCommandPaletteItems,
   getCommandPaletteCommandQuery,
+  getCommandPaletteModeSwitchSelectionRange,
+  getCommandPaletteQueryForRequestedMode,
   getCommandPaletteCurrentGroupId,
   getPreviousSessionProjectLabel,
   isCommandPaletteCommandMode,
@@ -96,6 +94,7 @@ type CommandPaletteProps = {
   isPrewarm?: boolean;
   onBrowserCommandRun?: () => void;
   onOpenChange: (isOpen: boolean) => void;
+  openRequestSequence?: number;
   petOverlayEnabled?: boolean;
   vscode: WebviewApi;
 };
@@ -154,6 +153,7 @@ export function CommandPalette({
   isPrewarm = false,
   onBrowserCommandRun,
   onOpenChange,
+  openRequestSequence = 0,
   petOverlayEnabled = false,
   vscode,
 }: CommandPaletteProps) {
@@ -163,6 +163,11 @@ export function CommandPalette({
   >();
   const latestPreviousSessionsRequestIdRef = useRef<string | undefined>(undefined);
   const hasRequestedPreviousSessionsRef = useRef(false);
+  const latestOpenRequestSequenceRef = useRef(openRequestSequence);
+  const pendingModeSwitchSelectionRef = useRef<{ end: number; start: number } | undefined>(
+    undefined,
+  );
+  const wasOpenRef = useRef(isOpen);
   const groupsById = useSidebarStore((state) => state.groupsById);
   const previousSessions = useSidebarStore((state) => state.previousSessions);
   const sessionIdsByGroup = useSidebarStore((state) => state.sessionIdsByGroup);
@@ -297,8 +302,24 @@ export function CommandPalette({
     sessionSections.some((section) => section.items.length > 0) ||
     filteredPreviousSessions.length > 0;
 
+  useLayoutEffect(() => {
+    const selection = pendingModeSwitchSelectionRef.current;
+    if (!selection) {
+      return;
+    }
+    pendingModeSwitchSelectionRef.current = undefined;
+    const input = document.querySelector<HTMLInputElement>(
+      '[data-ghostex-command-palette-input="true"]',
+    );
+    input?.focus();
+    input?.setSelectionRange(selection.start, selection.end);
+  }, [inputValue]);
+
   useEffect(() => {
     if (!isOpen) {
+      wasOpenRef.current = false;
+      latestOpenRequestSequenceRef.current = openRequestSequence;
+      pendingModeSwitchSelectionRef.current = undefined;
       setInputValue(initialQuery);
       setRemotePreviousSessions(undefined);
       latestPreviousSessionsRequestIdRef.current = undefined;
@@ -306,8 +327,31 @@ export function CommandPalette({
       return;
     }
 
-    setInputValue(initialQuery);
-  }, [initialQuery, isOpen]);
+    const isFollowUpOpenRequest =
+      wasOpenRef.current && latestOpenRequestSequenceRef.current !== openRequestSequence;
+    wasOpenRef.current = true;
+    latestOpenRequestSequenceRef.current = openRequestSequence;
+    if (!isFollowUpOpenRequest) {
+      setInputValue(initialQuery);
+      return;
+    }
+
+    setInputValue((currentValue) => {
+      const nextValue = getCommandPaletteQueryForRequestedMode(currentValue, initialQuery);
+      if (nextValue !== currentValue) {
+        /*
+         * CDXC:CommandPalette 2026-06-15-10:27:
+         * Switching an already-open palette between files and commands keeps
+         * the typed query, preserves the `>` mode marker when entering command
+         * mode, and selects the editable query text so the next keystroke can
+         * replace the old search.
+         */
+        pendingModeSwitchSelectionRef.current =
+          getCommandPaletteModeSwitchSelectionRange(nextValue);
+      }
+      return nextValue;
+    });
+  }, [initialQuery, isOpen, openRequestSequence]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -389,10 +433,14 @@ export function CommandPalette({
 
   const runProjectCommand = (command: SidebarCommandButton) => {
     if (!isConfigured(command)) {
+      /*
+      CDXC:CommandPalette 2026-06-15-15:29:
+      Selecting an unconfigured project action should take users to Settings > Actions, where the reusable command list now owns action setup instead of a standalone Configure Action modal.
+      */
       onOpenChange(false);
       openAppModal({
-        commandDraft: createCommandPaletteDraft(command),
-        modal: "commandConfig",
+        initialTab: "actions",
+        modal: "settings",
         type: "open",
       });
       return;
@@ -478,10 +526,26 @@ export function CommandPalette({
          * command fuzzy finding; no prefix means current-session and previous-
          * session search. Keep the prefix as actual input text so Cmd+Shift+P
          * opens with the caret immediately after `>`.
+         *
+         * CDXC:CommandPalette 2026-06-15-16:21:
+         * Escape while the command palette is shown must always close the
+         * palette. Do not let the shared CommandInput clear the query first;
+         * close the modal directly from the palette-owned key handler.
          */}
         <CommandInput
           className="pl-3"
+          clearOnEscape={false}
           clearLabel="Clear command palette search"
+          data-ghostex-command-palette-input="true"
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") {
+              return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            onOpenChange(false);
+          }}
           placeholder={
             isCommandMode
               ? "Search Ghostex commands..."
@@ -829,20 +893,6 @@ function getActionSlotHotkeyId(slotNumber: number): ghostexHotkeyDefinition["id"
     return undefined;
   }
   return `runActionSlot${slotNumber}` as ghostexHotkeyDefinition["id"];
-}
-
-function createCommandPaletteDraft(command: SidebarCommandButton): CommandConfigDraft {
-  return {
-    actionType: command.actionType,
-    closeTerminalOnExit: command.closeTerminalOnExit,
-    command: command.command ?? (command.actionType === "terminal" ? "" : undefined),
-    commandId: command.commandId,
-    icon: command.icon ?? DEFAULT_SIDEBAR_COMMAND_ICON,
-    iconColor: command.iconColor ?? DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
-    name: command.name,
-    playCompletionSound: command.playCompletionSound,
-    url: command.url ?? (command.actionType === "browser" ? DEFAULT_BROWSER_ACTION_URL : undefined),
-  };
 }
 
 function isRunnableOrConfigurableCommand(command: SidebarCommandButton): boolean {

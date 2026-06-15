@@ -55,6 +55,7 @@ import {
   DEFAULT_ghostex_SETTINGS,
   clampProjectSessionListCollapsedCount,
 } from "../shared/ghostex-settings";
+import type { SidebarSessionTagListItem } from "../shared/session-tags";
 import { ConfirmationModal } from "./confirmation-modal";
 import {
   createGroupDropData,
@@ -115,6 +116,7 @@ const GROUP_DRAG_HOLD_TOLERANCE_PX = 12;
 const TOUCH_GROUP_DRAG_HOLD_DELAY_MS = 320;
 const TOUCH_GROUP_DRAG_HOLD_TOLERANCE_PX = 12;
 const PROJECT_EDITOR_DISPLAY_MAX_FILES = 99;
+const EMPTY_PROJECT_NEW_SESSION_LABEL = "New Session";
 const DISABLED_GROUP_DND_AX_ATTRIBUTES = [
   "aria-describedby",
   "aria-disabled",
@@ -174,7 +176,15 @@ function isElementTarget(target: EventTarget | null): target is Element {
  */
 const PROJECT_EDITOR_DISPLAY_MAX_LINES = 9999;
 const PROJECT_CONTEXT_THEME_OPTIONS: ReadonlyArray<{ label: string; value: SidebarTheme }> = [
-  { label: "Dark Gray", value: "plain-dark" },
+  /**
+   * CDXC:SidebarTheme 2026-06-15-01:43:
+   * Workspace/project theme menus expose the same app-level Dark 1, Dark 2,
+   * and Light choices as Settings so project chrome can persist the new
+   * default or the previous dark snapshot explicitly.
+   */
+  { label: "Dark 1", value: "dark-1" },
+  { label: "Dark 2", value: "dark-2" },
+  { label: "Light", value: "plain-light" },
   { label: "Dark Green", value: "dark-green" },
   { label: "Dark Blue", value: "dark-blue" },
   { label: "Dark Red", value: "dark-red" },
@@ -488,12 +498,17 @@ export function shouldTreatProjectAsEmptySessionGroup({
   sessionCount: number;
 }): boolean {
   /**
-   * CDXC:ProjectHeaders 2026-05-18-14:53:
-   * Empty project groups should not show a "No sessions" placeholder. When a
-   * user expands a collapsed empty project, create a session there so the
-   * expanded project immediately has active content.
+   * CDXC:ProjectGroups 2026-06-15-20:14:
+   * Empty project groups should stay visible after their last terminal is closed
+   * and render an explicit New Session row in the body. The project header
+   * remains only an expand/collapse target so first-terminal creation always
+   * comes from the session-shaped button.
    */
   return hasProjectContext && sessionCount === 0;
+}
+
+export function getEmptyProjectNewSessionButtonLabel(): string {
+  return EMPTY_PROJECT_NEW_SESSION_LABEL;
 }
 
 export const PINNED_SESSION_DROP_GAP_AFTER_LAST = "after-last";
@@ -545,18 +560,17 @@ export function getPinnedSessionDropGapKey({
 
 export function shouldShowOpenProjectFolderIcon({
   isCollapsed,
-  sessionCount,
 }: {
   isCollapsed: boolean;
   sessionCount: number;
 }): boolean {
   /**
-   * CDXC:ProjectHeaders 2026-05-17-01:43:
-   * A project row with zero sessions should look like a closed folder even
-   * when its group body is technically expanded. Reserve the open folder icon
-   * for expanded projects that actually have session rows under them.
+   * CDXC:ProjectHeaders 2026-06-16-02:27:
+   * Empty expanded projects now show the open folder icon because the body can
+   * contain the New Session row even with no terminal sessions. Use collapsed
+   * state alone for the folder glyph so the icon mirrors the visible section.
    */
-  return !isCollapsed && sessionCount > 0;
+  return !isCollapsed;
 }
 
 export function formatProjectEditorDiffStatsLabel(
@@ -624,7 +638,7 @@ function ProjectHeaderDiffStats({
   );
 }
 
-function formatProjectTooltipGitStats(stats: SidebarProjectDiffStats): string {
+export function formatProjectTooltipGitStats(stats: SidebarProjectDiffStats): string {
   if (stats.isLoading) {
     return "Git: loading changes";
   }
@@ -634,11 +648,18 @@ function formatProjectTooltipGitStats(stats: SidebarProjectDiffStats): string {
   }
 
   const fileCount = Math.max(0, stats.files);
+  const changedLineCount = Math.max(0, stats.additions) + Math.max(0, stats.deletions);
+  /**
+   * CDXC:ProjectDiffStats 2026-06-14-16:33:
+   * Project and worktree title tooltips should spell out the file and line
+   * nouns so one changed file or one changed line reads as singular while the
+   * compact inline diff badge can remain numeric-only.
+   */
   return `${fileCount} ${formatCountLabel(fileCount, "file")} changed  +${formatProjectEditorLineCount(
     stats.additions,
   )}  -${formatProjectEditorLineCount(
     stats.deletions,
-  )}`;
+  )} ${formatCountLabel(changedLineCount, "line")}`;
 }
 
 function formatCountLabel(count: number, singular: string): string {
@@ -698,6 +719,7 @@ export type SessionGroupSectionProps = {
   sessionDropIndicatorGroupId?: string;
   sessionDraggingDisabled?: boolean;
   projectHeaderActions?: "all" | "terminal-only";
+  sessionTagListItems?: readonly SidebarSessionTagListItem[];
   showHeaderActions?: boolean;
   showSessionDropPositionIndicators?: boolean;
   vscode: WebviewApi;
@@ -782,6 +804,7 @@ export function SessionGroupSection({
   projectHeaderActions = "all",
   sessionDropIndicatorGroupId,
   sessionDraggingDisabled = false,
+  sessionTagListItems,
   showHeaderActions = true,
   showSessionDropPositionIndicators = true,
   vscode,
@@ -1682,11 +1705,7 @@ export function SessionGroupSection({
       return;
     }
 
-    const isExpandingEmptyProject = isCollapsed && isEmptyProjectGroup;
     onCollapsedChange(group.groupId, !isCollapsed);
-    if (isExpandingEmptyProject) {
-      requestCreateProjectTerminal();
-    }
   };
 
   const handleGroupHeaderClick = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -2286,6 +2305,7 @@ export function SessionGroupSection({
                           selectedSearchSessionId === sessionId
                         }
                         onFocusRequested={onFocusRequested}
+                        sessionTagListItems={sessionTagListItems}
                         sessionIdsBelow={sessionIdsBelow}
                         sessionId={sessionId}
                         showGroupDropTargetChrome={
@@ -2335,7 +2355,45 @@ export function SessionGroupSection({
                   />
                 ) : null}
               </>
-            ) : isEmptyProjectGroup ? null : (
+            ) : isEmptyProjectGroup ? (
+              /*
+               * CDXC:ProjectGroups 2026-06-15-20:14:
+               * After the last terminal in a project closes, the project body
+               * should expose a session-shaped New Session button with no Last
+               * Active timestamp. Mark it sleeping so it matches dormant rows,
+               * but create a fresh terminal instead of waking a removed one.
+               */
+              <div
+                className="session-frame group-empty-project-session-frame"
+                data-empty-project-new-session-row="true"
+                data-focused="false"
+                data-lifecycle-state="sleeping"
+                data-running="false"
+                data-sleeping="true"
+                data-visible="false"
+              >
+                <button
+                  aria-label={getEmptyProjectNewSessionButtonLabel()}
+                  className="session group-empty-project-session-button"
+                  data-focused="false"
+                  data-search-selected="false"
+                  data-sleeping="true"
+                  data-visible="false"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    requestCreateProjectTerminal();
+                  }}
+                  type="button"
+                >
+                  <div className="session-head" data-title-full-width="true">
+                    <div className="session-alias-heading">
+                      {getEmptyProjectNewSessionButtonLabel()}
+                    </div>
+                  </div>
+                </button>
+              </div>
+            ) : (
               <div
                 className="group-empty-drop-target"
                 data-drop-position={emptyGroupDropTarget.isDropTarget ? "start" : undefined}

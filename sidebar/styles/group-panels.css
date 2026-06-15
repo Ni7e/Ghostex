@@ -650,7 +650,10 @@
    controls are no longer part of the requested reference sidebar; keep the
    component mounted but hide that row with display:none.
    CDXC:SidebarReference 2026-05-08-02:40: Match the sidebar webview background
-   to the requested standalone macOS titlebar color (#0e0e0e).
+   to the requested standalone macOS titlebar color.
+   CDXC:SidebarTheme 2026-06-15-01:43:
+   The reference sidebar background follows the selected app background token:
+   Dark 1 uses #191919, Dark 2 preserves #0e0e0e, and Light can use light chrome.
    CDXC:SidebarReference 2026-05-08-02:52: Section collapse chevrons belong on
    the right side of the Chats/Projects label, matching the reference header
    affordance instead of leading the label.
@@ -676,8 +679,87 @@ body:has(.sidebar-reference-layout[data-reference-sidebar="true"]) #root,
 body:has(.sidebar-reference-layout[data-reference-sidebar="true"]) .native-sidebar-shell,
 body:has(.sidebar-reference-layout[data-reference-sidebar="true"]) .native-sidebar-main,
 body:has(.sidebar-reference-layout[data-reference-sidebar="true"]) .stack {
-  --app-background: #0e0e0e;
-  background: #0e0e0e;
+  background: var(--app-background);
+}
+
+/*
+ * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
+ * The experimental custom color setting is intentionally limited to the
+ * sidebar viewport and the separate native titlebar host. Override only the
+ * reference sidebar shell/main/stack and sidebar-local theme tokens so row
+ * surfaces, sticky headers, search inputs, scroll fades, and context-menu
+ * hover colors inherit the custom foreground/background without changing
+ * modal, dropdown portal, or shadcn surface tokens.
+ */
+body[data-custom-sidebar-titlebar-colors="true"]:has(
+    .sidebar-reference-layout[data-reference-sidebar="true"]
+  ),
+body[data-custom-sidebar-titlebar-colors="true"]:has(
+    .sidebar-reference-layout[data-reference-sidebar="true"]
+  )
+  #root,
+body[data-custom-sidebar-titlebar-colors="true"]:has(
+    .sidebar-reference-layout[data-reference-sidebar="true"]
+  )
+  .native-sidebar-shell,
+body[data-custom-sidebar-titlebar-colors="true"]:has(
+    .sidebar-reference-layout[data-reference-sidebar="true"]
+  )
+  .native-sidebar-main,
+body[data-custom-sidebar-titlebar-colors="true"]:has(
+    .sidebar-reference-layout[data-reference-sidebar="true"]
+  )
+  .stack,
+body[data-custom-sidebar-titlebar-colors="true"]
+  .sidebar-reference-layout[data-reference-sidebar="true"] {
+  background: var(--custom-sidebar-titlebar-background-color);
+}
+
+body[data-custom-sidebar-titlebar-colors="true"]
+  .sidebar-reference-layout[data-reference-sidebar="true"] {
+  --app-background: var(--custom-sidebar-titlebar-background-color);
+  --app-titlebar-background: var(--custom-sidebar-titlebar-background-color);
+  --app-foreground: var(--custom-sidebar-titlebar-foreground-color);
+  --app-muted: color-mix(
+    in srgb,
+    var(--custom-sidebar-titlebar-foreground-color) 56%,
+    var(--custom-sidebar-titlebar-background-color) 44%
+  );
+  --app-border: color-mix(
+    in srgb,
+    var(--custom-sidebar-titlebar-foreground-color) 12%,
+    transparent
+  );
+  --app-card: color-mix(
+    in srgb,
+    var(--custom-sidebar-titlebar-foreground-color) 4%,
+    var(--custom-sidebar-titlebar-background-color) 96%
+  );
+  --app-card-active: color-mix(
+    in srgb,
+    var(--custom-sidebar-titlebar-foreground-color) 7%,
+    var(--custom-sidebar-titlebar-background-color) 93%
+  );
+  --app-context-menu-hover-background: color-mix(
+    in srgb,
+    var(--custom-sidebar-titlebar-foreground-color) 8%,
+    var(--custom-sidebar-titlebar-background-color) 92%
+  );
+  --app-button-background: var(--custom-sidebar-titlebar-foreground-color);
+  --app-button-foreground: var(--custom-sidebar-titlebar-background-color);
+  --app-input-background: color-mix(
+    in srgb,
+    var(--custom-sidebar-titlebar-foreground-color) 5%,
+    var(--custom-sidebar-titlebar-background-color) 95%
+  );
+  --background: var(--app-background);
+  --foreground: var(--app-foreground);
+  --card: var(--app-card);
+  --card-foreground: var(--app-foreground);
+  --muted: var(--app-card-active);
+  --muted-foreground: var(--app-muted);
+  --border: var(--app-border);
+  color: var(--custom-sidebar-titlebar-foreground-color);
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] {
@@ -688,13 +770,6 @@ body:has(.sidebar-reference-layout[data-reference-sidebar="true"]) .stack {
   --reference-sidebar-scroll-row-bleed-right: 0px;
   --reference-sidebar-footer-edge-bleed-left: 8px;
   --reference-sidebar-edge-bleed-right: 1px;
-  --app-background: #0e0e0e;
-  --app-foreground: #c8cdd5;
-  --app-muted: #747b85;
-  --app-border: color-mix(in srgb, #ffffff 10%, transparent);
-  --app-card: #252525;
-  --app-card-active: #2a2a2a;
-  --app-button-background: #7da4f8;
   --attention-dot: var(--done-attention-color, #95d7f6);
   background: var(--app-background);
   box-sizing: border-box;
@@ -958,10 +1033,10 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 
 /*
  * CDXC:SidebarReference 2026-05-15-10:04:
- * The top New Session overflow trigger must not make the primary nav wider
- * than a narrow native sidebar. Allow all top rows to shrink below their
- * intrinsic label width, then truncate labels so Search, Plugins, Agents Hub,
- * and New Session stay inside the resized sidebar.
+ * The top overflow trigger must not make the primary nav wider than a narrow
+ * native sidebar. Allow all top rows to shrink below their intrinsic label
+ * width, then truncate labels so Search, Mobile, Automations, and Agents Hub
+ * stay inside the resized sidebar.
  *
  * CDXC:SidebarReference 2026-05-15-10:15:
  * Hidden secondary actions must not pre-truncate primary button titles. Use the
@@ -972,7 +1047,12 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
  * CDXC:SidebarReference 2026-05-15-15:36:
  * Primary sidebar labels must keep their descenders visible in the 34px rows.
  * Use an 18px text line box instead of clipping labels to 14px, which cuts off
- * New Session, Agents Hub, Plugins, Search, and Settings at the bottom.
+ * Agents Hub, Automations, Mobile, Search, and Settings at the bottom.
+ *
+ * CDXC:SidebarReference 2026-06-16-01:29:
+ * The More overflow trigger now lives as a right-side hover icon on Agents Hub,
+ * so the shared hover-action padding rules must keep the Agents Hub title clear
+ * of that secondary button after removing the New Session primary row.
  */
 .sidebar-reference-layout[data-reference-sidebar="true"] .reference-sidebar-primary-nav > * {
   min-width: 0;
@@ -1578,13 +1658,17 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-drawer-body {
-  max-height: 2000px;
+  /*
+   * CDXC:RecentProjects 2026-06-14-15:30:
+   * Recent Projects expansion should animate the drawer's real grid row instead of a 2000px max-height sentinel. The sentinel made the body reach its measured height almost immediately, which read as a jump when opening the drawer.
+   */
+  max-height: none;
+  min-height: 0;
   opacity: 1;
   overflow: hidden;
   pointer-events: auto;
   transform: translateY(0);
   transition:
-    max-height 240ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 150ms ease,
     transform 180ms ease,
     visibility 0s linear 0s;
@@ -1592,9 +1676,7 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
-  .reference-sidebar-collapsible-body[data-collapsed="true"],
-.sidebar-reference-layout[data-reference-sidebar="true"]
-  .recent-projects-drawer-body[data-collapsed="true"] {
+  .reference-sidebar-collapsible-body[data-collapsed="true"] {
   /*
    * CDXC:SidebarScroll 2026-05-21-12:32:
    * When both Quick and Projects are collapsed, their hidden child rows must
@@ -1609,6 +1691,20 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
   transform: translateY(-4px);
   transition:
     max-height 210ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 120ms ease,
+    transform 150ms ease,
+    visibility 0s linear 210ms;
+  visibility: hidden;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .recent-projects-drawer-body[data-collapsed="true"] {
+  max-height: none;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition:
     opacity 120ms ease,
     transform 150ms ease,
     visibility 0s linear 210ms;
@@ -1879,10 +1975,23 @@ manual mode visibly selected without adding text to the section row.
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-drawer {
   border-top: 0;
+  box-shadow: inset 0 -1px transparent;
   flex: none;
   gap: 6px;
-  margin: 10px -5px 0;
-  padding: 8px 0 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  /*
+   * CDXC:RecentProjects 2026-06-16-01:43:
+   * The footer gap above the closed Recent Projects row should be 12px shorter
+   * so the session/project scroll viewport can use more of the bottom sidebar.
+   * Keep the row hit target unchanged; only reduce the spacer before it.
+   */
+  margin: 6px -5px 0;
+  padding: 0;
+  transition:
+    box-shadow 160ms ease,
+    gap 220ms ease,
+    grid-template-rows 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding-bottom 220ms ease;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-drawer[data-open="true"] {
@@ -1891,7 +2000,7 @@ manual mode visibly selected without adding text to the section row.
    * Expanded Recent Projects needs a full-width bottom divider so its search
    * and previous-project rows read as a distinct drawer above Settings.
    */
-  border-bottom: 1px solid color-mix(in srgb, var(--app-border) 64%, transparent);
+  box-shadow: inset 0 -1px color-mix(in srgb, var(--app-border) 64%, transparent);
   padding-bottom: 8px;
 }
 
@@ -1907,6 +2016,7 @@ manual mode visibly selected without adding text to the section row.
  */
 .sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-drawer[data-open="false"] {
   gap: 0;
+  grid-template-rows: auto minmax(0, 0fr);
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-drawer-toggle.group-head,
@@ -2138,28 +2248,36 @@ manual mode visibly selected without adding text to the section row.
 /* CDXC:Hotkeys 2026-05-11-09:26
    Holding Cmd for one second reveals this lightweight cheat sheet inside the
    sidebar. It floats above the session list, uses the current effective
-   bindings, and disappears as soon as Cmd is released or the app loses focus. */
+   bindings, and disappears as soon as Cmd is released or the app loses focus.
+
+   CDXC:Hotkeys 2026-06-14-19:40:
+   The Cmd-hold overlay should feel like native shortcut help, not a form table.
+   Use compact dark keycaps and softer chrome so labels such as `⌘L` are easy to
+   scan without white rectangular buttons or literal plus separators. */
 .sidebar-hotkey-overlay-backdrop {
-  background: rgb(0 0 0 / 58%);
+  background: rgb(0 0 0 / 44%);
+  backdrop-filter: blur(1.5px);
   inset: 0;
   position: fixed;
   z-index: 79;
 }
 
 .sidebar-hotkey-overlay {
-  background: #111114;
-  border: 1px solid rgb(255 255 255 / 14%);
-  border-radius: 0;
-  box-shadow: 0 18px 48px color-mix(in srgb, #000 34%, transparent);
+  background: color-mix(in srgb, var(--app-bg, #111114) 94%, #ffffff 6%);
+  border: 1px solid color-mix(in srgb, var(--app-border, #ffffff) 70%, transparent);
+  border-radius: 8px;
+  box-shadow:
+    0 18px 48px color-mix(in srgb, #000 38%, transparent),
+    inset 0 1px rgb(255 255 255 / 6%);
   color: #f5f5f7;
   display: grid;
-  gap: 10px;
-  left: 10px;
-  max-height: calc(100vh - 20px);
+  gap: 12px;
+  left: 12px;
+  max-height: calc(100vh - 24px);
   overflow: auto;
-  padding: 12px;
+  padding: 14px 12px 12px;
   position: fixed;
-  right: 10px;
+  right: 12px;
   top: 50%;
   transform: translateY(-50%);
   z-index: 80;
@@ -2176,15 +2294,18 @@ manual mode visibly selected without adding text to the section row.
 
 .sidebar-hotkey-overlay-grid {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .sidebar-hotkey-overlay-row {
   align-items: center;
+  border-radius: 6px;
   display: grid;
   gap: 10px;
   grid-template-columns: minmax(0, 1fr) max-content;
+  min-height: 28px;
   min-width: 0;
+  padding: 1px 2px 1px 0;
 }
 
 .sidebar-hotkey-overlay-action {
@@ -2198,15 +2319,25 @@ manual mode visibly selected without adding text to the section row.
 }
 
 .sidebar-hotkey-overlay-key {
-  background: #ffffff;
-  border: 1px solid rgb(0 0 0 / 18%);
-  border-radius: 0;
-  color: #111114;
-  font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 13px;
+  background: color-mix(in srgb, #ffffff 10%, transparent);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 6px;
+  box-shadow:
+    inset 0 1px rgb(255 255 255 / 10%),
+    0 1px 1px rgb(0 0 0 / 22%);
+  color: rgb(255 255 255 / 92%);
+  font-family: var(--app-font-family, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0;
   line-height: 1;
-  padding: 5px 7px;
+  /*
+   * CDXC:Hotkeys 2026-06-15-02:34:
+   * Shortcut keycaps should stay compact; reduce side padding so labels like
+   * `⌘L` do not read as wide buttons when the overlay is re-enabled.
+   */
+  min-width: 34px;
+  padding: 5px 5px;
+  text-align: center;
   white-space: nowrap;
 }

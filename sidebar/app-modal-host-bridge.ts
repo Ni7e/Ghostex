@@ -1,8 +1,6 @@
 import type { AgentConfigDraft } from "./agent-config-modal";
 import { logAppModalError } from "./app-modal-error-log";
-import type { CommandConfigDraft } from "./command-config-modal";
 import type { SettingsModalTab } from "./settings-modal";
-import type { SidebarActionType } from "../shared/sidebar-commands";
 import type { ExtensionToSidebarMessage } from "../shared/session-grid-contract";
 
 type T3BrowserAccessMessage = Extract<ExtensionToSidebarMessage, { type: "showT3BrowserAccess" }>;
@@ -12,10 +10,10 @@ export type AppModalKind =
   | "agentConfig"
   | "agentsHub"
   | "commandPalette"
-  | "commandConfig"
   | "configureActions"
   | "configureAgents"
   | "daemonSessions"
+  | "discoverGhostex"
   | "floatingPromptEditor"
   | "gitFileDiff"
   | "deleteWorktree"
@@ -43,7 +41,6 @@ export type OpenAppModalMessage =
         | "addRepository"
         | "agentConfig"
         | "commandPalette"
-        | "commandConfig"
         | "delayedSend"
         | "firstUserMessage"
         | "floatingPromptEditor"
@@ -105,12 +102,6 @@ export type OpenAppModalMessage =
   | { access: T3BrowserAccessMessage; modal: "t3BrowserAccess"; type: "open" }
   | { modal: "t3ThreadId"; sessionId: string; threadId: string; type: "open" }
   | { agentDraft: AgentConfigDraft; modal: "agentConfig"; type: "open" }
-  | {
-      commandDraft: CommandConfigDraft;
-      lockedActionType?: SidebarActionType;
-      modal: "commandConfig";
-      type: "open";
-    }
   | {
       message: string;
       modal: "firstUserMessage";

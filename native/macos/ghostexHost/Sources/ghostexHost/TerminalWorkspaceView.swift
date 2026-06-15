@@ -2152,6 +2152,7 @@ final class TerminalWorkspaceView: NSView {
 
   private struct WebPaneSession {
     let browserTitleObservation: NSKeyValueObservation?
+    let browserHistoryScopeId: String?
     let containerView: TerminalPaneLeafContainerView
     let chromiumView: GhostexCEFBrowserView?
     let diagnosticsBridge: T3CodePaneDiagnosticsBridge
@@ -2201,6 +2202,7 @@ final class TerminalWorkspaceView: NSView {
     let chromiumView: GhostexCEFBrowserView?
     var hasLoaded: Bool
     let hostView: WebPaneHostView
+    var isPlaceholder: Bool
     let webView: WKWebView?
     var title: String
     var url: String
@@ -2208,6 +2210,7 @@ final class TerminalWorkspaceView: NSView {
 
   private struct ProjectEditorPaneSession {
     var activeTabId: String
+    let browserHistoryScopeId: String?
     var chromiumView: GhostexCEFBrowserView?
     var hostView: WebPaneHostView
     let mode: String
@@ -2484,7 +2487,13 @@ final class TerminalWorkspaceView: NSView {
    The minimal CEF/WKWebView repro app can reorder VS Code tabs, while the Ghostex window loses target-side dragover/drop events. Capture the app-level overlay and child-window state at each native Source drag phase so the next repro can distinguish CEF drag retargeting loss from a transparent AppKit/WebKit layer stealing the drag.
    */
   var sourceCEFDragOverlaySnapshotProvider: (() -> [String: Any])?
+  /*
+   CDXC:BrowserHistory 2026-06-15-10:49:
+   Native Browser history snapshots must honor the sidebar's 140-link retention cap after duplicate URLs are collapsed by latest visit, so reopened toolbars cannot resurrect older duplicate entries.
+   */
+  private static let browserHistoryMaxItems = 140
   private var sessions: [String: TerminalSession] = [:]
+  private var browserHistoryItemsByScopeId: [String: [NativeBrowserHistoryItem]] = [:]
   private var webPaneSessions: [String: WebPaneSession] = [:]
   private var projectEditorPaneSessions: [String: ProjectEditorPaneSession] = [:]
   private var webPaneFaviconTasksBySessionId: [String: Task<Void, Never>] = [:]
@@ -2505,6 +2514,7 @@ final class TerminalWorkspaceView: NSView {
   private var poppedOutPaneControllers: [String: PoppedOutPaneWindowController] = [:]
   private var poppedOutPlaceholderViews: [String: PoppedOutPanePlaceholderView] = [:]
   private var sleepingSessionIds = Set<String>()
+  private var mountingSessionIds = Set<String>()
   private var sleepingPanePlaceholderSessions: [String: SleepingPanePlaceholderSession] = [:]
   private var laidOutSleepingPlaceholderSessionIds = Set<String>()
   private var clickToWakeSleepingSessions = true
@@ -3946,6 +3956,29 @@ final class TerminalWorkspaceView: NSView {
       reason: "closeTerminal")
   }
 
+  func terminateAllSessionProcessesForFullQuit() {
+    /*
+     CDXC:MenuBarStatusIndicator 2026-06-15-03:16:
+     Quit Ghostex Fully should release current-window terminal memory before the
+     app exits. Close every live Ghostty surface through the normal close path so
+     tty-bound child processes are signaled, but preserve persistence-provider
+     sessions here because gxserver stop-all owns tracked zmx termination.
+     */
+    let sessionIds = Array(sessions.keys)
+    TerminalFocusDebugLog.append(
+      event: "nativeWorkspace.fullQuit.closeAllSessions",
+      details: [
+        "sessionCount": sessionIds.count,
+      ])
+    for sessionId in sessionIds {
+      closeTerminal(
+        sessionId: sessionId,
+        requestGhosttyClose: true,
+        preservePersistenceSession: true,
+        reason: "menuBarQuitFully")
+    }
+  }
+
   private func closeTerminal(
     sessionId: String,
     requestGhosttyClose: Bool,
@@ -4039,10 +4072,80 @@ final class TerminalWorkspaceView: NSView {
     value == "react-grab" ? "react-grab" : "agentation"
   }
 
+  func setBrowserHistory(_ command: SetBrowserHistory) {
+    rememberBrowserHistorySnapshot(
+      scopeId: command.browserHistoryScopeId,
+      items: command.browserHistory)
+  }
+
+  private func rememberBrowserHistorySnapshot(
+    scopeId rawScopeId: String?,
+    items: [NativeBrowserHistoryItem]?
+  ) {
+    guard let scopeId = rawScopeId?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !scopeId.isEmpty
+    else {
+      return
+    }
+    /*
+     CDXC:BrowserHistory 2026-06-15-10:25:
+     AppKit Browser history menus should read the sidebar-owned project-family
+     history snapshot. Store it by scope id and push it into every open toolbar
+     in that family so main-project and worktree Browser panes share one list.
+     */
+    let normalizedItems = normalizedBrowserHistoryItems(items ?? [])
+    browserHistoryItemsByScopeId[scopeId] = normalizedItems
+    applyBrowserHistoryItems(normalizedItems, scopeId: scopeId)
+  }
+
+  private func applyBrowserHistoryItems(
+    _ items: [NativeBrowserHistoryItem],
+    scopeId: String
+  ) {
+    for session in webPaneSessions.values where session.browserHistoryScopeId == scopeId {
+      session.hostView.setBrowserHistoryItems(items)
+    }
+    for session in projectEditorPaneSessions.values where session.browserHistoryScopeId == scopeId {
+      for tab in session.tabs {
+        tab.hostView.setBrowserHistoryItems(items)
+      }
+    }
+  }
+
+  private func browserHistoryItems(scopeId: String?) -> [NativeBrowserHistoryItem] {
+    guard let scopeId else {
+      return []
+    }
+    return browserHistoryItemsByScopeId[scopeId] ?? []
+  }
+
+  private func normalizedBrowserHistoryItems(_ items: [NativeBrowserHistoryItem]) -> [NativeBrowserHistoryItem] {
+    var byURL: [String: NativeBrowserHistoryItem] = [:]
+    for item in items {
+      let url = item.url.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !url.isEmpty, url.lowercased() != "about:blank" else {
+        continue
+      }
+      if let existing = byURL[url], existing.visitedAt > item.visitedAt {
+        continue
+      }
+      byURL[url] = NativeBrowserHistoryItem(
+        faviconDataUrl: item.faviconDataUrl?.trimmingCharacters(in: .whitespacesAndNewlines),
+        title: item.title.trimmingCharacters(in: .whitespacesAndNewlines),
+        url: url,
+        visitedAt: item.visitedAt)
+    }
+    return Array(byURL.values)
+      .sorted { $0.visitedAt > $1.visitedAt }
+      .prefix(Self.browserHistoryMaxItems)
+      .map { $0 }
+  }
+
   func createWebPane(_ command: CreateWebPane) {
     let initialUrl = URL(string: command.url)
     let isManagedT3Pane = initialUrl.map(NativeT3RuntimeLauncher.isManagedRuntimeURL) ?? false
     let browserFeedbackTool = Self.normalizedBrowserFeedbackTool(command.browserFeedbackTool)
+    rememberBrowserHistorySnapshot(scopeId: command.browserHistoryScopeId, items: command.browserHistory)
     appendLayoutLayeringDebugLog("nativeWorkspace.createWebPane.received", details: [
       "commandSessionId": command.sessionId,
       "commandTitle": command.title,
@@ -4061,6 +4164,7 @@ final class TerminalWorkspaceView: NSView {
       if existingSession.isManagedT3Pane, isManagedT3Pane {
         webPaneSessions[command.sessionId] = WebPaneSession(
           browserTitleObservation: existingSession.browserTitleObservation,
+          browserHistoryScopeId: command.browserHistoryScopeId ?? existingSession.browserHistoryScopeId,
           containerView: existingSession.containerView,
           chromiumView: existingSession.chromiumView,
           diagnosticsBridge: existingSession.diagnosticsBridge,
@@ -4216,6 +4320,7 @@ final class TerminalWorkspaceView: NSView {
         self?.showBrowserImportSettings(sessionId: command.sessionId)
       }
     )
+    hostView.setBrowserHistoryItems(browserHistoryItems(scopeId: command.browserHistoryScopeId))
     hostView.translatesAutoresizingMaskIntoConstraints = false
     if let chromiumView {
       chromiumView.titleChangedHandler = { [weak self, weak hostView, weak chromiumView] title in
@@ -4340,6 +4445,7 @@ final class TerminalWorkspaceView: NSView {
 
     webPaneSessions[command.sessionId] = WebPaneSession(
       browserTitleObservation: browserTitleObservation,
+      browserHistoryScopeId: command.browserHistoryScopeId,
       containerView: containerView,
       chromiumView: chromiumView,
       diagnosticsBridge: diagnosticsBridge,
@@ -4586,13 +4692,14 @@ final class TerminalWorkspaceView: NSView {
   }
 
   private func focusSleepingPanePlaceholder(sessionId: String, reason: String) {
-    guard sleepingSessionIds.contains(sessionId),
+    guard isPlaceholderPaneSession(sessionId),
       let session = sleepingPanePlaceholderSessions[sessionId]
     else {
       TerminalFocusDebugLog.append(
         event: "nativeWorkspace.focusSleepingPanePlaceholder.missingSession",
         details: [
           "knownSleepingPlaceholderIds": Array(sleepingPanePlaceholderSessions.keys).sorted(),
+          "mountingSessionIds": Array(mountingSessionIds).sorted(),
           "reason": reason,
           "requestedSessionId": sessionId,
           "sleepingSessionIds": Array(sleepingSessionIds).sorted(),
@@ -4603,6 +4710,9 @@ final class TerminalWorkspaceView: NSView {
      CDXC:SleepingPanePlaceholders 2026-06-13-21:26:
      A selected sleeping pane must be a real AppKit keyboard target so the visible "Press Any Key to Wake" affordance can wake on alphanumeric input.
      Focus the concrete placeholder content view instead of treating the sleeping pane as a missing Ghostty/Web surface.
+
+     CDXC:TerminalCreationFocus 2026-06-14-18:48:
+     A selected mounting pane also uses this concrete placeholder target, but its body is non-wakeable because terminalReady, not user input, replaces it with Ghostty.
      */
     if commandsPanelIsVisible && orderedVisibleCommandPaneOwnerSessionIds().contains(sessionId) {
       commandsPanelFocusedSessionId = sessionId
@@ -4644,6 +4754,7 @@ final class TerminalWorkspaceView: NSView {
     applyProjectEditorCompanionPaneHiddenPreference(
       command.companionPaneHidden,
       reason: "createProjectEditorPane")
+    rememberBrowserHistorySnapshot(scopeId: command.browserHistoryScopeId, items: command.browserHistory)
     let browserFeedbackTool = Self.normalizedBrowserFeedbackTool(command.browserFeedbackTool)
     let requestedMode = command.mode ?? projectEditorModeFromNativeEditorId(command.projectId) ?? "code"
     if let existingSession = projectEditorPaneSessions[command.projectId] {
@@ -4758,6 +4869,7 @@ final class TerminalWorkspaceView: NSView {
           tabId: createProjectEditorGitTabId(),
           title: projectEditorTabTitle(for: command.url, fallback: command.title),
           url: command.url,
+          browserHistoryItems: browserHistoryItems(scopeId: command.browserHistoryScopeId),
           browserFeedbackTool: browserFeedbackTool,
           showsBrowserToolbar: command.showsBrowserToolbar ?? false,
           showsInitialLoadingOverlay: true,
@@ -4768,8 +4880,10 @@ final class TerminalWorkspaceView: NSView {
         makeProjectEditorBrowserTab(
           projectId: command.projectId,
           tabId: tab.id,
+          isPlaceholder: tab.isPlaceholder == true,
           title: tab.title,
           url: tab.url,
+          browserHistoryItems: browserHistoryItems(scopeId: command.browserHistoryScopeId),
           browserFeedbackTool: browserFeedbackTool,
           showsBrowserToolbar: command.showsBrowserToolbar ?? false,
           showsInitialLoadingOverlay: true,
@@ -4780,6 +4894,7 @@ final class TerminalWorkspaceView: NSView {
       initialTabs.first(where: { $0.tabId == command.activeBrowserTabId }) ?? initialTabs[0]
     projectEditorPaneSessions[command.projectId] = ProjectEditorPaneSession(
       activeTabId: initialActiveTab.tabId,
+      browserHistoryScopeId: command.browserHistoryScopeId,
       chromiumView: initialActiveTab.chromiumView,
       hostView: initialActiveTab.hostView,
       mode: requestedMode,
@@ -4807,9 +4922,13 @@ final class TerminalWorkspaceView: NSView {
       moveOffscreen(titleBarView)
     }
     syncProjectEditorTabBars()
-    markProjectEditorBrowserTabLoaded(projectId: command.projectId, tabId: initialActiveTab.tabId)
-    loadProjectEditorPaneWhenReady(
-      projectId: command.projectId, url: initialActiveTab.url, reason: "createProjectEditorPaneNew")
+    if initialActiveTab.isPlaceholder {
+      sendEvent(.projectEditorLoadState(projectId: command.projectId, status: "running", message: nil))
+    } else {
+      markProjectEditorBrowserTabLoaded(projectId: command.projectId, tabId: initialActiveTab.tabId)
+      loadProjectEditorPaneWhenReady(
+        projectId: command.projectId, url: initialActiveTab.url, reason: "createProjectEditorPaneNew")
+    }
     focusProjectEditorPane(projectId: command.projectId, reason: "createProjectEditorPaneNew")
     if requestedMode == "git" {
       sendProjectEditorTabSelected(projectId: command.projectId)
@@ -4819,8 +4938,10 @@ final class TerminalWorkspaceView: NSView {
   private func makeProjectEditorBrowserTab(
     projectId: String,
     tabId: String,
+    isPlaceholder: Bool = false,
     title: String,
     url: String,
+    browserHistoryItems: [NativeBrowserHistoryItem] = [],
     browserFeedbackTool: String,
     showsBrowserToolbar: Bool,
     showsInitialLoadingOverlay: Bool,
@@ -4841,11 +4962,19 @@ final class TerminalWorkspaceView: NSView {
      project-editor session points at whichever tab is active for existing
      layout, focus, and toolbar commands.
      */
-    let useWebKitProjectView = projectEditorModeFromNativeEditorId(projectId) == "tasks"
+    let useWebKitProjectView = !isPlaceholder && projectEditorModeFromNativeEditorId(projectId) == "tasks"
     let chromiumView: GhostexCEFBrowserView?
     let webView: WKWebView?
     let browserView: NSView
-    if useWebKitProjectView {
+    if isPlaceholder {
+      /*
+       CDXC:ProjectBrowserTabs 2026-06-15-20:48:
+       A final Browser tab close should keep one address-bar tab but release the CEF browser. The placeholder is a plain black native content view and becomes a real Chromium tab only after address-bar navigation.
+       */
+      chromiumView = nil
+      webView = nil
+      browserView = makeProjectEditorBrowserPlaceholderView()
+    } else if useWebKitProjectView {
       /**
        CDXC:ProjectBoard 2026-06-02-13:31:
        The Project mode board is a first-party local React app and should use WKWebView, not the Chromium/CEF browser path used by Code and Git.
@@ -4911,8 +5040,8 @@ final class TerminalWorkspaceView: NSView {
       chromiumView: chromiumView,
       webView: webView,
       showsBrowserToolbar: showsBrowserToolbar,
-      showsInitialLoadingOverlay: showsInitialLoadingOverlay,
-      initialAddress: url,
+      showsInitialLoadingOverlay: showsInitialLoadingOverlay && !isPlaceholder,
+      initialAddress: isPlaceholder ? nil : url,
       browserFeedbackTool: browserFeedbackTool,
       onFocus: { [weak self] in
         self?.focusProjectEditorPaneFromUserInteraction(
@@ -4934,8 +5063,16 @@ final class TerminalWorkspaceView: NSView {
       },
       onShowImportSettings: { [weak self] in
         self?.showProjectEditorImportSettings(projectId: projectId)
+      },
+      onAddressNavigation: { [weak self] url in
+        self?.realizeProjectEditorBrowserPlaceholderTab(
+          projectId: projectId,
+          tabId: tabId,
+          url: url.absoluteString,
+          reason: "projectEditorBrowserAddressCommit") ?? false
       }
     )
+    hostView.setBrowserHistoryItems(browserHistoryItems)
     hostView.translatesAutoresizingMaskIntoConstraints = true
     if let chromiumView {
       configureProjectEditorChromiumCallbacks(chromiumView, projectId: projectId, reason: reason)
@@ -4944,11 +5081,20 @@ final class TerminalWorkspaceView: NSView {
     return ProjectEditorBrowserTab(
       tabId: tabId,
       chromiumView: chromiumView,
-      hasLoaded: hasLoaded,
+      hasLoaded: isPlaceholder ? false : hasLoaded,
       hostView: hostView,
+      isPlaceholder: isPlaceholder,
       webView: webView,
       title: title,
       url: url)
+  }
+
+  private func makeProjectEditorBrowserPlaceholderView() -> NSView {
+    let view = NSView(frame: .zero)
+    view.translatesAutoresizingMaskIntoConstraints = true
+    view.wantsLayer = true
+    view.layer?.backgroundColor = NSColor.black.cgColor
+    return view
   }
 
   private func normalizedProjectEditorBrowserTabs(
@@ -4960,7 +5106,9 @@ final class TerminalWorkspaceView: NSView {
     }
     var seenIds = Set<String>()
     return tabs.compactMap { tab in
-      guard let url = normalizedProjectEditorBrowserURL(tab.url) else {
+      let isPlaceholder = tab.isPlaceholder == true
+      let url = normalizedProjectEditorBrowserURL(tab.url)
+      guard url != nil || isPlaceholder else {
         return nil
       }
       let id = tab.id.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4968,8 +5116,18 @@ final class TerminalWorkspaceView: NSView {
         return nil
       }
       seenIds.insert(id)
-      let title = normalizedProjectEditorBrowserTitle(tab.title, url: url, fallback: fallbackTitle)
-      return ProjectEditorBrowserTabState(id: id, title: title, url: url)
+      let normalizedURL = isPlaceholder ? "" : url!
+      let title: String
+      if isPlaceholder {
+        title = "New Tab"
+      } else {
+        title = normalizedProjectEditorBrowserTitle(tab.title, url: normalizedURL, fallback: fallbackTitle)
+      }
+      return ProjectEditorBrowserTabState(
+        id: id,
+        title: title,
+        url: normalizedURL,
+        isPlaceholder: isPlaceholder ? true : nil)
     }
   }
 
@@ -5131,6 +5289,11 @@ final class TerminalWorkspaceView: NSView {
         TerminalSessionTitleBarView.TabItem(
           actions: [],
           /*
+           CDXC:ProjectBrowserTabs 2026-06-16-01:46:
+           The Browser New Tab placeholder is not a real loaded browser tab. Keep it selectable for address entry, but remove close chrome and close hit testing so users cannot close the lightweight placeholder itself.
+          */
+          allowsClose: !tab.isPlaceholder,
+          /*
            CDXC:SessionFocusMode 2026-05-28-13:22:
            Project editor tabs are browser tabs inside one editor pane, not terminal split panes, so their titlebar items must opt out of pane focus mode while still satisfying the shared tab item contract.
           */
@@ -5177,6 +5340,7 @@ final class TerminalWorkspaceView: NSView {
       chromiumView: tab.chromiumView,
       hasLoaded: true,
       hostView: tab.hostView,
+      isPlaceholder: false,
       webView: tab.webView,
       title: tab.title,
       url: tab.url)
@@ -5267,6 +5431,13 @@ final class TerminalWorkspaceView: NSView {
       return nil
     }
     return session.tabs.map { tab in
+      if tab.isPlaceholder {
+        return ProjectEditorBrowserTabState(
+          id: tab.tabId,
+          title: "New Tab",
+          url: "",
+          isPlaceholder: true)
+      }
       let currentURL = normalizedProjectEditorBrowserURL(tab.chromiumView?.currentURLString ?? "") ?? tab.url
       let currentTitle = normalizedProjectEditorBrowserTitle(
         tab.title,
@@ -5358,7 +5529,7 @@ final class TerminalWorkspaceView: NSView {
      the Browser tab strip is first surfaced. Selecting a tab is the surfacing
      point that may load its saved URL.
      */
-    let shouldLoadSelectedTab = !tab.hasLoaded
+    let shouldLoadSelectedTab = !tab.isPlaceholder && !tab.hasLoaded
     let nextSession = projectEditorSession(session, activating: tab.tabId)
     projectEditorPaneSessions[projectId] = nextSession
     setProjectEditorTabHostVisibility(nextSession, isActive: activeProjectEditorId == projectId)
@@ -5370,6 +5541,9 @@ final class TerminalWorkspaceView: NSView {
     nextSession.hostView.refreshBrowserToolbar(reason: "projectEditorGitTabSelected")
     syncProjectEditorTabBars()
     focusProjectEditorPane(projectId: projectId, reason: "projectEditorGitTabSelected")
+    if tab.isPlaceholder {
+      nextSession.hostView.focusAddressField(selectAll: false)
+    }
     sendProjectEditorTabSelected(projectId: projectId)
   }
 
@@ -5387,6 +5561,7 @@ final class TerminalWorkspaceView: NSView {
       tabId: createProjectEditorGitTabId(),
       title: title ?? projectEditorTabTitle(for: url, fallback: "Browser"),
       url: url,
+      browserHistoryItems: browserHistoryItems(scopeId: session.browserHistoryScopeId),
       browserFeedbackTool: session.hostView.browserFeedbackToolRawValue,
       showsBrowserToolbar: true,
       showsInitialLoadingOverlay: true,
@@ -5405,12 +5580,115 @@ final class TerminalWorkspaceView: NSView {
     sendProjectEditorTabSelected(projectId: projectId)
   }
 
+  private func realizeProjectEditorBrowserPlaceholderTab(
+    projectId: String,
+    tabId: String,
+    url: String,
+    reason: String
+  ) -> Bool {
+    guard var session = projectEditorPaneSessions[projectId],
+      session.mode == "git",
+      let tabIndex = session.tabs.firstIndex(where: { $0.tabId == tabId })
+    else {
+      return false
+    }
+    let tab = session.tabs[tabIndex]
+    guard tab.isPlaceholder else {
+      return false
+    }
+    guard GhostexCEFIsRuntimeAvailable() else {
+      sendEvent(
+        .projectEditorLoadState(
+          projectId: projectId,
+          status: "error",
+          message: "Chromium runtime is not bundled for Browser tabs"))
+      return true
+    }
+    /*
+     CDXC:ProjectBrowserTabs 2026-06-15-20:48:
+     The New Tab placeholder must not allocate CEF until the user commits an address. Once that happens, create the browser in the existing tab slot and run the normal project-editor load path so Browser memory stays zero while idle but behavior matches a real tab after navigation.
+     */
+    let chromiumView = GhostexCEFBrowserView(
+      frame: .zero,
+      initialURL: "about:blank",
+      profileIdentifier: "default")
+    chromiumView.trustedClipboardOrigin = NativeCodeServerRuntimeLauncher.origin
+    chromiumView.translatesAutoresizingMaskIntoConstraints = true
+    configureProjectEditorChromiumCallbacks(chromiumView, projectId: projectId, reason: reason)
+    installSourceCEFDragPageDiagnosticsIfNeeded(chromiumView, projectId: projectId, reason: reason)
+    let title = projectEditorTabTitle(for: url, fallback: "Browser")
+    session.tabs[tabIndex] = ProjectEditorBrowserTab(
+      tabId: tab.tabId,
+      chromiumView: chromiumView,
+      hasLoaded: true,
+      hostView: tab.hostView,
+      isPlaceholder: false,
+      webView: nil,
+      title: title,
+      url: url)
+    session = projectEditorSession(session, activating: tab.tabId)
+    projectEditorPaneSessions[projectId] = session
+    tab.hostView.replaceHostedBrowserView(
+      browserView: chromiumView,
+      chromiumView: chromiumView,
+      webView: nil,
+      reason: reason)
+    setProjectEditorTabHostVisibility(session, isActive: activeProjectEditorId == projectId)
+    syncProjectEditorTabBars()
+    focusProjectEditorPane(projectId: projectId, reason: reason)
+    loadProjectEditorPaneWhenReady(projectId: projectId, url: url, reason: reason)
+    sendProjectEditorTabSelected(projectId: projectId)
+    return true
+  }
+
   private func closeProjectEditorGitTab(projectId: String, tabId: String) {
-    guard let session = projectEditorPaneSessions[projectId], session.tabs.count > 1 else {
+    guard let session = projectEditorPaneSessions[projectId] else {
       return
     }
     let removedIndex = session.tabs.firstIndex(where: { $0.tabId == tabId })
     let removedTab = session.tabs.first(where: { $0.tabId == tabId })
+    if session.tabs.count == 1 {
+      guard let removedTab else {
+        return
+      }
+      if removedTab.isPlaceholder {
+        focusProjectEditorPane(projectId: projectId, reason: "projectEditorGitPlaceholderCloseIgnored")
+        removedTab.hostView.focusAddressField(selectAll: false)
+        return
+      }
+      /*
+       CDXC:ProjectBrowserTabs 2026-06-15-20:48:
+       Closing the last Browser top-mode tab should reset it to an address-only New Tab placeholder, not keep a hidden Chromium page alive. Tear down the CEF browser and persist one placeholder tab so memory is released until the user enters an address.
+       */
+      removedTab.chromiumView?.closeBrowser()
+      removedTab.hostView.removeFromSuperview()
+      let placeholderTab = makeProjectEditorBrowserTab(
+        projectId: projectId,
+        tabId: removedTab.tabId,
+        isPlaceholder: true,
+        title: "New Tab",
+        url: "",
+        browserHistoryItems: browserHistoryItems(scopeId: session.browserHistoryScopeId),
+        browserFeedbackTool: session.hostView.browserFeedbackToolRawValue,
+        showsBrowserToolbar: true,
+        showsInitialLoadingOverlay: false,
+        reason: "projectEditorGitLastTabClosed")
+      var nextSession = session
+      nextSession.tabs = [placeholderTab]
+      nextSession = projectEditorSession(nextSession, activating: placeholderTab.tabId)
+      projectEditorPaneSessions[projectId] = nextSession
+      addSubview(placeholderTab.hostView)
+      moveOffscreen(placeholderTab.hostView)
+      setProjectEditorTabHostVisibility(nextSession, isActive: activeProjectEditorId == projectId)
+      syncProjectEditorTabBars()
+      focusProjectEditorPane(projectId: projectId, reason: "projectEditorGitLastTabClosed")
+      placeholderTab.hostView.focusAddressField(selectAll: false)
+      sendEvent(.projectEditorLoadState(projectId: projectId, status: "running", message: nil))
+      sendProjectEditorTabSelected(projectId: projectId)
+      syncCEFNativeDragSourceReleaseMonitor(reason: "projectEditorGitLastTabClosed")
+      syncSourceCEFDragDiagnosticsMonitor(reason: "projectEditorGitLastTabClosed")
+      return
+    }
     let nextTabs = session.tabs.filter { $0.tabId != tabId }
     guard !nextTabs.isEmpty else {
       return
@@ -5468,6 +5746,7 @@ final class TerminalWorkspaceView: NSView {
         chromiumView: tab.chromiumView,
         hasLoaded: tab.hasLoaded,
         hostView: tab.hostView,
+        isPlaceholder: false,
         webView: tab.webView,
         title: normalizedTitle?.isEmpty == false
           ? normalizedTitle!
@@ -5567,8 +5846,8 @@ final class TerminalWorkspaceView: NSView {
       return false
     }
     /**
-     CDXC:CommandsPanel 2026-06-12-04:06:
-     Cmd+W should minimize the Commands panel when a command terminal owns first responder. Use the same closeCommandsPanel titlebar action event as the chevron button, and require live command-panel responder focus so a stale commandsPanelFocusedSessionId cannot intercept workspace pane close.
+     CDXC:CommandPaneHotkeys 2026-06-15-10:33:
+     Cmd+W should close the command terminal that owns first responder, not minimize the Commands panel. Require live command-panel responder focus so a stale commandsPanelFocusedSessionId cannot intercept workspace pane close, then route through the sidebar command-terminal close action so gxserver lifecycle, paneLayout removal, and post-close focus all use the normal terminal path.
      */
     TerminalFocusDebugLog.append(
       event: "nativeWorkspace.commandsPanel.closeFocused",
@@ -5576,7 +5855,7 @@ final class TerminalWorkspaceView: NSView {
         "reason": reason,
         "sessionId": sessionId,
       ])
-    sendEvent(.terminalTitleBarAction(sessionId: sessionId, action: .closeCommandsPanel))
+    sendEvent(.terminalTitleBarAction(sessionId: sessionId, action: .close))
     return true
   }
 
@@ -6737,6 +7016,7 @@ final class TerminalWorkspaceView: NSView {
     sessionTitleBarActions = command.sessionTitleBarActions ?? [:]
     sessionTitles = command.sessionTitles ?? [:]
     zmxInactiveSessionIds = Set(command.sessionZmxInactiveIds ?? [])
+    mountingSessionIds = Set(command.mountingSessionIds ?? [])
     clickToWakeSleepingSessions = command.clickToWakeSleepingSessions ?? true
     showSessionIdInTerminalPanes = command.showSessionIdInTerminalPanes == true
     activeProjectEditorId = nextActiveProjectEditorId
@@ -6855,7 +7135,7 @@ final class TerminalWorkspaceView: NSView {
         sessionAgentIconDataUrls[session.sessionId],
         colorHex: sessionAgentIconColors[session.sessionId])
       session.contentView.setShowsClickToWake(clickToWakeSleepingSessions)
-      if shouldRelayout && !sleepingSessionIds.contains(session.sessionId) {
+      if shouldRelayout && !isPlaceholderPaneSession(session.sessionId) {
         session.containerView.isHidden = true
         moveOffscreen(session.containerView)
       }
@@ -7059,10 +7339,12 @@ final class TerminalWorkspaceView: NSView {
         ])
       return
     }
-    lastAppliedLayoutFocusRequestId = focusRequestId
     /*
      CDXC:PaneFocus 2026-06-13-23:13:
      Cmd+Opt+Arrow treats the expanded Commands panel as part of the visible main layout. When the explicit focus target is a command pane, the workspace focusedSessionId remains the terminal above it; honor focusRequestSessionId first so the request moves AppKit first responder to the command terminal instead of refocusing the workspace pane.
+
+     CDXC:PaneFocus 2026-06-14-19:21:
+     Explicit pane-tab close focus requests must not be consumed before AppKit actually focuses the selected surviving tab, or before native intentionally preserves a protected in-workspace editor. Sidebar/window-shell responders after a terminal close are not protected input owners.
      */
     let requestedFocusSessionId =
       command.focusRequestSessionId.flatMap {
@@ -7074,17 +7356,20 @@ final class TerminalWorkspaceView: NSView {
       }
     if let focusedSessionId = requestedFocusSessionId
     {
-      if shouldPreserveNonTerminalFirstResponder() {
+      if shouldPreserveNonTerminalFirstResponder(forRequestedFocusSessionId: focusedSessionId) {
         /**
          CDXC:ScratchPadFocus 2026-04-28-05:35
          Layout focus requests must not steal typing focus from the full-window
          modal host or other WKWebView controls. Explicit terminal focus should
          still preserve non-terminal first responders when a modal owns input.
          */
+        lastAppliedLayoutFocusRequestId = focusRequestId
         TerminalFocusDebugLog.append(
           event: "nativeWorkspace.setActiveTerminalSet.focusPreserved",
           details: [
             "focusedSessionId": focusedSessionId,
+            "focusRequestId": focusRequestId,
+            "preservationScope": explicitFocusResponderScopeDescription(),
             "responder": responderSnapshot(),
           ])
         return
@@ -7112,10 +7397,22 @@ final class TerminalWorkspaceView: NSView {
             didSurface: false,
             reason: "setActiveTerminalSet.focusSwitch")
         }
+        recordAppliedExplicitLayoutFocusRequestIfNeeded(
+          focusRequestId: focusRequestId,
+          requestedSessionId: focusedSessionId,
+          focusSurfaceKind: isCommandPanelFocus ? "commandTerminal" : "terminal")
       } else if webPaneSessions[focusedSessionId] != nil {
         focusWebPane(sessionId: focusedSessionId, reason: "setActiveTerminalSet")
-      } else if sleepingSessionIds.contains(focusedSessionId) {
+        recordAppliedExplicitLayoutFocusRequestIfNeeded(
+          focusRequestId: focusRequestId,
+          requestedSessionId: focusedSessionId,
+          focusSurfaceKind: "webPane")
+      } else if isPlaceholderPaneSession(focusedSessionId) {
         focusSleepingPanePlaceholder(sessionId: focusedSessionId, reason: "setActiveTerminalSet")
+        recordAppliedExplicitLayoutFocusRequestIfNeeded(
+          focusRequestId: focusRequestId,
+          requestedSessionId: focusedSessionId,
+          focusSurfaceKind: "placeholder")
       } else {
         /*
          CDXC:SessionSurfaceRecovery 2026-05-23-09:05:
@@ -8155,9 +8452,14 @@ final class TerminalWorkspaceView: NSView {
   }
 
   private func isProjectEditorCompanionEligibleSession(_ sessionId: String) -> Bool {
+    /*
+     CDXC:ProjectEditorCompanion 2026-06-15-09:55:
+     Source/Browser/Kanban sidebar clicks must surface the selected session in the companion pane. A stale or overlapping mounting marker must not block retargeting once Ghostty or a web pane has a real render surface; only true mounting placeholders are ineligible.
+     */
     activeSessionIds.contains(sessionId)
       && !commandsPanelActiveSessionIds.contains(sessionId)
       && !sleepingSessionIds.contains(sessionId)
+      && !isMountingPlaceholderSession(sessionId)
       && !poppedOutSessionIds.contains(sessionId)
       && (sessions[sessionId] != nil || webPaneSessions[sessionId] != nil)
   }
@@ -8179,8 +8481,12 @@ final class TerminalWorkspaceView: NSView {
         "activeProjectEditorId": nullableString(activeProjectEditorId),
         "activeSessionIds": Array(activeSessionIds).sorted(),
         "companionPaneHidden": projectEditorCompanionPaneHidden,
+        "commandsPanelActiveSessionIds": Array(commandsPanelActiveSessionIds).sorted(),
+        "hasPaneRenderSurface": hasPaneRenderSurface(sessionId),
+        "isMountingPlaceholderSession": isMountingPlaceholderSession(sessionId),
         "knownTerminalSession": sessions[sessionId] != nil,
         "knownWebPaneSession": webPaneSessions[sessionId] != nil,
+        "mountingSessionIds": Array(mountingSessionIds).sorted(),
         "reason": reason,
         "requestedSessionId": sessionId,
         "sleepingSessionIds": Array(sleepingSessionIds).sorted(),
@@ -8210,10 +8516,14 @@ final class TerminalWorkspaceView: NSView {
         details: [
           "activeProjectEditorId": nullableString(activeProjectEditorId),
           "activeSessionIds": Array(activeSessionIds).sorted(),
+          "commandsPanelActiveSessionIds": Array(commandsPanelActiveSessionIds).sorted(),
           "focus": focus,
+          "hasPaneRenderSurface": hasPaneRenderSurface(sessionId),
           "isEligible": isEligible,
+          "isMountingPlaceholderSession": isMountingPlaceholderSession(sessionId),
           "knownTerminalSession": sessions[sessionId] != nil,
           "knownWebPaneSession": webPaneSessions[sessionId] != nil,
+          "mountingSessionIds": Array(mountingSessionIds).sorted(),
           "poppedOutSessionIds": Array(poppedOutSessionIds).sorted(),
           "reason": reason,
           "requestedSessionId": sessionId,
@@ -9698,6 +10008,50 @@ final class TerminalWorkspaceView: NSView {
     webView.evaluateJavaScript(script, completionHandler: nil)
   }
 
+  private static func modeSwitcherDebugURLKind(_ value: String?) -> String {
+    /*
+     CDXC:ModeSwitcherDiagnostics 2026-06-15-00:21:
+     Agents/Source/Browser/Kanban switch repros need native load-state breadcrumbs
+     without raw URLs, titles, paths, or page content. Classify destinations by
+     scheme only so support can distinguish CEF, WebKit, and code-server paths
+     while the shared support-bundle log remains safe to zip.
+     */
+    let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if trimmed.isEmpty {
+      return "empty"
+    }
+    if trimmed == "about:blank" {
+      return "blank"
+    }
+    guard let scheme = URL(string: trimmed)?.scheme?.lowercased(), !scheme.isEmpty else {
+      return "unknown"
+    }
+    switch scheme {
+    case "about":
+      return "blank"
+    case "file", "http", "https":
+      return scheme
+    default:
+      return "custom"
+    }
+  }
+
+  private static func modeSwitcherDebugReasonKind(_ value: String) -> String {
+    switch value {
+    case "createProjectEditorPaneNew",
+      "createProjectEditorPaneReroute",
+      "createProjectEditorPaneRestoredTab",
+      "chromiumNavigationStateChanged",
+      "loadEnd",
+      "navigationFinish",
+      "navigationFail",
+      "provisionalNavigationFail":
+      return value
+    default:
+      return "other"
+    }
+  }
+
   private func loadProjectEditorPaneWhenReady(projectId: String, url: String, reason: String) {
     /**
      CDXC:EditorPanes 2026-05-09-17:24
@@ -9705,8 +10059,20 @@ final class TerminalWorkspaceView: NSView {
      row visible through loading and turns it into a retryable error row if
      code-server does not become responsive within ten seconds.
      */
+    let existingSession = projectEditorPaneSessions[projectId]
+    let isCodeServerURL = url.hasPrefix(NativeCodeServerRuntimeLauncher.origin)
+    NativeModeSwitcherDebugLog.append(
+      event: "titlebarModeSwitch.nativeProjectEditorLoadStart",
+      details: [
+        "hasSession": existingSession != nil,
+        "isCodeServerURL": isCodeServerURL,
+        "mode": existingSession?.mode ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+        "projectId": projectId,
+        "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+        "urlKind": Self.modeSwitcherDebugURLKind(url),
+      ])
     sendEvent(.projectEditorLoadState(projectId: projectId, status: "opening", message: nil))
-    guard url.hasPrefix(NativeCodeServerRuntimeLauncher.origin) else {
+    guard isCodeServerURL else {
       /**
        CDXC:ModeSwitcher 2026-05-15-14:42:
        Git and tasks-backed Project modes reuse the project-editor shell so
@@ -9716,8 +10082,29 @@ final class TerminalWorkspaceView: NSView {
        navigate directly instead of failing on a localhost readiness check.
        */
       guard let session = projectEditorPaneSessions[projectId], session.url == url else {
+        let currentSession = projectEditorPaneSessions[projectId]
+        NativeModeSwitcherDebugLog.append(
+          event: "titlebarModeSwitch.nativeProjectEditorDirectNavigationSkipped",
+          details: [
+            "hasSession": currentSession != nil,
+            "mode": currentSession?.mode ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+            "projectId": projectId,
+            "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+            "urlKind": Self.modeSwitcherDebugURLKind(url),
+            "urlMatchesSession": currentSession?.url == url,
+          ])
         return
       }
+      NativeModeSwitcherDebugLog.append(
+        event: "titlebarModeSwitch.nativeProjectEditorDirectNavigationPosted",
+        details: [
+          "hasChromiumView": session.chromiumView != nil,
+          "hasWebView": session.webView != nil,
+          "mode": session.mode,
+          "projectId": projectId,
+          "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+          "urlKind": Self.modeSwitcherDebugURLKind(url),
+        ])
       if let chromiumView = session.chromiumView {
         chromiumView.loadURLString(url)
       } else if let webView = session.webView, let parsedURL = URL(string: url) {
@@ -9726,6 +10113,14 @@ final class TerminalWorkspaceView: NSView {
         } else {
           webView.load(URLRequest(url: parsedURL))
         }
+        NativeModeSwitcherDebugLog.append(
+          event: "titlebarModeSwitch.nativeProjectEditorWebKitRunningSent",
+          details: [
+            "mode": session.mode,
+            "projectId": projectId,
+            "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+            "urlKind": Self.modeSwitcherDebugURLKind(url),
+          ])
         sendEvent(.projectEditorLoadState(projectId: projectId, status: "running", message: nil))
       }
       session.hostView.refreshHostedWebView(reason: reason)
@@ -9744,6 +10139,15 @@ final class TerminalWorkspaceView: NSView {
           "reason": reason,
           "url": url,
         ])
+        NativeModeSwitcherDebugLog.append(
+          event: "titlebarModeSwitch.nativeProjectEditorCodeServerWaitDone",
+          details: [
+            "isRuntimeReady": isReady,
+            "mode": session.mode,
+            "projectId": projectId,
+            "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+            "urlKind": Self.modeSwitcherDebugURLKind(url),
+          ])
         if !isReady {
           /**
            CDXC:EditorPanes 2026-05-13-08:44
@@ -9777,6 +10181,17 @@ final class TerminalWorkspaceView: NSView {
       guard let self, let chromiumView else {
         return
       }
+      let session = self.projectEditorPaneSessions[projectId]
+      NativeModeSwitcherDebugLog.append(
+        event: "titlebarModeSwitch.nativeCefNavigationStateChanged",
+        details: [
+          "currentUrlKind": Self.modeSwitcherDebugURLKind(chromiumView.currentURLString),
+          "isActive": self.activeProjectEditorId == projectId,
+          "isLoading": isLoading,
+          "mode": session?.mode ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+          "projectId": projectId,
+          "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+        ])
       self.updateProjectEditorInitialLoadingOverlay(
         projectId: projectId,
         chromiumView: chromiumView,
@@ -9866,6 +10281,21 @@ final class TerminalWorkspaceView: NSView {
         "url": url,
         "windowNumber": self.window?.windowNumber ?? NSNull(),
       ])
+      NativeModeSwitcherDebugLog.append(
+        event: "titlebarModeSwitch.nativeCefLoadEvent",
+        details: [
+          "currentUrlKind": Self.modeSwitcherDebugURLKind(chromiumView?.currentURLString),
+          "eventName": event,
+          "hasError": errorCode != 0,
+          "httpStatusCode": httpStatusCode,
+          "isActive": self.activeProjectEditorId == projectId,
+          "isLoading": chromiumView?.isLoading ?? false,
+          "mode": session?.mode ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+          "projectId": projectId,
+          "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+          "urlKind": Self.modeSwitcherDebugURLKind(url),
+          "urlMatchesSession": session?.url == url,
+        ])
       if event == "loadEnd", let chromiumView {
         self.installSourceCEFDragPageDiagnosticsIfNeeded(
           chromiumView,
@@ -9944,16 +10374,60 @@ final class TerminalWorkspaceView: NSView {
     isLoading: Bool,
     reason: String
   ) {
-    guard let hostView = projectEditorHostView(projectId: projectId, chromiumView: chromiumView),
-      !isLoading
-    else {
+    let currentURL = chromiumView.currentURLString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard let hostView = projectEditorHostView(projectId: projectId, chromiumView: chromiumView) else {
+      NativeModeSwitcherDebugLog.append(
+        event: "titlebarModeSwitch.nativeCefRunningDeferred",
+        details: [
+          "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
+          "deferReason": "missingHostView",
+          "isLoading": isLoading,
+          "mode": projectEditorPaneSessions[projectId]?.mode
+            ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+          "projectId": projectId,
+          "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+        ])
       return
     }
-    let currentURL = chromiumView.currentURLString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard !isLoading else {
+      NativeModeSwitcherDebugLog.append(
+        event: "titlebarModeSwitch.nativeCefRunningDeferred",
+        details: [
+          "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
+          "deferReason": "stillLoading",
+          "isLoading": isLoading,
+          "mode": projectEditorPaneSessions[projectId]?.mode
+            ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+          "projectId": projectId,
+          "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+        ])
+      return
+    }
     guard !currentURL.isEmpty, currentURL != "about:blank" else {
+      NativeModeSwitcherDebugLog.append(
+        event: "titlebarModeSwitch.nativeCefRunningDeferred",
+        details: [
+          "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
+          "deferReason": "placeholderUrl",
+          "isLoading": isLoading,
+          "mode": projectEditorPaneSessions[projectId]?.mode
+            ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+          "projectId": projectId,
+          "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+        ])
       return
     }
     hostView.setInitialLoadingOverlayVisible(false, reason: reason)
+    NativeModeSwitcherDebugLog.append(
+      event: "titlebarModeSwitch.nativeCefRunningSent",
+      details: [
+        "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
+        "isLoading": isLoading,
+        "mode": projectEditorPaneSessions[projectId]?.mode
+          ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+        "projectId": projectId,
+        "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+      ])
     sendEvent(.projectEditorLoadState(projectId: projectId, status: "running", message: nil))
   }
 
@@ -10013,6 +10487,7 @@ final class TerminalWorkspaceView: NSView {
       chromiumView: existingTab.chromiumView,
       hasLoaded: existingTab.hasLoaded,
       hostView: existingTab.hostView,
+      isPlaceholder: false,
       webView: existingTab.webView,
       title: resolvedTitle,
       url: resolvedURL)
@@ -10108,15 +10583,18 @@ final class TerminalWorkspaceView: NSView {
   }
 
   private func isPaneSessionVisible(_ sessionId: String) -> Bool {
-    activeSessionIds.contains(sessionId) || commandsPanelActiveSessionIds.contains(sessionId)
+    (activeSessionIds.contains(sessionId) || commandsPanelActiveSessionIds.contains(sessionId))
+      && !isMountingPlaceholderSession(sessionId)
   }
 
   private func isPaneSessionLayoutVisible(_ sessionId: String) -> Bool {
     activeSessionIds.contains(sessionId) || sleepingSessionIds.contains(sessionId)
+      || mountingSessionIds.contains(sessionId)
   }
 
   private func isCommandPaneSessionLayoutVisible(_ sessionId: String) -> Bool {
     commandsPanelActiveSessionIds.contains(sessionId) || sleepingSessionIds.contains(sessionId)
+      || mountingSessionIds.contains(sessionId)
   }
 
   private func isPaneSessionLayoutVisible(_ sessionId: String, role: PaneContentLayoutRole) -> Bool {
@@ -10136,7 +10614,7 @@ final class TerminalWorkspaceView: NSView {
         setPaneTabs([sessionId], activeSessionId: sessionId, on: sessionId)
         recordPaneContentLayoutRegion(sessionId: sessionId, paneRect: rect, path: path)
         setFrame(rect, for: sessionId)
-      } else if sleepingSessionIds.contains(sessionId) {
+      } else if isPlaceholderPaneSession(sessionId) {
         setSleepingPanePlaceholderFrame(
           rect,
           activeSessionId: sessionId,
@@ -10149,10 +10627,16 @@ final class TerminalWorkspaceView: NSView {
       let tabSessionIds = sessionIds.filter { isPaneSessionLayoutVisible($0, role: role) }
       let activeTabSessionIds = tabSessionIds.filter { isPaneSessionVisible($0, role: role) }
       guard !tabSessionIds.isEmpty else { return }
-      let selectedSessionId =
+      let requestedSelectedSessionId =
         activeSessionId.flatMap { tabSessionIds.contains($0) ? $0 : nil }
           ?? activeTabSessionIds.first
           ?? tabSessionIds[0]
+      let selectedSessionId = resolvedPaneTabOwnerSessionId(
+        requestedSessionId: requestedSelectedSessionId,
+        tabSessionIds: tabSessionIds,
+        activeTabSessionIds: activeTabSessionIds,
+        role: role,
+        path: path)
       for sessionId in activeTabSessionIds where sessionId != selectedSessionId {
         movePaneSessionOffscreen(sessionId)
       }
@@ -10287,10 +10771,16 @@ final class TerminalWorkspaceView: NSView {
       guard !tabSessionIds.isEmpty else {
         return
       }
-      let selectedSessionId =
+      let requestedSelectedSessionId =
         activeSessionId.flatMap { tabSessionIds.contains($0) ? $0 : nil }
           ?? mountedTabSessionIds.first
           ?? tabSessionIds[0]
+      let selectedSessionId = resolvedPaneTabOwnerSessionId(
+        requestedSessionId: requestedSelectedSessionId,
+        tabSessionIds: tabSessionIds,
+        activeTabSessionIds: mountedTabSessionIds,
+        role: role,
+        path: path)
       guard let region = paneContentLayoutRegion(
         forTabPath: path,
         role: role,
@@ -10383,9 +10873,65 @@ final class TerminalWorkspaceView: NSView {
     switch role {
     case .commands:
       return commandsPanelActiveSessionIds.contains(sessionId)
+        && !isMountingPlaceholderSession(sessionId)
     case .workspace:
       return activeSessionIds.contains(sessionId)
+        && !isMountingPlaceholderSession(sessionId)
     }
+  }
+
+  private func hasPaneRenderSurface(_ sessionId: String) -> Bool {
+    sessions[sessionId] != nil || webPaneSessions[sessionId] != nil
+  }
+
+  private func isMountingPlaceholderSession(_ sessionId: String) -> Bool {
+    mountingSessionIds.contains(sessionId) && !hasPaneRenderSurface(sessionId)
+  }
+
+  private func isPlaceholderPaneSession(_ sessionId: String) -> Bool {
+    sleepingSessionIds.contains(sessionId) || isMountingPlaceholderSession(sessionId)
+  }
+
+  private func canOwnPaneTabSurface(_ sessionId: String) -> Bool {
+    sessions[sessionId] != nil
+      || webPaneSessions[sessionId] != nil
+      || sleepingPanePlaceholderSessions[sessionId] != nil
+      || sleepingSessionIds.contains(sessionId)
+      || isMountingPlaceholderSession(sessionId)
+  }
+
+  private func resolvedPaneTabOwnerSessionId(
+    requestedSessionId: String,
+    tabSessionIds: [String],
+    activeTabSessionIds: [String],
+    role: PaneContentLayoutRole,
+    path: String
+  ) -> String {
+    guard !canOwnPaneTabSurface(requestedSessionId) else {
+      return requestedSessionId
+    }
+    guard
+      let mountedOwnerSessionId =
+        activeTabSessionIds.first(where: canOwnPaneTabSurface)
+        ?? tabSessionIds.first(where: canOwnPaneTabSurface)
+    else {
+      return requestedSessionId
+    }
+    /*
+     CDXC:PaneTabs 2026-06-14-18:48:
+     Native layout must not blank a tab group's titlebar when a command names a tab whose AppKit surface has not mounted yet. Mounting create-terminal tabs are handled by a selected placeholder; this fallback keeps an existing owner only for malformed future commands that omit the mounting marker.
+     */
+    appendLayoutLayeringDebugLog(
+      "nativePaneLayoutTrace.pendingSurfaceOwnerPreserved",
+      details: [
+        "mountedOwnerSessionId": mountedOwnerSessionId,
+        "path": path,
+        "requestedSessionId": requestedSessionId,
+        "role": role == .commands ? "commands" : "workspace",
+        "tabSessionIds": tabSessionIds,
+      ],
+      force: true)
+    return mountedOwnerSessionId
   }
 
   private func paneContentLayoutRegion(
@@ -13191,6 +13737,11 @@ final class TerminalWorkspaceView: NSView {
      the final pane rect, keep tabs in their original group, and route body
      clicks plus alphanumeric placeholder key presses to wake so tab selection
      does not create terminal pop-in.
+
+     CDXC:TerminalCreationFocus 2026-06-14-18:48:
+     Mounting terminal tabs use the same stable visual slot, but render a
+     non-wake startup placeholder. That lets New Terminal switch to the new tab
+     instantly while the real Ghostty view attaches asynchronously.
      */
     let session = ensureSleepingPanePlaceholderSession(sessionId: ownerSessionId)
     laidOutSleepingPlaceholderSessionIds.insert(ownerSessionId)
@@ -13207,7 +13758,9 @@ final class TerminalWorkspaceView: NSView {
     session.titleBarView.setAgentIconDataUrl(
       sessionAgentIconDataUrls[ownerSessionId],
       colorHex: sessionAgentIconColors[ownerSessionId])
-    session.contentView.setShowsClickToWake(clickToWakeSleepingSessions)
+    session.contentView.setMode(
+      isMountingPlaceholderSession(ownerSessionId) ? .mounting : .sleeping,
+      clickToWakeEnabled: clickToWakeSleepingSessions)
     mountSleepingPanePlaceholderContainer(for: session)
     setPaneTabs(sessionIds, activeSessionId: activeSessionId, on: ownerSessionId)
     session.containerView.frame = rect
@@ -13452,6 +14005,7 @@ final class TerminalWorkspaceView: NSView {
     let items = sessionIds.map { sessionId in
       TerminalSessionTitleBarView.TabItem(
         actions: sessionTitleBarActions[sessionId] ?? [],
+        allowsClose: true,
         allowsFocusMode: sessionFocusModeAvailableSessionIds.contains(sessionId),
         isSleeping: sleepingSessionIds.contains(sessionId),
         isZmxInactive: zmxInactiveSessionIds.contains(sessionId),
@@ -14182,6 +14736,14 @@ final class TerminalWorkspaceView: NSView {
     }
     entry.session.hostView.setInitialLoadingOverlayVisible(false, reason: reason)
     entry.session.hostView.refreshHostedWebView(reason: reason)
+    NativeModeSwitcherDebugLog.append(
+      event: "titlebarModeSwitch.nativeWebKitRunningSent",
+      details: [
+        "mode": entry.session.mode,
+        "projectId": entry.projectId,
+        "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+        "urlKind": Self.modeSwitcherDebugURLKind(webView.url?.absoluteString),
+      ])
     sendEvent(.projectEditorLoadState(projectId: entry.projectId, status: "running", message: nil))
     NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.webkitNavigation.finish", [
       "projectId": entry.projectId,
@@ -14201,6 +14763,16 @@ final class TerminalWorkspaceView: NSView {
     }
     let message = error.localizedDescription
     entry.session.hostView.setInitialLoadingOverlayError(message, reason: reason)
+    NativeModeSwitcherDebugLog.append(
+      event: "titlebarModeSwitch.nativeWebKitLoadFailed",
+      details: [
+        "errorCode": (error as NSError).code,
+        "errorDomain": (error as NSError).domain,
+        "mode": entry.session.mode,
+        "projectId": entry.projectId,
+        "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+        "urlKind": Self.modeSwitcherDebugURLKind(webView.url?.absoluteString),
+      ])
     sendEvent(.projectEditorLoadState(projectId: entry.projectId, status: "error", message: message))
     NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.webkitNavigation.fail", [
       "error": message,
@@ -15707,7 +16279,7 @@ final class TerminalWorkspaceView: NSView {
     {
       return true
     }
-    return activeSessionIds.contains(sessionId) || sleepingSessionIds.contains(sessionId)
+    return activeSessionIds.contains(sessionId) || isPlaceholderPaneSession(sessionId)
   }
 
   private func invalidateFocusedPaneBorderSettlement(reason _: String) {
@@ -16087,18 +16659,21 @@ final class TerminalWorkspaceView: NSView {
         isExpected ? nil : "workspaceFocusMismatch")
     }
     if let session = sleepingPanePlaceholderSessions[sessionId],
-      sleepingSessionIds.contains(sessionId)
+      isPlaceholderPaneSession(sessionId)
     {
       let isCommandPlaceholder =
         commandsPanelIsVisible && orderedVisibleCommandPaneOwnerSessionIds().contains(sessionId)
       let isExpected = isCommandPlaceholder
         ? commandsPanelFocusedSessionId == sessionId
         : focusedSessionId == sessionId
+      let role = isMountingPlaceholderSession(sessionId)
+        ? "mountingPlaceholder"
+        : isCommandPlaceholder ? "sleepingCommandPlaceholder" : "sleepingPlaceholder"
       return (
         session.contentView,
-        isCommandPlaceholder ? "sleepingCommandPlaceholder" : "sleepingPlaceholder",
+        role,
         isExpected,
-        isExpected ? nil : "sleepingFocusMismatch")
+        isExpected ? nil : "placeholderFocusMismatch")
     }
     return (nil, "missing", false, "missingSession")
   }
@@ -16537,11 +17112,115 @@ final class TerminalWorkspaceView: NSView {
     return sessionId
   }
 
-  private func shouldPreserveNonTerminalFirstResponder() -> Bool {
-    guard let responder = window?.firstResponder else {
+  private func shouldPreserveNonTerminalFirstResponder(
+    forRequestedFocusSessionId requestedFocusSessionId: String
+  ) -> Bool {
+    NativeTerminalFocusRequestPolicy.shouldPreserveExplicitFocus(
+      responderScope: explicitFocusResponderScope(),
+      requestedTargetIsVisible: isPaneSessionLayoutVisible(requestedFocusSessionId)
+        || isCommandPaneSessionLayoutVisible(requestedFocusSessionId))
+  }
+
+  private func explicitLayoutFocusRequestDidApply(to sessionId: String) -> Bool {
+    let focusTarget = workspaceFocusTarget(sessionId: sessionId)
+    guard let targetView = focusTarget.view else {
       return false
     }
-    return sessionId(containing: responder) == nil
+    return responder(targetView.window?.firstResponder, isInside: targetView)
+  }
+
+  private func recordAppliedExplicitLayoutFocusRequestIfNeeded(
+    focusRequestId: Int,
+    requestedSessionId: String,
+    focusSurfaceKind: String
+  ) {
+    guard explicitLayoutFocusRequestDidApply(to: requestedSessionId) else {
+      TerminalFocusDebugLog.append(
+        event: "nativeWorkspace.setActiveTerminalSet.focusSkipped",
+        details: [
+          "focusRequestId": focusRequestId,
+          "focusSurfaceKind": focusSurfaceKind,
+          "reason": "focusRequestNotApplied",
+          "requestedSessionId": requestedSessionId,
+          "responder": responderSnapshot(),
+        ])
+      return
+    }
+    lastAppliedLayoutFocusRequestId = focusRequestId
+  }
+
+  private func explicitFocusResponderScopeDescription() -> String {
+    switch explicitFocusResponderScope() {
+    case .noResponder:
+      return "noResponder"
+    case .paneSession:
+      return "paneSession"
+    case .workspaceShell:
+      return "workspaceShell"
+    case .externalChrome:
+      return "externalChrome"
+    case .protectedInput:
+      return "protectedInput"
+    case .unknownNonTerminal:
+      return "unknownNonTerminal"
+    }
+  }
+
+  private func explicitFocusResponderScope() -> NativeTerminalExplicitFocusResponderScope {
+    guard let responder = window?.firstResponder else {
+      return .noResponder
+    }
+    if sessionId(containing: responder) != nil {
+      return .paneSession
+    }
+    if let currentWindow = window, responder === currentWindow {
+      return .workspaceShell
+    }
+    guard let responderView = responder as? NSView else {
+      return .unknownNonTerminal
+    }
+    if responderView is NSTextView || responderView is NSTextField {
+      return .protectedInput
+    }
+    guard responderView === self || responderView.isDescendant(of: self) else {
+      return .externalChrome
+    }
+    if responderView === self {
+      return .workspaceShell
+    }
+    if isProtectedWorkspaceInputResponder(responderView) {
+      return .protectedInput
+    }
+    return .unknownNonTerminal
+  }
+
+  private func isProtectedWorkspaceInputResponder(_ responderView: NSView) -> Bool {
+    if let floatingEditorOverlayView,
+      responderView === floatingEditorOverlayView || responderView.isDescendant(of: floatingEditorOverlayView)
+    {
+      return true
+    }
+    if projectEditorId(containing: responderView) != nil {
+      return true
+    }
+    if responderView is NSTextView || responderView is NSTextField {
+      return true
+    }
+    return hasWebViewAncestorInsideWorkspace(responderView)
+  }
+
+  private func hasWebViewAncestorInsideWorkspace(_ responderView: NSView) -> Bool {
+    var currentView: NSView? = responderView
+    while let view = currentView {
+      if view is WKWebView {
+        return true
+      }
+      if view === self {
+        return false
+      }
+      currentView = view.superview
+    }
+    return false
   }
 
   private func sessionId(containing responder: NSResponder) -> String? {
@@ -19826,7 +20505,7 @@ private final class BrowserFindBarView: NSView, NSTextFieldDelegate {
     button.isBordered = false
     button.target = self
     button.action = action
-    button.toolTip = tooltip
+    button.toolTip = NativeTooltip.text(tooltip)
     button.focusRingType = .none
     button.contentTintColor = NSColor(calibratedWhite: 0.82, alpha: 1)
     if button.image == nil {
@@ -21393,8 +22072,8 @@ private final class TerminalTitleBarTabButton: NSButton {
   }
 
   func setTabToolTip(_ value: String?) {
-    baseToolTip = value
-    toolTip = isOverlayInteractionSuppressed ? nil : value
+    baseToolTip = NativeTooltip.text(value)
+    toolTip = isOverlayInteractionSuppressed ? nil : baseToolTip
   }
 
   func setOverlayInteractionSuppressed(_ suppressed: Bool) {
@@ -21889,10 +22568,15 @@ private final class TerminalTitleBarTabButton: NSButton {
 
      CDXC:PaneTabs 2026-05-15-15:43:
      Tab right-click menus should start with the primary session actions from
-     the collapsed pane menu: Rename Session, Delayed Send, Fork Session,
-     Reload Session, and Pop Out Pane. Keep those actions in one unseparated
-     block, then place the separator before Sleep so the sleep/close tab-scope
-     commands remain visually grouped below the moved actions.
+     the collapsed pane menu: Rename Session, Delayed Send, Close After Done,
+     Fork Session, Reload Session, and Pop Out Pane. Keep those actions in one
+     unseparated block, then place the separator before Sleep so the sleep/close
+     tab-scope commands remain visually grouped below the moved actions.
+
+     CDXC:CloseAfterDone 2026-06-15-21:00:
+     Every native pane or tab context menu that already exposes Delayed Send must
+     place Close After Done directly below it, using the same clock glyph and the
+     same normal menu icon tint as other native menu actions.
 
      CDXC:SessionFocusMode 2026-05-23-09:28:
      Focus belongs in the native tab context menu above Pop Out Pane so users
@@ -21942,7 +22626,7 @@ private final class TerminalTitleBarTabButton: NSButton {
   private func primaryTabContextMenuActions() -> [TerminalTitleBarAction] {
     let popOutAction: TerminalTitleBarAction =
       contextMenuActions.contains(.restorePopOut) ? .restorePopOut : .popOut
-    return [.rename, .delayedSend, .fork, .reload, popOutAction].filter { contextMenuActions.contains($0) }
+    return [.rename, .delayedSend, .closeAfterDone, .fork, .reload, popOutAction].filter { contextMenuActions.contains($0) }
   }
 
   private func addTabActionMenuItem(_ action: TerminalTitleBarAction, to menu: NSMenu) {
@@ -22315,6 +22999,7 @@ private final class TerminalTitleBarTabButton: NSButton {
 private final class TerminalSessionTitleBarView: NSView {
   struct TabItem: Equatable {
     let actions: [TerminalTitleBarAction]
+    let allowsClose: Bool
     let allowsFocusMode: Bool
     let isSleeping: Bool
     let isZmxInactive: Bool
@@ -22735,6 +23420,7 @@ private final class TerminalSessionTitleBarView: NSView {
       button.setZmxInactive(tab.isZmxInactive)
       button.setDelayedSendRemainingLabel(nil)
       button.setContextMenuActions(tab.actions)
+      button.setAllowsClose(allowsTabClosing && tab.allowsClose)
       button.setAllowsFocusMode(tab.allowsFocusMode)
       button.setOverlayInteractionSuppressed(isOverlayInteractionSuppressed)
     }
@@ -22772,15 +23458,17 @@ private final class TerminalSessionTitleBarView: NSView {
     guard allowsTabClosing != allowsClosing else {
       return
     }
-    /**
+    /*
      CDXC:ProjectBrowserTabs 2026-06-13-00:28:
-     Browser project tabs reuse the main native tab strip for navigation only.
-     Disable inline close chrome for that strip so Browser tabs cannot appear to be
-     normal Agents session tabs with close/sleep lifecycle controls.
+     Browser project tabs reuse the main native tab strip for navigation.
+
+     CDXC:ProjectBrowserTabs 2026-06-16-01:46:
+     Global tab-closing availability combines with each TabItem's allowsClose flag so Browser New Tab placeholders can stay selectable without painting or hit-testing close chrome.
      */
     allowsTabClosing = allowsClosing
-    for button in tabButtons {
-      button.setAllowsClose(allowsClosing)
+    for (index, button) in tabButtons.enumerated() {
+      let itemAllowsClose = tabItems.indices.contains(index) ? tabItems[index].allowsClose : true
+      button.setAllowsClose(allowsClosing && itemAllowsClose)
     }
   }
 
@@ -22882,6 +23570,7 @@ private final class TerminalSessionTitleBarView: NSView {
     .mergeAllTabs,
     .rename,
     .delayedSend,
+    .closeAfterDone,
     .fork,
     .reload,
     .popOut,
@@ -24745,7 +25434,7 @@ private final class TerminalSessionTitleBarView: NSView {
     tabAddButton.bezelStyle = .texturedRounded
     tabAddButton.isBordered = false
     tabAddButton.imagePosition = .imageOnly
-    tabAddButton.toolTip = "New Terminal"
+    tabAddButton.toolTip = NativeTooltip.text("New Terminal")
     tabAddButton.target = self
     tabAddButton.action = #selector(performTabAddButton(_:))
     /**
@@ -24773,7 +25462,7 @@ private final class TerminalSessionTitleBarView: NSView {
     tabBrowserButton.bezelStyle = .texturedRounded
     tabBrowserButton.isBordered = false
     tabBrowserButton.imagePosition = .imageOnly
-    tabBrowserButton.toolTip = "New Browser Tab"
+    tabBrowserButton.toolTip = NativeTooltip.text("New Browser Tab")
     tabBrowserButton.target = self
     tabBrowserButton.action = #selector(performTabBrowserButton(_:))
     /*
@@ -24800,7 +25489,7 @@ private final class TerminalSessionTitleBarView: NSView {
     stickyActiveTabButton.bezelStyle = .texturedRounded
     stickyActiveTabButton.isBordered = false
     stickyActiveTabButton.imagePosition = .imageOnly
-    stickyActiveTabButton.toolTip = "Show Active Tab"
+    stickyActiveTabButton.toolTip = NativeTooltip.text("Show Active Tab")
     stickyActiveTabButton.target = self
     stickyActiveTabButton.action = #selector(performStickyActiveTabButton(_:))
     stickyActiveTabButton.sendAction(on: [.leftMouseDown])
@@ -24822,7 +25511,7 @@ private final class TerminalSessionTitleBarView: NSView {
     actionMenuButton.bezelStyle = .texturedRounded
     actionMenuButton.isBordered = false
     actionMenuButton.imagePosition = .imageOnly
-    actionMenuButton.toolTip = "Pane Actions"
+    actionMenuButton.toolTip = NativeTooltip.text("Pane Actions")
     actionMenuButton.target = self
     actionMenuButton.action = #selector(performActionMenuButton(_:))
     /**
@@ -24958,7 +25647,7 @@ private final class TerminalSessionTitleBarView: NSView {
 
   private static func actionGroup(for action: TerminalTitleBarAction) -> Int {
     switch action {
-    case .reload, .fork, .rename, .delayedSend:
+    case .reload, .fork, .rename, .delayedSend, .closeAfterDone:
       return 0
     case .splitHorizontal, .splitVertical, .rotatePanesClockwise, .mergeAllTabs:
       return 1
@@ -24999,6 +25688,8 @@ private final class TerminalSessionTitleBarView: NSView {
       return makeActionButton(systemSymbolName: "pencil", fallbackTitle: "R", tooltip: "Rename Session")
     case .delayedSend:
       return makeActionButton(systemSymbolName: "clock", fallbackTitle: "D", tooltip: "Delayed Send")
+    case .closeAfterDone:
+      return makeActionButton(systemSymbolName: "clock", fallbackTitle: "C", tooltip: "Close After Done")
     case .fork:
       return makeActionButton(systemSymbolName: "arrow.triangle.branch", fallbackTitle: "F", tooltip: "Fork Session")
     case .reload:
@@ -25040,6 +25731,8 @@ private final class TerminalSessionTitleBarView: NSView {
       return "Rename Session"
     case .delayedSend:
       return "Delayed Send"
+    case .closeAfterDone:
+      return "Close After Done"
     case .fork:
       return "Fork Session"
     case .reload:
@@ -25082,6 +25775,8 @@ private final class TerminalSessionTitleBarView: NSView {
       symbolName = "pencil"
     case .delayedSend:
       symbolName = "clock"
+    case .closeAfterDone:
+      symbolName = "clock"
     case .fork:
       symbolName = "arrow.triangle.branch"
     case .reload:
@@ -25115,7 +25810,7 @@ private final class TerminalSessionTitleBarView: NSView {
      collapsed action menu.
      */
     button.sendAction(on: [.leftMouseDown])
-    button.toolTip = tooltip
+    button.toolTip = NativeTooltip.text(tooltip)
     if let image = NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: tooltip) {
       button.image = image
     } else {
@@ -25323,11 +26018,13 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   private static let toolbarHorizontalPadding: CGFloat = 12
   private static let toolbarItemGap: CGFloat = 10
   private static let addressMinimumWidth: CGFloat = 180
+  private static let browserHistoryPageSize = 20
+  private static let feedbackToolUnavailableTooltip = "This site disallows using this tool"
 
-  private let browserView: NSView
+  private var browserView: NSView
   private weak var chromiumView: GhostexCEFBrowserView?
   private weak var webView: WKWebView?
-  private let browserFindBar: BrowserFindBarView?
+  private var browserFindBar: BrowserFindBarView?
   private let showsBrowserToolbar: Bool
   private let initialLoadingOverlayView: ProjectEditorInitialLoadingOverlayView?
   private let onFocus: (() -> Void)?
@@ -25335,8 +26032,11 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   private let onInjectFeedbackTool: (() -> Void)?
   private let onShowProfilePicker: (() -> Void)?
   private let onShowImportSettings: (() -> Void)?
+  private let onAddressNavigation: ((URL) -> Bool)?
   private let toolbarView = NSView(frame: .zero)
   private var browserFeedbackTool: BrowserFeedbackTool
+  private var browserHistoryItems: [NativeBrowserHistoryItem] = []
+  private var browserHistoryVisibleLimit = WebPaneHostView.browserHistoryPageSize
   var chromiumLiveResizeBackingHeight: CGFloat? {
     didSet {
       if chromiumLiveResizeBackingHeight != oldValue {
@@ -25376,6 +26076,11 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     fallbackTitle: "AG",
     tooltip: "Agentation"
   )
+  private let historyButton = WebPaneHostView.makeToolbarButton(
+    systemSymbolName: "clock.arrow.circlepath",
+    fallbackTitle: "H",
+    tooltip: "History"
+  )
   private let profileButton = WebPaneHostView.makeToolbarButton(
     systemSymbolName: "person.crop.circle",
     fallbackTitle: "P",
@@ -25402,7 +26107,8 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     onOpenDevTools: (() -> Void)? = nil,
     onInjectFeedbackTool: (() -> Void)? = nil,
     onShowProfilePicker: (() -> Void)? = nil,
-    onShowImportSettings: (() -> Void)? = nil
+    onShowImportSettings: (() -> Void)? = nil,
+    onAddressNavigation: ((URL) -> Bool)? = nil
   ) {
     self.browserView = browserView
     self.chromiumView = chromiumView
@@ -25417,6 +26123,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     self.onInjectFeedbackTool = onInjectFeedbackTool
     self.onShowProfilePicker = onShowProfilePicker
     self.onShowImportSettings = onShowImportSettings
+    self.onAddressNavigation = onAddressNavigation
     super.init(frame: .zero)
     translatesAutoresizingMaskIntoConstraints = true
     autoresizesSubviews = true
@@ -25519,6 +26226,51 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     chromiumView
   }
 
+  func replaceHostedBrowserView(
+    browserView nextBrowserView: NSView,
+    chromiumView nextChromiumView: GhostexCEFBrowserView?,
+    webView nextWebView: WKWebView?,
+    reason: String
+  ) {
+    /*
+     CDXC:ProjectBrowserTabs 2026-06-15-20:48:
+     A New Tab placeholder becomes a real browser only after address-bar navigation. Replace the hosted content view in place so AppKit layout, toolbar hit-testing, and the tab strip keep the same ownership boundaries while CEF is created just-in-time.
+     */
+    navigationObservations.removeAll()
+    browserFindBar?.removeFromSuperview()
+    browserFindBar = nil
+    browserView.removeFromSuperview()
+    browserView = nextBrowserView
+    chromiumView = nextChromiumView
+    webView = nextWebView
+    browserView.translatesAutoresizingMaskIntoConstraints = true
+    browserView.autoresizingMask = []
+    addSubview(browserView)
+    if let chromiumView {
+      let findBar = BrowserFindBarView(chromiumView: chromiumView)
+      chromiumView.findResultHandler = { [weak findBar] count, activeMatchOrdinal, finalUpdate in
+        findBar?.setFindResult(
+          count: count,
+          activeMatchOrdinal: activeMatchOrdinal,
+          finalUpdate: finalUpdate)
+      }
+      browserFindBar = findBar
+      addSubview(findBar)
+    }
+    refreshHostedWebView(reason: reason)
+    updateBrowserToolbarState()
+  }
+
+  func focusAddressField(selectAll: Bool) {
+    guard showsBrowserToolbar else {
+      return
+    }
+    window?.makeFirstResponder(addressField)
+    if selectAll {
+      addressField.selectText(nil)
+    }
+  }
+
   var browserFeedbackToolRawValue: String {
     browserFeedbackTool.rawValue
   }
@@ -25526,6 +26278,19 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   func setBrowserFeedbackTool(_ value: String?) {
     browserFeedbackTool = BrowserFeedbackTool.normalized(value)
     updateBrowserFeedbackToolButton()
+  }
+
+  func setBrowserHistoryItems(_ items: [NativeBrowserHistoryItem]) {
+    /*
+     CDXC:BrowserHistory 2026-06-15-10:25:
+     The toolbar history menu displays the latest project-family links supplied
+     by the sidebar. Keep the host's visible page size bounded so opening the
+     menu starts at the most recent 20 links, with explicit Show More paging.
+     */
+    browserHistoryItems = items
+    browserHistoryVisibleLimit = min(
+      max(Self.browserHistoryPageSize, min(browserHistoryVisibleLimit, items.count)),
+      max(Self.browserHistoryPageSize, items.count))
   }
 
   func refreshHostedWebView(reason: String) {
@@ -25809,7 +26574,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     toolbarView.wantsLayer = true
     toolbarView.layer?.backgroundColor = NSColor.black.cgColor
 
-    [backButton, forwardButton, reloadButton, zoomButton, reactGrabButton, profileButton, appearanceButton, devToolsButton].forEach {
+    [backButton, forwardButton, reloadButton, zoomButton, reactGrabButton, historyButton, profileButton, appearanceButton, devToolsButton].forEach {
       button in
       button.target = self
       toolbarView.addSubview(button)
@@ -25821,6 +26586,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     reloadButton.action = #selector(reloadPage)
     devToolsButton.action = #selector(openDevTools)
     reactGrabButton.action = #selector(injectFeedbackTool)
+    historyButton.action = #selector(showHistoryMenu)
     updateBrowserFeedbackToolButton()
     profileButton.action = #selector(showProfilePicker)
     appearanceButton.action = #selector(showAppearanceMenu)
@@ -25888,11 +26654,16 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     /**
      CDXC:BrowserPanes 2026-05-02-17:13
      The browser address row should match the reference chrome exactly: the
-     selected feedback tool, profile, theme, and DevTools live to the right of the URL field.
+     selected feedback tool, history, profile, theme, and DevTools live to the right of the URL field.
      Import remains a profile-menu action instead of a fifth always-visible
      toolbar button so the pane chrome does not drift from the expected layout.
+
+     CDXC:BrowserHistory 2026-06-15-10:25:
+     The History button belongs immediately left of the profile button in the
+     real toolbar layout. Keep it in the right-button run instead of overlaying
+     the address field so hit-testing remains normal AppKit sibling geometry.
      */
-    let rightButtons = [zoomButton, reactGrabButton, profileButton, appearanceButton, devToolsButton].filter { !$0.isHidden }
+    let rightButtons = [zoomButton, reactGrabButton, historyButton, profileButton, appearanceButton, devToolsButton].filter { !$0.isHidden }
     var rightX = toolbarView.bounds.width - Self.toolbarHorizontalPadding
     for button in rightButtons.reversed() {
       rightX -= Self.toolbarButtonSize.width
@@ -25926,8 +26697,9 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     }
     backButton.isEnabled = canGoBack()
     forwardButton.isEnabled = canGoForward()
-    reloadButton.toolTip = isPageLoading() ? "Stop Loading" : "Reload"
+    reloadButton.toolTip = NativeTooltip.text(isPageLoading() ? "Stop Loading" : "Reload")
     updatePageZoomButton()
+    updateBrowserFeedbackToolButton()
     let lockSymbol = URL(string: currentURLString() ?? "")?.scheme == "https" ? "lock.fill" : "globe"
     securityIcon.image = NSImage(systemSymbolName: lockSymbol, accessibilityDescription: nil)
     if !isEditingAddress {
@@ -25949,6 +26721,16 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
 
   private func currentURLString() -> String? {
     chromiumView?.currentURLString ?? webView?.url?.absoluteString
+  }
+
+  private static func browserFeedbackToolUnavailable(urlString: String?) -> Bool {
+    guard let trimmed = urlString?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !trimmed.isEmpty,
+      let host = URL(string: trimmed)?.host?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+    else {
+      return false
+    }
+    return host == "github.com" || host.hasSuffix(".github.com")
   }
 
   private func canGoBack() -> Bool {
@@ -25988,9 +26770,9 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       zoomButton.isHidden = !shouldShowZoomButton
       needsLayout = true
     }
-    zoomButton.toolTip = shouldShowZoomButton
+    zoomButton.toolTip = NativeTooltip.text(shouldShowZoomButton
       ? "Reset Page Zoom (\(zoomPercentText()))"
-      : "Reset Page Zoom"
+      : "Reset Page Zoom")
   }
 
   func refreshPageZoomState(reason: String) {
@@ -26094,11 +26876,20 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       "input": input,
       "url": url.absoluteString,
     ])
+    navigateBrowserToolbar(to: url, reason: "addressCommit")
+  }
+
+  private func navigateBrowserToolbar(to url: URL, reason _: String) {
     addressField.stringValue = url.absoluteString
-    if let chromiumView {
+    if onAddressNavigation?(url) == true {
+      updateBrowserToolbarState()
+    } else if let chromiumView {
       chromiumView.loadURLString(url.absoluteString)
+    } else if let webView {
+      webView.load(Self.browserPaneNavigationRequest(url: url))
     } else {
-      webView?.load(Self.browserPaneNavigationRequest(url: url))
+      NSSound.beep()
+      updateBrowserToolbarState()
     }
   }
 
@@ -26128,13 +26919,24 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   }
 
   private func updateBrowserFeedbackToolButton() {
-    reactGrabButton.toolTip = browserFeedbackTool.tooltip
+    /**
+     CDXC:BrowserFeedbackTools 2026-06-15-01:52:
+     GitHub disallows the browser feedback injection tool. Disable the native toolbar feedback button on github.com pages and show "This site disallows using this tool" so users understand the tool is unavailable before clicking.
+     */
+    let feedbackToolUnavailable = Self.browserFeedbackToolUnavailable(urlString: currentURLString())
+    reactGrabButton.isEnabled = !feedbackToolUnavailable
+    reactGrabButton.toolTip = NativeTooltip.text(
+      feedbackToolUnavailable ? Self.feedbackToolUnavailableTooltip : browserFeedbackTool.tooltip)
     if reactGrabButton.image == nil {
       reactGrabButton.title = browserFeedbackTool.fallbackTitle
     }
   }
 
   @objc private func injectFeedbackTool() {
+    guard !Self.browserFeedbackToolUnavailable(urlString: currentURLString()) else {
+      updateBrowserFeedbackToolButton()
+      return
+    }
     let action = browserFeedbackTool.logAction
     NSLog(
       "Browser feedback toolbar action: %@ url=%@",
@@ -26148,6 +26950,118 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     onInjectFeedbackTool?()
     logBrowserToolbarActionDiagnostics(action: action, phase: "after")
     scheduleBrowserToolbarActionDiagnostics(action: action)
+  }
+
+  @objc private func showHistoryMenu() {
+    showBrowserHistoryMenu(resetVisibleLimit: true)
+  }
+
+  private func showBrowserHistoryMenu(resetVisibleLimit: Bool) {
+    if resetVisibleLimit {
+      browserHistoryVisibleLimit = Self.browserHistoryPageSize
+    }
+    onFocus?()
+    let menu = NSMenu(title: "History")
+    let visibleItems = Array(browserHistoryItems.prefix(browserHistoryVisibleLimit))
+    if visibleItems.isEmpty {
+      let emptyItem = NSMenuItem(title: "No History", action: nil, keyEquivalent: "")
+      emptyItem.isEnabled = false
+      menu.addItem(emptyItem)
+    } else {
+      for item in visibleItems {
+        let menuItem = NSMenuItem(title: "", action: #selector(openHistoryItem(_:)), keyEquivalent: "")
+        menuItem.target = self
+        menuItem.representedObject = item.url
+        menuItem.attributedTitle = Self.browserHistoryMenuTitle(for: item)
+        menuItem.image = Self.browserHistoryMenuImage(faviconDataUrl: item.faviconDataUrl)
+        menuItem.toolTip = NativeTooltip.browserHistory(
+          title: Self.browserHistoryTitle(for: item),
+          url: item.url)
+        menu.addItem(menuItem)
+      }
+      if browserHistoryItems.count > visibleItems.count {
+        menu.addItem(NSMenuItem.separator())
+        let showMoreItem = NSMenuItem(
+          title: "Show More",
+          action: #selector(showMoreHistoryItems(_:)),
+          keyEquivalent: "")
+        showMoreItem.target = self
+        showMoreItem.image = NSImage(systemSymbolName: "chevron.down.circle", accessibilityDescription: "Show More")
+        menu.addItem(showMoreItem)
+      }
+    }
+    NSMenu.popUpContextMenu(menu, with: syntheticMenuEvent(), for: historyButton)
+  }
+
+  @objc private func showMoreHistoryItems(_ sender: NSMenuItem) {
+    browserHistoryVisibleLimit = min(
+      browserHistoryItems.count,
+      browserHistoryVisibleLimit + Self.browserHistoryPageSize)
+    DispatchQueue.main.async { [weak self] in
+      self?.showBrowserHistoryMenu(resetVisibleLimit: false)
+    }
+  }
+
+  @objc private func openHistoryItem(_ sender: NSMenuItem) {
+    guard let urlString = sender.representedObject as? String,
+      let url = URL(string: urlString)
+    else {
+      return
+    }
+    onFocus?()
+    navigateBrowserToolbar(to: url, reason: "historyMenu")
+  }
+
+  private static func browserHistoryTitle(for item: NativeBrowserHistoryItem) -> String {
+    let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !title.isEmpty, title.lowercased() != "about:blank" {
+      return title
+    }
+    return URL(string: item.url)?.host ?? "Browser"
+  }
+
+  private static func browserHistoryMenuTitle(for item: NativeBrowserHistoryItem) -> NSAttributedString {
+    let title = browserHistoryTitle(for: item)
+    let url = truncatedBrowserHistoryURL(item.url)
+    let text = "\(title)\n\(url)"
+    let attributed = NSMutableAttributedString(string: text)
+    let titleRange = NSRange(location: 0, length: (title as NSString).length)
+    let urlRange = NSRange(location: titleRange.length + 1, length: (url as NSString).length)
+    attributed.addAttributes(
+      [
+        .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+        .foregroundColor: NSColor.labelColor,
+      ],
+      range: titleRange)
+    attributed.addAttributes(
+      [
+        .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+        .foregroundColor: NSColor.secondaryLabelColor,
+      ],
+      range: urlRange)
+    return attributed
+  }
+
+  private static func truncatedBrowserHistoryURL(_ value: String) -> String {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.count > 72 else {
+      return trimmed
+    }
+    return "\(trimmed.prefix(72))..."
+  }
+
+  private static func browserHistoryMenuImage(faviconDataUrl: String?) -> NSImage? {
+    if let faviconDataUrl,
+      let commaIndex = faviconDataUrl.firstIndex(of: ","),
+      let data = Data(base64Encoded: String(faviconDataUrl[faviconDataUrl.index(after: commaIndex)...])),
+      let image = NSImage(data: data)
+    {
+      image.size = CGSize(width: 16, height: 16)
+      return image
+    }
+    let image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
+    image?.size = CGSize(width: 16, height: 16)
+    return image
   }
 
   @objc private func showProfilePicker() {
@@ -26249,6 +27163,9 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     if reactGrabButton.frame.contains(point) {
       return "feedbackToolButton"
     }
+    if historyButton.frame.contains(point) {
+      return "historyButton"
+    }
     if profileButton.frame.contains(point) {
       return "profileButton"
     }
@@ -26291,6 +27208,9 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     }
     if reactGrabButton.frame.contains(point) {
       return reactGrabButton
+    }
+    if historyButton.frame.contains(point) {
+      return historyButton
     }
     if profileButton.frame.contains(point) {
       return profileButton
@@ -26385,7 +27305,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     button.bezelStyle = .texturedRounded
     button.isBordered = false
     button.imagePosition = .imageOnly
-    button.toolTip = tooltip
+    button.toolTip = NativeTooltip.text(tooltip)
     button.contentTintColor = NSColor(calibratedWhite: 0.86, alpha: 0.82)
     button.focusRingType = .none
     if let image = NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: tooltip) {
@@ -26827,7 +27747,7 @@ private final class TerminalPaneScrollButton: NSButton {
     layer?.shadowOffset = CGSize(width: 0, height: -10)
     layer?.shadowOpacity = 0.32
     layer?.shadowRadius = 22
-    toolTip = direction == .bottom ? "Scroll terminal to bottom" : "Scroll terminal to top"
+    toolTip = NativeTooltip.text(direction == .bottom ? "Scroll terminal to bottom" : "Scroll terminal to top")
     isEnabled = false
     isHidden = true
     alphaValue = 0
@@ -26928,8 +27848,14 @@ private final class TerminalPaneLeafContainerView: NSView {
 }
 
 private final class SleepingPanePlaceholderContentView: NSView {
+  enum Mode {
+    case mounting
+    case sleeping
+  }
+
   var onWakeRequested: (() -> Void)?
   private let wakeLabel = NSTextField(wrappingLabelWithString: "Press Any Key to Wake")
+  private var mode: Mode = .sleeping
 
   override var isOpaque: Bool {
     true
@@ -26991,6 +27917,9 @@ private final class SleepingPanePlaceholderContentView: NSView {
 
   override func mouseDown(with event: NSEvent) {
     window?.makeFirstResponder(self)
+    guard mode == .sleeping else {
+      return
+    }
     onWakeRequested?()
   }
 
@@ -26999,7 +27928,7 @@ private final class SleepingPanePlaceholderContentView: NSView {
   }
 
   override func keyDown(with event: NSEvent) {
-    guard Self.isAlphanumericWakeKey(event) else {
+    guard mode == .sleeping, Self.isAlphanumericWakeKey(event) else {
       super.keyDown(with: event)
       return
     }
@@ -27007,7 +27936,27 @@ private final class SleepingPanePlaceholderContentView: NSView {
   }
 
   func setShowsClickToWake(_ shows: Bool) {
-    wakeLabel.isHidden = !shows
+    setMode(.sleeping, clickToWakeEnabled: shows)
+  }
+
+  func setMode(_ mode: Mode, clickToWakeEnabled: Bool) {
+    self.mode = mode
+    switch mode {
+    case .mounting:
+      /*
+       CDXC:TerminalCreationFocus 2026-06-14-18:48:
+       A mounting placeholder is not a sleep/wake affordance. It communicates that Ghostty is attaching and ignores click/key wake input until terminalReady swaps in the real terminal.
+
+       CDXC:TerminalCreationFocus 2026-06-14-19:02:
+       New-terminal placeholders should be visually quiet: keep the native placeholder black and blank while Ghostty mounts instead of showing centered status text.
+       */
+      wakeLabel.stringValue = ""
+      wakeLabel.isHidden = true
+    case .sleeping:
+      wakeLabel.stringValue = "Press Any Key to Wake"
+      wakeLabel.isHidden = !clickToWakeEnabled
+    }
+    needsLayout = true
   }
 
   private static func isAlphanumericWakeKey(_ event: NSEvent) -> Bool {

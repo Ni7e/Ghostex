@@ -24,6 +24,34 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("project editor companion retarget source", () => {
+  test("allows mounted terminals to retarget the companion even if mounting state overlaps", () => {
+    /*
+     * CDXC:ProjectEditorCompanion 2026-06-15-09:55:
+     * Source/Browser/Kanban sidebar clicks must surface the selected session in
+     * the companion pane. Mounting state should block only true placeholders
+     * without a render surface, not already-mounted terminal or web-pane views.
+     */
+    const eligibilitySource = sourceBetween(
+      terminalWorkspaceSource,
+      "private func isProjectEditorCompanionEligibleSession",
+      "func focusProjectEditorCompanionSession",
+    );
+    expect(eligibilitySource).toContain("!isMountingPlaceholderSession(sessionId)");
+    expect(eligibilitySource).not.toContain("!mountingSessionIds.contains(sessionId)");
+    expect(terminalWorkspaceSource).toContain(
+      "mountingSessionIds.contains(sessionId) && !hasPaneRenderSurface(sessionId)",
+    );
+
+    const focusCommandSource = sourceBetween(
+      terminalWorkspaceSource,
+      "func focusProjectEditorCompanionSession",
+      "private func scheduleDelayedProjectEditorCompanionClick",
+    );
+    expect(focusCommandSource).toContain('"mountingSessionIds"');
+    expect(focusCommandSource).toContain('"hasPaneRenderSurface"');
+    expect(focusCommandSource).toContain('"isMountingPlaceholderSession"');
+  });
+
   test("moves the old rendered companion surface before focusing the requested session", () => {
     /*
      * CDXC:ProjectEditorCompanion 2026-06-13-22:39:

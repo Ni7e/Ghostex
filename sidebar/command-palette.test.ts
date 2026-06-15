@@ -8,6 +8,8 @@ import {
   createCommandPaletteSessionSections,
   filterCommandPaletteCurrentSessionItems,
   getCommandPaletteCommandQuery,
+  getCommandPaletteModeSwitchSelectionRange,
+  getCommandPaletteQueryForRequestedMode,
   isCommandPaletteCommandMode,
   sortCommandPalettePreviousSessionsByLastActive,
   type CommandPaletteCurrentSessionItem,
@@ -19,6 +21,10 @@ const commandPaletteSource = readFileSync(
 );
 const commandPaletteSearchSource = readFileSync(
   new URL("./command-palette-session-search.ts", import.meta.url),
+  "utf8",
+);
+const commandInputSource = readFileSync(
+  new URL("../components/ui/command.tsx", import.meta.url),
   "utf8",
 );
 const sidebarStylesSource = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
@@ -39,6 +45,24 @@ describe("command palette modes", () => {
     expect(getCommandPaletteCommandQuery(">focus left")).toBe("focus left");
     expect(getCommandPaletteCommandQuery("> focus left")).toBe("focus left");
     expect(getCommandPaletteCommandQuery("focus left")).toBe("");
+  });
+
+  test("switches an already-open palette between session and command modes", () => {
+    /*
+     * CDXC:CommandPalette 2026-06-15-10:27:
+     * Cmd+P and Cmd+Shift+P should switch the visible shared palette in-place:
+     * adding `>` preserves a session-search query as a command query, removing
+     * `>` preserves a command query as a session-search query, and same-mode
+     * repeats remain no-ops.
+     */
+    expect(getCommandPaletteQueryForRequestedMode("agent", ">")).toBe(">agent");
+    expect(getCommandPaletteQueryForRequestedMode(">agent", "")).toBe("agent");
+    expect(getCommandPaletteQueryForRequestedMode("> agent", "")).toBe("agent");
+    expect(getCommandPaletteQueryForRequestedMode("agent", "")).toBe("agent");
+    expect(getCommandPaletteQueryForRequestedMode(">agent", ">")).toBe(">agent");
+    expect(getCommandPaletteModeSwitchSelectionRange(">agent")).toEqual({ start: 1, end: 6 });
+    expect(getCommandPaletteModeSwitchSelectionRange("> agent")).toEqual({ start: 2, end: 7 });
+    expect(getCommandPaletteModeSwitchSelectionRange("agent")).toEqual({ start: 0, end: 5 });
   });
 
   test("filters current sessions by session metadata and project label", () => {
@@ -216,6 +240,24 @@ describe("command palette modes", () => {
 });
 
 describe("command palette source contracts", () => {
+  test("keeps Escape as close and leaves the input clear button unboxed", () => {
+    /*
+     * CDXC:CommandPalette 2026-06-15-16:21:
+     * Escape while the command palette is shown closes the palette even with
+     * a non-empty query. The clear affordance remains a bare X glyph inside
+     * the command input, without inherited square button chrome.
+     */
+    expect(commandInputSource).toContain("clearOnEscape = true");
+    expect(commandInputSource).toContain(
+      'clearOnEscape && event.key === "Escape" && currentValue.length > 0',
+    );
+    expect(commandInputSource).toContain('data-slot="command-input-clear"');
+    expect(commandPaletteSource).toContain("clearOnEscape={false}");
+    expect(commandPaletteSource).toContain("onOpenChange(false);");
+    expect(sidebarStylesSource).toContain('[data-slot="command-input-clear"]');
+    expect(sidebarStylesSource).toContain("border: 0 !important;");
+  });
+
   test("keeps session search copy and single-row selection styling scoped", () => {
     /*
      * CDXC:CommandPalette 2026-06-13-22:22:
@@ -224,6 +266,9 @@ describe("command palette source contracts", () => {
      * inside the command palette.
     */
     expect(commandPaletteSource).toContain("Search sessions or write > for commands...");
+    expect(commandPaletteSource).toContain("openRequestSequence");
+    expect(commandPaletteSource).toContain("pendingModeSwitchSelectionRef");
+    expect(commandPaletteSource).toContain('data-ghostex-command-palette-input="true"');
     expect(commandPaletteSearchSource).toContain('heading: "Current Project"');
     expect(commandPaletteSearchSource).toContain('heading: "Active Projects"');
     expect(commandPaletteSearchSource).toContain('heading: "Collapsed Projects"');

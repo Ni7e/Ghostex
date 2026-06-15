@@ -108,7 +108,26 @@ const SIDEBAR_SESSION_TAG_LIST_SEPARATOR_SET = new Set<string>(
  * separators between the default Priority, Progress, and Type groups. Keep this
  * separate from the durable sessionTag union so changing filter chrome cannot
  * rewrite existing session metadata.
+ *
+ * CDXC:SessionTagFilters 2026-06-15-18:32:
+ * First-run sidebar tag filters should show a smaller triage set by default.
+ * Keep High Priority, Low Priority, Todo, Bug, and Feature hidden from the
+ * filter menu until users opt them back in from Settings, while Testing,
+ * Research, and Design remain visible.
+ *
+ * CDXC:SessionTagFilters 2026-06-15-22:10:
+ * Tags hidden by the first-run default should also be disabled so Reset to
+ * Default does not leave a filter row looking enabled while its eye state is
+ * hidden. Treat those defaults as fully off until the user turns them back on.
  */
+const DEFAULT_OFF_SIDEBAR_SESSION_TAG_FILTERS = new Set<SidebarSessionTag>([
+  "high-priority",
+  "low-priority",
+  "todo",
+  "bug",
+  "feature",
+]);
+
 export const DEFAULT_SIDEBAR_SESSION_TAG_LIST_ITEMS: readonly SidebarSessionTagListItem[] = [
   ...SIDEBAR_SESSION_TAG_SECTIONS[0]!.options.map((option) =>
     createDefaultSidebarSessionTagListTagItem(option.value),
@@ -198,15 +217,44 @@ export function getEnabledVisibleSidebarSessionTags(
   );
 }
 
+export function getEnabledVisibleSidebarSessionTagSections(
+  items: unknown,
+  options: { includeTags?: readonly SidebarSessionTag[] } = {},
+): SidebarSessionTagSection[] {
+  /*
+   * CDXC:SessionTagFilters 2026-06-15-22:33:
+   * Every tag-selection surface should derive its menu sections from the same
+   * enabled-and-visible sidebar tag list. This keeps Previous Sessions filters
+   * and session-card Tag as menus aligned with Settings Reset to Default while
+   * still allowing a caller to include an already-selected hidden tag for
+   * removal.
+   */
+  const visibleTagSet = new Set<SidebarSessionTag>();
+  for (const item of normalizeSidebarSessionTagListItems(items)) {
+    if (item.type === "tag" && item.enabled && item.visible) {
+      visibleTagSet.add(item.tag);
+    }
+  }
+  for (const tag of options.includeTags ?? []) {
+    visibleTagSet.add(tag);
+  }
+
+  return SIDEBAR_SESSION_TAG_SECTIONS.map((section) => ({
+    ...section,
+    options: section.options.filter((option) => visibleTagSet.has(option.value)),
+  })).filter((section) => section.options.length > 0);
+}
+
 function createDefaultSidebarSessionTagListTagItem(
   tag: SidebarSessionTag,
 ): SidebarSessionTagListItem {
+  const isDefaultOff = DEFAULT_OFF_SIDEBAR_SESSION_TAG_FILTERS.has(tag);
   return {
-    enabled: true,
+    enabled: !isDefaultOff,
     id: tag,
     tag,
     type: "tag",
-    visible: true,
+    visible: !isDefaultOff,
   };
 }
 

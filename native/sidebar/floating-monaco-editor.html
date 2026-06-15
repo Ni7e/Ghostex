@@ -19,10 +19,14 @@
       body {
         /*
          * CDXC:PromptEditor 2026-05-28-13:52:
-         * The standalone Monaco editor body should match the unified #0e0e0e
-         * modal background when native hosts it as an editor overlay.
+         * The standalone Monaco editor body should match the unified modal
+         * background when native hosts it as an editor overlay.
+         *
+         * CDXC:SidebarTheme 2026-06-15-01:43:
+         * Prompt editor overlay chrome follows --app-modal-background so Dark 1
+         * uses #191919 while Dark 2 preserves #0e0e0e.
          */
-        background: #0e0e0e;
+        background: var(--app-modal-background, #191919);
       }
     </style>
     <script src="./monaco/vs/loader.js"></script>

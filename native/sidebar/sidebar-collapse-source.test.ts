@@ -82,7 +82,12 @@ describe("native sidebar collapse source", () => {
      *
      * CDXC:SidebarCollapse 2026-06-13-10:53:
      * Keep the expanded hit target inside the titlebar vertically and show a
-     * hover tooltip containing only the assigned Toggle Sidebar hotkey.
+     * hover tooltip for the assigned Toggle Sidebar hotkey.
+     *
+     * CDXC:SidebarCollapse 2026-06-15-13:34:
+     * The hover tooltip should read `Toggle Sidebar (<hotkey>)` instead of
+     * showing only the shortcut, so the native titlebar control names the
+     * command and its current binding.
      *
      * CDXC:SidebarCollapse 2026-06-13-01:00:
      * Move only the visible dot 2px lower while keeping the expanded native hit
@@ -131,7 +136,10 @@ describe("native sidebar collapse source", () => {
     expect(titlebarHostSource).toContain("sidebarSide: SidebarSide;");
     expect(titlebarHostSource).toContain("type SidebarSide");
     expect(titlebarHostSource).toContain("toggleSidebarHotkeyLabel: string;");
-    expect(titlebarHostSource).toContain("formatSidebarHotkeyLabel(settings.hotkeys.toggleSidebarCollapsed)");
+    expect(titlebarHostSource).toContain("function formatToggleSidebarTooltipLabel(hotkey: string | undefined): string");
+    expect(titlebarHostSource).toContain('return `Toggle Sidebar (${formatSidebarHotkeyLabel(hotkey)})`;');
+    expect(titlebarHostSource).toContain("formatToggleSidebarTooltipLabel(");
+    expect(titlebarHostSource).toContain("settings.hotkeys.toggleSidebarCollapsed");
     expect(titlebarHostSource).toContain(
       'sidebarSide: bootstrap.sidebarSide === "right" ? "right" : settings.sidebarSide',
     );

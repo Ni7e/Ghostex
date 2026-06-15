@@ -21,6 +21,11 @@ const nativeBrowserProfilesSource = readFileSync(
   new URL("../macos/ghostexHost/Sources/ghostexHost/NativeBrowserProfiles.swift", import.meta.url),
   "utf8",
 );
+const nativeTooltipSource = readFileSync(
+  new URL("../macos/ghostexHost/Sources/ghostexHost/NativeTooltip.swift", import.meta.url),
+  "utf8",
+);
+const gpuiMainSource = readFileSync(new URL("../../gpui/src/main.rs", import.meta.url), "utf8");
 const terminalWorkspaceSource = readFileSync(
   new URL("../macos/ghostexHost/Sources/ghostexHost/TerminalWorkspaceView.swift", import.meta.url),
   "utf8",
@@ -202,6 +207,94 @@ describe("chromium browser source", () => {
     expect(hostEventHandlerSource).toContain("handleBrowserOpenInNewTabRequested(hostEvent);");
   });
 
+  test("persists project Browser tabs outside the active project editor mode", () => {
+    /*
+     * CDXC:ProjectBrowserTabs 2026-06-15-10:15:
+     * Browser tabs must restore after app launch even when the user last
+     * switched away to Agents, Source, or Kanban. Keep the Browser tab group on
+     * project-local Browser memory instead of coupling it to projectEditor.isOpen.
+     */
+    const projectTypeSource = sourceBetween(
+      nativeSidebarSource,
+      "type NativeProject =",
+      "function isQuickProject",
+    );
+    expect(projectTypeSource).toContain("projectBrowser?: NativeProjectBrowserRestoreState;");
+
+    const projectNormalizerSource = sourceBetween(
+      nativeSidebarSource,
+      "function normalizeStoredNativeProject",
+      "function normalizeStoredProjectEditorRestoreState",
+    );
+    expect(projectNormalizerSource).toContain(
+      "normalizeStoredProjectBrowserRestoreState(project.projectBrowser)",
+    );
+    expect(projectNormalizerSource).toContain("projectBrowser: normalizedProjectBrowser");
+
+    const browserMemoryWriterSource = sourceBetween(
+      nativeSidebarSource,
+      "function setProjectBrowserPersistedState",
+      "function setProjectEditorCompanionPaneHidden",
+    );
+    expect(browserMemoryWriterSource).toContain("project.projectBrowser");
+    expect(browserMemoryWriterSource).toContain("return { ...project, projectBrowser: nextProjectBrowser };");
+
+    const browserOpenSource = sourceBetween(
+      nativeSidebarSource,
+      "function openProjectGitEditorSurface",
+      "function openProjectTasksEditorSurface",
+    );
+    expect(browserOpenSource).toContain(
+      "surfaceState?.mode === \"git\" ? surfaceState : project.projectBrowser",
+    );
+    expect(browserOpenSource).toContain("setProjectBrowserPersistedState(");
+
+    const projectEditorTabSelectedSource = sourceBetween(
+      nativeSidebarSource,
+      "function handleProjectEditorTabSelected",
+      "function disposeProjectEditorSurface",
+    );
+    expect(projectEditorTabSelectedSource).toContain("setProjectBrowserPersistedState(");
+  });
+
+  test("resets the last Browser top-mode tab to a non-CEF placeholder", () => {
+    /*
+     * CDXC:ProjectBrowserTabs 2026-06-15-20:48:
+     * Closing the last Browser top-mode tab should free the Chromium view while keeping one New Tab placeholder with the address bar. The placeholder persists through React/native tab state and becomes a CEF-backed browser only when the user commits an address.
+     *
+     * CDXC:ProjectBrowserTabs 2026-06-16-01:46:
+     * The New Tab placeholder is selectable but not closable, because it is the memory-saving empty browser state rather than a real browser tab.
+     */
+    expect(sharedHostProtocolSource).toContain("isPlaceholder?: boolean;");
+    expect(nativeSidebarSource).toContain("isPlaceholder?: boolean;");
+    expect(hostProtocolSource).toContain("let isPlaceholder: Bool?");
+    expect(terminalWorkspaceSource).toContain("var isPlaceholder: Bool");
+    expect(terminalWorkspaceSource).toContain("allowsClose: !tab.isPlaceholder");
+    expect(terminalWorkspaceSource).toContain("button.setAllowsClose(allowsTabClosing && tab.allowsClose)");
+    expect(terminalWorkspaceSource).toContain("makeProjectEditorBrowserPlaceholderView()");
+    expect(terminalWorkspaceSource).toContain("realizeProjectEditorBrowserPlaceholderTab(");
+    expect(terminalWorkspaceSource).toContain("projectEditorGitLastTabClosed");
+    expect(terminalWorkspaceSource).toContain("onAddressNavigation?(url) == true");
+
+    const closeTabSource = sourceBetween(
+      terminalWorkspaceSource,
+      "private func closeProjectEditorGitTab(",
+      "private func createProjectEditorGitTabId()",
+    );
+    expect(closeTabSource).toContain("session.tabs.count == 1");
+    expect(closeTabSource).toContain("removedTab.chromiumView?.closeBrowser()");
+    expect(closeTabSource).toContain('title: "New Tab"');
+    expect(closeTabSource).not.toContain("session.tabs.count > 1");
+
+    const browserWakeSource = sourceBetween(
+      nativeSidebarSource,
+      "function wakeProjectEditorSurface",
+      "function restoreActiveProjectEditorAtStartup",
+    );
+    expect(browserWakeSource).toContain("activeBrowserTabIsPlaceholder");
+    expect(browserWakeSource).toContain('status: hasAwakeTargetMode || activeBrowserTabIsPlaceholder ? "running" : "opening"');
+  });
+
   test("labels CEF browser profile beta actions without adding an action", () => {
     /*
      * CDXC:BrowserProfiles 2026-06-13-22:09:
@@ -220,5 +313,120 @@ describe("chromium browser source", () => {
     expect(newProfileIndex).toBeGreaterThan(betaIndex);
     expect(importIndex).toBeGreaterThan(newProfileIndex);
     expect(profilePickerSource).toContain("betaItem.isEnabled = false");
+  });
+
+  test("disables browser feedback tool buttons on GitHub pages", () => {
+    /*
+     * CDXC:BrowserFeedbackTools 2026-06-15-01:52:
+     * Browser feedback tools are unavailable on github.com. The GPUI and
+     * native AppKit browser toolbars must disable the feedback button on that
+     * host and show the site-specific tooltip instead of accepting clicks.
+     */
+    expect(gpuiMainSource).toContain(
+      'const BROWSER_FEEDBACK_TOOL_UNAVAILABLE_TOOLTIP: &str = "This site disallows using this tool";',
+    );
+    const gpuiToolbarSource = sourceBetween(
+      gpuiMainSource,
+      "fn render_browser_toolbar(&self",
+      "fn render_browser_address_field",
+    );
+    expect(gpuiToolbarSource).toContain(
+      "let feedback_tool_unavailable = browser_feedback_tool_unavailable_url(&self.browser_url);",
+    );
+    expect(gpuiToolbarSource).toContain("!feedback_tool_unavailable");
+    expect(gpuiToolbarSource).toContain(".then_some(BROWSER_FEEDBACK_TOOL_UNAVAILABLE_TOOLTIP)");
+
+    const gpuiPredicateSource = sourceBetween(
+      gpuiMainSource,
+      "fn browser_feedback_tool_unavailable_url",
+      "fn project_name",
+    );
+    expect(gpuiPredicateSource).toContain('host == "github.com" || host.ends_with(".github.com")');
+    expect(gpuiPredicateSource).toContain("trim_end_matches('.')");
+
+    expect(terminalWorkspaceSource).toContain(
+      'private static let feedbackToolUnavailableTooltip = "This site disallows using this tool"',
+    );
+    const nativeFeedbackButtonSource = sourceBetween(
+      terminalWorkspaceSource,
+      "private func updateBrowserFeedbackToolButton()",
+      "  @objc private func injectFeedbackTool()",
+    );
+    expect(nativeFeedbackButtonSource).toContain(
+      "let feedbackToolUnavailable = Self.browserFeedbackToolUnavailable(urlString: currentURLString())",
+    );
+    expect(nativeFeedbackButtonSource).toContain("reactGrabButton.isEnabled = !feedbackToolUnavailable");
+    expect(nativeFeedbackButtonSource).toContain(
+      "reactGrabButton.toolTip = NativeTooltip.text(",
+    );
+
+    const nativePredicateSource = sourceBetween(
+      terminalWorkspaceSource,
+      "private static func browserFeedbackToolUnavailable",
+      "  private func canGoBack()",
+    );
+    expect(nativePredicateSource).toContain('host == "github.com" || host.hasSuffix(".github.com")');
+    expect(nativePredicateSource).toContain('CharacterSet(charactersIn: ".")');
+
+    const nativeInjectionSource = sourceBetween(
+      terminalWorkspaceSource,
+      "  @objc private func injectFeedbackTool()",
+      "  @objc private func showProfilePicker()",
+    );
+    expect(nativeInjectionSource).toContain(
+      "guard !Self.browserFeedbackToolUnavailable(urlString: currentURLString()) else",
+    );
+  });
+
+  test("adds project-family browser history to native browser toolbar", () => {
+    /*
+     * CDXC:BrowserHistory 2026-06-15-10:25:
+     * The native browser address toolbar should show a History button
+     * immediately left of Profile. Its menu reads project-family history owned
+     * by the sidebar, de-duplicates URLs, starts with the latest 20, and pages
+     * additional rows through Show More while retaining no more than 140 links.
+     */
+    expect(sharedHostProtocolSource).toContain('type: "setBrowserHistory";');
+    expect(sharedHostProtocolSource).toContain("browserHistoryScopeId: string;");
+    expect(nativeSidebarSource).toContain("type NativeProjectBrowserHistoryItem");
+    expect(nativeSidebarSource).toContain("const PROJECT_BROWSER_HISTORY_MAX_ITEMS = 140");
+    expect(nativeSidebarSource).toContain("function projectBrowserHistoryScopeIdForProject");
+    expect(nativeSidebarSource).toContain("project.worktree?.parentProjectId?.trim() || project.projectId");
+    expect(nativeSidebarSource).toContain("function normalizeProjectBrowserHistory");
+    expect(nativeSidebarSource).toContain("recordBrowserSessionHistoryVisit");
+    expect(nativeSidebarSource).toContain("recordProjectBrowserHistoryVisit(project, {");
+
+    const toolbarSource = sourceBetween(
+      terminalWorkspaceSource,
+      "private static let browserToolbarHeight",
+      "private static func describeFrame",
+    );
+    expect(toolbarSource).toContain("private static let browserHistoryPageSize = 20");
+    expect(terminalWorkspaceSource).toContain("private static let browserHistoryMaxItems = 140");
+    expect(terminalWorkspaceSource).toContain(".prefix(Self.browserHistoryMaxItems)");
+    expect(toolbarSource).toContain("private let historyButton = WebPaneHostView.makeToolbarButton(");
+    expect(toolbarSource).toContain('systemSymbolName: "clock.arrow.circlepath"');
+    expect(toolbarSource).toContain(
+      "let rightButtons = [zoomButton, reactGrabButton, historyButton, profileButton, appearanceButton, devToolsButton]",
+    );
+    expect(toolbarSource).toContain("Array(browserHistoryItems.prefix(browserHistoryVisibleLimit))");
+    expect(toolbarSource).toContain("NSMenuItem.separator()");
+    expect(toolbarSource).toContain('title: "Show More"');
+    expect(toolbarSource).toContain("NativeTooltip.browserHistory(");
+  });
+
+  test("caps native tooltip text width through shared helper", () => {
+    /*
+     * CDXC:NativeTooltips 2026-06-15-10:25:
+     * Native AppKit tooltips should use one 225px wrapping helper so long
+     * browser history titles/URLs and titlebar labels do not create wide hover
+     * bubbles.
+     */
+    expect(nativeTooltipSource).toContain("static let maxWidth: CGFloat = 225");
+    expect(nativeTooltipSource).toContain("static func browserHistory(title: String, url: String) -> String");
+    expect(nativeTooltipSource).toContain('text("\\(title)\\n\\n\\(url)")');
+    expect(terminalWorkspaceSource).toContain("button.toolTip = NativeTooltip.text(tooltip)");
+    expect(terminalWorkspaceSource).toContain("menuItem.toolTip = NativeTooltip.browserHistory(");
+    expect(appDelegateSource).toContain("appTitlebarLabel?.toolTip = NativeTooltip.text(normalizedTitle)");
   });
 });

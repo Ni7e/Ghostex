@@ -28,6 +28,13 @@ export type NativePresentationDelayedSendProjection = {
   remainingMs?: number;
 };
 
+export type NativePresentationCloseAfterDoneProjection = {
+  armed: boolean;
+  deadlineAt?: string;
+  remainingLabel?: string;
+  remainingMs?: number;
+};
+
 export type NativePresentationProjectProjection = {
   editor?: NonNullable<SidebarSessionGroup["projectContext"]>["editor"];
   isChatProject?: boolean;
@@ -58,6 +65,10 @@ export type NativePresentationProjectionInput = {
     projectId: string,
     sessionId: string,
   ) => NativePresentationDelayedSendProjection | undefined;
+  resolveCloseAfterDone: (
+    projectId: string,
+    sessionId: string,
+  ) => NativePresentationCloseAfterDoneProjection | undefined;
   resolveSessionRoutingId: (projectId: string, sessionId: string) => string | undefined;
   visibleSessionIds?: ReadonlySet<string>;
 };
@@ -169,13 +180,19 @@ export function presentationLifecycleStateForSidebar(
 }
 
 export function providerSessionStateForGxserverPresentation(
-  lifecycleState: GxserverDomainLifecycleState,
+  presentation: Pick<GxserverPresentationSession, "lifecycleState" | "providerSessionState">,
 ): NonNullable<SidebarSessionItem["providerSessionState"]> {
   /*
   CDXC:PaneTabs 2026-06-13-00:49:
   Native tab moons follow zmx provider liveness, not mounted renderer state. gxserver sleep/stop transitions remove the named provider session, while unknown must avoid claiming the provider is inactive.
+
+  CDXC:GxserverPresentation 2026-06-15-17:32:
+  gxserver now publishes provider liveness separately from lifecycle. Use that field when present so persistence-disabled or missing-provider rows do not look provider-live merely because the domain row is still running.
   */
-  switch (lifecycleState) {
+  if (presentation.providerSessionState) {
+    return presentation.providerSessionState;
+  }
+  switch (presentation.lifecycleState) {
     case "running":
       return "exists";
     case "sleeping":
@@ -241,6 +258,9 @@ function createPresentationQuickSidebarSessions({
 
   CDXC:RemoteAttach 2026-06-13-00:49:
   Remote attach terminals use local Quick projects only as native carriers. Honor local hidden-session overlays during the Quick local-only merge so suppressed gxserver rows do not reappear as duplicate Quick cards.
+
+  CDXC:GxserverPresentationQuick 2026-06-16-01:05:
+  Quick browser and local-only pane rows render inside one synthetic Quick group, so their click IDs must include the owning project. Keep local-only Quick rows combined the same way presentation rows and normal project web panes are combined; otherwise native focus resolves bare browser IDs through the currently active project and clicks on other Quick rows become no-ops.
   */
   const chatProjectsById = new Map<string, GxserverPresentationProject>(
     chatProjects.map((project) => [project.projectId, project]),
@@ -272,13 +292,15 @@ function createPresentationQuickSidebarSessions({
           projectId: project.projectId,
         }),
       );
-      const localOnlySessions = project.localSidebarSessions.filter(
-        (session) =>
-          !presentationSessionIds.has(originalSidebarSessionId(session.sessionId)) &&
-          !input.hiddenSessionKeys?.has(
-            createNativePresentationProjectionSessionKey(project.projectId, originalSidebarSessionId(session.sessionId)),
-          ),
-      );
+      const localOnlySessions = project.localSidebarSessions
+        .filter(
+          (session) =>
+            !presentationSessionIds.has(originalSidebarSessionId(session.sessionId)) &&
+            !input.hiddenSessionKeys?.has(
+              createNativePresentationProjectionSessionKey(project.projectId, originalSidebarSessionId(session.sessionId)),
+            ),
+        )
+        .map((session) => combineLocalSidebarSession(project.projectId, session));
       return presentationProject || localOnlySessions.length > 0
         ? [...presentationSessions, ...localOnlySessions]
         : localOnlySessions;
@@ -342,10 +364,7 @@ function createPresentationProjectSidebarGroup({
           createNativePresentationProjectionSessionKey(project.projectId, originalSidebarSessionId(session.sessionId)),
         ),
     )
-    .map((session) => ({
-      ...session,
-      sessionId: createCombinedProjectSessionId(project.projectId, originalSidebarSessionId(session.sessionId)),
-    }));
+    .map((session) => combineLocalSidebarSession(project.projectId, session));
   const sidebarSessions = [...presentationSidebarSessions, ...localPaneSessions];
   const projectContext = localProject
     ? {
@@ -392,8 +411,16 @@ function createPresentationSidebarSession({
   projectId: string;
 }): SidebarSessionItem {
   const lifecycleState = presentationLifecycleStateForSidebar(presentation.lifecycleState);
-  const providerSessionState = providerSessionStateForGxserverPresentation(presentation.lifecycleState);
-  const isLive = presentation.lifecycleState === "running";
+  const nativePaneState = localSession?.nativePaneState;
+  const providerSessionState = providerSessionStateForPresentationLocalPane(
+    presentation,
+    nativePaneState,
+  );
+  const isLive =
+    providerSessionState === "exists" ||
+    nativePaneState === "mounted" ||
+    nativePaneState === "mounting";
+  const closeAfterDone = input.resolveCloseAfterDone(projectId, presentation.sessionId);
   const delayedSend = input.resolveDelayedSend(projectId, presentation.sessionId);
   return {
     activity: presentation.activity,
@@ -404,9 +431,18 @@ function createPresentationSidebarSession({
 
     CDXC:DelayedSend 2026-06-13-00:49:
     Delayed Send timers remain native window state keyed by project/session. Join that timer projection onto the presentation-backed row so the leading clock keeps precedence over tags and agent icons.
+
+    CDXC:CloseAfterDone 2026-06-15-21:00:
+    Close After Done is also native-window timer state keyed by project/session.
+    Join it here so presentation-backed rows show the pastel red clock before
+    and during the three-minute Done close countdown.
     */
     agentSessionId: presentation.agentSessionId ?? localSession?.agentSessionId,
     alias: presentation.title,
+    closeAfterDone: closeAfterDone?.armed,
+    closeAfterDoneDeadlineAt: closeAfterDone?.deadlineAt,
+    closeAfterDoneRemainingLabel: closeAfterDone?.remainingLabel,
+    closeAfterDoneRemainingMs: closeAfterDone?.remainingMs,
     column: index % GRID_COLUMN_COUNT,
     detail: presentation.subtitle,
     delayedSendDeadlineAt: delayedSend?.deadlineAt,
@@ -428,7 +464,7 @@ function createPresentationSidebarSession({
     ),
     lastInteractionAt: presentation.lastActiveAt ?? presentation.updatedAt,
     lifecycleState,
-    nativePaneState: localSession?.nativePaneState,
+    nativePaneState,
     primaryTitle: presentation.primaryTitle ?? presentation.title,
     providerSessionState,
     row: Math.floor(index / GRID_COLUMN_COUNT),
@@ -437,11 +473,39 @@ function createPresentationSidebarSession({
     sessionTag: presentation.sessionTag,
     sessionNumber: String(index + 1),
     sessionPersistenceName: presentation.zmxName,
-    sessionPersistenceProvider: "zmx",
+    sessionPersistenceProvider: presentation.sessionPersistenceProvider,
     sessionRoutingId: input.resolveSessionRoutingId(projectId, presentation.sessionId),
     shortcutLabel: String(index + 1),
     terminalTitle: presentation.terminalTitle,
     titleObservation: presentation.titleObservation,
+  };
+}
+
+function providerSessionStateForPresentationLocalPane(
+  presentation: Pick<GxserverPresentationSession, "lifecycleState" | "providerSessionState">,
+  nativePaneState: SidebarSessionItem["nativePaneState"] | undefined,
+): NonNullable<SidebarSessionItem["providerSessionState"]> {
+  const providerSessionState = providerSessionStateForGxserverPresentation(presentation);
+  /*
+  CDXC:PaneTabs 2026-06-15-18:13:
+  A locally mounted or mounting terminal pane is live in this macOS window, so its native tab must not render the zmx-missing moon from a stale gxserver presentation probe. Keep the missing marker only for rows with no live local pane.
+  */
+  if (
+    providerSessionState === "missing" &&
+    (nativePaneState === "mounted" || nativePaneState === "mounting")
+  ) {
+    return "exists";
+  }
+  return providerSessionState;
+}
+
+function combineLocalSidebarSession(
+  projectId: string,
+  session: SidebarSessionItem,
+): SidebarSessionItem {
+  return {
+    ...session,
+    sessionId: createCombinedProjectSessionId(projectId, originalSidebarSessionId(session.sessionId)),
   };
 }
 

@@ -12,6 +12,10 @@
  * project headers, including remote machine project headers. Keep the backdrop
  * above those headers too so outside clicks dismiss the open menu instead of
  * activating header buttons through it.
+ *
+ * CDXC:SidebarContextMenu 2026-06-15-03:07:
+ * Dark Gray sidebar context-menu item hover should be the neutral #202020 menu
+ * row surface, not a blue accent wash from --app-button-background.
  */
 :root {
   --sidebar-context-menu-backdrop-z-index: 299;
@@ -112,24 +116,15 @@
 }
 
 .session-tag-menu-section + .session-tag-menu-section {
+  /*
+   * CDXC:SessionTagFilters 2026-06-16-00:05:
+   * Tag context menus keep section dividers for Priority/Progress/Type grouping
+   * but no longer render text heading rows, so the menus stay compact while
+   * preserving the established tag order.
+   */
   margin-top: 5px;
   padding-top: 5px;
   border-top: 1px solid color-mix(in srgb, var(--app-border) 60%, transparent);
-}
-
-.session-tag-menu-section-label {
-  /*
-   * CDXC:SessionTags 2026-06-05-15:22:
-   * Tag menus are grouped by Priority, Progress, and Type so workflow-related
-   * tags stay together while non-progress markers remain easy to scan.
-   */
-  padding: 4px 10px 2px;
-  color: color-mix(in srgb, var(--app-foreground) 50%, transparent);
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  line-height: 1.2;
-  text-transform: uppercase;
 }
 
 .session-tag-menu-item[data-selected="true"] {
@@ -191,7 +186,7 @@
 .session-context-menu-split-item:focus-visible,
 .session-context-menu-item:hover,
 .session-context-menu-item:focus-visible {
-  background: color-mix(in srgb, var(--app-button-background) 20%, transparent);
+  background: var(--app-context-menu-hover-background, #202020);
   outline: none;
 }
 
@@ -295,37 +290,6 @@
 
 .session-local-tooltip-meta {
   font-weight: inherit;
-}
-
-/*
- * CDXC:SessionTooltips 2026-06-13-23:24:
- * Metadata rows in session hover tooltips should scan as separate facts while
- * leaving the title as the only strong white line. Rotate restrained pastel
- * text colors by logical metadata line so state, path, ids, and provider rows
- * are distinguishable without adding badges or changing tooltip layout.
- */
-.session-local-tooltip-meta[data-tooltip-meta-color="1"] {
-  color: #b9f3d0;
-}
-
-.session-local-tooltip-meta[data-tooltip-meta-color="2"] {
-  color: #b7dcff;
-}
-
-.session-local-tooltip-meta[data-tooltip-meta-color="3"] {
-  color: #dec8ff;
-}
-
-.session-local-tooltip-meta[data-tooltip-meta-color="4"] {
-  color: #ffd2a8;
-}
-
-.session-local-tooltip-meta[data-tooltip-meta-color="5"] {
-  color: #ffc1d6;
-}
-
-.session-local-tooltip-meta[data-tooltip-meta-color="6"] {
-  color: #f2eaa0;
 }
 
 .tooltip-popup {

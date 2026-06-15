@@ -294,6 +294,8 @@ export function normalizeSessionRecord(session: SessionRecord): SessionRecord {
     commandTitle: normalizeTerminalCommandTitle(
       session.kind === "terminal" ? session.commandTitle : undefined,
     ),
+    closeAfterDone:
+      session.kind === "terminal" && session.closeAfterDone === true ? true : undefined,
     delayedSendDeadlineAt: normalizeTerminalDelayedSendDeadlineAt(
       session.kind === "terminal" ? session.delayedSendDeadlineAt : undefined,
     ),

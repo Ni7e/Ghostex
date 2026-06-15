@@ -29,6 +29,7 @@ import {
   IconRocket,
   IconSearch,
   IconSettings,
+  IconSquareMinus,
   IconStackPush,
   IconTerminal2,
   IconUpload,
@@ -49,23 +50,17 @@ import {
   type ReactNode,
 } from "react";
 import { createRoot } from "react-dom/client";
-import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
+import { cn } from "@/lib/utils";
 import { AppTooltip, TooltipProvider } from "../../sidebar/app-tooltip";
 import type { SidebarProjectDiffStats } from "../../shared/project-diff-stats";
 import { createDefaultSidebarProjectDiffStats } from "../../shared/project-diff-stats";
 import {
-  DEFAULT_BROWSER_ACTION_URL,
   getSidebarCommandPreviewLabel,
   isSidebarCommandConfigured,
   type SidebarCommandButton,
 } from "../../shared/sidebar-commands";
-import {
-  DEFAULT_SIDEBAR_COMMAND_ICON,
-  DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
-} from "../../shared/sidebar-command-icons";
-import type { CommandConfigDraft } from "../../sidebar/command-config-modal";
 import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "../../sidebar/agent-logos";
 import {
   getDefaultSidebarAgentByIcon,
@@ -75,7 +70,9 @@ import type {
   SidebarAgentHookStatusMessage,
   SidebarGhostexCliStatusMessage,
 } from "../../shared/session-grid-contract-sidebar";
+import { resolveSidebarTheme, type SidebarTheme } from "../../shared/session-grid-contract";
 import {
+  getSidebarTitlebarForegroundForBackground,
   KEEP_AWAKE_DURATION_OPTIONS,
   normalizeghostexSettings,
   type KeepAwakeDurationMinutes,
@@ -92,11 +89,16 @@ import {
 import { EditorBrandIcon, getEditorBrandIconId } from "../../sidebar/brand-icons";
 import { formatSidebarHotkeyLabel } from "../../sidebar/hotkey-label";
 import { SidebarCommandIconGlyph } from "../../sidebar/sidebar-command-icon";
-import { createCombinedProjectSessionId, parseCombinedProjectGroupId } from "./combined-sidebar-mode";
+import {
+  createCombinedProjectSessionId,
+  parseCombinedProjectGroupId,
+  parseCombinedProjectSessionId,
+} from "./combined-sidebar-mode";
 import "../../sidebar/styles.css";
 import {
   buildSidebarGitMenuItems,
   createDefaultSidebarGitState,
+  getSidebarGitDisabledReason,
   resolveSidebarGitPrimaryActionState,
   type SidebarGitAction,
   type SidebarGitState,
@@ -247,6 +249,10 @@ type TitlebarProjectState = {
   projectPath: string;
   petOverlayEnabled: boolean;
   resourceGroups: TitlebarResourceGroup[];
+  sidebarTheme: SidebarTheme;
+  customSidebarTitlebarColorsEnabled: boolean;
+  customSidebarTitlebarForegroundColor: string;
+  customSidebarTitlebarBackgroundColor: string;
   sidebarCollapsed: boolean;
   sidebarSide: SidebarSide;
   sidebarActions: TitlebarSidebarActionsSettings;
@@ -286,6 +292,7 @@ type ResourceGroupView = {
 };
 
 type NativeTitlebarCommand =
+  | { details?: string; event: string; force?: boolean; type: "appendModeSwitcherDebugLog" }
   | { details?: string; event: string; force?: boolean; type: "appendSessionTitleDebugLog" }
   | { details?: string; event: string; force?: boolean; type: "appendTerminalFocusDebugLog" }
   | {
@@ -385,6 +392,8 @@ declare global {
 const LAST_OPEN_TARGET_STORAGE_KEY = "ghostex.titlebar.lastOpenTargetId";
 const LAST_ACTION_COMMAND_STORAGE_PREFIX = "ghostex.titlebar.lastActionCommandByProject:";
 const KEEP_AWAKE_RUNTIME_STORAGE_KEY = "ghostex.titlebar.keepAwakeRuntime";
+const KEEP_AWAKE_RUNTIME_SYNC_STORAGE_KEY = "ghostex.titlebar.keepAwakeRuntimeSync";
+const KEEP_AWAKE_RUNTIME_CHANGED_EVENT = "ghostex:titlebar-keep-awake-runtime-changed";
 const KEEP_AWAKE_LID_SLEEP_STORAGE_KEY = "ghostex.titlebar.lidSleepPrevention";
 const TITLEBAR_TIPS_READ_STORAGE_KEY = "ghostex.titlebar.tips.readIds";
 const KEEP_AWAKE_POWER_CHECK_INTERVAL_MS = 30_000;
@@ -433,6 +442,7 @@ const TITLEBAR_DROPDOWN_RESOURCES_PANEL_WIDTH = 656;
 const TITLEBAR_DROPDOWN_TIPS_PANEL_WIDTH = 556;
 const TITLEBAR_DROPDOWN_READING_PANEL_HEIGHT = 650;
 const TITLEBAR_DROPDOWN_MENU_CHROME_HEIGHT = 10;
+const TITLEBAR_DROPDOWN_MENU_LABEL_HEIGHT = 22;
 const TITLEBAR_DROPDOWN_MENU_ITEM_HEIGHT = 30;
 const TITLEBAR_DROPDOWN_ACTION_ITEM_HEIGHT = 44;
 const TITLEBAR_DROPDOWN_SEPARATOR_HEIGHT = 9;
@@ -516,14 +526,14 @@ function createTitlebarDropdownPanelPreferredSize(
     }
     case "git":
       return compactTitlebarDropdownPanelSize(
-        titlebarMenuHeight(Math.max(1, counts.gitItemCount)),
+        titlebarMenuHeight(Math.max(1, counts.gitItemCount) + 3, { separatorCount: 1 }),
       );
     case "keepAwake":
       return compactTitlebarDropdownPanelSize(
         titlebarMenuHeight(
           KEEP_AWAKE_DURATION_OPTIONS.length + (counts.keepAwakeIsRunning ? 1 : 0) + 1,
           { separatorCount: 1 },
-        ),
+        ) + TITLEBAR_DROPDOWN_MENU_LABEL_HEIGHT,
       );
     case "mode":
       return compactTitlebarDropdownPanelSize(
@@ -757,6 +767,10 @@ type KeepAwakeRuntimeState = {
   startedAtMs: number;
 };
 
+type KeepAwakeRuntimeSyncState = {
+  suppressAutoStart: boolean;
+};
+
 const pendingProcessResults = new Map<
   string,
   {
@@ -804,12 +818,37 @@ function enableTitlebarTooltipsFromDom(): void {
   setTitlebarNativePointerInside(true);
 }
 
+/*
+ * CDXC:TitlebarTooltips 2026-06-15-13:34:
+ * Titlebar hover labels should close when the pointer leaves the trigger.
+ * Hovering the floating label itself must not keep it open, so titlebar-owned
+ * AppTooltip roots disable Base UI's hoverable popup behavior instead of adding
+ * native hit-test routing or invisible hover surfaces.
+ */
+const TITLEBAR_TOOLTIP_ROOT_PROPS = {
+  disableHoverablePopup: true,
+} as const;
+
+/*
+ * CDXC:TitlebarTooltips 2026-06-15-16:40:
+ * macOS titlebar button hover labels should sit higher than the default
+ * centered side placement. Use Base UI's alignment offset so the popup
+ * positioner owns the nudge and tooltip animations keep their normal transform.
+ *
+ * CDXC:TitlebarTooltips 2026-06-15-23:25:
+ * Shift titlebar hover labels up another 2px so they clear the titlebar button
+ * row with the tighter tooltip height.
+ */
+const TITLEBAR_TOOLTIP_ALIGN_OFFSET_PX = -4;
+
 function TitlebarAppTooltip({
+  alignOffset = TITLEBAR_TOOLTIP_ALIGN_OFFSET_PX,
   children,
   content,
   side = "left",
   sideOffset = 7,
 }: {
+  alignOffset?: number;
   children: ReactElement;
   content: ReactNode;
   side?: "bottom" | "left" | "right" | "top";
@@ -826,6 +865,8 @@ function TitlebarAppTooltip({
    */
   return (
     <AppTooltip
+      {...TITLEBAR_TOOLTIP_ROOT_PROPS}
+      alignOffset={alignOffset}
       content={content}
       contentClassName="titlebar-app-tooltip"
       side={side}
@@ -854,14 +895,37 @@ function postTitlebarSidebarCommand(message: { type: "requestAgentHookStatus" } 
   });
 }
 
-function appendTitlebarActionCrashDebugLog(event: string, details?: unknown): void {
+function closeAppModalFromTitlebarNavigation(area: string): void {
+  /*
+   * CDXC:SettingsDismissal 2026-06-15-14:07:
+   * Titlebar mode switches and titlebar action runners should dismiss the
+   * workspace-scoped Settings child window before they change workarea state or
+   * run commands. Send the normal app-modal close message through the native
+   * bridge so Settings, if open, closes without adding titlebar-specific state.
+   */
+  window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({ area, type: "close" });
+}
+
+function appendTitlebarActionCrashDebugLog(
+  debuggingMode: boolean,
+  event: string,
+  details?: unknown,
+): void {
   /**
    * CDXC:TitlebarActions 2026-05-15-17:23:
    * Terminal action button crashes need a breadcrumb from the isolated React
    * titlebar before the native-sidebar command runner receives the click.
    * Persist this trace outside the normal debug-toggle filter so a repro that
    * exits the app still leaves the selected action id and project context.
+   *
+   * CDXC:GxserverLogs 2026-06-15-20:39:
+   * actionCrashTrace is a breadcrumb namespace, not severity. Keep the first
+   * titlebar hop only while Debugging Mode is enabled so routine action clicks
+   * do not persist as normal-mode crash warnings.
    */
+  if (!debuggingMode) {
+    return;
+  }
   postNative({
     details: details === undefined ? undefined : JSON.stringify(details),
     event,
@@ -869,29 +933,49 @@ function appendTitlebarActionCrashDebugLog(event: string, details?: unknown): vo
   });
 }
 
-function appendTitlebarCodeLagDebugLog(
+function appendTitlebarModeSwitchDebugLog(
   debuggingMode: boolean,
   event: string,
-  details?: unknown,
+  details: Record<string, unknown> = {},
 ): void {
   /**
-   * CDXC:ModeSwitcher 2026-05-16-07:23:
-   * Titlebar Code-click lag breadcrumbs are regular diagnostics. Send them only
-   * while Settings Debugging Mode is enabled, matching the app-wide requirement
-   * that non-error logging stays silent during normal use.
+   * CDXC:ModeSwitcherDiagnostics 2026-06-15-00:21:
+   * Agents, Source, Browser, and Kanban titlebar clicks need the same first-hop
+   * timing breadcrumbs. Send only enum-like mode state, booleans, safe ids,
+   * and monotonic timestamps while Settings Debugging Mode is enabled; never
+   * include project names, paths, URLs, titles, commands, or user text.
    */
   if (!debuggingMode) {
     return;
   }
   postNative({
     details: JSON.stringify({
-      details,
+      ...details,
       performanceNowMs: performance.now(),
+      source: "titlebar",
       wallTimeMs: Date.now(),
     }),
     event,
-    type: "appendSessionTitleDebugLog",
+    type: "appendModeSwitcherDebugLog",
   });
+}
+
+function titlebarModeSwitchLogDetails(input: {
+  optimisticMode: TitlebarMode | undefined;
+  projectState: TitlebarProjectState;
+  targetMode: TitlebarMode;
+}): Record<string, unknown> {
+  return {
+    activeMode: input.projectState.activeMode,
+    editorIsOpen: input.projectState.editorIsOpen,
+    editorIsSleeping: input.projectState.editorIsSleeping,
+    editorStatus: input.projectState.editorStatus,
+    hasOptimisticMode: input.optimisticMode !== undefined,
+    optimisticMode: input.optimisticMode ?? "none",
+    projectId: input.projectState.projectId ?? "none",
+    projectIsQuick: input.projectState.projectIsQuick,
+    targetMode: input.targetMode,
+  };
 }
 
 function runNativeProcess(
@@ -1533,11 +1617,7 @@ function createInactiveTerminalSleepSessionIds(resourceGroups: TitlebarResourceG
           hasTitlebarResourceDelayedSend(session)
         );
       })
-      .map((session) =>
-        session.projectId
-          ? createCombinedProjectSessionId(session.projectId, session.sessionId)
-          : session.sessionId,
-      ),
+      .map(titlebarResourceSidebarSessionId),
   );
 }
 
@@ -1554,6 +1634,24 @@ function hasTitlebarResourceDelayedSend(
   );
 }
 
+function titlebarResourceSidebarSessionId(
+  session: Pick<TitlebarResourceSession, "projectId" | "sessionId">,
+): string {
+  /*
+   * CDXC:TitlebarResources 2026-06-15-15:27:
+   * gxserver presentation-backed Resources rows already arrive with combined
+   * project/session ids. Focus, Sleep, and Close must forward that id unchanged
+   * instead of wrapping it again, or the sidebar resolves a synthetic session
+   * id and the visible row action does nothing.
+   */
+  if (parseCombinedProjectSessionId(session.sessionId)) {
+    return session.sessionId;
+  }
+  return session.projectId
+    ? createCombinedProjectSessionId(session.projectId, session.sessionId)
+    : session.sessionId;
+}
+
 function uniqueResourceBundles(bundles: ResourceProcessBundle[]): ResourceProcessBundle[] {
   const seen = new Set<string>();
   return bundles.filter((bundle) => {
@@ -1565,14 +1663,18 @@ function uniqueResourceBundles(bundles: ResourceProcessBundle[]): ResourceProces
   });
 }
 
+function isResourceBundleActionable(bundle: ResourceProcessBundle): boolean {
+  /**
+   * CDXC:TitlebarResources 2026-06-15-13:45:
+   * Resources must not expose Close for shared Chromium runtime bundles because killing GPU, network, storage, or unmatched renderer helpers can leave the app's embedded browser surfaces broken. Only user-owned browser tabs get resource Close controls; diagnostic browser helper rows stay visible for CPU/RAM accounting.
+   */
+  return !(bundle.type === "browser" && !bundle.browserTab);
+}
+
 function resourceBundleSidebarSessionIds(bundle: ResourceProcessBundle): string[] {
   const session = bundle.session;
   if (session) {
-    return [
-      session.projectId
-        ? createCombinedProjectSessionId(session.projectId, session.sessionId)
-        : session.sessionId,
-    ];
+    return [titlebarResourceSidebarSessionId(session)];
   }
   const browserSessionId = bundle.browserTab ? browserTabSessionId(bundle.browserTab) : undefined;
   if (!browserSessionId) {
@@ -1653,6 +1755,7 @@ function App() {
   const [keepAwakeRuntime, setKeepAwakeRuntime] = useState<KeepAwakeRuntimeState | undefined>(
     () => readStoredKeepAwakeRuntime(),
   );
+  const [keepAwakeAutoStartSuppressed, setKeepAwakeAutoStartSuppressed] = useState(false);
   const [resourceProcesses, setResourceProcesses] = useState<ResourceProcess[]>([]);
   const sidebarCollapseChevronPointsRight =
     projectState.sidebarSide === "right" ? !projectState.sidebarCollapsed : projectState.sidebarCollapsed;
@@ -1759,14 +1862,25 @@ function App() {
     setNativeDropdownOpen(undefined);
   }, []);
   const showTitlebarDropdownPanel = useCallback(
-    (kind: TitlebarDropdownPanelKind, anchor: HTMLElement) => {
+    (
+      kind: TitlebarDropdownPanelKind,
+      anchor: HTMLElement,
+      options: { closeWhenAlreadyOpen?: boolean } = {},
+    ) => {
       /*
        * CDXC:ReactTitlebar 2026-06-11-23:20:
        * Native child-window dropdown triggers should behave like normal menu
        * buttons: requesting the already-open panel closes it instead of
        * reopening or repositioning the same child window.
+       *
+       * CDXC:TitlebarKeepAwake 2026-06-15-23:25:
+       * Keep Awake is a dropdown launcher, not a direct start/stop toggle.
+       *
+       * CDXC:TitlebarKeepAwake 2026-06-15-23:25:
+       * Clicking Keep Awake again while its dropdown is open should close the
+       * menu like the other titlebar dropdown triggers.
        */
-      if (nativeDropdownOpen === kind) {
+      if (nativeDropdownOpen === kind && options.closeWhenAlreadyOpen !== false) {
         closeTitlebarDropdownPanel();
         return false;
       }
@@ -1926,9 +2040,6 @@ function App() {
     () => resolveSidebarGitPrimaryActionState(projectState.git),
     [projectState.git],
   );
-  const gitPrimaryLabel = titlebarPrimaryGitActionLabel(gitPrimaryAction.label);
-  const gitPrimaryCompactLabel = compactTitlebarPrimaryGitActionLabel(gitPrimaryAction.label);
-  const shouldCompactGitPrimaryLabel = gitPrimaryCompactLabel !== gitPrimaryLabel;
   const gitMenuItems = useMemo(
     () => buildSidebarGitMenuItems(projectState.git),
     [projectState.git],
@@ -2301,43 +2412,57 @@ function App() {
     ]);
   };
 
-  const openSidebarActionEditor = (command: SidebarCommandButton) => {
+  const openSidebarActionsSettings = () => {
+    /*
+    CDXC:ProjectActions 2026-06-15-15:29:
+    Empty or unconfigured titlebar Actions clicks should open Settings on the Actions page instead of showing the removed standalone Configure Action modal.
+    */
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarActionsSettings");
     window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
-      commandDraft: createTitlebarCommandConfigDraft(command),
-      modal: "commandConfig",
+      initialTab: "actions",
+      modal: "settings",
       type: "open",
     });
   };
 
   const runSidebarAction = (command: SidebarCommandButton | undefined) => {
     if (!command) {
-      appendTitlebarActionCrashDebugLog("nativeSidebar.actionCrashTrace.titlebarMissingAction", {
-        projectId: projectState.projectId,
-        projectPath: projectState.projectPath,
-      });
+      openSidebarActionsSettings();
       return;
     }
     if (!isSidebarCommandConfigured(command)) {
-      openSidebarActionEditor(command);
+      openSidebarActionsSettings();
       return;
     }
-    appendTitlebarActionCrashDebugLog("nativeSidebar.actionCrashTrace.titlebarClick", {
-      actionType: command.actionType,
-      closeTerminalOnExit: command.closeTerminalOnExit,
-      commandId: command.commandId,
-      hasCommand: Boolean(command.command?.trim()),
-      hasUrl: Boolean(command.url?.trim()),
-      projectId: projectState.projectId,
-      projectPath: projectState.projectPath,
-    });
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarAction");
+    appendTitlebarActionCrashDebugLog(
+      projectState.debuggingMode,
+      "nativeSidebar.actionCrashTrace.titlebarClick",
+      {
+        actionType: command.actionType,
+        closeTerminalOnExit: command.closeTerminalOnExit,
+        commandId: command.commandId,
+        hasCommand: Boolean(command.command?.trim()),
+        hasUrl: Boolean(command.url?.trim()),
+        projectId: projectState.projectId,
+        projectPath: projectState.projectPath,
+      },
+    );
     setSelectedActionCommandId(command.commandId);
     persistLastActionCommandId(projectState, command.commandId);
     postNative({ commandId: command.commandId, type: "runSidebarCommandFromTitlebar" });
   };
 
   const runGitAction = (action: SidebarGitAction) => {
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarGitAction");
     postNative({ action, type: "runSidebarGitActionFromTitlebar" });
   };
+  const openGitMenuFromTitlebar = useCallback(
+    (event: { currentTarget: HTMLElement }) => {
+      showTitlebarDropdownPanel("git", event.currentTarget);
+    },
+    [showTitlebarDropdownPanel],
+  );
 
   const toggleResourceCollapse = (key: string) => {
     setCollapsedResourceKeys((current) => {
@@ -2376,7 +2501,7 @@ function App() {
   };
 
   const quitResourceBundles = (bundles: ResourceProcessBundle[]) => {
-    const uniqueBundles = uniqueResourceBundles(bundles);
+    const uniqueBundles = uniqueResourceBundles(bundles).filter(isResourceBundleActionable);
     if (uniqueBundles.length === 0) {
       return;
     }
@@ -2458,10 +2583,16 @@ function App() {
     postNative({ enabled, type: "setGxserverAlwaysStartFromTitlebar" });
   };
 
-  const stopKeepAwake = useCallback(async () => {
+  const stopKeepAwake = useCallback(async (options: { suppressAutoStart?: boolean } = {}) => {
     const runtime = keepAwakeRuntime;
     setKeepAwakeRuntime(undefined);
     localStorage.removeItem(KEEP_AWAKE_RUNTIME_STORAGE_KEY);
+    if (options.suppressAutoStart !== false) {
+      setKeepAwakeAutoStartSuppressed(true);
+    }
+    publishKeepAwakeRuntimeSync({
+      suppressAutoStart: options.suppressAutoStart !== false,
+    });
     if (!runtime) {
       return;
     }
@@ -2475,13 +2606,14 @@ function App() {
   const startKeepAwake = useCallback(
     async (durationMinutes: KeepAwakeDurationMinutes = projectState.keepAwake.defaultDurationMinutes) => {
       if (keepAwakeRuntime) {
-        await stopKeepAwake();
+        await stopKeepAwake({ suppressAutoStart: false });
       }
       /**
        * CDXC:TitlebarKeepAwake 2026-05-28-19:28:
        * The normal keep-awake button should prevent idle sleep and AC system sleep.
        * Lid-close sleep is controlled by the separate Settings toggle because macOS does not treat it as a regular caffeinate idle-sleep assertion.
        */
+      setKeepAwakeAutoStartSuppressed(false);
       const flags = projectState.keepAwake.allowDisplaySleep ? "-is" : "-dis";
       const timeout = durationMinutes > 0 ? ` -t ${durationMinutes * 60}` : "";
       const result = await runNativeProcess("/bin/sh", [
@@ -2501,17 +2633,17 @@ function App() {
       };
       setKeepAwakeRuntime(nextRuntime);
       localStorage.setItem(KEEP_AWAKE_RUNTIME_STORAGE_KEY, JSON.stringify(nextRuntime));
+      publishKeepAwakeRuntimeSync({ suppressAutoStart: false });
     },
     [keepAwakeRuntime, projectState.keepAwake.allowDisplaySleep, projectState.keepAwake.defaultDurationMinutes, stopKeepAwake],
   );
 
-  const toggleKeepAwake = () => {
-    if (keepAwakeRuntime) {
-      void stopKeepAwake();
-      return;
-    }
-    void startKeepAwake();
-  };
+  const openKeepAwakeMenuFromTitlebar = useCallback(
+    (event: { currentTarget: HTMLElement }) => {
+      showTitlebarDropdownPanel("keepAwake", event.currentTarget);
+    },
+    [showTitlebarDropdownPanel],
+  );
 
   const openPowerSettings = () => {
     window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
@@ -2592,11 +2724,62 @@ function App() {
   };
 
   useEffect(() => {
-    if (!projectState.keepAwake.activateOnLaunch || keepAwakeRuntime) {
+    const syncKeepAwakeRuntime = (syncState: KeepAwakeRuntimeSyncState | undefined) => {
+      if (syncState?.suppressAutoStart === true) {
+        setKeepAwakeRuntime(undefined);
+        setKeepAwakeAutoStartSuppressed(true);
+        return;
+      }
+      const storedRuntime = readStoredKeepAwakeRuntime();
+      setKeepAwakeRuntime(storedRuntime);
+      if (syncState?.suppressAutoStart === false || storedRuntime) {
+        setKeepAwakeAutoStartSuppressed(false);
+      }
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (
+        event.key !== KEEP_AWAKE_RUNTIME_STORAGE_KEY &&
+        event.key !== KEEP_AWAKE_RUNTIME_SYNC_STORAGE_KEY
+      ) {
+        return;
+      }
+      if (event.key === KEEP_AWAKE_RUNTIME_STORAGE_KEY && event.newValue === null) {
+        return;
+      }
+      syncKeepAwakeRuntime(
+        event.key === KEEP_AWAKE_RUNTIME_SYNC_STORAGE_KEY
+          ? readKeepAwakeRuntimeSyncState(event.newValue)
+          : undefined,
+      );
+    };
+    const handleLocalSync = (event: Event) => {
+      syncKeepAwakeRuntime(
+        event instanceof CustomEvent ? event.detail as KeepAwakeRuntimeSyncState : undefined,
+      );
+    };
+    /*
+     * CDXC:TitlebarKeepAwake 2026-06-15-10:12:
+     * The keep-awake dropdown renders in a native child titlebar window. Runtime changes from that child must update the main titlebar immediately and explicit Don't keep awake must suppress launch/display auto-start for this app run until the user starts keep-awake again.
+     */
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener(KEEP_AWAKE_RUNTIME_CHANGED_EVENT, handleLocalSync);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener(KEEP_AWAKE_RUNTIME_CHANGED_EVENT, handleLocalSync);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!projectState.keepAwake.activateOnLaunch || keepAwakeRuntime || keepAwakeAutoStartSuppressed) {
       return;
     }
     void startKeepAwake();
-  }, [keepAwakeRuntime, projectState.keepAwake.activateOnLaunch, startKeepAwake]);
+  }, [
+    keepAwakeAutoStartSuppressed,
+    keepAwakeRuntime,
+    projectState.keepAwake.activateOnLaunch,
+    startKeepAwake,
+  ]);
 
   useEffect(() => {
     const desired = Boolean(keepAwakeRuntime && projectState.keepAwake.preventLidSleep);
@@ -2650,6 +2833,7 @@ function App() {
       if (pidCheck.exitCode !== 0) {
         setKeepAwakeRuntime(undefined);
         localStorage.removeItem(KEEP_AWAKE_RUNTIME_STORAGE_KEY);
+        publishKeepAwakeRuntimeSync({ suppressAutoStart: false });
       }
     };
     void checkRuntime();
@@ -2661,7 +2845,9 @@ function App() {
 
   useEffect(() => {
     const shouldCheckExternalDisplay =
-      !keepAwakeRuntime && projectState.keepAwake.activateOnExternalDisplay;
+      !keepAwakeRuntime &&
+      !keepAwakeAutoStartSuppressed &&
+      projectState.keepAwake.activateOnExternalDisplay;
     const shouldCheckBattery =
       Boolean(keepAwakeRuntime && projectState.keepAwake.deactivateBelowBatteryThreshold);
     const shouldCheckLowPowerMode =
@@ -2697,6 +2883,7 @@ function App() {
       }
       if (
         !keepAwakeRuntime &&
+        !keepAwakeAutoStartSuppressed &&
         projectState.keepAwake.activateOnExternalDisplay &&
         snapshot.externalDisplayConnected
       ) {
@@ -2709,6 +2896,7 @@ function App() {
     }, KEEP_AWAKE_POWER_CHECK_INTERVAL_MS);
     return () => window.clearInterval(interval);
   }, [
+    keepAwakeAutoStartSuppressed,
     keepAwakeRuntime,
     projectState.keepAwake.activateOnExternalDisplay,
     projectState.keepAwake.batteryThresholdPercent,
@@ -2719,25 +2907,32 @@ function App() {
   ]);
 
   const openAgentsMode = () => {
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarAgentsMode");
+    appendTitlebarModeSwitchDebugLog(
+      projectState.debuggingMode,
+      "titlebarModeSwitch.titlebarClickStart",
+      titlebarModeSwitchLogDetails({ optimisticMode, projectState, targetMode: "agents" }),
+    );
     setOptimisticMode("agents");
     postNative({ type: "openAgentsModeFromTitlebar" });
+    appendTitlebarModeSwitchDebugLog(projectState.debuggingMode, "titlebarModeSwitch.titlebarClickPostedNative", {
+      projectId: projectState.projectId ?? "none",
+      targetMode: "agents",
+    });
   };
 
   const openCodeMode = () => {
-    appendTitlebarCodeLagDebugLog(projectState.debuggingMode, "titlebarCodeLag.titlebarClickStart", {
-      activeMode: projectState.activeMode,
-      editorIsOpen: projectState.editorIsOpen,
-      editorIsSleeping: projectState.editorIsSleeping,
-      editorStatus: projectState.editorStatus,
-      optimisticMode,
-      projectId: projectState.projectId,
-      projectPath: projectState.projectPath,
-    });
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarSourceMode");
+    appendTitlebarModeSwitchDebugLog(
+      projectState.debuggingMode,
+      "titlebarModeSwitch.titlebarClickStart",
+      titlebarModeSwitchLogDetails({ optimisticMode, projectState, targetMode: "code" }),
+    );
     setOptimisticMode("code");
     postNative({ type: "openActiveProjectEditorFromTitlebar" });
-    appendTitlebarCodeLagDebugLog(projectState.debuggingMode, "titlebarCodeLag.titlebarClickPostedNative", {
-      projectId: projectState.projectId,
-      projectPath: projectState.projectPath,
+    appendTitlebarModeSwitchDebugLog(projectState.debuggingMode, "titlebarModeSwitch.titlebarClickPostedNative", {
+      projectId: projectState.projectId ?? "none",
+      targetMode: "code",
     });
   };
 
@@ -2766,20 +2961,40 @@ function App() {
     if (browserModeDisabledReason) {
       return;
     }
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarBrowserMode");
+    appendTitlebarModeSwitchDebugLog(
+      projectState.debuggingMode,
+      "titlebarModeSwitch.titlebarClickStart",
+      titlebarModeSwitchLogDetails({ optimisticMode, projectState, targetMode: "git" }),
+    );
     setOptimisticMode("git");
     postNative({ type: "openGitHubProjectFromTitlebar" });
+    appendTitlebarModeSwitchDebugLog(projectState.debuggingMode, "titlebarModeSwitch.titlebarClickPostedNative", {
+      projectId: projectState.projectId ?? "none",
+      targetMode: "git",
+    });
   };
 
   const openTasksMode = () => {
     if (kanbanModeDisabledReason) {
       return;
     }
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarKanbanMode");
+    appendTitlebarModeSwitchDebugLog(
+      projectState.debuggingMode,
+      "titlebarModeSwitch.titlebarClickStart",
+      titlebarModeSwitchLogDetails({ optimisticMode, projectState, targetMode: "tasks" }),
+    );
     setOptimisticMode("tasks");
     postNative({ type: "openTasksPlaceholderFromTitlebar" });
+    appendTitlebarModeSwitchDebugLog(projectState.debuggingMode, "titlebarModeSwitch.titlebarClickPostedNative", {
+      projectId: projectState.projectId ?? "none",
+      targetMode: "tasks",
+    });
   };
 
   const toggleProjectEditorCompanion = () => {
-    appendTitlebarCodeLagDebugLog(projectState.debuggingMode, "titlebarCompanionToggle.dispatch", {
+    appendTitlebarModeSwitchDebugLog(projectState.debuggingMode, "titlebarModeSwitch.companionToggle.dispatch", {
       activeMode,
       editorIsOpen: projectState.editorIsOpen,
       nextProjectEditorCompanionPaneHidden: projectState.projectEditorCompanionPaneHidden !== true,
@@ -2790,6 +3005,9 @@ function App() {
     postNative({ type: "toggleProjectEditorCompanionFromTitlebar" });
   };
   const showUpdateDialog = () => {
+    if (projectState.updateDownloading) {
+      return;
+    }
     postNative({ type: "showUpdateDialogFromTitlebar" });
   };
 
@@ -2849,6 +3067,90 @@ function App() {
     dropdownPanelSizeResolverRef.current = resolveTitlebarDropdownPanelSize;
   }, [resolveTitlebarDropdownPanelSize]);
 
+  useEffect(() => {
+    /**
+     * CDXC:SidebarTheme 2026-06-15-01:43:
+     * The titlebar runs in its own WKWebView, so mirror the resolved sidebar
+     * theme onto body for shared CSS tokens. This keeps the titlebar strip and
+     * native child-window dropdown panels aligned with Dark 1, Dark 2, and
+     * Light Settings changes.
+     */
+    document.body.dataset.sidebarTheme = projectState.sidebarTheme;
+    return () => {
+      delete document.body.dataset.sidebarTheme;
+    };
+  }, [projectState.sidebarTheme]);
+
+  useEffect(() => {
+    if (initialTitlebarDropdownPanelKind) {
+      return;
+    }
+
+    if (projectState.customSidebarTitlebarColorsEnabled) {
+      /**
+       * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
+       * The React titlebar is a separate WKWebView from the sidebar. Apply the
+       * experimental custom chrome colors only in this titlebar host; dropdown
+       * panels reuse this bundle but must continue using normal dropdown/theme
+       * tokens instead of the sidebar/titlebar override.
+       *
+       * CDXC:SidebarTitlebarColors 2026-06-15-13:22:
+       * Foreground is derived from the background before it reaches this state;
+       * the titlebar host should not expose or preserve a separate foreground
+       * choice.
+       *
+       * CDXC:SidebarTitlebarColors 2026-06-15-15:01:
+       * Custom titlebar separators darken as the slider-selected background gets
+       * lighter, but only inside the real titlebar host.
+       */
+      document.body.dataset.customSidebarTitlebarColors = "true";
+      document.body.style.setProperty(
+        "--app-titlebar-background",
+        projectState.customSidebarTitlebarBackgroundColor,
+      );
+      document.body.style.setProperty(
+        "--custom-sidebar-titlebar-background-color",
+        projectState.customSidebarTitlebarBackgroundColor,
+      );
+      document.body.style.setProperty(
+        "--custom-sidebar-titlebar-foreground-color",
+        projectState.customSidebarTitlebarForegroundColor,
+      );
+      document.body.style.setProperty(
+        "--app-foreground",
+        projectState.customSidebarTitlebarForegroundColor,
+      );
+      document.body.style.setProperty(
+        "--titlebar-button-border-color",
+        getTitlebarButtonSeparatorColorForBackground(
+          projectState.customSidebarTitlebarBackgroundColor,
+        ),
+      );
+    } else {
+      delete document.body.dataset.customSidebarTitlebarColors;
+      document.body.style.removeProperty("--app-titlebar-background");
+      document.body.style.removeProperty("--app-foreground");
+      document.body.style.removeProperty("--custom-sidebar-titlebar-background-color");
+      document.body.style.removeProperty("--custom-sidebar-titlebar-foreground-color");
+      document.body.style.removeProperty("--titlebar-button-border-color");
+    }
+
+    return () => {
+      delete document.body.dataset.customSidebarTitlebarColors;
+      document.body.style.removeProperty("--app-titlebar-background");
+      document.body.style.removeProperty("--app-foreground");
+      document.body.style.removeProperty("--custom-sidebar-titlebar-background-color");
+      document.body.style.removeProperty("--custom-sidebar-titlebar-foreground-color");
+      document.body.style.removeProperty("--titlebar-button-border-color");
+    };
+  }, [
+    projectState.customSidebarTitlebarBackgroundColor,
+    projectState.customSidebarTitlebarColorsEnabled,
+    projectState.customSidebarTitlebarForegroundColor,
+  ]);
+
+  const isTitlebarDarkTheme = getTitlebarThemeVariant(projectState.sidebarTheme) === "dark";
+
   if (titlebarPanelKind) {
     return (
       <TooltipProvider delayDuration={300}>
@@ -2858,6 +3160,7 @@ function App() {
           browserBundles={resourceViews.browserBundles}
           collapsedResourceKeys={collapsedResourceKeys}
           daemon={projectState.gxserverDaemon}
+          git={projectState.git}
           gitItems={gitMenuItems}
           inactiveTerminalSleepSessionCount={inactiveTerminalSleepSessionIds.length}
           kind={titlebarPanelKind}
@@ -2888,6 +3191,7 @@ function App() {
           readTips={readTips}
           resourceGroupViews={resourceViews.groupViews}
           selectedActionCommandId={selectedActionCommandId}
+          sidebarTheme={projectState.sidebarTheme}
           sessionPersistenceProvider={
             projectState.sessionPersistenceProvider === "off"
               ? undefined
@@ -2970,18 +3274,25 @@ function App() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="dark" ref={rootRef} style={styles.shell}>
+      <div
+        className={cn(isTitlebarDarkTheme && "dark")}
+        data-sidebar-theme={projectState.sidebarTheme}
+        ref={rootRef}
+        style={styles.shell}
+      >
         <div onMouseDown={requestTitlebarBlankMouseDown} style={styles.titlebar}>
           <div style={styles.projectSlot}>
             {titlebarSidebarCollapseButton}
             {projectState.updateAvailable || projectState.updateDownloading ? (
               <TitlebarAppTooltip
-                content={projectState.updateDownloading ? "Downloading update" : "Download update"}
+                content={projectState.updateDownloading ? "Downloading..." : "Download update"}
                 side="right"
               >
                 <Button
                   aria-label={projectState.updateDownloading ? "Downloading update" : "Download update"}
+                  aria-disabled={projectState.updateDownloading ? true : undefined}
                   className="titlebar-session-button titlebar-update-button"
+                  data-disabled={projectState.updateDownloading ? "true" : undefined}
                   data-downloading={projectState.updateDownloading ? "true" : undefined}
                   onClick={showUpdateDialog}
                   type="button"
@@ -2996,11 +3307,26 @@ function App() {
                    *
                    * CDXC:AutoUpdate 2026-06-13-17:52:
                    * Once Sparkle is actually downloading the accepted update,
-                   * keep this same consent affordance visible and fade it in
-                   * and out so download activity is indicated without showing
-                   * Sparkle's separate progress window.
+                   * keep this same consent affordance visible while download
+                   * activity is indicated without showing Sparkle's separate
+                   * progress window.
+                   *
+                   * CDXC:AutoUpdate 2026-06-15-16:39:
+                   * After Sparkle starts downloading, the titlebar update
+                   * button must stop accepting repeat download clicks, show a
+                   * spinner instead of the download glyph, and expose the
+                   * hover label "Downloading..." while the download is active.
                    */}
-                  <IconDownload aria-hidden="true" size={15} stroke={1.8} />
+                  {projectState.updateDownloading ? (
+                    <IconLoader2
+                      aria-hidden="true"
+                      className="titlebar-update-spinner"
+                      size={15}
+                      stroke={1.8}
+                    />
+                  ) : (
+                    <IconDownload aria-hidden="true" size={15} stroke={1.8} />
+                  )}
                 </Button>
               </TitlebarAppTooltip>
             ) : null}
@@ -3111,17 +3437,20 @@ function App() {
                 className="titlebar-open-group titlebar-keep-awake-group"
                 data-titlebar-dropdown-anchor
               >
-                <TitlebarAppTooltip content="Click to toggle. Right-click for options.">
+                <TitlebarAppTooltip content="Keep awake">
                   <Button
-                    aria-label={keepAwakeRuntime ? "Allow Mac sleep" : "Keep Mac awake"}
+                    aria-expanded={nativeDropdownOpen === "keepAwake"}
+                    aria-haspopup="menu"
+                    aria-label="Keep awake"
                     className="titlebar-session-button titlebar-open-main-button"
                     data-active={String(Boolean(keepAwakeRuntime))}
                     data-state={nativeDropdownOpen === "keepAwake" ? "open" : undefined}
-                    onClick={toggleKeepAwake}
+                    onClick={openKeepAwakeMenuFromTitlebar}
                     onContextMenu={(event) => {
                       event.preventDefault();
-                      showTitlebarDropdownPanel("keepAwake", event.currentTarget);
+                      openKeepAwakeMenuFromTitlebar(event);
                     }}
+                    onDoubleClick={openKeepAwakeMenuFromTitlebar}
                     type="button"
                     variant={keepAwakeRuntime ? "outline" : "ghost"}
                   >
@@ -3129,7 +3458,9 @@ function App() {
                      * CDXC:TitlebarKeepAwake 2026-05-27-07:32:
                      * Keep-awake titlebar chrome must be icon-only so it cannot
                      * clip in the narrow right-side slot. Coffee means Ghostex is
-                     * keeping the Mac awake; moon means clicking will allow sleep.
+                     * keeping the Mac awake; moon means inactive. Clicking or
+                     * double-clicking opens the dropdown rather than starting or
+                     * stopping keep-awake directly.
                      */}
                     {keepAwakeRuntime ? (
                       <IconCoffee aria-hidden="true" size={14} stroke={1.8} />
@@ -3178,22 +3509,21 @@ function App() {
               className="titlebar-open-group titlebar-git-group"
               data-titlebar-dropdown-anchor
             >
-              <TitlebarAppTooltip content="Commit. Right-click for more actions">
+              <TitlebarAppTooltip content="Git actions">
                 <Button
                   aria-disabled={gitPrimaryAction.disabled}
-                  aria-label={gitPrimaryAction.disabledReason ?? gitPrimaryLabel}
+                  aria-expanded={nativeDropdownOpen === "git"}
+                  aria-haspopup="menu"
+                  aria-label="Git actions"
                   className="titlebar-session-button titlebar-open-main-button titlebar-git-main-button"
                   data-disabled={String(gitPrimaryAction.disabled)}
                   data-state={nativeDropdownOpen === "git" ? "open" : undefined}
-                  onClick={() => {
-                    if (!gitPrimaryAction.disabled) {
-                      runGitAction(gitPrimaryAction.action);
-                    }
-                  }}
+                  onClick={openGitMenuFromTitlebar}
                   onContextMenu={(event) => {
                     event.preventDefault();
-                    showTitlebarDropdownPanel("git", event.currentTarget);
+                    openGitMenuFromTitlebar(event);
                   }}
+                  onDoubleClick={openGitMenuFromTitlebar}
                   type="button"
                   variant="ghost"
                 >
@@ -3205,25 +3535,18 @@ function App() {
                    * Use aria-disabled instead of native disabled here so the
                    * shared AppTooltip trigger can still receive hover, matching
                    * the sidebar toolbar's disabled-action pattern.
+                   *
+                   * CDXC:TitlebarGit 2026-06-15-23:25:
+                   * The Git titlebar button is a dropdown launcher, not a direct
+                   * commit/push toggle. Click, right-click, and double-click open
+                   * or close the Git actions menu so choosing a Git operation is
+                   * always explicit inside the dropdown.
                    */
                   projectState.git.isBusy ? (
                     <IconLoader2 aria-hidden="true" className="titlebar-git-spinner" size={14} />
                   ) : (
                     getTitlebarGitActionIcon(gitPrimaryAction.action)
                   )}
-                  {/*
-                  <span
-                    className="titlebar-git-label titlebar-git-label-full"
-                    data-compact-below-620={String(shouldCompactGitPrimaryLabel)}
-                  >
-                    {gitPrimaryLabel}
-                  </span>
-                  {gitPrimaryCompactLabel ? (
-                    <span aria-hidden="true" className="titlebar-git-label titlebar-git-label-compact">
-                      {gitPrimaryCompactLabel}
-                    </span>
-                  ) : null}
-                  */}
                 </Button>
               </TitlebarAppTooltip>
             </ButtonGroup>
@@ -3231,22 +3554,22 @@ function App() {
               className="titlebar-open-group titlebar-actions-group"
               data-titlebar-dropdown-anchor
             >
-              <TitlebarAppTooltip content="Click to run. Right-click for actions.">
+              {/*
+               * CDXC:TitlebarTooltips 2026-06-16-01:19:
+               * Actions and Open In hover labels should state the button
+               * function first, then explain the right-click menu. Do not lead
+               * with generic click instructions in these titlebar tooltips.
+               */}
+              <TitlebarAppTooltip content="Quick Actions. Right click for more options">
                 <Button
-                  aria-disabled={!activeAction}
                   aria-label={
                     activeAction
                       ? `Run ${getSidebarActionLabel(activeAction)}`
-                      : "No actions configured"
+                      : "Configure actions"
                   }
                   className="titlebar-session-button titlebar-open-main-button"
-                  data-disabled={String(!activeAction)}
                   data-state={nativeDropdownOpen === "actions" ? "open" : undefined}
-                  onClick={() => {
-                    if (activeAction) {
-                      runSidebarAction(activeAction);
-                    }
-                  }}
+                  onClick={() => runSidebarAction(activeAction)}
                   onContextMenu={(event) => {
                     event.preventDefault();
                     showTitlebarDropdownPanel("actions", event.currentTarget);
@@ -3254,7 +3577,11 @@ function App() {
                   type="button"
                   variant="ghost"
                 >
-                  {getSidebarActionIcon(activeAction)}
+                  {activeAction ? (
+                    getSidebarActionIcon(activeAction)
+                  ) : (
+                    <IconSettings aria-hidden="true" className="quick-action-icon" size={16} stroke={1.8} />
+                  )}
                 </Button>
               </TitlebarAppTooltip>
             </ButtonGroup>
@@ -3262,7 +3589,7 @@ function App() {
               className="titlebar-open-group"
               data-titlebar-dropdown-anchor
             >
-              <TitlebarAppTooltip content="Click to open. Right-click for targets.">
+              <TitlebarAppTooltip content="Open in an app. Right click for more options">
                 <Button
                   aria-label={activeTarget?.label ?? "Open project"}
                   className="titlebar-session-button titlebar-open-main-button"
@@ -3297,6 +3624,7 @@ function TitlebarDropdownPanelSurface({
   browserBundles,
   collapsedResourceKeys,
   daemon,
+  git,
   gitItems,
   inactiveTerminalSleepSessionCount,
   keepAwakeIsRunning,
@@ -3328,6 +3656,7 @@ function TitlebarDropdownPanelSurface({
   readTips,
   resourceGroupViews,
   selectedActionCommandId,
+  sidebarTheme,
   sessionPersistenceProvider,
   visibleActions,
   visibleTargets,
@@ -3339,6 +3668,7 @@ function TitlebarDropdownPanelSurface({
   browserBundles: ResourceProcessBundle[];
   collapsedResourceKeys: Set<string>;
   daemon: TitlebarGxserverDaemonStatus;
+  git: SidebarGitState;
   gitItems: ReturnType<typeof buildSidebarGitMenuItems>;
   inactiveTerminalSleepSessionCount: number;
   keepAwakeIsRunning: boolean;
@@ -3373,6 +3703,7 @@ function TitlebarDropdownPanelSurface({
   readTips: TitlebarTip[];
   resourceGroupViews: ResourceGroupView[];
   selectedActionCommandId: string | undefined;
+  sidebarTheme: SidebarTheme;
   sessionPersistenceProvider: Exclude<SessionPersistenceProvider, "off"> | undefined;
   visibleActions: SidebarCommandButton[];
   visibleTargets: ResolvedOpenTarget[];
@@ -3393,14 +3724,16 @@ function TitlebarDropdownPanelSurface({
     action();
     onClose();
   };
+  const isPanelDarkTheme = getTitlebarThemeVariant(sidebarTheme) === "dark";
 
   return (
     <div
-      className="dark titlebar-dropdown-panel-root"
+      className={cn(isPanelDarkTheme && "dark", "titlebar-dropdown-panel-root")}
       data-panel-kind={kind}
+      data-sidebar-theme={sidebarTheme}
     >
       {kind === "mode" ? (
-        <div className="titlebar-open-menu titlebar-mode-picker-menu min-w-[180px] rounded-none border-border/80 !bg-[#0e0e0e] p-1 text-[13px] text-foreground shadow-2xl">
+        <div className="titlebar-open-menu titlebar-mode-picker-menu min-w-[180px] rounded-none border-border/80 p-1 text-[13px] text-foreground shadow-2xl">
           {modeOptions.map((mode) => (
             <TitlebarPanelMenuItem
               disabled={mode.disabled}
@@ -3417,7 +3750,7 @@ function TitlebarDropdownPanelSurface({
         </div>
       ) : null}
       {kind === "tips" ? (
-        <div className="titlebar-open-menu titlebar-tips-menu rounded-none border-border/80 !bg-[#0e0e0e] p-0 text-[13px] text-foreground shadow-2xl">
+        <div className="titlebar-open-menu titlebar-tips-menu rounded-none border-border/80 p-0 text-[13px] text-foreground shadow-2xl">
           <TitlebarTipsMenu
             notices={notices}
             onMarkAllRead={onMarkAllTipsRead}
@@ -3429,7 +3762,15 @@ function TitlebarDropdownPanelSurface({
         </div>
       ) : null}
       {kind === "keepAwake" ? (
-        <div className="titlebar-open-menu min-w-[220px] rounded-none border-border/80 !bg-[#0e0e0e] p-1 text-[13px] text-foreground shadow-2xl">
+        <div className="titlebar-open-menu min-w-[220px] rounded-none border-border/80 p-1 text-[13px] text-foreground shadow-2xl">
+          {/*
+            CDXC:TitlebarKeepAwake 2026-06-15-02:34:
+            The compact titlebar dropdown should name the duration group as "Keep awake period" and keep each row label short: Until turned off, For 2 hours, For 5 hours, and Don't keep awake.
+
+            CDXC:TitlebarKeepAwake 2026-06-15-02:57:
+            The Don't keep awake action should use IconSquareMinus so the row reads as disabling the keep-awake state instead of a moon or sleep-mode action.
+          */}
+          <div className="titlebar-menu-section-label">Keep awake period</div>
           {KEEP_AWAKE_DURATION_OPTIONS.map((option) => (
             <TitlebarPanelMenuItem
               key={option.value}
@@ -3439,7 +3780,7 @@ function TitlebarDropdownPanelSurface({
               }}
             >
               <IconCoffee aria-hidden="true" size={14} stroke={1.8} />
-              <span className="min-w-0 flex-1 truncate">Keep awake {option.label.toLowerCase()}</span>
+              <span className="min-w-0 flex-1 truncate">{getTitlebarKeepAwakeMenuLabel(option.label)}</span>
               {activeKeepAwakeDuration === option.value ? (
                 <IconCheck aria-hidden="true" className="ml-2 size-4 opacity-75" />
               ) : null}
@@ -3452,8 +3793,8 @@ function TitlebarDropdownPanelSurface({
                 onClose();
               }}
             >
-              <IconMoon aria-hidden="true" size={14} stroke={1.8} />
-              <span>Allow sleep now</span>
+              <IconSquareMinus aria-hidden="true" size={14} stroke={1.8} />
+              <span>Don't keep awake</span>
             </TitlebarPanelMenuItem>
           ) : null}
           <TitlebarPanelMenuSeparator />
@@ -3464,7 +3805,7 @@ function TitlebarDropdownPanelSurface({
         </div>
       ) : null}
       {kind === "resources" ? (
-        <div className="titlebar-open-menu titlebar-resources-menu rounded-none border-border/80 !bg-[#0e0e0e] p-0 text-[13px] text-foreground shadow-2xl">
+        <div className="titlebar-open-menu titlebar-resources-menu rounded-none border-border/80 p-0 text-[13px] text-foreground shadow-2xl">
           <TitlebarResourcesMenu
             browserBundles={browserBundles}
             collapsedKeys={collapsedResourceKeys}
@@ -3491,8 +3832,44 @@ function TitlebarDropdownPanelSurface({
         </div>
       ) : null}
       {kind === "git" ? (
-        <div className="titlebar-open-menu titlebar-git-menu rounded-none border-border/80 !bg-[#0e0e0e] p-1 text-[13px] text-foreground shadow-2xl">
-          {gitItems.map((item) => (
+        <div className="titlebar-open-menu titlebar-git-menu rounded-none border-border/80 p-1 text-[13px] text-foreground shadow-2xl">
+          {/*
+            CDXC:TitlebarGit 2026-06-15-23:25:
+            The titlebar Git dropdown should expose branch context, colored
+            working-tree line stats, and a sync-with-main action before Commit.
+            Keep branch and stats rows non-clickable so the first real command is
+            the explicit sync row, followed by the existing Git action list.
+
+            CDXC:TitlebarGit 2026-06-15-23:25:
+            The sync row must call the same titlebar Git action bridge as Commit,
+            Push, and PR. The sidebar-owned Git pipeline refreshes status before
+            running the operation and republishes the updated state to both the
+            dropdown child window and the sidebar project chrome.
+          */}
+          <div className="titlebar-open-menu-item titlebar-git-meta-row" role="presentation">
+            <IconGitCommit aria-hidden="true" className="titlebar-git-icon" size={15} stroke={1.8} />
+            <span className="titlebar-git-branch-name">{titlebarGitBranchLabel(git.branch)}</span>
+          </div>
+          <div className="titlebar-open-menu-item titlebar-git-meta-row" role="presentation">
+            <IconGitCompare aria-hidden="true" className="titlebar-git-icon" size={15} stroke={1.8} />
+            <span className="titlebar-git-stat-pair">
+              <span className="titlebar-git-stat titlebar-git-stat-additions">
+                +{formatTitlebarGitStatCount(git.additions)}
+              </span>
+              <span className="titlebar-git-stat titlebar-git-stat-deletions">
+                -{formatTitlebarGitStatCount(git.deletions)}
+              </span>
+            </span>
+          </div>
+          <TitlebarPanelMenuItem
+            disabled={titlebarGitSyncMainDisabledReason(git) !== undefined}
+            onClick={() => closeAfter(() => onRunGitAction("syncMain"))}
+          >
+            {getTitlebarGitActionIcon("syncMain")}
+            <span>{titlebarGitSyncMainLabel(git)}</span>
+          </TitlebarPanelMenuItem>
+          <TitlebarPanelMenuSeparator />
+          {gitItems.filter((item) => item.action !== "syncMain").map((item) => (
             <TitlebarPanelMenuItem
               disabled={item.disabled}
               key={item.action}
@@ -3505,7 +3882,7 @@ function TitlebarDropdownPanelSurface({
         </div>
       ) : null}
       {kind === "actions" ? (
-        <div className="titlebar-open-menu min-w-[220px] rounded-none border-border/80 !bg-[#0e0e0e] p-1 text-[13px] text-foreground shadow-2xl">
+        <div className="titlebar-open-menu min-w-[220px] rounded-none border-border/80 p-1 text-[13px] text-foreground shadow-2xl">
           {visibleActions.length > 0 ? (
             visibleActions.map((command) => {
               const actionCommandPreview = getSidebarCommandPreviewLabel(command);
@@ -3521,6 +3898,7 @@ function TitlebarDropdownPanelSurface({
                       {getSidebarActionLabel(command)}
                     </span>
                     <AppTooltip
+                      {...TITLEBAR_TOOLTIP_ROOT_PROPS}
                       content={actionCommandPreview}
                       contentClassName="titlebar-action-command-tooltip whitespace-normal text-left"
                       side="left"
@@ -3560,7 +3938,7 @@ function TitlebarDropdownPanelSurface({
         </div>
       ) : null}
       {kind === "openIn" ? (
-        <div className="titlebar-open-menu min-w-[220px] rounded-none border-border/80 !bg-[#0e0e0e] p-1 text-[13px] text-foreground shadow-2xl">
+        <div className="titlebar-open-menu min-w-[220px] rounded-none border-border/80 p-1 text-[13px] text-foreground shadow-2xl">
           {visibleTargets.map((target) => (
             <TitlebarPanelMenuItem
               key={target.id}
@@ -3624,10 +4002,48 @@ function TitlebarPanelMenuSeparator() {
   return <div aria-hidden="true" className="bg-border/70 titlebar-panel-menu-separator" />;
 }
 
+function getTitlebarKeepAwakeMenuLabel(label: string): string {
+  return label === "Until turned off" ? label : `For ${label.toLowerCase()}`;
+}
+
+function getTitlebarThemeVariant(theme: SidebarTheme): "dark" | "light" {
+  return theme.startsWith("light-") || theme === "plain-light" ? "light" : "dark";
+}
+
+function getTitlebarButtonSeparatorColorForBackground(backgroundColor: string): string {
+  /**
+   * CDXC:SidebarTitlebarColors 2026-06-15-15:01:
+   * When the experimental sidebar/titlebar background gets lighter, titlebar
+   * button separators should get darker so the chrome reads as deliberate lines
+   * instead of faint raised rows.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-15-16:03:
+   * A 90 contrast background made the previous separator curve nearly match
+   * the background. Darken separators much faster as the background lightens so
+   * the button dividers stay visible throughout the 85-100 slider range.
+   */
+  const normalized = backgroundColor.trim().toLowerCase();
+  const match = /^#([0-9a-f]{6})$/u.exec(normalized);
+  if (!match) {
+    return "#252525";
+  }
+
+  const hex = match[1];
+  const red = Number.parseInt(hex.slice(0, 2), 16);
+  const green = Number.parseInt(hex.slice(2, 4), 16);
+  const blue = Number.parseInt(hex.slice(4, 6), 16);
+  const averageChannel = Math.round((red + green + blue) / 3);
+  const separatorChannel = Math.max(6, Math.min(37, Math.round(37 - averageChannel * 0.8)));
+  const separatorHex = separatorChannel.toString(16).padStart(2, "0");
+  return `#${separatorHex}${separatorHex}${separatorHex}`;
+}
+
 function mergeTitlebarProjectState(
   current: TitlebarProjectState,
   state: Partial<TitlebarProjectState>,
 ): TitlebarProjectState {
+  const customSidebarTitlebarBackgroundColor =
+    state.customSidebarTitlebarBackgroundColor ?? current.customSidebarTitlebarBackgroundColor;
   return {
     ...current,
     ...state,
@@ -3648,6 +4064,13 @@ function mergeTitlebarProjectState(
     projectIsQuick: state.projectIsQuick ?? current.projectIsQuick,
     petOverlayEnabled: state.petOverlayEnabled ?? current.petOverlayEnabled,
     resourceGroups: state.resourceGroups ?? current.resourceGroups,
+    sidebarTheme: state.sidebarTheme ?? current.sidebarTheme,
+    customSidebarTitlebarColorsEnabled:
+      state.customSidebarTitlebarColorsEnabled ?? current.customSidebarTitlebarColorsEnabled,
+    customSidebarTitlebarForegroundColor: getSidebarTitlebarForegroundForBackground(
+      customSidebarTitlebarBackgroundColor,
+    ),
+    customSidebarTitlebarBackgroundColor,
     sidebarActions: state.sidebarActions ?? current.sidebarActions,
     sidebarSide: state.sidebarSide ?? current.sidebarSide,
     sessionPersistenceProvider:
@@ -3659,6 +4082,19 @@ function mergeTitlebarProjectState(
     updateAvailable: state.updateAvailable ?? current.updateAvailable,
     updateDownloading: state.updateDownloading ?? current.updateDownloading,
   };
+}
+
+function formatToggleSidebarTooltipLabel(hotkey: string | undefined): string {
+  if (!hotkey) {
+    return "";
+  }
+  /*
+   * CDXC:SidebarCollapse 2026-06-15-13:34:
+   * The traffic-light-side collapse control tooltip should name the command
+   * and show the assigned shortcut, matching native hover help language while
+   * preserving the empty label when Toggle Sidebar has no hotkey.
+   */
+  return `Toggle Sidebar (${formatSidebarHotkeyLabel(hotkey)})`;
 }
 
 function createInitialProjectState(bootstrap: Record<string, unknown>): TitlebarProjectState {
@@ -3693,6 +4129,12 @@ function createInitialProjectState(bootstrap: Record<string, unknown>): Titlebar
     projectPath,
     petOverlayEnabled: settings.petOverlayEnabled,
     resourceGroups: [],
+    sidebarTheme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
+    customSidebarTitlebarColorsEnabled: settings.customSidebarTitlebarColorsEnabled,
+    customSidebarTitlebarForegroundColor: getSidebarTitlebarForegroundForBackground(
+      settings.customSidebarTitlebarBackgroundColor,
+    ),
+    customSidebarTitlebarBackgroundColor: settings.customSidebarTitlebarBackgroundColor,
     sidebarCollapsed: bootstrap.sidebarCollapsed === true,
     sidebarSide: bootstrap.sidebarSide === "right" ? "right" : settings.sidebarSide,
     sidebarActions: {
@@ -3700,9 +4142,9 @@ function createInitialProjectState(bootstrap: Record<string, unknown>): Titlebar
     },
     showProjectEditorDiffFileCount: settings.showProjectEditorDiffFileCount,
     sessionPersistenceProvider: settings.sessionPersistenceProvider,
-    toggleSidebarHotkeyLabel: settings.hotkeys.toggleSidebarCollapsed
-      ? formatSidebarHotkeyLabel(settings.hotkeys.toggleSidebarCollapsed)
-      : "",
+    toggleSidebarHotkeyLabel: formatToggleSidebarTooltipLabel(
+      settings.hotkeys.toggleSidebarCollapsed,
+    ),
     workspaceOpenTargets: {
       availability: settings.workspaceOpenTargetAvailability,
       customTargets: settings.customWorkspaceOpenTargets,
@@ -3784,6 +4226,33 @@ function readStoredKeepAwakeRuntime(): KeepAwakeRuntimeState | undefined {
   } catch {
     return undefined;
   }
+}
+
+function readKeepAwakeRuntimeSyncState(raw: string | null): KeepAwakeRuntimeSyncState | undefined {
+  try {
+    const parsed = JSON.parse(raw || "null");
+    if (!isRecord(parsed)) {
+      return undefined;
+    }
+    return {
+      suppressAutoStart: parsed.suppressAutoStart === true,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function publishKeepAwakeRuntimeSync(state: KeepAwakeRuntimeSyncState): void {
+  const payload = {
+    suppressAutoStart: state.suppressAutoStart,
+    updatedAtMs: Date.now(),
+  };
+  localStorage.setItem(KEEP_AWAKE_RUNTIME_SYNC_STORAGE_KEY, JSON.stringify(payload));
+  window.dispatchEvent(new CustomEvent<KeepAwakeRuntimeSyncState>(KEEP_AWAKE_RUNTIME_CHANGED_EVENT, {
+    detail: {
+      suppressAutoStart: state.suppressAutoStart,
+    },
+  }));
 }
 
 function readStoredTitlebarTipIds(): Set<string> {
@@ -4209,6 +4678,7 @@ function TitlebarResourcesMenu({
   const resourceItemToggleLabel = allResourceItemsCollapsed
     ? "Expand all resource items"
     : "Collapse all resource items";
+  const [resourcesInfoOpen, setResourcesInfoOpen] = useState(false);
   return (
     <div className="titlebar-resources-panel">
       <div className="titlebar-resources-header">
@@ -4217,6 +4687,45 @@ function TitlebarResourcesMenu({
           <span>Resources</span>
         </div>
         <div className="titlebar-resources-actions">
+          <div className="titlebar-resources-info-control">
+            <button
+              aria-expanded={resourcesInfoOpen}
+              aria-label="Resources information"
+              className="titlebar-resources-info-button"
+              onClick={() => setResourcesInfoOpen((open) => !open)}
+              type="button"
+            >
+              {/*
+               * CDXC:TitlebarResources 2026-06-16-01:08:
+               * Resources explanatory copy belongs behind a click-only info
+               * affordance beside the bulk expand/collapse control. Keep the
+               * dropdown 400px wide and separate each note line with whitespace
+               * so the header stays compact while the copy remains available.
+               *
+               * CDXC:TitlebarResources 2026-06-16-01:54:
+               * The info dropdown must fit inside the Resources panel and draw
+               * only one background/border surface. Position it from the full
+               * header instead of the small icon wrapper so the 400px text area
+               * is not clipped.
+               *
+               * CDXC:TitlebarResources 2026-06-16-02:02:
+               * Make the info dropdown wider and lighter than the Resources
+               * panel so the explanatory sentences can fit without looking
+               * like the same dark layer as the modal behind it.
+               */}
+              <IconInfoCircle aria-hidden="true" size={14} stroke={1.9} />
+            </button>
+            {resourcesInfoOpen ? (
+              <div className="titlebar-resources-info-popover" role="dialog">
+                <div className="titlebar-resources-info-note">
+                  <p>This app uses native Ghostty terminals as they're lighter on CPU & RAM than electron/web terminals.</p>
+                  <p>The RAM use you see here is the lowest possible for the Agent CLI that you're using.</p>
+                  <p>Keep in mind that each CLI uses more/less RAM based on a lot of factors.</p>
+                  <p>You can easily sleep all inactive terminals here (Auto-sleep can be configured in settings).</p>
+                </div>
+              </div>
+            ) : null}
+          </div>
           <button
             aria-label={resourceItemToggleLabel}
             className="titlebar-resources-collapse-all-button"
@@ -4271,6 +4780,7 @@ function TitlebarResourcesMenu({
           ) : null}
           <div className="titlebar-resources-summary">
             <AppTooltip
+              {...TITLEBAR_TOOLTIP_ROOT_PROPS}
               content={
                 <>
                   <span className="titlebar-resource-tooltip-title">Live CPU</span>
@@ -4286,6 +4796,7 @@ function TitlebarResourcesMenu({
               </span>
             </AppTooltip>
             <AppTooltip
+              {...TITLEBAR_TOOLTIP_ROOT_PROPS}
               content={
                 <>
                   <span className="titlebar-resource-tooltip-title">Live memory</span>
@@ -4313,12 +4824,6 @@ function TitlebarResourcesMenu({
         />
         {processSnapshotReady ? (
           <>
-            <div className="titlebar-resources-info-note">
-              • This app uses native Ghostty terminals as they're lighter on CPU & RAM than electron/web terminals.<br />
-              • The RAM use you see here is the lowest possible for the Agent CLI that you're using.<br />
-              • Keep in mind that each CLI uses more/less RAM based on a lot of factors.<br />
-              You can easily sleep all inactive terminals here (Auto-sleep can be configured in settings).
-            </div>
             {visibleGroupViews.length > 0 ? (
               visibleGroupViews.map((view) => (
                 <TitlebarResourceSection
@@ -4398,7 +4903,11 @@ function TitlebarGxserverDaemonSection({
          * CDXC:TitlebarDaemonControls 2026-06-12-11:51:
          * The Resources dropdown should expose Restart as the primary daemon action. Hide manual Start/Stop controls so users do not manage daemon lifecycle from this compact status row.
          */}
-        <AppTooltip content="Restart daemon" contentClassName="titlebar-resource-tooltip">
+        <AppTooltip
+          {...TITLEBAR_TOOLTIP_ROOT_PROPS}
+          content="Restart daemon"
+          contentClassName="titlebar-resource-tooltip"
+        >
           <button
             aria-label="Restart gxserver"
             className="titlebar-gxserver-daemon-icon-button"
@@ -4410,7 +4919,11 @@ function TitlebarGxserverDaemonSection({
           </button>
         </AppTooltip>
         {shouldShowReloadApp ? (
-          <AppTooltip content="Reload app" contentClassName="titlebar-resource-tooltip">
+          <AppTooltip
+            {...TITLEBAR_TOOLTIP_ROOT_PROPS}
+            content="Reload app"
+            contentClassName="titlebar-resource-tooltip"
+          >
             <button
               aria-label="Reload Ghostex"
               className="titlebar-gxserver-daemon-icon-button"
@@ -4467,17 +4980,18 @@ function TitlebarResourceSection({
   const sectionCpu = sumBundleCpu(bundles);
   const sectionMemory = sumBundleMemory(bundles);
   const sortedBundles = sortResourceBundlesForDisplay(bundles, quittingKeys);
-  const hasTerminalSession = bundles.some(
+  const actionableBundles = bundles.filter(isResourceBundleActionable);
+  const hasTerminalSession = actionableBundles.some(
     (bundle) => bundle.type === "session" && bundle.session?.sessionKind === "terminal",
   );
   const sectionActionBundles = hasTerminalSession
-    ? bundles.filter((bundle) => bundle.type === "session" && bundle.session?.sessionKind === "terminal")
-    : bundles;
+    ? actionableBundles.filter((bundle) => bundle.type === "session" && bundle.session?.sessionKind === "terminal")
+    : actionableBundles;
   const sectionActionLabel = hasTerminalSession ? "Sleep Project" : "Quit";
   const sectionActionTooltipTitle = hasTerminalSession ? "Sleep project" : "Quit this group";
   const sectionActionTooltipBody = hasTerminalSession
     ? "Sleeps this project's terminal sessions and keeps them restorable in the sidebar."
-    : "Stops live processes and closes related surfaces.";
+    : "Stops user-owned live processes and closes related surfaces.";
   /**
    * CDXC:TitlebarResources 2026-05-25-14:21:
    * Resource action tooltips share the compact width cap used by header and
@@ -4499,6 +5013,12 @@ function TitlebarResourceSection({
    * The single header button controls the individual resource rows in bulk,
    * not this section container. Always render section bodies so Projects,
    * Browser Tabs, and Orphaned / Detached remain visible grouping labels.
+   *
+   * CDXC:TitlebarResources 2026-06-15-13:45:
+   * Section-level Quit must target the same action-eligible resources as row
+   * Close. Keep shared browser helper bundles visible for diagnostics, but do
+   * not let a bulk action close infrastructure that embedded browser panes need
+   * to keep working.
    */
   const resourceTooltipStyle = { maxWidth: 220 };
   return (
@@ -4518,25 +5038,28 @@ function TitlebarResourceSection({
             <span className="titlebar-resource-section-count">{bundles.length}</span>
           </span>
         </div>
-        <AppTooltip
-          content={
-            <>
-              <span className="titlebar-resource-tooltip-title">{sectionActionTooltipTitle}</span>
-              <span>{sectionActionTooltipBody}</span>
-            </>
-          }
-          contentClassName="titlebar-resource-tooltip"
-          contentStyle={resourceTooltipStyle}
-        >
-          <button
-            className="titlebar-resource-section-quit-button"
-            data-action={hasTerminalSession ? "sleep" : "quit"}
-            onClick={() => onQuit(sectionActionBundles)}
-            type="button"
+        {sectionActionBundles.length > 0 ? (
+          <AppTooltip
+            {...TITLEBAR_TOOLTIP_ROOT_PROPS}
+            content={
+              <>
+                <span className="titlebar-resource-tooltip-title">{sectionActionTooltipTitle}</span>
+                <span>{sectionActionTooltipBody}</span>
+              </>
+            }
+            contentClassName="titlebar-resource-tooltip"
+            contentStyle={resourceTooltipStyle}
           >
-            {sectionActionLabel}
-          </button>
-        </AppTooltip>
+            <button
+              className="titlebar-resource-section-quit-button"
+              data-action={hasTerminalSession ? "sleep" : "quit"}
+              onClick={() => onQuit(sectionActionBundles)}
+              type="button"
+            >
+              {sectionActionLabel}
+            </button>
+          </AppTooltip>
+        ) : null}
       </div>
       <div className="titlebar-resource-section-body">
         {sortedBundles.map((bundle) => (
@@ -4598,6 +5121,7 @@ function TitlebarResourceBundle({
   const preservesSidebarSession =
     bundle.type === "session" && bundle.session?.sessionKind === "terminal";
   const focusSessionId = bundle.type === "session" ? resourceBundleSidebarSessionIds(bundle)[0] : undefined;
+  const isActionable = isResourceBundleActionable(bundle);
   const actionLabel = preservesSidebarSession ? `Sleep ${bundle.label}` : `Close ${bundle.label}`;
   /**
    * CDXC:TitlebarResources 2026-05-28-10:39:
@@ -4610,6 +5134,12 @@ function TitlebarResourceBundle({
    * not hover-revealed overlays. Keep metrics visible, keep actions in stable
    * grid columns, and avoid tooltip trigger wrappers or native-pointer hover
    * gates that can make visible row buttons reject clicks.
+   *
+   * CDXC:TitlebarResources 2026-06-15-13:45:
+   * Row-level Close should disappear for app-critical shared browser helper
+   * bundles instead of disabling the button or letting the click reach process
+   * termination. Users should only be able to close resource rows that map to a
+   * restorable terminal session or an owned browser/code/orphan surface.
    */
   return (
     <div className="titlebar-resource-bundle" data-quitting={String(isQuitting)}>
@@ -4673,23 +5203,25 @@ function TitlebarResourceBundle({
             <IconFocus2 aria-hidden="true" size={13} stroke={1.9} />
           </button>
         ) : null}
-        <button
-          aria-label={actionLabel}
-          className="titlebar-resource-kill-button"
-          data-action={preservesSidebarSession ? "sleep" : "quit"}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onQuit([ bundle ]);
-          }}
-          type="button"
-        >
-          {preservesSidebarSession ? (
-            <IconMoon aria-hidden="true" size={13} stroke={1.9} />
-          ) : (
-            <IconX aria-hidden="true" size={13} stroke={2} />
-          )}
-        </button>
+        {isActionable ? (
+          <button
+            aria-label={actionLabel}
+            className="titlebar-resource-kill-button"
+            data-action={preservesSidebarSession ? "sleep" : "quit"}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onQuit([ bundle ]);
+            }}
+            type="button"
+          >
+            {preservesSidebarSession ? (
+              <IconMoon aria-hidden="true" size={13} stroke={1.9} />
+            ) : (
+              <IconX aria-hidden="true" size={13} stroke={2} />
+            )}
+          </button>
+        ) : null}
       </div>
       {hasChildren && !isCollapsed ? (
         <div className="titlebar-resource-children">
@@ -4845,6 +5377,19 @@ type TitlebarModeOption = {
   onSelect: () => void;
   value: TitlebarMode;
 };
+
+/*
+CDXC:ModeSwitcher 2026-06-15-20:07:
+Titlebar mode tabs should show the active segment immediately on click instead of animating the shared-layout pill between Agents, Source, Browser, and Kanban. Keep the previous Motion transition commented here so the animated behavior can be restored if the requirement changes.
+
+Previous Motion wiring:
+* import { motion } from "motion/react";
+* const TITLEBAR_MODE_PILL_TRANSITION = {
+*   type: "spring",
+*   bounce: 0,
+*   duration: 0.39,
+* } as const;
+*/
 
 function TitlebarModeDropdown({
   activeMode,
@@ -5005,11 +5550,20 @@ function TitlebarModeSwitcher({
             type="button"
           >
             {isActive ? (
-              <motion.div
-                className="titlebar-mode-tab-active"
-                layoutId="clickedbutton"
-                transition={{ type: "spring", bounce: 0.3, duration: 0.6 }}
-              />
+              <>
+                {/*
+                 * CDXC:ModeSwitcher 2026-06-15-20:07:
+                 * Clicking a titlebar tab should instantly paint the active
+                 * state on that tab. Previous animated implementation, kept
+                 * for a possible restore:
+                 *   <motion.div
+                 *     className="titlebar-mode-tab-active"
+                 *     layoutId="clickedbutton"
+                 *     transition={TITLEBAR_MODE_PILL_TRANSITION}
+                 *   />
+                 */}
+                <span aria-hidden="true" className="titlebar-mode-tab-active" />
+              </>
             ) : null}
             <span className="titlebar-mode-tab-content">
               {getTitlebarModeIcon(mode.value)}
@@ -5099,23 +5653,6 @@ function getOpenTargetIcon(target: ResolvedOpenTarget): ReactNode {
   return <IconBox aria-hidden="true" className="size-4 text-zinc-400" />;
 }
 
-function titlebarPrimaryGitActionLabel(label: string): string {
-  return label.replace(/\bPush\b/g, "push").replace(/\bPR\b/g, "PR");
-}
-
-function compactTitlebarPrimaryGitActionLabel(label: string): string {
-  /**
-   * CDXC:TitlebarGit 2026-05-29-16:05:
-   * Below 620px, the top-right Git primary button needs to remove the visible
-   * Commit wording while preserving any following push or PR destination text.
-   * Keep the full aria label on the button so the compact visual label does not
-   * reduce screen-reader context.
-   */
-  return titlebarPrimaryGitActionLabel(label)
-    .replace(/^Commit(?:\s*&\s*|,\s*)?/i, "")
-    .trim();
-}
-
 function getTitlebarGitActionIcon(action: SidebarGitAction): ReactNode {
   if (action === "syncMain") {
     return (
@@ -5144,6 +5681,23 @@ function getTitlebarGitActionIcon(action: SidebarGitAction): ReactNode {
     );
   }
   return <IconGitCommit aria-hidden="true" className="titlebar-git-icon" size={15} stroke={1.8} />;
+}
+
+function formatTitlebarGitStatCount(value: number): string {
+  const normalized = Math.max(0, Math.trunc(value));
+  return String(Math.min(normalized, 9999));
+}
+
+function titlebarGitBranchLabel(branch: string | null): string {
+  return branch?.trim() || "(detached HEAD)";
+}
+
+function titlebarGitSyncMainLabel(state: SidebarGitState): string {
+  return `+${formatTitlebarGitStatCount(state.behindCount)} / +${formatTitlebarGitStatCount(state.aheadCount)}`;
+}
+
+function titlebarGitSyncMainDisabledReason(state: SidebarGitState): string | undefined {
+  return getSidebarGitDisabledReason(state, "syncMain");
 }
 
 function readLastOpenTargetId(): string {
@@ -5184,20 +5738,6 @@ function getLastActionCommandStorageKey(
 
 function getSidebarActionLabel(command: SidebarCommandButton): string {
   return command.name.trim() || command.commandId;
-}
-
-function createTitlebarCommandConfigDraft(command: SidebarCommandButton): CommandConfigDraft {
-  return {
-    actionType: command.actionType,
-    closeTerminalOnExit: command.closeTerminalOnExit,
-    command: command.command ?? (command.actionType === "terminal" ? "" : undefined),
-    commandId: command.commandId,
-    icon: command.icon ?? DEFAULT_SIDEBAR_COMMAND_ICON,
-    iconColor: command.iconColor ?? DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
-    name: command.name,
-    playCompletionSound: command.playCompletionSound,
-    url: command.url ?? (command.actionType === "browser" ? DEFAULT_BROWSER_ACTION_URL : undefined),
-  };
 }
 
 function getSidebarActionIcon(command: SidebarCommandButton | undefined): ReactNode {
@@ -5268,7 +5808,7 @@ const styles = {
   },
   titlebar: {
     alignItems: "center",
-    background: "#0e0e0e",
+    background: "var(--app-titlebar-background)",
     display: "flex",
     height: TITLEBAR_HEIGHT,
     justifyContent: "center",
@@ -5302,9 +5842,35 @@ styleElement.textContent = `
      * the titlebar font token to the imported sidebar shadcn sans token instead
      * of the older bespoke monospace stack while leaving titlebar sizing and
      * weight rules unchanged.
-     */
+    */
     --titlebar-font-family: var(--font-sans, "Inter Variable", sans-serif);
+    /*
+     * CDXC:SidebarTitlebarColors 2026-06-15-15:01:
+     * Experimental custom titlebar colors override this token from body so
+     * button separators can darken as the custom background gets lighter.
+     */
     --titlebar-button-border-color: #252525;
+  }
+  /*
+   * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
+   * Foreground color needs to beat older hardcoded white titlebar text/icon
+   * rules, but only in the real titlebar host. The dropdown-panel host never
+   * gets this body data attribute, so menu surfaces keep their theme colors.
+   */
+  body[data-custom-sidebar-titlebar-colors="true"] :is(
+    .titlebar-sidebar-collapse-button,
+    .titlebar-sidebar-collapse-button-visual,
+    .titlebar-session-button,
+    .titlebar-project-title,
+    .titlebar-project-name,
+    .titlebar-mode-tab,
+    .titlebar-mode-label,
+    .titlebar-git-label,
+    .titlebar-open-group,
+    .titlebar-open-main-button,
+    svg
+  ) {
+    color: var(--custom-sidebar-titlebar-foreground-color) !important;
   }
   /*
    * CDXC:ReactTitlebar 2026-06-10-23:44:
@@ -5516,20 +6082,28 @@ styleElement.textContent = `
   .titlebar-update-button[data-downloading="true"] {
     /*
      * CDXC:AutoUpdate 2026-06-13-17:52:
-     * Downloading updates should make the existing titlebar download button
-     * fade in and out. Animate opacity only so the compact titlebar layout and
-     * hit target stay stable while Sparkle performs the actual download.
+     * Downloading updates should keep the existing titlebar update button
+     * visible so the compact titlebar layout and hit target stay stable while
+     * Sparkle performs the actual download.
+     *
+     * CDXC:AutoUpdate 2026-06-15-16:39:
+     * The active download state uses a disabled, hoverable titlebar button with
+     * a spinner glyph. Do not fade the whole button; the loader animation alone
+     * should communicate activity while the tooltip says "Downloading...".
      */
-    animation: titlebar-update-download-fade 1.15s ease-in-out infinite;
     color: rgba(255,255,255,0.92);
   }
-  @keyframes titlebar-update-download-fade {
-    0%,
-    100% {
-      opacity: 0.38;
-    }
-    50% {
-      opacity: 1;
+  .titlebar-update-button[data-downloading="true"]:hover,
+  .titlebar-update-button[data-downloading="true"]:focus-visible {
+    background: transparent;
+    color: rgba(255,255,255,0.92);
+  }
+  .titlebar-update-spinner {
+    animation: titlebar-update-download-spin 1s linear infinite;
+  }
+  @keyframes titlebar-update-download-spin {
+    to {
+      transform: rotate(360deg);
     }
   }
   .titlebar-project-title {
@@ -5802,10 +6376,14 @@ styleElement.textContent = `
      * The unread indicator is intentionally a quiet half-size dot instead of a
      * numbered badge: use #95d7f6 and a circular shape at the top-right of the
      * Tips & Tricks icon.
+     *
+     * CDXC:SidebarTheme 2026-06-15-01:43:
+     * The badge border follows the titlebar background so Dark 1, Dark 2, and
+     * Light keep the dot clean against the selected titlebar surface.
      */
     align-items: center;
     background: #95d7f6;
-    border: 1px solid #0e0e0e;
+    border: 1px solid var(--app-titlebar-background);
     display: inline-flex;
     height: 7.5px;
     justify-content: center;
@@ -5876,14 +6454,28 @@ styleElement.textContent = `
     border-bottom-right-radius: 0;
     border-top-right-radius: 0;
   }
+  .titlebar-app-tooltip {
+    /*
+     * CDXC:TitlebarTooltips 2026-06-15-23:25:
+     * Titlebar hover labels should be 6px shorter than the shared app tooltip
+     * chrome. Reduce vertical padding by 3px per side only for titlebar-owned
+     * AppTooltip content so sidebar and resource-detail tooltips keep their size.
+     */
+    padding-bottom: 3px !important;
+    padding-top: 3px !important;
+  }
   .titlebar-open-menu {
     /**
      * CDXC:TitlebarMenus 2026-05-28-13:52:
-     * Titlebar dropdown surfaces should match the unified #0e0e0e app-modal
+     * Titlebar dropdown surfaces should match the unified app overlay
      * background instead of using the older #181818 menu shell.
+     *
+     * CDXC:SidebarTheme 2026-06-15-01:43:
+     * Titlebar dropdowns follow --app-dropdown-background so Dark 1 uses
+     * #191919, Dark 2 preserves #0e0e0e, and Light uses a light overlay.
      */
-    background: #0e0e0e !important;
-    background-color: #0e0e0e !important;
+    background: var(--app-dropdown-background) !important;
+    background-color: var(--app-dropdown-background) !important;
     border: 1px solid rgba(255,255,255,0.14);
     box-shadow: 0 18px 42px rgba(0,0,0,0.44);
   }
@@ -5901,8 +6493,8 @@ styleElement.textContent = `
    * without ResizeObserver-driven native resize messages after open.
    */
   .titlebar-dropdown-panel-root {
-    background: #0e0e0e;
-    color: rgba(255,255,255,0.92);
+    background: var(--app-dropdown-background);
+    color: var(--foreground);
     display: block;
     height: 100vh;
     min-height: 1px;
@@ -5958,6 +6550,15 @@ styleElement.textContent = `
     height: 1px;
     margin: 4px 0;
   }
+  .titlebar-menu-section-label {
+    align-items: center;
+    color: var(--muted-foreground);
+    display: flex;
+    font: 600 11px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    height: ${TITLEBAR_DROPDOWN_MENU_LABEL_HEIGHT}px;
+    letter-spacing: 0;
+    padding: 4px 8px 2px;
+  }
   /**
    * CDXC:TitlebarGit 2026-05-24-20:40:
    * The Git split menu opens from the chevron segment, but the menu must be wide enough to show Commit, Push, and Create PR labels. Pin the menu width instead of letting Radix size it from the narrow chevron trigger.
@@ -5966,17 +6567,113 @@ styleElement.textContent = `
    * Release-oriented Git actions add longer dropdown labels such as Multicommit & Release, so the pinned menu width must fit them without clipping.
    */
   .titlebar-git-menu {
-    max-width: 260px;
-    min-width: 240px !important;
+    max-width: 320px;
+    min-width: 300px !important;
     overflow-x: visible;
-    width: 240px !important;
+    width: 300px !important;
+  }
+  /*
+   * CDXC:TitlebarGit 2026-06-16-00:00:
+   * Git dropdown rows need one visual rhythm: fixed icon column, shared menu
+   * font, and left-aligned content. Keep branch, changed-line stats, sync, and
+   * action rows on the same grid so the menu does not look like separate
+   * components stacked together.
+   *
+   * CDXC:TitlebarGit 2026-06-16-00:05:
+   * Do not vary font weight between branch, changes, sync, and action text.
+   * Disabled sync rows should not switch to a separate gray family; keep the
+   * same text color system and use icon/row opacity only for availability.
+   *
+   * CDXC:TitlebarGit 2026-06-16-00:08:
+   * Do not label the compact branch, change-stat, or sync rows with extra words.
+   * Use one left-aligned content column so long values never wrap into a second
+   * grid line under a right-aligned value column.
+   *
+   * CDXC:TitlebarGit 2026-06-16-00:18:
+   * Keep Git dropdown row text light. The compact metadata and action rows are
+   * dense enough that medium-weight text reads too heavy in the dark menu.
+   */
+  .titlebar-git-menu .titlebar-open-menu-item {
+    --titlebar-git-value-color: rgba(255,255,255,0.86);
+    color: var(--titlebar-git-value-color);
+    display: grid !important;
+    font-weight: 400;
+    grid-template-columns: 18px minmax(0, 1fr);
+    padding-inline: 8px;
+  }
+  .titlebar-dropdown-panel-root .titlebar-git-menu .titlebar-open-menu-item:disabled {
+    color: var(--titlebar-git-value-color);
+  }
+  .titlebar-dropdown-panel-root .titlebar-git-menu .titlebar-open-menu-item:disabled > svg,
+  .titlebar-dropdown-panel-root .titlebar-git-menu .titlebar-open-menu-item:disabled .titlebar-git-icon {
+    opacity: 0.42;
+  }
+  .titlebar-dropdown-panel-root .titlebar-git-menu .titlebar-open-menu-item:not(:disabled):hover,
+  .titlebar-dropdown-panel-root .titlebar-git-menu .titlebar-open-menu-item:not(:disabled):focus-visible {
+    /*
+     * CDXC:TitlebarGit 2026-06-16-00:10:
+     * Clickable Git dropdown rows need a visible hover affordance inside the
+     * dark native child menu. Use a Git-scoped state color instead of relying on
+     * the subtler generic titlebar menu hover.
+     */
+    background: rgba(255,255,255,0.14);
+    color: rgba(255,255,255,0.94);
+    outline: none;
+  }
+  .titlebar-git-menu .titlebar-open-menu-item > svg,
+  .titlebar-git-menu .titlebar-git-icon {
+    grid-column: 1;
+    justify-self: center;
+  }
+  .titlebar-git-menu .titlebar-open-menu-item > span {
+    min-width: 0;
+  }
+  .titlebar-git-menu .titlebar-open-menu-item > svg + span,
+  .titlebar-git-menu .titlebar-git-icon + span {
+    grid-column: 2;
+  }
+  .titlebar-git-meta-row {
+    pointer-events: none;
+  }
+  .titlebar-git-branch-name {
+    color: var(--titlebar-git-value-color);
+    font: inherit;
+    grid-column: 2;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .titlebar-git-stat-pair {
+    align-items: center;
+    display: inline-flex;
+    gap: 10px;
+    grid-column: 2;
+    justify-self: start;
+  }
+  .titlebar-git-stat {
+    font: inherit;
+    min-width: 42px;
+    text-align: right;
+  }
+  .titlebar-git-stat-additions {
+    color: rgb(74, 222, 128);
+  }
+  .titlebar-git-stat-deletions {
+    color: rgb(248, 113, 113);
   }
   .titlebar-open-menu-item {
+    /*
+     * CDXC:TitlebarMenus 2026-06-16-00:18:
+     * Titlebar dropdown item labels should use normal-weight text. Menu rows are
+     * compact and icon-led, so medium weight makes Actions/Open/Git lists feel
+     * visually loud compared with the rest of the titlebar chrome.
+     */
     cursor: default !important;
     min-height: 30px;
     gap: 10px;
     border-radius: 0;
-    font: 500 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font: 400 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   }
   /**
    * CDXC:TitlebarActions 2026-05-19-16:05:
@@ -6002,6 +6699,7 @@ styleElement.textContent = `
   }
   .titlebar-action-menu-title {
     display: block;
+    font-weight: inherit;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -6034,8 +6732,8 @@ styleElement.textContent = `
      * The macOS Tips & Tricks child panel is 100px narrower than the Resources
      * reading panel so the guide occupies less horizontal space.
      */
-    background: #0e0e0e !important;
-    background-color: #0e0e0e !important;
+    background: var(--app-dropdown-background) !important;
+    background-color: var(--app-dropdown-background) !important;
     width: min(556px, calc(100vw - 24px));
     max-height: min(760px, calc(100vh - 46px));
     overflow: hidden;
@@ -6227,11 +6925,15 @@ styleElement.textContent = `
   .titlebar-resources-menu {
     /**
      * CDXC:TitlebarResources 2026-05-28-13:22:
-     * The Resources manager background must match #0e0e0e while adjacent
-     * titlebar dropdowns keep the existing titlebar menu color.
+     * The Resources manager background must match the titlebar dropdown family
+     * while adjacent titlebar dropdowns keep the existing titlebar menu color.
+     *
+     * CDXC:SidebarTheme 2026-06-15-01:43:
+     * Resources uses the dropdown token so the large child panel switches with
+     * Dark 1, Dark 2, and Light.
      */
-    background: #0e0e0e !important;
-    background-color: #0e0e0e !important;
+    background: var(--app-dropdown-background) !important;
+    background-color: var(--app-dropdown-background) !important;
     width: min(656px, calc(100vw - 24px));
     max-height: min(760px, calc(100vh - 46px));
     overflow: hidden;
@@ -6249,6 +6951,8 @@ styleElement.textContent = `
     justify-content: space-between;
     gap: 12px;
     padding: 11px 12px;
+    position: relative;
+    z-index: 2;
   }
   .titlebar-resources-title,
   .titlebar-resources-actions,
@@ -6261,7 +6965,13 @@ styleElement.textContent = `
   }
   .titlebar-resources-title {
     gap: 8px;
-    font: 750 14px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    /*
+     * CDXC:TitlebarResources 2026-06-16-00:19:
+     * The Resources dropdown should use the same lighter text treatment as the
+     * titlebar action menus. Keep labels, metrics, daemon status, and controls
+     * visually consistent instead of mixing heavy font weights across the panel.
+     */
+    font: 400 14px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     min-width: 0;
   }
   .titlebar-resource-tooltip {
@@ -6282,6 +6992,44 @@ styleElement.textContent = `
   .titlebar-resources-actions {
     gap: 10px;
     margin-left: auto;
+  }
+  .titlebar-resources-info-control {
+    display: inline-flex;
+  }
+  .titlebar-resources-info-button {
+    align-items: center;
+    appearance: none;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 0;
+    color: rgba(255,255,255,0.78);
+    display: inline-flex;
+    height: 24px;
+    justify-content: center;
+    padding: 0;
+    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+    width: 24px;
+  }
+  .titlebar-resources-info-button:hover,
+  .titlebar-resources-info-button:focus-visible,
+  .titlebar-resources-info-button[aria-expanded="true"] {
+    background: rgba(255,255,255,0.14);
+    border-color: rgba(255,255,255,0.18);
+    color: rgba(255,255,255,0.94);
+    outline: none;
+  }
+  .titlebar-resources-info-popover {
+    background: color-mix(in srgb, var(--app-dropdown-background) 82%, #ffffff 18%) !important;
+    border: 1px solid rgba(255,255,255,0.14);
+    box-shadow: 0 14px 36px rgba(0,0,0,0.36);
+    box-sizing: border-box;
+    color: rgba(255,255,255,0.72);
+    padding: 10px;
+    position: absolute;
+    right: 12px;
+    top: calc(100% + 8px);
+    width: min(620px, calc(100% - 24px));
+    z-index: 5;
   }
   .titlebar-resources-collapse-all-button {
     /*
@@ -6328,7 +7076,7 @@ styleElement.textContent = `
     color: rgba(255,255,255,0.78);
     display: inline-flex;
     gap: 6px;
-    font: 750 11px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font: 400 11px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     height: 24px;
     justify-content: center;
     padding: 0 8px;
@@ -6361,7 +7109,7 @@ styleElement.textContent = `
     border-radius: 0;
     color: rgba(255,255,255,0.86);
     display: inline-flex;
-    font: 750 11px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font: 400 11px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     height: 24px;
     justify-content: center;
     opacity: 0;
@@ -6401,7 +7149,7 @@ styleElement.textContent = `
   .titlebar-resources-summary {
     color: rgba(255,255,255,0.72);
     gap: 12px;
-    font: 650 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font: 400 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   }
   .titlebar-resources-summary span {
     gap: 5px;
@@ -6420,7 +7168,7 @@ styleElement.textContent = `
     align-items: center;
     color: rgba(255,255,255,0.58);
     display: flex;
-    font: 650 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font: 400 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     gap: 8px;
     justify-content: center;
     min-height: 260px;
@@ -6434,14 +7182,25 @@ styleElement.textContent = `
      * CDXC:TitlebarResources 2026-05-21-16:58:
      * Keep explanatory copy out of the crowded titlebar. Put the general
      * resource-usage note in the scroll body above the resource sections.
+     *
+     * CDXC:TitlebarResources 2026-06-16-01:08:
+     * The note now appears only inside the click-triggered info dropdown next
+     * to the bulk expand/collapse control, with paragraph spacing instead of
+     * inline line breaks.
+     *
+     * CDXC:TitlebarResources 2026-06-16-01:54:
+     * The popover shell owns the only card background and border. Keep this
+     * inner text wrapper visually transparent so the note is not a card inside
+     * another boxed surface.
      */
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 0;
     color: rgba(255,255,255,0.62);
-    font: 600 12px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-    margin-bottom: 8px;
-    padding: 8px 10px;
+    font: 400 12px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  }
+  .titlebar-resources-info-note p {
+    margin: 0;
+  }
+  .titlebar-resources-info-note p + p {
+    margin-top: 10px;
   }
   .titlebar-gxserver-daemon {
     /*
@@ -6450,12 +7209,17 @@ styleElement.textContent = `
      *
      * CDXC:TitlebarResources 2026-06-12-11:30:
      * The gxserver status headline should show the live status message (for example "gxserver is running and uses the expected protocol.") beside the state dot instead of a generic "Daemon" label, with the state/version line directly underneath.
+     *
+     * CDXC:TitlebarResources 2026-06-16-00:56:
+     * Hide the gxserver daemon status strip in the Resources dropdown with CSS
+     * only. Keep the component mounted so the surrounding daemon controls and
+     * status plumbing do not need a separate conditional path.
      */
     align-items: center;
     background: rgba(255,255,255,0.045);
     border: 1px solid rgba(255,255,255,0.1);
     color: rgba(255,255,255,0.72);
-    display: grid;
+    display: none;
     gap: 6px 10px;
     grid-template-columns: minmax(0, 1fr) auto;
     margin-bottom: 8px;
@@ -6497,7 +7261,7 @@ styleElement.textContent = `
   }
   .titlebar-gxserver-daemon-copy {
     display: grid;
-    font: 650 11px/1.25 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font: 400 11px/1.25 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     gap: 1px;
     min-width: 0;
   }
@@ -6509,7 +7273,7 @@ styleElement.textContent = `
   }
   .titlebar-gxserver-daemon-copy span:first-child {
     color: rgba(255,255,255,0.92);
-    font-weight: 760;
+    font-weight: 400;
   }
   .titlebar-gxserver-daemon-controls {
     gap: 6px;
@@ -6534,7 +7298,7 @@ styleElement.textContent = `
   .titlebar-gxserver-daemon-checkbox {
     color: rgba(255,255,255,0.58);
     gap: 4px;
-    font: 650 10px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font: 400 10px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     white-space: nowrap;
   }
   .titlebar-gxserver-daemon-checkbox input {
@@ -6550,7 +7314,7 @@ styleElement.textContent = `
     align-items: center;
     color: rgba(255,255,255,0.62);
     display: flex;
-    font: 750 11px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font: 400 11px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     gap: 6px;
     letter-spacing: 0.08em;
     padding: 4px 2px 7px;
@@ -6630,20 +7394,23 @@ styleElement.textContent = `
      * fixed grid tracks and let only the text track shrink.
      *
      * CDXC:TitlebarResources 2026-06-13-00:56:
-     * Per-item Focus and Sleep/Close buttons are fixed visible columns after
-     * CPU/RAM metrics. Do not overlay them on hover or hide metrics to reveal
+     * Per-item Focus and Sleep/Close buttons are fixed visible columns. Do not
+     * overlay them on hover or hide metrics to reveal
      * actions; normal hover on the buttons is the only interaction treatment.
      *
      * CDXC:TitlebarResources 2026-06-13-02:07:
-     * CPU and RAM should read as one centered usage cluster between the session
-     * text and the right-side buttons. Keep the text and action tracks stable,
-     * and center a fixed metrics track so the values do not drift into the
-     * action area.
+     * CPU and RAM should read as one usage cluster. Keep the text and action
+     * tracks stable so values do not drift into the action area.
+     *
+     * CDXC:TitlebarResources 2026-06-16-01:10:
+     * CPU and RAM must always occupy the far-right row area. Focus and
+     * Sleep/Close sit immediately to the left of the metrics so usage values
+     * stay aligned at the panel edge across all resource rows.
      */
     align-items: center;
     display: grid;
     gap: 8px;
-    grid-template-columns: minmax(0, 1fr) minmax(184px, 220px) 24px 24px;
+    grid-template-columns: minmax(0, 1fr) 24px 24px minmax(184px, 220px);
     min-height: 44px;
     overflow: hidden;
     padding: 7px 8px;
@@ -6681,7 +7448,7 @@ styleElement.textContent = `
     color: rgba(255,255,255,0.84);
     display: inline-flex;
     flex: 0 0 auto;
-    font: 750 11px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font: 400 11px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     height: 28px;
     justify-content: center;
     width: 28px;
@@ -6712,7 +7479,7 @@ styleElement.textContent = `
   }
   .titlebar-resource-name {
     color: rgba(255,255,255,0.94);
-    font: 700 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font: 400 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -6720,7 +7487,7 @@ styleElement.textContent = `
   .titlebar-resource-meta,
   .titlebar-resource-child-name {
     color: rgba(255,255,255,0.58);
-    font: 500 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font: 400 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -6729,8 +7496,9 @@ styleElement.textContent = `
     align-items: center;
     display: grid;
     gap: 8px;
+    grid-column: 4;
     grid-template-columns: minmax(68px, 0.85fr) minmax(100px, 1fr);
-    justify-self: center;
+    justify-self: end;
     max-width: 220px;
     min-width: 184px;
     width: 100%;
@@ -6742,7 +7510,7 @@ styleElement.textContent = `
     box-sizing: border-box;
     color: rgba(255,255,255,0.88);
     display: inline-flex;
-    font: 680 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font: 400 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     font-variant-numeric: tabular-nums;
     gap: 6px;
     height: 24px;
@@ -6777,7 +7545,7 @@ styleElement.textContent = `
      * the session label and process totals never shift.
      */
     border-color: rgba(255,255,255,0.16);
-    grid-column: 3;
+    grid-column: 2;
   }
   .titlebar-resource-focus-button:hover,
   .titlebar-resource-focus-button:focus-visible {
@@ -6786,9 +7554,16 @@ styleElement.textContent = `
     outline: none;
   }
   .titlebar-resource-kill-button {
-    background: rgb(220 38 38);
-    color: white;
-    grid-column: 4;
+    /*
+     * CDXC:TitlebarResources 2026-06-14-16:50:
+     * Row-level Close should carry the same neutral background, border, and
+     * icon color as Sleep. The Resources modal still distinguishes the action
+     * by the X icon and aria label without using a destructive red palette.
+     */
+    background: rgba(255,255,255,0.14);
+    border-color: rgba(255,255,255,0.16);
+    color: rgba(255,255,255,0.9);
+    grid-column: 3;
   }
   .titlebar-resource-kill-button[data-action="sleep"] {
     background: rgba(255,255,255,0.14);
@@ -6796,15 +7571,11 @@ styleElement.textContent = `
     color: rgba(255,255,255,0.9);
   }
   .titlebar-resource-kill-button[data-action="sleep"]:hover,
-  .titlebar-resource-kill-button[data-action="sleep"]:focus-visible {
-    background: rgba(255,255,255,0.2);
-    color: rgba(255,255,255,0.96);
-    outline: none;
-  }
+  .titlebar-resource-kill-button[data-action="sleep"]:focus-visible,
   .titlebar-resource-kill-button[data-action="quit"]:hover,
   .titlebar-resource-kill-button[data-action="quit"]:focus-visible {
-    background: rgb(185 28 28);
-    border-color: rgba(248,113,113,0.45);
+    background: rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.96);
     outline: none;
   }
   .titlebar-resource-children {
@@ -6820,7 +7591,7 @@ styleElement.textContent = `
   }
   .titlebar-resources-empty {
     color: rgba(255,255,255,0.54);
-    font: 500 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font: 400 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     padding: 10px 4px;
   }
   /*

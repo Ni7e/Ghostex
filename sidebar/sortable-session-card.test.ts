@@ -4,6 +4,7 @@ import {
   canSleepSidebarSession,
   createSleepBelowDebugDetails,
   getSessionCardAccessibleLabel,
+  getSessionTagSubmenuSections,
   resolveSessionCardSessionIdsBelow,
   runSidebarBulkContextMenuActionInBackground,
 } from "./sortable-session-card";
@@ -32,6 +33,47 @@ describe("getSessionCardAccessibleLabel", () => {
         title: " ",
       }),
     ).toBe("Session");
+  });
+});
+
+describe("getSessionTagSubmenuSections", () => {
+  test("uses default enabled and visible tag rows for the Tag as menu", () => {
+    /*
+     * CDXC:SessionTagFilters 2026-06-15-22:23:
+     * Session context-menu tagging should mirror the Settings-controlled
+     * sidebar tag list so Reset to Default removes default-off tags from both
+     * the filter menu and the Tag as assignment submenu.
+     */
+    expect(
+      getSessionTagSubmenuSections({})
+        .flatMap((section) => section.options.map((option) => option.value)),
+    ).toEqual([
+      "favorite",
+      "in-progress",
+      "testing",
+      "blocked",
+      "on-hold",
+      "done",
+      "research",
+      "design",
+    ]);
+  });
+
+  test("keeps the current hidden tag visible so it can be removed", () => {
+    expect(
+      getSessionTagSubmenuSections({ currentSessionTag: "bug" })
+        .flatMap((section) => section.options.map((option) => option.value)),
+    ).toEqual([
+      "favorite",
+      "in-progress",
+      "testing",
+      "blocked",
+      "on-hold",
+      "done",
+      "research",
+      "bug",
+      "design",
+    ]);
   });
 });
 

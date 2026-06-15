@@ -129,7 +129,28 @@ final class GxserverClient {
     "ghostex_WORKSPACE_ID",
     "ghostex_WORKSPACE_ROOT",
   ]
+  private static let gxserverLaunchEnvironmentKeys = [
+    "GHOSTEX_GXSERVER_CLI",
+    "GHOSTEX_GXSERVER_BIN",
+  ]
   private let fileManager = FileManager.default
+
+  private enum GxserverLaunchExecutableKind {
+    case javascriptCli
+    case nativeExecutable
+  }
+
+  private struct GxserverLaunchPlan {
+    let executableURL: URL
+    let expectedBuildIdentity: String?
+    let isExplicitSelection: Bool
+    let kind: GxserverLaunchExecutableKind
+  }
+
+  private enum GxserverLaunchPlanResolution {
+    case failure(message: String, explicit: Bool)
+    case success(GxserverLaunchPlan)
+  }
 
   /*
    CDXC:GxserverBootstrap 2026-05-30-15:39:
@@ -139,18 +160,52 @@ final class GxserverClient {
    LaunchServices does not inherit the user's interactive shell PATH after a Mac restart. Resolve gxserver's runtime from deterministic app resources, surface the exact daemon status to React, and let users disable future auto-start without adding sidebar restore fallbacks.
 
    CDXC:GxserverBootstrap 2026-06-08-12:17:
-   Ghostex macOS must launch gxserver with code-server's bundled Node 22 runtime under app resources so users never need to install Node, fix PATH, or match the better-sqlite3 ABI before the sidebar can start.
+   Legacy JavaScript gxserver selections must launch with code-server's bundled Node 22 runtime under app resources so users never need to install Node, fix PATH, or match the database-module ABI before the sidebar can start.
+
+   CDXC:GxserverRustPort 2026-06-14-21:09:
+   Phase 2 Rust testing used explicit opt-in through GHOSTEX_GXSERVER_CLI/BIN. Keep those hard-selection hooks for source/reference testing, skip Node validation for native gxserver binaries, and report fixed-port startup failures instead of silently switching daemons.
+
+   CDXC:GxserverRustPackaging 2026-06-16-10:35:
+   Phase 8 app bundles launch Web/gxserver/bin/gxserver as the default daemon. Explicit gxserver selections still refuse to stop a different fixed-port owner, but the packaged default may restart an older build after the build identity check.
   */
   func startOrReuse(allowStart: Bool? = nil) async -> GxserverClientStatus {
     let shouldStart = allowStart ?? alwaysStartOnLaunch
-    let expectedBuildIdentity = expectedBundledBuildIdentity()
-    let expectedNativeRuntimeLoadResult = expectedBundledNativeNodeRuntime()
+    let launchResolution = resolveGxserverLaunchPlan()
+    let launchPlan: GxserverLaunchPlan?
+    switch launchResolution {
+    case .success(let resolvedPlan):
+      launchPlan = resolvedPlan
+    case .failure(let message, let explicit):
+      if explicit || shouldStart {
+        return GxserverClientStatus(
+          alwaysStart: alwaysStartOnLaunch,
+          authToken: readAuthToken(),
+          health: nil,
+          message: message,
+          ok: false,
+          state: "missingGxserverCli"
+        )
+      }
+      launchPlan = nil
+    }
+    let expectedBuildIdentity = launchPlan?.expectedBuildIdentity
     if let running = await authenticatedHealthStatus(expectedBuildIdentity: expectedBuildIdentity) {
       if !Self.reuseFailureRequiresRestart(running.state) {
         return running
       }
       guard shouldStart else {
         return running
+      }
+      if launchPlan?.kind == .nativeExecutable && launchPlan?.isExplicitSelection == true {
+        return GxserverClientStatus(
+          alwaysStart: alwaysStartOnLaunch,
+          authToken: running.authToken,
+          health: running.health,
+          message:
+            "Rust gxserver was selected, but 127.0.0.1:58744 is already owned by a different gxserver. Stop the current control plane before starting the Rust opt-in.",
+          ok: false,
+          state: "portConflict"
+        )
       }
       await stopRunningGxserverControlPlane()
     }
@@ -169,66 +224,65 @@ final class GxserverClient {
       )
     }
 
-    let expectedNativeRuntime: GxserverNativeNodeRuntime?
-    switch expectedNativeRuntimeLoadResult {
-    case .loaded(let runtime):
-      expectedNativeRuntime = runtime
-    case .unavailable:
-      expectedNativeRuntime = nil
-    case .invalid(let message):
-      return GxserverClientStatus(
-        alwaysStart: alwaysStartOnLaunch,
-        authToken: readAuthToken(),
-        health: nil,
-        message: message,
-        ok: false,
-        state: "runtimeUnavailable"
-      )
-    }
-
-    let nodeResolution = resolveBundledNode()
-    if let nodeError = bundledNodeDependencyError(resolution: nodeResolution, expectedRuntime: expectedNativeRuntime) {
-      return GxserverClientStatus(
-        alwaysStart: alwaysStartOnLaunch,
-        authToken: readAuthToken(),
-        health: nil,
-        message: nodeError,
-        nodeModuleVersion: nodeResolution.moduleVersion,
-        nodePath: nodeResolution.path,
-        nodeVersion: nodeResolution.version,
-        ok: false,
-        expectedNodeMajor: expectedNativeRuntime?.nodeMajor,
-        expectedNodeModuleVersion: expectedNativeRuntime?.nodeModuleVersion,
-        state: "runtimeUnavailable"
-      )
-    }
-
-    guard let cliURL = resolveGxserverCliURL() else {
+    guard let launchPlan else {
       return GxserverClientStatus(
         alwaysStart: alwaysStartOnLaunch,
         authToken: readAuthToken(),
         health: nil,
         message:
-          "gxserver CLI build output is missing. Run `npm run build` in gxserver/ for development, or reinstall Ghostex so gxserver/dist/src/cli.js is present.",
-        nodeModuleVersion: nodeResolution.moduleVersion,
-        nodePath: nodeResolution.path,
-        nodeVersion: nodeResolution.version,
+          "Bundled Rust gxserver is missing. Run `bun run build` for development, or reinstall Ghostex so Web/gxserver/bin/gxserver is present.",
         ok: false,
-        expectedNodeMajor: expectedNativeRuntime?.nodeMajor,
-        expectedNodeModuleVersion: expectedNativeRuntime?.nodeModuleVersion,
         state: "missingGxserverCli"
       )
     }
 
-    if let launchError = launchGxserverForeground(cliURL: cliURL, nodePath: nodeResolution.path) {
+    var expectedNativeRuntime: GxserverNativeNodeRuntime?
+    var nodeResolution: BundledNodeResolution?
+    if launchPlan.kind == .javascriptCli {
+      switch expectedBundledNativeNodeRuntime(for: launchPlan.executableURL) {
+      case .loaded(let runtime):
+        expectedNativeRuntime = runtime
+      case .unavailable:
+        expectedNativeRuntime = nil
+      case .invalid(let message):
+        return GxserverClientStatus(
+          alwaysStart: alwaysStartOnLaunch,
+          authToken: readAuthToken(),
+          health: nil,
+          message: message,
+          ok: false,
+          state: "runtimeUnavailable"
+        )
+      }
+
+      let resolvedNode = resolveBundledNode()
+      if let nodeError = bundledNodeDependencyError(resolution: resolvedNode, expectedRuntime: expectedNativeRuntime) {
+        return GxserverClientStatus(
+          alwaysStart: alwaysStartOnLaunch,
+          authToken: readAuthToken(),
+          health: nil,
+          message: nodeError,
+          nodeModuleVersion: resolvedNode.moduleVersion,
+          nodePath: resolvedNode.path,
+          nodeVersion: resolvedNode.version,
+          ok: false,
+          expectedNodeMajor: expectedNativeRuntime?.nodeMajor,
+          expectedNodeModuleVersion: expectedNativeRuntime?.nodeModuleVersion,
+          state: "runtimeUnavailable"
+        )
+      }
+      nodeResolution = resolvedNode
+    }
+
+    if let launchError = launchGxserverForeground(plan: launchPlan, nodePath: nodeResolution?.path) {
       return GxserverClientStatus(
         alwaysStart: alwaysStartOnLaunch,
         authToken: readAuthToken(),
         health: nil,
         message: launchError,
-        nodeModuleVersion: nodeResolution.moduleVersion,
-        nodePath: nodeResolution.path,
-        nodeVersion: nodeResolution.version,
+        nodeModuleVersion: nodeResolution?.moduleVersion,
+        nodePath: nodeResolution?.path,
+        nodeVersion: nodeResolution?.version,
         ok: false,
         expectedNodeMajor: expectedNativeRuntime?.nodeMajor,
         expectedNodeModuleVersion: expectedNativeRuntime?.nodeModuleVersion,
@@ -244,14 +298,18 @@ final class GxserverClient {
       try? await Task.sleep(nanoseconds: 150_000_000)
     }
 
+    let launchOutput = recentGxserverLaunchOutput()
+    let launchMessage = launchOutput.map {
+      "gxserver launch completed, but authenticated health did not become ready on 127.0.0.1:58744. Recent startup output: \($0)"
+    } ?? "gxserver launch completed, but authenticated health did not become ready on 127.0.0.1:58744."
     return GxserverClientStatus(
       alwaysStart: alwaysStartOnLaunch,
       authToken: readAuthToken(),
       health: nil,
-      message: "gxserver launch completed, but authenticated health did not become ready on 127.0.0.1:58744.",
-      nodeModuleVersion: nodeResolution.moduleVersion,
-      nodePath: nodeResolution.path,
-      nodeVersion: nodeResolution.version,
+      message: launchMessage,
+      nodeModuleVersion: nodeResolution?.moduleVersion,
+      nodePath: nodeResolution?.path,
+      nodeVersion: nodeResolution?.version,
       ok: false,
       expectedNodeMajor: expectedNativeRuntime?.nodeMajor,
       expectedNodeModuleVersion: expectedNativeRuntime?.nodeModuleVersion,
@@ -296,6 +354,33 @@ final class GxserverClient {
   func stopControlPlane() async -> GxserverClientStatus {
     await stopRunningGxserverControlPlane()
     return stoppedStatus()
+  }
+
+  func stopAllControlPlane() async -> GxserverClientStatus {
+    /*
+     CDXC:MenuBarStatusIndicator 2026-06-15-03:16:
+     Quit Ghostex Fully is the explicit RAM-recovery path from the menu bar
+     status item. Use gxserver's destructive stop-all control API so tracked zmx
+     provider sessions are killed before the control plane shuts down; normal
+     app quits must continue leaving gxserver and provider sessions alive.
+     */
+    let response = await stopRunningGxserverControlPlane(killTrackedSessions: true)
+    let result = response?["result"] as? [String: Any]
+    let killedSessions = Self.integerValue(result?["killedSessions"]) ?? 0
+    let failedSessions = Self.integerValue(result?["failedSessions"]) ?? 0
+    let attemptedSessions = Self.integerValue(result?["attemptedSessions"]) ?? 0
+    let message =
+      response == nil
+      ? "gxserver stop-all did not return a response before app quit."
+      : "gxserver stop-all completed. zmx sessions attempted: \(attemptedSessions); killed: \(killedSessions); failed: \(failedSessions)."
+    return GxserverClientStatus(
+      alwaysStart: alwaysStartOnLaunch,
+      authToken: readAuthToken(),
+      health: nil,
+      message: message,
+      ok: response != nil && failedSessions == 0,
+      state: response == nil ? "stopping" : "stopped"
+    )
   }
 
   func webBootstrap(status: GxserverClientStatus? = nil) -> [String: Any] {
@@ -449,25 +534,49 @@ final class GxserverClient {
     return true
   }
 
-  private func stopRunningGxserverControlPlane() async {
+  @discardableResult
+  private func stopRunningGxserverControlPlane(
+    killTrackedSessions: Bool = false
+  ) async -> [String: Any]? {
     guard let token = readAuthToken(),
-      let url = URL(string: "\(Self.localBaseURL)/api/control/stop")
+      let url = URL(
+        string:
+          "\(Self.localBaseURL)/api/control/\(killTrackedSessions ? "stopAll" : "stop")")
     else {
-      return
+      return nil
     }
-    var request = URLRequest(url: url, timeoutInterval: 2)
+    var request = URLRequest(url: url, timeoutInterval: killTrackedSessions ? 12 : 2)
     request.httpMethod = "POST"
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue(String(Self.protocolVersion), forHTTPHeaderField: "x-gxserver-protocol-version")
-    _ = try? await URLSession.shared.data(for: request)
+    let responsePayload: [String: Any]?
+    if let (data, _) = try? await URLSession.shared.data(for: request) {
+      responsePayload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    } else {
+      responsePayload = nil
+    }
 
     let deadline = Date().addingTimeInterval(5)
     while Date() < deadline {
       if await authenticatedHealthStatus(expectedBuildIdentity: nil) == nil {
-        return
+        return responsePayload
       }
       try? await Task.sleep(nanoseconds: 100_000_000)
     }
+    return responsePayload
+  }
+
+  private static func integerValue(_ value: Any?) -> Int? {
+    if let number = value as? NSNumber {
+      return number.intValue
+    }
+    if let int = value as? Int {
+      return int
+    }
+    if let string = value as? String {
+      return Int(string.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    return nil
   }
 
   private func fetchJSON(path: String, token: String, timeoutSeconds: TimeInterval) async -> [String: Any]? {
@@ -489,18 +598,30 @@ final class GxserverClient {
     }
   }
 
-  private func launchGxserverForeground(cliURL: URL, nodePath: String) -> String? {
+  private func launchGxserverForeground(plan: GxserverLaunchPlan, nodePath: String?) -> String? {
     /*
      CDXC:GxserverBootstrap 2026-05-30-17:06:
      LaunchServices-started macOS apps should create gxserver as an app-independent background daemon by running `nohup node <gxserver> --foreground &` and then polling authenticated health. The UI app must not retain a Swift Process handle as daemon ownership, because gxserver must survive closing the macOS app and continue managing zmx sessions.
+
+     CDXC:GxserverRustPort 2026-06-14-21:09:
+     A selected Rust gxserver is a native executable launch, not a Node CLI launch. Keep the foreground args identical while preserving the single fixed port and writing startup stderr where the timeout path can surface it to the user.
      */
     let launchLogPath = gxserverLaunchLogURL.path
     try? fileManager.createDirectory(
       at: gxserverLaunchLogURL.deletingLastPathComponent(),
       withIntermediateDirectories: true
     )
-    let command =
-      "nohup \(shellQuote(nodePath)) \(shellQuote(cliURL.path)) --foreground >>\(shellQuote(launchLogPath)) 2>&1 </dev/null &"
+    let launchCommand: String
+    switch plan.kind {
+    case .javascriptCli:
+      guard let nodePath, !nodePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return "gxserver JavaScript CLI was selected, but the bundled Node runtime is unavailable."
+      }
+      launchCommand = "\(shellQuote(nodePath)) \(shellQuote(plan.executableURL.path)) --foreground"
+    case .nativeExecutable:
+      launchCommand = "\(shellQuote(plan.executableURL.path)) --foreground"
+    }
+    let command = "nohup \(launchCommand) >>\(shellQuote(launchLogPath)) 2>&1 </dev/null &"
     let result = runProcess(
       executable: "/bin/sh",
       arguments: ["-c", command],
@@ -512,6 +633,21 @@ final class GxserverClient {
       return stderr.isEmpty ? (stdout.isEmpty ? "gxserver failed to launch." : stdout) : stderr
     }
     return nil
+  }
+
+  private func recentGxserverLaunchOutput() -> String? {
+    guard
+      let text = try? String(contentsOf: gxserverLaunchLogURL, encoding: .utf8)
+    else {
+      return nil
+    }
+    let lines = text
+      .components(separatedBy: .newlines)
+      .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+      .suffix(6)
+    let output = lines.joined(separator: " ")
+    return output.isEmpty ? nil : output
   }
 
   private func shellQuote(_ value: String) -> String {
@@ -613,25 +749,151 @@ final class GxserverClient {
     return try result.get()
   }
 
-  private func resolveGxserverCliURL() -> URL? {
+  private func resolveGxserverLaunchPlan() -> GxserverLaunchPlanResolution {
+    if let explicit = explicitGxserverLaunchPath() {
+      guard let url = resolveExplicitGxserverLaunchURL(explicit.path) else {
+        return .failure(
+          message: "Selected gxserver path from \(explicit.key) does not exist: \(explicit.path). TypeScript gxserver was not started because this launch explicitly opted into another daemon.",
+          explicit: true
+        )
+      }
+      if url.pathExtension == "js" {
+        return .success(GxserverLaunchPlan(
+          executableURL: url,
+          expectedBuildIdentity: expectedBundledBuildIdentity(for: url),
+          isExplicitSelection: true,
+          kind: .javascriptCli
+        ))
+      }
+      guard fileManager.isExecutableFile(atPath: url.path) else {
+        return .failure(
+          message: "Selected gxserver binary from \(explicit.key) is not executable: \(url.path). TypeScript gxserver was not started because this launch explicitly opted into another daemon.",
+          explicit: true
+        )
+      }
+      let versionResult = runProcess(executable: url.path, arguments: ["--version"], timeoutSeconds: 3)
+      guard versionResult.exitCode == 0 else {
+        let detail = startupProbeMessage(stdout: versionResult.stdout, stderr: versionResult.stderr)
+        return .failure(
+          message: "Selected Rust gxserver from \(explicit.key) did not report a version.\(detail) TypeScript gxserver was not started because this launch explicitly opted into Rust.",
+          explicit: true
+        )
+      }
+      let version = versionResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !version.isEmpty else {
+        return .failure(
+          message: "Selected Rust gxserver from \(explicit.key) returned an empty version. TypeScript gxserver was not started because this launch explicitly opted into Rust.",
+          explicit: true
+        )
+      }
+      return .success(GxserverLaunchPlan(
+        executableURL: url,
+        expectedBuildIdentity: expectedBundledBuildIdentity(for: url) ?? "gxserver:\(version):rust-source",
+        isExplicitSelection: true,
+        kind: .nativeExecutable
+      ))
+    }
+
+    guard let defaultPlan = resolveDefaultGxserverLaunchPlan() else {
+      return .failure(
+        message: "Bundled Rust gxserver is missing. Run `bun run build` for development, or reinstall Ghostex so Web/gxserver/bin/gxserver is present.",
+        explicit: false
+      )
+    }
+    return .success(defaultPlan)
+  }
+
+  private func explicitGxserverLaunchPath() -> (key: String, path: String)? {
+    let environment = ProcessInfo.processInfo.environment
+    for key in Self.gxserverLaunchEnvironmentKeys {
+      if let value = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+        return (key, value)
+      }
+    }
+    return nil
+  }
+
+  private func resolveExplicitGxserverLaunchURL(_ pathValue: String) -> URL? {
+    let expandedPath = expandedUserPath(pathValue)
+    if expandedPath.hasPrefix("/") {
+      let url = URL(fileURLWithPath: expandedPath, isDirectory: false)
+      return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+    for root in gxserverDevelopmentRoots() {
+      let candidate = root.appendingPathComponent(expandedPath, isDirectory: false)
+      if fileManager.fileExists(atPath: candidate.path) {
+        return candidate
+      }
+    }
+    return nil
+  }
+
+  private func expandedUserPath(_ value: String) -> String {
+    if value == "~" {
+      return FileManager.default.homeDirectoryForCurrentUser.path
+    }
+    if value.hasPrefix("~/") {
+      return FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(String(value.dropFirst(2)))
+        .path
+    }
+    return value
+  }
+
+  private func resolveDefaultGxserverLaunchPlan() -> GxserverLaunchPlan? {
+    var candidates: [URL] = []
+    if let webBinary = Bundle.main.resourceURL?.appendingPathComponent("Web/gxserver/bin/gxserver") {
+      candidates.append(webBinary)
+    }
+    if let resourceBinary = Bundle.main.resourceURL?.appendingPathComponent("gxserver/bin/gxserver") {
+      candidates.append(resourceBinary)
+    }
+    candidates.append(contentsOf: gxserverDevelopmentRoots().map {
+      $0.appendingPathComponent("native/macos/ghostexHost/Web/gxserver/bin/gxserver")
+    })
+    guard let binaryURL = candidates.first(where: { fileManager.isExecutableFile(atPath: $0.path) }) else {
+      return nil
+    }
+    return GxserverLaunchPlan(
+      executableURL: binaryURL,
+      expectedBuildIdentity: expectedBundledBuildIdentity(for: binaryURL),
+      isExplicitSelection: false,
+      kind: .nativeExecutable
+    )
+  }
+
+  private func gxserverDevelopmentRoots() -> [URL] {
     let cwd = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
     var sourceRoot = URL(fileURLWithPath: #filePath, isDirectory: false)
     for _ in 0..<6 {
       sourceRoot.deleteLastPathComponent()
     }
+    let environment = ProcessInfo.processInfo.environment
     let candidates = [
-      Bundle.main.resourceURL?.appendingPathComponent("Web/gxserver/dist/src/cli.js"),
-      Bundle.main.resourceURL?.appendingPathComponent("gxserver/dist/src/cli.js"),
-      cwd.appendingPathComponent("gxserver/dist/src/cli.js"),
-      sourceRoot.appendingPathComponent("gxserver/dist/src/cli.js"),
+      cwd,
+      environment["GHOSTEX_SOURCE_ROOT"].map { URL(fileURLWithPath: expandedUserPath($0), isDirectory: true) },
+      environment["ghostex_REPO_ROOT"].map { URL(fileURLWithPath: expandedUserPath($0), isDirectory: true) },
+      sourceRoot,
     ].compactMap { $0 }
-    return candidates.first { fileManager.fileExists(atPath: $0.path) }
+    var seen = Set<String>()
+    return candidates.filter { url in
+      let key = url.standardizedFileURL.path
+      if seen.contains(key) {
+        return false
+      }
+      seen.insert(key)
+      return true
+    }
   }
 
-  private func expectedBundledBuildIdentity() -> String? {
-    guard let cliURL = resolveGxserverCliURL() else {
-      return nil
-    }
+  private func startupProbeMessage(stdout: String, stderr: String) -> String {
+    let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      ? stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+      : stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+    return detail.isEmpty ? "" : " \(detail)"
+  }
+
+  private func expectedBundledBuildIdentity(for cliURL: URL) -> String? {
     let packageRoot = Self.gxserverPackageRoot(for: cliURL)
     let identityURL = packageRoot.appendingPathComponent("build-identity.json", isDirectory: false)
     if fileManager.fileExists(atPath: identityURL.path) {
@@ -657,10 +919,7 @@ final class GxserverClient {
     return "gxserver:\(version):source"
   }
 
-  private func expectedBundledNativeNodeRuntime() -> GxserverNativeNodeRuntimeLoadResult {
-    guard let cliURL = resolveGxserverCliURL() else {
-      return .unavailable
-    }
+  private func expectedBundledNativeNodeRuntime(for cliURL: URL) -> GxserverNativeNodeRuntimeLoadResult {
     let packageRoot = Self.gxserverPackageRoot(for: cliURL)
     let runtimeURL = packageRoot.appendingPathComponent("native-runtime.json", isDirectory: false)
     if !fileManager.fileExists(atPath: runtimeURL.path) {
@@ -700,8 +959,12 @@ final class GxserverClient {
     ))
   }
 
-  private static func gxserverPackageRoot(for cliURL: URL) -> URL {
-    cliURL
+  private static func gxserverPackageRoot(for executableURL: URL) -> URL {
+    let parent = executableURL.deletingLastPathComponent()
+    if parent.lastPathComponent == "bin" {
+      return parent.deletingLastPathComponent()
+    }
+    return executableURL
       .deletingLastPathComponent()
       .deletingLastPathComponent()
       .deletingLastPathComponent()

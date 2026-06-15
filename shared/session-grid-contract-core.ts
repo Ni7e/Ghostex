@@ -64,6 +64,8 @@ export type SessionTitleSource =
   | "user";
 
 export type SidebarTheme =
+  | "dark-1"
+  | "dark-2"
   | "plain-dark"
   | "plain-light"
   | "dark-green"
@@ -79,6 +81,9 @@ export type SidebarTheme =
 export type SidebarThemeSetting =
   | "auto"
   | "plain"
+  | "dark-1"
+  | "dark-2"
+  | "plain-light"
   | "dark-green"
   | "dark-blue"
   | "dark-red"
@@ -165,6 +170,13 @@ export type BaseSessionRecord = {
 export type TerminalSessionRecord = BaseSessionRecord & {
   agentName?: string;
   /**
+   * CDXC:CloseAfterDone 2026-06-15-21:00:
+   * Close After Done is a per-terminal arming flag, not a lifecycle fallback.
+   * Keep it on the terminal record so the sidebar can wait for a continuous
+   * Done state and then close through the normal session close path.
+   */
+  closeAfterDone?: boolean;
+  /**
    * CDXC:DelayedSend 2026-05-21-12:21:
    * Provider-backed delayed sends must survive app restart with the terminal
    * session that owns the prompt. Persist the absolute deadline on the terminal
@@ -241,6 +253,7 @@ export type CreateSessionRecordOptions =
       agentName?: string;
       agentSessionId?: string;
       agentSessionPath?: string;
+      closeAfterDone?: boolean;
       commandTitle?: string;
       delayedSendDeadlineAt?: string;
       displayId?: string;

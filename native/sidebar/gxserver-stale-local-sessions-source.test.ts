@@ -60,5 +60,34 @@ describe("gxserver stale local sessions source", () => {
       "function applyGxserverPresentationSessionsToNativePaneChrome",
     );
     expect(presentationDeltaSource).toContain("pruneStaleGxserverLocalSessionsFromPresentation");
+    expect(presentationDeltaSource).toContain("staleGxserverLocalSessionPruneScopeForDelta(delta)");
+    expect(presentationDeltaSource).toContain("stalePruneScope");
+  });
+
+  test("limits delta pruning to explicit gxserver removals", () => {
+    /*
+    CDXC:GxserverPresentation 2026-06-15-10:04:
+    Source coverage keeps stale cleanup away from ordinary presentation deltas. A sessionPresentationChanged delta may arrive before gxserver echoes a just-created split, so only explicit removal deltas should prune from the websocket delta stream.
+    */
+    const scopeSource = sourceBetween(
+      nativeSidebarSource,
+      "function staleGxserverLocalSessionPruneScopeForDelta",
+      "function pruneStaleGxserverLocalSessionsFromPresentation",
+    );
+    expect(scopeSource).toContain('delta.type === "sessionRemoved"');
+    expect(scopeSource).toContain('return { kind: "session", projectId: delta.projectId, sessionId: delta.sessionId };');
+    expect(scopeSource).toContain('delta.type === "projectRemoved"');
+    expect(scopeSource).toContain('return { kind: "project", projectId: delta.projectId };');
+    expect(scopeSource).toContain("return undefined;");
+
+    const pruneSource = sourceBetween(
+      nativeSidebarSource,
+      "function pruneStaleGxserverLocalSessionsFromPresentation",
+      "function clearStaleGxserverLocalSessionRuntime",
+    );
+    expect(pruneSource).toContain("scope: StaleGxserverLocalSessionPruneScope = { kind: \"all\" }");
+    expect(pruneSource).toContain(
+      "doesStaleGxserverLocalSessionPruneScopeInclude(scope, project.projectId, session.sessionId)",
+    );
   });
 });

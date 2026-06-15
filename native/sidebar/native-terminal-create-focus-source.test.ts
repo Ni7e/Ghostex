@@ -88,21 +88,54 @@ describe("native terminal create focus source", () => {
     expect(eventSource).toContain('`${focusAfterReady.reason}:typingFocus`');
   });
 
-  test("keeps presentation pruning from deleting in-flight zmx creates", () => {
+  test("focuses the worktree agent terminal after Add Worktree modal creation", () => {
+    /*
+    CDXC:WorktreeModal 2026-06-15-11:30:
+    Add Worktree modal submit should keep the existing toast-backed creation
+    flow, then switch to the new worktree's agent terminal once the terminal is
+    created. Source coverage keeps that modal path explicit instead of relying
+    on createTerminal's current default.
+    */
+    const worktreeCreateSource = sourceBetween(
+      nativeSidebarSource,
+      "async function createProjectWorktreeFromPrompt",
+      "async function openExistingRemoteWorktreeProject",
+    );
+    expect(worktreeCreateSource).toContain("await createNativeWorktreeForAgentPrompt({");
+    expect(worktreeCreateSource).toContain("focusAfterCreate: true,");
+    expect(worktreeCreateSource).toContain('showAppToast("warning", "Worktree prompt is empty")');
+    expect(worktreeCreateSource).toContain('showAppToast("error", "Agent is unavailable"');
+  });
+
+  test("keeps presentation pruning from deleting gxserver-unconfirmed zmx creates", () => {
     /*
     CDXC:TerminalCreationFocus 2026-06-13-15:44:
     gxserver project deltas can arrive after local zmx create has inserted a
     canonical P/G row but before the presentation stream echoes the new session.
     Source coverage keeps pruneStaleGxserverLocalSessionsFromPresentation from
     closing that row while native createTerminal is still pending.
+
+    CDXC:TerminalCreationFocus 2026-06-15-10:04:
+    Native terminalReady is not gxserver confirmation. Keep stale-prune guarded by a separate presentation-confirmation marker so splitMore cannot close a fresh pane in the gap between AppKit surface readiness and gxserver's session echo.
     */
-    const pendingHelperSource = sourceBetween(
+    const surfacePendingHelperSource = sourceBetween(
       nativeSidebarSource,
-      "function isNativeTerminalSurfaceCreationPendingForProject",
-      "function markNativeInPlaceReloadClosePending",
+      "function markNativeTerminalSurfaceCreationPending",
+      "function takeNativeTerminalSurfaceCreationPending",
     );
-    expect(pendingHelperSource).toContain("pendingNativeTerminalSurfaceCreationBySessionId.get(sessionId)");
-    expect(pendingHelperSource).toContain("pending.projectId === projectId");
+    expect(surfacePendingHelperSource).toContain("markGxserverPresentationConfirmationPending");
+
+    const pendingConfirmationHelperSource = sourceBetween(
+      nativeSidebarSource,
+      "function markGxserverPresentationConfirmationPending",
+      "function isNativeTerminalSurfaceCreationPendingForProject",
+    );
+    expect(pendingConfirmationHelperSource).toContain("pendingGxserverPresentationConfirmationBySessionId.set(sessionId");
+    expect(pendingConfirmationHelperSource).toContain("function confirmGxserverPresentationSession");
+    expect(pendingConfirmationHelperSource).toContain("pendingGxserverPresentationConfirmationBySessionId.delete(sessionId)");
+    expect(pendingConfirmationHelperSource).toContain("function isGxserverPresentationConfirmationPendingForProject");
+    expect(pendingConfirmationHelperSource).toContain("Date.now() - pending.startedAt");
+    expect(pendingConfirmationHelperSource).toContain("GXSERVER_PRESENTATION_CONFIRMATION_PENDING_MS");
 
     const pruneSource = sourceBetween(
       nativeSidebarSource,
@@ -110,18 +143,37 @@ describe("native terminal create focus source", () => {
       "function clearStaleGxserverLocalSessionRuntime",
     );
     expect(pruneSource).toContain("skippedPendingCreateSessionKeys");
+    expect(pruneSource).toContain('scope.kind === "all"');
     expect(pruneSource).toContain(
-      "isNativeTerminalSurfaceCreationPendingForProject(project.projectId, session.sessionId)",
+      "isGxserverPresentationConfirmationPendingForProject(project.projectId, session.sessionId)",
     );
     expect(pruneSource).toContain("nativeSidebar.gxserver.staleLocalSessionPruneSkippedPendingCreate");
 
     const missingPresentationIndex = pruneSource.indexOf("presentationSessionKeys.has(");
     const pendingCreateIndex = pruneSource.indexOf(
-      "isNativeTerminalSurfaceCreationPendingForProject(project.projectId, session.sessionId)",
+      "isGxserverPresentationConfirmationPendingForProject(project.projectId, session.sessionId)",
     );
     const pruneIndex = pruneSource.indexOf("return true;", pendingCreateIndex);
     expect(missingPresentationIndex).toBeGreaterThanOrEqual(0);
     expect(pendingCreateIndex).toBeGreaterThan(missingPresentationIndex);
     expect(pruneIndex).toBeGreaterThan(pendingCreateIndex);
+
+    const terminalReadySource = sourceBetween(
+      nativeSidebarSource,
+      '} else if (hostEvent.type === "terminalReady") {',
+      "const startupText = takeNativeTerminalStartupText(sidebarSessionId);",
+    );
+    expect(terminalReadySource).toContain("takeNativeTerminalSurfaceCreationPending(sidebarSessionId)");
+    expect(terminalReadySource).not.toContain("clearGxserverPresentationConfirmationPending(sidebarSessionId)");
+    expect(terminalReadySource).not.toContain("pendingGxserverPresentationConfirmationBySessionId.delete(sidebarSessionId)");
+
+    const paneChromeSource = sourceBetween(
+      nativeSidebarSource,
+      "function applyGxserverPresentationSessionToNativePaneChrome",
+      "gxserverTitleProjectionBySessionKey.set",
+    );
+    expect(paneChromeSource).toContain(
+      "confirmGxserverPresentationSession(presentation.projectId, presentation.sessionId, reason)",
+    );
   });
 });

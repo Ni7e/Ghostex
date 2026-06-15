@@ -32,6 +32,7 @@ describe("Native Presentation Projection", () => {
         sessions: [presentationSession({ projectId, sessionId })],
       }),
       resolveAgentIcon: () => "codex",
+      resolveCloseAfterDone: () => undefined,
       resolveDelayedSend: () => ({
         deadlineAt: "2026-06-12T10:00:00.000Z",
         remainingLabel: "2m",
@@ -49,6 +50,37 @@ describe("Native Presentation Projection", () => {
       isFocused: true,
       sessionId: createCombinedProjectSessionId(projectId, sessionId),
       sessionRoutingId: "S1a-P1abc-G1abc",
+    });
+  });
+
+  test("joins close-after-done timers onto gxserver presentation rows", () => {
+    const projectId = projectIdValue("P1abc");
+    const sessionId = sessionIdValue("G1abc");
+    const groups = createNativePresentationSidebarGroups({
+      activeProjectId: projectId,
+      localProjects: [localProject({ projectId })],
+      presentation: snapshot({
+        groups: [presentationGroup({ projectId, sessionIds: [sessionId] })],
+        projects: [presentationProject({ projectId })],
+        sessions: [presentationSession({ projectId, sessionId })],
+      }),
+      resolveAgentIcon: () => "codex",
+      resolveCloseAfterDone: () => ({
+        armed: true,
+        deadlineAt: "2026-06-12T10:03:00.000Z",
+        remainingLabel: "03:00",
+        remainingMs: 180_000,
+      }),
+      resolveDelayedSend: () => undefined,
+      resolveSessionRoutingId: () => undefined,
+      visibleSessionIds: new Set([sessionId]),
+    });
+
+    expect(groups[1]?.sessions[0]).toMatchObject({
+      closeAfterDone: true,
+      closeAfterDoneDeadlineAt: "2026-06-12T10:03:00.000Z",
+      closeAfterDoneRemainingLabel: "03:00",
+      closeAfterDoneRemainingMs: 180_000,
     });
   });
 
@@ -81,12 +113,59 @@ describe("Native Presentation Projection", () => {
         ],
       }),
       resolveAgentIcon: () => "codex",
+      resolveCloseAfterDone: () => undefined,
       resolveDelayedSend: () => undefined,
       resolveSessionRoutingId: () => undefined,
       visibleSessionIds: new Set([sessionId]),
     });
 
     expect(groups[1]?.sessions[0]?.agentSessionId).toBe("gxserver-provider-session");
+  });
+
+  test("treats a mounted local zmx pane as provider-live when presentation is stale missing", () => {
+    const projectId = projectIdValue("P1abc");
+    const sessionId = sessionIdValue("G1abc");
+    const groups = createNativePresentationSidebarGroups({
+      activeProjectId: projectId,
+      localProjects: [
+        localProject({
+          localSidebarSessions: [
+            localSidebarSession({
+              nativePaneState: "mounted",
+              providerSessionState: "exists",
+              sessionId,
+              sessionKind: "terminal",
+              sessionPersistenceProvider: "zmx",
+            }),
+          ],
+          projectId,
+        }),
+      ],
+      presentation: snapshot({
+        groups: [presentationGroup({ projectId, sessionIds: [sessionId] })],
+        projects: [presentationProject({ projectId })],
+        sessions: [
+          presentationSession({
+            projectId,
+            providerSessionState: "missing",
+            sessionId,
+            sessionPersistenceProvider: "zmx",
+          }),
+        ],
+      }),
+      resolveAgentIcon: () => "codex",
+      resolveCloseAfterDone: () => undefined,
+      resolveDelayedSend: () => undefined,
+      resolveSessionRoutingId: () => undefined,
+      visibleSessionIds: new Set([sessionId]),
+    });
+
+    expect(groups[1]?.sessions[0]).toMatchObject({
+      isLive: true,
+      nativePaneState: "mounted",
+      providerSessionState: "exists",
+      sessionPersistenceProvider: "zmx",
+    });
   });
 
   test("keeps native-only T3 and browser panes visible in gxserver-owned project groups", () => {
@@ -115,6 +194,7 @@ describe("Native Presentation Projection", () => {
         sessions: [presentationSession({ projectId, sessionId: terminalId })],
       }),
       resolveAgentIcon: () => "codex",
+      resolveCloseAfterDone: () => undefined,
       resolveDelayedSend: () => undefined,
       resolveSessionRoutingId: () => undefined,
       visibleSessionIds: new Set([terminalId]),
@@ -126,7 +206,7 @@ describe("Native Presentation Projection", () => {
     ]);
   });
 
-  test("merges Quick local rows and presentation rows into the Chats group", () => {
+  test("merges Quick local rows and presentation rows into the Chats group with routable ids", () => {
     const projectId = projectIdValue("P2abc");
     const terminalId = sessionIdValue("G2abc");
     const browserId = "quick-browser";
@@ -150,6 +230,7 @@ describe("Native Presentation Projection", () => {
         sessions: [presentationSession({ projectId, sessionId: terminalId })],
       }),
       resolveAgentIcon: () => "codex",
+      resolveCloseAfterDone: () => undefined,
       resolveDelayedSend: () => undefined,
       resolveSessionRoutingId: () => undefined,
       visibleSessionIds: new Set([terminalId]),
@@ -159,7 +240,7 @@ describe("Native Presentation Projection", () => {
     expect(groups[0]?.isActive).toBe(true);
     expect(groups[0]?.sessions.map((session) => session.sessionId)).toEqual([
       createCombinedProjectSessionId(projectId, terminalId),
-      browserId,
+      createCombinedProjectSessionId(projectId, browserId),
     ]);
     expect(groups).toHaveLength(1);
   });
@@ -174,6 +255,7 @@ describe("Native Presentation Projection", () => {
         sessions: [],
       }),
       resolveAgentIcon: () => "codex",
+      resolveCloseAfterDone: () => undefined,
       resolveDelayedSend: () => undefined,
       resolveSessionRoutingId: () => undefined,
     });
@@ -217,12 +299,18 @@ function localProject({
 
 function localSidebarSession({
   agentSessionId,
+  nativePaneState,
+  providerSessionState,
   sessionId,
   sessionKind,
+  sessionPersistenceProvider,
 }: {
   agentSessionId?: string;
+  nativePaneState?: SidebarSessionItem["nativePaneState"];
+  providerSessionState?: SidebarSessionItem["providerSessionState"];
   sessionId: string;
   sessionKind: NonNullable<SidebarSessionItem["sessionKind"]>;
+  sessionPersistenceProvider?: SidebarSessionItem["sessionPersistenceProvider"];
 }): SidebarSessionItem {
   return {
     activity: "idle",
@@ -232,9 +320,12 @@ function localSidebarSession({
     isFocused: false,
     isRunning: true,
     isVisible: true,
+    ...(nativePaneState !== undefined ? { nativePaneState } : {}),
+    ...(providerSessionState !== undefined ? { providerSessionState } : {}),
     row: 0,
     sessionId,
     sessionKind,
+    ...(sessionPersistenceProvider !== undefined ? { sessionPersistenceProvider } : {}),
     shortcutLabel: "",
   };
 }
@@ -298,11 +389,15 @@ function presentationGroup({
 function presentationSession({
   agentSessionId,
   projectId,
+  providerSessionState = "exists",
   sessionId,
+  sessionPersistenceProvider = "zmx",
 }: {
   agentSessionId?: string;
   projectId: GxserverProjectId;
+  providerSessionState?: GxserverPresentationSession["providerSessionState"];
   sessionId: GxserverSessionId;
+  sessionPersistenceProvider?: GxserverPresentationSession["sessionPersistenceProvider"];
 }): GxserverPresentationSession {
   return {
     actions: {
@@ -328,7 +423,9 @@ function presentationSession({
     kind: "agent",
     lifecycleState: "running",
     projectId,
+    providerSessionState,
     sessionId,
+    sessionPersistenceProvider,
     sortKey: `0:${sessionId}`,
     surface: "workspace",
     title: "Agent Session",

@@ -61,21 +61,20 @@ enum TerminalFocusDebugLog {
      when Debugging Mode is off, so normal app use only persists warnings,
      errors, exceptions, and crashes.
 
-     CDXC:Hotkeys 2026-06-07-14:24:
-     A user-requested next/previous-session repro needs a narrow normal-mode
-     trace because Debugging Mode was off during the failed 14:14 shortcut
-     attempt. Allow only nativeHotkeys.navigationRepro entries through; their
-     payload is sanitized and limited to key/action/routing metadata.
-
      CDXC:TerminalImagePaste 2026-06-11-19:12:
      Terminal file/image drag-drop support and its forced normal-mode diagnostic
      bypass were removed. Keep normal-mode native logging limited to important
-     diagnostics and the active hotkey repro path.
+     diagnostics.
+
+     CDXC:Diagnostics 2026-06-15-18:39:
+     Normal app use must not persist stale repro breadcrumbs such as hotkey
+     navigation traces or routine missing-session focus probes. Debugging Mode
+     can still write targeted forced traces, but Debugging Mode off writes only
+     warning/error/failure-class events.
      */
     let isStartupPaneLayoutEvent = event.hasPrefix("nativePaneLayoutStartup.")
-    let isHotkeyNavigationReproEvent = event.hasPrefix("nativeHotkeys.navigationRepro")
     let isImportantDiagnostic = isNativePersistentLogImportantDiagnostic(event)
-    guard isImportantDiagnostic || isHotkeyNavigationReproEvent || (NativeDebugLogging.isEnabled && (force || isStartupPaneLayoutEvent || !noisyEvents.contains(event))) else {
+    guard isImportantDiagnostic || (NativeDebugLogging.isEnabled && (force || isStartupPaneLayoutEvent || !noisyEvents.contains(event))) else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory
@@ -161,17 +160,46 @@ func isNativePersistentLogImportantDiagnostic(_ event: String) -> Bool {
    failures that support can inspect without asking users to reproduce with
    Debugging Mode already enabled. Classify only warning/error/exception-style
    event names as normal-mode writes; all routine diagnostics remain gated.
+
+   CDXC:Diagnostics 2026-06-15-18:39:
+   Missing-session, focus-trace, hotkey-repro, and pane-layout breadcrumb names
+   are common during recoverable UI transitions. They are useful with Debugging
+   Mode on, but they are not important warnings by themselves and must not write
+   persistent logs in normal mode.
+
+   CDXC:GxserverLogs 2026-06-15-20:39:
+   The nativeSidebar.actionCrashTrace prefix is a legacy breadcrumb namespace,
+   not severity. Ignore the crash word in that namespace unless the actual phase
+   name is warning/error/failure-like.
   */
   let normalized = event.lowercased()
+  if normalized.hasPrefix("nativesidebar.actioncrashtrace.")
+    && !normalized.contains("warn")
+    && !normalized.contains("error")
+    && !normalized.contains("exception")
+    && !normalized.contains("fatal")
+    && !normalized.contains("panic")
+    && !normalized.contains("fail")
+    && !normalized.contains("invalid")
+    && !normalized.contains("timeout")
+    && !normalized.contains("exhausted")
+    && !normalized.contains("rejected")
+    && !normalized.contains("unhealthy")
+    && !normalized.contains("portbusy")
+  {
+    return false
+  }
   return (
     normalized.contains("warn")
       || normalized.contains("error")
       || normalized.contains("exception")
+      || normalized.contains("fatal")
+      || normalized.contains("panic")
       || normalized.contains("fail")
       || normalized.contains("invalid")
-      || normalized.contains("missing")
       || normalized.contains("timeout")
       || normalized.contains("exhausted")
+      || normalized.contains("rejected")
       || normalized.contains("crash")
       || normalized.contains("unhealthy")
       || normalized.contains("portbusy")
@@ -212,11 +240,21 @@ enum NativeLogPrivacy {
     if let string = value as? String {
       return sanitizeString(string, key: normalizedKey)
     }
+    if let number = value as? NSNumber {
+      /*
+       CDXC:ModeSwitcherDiagnostics 2026-06-15-00:21:
+       JSONSerialization gives booleans and small numbers to Swift as NSNumber.
+       Preserve real numeric telemetry such as elapsedMs, counts, and exit codes
+       instead of logging 0/1 as false/true, while still keeping actual
+       CFBoolean values as booleans.
+       */
+      if CFGetTypeID(number) == CFBooleanGetTypeID() {
+        return number.boolValue
+      }
+      return number
+    }
     if let bool = value as? Bool {
       return bool
-    }
-    if let number = value as? NSNumber {
-      return number
     }
     if let array = value as? [Any] {
       if isSensitiveCollectionKey(normalizedKey) {

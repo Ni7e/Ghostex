@@ -6,9 +6,9 @@ import { AddRepositoryModal } from "../../sidebar/add-repository-modal";
 import { AgentConfigModal, type AgentConfigDraft } from "../../sidebar/agent-config-modal";
 import { AgentsHubModal } from "../../sidebar/agents-hub-modal";
 import { CommandPalette } from "../../sidebar/command-palette";
-import { CommandConfigModal, type CommandConfigDraft } from "../../sidebar/command-config-modal";
 import { DaemonSessionsModal } from "../../sidebar/daemon-sessions-modal";
 import { DelayedSendModal } from "../../sidebar/delayed-send-modal";
+import { DiscoverGhostexModal } from "../../sidebar/discover-ghostex-modal";
 import { FirstUserMessageModal } from "../../sidebar/first-user-message-modal";
 import { PinnedPromptsModal } from "../../sidebar/pinned-prompts-modal";
 import { PreviousSessionsModal } from "../../sidebar/previous-sessions-modal";
@@ -33,7 +33,6 @@ import {
 } from "../../sidebar/worktree-delete-modal";
 import { WorktreeCreateModal } from "../../sidebar/worktree-create-modal";
 import type { AppToastRequest } from "../../shared/app-toast-contract";
-import type { SidebarActionType } from "../../shared/sidebar-commands";
 import type { SidebarAgentButton } from "../../shared/sidebar-agents";
 import type {
   ExtensionToSidebarMessage,
@@ -62,11 +61,11 @@ type AppModalKind =
   | "agentConfig"
   | "agentsHub"
   | "commandPalette"
-  | "commandConfig"
   | "configureActions"
   | "configureAgents"
   | "daemonSessions"
   | "delayedSend"
+  | "discoverGhostex"
   | "hotkeys"
   | "gitCommit"
   | "gitFileDiff"
@@ -102,7 +101,6 @@ type AppModalHostMessage =
       agentDraft?: AgentConfigDraft;
       access?: T3BrowserAccessMessage;
       collapsedGroupsById?: Record<string, true>;
-      commandDraft?: CommandConfigDraft;
       delayedSendDeadlineAt?: string;
       delayedSendRemainingLabel?: string;
       initialTitle?: string;
@@ -123,7 +121,6 @@ type AppModalHostMessage =
       initialSearchQuery?: string;
       initialTab?: SettingsModalTab;
       initialText?: string;
-      lockedActionType?: SidebarActionType;
       language?: string;
       modal: AppModalKind;
       nativeOpenStartedAtMs?: number;
@@ -327,8 +324,6 @@ function isEditableAppModalContextMenuTarget(target: EventTarget | null): boolea
 
 type ConfigModalState = {
   agentDraft?: AgentConfigDraft;
-  commandDraft?: CommandConfigDraft;
-  lockedActionType?: SidebarActionType;
 };
 
 declare global {
@@ -1832,6 +1827,7 @@ function AppModalHost() {
     worktreeDelete,
     commandPaletteCollapsedGroupsById,
     commandPaletteInitialQuery,
+    commandPaletteOpenRequestSequence,
     isCommandPalettePrewarm,
     floatingPromptEditor,
     floatingPromptEditorCloseAndSaveRequestId,
@@ -2183,6 +2179,7 @@ function AppModalHost() {
             closeModal();
           }
         }}
+        openRequestSequence={commandPaletteOpenRequestSequence}
         petOverlayEnabled={settings?.petOverlayEnabled}
         vscode={vscode}
       />
@@ -2265,6 +2262,7 @@ function AppModalHost() {
         }}
         onPromptAgentIdChange={updateGitCommitPromptAgentId}
         promptAgentId={resolvedGitCommitPromptAgentId}
+        theme={theme}
       />
       {activeModal === "gitCommit" ? null : (
         <GitFileDiffModal
@@ -2276,6 +2274,7 @@ function AppModalHost() {
           }
           isOpen={gitFileDiff !== undefined}
           onClose={closeGitFileDiff}
+          theme={theme}
         />
       )}
       <WorktreeDeleteModal
@@ -2306,6 +2305,7 @@ function AppModalHost() {
           });
           closeModal();
         }}
+        theme={theme}
       />
       {/*
        * CDXC:Worktrees 2026-06-02-13:41:
@@ -2482,6 +2482,11 @@ function AppModalHost() {
         osIntegrationStatus={osIntegrationStatus}
         osIntegrationStatusLoading={osIntegrationStatusLoading}
       />
+      <DiscoverGhostexModal
+        isOpen={activeModal === "discoverGhostex"}
+        onClose={closeModal}
+        theme={theme}
+      />
       <FirstLaunchSetupModal
         agentHookStatus={agentHookStatus}
         agentHookStatusLoading={agentHookStatusLoading}
@@ -2643,27 +2648,6 @@ function AppModalHost() {
           });
         }}
       />
-      <CommandConfigModal
-        draft={config.commandDraft ?? createEmptyCommandDraft()}
-        isOpen={activeModal === "commandConfig" && config.commandDraft !== undefined}
-        lockedActionType={config.lockedActionType}
-        onCancel={closeModal}
-        onSave={(draft) => {
-          vscode.postMessage({
-            actionType: draft.actionType,
-            closeTerminalOnExit: draft.closeTerminalOnExit,
-            command: draft.command,
-            commandId: draft.commandId,
-            icon: draft.icon,
-            iconColor: draft.iconColor,
-            name: draft.name,
-            playCompletionSound: draft.playCompletionSound,
-            type: "saveSidebarCommand",
-            url: draft.url,
-          });
-          closeModal();
-        }}
-      />
       <AgentConfigModal
         draft={config.agentDraft ?? createEmptyAgentDraft()}
         isOpen={activeModal === "agentConfig" && config.agentDraft !== undefined}
@@ -2679,6 +2663,7 @@ function AppModalHost() {
           });
           closeModal();
         }}
+        theme={theme}
       />
       {/*
        * CDXC:AppToasts 2026-05-21-12:21:
@@ -2687,8 +2672,12 @@ function AppModalHost() {
        * worktree/git notices stay visually consistent with the dark app chrome.
        *
        * CDXC:AppModals 2026-05-28-13:52:
-       * Toast overlay chrome should use the same #0e0e0e background as modal
+       * Toast overlay chrome should use the same background family as modal
        * and menu overlays instead of the older #181818 surface.
+       *
+       * CDXC:SidebarTheme 2026-06-15-01:43:
+       * Toasts inherit --app-modal-background so Dark 1, Dark 2, and Light
+       * keep transient modal-host feedback on the selected app surface.
        */}
       <Toaster
         offset={{ bottom: APP_MODAL_TOAST_BOTTOM_OFFSET_PX }}
@@ -2697,7 +2686,7 @@ function AppModalHost() {
         theme="dark"
         toastOptions={{
           style: {
-            background: "#0e0e0e",
+            background: "var(--app-modal-background)",
             border: "1px solid rgba(255, 255, 255, 0.14)",
             color: "#f4f4f5",
           },
@@ -2747,6 +2736,7 @@ function useModalStateFromNative() {
     Record<string, true>
   >({});
   const [commandPaletteInitialQuery, setCommandPaletteInitialQuery] = useState("");
+  const [commandPaletteOpenRequestSequence, setCommandPaletteOpenRequestSequence] = useState(0);
   const [isCommandPalettePrewarm, setIsCommandPalettePrewarm] = useState(false);
   const [ghostexCliStatus, setGhostexCliStatus] = useState<GhostexCliStatusMessage>();
   const [ghostexFolderStats, setGhostexFolderStats] = useState<SidebarGhostexFolderStatsMessage>();
@@ -2782,6 +2772,7 @@ function useModalStateFromNative() {
     setAgentsHubFileContent(undefined);
     setCommandPaletteCollapsedGroupsById({});
     setCommandPaletteInitialQuery("");
+    setCommandPaletteOpenRequestSequence(0);
     setIsCommandPalettePrewarm(false);
     setSettingsInitialSection(undefined);
     setSettingsInitialRemoteMachineId(undefined);
@@ -3107,24 +3098,6 @@ function useModalStateFromNative() {
             }
             setGitFileDiff(message.gitFileDiff);
             return;
-          } else if (message.modal === "commandConfig") {
-            if (!message.commandDraft) {
-              throw new Error("Command config modal request is missing commandDraft.");
-            }
-            setConfig({
-              commandDraft: message.commandDraft,
-              lockedActionType: message.lockedActionType,
-            });
-            setDelayedSend(undefined);
-            setFirstUserMessage(undefined);
-            setFloatingPromptEditor(undefined);
-            setRemoteGxserverInstall(undefined);
-            setRemoteProjectPicker(undefined);
-            setRenameSession(undefined);
-            setT3BrowserAccess(undefined);
-            setT3ThreadId(undefined);
-            setWorktree(undefined);
-            setWorktreeDelete(undefined);
           } else if (message.modal === "agentConfig") {
             if (!message.agentDraft) {
               throw new Error("Agent config modal request is missing agentDraft.");
@@ -3203,6 +3176,13 @@ function useModalStateFromNative() {
              * collapse is sidebar-local UI state. Normalize the caller's map at
              * the host boundary so Collapsed Projects can be rendered without
              * querying DOM state from the separate modal window.
+             *
+             * CDXC:CommandPalette 2026-06-15-10:27:
+             * Duplicate command-palette opens are normally no-ops, but Cmd+P
+             * and Cmd+Shift+P must still switch an already-visible palette
+             * between session and command modes. Increment a request sequence
+             * for every open message so React can distinguish a repeat hotkey
+             * from a normal prop re-render.
              */
             setCommandPaletteCollapsedGroupsById(
               normalizeCommandPaletteCollapsedGroupsById(message.collapsedGroupsById),
@@ -3210,10 +3190,12 @@ function useModalStateFromNative() {
             setCommandPaletteInitialQuery(
               typeof message.initialQuery === "string" ? message.initialQuery : "",
             );
+            setCommandPaletteOpenRequestSequence((sequence) => sequence + 1);
             setIsCommandPalettePrewarm(message.prewarm === true);
           } else {
             setCommandPaletteCollapsedGroupsById({});
             setCommandPaletteInitialQuery("");
+            setCommandPaletteOpenRequestSequence(0);
             setIsCommandPalettePrewarm(false);
           }
           if (message.modal !== "agentsHub") {
@@ -3306,13 +3288,15 @@ function useModalStateFromNative() {
             style:
               message.level === "error"
                 ? {
-                    background: "linear-gradient(0deg, rgba(95, 24, 31, 0.28), rgba(95, 24, 31, 0.28)), #0e0e0e",
+                    background:
+                      "linear-gradient(0deg, rgba(95, 24, 31, 0.28), rgba(95, 24, 31, 0.28)), var(--app-modal-background)",
                     border: "1px solid rgba(248, 113, 113, 0.32)",
                     color: "#fff1f2",
                   }
                 : message.level === "success"
                   ? {
-                      background: "linear-gradient(0deg, rgba(22, 101, 52, 0.24), rgba(22, 101, 52, 0.24)), #0e0e0e",
+                      background:
+                        "linear-gradient(0deg, rgba(22, 101, 52, 0.24), rgba(22, 101, 52, 0.24)), var(--app-modal-background)",
                       border: "1px solid rgba(74, 222, 128, 0.3)",
                       color: "#f0fdf4",
                     }
@@ -3426,6 +3410,7 @@ function useModalStateFromNative() {
     worktreeDelete,
     commandPaletteCollapsedGroupsById,
     commandPaletteInitialQuery,
+    commandPaletteOpenRequestSequence,
     isCommandPalettePrewarm,
     floatingPromptEditor,
     floatingPromptEditorCloseAndSaveRequestId,
@@ -3517,15 +3502,6 @@ function isAgentsHubFileContentMessage(message: unknown): message is AgentsHubFi
   );
 }
 
-function createEmptyCommandDraft(): CommandConfigDraft {
-  return {
-    actionType: "terminal",
-    closeTerminalOnExit: false,
-    name: "",
-    playCompletionSound: false,
-  };
-}
-
 function createEmptyAgentDraft(): AgentConfigDraft {
   return {
     command: "",
@@ -3576,8 +3552,6 @@ function isModalRenderable({
     case "agentsHub":
     case "commandPalette":
       return true;
-    case "commandConfig":
-      return config.commandDraft !== undefined;
     case "delayedSend":
       return delayedSend !== undefined;
     case "firstUserMessage":
@@ -3612,6 +3586,7 @@ function isModalRenderable({
     case "pinnedPrompts":
     case "previousSessions":
     case "scratchPad":
+    case "discoverGhostex":
     case "tipsAndTricks":
     case "firstLaunchSetup":
       return true;

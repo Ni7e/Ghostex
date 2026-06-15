@@ -31,7 +31,7 @@ export type ghostexHotkeyActionId =
   | "switchGitHubView"
   | "switchKanbanView"
   | `runActionSlot${1 | 2 | 3 | 4 | 5}`
-  | `focusGroup${1 | 2 | 3 | 4 | 5}`
+  | `jumpToProject${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`
   | `focusSessionSlot${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`;
 
 export type ghostexHotkeySettings = Partial<Record<ghostexHotkeyActionId, string>>;
@@ -49,9 +49,9 @@ export type ghostexHotkeyAction =
   | { id: ghostexHotkeyActionId; kind: "createSession" }
   | { id: ghostexHotkeyActionId; kind: "focusAdjacentGroup"; direction: -1 | 1 }
   | { id: ghostexHotkeyActionId; kind: "focusDirection"; direction: SessionGridDirection }
-  | { id: ghostexHotkeyActionId; kind: "focusGroup"; groupIndex: number }
   | { id: ghostexHotkeyActionId; kind: "focusSessionSlot"; slotNumber: number }
   | { id: ghostexHotkeyActionId; kind: "focusedPaneAction"; focusedPaneAction: ghostexFocusedPaneAction }
+  | { id: ghostexHotkeyActionId; kind: "jumpToProject"; projectIndex: number }
   | { id: ghostexHotkeyActionId; kind: "moveSidebar" }
   | { id: ghostexHotkeyActionId; kind: "openCommandPalette" }
   | { id: ghostexHotkeyActionId; kind: "openSessionSearchPalette" }
@@ -320,16 +320,21 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     retiredDefaultKeys: [`cmd+${direction}`],
     title: `Focus ${capitalize(direction)}`,
   })),
-  ...[1, 2, 3, 4, 5].map((groupIndex) => ({
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((projectIndex) => ({
     action: {
-      groupIndex,
-      id: `focusGroup${groupIndex}` as ghostexHotkeyActionId,
-      kind: "focusGroup" as const,
+      id: `jumpToProject${projectIndex}` as ghostexHotkeyActionId,
+      kind: "jumpToProject" as const,
+      projectIndex,
     },
-    defaultKey: `cmd+ctrl+${groupIndex}`,
-    description: `Focus group ${groupIndex}.`,
-    id: `focusGroup${groupIndex}` as ghostexHotkeyActionId,
-    title: `Focus Group ${groupIndex}`,
+    /**
+     * CDXC:ProjectHotkeys 2026-06-15-11:12:
+     * Cmd+Ctrl+1..9 are project jump shortcuts, not workspace-group shortcuts.
+     * Resolve these against the Projects rows as shown in the sidebar so numbered project navigation follows the same ordering model users can see.
+     */
+    defaultKey: `cmd+ctrl+${projectIndex}`,
+    description: `Jump to project ${projectIndex} as shown in the sidebar.`,
+    id: `jumpToProject${projectIndex}` as ghostexHotkeyActionId,
+    title: `Jump to Project ${projectIndex}`,
   })),
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((slotNumber) => ({
     action: {
@@ -389,7 +394,7 @@ export function normalizeghostexHotkeySettings(candidate: unknown): ghostexHotke
   const source = isRecord(candidate) ? candidate : {};
   const normalized: ghostexHotkeySettings = {};
   for (const definition of GHOSTEX_HOTKEY_DEFINITIONS) {
-    const value = source[definition.id];
+    const value = source[definition.id] ?? readLegacyProjectJumpHotkey(source, definition.id);
     if (typeof value === "string") {
       /**
        * CDXC:Hotkeys 2026-05-11-09:06
@@ -406,6 +411,23 @@ export function normalizeghostexHotkeySettings(candidate: unknown): ghostexHotke
     normalized[definition.id] = definition.defaultKey;
   }
   return normalized;
+}
+
+function readLegacyProjectJumpHotkey(
+  source: Record<string, unknown>,
+  actionId: ghostexHotkeyActionId,
+): unknown {
+  const match = /^jumpToProject([1-5])$/u.exec(actionId);
+  if (!match) {
+    return undefined;
+  }
+
+  /**
+   * CDXC:ProjectHotkeys 2026-06-15-11:12:
+   * Existing users may have customized or cleared the old Focus Group 1..5 bindings.
+   * When those action ids become Jump to Project 1..5, preserve the persisted chord or explicit blank value instead of silently restoring the default.
+   */
+  return source[`focusGroup${match[1]}`];
 }
 
 export function getghostexHotkeyActionById(id: string): ghostexHotkeyAction | undefined {

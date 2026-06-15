@@ -86,6 +86,14 @@ export const MAX_SIDEBAR_DEFAULT_WIDTH_PX = 520;
 export const DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT = 10;
 export const MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT = 1;
 export const MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT = 50;
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_FOREGROUND_COLOR = "#d8d8d8";
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_DARK_FOREGROUND_COLOR = "#262626";
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR = "#0e0e0e";
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR = "#808080";
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 95;
+export const MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 85;
+export const MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 100;
+const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_STRENGTH = 0.12;
 export const SESSION_TITLE_GENERATION_AGENT_OPTIONS: ReadonlyArray<{
   label: string;
   value: SessionTitleGenerationAgent;
@@ -126,6 +134,101 @@ export function clampProjectSessionListCollapsedCount(value: number): number {
     MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
     Math.max(MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT, Math.round(value)),
   );
+}
+
+function normalizeSidebarTitlebarHexColor(value: string, fallback: string): string {
+  const normalized = value.trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/u.test(normalized) ? normalized : fallback;
+}
+
+function clampColorChannel(value: number): number {
+  return Math.min(255, Math.max(0, Math.round(value)));
+}
+
+export function clampSidebarTitlebarBackgroundDarknessPercent(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT;
+  }
+  return Math.min(
+    MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
+    Math.max(MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT, Math.round(value)),
+  );
+}
+
+function getSidebarTitlebarBackgroundDarknessForColor(backgroundColor: string): number {
+  const background = normalizeSidebarTitlebarHexColor(
+    backgroundColor,
+    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR,
+  );
+  const red = Number.parseInt(background.slice(1, 3), 16);
+  const green = Number.parseInt(background.slice(3, 5), 16);
+  const blue = Number.parseInt(background.slice(5, 7), 16);
+  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+  return clampSidebarTitlebarBackgroundDarknessPercent((1 - luminance) * 100);
+}
+
+export function getSidebarTitlebarBackgroundForDarkness(
+  darknessPercent: number,
+  tintColor = DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
+): string {
+  /**
+   * CDXC:SidebarTitlebarColors 2026-06-15-13:45:
+   * Replace the freeform custom background color picker with a contrast slider.
+   * The slider produces grayscale-only sidebar/titlebar backgrounds so custom
+   * chrome can vary in contrast without introducing arbitrary hues that break
+   * sidebar row contrast.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-15-15:01:
+   * Limit the contrast slider to 85-100 so custom chrome stays in the dark
+   * gray range instead of drifting into mid-gray sidebar backgrounds.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-15-15:15:
+   * Keep the internal darkness percentage name for compatibility while the
+   * visible Settings control is labeled Background Contrast.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-15-15:28:
+   * Add a web-only tint picker without returning to arbitrary background
+   * colors. Apply a small hue offset around the contrast-selected gray so tint
+   * changes are subtle and neutral #808080 preserves the original gray.
+   */
+  const darkness = clampSidebarTitlebarBackgroundDarknessPercent(darknessPercent);
+  const baseChannel =
+    darkness === 100 ? 0 : Math.min(255, Math.round(280 * ((100 - darkness) / 100)));
+  const tint = normalizeSidebarTitlebarHexColor(
+    tintColor,
+    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
+  );
+  const tintRed = Number.parseInt(tint.slice(1, 3), 16);
+  const tintGreen = Number.parseInt(tint.slice(3, 5), 16);
+  const tintBlue = Number.parseInt(tint.slice(5, 7), 16);
+  const tintAverage = (tintRed + tintGreen + tintBlue) / 3;
+  const channels = [tintRed, tintGreen, tintBlue].map((channel) =>
+    clampColorChannel(
+      baseChannel + (channel - tintAverage) * CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_STRENGTH,
+    ),
+  );
+  return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
+ * CDXC:SidebarTitlebarColors 2026-06-15-13:22:
+ * The foreground is no longer user-selectable. Ignore any legacy saved
+ * foreground value and recompute it from the validated background color, using
+ * the standard light foreground for dark backgrounds and standard dark
+ * foreground for light backgrounds.
+ */
+export function getSidebarTitlebarForegroundForBackground(backgroundColor: string): string {
+  const background = normalizeSidebarTitlebarHexColor(
+    backgroundColor,
+    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR,
+  );
+  const red = Number.parseInt(background.slice(1, 3), 16);
+  const green = Number.parseInt(background.slice(3, 5), 16);
+  const blue = Number.parseInt(background.slice(5, 7), 16);
+  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+  return luminance > 0.54
+    ? DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_DARK_FOREGROUND_COLOR
+    : DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_FOREGROUND_COLOR;
 }
 
 /**
@@ -275,7 +378,52 @@ export type ghostexSettings = {
    * The project header Show less action keeps a configurable number of project sessions visible. Default to ten visible sessions so active projects stay scannable before switching back to Show more.
    */
   projectSessionListCollapsedCount: number;
+  /**
+   * CDXC:ProjectHotkeys 2026-06-15-11:12:
+   * Jump to Project shortcuts should reveal the target project row when it was collapsed, because the keyboard action is also a navigation intent in the visible Projects sidebar area.
+   */
+  expandCollapsedProjectsOnJump: boolean;
+  /**
+   * CDXC:ProjectHotkeys 2026-06-15-11:12:
+   * Some users want a project jump to reveal only the target project header plus the configured Show less slice after auto-expanding a collapsed project. Keep that secondary behavior opt-in and only meaningful when auto-expand is enabled.
+   */
+  showLessForExpandedProjectJumps: boolean;
   sidebarTheme: SidebarThemeSetting;
+  /**
+   * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
+   * Custom chrome colors are scoped to the sidebar and native titlebar only.
+   * Keep these separate from theme tokens so modals, dropdowns, and the
+   * disabled theme selector keep using Dark Gray/Dark 2 defaults.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-15-13:22:
+   * Settings still carries a foreground field for compatibility with native
+   * layout payloads and older stored settings, but normalization derives it
+   * from the background instead of preserving user-entered foreground values.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-15-13:45:
+   * Users now tune the custom sidebar/titlebar background through a contrast
+   * slider. Keep the background color field as the computed grayscale protocol
+   * value, not as a user-editable setting.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-15-15:15:
+   * The user-facing Settings control is named Contrast, but this protocol keeps
+   * its darkness key so stored settings and native payloads remain compatible.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-15-15:28:
+   * Tint is stored as a separate web-picker color and folded into the computed
+   * background hex. The native/sidebar consumers still receive one final
+   * background color, preserving their existing contract.
+   *
+   * CDXC:SettingsTheming 2026-06-15-21:35:
+   * The old custom sidebar/titlebar contrast toggle is retired from Settings.
+   * Keep this compatibility field enabled after normalization so visible
+   * Theming controls apply without a hidden or experimental gate.
+   */
+  customSidebarTitlebarColorsEnabled: boolean;
+  customSidebarTitlebarForegroundColor: string;
+  customSidebarTitlebarBackgroundTintColor: string;
+  customSidebarTitlebarBackgroundDarknessPercent: number;
+  customSidebarTitlebarBackgroundColor: string;
   terminalCursorStyle: TerminalCursorStyle;
   terminalCursorStyleBlink: boolean;
   terminalEngine: TerminalEngine;
@@ -344,7 +492,6 @@ export const SIDEBAR_SETTINGS_PRESET_KEYS = [
   "hideLastActiveTimeOnSessionCards",
   "hideProjectHeaderDiffStats",
   "showProjectEditorDiffFileCount",
-  "hideFloatingSessionStatusIndicators",
   "hideMenuBarSessionStatusIndicators",
 ] as const satisfies ReadonlyArray<keyof ghostexSettings>;
 
@@ -364,6 +511,9 @@ export type SidebarSettingsPresetSettings = Pick<ghostexSettings, SidebarSetting
  *
  * CDXC:SidebarSettingsPresets 2026-06-13-15:42:
  * Recommended should keep the sidebar quieter by hiding session-card Last Active timestamps while preserving the rest of the detailed status chrome.
+ *
+ * CDXC:SessionStatusIndicators 2026-06-15-14:00:
+ * Sidebar presets must not control the macOS floating status indicator. Keep the floating badge setting under Status Indicators so switching sidebar chrome cannot enable or disable that desktop surface.
  */
 export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
   codex: {
@@ -373,7 +523,6 @@ export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
     hideLastActiveTimeOnSessionCards: false,
     hideProjectHeaderDiffStats: true,
     showProjectEditorDiffFileCount: false,
-    hideFloatingSessionStatusIndicators: true,
     hideMenuBarSessionStatusIndicators: true,
   },
   minimal: {
@@ -383,7 +532,6 @@ export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
     hideLastActiveTimeOnSessionCards: true,
     hideProjectHeaderDiffStats: true,
     showProjectEditorDiffFileCount: false,
-    hideFloatingSessionStatusIndicators: true,
     hideMenuBarSessionStatusIndicators: true,
   },
   detailed: {
@@ -393,7 +541,6 @@ export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
     hideLastActiveTimeOnSessionCards: false,
     hideProjectHeaderDiffStats: false,
     showProjectEditorDiffFileCount: false,
-    hideFloatingSessionStatusIndicators: false,
     hideMenuBarSessionStatusIndicators: false,
   },
   recommended: {
@@ -403,7 +550,6 @@ export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
     hideLastActiveTimeOnSessionCards: true,
     hideProjectHeaderDiffStats: false,
     showProjectEditorDiffFileCount: false,
-    hideFloatingSessionStatusIndicators: false,
     hideMenuBarSessionStatusIndicators: false,
   },
 } as const satisfies Record<SidebarSettingsPresetId, SidebarSettingsPresetSettings>;
@@ -572,9 +718,15 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   sidebarSessionTagListItems: DEFAULT_SIDEBAR_SESSION_TAG_LIST_ITEMS,
   /**
    * CDXC:AutoSleep 2026-05-28-08:06:
-   * Background VS Code, Project, and Git panes auto-sleep after fifteen minutes
-   * of idle time by default. Browser and agent auto-sleep start opt-in because
-   * they close live user-created session surfaces.
+   * Background VS Code, Project, and Git panes originally auto-slept after
+   * fifteen minutes of idle time by default. Agent terminal auto-sleep starts
+   * opt-in because it closes live user-created conversation surfaces.
+   *
+   * CDXC:AutoSleep 2026-06-15-18:31:
+   * Heavy editor, Project, Git/Browser, and browser-session surfaces should
+   * retire quickly by default because many awake webviews and code-server
+   * processes make sidebar switching laggy. Use a five-minute idle window and
+   * enable browser-session Auto Sleep while keeping agent terminals opt-in.
    *
    * CDXC:AutoSleep 2026-06-07-00:53:
    * Agent auto-sleep keeps its opt-in policy, but the default idle threshold is
@@ -587,14 +739,14 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   autoSleepAgentSessionsEnabled: false,
   autoSleepAgentIdleMinutes: 15,
-  autoSleepBrowserSessionsEnabled: false,
-  autoSleepBrowserIdleMinutes: 30,
+  autoSleepBrowserSessionsEnabled: true,
+  autoSleepBrowserIdleMinutes: 5,
   autoSleepCodeEditorEnabled: true,
-  autoSleepCodeEditorIdleMinutes: 15,
+  autoSleepCodeEditorIdleMinutes: 5,
   autoSleepGitEditorEnabled: true,
-  autoSleepGitEditorIdleMinutes: 15,
+  autoSleepGitEditorIdleMinutes: 5,
   autoSleepProjectEditorEnabled: true,
-  autoSleepProjectEditorIdleMinutes: 15,
+  autoSleepProjectEditorIdleMinutes: 5,
   autoSleepRequireAgentResumeCommand: true,
   autoSleepFavoriteAgentSessions: false,
   keepAwakeActivateOnExternalDisplay: false,
@@ -631,12 +783,15 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   showMacOSAttentionNotifications: true,
   /**
    * CDXC:SessionStatusIndicators 2026-05-09-17:30
-   * Floating and menu bar desktop status badges are visible under the default
-   * Recommended preset. Keep separate hide toggles so users can hide either
-   * surface without coupling their visibility.
+   * Floating and menu bar desktop status badges stay independently controlled.
+   *
+   * CDXC:SessionStatusIndicators 2026-06-15-02:01:
+   * Floating session indicators start hidden for new installs, so the Show Floating Session Indicators setting is off by default. Keep the menu bar session indicator visible unless that separate setting changes.
+   *
+   * CDXC:SessionStatusIndicators 2026-06-15-14:00:
+   * Sidebar presets must not provide the floating indicator value. Store the first-run default here so applying a sidebar preset preserves whatever the user chose for the macOS floating badge.
    */
-  hideFloatingSessionStatusIndicators:
-    SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideFloatingSessionStatusIndicators,
+  hideFloatingSessionStatusIndicators: true,
   hideMenuBarSessionStatusIndicators:
     SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideMenuBarSessionStatusIndicators,
   petOverlayEnabled: false,
@@ -695,13 +850,55 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   sidebarDefaultWidthPx: DEFAULT_SIDEBAR_DEFAULT_WIDTH_PX,
   projectSessionListCollapsedCount: DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
+  expandCollapsedProjectsOnJump: true,
+  showLessForExpandedProjectJumps: false,
   /**
-   * CDXC:SidebarTheme 2026-05-08-11:14
-   * Dark Gray is the only active user-facing sidebar theme while the broader
-   * theme picker is hidden. New installs must start on the persisted "plain"
-   * value so the resolved chrome is the dark gray palette immediately.
+   * CDXC:SidebarTheme 2026-06-15-02:29:
+   * Theme selection is disabled again until the full theme system is ready.
+   * Use Dark 2 as the active app theme and present it to users as Dark Gray.
    */
-  sidebarTheme: "plain",
+  sidebarTheme: "dark-2",
+  /**
+   * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
+   * Custom sidebar/titlebar colors are scoped to the sidebar and titlebar.
+   * The default background matches Dark Gray chrome without changing modal or
+   * dropdown color tokens.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-15-13:22:
+   * Foreground is derived from background luminance, so the default foreground
+   * remains light for Dark Gray and flips to the dark foreground on light
+   * custom backgrounds.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-15-13:45:
+   * The custom background contrast slider defaults near Dark Gray and is
+   * restricted to dark grayscale values to avoid arbitrary color blends in
+   * sidebar rows.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-15-15:01:
+   * Clamp the slider to 85-100 per visual review; lighter values made the
+   * sidebar feel too gray.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-15-15:15:
+   * Keep this persisted field named darkness for compatibility while Settings
+   * labels the same control Background Contrast.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-15-15:28:
+   * The tint picker defaults to neutral #808080. The tint algorithm uses hue
+   * offset around the selected contrast gray, so this default does not change
+   * Dark Gray chrome.
+   *
+   * CDXC:SettingsTheming 2026-06-15-21:35:
+   * Background Contrast and Background Tint are standard Theming controls.
+   * Enable the retained protocol field by default so the removed toggle cannot
+   * make those visible controls inert.
+   */
+  customSidebarTitlebarColorsEnabled: true,
+  customSidebarTitlebarForegroundColor: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_FOREGROUND_COLOR,
+  customSidebarTitlebarBackgroundTintColor:
+    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
+  customSidebarTitlebarBackgroundDarknessPercent:
+    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
+  customSidebarTitlebarBackgroundColor: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR,
   /**
    * CDXC:GhosttyDefaults 2026-05-22-12:29:
    * New Ghostex terminals should default to the requested GitHub Dark terminal
@@ -801,15 +998,12 @@ export const SIDEBAR_THEME_SETTING_OPTIONS: ReadonlyArray<{
   value: SidebarThemeSetting;
 }> = [
   /**
-   * CDXC:SidebarTheme 2026-05-08-11:14
-   * Hide Auto and the other theme presets from Settings until theme selection
-   * returns. Keep only Dark Gray visible so the UI matches the active default.
-   *
-   * CDXC:SidebarTheme 2026-04-26-21:32: Keep the persisted value as "plain"
-   * for compatibility, but present it as Dark Gray because the option now
-   * always selects the dark gray sidebar palette.
+   * CDXC:SidebarTheme 2026-06-15-02:29:
+   * The Settings theme dropdown is disabled while themes are coming soon.
+   * Keep the persisted value concrete as Dark 2, but use the friendly label
+   * Dark Gray so the disabled control matches the current app chrome.
    */
-  { label: "Dark Gray", value: "plain" },
+  { label: "Dark Gray", value: "dark-2" },
 ];
 
 export const TERMINAL_ENGINE_SETTING_OPTIONS: ReadonlyArray<{
@@ -892,8 +1086,11 @@ export const KEEP_AWAKE_DURATION_OPTIONS: ReadonlyArray<{
    * CDXC:TitlebarKeepAwake 2026-05-28-19:28:
    * The keep-awake menu should stay intentionally small: indefinite, two hours,
    * five hours, and the runtime Allow Sleep Now action are the complete user-facing duration set.
+   *
+   * CDXC:TitlebarKeepAwake 2026-06-15-01:25:
+   * Dropdown settings must never expose an empty selected value. The indefinite keep-awake duration uses explicit friendly copy so Settings and the title-bar menu both render a readable option label.
    */
-  { label: "", value: 0 },
+  { label: "Until turned off", value: 0 },
   { label: "2 hours", value: 120 },
   { label: "5 hours", value: 300 },
 ];
@@ -970,8 +1167,36 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       "sessionPersistenceProvider",
       readBoolean(source, "tmuxMode", DEFAULT_ghostex_SETTINGS.tmuxMode)
         ? "tmux"
-        : DEFAULT_ghostex_SETTINGS.sessionPersistenceProvider,
+      : DEFAULT_ghostex_SETTINGS.sessionPersistenceProvider,
     ),
+  );
+  const legacyCustomSidebarTitlebarBackgroundColor = normalizeSidebarTitlebarHexColor(
+    readString(
+      source,
+      "customSidebarTitlebarBackgroundColor",
+      DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundColor,
+    ),
+    DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundColor,
+  );
+  const customSidebarTitlebarBackgroundDarknessPercent =
+    clampSidebarTitlebarBackgroundDarknessPercent(
+      readNumber(
+        source,
+        "customSidebarTitlebarBackgroundDarknessPercent",
+        getSidebarTitlebarBackgroundDarknessForColor(legacyCustomSidebarTitlebarBackgroundColor),
+      ),
+    );
+  const customSidebarTitlebarBackgroundTintColor = normalizeSidebarTitlebarHexColor(
+    readString(
+      source,
+      "customSidebarTitlebarBackgroundTintColor",
+      DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor,
+    ),
+    DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor,
+  );
+  const customSidebarTitlebarBackgroundColor = getSidebarTitlebarBackgroundForDarkness(
+    customSidebarTitlebarBackgroundDarknessPercent,
+    customSidebarTitlebarBackgroundTintColor,
   );
   return {
     actionCompletionSound: clampCompletionSoundSetting(
@@ -1389,9 +1614,26 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
         DEFAULT_ghostex_SETTINGS.projectSessionListCollapsedCount,
       ),
     ),
+    expandCollapsedProjectsOnJump: readBoolean(
+      source,
+      "expandCollapsedProjectsOnJump",
+      DEFAULT_ghostex_SETTINGS.expandCollapsedProjectsOnJump,
+    ),
+    showLessForExpandedProjectJumps: readBoolean(
+      source,
+      "showLessForExpandedProjectJumps",
+      DEFAULT_ghostex_SETTINGS.showLessForExpandedProjectJumps,
+    ),
     sidebarTheme: clampSidebarThemeSetting(
       readString(source, "sidebarTheme", DEFAULT_ghostex_SETTINGS.sidebarTheme),
     ),
+    customSidebarTitlebarColorsEnabled: true,
+    customSidebarTitlebarForegroundColor: getSidebarTitlebarForegroundForBackground(
+      customSidebarTitlebarBackgroundColor,
+    ),
+    customSidebarTitlebarBackgroundTintColor,
+    customSidebarTitlebarBackgroundDarknessPercent,
+    customSidebarTitlebarBackgroundColor,
     terminalCursorStyle: normalizeTerminalCursorStyle(
       readString(source, "terminalCursorStyle", DEFAULT_ghostex_SETTINGS.terminalCursorStyle),
     ),

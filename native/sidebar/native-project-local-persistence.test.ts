@@ -13,6 +13,7 @@ describe("native project local persistence", () => {
       agentSessionId: "conversation-id",
       agentSessionPath: "/private/thread.jsonl",
       alias: "Stale Alias",
+      closeAfterDone: true,
       column: 2,
       commandTitle: "Stale Command",
       createdAt: "2026-06-02T10:00:00.000Z",
@@ -42,6 +43,7 @@ describe("native project local persistence", () => {
 
     expect(persisted).toMatchObject({
       alias: "Terminal Session",
+      closeAfterDone: true,
       column: 2,
       createdAt: "1970-01-01T00:00:00.000Z",
       delayedSendDeadlineAt: "2026-06-02T10:05:00.000Z",

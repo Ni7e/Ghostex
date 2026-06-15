@@ -255,19 +255,34 @@ export function clampSidebarThemeSetting(value: string | undefined): SidebarThem
   switch (value) {
     case "auto":
       /**
-       * CDXC:SidebarTheme 2026-05-08-11:14
-       * Auto is no longer an active sidebar theme. Normalize legacy saved Auto
-       * settings to Dark Gray instead of preserving a hidden system-dependent
-       * mode after the picker has been removed from Settings.
+       * CDXC:SidebarTheme 2026-06-15-02:29:
+       * Theme selection is disabled again while themes are coming soon, so
+       * legacy Auto should resolve to the active Dark Gray/Dark 2 chrome.
        */
-      return "plain";
+      return "dark-2";
     case "plain":
+      /**
+       * CDXC:SidebarTheme 2026-06-15-01:43:
+       * The old persisted "plain" setting is the current shipped dark surface.
+       * Keep it as the Dark 2 snapshot so existing users do not silently move
+       * off the exact #0e0e0e chrome they selected before Dark 1 became the
+       * default.
+       */
+      return "dark-2";
+    case "dark-2":
+      return "dark-2";
+    case "dark-1":
+    case "plain-light":
     case "dark-modern":
     case "dark-green":
-      return value === "dark-modern" ? "dark-green" : value;
+      /**
+       * CDXC:SidebarTheme 2026-06-15-02:29:
+       * Hidden theme values may exist from prior builds or settings files, but
+       * the disabled Settings control must keep the app on Dark Gray/Dark 2.
+       */
+      return "dark-2";
     case "dark-plus":
     case "dark-blue":
-      return value === "dark-plus" ? "dark-blue" : value;
     case "dark-red":
     case "dark-pink":
     case "dark-orange":
@@ -276,13 +291,11 @@ export function clampSidebarThemeSetting(value: string | undefined): SidebarThem
     case "light-green":
     case "light-pink":
     case "light-orange":
-      return value === "light-plus" ? "light-blue" : value;
     case "monokai":
-      return "dark-green";
     case "solarized-dark":
-      return "dark-blue";
+      return "dark-2";
     default:
-      return "plain";
+      return "dark-2";
   }
 }
 
@@ -291,18 +304,21 @@ export function resolveSidebarTheme(
   variant: SidebarThemeVariant,
 ): SidebarTheme {
   if (themeSetting === "auto") {
-    return variant === "light" ? "light-blue" : "dark-blue";
+    /**
+     * CDXC:SidebarTheme 2026-06-15-02:29:
+     * Theme selection is disabled again; direct Auto callers should use the
+     * same active Dark Gray/Dark 2 chrome as normalized settings.
+     */
+    return "dark-2";
   }
 
   if (themeSetting === "plain") {
     /**
-     * CDXC:SidebarTheme 2026-04-26-21:32: The stored "plain" setting is the
-     * user-facing Dark Gray theme. It must always resolve to the dark gray
-     * palette instead of following the current light/dark variant, otherwise
-     * the sidebar can show a blue/light-looking chrome while the picker says
-     * Dark Gray.
+     * CDXC:SidebarTheme 2026-06-15-01:43:
+     * Preserve old callers that pass the legacy "plain" value directly by
+     * resolving it to Dark 2, the snapshot of the previous #0e0e0e app chrome.
      */
-    return "plain-dark";
+    return "dark-2";
   }
 
   return themeSetting;
@@ -539,6 +555,7 @@ export function createSessionRecord(
     commandTitle: normalizeTerminalCommandTitle(options?.commandTitle),
     column: position.column,
     createdAt,
+    closeAfterDone: options?.closeAfterDone === true ? true : undefined,
     delayedSendDeadlineAt: normalizeTerminalDelayedSendDeadlineAt(options?.delayedSendDeadlineAt),
     displayId,
     isFavorite: options?.sessionTag === "favorite" ? true : undefined,

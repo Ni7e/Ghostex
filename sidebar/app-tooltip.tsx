@@ -55,6 +55,7 @@ export function setSidebarTooltipsSuppressedForDrag(suppressed: boolean) {
 
 type AppTooltipProps = ComponentProps<typeof Tooltip> & {
   align?: ComponentProps<typeof TooltipContent>["align"];
+  alignOffset?: ComponentProps<typeof TooltipContent>["alignOffset"];
   children: ReactElement;
   collisionPadding?: ComponentProps<typeof TooltipContent>["collisionPadding"];
   content: ReactNode;
@@ -73,6 +74,7 @@ type AppTooltipProps = ComponentProps<typeof Tooltip> & {
  */
 export function AppTooltip({
   align,
+  alignOffset,
   children,
   collisionPadding,
   content,
@@ -139,12 +141,19 @@ export function AppTooltip({
    * The macOS titlebar uses the same AppTooltip wrapper as the sidebar, but its
    * compact chrome sometimes needs side-positioned labels. Forward side to
    * TooltipContent without changing the sidebar's default bottom placement.
+   *
+   * CDXC:TitlebarTooltips 2026-06-15-16:40:
+   * Titlebar button hover labels need a small vertical alignment nudge while
+   * preserving the shared tooltip primitive. Forward alignOffset so the
+   * titlebar wrapper can adjust placement through Base UI's positioner instead
+   * of CSS transforms.
    */
   return (
     <Tooltip {...tooltipRootProps} onOpenChange={setOpen} open={open}>
       <TooltipTrigger render={children} />
       <TooltipContent
         align={align}
+        alignOffset={alignOffset}
         className={contentClassName}
         collisionPadding={collisionPadding}
         side={side}

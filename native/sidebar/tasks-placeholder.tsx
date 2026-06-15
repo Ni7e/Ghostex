@@ -2412,7 +2412,7 @@ function ProjectBoardApp() {
             />
             <label className="project-ticket-field">
               <span>Title</span>
-              <Textarea
+              <Input
                 className="project-ticket-title-input"
                 onChange={(event) => {
                   const title = event.currentTarget.value;
@@ -2637,7 +2637,7 @@ function ProjectBoardApp() {
             />
             <label className="project-ticket-field">
               <span>Title</span>
-              <Textarea
+              <Input
                 className="project-ticket-title-input"
                 onChange={(event) => {
                   const title = event.currentTarget.value;
@@ -4933,10 +4933,10 @@ const styleElement = document.createElement("style");
 styleElement.textContent = `
   :root {
     color-scheme: dark;
-    background: #0e0e0e;
+    background: var(--app-background, #191919);
     color: #f4f4f5;
     font-family: Inter Variable, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-    --background: #0e0e0e;
+    --background: var(--app-background, #191919);
     --foreground: oklch(0.985 0 0);
     --card: #171717;
     --card-foreground: oklch(0.985 0 0);
@@ -4955,7 +4955,7 @@ styleElement.textContent = `
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
     --radius: 0;
-    --project-board-bg: #0e0e0e;
+    --project-board-bg: var(--app-background, #191919);
     --project-board-panel: #171717;
     --project-board-panel-hover: #1d1d1d;
     --project-board-card: #1a1a1a;
@@ -6251,11 +6251,15 @@ styleElement.textContent = `
   .project-ticket-dialog {
     /*
      * CDXC:ProjectBoard 2026-05-28-13:52:
-     * Project ticket edit/create dialogs should use the same #0e0e0e modal
-     * background as the rest of Ghostex app-modal surfaces.
+     * Project ticket edit/create dialogs should use the same modal background
+     * as the rest of Ghostex app-modal surfaces.
+     *
+     * CDXC:SidebarTheme 2026-06-15-01:43:
+     * Project Board dialogs follow --app-modal-background so Dark 1 uses
+     * #191919 while Dark 2 preserves the previous #0e0e0e surface.
      */
-    background: #0e0e0e;
-    background-color: #0e0e0e;
+    background: var(--app-modal-background, #191919);
+    background-color: var(--app-modal-background, #191919);
     max-width: min(780px, calc(100vw - 44px));
     overflow: hidden;
     width: 780px;
@@ -6372,7 +6376,16 @@ styleElement.textContent = `
   }
 
   .project-ticket-title-input {
-    min-height: 58px !important;
+    /*
+    CDXC:ProjectBoardTickets 2026-06-15-21:00:
+    Ticket title editing is a single-line text field. Keep the create/edit title control at one input row so it does not inherit prompt textarea height or wrap its value like long-form content.
+    */
+    height: 34px;
+    line-height: 18px;
+    min-height: 34px !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .project-ticket-label-list {

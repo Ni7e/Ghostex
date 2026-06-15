@@ -57,6 +57,13 @@ body.native-sidebar-body .stack,
   overscroll-behavior: contain;
 }
 
+.workspace-theme-swatch[data-workspace-theme="dark-1"] {
+  --workspace-theme-swatch-background: #191919;
+  --workspace-theme-swatch-border: #525252;
+  --workspace-theme-swatch-foreground: #ffffff;
+}
+
+.workspace-theme-swatch[data-workspace-theme="dark-2"],
 .workspace-theme-swatch[data-workspace-theme="plain-dark"] {
   --workspace-theme-swatch-background: #252525;
   --workspace-theme-swatch-border: #525252;

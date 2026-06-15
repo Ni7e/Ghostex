@@ -12,16 +12,17 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconCheck,
+  IconClock,
   IconCommand,
   IconCopy,
   IconDownload,
   IconEdit,
+  IconDeviceMobile,
   IconFilter2,
   IconFileSearch,
   IconFolder,
   IconFolderOpen,
   IconGitBranch,
-  IconGridDots,
   IconHelpCircle,
   IconHistory,
   IconHistoryToggle,
@@ -50,6 +51,7 @@ import {
   useState,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
   type ReactNode,
 } from "react";
@@ -61,6 +63,7 @@ import {
   type SidebarActiveSessionsSortMode,
   type ExtensionToSidebarMessage,
   type SidebarPreviousSessionItem,
+  type SidebarRecentProject,
 } from "../shared/session-grid-contract";
 import {
   getWorkspaceThemeForeground,
@@ -122,6 +125,7 @@ import { isEditableKeyboardTarget } from "./text-input-keyboard";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
 import {
   AppTooltip,
+  dismissSidebarTooltips,
   setSidebarTooltipsSuppressedForDrag,
   TooltipProvider,
 } from "./app-tooltip";
@@ -152,7 +156,15 @@ import {
   normalizeghostexHotkeySettings,
   type ghostexHotkeySettings,
 } from "../shared/ghostex-hotkeys";
-import { DEFAULT_ghostex_SETTINGS, type RemoteMachineSettings } from "../shared/ghostex-settings";
+import {
+  DEFAULT_ghostex_SETTINGS,
+  getSidebarTitlebarForegroundForBackground,
+  type RemoteMachineSettings,
+} from "../shared/ghostex-settings";
+import {
+  SIDEBAR_PROJECT_JUMP_EVENT,
+  type SidebarProjectJumpEventDetail,
+} from "../shared/sidebar-project-jump";
 import type { SidebarAgentButton } from "../shared/sidebar-agents";
 import {
   readRenderedSidebarSessionSlotIds,
@@ -166,6 +178,10 @@ import {
   writePrimaryAgentLauncherId,
   type PrimaryAgentLauncherChangedEvent,
 } from "./primary-agent-launcher";
+import {
+  readProjectSessionListCollapsedState,
+  writeProjectSessionListCollapsedState,
+} from "./project-session-list-toggle";
 import { ProjectAgentLauncherIcon } from "./project-agent-launcher-icon";
 
 type SidebarEventSource = Pick<Window, "addEventListener" | "removeEventListener">;
@@ -177,8 +193,11 @@ export type SidebarAppProps = {
 };
 
 type SessionIdsByGroup = Record<string, string[]>;
-type RemoteMachineRuntimeStatus = Extract<ExtensionToSidebarMessage, { type: "remoteMachineStatus" }>;
-type RemoteMachineRuntimeStatuses = Record<string, RemoteMachineRuntimeStatus["state"]>;
+type SidebarStoreState = ReturnType<typeof useSidebarStore.getState>;
+type SidebarGroupsById = SidebarStoreState[ "groupsById" ];
+type SidebarSessionsById = SidebarStoreState[ "sessionsById" ];
+type RemoteMachineRuntimeStatus = Extract<ExtensionToSidebarMessage, { type: "remoteMachineStatus"; }>;
+type RemoteMachineRuntimeStatuses = Record<string, RemoteMachineRuntimeStatus[ "state" ]>;
 type FloatingMenuPosition = {
   right: number;
   top: number;
@@ -196,6 +215,24 @@ type RecentProjectContextMenuPosition = {
   x: number;
   y: number;
 };
+type PointerViewportPoint = {
+  clientX: number;
+  clientY: number;
+};
+
+type NativeModifierStateHostEvent = {
+  isCommandPressed: boolean;
+  type: "nativeModifierState";
+};
+
+const SIDEBAR_HOTKEY_OVERLAY_ENABLED = false;
+/*
+ * CDXC:Hotkeys 2026-06-15-02:33:
+ * Temporarily disable the Cmd-hold sidebar hotkey overlay while keeping the
+ * hook, renderer, styles, and native modifier bridge in source for near-term
+ * re-enable. Holding Cmd must not show the overlay from sidebar DOM focus or
+ * native terminal/browser/titlebar focus while this flag is false.
+ */
 
 type SidebarGroupDragPreview = {
   groupId: string;
@@ -210,10 +247,15 @@ type SidebarGroupDragPreview = {
 };
 
 function useCommandHotkeyOverlay(): boolean {
-  const [isVisible, setIsVisible] = useState(false);
+  const [ isVisible, setIsVisible ] = useState(false);
+  const isCommandPressedRef = useRef(false);
   const showTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
+    if (!SIDEBAR_HOTKEY_OVERLAY_ENABLED) {
+      return;
+    }
+
     const clearOverlayTimer = () => {
       if (showTimerRef.current !== undefined) {
         window.clearTimeout(showTimerRef.current);
@@ -221,45 +263,87 @@ function useCommandHotkeyOverlay(): boolean {
       }
     };
     const hideOverlay = () => {
+      isCommandPressedRef.current = false;
       clearOverlayTimer();
       setIsVisible(false);
     };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Meta" || showTimerRef.current !== undefined) {
+    const showOverlayAfterDelay = () => {
+      if (isCommandPressedRef.current || showTimerRef.current !== undefined) {
         return;
       }
+      isCommandPressedRef.current = true;
       /**
        * CDXC:Hotkeys 2026-05-11-09:26
        * Holding Cmd for one second should reveal an in-sidebar cheat sheet of
        * the current effective hotkeys. Delay the overlay so normal Cmd chords
        * do not flash UI while still making discovery available from the key the
        * simplified keymap now centers on.
+       *
+       * CDXC:Hotkeys 2026-06-14-19:40:
+       * Native terminal, browser, and titlebar focus can hold Cmd without
+       * delivering a WebKit keydown to the sidebar. Keep this dormant path wired
+       * to native modifier host events so the cheat sheet can be restored by
+       * flipping SIDEBAR_HOTKEY_OVERLAY_ENABLED.
+       *
+       * CDXC:Hotkeys 2026-06-15-02:33:
+       * SIDEBAR_HOTKEY_OVERLAY_ENABLED intentionally short-circuits this effect
+       * before listeners attach, so holding Cmd must not show this overlay until
+       * the temporary disable is removed.
        */
       showTimerRef.current = window.setTimeout(() => {
         showTimerRef.current = undefined;
-        setIsVisible(true);
+        if (isCommandPressedRef.current) {
+          setIsVisible(true);
+        }
       }, 1_000);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Meta") {
+        return;
+      }
+      showOverlayAfterDelay();
     };
     const handleKeyUp = (event: KeyboardEvent) => {
       if (event.key === "Meta" || !event.metaKey) {
         hideOverlay();
       }
     };
+    const handleNativeHostEvent = (event: Event) => {
+      if (!(event instanceof CustomEvent) || !isNativeModifierStateHostEvent(event.detail)) {
+        return;
+      }
+      if (event.detail.isCommandPressed) {
+        showOverlayAfterDelay();
+      } else {
+        hideOverlay();
+      }
+    };
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("ghostex-native-host-event", handleNativeHostEvent);
     window.addEventListener("blur", hideOverlay);
     return () => {
       clearOverlayTimer();
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("ghostex-native-host-event", handleNativeHostEvent);
       window.removeEventListener("blur", hideOverlay);
     };
   }, []);
 
-  return isVisible;
+  return SIDEBAR_HOTKEY_OVERLAY_ENABLED && isVisible;
 }
 
-function SidebarHotkeyOverlay({ hotkeys }: { hotkeys?: ghostexHotkeySettings }) {
+function isNativeModifierStateHostEvent(value: unknown): value is NativeModifierStateHostEvent {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    (value as NativeModifierStateHostEvent).type === "nativeModifierState" &&
+    typeof (value as NativeModifierStateHostEvent).isCommandPressed === "boolean"
+  );
+}
+
+function SidebarHotkeyOverlay({ hotkeys }: { hotkeys?: ghostexHotkeySettings; }) {
   const normalizedHotkeys = normalizeghostexHotkeySettings(hotkeys);
   const rows = getSidebarHotkeyOverlayRows(normalizedHotkeys);
 
@@ -281,7 +365,7 @@ function SidebarHotkeyOverlay({ hotkeys }: { hotkeys?: ghostexHotkeySettings }) 
   );
 }
 
-function ProjectGroupDragGhost({ preview }: { preview: SidebarGroupDragPreview }) {
+function ProjectGroupDragGhost({ preview }: { preview: SidebarGroupDragPreview; }) {
   const style = {
     left: `${preview.left}px`,
     top: `${preview.top}px`,
@@ -332,14 +416,14 @@ function ProjectGroupDragGhost({ preview }: { preview: SidebarGroupDragPreview }
 }
 
 function getSidebarHotkeyOverlayRows(hotkeys: ghostexHotkeySettings) {
-  const rows: Array<{ hotkey: string; title: string }> = [];
+  const rows: Array<{ hotkey: string; title: string; }> = [];
   for (const definition of GHOSTEX_HOTKEY_DEFINITIONS) {
-    if (definition.id === "focusGroup1") {
-      const hotkey = normalizeHotkeyText(hotkeys.focusGroup1 ?? "");
+    if (definition.id === "jumpToProject1") {
+      const hotkey = normalizeHotkeyText(hotkeys.jumpToProject1 ?? "");
       if (hotkey) {
         rows.push({
           hotkey: formatNumberedHotkeyExample(hotkey),
-          title: "Focus Group N",
+          title: "Jump to Project N",
         });
       }
       continue;
@@ -355,12 +439,12 @@ function getSidebarHotkeyOverlayRows(hotkeys: ghostexHotkeySettings) {
       continue;
     }
     if (
-      /^focusGroup[2-9]$/u.test(definition.id) ||
+      /^jumpToProject[2-9]$/u.test(definition.id) ||
       /^focusSessionSlot[2-9]$/u.test(definition.id)
     ) {
       continue;
     }
-    const hotkey = normalizeHotkeyText(hotkeys[definition.id] ?? "");
+    const hotkey = normalizeHotkeyText(hotkeys[ definition.id ] ?? "");
     if (hotkey) {
       rows.push({ hotkey, title: definition.title });
     }
@@ -422,16 +506,16 @@ type SidebarProjectGroupOrderItem = ProjectWorktreeOrderItem & {
 type SidebarProjectGroupLookup = Record<
   string,
   | {
-      projectContext?: {
-        path?: string;
-        editor: {
-          projectId: string;
-        };
-        worktree?: {
-          parentProjectId: string;
-        };
+    projectContext?: {
+      path?: string;
+      editor: {
+        projectId: string;
       };
-    }
+      worktree?: {
+        parentProjectId: string;
+      };
+    };
+  }
   | undefined
 >;
 
@@ -443,10 +527,10 @@ const sensors = [
   PointerSensor.configure({
     activationConstraints(event) {
       if (event.pointerType === "touch") {
-        return [new PointerActivationConstraints.Delay({ tolerance: 5, value: 250 })];
+        return [ new PointerActivationConstraints.Delay({ tolerance: 5, value: 250 }) ];
       }
 
-      return [new PointerActivationConstraints.Distance({ value: 6 })];
+      return [ new PointerActivationConstraints.Distance({ value: 6 }) ];
     },
   }),
   KeyboardSensor,
@@ -454,6 +538,7 @@ const sensors = [
 
 const SIDEBAR_STARTUP_INTERACTION_BLOCK_MS = 1500;
 const SIDEBAR_STARTUP_REPRO_WINDOW_MS = 15_000;
+const RECENT_PROJECTS_TOOLTIP_SCROLL_SETTLE_MS = 180;
 const SIDEBAR_POINTER_DRAG_REORDER_THRESHOLD_PX = 8;
 const SIDEBAR_GXSERVER_UNAVAILABLE_GROUP_ID = "gxserver-unavailable";
 const SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY = "ghostex-sidebar-ui-collapse-state";
@@ -543,9 +628,9 @@ function normalizeStoredCollapsedGroupsById(candidate: unknown): Record<string, 
   }
 
   const collapsedGroupsById: Record<string, true> = {};
-  for (const [groupId, collapsed] of Object.entries(candidate)) {
+  for (const [ groupId, collapsed ] of Object.entries(candidate)) {
     if (collapsed === true) {
-      collapsedGroupsById[groupId] = true;
+      collapsedGroupsById[ groupId ] = true;
     }
   }
   return collapsedGroupsById;
@@ -589,43 +674,65 @@ function writeSidebarUiCollapseState(
   }
 }
 
+function readSidebarProjectJumpEventDetail(event: Event): SidebarProjectJumpEventDetail | undefined {
+  const detail = (event as CustomEvent<unknown>).detail;
+  if (!detail || typeof detail !== "object") {
+    return undefined;
+  }
+  const candidate = detail as Partial<SidebarProjectJumpEventDetail>;
+  if (
+    typeof candidate.groupId !== "string" ||
+    typeof candidate.projectId !== "string" ||
+    typeof candidate.expandCollapsedProject !== "boolean" ||
+    typeof candidate.showLessAfterExpand !== "boolean"
+  ) {
+    return undefined;
+  }
+  return {
+    expandCollapsedProject: candidate.expandCollapsedProject,
+    groupId: candidate.groupId,
+    projectId: candidate.projectId,
+    showLessAfterExpand: candidate.showLessAfterExpand,
+  };
+}
+
 export function SidebarApp({
   messageSource = window,
   nativeHostEventSource = window,
   vscode,
 }: SidebarAppProps) {
-  const [initialUiCollapseStateRead] = useState(readSidebarUiCollapseState);
+  const [ initialUiCollapseStateRead ] = useState(readSidebarUiCollapseState);
   const initialUiCollapseState = initialUiCollapseStateRead.state;
-  const [isStartupInteractionBlocked, setIsStartupInteractionBlocked] = useState(true);
-  const [autoEditingGroupId, setAutoEditingGroupId] = useState<string>();
-  const [agentCreateRequestId, setAgentCreateRequestId] = useState(0);
-  const [isOverflowMenuOpen, setIsOverflowMenuOpen] = useState(false);
-  const [isDaemonSessionsOpen, setIsDaemonSessionsOpen] = useState(false);
-  const [isPinnedPromptsOpen, setIsPinnedPromptsOpen] = useState(false);
-  const [isPreviousSessionsOpen, setIsPreviousSessionsOpen] = useState(false);
-  const [isRecentProjectsOpen, setIsRecentProjectsOpen] = useState(
+  const [ isStartupInteractionBlocked, setIsStartupInteractionBlocked ] = useState(true);
+  const [ autoEditingGroupId, setAutoEditingGroupId ] = useState<string>();
+  const [ agentCreateRequestId, setAgentCreateRequestId ] = useState(0);
+  const [ isOverflowMenuOpen, setIsOverflowMenuOpen ] = useState(false);
+  const [ isDaemonSessionsOpen, setIsDaemonSessionsOpen ] = useState(false);
+  const [ isPinnedPromptsOpen, setIsPinnedPromptsOpen ] = useState(false);
+  const [ isPreviousSessionsOpen, setIsPreviousSessionsOpen ] = useState(false);
+  const [ isRecentProjectsOpen, setIsRecentProjectsOpen ] = useState(
     initialUiCollapseState.isRecentProjectsOpen,
   );
-  const [isReferenceChatsCollapsed, setIsReferenceChatsCollapsed] = useState(
+  const [ isReferenceChatsCollapsed, setIsReferenceChatsCollapsed ] = useState(
     initialUiCollapseState.isReferenceChatsCollapsed,
   );
-  const [isReferenceProjectsCollapsed, setIsReferenceProjectsCollapsed] = useState(
+  const [ isReferenceProjectsCollapsed, setIsReferenceProjectsCollapsed ] = useState(
     initialUiCollapseState.isReferenceProjectsCollapsed,
   );
-  const [isScratchPadOpen, setIsScratchPadOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isSessionSearchOpen, setIsSessionSearchOpen] = useState(false);
+  const [ isScratchPadOpen, setIsScratchPadOpen ] = useState(false);
+  const [ isSettingsOpen, setIsSettingsOpen ] = useState(false);
+  const [ isSessionSearchOpen, setIsSessionSearchOpen ] = useState(false);
   const showCommandHotkeyOverlay = useCommandHotkeyOverlay();
-  const [completionFlashNonceBySessionId, setCompletionFlashNonceBySessionId] = useState<
+  const [ completionFlashNonceBySessionId, setCompletionFlashNonceBySessionId ] = useState<
     Record<string, number>
   >({});
-  const [collapsedGroupsById, setCollapsedGroupsById] = useState<Record<string, true>>(
+  const [ collapsedGroupsById, setCollapsedGroupsById ] = useState<Record<string, true>>(
     initialUiCollapseState.collapsedGroupsById,
   );
-  const [collapsedRemoteMachineSectionsById, setCollapsedRemoteMachineSectionsById] = useState<
+  const [ collapsedRemoteMachineSectionsById, setCollapsedRemoteMachineSectionsById ] = useState<
     Record<string, true>
   >(initialUiCollapseState.collapsedRemoteMachineSectionsById);
-  const [referenceSectionChildAnimations, setReferenceSectionChildAnimations] = useState<
+  const [ referenceSectionChildAnimations, setReferenceSectionChildAnimations ] = useState<
     Record<ReferenceSidebarSectionId, boolean>
   >({
     projects: false,
@@ -633,22 +740,23 @@ export function SidebarApp({
     remote: false,
   });
   const previousExpandedReferenceProjectGroupIdsRef = useRef<string[]>([]);
-  const [recentProjectsQuery, setRecentProjectsQuery] = useState("");
-  const [sessionSearchQuery, setSessionSearchQuery] = useState("");
-  const [selectedSessionTagFilters, setSelectedSessionTagFilters] = useState<
+  const [ recentProjectsQuery, setRecentProjectsQuery ] = useState("");
+  const [ isRecentProjectsListScrolling, setIsRecentProjectsListScrolling ] = useState(false);
+  const [ sessionSearchQuery, setSessionSearchQuery ] = useState("");
+  const [ selectedSessionTagFilters, setSelectedSessionTagFilters ] = useState<
     SidebarSessionTag[]
   >([]);
-  const [remoteSessionSearchPreviousSessions, setRemoteSessionSearchPreviousSessions] =
+  const [ remoteSessionSearchPreviousSessions, setRemoteSessionSearchPreviousSessions ] =
     useState<SidebarPreviousSessionItem[] | undefined>(undefined);
-  const [groupDropIndicator, setGroupDropIndicator] = useState<SidebarGroupDropTarget>();
-  const [groupDragPreview, setGroupDragPreview] = useState<SidebarGroupDragPreview>();
-  const [pinnedSessionDropIndicator, setPinnedSessionDropIndicator] =
+  const [ groupDropIndicator, setGroupDropIndicator ] = useState<SidebarGroupDropTarget>();
+  const [ groupDragPreview, setGroupDragPreview ] = useState<SidebarGroupDragPreview>();
+  const [ pinnedSessionDropIndicator, setPinnedSessionDropIndicator ] =
     useState<SidebarSessionDropTarget>();
-  const [sessionDropIndicatorGroupId, setSessionDropIndicatorGroupId] = useState<string>();
-  const [overflowMenuAnchor, setOverflowMenuAnchor] = useState<HTMLElement>();
-  const [overflowMenuPosition, setOverflowMenuPosition] = useState<FloatingMenuPosition>();
-  const [isSessionSearchSelectionVisible, setIsSessionSearchSelectionVisible] = useState(false);
-  const [selectedSessionSearchResult, setSelectedSessionSearchResult] =
+  const [ sessionDropIndicatorGroupId, setSessionDropIndicatorGroupId ] = useState<string>();
+  const [ overflowMenuAnchor, setOverflowMenuAnchor ] = useState<HTMLElement>();
+  const [ overflowMenuPosition, setOverflowMenuPosition ] = useState<FloatingMenuPosition>();
+  const [ isSessionSearchSelectionVisible, setIsSessionSearchSelectionVisible ] = useState(false);
+  const [ selectedSessionSearchResult, setSelectedSessionSearchResult ] =
     useState<SidebarSessionSearchSelection>();
   const pendingCreateGroupRef = useRef(false);
   const didResetStoreRef = useRef(false);
@@ -656,6 +764,8 @@ export function SidebarApp({
   const sessionGroupsPanelRef = useRef<HTMLElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const recentProjectsSearchInputRef = useRef<HTMLInputElement>(null);
+  const recentProjectsPointerPointRef = useRef<PointerViewportPoint | undefined>(undefined);
+  const recentProjectsScrollIdleTimeoutRef = useRef<number | undefined>(undefined);
   const groupIdsRef = useRef<string[]>([]);
   const sessionIdsByGroupRef = useRef<SessionIdsByGroup>({});
   const pinnedSessionDropTargetLogKeyRef = useRef<string | undefined>(undefined);
@@ -665,7 +775,7 @@ export function SidebarApp({
   const hasEstablishedStartupGroupCollapseBaselineRef = useRef(false);
   const previousNormalizedSessionSearchQueryRef = useRef("");
   const refreshDebugInstanceIdRef = useRef(createSidebarRefreshDebugInstanceId());
-  const [recentProjectContextMenuPosition, setRecentProjectContextMenuPosition] =
+  const [ recentProjectContextMenuPosition, setRecentProjectContextMenuPosition ] =
     useState<RecentProjectContextMenuPosition>();
   const pointerDownSessionTargetRef = useRef<SidebarPointerDownSessionTarget | undefined>(
     undefined,
@@ -684,6 +794,7 @@ export function SidebarApp({
   const didLogInitialUiCollapseStateReadRef = useRef(false);
   const collapseStateHydrateLogCountRef = useRef(0);
   const lastCollapseStateHydrateShapeRef = useRef<string | undefined>(undefined);
+  const focusedSessionScrollLogSequenceRef = useRef(0);
 
   if (!didResetStoreRef.current) {
     resetSidebarStore();
@@ -692,6 +803,9 @@ export function SidebarApp({
 
   useEffect(() => {
     return () => {
+      if (recentProjectsScrollIdleTimeoutRef.current !== undefined) {
+        window.clearTimeout(recentProjectsScrollIdleTimeoutRef.current);
+      }
       setSidebarTooltipsSuppressedForDrag(false);
     };
   }, []);
@@ -749,25 +863,25 @@ export function SidebarApp({
   const gitCommitDraft = useSidebarStore((state) => state.gitCommitDraft);
   const gitFileDiffDraft = useSidebarStore((state) => state.gitFileDiffDraft);
   const authoritativeSessionIdsByGroup = useSidebarStore((state) => state.sessionIdsByGroup);
-  const [remoteMachineRuntimeStatuses, setRemoteMachineRuntimeStatuses] =
+  const [ remoteMachineRuntimeStatuses, setRemoteMachineRuntimeStatuses ] =
     useState<RemoteMachineRuntimeStatuses>({});
-  const [primaryAgentLauncherId, setPrimaryAgentLauncherId] = useState(readPrimaryAgentLauncherId);
+  const [ primaryAgentLauncherId, setPrimaryAgentLauncherId ] = useState(readPrimaryAgentLauncherId);
   const buildStamp = useSidebarStore((state) =>
     state.hud.debuggingMode ? state.hud.buildStamp : undefined,
   );
   const effectiveSettings = settings ?? DEFAULT_ghostex_SETTINGS;
   const sidebarSessionTagListItems = useMemo(
     () => normalizeSidebarSessionTagListItems(effectiveSettings.sidebarSessionTagListItems),
-    [effectiveSettings.sidebarSessionTagListItems],
+    [ effectiveSettings.sidebarSessionTagListItems ],
   );
   const enabledVisibleSidebarSessionTagSet = useMemo(
     () => new Set(getEnabledVisibleSidebarSessionTags(sidebarSessionTagListItems)),
-    [sidebarSessionTagListItems],
+    [ sidebarSessionTagListItems ],
   );
   const activeSelectedSessionTagFilters = useMemo(
     () =>
       selectedSessionTagFilters.filter((tag) => enabledVisibleSidebarSessionTagSet.has(tag)),
-    [enabledVisibleSidebarSessionTagSet, selectedSessionTagFilters],
+    [ enabledVisibleSidebarSessionTagSet, selectedSessionTagFilters ],
   );
 
   useEffect(() => {
@@ -781,7 +895,7 @@ export function SidebarApp({
       const next = current.filter((tag) => enabledVisibleSidebarSessionTagSet.has(tag));
       return next.length === current.length ? current : next;
     });
-  }, [enabledVisibleSidebarSessionTagSet]);
+  }, [ enabledVisibleSidebarSessionTagSet ]);
 
   useEffect(() => {
     const refreshPrimaryAgentLauncher = (event: Event) => {
@@ -816,7 +930,7 @@ export function SidebarApp({
     (
       event: string,
       details: Record<string, unknown>,
-      options: { enabled?: boolean } = {},
+      options: { enabled?: boolean; } = {},
     ) => {
       /*
        * CDXC:SidebarCollapseDiagnostics 2026-06-02-23:52:
@@ -913,12 +1027,12 @@ export function SidebarApp({
     const sessionCountIncreaseGroupIds = isEstablishingStartupGroupCollapseBaseline
       ? []
       : groupOrder.filter((groupId) => {
-          const previousCount = previousSessionCountsByGroupRef.current[groupId];
-          return (
-            previousCount !== undefined &&
-            (authoritativeSessionIdsByGroup[groupId] ?? []).length > previousCount
-          );
-        });
+        const previousCount = previousSessionCountsByGroupRef.current[ groupId ];
+        return (
+          previousCount !== undefined &&
+          (authoritativeSessionIdsByGroup[ groupId ] ?? []).length > previousCount
+        );
+      });
 
     if (preserveUnknownCollapsedGroups && unknownCollapsedGroupCount > 0) {
       postSidebarCollapseStateLog("startupPartialHydratePreserved", {
@@ -951,7 +1065,7 @@ export function SidebarApp({
      * Do not expand Chats/Projects section headers on the first post-hydrate
      * baseline pass after restart. Restored session counts are not new sessions.
      */
-    if (sessionCountIncreaseGroupIds.some((groupId) => groupsById[groupId]?.isChatCollection)) {
+    if (sessionCountIncreaseGroupIds.some((groupId) => groupsById[ groupId ]?.isChatCollection)) {
       postSidebarCollapseStateLog("sectionAutoExpanded", {
         reason: "session-count-increase",
         section: "quick",
@@ -960,7 +1074,7 @@ export function SidebarApp({
       setIsReferenceChatsCollapsed(false);
     }
 
-    if (sessionCountIncreaseGroupIds.some((groupId) => !groupsById[groupId]?.isChatCollection)) {
+    if (sessionCountIncreaseGroupIds.some((groupId) => !groupsById[ groupId ]?.isChatCollection)) {
       postSidebarCollapseStateLog("sectionAutoExpanded", {
         reason: "session-count-increase",
         section: "projects",
@@ -989,7 +1103,7 @@ export function SidebarApp({
   const isSidebarInteractionBlocked = isStartupInteractionBlocked;
 
   const setGroupCollapsed = (groupId: string, collapsed: boolean) => {
-    const wasCollapsed = collapsedGroupsById[groupId] === true;
+    const wasCollapsed = collapsedGroupsById[ groupId ] === true;
     const collapsedGroupCountBefore = Object.keys(collapsedGroupsById).length;
     postSidebarCollapseStateLog("groupToggle", {
       changed: wasCollapsed !== collapsed,
@@ -1003,22 +1117,22 @@ export function SidebarApp({
     });
     setCollapsedGroupsById((previous) => {
       if (collapsed) {
-        if (previous[groupId]) {
+        if (previous[ groupId ]) {
           return previous;
         }
 
         return {
           ...previous,
-          [groupId]: true,
+          [ groupId ]: true,
         };
       }
 
-      if (!previous[groupId]) {
+      if (!previous[ groupId ]) {
         return previous;
       }
 
       const next = { ...previous };
-      delete next[groupId];
+      delete next[ groupId ];
       return next;
     });
   };
@@ -1027,7 +1141,7 @@ export function SidebarApp({
     const targetGroupSet = new Set(groupIds);
     const collapsedGroupCountBefore = Object.keys(collapsedGroupsById).length;
     const changedGroupCount = groupIds.filter(
-      (groupId) => collapsedGroupsById[groupId] !== (collapsed ? true : undefined),
+      (groupId) => collapsedGroupsById[ groupId ] !== (collapsed ? true : undefined),
     ).length;
     postSidebarCollapseStateLog("groupsBulkToggle", {
       changedGroupCount,
@@ -1043,8 +1157,8 @@ export function SidebarApp({
         const next = { ...previous };
         let changed = false;
         for (const groupId of groupIds) {
-          if (!next[groupId]) {
-            next[groupId] = true;
+          if (!next[ groupId ]) {
+            next[ groupId ] = true;
             changed = true;
           }
         }
@@ -1053,9 +1167,9 @@ export function SidebarApp({
 
       let next: Record<string, true> | undefined;
       for (const groupId of groupIds) {
-        if (previous[groupId]) {
+        if (previous[ groupId ]) {
           next ??= { ...previous };
-          delete next[groupId];
+          delete next[ groupId ];
         }
       }
       return next ?? previous;
@@ -1063,7 +1177,7 @@ export function SidebarApp({
   };
 
   const setRemoteMachineSectionCollapsed = (machineId: string, collapsed: boolean) => {
-    const wasCollapsed = collapsedRemoteMachineSectionsById[machineId] === true;
+    const wasCollapsed = collapsedRemoteMachineSectionsById[ machineId ] === true;
     postSidebarCollapseStateLog("remoteMachineSectionToggle", {
       changed: wasCollapsed !== collapsed,
       collapsed,
@@ -1078,24 +1192,44 @@ export function SidebarApp({
      */
     setCollapsedRemoteMachineSectionsById((previous) => {
       if (collapsed) {
-        if (previous[machineId]) {
+        if (previous[ machineId ]) {
           return previous;
         }
 
         return {
           ...previous,
-          [machineId]: true,
+          [ machineId ]: true,
         };
       }
 
-      if (!previous[machineId]) {
+      if (!previous[ machineId ]) {
         return previous;
       }
 
       const next = { ...previous };
-      delete next[machineId];
+      delete next[ machineId ];
       return next;
     });
+  };
+
+  const dismissAppModalForSidebarNavigation = (area: string) => {
+    /*
+     * CDXC:SettingsDismissal 2026-06-15-14:07:
+     * Settings is a workspace-scoped app modal, but sidebar navigation should
+     * always return users to the live workspace. Dismiss the native app-modal
+     * host before session focus, session creation, sidebar nav buttons,
+     * top-level modals, and direct previous-session text search.
+     */
+    setIsSettingsOpen(false);
+    if (!window.webkit?.messageHandlers?.ghostexAppModalHost) {
+      return;
+    }
+    closeAppModal(area);
+  };
+
+  const focusSidebarSessionFromNavigation = (groupId: string, sessionId: string) => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:focusSession");
+    applyLocalFocus(groupId, sessionId);
   };
 
   const requestNewSession = () => {
@@ -1103,6 +1237,7 @@ export function SidebarApp({
       return;
     }
 
+    dismissAppModalForSidebarNavigation("SettingsDismissal:createSession");
     vscode.postMessage({ type: "createSession" });
   };
 
@@ -1117,6 +1252,17 @@ export function SidebarApp({
 
     event.preventDefault();
     requestNewSession();
+  };
+
+  const handleSidebarClickCapture = (event: ReactMouseEvent<HTMLElement>) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    if (!target.closest(".session")) {
+      return;
+    }
+    dismissAppModalForSidebarNavigation("SettingsDismissal:sessionClick");
   };
 
   const handleWindowMessage = useEffectEvent((event: MessageEvent<ExtensionToSidebarMessage>) => {
@@ -1142,7 +1288,7 @@ export function SidebarApp({
         }
         setCompletionFlashNonceBySessionId((previous) => ({
           ...previous,
-          [sessionId]: (previous[sessionId] ?? 0) + 1,
+          [ sessionId ]: (previous[ sessionId ] ?? 0) + 1,
         }));
         const timeout = window.setTimeout(() => {
           completionFlashTimeoutBySessionIdRef.current.delete(sessionId);
@@ -1152,7 +1298,7 @@ export function SidebarApp({
             }
 
             const next = { ...previous };
-            delete next[sessionId];
+            delete next[ sessionId ];
             return next;
           });
         }, COMPLETION_FLASH_DURATION_MS);
@@ -1222,7 +1368,7 @@ export function SidebarApp({
       const remoteMachineStatus = event.data as RemoteMachineRuntimeStatus;
       setRemoteMachineRuntimeStatuses((current) => ({
         ...current,
-        [remoteMachineStatus.machineId]: remoteMachineStatus.state,
+        [ remoteMachineStatus.machineId ]: remoteMachineStatus.state,
       }));
       return;
     }
@@ -1243,6 +1389,7 @@ export function SidebarApp({
     }
 
     if (event.data.type === "showSessionRenameModal") {
+      dismissAppModalForSidebarNavigation("SettingsDismissal:renameSession");
       openAppModal({
         initialTitle: event.data.initialTitle,
         modal: "renameSession",
@@ -1301,7 +1448,7 @@ export function SidebarApp({
     const shouldLogSidebarCollapseHydrateMessage =
       event.data.hud.debuggingMode &&
       getSidebarStartupElapsedMs(sidebarStartupStartedAtRef.current) <=
-        SIDEBAR_STARTUP_REPRO_WINDOW_MS &&
+      SIDEBAR_STARTUP_REPRO_WINDOW_MS &&
       (collapseStateHydrateLogCountRef.current < 8 ||
         lastCollapseStateHydrateShapeRef.current !== sidebarCollapseMessageShape);
     if (shouldLogSidebarCollapseHydrateMessage) {
@@ -1524,7 +1671,7 @@ export function SidebarApp({
     return () => {
       messageSource.removeEventListener("message", handleMessage);
     };
-  }, [handleWindowMessage, messageSource]);
+  }, [ handleWindowMessage, messageSource ]);
 
   useEffect(() => {
     if (!nativeHostEventSource) {
@@ -1555,7 +1702,7 @@ export function SidebarApp({
     return () => {
       nativeHostEventSource.removeEventListener("ghostex-native-host-event", handleNativeHostEvent);
     };
-  }, [handleWindowMessage, nativeHostEventSource]);
+  }, [ handleWindowMessage, nativeHostEventSource ]);
 
   useEffect(() => {
     return () => {
@@ -1590,6 +1737,11 @@ export function SidebarApp({
   useEffect(() => {
     document.body.dataset.sidebarTheme = theme;
     const normalizedThemeColor = normalizeWorkspaceThemeColor(customThemeColor);
+    const customSidebarTitlebarColorsEnabled =
+      effectiveSettings.customSidebarTitlebarColorsEnabled === true;
+    const customSidebarTitlebarForegroundColor = getSidebarTitlebarForegroundForBackground(
+      effectiveSettings.customSidebarTitlebarBackgroundColor,
+    );
     if (normalizedThemeColor) {
       /**
        * CDXC:WorkspaceTheme 2026-05-05-02:58
@@ -1609,13 +1761,48 @@ export function SidebarApp({
       document.body.style.removeProperty("--workspace-sidebar-theme-foreground");
     }
 
+    if (customSidebarTitlebarColorsEnabled) {
+      /**
+       * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
+       * Custom sidebar/titlebar colors are an experimental chrome override.
+       * Publish dedicated CSS variables instead of mutating app theme tokens so
+       * Settings modals, sidebar dropdowns, and other overlay surfaces continue
+       * to resolve their normal Dark Gray/Dark 2 colors.
+       *
+       * CDXC:SidebarTitlebarColors 2026-06-15-13:22:
+       * The foreground is derived from the selected background at apply time.
+       * Do not preserve older stored foreground choices in the sidebar DOM.
+       */
+      document.body.dataset.customSidebarTitlebarColors = "true";
+      document.body.style.setProperty(
+        "--custom-sidebar-titlebar-foreground-color",
+        customSidebarTitlebarForegroundColor,
+      );
+      document.body.style.setProperty(
+        "--custom-sidebar-titlebar-background-color",
+        effectiveSettings.customSidebarTitlebarBackgroundColor,
+      );
+    } else {
+      delete document.body.dataset.customSidebarTitlebarColors;
+      document.body.style.removeProperty("--custom-sidebar-titlebar-foreground-color");
+      document.body.style.removeProperty("--custom-sidebar-titlebar-background-color");
+    }
+
     return () => {
       delete document.body.dataset.sidebarTheme;
       delete document.body.dataset.sidebarCustomTheme;
+      delete document.body.dataset.customSidebarTitlebarColors;
       document.body.style.removeProperty("--workspace-sidebar-theme-color");
       document.body.style.removeProperty("--workspace-sidebar-theme-foreground");
+      document.body.style.removeProperty("--custom-sidebar-titlebar-foreground-color");
+      document.body.style.removeProperty("--custom-sidebar-titlebar-background-color");
     };
-  }, [customThemeColor, theme]);
+  }, [
+    customThemeColor,
+    effectiveSettings.customSidebarTitlebarBackgroundColor,
+    effectiveSettings.customSidebarTitlebarColorsEnabled,
+    theme,
+  ]);
 
   useEffect(() => {
     document.body.style.setProperty("--ghostex-agent-manager-zoom", `${agentManagerZoomPercent}%`);
@@ -1623,7 +1810,7 @@ export function SidebarApp({
     return () => {
       document.body.style.removeProperty("--ghostex-agent-manager-zoom");
     };
-  }, [agentManagerZoomPercent]);
+  }, [ agentManagerZoomPercent ]);
 
   const closeGitCommitModal = useEffectEvent((requestId: string) => {
     setGitCommitDraft(undefined);
@@ -1640,7 +1827,7 @@ export function SidebarApp({
     }
 
     sessionGroupsPanelRef.current.inert = isSidebarInteractionBlocked;
-  }, [isSidebarInteractionBlocked]);
+  }, [ isSidebarInteractionBlocked ]);
 
   useEffect(() => {
     if (!isOverflowMenuOpen) {
@@ -1691,7 +1878,7 @@ export function SidebarApp({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
     };
-  }, [isOverflowMenuOpen]);
+  }, [ isOverflowMenuOpen ]);
 
   useEffect(() => {
     if (!isOverflowMenuOpen || !overflowMenuAnchor) {
@@ -1731,7 +1918,7 @@ export function SidebarApp({
       window.removeEventListener("resize", updateOverflowMenuPosition);
       window.removeEventListener("scroll", updateOverflowMenuPosition, true);
     };
-  }, [isOverflowMenuOpen, overflowMenuAnchor]);
+  }, [ isOverflowMenuOpen, overflowMenuAnchor ]);
 
   const toggleOverflowMenu = (trigger: HTMLElement) => {
     setOverflowMenuAnchor(trigger);
@@ -1746,19 +1933,19 @@ export function SidebarApp({
      * state that replays the project/session "loading in" animation.
      */
     setReferenceSectionChildAnimations((previous) =>
-      previous[section] ? previous : { ...previous, [section]: true },
+      previous[ section ] ? previous : { ...previous, [ section ]: true },
     );
 
-    const existingTimeoutId = referenceSectionAnimationTimeoutsRef.current[section];
+    const existingTimeoutId = referenceSectionAnimationTimeoutsRef.current[ section ];
     if (existingTimeoutId !== undefined) {
       window.clearTimeout(existingTimeoutId);
     }
 
-    referenceSectionAnimationTimeoutsRef.current[section] = window.setTimeout(() => {
+    referenceSectionAnimationTimeoutsRef.current[ section ] = window.setTimeout(() => {
       setReferenceSectionChildAnimations((previous) =>
-        previous[section] ? { ...previous, [section]: false } : previous,
+        previous[ section ] ? { ...previous, [ section ]: false } : previous,
       );
-      delete referenceSectionAnimationTimeoutsRef.current[section];
+      delete referenceSectionAnimationTimeoutsRef.current[ section ];
     }, REFERENCE_SECTION_CHILD_ANIMATION_RESET_MS);
   };
 
@@ -1780,7 +1967,7 @@ export function SidebarApp({
         sortMode: activeSessionsSortMode,
         workspaceGroupIds,
       }),
-    [activeSessionsSortMode, authoritativeSessionIdsByGroup, sessionsById, workspaceGroupIds],
+    [ activeSessionsSortMode, authoritativeSessionIdsByGroup, sessionsById, workspaceGroupIds ],
   );
   const normalizedSessionSearchQuery = sessionSearchQuery.trim();
   const isSessionSearchFiltering =
@@ -1808,7 +1995,7 @@ export function SidebarApp({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [isSessionSearchFiltering, normalizedSessionSearchQuery, vscode]);
+  }, [ isSessionSearchFiltering, normalizedSessionSearchQuery, vscode ]);
   /**
    * CDXC:ProjectBrowserTabs 2026-05-16-12:59:
    * Do not render a standalone Browsers group in the sidebar. Browser pane
@@ -1850,30 +2037,30 @@ export function SidebarApp({
   );
   const displayedReferenceChatGroupIds = useMemo(
     () =>
-      displayedWorkspaceGroupIds.filter((groupId) => groupsById[groupId]?.isChatCollection),
-    [displayedWorkspaceGroupIds, groupsById],
+      displayedWorkspaceGroupIds.filter((groupId) => groupsById[ groupId ]?.isChatCollection),
+    [ displayedWorkspaceGroupIds, groupsById ],
   );
   const displayedReferenceProjectGroupIds = useMemo(
     () =>
       displayedWorkspaceGroupIds.filter(
         (groupId) =>
-          !groupsById[groupId]?.isChatCollection &&
-          !groupsById[groupId]?.remoteMachineContext,
+          !groupsById[ groupId ]?.isChatCollection &&
+          !groupsById[ groupId ]?.remoteMachineContext,
       ),
-    [displayedWorkspaceGroupIds, groupsById],
+    [ displayedWorkspaceGroupIds, groupsById ],
   );
   const remoteProjectGroupIdsByMachineId = useMemo(() => {
     const next: Record<string, string[]> = {};
     for (const groupId of displayedWorkspaceGroupIds) {
-      const remoteMachineContext = groupsById[groupId]?.remoteMachineContext;
+      const remoteMachineContext = groupsById[ groupId ]?.remoteMachineContext;
       if (!remoteMachineContext) {
         continue;
       }
-      next[remoteMachineContext.machineId] ??= [];
-      next[remoteMachineContext.machineId].push(groupId);
+      next[ remoteMachineContext.machineId ] ??= [];
+      next[ remoteMachineContext.machineId ].push(groupId);
     }
     return next;
-  }, [displayedWorkspaceGroupIds, groupsById]);
+  }, [ displayedWorkspaceGroupIds, groupsById ]);
   const remoteMachines = settings?.remoteMachines ?? [];
   useEffect(() => {
     const remoteMachineIds = new Set(remoteMachines.map((machine) => machine.id));
@@ -1882,12 +2069,12 @@ export function SidebarApp({
       for (const machineId of Object.keys(previous)) {
         if (!remoteMachineIds.has(machineId)) {
           next ??= { ...previous };
-          delete next[machineId];
+          delete next[ machineId ];
         }
       }
       return next ?? previous;
     });
-  }, [remoteMachines]);
+  }, [ remoteMachines ]);
   const moveRemoteMachineSection = useEffectEvent(
     (sourceRemoteMachineId: string, targetRemoteMachineId: string) => {
       if (!settings || sourceRemoteMachineId === targetRemoteMachineId) {
@@ -1902,8 +2089,8 @@ export function SidebarApp({
       if (sourceIndex < 0 || targetIndex < 0) {
         return;
       }
-      const nextRemoteMachines = [...settings.remoteMachines];
-      const [movedMachine] = nextRemoteMachines.splice(sourceIndex, 1);
+      const nextRemoteMachines = [ ...settings.remoteMachines ];
+      const [ movedMachine ] = nextRemoteMachines.splice(sourceIndex, 1);
       if (!movedMachine) {
         return;
       }
@@ -1938,16 +2125,131 @@ export function SidebarApp({
   );
   const filteredRecentProjects = useMemo(
     () => filterRecentProjects(recentProjects, recentProjectsQuery),
-    [recentProjects, recentProjectsQuery],
+    [ recentProjects, recentProjectsQuery ],
   );
+
+  const handleRecentProjectsListPointerMove = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void => {
+    recentProjectsPointerPointRef.current = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+  };
+
+  const handleRecentProjectsListPointerLeave = (): void => {
+    recentProjectsPointerPointRef.current = undefined;
+    dismissSidebarTooltips();
+  };
+
+  const handleRecentProjectsListScroll = (): void => {
+    /*
+     * CDXC:RecentProjects 2026-06-14-15:45:
+     * Recent Project path tooltips should be dismissed as soon as the drawer scroll area receives scroll input. Do not reopen on scroll idle; the next normal hover should create a fresh tooltip for the row currently under the pointer.
+     */
+    dismissSidebarTooltips();
+    setIsRecentProjectsListScrolling(true);
+    if (recentProjectsScrollIdleTimeoutRef.current !== undefined) {
+      window.clearTimeout(recentProjectsScrollIdleTimeoutRef.current);
+    }
+    recentProjectsScrollIdleTimeoutRef.current = window.setTimeout(() => {
+      recentProjectsScrollIdleTimeoutRef.current = undefined;
+      setIsRecentProjectsListScrolling(false);
+    }, RECENT_PROJECTS_TOOLTIP_SCROLL_SETTLE_MS);
+  };
+
+  useEffect(() => {
+    if (isRecentProjectsOpen) {
+      return;
+    }
+    if (recentProjectsScrollIdleTimeoutRef.current !== undefined) {
+      window.clearTimeout(recentProjectsScrollIdleTimeoutRef.current);
+      recentProjectsScrollIdleTimeoutRef.current = undefined;
+    }
+    recentProjectsPointerPointRef.current = undefined;
+    setIsRecentProjectsListScrolling(false);
+    dismissSidebarTooltips();
+  }, [ isRecentProjectsOpen ]);
+
   const hasExpandedReferenceProjects = useMemo(
     () =>
-      displayedReferenceProjectGroupIds.some((groupId) => collapsedGroupsById[groupId] !== true),
-    [collapsedGroupsById, displayedReferenceProjectGroupIds],
+      displayedReferenceProjectGroupIds.some((groupId) => collapsedGroupsById[ groupId ] !== true),
+    [ collapsedGroupsById, displayedReferenceProjectGroupIds ],
   );
+  const handleSidebarProjectJump = useEffectEvent((detail: SidebarProjectJumpEventDetail) => {
+    if (
+      !detail.expandCollapsedProject ||
+      !displayedReferenceProjectGroupIds.includes(detail.groupId)
+    ) {
+      return;
+    }
+
+    const wasProjectCollapsed = collapsedGroupsById[ detail.groupId ] === true;
+    const wasSectionCollapsed = isReferenceProjectsCollapsed;
+    if (!wasProjectCollapsed && !wasSectionCollapsed) {
+      return;
+    }
+
+    /**
+     * CDXC:ProjectHotkeys 2026-06-15-11:12:
+     * Jump to Project shortcuts are navigation in the visible Projects sidebar area. When configured, a keyboard jump must reveal a collapsed target row immediately through React state, and the optional Show less write is only applied when that project row was actually expanded by the jump.
+     */
+    postSidebarCollapseStateLog("projectJumpAutoExpand", {
+      projectGroupCount: displayedReferenceProjectGroupIds.length,
+      groupHash: hashSidebarCollapseDebugId(detail.groupId),
+      showLessAfterExpand: detail.showLessAfterExpand,
+      wasProjectCollapsed,
+      wasSectionCollapsed,
+    });
+    if (wasSectionCollapsed) {
+      triggerReferenceSectionChildAnimation("projects");
+      setIsReferenceProjectsCollapsed(false);
+    }
+    if (wasProjectCollapsed) {
+      setGroupCollapsed(detail.groupId, false);
+      if (detail.showLessAfterExpand) {
+        writeProjectSessionListCollapsedState({
+          ...readProjectSessionListCollapsedState(),
+          [ detail.projectId ]: true,
+        });
+      }
+    }
+  });
+  useEffect(() => {
+    const handleProjectJumpEvent = (event: Event) => {
+      const detail = readSidebarProjectJumpEventDetail(event);
+      if (detail) {
+        handleSidebarProjectJump(detail);
+      }
+    };
+    window.addEventListener(SIDEBAR_PROJECT_JUMP_EVENT, handleProjectJumpEvent);
+    return () => {
+      window.removeEventListener(SIDEBAR_PROJECT_JUMP_EVENT, handleProjectJumpEvent);
+    };
+  }, [ handleSidebarProjectJump ]);
   const focusedSessionId = useMemo(
     () => Object.values(sessionsById).find((session) => session.isFocused)?.sessionId,
-    [sessionsById],
+    [ sessionsById ],
+  );
+  const postSidebarWakeScrollLog = useEffectEvent(
+    (event: string, targetSessionId: string, details: Record<string, unknown>) => {
+      postSidebarDebugLog(`repro.sidebarWakeScroll.${event}`, {
+        ...details,
+        ...summarizeSidebarWakeScrollOrderState({
+          activeSessionsSortMode,
+          displayedWorkspaceGroupIds,
+          displayedWorkspaceSessionIdsByGroup,
+          focusedSessionId: targetSessionId,
+          groupsById,
+          revision,
+          sessionsById,
+        }),
+        ...summarizeSidebarWakeScrollRenderedSlots(
+          sessionGroupsContentRef.current ?? document,
+          targetSessionId,
+        ),
+      });
+    },
   );
   const focusSidebarSessionSlot = useEffectEvent((slotNumber: number) => {
     /*
@@ -1961,15 +2263,15 @@ export function SidebarApp({
     const sessionId =
       slotNumber === 0 || slotNumber === -1
         ? resolveAdjacentRenderedSidebarSessionSlotId({
-            direction: slotNumber === 0 ? 1 : -1,
-            focusedSessionId,
-            slots: readRenderedSidebarSessionSlots(root),
-          })
+          direction: slotNumber === 0 ? 1 : -1,
+          focusedSessionId,
+          slots: readRenderedSidebarSessionSlots(root),
+        })
         : resolveVisibleSidebarSessionSlotId({
-            focusedSessionId,
-            slotNumber,
-            visibleSessionIds: readRenderedSidebarSessionSlotIds(root),
-          });
+          focusedSessionId,
+          slotNumber,
+          visibleSessionIds: readRenderedSidebarSessionSlotIds(root),
+        });
     if (!sessionId) {
       return;
     }
@@ -1990,6 +2292,7 @@ export function SidebarApp({
     }
 
     if (action.kind === "focusSessionSlot") {
+      dismissAppModalForSidebarNavigation("SettingsDismissal:focusSessionHotkey");
       focusSidebarSessionSlot(action.slotNumber);
       return;
     }
@@ -2024,7 +2327,11 @@ export function SidebarApp({
       return;
     }
 
-    if (action.kind === "focusedPaneAction" || action.kind === "switchWorkareaView") {
+    if (
+      action.kind === "focusedPaneAction" ||
+      action.kind === "jumpToProject" ||
+      action.kind === "switchWorkareaView"
+    ) {
       vscode.postMessage({ actionId: action.id, type: "runGhostexHotkeyAction" });
     }
   });
@@ -2038,7 +2345,7 @@ export function SidebarApp({
 
     didApplyStartupEmptyChatsCollapseRef.current = true;
     const hasChatSessions = displayedReferenceChatGroupIds.some(
-      (groupId) => (authoritativeSessionIdsByGroup[groupId] ?? []).length > 0,
+      (groupId) => (authoritativeSessionIdsByGroup[ groupId ] ?? []).length > 0,
     );
     if (!hasChatSessions) {
       postSidebarCollapseStateLog("sectionAutoCollapsed", {
@@ -2053,7 +2360,7 @@ export function SidebarApp({
        */
       setIsReferenceChatsCollapsed(true);
     }
-  }, [authoritativeSessionIdsByGroup, displayedReferenceChatGroupIds]);
+  }, [ authoritativeSessionIdsByGroup, displayedReferenceChatGroupIds ]);
 
   useEffect(() => {
     /**
@@ -2122,11 +2429,11 @@ export function SidebarApp({
   );
   useEffect(() => {
     groupIdsRef.current = displayedReferenceProjectGroupIds;
-  }, [displayedReferenceProjectGroupIds]);
+  }, [ displayedReferenceProjectGroupIds ]);
 
   useEffect(() => {
     sessionIdsByGroupRef.current = displayedWorkspaceSessionIdsByGroup;
-  }, [displayedWorkspaceSessionIdsByGroup]);
+  }, [ displayedWorkspaceSessionIdsByGroup ]);
 
   useEffect(() => {
     const queryChanged =
@@ -2152,7 +2459,7 @@ export function SidebarApp({
       }
 
       if (queryChanged) {
-        return createSidebarSessionSearchSelection(sidebarSessionSearchResults[0]);
+        return createSidebarSessionSearchSelection(sidebarSessionSearchResults[ 0 ]);
       }
 
       if (!previous) {
@@ -2163,9 +2470,9 @@ export function SidebarApp({
         isSidebarSessionSearchSelectionMatch(result, previous),
       )
         ? previous
-        : createSidebarSessionSearchSelection(sidebarSessionSearchResults[0]);
+        : createSidebarSessionSearchSelection(sidebarSessionSearchResults[ 0 ]);
     });
-  }, [isSessionSearchOpen, normalizedSessionSearchQuery, sidebarSessionSearchResults]);
+  }, [ isSessionSearchOpen, normalizedSessionSearchQuery, sidebarSessionSearchResults ]);
 
   useEffect(() => {
     if (!isSessionSearchSelectionVisible || !selectedSessionSearchResult) {
@@ -2175,24 +2482,35 @@ export function SidebarApp({
     const selectedElement =
       selectedSessionSearchResult.kind === "session"
         ? document.querySelector<HTMLElement>(
-            `[data-sidebar-session-id="${selectedSessionSearchResult.sessionId}"]`,
-          )
+          `[data-sidebar-session-id="${selectedSessionSearchResult.sessionId}"]`,
+        )
         : document.querySelector<HTMLElement>(
-            `[data-sidebar-history-id="${selectedSessionSearchResult.historyId}"]`,
-          );
+          `[data-sidebar-history-id="${selectedSessionSearchResult.historyId}"]`,
+        );
     selectedElement?.scrollIntoView({
       block: "nearest",
     });
-  }, [isSessionSearchSelectionVisible, selectedSessionSearchResult]);
+  }, [ isSessionSearchSelectionVisible, selectedSessionSearchResult ]);
 
   useEffect(() => {
     if (!focusedSessionId || !sessionGroupsContentRef.current) {
       return;
     }
 
+    /*
+     * CDXC:SidebarWakeScrollDiagnostics 2026-06-16-02:20:
+     * Wake-scroll repros need to prove whether the sidebar jumped because focus-following issued scrollIntoView or because the focused row moved in the displayed order. Log only session IDs, row indexes, sort mode, and geometry metrics while Debugging Mode is enabled.
+     */
+    let afterAnimationFrameId: number | undefined;
+    let afterSettledTimeoutId: number | undefined;
+    const sequence = ++focusedSessionScrollLogSequenceRef.current;
     const animationFrameId = window.requestAnimationFrame(() => {
       const scrollViewport = sessionGroupsContentRef.current;
       if (!scrollViewport) {
+        postSidebarWakeScrollLog("focusedRowScrollSkipped", focusedSessionId, {
+          reason: "missing-scroll-viewport",
+          sequence,
+        });
         return;
       }
 
@@ -2200,16 +2518,69 @@ export function SidebarApp({
         `[data-sidebar-session-id="${focusedSessionId}"]`,
       );
       if (!focusedSessionElement) {
+        postSidebarWakeScrollLog("focusedRowScrollSkipped", focusedSessionId, {
+          reason: "missing-focused-row",
+          sequence,
+        });
         return;
       }
 
-      scrollElementIntoViewIfNeeded(focusedSessionElement, scrollViewport);
+      const beforeScrollTop = scrollViewport.scrollTop;
+      const beforeGeometry = summarizeSidebarWakeScrollGeometry(
+        focusedSessionElement,
+        scrollViewport,
+      );
+      const scrollIssued = scrollElementIntoViewIfNeeded(focusedSessionElement, scrollViewport);
+      postSidebarWakeScrollLog("focusedRowScrollDecision", focusedSessionId, {
+        beforeGeometry,
+        scrollIssued,
+        sequence,
+      });
+
+      if (!scrollIssued) {
+        return;
+      }
+
+      afterAnimationFrameId = window.requestAnimationFrame(() => {
+        const nextScrollViewport = sessionGroupsContentRef.current;
+        const nextFocusedSessionElement = document.querySelector<HTMLElement>(
+          `[data-sidebar-session-id="${focusedSessionId}"]`,
+        );
+        postSidebarWakeScrollLog("focusedRowScrollAfterFrame", focusedSessionId, {
+          afterGeometry: nextScrollViewport && nextFocusedSessionElement
+            ? summarizeSidebarWakeScrollGeometry(nextFocusedSessionElement, nextScrollViewport)
+            : undefined,
+          scrollDeltaTop: nextScrollViewport ? nextScrollViewport.scrollTop - beforeScrollTop : undefined,
+          sequence,
+        });
+      });
+      afterSettledTimeoutId = window.setTimeout(() => {
+        const settledScrollViewport = sessionGroupsContentRef.current;
+        const settledFocusedSessionElement = document.querySelector<HTMLElement>(
+          `[data-sidebar-session-id="${focusedSessionId}"]`,
+        );
+        postSidebarWakeScrollLog("focusedRowScrollAfterSettled", focusedSessionId, {
+          afterGeometry: settledScrollViewport && settledFocusedSessionElement
+            ? summarizeSidebarWakeScrollGeometry(settledFocusedSessionElement, settledScrollViewport)
+            : undefined,
+          scrollDeltaTop: settledScrollViewport
+            ? settledScrollViewport.scrollTop - beforeScrollTop
+            : undefined,
+          sequence,
+        });
+      }, 350);
     });
 
     return () => {
       window.cancelAnimationFrame(animationFrameId);
+      if (afterAnimationFrameId !== undefined) {
+        window.cancelAnimationFrame(afterAnimationFrameId);
+      }
+      if (afterSettledTimeoutId !== undefined) {
+        window.clearTimeout(afterSettledTimeoutId);
+      }
     };
-  }, [focusedSessionId]);
+  }, [ focusedSessionId ]);
 
   const unlockCompletionSoundPlayback = useEffectEvent(() => {
     void prepareCompletionSoundPlayback((soundEvent, details) => {
@@ -2242,7 +2613,7 @@ export function SidebarApp({
       sessionId,
     };
 
-    if (sessionsById[sessionId]?.isPinned === true) {
+    if (sessionsById[ sessionId ]?.isPinned === true) {
       /*
        * CDXC:PinnedSessions 2026-06-02-19:53:
        * Pinned project-session reorder regressions can fail before dnd-kit
@@ -2251,7 +2622,7 @@ export function SidebarApp({
        * skipped sync" without logging titles, paths, commands, or user text.
        */
       postPinnedSessionReorderLog("pointerDown", {
-        groupCollapsed: collapsedGroupsById[groupId] === true,
+        groupCollapsed: collapsedGroupsById[ groupId ] === true,
         pointer: summarizePointerEventForPinnedReorder(event),
         state: createPinnedSessionReorderDebugState(
           { groupId, kind: "session", sessionId },
@@ -2282,10 +2653,10 @@ export function SidebarApp({
       window.removeEventListener("pointerdown", handlePointerDown, true);
       window.removeEventListener("keydown", handleKeyDown, true);
     };
-  }, [recordPointerDownSessionTarget, unlockCompletionSoundPlayback]);
+  }, [ recordPointerDownSessionTarget, unlockCompletionSoundPlayback ]);
 
   const updateSessionDropIndicator = useEffectEvent(
-    (event: Parameters<NonNullable<DragDropEventHandlers["onDragOver"]>>[0]) => {
+    (event: Parameters<NonNullable<DragDropEventHandlers[ "onDragOver" ]>>[ 0 ]) => {
       const sourceData = getSidebarDropData(event.operation.source);
       if (sourceData?.kind === "group") {
         setPinnedSessionDropIndicator(undefined);
@@ -2319,7 +2690,7 @@ export function SidebarApp({
         return;
       }
 
-      if (sessionsById[sourceData.sessionId]?.isPinned === true) {
+      if (sessionsById[ sourceData.sessionId ]?.isPinned === true) {
         setSessionDropIndicatorGroupId(undefined);
         const resolvedPinnedSessionDropTarget = resolvePinnedSessionDropTargetFromPoint(
           getDragNativeEvent(event),
@@ -2379,7 +2750,7 @@ export function SidebarApp({
     const pointerDownSessionTarget = pointerDownSessionTargetRef.current;
     if (sourceData?.kind === "group") {
       const point = getClientPoint(nativeEvent);
-      const group = groupsById[sourceData.groupId];
+      const group = groupsById[ sourceData.groupId ];
       const headerMetrics = point
         ? getProjectGroupDragHeaderMetrics(sourceData.groupId, point)
         : undefined;
@@ -2399,21 +2770,21 @@ export function SidebarApp({
       setGroupDragPreview(
         point && headerMetrics && group?.projectContext
           ? {
-              groupId: sourceData.groupId,
-              icon: group.projectContext.worktree
-                ? "branch"
-                : collapsedGroupsById[sourceData.groupId] === true ||
-                  (authoritativeSessionIdsByGroup[sourceData.groupId] ?? []).length === 0
+            groupId: sourceData.groupId,
+            icon: group.projectContext.worktree
+              ? "branch"
+              : collapsedGroupsById[ sourceData.groupId ] === true ||
+                (authoritativeSessionIdsByGroup[ sourceData.groupId ] ?? []).length === 0
                 ? "closed"
                 : "open",
-              isCollapsed: collapsedGroupsById[sourceData.groupId] === true,
-              left: headerMetrics.left,
-              pointerOffsetY: headerMetrics.pointerOffsetY,
-              themeColor: group.projectContext.themeColor,
-              title: group.title,
-              top: headerMetrics.top,
-              width: headerMetrics.width,
-            }
+            isCollapsed: collapsedGroupsById[ sourceData.groupId ] === true,
+            left: headerMetrics.left,
+            pointerOffsetY: headerMetrics.pointerOffsetY,
+            themeColor: group.projectContext.themeColor,
+            title: group.title,
+            top: headerMetrics.top,
+            width: headerMetrics.width,
+          }
           : undefined,
       );
     } else {
@@ -2429,7 +2800,7 @@ export function SidebarApp({
     setSessionDropIndicatorGroupId(undefined);
     if (
       pointerDownSessionTarget &&
-      sessionsById[pointerDownSessionTarget.sessionId]?.isPinned === true &&
+      sessionsById[ pointerDownSessionTarget.sessionId ]?.isPinned === true &&
       !(
         sourceData?.kind === "session" &&
         sourceData.groupId === pointerDownSessionTarget.groupId &&
@@ -2455,7 +2826,7 @@ export function SidebarApp({
         targetData: getSidebarDropData(event.operation.target),
       });
     }
-    if (sourceData?.kind === "session" && sessionsById[sourceData.sessionId]?.isPinned === true) {
+    if (sourceData?.kind === "session" && sessionsById[ sourceData.sessionId ]?.isPinned === true) {
       postPinnedSessionReorderLog("dragStart", {
         point: getClientPoint(nativeEvent),
         pointerDownSessionTarget,
@@ -2477,21 +2848,21 @@ export function SidebarApp({
       sourceData,
       targetData: getSidebarDropData(event.operation.target),
     });
-  }) satisfies DragDropEventHandlers["onDragStart"];
+  }) satisfies DragDropEventHandlers[ "onDragStart" ];
 
   const handleDragMove = ((event) => {
     const nativeEvent = getDragNativeEvent(event);
     updateGroupDragPreviewFromEvent(setGroupDragPreview, nativeEvent);
     updateSessionPointerDragState(sessionPointerDragStateRef.current, nativeEvent);
     updateSessionDropIndicator(event);
-  }) satisfies DragDropEventHandlers["onDragMove"];
+  }) satisfies DragDropEventHandlers[ "onDragMove" ];
 
   const handleDragOver = ((event) => {
     const nativeEvent = getDragNativeEvent(event);
     updateGroupDragPreviewFromEvent(setGroupDragPreview, nativeEvent);
     updateSessionPointerDragState(sessionPointerDragStateRef.current, nativeEvent);
     updateSessionDropIndicator(event);
-  }) satisfies DragDropEventHandlers["onDragOver"];
+  }) satisfies DragDropEventHandlers[ "onDragOver" ];
 
   const handleDragEnd = ((event) => {
     setSidebarTooltipsSuppressedForDrag(false);
@@ -2513,11 +2884,11 @@ export function SidebarApp({
     const resolvedSessionDropTarget =
       sourceData?.kind === "session"
         ? resolveSessionDropTargetFromPoint(
-            nativeEvent,
-            currentSessionIdsByGroup,
-            targetData,
-            sourceData,
-          )
+          nativeEvent,
+          currentSessionIdsByGroup,
+          targetData,
+          sourceData,
+        )
         : undefined;
     postSidebarDebugLog("session.dragEnd", {
       canceled: event.canceled,
@@ -2556,11 +2927,11 @@ export function SidebarApp({
         createProjectGroupOrderItems(currentGroupIds, groupsById).length === currentGroupIds.length;
       const nextGroupIds = resolvedGroupDropTarget
         ? moveGroupIdsByProjectDropTarget(
-            currentGroupIds,
-            sourceData.groupId,
-            resolvedGroupDropTarget,
-            groupsById,
-          )
+          currentGroupIds,
+          sourceData.groupId,
+          resolvedGroupDropTarget,
+          groupsById,
+        )
         : targetData?.kind === "group" && !isProjectGroupOrder
           ? move(currentGroupIds, event)
           : currentGroupIds;
@@ -2580,7 +2951,7 @@ export function SidebarApp({
     }
 
     if (sessionPointerDragState?.startPoint && !sessionPointerDragState.didMove) {
-      if (sessionsById[sourceData.sessionId]?.isPinned === true) {
+      if (sessionsById[ sourceData.sessionId ]?.isPinned === true) {
         postPinnedSessionReorderLog("dragEndIgnoredWithoutPointerMovement", {
           point: getClientPoint(nativeEvent),
           pointerDragState: sessionPointerDragState,
@@ -2595,7 +2966,7 @@ export function SidebarApp({
     }
 
     if (event.canceled) {
-      if (sessionsById[sourceData.sessionId]?.isPinned === true) {
+      if (sessionsById[ sourceData.sessionId ]?.isPinned === true) {
         postPinnedSessionReorderLog("dragEndCanceled", {
           point: getClientPoint(nativeEvent),
           sourceData,
@@ -2605,7 +2976,7 @@ export function SidebarApp({
       return;
     }
 
-    if (sessionsById[sourceData.sessionId]?.isPinned === true) {
+    if (sessionsById[ sourceData.sessionId ]?.isPinned === true) {
       const resolvedPinnedSessionDropTarget = resolvePinnedSessionDropTargetFromPoint(
         nativeEvent,
         sourceData,
@@ -2641,8 +3012,8 @@ export function SidebarApp({
         return;
       }
 
-      const previousPinnedSessionIds = (previousSessionIdsByGroup[sourceData.groupId] ?? []).filter(
-        (sessionId) => sessionsById[sessionId]?.isPinned === true,
+      const previousPinnedSessionIds = (previousSessionIdsByGroup[ sourceData.groupId ] ?? []).filter(
+        (sessionId) => sessionsById[ sessionId ]?.isPinned === true,
       );
       const nextPinnedSessionIds = movePinnedSessionIdsByDropTarget(
         previousPinnedSessionIds,
@@ -2673,9 +3044,9 @@ export function SidebarApp({
        * non-pinned project sessions in their authoritative order.
        */
       const nextSessionIds = createPinnedFirstSessionOrder(
-        (authoritativeSessionIdsByGroup[sourceData.groupId] ?? []).length > 0
-          ? (authoritativeSessionIdsByGroup[sourceData.groupId] ?? [])
-          : (previousSessionIdsByGroup[sourceData.groupId] ?? []),
+        (authoritativeSessionIdsByGroup[ sourceData.groupId ] ?? []).length > 0
+          ? (authoritativeSessionIdsByGroup[ sourceData.groupId ] ?? [])
+          : (previousSessionIdsByGroup[ sourceData.groupId ] ?? []),
         nextPinnedSessionIds,
         sessionsById,
       );
@@ -2705,10 +3076,10 @@ export function SidebarApp({
     const nextSessionIdsByGroup =
       resolvedSessionDropTarget !== undefined
         ? moveSessionIdsByDropTarget(
-            currentSessionIdsByGroup,
-            sourceData.sessionId,
-            resolvedSessionDropTarget,
-          )
+          currentSessionIdsByGroup,
+          sourceData.sessionId,
+          resolvedSessionDropTarget,
+        )
         : move(currentSessionIdsByGroup, event);
     const nextListedSessionIds = new Set(Object.values(nextSessionIdsByGroup).flat());
     const omittedSessionIds = Object.values(currentSessionIdsByGroup)
@@ -2729,7 +3100,7 @@ export function SidebarApp({
     }
 
     if (previousGroupId !== nextGroupId) {
-      if (sessionsById[sourceData.sessionId]?.isPinned === true) {
+      if (sessionsById[ sourceData.sessionId ]?.isPinned === true) {
         /**
          * CDXC:PinnedSessions 2026-05-28-12:04:
          * Project pinned sessions are only reorderable inside their owning
@@ -2740,7 +3111,7 @@ export function SidebarApp({
         return;
       }
 
-      const targetIndex = nextSessionIdsByGroup[nextGroupId]?.indexOf(sourceData.sessionId);
+      const targetIndex = nextSessionIdsByGroup[ nextGroupId ]?.indexOf(sourceData.sessionId);
       if (targetIndex == null || targetIndex < 0) {
         return;
       }
@@ -2755,15 +3126,15 @@ export function SidebarApp({
     }
 
     if (!isManualActiveSessionsSort) {
-      if (sessionsById[sourceData.sessionId]?.isPinned === true) {
-        const authoritativeSessionIds = authoritativeSessionIdsByGroup[nextGroupId] ?? [];
-        const previousSessionIds = previousSessionIdsByGroup[nextGroupId] ?? [];
-        const nextDisplaySessionIds = nextSessionIdsByGroup[nextGroupId] ?? [];
+      if (sessionsById[ sourceData.sessionId ]?.isPinned === true) {
+        const authoritativeSessionIds = authoritativeSessionIdsByGroup[ nextGroupId ] ?? [];
+        const previousSessionIds = previousSessionIdsByGroup[ nextGroupId ] ?? [];
+        const nextDisplaySessionIds = nextSessionIdsByGroup[ nextGroupId ] ?? [];
         const nextPinnedSessionIds = nextDisplaySessionIds.filter(
-          (sessionId) => sessionsById[sessionId]?.isPinned === true,
+          (sessionId) => sessionsById[ sessionId ]?.isPinned === true,
         );
         const previousPinnedSessionIds = previousSessionIds.filter(
-          (sessionId) => sessionsById[sessionId]?.isPinned === true,
+          (sessionId) => sessionsById[ sessionId ]?.isPinned === true,
         );
         if (
           !haveSameSessionOrder(previousPinnedSessionIds, nextPinnedSessionIds) &&
@@ -2790,8 +3161,8 @@ export function SidebarApp({
       return;
     }
 
-    const previousSessionIds = previousSessionIdsByGroup[nextGroupId] ?? [];
-    const nextSessionIds = nextSessionIdsByGroup[nextGroupId] ?? [];
+    const previousSessionIds = previousSessionIdsByGroup[ nextGroupId ] ?? [];
+    const nextSessionIds = nextSessionIdsByGroup[ nextGroupId ] ?? [];
     if (haveSameSessionOrder(previousSessionIds, nextSessionIds)) {
       return;
     }
@@ -2801,7 +3172,7 @@ export function SidebarApp({
       sessionIds: nextSessionIds,
       type: "syncSessionOrder",
     });
-  }) satisfies DragDropEventHandlers["onDragEnd"];
+  }) satisfies DragDropEventHandlers[ "onDragEnd" ];
 
   const openScratchPad = () => {
     setIsOverflowMenuOpen(false);
@@ -2940,7 +3311,7 @@ export function SidebarApp({
   });
 
   const toggleSessionSearch = () => {
-    closeAppModal("AppModals:sidebarSearch");
+    dismissAppModalForSidebarNavigation("SettingsDismissal:sidebarSearch");
     setIsDaemonSessionsOpen(false);
     setIsPinnedPromptsOpen(false);
     setIsPreviousSessionsOpen(false);
@@ -2987,6 +3358,7 @@ export function SidebarApp({
       return false;
     }
 
+    dismissAppModalForSidebarNavigation("SettingsDismissal:sessionSearchActivate");
     applyLocalFocus(selectedResult.groupId, selectedResult.sessionId);
     vscode.postMessage({
       sessionId: selectedResult.sessionId,
@@ -3164,11 +3536,11 @@ export function SidebarApp({
       manualSessionIdsByGroup:
         sortMode === "manual" && activeSessionsSortMode !== "manual"
           ? Object.fromEntries(
-              workspaceGroupIds.map((groupId) => [
-                groupId,
-                [...(effectiveSessionIdsByGroup[groupId] ?? [])],
-              ]),
-            )
+            workspaceGroupIds.map((groupId) => [
+              groupId,
+              [ ...(effectiveSessionIdsByGroup[ groupId ] ?? []) ],
+            ]),
+          )
           : undefined,
       sortMode,
       type: "setActiveSessionsSortMode",
@@ -3188,16 +3560,18 @@ export function SidebarApp({
     setSelectedSessionTagFilters((current) =>
       current.includes(sessionTag)
         ? current.filter((tag) => tag !== sessionTag)
-        : [...current, sessionTag],
+        : [ ...current, sessionTag ],
     );
   };
 
   const moveSidebar = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:moveSidebar");
     setIsOverflowMenuOpen(false);
     vscode.postMessage({ type: "moveSidebarToOtherSide" });
   };
 
   const toggleSidebarCollapsed = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:toggleSidebar");
     setIsOverflowMenuOpen(false);
     /**
      * CDXC:SidebarCollapse 2026-06-12-02:23:
@@ -3207,18 +3581,24 @@ export function SidebarApp({
     vscode.postMessage({ type: "toggleSidebarCollapsed" });
   };
 
-  const openWorkspaceWelcome = () => {
+  const openDiscoverGhostex = () => {
     setIsOverflowMenuOpen(false);
     /**
-     * CDXC:FirstLaunchSetup 2026-05-27-02:41:
-     * Setup Wizard routes to the first-launch setup modal because Ghostex
-     * should have one teaching/setup surface instead of separate guide and
-     * onboarding dialogs.
-     *
-     * CDXC:SidebarSetupWizard 2026-06-07-12:35:
-     * The sidebar overflow menu should expose this teaching/setup surface as
-     * Setup Wizard. Keep it as the stable menu action even when agent hooks are
-     * missing; hook repair stays inside Settings and the setup flow itself.
+     * CDXC:DiscoverGhostex 2026-06-16-00:26:
+     * The overflow help entry opens Discover Ghostex, a replayable feature tour
+     * that is separate from first-launch setup. Keep hook repair inside Settings
+     * and onboarding while this menu item stays focused on discovery.
+     */
+    openAppModal({ modal: "discoverGhostex", type: "open" });
+  };
+
+  const openFirstLaunchSetup = () => {
+    setIsOverflowMenuOpen(false);
+    /**
+     * CDXC:FirstLaunchSetup 2026-06-16-00:56:
+     * The overflow menu must expose the original first-launch setup flow as its
+     * own Setup Flow item immediately above Discover Ghostex, so users can
+     * reopen onboarding tasks without replacing the feature-tour entry.
      */
     openAppModal({ modal: "firstLaunchSetup", type: "open" });
   };
@@ -3235,18 +3615,9 @@ export function SidebarApp({
   };
 
   const pickWorkspaceFolder = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:pickWorkspaceFolder");
     setIsOverflowMenuOpen(false);
     vscode.postMessage({ type: "pickWorkspaceFolder" });
-  };
-
-  const createReferenceSession = () => {
-    /**
-     * CDXC:SidebarReference 2026-05-10-14:47
-     * The top primary row is "New Session", not "New Chat". It must target the
-     * currently live project context through createSession, while the Chats
-     * section header remains the explicit path for creating a new chat folder.
-     */
-    vscode.postMessage({ type: "createSession" });
   };
 
   const togglePetOverlay = () => {
@@ -3262,6 +3633,7 @@ export function SidebarApp({
   };
 
   const createFullWidthTerminalPane = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:commandsPane");
     /**
      * CDXC:CommandsPanel 2026-05-13-17:02
      * The Settings-row terminal shortcut keeps the legacy message name, but the
@@ -3279,10 +3651,12 @@ export function SidebarApp({
   };
 
   const createReferenceChat = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:createQuickTerminal");
     vscode.postMessage({ type: "createChat" });
   };
 
   const createReferenceBrowserChat = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:createQuickBrowser");
     /**
      * CDXC:Chats 2026-05-08-11:53
      * The reference-style Chats section header owns its own hover actions,
@@ -3293,11 +3667,12 @@ export function SidebarApp({
   };
 
   const createReferenceAgentChat = (agent: SidebarAgentButton) => {
-    const quickGroupId = displayedReferenceChatGroupIds[0];
+    const quickGroupId = displayedReferenceChatGroupIds[ 0 ];
     if (!quickGroupId) {
       return;
     }
 
+    dismissAppModalForSidebarNavigation("SettingsDismissal:createQuickAgent");
     /**
      * CDXC:QuickAgents 2026-06-08-18:25:
      * The Quick section header should expose the same selected-agent split picker as project headers. Launch through runSidebarAgent with the synthetic Quick group id so native creates a new projectless agent chat instead of targeting the active code project.
@@ -3312,18 +3687,27 @@ export function SidebarApp({
   };
 
   const openConfigureAgentsModal = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:configureAgents");
     openAppModal({ modal: "configureAgents", type: "open" });
   };
 
-  const openReferencePlugins = () => {
-    vscode.postMessage({ type: "openPluginsBrowserChat" });
+  const openReferenceAutomations = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:automations");
+    vscode.postMessage({ type: "showAutomationsComingSoonToast" });
+  };
+
+  const openReferenceMobile = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:mobile");
+    vscode.postMessage({ type: "openMobileBrowserChat" });
   };
 
   const openReferenceAgentsHub = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:agentsHub");
     openAppModal({ modal: "agentsHub", type: "open" });
   };
 
   const togglePinnedPrompts = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:pinnedPrompts");
     setIsOverflowMenuOpen(false);
     setIsDaemonSessionsOpen(false);
     setIsPreviousSessionsOpen(false);
@@ -3335,6 +3719,7 @@ export function SidebarApp({
   };
 
   const openPreviousSessions = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:previousSessions");
     setIsOverflowMenuOpen(false);
     setIsPinnedPromptsOpen(false);
     setIsDaemonSessionsOpen(false);
@@ -3346,6 +3731,7 @@ export function SidebarApp({
   };
 
   const searchPreviousSessionsByText = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:previousSessionsTextSearch");
     setIsOverflowMenuOpen(false);
     setIsPinnedPromptsOpen(false);
     setIsDaemonSessionsOpen(false);
@@ -3367,7 +3753,8 @@ export function SidebarApp({
     onMoveSidebar: moveSidebar,
     onOpenCommandPalette: openCommandPalette,
     onOpenDiscord: openDiscord,
-    onOpenHelp: openWorkspaceWelcome,
+    onOpenFirstLaunchSetup: openFirstLaunchSetup,
+    onOpenHelp: openDiscoverGhostex,
     onOpenHotkeys: openHotkeys,
     onShowRunning: openRunningSessions,
     onTogglePetOverlay: togglePetOverlay,
@@ -3387,8 +3774,8 @@ export function SidebarApp({
           isSessionSearchOpen={isSessionSearchOpen}
           onCloseSearch={closeSessionSearch}
           onOpenAgentsHub={openReferenceAgentsHub}
-          onCreateSession={createReferenceSession}
-          onOpenPlugins={openReferencePlugins}
+          onOpenAutomations={openReferenceAutomations}
+          onOpenMobile={openReferenceMobile}
           onOpenPreviousSessions={openPreviousSessions}
           onSearchPreviousSessionsByText={searchPreviousSessionsByText}
           onSearch={toggleSessionSearch}
@@ -3397,143 +3784,146 @@ export function SidebarApp({
           sessionSearchQuery={sessionSearchQuery}
           setSessionSearchQuery={setSessionSearchQuery}
         />
-      {renderFloatingOverflowMenu(topControlOptions)}
-      <div
-        className="stack"
-        data-dimmed={String(isStartupInteractionBlocked)}
-        data-sidebar-custom-theme={String(Boolean(normalizeWorkspaceThemeColor(customThemeColor)))}
-        data-sidebar-theme={theme}
-        onDoubleClick={handleSidebarDoubleClick}
-      >
-        <section className="session-groups-panel" ref={sessionGroupsPanelRef}>
-          <div className="session-groups-top">
-            {null}
-          </div>
-          {/*
+        {renderFloatingOverflowMenu(topControlOptions)}
+        <div
+          className="stack"
+          data-dimmed={String(isStartupInteractionBlocked)}
+          data-sidebar-custom-theme={String(Boolean(normalizeWorkspaceThemeColor(customThemeColor)))}
+          data-sidebar-theme={theme}
+          onClickCapture={handleSidebarClickCapture}
+          onDoubleClick={handleSidebarDoubleClick}
+        >
+          <section className="session-groups-panel" ref={sessionGroupsPanelRef}>
+            <div className="session-groups-top">
+              {null}
+            </div>
+            {/*
             CDXC:SidebarStickyHeaders 2026-05-20-09:55:
             The reference sidebar scroll area should not draw the dark top
             scroll glow now that project folder headers stick at the scroll
             viewport top. The sticky project row provides top-edge context,
             while the bottom glow remains useful for undiscovered content below.
           */}
-          <div
-            className="session-groups-scroll-shell"
-            data-scroll-glow-bottom={String(showSessionGroupsBottomGlow)}
-            data-scroll-glow-top="false"
-            data-scrollable-y={String(sessionGroupsHaveScrollableOverflow)}
-          >
             <div
-              className="session-groups-content scroll-mask-y"
+              className="session-groups-scroll-shell"
+              data-scroll-glow-bottom={String(showSessionGroupsBottomGlow)}
+              data-scroll-glow-top="false"
               data-scrollable-y={String(sessionGroupsHaveScrollableOverflow)}
-              ref={sessionGroupsContentRef}
             >
-              {/*
+              <div
+                className="session-groups-content scroll-mask-y"
+                data-scrollable-y={String(sessionGroupsHaveScrollableOverflow)}
+                ref={sessionGroupsContentRef}
+              >
+                {/*
                 CDXC:SidebarSessions 2026-05-17-00:11:
                 Opening or closing one session must not remount every sidebar
                 project. Keep DragDropProvider stable so sortable/droppable hooks
                 update the dnd registry without forcing all project rows to
                 replay their entrance animation.
               */}
-              <DragDropProvider
-                onDragEnd={handleDragEnd}
-                onDragMove={handleDragMove}
-                onDragOver={handleDragOver}
-                onDragStart={handleDragStart}
-                plugins={(plugins) => plugins.filter((plugin) => plugin !== Cursor)}
-                sensors={sensors}
-              >
-                {!shouldHideReferenceSectionsForSearchEmptyState &&
-                displayedReferenceChatGroupIds.length > 0 ? (
-                  <>
-                    {/* CDXC:QuickSessions 2026-05-16-12:55: The projectless chat collection is user-facing as Quick in the reference sidebar while internal chat group semantics stay unchanged. */}
+                <DragDropProvider
+                  onDragEnd={handleDragEnd}
+                  onDragMove={handleDragMove}
+                  onDragOver={handleDragOver}
+                  onDragStart={handleDragStart}
+                  plugins={(plugins) => plugins.filter((plugin) => plugin !== Cursor)}
+                  sensors={sensors}
+                >
+                  {!shouldHideReferenceSectionsForSearchEmptyState &&
+                    displayedReferenceChatGroupIds.length > 0 ? (
+                    <>
+                      {/* CDXC:QuickSessions 2026-05-16-12:55: The projectless chat collection is user-facing as Quick in the reference sidebar while internal chat group semantics stay unchanged. */}
+                      <SidebarReferenceSectionHeader
+                        activeSessionsSortMode={activeSessionsSortMode}
+                        agents={agents}
+                        collapsed={isReferenceChatsCollapsed}
+                        onCreateBrowserChat={createReferenceBrowserChat}
+                        onCreateChat={createReferenceChat}
+                        onConfigureAgents={openConfigureAgentsModal}
+                        onFilterChats={toggleSessionSearch}
+                        onRunAgent={createReferenceAgentChat}
+                        onSetActiveSessionsSortMode={setActiveSessionsSortMode}
+                        onToggleSessionTagFilter={toggleSessionTagFilter}
+                        onToggleCollapsed={() => {
+                          const nextCollapsed = !isReferenceChatsCollapsed;
+                          postSidebarCollapseStateLog("sectionToggle", {
+                            childGroupCount: displayedReferenceChatGroupIds.length,
+                            collapsed: nextCollapsed,
+                            section: "quick",
+                          });
+                          if (isReferenceChatsCollapsed) {
+                            triggerReferenceSectionChildAnimation("quick");
+                          }
+                          setIsReferenceChatsCollapsed((previous) => !previous);
+                        }}
+                        primaryAgentId={primaryAgentLauncherId}
+                        sectionKey="quick"
+                        selectedSessionTagFilters={activeSelectedSessionTagFilters}
+                        sessionTagListItems={sidebarSessionTagListItems}
+                        title="Quick"
+                      />
+                      <div
+                        aria-hidden={isReferenceChatsCollapsed}
+                        className="group-list workspace-group-list reference-chat-group-list reference-sidebar-collapsible-body"
+                        data-animate-children={String(referenceSectionChildAnimations.quick)}
+                        data-collapsed={String(isReferenceChatsCollapsed)}
+                      >
+                        {displayedReferenceChatGroupIds.map((groupId, groupIndex) => (
+                          <SessionGroupSection
+                            autoEdit={autoEditingGroupId === groupId}
+                            canClose={effectiveGroupIds.length > 1}
+                            completionFlashNonceBySessionId={completionFlashNonceBySessionId}
+                            draggingDisabled={!isManualActiveSessionsSort}
+                            groupDropIndicator={groupDropIndicator}
+                            groupId={groupId}
+                            index={groupIndex}
+                            isGroupDragPreviewSource={groupDragPreview?.groupId === groupId}
+                            isCollapsed={false}
+                            key={groupId}
+                            onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
+                            onCollapsedChange={setGroupCollapsed}
+                            onFocusRequested={focusSidebarSessionFromNavigation}
+                            orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
+                            pinnedSessionDropIndicator={pinnedSessionDropIndicator}
+                            selectedSearchSessionId={
+                              isSessionSearchSelectionVisible &&
+                                selectedSessionSearchResult?.kind === "session"
+                                ? selectedSessionSearchResult.sessionId
+                                : undefined
+                            }
+                            enableProjectSessionListToggle={!isSessionSearchFiltering}
+                            sessionDropIndicatorGroupId={sessionDropIndicatorGroupId}
+                            sessionDraggingDisabled={!isManualActiveSessionsSort}
+                            sessionTagListItems={sidebarSessionTagListItems}
+                            showHeaderActions={true}
+                            showSessionDropPositionIndicators={isManualActiveSessionsSort}
+                            vscode={vscode}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                  {!shouldHideReferenceSectionsForSearchEmptyState ? (
                     <SidebarReferenceSectionHeader
                       activeSessionsSortMode={activeSessionsSortMode}
-                      agents={agents}
-                      collapsed={isReferenceChatsCollapsed}
-                      onCreateBrowserChat={createReferenceBrowserChat}
-                      onCreateChat={createReferenceChat}
-                      onConfigureAgents={openConfigureAgentsModal}
-                      onFilterChats={toggleSessionSearch}
-                      onRunAgent={createReferenceAgentChat}
-                      onSetActiveSessionsSortMode={setActiveSessionsSortMode}
-                      onToggleSessionTagFilter={toggleSessionTagFilter}
-                      onToggleCollapsed={() => {
-                        const nextCollapsed = !isReferenceChatsCollapsed;
-                        postSidebarCollapseStateLog("sectionToggle", {
-                          childGroupCount: displayedReferenceChatGroupIds.length,
-                          collapsed: nextCollapsed,
-                          section: "quick",
-                        });
-                        if (isReferenceChatsCollapsed) {
-                          triggerReferenceSectionChildAnimation("quick");
-                        }
-                        setIsReferenceChatsCollapsed((previous) => !previous);
+                      actionsAlwaysVisible={displayedReferenceProjectGroupIds.length === 0}
+                      bulkActionLabel={
+                        displayedReferenceProjectGroupIds.length > 0
+                          ? hasExpandedReferenceProjects
+                            ? "Collapse All"
+                            : "Expand Previous"
+                          : undefined
+                      }
+                      collapsed={isReferenceProjectsCollapsed}
+                      onAddRepository={() => {
+                        dismissAppModalForSidebarNavigation("SettingsDismissal:addRepository");
+                        openAppModal({ modal: "addRepository", type: "open" });
                       }}
-                      primaryAgentId={primaryAgentLauncherId}
-                      sectionKey="quick"
-                      selectedSessionTagFilters={activeSelectedSessionTagFilters}
-                      sessionTagListItems={sidebarSessionTagListItems}
-                      title="Quick"
-                    />
-                    <div
-                      aria-hidden={isReferenceChatsCollapsed}
-                      className="group-list workspace-group-list reference-chat-group-list reference-sidebar-collapsible-body"
-                      data-animate-children={String(referenceSectionChildAnimations.quick)}
-                      data-collapsed={String(isReferenceChatsCollapsed)}
-                    >
-                      {displayedReferenceChatGroupIds.map((groupId, groupIndex) => (
-                        <SessionGroupSection
-                          autoEdit={autoEditingGroupId === groupId}
-                          canClose={effectiveGroupIds.length > 1}
-                          completionFlashNonceBySessionId={completionFlashNonceBySessionId}
-                          draggingDisabled={!isManualActiveSessionsSort}
-                          groupDropIndicator={groupDropIndicator}
-                          groupId={groupId}
-                          index={groupIndex}
-                          isGroupDragPreviewSource={groupDragPreview?.groupId === groupId}
-                          isCollapsed={false}
-                          key={groupId}
-                          onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
-                          onCollapsedChange={setGroupCollapsed}
-                          onFocusRequested={applyLocalFocus}
-                          orderedSessionIds={displayedWorkspaceSessionIdsByGroup[groupId] ?? []}
-                          pinnedSessionDropIndicator={pinnedSessionDropIndicator}
-                          selectedSearchSessionId={
-                            isSessionSearchSelectionVisible &&
-                            selectedSessionSearchResult?.kind === "session"
-                              ? selectedSessionSearchResult.sessionId
-                              : undefined
-                          }
-                          enableProjectSessionListToggle={!isSessionSearchFiltering}
-                          sessionDropIndicatorGroupId={sessionDropIndicatorGroupId}
-                          sessionDraggingDisabled={!isManualActiveSessionsSort}
-                          showHeaderActions={true}
-                          showSessionDropPositionIndicators={isManualActiveSessionsSort}
-                          vscode={vscode}
-                        />
-                      ))}
-                    </div>
-                  </>
-                ) : null}
-                {!shouldHideReferenceSectionsForSearchEmptyState ? (
-                  <SidebarReferenceSectionHeader
-                    activeSessionsSortMode={activeSessionsSortMode}
-                    actionsAlwaysVisible={displayedReferenceProjectGroupIds.length === 0}
-                    bulkActionLabel={
-                      displayedReferenceProjectGroupIds.length > 0
-                        ? hasExpandedReferenceProjects
-                          ? "Collapse All"
-                          : "Expand Previous"
-                        : undefined
-                    }
-                    collapsed={isReferenceProjectsCollapsed}
-                    onAddRepository={() => {
-                      openAppModal({ modal: "addRepository", type: "open" });
-                    }}
-                    onAddProject={pickWorkspaceFolder}
-                    onBulkProjectToggle={
-                      displayedReferenceProjectGroupIds.length > 0
-                        ? () => {
+                      onAddProject={pickWorkspaceFolder}
+                      onBulkProjectToggle={
+                        displayedReferenceProjectGroupIds.length > 0
+                          ? () => {
                             postSidebarCollapseStateLog("projectBulkCommand", {
                               expandedProjectGroupCount:
                                 displayedReferenceProjectGroupIds.length -
@@ -3554,7 +3944,7 @@ export function SidebarApp({
                             if (hasExpandedReferenceProjects) {
                               previousExpandedReferenceProjectGroupIdsRef.current =
                                 displayedReferenceProjectGroupIds.filter(
-                                  (groupId) => collapsedGroupsById[groupId] !== true,
+                                  (groupId) => collapsedGroupsById[ groupId ] !== true,
                                 );
                               setGroupsCollapsed(displayedReferenceProjectGroupIds, true);
                               return;
@@ -3571,327 +3961,312 @@ export function SidebarApp({
                               false,
                             );
                           }
-                        : undefined
-                    }
-                    onSetActiveSessionsSortMode={setActiveSessionsSortMode}
-                    onToggleSessionTagFilter={toggleSessionTagFilter}
-                    onToggleCollapsed={() => {
-                      const nextCollapsed = !isReferenceProjectsCollapsed;
-                      postSidebarCollapseStateLog("sectionToggle", {
-                        childGroupCount: displayedReferenceProjectGroupIds.length,
-                        collapsed: nextCollapsed,
-                        section: "projects",
-                      });
-                      if (isReferenceProjectsCollapsed) {
-                        triggerReferenceSectionChildAnimation("projects");
+                          : undefined
                       }
-                      setIsReferenceProjectsCollapsed((previous) => !previous);
-                    }}
-                    sectionKey="projects"
-                    selectedSessionTagFilters={activeSelectedSessionTagFilters}
-                    sessionTagListItems={sidebarSessionTagListItems}
-                    title="Projects"
-                  />
-                ) : null}
-                {!shouldHideReferenceSectionsForSearchEmptyState ? (
-                  <div
-                    aria-hidden={isReferenceProjectsCollapsed}
-                    className="group-list workspace-group-list reference-project-group-list reference-sidebar-collapsible-body"
-                    data-animate-children={String(referenceSectionChildAnimations.projects)}
-                    data-collapsed={String(isReferenceProjectsCollapsed)}
-                  >
-                    {displayedReferenceProjectGroupIds.length > 0 ? (
-                      displayedReferenceProjectGroupIds.map((groupId, groupIndex) => (
-                        <SessionGroupSection
-                          autoEdit={autoEditingGroupId === groupId}
-                          canClose={effectiveGroupIds.length > 1}
-                          completionFlashNonceBySessionId={completionFlashNonceBySessionId}
-                          draggingDisabled={isSessionSearchOpen}
-                          groupDropIndicator={groupDropIndicator}
-                          groupId={groupId}
-                          index={groupIndex}
-                          isGroupDragPreviewSource={groupDragPreview?.groupId === groupId}
-                          isCollapsed={collapsedGroupsById[groupId] === true}
-                          key={groupId}
-                          onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
-                          onCollapsedChange={setGroupCollapsed}
-                          onFocusRequested={applyLocalFocus}
-                          orderedSessionIds={displayedWorkspaceSessionIdsByGroup[groupId] ?? []}
-                          allowPinnedSessionReorder={!isManualActiveSessionsSort}
-                          pinnedSessionDropIndicator={pinnedSessionDropIndicator}
-                          selectedSearchSessionId={
-                            isSessionSearchSelectionVisible &&
-                            selectedSessionSearchResult?.kind === "session"
-                              ? selectedSessionSearchResult.sessionId
-                              : undefined
-                          }
-                          enableProjectSessionListToggle={!isSessionSearchFiltering}
-                          sessionDropIndicatorGroupId={sessionDropIndicatorGroupId}
-                          sessionDraggingDisabled={!isManualActiveSessionsSort}
-                          showHeaderActions={true}
-                          showSessionDropPositionIndicators={true}
-                          vscode={vscode}
-                        />
-                      ))
-                    ) : (
-                      <div className="reference-sidebar-empty-state">No projects</div>
-                    )}
-                  </div>
-	                ) : null}
-	                {!shouldHideReferenceSectionsForSearchEmptyState && remoteMachines.length > 0 ? (
-	                  <div className="reference-remote-section-list">
-	                    {/*
+                      onSetActiveSessionsSortMode={setActiveSessionsSortMode}
+                      onToggleSessionTagFilter={toggleSessionTagFilter}
+                      onToggleCollapsed={() => {
+                        const nextCollapsed = !isReferenceProjectsCollapsed;
+                        postSidebarCollapseStateLog("sectionToggle", {
+                          childGroupCount: displayedReferenceProjectGroupIds.length,
+                          collapsed: nextCollapsed,
+                          section: "projects",
+                        });
+                        if (isReferenceProjectsCollapsed) {
+                          triggerReferenceSectionChildAnimation("projects");
+                        }
+                        setIsReferenceProjectsCollapsed((previous) => !previous);
+                      }}
+                      sectionKey="projects"
+                      selectedSessionTagFilters={activeSelectedSessionTagFilters}
+                      sessionTagListItems={sidebarSessionTagListItems}
+                      title="Projects"
+                    />
+                  ) : null}
+                  {!shouldHideReferenceSectionsForSearchEmptyState ? (
+                    <div
+                      aria-hidden={isReferenceProjectsCollapsed}
+                      className="group-list workspace-group-list reference-project-group-list reference-sidebar-collapsible-body"
+                      data-animate-children={String(referenceSectionChildAnimations.projects)}
+                      data-collapsed={String(isReferenceProjectsCollapsed)}
+                    >
+                      {displayedReferenceProjectGroupIds.length > 0 ? (
+                        displayedReferenceProjectGroupIds.map((groupId, groupIndex) => (
+                          <SessionGroupSection
+                            autoEdit={autoEditingGroupId === groupId}
+                            canClose={effectiveGroupIds.length > 1}
+                            completionFlashNonceBySessionId={completionFlashNonceBySessionId}
+                            draggingDisabled={isSessionSearchOpen}
+                            groupDropIndicator={groupDropIndicator}
+                            groupId={groupId}
+                            index={groupIndex}
+                            isGroupDragPreviewSource={groupDragPreview?.groupId === groupId}
+                            isCollapsed={collapsedGroupsById[ groupId ] === true}
+                            key={groupId}
+                            onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
+                            onCollapsedChange={setGroupCollapsed}
+                            onFocusRequested={focusSidebarSessionFromNavigation}
+                            orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
+                            allowPinnedSessionReorder={!isManualActiveSessionsSort}
+                            pinnedSessionDropIndicator={pinnedSessionDropIndicator}
+                            selectedSearchSessionId={
+                              isSessionSearchSelectionVisible &&
+                                selectedSessionSearchResult?.kind === "session"
+                                ? selectedSessionSearchResult.sessionId
+                                : undefined
+                            }
+                            enableProjectSessionListToggle={!isSessionSearchFiltering}
+                            sessionDropIndicatorGroupId={sessionDropIndicatorGroupId}
+                            sessionDraggingDisabled={!isManualActiveSessionsSort}
+                            sessionTagListItems={sidebarSessionTagListItems}
+                            showHeaderActions={true}
+                            showSessionDropPositionIndicators={true}
+                            vscode={vscode}
+                          />
+                        ))
+                      ) : (
+                        <div className="reference-sidebar-empty-state">No projects</div>
+                      )}
+                    </div>
+                  ) : null}
+                  {!shouldHideReferenceSectionsForSearchEmptyState && remoteMachines.length > 0 ? (
+                    <div className="reference-remote-section-list">
+                      {/*
 	                     * CDXC:RemoteMachines 2026-06-02-23:47:
 	                     * Saved Remote machines render as peer sidebar sections beside local Projects. Until the SSH/gxserver connection is active, each machine remains visible and exposes Reload instead of Add Project or Clone Repository.
 	                     *
 	                     * CDXC:RemoteMachines 2026-06-09-19:02:
 	                     * Remote machine section rows must collapse like Quick and Projects and use the same section-header styling, including the visible chevron and hover actions.
 	                     */}
-	                    {remoteMachines.map((machine, index) => (
-	                      <RemoteMachineSidebarSection
-	                        collapsed={collapsedRemoteMachineSectionsById[machine.id] === true}
-	                        index={index}
-	                        key={machine.id}
-	                        machine={machine}
-	                        onAddProject={() =>
-	                          openAppModal({
-	                            modal: "remoteProjectPicker",
-                            remoteMachineId: machine.id,
-                            remoteMachineName: machine.name,
-                            type: "open",
-                          })
-                        }
-                        onCloneRepository={() =>
-                          vscode.postMessage({
-                            remoteMachineId: machine.id,
-                            type: "openRemoteCloneRepository",
-                          })
-                        }
-                        onEdit={() =>
-                          openAppModal({
-                            initialRemoteMachineId: machine.id,
-                            initialTab: "remote",
-                            modal: "settings",
-                            type: "open",
-                          })
-                        }
-                        onReconnect={() =>
-                          vscode.postMessage({
-                            remoteMachineId: machine.id,
-                            type: "reconnectRemoteMachine",
-                          })
-                        }
-                        projectGroupIds={remoteProjectGroupIdsByMachineId[machine.id] ?? []}
-                        renderProjectGroup={(groupId, groupIndex) => (
-                          <SessionGroupSection
-                            autoEdit={false}
-                            canClose={false}
-                            completionFlashNonceBySessionId={completionFlashNonceBySessionId}
-                            draggingDisabled={true}
-	                            groupId={groupId}
-	                            index={groupIndex}
-	                            isCollapsed={collapsedGroupsById[groupId] === true}
-	                            key={groupId}
-	                            onAutoEditHandled={() => undefined}
-	                            onCollapsedChange={setGroupCollapsed}
-	                            onFocusRequested={() => undefined}
-	                            orderedSessionIds={displayedWorkspaceSessionIdsByGroup[groupId] ?? []}
-	                            enableProjectSessionListToggle={!isSessionSearchFiltering}
-	                            projectHeaderActions="terminal-only"
-	                            sessionDraggingDisabled={true}
-	                            showHeaderActions={true}
-	                            showSessionDropPositionIndicators={false}
-	                            vscode={vscode}
-	                          />
-	                        )}
-	                        onToggleCollapsed={() => {
-	                          const nextCollapsed =
-	                            collapsedRemoteMachineSectionsById[machine.id] !== true;
-	                          if (!nextCollapsed) {
-	                            triggerReferenceSectionChildAnimation("remote");
-	                          }
-	                          setRemoteMachineSectionCollapsed(machine.id, nextCollapsed);
-	                        }}
-	                        status={remoteMachineRuntimeStatuses[machine.id] ?? "disconnected"}
-	                      />
-	                    ))}
-	                  </div>
-	                ) : null}
-                {groupDragPreview && typeof document !== "undefined"
-                  ? createPortal(
+                      {remoteMachines.map((machine, index) => (
+                        <RemoteMachineSidebarSection
+                          collapsed={collapsedRemoteMachineSectionsById[ machine.id ] === true}
+                          index={index}
+                          key={machine.id}
+                          machine={machine}
+                          onAddProject={() => {
+                            dismissAppModalForSidebarNavigation("SettingsDismissal:remoteAddProject");
+                            openAppModal({
+                              modal: "remoteProjectPicker",
+                              remoteMachineId: machine.id,
+                              remoteMachineName: machine.name,
+                              type: "open",
+                            });
+                          }}
+                          onCloneRepository={() => {
+                            dismissAppModalForSidebarNavigation("SettingsDismissal:remoteCloneRepository");
+                            vscode.postMessage({
+                              remoteMachineId: machine.id,
+                              type: "openRemoteCloneRepository",
+                            });
+                          }}
+                          onEdit={() => {
+                            dismissAppModalForSidebarNavigation("SettingsDismissal:remoteEditSettings");
+                            openAppModal({
+                              initialRemoteMachineId: machine.id,
+                              initialTab: "remote",
+                              modal: "settings",
+                              type: "open",
+                            });
+                          }}
+                          onReconnect={() => {
+                            dismissAppModalForSidebarNavigation("SettingsDismissal:remoteReconnect");
+                            vscode.postMessage({
+                              remoteMachineId: machine.id,
+                              type: "reconnectRemoteMachine",
+                            });
+                          }}
+                          projectGroupIds={remoteProjectGroupIdsByMachineId[ machine.id ] ?? []}
+                          renderProjectGroup={(groupId, groupIndex) => (
+                            <SessionGroupSection
+                              autoEdit={false}
+                              canClose={false}
+                              completionFlashNonceBySessionId={completionFlashNonceBySessionId}
+                              draggingDisabled={true}
+                              groupId={groupId}
+                              index={groupIndex}
+                              isCollapsed={collapsedGroupsById[ groupId ] === true}
+                              key={groupId}
+                              onAutoEditHandled={() => undefined}
+                              onCollapsedChange={setGroupCollapsed}
+                              onFocusRequested={() => undefined}
+                              orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
+                              enableProjectSessionListToggle={!isSessionSearchFiltering}
+                              projectHeaderActions="terminal-only"
+                              sessionDraggingDisabled={true}
+                              sessionTagListItems={sidebarSessionTagListItems}
+                              showHeaderActions={true}
+                              showSessionDropPositionIndicators={false}
+                              vscode={vscode}
+                            />
+                          )}
+                          onToggleCollapsed={() => {
+                            const nextCollapsed =
+                              collapsedRemoteMachineSectionsById[ machine.id ] !== true;
+                            if (!nextCollapsed) {
+                              triggerReferenceSectionChildAnimation("remote");
+                            }
+                            setRemoteMachineSectionCollapsed(machine.id, nextCollapsed);
+                          }}
+                          status={remoteMachineRuntimeStatuses[ machine.id ] ?? "disconnected"}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                  {groupDragPreview && typeof document !== "undefined"
+                    ? createPortal(
                       <ProjectGroupDragGhost preview={groupDragPreview} />,
                       document.body,
                     )
-                  : null}
-              </DragDropProvider>
-              {isSessionSearchFiltering ? (
-                <SidebarPreviousSessionsSearchGroup
-                  onDeletePreviousSession={deleteSearchedPreviousSession}
-                  onRestorePreviousSession={restoreSearchedPreviousSession}
-                  previousSessions={filteredPreviousSessions}
-                  selectedHistoryId={
-                    isSessionSearchSelectionVisible &&
-                    selectedSessionSearchResult?.kind === "previous"
-                      ? selectedSessionSearchResult.historyId
-                      : undefined
-                  }
-                  showDebugSessionNumbers={debuggingMode}
-                />
-              ) : null}
-              {shouldShowSessionSearchEmptyState ? (
-                <div
-                  className="group-empty-drop-target session-search-empty-drop-target"
-                  data-empty-space-blocking="true"
-                >
-                  <div className="group-empty-state session-search-empty-state">
-                    No current or previous sessions match that search.
+                    : null}
+                </DragDropProvider>
+                {isSessionSearchFiltering ? (
+                  <SidebarPreviousSessionsSearchGroup
+                    onDeletePreviousSession={deleteSearchedPreviousSession}
+                    onRestorePreviousSession={restoreSearchedPreviousSession}
+                    previousSessions={filteredPreviousSessions}
+                    selectedHistoryId={
+                      isSessionSearchSelectionVisible &&
+                        selectedSessionSearchResult?.kind === "previous"
+                        ? selectedSessionSearchResult.historyId
+                        : undefined
+                    }
+                    showDebugSessionNumbers={debuggingMode}
+                  />
+                ) : null}
+                {shouldShowSessionSearchEmptyState ? (
+                  <div
+                    className="group-empty-drop-target session-search-empty-drop-target"
+                    data-empty-space-blocking="true"
+                  >
+                    <div className="group-empty-state session-search-empty-state">
+                      No current or previous sessions match that search.
+                    </div>
                   </div>
-                </div>
-              ) : displayedWorkspaceGroupIds.every(
-                  (groupId) => (displayedWorkspaceSessionIdsByGroup[groupId] ?? []).length === 0,
+                ) : displayedWorkspaceGroupIds.every(
+                  (groupId) => (displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []).length === 0,
                 ) &&
-                !isSessionSearchOpen ? (
-                <div className="empty" data-empty-space-blocking="true"></div>
-              ) : null}
+                  !isSessionSearchOpen ? (
+                  <div className="empty" data-empty-space-blocking="true"></div>
+                ) : null}
+              </div>
+              <div
+                aria-hidden="true"
+                className="session-groups-scroll-glow session-groups-scroll-glow-bottom"
+              />
             </div>
-            <div
-              aria-hidden="true"
-              className="session-groups-scroll-glow session-groups-scroll-glow-bottom"
-            />
-          </div>
-        </section>
-        {recentProjects.length > 0 ? (
-          <section
-            aria-label="Recent Projects"
-            className="recent-projects-drawer"
-            data-open={String(isRecentProjectsOpen)}
-          >
-            {/*
+          </section>
+          {recentProjects.length > 0 ? (
+            <section
+              aria-label="Recent Projects"
+              className="recent-projects-drawer"
+              data-open={String(isRecentProjectsOpen)}
+            >
+              {/*
              * CDXC:RecentProjects 2026-05-04-14:25
              * Combined mode parks projects without surfaced sessions in a
              * bottom drawer. Clicking a row asks native to restore the full
              * project and only create a blank terminal when no sessions were
              * preserved.
              */}
-            <button
-              aria-expanded={isRecentProjectsOpen}
-              className="recent-projects-drawer-toggle group-head"
-              data-collapsible="true"
-              onClick={() => {
-                postSidebarCollapseStateLog("sectionToggle", {
-                  collapsed: !isRecentProjectsOpen,
-                  recentProjectCount: recentProjects.length,
-                  section: "recent-projects",
-                });
-                setRecentProjectContextMenuPosition(undefined);
-                setIsRecentProjectsOpen((previous) => !previous);
-              }}
-              type="button"
-            >
-              <span className="group-title-wrap">
-                <span className="group-title-row">
-                  <span
-                    aria-hidden="true"
-                    className="group-collapse-button section-titlebar-toggle"
-                    data-collapsed={String(!isRecentProjectsOpen)}
-                    data-has-idle-icon="true"
-                  >
-                    <span className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon">
-                      <IconHistory size={16} stroke={1.8} />
-                    </span>
-                    <IconCaretRightFilled
+              <button
+                aria-expanded={isRecentProjectsOpen}
+                className="recent-projects-drawer-toggle group-head"
+                data-collapsible="true"
+                onClick={() => {
+                  postSidebarCollapseStateLog("sectionToggle", {
+                    collapsed: !isRecentProjectsOpen,
+                    recentProjectCount: recentProjects.length,
+                    section: "recent-projects",
+                  });
+                  setRecentProjectContextMenuPosition(undefined);
+                  setIsRecentProjectsOpen((previous) => !previous);
+                }}
+                type="button"
+              >
+                <span className="group-title-wrap">
+                  <span className="group-title-row">
+                    <span
                       aria-hidden="true"
-                      className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
-                      size={16}
-                    />
-                  </span>
-                  <span className="group-title-handle">
-                    <span className="recent-projects-drawer-title group-title section-titlebar-label">
-                      Recent Projects
+                      className="group-collapse-button section-titlebar-toggle"
+                      data-collapsed={String(!isRecentProjectsOpen)}
+                      data-has-idle-icon="true"
+                    >
+                      <span className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon">
+                        <IconHistory size={16} stroke={1.8} />
+                      </span>
+                      <IconCaretRightFilled
+                        aria-hidden="true"
+                        className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
+                        size={16}
+                      />
+                    </span>
+                    <span className="group-title-handle">
+                      <span className="recent-projects-drawer-title group-title section-titlebar-label">
+                        Recent Projects
+                      </span>
                     </span>
                   </span>
                 </span>
-              </span>
-            </button>
-            <div
-              aria-hidden={!isRecentProjectsOpen}
-              className="recent-projects-drawer-body"
-              data-collapsed={String(!isRecentProjectsOpen)}
-            >
-              {/*
+              </button>
+              <div
+                aria-hidden={!isRecentProjectsOpen}
+                className="recent-projects-drawer-body"
+                data-collapsed={String(!isRecentProjectsOpen)}
+              >
+                {/*
                * CDXC:SidebarSearch 2026-05-15-18:13:
                * Recent Projects search must reuse the same shell, input, and
                * icon classes as Search sessions so both boxes stay identical
                * in typography, border, radius, padding, and icon placement.
                */}
-              <SidebarSessionSearchField
-                ariaLabel="Search recent projects"
-                autoComplete="off"
-                clearLabel="Clear recent projects search"
-                inputRef={recentProjectsSearchInputRef}
-                placeholder="Search projects"
-                query={recentProjectsQuery}
-                setQuery={setRecentProjectsQuery}
-                shellClassName="recent-projects-search"
-              />
-              <div className="recent-projects-list">
-                {filteredRecentProjects.length > 0 ? (
-                  filteredRecentProjects.map((project) => (
-                    <button
-                      className="recent-projects-row group-head"
-                      data-context-menu-open={String(
-                        recentProjectContextMenuPosition?.projectId === project.projectId,
-                      )}
-                      key={project.projectId}
-                      onClick={() => restoreRecentProject(project.projectId)}
-                      onContextMenu={(event) =>
-                        openRecentProjectContextMenu(event, project.projectId)
-                      }
-                      type="button"
-                    >
-                      {/*
-                       * CDXC:RecentProjects 2026-06-14-15:13:
-                       * Recent Project items should not show a hover tooltip; the row still restores on click and keeps its right-click parked-project menu.
-                       */}
-                      <span className="group-title-wrap">
-                        <span className="group-title-row">
-                          <span
-                            aria-hidden="true"
-                            className="recent-projects-row-icon group-collapse-button section-titlebar-toggle"
-                          >
-                            <IconFolder size={16} stroke={1.8} />
-                          </span>
-                          <span className="group-title-handle">
-                            <span className="recent-projects-row-title group-title section-titlebar-label">
-                              {project.title}
-                            </span>
-                          </span>
-                          <span className="group-title-spacer" />
-                          <span
-                            aria-label={`${project.sessionCount} preserved sessions`}
-                            className="recent-projects-session-count group-add-button"
-                          >
-                            {project.sessionCount}
-                          </span>
-                        </span>
-                      </span>
-                    </button>
-                  ))
-                ) : (
-                  <div className="recent-projects-empty">No projects match that search.</div>
-                )}
+                <SidebarSessionSearchField
+                  ariaLabel="Search recent projects"
+                  autoComplete="off"
+                  clearLabel="Clear recent projects search"
+                  inputRef={recentProjectsSearchInputRef}
+                  placeholder="Search projects"
+                  query={recentProjectsQuery}
+                  setQuery={setRecentProjectsQuery}
+                  shellClassName="recent-projects-search"
+                />
+                <div
+                  className="recent-projects-list"
+                  onPointerEnter={handleRecentProjectsListPointerMove}
+                  onPointerLeave={handleRecentProjectsListPointerLeave}
+                  onPointerMove={handleRecentProjectsListPointerMove}
+                  onScrollCapture={handleRecentProjectsListScroll}
+                  onWheelCapture={handleRecentProjectsListScroll}
+                >
+                  {filteredRecentProjects.length > 0 ? (
+                    filteredRecentProjects.map((project) => (
+                      <RecentProjectRow
+                        isContextMenuOpen={
+                          recentProjectContextMenuPosition?.projectId === project.projectId
+                        }
+                        isScrolling={isRecentProjectsListScrolling}
+                        key={project.projectId}
+                        onContextMenu={openRecentProjectContextMenu}
+                        onRestore={restoreRecentProject}
+                        pointerPointRef={recentProjectsPointerPointRef}
+                        project={project}
+                      />
+                    ))
+                  ) : (
+                    <div className="recent-projects-empty">No projects match that search.</div>
+                  )}
+                </div>
               </div>
-            </div>
-            {recentProjectContextMenuPosition ? (
-              <SidebarContextMenuPortal
-                menuStyle={{
-                  left: `${recentProjectContextMenuPosition.x}px`,
-                  top: `${recentProjectContextMenuPosition.y}px`,
-                }}
-                onDismiss={() => setRecentProjectContextMenuPosition(undefined)}
-                vscode={vscode}
-              >
-                {/*
+              {recentProjectContextMenuPosition ? (
+                <SidebarContextMenuPortal
+                  menuStyle={{
+                    left: `${recentProjectContextMenuPosition.x}px`,
+                    top: `${recentProjectContextMenuPosition.y}px`,
+                  }}
+                  onDismiss={() => setRecentProjectContextMenuPosition(undefined)}
+                  vscode={vscode}
+                >
+                  {/*
                  * CDXC:RecentProjects 2026-05-27-07:04:
                  * Right-clicking a Recent Projects row should expose only the
                  * parked-project actions: Copy Path, Open Folder, then a
@@ -3900,120 +4275,121 @@ export function SidebarApp({
                  * CDXC:RecentProjects 2026-06-04-13:39:
                  * User-facing filesystem actions should use Open Folder instead of Finder-specific wording while preserving the existing native reveal behavior.
                  */}
-                <button
-                  className="session-context-menu-item"
-                  onClick={() =>
-                    copyRecentProjectPath(recentProjectContextMenuPosition.projectId)
-                  }
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconCopy aria-hidden="true" className="session-context-menu-icon" size={14} />
-                  Copy Path
-                </button>
-                <button
-                  className="session-context-menu-item"
-                  onClick={() =>
-                    openRecentProjectInFinder(recentProjectContextMenuPosition.projectId)
-                  }
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconFolderOpen
-                    aria-hidden="true"
-                    className="session-context-menu-icon"
-                    size={14}
-                  />
-                  Open Folder
-                </button>
-                <div className="session-context-menu-divider" role="separator" />
-                <button
-                  className="session-context-menu-item session-context-menu-item-danger"
-                  onClick={() =>
-                    removeRecentProject(recentProjectContextMenuPosition.projectId)
-                  }
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconTrash aria-hidden="true" className="session-context-menu-icon" size={14} />
-                  Remove Project
-                </button>
-              </SidebarContextMenuPortal>
-            ) : null}
-          </section>
-        ) : null}
-        <GitCommitModal
-          agents={agents}
-          draft={
-            gitCommitDraft ?? {
-              confirmLabel: "Commit",
-              description: "",
-              changedFiles: [],
-              requestId: "",
-              showCommitMessage: true,
-              suggestedBody: undefined,
-              suggestedSubject: "",
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() =>
+                      copyRecentProjectPath(recentProjectContextMenuPosition.projectId)
+                    }
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconCopy aria-hidden="true" className="session-context-menu-icon" size={14} />
+                    Copy Path
+                  </button>
+                  <button
+                    className="session-context-menu-item"
+                    onClick={() =>
+                      openRecentProjectInFinder(recentProjectContextMenuPosition.projectId)
+                    }
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconFolderOpen
+                      aria-hidden="true"
+                      className="session-context-menu-icon"
+                      size={14}
+                    />
+                    Open Folder
+                  </button>
+                  <div className="session-context-menu-divider" role="separator" />
+                  <button
+                    className="session-context-menu-item session-context-menu-item-danger"
+                    onClick={() =>
+                      removeRecentProject(recentProjectContextMenuPosition.projectId)
+                    }
+                    role="menuitem"
+                    type="button"
+                  >
+                    <IconTrash aria-hidden="true" className="session-context-menu-icon" size={14} />
+                    Remove Project
+                  </button>
+                </SidebarContextMenuPortal>
+              ) : null}
+            </section>
+          ) : null}
+          <GitCommitModal
+            agents={agents}
+            draft={
+              gitCommitDraft ?? {
+                confirmLabel: "Commit",
+                description: "",
+                changedFiles: [],
+                requestId: "",
+                showCommitMessage: true,
+                suggestedBody: undefined,
+                suggestedSubject: "",
+              }
             }
-          }
-          isOpen={gitCommitDraft !== undefined}
-          fileDiffDraft={gitFileDiffDraft}
-          onCancel={(requestId) => {
-            closeGitCommitModal(requestId);
-          }}
-          onConfirm={(requestId, message, options) => {
-            setGitCommitDraft(undefined);
-            setGitFileDiffDraft(undefined);
-            vscode.postMessage({
-              agentId: options.agentId,
-              commitOnNewRef: options.commitOnNewRef,
-              deleteWorktreeAfter: options.deleteWorktreeAfter,
-              filePaths: options.filePaths,
-              message,
-              requestId,
-              type: "confirmSidebarGitCommit",
-            });
-          }}
-          onDirectMerge={(requestId, message, options) => {
-            setGitCommitDraft(undefined);
-            setGitFileDiffDraft(undefined);
-            vscode.postMessage({
-              agentId: options.agentId,
-              deleteWorktreeAfter: options.deleteWorktreeAfter,
-              filePaths: options.filePaths,
-              message,
-              requestId,
-              type: "confirmSidebarGitDirectMerge",
-            });
-          }}
-          onMultipleCommits={(requestId, agentId) => {
-            setGitCommitDraft(undefined);
-            setGitFileDiffDraft(undefined);
-            vscode.postMessage({ agentId, requestId, type: "runSidebarGitMultipleCommits" });
-          }}
-          onOpenFileDiff={(filePath, requestId) => {
-            vscode.postMessage({ filePath, requestId, type: "openSidebarGitChangedFileDiff" });
-          }}
+            isOpen={gitCommitDraft !== undefined}
+            fileDiffDraft={gitFileDiffDraft}
+            onCancel={(requestId) => {
+              closeGitCommitModal(requestId);
+            }}
+            onConfirm={(requestId, message, options) => {
+              setGitCommitDraft(undefined);
+              setGitFileDiffDraft(undefined);
+              vscode.postMessage({
+                agentId: options.agentId,
+                commitOnNewRef: options.commitOnNewRef,
+                deleteWorktreeAfter: options.deleteWorktreeAfter,
+                filePaths: options.filePaths,
+                message,
+                requestId,
+                type: "confirmSidebarGitCommit",
+              });
+            }}
+            onDirectMerge={(requestId, message, options) => {
+              setGitCommitDraft(undefined);
+              setGitFileDiffDraft(undefined);
+              vscode.postMessage({
+                agentId: options.agentId,
+                deleteWorktreeAfter: options.deleteWorktreeAfter,
+                filePaths: options.filePaths,
+                message,
+                requestId,
+                type: "confirmSidebarGitDirectMerge",
+              });
+            }}
+            onMultipleCommits={(requestId, agentId) => {
+              setGitCommitDraft(undefined);
+              setGitFileDiffDraft(undefined);
+              vscode.postMessage({ agentId, requestId, type: "runSidebarGitMultipleCommits" });
+            }}
+            onOpenFileDiff={(filePath, requestId) => {
+              vscode.postMessage({ filePath, requestId, type: "openSidebarGitChangedFileDiff" });
+            }}
+            theme={theme}
+          />
+          {buildStamp ? (
+            <AppTooltip content="Copy build stamp">
+              <button
+                aria-label={`Copy build stamp ${buildStamp}`}
+                className="copy-cursor"
+                onClick={() => {
+                  void navigator.clipboard.writeText(buildStamp).catch(() => { });
+                }}
+                style={DEBUG_BUILD_STAMP_STYLE}
+                type="button"
+              >
+                {buildStamp}
+              </button>
+            </AppTooltip>
+          ) : null}
+        </div>
+        <SidebarReferenceSettingsButton
+          onCreateFullWidthTerminalPane={createFullWidthTerminalPane}
+          onOpenSettings={openSidebarSettings}
         />
-        {buildStamp ? (
-          <AppTooltip content="Copy build stamp">
-            <button
-              aria-label={`Copy build stamp ${buildStamp}`}
-              className="copy-cursor"
-              onClick={() => {
-                void navigator.clipboard.writeText(buildStamp).catch(() => {});
-              }}
-              style={DEBUG_BUILD_STAMP_STYLE}
-              type="button"
-            >
-              {buildStamp}
-            </button>
-          </AppTooltip>
-        ) : null}
-      </div>
-      <SidebarReferenceSettingsButton
-        onCreateFullWidthTerminalPane={createFullWidthTerminalPane}
-        onOpenSettings={openSidebarSettings}
-      />
       </div>
     </TooltipProvider>
   );
@@ -4023,9 +4399,9 @@ function SidebarReferenceTopChrome({
   isOverflowMenuOpen,
   isSessionSearchOpen,
   onCloseSearch,
-  onCreateSession,
   onOpenAgentsHub,
-  onOpenPlugins,
+  onOpenAutomations,
+  onOpenMobile,
   onOpenPreviousSessions,
   onSearchPreviousSessionsByText,
   onSearch,
@@ -4037,9 +4413,9 @@ function SidebarReferenceTopChrome({
   isOverflowMenuOpen: boolean;
   isSessionSearchOpen: boolean;
   onCloseSearch: () => void;
-  onCreateSession: () => void;
   onOpenAgentsHub: () => void;
-  onOpenPlugins: () => void;
+  onOpenAutomations: () => void;
+  onOpenMobile: () => void;
   onOpenPreviousSessions: () => void;
   onSearchPreviousSessionsByText: () => void;
   onSearch: () => void;
@@ -4051,13 +4427,18 @@ function SidebarReferenceTopChrome({
   /**
    * CDXC:SidebarReference 2026-05-08-09:11
    * Combined mode should visually match the provided app sidebar: native-style
-   * window dots, disabled back/forward chrome, and large primary rows for New
-   * Session, Agents Hub, Plugins, and Search.
+   * window dots, disabled back/forward chrome, and large primary rows such as
+   * Agents Hub, Automations, Mobile, and Search.
    *
    * CDXC:SidebarReference 2026-05-08-14:48
-   * Reference sidebar exposes the overflow menu as a small right-side control
-   * on the New Session row so global sidebar actions stay close to the primary
-   * create-session affordance without replacing it.
+   * Reference sidebar exposes the overflow menu as a small right-side control.
+   * Keep it attached to a primary navigation row so global sidebar actions stay
+   * discoverable without adding a separate persistent row.
+   *
+   * CDXC:SidebarReference 2026-06-16-01:29:
+   * Remove the New Session primary row and move the More overflow control onto
+   * Agents Hub. The top nav should start with agent management while still
+   * keeping global overflow actions one hover target away.
    *
    * CDXC:TitlebarActions 2026-05-11-02:46
    * Actions moved out of the sidebar header into the native titlebar beside
@@ -4065,8 +4446,29 @@ function SidebarReferenceTopChrome({
    * menu has one home and one split-button UX.
    *
    * CDXC:AgentsHub 2026-05-12-09:59
-   * Agents Hub should appear above Plugins in the primary sidebar nav so agent
-   * configuration content is reached before plugin browsing.
+   * Agents Hub should remain the first primary sidebar destination so agent
+   * configuration content is reached before secondary reference surfaces.
+   *
+   * CDXC:Mobile 2026-06-16-00:45:
+   * The primary sidebar needs a Mobile entry near other reference/setup
+   * navigation. It should launch through the same fixed browser-chat path as
+   * Plugins so mobile setup docs open outside the active code project.
+   *
+   * CDXC:Mobile 2026-06-16-01:23:
+   * Mobile should open the Ghostex download page, not the GitHub README anchor,
+   * because the product site now owns mobile download routing.
+   *
+   * CDXC:Automations 2026-06-16-00:47:
+   * Automations should sit above Mobile in the primary sidebar.
+   * Until the feature is ready, clicking it shows a native app toast instead of
+   * opening another surface.
+   *
+   * CDXC:SidebarReference 2026-06-16-01:23:
+   * Plugins should no longer consume a primary sidebar row.
+   *
+   * CDXC:Plugins 2026-06-16-01:29:
+   * Hide the Plugins sidebar affordance for now instead of keeping it as an
+   * Agents Hub secondary action.
    */
   return (
     <header className="reference-sidebar-top">
@@ -4079,17 +4481,21 @@ function SidebarReferenceTopChrome({
         <IconArrowRight className="reference-sidebar-window-icon" size={17} stroke={1.9} />
       </div>
       <nav aria-label="Sidebar primary navigation" className="reference-sidebar-primary-nav">
-        <SidebarReferenceNewSessionNavItem
+        <SidebarReferenceAgentsHubNavItem
           isOverflowMenuOpen={isOverflowMenuOpen}
-          onCreateSession={onCreateSession}
+          onOpenAgentsHub={onOpenAgentsHub}
           onToggleMenu={onToggleMenu}
         />
         <SidebarReferenceNavButton
-          icon={IconUsersGroup}
-          label="Agents Hub"
-          onClick={onOpenAgentsHub}
+          icon={IconClock}
+          label="Automations"
+          onClick={onOpenAutomations}
         />
-        <SidebarReferenceNavButton icon={IconGridDots} label="Plugins" onClick={onOpenPlugins} />
+        <SidebarReferenceNavButton
+          icon={IconDeviceMobile}
+          label="Mobile"
+          onClick={onOpenMobile}
+        />
         <SidebarReferenceSearchNavItem
           inputRef={searchInputRef}
           isOpen={isSessionSearchOpen}
@@ -4105,21 +4511,21 @@ function SidebarReferenceTopChrome({
   );
 }
 
-function SidebarReferenceNewSessionNavItem({
+function SidebarReferenceAgentsHubNavItem({
   isOverflowMenuOpen,
-  onCreateSession,
+  onOpenAgentsHub,
   onToggleMenu,
 }: {
   isOverflowMenuOpen: boolean;
-  onCreateSession: () => void;
+  onOpenAgentsHub: () => void;
   onToggleMenu: (trigger: HTMLElement) => void;
 }) {
   return (
     <div className="reference-sidebar-nav-item">
       <SidebarReferenceNavButton
-        icon={IconPencil}
-        label="New Session"
-        onClick={onCreateSession}
+        icon={IconUsersGroup}
+        label="Agents Hub"
+        onClick={onOpenAgentsHub}
       />
       <button
         aria-controls="sidebar-overflow-menu"
@@ -4352,16 +4758,19 @@ function SidebarReferenceSectionHeader({
    * Remote machine headers need a Tabler edit action immediately to the right
    * of Reload so users can jump from a machine section to that machine's saved
    * Settings -> Remote fields without using the global Settings entry point.
+   *
+   * CDXC:SidebarSortFilter 2026-06-15-21:24:
+   * The section-header filter icon should use the stable hover label "Sort & Filter" even when the accessible label continues to expose the current sort mode and selected tag-filter count.
    */
-  const [sortMenuPosition, setSortMenuPosition] = useState<HeaderSortMenuPosition>();
-  const [agentMenuPosition, setAgentMenuPosition] = useState<HeaderSortMenuPosition>();
+  const [ sortMenuPosition, setSortMenuPosition ] = useState<HeaderSortMenuPosition>();
+  const [ agentMenuPosition, setAgentMenuPosition ] = useState<HeaderSortMenuPosition>();
   const BulkProjectIcon =
     bulkActionLabel === "Collapse All" ? IconArrowsDiagonalMinimize : IconArrowsDiagonal2;
-  const primaryAgent = agents.find((agent) => agent.agentId === primaryAgentId) ?? agents[0];
+  const primaryAgent = agents.find((agent) => agent.agentId === primaryAgentId) ?? agents[ 0 ];
   const primaryAgentLabel = primaryAgent?.name ?? "Agent";
   const normalizedSessionTagListItems = useMemo(
     () => normalizeSidebarSessionTagListItems(sessionTagListItems),
-    [sessionTagListItems],
+    [ sessionTagListItems ],
   );
   const hasTagFilters = selectedSessionTagFilters.length > 0;
   const hasActions =
@@ -4380,9 +4789,8 @@ function SidebarReferenceSectionHeader({
   const sortModeLabel =
     activeSessionsSortMode === "manual" ? "Manual Sorting" : "Last Active Sorting";
   const filterLabel = hasTagFilters
-    ? `${sortModeLabel}, ${selectedSessionTagFilters.length} tag filter${
-        selectedSessionTagFilters.length === 1 ? "" : "s"
-      }`
+    ? `${sortModeLabel}, ${selectedSessionTagFilters.length} tag filter${selectedSessionTagFilters.length === 1 ? "" : "s"
+    }`
     : sortModeLabel;
 
   const openSortMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -4445,7 +4853,7 @@ function SidebarReferenceSectionHeader({
               aria-label={`Filter sessions: ${filterLabel}`}
               className="reference-sidebar-section-action reference-sidebar-section-sort-action reference-sidebar-hover-action-tooltip"
               data-selected={String(activeSessionsSortMode === "manual" || hasTagFilters)}
-              data-tooltip={filterLabel}
+              data-tooltip="Sort & Filter"
               onClick={openSortMenu}
               type="button"
             >
@@ -4609,45 +5017,45 @@ function SidebarReferenceSectionHeader({
           ) : null}
           {onToggleSessionTagFilter
             ? normalizedSessionTagListItems.map((item) => {
-                if (!item.visible) {
-                  return null;
-                }
-                if (item.type === "separator") {
-                  return item.enabled ? (
-                    <div className="session-context-menu-divider" key={item.id} role="separator" />
-                  ) : null;
-                }
+              if (!item.visible) {
+                return null;
+              }
+              if (item.type === "separator") {
+                return item.enabled ? (
+                  <div className="session-context-menu-divider" key={item.id} role="separator" />
+                ) : null;
+              }
 
-                const isSelected = selectedSessionTagFilters.includes(item.tag);
-                return (
-                  <button
-                    aria-checked={isSelected}
-                    className="session-context-menu-item reference-sidebar-tag-filter-item"
-                    data-selected={String(isSelected)}
-                    disabled={!item.enabled}
-                    key={item.id}
-                    onClick={() => onToggleSessionTagFilter(item.tag)}
-                    role="menuitemcheckbox"
-                    type="button"
-                  >
-                    <SessionTagIcon
-                      className="session-context-menu-icon session-tag-colored-icon"
-                      fillFavorite
-                      size={14}
-                      stroke={1.8}
-                      tag={item.tag}
-                    />
-                    {getSidebarSessionTagLabel(item.tag)}
-                    <IconCheck
-                      aria-hidden="true"
-                      className="session-context-menu-trailing-icon reference-sidebar-tag-filter-check"
-                      data-visible={String(isSelected)}
-                      size={14}
-                      stroke={2}
-                    />
-                  </button>
-                );
-              })
+              const isSelected = selectedSessionTagFilters.includes(item.tag);
+              return (
+                <button
+                  aria-checked={isSelected}
+                  className="session-context-menu-item reference-sidebar-tag-filter-item"
+                  data-selected={String(isSelected)}
+                  disabled={!item.enabled}
+                  key={item.id}
+                  onClick={() => onToggleSessionTagFilter(item.tag)}
+                  role="menuitemcheckbox"
+                  type="button"
+                >
+                  <SessionTagIcon
+                    className="session-context-menu-icon session-tag-colored-icon"
+                    fillFavorite
+                    size={14}
+                    stroke={1.8}
+                    tag={item.tag}
+                  />
+                  {getSidebarSessionTagLabel(item.tag)}
+                  <IconCheck
+                    aria-hidden="true"
+                    className="session-context-menu-trailing-icon reference-sidebar-tag-filter-check"
+                    data-visible={String(isSelected)}
+                    size={14}
+                    stroke={2}
+                  />
+                </button>
+              );
+            })
             : null}
         </SidebarContextMenuPortal>
       ) : null}
@@ -4722,7 +5130,7 @@ function RemoteMachineSidebarSection({
   onToggleCollapsed: () => void;
   projectGroupIds: readonly string[];
   renderProjectGroup: (groupId: string, groupIndex: number) => ReactNode;
-  status: RemoteMachineRuntimeStatus["state"];
+    status: RemoteMachineRuntimeStatus[ "state" ];
 }) {
   const isConnected = status === "connected";
   const sortable = useSortable({
@@ -4768,6 +5176,99 @@ function RemoteMachineSidebarSection({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function isRecentProjectRowUnderPointer(
+  button: HTMLButtonElement | null,
+  pointerPoint: PointerViewportPoint | undefined,
+): boolean {
+  if (!button || !pointerPoint) {
+    return false;
+  }
+  const pointerElement = document.elementFromPoint(pointerPoint.clientX, pointerPoint.clientY);
+  return pointerElement !== null && button.contains(pointerElement);
+}
+
+type RecentProjectRowProps = {
+  isContextMenuOpen: boolean;
+  isScrolling: boolean;
+  onContextMenu: (event: ReactMouseEvent<HTMLButtonElement>, projectId: string) => void;
+  onRestore: (projectId: string) => void;
+  pointerPointRef: RefObject<PointerViewportPoint | undefined>;
+  project: SidebarRecentProject;
+};
+
+function RecentProjectRow({
+  isContextMenuOpen,
+  isScrolling,
+  onContextMenu,
+  onRestore,
+  pointerPointRef,
+  project,
+}: RecentProjectRowProps) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [ isTooltipOpen, setIsTooltipOpen ] = useState(false);
+
+  const setRecentProjectTooltipOpen = (nextOpen: boolean) => {
+    if (
+      nextOpen &&
+      (isScrolling || !isRecentProjectRowUnderPointer(buttonRef.current, pointerPointRef.current))
+    ) {
+      return;
+    }
+    setIsTooltipOpen(nextOpen);
+  };
+
+  useEffect(() => {
+    if (isScrolling) {
+      setIsTooltipOpen(false);
+    }
+  }, [ isScrolling ]);
+
+  return (
+    <AppTooltip
+      content={project.path}
+      onOpenChange={setRecentProjectTooltipOpen}
+      open={isTooltipOpen}
+    >
+      <button
+        className="recent-projects-row group-head"
+        data-context-menu-open={String(isContextMenuOpen)}
+        onClick={() => onRestore(project.projectId)}
+        onContextMenu={(event) => onContextMenu(event, project.projectId)}
+        onPointerLeave={() => setIsTooltipOpen(false)}
+        ref={buttonRef}
+        type="button"
+      >
+        {/*
+         * CDXC:RecentProjects 2026-06-14-15:45:
+         * Recent Project rows show their path tooltip only during a normal hover. Scrolling closes the current tooltip immediately and never reopens it from stale pointer state.
+         */}
+        <span className="group-title-wrap">
+          <span className="group-title-row">
+            <span
+              aria-hidden="true"
+              className="recent-projects-row-icon group-collapse-button section-titlebar-toggle"
+            >
+              <IconFolder size={16} stroke={1.8} />
+            </span>
+            <span className="group-title-handle">
+              <span className="recent-projects-row-title group-title section-titlebar-label">
+                {project.title}
+              </span>
+            </span>
+            <span className="group-title-spacer" />
+            <span
+              aria-label={`${project.sessionCount} preserved sessions`}
+              className="recent-projects-session-count group-add-button"
+            >
+              {project.sessionCount}
+            </span>
+          </span>
+        </span>
+      </button>
+    </AppTooltip>
   );
 }
 
@@ -4882,7 +5383,7 @@ function createWorkspaceSessionIdsByGroup(
   sessionIdsByGroup: SessionIdsByGroup,
 ): SessionIdsByGroup {
   return Object.fromEntries(
-    workspaceGroupIds.map((groupId) => [groupId, sessionIdsByGroup[groupId] ?? []]),
+    workspaceGroupIds.map((groupId) => [ groupId, sessionIdsByGroup[ groupId ] ?? [] ]),
   );
 }
 
@@ -4890,9 +5391,123 @@ function findSessionGroupId(
   sessionIdsByGroup: SessionIdsByGroup,
   sessionId: string,
 ): string | undefined {
-  return Object.entries(sessionIdsByGroup).find(([, sessionIds]) =>
+  return Object.entries(sessionIdsByGroup).find(([ , sessionIds ]) =>
     sessionIds.includes(sessionId),
-  )?.[0];
+  )?.[ 0 ];
+}
+
+function summarizeSidebarWakeScrollOrderState({
+  activeSessionsSortMode,
+  displayedWorkspaceGroupIds,
+  displayedWorkspaceSessionIdsByGroup,
+  focusedSessionId,
+  groupsById,
+  revision,
+  sessionsById,
+}: {
+  activeSessionsSortMode: SidebarActiveSessionsSortMode;
+  displayedWorkspaceGroupIds: readonly string[];
+  displayedWorkspaceSessionIdsByGroup: SessionIdsByGroup;
+  focusedSessionId: string;
+  groupsById: SidebarGroupsById;
+  revision: number;
+  sessionsById: SidebarSessionsById;
+}): Record<string, unknown> {
+  const groupId = findSessionGroupId(displayedWorkspaceSessionIdsByGroup, focusedSessionId);
+  const groupSessionIds = groupId ? displayedWorkspaceSessionIdsByGroup[ groupId ] ?? [] : [];
+  const groupIndex = groupId ? displayedWorkspaceGroupIds.indexOf(groupId) : -1;
+  const targetIndexInGroup = groupSessionIds.indexOf(focusedSessionId);
+  const group = groupId ? groupsById[ groupId ] : undefined;
+  const session = sessionsById[ focusedSessionId ];
+  return {
+    activeSessionsSortMode,
+    displayedGroupCount: displayedWorkspaceGroupIds.length,
+    firstSessionIdInGroup: groupSessionIds[ 0 ],
+    focusedSessionId,
+    groupId,
+    groupIndex,
+    groupIsChatCollection: group?.isChatCollection === true,
+    groupIsProject: Boolean(group?.projectContext),
+    groupIsRemote: Boolean(group?.remoteMachineContext),
+    groupSessionCount: groupSessionIds.length,
+    lastSessionIdInGroup: groupSessionIds.at(-1),
+    revision,
+    sessionActivity: session?.activity,
+    sessionIsFocused: session?.isFocused,
+    sessionIsLive: session?.isLive,
+    sessionIsPinned: session?.isPinned,
+    sessionIsSleeping: session?.isSleeping,
+    sessionIsVisible: session?.isVisible,
+    sessionKind: session?.sessionKind ?? session?.kind,
+    sessionLastInteractionAt: session?.lastInteractionAt,
+    sessionLifecycleState: session?.lifecycleState,
+    sessionNativePaneState: session?.nativePaneState,
+    sessionProviderSessionState: session?.providerSessionState,
+    targetIndexInGroup,
+    targetWindowSessionIds: createSidebarWakeScrollSessionIdWindow(
+      groupSessionIds,
+      targetIndexInGroup,
+    ),
+  };
+}
+
+function summarizeSidebarWakeScrollRenderedSlots(
+  root: ParentNode,
+  focusedSessionId: string,
+): Record<string, unknown> {
+  const slots = readRenderedSidebarSessionSlots(root);
+  const renderedSessionIds = slots.map((slot) => slot.sessionId);
+  const renderedIndex = renderedSessionIds.indexOf(focusedSessionId);
+  return {
+    renderedAwakeSlotCount: slots.filter((slot) => !slot.isSleeping).length,
+    renderedFirstSessionId: renderedSessionIds[ 0 ],
+    renderedIndex,
+    renderedLastSessionId: renderedSessionIds.at(-1),
+    renderedSleepingSlotCount: slots.filter((slot) => slot.isSleeping).length,
+    renderedSlotCount: slots.length,
+    renderedWindowSessionIds: createSidebarWakeScrollSessionIdWindow(
+      renderedSessionIds,
+      renderedIndex,
+    ),
+  };
+}
+
+function summarizeSidebarWakeScrollGeometry(
+  focusedSessionElement: HTMLElement,
+  scrollViewport: HTMLElement,
+): Record<string, unknown> {
+  const rowBounds = focusedSessionElement.getBoundingClientRect();
+  const viewportBounds = scrollViewport.getBoundingClientRect();
+  return {
+    clientHeight: roundSidebarWakeScrollMetric(scrollViewport.clientHeight),
+    isAboveViewport: rowBounds.top < viewportBounds.top,
+    isBelowViewport: rowBounds.bottom > viewportBounds.bottom,
+    isOutsideViewport: rowBounds.top < viewportBounds.top || rowBounds.bottom > viewportBounds.bottom,
+    rowBottomRelativeToViewport: roundSidebarWakeScrollMetric(rowBounds.bottom - viewportBounds.top),
+    rowHeight: roundSidebarWakeScrollMetric(rowBounds.height),
+    rowTopRelativeToViewport: roundSidebarWakeScrollMetric(rowBounds.top - viewportBounds.top),
+    scrollHeight: roundSidebarWakeScrollMetric(scrollViewport.scrollHeight),
+    scrollTop: roundSidebarWakeScrollMetric(scrollViewport.scrollTop),
+    viewportHeight: roundSidebarWakeScrollMetric(viewportBounds.height),
+  };
+}
+
+function createSidebarWakeScrollSessionIdWindow(
+  sessionIds: readonly string[],
+  targetIndex: number,
+  radius = 3,
+): string[] {
+  if (targetIndex < 0) {
+    return [];
+  }
+  return sessionIds.slice(
+    Math.max(0, targetIndex - radius),
+    Math.min(sessionIds.length, targetIndex + radius + 1),
+  );
+}
+
+function roundSidebarWakeScrollMetric(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function haveSameSessionOrder(left: readonly string[], right: readonly string[]): boolean {
@@ -4900,7 +5515,7 @@ function haveSameSessionOrder(left: readonly string[], right: readonly string[])
     return false;
   }
 
-  return left.every((sessionId, index) => sessionId === right[index]);
+  return left.every((sessionId, index) => sessionId === right[ index ]);
 }
 
 function haveSameSessionSet(left: readonly string[], right: readonly string[]): boolean {
@@ -4915,11 +5530,11 @@ function haveSameSessionSet(left: readonly string[], right: readonly string[]): 
 function createPinnedFirstSessionOrder(
   previousSessionIds: readonly string[],
   pinnedSessionIds: readonly string[],
-  sessionsById: Record<string, { isPinned?: boolean } | undefined>,
+  sessionsById: Record<string, { isPinned?: boolean; } | undefined>,
 ): string[] {
   const pinnedSessionIdSet = new Set(pinnedSessionIds);
   const unpinnedSessionIds = previousSessionIds.filter(
-    (sessionId) => sessionsById[sessionId]?.isPinned !== true,
+    (sessionId) => sessionsById[ sessionId ]?.isPinned !== true,
   );
 
   return [
@@ -4934,22 +5549,22 @@ function movePinnedSessionIdsByDropTarget(
   target: SidebarSessionDropTarget,
 ): string[] {
   if (target.kind !== "session") {
-    return [...previousPinnedSessionIds];
+    return [ ...previousPinnedSessionIds ];
   }
 
   return (
     moveSessionIdsByDropTarget(
       {
-        [target.groupId]: [...previousPinnedSessionIds],
+        [ target.groupId ]: [ ...previousPinnedSessionIds ],
       },
       sourceSessionId,
       target,
-    )[target.groupId] ?? [...previousPinnedSessionIds]
+    )[ target.groupId ] ?? [ ...previousPinnedSessionIds ]
   );
 }
 
 function createPinnedSessionDropTargetLogKey(
-  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session" }>,
+  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session"; }>,
   target: SidebarSessionDropTarget | undefined,
 ): string {
   if (!target) {
@@ -4964,23 +5579,23 @@ function createPinnedSessionDropTargetLogKey(
 }
 
 function createPinnedSessionReorderDebugState(
-  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session" }>,
+  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session"; }>,
   currentSessionIdsByGroup: SessionIdsByGroup,
   effectiveSessionIdsByGroup: SessionIdsByGroup,
   authoritativeSessionIdsByGroup: SessionIdsByGroup,
   sessionsById: Record<
     string,
-    { isPinned?: boolean; sessionId?: string } | undefined
+    { isPinned?: boolean; sessionId?: string; } | undefined
   >,
 ): Record<string, unknown> {
-  const currentSessionIds = currentSessionIdsByGroup[sourceData.groupId] ?? [];
-  const effectiveSessionIds = effectiveSessionIdsByGroup[sourceData.groupId] ?? [];
-  const authoritativeSessionIds = authoritativeSessionIdsByGroup[sourceData.groupId] ?? [];
+  const currentSessionIds = currentSessionIdsByGroup[ sourceData.groupId ] ?? [];
+  const effectiveSessionIds = effectiveSessionIdsByGroup[ sourceData.groupId ] ?? [];
+  const authoritativeSessionIds = authoritativeSessionIdsByGroup[ sourceData.groupId ] ?? [];
   const currentPinnedSessionIds = currentSessionIds.filter(
-    (sessionId) => sessionsById[sessionId]?.isPinned === true,
+    (sessionId) => sessionsById[ sessionId ]?.isPinned === true,
   );
   const effectivePinnedSessionIds = effectiveSessionIds.filter(
-    (sessionId) => sessionsById[sessionId]?.isPinned === true,
+    (sessionId) => sessionsById[ sessionId ]?.isPinned === true,
   );
 
   return {
@@ -4994,7 +5609,7 @@ function createPinnedSessionReorderDebugState(
     sourceCurrentPinnedIndex: currentPinnedSessionIds.indexOf(sourceData.sessionId),
     sourceEffectiveIndex: effectiveSessionIds.indexOf(sourceData.sessionId),
     sourceEffectivePinnedIndex: effectivePinnedSessionIds.indexOf(sourceData.sessionId),
-    sourceIsPinned: sessionsById[sourceData.sessionId]?.isPinned === true,
+    sourceIsPinned: sessionsById[ sourceData.sessionId ]?.isPinned === true,
   };
 }
 
@@ -5037,16 +5652,16 @@ function createPinnedSessionDomDebugState(
 
 function createPinnedSessionDropResolutionDebugState(
   nativeEvent: Event | undefined,
-  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session" }>,
+  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session"; }>,
   sessionIdsByGroup: SessionIdsByGroup,
-  sessionsById: Record<string, { isPinned?: boolean } | undefined>,
+  sessionsById: Record<string, { isPinned?: boolean; } | undefined>,
 ): Record<string, unknown> {
   const point = getClientPoint(nativeEvent);
   const groupElement = getSidebarGroupElementById(sourceData.groupId);
   const groupBounds = groupElement?.getBoundingClientRect();
-  const groupSessionIds = sessionIdsByGroup[sourceData.groupId] ?? [];
+  const groupSessionIds = sessionIdsByGroup[ sourceData.groupId ] ?? [];
   const pinnedSessionIds = groupSessionIds.filter(
-    (sessionId) => sessionsById[sessionId]?.isPinned === true,
+    (sessionId) => sessionsById[ sessionId ]?.isPinned === true,
   );
   const targetMetrics = pinnedSessionIds
     .filter((sessionId) => sessionId !== sourceData.sessionId)
@@ -5123,7 +5738,7 @@ function getScratchPadMenuLabel(isScratchPadOpen: boolean): string {
 
 function getCommandPaletteOverflowMenuLabel(hotkey: string): string {
   const hotkeyLabel = formatOverflowMenuTextHotkey(hotkey);
-  return hotkeyLabel ? `Commands [${hotkeyLabel}]` : "Commands";
+  return hotkeyLabel ? `Commands [${hotkeyLabel.replace("CMD", "⌘").replace("SHIFT", "⇧").replace("CTRL", "⌃").replace("ALT", "⌥")}]` : "Commands";
 }
 
 function formatOverflowMenuTextHotkey(hotkey: string): string {
@@ -5174,6 +5789,7 @@ type RenderSidebarTopControlsOptions = {
   onMoveSidebar: () => void;
   onOpenCommandPalette: () => void;
   onOpenDiscord: () => void;
+  onOpenFirstLaunchSetup: () => void;
   onOpenHelp: () => void;
   onOpenHotkeys: () => void;
   onShowRunning: () => void;
@@ -5194,6 +5810,7 @@ function renderFloatingOverflowMenu({
   onMoveSidebar: _onMoveSidebar,
   onOpenCommandPalette,
   onOpenDiscord,
+  onOpenFirstLaunchSetup,
   onOpenHelp,
   onOpenHotkeys,
   onShowRunning,
@@ -5227,21 +5844,21 @@ function renderFloatingOverflowMenu({
       </ToolbarIconButton>
       {isOverflowMenuOpen && overflowMenuPosition
         ? createPortal(
-            <div
-              aria-label="Sidebar actions"
-              className="session-context-menu sidebar-floating-menu"
-              data-empty-space-blocking="true"
-              id="sidebar-overflow-menu"
-              ref={overflowMenuRef}
-              role="menu"
-              style={{
-                right: overflowMenuPosition.right,
-                top: overflowMenuPosition.top,
-                zIndex: 250,
-              }}
-            >
-              <div className="session-context-menu-group">
-                {/*
+          <div
+            aria-label="Sidebar actions"
+            className="session-context-menu sidebar-floating-menu"
+            data-empty-space-blocking="true"
+            id="sidebar-overflow-menu"
+            ref={overflowMenuRef}
+            role="menu"
+            style={{
+              right: overflowMenuPosition.right,
+              top: overflowMenuPosition.top,
+              zIndex: 250,
+            }}
+          >
+            <div className="session-context-menu-group">
+              {/*
                  * CDXC:SidebarLayout 2026-05-13-08:11
                  * Pinned prompts and scratch pad are permanent overflow-menu
                  * actions so compact secondary tools stay reachable from one
@@ -5274,125 +5891,139 @@ function renderFloatingOverflowMenu({
                  * text form so users can discover the app-wide command surface
                  * and its configured shortcut from the sidebar's More control.
                  */}
-                <button
-                  className="session-context-menu-item"
-                  onClick={onOpenCommandPalette}
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconCommand
-                    aria-hidden="true"
-                    className="session-context-menu-icon"
-                    size={14}
-                    stroke={1.8}
-                  />
-                  {commandPaletteMenuLabel}
-                </button>
-                <button
-                  aria-checked={isPetOverlayEnabled}
-                  className="session-context-menu-item"
-                  onClick={onTogglePetOverlay}
-                  role="menuitemcheckbox"
-                  type="button"
-                >
-                  <IconRobotFace
-                    aria-hidden="true"
-                    className="session-context-menu-icon"
-                    size={14}
-                    stroke={1.8}
-                  />
-                  {isPetOverlayEnabled ? "Sleep Pet" : "Wake Pet"}
-                </button>
-                <button
-                  aria-checked={isPinnedPromptsOpen}
-                  className="session-context-menu-item"
-                  onClick={onTogglePinnedPrompts}
-                  role="menuitemcheckbox"
-                  type="button"
-                >
-                  <IconBookmark
-                    aria-hidden="true"
-                    className="session-context-menu-icon"
-                    size={14}
-                    stroke={1.8}
-                  />
-                  Pinned Prompts
-                </button>
-                <button
-                  className="session-context-menu-item"
-                  onClick={onToggleScratchPad}
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconPencil
-                    aria-hidden="true"
-                    className="session-context-menu-icon"
-                    size={14}
-                    stroke={1.8}
-                  />
-                  {getScratchPadMenuLabel(isScratchPadOpen)}
-                </button>
-              </div>
-              <div className="session-context-menu-divider" role="separator" />
-              <div className="session-context-menu-group">
-                <button
-                  className="session-context-menu-item"
-                  onClick={onShowRunning}
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconHistory aria-hidden="true" className="session-context-menu-icon" size={14} />
-                  Running
-                </button>
-                <button
-                  className="session-context-menu-item"
-                  onClick={onOpenHotkeys}
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconKeyboard
-                    aria-hidden="true"
-                    className="session-context-menu-icon"
-                    size={14}
-                    stroke={1.8}
-                  />
-                  Hotkeys
-                </button>
-                <button
-                  className="session-context-menu-item"
-                  onClick={onOpenHelp}
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconHelpCircle
-                    aria-hidden="true"
-                    className="session-context-menu-icon"
-                    size={14}
-                    stroke={1.8}
-                  />
-                  Setup Wizard
-                </button>
-              </div>
-              <div className="session-context-menu-divider" role="separator" />
-              <div className="session-context-menu-group">
-                <button
-                  className="session-context-menu-item"
-                  onClick={onOpenDiscord}
-                  role="menuitem"
-                  type="button"
-                >
-                  <IconUsersGroup
-                    aria-hidden="true"
-                    className="session-context-menu-icon"
-                    size={14}
-                    stroke={1.8}
-                  />
-                  Join Discord
-                </button>
-              </div>
-            </div>,
-            document.body,
-          )
+              <button
+                className="session-context-menu-item"
+                onClick={onOpenCommandPalette}
+                role="menuitem"
+                type="button"
+              >
+                <IconCommand
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  size={14}
+                  stroke={1.8}
+                />
+                {commandPaletteMenuLabel}
+              </button>
+              <button
+                aria-checked={isPetOverlayEnabled}
+                className="session-context-menu-item"
+                onClick={onTogglePetOverlay}
+                role="menuitemcheckbox"
+                type="button"
+              >
+                <IconRobotFace
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  size={14}
+                  stroke={1.8}
+                />
+                {isPetOverlayEnabled ? "Sleep Pet" : "Wake Pet"}
+              </button>
+              <button
+                aria-checked={isPinnedPromptsOpen}
+                className="session-context-menu-item"
+                onClick={onTogglePinnedPrompts}
+                role="menuitemcheckbox"
+                type="button"
+              >
+                <IconBookmark
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  size={14}
+                  stroke={1.8}
+                />
+                Pinned Prompts
+              </button>
+              <button
+                className="session-context-menu-item"
+                onClick={onToggleScratchPad}
+                role="menuitem"
+                type="button"
+              >
+                <IconPencil
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  size={14}
+                  stroke={1.8}
+                />
+                {getScratchPadMenuLabel(isScratchPadOpen)}
+              </button>
+            </div>
+            <div className="session-context-menu-divider" role="separator" />
+            <div className="session-context-menu-group">
+              <button
+                className="session-context-menu-item"
+                onClick={onShowRunning}
+                role="menuitem"
+                type="button"
+              >
+                <IconHistory aria-hidden="true" className="session-context-menu-icon" size={14} />
+                Running
+              </button>
+              <button
+                className="session-context-menu-item"
+                onClick={onOpenHotkeys}
+                role="menuitem"
+                type="button"
+              >
+                <IconKeyboard
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  size={14}
+                  stroke={1.8}
+                />
+                Hotkeys
+              </button>
+              <button
+                className="session-context-menu-item"
+                onClick={onOpenFirstLaunchSetup}
+                role="menuitem"
+                type="button"
+              >
+                <IconHelpCircle
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  size={14}
+                  stroke={1.8}
+                />
+                Setup Flow
+              </button>
+              <button
+                className="session-context-menu-item"
+                onClick={onOpenHelp}
+                role="menuitem"
+                type="button"
+              >
+                <IconHelpCircle
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  size={14}
+                  stroke={1.8}
+                />
+                Discover Ghostex
+              </button>
+            </div>
+            <div className="session-context-menu-divider" role="separator" />
+            <div className="session-context-menu-group">
+              <button
+                className="session-context-menu-item"
+                onClick={onOpenDiscord}
+                role="menuitem"
+                type="button"
+              >
+                <IconUsersGroup
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  size={14}
+                  stroke={1.8}
+                />
+                Join Discord
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )
         : null}
     </>
   );
@@ -5402,7 +6033,7 @@ function resolveSessionDropTargetFromPoint(
   nativeEvent: Event | undefined,
   sessionIdsByGroup: SessionIdsByGroup,
   targetData: ReturnType<typeof getSidebarDropData>,
-  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session" }> | undefined,
+  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session"; }> | undefined,
 ) {
   const point = getClientPoint(nativeEvent);
   const candidates = [
@@ -5417,7 +6048,7 @@ function resolveSessionDropTargetFromPoint(
       continue;
     }
 
-    const groupSessionIds = sessionIdsByGroup[candidate.groupId];
+    const groupSessionIds = sessionIdsByGroup[ candidate.groupId ];
     if (!groupSessionIds) {
       continue;
     }
@@ -5434,9 +6065,9 @@ function resolveSessionDropTargetFromPoint(
 
 function resolvePinnedSessionDropTargetFromPoint(
   nativeEvent: Event | undefined,
-  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session" }>,
+  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session"; }>,
   sessionIdsByGroup: SessionIdsByGroup,
-  sessionsById: Record<string, { isPinned?: boolean } | undefined>,
+  sessionsById: Record<string, { isPinned?: boolean; } | undefined>,
 ): SidebarSessionDropTarget | undefined {
   const point = getClientPoint(nativeEvent);
   if (!point) {
@@ -5449,9 +6080,9 @@ function resolvePinnedSessionDropTargetFromPoint(
     return undefined;
   }
 
-  const groupSessionIds = sessionIdsByGroup[sourceData.groupId] ?? [];
+  const groupSessionIds = sessionIdsByGroup[ sourceData.groupId ] ?? [];
   const pinnedSessionIds = groupSessionIds.filter(
-    (sessionId) => sessionsById[sessionId]?.isPinned === true,
+    (sessionId) => sessionsById[ sessionId ]?.isPinned === true,
   );
   if (pinnedSessionIds.length < 2 || !pinnedSessionIds.includes(sourceData.sessionId)) {
     return undefined;
@@ -5463,11 +6094,11 @@ function resolvePinnedSessionDropTargetFromPoint(
       const element = getTargetSessionElement(sessionId, point);
       return element
         ? [
-            {
-              bounds: element.getBoundingClientRect(),
-              sessionId,
-            },
-          ]
+          {
+            bounds: element.getBoundingClientRect(),
+            sessionId,
+          },
+        ]
         : [];
     });
   if (targetSessionMetrics.length === 0) {
@@ -5492,7 +6123,7 @@ function resolvePinnedSessionDropTargetFromPoint(
     }
   }
 
-  const lastTarget = targetSessionMetrics[targetSessionMetrics.length - 1];
+  const lastTarget = targetSessionMetrics[ targetSessionMetrics.length - 1 ];
   return {
     groupId: sourceData.groupId,
     kind: "session",
@@ -5506,7 +6137,7 @@ function resolveGroupDropTargetFromPoint(
   groupIds: readonly string[],
   groupsById: SidebarProjectGroupLookup,
   targetData: ReturnType<typeof getSidebarDropData>,
-  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "group" }> | undefined,
+  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "group"; }> | undefined,
 ): SidebarGroupDropTarget | undefined {
   const point = getClientPoint(nativeEvent);
   const candidates = [
@@ -5561,7 +6192,7 @@ function areSameSessionDropTarget(
 
 function isSourceSessionDropTarget(
   candidate: SidebarSessionDropTarget,
-  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session" }> | undefined,
+  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session"; }> | undefined,
 ): boolean {
   return Boolean(
     sourceData &&
@@ -5687,7 +6318,7 @@ function createProjectGroupOrderItems(
   groupsById: SidebarProjectGroupLookup,
 ): SidebarProjectGroupOrderItem[] {
   return groupIds.flatMap((groupId) => {
-    const projectContext = groupsById[groupId]?.projectContext;
+    const projectContext = groupsById[ groupId ]?.projectContext;
     if (!projectContext) {
       return [];
     }
@@ -5774,17 +6405,17 @@ function updateGroupDragPreviewFromEvent(
   setGroupDragPreview((previous) =>
     previous
       ? {
-          ...previous,
-          top: point.y - previous.pointerOffsetY,
-        }
+        ...previous,
+        top: point.y - previous.pointerOffsetY,
+      }
       : previous,
   );
 }
 
 function getProjectGroupDragHeaderMetrics(
   groupId: string,
-  point: { x: number; y: number },
-): { left: number; pointerOffsetY: number; top: number; width: number } | undefined {
+  point: { x: number; y: number; },
+): { left: number; pointerOffsetY: number; top: number; width: number; } | undefined {
   const groupElement = Array.from(
     document.querySelectorAll<HTMLElement>("[data-sidebar-group-id]"),
   ).find(
@@ -5806,14 +6437,14 @@ function getProjectGroupDragHeaderMetrics(
 }
 
 function createSessionPointerDragState(
-  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session" }>,
+  sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session"; }>,
   pointerDownSessionTarget: SidebarPointerDownSessionTarget | undefined,
   nativeEvent: Event | undefined,
 ): SidebarSessionPointerDragState {
   const startPoint =
     pointerDownSessionTarget &&
-    pointerDownSessionTarget.groupId === sourceData.groupId &&
-    pointerDownSessionTarget.sessionId === sourceData.sessionId
+      pointerDownSessionTarget.groupId === sourceData.groupId &&
+      pointerDownSessionTarget.sessionId === sourceData.sessionId
       ? pointerDownSessionTarget.point
       : undefined;
 
@@ -5838,8 +6469,8 @@ function updateSessionPointerDragState(
 }
 
 function hasPointerDragMovedPastThreshold(
-  startPoint: { x: number; y: number } | undefined,
-  currentPoint: { x: number; y: number } | undefined,
+  startPoint: { x: number; y: number; } | undefined,
+  currentPoint: { x: number; y: number; } | undefined,
 ): boolean {
   if (!startPoint || !currentPoint) {
     return false;
@@ -5867,7 +6498,7 @@ function getSidebarStartupElapsedMs(startedAt: number): number {
   return Math.round(getSidebarStartupNow() - startedAt);
 }
 
-function countSidebarSessions(groups: readonly { sessions: readonly unknown[] }[]): number {
+function countSidebarSessions(groups: readonly { sessions: readonly unknown[]; }[]): number {
   return groups.reduce((total, group) => total + group.sessions.length, 0);
 }
 
@@ -5906,7 +6537,7 @@ function summarizeSidebarAgentIconsFromGroups(
 }
 
 function summarizeSidebarAgentIconsFromStore(
-  sessionsById: ReturnType<typeof useSidebarStore.getState>["sessionsById"],
+  sessionsById: ReturnType<typeof useSidebarStore.getState>[ "sessionsById" ],
 ) {
   return summarizeSidebarAgentIconSessions(
     Object.values(sessionsById).map((session) => ({
@@ -5945,17 +6576,17 @@ function createDisplayedSessionIdsByGroup({
   query: string;
   selectedSessionTags: readonly SidebarSessionTag[];
   sessionIdsByGroup: SessionIdsByGroup;
-  sessionsById: ReturnType<typeof useSidebarStore.getState>["sessionsById"];
+    sessionsById: ReturnType<typeof useSidebarStore.getState>[ "sessionsById" ];
   shouldFilter: boolean;
 }): SessionIdsByGroup {
   const displayedSessionIdsByGroup: SessionIdsByGroup = {};
 
   for (const groupId of groupIds) {
-    const sessionIds = sessionIdsByGroup[groupId] ?? [];
+    const sessionIds = sessionIdsByGroup[ groupId ] ?? [];
     const queryFilteredSessionIds = !shouldFilter
-      ? [...sessionIds]
+      ? [ ...sessionIds ]
       : filterSessionIdsByQuery(sessionIds, sessionsById, query);
-    displayedSessionIdsByGroup[groupId] = filterSessionIdsByTags(
+    displayedSessionIdsByGroup[ groupId ] = filterSessionIdsByTags(
       queryFilteredSessionIds,
       sessionsById,
       selectedSessionTags,
@@ -5967,16 +6598,16 @@ function createDisplayedSessionIdsByGroup({
 
 function filterSessionIdsByTags(
   sessionIds: readonly string[],
-  sessionsById: ReturnType<typeof useSidebarStore.getState>["sessionsById"],
+  sessionsById: ReturnType<typeof useSidebarStore.getState>[ "sessionsById" ],
   selectedSessionTags: readonly SidebarSessionTag[],
 ): string[] {
   if (selectedSessionTags.length === 0) {
-    return [...sessionIds];
+    return [ ...sessionIds ];
   }
 
   const selectedTagSet = new Set(selectedSessionTags);
   return sessionIds.filter((sessionId) => {
-    const session = sessionsById[sessionId];
+    const session = sessionsById[ sessionId ];
     const sessionTag = session ? getEffectiveSessionTag(session) : undefined;
     return sessionTag ? selectedTagSet.has(sessionTag) : false;
   });
@@ -5984,12 +6615,12 @@ function filterSessionIdsByTags(
 
 function filterSessionIdsByQuery(
   sessionIds: readonly string[],
-  sessionsById: ReturnType<typeof useSidebarStore.getState>["sessionsById"],
+  sessionsById: ReturnType<typeof useSidebarStore.getState>[ "sessionsById" ],
   query: string,
 ): string[] {
   const sessions = sessionIds.flatMap((sessionId) => {
-    const session = sessionsById[sessionId];
-    return session ? [session] : [];
+    const session = sessionsById[ sessionId ];
+    return session ? [ session ] : [];
   });
   const matchedSessionIds = new Set(
     filterSidebarSessionItems(sessions, query).map((session) => session.sessionId),
@@ -6004,10 +6635,10 @@ function createDisplayedGroupIds(
   shouldFilter: boolean,
 ): string[] {
   if (!shouldFilter) {
-    return [...groupIds];
+    return [ ...groupIds ];
   }
 
-  return groupIds.filter((groupId) => (sessionIdsByGroup[groupId] ?? []).length > 0);
+  return groupIds.filter((groupId) => (sessionIdsByGroup[ groupId ] ?? []).length > 0);
 }
 
 function getCommandPaletteHotkeyActionId(

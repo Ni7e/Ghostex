@@ -59,6 +59,30 @@ can_reuse_local_adhoc_signature() {
 	[[ "$CODE_SIGN_IDENTITY" == "-" && "$CODE_SIGN_TIMESTAMP_FLAG" == "--timestamp=none" ]]
 }
 
+local_start_signing() {
+	[[ "${GHOSTEX_LOCAL_START:-}" == "1" ]]
+}
+
+signature_matches_requested_identity() {
+	local code_path="$1"
+	local signature_details
+	signature_details="$(codesign -dv --verbose=4 "$code_path" 2>&1 || true)"
+	if [[ "$CODE_SIGN_IDENTITY" == "-" ]]; then
+		[[ "$signature_details" == *"Signature=adhoc"* ]]
+	elif [[ "$CODE_SIGN_IDENTITY" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+		[[ "$signature_details" != *"Signature=adhoc"* && "$signature_details" != *"TeamIdentifier=not set"* ]]
+	else
+		[[ "$signature_details" == *"Authority=$CODE_SIGN_IDENTITY"* ]]
+	fi
+}
+
+can_reuse_local_signature() {
+	local code_path="$1"
+	(local_start_signing || can_reuse_local_adhoc_signature) &&
+		codesign --verify --strict "$code_path" >/dev/null 2>&1 &&
+		signature_matches_requested_identity "$code_path"
+}
+
 has_linker_signed_signature() {
 	local code_path="$1"
 	local signature_details
@@ -86,8 +110,8 @@ sign_plain_macho_if_needed() {
 	# CDXC:LocalStartFast 2026-06-07-17:32: Linker-signed Mach-O payloads can pass `codesign --verify` while still being denied when Node loads a bundled native module from the app bundle. Treat linker-signed payloads as unsigned for local starts so the preflight validates the same explicit signature the launched app will use.
 	# CDXC:LocalStartFast 2026-06-07-17:40: Keep the linker-signed test in a helper instead of an inline negated pipeline so Bash evaluates the runtime-load blocker as a single boolean before deciding to skip signing.
 	# CDXC:LocalStartFast 2026-06-07-17:45: Do not pipe `codesign -dv` into `grep -q` under pipefail; grep can exit before codesign finishes writing and make a real linker-signed payload look reusable. Capture the signature text first so local starts always re-sign runtime-loaded native modules.
-	if can_reuse_local_adhoc_signature &&
-		codesign --verify --strict "$code_path" >/dev/null 2>&1 &&
+	# CDXC:MacOSPermissions 2026-06-16-02:27: Certificate-signed local starts should keep the same fast nested-code reuse behavior as ad-hoc starts, but only when the existing signature already matches the requested identity. Re-sign old ad-hoc nested code once so the outer app keeps a stable Screen Recording TCC requirement across rebuilds.
+	if can_reuse_local_signature "$code_path" &&
 		! has_linker_signed_signature "$code_path" &&
 		(! requires_v8_runtime_entitlements "$code_path" || has_v8_runtime_entitlements "$code_path"); then
 		return 0

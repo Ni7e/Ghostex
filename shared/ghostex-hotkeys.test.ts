@@ -60,8 +60,13 @@ describe("normalizeghostexHotkeySettings", () => {
     expect(DEFAULT_ghostex_HOTKEYS.forkSession).toBe("ctrl+shift+f");
     expect(DEFAULT_ghostex_HOTKEYS.reloadSession).toBe("ctrl+shift+r");
     expect(DEFAULT_ghostex_HOTKEYS.popOutPane).toBe("ctrl+shift+o");
-    expect(DEFAULT_ghostex_HOTKEYS.focusGroup1).toBe("cmd+ctrl+1");
-    expect(DEFAULT_ghostex_HOTKEYS.focusGroup5).toBe("cmd+ctrl+5");
+    /**
+     * CDXC:ProjectHotkeys 2026-06-15-11:12:
+     * Cmd+Ctrl+1..9 are project jumps now, preserving the old physical chords
+     * while targeting Projects sidebar rows instead of workspace groups.
+     */
+    expect(DEFAULT_ghostex_HOTKEYS.jumpToProject1).toBe("cmd+ctrl+1");
+    expect(DEFAULT_ghostex_HOTKEYS.jumpToProject9).toBe("cmd+ctrl+9");
     expect(DEFAULT_ghostex_HOTKEYS.focusSessionSlot1).toBe("cmd+1");
     expect(DEFAULT_ghostex_HOTKEYS.switchAgentsView).toBe("alt+1");
     expect(DEFAULT_ghostex_HOTKEYS.switchSourceView).toBe("alt+2");
@@ -82,6 +87,15 @@ describe("normalizeghostexHotkeySettings", () => {
     );
     expect(getghostexHotkeyActionIdForKey(DEFAULT_ghostex_HOTKEYS, "ctrl+shift+5")).toBe(
       "runActionSlot5",
+    );
+  });
+
+  test("matches numbered project jump hotkeys", () => {
+    expect(getghostexHotkeyActionIdForKey(DEFAULT_ghostex_HOTKEYS, "cmd+ctrl+1")).toBe(
+      "jumpToProject1",
+    );
+    expect(getghostexHotkeyActionIdForKey(DEFAULT_ghostex_HOTKEYS, "cmd+ctrl+9")).toBe(
+      "jumpToProject9",
     );
   });
 
@@ -228,6 +242,23 @@ describe("normalizeghostexHotkeySettings", () => {
     ).toMatchObject({
       splitMore: "cmd+d",
       splitMoreDown: "",
+    });
+  });
+
+  test("preserves legacy focus group customizations for project jumps", () => {
+    /*
+     * CDXC:ProjectHotkeys 2026-06-15-11:12:
+     * Renaming Focus Group 1..5 to Jump to Project 1..5 must keep customized
+     * or explicitly cleared user bindings instead of restoring defaults.
+     */
+    expect(
+      normalizeghostexHotkeySettings({
+        focusGroup1: "cmd+ctrl+shift+1",
+        focusGroup2: "",
+      }),
+    ).toMatchObject({
+      jumpToProject1: "cmd+ctrl+shift+1",
+      jumpToProject2: "",
     });
   });
 });

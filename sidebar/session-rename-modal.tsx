@@ -66,6 +66,7 @@ export function SessionRenameModal({
   const agentSelectId = useId();
   const inputId = useId();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const userInteractedAfterOpenRef = useRef(false);
   const promptAgents = useMemo(
     () => agents.filter((agent) => agent.agentId !== "t3" && agent.command?.trim()),
     [agents],
@@ -85,6 +86,7 @@ export function SessionRenameModal({
       return;
     }
 
+    userInteractedAfterOpenRef.current = false;
     setTitle(initialTitle);
   }, [initialTitle, isOpen]);
 
@@ -96,14 +98,25 @@ export function SessionRenameModal({
    * (returning false so base-ui does not re-focus and collapse the selection
    * afterward), and keep a requestAnimationFrame pass as a fallback for hosts
    * where initialFocus runs before the textarea has its value.
+   *
+   * CDXC:SidebarRename 2026-06-15-01:27:
+   * Rename Session now opens in a hidden native child-window host that becomes
+   * key after React has already rendered and reported `presented`. Re-run the
+   * same focus/select request across the native window-focus boundary, but stop
+   * as soon as the user clicks or types in the modal so delayed host focus never
+   * steals an intentional caret or button/select interaction.
    */
   const focusAndSelectInput = useCallback(() => {
     const input = inputRef.current;
     if (input) {
-      input.focus();
-      input.select();
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(0, input.value.length);
     }
     return false as const;
+  }, []);
+
+  const markUserInteractedAfterOpen = useCallback(() => {
+    userInteractedAfterOpenRef.current = true;
   }, []);
 
   useEffect(() => {
@@ -111,13 +124,33 @@ export function SessionRenameModal({
       return;
     }
 
-    const animationFrame = window.requestAnimationFrame(() => {
+    const focusUnlessUserInteracted = () => {
+      if (userInteractedAfterOpenRef.current) {
+        return;
+      }
       focusAndSelectInput();
-    });
+    };
+    const retryDelaysMs = [0, 16, 50, 100, 250, 500, 1000, 1600, 2400];
+    const timeoutIds = retryDelaysMs.map((delayMs) =>
+      window.setTimeout(focusUnlessUserInteracted, delayMs),
+    );
+    const animationFrame = window.requestAnimationFrame(focusUnlessUserInteracted);
+    const windowFocusTimeoutIds: number[] = [];
+    const windowFocusAnimationFrames: number[] = [];
+    const handleWindowFocus = () => {
+      windowFocusTimeoutIds.push(window.setTimeout(focusUnlessUserInteracted, 0));
+      windowFocusAnimationFrames.push(window.requestAnimationFrame(focusUnlessUserInteracted));
+    };
+
+    window.addEventListener("focus", handleWindowFocus);
     return () => {
       window.cancelAnimationFrame(animationFrame);
+      timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      windowFocusTimeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      windowFocusAnimationFrames.forEach((frameId) => window.cancelAnimationFrame(frameId));
+      window.removeEventListener("focus", handleWindowFocus);
     };
-  }, [focusAndSelectInput, isOpen]);
+  }, [focusAndSelectInput, initialTitle, isOpen]);
 
   if (!isOpen) {
     return null;
@@ -202,7 +235,12 @@ export function SessionRenameModal({
         initialFocus={focusAndSelectInput}
         showCloseButton
       >
-        <form className="session-rename-form" onSubmit={submitRename}>
+        <form
+          className="session-rename-form"
+          onKeyDownCapture={markUserInteractedAfterOpen}
+          onPointerDownCapture={markUserInteractedAfterOpen}
+          onSubmit={submitRename}
+        >
           <DialogHeader>
             <DialogTitle className="text-xl">Rename Session</DialogTitle>
             <DialogDescription>

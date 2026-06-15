@@ -27,6 +27,7 @@ export type NativeTerminalLayout =
 export type NativeTerminalTitleBarAction =
   | "close"
   | "closeCommandsPanel"
+  | "closeAfterDone"
   | "delayedSend"
   | "expandCommandsPanel"
   | "fork"
@@ -113,6 +114,13 @@ export type NativeGhosttyHostCommand =
     }
   | {
       browserFeedbackTool?: "react-grab" | "agentation";
+      browserHistory?: Array<{
+        faviconDataUrl?: string;
+        title: string;
+        url: string;
+        visitedAt: string;
+      }>;
+      browserHistoryScopeId?: string;
       cwd?: string;
       projectId?: string;
       sessionId: string;
@@ -210,10 +218,26 @@ export type NativeGhosttyHostCommand =
       activeBrowserTabId?: string;
       browserTabs?: Array<{
         id: string;
+        /**
+         * CDXC:ProjectBrowserTabs 2026-06-15-20:48:
+         * Closing the last Browser top-mode tab should release Chromium memory while keeping one address-bar placeholder in the tab strip. Mark that placeholder explicitly instead of persisting about:blank as a real browser page.
+         */
+        isPlaceholder?: boolean;
         title: string;
         url: string;
       }>;
       browserFeedbackTool?: "react-grab" | "agentation";
+      /**
+       * CDXC:BrowserHistory 2026-06-15-10:25:
+       * Browser toolbar history is project-family state shared by the main project and its worktrees. The sidebar owns that family scope, then sends de-duplicated URL history snapshots to native so AppKit can render the address-bar menu without learning worktree relationships.
+       */
+      browserHistory?: Array<{
+        faviconDataUrl?: string;
+        title: string;
+        url: string;
+        visitedAt: string;
+      }>;
+      browserHistoryScopeId?: string;
       mode?: "code" | "git" | "tasks";
       companionPaneHidden?: boolean;
       projectId: string;
@@ -223,6 +247,20 @@ export type NativeGhosttyHostCommand =
       title: string;
       type: "createProjectEditorPane";
       url: string;
+    }
+  | {
+      /**
+       * CDXC:BrowserHistory 2026-06-15-10:25:
+       * Native Browser history updates are scoped by the sidebar-provided project-family id, not by individual browser pane ids, so every open Browser toolbar in a main project or worktree can show the same recent links.
+       */
+      browserHistory: Array<{
+        faviconDataUrl?: string;
+        title: string;
+        url: string;
+        visitedAt: string;
+      }>;
+      browserHistoryScopeId: string;
+      type: "setBrowserHistory";
     }
   | {
       projectId: string;
@@ -296,9 +334,17 @@ export type NativeGhosttyHostCommand =
        *
        * CDXC:SessionFocusMode 2026-05-28-15:35:
        * Availability follows rendered awake pane owners, so a persisted split whose other owner is sleeping does not show Focus in the native tab context menu.
-       */
+      */
       sessionFocusModeAvailableSessionIds?: string[];
       sleepingSessionIds?: string[];
+      /**
+       * CDXC:TerminalCreationFocus 2026-06-14-18:48:
+       * Pending native creates are selected tab owners before their Ghostty
+       * surface exists. AppKit renders these as non-wake placeholders so New
+       * Terminal switches tabs immediately, then terminalReady replaces the
+       * placeholder with the mounted terminal.
+       */
+      mountingSessionIds?: string[];
       /**
        * CDXC:NativeGpu 2026-05-08-16:45
        * Sidebar status/title/icon updates must still reach native pane chrome,
@@ -348,6 +394,36 @@ export type NativeGhosttyHostCommand =
        */
       showSessionIdInTerminalPanes?: boolean;
       showProjectEditorDiffFileCount?: boolean;
+      /**
+       * CDXC:SidebarTheme 2026-06-15-01:43:
+       * Native titlebar and child-window dropdown backing surfaces are outside
+       * the sidebar DOM. Carry the resolved app theme through layout sync so
+       * Dark 1, Dark 2, and Light repaint native-owned chrome with the same
+       * choice Settings shows.
+       */
+      sidebarTheme?: string;
+      /**
+       * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
+       * Custom chrome colors are scoped to the sidebar and native titlebar.
+       * Carry them beside the preset theme without changing modal/dropdown
+       * surfaces that still resolve from sidebarTheme.
+       *
+       * CDXC:SidebarTitlebarColors 2026-06-15-13:22:
+       * Foreground remains in the protocol for compatibility, but senders
+       * should derive it from the background instead of exposing a separate
+       * user-editable foreground choice.
+       *
+       * CDXC:SidebarTitlebarColors 2026-06-15-13:45:
+       * Background remains a hex payload for native/titlebar compatibility, but
+       * Settings now computes it from a grayscale contrast slider.
+       *
+       * CDXC:SidebarTitlebarColors 2026-06-15-15:15:
+       * The protocol field stays hex-only while Settings presents the source
+       * control as Background Contrast.
+       */
+      customSidebarTitlebarColorsEnabled?: boolean;
+      customSidebarTitlebarForegroundColor?: string;
+      customSidebarTitlebarBackgroundColor?: string;
       sidebarActions?: {
         commands: SidebarCommandButton[];
       };
@@ -391,10 +467,11 @@ export type NativeGhosttyHostEvent =
       appName?: string;
       bundleIdentifier?: string;
       imagePath: string;
-      text?: string;
       title?: string;
       trigger: string;
       type: "appShotCaptured";
+      windowHeight?: number;
+      windowWidth?: number;
     }
   | {
       message: string;
@@ -620,6 +697,11 @@ export type NativeGhosttyHostEvent =
       projectId: string;
       tabs?: Array<{
         id: string;
+        /**
+         * CDXC:ProjectBrowserTabs 2026-06-15-20:48:
+         * Native reports a placeholder tab after the final Browser tab is closed so React can persist an address-only empty state without treating it as a loaded Chromium page.
+         */
+        isPlaceholder?: boolean;
         title: string;
         url: string;
       }>;

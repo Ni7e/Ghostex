@@ -17,6 +17,7 @@ enum HostCommand: Decodable {
   case startCodeServerRuntime(StartCodeServerRuntime)
   case stopCodeServerRuntime
   case createProjectEditorPane(CreateProjectEditorPane)
+  case setBrowserHistory(SetBrowserHistory)
   case focusProjectEditorPane(ProjectEditorCommand)
   case closeProjectEditorPane(ProjectEditorCommand)
   case activateApp
@@ -37,6 +38,7 @@ enum HostCommand: Decodable {
   case showMessage(ShowMessage)
   case appendAgentDetectionDebugLog(AppendAgentDetectionDebugLog)
   case appendLayoutLayeringDebugLog(AppendLayoutLayeringDebugLog)
+  case appendModeSwitcherDebugLog(AppendModeSwitcherDebugLog)
   case appendProjectBoardDebugLog(AppendProjectBoardDebugLog)
   case appendTerminalFocusDebugLog(AppendTerminalFocusDebugLog)
   case appendRestoreDebugLog(AppendRestoreDebugLog)
@@ -124,6 +126,7 @@ enum HostCommand: Decodable {
     case startCodeServerRuntime
     case stopCodeServerRuntime
     case createProjectEditorPane
+    case setBrowserHistory
     case focusProjectEditorPane
     case closeProjectEditorPane
     case activateApp
@@ -144,6 +147,7 @@ enum HostCommand: Decodable {
     case showMessage
     case appendAgentDetectionDebugLog
     case appendLayoutLayeringDebugLog
+    case appendModeSwitcherDebugLog
     case appendProjectBoardDebugLog
     case appendTerminalFocusDebugLog
     case appendRestoreDebugLog
@@ -246,6 +250,8 @@ enum HostCommand: Decodable {
       self = .stopCodeServerRuntime
     case .createProjectEditorPane:
       self = .createProjectEditorPane(try CreateProjectEditorPane(from: decoder))
+    case .setBrowserHistory:
+      self = .setBrowserHistory(try SetBrowserHistory(from: decoder))
     case .focusProjectEditorPane:
       self = .focusProjectEditorPane(try ProjectEditorCommand(from: decoder))
     case .closeProjectEditorPane:
@@ -286,6 +292,8 @@ enum HostCommand: Decodable {
       self = .appendAgentDetectionDebugLog(try AppendAgentDetectionDebugLog(from: decoder))
     case .appendLayoutLayeringDebugLog:
       self = .appendLayoutLayeringDebugLog(try AppendLayoutLayeringDebugLog(from: decoder))
+    case .appendModeSwitcherDebugLog:
+      self = .appendModeSwitcherDebugLog(try AppendModeSwitcherDebugLog(from: decoder))
     case .appendProjectBoardDebugLog:
       self = .appendProjectBoardDebugLog(try AppendProjectBoardDebugLog(from: decoder))
     case .appendTerminalFocusDebugLog:
@@ -441,6 +449,8 @@ struct CreateTerminal: Decodable {
 
 struct CreateWebPane: Decodable {
   let browserFeedbackTool: String?
+  let browserHistory: [NativeBrowserHistoryItem]?
+  let browserHistoryScopeId: String?
   let cwd: String?
   let projectId: String?
   let sessionId: String
@@ -531,12 +541,33 @@ struct StartCodeServerRuntime: Decodable {
 
 struct ProjectEditorBrowserTabState: Codable {
   let id: String
+  let isPlaceholder: Bool?
   let title: String
   let url: String
+
+  /*
+   CDXC:ProjectBrowserTabs 2026-06-15-20:48:
+   Native and React exchange Browser top-mode placeholder tabs explicitly so closing the final loaded tab can release Chromium while preserving one address-bar tab for the next navigation.
+   */
+  init(id: String, title: String, url: String, isPlaceholder: Bool? = nil) {
+    self.id = id
+    self.isPlaceholder = isPlaceholder
+    self.title = title
+    self.url = url
+  }
+}
+
+struct NativeBrowserHistoryItem: Codable {
+  let faviconDataUrl: String?
+  let title: String
+  let url: String
+  let visitedAt: String
 }
 
 struct CreateProjectEditorPane: Decodable {
   let activeBrowserTabId: String?
+  let browserHistory: [NativeBrowserHistoryItem]?
+  let browserHistoryScopeId: String?
   let browserTabs: [ProjectEditorBrowserTabState]?
   let browserFeedbackTool: String?
   let companionPaneHidden: Bool?
@@ -547,6 +578,17 @@ struct CreateProjectEditorPane: Decodable {
   let showsProjectTabs: Bool?
   let title: String
   let url: String
+}
+
+struct SetBrowserHistory: Decodable {
+  /*
+   CDXC:BrowserHistory 2026-06-15-10:25:
+   The sidebar owns main-project/worktree family resolution and sends native a
+   de-duplicated history snapshot by scope id. Native stores only that UI list
+   for open toolbars and does not infer project relationships itself.
+   */
+  let browserHistory: [NativeBrowserHistoryItem]
+  let browserHistoryScopeId: String
 }
 
 struct ProjectEditorCommand: Decodable {
@@ -622,9 +664,14 @@ struct SetActiveTerminalSet: Decodable {
 
    CDXC:SessionFocusMode 2026-05-28-15:35:
    Availability follows rendered awake pane owners, so a persisted split whose other pane is sleeping does not leave Focus visible while AppKit shows one pane.
-   */
+  */
   let sessionFocusModeAvailableSessionIds: [String]?
   let sleepingSessionIds: [String]?
+  /**
+   CDXC:TerminalCreationFocus 2026-06-14-18:48:
+   Pending native creates should render as selected non-wake placeholders so New Terminal can switch tabs before Ghostty reports terminalReady.
+   */
+  let mountingSessionIds: [String]?
   let layoutChanged: Bool?
   let paneOwnerSelectionChanged: Bool?
   let layout: NativeTerminalLayout?
@@ -672,6 +719,28 @@ struct SetActiveTerminalSet: Decodable {
    */
   let showSessionIdInTerminalPanes: Bool?
   let showProjectEditorDiffFileCount: Bool?
+  /**
+   CDXC:SidebarTheme 2026-06-15-01:43:
+   React sidebar layout sync carries the resolved app theme because AppKit owns
+   titlebar and native child-window backing colors outside the sidebar DOM.
+   CDXC:SidebarTitlebarColors 2026-06-15-11:24:
+   Custom chrome colors ride with layout sync but are scoped to sidebar and
+   titlebar surfaces only; modal and dropdown controllers keep reading
+   sidebarTheme for their preset background.
+   CDXC:SidebarTitlebarColors 2026-06-15-13:22:
+   Foreground is still decoded for compatibility with existing web bundles, but
+   the host derives the applied foreground from the resolved custom background.
+   CDXC:SidebarTitlebarColors 2026-06-15-13:45:
+   Background is still decoded as hex for layout sync compatibility, but
+   Settings now computes that hex from a grayscale contrast slider.
+   CDXC:SidebarTitlebarColors 2026-06-15-15:15:
+   Layout sync keeps the hex protocol shape while Settings presents the source
+   control as Background Contrast.
+   */
+  let sidebarTheme: String?
+  let customSidebarTitlebarColorsEnabled: Bool?
+  let customSidebarTitlebarForegroundColor: String?
+  let customSidebarTitlebarBackgroundColor: String?
   let sidebarActions: TitlebarSidebarActions?
   let agentHookStatus: TitlebarAgentHookStatus?
   let ghostexCliStatus: TitlebarGhostexCliStatus?
@@ -960,6 +1029,12 @@ struct AppendTerminalFocusDebugLog: Decodable {
 }
 
 struct AppendLayoutLayeringDebugLog: Decodable {
+  let details: String?
+  let event: String
+  let force: Bool?
+}
+
+struct AppendModeSwitcherDebugLog: Decodable {
   let details: String?
   let event: String
   let force: Bool?
@@ -1311,10 +1386,11 @@ enum NativeTerminalLayout: Decodable {
 enum HostEvent: Encodable {
   case hostReady
   case appShotCaptured(
-    appName: String?, bundleIdentifier: String?, imagePath: String, text: String?, title: String?,
-    trigger: String)
+    appName: String?, bundleIdentifier: String?, imagePath: String, title: String?,
+    windowHeight: Int?, windowWidth: Int?, trigger: String)
   case appShotCaptureFailed(message: String)
   case nativeHotkey(actionId: String, sourceSessionId: String?)
+  case nativeModifierState(isCommandPressed: Bool)
   case terminalReady(
     sessionId: String, ttyName: String?, foregroundPid: Int?, sessionPersistenceName: String?,
     persistenceSessionCreated: Bool?)
@@ -1389,6 +1465,7 @@ enum HostEvent: Encodable {
     case event
     case bundleIdentifier
     case imagePath
+    case isCommandPressed
     case placement
     case actionId
     case sessionId
@@ -1396,6 +1473,8 @@ enum HostEvent: Encodable {
     case stdout
     case title
     case trigger
+    case windowHeight
+    case windowWidth
     case faviconDataUrl
     case url
     case activeTabId
@@ -1441,13 +1520,15 @@ enum HostEvent: Encodable {
       try container.encode("hostReady", forKey: .type)
       try container.encode(1, forKey: .protocolVersion)
     case .appShotCaptured(
-      let appName, let bundleIdentifier, let imagePath, let text, let title, let trigger):
+      let appName, let bundleIdentifier, let imagePath, let title, let windowHeight, let windowWidth,
+      let trigger):
       try container.encode("appShotCaptured", forKey: .type)
       try container.encodeIfPresent(appName, forKey: .appName)
       try container.encodeIfPresent(bundleIdentifier, forKey: .bundleIdentifier)
       try container.encode(imagePath, forKey: .imagePath)
-      try container.encodeIfPresent(text, forKey: .text)
       try container.encodeIfPresent(title, forKey: .title)
+      try container.encodeIfPresent(windowHeight, forKey: .windowHeight)
+      try container.encodeIfPresent(windowWidth, forKey: .windowWidth)
       try container.encode(trigger, forKey: .trigger)
     case .appShotCaptureFailed(let message):
       try container.encode("appShotCaptureFailed", forKey: .type)
@@ -1469,6 +1550,20 @@ enum HostEvent: Encodable {
       try container.encode("nativeHotkey", forKey: .type)
       try container.encode(actionId, forKey: .actionId)
       try container.encodeIfPresent(sourceSessionId, forKey: .sourceSessionId)
+    case .nativeModifierState(let isCommandPressed):
+      /**
+       CDXC:Hotkeys 2026-06-14-19:40:
+       The Cmd-hold shortcut overlay can open from native focus as well as
+       sidebar focus. Encode only the command modifier state so the sidebar can
+       run its existing one-second delay without exposing pressed keys or user
+       content in the bridge payload.
+
+       CDXC:Hotkeys 2026-06-15-02:33:
+       The sidebar temporarily disables rendering this overlay, but the typed
+       modifier-state event stays in the protocol for the near-term re-enable.
+      */
+      try container.encode("nativeModifierState", forKey: .type)
+      try container.encode(isCommandPressed, forKey: .isCommandPressed)
     case .terminalReady(
       let sessionId, let ttyName, let foregroundPid, let sessionPersistenceName,
       let persistenceSessionCreated):
@@ -1831,6 +1926,7 @@ enum HostEvent: Encodable {
 enum TerminalTitleBarAction: String, Codable, Hashable {
   case close
   case closeCommandsPanel
+  case closeAfterDone
   case delayedSend
   case expandCommandsPanel
   case fork

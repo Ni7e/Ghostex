@@ -68,8 +68,41 @@ describe("native sidebar App Shots source", () => {
     );
 
     expect(settingsSource).toContain("focused or recent agent session");
+    expect(settingsSource).toContain("basic window metadata");
     expect(settingsSource).toContain('badge="Beta"');
+    expect(settingsSource).not.toContain("available Accessibility text");
     expect(settingsSource).not.toContain("recent Codex session");
+  });
+
+  test("keeps App Shots instant by avoiding Accessibility text extraction", () => {
+    /*
+     * CDXC:AppShots 2026-06-15-02:01:
+     * App Shots should capture the screenshot and cheap WindowServer metadata
+     * only. Do not traverse the Accessibility tree or include extracted app
+     * text in the staged agent prompt.
+     */
+    const nativeCaptureSource = sourceBetween(
+      appDelegateSource,
+      "private struct AppShotCapture",
+      "func presentAppToast",
+    );
+    const promptSource = sourceBetween(
+      nativeSidebarSource,
+      "function formatNativeAppShotPrompt",
+      "window.addEventListener",
+    );
+
+    expect(nativeCaptureSource).toContain("appShotWindowSize");
+    expect(nativeCaptureSource).toContain("windowHeight");
+    expect(nativeCaptureSource).toContain("windowWidth");
+    expect(nativeCaptureSource).not.toContain("AXUIElement");
+    expect(nativeCaptureSource).not.toContain("kAX");
+    expect(nativeCaptureSource).not.toContain("accessibilityTextForFrontmostWindow");
+    expect(nativeCaptureSource).not.toContain("collectAccessibilityText");
+    expect(promptSource).toContain("Window size");
+    expect(promptSource).not.toContain("Available app text");
+    expect(promptSource).not.toContain("APP_SHOT_TEXT_MAX_LENGTH");
+    expect(promptSource).not.toContain("appShot.text");
   });
 
   test("keeps native App Shots disabled unless explicitly enabled", () => {

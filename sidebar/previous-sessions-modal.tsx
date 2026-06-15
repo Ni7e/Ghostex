@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import {
   filterPreviousSessions,
   filterPreviousSessionsModalItems,
+  getNextPreviousSessionsModalSelection,
   groupPreviousSessionsByDay,
   removePreviousSessionByHistoryId,
 } from "./previous-session-search";
@@ -20,11 +21,11 @@ import { TooltipProvider } from "./app-tooltip";
 import { SidebarSessionSearchField } from "./sidebar-session-search-overlay";
 import {
   SessionTagIcon,
-  SIDEBAR_SESSION_TAG_SECTIONS,
   type SidebarSessionTag,
 } from "./session-tag-ui";
 import type { WebviewApi } from "./webview-api";
 import type { ExtensionToSidebarMessage, SidebarPreviousSessionItem } from "../shared/session-grid-contract";
+import { getEnabledVisibleSidebarSessionTagSections } from "../shared/session-tags";
 
 const PREVIOUS_SESSIONS_INITIAL_LOAD_TIMEOUT_MS = 2_000;
 const PREVIOUS_SESSIONS_QUERY_DEBOUNCE_MS = 200;
@@ -78,6 +79,22 @@ export function PreviousSessionsModal({
 }: PreviousSessionsModalProps) {
   const previousSessions = useSidebarStore((state) => state.previousSessions);
   const showDebugSessionNumbers = useSidebarStore((state) => state.hud.debuggingMode);
+  const sidebarSessionTagListItems = useSidebarStore(
+    (state) => state.hud.settings?.sidebarSessionTagListItems,
+  );
+  const previousSessionTagFilterSections = useMemo(
+    () => getEnabledVisibleSidebarSessionTagSections(sidebarSessionTagListItems),
+    [sidebarSessionTagListItems],
+  );
+  const enabledPreviousSessionTagFilterSet = useMemo(
+    () =>
+      new Set(
+        previousSessionTagFilterSections.flatMap((section) =>
+          section.options.map((option) => option.value),
+        ),
+      ),
+    [previousSessionTagFilterSections],
+  );
   const [selectedSessionTagFilters, setSelectedSessionTagFilters] = useState<
     SidebarSessionTag[]
   >([]);
@@ -86,12 +103,14 @@ export function PreviousSessionsModal({
   const [hasInitialLoadResolved, setHasInitialLoadResolved] = useState(false);
   const [hasInitialLoadTimedOut, setHasInitialLoadTimedOut] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | undefined>(undefined);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const tagFilterButtonRef = useRef<HTMLButtonElement>(null);
   const tagFilterMenuRef = useRef<HTMLDivElement>(null);
   const hasRequestedInitialLoadRef = useRef(false);
   const latestRequestIdRef = useRef<string | undefined>(undefined);
   const pendingSelectionRef = useRef<{ end: number; start: number } | undefined>(undefined);
+  const selectedHistoryIdRef = useRef<string | undefined>(undefined);
   const modalPreviousSessions = useMemo(
     () => filterPreviousSessionsModalItems(remotePreviousSessions ?? previousSessions),
     [previousSessions, remotePreviousSessions],
@@ -110,6 +129,22 @@ export function PreviousSessionsModal({
   const canShowModal = isOpen && (hasInitialLoadResolved || hasInitialLoadTimedOut);
   const hasTagFilters = selectedSessionTagFilters.length > 0;
 
+  const selectPreviousSessionByKeyboard = (direction: -1 | 1) => {
+    const nextHistoryId = getNextPreviousSessionsModalSelection({
+      currentHistoryId: selectedHistoryIdRef.current,
+      direction,
+      sessions: filteredSessions,
+    });
+    if (!nextHistoryId) {
+      return false;
+    }
+
+    selectedHistoryIdRef.current = nextHistoryId;
+    setSelectedHistoryId(nextHistoryId);
+    searchInputRef.current?.focus({ preventScroll: true });
+    return true;
+  };
+
   const openTagFilterMenu = () => {
     const bounds = tagFilterButtonRef.current?.getBoundingClientRect();
     if (!bounds) {
@@ -120,12 +155,29 @@ export function PreviousSessionsModal({
   };
 
   const toggleSessionTagFilter = (sessionTag: SidebarSessionTag) => {
+    if (!enabledPreviousSessionTagFilterSet.has(sessionTag)) {
+      return;
+    }
     setSelectedSessionTagFilters((current) =>
       current.includes(sessionTag)
         ? current.filter((tag) => tag !== sessionTag)
         : [...current, sessionTag],
     );
+    searchInputRef.current?.focus({ preventScroll: true });
   };
+
+  useEffect(() => {
+    /*
+     * CDXC:SessionTagFilters 2026-06-15-22:33:
+     * Previous Sessions tag filters mirror the Settings-managed sidebar tag
+     * list. If Reset to Default or another settings change disables a selected
+     * tag, clear that stale filter before the next local or gxserver query.
+     */
+    setSelectedSessionTagFilters((current) => {
+      const next = current.filter((tag) => enabledPreviousSessionTagFilterSet.has(tag));
+      return next.length === current.length ? current : next;
+    });
+  }, [enabledPreviousSessionTagFilterSet]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -145,9 +197,31 @@ export function PreviousSessionsModal({
       }
 
       const searchInput = searchInputRef.current;
+      const isSearchInputTarget = event.target === searchInput;
+      if (
+        searchInput &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        (isSearchInputTarget || !isEditableKeyboardTarget(event.target)) &&
+        (event.key === "ArrowDown" || event.key === "ArrowUp")
+      ) {
+        /*
+        CDXC:PreviousSessions 2026-06-15-11:26:
+        The modal search field remains the focused text owner while Up/Down walks the visible previous-session rows. Keep selection in React state instead of focusing row buttons so held arrows repeat normally and the next typed character still lands in search.
+        */
+        if (!selectPreviousSessionByKeyboard(event.key === "ArrowUp" ? -1 : 1)) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       if (
         !searchInput ||
-        event.target === searchInput ||
+        isSearchInputTarget ||
         isEditableKeyboardTarget(event.target) ||
         !isTextEditingKey(event)
       ) {
@@ -180,7 +254,24 @@ export function PreviousSessionsModal({
     return () => {
       document.removeEventListener("keydown", handleKeyDown, true);
     };
-  }, [isOpen, isTagFilterMenuOpen, onClose]);
+  }, [filteredSessions, isOpen, isTagFilterMenuOpen, onClose]);
+
+  useEffect(() => {
+    selectedHistoryIdRef.current = selectedHistoryId;
+  }, [selectedHistoryId]);
+
+  useEffect(() => {
+    if (!selectedHistoryId) {
+      return;
+    }
+
+    if (filteredSessions.some((session) => session.historyId === selectedHistoryId)) {
+      return;
+    }
+
+    selectedHistoryIdRef.current = undefined;
+    setSelectedHistoryId(undefined);
+  }, [filteredSessions, selectedHistoryId]);
 
   useEffect(() => {
     if (!isTagFilterMenuOpen) {
@@ -218,6 +309,8 @@ export function PreviousSessionsModal({
       hasRequestedInitialLoadRef.current = false;
       latestRequestIdRef.current = undefined;
       pendingSelectionRef.current = undefined;
+      selectedHistoryIdRef.current = undefined;
+      setSelectedHistoryId(undefined);
     }
   }, [isOpen]);
 
@@ -331,6 +424,26 @@ export function PreviousSessionsModal({
     input.setSelectionRange(pendingSelection.start, pendingSelection.end);
   }, [canShowModal, searchQuery]);
 
+  useEffect(() => {
+    if (!canShowModal || !selectedHistoryId) {
+      return;
+    }
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      const selectedElement = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          ".previous-sessions-modal [data-sidebar-history-id]",
+        ),
+      ).find((element) => element.dataset.sidebarHistoryId === selectedHistoryId);
+      selectedElement?.scrollIntoView({ block: "nearest" });
+      searchInputRef.current?.focus({ preventScroll: true });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [canShowModal, selectedHistoryId]);
+
   if (!canShowModal) {
     return null;
   }
@@ -353,13 +466,17 @@ export function PreviousSessionsModal({
            * Fine-tune the Previous Sessions close X 6px left and 5px up from
            * the original 16px corner placement without changing its shadcn
            * button size or interaction model.
+           *
+           * CDXC:PreviousSessions 2026-06-15-11:26:
+           * Move the close button 9pt to the right from the prior tuned
+           * position while preserving the same top alignment and button chrome.
            */}
           <Button
             aria-label="Close previous sessions"
             className="previous-sessions-close-button absolute bg-secondary"
             onClick={onClose}
             size="icon-sm"
-            style={{ right: 22, top: 11 }}
+            style={{ right: 13, top: 11 }}
             type="button"
             variant="ghost"
           >
@@ -404,6 +521,9 @@ export function PreviousSessionsModal({
                     }
                     openTagFilterMenu();
                   }}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                  }}
                   ref={tagFilterButtonRef}
                   type="button"
                 >
@@ -425,10 +545,13 @@ export function PreviousSessionsModal({
                    * Previous Sessions supports selecting one or more session
                    * tags, matching the active sidebar filter semantics. Empty
                    * selection means all tags and untagged sessions are shown.
+                   *
+                   * CDXC:SessionTagFilters 2026-06-16-00:05:
+                   * Shared tag context menus omit Priority, Progress, and Type
+                   * heading rows while preserving section order and dividers.
                    */}
-                  {SIDEBAR_SESSION_TAG_SECTIONS.map((section) => (
+                  {previousSessionTagFilterSections.map((section) => (
                     <div className="session-tag-menu-section" key={section.label}>
-                      <div className="session-tag-menu-section-label">{section.label}</div>
                       {section.options.map((option) => {
                         const isSelected = selectedSessionTagFilters.includes(option.value);
                         return (
@@ -474,11 +597,13 @@ export function PreviousSessionsModal({
                   <div className="group-sessions">
                     {group.sessions.map((session) => (
                       <SessionHistoryCard
+                        isSearchSelected={selectedHistoryId === session.historyId}
                         key={session.historyId}
                         onDelete={() => {
                           setRemotePreviousSessions((current) =>
                             removePreviousSessionByHistoryId(current ?? modalPreviousSessions, session.historyId),
                           );
+                          searchInputRef.current?.focus({ preventScroll: true });
                           vscode.postMessage({
                             historyId: session.historyId,
                             type: "deletePreviousSession",

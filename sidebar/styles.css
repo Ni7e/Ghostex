@@ -18,12 +18,17 @@
  * keep the default cursor instead of the hand pointer.
  *
  * CDXC:AppModals 2026-05-28-13:52:
- * Menu overlay surfaces should use the same #0e0e0e background as modal
- * surfaces regardless of the theme/card color below.
+ * Menu overlay surfaces should use the same app-owned background family as
+ * modal surfaces regardless of the theme/card color below.
  *
  * CDXC:ReactDropdowns 2026-05-30-08:58:
  * Expanded React dropdowns should show the same border color as sidebar
  * tooltips so every floating menu has a visible edge against the app chrome.
+ *
+ * CDXC:SidebarTheme 2026-06-15-01:43:
+ * Dropdown, popover, select, and context-menu surfaces follow
+ * --app-dropdown-background so Dark 1 uses #191919, Dark 2 preserves #0e0e0e,
+ * and Light can render shadcn/Base UI overlay content on light surfaces.
  */
 [data-slot="dropdown-menu-content"],
 [data-slot="dropdown-menu-sub-content"],
@@ -33,8 +38,8 @@
 .git-action-menu,
 .quick-action-menu,
 .session-context-menu {
-  background: #0e0e0e !important;
-  background-color: #0e0e0e !important;
+  background: var(--app-dropdown-background) !important;
+  background-color: var(--app-dropdown-background) !important;
   border: 1px solid var(--ghostex-tooltip-border, rgba(255, 255, 255, 0.12)) !important;
 }
 
@@ -168,7 +173,7 @@ button,
 /*
  CDXC:UnifiedSettings 2026-05-09-17:01:
  The unified Settings modal should use the sidebar reference button radius
- across cards and controls, with the modal surface pinned to #0e0e0e so
+ across cards and controls, with the modal surface pinned to the app modal token so
  Settings, Agents, Actions, and Hotkeys read as one product surface.
 
  CDXC:AppModals 2026-05-16-08:10:
@@ -181,9 +186,9 @@ button,
 }
 
 .ghostex-settings-shadcn {
-  --background: #0e0e0e;
-  --card: #0e0e0e;
-  --popover: #0e0e0e;
+  --background: var(--app-modal-background);
+  --card: var(--app-modal-background);
+  --popover: var(--app-dropdown-background);
   --radius: var(--app-modal-background-radius);
   --settings-control-radius: var(--app-modal-background-radius);
 }
@@ -254,7 +259,7 @@ button,
 }
 
 .ghostex-settings-shadcn[data-slot="dialog-content"] {
-  background-color: #0e0e0e !important;
+  background-color: var(--app-modal-background) !important;
   border-radius: 0;
 }
 
@@ -274,6 +279,10 @@ button,
  of empty chrome above the search bar and from the left/right inset of the
  whole command component. Keep the override scoped to this dialog so other
  CommandInput surfaces retain their shared padding.
+
+ CDXC:SearchInputs 2026-06-15-16:21:
+ Command input clear controls should render as just the X glyph inside the
+ input, without inherited square button chrome around the icon.
 */
 .ghostex-command-palette-dialog {
   height: min(620px, calc(100vh - 2rem));
@@ -290,6 +299,20 @@ button,
 
 .ghostex-command-palette-dialog [data-slot="command-input-wrapper"] {
   padding: 3px 3px 0;
+}
+
+[data-slot="command-input-clear"] {
+  appearance: none;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none;
+}
+
+[data-slot="command-input-clear"]:hover,
+[data-slot="command-input-clear"]:focus-visible {
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 .ghostex-command-palette-dialog [data-slot="command-group"] {
@@ -376,6 +399,20 @@ button,
  CDXC:SettingsNavigation 2026-05-27-10:44: Do not draw a vertical divider between the section table of contents and the settings body on Settings or Hotkeys tabs.
 
  CDXC:SettingsNavigation 2026-06-13: The Settings tabs and search field should align with the content body's right edge (20px inset, matching the px-5 settings body padding) instead of stopping short of it.
+
+ CDXC:AppModals 2026-06-15-10:12:
+ The macOS Settings modal is framed by AppKit to the workspace region, below
+ the titlebar and beside the sidebar. In the native-window modal host, let the
+ React settings surface fill that viewport instead of keeping the older
+ centered management-dialog cap.
+
+ CDXC:AppModals 2026-06-15-10:37:
+ The workspace-sized Settings modal needs a 1px #252525 top separator so the
+ modal surface remains visually distinct from the native titlebar above it.
+
+ CDXC:AppModals 2026-06-15-10:53:
+ Add matching right and bottom separators to the workspace-sized Settings
+ modal while keeping the border inside the exact native child-window frame.
 */
 .ghostex-settings-shadcn.settings-modal-dialog {
   container-name: settings-modal;
@@ -386,8 +423,27 @@ button,
   width: min(1104px, calc(100vw - 1rem));
 }
 
+.app-modal-host-native-window-body .ghostex-settings-shadcn.settings-modal-dialog {
+  border-bottom: 1px solid #252525 !important;
+  border-right: 1px solid #252525 !important;
+  border-top: 1px solid #252525 !important;
+  box-sizing: border-box;
+  height: 100vh;
+  max-height: 100vh;
+  max-width: 100vw;
+  width: 100vw;
+}
+
 .ghostex-settings-shadcn.settings-modal-dialog .ghostex-modal-heading-bar {
   padding-right: 1.25rem;
+}
+
+.ghostex-settings-shadcn .settings-modal-title-row {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  min-width: 0;
 }
 
 @media (max-width: 760px) {
@@ -403,13 +459,13 @@ button,
 .first-launch-setup-story-frame {
   /*
    CDXC:AppModals 2026-06-11-20:28:
-   Story-backed modal preview frames should use the same #0e0e0e background as
-   native modal windows so screenshots and local QA do not preserve the older
-   darker app-modal shell.
+   Story-backed modal preview frames should use the same tokenized background
+   as native modal windows so screenshots and local QA do not preserve older
+   app-modal shells.
    */
   background:
     radial-gradient(circle at 18% 12%, rgb(34 64 94 / 24%), transparent 32rem),
-    #0e0e0e;
+    var(--app-modal-background);
   height: 100vh;
   width: 100vw;
 }
@@ -1650,6 +1706,218 @@ button,
   }
 }
 
+/*
+ CDXC:DiscoverGhostex 2026-06-16-00:26:
+ The Discover Ghostex modal should reuse the first-launch modal surface while
+ presenting a feature-tour layout matching the requested sketch: text on the
+ left, a large image area on the right, and five bottom thumbnail selectors.
+
+ CDXC:DiscoverGhostex 2026-06-16-02:01:
+ The tour should use README screenshots with short, balanced thumbnail labels.
+ Use fixed thumbnail title rows and image-cropped visual slots so the five
+ picture labels do not jump around or overflow when the modal is narrow.
+*/
+.ghostex-settings-shadcn.discover-ghostex-modal-dialog {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.ghostex-settings-shadcn .discover-ghostex-body {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 1rem;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 1.25rem;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-feature-stage {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(15rem, 0.36fr) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-feature-copy {
+  align-content: start;
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  padding-top: 1.5rem;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-feature-icon {
+  align-items: center;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  display: inline-flex;
+  height: 2.75rem;
+  justify-content: center;
+  width: 2.75rem;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-feature-title {
+  color: var(--foreground);
+  font-size: 1.875rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1.12;
+  margin: 0;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-feature-description {
+  color: var(--muted-foreground);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-feature-visual {
+  align-items: center;
+  background: color-mix(in srgb, var(--background) 82%, var(--foreground) 4%);
+  border: 2px solid color-mix(in srgb, var(--foreground) 72%, var(--border));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+  display: flex;
+  height: 100%;
+  justify-content: center;
+  min-height: 28rem;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-feature-image {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  width: 100%;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-feature-strip {
+  align-items: stretch;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-thumbnail-button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 0.5rem;
+  grid-template-rows: 2.25rem minmax(0, 7.75rem);
+  height: 10.5rem;
+  min-width: 0;
+  padding: 0;
+  text-align: center;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-thumbnail-title {
+  align-items: center;
+  color: inherit;
+  display: flex;
+  font-size: 0.875rem;
+  font-weight: 750;
+  justify-content: center;
+  line-height: 1.2;
+  max-height: 2.25rem;
+  min-height: 2.25rem;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-thumbnail-visual {
+  align-items: center;
+  background: color-mix(in srgb, var(--background) 82%, var(--foreground) 4%);
+  border: 2px solid color-mix(in srgb, var(--foreground) 56%, var(--border));
+  color: var(--muted-foreground);
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-thumbnail-image {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  opacity: 0.7;
+  width: 100%;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-thumbnail-icon {
+  align-items: center;
+  background: rgb(0 0 0 / 58%);
+  border: 1px solid rgb(255 255 255 / 20%);
+  color: #fff;
+  display: flex;
+  height: 2rem;
+  justify-content: center;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 2rem;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-thumbnail-button[data-active="true"] {
+  color: var(--foreground);
+}
+
+.ghostex-settings-shadcn .discover-ghostex-thumbnail-button[data-active="true"]
+  .discover-ghostex-thumbnail-visual {
+  background: color-mix(in srgb, var(--primary) 12%, var(--background));
+  border-color: color-mix(in srgb, var(--primary) 72%, var(--foreground));
+  color: var(--foreground);
+}
+
+.ghostex-settings-shadcn .discover-ghostex-thumbnail-button[data-active="true"]
+  .discover-ghostex-thumbnail-image {
+  opacity: 0.92;
+}
+
+.ghostex-settings-shadcn .discover-ghostex-thumbnail-button:focus-visible
+  .discover-ghostex-thumbnail-visual {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@container settings-modal (max-width: 820px) {
+  .ghostex-settings-shadcn .discover-ghostex-body {
+    overflow: auto;
+  }
+
+  .ghostex-settings-shadcn .discover-ghostex-feature-stage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ghostex-settings-shadcn .discover-ghostex-feature-copy {
+    padding-top: 0;
+  }
+
+  .ghostex-settings-shadcn .discover-ghostex-feature-visual {
+    min-height: 18rem;
+  }
+
+  .ghostex-settings-shadcn .discover-ghostex-feature-strip {
+    grid-template-columns: repeat(5, minmax(10rem, 1fr));
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+  }
+}
+
 .ghostex-settings-shadcn .settings-main-tab-layout {
   display: grid;
   grid-template-columns: 150px minmax(0, 1fr);
@@ -1666,12 +1934,53 @@ button,
   padding: 0 0.75rem 1.25rem 1.25rem;
 }
 
+.ghostex-settings-shadcn .settings-show-advanced-toggle {
+  /*
+   * CDXC:SettingsAdvanced 2026-06-16-01:35:
+   * Show Advanced is a browsing filter for the first Settings page.
+   *
+   * CDXC:SettingsAdvanced 2026-06-16-01:53:
+   * The toggle belongs to the right of the modal header, styled as quiet header
+   * chrome so it changes Settings density without competing with tabs/search.
+   */
+  align-items: center;
+  background: color-mix(in srgb, var(--muted) 36%, transparent);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  cursor: pointer;
+  display: flex;
+  gap: 0.625rem;
+  justify-content: space-between;
+  min-height: 2.25rem;
+  padding: 0.375rem 0.625rem;
+  width: 11rem;
+}
+
+.ghostex-settings-shadcn .settings-show-advanced-toggle:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.ghostex-settings-shadcn .settings-show-advanced-copy {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.125rem;
+  min-width: 0;
+}
+
 .ghostex-settings-shadcn .settings-section-sidebar-button {
   justify-content: flex-start !important;
   min-height: 2rem;
   padding-inline: 0.625rem !important;
   text-align: left;
   width: 100%;
+}
+
+.ghostex-settings-shadcn .settings-section-sidebar-button[data-active="true"] {
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 
 .ghostex-settings-shadcn .settings-section-anchor {
@@ -1720,6 +2029,19 @@ button,
   outline: none;
 }
 
+.ghostex-settings-shadcn [data-slot="input"]:is(:focus, :focus-visible),
+.ghostex-settings-shadcn [data-slot="textarea"]:is(:focus, :focus-visible) {
+  /*
+   * CDXC:SettingsSearch 2026-06-15-11:30:
+   * Settings text inputs and textareas should use the same focus treatment as
+   * the Settings search box: white border on the existing control, no outer
+   * shadcn ring.
+   */
+  border-color: #fff;
+  box-shadow: none;
+  outline: none;
+}
+
 .ghostex-settings-shadcn .settings-modal-search-toolbar .session-search-input-icon,
 .ghostex-settings-shadcn .settings-modal-search-toolbar .session-search-clear-button {
   color: var(--muted-foreground);
@@ -1746,6 +2068,12 @@ button,
 }
 
 @container settings-modal (max-width: 720px) {
+  .ghostex-settings-shadcn .settings-modal-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.625rem;
+  }
+
   .ghostex-settings-shadcn .settings-main-tab-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1757,6 +2085,10 @@ button,
     gap: 0.375rem;
     overflow: visible;
     padding: 0 1.25rem 0.75rem;
+  }
+
+  .ghostex-settings-shadcn .settings-show-advanced-toggle {
+    width: 11rem;
   }
 
   .ghostex-settings-shadcn .settings-section-sidebar-button {
@@ -1779,12 +2111,25 @@ button,
 .ghostex-settings-shadcn .settings-management-edit-button,
 .ghostex-settings-shadcn .settings-management-icon,
 .ghostex-settings-shadcn .settings-management-row,
+.ghostex-settings-shadcn .settings-show-advanced-toggle,
 .ghostex-settings-shadcn .settings-section-title-pill {
   border-radius: 0;
 }
 
 .ghostex-settings-shadcn .settings-section-with-actions {
   padding-top: 2.75rem;
+}
+
+/*
+ * CDXC:SidebarTheme 2026-06-15-02:27:
+ * Dark 2 is a snapshot of the old #0e0e0e Settings appearance and must not
+ * paint a separate card-colored rectangle behind each settings section.
+ * Keep section cards visually transparent against the modal surface while
+ * leaving shadcn --card available for real repeated cards and row controls.
+ */
+.ghostex-settings-shadcn .settings-section-card {
+  background: transparent !important;
+  background-color: transparent !important;
 }
 
 /*
@@ -1810,7 +2155,7 @@ button,
 
 .ghostex-settings-shadcn .settings-section-header-actions {
   align-items: center;
-  background: #0e0e0e;
+  background: var(--app-modal-background);
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
@@ -1856,10 +2201,13 @@ button,
 /* CDXC:Settings 2026-04-26-22:29: Section title pills in the settings modal
    must size to the full title in the native app as well as Storybook. A
    scoped CSS class avoids shadcn CardHeader/container internals under-measuring
-   the text and clipping labels like "Sidebar". */
+   the text and clipping labels like "Sidebar".
+   CDXC:SidebarTheme 2026-06-15-01:43:
+   Settings section header chrome follows the modal token so Dark 1, Dark 2,
+   and Light do not leave old dark islands inside the chosen mode. */
 .ghostex-settings-shadcn .settings-section-title-pill {
   align-items: center !important;
-  background: #0e0e0e !important;
+  background: var(--app-modal-background) !important;
   border: 1px solid var(--border) !important;
   display: inline-flex !important;
   gap: 0 !important;

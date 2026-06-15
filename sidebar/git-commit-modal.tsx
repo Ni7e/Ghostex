@@ -7,6 +7,7 @@ import {
   type ClipboardEvent as ReactClipboardEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +30,7 @@ import {
   type SidebarAgentButton,
 } from "../shared/sidebar-agents";
 import type { SidebarGitAction, SidebarGitChangedFile } from "../shared/sidebar-git";
+import type { SidebarTheme } from "../shared/session-grid-contract";
 import { ChangedFilesTree } from "./changed-files-tree";
 import { summarizeChangedFiles } from "./changed-files-tree-utils";
 import { ConfirmationModal } from "./confirmation-modal";
@@ -102,6 +104,7 @@ export type GitCommitModalProps = {
   onOpenFileDiff: (filePath: string, requestId: string) => void;
   onPromptAgentIdChange?: (agentId: string) => void;
   promptAgentId?: string;
+  theme?: SidebarTheme;
 };
 
 export function GitCommitModal({
@@ -116,6 +119,7 @@ export function GitCommitModal({
   onOpenFileDiff,
   onPromptAgentIdChange,
   promptAgentId,
+  theme = "dark-1",
 }: GitCommitModalProps) {
   const [message, setMessage] = useState(buildDraftMessage(draft));
   const [deleteWorktreeAfter, setDeleteWorktreeAfter] = useState(
@@ -165,6 +169,7 @@ export function GitCommitModal({
   const descriptionId = useId();
   const generateAgentId = useId();
   const titleId = useId();
+  const isDarkTheme = getSidebarThemeVariant(theme) === "dark";
   const changedFiles = draft.changedFiles ?? [];
   const showCommitMessage = draft.showCommitMessage ?? true;
   const canDirectMerge = Boolean(draft.isWorktree && onDirectMerge);
@@ -384,8 +389,11 @@ export function GitCommitModal({
         <DialogContent
           aria-describedby={descriptionId}
           aria-labelledby={titleId}
-          className="ghostex-settings-shadcn settings-modal-dialog command-config-modal-shadcn git-commit-modal-shadcn dark flex flex-col gap-0 overflow-hidden p-0 font-sans"
-          data-sidebar-theme="plain-dark"
+          className={cn(
+            "ghostex-settings-shadcn settings-modal-dialog command-config-modal-shadcn git-commit-modal-shadcn flex flex-col gap-0 overflow-hidden p-0 font-sans",
+            isDarkTheme && "dark",
+          )}
+          data-sidebar-theme={theme}
         >
           <DialogTitle className="sr-only" id={titleId}>
             Commit changes
@@ -678,6 +686,15 @@ function buildDraftMessage(draft: GitCommitModalDraft): string {
   const subject = draft.suggestedSubject.trim();
   const body = draft.suggestedBody?.trim();
   return body ? `${subject}\n\n${body}` : subject;
+}
+
+function getSidebarThemeVariant(theme: SidebarTheme): "dark" | "light" {
+  /**
+   * CDXC:SidebarTheme 2026-06-15-01:43:
+   * Commit review modals follow the app modal theme: Dark 1/Dark 2 keep dark
+   * shadcn mode, while Light removes the dark class and uses light tokens.
+   */
+  return theme.startsWith("light-") || theme === "plain-light" ? "light" : "dark";
 }
 
 function buildAllFilesDiffDraft(

@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { IconCheck } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -9,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import type { SidebarTheme } from "../shared/session-grid-contract";
 
 export type WorktreeDeleteModalDraft = {
   branch: string | null;
@@ -34,6 +36,7 @@ export type WorktreeDeleteModalProps = {
     projectId: string,
     options: { deleteLocalBranch: boolean; deleteRemoteBranch: boolean },
   ) => void;
+  theme?: SidebarTheme;
 };
 
 export function WorktreeDeleteModal({
@@ -42,11 +45,13 @@ export function WorktreeDeleteModal({
   onCancel,
   onCommit,
   onDelete,
+  theme = "dark-1",
 }: WorktreeDeleteModalProps) {
   const [deleteLocalBranch, setDeleteLocalBranch] = useState(false);
   const [deleteRemoteBranch, setDeleteRemoteBranch] = useState(false);
   const localBranchCheckboxId = useId();
   const remoteBranchCheckboxId = useId();
+  const isDarkTheme = getSidebarThemeVariant(theme) === "dark";
   const localBranchName = draft.localBranchName ?? draft.branch ?? undefined;
   const remoteName = draft.remoteName ?? "origin";
   const remoteBranchLabel = draft.remoteBranchName
@@ -101,8 +106,11 @@ export function WorktreeDeleteModal({
       open={isOpen}
     >
       <DialogContent
-        className="ghostex-settings-shadcn command-config-modal-shadcn worktree-delete-modal-shadcn dark flex flex-col gap-0 overflow-hidden p-0 font-sans"
-        data-sidebar-theme="plain-dark"
+        className={cn(
+          "ghostex-settings-shadcn command-config-modal-shadcn worktree-delete-modal-shadcn flex flex-col gap-0 overflow-hidden p-0 font-sans",
+          isDarkTheme && "dark",
+        )}
+        data-sidebar-theme={theme}
       >
         <DialogHeader className="worktree-delete-modal-header">
           <DialogTitle className="text-xl">Delete worktree</DialogTitle>
@@ -224,4 +232,13 @@ export function WorktreeDeleteModal({
       </DialogContent>
     </Dialog>
   );
+}
+
+function getSidebarThemeVariant(theme: SidebarTheme): "dark" | "light" {
+  /**
+   * CDXC:SidebarTheme 2026-06-15-01:43:
+   * Worktree delete confirmation is part of the app-modal family, so Light
+   * removes the dark class while Dark 1 and Dark 2 keep dark shadcn mode.
+   */
+  return theme.startsWith("light-") || theme === "plain-light" ? "light" : "dark";
 }

@@ -96,13 +96,17 @@
      sidebar action-button colors. Switch and Slider read --primary for their
      active state, and Select/Input triggers read --input for their borders and
      subtle fill, so the modal owns a neutral shadcn palette while sidebar theme
-     variables continue to style the surrounding app chrome. */
+     variables continue to style the surrounding app chrome.
+     CDXC:SidebarTheme 2026-06-15-01:43:
+     Settings shadcn tokens read the app modal/dropdown background variables so
+     Dark 1 uses #191919, Dark 2 preserves #0e0e0e, and Light can use shadcn's
+     light component defaults instead of a forced dark shell. */
   color-scheme: dark;
-  --background: oklch(0.145 0 0);
+  --background: var(--app-modal-background, oklch(0.145 0 0));
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  --card: var(--app-modal-background, oklch(0.205 0 0));
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  --popover: var(--app-dropdown-background, oklch(0.205 0 0));
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);

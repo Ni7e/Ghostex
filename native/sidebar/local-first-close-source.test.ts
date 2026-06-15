@@ -53,4 +53,49 @@ describe("local-first sidebar close source", () => {
     expect(nativeCloseCaseSource).toContain("closeNativeSessionsInBackground([message.sessionId]);");
     expect(nativeCloseCaseSource).not.toContain("closeTerminal(message.sessionId);");
   });
+
+  test("closes the final project terminal instead of parking it asleep", () => {
+    /*
+     * CDXC:LocalFirstSidebar 2026-06-15-20:14:
+     * The last visible terminal in a normal project must close all the way so
+     * the project can show its empty New Session row. Source coverage keeps the
+     * close path from reintroducing the previous last-session sleep branch.
+     */
+    const closeTerminalSource = sourceBetween(
+      nativeSidebarSource,
+      "function closeTerminal(",
+      "function focusTerminal(",
+    );
+
+    expect(nativeSidebarSource).not.toContain("shouldParkLastProjectSidebarSessionOnClose");
+    expect(closeTerminalSource).toContain("hideGxserverPresentationSessionLocally(");
+    expect(closeTerminalSource).toContain(
+      'const transitionResult = applyGxserverSessionTransition(\n    reference,\n    sessionRecord,\n    "close",',
+    );
+    expect(closeTerminalSource).not.toContain("shouldParkLastProjectSession");
+    expect(closeTerminalSource).not.toContain('"sleep" : "close"');
+  });
+
+  test("hides the commands panel when manual close removes its final command tab", () => {
+    /*
+     * CDXC:CommandsPanel 2026-06-15-23:23:
+     * Manual command-pane tab close must use the same empty-panel invariant as
+     * command process-exit cleanup. When no command sessions remain, the bottom
+     * native panel is not visible and must not retain its last resize height.
+     */
+    const closeTerminalSource = sourceBetween(
+      nativeSidebarSource,
+      "function closeTerminal(",
+      "function focusTerminal(",
+    );
+    const commandPanelCloseSource = sourceBetween(
+      closeTerminalSource,
+      'if (sessionRecord?.kind === "terminal" && sessionRecord.surface === "commands") {',
+      "  const transitionOrigin = options.transitionOrigin",
+    );
+
+    expect(commandPanelCloseSource).toContain(
+      "isVisible: sessions.length > 0 ? panel.isVisible : false",
+    );
+  });
 });

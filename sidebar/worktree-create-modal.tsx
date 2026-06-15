@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -80,6 +81,7 @@ export function WorktreeCreateModal({
   const agentId = useId();
   const existingWorktreeId = useId();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const userInteractedAfterOpenRef = useRef(false);
   const worktreeListRequestIdRef = useRef<string | undefined>(undefined);
   const commandAgents = useMemo(
     () => agents.filter((agent) => agent.command?.trim()),
@@ -133,17 +135,24 @@ export function WorktreeCreateModal({
    * Add Worktree should close from the same top-right shadcn X used by Rename
    * Session. Do not keep a footer Cancel row; the bottom of the modal should
    * be reserved for the primary worktree action and create-mode image picker.
+   *
+   * CDXC:WorktreeModal 2026-06-15-11:30:
+   * Add Worktree opens in the same hidden native child-window host as Rename
+   * Session, so the first-prompt textarea must retry focus across native
+   * window activation and stop retrying after any user click or key input.
    */
   const hasInitializedOpenDraftRef = useRef(false);
   useEffect(() => {
     if (!isOpen) {
       hasInitializedOpenDraftRef.current = false;
+      userInteractedAfterOpenRef.current = false;
       return;
     }
     if (hasInitializedOpenDraftRef.current) {
       return;
     }
     hasInitializedOpenDraftRef.current = true;
+    userInteractedAfterOpenRef.current = false;
 
     setPrompt("");
     setImageCount(0);
@@ -172,18 +181,52 @@ export function WorktreeCreateModal({
     );
   }, [commandAgents, defaultAgentId, isOpen]);
 
+  const focusInput = useCallback(() => {
+    const input = inputRef.current;
+    if (input) {
+      input.focus({ preventScroll: true });
+      const selectionIndex = input.value.length;
+      input.setSelectionRange(selectionIndex, selectionIndex);
+    }
+    return false as const;
+  }, []);
+
+  const markUserInteractedAfterOpen = useCallback(() => {
+    userInteractedAfterOpenRef.current = true;
+  }, []);
+
   useEffect(() => {
     if (!isOpen) {
       return;
     }
 
-    const animationFrame = window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
-    });
+    const focusUnlessUserInteracted = () => {
+      if (userInteractedAfterOpenRef.current) {
+        return;
+      }
+      focusInput();
+    };
+    const retryDelaysMs = [0, 16, 50, 100, 250, 500, 1000, 1600, 2400];
+    const timeoutIds = retryDelaysMs.map((delayMs) =>
+      window.setTimeout(focusUnlessUserInteracted, delayMs),
+    );
+    const animationFrame = window.requestAnimationFrame(focusUnlessUserInteracted);
+    const windowFocusTimeoutIds: number[] = [];
+    const windowFocusAnimationFrames: number[] = [];
+    const handleWindowFocus = () => {
+      windowFocusTimeoutIds.push(window.setTimeout(focusUnlessUserInteracted, 0));
+      windowFocusAnimationFrames.push(window.requestAnimationFrame(focusUnlessUserInteracted));
+    };
+
+    window.addEventListener("focus", handleWindowFocus);
     return () => {
       window.cancelAnimationFrame(animationFrame);
+      timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      windowFocusTimeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      windowFocusAnimationFrames.forEach((frameId) => window.cancelAnimationFrame(frameId));
+      window.removeEventListener("focus", handleWindowFocus);
     };
-  }, [isOpen]);
+  }, [focusInput, isOpen]);
 
   const normalizedPrompt = trimPromptEditorTrailingSpaces(prompt);
   const trimmedPrompt = normalizedPrompt.trim();
@@ -253,6 +296,7 @@ export function WorktreeCreateModal({
       return;
     }
     event.preventDefault();
+    event.stopPropagation();
     if (canCreate) {
       onConfirm(createDraft(mode, selectedAgentId, trimmedPrompt, selectedExistingWorktreePath));
     }
@@ -342,9 +386,15 @@ export function WorktreeCreateModal({
     >
       <DialogContent
         className="command-config-modal-shadcn worktree-create-modal-shadcn font-sans"
+        initialFocus={focusInput}
         showCloseButton
       >
-        <form className="session-rename-form worktree-create-form" onSubmit={submit}>
+        <form
+          className="session-rename-form worktree-create-form"
+          onKeyDownCapture={markUserInteractedAfterOpen}
+          onPointerDownCapture={markUserInteractedAfterOpen}
+          onSubmit={submit}
+        >
           <DialogHeader>
             <DialogTitle className="text-xl">Add Worktree</DialogTitle>
             <DialogDescription>

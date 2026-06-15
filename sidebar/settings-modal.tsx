@@ -6,16 +6,32 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type RefObject,
   type UIEvent as ReactUIEvent,
 } from "react";
 import Fuse from "fuse.js";
+import ColorPicker from "react-best-gradient-color-picker";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Popover,
   PopoverContent,
@@ -38,7 +54,7 @@ import {
   FieldLabel,
   FieldTitle,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input as BaseInput } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -52,7 +68,7 @@ import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
+import { Textarea as BaseTextarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Tooltip,
@@ -62,8 +78,15 @@ import {
 } from "@/components/ui/tooltip";
 import { SidebarSessionSearchField } from "./sidebar-session-search-overlay";
 import {
+  resolveSettingsModalTabForVisibility,
+  shouldShowOSIntegrationSettingsTab,
+  type SettingsModalTab,
+  type SettingsModalTabVisibilityOptions,
+} from "./settings-modal-tabs";
+import {
   IconAsterisk,
   IconAlertTriangle,
+  IconChevronDown,
   IconChevronRight,
   IconCircleCheckFilled,
   IconCircleX,
@@ -76,6 +99,7 @@ import {
   IconGripVertical,
   IconInfoCircle,
   IconMinus,
+  IconPalette,
   IconPencil,
   IconPlayerPlay,
   IconPlus,
@@ -104,14 +128,17 @@ import {
   AUTO_SLEEP_IDLE_MINUTE_OPTIONS,
   APP_SHOTS_HOTKEY_OPTIONS,
   BROWSER_FEEDBACK_TOOL_OPTIONS,
+  DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
   DEFAULT_ghostex_SETTINGS,
   DEFAULT_EDITOR_COMMAND_OPTIONS,
+  MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
   MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   GHOSTTY_CONFIRM_CLOSE_SURFACE_OPTIONS,
   GHOSTTY_COPY_ON_SELECT_OPTIONS,
   GHOSTTY_SCROLLBAR_OPTIONS,
   GHOSTTY_THEME_SETTING_OPTIONS,
   KEEP_AWAKE_DURATION_OPTIONS,
+  MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
   MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   PROMPT_EDITOR_BACKEND_OPTIONS,
   type PromptEditorBackend,
@@ -173,6 +200,7 @@ import {
 } from "../shared/sidebar-agents";
 import {
   DEFAULT_BROWSER_ACTION_URL,
+  isSidebarCommandConfigured,
   type SidebarActionType,
   type SidebarCommandButton,
 } from "../shared/sidebar-commands";
@@ -206,14 +234,56 @@ import { SidebarCommandIconGlyph } from "./sidebar-command-icon";
 import { getSidebarSessionTagLabel, SessionTagIcon } from "./session-tag-ui";
 import { useSidebarStore } from "./sidebar-store";
 import type { AgentConfigDraft } from "./agent-config-modal";
-import type { CommandConfigDraft } from "./command-config-modal";
 import type { WebviewApi } from "./webview-api";
+
+export type { SettingsModalTab } from "./settings-modal-tabs";
 
 const NUMERIC_SETTINGS_DEBOUNCE_MS = 180;
 const GHOSTTY_THEME_UNMANAGED_VALUE = "__ghostex_ghostty_theme_unmanaged__";
 const MODIFIED_SETTING_TOOLTIP = "Modified Setting.\n \nClick to Reset to Default";
 const PASTE_PREVIEWABLE_IMAGES_DESCRIPTION =
   "Paste clipboard images as previewable Markdown links with Cmd+V or Ctrl+V. Hold Cmd over the linked path to preview it in the terminal, and see the same image preview in the Ctrl+G Rich Prompt Editor.";
+
+/*
+ * CDXC:SettingsTextFields 2026-06-15-18:19:
+ * Settings text fields hold explicit configuration values, including Remote SSH names, users, hosts, ports, identity files, commands, and prompts. Disable browser and macOS text assistance at the Settings modal field boundary so autocomplete, autocorrect, capitalization, and spellcheck cannot rewrite user-entered configuration.
+ */
+function SettingsInput({
+  autoCapitalize = "none",
+  autoComplete = "off",
+  autoCorrect = "off",
+  spellCheck = false,
+  ...props
+}: ComponentProps<"input">) {
+  return (
+    <BaseInput
+      autoCapitalize={autoCapitalize}
+      autoComplete={autoComplete}
+      autoCorrect={autoCorrect}
+      spellCheck={spellCheck}
+      {...props}
+    />
+  );
+}
+
+function SettingsTextarea({
+  autoCapitalize = "none",
+  autoComplete = "off",
+  autoCorrect = "off",
+  spellCheck = false,
+  ...props
+}: ComponentProps<"textarea">) {
+  return (
+    <BaseTextarea
+      autoCapitalize={autoCapitalize}
+      autoComplete={autoComplete}
+      autoCorrect={autoCorrect}
+      spellCheck={spellCheck}
+      {...props}
+    />
+  );
+}
+
 const HOTKEY_SETTINGS_SECTIONS: readonly HotkeySettingsSectionDefinition[] = [
   {
     id: "general",
@@ -258,9 +328,19 @@ const HOTKEY_SETTINGS_SECTIONS: readonly HotkeySettingsSectionDefinition[] = [
     title: "Navigation",
   },
   {
-    id: "groups",
-    ids: ["focusGroup1", "focusGroup2", "focusGroup3", "focusGroup4", "focusGroup5"],
-    title: "Groups",
+    id: "projects",
+    ids: [
+      "jumpToProject1",
+      "jumpToProject2",
+      "jumpToProject3",
+      "jumpToProject4",
+      "jumpToProject5",
+      "jumpToProject6",
+      "jumpToProject7",
+      "jumpToProject8",
+      "jumpToProject9",
+    ],
+    title: "Projects",
   },
   {
     id: "sessionSlots",
@@ -291,6 +371,7 @@ const HOTKEY_SETTINGS_SECTIONS: readonly HotkeySettingsSectionDefinition[] = [
 ];
 
 type SettingSearchDefinition = {
+  advanced?: boolean;
   key: string;
   options?: ReadonlyArray<{ label: string; value: string }>;
   subtitle?: string;
@@ -303,29 +384,26 @@ type SettingsSectionSearchResult = {
   visibleSettingKeys: Set<string>;
 };
 
+type SettingsSectionNavigationItem<SectionId extends string> = {
+  id: SectionId;
+  ref: RefObject<HTMLDivElement | null>;
+  title: string;
+};
+
 type SettingModificationProps = {
   isModified?: boolean;
   onResetToDefault?: () => void;
 };
 
-export type SettingsModalTab =
-  | "settings"
-  | "integrations"
-  | "osIntegration"
-  | "remote"
-  | "projects"
-  | "agents"
-  | "actions"
-  | "openTargets"
-  | "hotkeys";
-
 type MainSettingsSectionId =
   | "agents"
   | "sidebar"
+  | "theming"
   | "sidebarTags"
   | "statusIndicators"
   | "sessionCards"
   | "workspace"
+  | "debugging"
   | "terminal"
   | "terminalBehavior"
   | "terminalScrolling"
@@ -348,11 +426,21 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "sidebarSide",
     "sidebarDefaultWidthPx",
     "projectSessionListCollapsedCount",
-    "sidebarTheme",
-    "sessionStatusIndicatorSize",
+    /*
+     * CDXC:SidebarProjectStats 2026-06-16-02:14:
+     * Project git-stat display controls belong with Sidebar settings because they change sidebar project rows, not editor behavior.
+     * Keep both controls Advanced and use changed-file wording for the file-count toggle so it does not read like an editor-pane setting.
+     */
+    "hideProjectHeaderDiffStats",
+    "showProjectEditorDiffFileCount",
     "agentManagerZoomPercent",
     "createSessionOnSidebarDoubleClick",
     "renameSessionOnDoubleClick",
+  ],
+  theming: [
+    "sidebarTheme",
+    "customSidebarTitlebarBackgroundDarknessPercent",
+    "customSidebarTitlebarBackgroundTintColor",
   ],
   sidebarTags: ["sidebarSessionTagListItems"],
   /*
@@ -368,6 +456,7 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
    */
   statusIndicators: [
     "hideFloatingSessionStatusIndicators",
+    "sessionStatusIndicatorSize",
     "hideMenuBarSessionStatusIndicators",
     "petOverlayEnabled",
     "selectedPetId",
@@ -378,15 +467,21 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "showCloseButtonOnSessionCards",
     "hideLastActiveTimeOnSessionCards",
     "showSessionCloseContextMenuAction",
-    "showSessionCommandCopyActions",
-    "showSessionDetailsCopyAction",
   ],
   workspace: [
     "workspaceActivePaneBorderColor",
     "workspaceBackgroundColor",
     "clickToWakeSleepingSessions",
     "commandsPanelDefaultHeightPx",
+  ],
+  /*
+   * CDXC:DebuggingSettings 2026-06-15-21:34:
+   * Debugging controls belong in a dedicated bottom Settings section so support-oriented logging and session metadata copy actions are grouped away from everyday Workspace and Session Cards preferences.
+   */
+  debugging: [
     "debuggingMode",
+    "showSessionCommandCopyActions",
+    "showSessionDetailsCopyAction",
   ],
   terminal: [
     "ghosttySettingsActions",
@@ -423,8 +518,6 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "customDefaultEditorCommand",
     "codeServerLinkVscodeUserConfig",
     "codeServerUseVscodeInsidersUserConfig",
-    "hideProjectHeaderDiffStats",
-    "showProjectEditorDiffFileCount",
     "showUntrackedProjectDiffWhenNoTrackedChanges",
   ],
   autoSleep: [
@@ -462,11 +555,71 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
   storage: [],
 };
 
+/*
+ * CDXC:SettingsAdvanced 2026-06-16-01:35:
+ * The first Settings page should default to everyday controls and hide precision tuning, support/debug toggles, context-menu utilities, disabled theme work, and provider-specific terminal options until users enable Show Advanced. Search still exposes matching advanced controls so discoverability is not tied to browsing mode.
+ *
+ * CDXC:SettingsAdvanced 2026-06-16-01:53:
+ * Show Advanced belongs to the right of the Settings modal header rather than the section rail, because it changes the density of the full General page.
+ */
+const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
+  "sidebarDefaultWidthPx",
+  "projectSessionListCollapsedCount",
+  "agentManagerZoomPercent",
+  "sidebarTheme",
+  "customSidebarTitlebarBackgroundDarknessPercent",
+  "customSidebarTitlebarBackgroundTintColor",
+  "sessionStatusIndicatorSize",
+  "selectedPetId",
+  "showSessionCloseContextMenuAction",
+  "workspaceActivePaneBorderColor",
+  "workspaceBackgroundColor",
+  "commandsPanelDefaultHeightPx",
+  "ghosttySettingsActions",
+  "terminalFontWeight",
+  "terminalLineHeight",
+  "terminalLetterSpacing",
+  "terminalCursorStyleBlink",
+  "showSessionIdInTerminalPanes",
+  "promptEditorBackend",
+  "customPromptEditorCommand",
+  "terminalScrollbackLimitMb",
+  "terminalClipboardTrimTrailingSpaces",
+  "terminalPastePreviewableImages",
+  "terminalMouseHideWhileTyping",
+  "terminalScrollbar",
+  "terminalMouseScrollMultiplierPrecision",
+  "terminalMouseScrollMultiplierDiscrete",
+  "terminalScrollToBottomWhenTyping",
+  "codeServerUseVscodeInsidersUserConfig",
+  "hideProjectHeaderDiffStats",
+  "showProjectEditorDiffFileCount",
+  "showUntrackedProjectDiffWhenNoTrackedChanges",
+  "autoSleepCodeEditorIdleMinutes",
+  "autoSleepGitEditorIdleMinutes",
+  "autoSleepProjectEditorIdleMinutes",
+  "autoSleepBrowserIdleMinutes",
+  "autoSleepAgentIdleMinutes",
+  "autoSleepRequireAgentResumeCommand",
+  "autoSleepFavoriteAgentSessions",
+  "keepAwakeActivateOnLaunch",
+  "keepAwakeActivateOnExternalDisplay",
+  "keepAwakeDeactivateBelowBatteryThreshold",
+  "keepAwakeBatteryThresholdPercent",
+  "keepAwakeDeactivateOnLowPowerMode",
+  "keepAwakeDeactivateOnUserSwitch",
+  "actionCompletionSound",
+  "sidebarSessionTagListItems",
+  "debuggingMode",
+  "showSessionCommandCopyActions",
+  "showSessionDetailsCopyAction",
+]);
+
 type HotkeySettingsSectionId =
   | "general"
   | "paneActions"
   | "navigation"
-  | "groups"
+  | "projects"
   | "sessionSlots"
   | "actions";
 
@@ -479,17 +632,18 @@ type HotkeySettingsSectionDefinition = {
 let rememberedSettingsModalTab: SettingsModalTab | undefined;
 const rememberedSettingsModalScrollTopByTab: Partial<Record<SettingsModalTab, number>> = {};
 
-function getInitialSettingsModalTab(initialTab: SettingsModalTab): SettingsModalTab {
+function getInitialSettingsModalTab(
+  initialTab: SettingsModalTab,
+  visibility: SettingsModalTabVisibilityOptions,
+): SettingsModalTab {
   /**
    * CDXC:Settings 2026-05-11-09:06
    * Settings remembers the last selected tab for the current app session. A
    * non-default entry point such as Hotkeys still opens its requested tab, then
    * that tab becomes the remembered choice until the app restarts.
    */
-  if (initialTab !== "settings") {
-    return initialTab;
-  }
-  return rememberedSettingsModalTab ?? initialTab;
+  const requestedTab = initialTab !== "settings" ? initialTab : rememberedSettingsModalTab ?? initialTab;
+  return resolveSettingsModalTabForVisibility(requestedTab, visibility);
 }
 
 function isSearchableSettingsModalTab(tab: SettingsModalTab): tab is "settings" | "hotkeys" {
@@ -523,6 +677,55 @@ function getMainSettingsSectionRef(
   refs: Record<MainSettingsSectionId, RefObject<HTMLDivElement | null>>,
 ): RefObject<HTMLDivElement | null> {
   return refs[sectionId];
+}
+
+function getMostlyVisibleSettingsSectionId<SectionId extends string>(
+  viewport: HTMLElement,
+  sections: readonly SettingsSectionNavigationItem<SectionId>[],
+): SectionId | undefined {
+  /*
+   * CDXC:SettingsNavigation 2026-06-15-22:28:
+   * Settings and Hotkeys section sidebars must track the section that occupies
+   * the largest share of the scroll viewport so the highlighted nav item
+   * follows reading position while users scroll long settings pages.
+   */
+  const viewportRect = viewport.getBoundingClientRect();
+  const viewportCenter = viewportRect.top + viewportRect.height / 2;
+  let bestSection:
+    | {
+        centerDistance: number;
+        id: SectionId;
+        visibleHeight: number;
+      }
+    | undefined;
+
+  for (const section of sections) {
+    const element = section.ref.current;
+    if (!element) {
+      continue;
+    }
+
+    const sectionRect = element.getBoundingClientRect();
+    const visibleHeight = Math.max(
+      0,
+      Math.min(sectionRect.bottom, viewportRect.bottom) - Math.max(sectionRect.top, viewportRect.top),
+    );
+    if (visibleHeight <= 0) {
+      continue;
+    }
+
+    const sectionCenter = sectionRect.top + sectionRect.height / 2;
+    const centerDistance = Math.abs(sectionCenter - viewportCenter);
+    if (
+      !bestSection ||
+      visibleHeight > bestSection.visibleHeight ||
+      (visibleHeight === bestSection.visibleHeight && centerDistance < bestSection.centerDistance)
+    ) {
+      bestSection = { centerDistance, id: section.id, visibleHeight };
+    }
+  }
+
+  return bestSection?.id;
 }
 
 export type GhosttySettingsAction =
@@ -625,13 +828,27 @@ export function SettingsModal({
   osIntegrationStatusLoading = false,
 }: SettingsModalProps) {
   const isFirstLaunchSetup = presentation === "firstLaunchSetup";
-  const [draft, setDraft] = useState<ghostexSettings>(normalizeghostexSettings(settings));
+  const normalizedInitialSettings = normalizeghostexSettings(settings);
+  const [draft, setDraft] = useState<ghostexSettings>(normalizedInitialSettings);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [settingsSearchQuery, setSettingsSearchQuery] = useState("");
   const [hotkeysSearchQuery, setHotkeysSearchQuery] = useState("");
+  const [activeMainSettingsSectionId, setActiveMainSettingsSectionId] =
+    useState<MainSettingsSectionId>("sidebar");
+  const showOSIntegrationSettingsTab = shouldShowOSIntegrationSettingsTab({
+    debuggingMode: draft.debuggingMode,
+    isFirstLaunchSetup,
+  });
   const [activeTab, setActiveTabState] = useState<SettingsModalTab>(() =>
-    getInitialSettingsModalTab(initialTab),
+    getInitialSettingsModalTab(initialTab, {
+      showOSIntegrationSettingsTab: shouldShowOSIntegrationSettingsTab({
+        debuggingMode: normalizedInitialSettings.debuggingMode,
+        isFirstLaunchSetup,
+      }),
+    }),
   );
   const dialogContentRef = useRef<HTMLDivElement>(null);
+  const showAdvancedSettingsId = useId();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const pendingSettingsRef = useRef<ghostexSettings | undefined>(undefined);
   const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -644,8 +861,10 @@ export function SettingsModal({
   const powerSectionRef = useRef<HTMLDivElement>(null);
   const statusIndicatorsSectionRef = useRef<HTMLDivElement>(null);
   const sessionCardsSectionRef = useRef<HTMLDivElement>(null);
+  const debuggingSectionRef = useRef<HTMLDivElement>(null);
   const agentsOnboardingSectionRef = useRef<HTMLDivElement>(null);
   const sidebarSectionRef = useRef<HTMLDivElement>(null);
+  const themingSectionRef = useRef<HTMLDivElement>(null);
   const sidebarTagsSectionRef = useRef<HTMLDivElement>(null);
   const soundsSectionRef = useRef<HTMLDivElement>(null);
   const storageSectionRef = useRef<HTMLDivElement>(null);
@@ -681,6 +900,15 @@ export function SettingsModal({
   const handleSettingsModalScrollCapture = (event: ReactUIEvent<HTMLDivElement>) => {
     if (event.target instanceof HTMLElement && event.target.dataset.slot === "scroll-area-viewport") {
       rememberedSettingsModalScrollTopByTab[activeTab] = event.target.scrollTop;
+      if (activeTab === "settings") {
+        const mostlyVisibleSectionId = getMostlyVisibleSettingsSectionId(
+          event.target,
+          visibleMainSettingsSectionNavigation,
+        );
+        if (mostlyVisibleSectionId) {
+          setActiveMainSettingsSectionId(mostlyVisibleSectionId);
+        }
+      }
     }
   };
   const handleSettingsModalKeyDownCapture = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -703,9 +931,12 @@ export function SettingsModal({
     requestAnimationFrame(focusSearchInput);
   };
   const setActiveTab = (nextTab: SettingsModalTab) => {
+    const visibleTab = resolveSettingsModalTabForVisibility(nextTab, {
+      showOSIntegrationSettingsTab,
+    });
     rememberActiveScrollPosition();
-    rememberedSettingsModalTab = nextTab;
-    setActiveTabState(nextTab);
+    rememberedSettingsModalTab = visibleTab;
+    setActiveTabState(visibleTab);
   };
 
   const scrollSettingsSectionIntoView = (sectionRef: RefObject<HTMLDivElement | null>) => {
@@ -716,18 +947,26 @@ export function SettingsModal({
     if (!isOpen) {
       return;
     }
-    const nextTab = getInitialSettingsModalTab(initialTab);
+    const nextTab = getInitialSettingsModalTab(initialTab, { showOSIntegrationSettingsTab });
     rememberActiveScrollPosition();
     rememberedSettingsModalTab = nextTab;
     setActiveTabState(nextTab);
   }, [initialTab, isOpen]);
 
   useEffect(() => {
+    if (activeTab !== "osIntegration" || showOSIntegrationSettingsTab) {
+      return;
+    }
+    rememberedSettingsModalTab = "settings";
+    setActiveTabState("settings");
+  }, [activeTab, showOSIntegrationSettingsTab]);
+
+  useEffect(() => {
     if (!isOpen || isFirstLaunchSetup || !initialSearchQuery?.trim()) {
       return;
     }
     const nextQuery = initialSearchQuery.trim();
-    const nextTab = getInitialSettingsModalTab(initialTab);
+    const nextTab = getInitialSettingsModalTab(initialTab, { showOSIntegrationSettingsTab });
     /**
      * CDXC:SessionPersistence 2026-06-04-02:52:
      * Titlebar Tips notices can deep-link into Settings by opening a searchable
@@ -748,7 +987,13 @@ export function SettingsModal({
   }, [initialSearchQuery, initialTab, isFirstLaunchSetup, isOpen]);
 
   useEffect(() => {
-    if (!isOpen || activeTab !== "osIntegration" || osIntegrationStatus || osIntegrationStatusLoading) {
+    if (
+      !isOpen ||
+      !showOSIntegrationSettingsTab ||
+      activeTab !== "osIntegration" ||
+      osIntegrationStatus ||
+      osIntegrationStatusLoading
+    ) {
       return;
     }
     onRequestOSIntegrationStatus?.();
@@ -758,6 +1003,7 @@ export function SettingsModal({
     onRequestOSIntegrationStatus,
     osIntegrationStatus,
     osIntegrationStatusLoading,
+    showOSIntegrationSettingsTab,
   ]);
 
   useEffect(() => {
@@ -865,16 +1111,6 @@ export function SettingsModal({
         key: "codeServerUseVscodeInsidersUserConfig",
         subtitle: "Use the VS Code Insiders user settings directory.",
         title: "Use VS Code Insiders settings",
-      },
-      {
-        key: "hideProjectHeaderDiffStats",
-        subtitle: "Hide +added/-removed line counts next to project headers.",
-        title: "Hide project git stats",
-      },
-      {
-        key: "showProjectEditorDiffFileCount",
-        subtitle: "Show changed-file counts in project header git stats.",
-        title: "Show editor file count",
       },
       {
         key: "showUntrackedProjectDiffWhenNoTrackedChanges",
@@ -1052,16 +1288,6 @@ export function SettingsModal({
         subtitle: "Show the Close item in session context menus.",
         title: "Show Close option in context menu",
       },
-      {
-        key: "showSessionCommandCopyActions",
-        subtitle: "Show Copy resume and Copy attach command in session context menus.",
-        title: "Show command copy actions",
-      },
-      {
-        key: "showSessionDetailsCopyAction",
-        subtitle: "Show Copy details in session context menus.",
-        title: "Show Copy details option",
-      },
     ]),
     statusIndicators: getSettingsSectionSearch(settingsSearchQuery, "Status Indicators", [
       /*
@@ -1074,6 +1300,20 @@ export function SettingsModal({
         subtitle: "Show the desktop floating session status badges.",
         title: "Show Floating Session Indicators",
       },
+      /*
+       * CDXC:StatusIndicators 2026-06-14-19:36:
+       * The floating indicator size selector belongs directly below the Show Floating Session Indicators toggle and should not be searchable or rendered while that desktop badge surface is disabled.
+       */
+      ...(!draft.hideFloatingSessionStatusIndicators
+        ? [
+            {
+              key: "sessionStatusIndicatorSize",
+              options: SESSION_STATUS_INDICATOR_SIZE_OPTIONS,
+              subtitle: "Scale the floating session status indicator.",
+              title: "Floating Session Indicator Size",
+            },
+          ]
+        : []),
       {
         key: "hideMenuBarSessionStatusIndicators",
         subtitle: "Show the menu bar session status badges.",
@@ -1121,16 +1361,14 @@ export function SettingsModal({
         title: "Show Less Count",
       },
       {
-        key: "sidebarTheme",
-        options: SIDEBAR_THEME_SETTING_OPTIONS,
-        subtitle: "Choose the sidebar color scheme.",
-        title: "Theme",
+        key: "hideProjectHeaderDiffStats",
+        subtitle: "Hide +added/-removed line counts in sidebar project rows.",
+        title: "Hide project git stats",
       },
       {
-        key: "sessionStatusIndicatorSize",
-        options: SESSION_STATUS_INDICATOR_SIZE_OPTIONS,
-        subtitle: "Scale the floating session status indicator.",
-        title: "Floating Session Indicator Size",
+        key: "showProjectEditorDiffFileCount",
+        subtitle: "Show changed-file counts in sidebar project row git stats.",
+        title: "Show changed-file count",
       },
       {
         key: "agentManagerZoomPercent",
@@ -1146,6 +1384,24 @@ export function SettingsModal({
         key: "renameSessionOnDoubleClick",
         subtitle: "Rename sessions directly from their cards.",
         title: "Double-click session cards to rename",
+      },
+    ]),
+    theming: getSettingsSectionSearch(settingsSearchQuery, "Theming", [
+      {
+        key: "sidebarTheme",
+        options: SIDEBAR_THEME_SETTING_OPTIONS,
+        subtitle: "Choose the sidebar color scheme.",
+        title: "Theme",
+      },
+      {
+        key: "customSidebarTitlebarBackgroundDarknessPercent",
+        subtitle: "Contrast level for the sidebar and titlebar background.",
+        title: "Background Contrast",
+      },
+      {
+        key: "customSidebarTitlebarBackgroundTintColor",
+        subtitle: "Subtle tint color for the sidebar and titlebar background.",
+        title: "Background Tint",
       },
     ]),
     sidebarTags: getSettingsSectionSearch(settingsSearchQuery, "Sidebar Tags", [
@@ -1384,14 +1640,29 @@ export function SettingsModal({
         subtitle: "Height used when opening the command pane and when double-clicking its top resize rail.",
         title: "Command Pane Default Height",
       },
+    ]),
+    debugging: getSettingsSectionSearch(settingsSearchQuery, "Debugging", [
       /*
-      CDXC:DiagnosticsSettings 2026-06-06-07:09:
-      Debugging Mode is both diagnostic disk logging and debug UI exposure. The setting label and searchable subtitle must warn that detailed app logs can affect performance so users disable it after a repro.
-      */
+       * CDXC:DiagnosticsSettings 2026-06-06-07:09:
+       * Debugging Mode is both diagnostic disk logging and debug UI exposure. The setting label and searchable subtitle must warn that detailed app logs can affect performance so users disable it after a repro.
+       *
+       * CDXC:DebuggingSettings 2026-06-15-21:34:
+       * The Debugging section owns support and diagnostic toggles at the bottom of Settings, including command copy actions and Copy details, so users can find debug-only context-menu features together.
+       */
       {
         key: "debuggingMode",
         subtitle: "Show debugging controls and write detailed app diagnostics to disk. This can affect performance, so turn it off when you do not need it.",
         title: "Debug logging and UI",
+      },
+      {
+        key: "showSessionCommandCopyActions",
+        subtitle: "Show Copy resume and Copy attach command in session context menus.",
+        title: "Show command copy actions",
+      },
+      {
+        key: "showSessionDetailsCopyAction",
+        subtitle: "Show Copy details in session context menus.",
+        title: "Show Copy details option",
       },
     ]),
   };
@@ -1402,6 +1673,7 @@ export function SettingsModal({
     title: string;
   }> = [
     { id: "sidebar", ref: sidebarSectionRef, searchResult: settingsSearch.sidebar, title: "Sidebar" },
+    { id: "theming", ref: themingSectionRef, searchResult: settingsSearch.theming, title: "Theming" },
     {
       id: "statusIndicators",
       ref: statusIndicatorsSectionRef,
@@ -1447,12 +1719,22 @@ export function SettingsModal({
     },
     { id: "power", ref: powerSectionRef, searchResult: settingsSearch.power, title: "Power" },
     { id: "sounds", ref: soundsSectionRef, searchResult: settingsSearch.sounds, title: "Sounds" },
-    { id: "storage", ref: storageSectionRef, searchResult: settingsSearch.storage, title: "Storage" },
+    /*
+     * CDXC:SettingsNavigation 2026-06-15-21:36:
+     * Sidebar Tags should appear directly above Storage in the Settings modal, keeping lower-frequency storage inspection at the bottom of this settings group.
+     */
     {
       id: "sidebarTags",
       ref: sidebarTagsSectionRef,
       searchResult: settingsSearch.sidebarTags,
       title: "Sidebar Tags",
+    },
+    { id: "storage", ref: storageSectionRef, searchResult: settingsSearch.storage, title: "Storage" },
+    {
+      id: "debugging",
+      ref: debuggingSectionRef,
+      searchResult: settingsSearch.debugging,
+      title: "Debugging",
     },
   ];
   const hasVisibleMainSettings = mainSettingsSectionNavigation.some((section) =>
@@ -1470,7 +1752,7 @@ export function SettingsModal({
         visibleFirstLaunchMainSettings,
       );
     }
-    return shouldShowSetting(sectionResult, settingKey);
+    return shouldShowSetting(sectionResult, settingKey, showAdvancedSettings);
   };
   const mainSectionVisible = (
     sectionId: MainSettingsSectionId,
@@ -1481,8 +1763,23 @@ export function SettingsModal({
         isFirstLaunchSetupMainSettingVisible(settingKey, visibleFirstLaunchMainSettings),
       );
     }
-    return shouldShowSettingsSection(sectionResult);
+    return shouldShowSettingsSection(sectionResult, showAdvancedSettings);
   };
+  const visibleMainSettingsSectionNavigation: SettingsSectionNavigationItem<MainSettingsSectionId>[] =
+    (isFirstLaunchSetup
+      ? [
+          { id: "agents" as const, ref: agentsOnboardingSectionRef, title: "Agents" },
+          ...mainSettingsSectionNavigation,
+        ]
+      : mainSettingsSectionNavigation
+    ).filter((section) =>
+      section.id === "agents"
+        ? mainSectionVisible("agents", settingsSearch.sidebar)
+        : mainSectionVisible(section.id, section.searchResult),
+    );
+  const visibleMainSettingsSectionIds = visibleMainSettingsSectionNavigation
+    .map((section) => section.id)
+    .join("|");
 
   useEffect(() => {
     if (!isOpen || activeTab !== "settings" || initialSection === undefined) {
@@ -1505,9 +1802,11 @@ export function SettingsModal({
 	      statusIndicators: statusIndicatorsSectionRef,
 	      storage: storageSectionRef,
 	      sidebarTags: sidebarTagsSectionRef,
+	      debugging: debuggingSectionRef,
 	      terminal: ghosttyTerminalSectionRef,
 	      terminalBehavior: ghosttyBehaviorSectionRef,
 	      terminalScrolling: ghosttyScrollingSectionRef,
+	      theming: themingSectionRef,
 	      workspace: workspaceSectionRef,
 	      agents: agentsOnboardingSectionRef,
 	    });
@@ -1516,6 +1815,27 @@ export function SettingsModal({
     });
     return () => cancelAnimationFrame(animationFrame);
   }, [activeTab, initialSection, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== "settings") {
+      return;
+    }
+
+    const animationFrame = requestAnimationFrame(() => {
+      const viewport = getActiveSettingsModalScrollViewport(dialogContentRef.current);
+      if (!viewport) {
+        return;
+      }
+      const mostlyVisibleSectionId = getMostlyVisibleSettingsSectionId(
+        viewport,
+        visibleMainSettingsSectionNavigation,
+      );
+      if (mostlyVisibleSectionId) {
+        setActiveMainSettingsSectionId(mostlyVisibleSectionId);
+      }
+    });
+    return () => cancelAnimationFrame(animationFrame);
+  }, [activeTab, isOpen, settingsSearchQuery, visibleMainSettingsSectionIds]);
   useEffect(() => {
     if (!isOpen) {
       hasRequestedStorageStatsRef.current = false;
@@ -1772,9 +2092,28 @@ export function SettingsModal({
             value={activeTab}
           >
           <DialogHeader className="ghostex-modal-heading-bar">
-            <DialogTitle className="ghostex-modal-heading-title">
-              {isFirstLaunchSetup ? "Get started" : "Settings"}
-            </DialogTitle>
+            <div className="settings-modal-title-row">
+              <DialogTitle className="ghostex-modal-heading-title">
+                {isFirstLaunchSetup ? "Get started" : "Settings"}
+              </DialogTitle>
+              {/*
+               * CDXC:SettingsAdvanced 2026-06-16-01:35:
+               * Show Advanced is a local browsing filter for the first Settings page, not a persisted app preference.
+               *
+               * CDXC:SettingsAdvanced 2026-06-16-01:53:
+               * The Show Advanced toggle belongs to the right of the Settings modal header so users can change page density without scanning the section rail.
+               */}
+              {!isFirstLaunchSetup ? (
+                <label className="settings-show-advanced-toggle" htmlFor={showAdvancedSettingsId}>
+                  <span className="settings-show-advanced-copy">Show Advanced</span>
+                  <Switch
+                    checked={showAdvancedSettings}
+                    id={showAdvancedSettingsId}
+                    onCheckedChange={setShowAdvancedSettings}
+                  />
+                </label>
+              ) : null}
+            </div>
             {isFirstLaunchSetup ? (
               <p className="mt-2 text-sm text-muted-foreground">
                 Choose a few defaults for Ghostex. You can change everything later in Settings.
@@ -1788,12 +2127,22 @@ export function SettingsModal({
              * CDXC:SettingsNavigation 2026-06-12-04:13:
              * Ghostty terminal settings are merged into the main Settings page
              * so one Settings search covers app settings and terminal settings.
+             *
+             * CDXC:SettingsNavigation 2026-06-15-03:06:
+             * OS Integration should be the final Settings tab because default
+             * app-handler actions are less frequently used than daily app,
+             * integration, remote, project, hotkey, agent, action, and Open In
+             * controls.
+             *
+             * CDXC:SettingsNavigation 2026-06-15-20:48:
+             * The first tab label should read General so the modal title can
+             * own the Settings name while the tab describes its general app and
+             * terminal preference content.
              */}
             {!isFirstLaunchSetup ? (
             <div className="settings-modal-tabs-scroll mt-3">
               <TabsList>
-                <TabsTrigger value="settings">Settings</TabsTrigger>
-                <TabsTrigger value="osIntegration">OS Integration</TabsTrigger>
+                <TabsTrigger value="settings">General</TabsTrigger>
                 <TabsTrigger value="integrations">Integrations</TabsTrigger>
                 <TabsTrigger value="remote">Remote</TabsTrigger>
                 <TabsTrigger value="projects">Projects</TabsTrigger>
@@ -1801,6 +2150,9 @@ export function SettingsModal({
                 <TabsTrigger value="agents">Agents</TabsTrigger>
                 <TabsTrigger value="actions">Actions</TabsTrigger>
                 <TabsTrigger value="openTargets">Open In</TabsTrigger>
+                {showOSIntegrationSettingsTab ? (
+                  <TabsTrigger value="osIntegration">OS Integration</TabsTrigger>
+                ) : null}
               </TabsList>
             </div>
             ) : null}
@@ -1811,6 +2163,9 @@ export function SettingsModal({
                     ? "Search hotkeys"
                     : "Search settings"
                 }
+                autoCapitalize="none"
+                autoComplete="off"
+                autoCorrect="off"
                 clearLabel={
                   activeTab === "hotkeys"
                     ? "Clear hotkeys search"
@@ -1827,6 +2182,7 @@ export function SettingsModal({
                   }
                   setSettingsSearchQuery(nextQuery);
                 }}
+                spellCheck={false}
                 toolbarClassName="settings-modal-search-toolbar"
               />
             ) : null}
@@ -1847,24 +2203,14 @@ export function SettingsModal({
 
               CDXC:SettingsNavigation 2026-06-12-04:13:
               Terminal sections share this navigator with app settings so search
-              and section jumps operate on one main Settings page. */}
+          and section jumps operate on one main Settings page. */}
           <div className="settings-main-tab-layout">
             <aside aria-label="Settings sections" className="settings-section-sidebar">
-              {(isFirstLaunchSetup
-                ? [
-                    { id: "agents" as const, ref: agentsOnboardingSectionRef, title: "Agents" },
-                    ...mainSettingsSectionNavigation,
-                  ]
-                : mainSettingsSectionNavigation
-              )
-                .filter((section) =>
-                  section.id === "agents"
-                    ? mainSectionVisible("agents", settingsSearch.sidebar)
-                    : mainSectionVisible(section.id, section.searchResult),
-                )
+              {visibleMainSettingsSectionNavigation
                 .map((section) => (
                   <Button
                     className="settings-section-sidebar-button"
+                    data-active={activeMainSettingsSectionId === section.id ? "true" : "false"}
                     key={section.id}
                     onClick={() => scrollSettingsSectionIntoView(section.ref)}
                     type="button"
@@ -1955,25 +2301,22 @@ export function SettingsModal({
                 />
               </>
               ) : null}
-              {mainSettingVisible(settingsSearch.sidebar, "sidebarTheme") ? (
-              <StaticNoteField
-                description="Dark Gray is active. Themes are coming back soon."
-                label="Theme"
+              {mainSettingVisible(settingsSearch.sidebar, "hideProjectHeaderDiffStats") ? (
+              <ToggleField
+                checked={draft.hideProjectHeaderDiffStats}
+                description="Hide +added/-removed line counts in sidebar project rows."
+                label="Hide project git stats"
+                {...getSettingModificationProps("hideProjectHeaderDiffStats")}
+                onChange={(checked) => updateDraft("hideProjectHeaderDiffStats", checked)}
               />
               ) : null}
-              {/* CDXC:SessionStatusIndicators 2026-05-07-18:20: The floating
-                  AppKit indicator size is a Sidebar setting because it controls
-                  sidebar-owned session navigation chrome outside the webview. */}
-              {mainSettingVisible(settingsSearch.sidebar, "sessionStatusIndicatorSize") ? (
-              <SelectField
-                description="Scale the floating session status indicator."
-                label="Floating Session Indicator Size"
-                {...getSettingModificationProps("sessionStatusIndicatorSize")}
-                onChange={(value) =>
-                  updateDraft("sessionStatusIndicatorSize", value as SessionStatusIndicatorSize)
-                }
-                options={SESSION_STATUS_INDICATOR_SIZE_OPTIONS}
-                value={draft.sessionStatusIndicatorSize}
+              {mainSettingVisible(settingsSearch.sidebar, "showProjectEditorDiffFileCount") ? (
+              <ToggleField
+                checked={draft.showProjectEditorDiffFileCount}
+                description="Show changed-file counts in sidebar project row git stats."
+                label="Show changed-file count"
+                {...getSettingModificationProps("showProjectEditorDiffFileCount")}
+                onChange={(checked) => updateDraft("showProjectEditorDiffFileCount", checked)}
               />
               ) : null}
               {mainSettingVisible(settingsSearch.sidebar, "agentManagerZoomPercent") ? (
@@ -2010,6 +2353,91 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
+            {mainSectionVisible("theming", settingsSearch.theming) ? (
+              <SettingsSection sectionRef={themingSectionRef} title="Theming">
+                {/*
+                  CDXC:SettingsTheming 2026-06-15-21:35:
+                  General settings needs Theming as the second section, separate
+                  from Sidebar layout controls.
+
+                  CDXC:SettingsAdvanced 2026-06-16-01:35:
+                  Theming remains a distinct section, but its disabled theme
+                  selector and precision sidebar/titlebar color controls are
+                  advanced Settings rows because they are lower-frequency visual
+                  tuning controls.
+
+                  CDXC:SidebarTitlebarColors 2026-06-15-13:22:
+                  Users should only pick the sidebar/titlebar background. The
+                  foreground is derived automatically from that background so
+                  light and dark custom colors keep readable chrome.
+
+                  CDXC:SidebarTitlebarColors 2026-06-15-13:45:
+                  Replace the freeform background color picker with a constrained
+                  contrast slider. The slider outputs grayscale backgrounds so
+                  sidebar row states remain predictable.
+
+                  CDXC:SidebarTitlebarColors 2026-06-15-15:01:
+                  Limit the contrast slider to 85-100 because lower values made
+                  custom sidebar chrome too gray.
+
+                  CDXC:SidebarTitlebarColors 2026-06-15-15:15:
+                  Call the user-facing control Contrast while keeping the stored
+                  background darkness key stable for existing settings and native
+                  startup compatibility.
+
+                  CDXC:SidebarTitlebarColors 2026-06-15-15:28:
+                  Add Background Tint as a web-only color picker. Do not use
+                  input[type=color], because macOS replaces that with a native
+                  color panel instead of the in-app picker requested here.
+                */}
+                {mainSettingVisible(settingsSearch.theming, "sidebarTheme") ? (
+                  <SelectField
+                    description="Themes are coming soon."
+                    disabled
+                    label="Theme"
+                    {...getSettingModificationProps("sidebarTheme")}
+                    onChange={(value) =>
+                      updateDraft("sidebarTheme", value as ghostexSettings["sidebarTheme"])
+                    }
+                    options={SIDEBAR_THEME_SETTING_OPTIONS}
+                    value="dark-2"
+                  />
+                ) : null}
+                {mainSettingVisible(
+                  settingsSearch.theming,
+                  "customSidebarTitlebarBackgroundDarknessPercent",
+                ) ? (
+                  <SliderNumberField
+                    description="85 is softer gray; 100 is black. Text and icons adjust automatically."
+                    label="Background Contrast"
+                    {...getSettingModificationProps("customSidebarTitlebarBackgroundDarknessPercent")}
+                    max={MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
+                    min={MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
+                    onCommit={(value) =>
+                      updateDraft("customSidebarTitlebarBackgroundDarknessPercent", value)
+                    }
+                    onChange={(value) =>
+                      updateDraftDebounced("customSidebarTitlebarBackgroundDarknessPercent", value)
+                    }
+                    step={1}
+                    value={draft.customSidebarTitlebarBackgroundDarknessPercent}
+                  />
+                ) : null}
+                {mainSettingVisible(settingsSearch.theming, "customSidebarTitlebarBackgroundTintColor") ? (
+                  <WebColorPickerField
+                    description="Applies a subtle hue to the sidebar and titlebar background."
+                    label="Background Tint"
+                    {...getSettingModificationProps("customSidebarTitlebarBackgroundTintColor")}
+                    onChange={(value) =>
+                      updateDraftDebounced("customSidebarTitlebarBackgroundTintColor", value)
+                    }
+                    onCommit={(value) => updateDraft("customSidebarTitlebarBackgroundTintColor", value)}
+                    value={draft.customSidebarTitlebarBackgroundTintColor}
+                  />
+                ) : null}
+              </SettingsSection>
+            ) : null}
+
             {mainSectionVisible("statusIndicators", settingsSearch.statusIndicators) ? (
             <SettingsSection sectionRef={statusIndicatorsSectionRef} title="Status Indicators">
               {mainSettingVisible(
@@ -2024,6 +2452,19 @@ export function SettingsModal({
                 onChange={(checked) =>
                   updateDraft("hideFloatingSessionStatusIndicators", !checked)
                 }
+              />
+              ) : null}
+              {!draft.hideFloatingSessionStatusIndicators &&
+              mainSettingVisible(settingsSearch.statusIndicators, "sessionStatusIndicatorSize") ? (
+              <SelectField
+                description="Scale the floating session status indicator."
+                label="Floating Session Indicator Size"
+                {...getSettingModificationProps("sessionStatusIndicatorSize")}
+                onChange={(value) =>
+                  updateDraft("sessionStatusIndicatorSize", value as SessionStatusIndicatorSize)
+                }
+                options={SESSION_STATUS_INDICATOR_SIZE_OPTIONS}
+                value={draft.sessionStatusIndicatorSize}
               />
               ) : null}
               {mainSettingVisible(
@@ -2135,36 +2576,6 @@ export function SettingsModal({
                 />
               </>
               ) : null}
-              {mainSettingVisible(settingsSearch.sessionCards, "showSessionCommandCopyActions") ? (
-              <>
-                {/*
-                 * CDXC:SidebarContextMenu 2026-06-09-23:17:
-                 * Copy resume and Copy attach command are advanced session-card context-menu utilities. Keep both hidden unless this Settings toggle is enabled so the default menu stays focused on normal session actions.
-                 */}
-                <ToggleField
-                  checked={draft.showSessionCommandCopyActions}
-                  description="Show Copy resume and Copy attach command in session context menus."
-                  label="Show command copy actions"
-                  {...getSettingModificationProps("showSessionCommandCopyActions")}
-                  onChange={(checked) => updateDraft("showSessionCommandCopyActions", checked)}
-                />
-              </>
-              ) : null}
-              {mainSettingVisible(settingsSearch.sessionCards, "showSessionDetailsCopyAction") ? (
-              <>
-                {/*
-                 * CDXC:SidebarContextMenu 2026-06-11-23:08:
-                 * Copy details is separate from command-copy actions because it copies metadata, not executable shell commands. Keep it opt-in so users choose when session ids and project paths appear in context menus.
-                 */}
-                <ToggleField
-                  checked={draft.showSessionDetailsCopyAction}
-                  description="Show Copy details in session context menus."
-                  label="Show Copy details option"
-                  {...getSettingModificationProps("showSessionDetailsCopyAction")}
-                  onChange={(checked) => updateDraft("showSessionDetailsCopyAction", checked)}
-                />
-              </>
-              ) : null}
             </SettingsSection>
             ) : null}
 
@@ -2214,15 +2625,6 @@ export function SettingsModal({
                 onChange={(value) => updateDraftDebounced("commandsPanelDefaultHeightPx", value)}
                 step={1}
                 value={draft.commandsPanelDefaultHeightPx}
-              />
-              ) : null}
-              {mainSettingVisible(settingsSearch.workspace, "debuggingMode") ? (
-              <ToggleField
-                checked={draft.debuggingMode}
-                description="Shows debugging controls and writes detailed app diagnostics to disk. This can affect performance, so turn it off when you do not need it."
-                label="Debug logging and UI"
-                {...getSettingModificationProps("debuggingMode")}
-                onChange={(checked) => updateDraft("debuggingMode", checked)}
               />
               ) : null}
             </SettingsSection>
@@ -2703,25 +3105,6 @@ export function SettingsModal({
                 }
               />
               ) : null}
-              {/* CDXC:ProjectDiffStats 2026-05-16-08:46: The project-header git line summary is useful but visually noisy for some workflows, so Settings owns a full hide toggle separate from the changed-file count toggle. */}
-              {mainSettingVisible(settingsSearch.editor, "hideProjectHeaderDiffStats") ? (
-              <ToggleField
-                checked={draft.hideProjectHeaderDiffStats}
-                description="Hide +added/-removed line counts next to project headers."
-                label="Hide project git stats"
-                {...getSettingModificationProps("hideProjectHeaderDiffStats")}
-                onChange={(checked) => updateDraft("hideProjectHeaderDiffStats", checked)}
-              />
-              ) : null}
-              {mainSettingVisible(settingsSearch.editor, "showProjectEditorDiffFileCount") ? (
-              <ToggleField
-                checked={draft.showProjectEditorDiffFileCount}
-                description="Show changed-file counts in project header git stats."
-                label="Show editor file count"
-                {...getSettingModificationProps("showProjectEditorDiffFileCount")}
-                onChange={(checked) => updateDraft("showProjectEditorDiffFileCount", checked)}
-              />
-              ) : null}
               {mainSettingVisible(
                 settingsSearch.editor,
                 "showUntrackedProjectDiffWhenNoTrackedChanges",
@@ -3069,16 +3452,6 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("storage", settingsSearch.storage) ? (
-              <div ref={storageSectionRef}>
-                <GhostexFolderStatsSection
-                  isLoading={ghostexFolderStatsLoading}
-                  onOpenGhostexFolder={onOpenGhostexFolder}
-                  stats={ghostexFolderStats}
-                />
-              </div>
-            ) : null}
-
             {mainSectionVisible("sidebarTags", settingsSearch.sidebarTags) ? (
               <SettingsSection sectionRef={sidebarTagsSectionRef} title="Sidebar Tags">
                 {mainSettingVisible(settingsSearch.sidebarTags, "sidebarSessionTagListItems") ? (
@@ -3098,6 +3471,66 @@ export function SettingsModal({
                       )
                     }
                   />
+                ) : null}
+              </SettingsSection>
+            ) : null}
+
+            {mainSectionVisible("storage", settingsSearch.storage) ? (
+              <div ref={storageSectionRef}>
+                <GhostexFolderStatsSection
+                  isLoading={ghostexFolderStatsLoading}
+                  onOpenGhostexFolder={onOpenGhostexFolder}
+                  stats={ghostexFolderStats}
+                />
+              </div>
+            ) : null}
+
+            {mainSectionVisible("debugging", settingsSearch.debugging) ? (
+              <SettingsSection sectionRef={debuggingSectionRef} title="Debugging">
+                {mainSettingVisible(settingsSearch.debugging, "debuggingMode") ? (
+                  <ToggleField
+                    checked={draft.debuggingMode}
+                    description="Shows debugging controls and writes detailed app diagnostics to disk. This can affect performance, so turn it off when you do not need it."
+                    label="Debug logging and UI"
+                    {...getSettingModificationProps("debuggingMode")}
+                    onChange={(checked) => updateDraft("debuggingMode", checked)}
+                  />
+                ) : null}
+                {mainSettingVisible(settingsSearch.debugging, "showSessionCommandCopyActions") ? (
+                  <>
+                    {/*
+                     * CDXC:SidebarContextMenu 2026-06-09-23:17:
+                     * Copy resume and Copy attach command are advanced session-card context-menu utilities. Keep both hidden unless this Settings toggle is enabled so the default menu stays focused on normal session actions.
+                     *
+                     * CDXC:DebuggingSettings 2026-06-15-21:34:
+                     * Command copy actions are support-oriented session-card context-menu controls and should appear in the bottom Debugging section rather than the everyday Session Cards section.
+                     */}
+                    <ToggleField
+                      checked={draft.showSessionCommandCopyActions}
+                      description="Show Copy resume and Copy attach command in session context menus."
+                      label="Show command copy actions"
+                      {...getSettingModificationProps("showSessionCommandCopyActions")}
+                      onChange={(checked) => updateDraft("showSessionCommandCopyActions", checked)}
+                    />
+                  </>
+                ) : null}
+                {mainSettingVisible(settingsSearch.debugging, "showSessionDetailsCopyAction") ? (
+                  <>
+                    {/*
+                     * CDXC:SidebarContextMenu 2026-06-11-23:08:
+                     * Copy details is separate from command-copy actions because it copies metadata, not executable shell commands. Keep it opt-in so users choose when session ids and project paths appear in context menus.
+                     *
+                     * CDXC:DebuggingSettings 2026-06-15-21:34:
+                     * Copy details can expose support metadata in the context menu, so Settings groups it with Debugging rather than normal session-card appearance controls.
+                     */}
+                    <ToggleField
+                      checked={draft.showSessionDetailsCopyAction}
+                      description="Show Copy details in session context menus."
+                      label="Show Copy details option"
+                      {...getSettingModificationProps("showSessionDetailsCopyAction")}
+                      onChange={(checked) => updateDraft("showSessionDetailsCopyAction", checked)}
+                    />
+                  </>
                 ) : null}
               </SettingsSection>
             ) : null}
@@ -3141,7 +3574,7 @@ export function SettingsModal({
           </ScrollArea>
           </div>
           </TabsContent>
-          {!isFirstLaunchSetup ? (
+          {!isFirstLaunchSetup && showOSIntegrationSettingsTab ? (
           <TabsContent className="mt-0 min-h-0 flex-1 overflow-hidden" value="osIntegration">
             <OSIntegrationSettingsTab
               loading={osIntegrationStatusLoading}
@@ -3253,9 +3686,23 @@ export function SettingsModal({
           {!isFirstLaunchSetup ? (
           <TabsContent className="mt-0 min-h-0 flex-1 overflow-hidden" value="hotkeys">
             <HotkeysSettingsTab
+              expandCollapsedProjectsOnJump={draft.expandCollapsedProjectsOnJump}
+              expandCollapsedProjectsOnJumpModification={getSettingModificationProps(
+                "expandCollapsedProjectsOnJump",
+              )}
               hotkeys={draft.hotkeys}
+              showLessForExpandedProjectJumps={draft.showLessForExpandedProjectJumps}
+              showLessForExpandedProjectJumpsModification={getSettingModificationProps(
+                "showLessForExpandedProjectJumps",
+              )}
               searchQuery={hotkeysSearchQuery}
               onChange={(hotkeys) => updateDraft("hotkeys", hotkeys)}
+              onExpandCollapsedProjectsOnJumpChange={(checked) =>
+                updateDraft("expandCollapsedProjectsOnJump", checked)
+              }
+              onShowLessForExpandedProjectJumpsChange={(checked) =>
+                updateDraft("showLessForExpandedProjectJumps", checked)
+              }
             />
           </TabsContent>
           ) : null}
@@ -3271,8 +3718,20 @@ type SettingsAgentEditorState = {
 };
 
 type SettingsCommandEditorState = {
-  draft: CommandConfigDraft;
+  draft: SettingsCommandDraft;
   lockedActionType?: SidebarActionType;
+};
+
+type SettingsCommandDraft = {
+  actionType: SidebarActionType;
+  closeTerminalOnExit: boolean;
+  command?: string;
+  commandId?: string;
+  icon?: SidebarCommandIcon;
+  iconColor?: string;
+  name: string;
+  playCompletionSound: boolean;
+  url?: string;
 };
 
 type SettingsOpenTargetEditorState = {
@@ -3609,7 +4068,7 @@ function RemoteMachineFields({
     <FieldGroup className="settings-remote-machine-fields">
       <Field className="settings-remote-machine-field">
         <FieldLabel className="settings-remote-machine-field-label">Name</FieldLabel>
-        <Input
+        <SettingsInput
           aria-label="Remote machine name"
           className="settings-remote-machine-input"
           maxLength={80}
@@ -3620,7 +4079,7 @@ function RemoteMachineFields({
       </Field>
       <Field className="settings-remote-machine-field">
         <FieldLabel className="settings-remote-machine-field-label">SSH host</FieldLabel>
-        <Input
+        <SettingsInput
           aria-label="Remote machine SSH host"
           className="settings-remote-machine-input"
           maxLength={200}
@@ -3632,7 +4091,7 @@ function RemoteMachineFields({
       <div className="settings-remote-machine-user-port">
         <Field className="settings-remote-machine-field">
           <FieldLabel className="settings-remote-machine-field-label">SSH user</FieldLabel>
-          <Input
+          <SettingsInput
             aria-label="Remote machine SSH user"
             className="settings-remote-machine-input"
             maxLength={120}
@@ -3643,7 +4102,7 @@ function RemoteMachineFields({
         </Field>
         <Field className="settings-remote-machine-field">
           <FieldLabel className="settings-remote-machine-field-label">SSH port</FieldLabel>
-          <Input
+          <SettingsInput
             aria-label="Remote machine SSH port"
             className="settings-remote-machine-input"
             inputMode="numeric"
@@ -3656,7 +4115,7 @@ function RemoteMachineFields({
       </div>
       <Field className="settings-remote-machine-field">
         <FieldLabel className="settings-remote-machine-field-label">Identity file</FieldLabel>
-        <Input
+        <SettingsInput
           aria-label="Remote machine SSH identity file"
           className="settings-remote-machine-input"
           maxLength={500}
@@ -3674,7 +4133,7 @@ function RemoteMachineFields({
         <Field className="settings-remote-machine-field">
           <FieldLabel className="settings-remote-machine-field-label">Password</FieldLabel>
           <div className="settings-remote-machine-password-row">
-            <Input
+            <SettingsInput
               aria-label="Remote machine SSH password"
               autoComplete="off"
               className="settings-remote-machine-input"
@@ -3732,7 +4191,11 @@ function ProjectsSettingsPanel({
   projects: SidebarProjectSettingsItem[];
   vscode?: WebviewApi;
 }) {
+  const projectSelectorLabelId = useId();
+  const projectSelectorValueId = useId();
   const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.projectId ?? "");
+  const [isProjectSelectorOpen, setIsProjectSelectorOpen] = useState(false);
+  const [projectSelectorQuery, setProjectSelectorQuery] = useState("");
   const selectedProject =
     projects.find((project) => project.projectId === selectedProjectId) ?? projects[0];
   const [command, setCommand] = useState(selectedProject?.worktreeCommand ?? "");
@@ -3755,6 +4218,24 @@ function ProjectsSettingsPanel({
     selectedProject?.projectId,
     selectedProject?.worktreeCommand,
   ]);
+
+  useEffect(() => {
+    if (!isProjectSelectorOpen) {
+      return undefined;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLInputElement>(".projects-settings-selector-popover [data-slot='command-input']")
+        ?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isProjectSelectorOpen]);
+
+  const selectProject = (projectId: string) => {
+    setSelectedProjectId(projectId);
+    setIsProjectSelectorOpen(false);
+    setProjectSelectorQuery("");
+  };
 
   const saveCommand = () => {
     if (!selectedProject) {
@@ -3809,28 +4290,119 @@ function ProjectsSettingsPanel({
        * Main projects can store a setup command that runs inside every new worktree before the selected agent receives the first prompt. Keep worktree projects out of this list because they inherit from their parent project.
        */}
       <div className="projects-settings-layout">
-        <div className="projects-settings-list" role="list">
-          {projects.map((project) => (
-            <button
-              aria-pressed={selectedProject?.projectId === project.projectId}
-              className="settings-management-row projects-settings-project"
-              data-selected={String(selectedProject?.projectId === project.projectId)}
-              key={project.projectId}
-              onClick={() => setSelectedProjectId(project.projectId)}
-              type="button"
+        {/*
+         * CDXC:ProjectSettings 2026-06-14-17:29:
+         * The Projects settings tab should not render every project as a visible
+         * button list. Keep one project selector at the top, open a searchable
+         * dropdown of project paths on click, and bind the settings editor below
+         * to the selected project.
+         */}
+        <div className="projects-settings-selector">
+          <span className="projects-settings-selector-label" id={projectSelectorLabelId}>
+            Project
+          </span>
+          <Popover
+            onOpenChange={(open) => {
+              setIsProjectSelectorOpen(open);
+              if (!open) {
+                setProjectSelectorQuery("");
+              }
+            }}
+            open={isProjectSelectorOpen}
+          >
+            <PopoverTrigger
+              render={
+                <Button
+                  aria-expanded={isProjectSelectorOpen}
+                  aria-labelledby={`${projectSelectorLabelId} ${projectSelectorValueId}`}
+                  className="projects-settings-selector-trigger"
+                  type="button"
+                  variant="outline"
+                />
+              }
             >
-              <span className="settings-management-icon flex size-9 shrink-0 items-center justify-center bg-muted">
+              <span className="projects-settings-selector-icon" aria-hidden="true">
                 <IconFolderOpen aria-hidden="true" />
               </span>
-              <span className="settings-management-main min-w-0">
-                <span className="settings-management-title">{project.name}</span>
-                <span className="settings-management-detail">{project.path}</span>
+              <span className="projects-settings-selector-copy" id={projectSelectorValueId}>
+                <span className="projects-settings-selector-name">{selectedProject?.name}</span>
+                <span className="projects-settings-selector-path">{selectedProject?.path}</span>
               </span>
-            </button>
-          ))}
+              <IconChevronDown aria-hidden="true" data-icon="inline-end" />
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              className="projects-settings-selector-popover"
+              onOpenAutoFocus={(event) => event.preventDefault()}
+              sideOffset={8}
+            >
+              <Command className="projects-settings-selector-command">
+                <CommandInput
+                  aria-label="Search projects"
+                  className="projects-settings-selector-search pl-3"
+                  clearLabel="Clear project search"
+                  onValueChange={setProjectSelectorQuery}
+                  placeholder="Search project paths"
+                  spellCheck={false}
+                  value={projectSelectorQuery}
+                />
+                <CommandList className="projects-settings-selector-list scroll-mask-y">
+                  <CommandEmpty>No matching projects</CommandEmpty>
+                  <CommandGroup heading="Projects">
+                    {projects.map((project) => (
+                      <CommandItem
+                        className="projects-settings-selector-option"
+                        data-checked={selectedProject?.projectId === project.projectId}
+                        key={project.projectId}
+                        onSelect={() => selectProject(project.projectId)}
+                        value={`${project.name} ${project.path}`}
+                      >
+                        <IconFolderOpen aria-hidden="true" />
+                        <span className="projects-settings-selector-option-copy">
+                          <span className="projects-settings-selector-option-name">
+                            {project.name}
+                          </span>
+                          <span className="projects-settings-selector-option-path">
+                            {project.path}
+                          </span>
+                        </span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
         <Card className="settings-project-command-card">
           <CardContent className="flex flex-col gap-4 p-4">
+            {/*
+              CDXC:ProjectSettings 2026-06-15-03:21:
+              Worktree command is the primary Projects-page setup control, so it should be the first editable project field after selecting a project. Ticket key and Beads directory stay below because they configure board metadata.
+            */}
+            <FieldGroup>
+              <Field>
+                <FieldLabel>Worktree command</FieldLabel>
+                <SettingsTextarea
+                  aria-label="Worktree command"
+                  className="settings-project-command-textarea"
+                  onChange={(event) => setCommand(event.currentTarget.value)}
+                  placeholder="bun install"
+                  value={command}
+                />
+                <FieldDescription>
+                  Runs in the new worktree folder before the project is added (Useful for .envs/installing dependencies/etc.)
+                </FieldDescription>
+              </Field>
+            </FieldGroup>
+            <div className="settings-management-actions">
+              <Button onClick={() => setCommand("")} type="button" variant="outline">
+                Clear
+              </Button>
+              <Button onClick={saveCommand} type="button">
+                Save Command
+              </Button>
+            </div>
             {/*
               CDXC:ProjectBoard 2026-05-23-14:35:
               Projects settings owns the three-letter ticket key shown on the board (for example ZMX-12) while Beads keeps hash ids internally.
@@ -3838,7 +4410,7 @@ function ProjectsSettingsPanel({
             <FieldGroup>
               <Field>
                 <FieldLabel>Ticket key</FieldLabel>
-                <Input
+                <SettingsInput
                   aria-label="Ticket key"
                   maxLength={3}
                   onChange={(event) =>
@@ -3867,7 +4439,7 @@ function ProjectsSettingsPanel({
             <FieldGroup>
               <Field>
                 <FieldLabel>Beads directory</FieldLabel>
-                <Input
+                <SettingsInput
                   aria-label="Beads directory"
                   onChange={(event) => setBeadsDirectory(event.currentTarget.value)}
                   placeholder="/Users/you/code/my-repo"
@@ -3884,29 +4456,6 @@ function ProjectsSettingsPanel({
               </Button>
               <Button onClick={saveBeadsDirectory} type="button">
                 Save Beads Directory
-              </Button>
-            </div>
-            <FieldGroup>
-              <Field>
-                <FieldLabel>Worktree command</FieldLabel>
-                <Textarea
-                  aria-label="Worktree command"
-                  className="settings-project-command-textarea"
-                  onChange={(event) => setCommand(event.currentTarget.value)}
-                  placeholder="bun install"
-                  value={command}
-                />
-                <FieldDescription>
-                  Runs in the new worktree folder before the project is added (Useful for .envs/installing dependencies/etc.)
-                </FieldDescription>
-              </Field>
-            </FieldGroup>
-            <div className="settings-management-actions">
-              <Button onClick={() => setCommand("")} type="button" variant="outline">
-                Clear
-              </Button>
-              <Button onClick={saveCommand} type="button">
-                Save Command
               </Button>
             </div>
           </CardContent>
@@ -4093,7 +4642,7 @@ function OpenTargetsSettingsTab({
             ))}
             {editorState ? (
               <div className="flex flex-col gap-3 rounded-none border border-border/70 bg-card/40 p-3">
-                <Input
+                <SettingsInput
                   aria-label="Open target name"
                   onChange={(event) =>
                     setEditorState({
@@ -4104,7 +4653,7 @@ function OpenTargetsSettingsTab({
                   placeholder="Name"
                   value={editorState.draft.label}
                 />
-                <Input
+                <SettingsInput
                   aria-label="Open target command"
                   onChange={(event) =>
                     setEditorState({
@@ -4115,7 +4664,7 @@ function OpenTargetsSettingsTab({
                   placeholder="Command"
                   value={editorState.draft.command}
                 />
-                <Textarea
+                <SettingsTextarea
                   aria-label="Open target arguments"
                   onChange={(event) =>
                     setEditorState({
@@ -4564,10 +5113,13 @@ function IntegrationsSettingsTab({
           {/*
            * CDXC:AppShots 2026-06-12-11:12:
            * Settings copy must describe App Shots as an agent-session feature because captured context now targets the focused or recent agent instead of Codex only.
+           *
+           * CDXC:AppShots 2026-06-15-02:01:
+           * App Shots should be instant screenshot capture. Settings copy must not promise OCR, Accessibility text extraction, or other app-content scraping.
            */}
           <IntegrationSettingsRow
             badge="Beta"
-            description="Capture the frontmost app window and available Accessibility text, then stage it in the focused or recent agent session as local image context."
+            description="Capture the frontmost app window and basic window metadata, then stage it in the focused or recent agent session as local image context."
             icon={IconDeviceDesktop}
             status={appShotsEnabled ? "Enabled" : "Disabled"}
             tone={appShotsEnabled ? "success" : "neutral"}
@@ -5413,7 +5965,7 @@ function AgentSettingsEditor({
             Name
           </FieldLabel>
         </FieldContent>
-        <Input
+        <SettingsInput
           autoFocus
           className="h-10 px-3 text-sm"
           id={nameId}
@@ -5428,7 +5980,7 @@ function AgentSettingsEditor({
             Command
           </FieldLabel>
         </FieldContent>
-        <Textarea
+        <SettingsTextarea
           id={commandId}
           onChange={(event) => setCommand(event.currentTarget.value)}
           placeholder="codex"
@@ -5513,6 +6065,14 @@ function ActionsSettingsTab({ vscode }: { vscode?: WebviewApi }) {
       .map((commandId) => commandById.get(commandId))
       .filter((command): command is SidebarCommandButton => command !== undefined);
   }, [commands, draftCommandIds]);
+  /*
+  CDXC:ProjectActions 2026-06-15-15:29:
+  When no Actions have a saved terminal command or browser URL, the top of Settings > Actions should explain that frequently used commands can be set here for one-click or hotkey execution.
+  */
+  const hasConfiguredActions = useMemo(
+    () => orderedCommands.some((command) => isSidebarCommandConfigured(command)),
+    [orderedCommands],
+  );
 
   const openCreateCommandEditor = (actionType: SidebarActionType) => {
     setEditorState({
@@ -5521,7 +6081,7 @@ function ActionsSettingsTab({ vscode }: { vscode?: WebviewApi }) {
     });
   };
 
-  const saveCommand = (draft: CommandConfigDraft) => {
+  const saveCommand = (draft: SettingsCommandDraft) => {
     if (!vscode) {
       return;
     }
@@ -5581,6 +6141,15 @@ function ActionsSettingsTab({ vscode }: { vscode?: WebviewApi }) {
   return (
     <ScrollArea className="h-full min-h-0">
       <div className="flex flex-col gap-6 px-5 pb-5">
+        {!editorState && !hasConfiguredActions ? (
+          <div className="flex items-start gap-3 border border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+            <IconInfoCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-foreground" />
+            <p className="m-0">
+              Set frequently used terminal or browser commands here so you can run them with one
+              click or a hotkey.
+            </p>
+          </div>
+        ) : null}
         <SettingsSection
           actions={
             !editorState ? (
@@ -5605,6 +6174,18 @@ function ActionsSettingsTab({ vscode }: { vscode?: WebviewApi }) {
                 </Button>
               </>
             ) : null
+          }
+          /*
+           * CDXC:ActionsSettings 2026-06-15-14:00:
+           * The Actions section header needs explanatory copy because users may
+           * not know that terminal actions run in quick command terminals,
+           * browser actions open panes, project actions are shared with
+           * worktrees, and right-click exposes every configured project action.
+           */
+          description={
+            !editorState
+              ? "Actions are custom shortcuts for repeat work. Add terminal actions to run saved commands in quick command terminals, or browser actions to open saved URLs in browser panes. These actions are shared between a main project and its worktrees, and you can right-click the action button to show all configured actions for that project."
+              : undefined
           }
           title={editorState ? "Action" : "Actions"}
         >
@@ -5744,11 +6325,11 @@ function ActionSettingsEditor({
   onCancel,
   onSave,
 }: {
-  draft: CommandConfigDraft;
+  draft: SettingsCommandDraft;
   existingCommands: readonly SidebarCommandButton[];
   lockedActionType?: SidebarActionType;
   onCancel: () => void;
-  onSave: (draft: CommandConfigDraft) => void;
+  onSave: (draft: SettingsCommandDraft) => void;
 }) {
   const [actionType, setActionType] = useState<SidebarActionType>(draft.actionType);
   const [closeTerminalOnExit, setCloseTerminalOnExit] = useState(draft.closeTerminalOnExit);
@@ -5787,7 +6368,7 @@ function ActionSettingsEditor({
   );
   const isSaveDisabled = targetValue.length === 0 || hasDuplicateTitle;
 
-  const getDraft = (): CommandConfigDraft => ({
+  const getDraft = (): SettingsCommandDraft => ({
     actionType,
     closeTerminalOnExit: actionType === "terminal" ? closeTerminalOnExit : false,
     command: actionType === "terminal" ? command.trim() : undefined,
@@ -5836,7 +6417,7 @@ function ActionSettingsEditor({
             Text
           </FieldLabel>
         </FieldContent>
-        <Input
+        <SettingsInput
           autoFocus
           aria-invalid={hasDuplicateTitle || undefined}
           className="h-10 px-3 text-sm"
@@ -5864,7 +6445,7 @@ function ActionSettingsEditor({
               URL
             </FieldLabel>
           </FieldContent>
-          <Textarea
+          <SettingsTextarea
             id={urlId}
             onChange={(event) => setUrl(event.currentTarget.value)}
             placeholder={DEFAULT_BROWSER_ACTION_URL}
@@ -5880,7 +6461,7 @@ function ActionSettingsEditor({
                 Command
               </FieldLabel>
             </FieldContent>
-            <Textarea
+            <SettingsTextarea
               id={commandId}
               onChange={(event) => setCommand(event.currentTarget.value)}
               placeholder="vp dev"
@@ -5964,20 +6545,34 @@ function normalizeSettingsCommandTitle(value: string | undefined): string | unde
 }
 
 function HotkeysSettingsTab({
+  expandCollapsedProjectsOnJump,
+  expandCollapsedProjectsOnJumpModification,
   hotkeys,
   onChange,
+  onExpandCollapsedProjectsOnJumpChange,
+  onShowLessForExpandedProjectJumpsChange,
   searchQuery,
+  showLessForExpandedProjectJumps,
+  showLessForExpandedProjectJumpsModification,
 }: {
+  expandCollapsedProjectsOnJump: boolean;
+  expandCollapsedProjectsOnJumpModification: Required<SettingModificationProps>;
   hotkeys?: ghostexHotkeySettings;
   onChange: (hotkeys: ghostexHotkeySettings) => void;
+  onExpandCollapsedProjectsOnJumpChange: (checked: boolean) => void;
+  onShowLessForExpandedProjectJumpsChange: (checked: boolean) => void;
   searchQuery: string;
+  showLessForExpandedProjectJumps: boolean;
+  showLessForExpandedProjectJumpsModification: Required<SettingModificationProps>;
 }) {
   const normalizedHotkeys = normalizeghostexHotkeySettings(hotkeys);
+  const [activeHotkeySettingsSectionId, setActiveHotkeySettingsSectionId] =
+    useState<HotkeySettingsSectionId>("general");
   const actionsSectionRef = useRef<HTMLDivElement>(null);
   const generalSectionRef = useRef<HTMLDivElement>(null);
-  const groupsSectionRef = useRef<HTMLDivElement>(null);
   const navigationSectionRef = useRef<HTMLDivElement>(null);
   const paneActionsSectionRef = useRef<HTMLDivElement>(null);
+  const projectsSectionRef = useRef<HTMLDivElement>(null);
   const sessionSlotsSectionRef = useRef<HTMLDivElement>(null);
   const duplicateIds = useMemo(
     () => getDuplicateHotkeyIds(normalizedHotkeys),
@@ -5996,40 +6591,74 @@ function HotkeysSettingsTab({
   const sectionSearches = useMemo(
     () =>
       Object.fromEntries(
-        HOTKEY_SETTINGS_SECTIONS.map((section) => [
-          section.id,
-          getSettingsSectionSearch(
-            searchQuery,
-            section.title,
-            section.ids.flatMap((id) => {
-              const definition = definitionsById.get(id);
-              return definition
-                ? [
-                    {
-                      key: definition.id,
-                      options: [{ label: definition.defaultKey, value: definition.defaultKey }],
-                      subtitle: definition.description,
-                      title: definition.title,
-                    },
-                  ]
-                : [];
-            }),
-          ),
-        ]),
+        HOTKEY_SETTINGS_SECTIONS.map((section) => {
+          const projectJumpSettings: SettingSearchDefinition[] =
+            section.id === "projects"
+              ? [
+                  {
+                    key: "expandCollapsedProjectsOnJump",
+                    subtitle: "Reveal a collapsed Projects row before focusing it from Jump to Project hotkeys.",
+                    title: "Expand collapsed projects on jump",
+                  },
+                  ...(expandCollapsedProjectsOnJump
+                    ? [
+                        {
+                          key: "showLessForExpandedProjectJumps",
+                          subtitle:
+                            "After a project jump expands a collapsed project, switch that project session list to Show less.",
+                          title: "Use Show less after jump expand",
+                        },
+                      ]
+                    : []),
+                ]
+              : [];
+          return [
+            section.id,
+            getSettingsSectionSearch(
+              searchQuery,
+              section.title,
+              [
+                ...projectJumpSettings,
+                ...section.ids.flatMap((id) => {
+                  const definition = definitionsById.get(id);
+                  return definition
+                    ? [
+                        {
+                          key: definition.id,
+                          options: [{ label: definition.defaultKey, value: definition.defaultKey }],
+                          subtitle: definition.description,
+                          title: definition.title,
+                        },
+                      ]
+                    : [];
+                }),
+              ],
+            ),
+          ];
+        }),
       ) as Record<HotkeySettingsSectionId, SettingsSectionSearchResult>,
-    [definitionsById, searchQuery],
+    [definitionsById, expandCollapsedProjectsOnJump, searchQuery],
   );
   const sectionRefs: Record<HotkeySettingsSectionId, RefObject<HTMLDivElement | null>> = {
     actions: actionsSectionRef,
     general: generalSectionRef,
-    groups: groupsSectionRef,
     navigation: navigationSectionRef,
     paneActions: paneActionsSectionRef,
+    projects: projectsSectionRef,
     sessionSlots: sessionSlotsSectionRef,
   };
   const visibleSections = HOTKEY_SETTINGS_SECTIONS.filter((section) =>
     shouldShowSettingsSection(sectionSearches[section.id]),
   );
+  const visibleHotkeySectionNavigation: SettingsSectionNavigationItem<HotkeySettingsSectionId>[] =
+    visibleSections.map((section) => ({
+      id: section.id,
+      ref: sectionRefs[section.id],
+      title: section.title,
+    }));
+  const visibleHotkeySectionIds = visibleHotkeySectionNavigation
+    .map((section) => section.id)
+    .join("|");
   const hasVisibleHotkeys = visibleSections.length > 0;
 
   const updateHotkey = (id: ghostexHotkeyActionId, value: string) => {
@@ -6045,12 +6674,44 @@ function HotkeysSettingsTab({
     onChange(normalizeghostexHotkeySettings(DEFAULT_ghostex_HOTKEYS));
   };
 
+  const handleHotkeySettingsScrollCapture = (event: ReactUIEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof HTMLElement) || event.target.dataset.slot !== "scroll-area-viewport") {
+      return;
+    }
+    const mostlyVisibleSectionId = getMostlyVisibleSettingsSectionId(
+      event.target,
+      visibleHotkeySectionNavigation,
+    );
+    if (mostlyVisibleSectionId) {
+      setActiveHotkeySettingsSectionId(mostlyVisibleSectionId);
+    }
+  };
+
+  useEffect(() => {
+    const animationFrame = requestAnimationFrame(() => {
+      const firstSection = visibleHotkeySectionNavigation[0];
+      const viewport = firstSection?.ref.current?.closest<HTMLElement>("[data-slot='scroll-area-viewport']");
+      if (!viewport) {
+        return;
+      }
+      const mostlyVisibleSectionId = getMostlyVisibleSettingsSectionId(
+        viewport,
+        visibleHotkeySectionNavigation,
+      );
+      if (mostlyVisibleSectionId) {
+        setActiveHotkeySettingsSectionId(mostlyVisibleSectionId);
+      }
+    });
+    return () => cancelAnimationFrame(animationFrame);
+  }, [searchQuery, visibleHotkeySectionIds]);
+
   return (
     <div className="settings-main-tab-layout">
       <aside aria-label="Hotkey sections" className="settings-section-sidebar">
         {visibleSections.map((section) => (
           <Button
             className="settings-section-sidebar-button"
+            data-active={activeHotkeySettingsSectionId === section.id ? "true" : "false"}
             key={section.id}
             onClick={() => sectionRefs[section.id].current?.scrollIntoView({ behavior: "smooth", block: "start" })}
             type="button"
@@ -6060,7 +6721,7 @@ function HotkeysSettingsTab({
           </Button>
         ))}
       </aside>
-      <ScrollArea className="h-full min-h-0">
+      <ScrollArea className="h-full min-h-0" onScrollCapture={handleHotkeySettingsScrollCapture}>
         <div className="flex flex-col gap-6 px-5 pb-5">
           {visibleSections.map((section) => (
             <SettingsSection
@@ -6068,6 +6729,27 @@ function HotkeysSettingsTab({
               sectionRef={sectionRefs[section.id]}
               title={section.title}
             >
+              {section.id === "projects" &&
+              shouldShowSetting(sectionSearches.projects, "expandCollapsedProjectsOnJump") ? (
+                <ToggleField
+                  checked={expandCollapsedProjectsOnJump}
+                  description="Reveal a collapsed project row before focusing it from Jump to Project hotkeys."
+                  label="Expand Collapsed Projects on Jump"
+                  {...expandCollapsedProjectsOnJumpModification}
+                  onChange={onExpandCollapsedProjectsOnJumpChange}
+                />
+              ) : null}
+              {section.id === "projects" &&
+              expandCollapsedProjectsOnJump &&
+              shouldShowSetting(sectionSearches.projects, "showLessForExpandedProjectJumps") ? (
+                <ToggleField
+                  checked={showLessForExpandedProjectJumps}
+                  description="After a project jump expands a collapsed project, switch that project session list to Show less."
+                  label="Use Show less After Jump Expand"
+                  {...showLessForExpandedProjectJumpsModification}
+                  onChange={onShowLessForExpandedProjectJumpsChange}
+                />
+              ) : null}
               {section.ids.flatMap((id) => {
                 const definition = definitionsById.get(id);
                 if (
@@ -6172,7 +6854,7 @@ function getActionTarget(command: SidebarCommandButton): string | undefined {
   return target.split("\n")[0] || undefined;
 }
 
-function createSettingsCommandDraft(actionType: SidebarActionType): CommandConfigDraft {
+function createSettingsCommandDraft(actionType: SidebarActionType): SettingsCommandDraft {
   return {
     actionType,
     closeTerminalOnExit: false,
@@ -6186,7 +6868,7 @@ function createSettingsCommandDraft(actionType: SidebarActionType): CommandConfi
   };
 }
 
-function createSettingsCommandDraftFromButton(command: SidebarCommandButton): CommandConfigDraft {
+function createSettingsCommandDraftFromButton(command: SidebarCommandButton): SettingsCommandDraft {
   return {
     actionType: command.actionType,
     closeTerminalOnExit: command.closeTerminalOnExit,
@@ -6605,22 +7287,44 @@ function hasVisibleSettingsSearchResult(result: SettingsSectionSearchResult): bo
   return result.sectionMatches || result.visibleSettingKeys.size > 0;
 }
 
-function shouldShowSettingsSection(result: SettingsSectionSearchResult): boolean {
-  return hasVisibleSettingsSearchResult(result);
+function isAdvancedMainSetting(settingKey: string): boolean {
+  return ADVANCED_MAIN_SETTING_KEYS.has(settingKey);
 }
 
-function shouldShowSetting(result: SettingsSectionSearchResult, settingKey: string): boolean {
-  return !result.isSearching || result.sectionMatches || result.visibleSettingKeys.has(settingKey);
+function shouldShowSettingsSection(
+  result: SettingsSectionSearchResult,
+  showAdvancedSettings = true,
+): boolean {
+  if (!hasVisibleSettingsSearchResult(result)) {
+    return false;
+  }
+  if (result.isSearching || showAdvancedSettings) {
+    return true;
+  }
+  return Array.from(result.visibleSettingKeys).some((settingKey) => !isAdvancedMainSetting(settingKey));
+}
+
+function shouldShowSetting(
+  result: SettingsSectionSearchResult,
+  settingKey: string,
+  showAdvancedSettings = true,
+): boolean {
+  if (result.isSearching) {
+    return result.sectionMatches || result.visibleSettingKeys.has(settingKey);
+  }
+  return showAdvancedSettings || !isAdvancedMainSetting(settingKey);
 }
 
 function SettingsSection({
   actions,
   children,
+  description,
   sectionRef,
   title,
 }: {
   actions?: ReactNode;
   children: ReactNode;
+  description?: ReactNode;
   sectionRef?: RefObject<HTMLDivElement | null>;
   title: string;
 }) {
@@ -6628,7 +7332,7 @@ function SettingsSection({
     <div className="settings-section-anchor" ref={sectionRef}>
       <Card
         className={cn(
-          "relative mt-5 overflow-visible pb-[25px] pt-8",
+          "settings-section-card relative mt-5 overflow-visible pb-[25px] pt-8",
           actions && "settings-section-with-actions",
         )}
         size="sm"
@@ -6661,6 +7365,9 @@ function SettingsSection({
           requirements. */}
       {actions ? <div className="settings-section-header-actions">{actions}</div> : null}
       <CardContent className="pt-2">
+        {description ? (
+          <p className="m-0 pb-5 text-sm leading-6 text-muted-foreground">{description}</p>
+        ) : null}
         <FieldGroup className="gap-6">{children}</FieldGroup>
       </CardContent>
       </Card>
@@ -6749,7 +7456,7 @@ function SliderNumberField({
           step={step}
           value={[value]}
         />
-        <Input
+        <SettingsInput
           id={id}
           className="h-10 px-3 text-sm tabular-nums"
           onBlur={(event) => commitValue(Number(event.currentTarget.value))}
@@ -6845,6 +7552,7 @@ function ActionButtonPairField({
 function SelectField({
   contentClassName,
   description,
+  disabled,
   isModified,
   label,
   onChange,
@@ -6856,6 +7564,7 @@ function SelectField({
 }: {
   contentClassName?: string;
   description?: string;
+  disabled?: boolean;
   label: string;
   onChange: (value: string) => void;
   options: ReadonlyArray<{ label: string; value: string }>;
@@ -6872,8 +7581,8 @@ function SelectField({
       label={label}
       onResetToDefault={onResetToDefault}
     >
-      <Select items={options} onValueChange={onChange} value={value}>
-        <SelectTrigger className="h-10 w-full px-3 text-sm" id={id}>
+      <Select disabled={disabled} items={options} onValueChange={onChange} value={value}>
+        <SelectTrigger className="h-10 w-full px-3 text-sm" disabled={disabled} id={id}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent className={contentClassName} showScrollButtons={showScrollButtons}>
@@ -6887,6 +7596,20 @@ function SelectField({
         </SelectContent>
       </Select>
       {supportingContent}
+    </SettingRow>
+  );
+}
+
+function StaticNoteField({ description, label }: { description: string; label: string }) {
+  const id = useId();
+  return (
+    <SettingRow description={description} htmlFor={id} label={label}>
+      <div
+        className="rounded-none border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
+        id={id}
+      >
+        Not available
+      </div>
     </SettingRow>
   );
 }
@@ -6931,27 +7654,6 @@ function PetPickerField({
           </Select>
           <div className="truncate text-xs text-muted-foreground">{selectedPet.description}</div>
         </div>
-      </div>
-    </SettingRow>
-  );
-}
-
-function StaticNoteField({ description, label }: { description: string; label: string }) {
-  const id = useId();
-  /**
-   * CDXC:SidebarTheme 2026-05-08-11:14
-   * The Sidebar Theme setting should no longer expose Auto or the previous
-   * theme presets. Show a non-editable note while theme selection is paused so
-   * Settings communicates the temporary product state without offering hidden
-   * values.
-   */
-  return (
-    <SettingRow description={description} htmlFor={id} label={label}>
-      <div
-        className="rounded-none border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
-        id={id}
-      >
-        Themes are coming back soon.
       </div>
     </SettingRow>
   );
@@ -7057,7 +7759,7 @@ function TextField({
       label={label}
       onResetToDefault={onResetToDefault}
     >
-      <Input
+      <SettingsInput
         id={id}
         className="h-10 px-3 text-sm"
         onChange={(event) => onChange(event.currentTarget.value)}
@@ -7080,7 +7782,7 @@ function DisabledCommandPreviewField({
   const id = useId();
   return (
     <SettingRow description={description} htmlFor={id} label={label}>
-      <Textarea
+      <SettingsTextarea
         className="min-h-24 resize-none px-3 py-2 font-mono text-xs leading-5"
         disabled
         id={id}
@@ -7115,14 +7817,14 @@ function ColorField({
       onResetToDefault={onResetToDefault}
     >
       <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-3">
-        <Input
+        <SettingsInput
           aria-label={`${label} picker`}
           className="h-10 cursor-pointer rounded-none p-1"
           onChange={(event) => onChange(event.currentTarget.value)}
           type="color"
           value={colorValue}
         />
-        <Input
+        <SettingsInput
           id={id}
           className="h-10 px-3 text-sm"
           onChange={(event) => onChange(event.currentTarget.value)}
@@ -7133,8 +7835,238 @@ function ColorField({
   );
 }
 
-function normalizeColorInputValue(value: string): string {
-  return /^#[0-9a-f]{6}$/iu.test(value.trim()) ? value.trim() : "#121212";
+const SIDEBAR_TITLEBAR_TINT_SWATCHES: ReadonlyArray<{ label: string; value: string }> = [
+  { label: "Neutral", value: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR },
+  { label: "Blue", value: "#336699" },
+  { label: "Sky", value: "#2f6f8f" },
+  { label: "Cyan", value: "#287c7f" },
+  { label: "Teal", value: "#2f7d66" },
+  { label: "Violet", value: "#6c4f8f" },
+  { label: "Purple", value: "#5f4f96" },
+  { label: "Indigo", value: "#4f5f96" },
+  { label: "Green", value: "#3f7a5f" },
+  { label: "Olive", value: "#657a3f" },
+  { label: "Amber", value: "#8a6a2f" },
+  { label: "Orange", value: "#8a5330" },
+  { label: "Red", value: "#884444" },
+  { label: "Rose", value: "#8a4f5f" },
+  { label: "Pink", value: "#854f7a" },
+  { label: "Steel", value: "#4f6672" },
+];
+
+function WebColorPickerField({
+  description,
+  isModified,
+  label,
+  onChange,
+  onCommit,
+  onResetToDefault,
+  value,
+}: {
+  description?: string;
+  label: string;
+  onChange: (value: string) => void;
+  onCommit?: (value: string) => void;
+  value: string;
+} & SettingModificationProps) {
+  const id = useId();
+  const savedColorValue = normalizeColorInputValue(
+    value,
+    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
+  );
+  const [colorText, setColorText] = useState(savedColorValue);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerValue, setPickerValue] = useState(savedColorValue);
+  const colorValue = normalizePickerColorValue(colorText, savedColorValue);
+
+  useEffect(() => {
+    setColorText(savedColorValue);
+    setPickerValue(savedColorValue);
+  }, [savedColorValue]);
+
+  const previewColor = (nextColor: string) => {
+    const normalizedColor = normalizePickerColorValue(
+      nextColor,
+      DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
+    );
+    setColorText(normalizedColor);
+    setPickerValue(nextColor);
+    onChange(normalizedColor);
+    return normalizedColor;
+  };
+
+  const commitColor = (nextColor: string) => {
+    const normalizedColor = previewColor(nextColor);
+    onCommit?.(normalizedColor);
+  };
+
+  return (
+    <SettingRow
+      description={description}
+      htmlFor={id}
+      isModified={isModified}
+      label={label}
+      onResetToDefault={onResetToDefault}
+    >
+      {/*
+        CDXC:SidebarTitlebarColors 2026-06-15-15:28:
+        Background Tint must be a web picker, not input[type=color], so the
+        macOS color panel never opens. Use swatches plus a hex field and let
+        shared settings normalize the saved color.
+
+        CDXC:SidebarTitlebarColors 2026-06-15-16:04:
+        The first tint picker rendered as a full-width framed popover trigger,
+        which made the Settings section look like an empty bordered slab. Keep
+        the control inline and compact: swatches first, hex value second, no
+        extra container chrome.
+
+        CDXC:SidebarTitlebarColors 2026-06-15-16:13:
+        Users need both more tint presets and a way to pick any tint color.
+        Keep presets inline, and put the full web picker behind a compact
+        swatch trigger so the Settings row does not regain the oversized
+        framed surface that was removed.
+
+        CDXC:SidebarTitlebarColors 2026-06-15-16:13:
+        Picker dragging should preview immediately from local color state while
+        the saved tint setting still uses the existing debounced Settings write
+        path before native sidebar/titlebar chrome is updated.
+
+        CDXC:SidebarTitlebarColors 2026-06-15-17:34:
+        Replace the hand-built hue picker with the same
+        react-best-gradient-color-picker control used in Sharptabs. Keep this
+        setting solid-color only, and expose it as a simple Pick Color dialog
+        rather than showing technical hue/saturation labels in the Settings row.
+      */}
+      <div className="flex flex-wrap items-center gap-2">
+        {SIDEBAR_TITLEBAR_TINT_SWATCHES.map((swatch) => {
+          const isSelected = colorValue === swatch.value;
+          return (
+            <Button
+              aria-label={`Use ${swatch.label} tint`}
+              aria-pressed={isSelected}
+              className={cn(
+                "size-7 min-w-0 shrink-0 border p-0",
+                isSelected ? "border-ring ring-2 ring-ring/45" : "border-border/80",
+              )}
+              key={swatch.value}
+              onClick={() => commitColor(swatch.value)}
+              style={{ backgroundColor: swatch.value }}
+              title={swatch.label}
+              type="button"
+              variant="ghost"
+            />
+          );
+        })}
+        <Button
+          aria-label={`${label} custom color picker`}
+          className="h-8 min-w-0 gap-2 px-2 text-xs"
+          onClick={() => {
+            setPickerValue(colorValue);
+            setPickerOpen(true);
+          }}
+          title="Pick custom tint color"
+          type="button"
+          variant="outline"
+        >
+          <span
+            aria-hidden="true"
+            className="size-4 shrink-0 border border-border"
+            style={{ backgroundColor: colorValue }}
+          />
+          <IconPalette aria-hidden="true" data-icon="inline-end" />
+        </Button>
+        <Dialog
+          open={pickerOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              commitColor(colorValue);
+            }
+            setPickerOpen(open);
+          }}
+        >
+          <DialogContent className="w-[22rem] gap-4 p-4" showCloseButton={false}>
+            <DialogHeader>
+              <DialogTitle>Pick Color</DialogTitle>
+            </DialogHeader>
+            <div className="mx-auto">
+              <ColorPicker
+                hideAdvancedSliders
+                hideColorGuide
+                hideColorTypeBtns
+                hideEyeDrop
+                hideGradientAngle
+                hideGradientControls
+                hideGradientStop
+                hideGradientType
+                hideInputType
+                hideOpacity
+                hidePresets
+                idSuffix="sidebar-titlebar-tint"
+                onChange={previewColor}
+                value={pickerValue}
+                width={294}
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                onClick={() => {
+                  commitColor(colorValue);
+                  setPickerOpen(false);
+                }}
+                type="button"
+              >
+                Done
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <SettingsInput
+          aria-label={`${label} hex color`}
+          className="h-8 w-[8.5rem] px-2 font-mono text-xs uppercase"
+          id={id}
+          inputMode="text"
+          onBlur={() => commitColor(colorText)}
+          onChange={(event) => {
+            const nextValue = event.currentTarget.value;
+            setColorText(nextValue);
+            if (/^#[0-9a-f]{6}$/iu.test(nextValue.trim())) {
+              onChange(nextValue.trim().toLowerCase());
+            }
+          }}
+          placeholder={DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR}
+          spellCheck={false}
+          value={colorText}
+        />
+      </div>
+    </SettingRow>
+  );
+}
+
+function normalizeColorInputValue(value: string, fallback = "#121212"): string {
+  const normalized = value.trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/u.test(normalized) ? normalized : fallback;
+}
+
+function normalizePickerColorValue(value: string, fallback = "#121212"): string {
+  const normalized = value.trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/u.test(normalized)) {
+    return normalized;
+  }
+  const rgbMatch = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/u.exec(normalized);
+  if (!rgbMatch) {
+    return fallback;
+  }
+  return rgbToHexColor({
+    blue: Number(rgbMatch[3] ?? 0),
+    green: Number(rgbMatch[2] ?? 0),
+    red: Number(rgbMatch[1] ?? 0),
+  });
+}
+
+function rgbToHexColor(color: { blue: number; green: number; red: number }): string {
+  const toHexComponent = (component: number) =>
+    clampNumber(component, 0, 255).toString(16).padStart(2, "0");
+  return `#${toHexComponent(color.red)}${toHexComponent(color.green)}${toHexComponent(color.blue)}`;
 }
 
 function SidebarPresetField({
@@ -7274,6 +8206,26 @@ function SidebarTagListSettingsField({
       ),
     );
   };
+  const updateItemEnabled = (itemId: string, enabled: boolean) => {
+    /*
+     * CDXC:SessionTagFilters 2026-06-15-22:10:
+     * The Settings switch is the primary on/off control for tag filters.
+     * Switching a row off should also hide it from the sidebar filter menu,
+     * while switching it back on restores visibility so the eye icon and switch
+     * cannot drift into a half-on reset state.
+     */
+    updateItem(itemId, { enabled, visible: enabled });
+  };
+
+  const updateItemVisible = (itemId: string, visible: boolean) => {
+    /*
+     * CDXC:SessionTagFilters 2026-06-15-22:10:
+     * The eye button mirrors the same on/off model as the switch for tag rows.
+     * Showing a hidden row should re-enable it; hiding a row should disable it
+     * so Settings does not present hidden filters as enabled.
+     */
+    updateItem(itemId, { enabled: visible, visible });
+  };
 
   return (
     <details className="group w-full">
@@ -7283,6 +8235,10 @@ function SidebarTagListSettingsField({
        * configurable-list chrome used by tab context menu item settings:
        * full-width rows, drag handles, enabled switches, and visibility icons.
        * Separators are real rows so users can move or hide them with tags.
+       *
+       * CDXC:SessionTagFilters 2026-06-15-14:02:
+       * The expanded Sidebar Tags list should attach directly to the disclosure
+       * header; no vertical gutter belongs between the header and its rows.
        */}
       <summary className="settings-management-row flex cursor-pointer list-none items-center justify-between gap-3 border border-border bg-muted/20 px-3 py-3 marker:hidden [&::-webkit-details-marker]:hidden">
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -7310,7 +8266,7 @@ function SidebarTagListSettingsField({
           Reset to Default
         </Button>
       </summary>
-      <div className="mt-3 border border-border/80 bg-muted/10 p-3">
+      <div className="border border-border/80 bg-muted/10 p-3">
         <DragDropProvider onDragEnd={handleDragEnd}>
           <div className="flex w-full flex-col gap-2">
             {normalizedItems.map((item, index) => (
@@ -7318,8 +8274,8 @@ function SidebarTagListSettingsField({
                 index={index}
                 item={item}
                 key={item.id}
-                onEnabledChange={(enabled) => updateItem(item.id, { enabled })}
-                onVisibleChange={(visible) => updateItem(item.id, { visible })}
+                onEnabledChange={(enabled) => updateItemEnabled(item.id, enabled)}
+                onVisibleChange={(visible) => updateItemVisible(item.id, visible)}
               />
             ))}
           </div>
@@ -7442,6 +8398,12 @@ function SidebarTagListSettingsRow({
  * left of its label. Position it absolutely so modified-state indication does
  * not reflow setting titles, while the tooltip action still resets only that
  * setting to DEFAULT_ghostex_SETTINGS.
+ *
+ * CDXC:SettingsDensity 2026-06-15-20:53:
+ * Main Settings rows should not show explanatory subtitles inline because the
+ * modal needs to stay dense and scannable. Reveal a compact info trigger only
+ * while the row is hovered or focused, then show the description in a
+ * right-side tooltip capped at 350px.
  */
 function SettingRow({
   children,
@@ -7459,7 +8421,7 @@ function SettingRow({
   onResetToDefault?: () => void;
 }) {
   return (
-    <Field className="gap-2.5" orientation="vertical">
+    <Field className="settings-row gap-2.5" orientation="vertical">
       <FieldContent>
         <FieldTitle className="relative text-sm">
           {isModified && onResetToDefault ? (
@@ -7468,13 +8430,40 @@ function SettingRow({
           <FieldLabel className="text-sm" htmlFor={htmlFor}>
             {label}
           </FieldLabel>
+          {description ? <SettingDescriptionTooltip description={description} label={label} /> : null}
         </FieldTitle>
         {description ? (
-          <FieldDescription className="text-sm">{description}</FieldDescription>
+          <FieldDescription className="sr-only">{description}</FieldDescription>
         ) : null}
       </FieldContent>
       <div className="min-w-0">{children}</div>
     </Field>
+  );
+}
+
+function SettingDescriptionTooltip({ description, label }: { description: string; label: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            aria-label={`${label} setting details`}
+            className="settings-row-info-button"
+            type="button"
+          >
+            <IconInfoCircle aria-hidden="true" />
+          </button>
+        }
+      />
+      <TooltipContent
+        className="settings-row-info-tooltip"
+        side="right"
+        sideOffset={8}
+        style={{ maxWidth: "min(350px, calc(100vw - 32px))" }}
+      >
+        {description}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

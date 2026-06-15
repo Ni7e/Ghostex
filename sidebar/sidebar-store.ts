@@ -761,8 +761,8 @@ function setSessionSleepingLocallyState(
   CDXC:LocalFirstSidebar 2026-06-01-19:34:
   Wake from the session context menu and explicit local parking flows should dismiss the menu and flip the card state before native disposes or recreates the terminal surface. Keep a local override until the host snapshot confirms the same sleeping state.
 
-  CDXC:SessionSleep 2026-06-10-10:01:
-  Context-menu Sleep must not use this local override because zmx provider shutdown is the source of truth; otherwise rows can fade as sleeping while the provider stays alive. Keep local overrides for Wake and for close flows that intentionally park the last visible project session after native/gxserver has a separate lifecycle action.
+  CDXC:SessionSleep 2026-06-15-20:14:
+  Context-menu Sleep must not use this local override because zmx provider shutdown is the source of truth; otherwise rows can fade as sleeping while the provider stays alive. Keep local overrides for Wake only; closing the last visible project terminal now removes the session row and lets the empty-project New Session button represent the project.
   */
   return {
     localSessionSleepingOverrides: {
@@ -1129,6 +1129,10 @@ function haveSameSidebarSessionItem(left: SidebarSessionItem, right: SidebarSess
     left.agentIcon === right.agentIcon &&
     left.alias === right.alias &&
     left.column === right.column &&
+    left.closeAfterDone === right.closeAfterDone &&
+    left.closeAfterDoneDeadlineAt === right.closeAfterDoneDeadlineAt &&
+    left.closeAfterDoneRemainingLabel === right.closeAfterDoneRemainingLabel &&
+    left.closeAfterDoneRemainingMs === right.closeAfterDoneRemainingMs &&
     left.delayedSendDeadlineAt === right.delayedSendDeadlineAt &&
     left.delayedSendRemainingLabel === right.delayedSendRemainingLabel &&
     left.delayedSendRemainingMs === right.delayedSendRemainingMs &&

@@ -2,13 +2,9 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useRef } from "react";
 import { installAppModalGlobalErrorLogging } from "../../sidebar/app-modal-error-log";
 import { AppTooltip, dismissSidebarTooltips, TooltipProvider } from "../../sidebar/app-tooltip";
-import { openAppModal, postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
+import { closeAppModal, openAppModal, postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
 import { dismissAllSidebarContextMenus } from "../../sidebar/sidebar-context-menu-portal";
 import { SidebarApp } from "../../sidebar/sidebar-app";
-import {
-  readRenderedSidebarSessionSlots,
-  type RenderedSidebarSessionSlot,
-} from "../../sidebar/sidebar-visible-session-slots";
 import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "../../sidebar/agent-logos";
 import { TOOLTIP_DELAY_MS } from "../../sidebar/tooltip-delay";
 import {
@@ -157,7 +153,6 @@ import {
   createGroupInSimpleWorkspace,
   createSessionInSimpleWorkspace,
   ensureAllSessionsInFocusedPaneTabGroupInSimpleWorkspace,
-  focusGroupByIndexInSimpleWorkspace,
   focusGroupInSimpleWorkspace,
   focusSidebarSessionInSimpleWorkspace,
   focusSessionExclusivelyInSimpleWorkspace,
@@ -243,7 +238,6 @@ import {
 import {
   createSidebarCommandButtons,
   DEFAULT_BROWSER_LAUNCH_URL,
-  DEFAULT_BROWSER_ACTION_URL,
   isDefaultSidebarCommandId,
   isSidebarCommandConfigured,
   normalizeStoredSidebarCommandOrder,
@@ -253,11 +247,9 @@ import {
   type StoredSidebarCommand,
 } from "../../shared/sidebar-commands";
 import {
-  DEFAULT_SIDEBAR_COMMAND_ICON,
   DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
   normalizeSidebarCommandIconColor,
 } from "../../shared/sidebar-command-icons";
-import type { CommandConfigDraft } from "../../sidebar/command-config-modal";
 import { SidebarCommandIconGlyph } from "../../sidebar/sidebar-command-icon";
 import { SIDEBAR_REFRESH_DEBUG_EVENT_PREFIX } from "../../sidebar/sidebar-refresh-debug-log";
 import {
@@ -266,6 +258,10 @@ import {
   parseCombinedProjectGroupId,
   parseCombinedProjectSessionId,
 } from "./combined-sidebar-mode";
+import {
+  SIDEBAR_PROJECT_JUMP_EVENT,
+  type SidebarProjectJumpEventDetail,
+} from "../../shared/sidebar-project-jump";
 import {
   createLocalPersistableSessionRecord,
   isGxserverBackedLocalPersistedSession,
@@ -290,6 +286,7 @@ import {
 import {
   DEFAULT_ghostex_SETTINGS,
   getDefaultEditorCommandForSettings,
+  getSidebarTitlebarForegroundForBackground,
   normalizeghostexSettings,
   type SessionTitleGenerationAgent,
   type SidebarSide,
@@ -319,6 +316,7 @@ import { orderProjectsWithWorktrees } from "../../shared/project-worktree-order"
 import {
   PROJECT_SESSION_LIST_COLLAPSED_CHANGED_EVENT,
   PROJECT_SESSION_LIST_COLLAPSED_STORAGE_KEY,
+  getVisibleProjectSessionIds,
   normalizeStoredProjectSessionListCollapsedState,
   type ProjectSessionListCollapsedState,
 } from "../../sidebar/project-session-list-toggle";
@@ -394,6 +392,7 @@ type NativePetOverlayStatusItem = {
 type NativeTerminalTitleBarAction =
   | "close"
   | "closeCommandsPanel"
+  | "closeAfterDone"
   | "delayedSend"
   | "expandCommandsPanel"
   | "fork"
@@ -415,8 +414,15 @@ type ProjectEditorSurfaceMode = "code" | "git" | "tasks";
 type TitlebarMode = "agents" | ProjectEditorSurfaceMode;
 type NativeProjectBrowserTabRestoreState = {
   id: string;
+  isPlaceholder?: boolean;
   title: string;
   url: string;
+};
+type NativeProjectBrowserHistoryItem = {
+  faviconDataUrl?: string;
+  title: string;
+  url: string;
+  visitedAt: string;
 };
 type NativeGxserverDaemonStatus = {
   alwaysStart: boolean;
@@ -448,6 +454,8 @@ type NativeHostCommand =
     }
   | {
       browserFeedbackTool?: "react-grab" | "agentation";
+      browserHistory?: NativeProjectBrowserHistoryItem[];
+      browserHistoryScopeId?: string;
       cwd?: string;
       projectId?: string;
       sessionId: string;
@@ -495,6 +503,8 @@ type NativeHostCommand =
       activeBrowserTabId?: string;
       browserTabs?: NativeProjectBrowserTabRestoreState[];
       browserFeedbackTool?: "react-grab" | "agentation";
+      browserHistory?: NativeProjectBrowserHistoryItem[];
+      browserHistoryScopeId?: string;
       companionPaneHidden?: boolean;
       mode?: ProjectEditorSurfaceMode;
       projectId: string;
@@ -504,6 +514,11 @@ type NativeHostCommand =
       title: string;
       type: "createProjectEditorPane";
       url: string;
+    }
+  | {
+      browserHistory: NativeProjectBrowserHistoryItem[];
+      browserHistoryScopeId: string;
+      type: "setBrowserHistory";
     }
   | { projectId: string; type: "focusProjectEditorPane" }
   | { projectId: string; type: "closeProjectEditorPane" }
@@ -562,9 +577,17 @@ type NativeHostCommand =
        *
        * CDXC:SessionFocusMode 2026-05-28-15:35:
        * Availability follows rendered awake pane owners, so a sleeping-only split sibling does not expose Focus while the native workarea visually has one pane.
-       */
+      */
       sessionFocusModeAvailableSessionIds?: string[];
       sleepingSessionIds?: string[];
+      /**
+       * CDXC:TerminalCreationFocus 2026-06-14-18:48:
+       * New zmx tabs should become the selected pane immediately even though
+       * their Ghostty surface is still mounting. Send mounting ids separately
+       * from sleeping ids so AppKit can render a non-wake placeholder in the
+       * new tab until terminalReady replaces it with the real terminal.
+       */
+      mountingSessionIds?: string[];
       /**
        * CDXC:NativeGpu 2026-05-08-16:45
        * Metadata-only native syncs update pane chrome without forcing AppKit
@@ -609,7 +632,22 @@ type NativeHostCommand =
       gxserverDaemon?: NativeGxserverDaemonStatus;
 	      petOverlayEnabled?: boolean;
 	      showSessionIdInTerminalPanes?: boolean;
-	      showProjectEditorDiffFileCount?: boolean;
+      showProjectEditorDiffFileCount?: boolean;
+      /**
+       * CDXC:SidebarTheme 2026-06-15-01:43:
+       * Native titlebar/dropdown backing surfaces are AppKit-owned, so layout
+       * sync carries the resolved sidebar theme beside the compact titlebar
+       * state instead of asking the isolated titlebar webview to infer it.
+       *
+       * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
+       * The experimental custom foreground/background colors are carried beside
+       * the preset theme, but native/modal dropdown paths must keep using the
+       * theme value for non-sidebar/titlebar surfaces.
+       */
+      sidebarTheme?: string;
+      customSidebarTitlebarColorsEnabled?: boolean;
+      customSidebarTitlebarForegroundColor?: string;
+      customSidebarTitlebarBackgroundColor?: string;
       sidebarActions?: {
         commands: SidebarCommandButton[];
       };
@@ -689,6 +727,7 @@ type NativeHostCommand =
   | { type: "showMessage"; level: "info" | "warning" | "error"; message: string }
   | { details?: string; event: string; type: "appendAgentDetectionDebugLog" }
   | { details?: string; event: string; force?: boolean; type: "appendLayoutLayeringDebugLog" }
+  | { details?: string; event: string; force?: boolean; type: "appendModeSwitcherDebugLog" }
   | { details?: string; event: string; type: "appendProjectBoardDebugLog" }
   | { details?: string; event: string; force?: boolean; type: "appendTerminalFocusDebugLog" }
   | { details?: string; event: string; type: "appendRestoreDebugLog" }
@@ -843,10 +882,11 @@ type NativeHostEvent =
       appName?: string;
       bundleIdentifier?: string;
       imagePath: string;
-      text?: string;
       title?: string;
       trigger: string;
       type: "appShotCaptured";
+      windowHeight?: number;
+      windowWidth?: number;
     }
   | { message: string; type: "appShotCaptureFailed" }
   | {
@@ -984,6 +1024,7 @@ type NativeHostEvent =
     }
   | NativeGxserverResponseEvent
   | { actionId: ghostexHotkeyActionId; sourceSessionId?: string; type: "nativeHotkey" }
+  | { isCommandPressed: boolean; type: "nativeModifierState" }
   | { protocolVersion: 1; type: "hostReady" };
 
 type NativeProcessResult = Extract<NativeHostEvent, { type: "processResult" }>;
@@ -1275,11 +1316,11 @@ const TIPS_AND_TRICKS_SEEN_STORAGE_KEY = "ghostex-native-tips-and-tricks-seen";
 const OS_INTEGRATION_ONBOARDING_SEEN_STORAGE_KEY = "ghostex-os-integration-onboarding-seen";
 const COMBINED_CHATS_GROUP_ID = NATIVE_PRESENTATION_CHATS_GROUP_ID;
 const PLUGINS_BROWSER_CHAT_URL = "https://skills.sh/";
+const MOBILE_BROWSER_CHAT_URL = "https://ghostex.dev/?download=1";
 const NATIVE_T3_REMOTE_ACCESS_ORIGIN = "http://127.0.0.1:3774";
 const NATIVE_T3_REMOTE_ACCESS_AUTH_ATTEMPTS = 30;
 const NATIVE_T3_REMOTE_ACCESS_AUTH_RETRY_MS = 500;
 const APP_SHOT_RECENT_TARGET_MS = 60_000;
-const APP_SHOT_TEXT_MAX_LENGTH = 16_000;
 /**
  * CDXC:T3Code 2026-05-04-04:41
  * T3 can emit a thread-change event before the sidebar summary title has caught
@@ -1299,6 +1340,13 @@ const AUTO_SUBMIT_STAGED_RENAME_DELAY_MS = 1_000;
 const NATIVE_SETTLED_TERMINAL_TITLE_SYNC_DELAY_MS = 1_500;
 const DELAYED_SEND_MAX_DELAY_MS = 2_147_483_647;
 const DELAYED_SEND_RESTORE_FIRE_GRACE_MS = 2_000;
+/**
+ * CDXC:CloseAfterDone 2026-06-16-01:48:
+ * Close After Done should close a session after it remains Done/non-working
+ * for three minutes. Keep this duration centralized because native owns both
+ * the timer deadline and the countdown projection shown in session rows.
+ */
+const CLOSE_AFTER_DONE_DELAY_MS = 3 * 60_000;
 /**
  * CDXC:SessionAttention 2026-05-27-09:17:
  * New/resumed/forked agent panes and manually started agents in plain
@@ -1401,9 +1449,16 @@ function buildGitSyncWithMainPrompt(input: {
  * Project context-menu themes use the same concrete theme palette names as
  * Settings, excluding Auto because per-workspace selection must persist a
  * deterministic color and apply that theme when the workspace becomes active.
+ *
+ * CDXC:SidebarTheme 2026-06-15-01:43:
+ * Project theme choices include Dark 1, Dark 2, and Light so new projects can
+ * persist the new default and older plain-dark projects normalize to the Dark
+ * 2 snapshot instead of losing their theme.
  */
 const WORKSPACE_PROJECT_THEME_OPTIONS: ReadonlyArray<{ label: string; value: SidebarTheme }> = [
-  { label: "Dark Gray", value: "plain-dark" },
+  { label: "Dark 1", value: "dark-1" },
+  { label: "Dark 2", value: "dark-2" },
+  { label: "Light", value: "plain-light" },
   { label: "Dark Green", value: "dark-green" },
   { label: "Dark Blue", value: "dark-blue" },
   { label: "Dark Red", value: "dark-red" },
@@ -1496,6 +1551,14 @@ const DEFAULT_PROJECT_BROWSER_URL = "https://github.com/maddada/Ghostex";
 const PROJECT_EDITOR_OPEN_TIMEOUT_MS = 10 * 1000;
 const AUTO_SLEEP_MONITOR_INTERVAL_MS = 60 * 1000;
 const AUTO_SLEEP_MINUTE_MS = 60 * 1000;
+/*
+CDXC:AutoSleep 2026-06-15-18:31:
+Project-editor surfaces are the heaviest sidebar-owned webviews. Keep the
+active/new surface plus only a small LRU background set awake so opening Code,
+Browser, or Project does not leave many code-server/CEF/WK surfaces consuming
+CPU and memory until the idle timer eventually fires.
+*/
+const PROJECT_EDITOR_AWAKE_SURFACE_LIMIT = 3;
 const projectDiffStatsByProjectId = new Map<string, SidebarProjectDiffStats>();
 const pendingProjectDiffRefreshProjectIds = new Set<string>();
 let lastNativeLayoutSyncKey: string | undefined;
@@ -1634,6 +1697,8 @@ type NativeProject = {
   isRemoteAttachCarrier?: boolean;
   name: string;
   path: string;
+  projectBrowser?: NativeProjectBrowserRestoreState;
+  projectBrowserHistory?: NativeProjectBrowserHistoryItem[];
   projectEditorCompanionPaneHidden?: boolean;
   projectEditor?: NativeProjectEditorRestoreState;
   projectId: string;
@@ -1811,6 +1876,12 @@ type NativeProjectEditorRestoreState = {
   url?: string;
 };
 
+type NativeProjectBrowserRestoreState = {
+  activeBrowserTabId?: string;
+  browserTabs?: NativeProjectBrowserTabRestoreState[];
+  url?: string;
+};
+
 type NativeCliSessionSelector = {
   index?: number;
   project?: string;
@@ -1976,6 +2047,11 @@ let nextNativeLayoutFocusRequestId = 0;
 let pendingNativeLayoutFocusRequest:
   | { reason: string; requestId: number; sessionId: string }
   | undefined;
+const startupRestoredTerminalFocusTarget = {
+  projectId: activeProjectId,
+  sessionId: activeSnapshot().focusedSessionId,
+};
+let didResolveStartupRestoredTerminalFocusRequest = false;
 type NativeSidebarFocusIntent = {
   projectId: string;
   reason: string;
@@ -2060,6 +2136,7 @@ const pendingNativeTerminalStartupTextBySessionId = new Map<string, string>();
 const nativeTerminalReadyAtBySessionId = new Map<string, number>();
 const nativeTerminalReadyWaitersBySessionId = new Map<string, Set<() => void>>();
 const NATIVE_TERMINAL_SURFACE_CREATION_PENDING_MS = 5_000;
+const GXSERVER_PRESENTATION_CONFIRMATION_PENDING_MS = 5_000;
 type PendingNativeTerminalSurfaceCreationState = {
   /**
    * CDXC:ProjectEditorCompanion 2026-06-05-03:59:
@@ -2082,6 +2159,15 @@ type PendingNativeTerminalSurfaceCreationState = {
 };
 const pendingNativeTerminalSurfaceCreationBySessionId =
   new Map<string, PendingNativeTerminalSurfaceCreationState>();
+type PendingGxserverPresentationConfirmationState = {
+  nativeSessionId: string;
+  projectId: string;
+  reason: string;
+  sessionId: string;
+  startedAt: number;
+};
+const pendingGxserverPresentationConfirmationBySessionId =
+  new Map<string, PendingGxserverPresentationConfirmationState>();
 const NATIVE_IN_PLACE_RELOAD_CLOSE_EVENT_MS = 15_000;
 const nativeInPlaceReloadCloseBySessionId = new Map<
   string,
@@ -2127,6 +2213,13 @@ type DelayedSendTimerState = {
   sessionId: string;
   timeoutId: number;
 };
+type CloseAfterDoneTimerState = {
+  deadlineAtMs?: number;
+  doneSinceAtMs?: number;
+  projectId: string;
+  sessionId: string;
+  timeoutId?: number;
+};
 /**
  * CDXC:DelayedSend 2026-05-17-03:14
  * Delayed Send needs a visible countdown, editable modal state, sidebar badges,
@@ -2136,6 +2229,16 @@ type DelayedSendTimerState = {
 const delayedSendTimerByNativeSessionId = new Map<string, DelayedSendTimerState>();
 let delayedSendCountdownTicker: number | undefined;
 restoreDelayedSendTimersFromStoredProjects();
+/**
+ * CDXC:CloseAfterDone 2026-06-15-21:00:
+ * Close After Done mirrors Delayed Send's local native timer ownership but
+ * waits for a continuous Done state before using the normal session
+ * close path. Store only stable ids, deadline metadata, and timeout ids here;
+ * the UI derives the red clock state from this projection.
+ */
+const closeAfterDoneTimerByNativeSessionId = new Map<string, CloseAfterDoneTimerState>();
+let closeAfterDoneCountdownTicker: number | undefined;
+restoreCloseAfterDoneTimersFromStoredProjects();
 type NativeSidebarCommandSession = {
   closeOnExit: boolean;
   commandId: string;
@@ -2250,6 +2353,7 @@ function markNativeTerminalSurfaceCreationPending(
     reason,
     startedAt: Date.now(),
   });
+  markGxserverPresentationConfirmationPending(projectId, sessionId, nativeSessionId, reason);
 }
 
 function takeNativeTerminalSurfaceCreationPending(
@@ -2264,9 +2368,91 @@ function clearNativeTerminalSurfaceCreationPending(sessionId: string): void {
   pendingNativeTerminalSurfaceCreationBySessionId.delete(sessionId);
 }
 
+function markGxserverPresentationConfirmationPending(
+  projectId: string,
+  sessionId: string,
+  nativeSessionId: string,
+  reason: string,
+): void {
+  if (
+    !isCanonicalGxserverProjectSession(projectId, sessionId) ||
+    gxserverStartupSnapshot?.presentation?.sessions.some(
+      (session) => session.projectId === projectId && session.sessionId === sessionId,
+    )
+  ) {
+    return;
+  }
+  /*
+  CDXC:GxserverPresentation 2026-06-15-10:04:
+  New native splits have two independent readiness gates: terminalReady means AppKit has mounted the surface, while gxserver presentation confirmation means the shared session row has caught up. Keep stale-prune protection tied to gxserver confirmation so an ordinary presentation delta cannot close a just-created split after terminalReady consumes the surface marker.
+  */
+  pendingGxserverPresentationConfirmationBySessionId.set(sessionId, {
+    nativeSessionId,
+    projectId,
+    reason,
+    sessionId,
+    startedAt: Date.now(),
+  });
+}
+
+function clearGxserverPresentationConfirmationPending(sessionId: string): void {
+  pendingGxserverPresentationConfirmationBySessionId.delete(sessionId);
+}
+
+function confirmGxserverPresentationSession(
+  projectId: string,
+  sessionId: string,
+  reason: string,
+): void {
+  const pending = pendingGxserverPresentationConfirmationBySessionId.get(sessionId);
+  if (!pending || pending.projectId !== projectId) {
+    return;
+  }
+  pendingGxserverPresentationConfirmationBySessionId.delete(sessionId);
+  appendSidebarRefreshDebugLog("nativeSidebar.gxserver.presentationConfirmationPendingCleared", {
+    elapsedMs: Date.now() - pending.startedAt,
+    reason,
+    sessionId,
+  });
+}
+
+function isGxserverPresentationConfirmationPendingForProject(
+  projectId: string,
+  sessionId: string,
+): boolean {
+  const pending = pendingGxserverPresentationConfirmationBySessionId.get(sessionId);
+  if (!pending) {
+    return false;
+  }
+  if (pending.projectId !== projectId) {
+    return false;
+  }
+  const elapsedMs = Date.now() - pending.startedAt;
+  if (elapsedMs < 0 || elapsedMs > GXSERVER_PRESENTATION_CONFIRMATION_PENDING_MS) {
+    pendingGxserverPresentationConfirmationBySessionId.delete(sessionId);
+    return false;
+  }
+  return true;
+}
+
 function isNativeTerminalSurfaceCreationPendingForProject(projectId: string, sessionId: string): boolean {
   const pending = pendingNativeTerminalSurfaceCreationBySessionId.get(sessionId);
-  return pending !== undefined && pending.projectId === projectId;
+  if (!pending) {
+    return false;
+  }
+  if (pending.projectId !== projectId) {
+    return false;
+  }
+  const elapsedMs = Date.now() - pending.startedAt;
+  /*
+  CDXC:TerminalCreationFocus 2026-06-15-09:55:
+  Mounting markers are only for the short interval before terminalReady replaces a selected placeholder with a real native surface. Expire stale pending-create state at the writer boundary so Source/Browser/Kanban companion retargeting is not blocked by an old mounting id.
+  */
+  if (elapsedMs < 0 || elapsedMs > NATIVE_TERMINAL_SURFACE_CREATION_PENDING_MS) {
+    pendingNativeTerminalSurfaceCreationBySessionId.delete(sessionId);
+    return false;
+  }
+  return true;
 }
 
 function markNativeInPlaceReloadClosePending(sessionId: string, nativeSessionId: string): void {
@@ -2606,11 +2792,19 @@ function appendNativeHotkeyNavigationReproLog(
 ): void {
   /**
    * CDXC:Hotkeys 2026-06-07-14:24:
-   * A 14:14 repro happened with Debugging Mode off. Persist only narrow
-   * next/previous-session DOM hotkey phases using event-name metadata so the
-   * native writer never receives session names, titles, paths, URLs, command
-   * text, or raw terminal content.
+   * A 14:14 repro needed narrow next/previous-session DOM hotkey phases. These
+   * breadcrumbs are now Debugging Mode diagnostics only; normal mode keeps only
+   * warning/error/failure events so held shortcuts cannot fill persistent logs.
+   *
+   * CDXC:Diagnostics 2026-06-15-18:39:
+   * The user usually runs with Debugging Mode enabled, so stale repro traces can
+   * still dominate support bundles. Keep the metadata-only hotkey breadcrumb
+   * available for active debugging, but never classify it as a normal-mode
+   * important warning.
    */
+  if (!isNativeSidebarDebugLoggingEnabled()) {
+    return;
+  }
   const actionSuffix = actionId ? `.${actionId}` : "";
   appendTerminalFocusDebugLog(
     `nativeHotkeys.navigationRepro.${phase}${actionSuffix}`,
@@ -2629,11 +2823,11 @@ function recordSidebarCardFocusTrace(details: unknown): void {
   };
   /**
    * CDXC:SidebarSessionFocus 2026-05-15-20:01:
-   * Session-card focus repros need a persistent bridge boundary even when the
-   * Debugging Mode toggle was not enabled before the bad click. Force only this
-   * low-volume card-click breadcrumb so later native paneLayout logs can be
-   * correlated to the exact sidebar card, group, pointer position, and local
-   * focus decision that initiated the focus request.
+   * Session-card focus repros need a persistent bridge boundary while
+   * Debugging Mode is enabled. Force only this low-volume card-click breadcrumb
+   * so later native paneLayout logs can be correlated to the exact sidebar
+   * card, group, pointer position, and local focus decision that initiated the
+   * focus request.
    */
   appendTerminalFocusDebugLog(
     "nativeFocusTrace.sidebarCardFocusRequested",
@@ -2727,12 +2921,47 @@ function summarizeSidebarCardFocusTrace(
   };
 }
 
+function summarizeSidebarWakeScrollCardFocusRequest(details: unknown): Record<string, unknown> {
+  return {
+    activity: readUnknownRecordString(details, "activity"),
+    button: readUnknownRecordNumber(details, "button"),
+    clickDetail: readUnknownRecordNumber(details, "clickDetail"),
+    groupId: readUnknownRecordString(details, "groupId"),
+    index: readUnknownRecordNumber(details, "index"),
+    isFocused: readUnknownRecordBoolean(details, "isFocused"),
+    isSleeping: readUnknownRecordBoolean(details, "isSleeping"),
+    isVisible: readUnknownRecordBoolean(details, "isVisible"),
+    localFocusWillRun: readUnknownRecordBoolean(details, "localFocusWillRun"),
+    metaKey: readUnknownRecordBoolean(details, "metaKey"),
+    requestedAt: readUnknownRecordNumber(details, "requestedAt"),
+    sessionId: readUnknownRecordString(details, "sessionId"),
+    sessionKind: readUnknownRecordString(details, "sessionKind"),
+    shiftKey: readUnknownRecordBoolean(details, "shiftKey"),
+  };
+}
+
 function readUnknownRecordString(value: unknown, key: string): string | undefined {
   if (!value || typeof value !== "object") {
     return undefined;
   }
   const record = value as Record<string, unknown>;
   return typeof record[key] === "string" ? record[key] : undefined;
+}
+
+function readUnknownRecordBoolean(value: unknown, key: string): boolean | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  return typeof record[key] === "boolean" ? record[key] : undefined;
+}
+
+function readUnknownRecordNumber(value: unknown, key: string): number | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  return typeof record[key] === "number" ? record[key] : undefined;
 }
 
 function postNative(command: NativeHostCommand): void {
@@ -2856,6 +3085,10 @@ async function refreshGxserverStartupSnapshot(reason: string): Promise<boolean> 
     if (snapshot.presentation) {
       applyGxserverPresentationSessionsToNativePaneChrome(snapshot.presentation.sessions, "startup-snapshot");
     }
+    const startupFocusQueued = queueStartupRestoredTerminalFocusRequest(
+      snapshot.presentation,
+      `startupSnapshot:${reason}`,
+    );
     appendSidebarRefreshDebugLog("nativeSidebar.gxserver.snapshot", {
       previousProjectCount: previousSnapshot?.projects.length,
       projectCount: snapshot.projects.length,
@@ -2868,6 +3101,7 @@ async function refreshGxserverStartupSnapshot(reason: string): Promise<boolean> 
       reason,
       serverId: snapshot.health.serverId,
       stalePrune,
+      startupFocusQueued,
     });
     startGxserverPresentationSubscription();
     publish();
@@ -3087,9 +3321,45 @@ type StaleGxserverLocalSessionPruneResult = {
   workspaceSessionCount: number;
 };
 
+type StaleGxserverLocalSessionPruneScope =
+  | { kind: "all" }
+  | { kind: "project"; projectId: string }
+  | { kind: "session"; projectId: string; sessionId: string };
+
+function doesStaleGxserverLocalSessionPruneScopeInclude(
+  scope: StaleGxserverLocalSessionPruneScope,
+  projectId: string,
+  sessionId: string,
+): boolean {
+  if (scope.kind === "all") {
+    return true;
+  }
+  if (scope.kind === "project") {
+    return scope.projectId === projectId;
+  }
+  return scope.projectId === projectId && scope.sessionId === sessionId;
+}
+
+function staleGxserverLocalSessionPruneScopeForDelta(
+  delta: GxserverPresentationDelta,
+): StaleGxserverLocalSessionPruneScope | undefined {
+  /*
+  CDXC:GxserverPresentation 2026-06-15-10:04:
+  Presentation deltas are not all authoritative absence proofs. Only explicit removal deltas may prune from the delta stream; ordinary session/title/activity/project updates can arrive before a just-created split's session row is echoed, so full absence cleanup stays with snapshots.
+  */
+  if (delta.type === "sessionRemoved") {
+    return { kind: "session", projectId: delta.projectId, sessionId: delta.sessionId };
+  }
+  if (delta.type === "projectRemoved") {
+    return { kind: "project", projectId: delta.projectId };
+  }
+  return undefined;
+}
+
 function pruneStaleGxserverLocalSessionsFromPresentation(
   presentation: GxserverPresentationSnapshot,
   reason: string,
+  scope: StaleGxserverLocalSessionPruneScope = { kind: "all" },
 ): StaleGxserverLocalSessionPruneResult {
   const presentationSessionKeys = new Set(
     presentation.sessions.map((session) =>
@@ -3109,6 +3379,7 @@ function pruneStaleGxserverLocalSessionsFromPresentation(
       if (
         session.kind !== "terminal" ||
         !isCanonicalGxserverProjectSession(project.projectId, session.sessionId) ||
+        !doesStaleGxserverLocalSessionPruneScopeInclude(scope, project.projectId, session.sessionId) ||
         presentationSessionKeys.has(
           localFirstPresentationSessionKey(project.projectId, session.sessionId),
         )
@@ -3117,9 +3388,15 @@ function pruneStaleGxserverLocalSessionsFromPresentation(
       }
       /*
       CDXC:GxserverPresentation 2026-06-13-15:44:
-      Local zmx create publishes a canonical sidebar row before gxserver presentation may echo the new session. Presentation snapshots and project deltas must not prune that row while native createTerminal is pending, otherwise Swift creates the surface outside the active layout and later focus updates can bounce between the new pane and the previous tab.
+      Local zmx create publishes a canonical sidebar row before gxserver presentation may echo the new session. Absence-based presentation snapshots must not prune that row while native createTerminal is pending, otherwise Swift creates the surface outside the active layout and later focus updates can bounce between the new pane and the previous tab.
+
+      CDXC:GxserverPresentation 2026-06-15-10:04:
+      The stale-prune guard must follow gxserver presentation confirmation, not native terminalReady. The terminal surface can be ready before gxserver echoes the session, and clearing this protection at terminalReady can make splitMore remove its own fresh pane.
       */
-      if (isNativeTerminalSurfaceCreationPendingForProject(project.projectId, session.sessionId)) {
+      if (
+        scope.kind === "all" &&
+        isGxserverPresentationConfirmationPendingForProject(project.projectId, session.sessionId)
+      ) {
         skippedPendingCreateSessionKeys.add(
           localFirstPresentationSessionKey(project.projectId, session.sessionId),
         );
@@ -3225,6 +3502,7 @@ function clearStaleGxserverLocalSessionRuntime(
   clearNativeSessionAttentionTracking(sessionId);
   nativeAttentionNotificationLastSentAtBySessionId.delete(sessionId);
   clearDelayedSendTimer(sessionId, projectId);
+  clearCloseAfterDoneTimer(sessionId, projectId, "staleSessionRuntimeCleared");
   postNative({ sessionId: nativeSessionId, type: "closeTerminal" });
   appendSidebarRefreshDebugLog("nativeSidebar.gxserver.staleLocalSessionRuntimeCleared", {
     projectId,
@@ -3248,6 +3526,10 @@ function applyGxserverPresentationSnapshot(snapshot: GxserverPresentationSnapsho
     `snapshot:${reason}`,
   );
   applyGxserverPresentationSessionsToNativePaneChrome(nextSnapshot.sessions, reason);
+  const startupFocusQueued = queueStartupRestoredTerminalFocusRequest(
+    nextSnapshot,
+    `presentationSnapshot:${reason}`,
+  );
   appendSidebarRefreshDebugLog("nativeSidebar.gxserver.presentationSnapshot.applied", {
     groupCount: nextSnapshot.groups.length,
     projectCount: nextSnapshot.projects.length,
@@ -3255,6 +3537,7 @@ function applyGxserverPresentationSnapshot(snapshot: GxserverPresentationSnapsho
     revision: nextSnapshot.revision,
     sessionCount: nextSnapshot.sessions.length,
     stalePrune,
+    startupFocusQueued,
   });
   publish();
 }
@@ -3284,10 +3567,14 @@ function applyGxserverPresentationDelta(delta: GxserverPresentationDelta, revisi
     presentation: nextPresentation,
     projects: nextProjects,
   };
-  const stalePrune = pruneStaleGxserverLocalSessionsFromPresentation(
-    nextPresentation,
-    `delta:${delta.type}`,
-  );
+  const stalePruneScope = staleGxserverLocalSessionPruneScopeForDelta(delta);
+  const stalePrune = stalePruneScope
+    ? pruneStaleGxserverLocalSessionsFromPresentation(
+        nextPresentation,
+        `delta:${delta.type}`,
+        stalePruneScope,
+      )
+    : { commandSessionCount: 0, projectCount: 0, workspaceSessionCount: 0 };
   const gxserverProjectCacheSync =
     delta.type === "projectAdded" || delta.type === "projectUpdated"
       ? syncSidebarSharedProjectCacheFromGxserverProjects(
@@ -3341,6 +3628,7 @@ function applyGxserverPresentationSessionToNativePaneChrome(
   presentation: GxserverPresentationSession,
   reason: string,
 ): boolean {
+  confirmGxserverPresentationSession(presentation.projectId, presentation.sessionId, reason);
   const localSession = findSessionRecord(presentation.sessionId);
   const terminalState = terminalStateById.get(presentation.sessionId);
   if (!localSession && !terminalState) {
@@ -4133,6 +4421,7 @@ function markNativeTerminalCreateFailed(
   message: string,
 ): void {
   clearNativeTerminalSurfaceCreationPending(sessionId);
+  clearGxserverPresentationConfirmationPending(sessionId);
   const terminalState = terminalStateById.get(sessionId);
   if (terminalState) {
     terminalState.lifecycleState = "error";
@@ -4704,16 +4993,16 @@ function appendZmxPersistenceFocusReproLog(event: string, details?: unknown): vo
   /**
    * CDXC:ZmxPersistenceDiagnostics 2026-05-18-08:52:
    * Intermittent broken text after clicking zmx-backed sidebar sessions must
-   * be diagnosable from a session id and minute without requiring the user to
-   * pre-enable broad Debugging Mode. Force only this zmx focus breadcrumb chain
-   * into the native terminal-focus log; keep the payload metadata-only.
+   * be diagnosable from a session id and minute while Debugging Mode is enabled.
+   * Force only this zmx focus breadcrumb chain into the native terminal-focus
+   * log; keep the payload metadata-only.
+   *
+   * CDXC:Diagnostics 2026-06-15-18:39:
+   * Forced repro breadcrumbs are not normal-mode warnings. Route through the
+   * shared helper so Debugging Mode off avoids the native bridge unless the
+   * event name is failure-classified.
    */
-  postNative({
-    details: details === undefined ? undefined : safeSerializeForNativeLog(details),
-    event,
-    force: true,
-    type: "appendTerminalFocusDebugLog",
-  });
+  appendTerminalFocusDebugLog(event, details, { force: true });
 }
 
 function appendRestoreResumeInputDiagnosticLog(event: string, details?: unknown): void {
@@ -4724,13 +5013,12 @@ function appendRestoreResumeInputDiagnosticLog(event: string, details?: unknown)
    * Force this narrow restore-input breadcrumb so the next repro shows the
    * sidebar reason, provider identity, and native mapping before text can reach
    * an agent CLI prompt.
+   *
+   * CDXC:Diagnostics 2026-06-15-18:39:
+   * Restore-input breadcrumbs are Debugging Mode diagnostics unless the event is
+   * failure-classified.
    */
-  postNative({
-    details: details === undefined ? undefined : safeSerializeForNativeLog(details),
-    event,
-    force: true,
-    type: "appendTerminalFocusDebugLog",
-  });
+  appendTerminalFocusDebugLog(event, details, { force: true });
 }
 
 function appendActionCrashTraceDebugLog(event: string, details?: unknown): void {
@@ -4741,33 +5029,41 @@ function appendActionCrashTraceDebugLog(event: string, details?: unknown): void 
    * the normal filtered diagnostics flush. Keep this helper action-scoped and
    * low-volume so post-repro logs show command lookup, command-pane reuse or
    * creation, and write/submit boundaries without enabling noisy focus traces.
+   *
+   * CDXC:GxserverLogs 2026-06-15-20:39:
+   * The historical actionCrashTrace event prefix is a breadcrumb label, not a
+   * severity. Route it through the shared terminal-focus gate so ordinary
+   * titlebar action phases require Debugging Mode while real error/failed
+   * phases can still persist as normal-mode diagnostics.
    */
-  postNative({
-    details: details === undefined ? undefined : safeSerializeForNativeLog(details),
-    event,
-    type: "appendTerminalFocusDebugLog",
-  });
+  appendTerminalFocusDebugLog(event, details, { force: true });
 }
 
-function appendTitlebarCodeLagDebugLog(event: string, details?: unknown): void {
+function appendModeSwitcherDebugLog(
+  event: string,
+  details: Record<string, unknown> = {},
+  options: { force?: boolean } = {},
+): void {
   /**
-   * CDXC:ModeSwitcher 2026-05-16-07:23:
-   * Reproducing titlebar Code-tab lag is regular diagnostics, not error
-   * logging. Keep this breadcrumb chain behind Settings Debugging Mode and
-   * include monotonic performance timestamps only when the user is reproducing
-   * with diagnostics enabled.
+   * CDXC:ModeSwitcherDiagnostics 2026-06-15-00:21:
+   * View-switch lag repros need timing across titlebar, sidebar routing,
+   * project-surface wake, native layout sync, and AppKit settle. Keep routine
+   * breadcrumbs behind Settings Debugging Mode, and send only safe ids,
+   * enum-like modes/statuses, counts, booleans, hashes, and elapsed timings.
    */
   if (!isNativeSidebarDebugLoggingEnabled()) {
     return;
   }
   postNative({
     details: safeSerializeForNativeLog({
-      details,
+      ...details,
       performanceNowMs: performance.now(),
+      source: "native-sidebar",
       wallTimeMs: Date.now(),
     }),
+    ...(options.force ? { force: true } : {}),
     event,
-    type: "appendSessionTitleDebugLog",
+    type: "appendModeSwitcherDebugLog",
   });
 }
 
@@ -4851,6 +5147,21 @@ function appendSidebarRefreshDebugLog(event: string, details?: unknown): void {
   });
 }
 
+const SIDEBAR_WAKE_SCROLL_DEBUG_EVENT_PREFIX = "repro.sidebarWakeScroll.";
+
+function appendSidebarWakeScrollDebugLog(event: string, details?: unknown): void {
+  /*
+   * CDXC:SidebarWakeScrollDiagnostics 2026-06-16-02:20:
+   * Session wake-scroll repros need one persistent chain from sidebar card click through native focus/publish and the React scrollIntoView decision. Keep this in the existing sidebar refresh log, gated by Debugging Mode, and log only stable ids, indexes, booleans, enum states, and geometry summaries.
+   */
+  appendSidebarRefreshDebugLog(
+    event.startsWith(SIDEBAR_WAKE_SCROLL_DEBUG_EVENT_PREFIX)
+      ? event
+      : `${SIDEBAR_WAKE_SCROLL_DEBUG_EVENT_PREFIX}${event}`,
+    details,
+  );
+}
+
 function appendSidebarCollapseStateDebugLog(event: string, details?: unknown): void {
   /**
    * CDXC:SidebarCollapseDiagnostics 2026-06-02-23:52:
@@ -4872,16 +5183,14 @@ function appendSidebarCollapseStateDebugLog(event: string, details?: unknown): v
 function appendPinnedSessionReorderDebugLog(event: string, details?: unknown): void {
   /**
    * CDXC:PinnedSessions 2026-05-28-15:33:
-   * Pinned-session reorder repros need low-volume persistent breadcrumbs even
-   * when broad Debugging Mode is off, because the bug happens during one drag
-   * and can be missed by console-only sidebarDebugLog output.
+   * Pinned-session reorder repros need low-volume persistent breadcrumbs while
+   * Debugging Mode is enabled, because the bug happens during one drag and can
+   * be missed by console-only sidebarDebugLog output.
+   *
+   * CDXC:Diagnostics 2026-06-15-18:39:
+   * Reorder breadcrumbs are useful repro context, not normal-mode warnings.
    */
-  postNative({
-    details: details === undefined ? undefined : safeSerializeForNativeLog(details),
-    event,
-    force: true,
-    type: "appendTerminalFocusDebugLog",
-  });
+  appendTerminalFocusDebugLog(event, details, { force: true });
 }
 
 function appendProjectBoardDebugLog(event: string, details?: unknown): void {
@@ -4903,21 +5212,45 @@ function appendProjectBoardDebugLog(event: string, details?: unknown): void {
 }
 
 function shouldPersistNativeSidebarDiagnostic(event: string): boolean {
+  /*
+  CDXC:Diagnostics 2026-06-15-18:39:
+  Normal mode persistent logs are for actual warnings, errors, failures,
+  crashes, timeouts, and malformed payloads. Focus traces, hotkey repro phases,
+  pane-layout breadcrumbs, and missing-session probes are recoverable UI
+  diagnostics that should write only when Debugging Mode explicitly enables
+  them.
+
+  CDXC:GxserverLogs 2026-06-15-20:39:
+  actionCrashTrace is a legacy breadcrumb namespace. Do not let the word crash
+  in that namespace make routine click/run phases look like important warnings;
+  only the actual failed/error phases should persist without Debugging Mode.
+  */
   const normalizedEvent = event.toLowerCase();
+  if (
+    normalizedEvent.startsWith("nativesidebar.actioncrashtrace.") &&
+    !normalizedEvent.includes("warn") &&
+    !normalizedEvent.includes("fail") &&
+    !normalizedEvent.includes("error") &&
+    !normalizedEvent.includes("exception") &&
+    !normalizedEvent.includes("fatal") &&
+    !normalizedEvent.includes("panic") &&
+    !normalizedEvent.includes("invalid") &&
+    !normalizedEvent.includes("timeout") &&
+    !normalizedEvent.includes("exhausted") &&
+    !normalizedEvent.includes("rejected") &&
+    !normalizedEvent.includes("unhealthy") &&
+    !normalizedEvent.includes("portbusy")
+  ) {
+    return false;
+  }
   return (
-    normalizedEvent.startsWith("nativefocustrace.") ||
-    normalizedEvent.startsWith("nativehotkeys.commandarrow") ||
-    normalizedEvent.startsWith("nativehotkeys.actionstart") ||
-    normalizedEvent.startsWith("nativehotkeys.focusdirection") ||
-    normalizedEvent.startsWith("nativehotkeys.hosteventreceived") ||
-    normalizedEvent.startsWith("nativehotkeys.navigationrepro") ||
-    normalizedEvent.startsWith("nativehotkeys.projecteditorcompanion") ||
-    normalizedEvent.startsWith("nativehotkeys.renderedfocusdirection") ||
-    normalizedEvent.startsWith("nativepanelayouttrace.") ||
+    normalizedEvent.includes("warn") ||
     normalizedEvent.includes("fail") ||
     normalizedEvent.includes("error") ||
+    normalizedEvent.includes("exception") ||
+    normalizedEvent.includes("fatal") ||
+    normalizedEvent.includes("panic") ||
     normalizedEvent.includes("invalid") ||
-    normalizedEvent.includes("missing") ||
     normalizedEvent.includes("timeout") ||
     normalizedEvent.includes("exhausted") ||
     normalizedEvent.includes("rejected") ||
@@ -4929,7 +5262,6 @@ function shouldPersistNativeSidebarDiagnostic(event: string): boolean {
 
 const SIDEBAR_REFRESH_DEBUG_LOG_SAMPLE_MS = 5_000;
 const sidebarRefreshDebugLogSampleAtByEvent = new Map<string, number>();
-const LEGACY_DEFAULT_WORKSPACE_BACKGROUND_COLOR = "#151515";
 
 function shouldPersistSidebarRefreshDebugLog(event: string): boolean {
   if (isHighVolumeSidebarRefreshDebugEvent(event)) {
@@ -5011,25 +5343,15 @@ function summarizeNativeFocusCommand(command: NativeHostCommand): Record<string,
   };
 }
 
-function resolveNativeWorkspaceBackgroundColor(
-  currentSettings: ghostexSettings,
-): string | undefined {
+function resolveNativeWorkspaceBackgroundColor(): string {
   /*
-   * CDXC:WorkspaceLayout 2026-06-07-16:53:
-   * Native macOS workspace background defaults should come from Ghostty's loaded
-   * terminal background, not from the sidebar settings object. Send a color only
-   * when the user has an explicit non-default workspace override; treat the old
-   * #151515 default as automatic so upgraded installs stop forcing gray.
+   * CDXC:WorkspaceLayout 2026-06-15-17:01:
+   * The empty native workspace visible after the last terminal pane closes must
+   * be black for every user, regardless of Ghostty theme or persisted workspace
+   * color settings. Always send black to AppKit so the backing layer cannot
+   * diverge across machines.
    */
-  const value = currentSettings.workspaceBackgroundColor.trim();
-  const normalized = value.toLowerCase();
-  if (
-    normalized === DEFAULT_ghostex_SETTINGS.workspaceBackgroundColor.toLowerCase() ||
-    normalized === LEGACY_DEFAULT_WORKSPACE_BACKGROUND_COLOR
-  ) {
-    return undefined;
-  }
-  return value;
+  return "#000000";
 }
 
 function getNativeFocusCommandSidebarSessionId(command: NativeHostCommand): string | undefined {
@@ -5062,6 +5384,102 @@ function queueNativeLayoutFocusRequest(sessionId: string, reason: string): void 
     sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
     sessionId,
   }, { force: sidebarCardFocusTrace !== undefined });
+}
+
+function queueStartupRestoredTerminalFocusRequest(
+  presentation: GxserverPresentationSnapshot | undefined,
+  reason: string,
+): boolean {
+  if (didResolveStartupRestoredTerminalFocusRequest) {
+    return false;
+  }
+  const sessionId = startupRestoredTerminalFocusTarget.sessionId?.trim();
+  if (!sessionId) {
+    didResolveStartupRestoredTerminalFocusRequest = true;
+    return false;
+  }
+  if (!presentation) {
+    return false;
+  }
+  const skip = (skipReason: string, details: Record<string, unknown> = {}): false => {
+    didResolveStartupRestoredTerminalFocusRequest = true;
+    appendTerminalFocusDebugLog("nativeFocusTrace.startupRestoredTerminalFocusSkipped", {
+      ...details,
+      projectId: startupRestoredTerminalFocusTarget.projectId,
+      reason,
+      sessionId,
+      skipReason,
+    });
+    return false;
+  };
+  const project = activeProject();
+  if (
+    startupRestoredTerminalFocusTarget.projectId !== activeProjectId ||
+    project.projectId !== startupRestoredTerminalFocusTarget.projectId
+  ) {
+    return skip("activeProjectChanged", {
+      activeProjectId,
+      currentProjectId: project.projectId,
+    });
+  }
+  const snapshot = activeSnapshot();
+  if (snapshot.focusedSessionId !== sessionId) {
+    return skip("focusedSessionChanged", {
+      currentFocusedSessionId: snapshot.focusedSessionId,
+    });
+  }
+  const session = snapshot.sessions.find((candidate) => candidate.sessionId === sessionId);
+  if (session?.kind !== "terminal") {
+    return skip("missingOrNonTerminal", {
+      sessionKind: session?.kind,
+    });
+  }
+  if (session.surface === "commands") {
+    return skip("commandSurface");
+  }
+  if (session.isSleeping === true) {
+    return skip("sleepingLocalSession");
+  }
+  if (!isCurrentWorkspaceNativeFocusTarget(snapshot, sessionId)) {
+    return skip("notCurrentWorkspaceNativeFocusTarget", {
+      visibleSessionCount: snapshot.visibleSessionIds.length,
+    });
+  }
+  const presentationSession = presentation.sessions.find(
+    (candidate) =>
+      candidate.projectId === project.projectId && candidate.sessionId === sessionId,
+  );
+  if (!presentationSession) {
+    return skip("missingPresentationSession", {
+      presentationSessionCount: presentation.sessions.length,
+    });
+  }
+  if (
+    presentationSession.surface !== "workspace" ||
+    presentationSession.visibleInSidebarByDefault !== true ||
+    isGxserverPresentationSessionLocallyHidden(project.projectId, sessionId)
+  ) {
+    return skip("presentationNotWorkspaceVisible", {
+      isLocallyHidden: isGxserverPresentationSessionLocallyHidden(project.projectId, sessionId),
+      lifecycleState: presentationSession.lifecycleState,
+      presentationSurface: presentationSession.surface,
+      visibleInSidebarByDefault: presentationSession.visibleInSidebarByDefault,
+    });
+  }
+
+  /*
+  CDXC:StartupFocus 2026-06-15-10:59:
+  App relaunch should return AppKit keyboard focus to the terminal that owned it at shutdown, but only after gxserver confirms the same active workspace session still exists. Queue one explicit layout focus request so startup uses the normal setActiveTerminalSet first-responder path instead of treating passive focusedSessionId chrome as permission to move keyboard focus.
+  */
+  didResolveStartupRestoredTerminalFocusRequest = true;
+  queueNativeLayoutFocusRequest(sessionId, "startupRestoredTerminalFocus");
+  appendTerminalFocusDebugLog("nativeFocusTrace.startupRestoredTerminalFocusQueued", {
+    lifecycleState: presentationSession.lifecycleState,
+    projectId: project.projectId,
+    reason,
+    sessionId,
+  });
+  return true;
 }
 
 function beginNativeSidebarFocusIntent(
@@ -5183,33 +5601,38 @@ function appendPaneLayoutTraceDebugLog(
 function appendStartupPaneLayoutDebugLog(event: string, details?: unknown): void {
   /**
    * CDXC:StartupPaneDiagnostics 2026-05-16-09:14:
-   * A restart can incorrectly surface every parked tab as its own split pane before the user can enable Debugging Mode. Persist two low-volume startup breadcrumbs unconditionally: the restored project snapshot and the first native layout synthesis.
+   * A restart can incorrectly surface every parked tab as its own split pane.
+   * Persist two low-volume startup breadcrumbs while Debugging Mode is enabled:
+   * the restored project snapshot and the first native layout synthesis.
+   *
+   * CDXC:Diagnostics 2026-06-15-18:39:
+   * Startup breadcrumbs are not normal-mode warnings by themselves. Failure-like
+   * startup events still pass through the shared important-diagnostic gate.
    */
-  postNative({
-    details: details === undefined ? undefined : safeSerializeForNativeLog(details),
-    event: `nativePaneLayoutStartup.${event}`,
-    force: true,
-    type: "appendLayoutLayeringDebugLog",
-  });
+  appendLayoutLayeringDebugLog(`nativePaneLayoutStartup.${event}`, details, { force: true });
 }
 
 function appendPreviousSessionRestoreTraceDebugLog(event: string, details?: unknown): void {
   /**
    * CDXC:PreviousSessions 2026-05-17-03:18:
-   * The zmx previous-session restore repro can hide the terminal pane before the user can enable or inspect normal Debugging Mode logs.
+   * The zmx previous-session restore repro can hide the terminal pane while
+   * Debugging Mode is enabled.
    * Force only this click-scoped restore breadcrumb chain so the next repro shows the archived record, provider choice, sidebar workspace mutation, and native create/layout handoff without broadening routine terminal logging.
+   *
+   * CDXC:Diagnostics 2026-06-15-18:39:
+   * Previous-session restore traces are not normal-mode warnings unless they
+   * carry a failure-classified event name.
    */
-  postNative({
-    details: details === undefined ? undefined : safeSerializeForNativeLog({
+  appendTerminalFocusDebugLog(
+    `previousSessionRestore.${event}`,
+    details === undefined ? undefined : {
       activeProjectId,
       details,
       performanceNowMs: performance.now(),
       wallTimeMs: Date.now(),
-    }),
-    event: `previousSessionRestore.${event}`,
-    force: true,
-    type: "appendTerminalFocusDebugLog",
-  });
+    },
+    { force: true },
+  );
 }
 
 function summarizeSessionPaneLayout(
@@ -5356,6 +5779,88 @@ function summarizeSidebarSessionFocusTarget(
     targetGroupIndex,
     visibleSessionIds: targetSnapshot?.visibleSessionIds,
   };
+}
+
+function summarizeSidebarWakeScrollNativeState(
+  project: NativeProject,
+  sessionId: string,
+): Record<string, unknown> {
+  const targetGroupIndex = project.workspace.groups.findIndex((group) =>
+    group.snapshot.sessions.some((session) => session.sessionId === sessionId),
+  );
+  const targetGroup =
+    targetGroupIndex >= 0 ? project.workspace.groups[ targetGroupIndex ] : undefined;
+  const targetSnapshot = targetGroup?.snapshot;
+  const workspaceSessionIds = targetSnapshot?.sessions.map((session) => session.sessionId) ?? [];
+  const workspaceSessionIndex = workspaceSessionIds.indexOf(sessionId);
+  const workspaceVisibleSessionIds = targetSnapshot?.visibleSessionIds ?? [];
+  const workspaceVisibleSessionIndex = workspaceVisibleSessionIds.indexOf(sessionId);
+  const commandPanelSessionIds = project.commandsPanel.sessions.map((session) => session.sessionId);
+  const commandPanelSessionIndex = commandPanelSessionIds.indexOf(sessionId);
+  const sessionRecord = findSessionRecordInProject(project, sessionId);
+  const presentationSession = findGxserverPresentationSession(project.projectId, sessionId);
+  return {
+    activeProjectId,
+    activeSessionsSortMode,
+    activeWorkspaceGroupId: project.workspace.activeGroupId,
+    commandPanelActiveSessionId: project.commandsPanel.activeSessionId,
+    commandPanelIsVisible: project.commandsPanel.isVisible,
+    commandPanelSessionCount: commandPanelSessionIds.length,
+    commandPanelSessionIndex,
+    commandPanelSessionWindowIds: createSidebarWakeScrollSessionIdWindow(
+      commandPanelSessionIds,
+      commandPanelSessionIndex,
+    ),
+    firstWorkspaceSessionId: workspaceSessionIds[ 0 ],
+    firstWorkspaceVisibleSessionId: workspaceVisibleSessionIds[ 0 ],
+    hasNativeTerminalState: terminalStateById.has(sessionId),
+    isSleeping: sessionRecord?.isSleeping === true,
+    lastWorkspaceSessionId: workspaceSessionIds.at(-1),
+    lastWorkspaceVisibleSessionId: workspaceVisibleSessionIds.at(-1),
+    presentationActivity: presentationSession?.activity,
+    presentationKind: presentationSession?.kind,
+    presentationLastActiveAt: presentationSession?.lastActiveAt,
+    presentationLifecycleState: presentationSession?.lifecycleState,
+    presentationProvider: presentationSession?.sessionPersistenceProvider,
+    presentationProviderSessionState: presentationSession?.providerSessionState,
+    presentationSurface: presentationSession?.surface,
+    presentationVisibleInSidebarByDefault: presentationSession?.visibleInSidebarByDefault,
+    projectId: project.projectId,
+    sessionId,
+    sessionKind: sessionRecord?.kind,
+    sessionSurface: sessionRecord?.kind === "terminal" ? sessionRecord.surface : undefined,
+    workspaceFocusedSessionId: targetSnapshot?.focusedSessionId,
+    workspaceGroupCount: project.workspace.groups.length,
+    workspaceGroupId: targetGroup?.groupId,
+    workspaceGroupIndex: targetGroupIndex,
+    workspaceSessionCount: workspaceSessionIds.length,
+    workspaceSessionIndex,
+    workspaceSessionWindowIds: createSidebarWakeScrollSessionIdWindow(
+      workspaceSessionIds,
+      workspaceSessionIndex,
+    ),
+    workspaceVisibleCount: targetSnapshot?.visibleCount,
+    workspaceVisibleSessionCount: workspaceVisibleSessionIds.length,
+    workspaceVisibleSessionIndex,
+    workspaceVisibleSessionWindowIds: createSidebarWakeScrollSessionIdWindow(
+      workspaceVisibleSessionIds,
+      workspaceVisibleSessionIndex,
+    ),
+  };
+}
+
+function createSidebarWakeScrollSessionIdWindow(
+  sessionIds: readonly string[],
+  targetIndex: number,
+  radius = 3,
+): string[] {
+  if (targetIndex < 0) {
+    return [];
+  }
+  return sessionIds.slice(
+    Math.max(0, targetIndex - radius),
+    Math.min(sessionIds.length, targetIndex + radius + 1),
+  );
 }
 
 function collectSessionPaneLayoutSessionIds(node: SessionPaneLayoutNode | undefined): string[] {
@@ -5607,6 +6112,11 @@ function createNativeBrowserSession(
   }
   const normalizedUrl = normalizeBrowserPaneUrl(url);
   const title = options?.title ?? browserPaneTitleFromUrl(normalizedUrl);
+  const browserHistoryScopeId = projectBrowserHistoryScopeIdForProject(project);
+  const browserHistory = recordProjectBrowserHistoryLaunch(project, {
+    title,
+    url: normalizedUrl,
+  });
   const targetWorkspace = groupId
     ? focusGroupInSimpleWorkspace(project.workspace, groupId).snapshot
     : project.workspace;
@@ -5674,6 +6184,8 @@ function createNativeBrowserSession(
   });
   postNative({
     browserFeedbackTool: settings.browserFeedbackTool,
+    browserHistory,
+    browserHistoryScopeId,
     cwd: project.path,
     sessionId: nativeSessionId,
     title: session.title || title || "Browser",
@@ -7235,12 +7747,18 @@ function syncAutoSleepSettings(
      * CDXC:AutoSleep 2026-05-28-08:06:
      * Changing editor or Git Auto Sleep settings should affect already-open
      * background panes immediately by rescheduling their pending sleep timers.
+     *
+     * CDXC:AutoSleep 2026-06-15-18:31:
+     * The project-editor resource cap is part of Auto Sleep policy. Re-apply it
+     * when editor sleep settings change so existing awake background webviews
+     * are trimmed without waiting for another Code/Browser/Project open action.
      */
     for (const [projectId, surfaceState] of projectEditorSurfaceByProjectId.entries()) {
       if (surfaceState.isOpen === false && surfaceState.isSleeping !== true) {
         scheduleProjectEditorSleep(projectId);
       }
     }
+    enforceProjectEditorAwakeSurfaceLimit("settings-change");
   }
   if (
     previousSettings.autoSleepAgentSessionsEnabled !== nextSettings.autoSleepAgentSessionsEnabled ||
@@ -9626,6 +10144,12 @@ function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
     return [];
   }
   const projectId = project.projectId?.trim() || createProjectId(path);
+  const normalizedProjectEditor = normalizeStoredProjectEditorRestoreState(project.projectEditor);
+  const normalizedProjectBrowser =
+    normalizeStoredProjectBrowserRestoreState(project.projectBrowser) ??
+    (normalizedProjectEditor?.mode === "git"
+      ? normalizeStoredProjectBrowserRestoreState(normalizedProjectEditor)
+      : undefined);
   const normalizedProject: NativeProject = {
       icon: normalizeWorkspaceProjectIcon(project.icon) ?? normalizeLegacyWorkspaceProjectIcon(project),
       iconDataUrl: normalizeWorkspaceProjectIconDataUrl(project.iconDataUrl),
@@ -9636,8 +10160,10 @@ function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
       isRemoteAttachCarrier: project.isRemoteAttachCarrier === true,
       name: project.name?.trim() || projectNameFromPath(path),
       path,
+      projectBrowser: normalizedProjectBrowser,
+      projectBrowserHistory: normalizeProjectBrowserHistory(project.projectBrowserHistory),
       projectEditorCompanionPaneHidden: project.projectEditorCompanionPaneHidden === true,
-      projectEditor: normalizeStoredProjectEditorRestoreState(project.projectEditor),
+      projectEditor: normalizedProjectEditor,
       projectId,
       quickKind:
         project.quickKind === "browser" || project.quickKind === "editor" || project.quickKind === "terminal"
@@ -9903,6 +10429,46 @@ function normalizeStoredProjectEditorRestoreState(
   };
 }
 
+function normalizeStoredProjectBrowserRestoreState(
+  candidate: unknown,
+): NativeProjectBrowserRestoreState | undefined {
+  /*
+  CDXC:ProjectBrowserTabs 2026-06-15-10:15:
+  Browser tab memory is project-local state, not the same thing as the currently open project-editor mode. Persist and restore it separately so switching back to Agents, Source, or Kanban cannot erase the Browser tabs that should reopen from the top Browser control.
+  */
+  if (!candidate || typeof candidate !== "object") {
+    return undefined;
+  }
+  const source = candidate as Partial<NativeProjectBrowserRestoreState>;
+  const url = normalizeProjectBrowserUrl(source.url);
+  let browserTabs = normalizeProjectBrowserTabRestoreStates(source.browserTabs);
+  if (browserTabs.length === 0 && url) {
+    const id = createProjectBrowserTabRestoreId();
+    browserTabs = [
+      {
+        id,
+        title: projectBrowserTabTitleForUrl(url),
+        url,
+      },
+    ];
+  }
+  if (browserTabs.length === 0) {
+    return undefined;
+  }
+  const activeBrowserTabId =
+    typeof source.activeBrowserTabId === "string" &&
+    browserTabs.some((tab) => tab.id === source.activeBrowserTabId)
+      ? source.activeBrowserTabId
+      : browserTabs[0]!.id;
+  const activeBrowserTab =
+    browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? browserTabs[0]!;
+  return {
+    activeBrowserTabId,
+    browserTabs,
+    url: url ?? activeBrowserTab.url,
+  };
+}
+
 function normalizeProjectBrowserTabRestoreStates(
   candidate: unknown,
 ): NativeProjectBrowserTabRestoreState[] {
@@ -9916,8 +10482,9 @@ function normalizeProjectBrowserTabRestoreStates(
       continue;
     }
     const source = value as Partial<NativeProjectBrowserTabRestoreState> & { tabId?: string };
+    const isPlaceholder = source.isPlaceholder === true;
     const url = normalizeProjectBrowserUrl(source.url);
-    if (!url) {
+    if (!url && !isPlaceholder) {
       continue;
     }
     const idSource =
@@ -9931,8 +10498,13 @@ function normalizeProjectBrowserTabRestoreStates(
       continue;
     }
     seenIds.add(id);
-    const title = normalizeProjectBrowserTabTitle(source.title, url);
-    tabs.push({ id, title, url });
+    const title = normalizeProjectBrowserTabTitle(source.title, url, { isPlaceholder });
+    tabs.push({
+      id,
+      ...(isPlaceholder ? { isPlaceholder: true } : {}),
+      title,
+      url: isPlaceholder ? "" : url!,
+    });
   }
   return tabs;
 }
@@ -9945,12 +10517,23 @@ function normalizeProjectBrowserTabId(candidate: string | undefined): string | u
   return trimmed.slice(0, 160);
 }
 
-function normalizeProjectBrowserTabTitle(candidate: unknown, url: string): string {
+function normalizeProjectBrowserTabTitle(
+  candidate: unknown,
+  url: string | undefined,
+  options: { isPlaceholder?: boolean } = {},
+): string {
+  /*
+   * CDXC:ProjectBrowserTabs 2026-06-15-20:48:
+   * The final Browser tab close becomes an address-only New Tab placeholder. Preserve that state as an explicit tab label with no URL so restart does not launch Chromium just to show a blank page.
+   */
+  if (options.isPlaceholder === true) {
+    return "New Tab";
+  }
   const trimmed = typeof candidate === "string" ? candidate.trim() : "";
   if (trimmed && trimmed.toLowerCase() !== "about:blank") {
     return trimmed.slice(0, 160);
   }
-  return projectBrowserTabTitleForUrl(url);
+  return url ? projectBrowserTabTitleForUrl(url) : "Browser";
 }
 
 function normalizeProjectBrowserUrl(candidate: unknown): string | undefined {
@@ -9964,6 +10547,210 @@ function normalizeProjectBrowserUrl(candidate: unknown): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/*
+ * CDXC:BrowserHistory 2026-06-15-10:49:
+ * Project Browser history retains at most 140 de-duplicated links per main-project/worktree family. Revisited URLs replace their older occurrence with a fresh visitedAt timestamp so they move back to the top instead of accumulating duplicates.
+ */
+const PROJECT_BROWSER_HISTORY_MAX_ITEMS = 140;
+
+function normalizeProjectBrowserHistory(candidate: unknown): NativeProjectBrowserHistoryItem[] {
+  if (!Array.isArray(candidate)) {
+    return [];
+  }
+  const byUrl = new Map<string, NativeProjectBrowserHistoryItem>();
+  for (const value of candidate) {
+    const item = normalizeProjectBrowserHistoryItem(value);
+    if (!item) {
+      continue;
+    }
+    const existing = byUrl.get(item.url);
+    if (!existing || Date.parse(item.visitedAt) >= Date.parse(existing.visitedAt)) {
+      byUrl.set(item.url, item);
+    }
+  }
+  return [...byUrl.values()]
+    .sort((left, right) => Date.parse(right.visitedAt) - Date.parse(left.visitedAt))
+    .slice(0, PROJECT_BROWSER_HISTORY_MAX_ITEMS);
+}
+
+function normalizeProjectBrowserHistoryItem(candidate: unknown): NativeProjectBrowserHistoryItem | undefined {
+  if (!candidate || typeof candidate !== "object") {
+    return undefined;
+  }
+  const source = candidate as Partial<NativeProjectBrowserHistoryItem>;
+  const url = normalizeProjectBrowserUrl(source.url);
+  if (!url) {
+    return undefined;
+  }
+  const visitedAt =
+    typeof source.visitedAt === "string" && !Number.isNaN(Date.parse(source.visitedAt))
+      ? source.visitedAt
+      : undefined;
+  if (!visitedAt) {
+    return undefined;
+  }
+  const title = normalizeProjectBrowserHistoryTitle(source.title, url);
+  const faviconDataUrl =
+    typeof source.faviconDataUrl === "string" && source.faviconDataUrl.startsWith("data:")
+      ? source.faviconDataUrl
+      : undefined;
+  return {
+    ...(faviconDataUrl ? { faviconDataUrl } : {}),
+    title,
+    url,
+    visitedAt,
+  };
+}
+
+function normalizeProjectBrowserHistoryTitle(candidate: unknown, url: string): string {
+  const trimmed = typeof candidate === "string" ? candidate.trim() : "";
+  if (trimmed && trimmed.toLowerCase() !== "about:blank") {
+    return trimmed.slice(0, 240);
+  }
+  return projectBrowserTabTitleForUrl(url);
+}
+
+function projectBrowserHistoryScopeIdForProject(project: Pick<NativeProject, "projectId" | "worktree">): string {
+  return project.worktree?.parentProjectId?.trim() || project.projectId;
+}
+
+function projectBrowserHistoryScopeContainsProject(
+  project: Pick<NativeProject, "projectId" | "worktree">,
+  scopeId: string,
+): boolean {
+  return project.projectId === scopeId || project.worktree?.parentProjectId?.trim() === scopeId;
+}
+
+function projectBrowserHistoryForScope(scopeId: string): NativeProjectBrowserHistoryItem[] {
+  return normalizeProjectBrowserHistory(
+    projects
+      .filter((project) => projectBrowserHistoryScopeContainsProject(project, scopeId))
+      .flatMap((project) => project.projectBrowserHistory ?? []),
+  );
+}
+
+function setProjectBrowserHistoryForScope(
+  scopeId: string,
+  history: NativeProjectBrowserHistoryItem[],
+  reason: string,
+): NativeProjectBrowserHistoryItem[] {
+  /*
+   * CDXC:BrowserHistory 2026-06-15-10:25:
+   * Browser history is scoped to the main project plus its worktrees. Mirror the
+   * normalized list to every visible member of that family so reopening either
+   * side restores the same de-duplicated link history without a fallback store.
+   */
+  const normalizedHistory = normalizeProjectBrowserHistory(history);
+  let didChange = false;
+  projects = projects.map((project) => {
+    if (!projectBrowserHistoryScopeContainsProject(project, scopeId)) {
+      return project;
+    }
+    if (JSON.stringify(project.projectBrowserHistory ?? []) === JSON.stringify(normalizedHistory)) {
+      return project;
+    }
+    didChange = true;
+    return normalizedHistory.length > 0
+      ? { ...project, projectBrowserHistory: normalizedHistory }
+      : { ...project, projectBrowserHistory: undefined };
+  });
+  if (didChange) {
+    writeStoredProjects(reason);
+  }
+  postNative({
+    browserHistory: normalizedHistory,
+    browserHistoryScopeId: scopeId,
+    type: "setBrowserHistory",
+  });
+  return normalizedHistory;
+}
+
+function recordProjectBrowserHistoryLaunch(
+  project: NativeProject,
+  input: {
+    faviconDataUrl?: string;
+    title?: string;
+    url?: string;
+  },
+): NativeProjectBrowserHistoryItem[] {
+  const url = normalizeProjectBrowserUrl(input.url);
+  if (!url) {
+    return projectBrowserHistoryForScope(projectBrowserHistoryScopeIdForProject(project));
+  }
+  const scopeId = projectBrowserHistoryScopeIdForProject(project);
+  const history = projectBrowserHistoryForScope(scopeId);
+  const faviconDataUrl =
+    typeof input.faviconDataUrl === "string" && input.faviconDataUrl.startsWith("data:")
+      ? input.faviconDataUrl
+      : history.find((item) => item.url === url)?.faviconDataUrl;
+  return setProjectBrowserHistoryForScope(
+    scopeId,
+    [
+      {
+        ...(faviconDataUrl ? { faviconDataUrl } : {}),
+        title: normalizeProjectBrowserHistoryTitle(input.title, url),
+        url,
+        visitedAt: new Date().toISOString(),
+      },
+      ...history,
+    ],
+    "recordProjectBrowserHistoryLaunch",
+  );
+}
+
+function recordProjectBrowserHistoryVisit(
+  project: NativeProject,
+  input: {
+    faviconDataUrl?: string;
+    title?: string;
+    url?: string;
+  },
+): void {
+  const url = normalizeProjectBrowserUrl(input.url);
+  if (!url) {
+    return;
+  }
+  const scopeId = projectBrowserHistoryScopeIdForProject(project);
+  const history = projectBrowserHistoryForScope(scopeId);
+  const faviconDataUrl =
+    typeof input.faviconDataUrl === "string" && input.faviconDataUrl.startsWith("data:")
+      ? input.faviconDataUrl
+      : history.find((item) => item.url === url)?.faviconDataUrl;
+  setProjectBrowserHistoryForScope(scopeId, [
+    {
+      ...(faviconDataUrl ? { faviconDataUrl } : {}),
+      title: normalizeProjectBrowserHistoryTitle(input.title, url),
+      url,
+      visitedAt: new Date().toISOString(),
+    },
+    ...history,
+  ], "recordProjectBrowserHistoryVisit");
+}
+
+function recordBrowserSessionHistoryVisit(
+  projectId: string,
+  sessionId: string,
+  overrides: {
+    faviconDataUrl?: string;
+    title?: string;
+    url?: string;
+  } = {},
+): void {
+  const project = findProject(projectId);
+  if (!project) {
+    return;
+  }
+  const session = findSessionRecordInProject(project, sessionId);
+  if (session?.kind !== "browser") {
+    return;
+  }
+  recordProjectBrowserHistoryVisit(project, {
+    faviconDataUrl: overrides.faviconDataUrl ?? session.browser.faviconDataUrl,
+    title: overrides.title ?? session.title,
+    url: overrides.url ?? session.browser.url,
+  });
 }
 
 function projectBrowserTabTitleForUrl(url: string): string {
@@ -10156,6 +10943,9 @@ function normalizeLegacyWorkspaceProjectIcon(
 }
 
 function normalizeWorkspaceProjectTheme(value: unknown): SidebarTheme | undefined {
+  if (value === "plain-dark") {
+    return "dark-2";
+  }
   return WORKSPACE_PROJECT_THEME_OPTIONS.some((theme) => theme.value === value)
     ? (value as SidebarTheme)
     : undefined;
@@ -14266,29 +15056,16 @@ function createNativeSidebarCommandButtons(): SidebarCommandButton[] {
   );
 }
 
-function createNativeSidebarCommandConfigDraft(command: SidebarCommandButton): CommandConfigDraft {
-  return {
-    actionType: command.actionType,
-    closeTerminalOnExit: command.closeTerminalOnExit,
-    command: command.command ?? (command.actionType === "terminal" ? "" : undefined),
-    commandId: command.commandId,
-    icon: command.icon ?? DEFAULT_SIDEBAR_COMMAND_ICON,
-    iconColor: command.iconColor ?? DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
-    name: command.name,
-    playCompletionSound: command.playCompletionSound,
-    url: command.url ?? (command.actionType === "browser" ? DEFAULT_BROWSER_ACTION_URL : undefined),
-  };
-}
-
-function openNativeSidebarCommandEditor(command: SidebarCommandButton): void {
+function openNativeSidebarActionsSettings(): void {
   /**
-   * CDXC:ProjectActions 2026-05-19-17:10:
-   * Terminal actions without a saved command must open the configure-action
-   * editor immediately instead of attempting a no-op run.
+   * CDXC:ProjectActions 2026-06-15-15:29:
+   * Action slots without a saved terminal command or browser URL should open
+   * Settings on the Actions page instead of the removed standalone Configure
+   * Action modal.
    */
   openAppModal({
-    commandDraft: createNativeSidebarCommandConfigDraft(command),
-    modal: "commandConfig",
+    initialTab: "actions",
+    modal: "settings",
     type: "open",
   });
 }
@@ -14908,6 +15685,7 @@ function forgetNativeSessionMapping(sidebarSessionId: string): string {
 
 function forgetNativeSessionMappingForProject(projectId: string, sidebarSessionId: string): string {
   const nativeSessionId = nativeSessionIdForProjectSidebarSession(projectId, sidebarSessionId);
+  clearGxserverPresentationConfirmationPending(sidebarSessionId);
   if (nativeSessionIdBySidebarSessionId.get(sidebarSessionId) === nativeSessionId) {
     nativeSessionIdBySidebarSessionId.delete(sidebarSessionId);
   }
@@ -14946,6 +15724,12 @@ function rememberFocusedWorkspaceTerminal(project: NativeProject, sessionId: str
    * preserve the workspace terminal the user was typing in. The minimized
    * Commands panel should hand keyboard focus back to that terminal, so users
    * can collapse it by any command-pane control and keep typing immediately.
+   *
+   * CDXC:ProjectHotkeys 2026-06-15-11:12:
+   * Jump to Project shortcuts should restore the target project's last focused
+   * workspace terminal, so project-to-project keyboard navigation returns to
+   * the terminal the user last left in that project instead of a stale project
+   * editor or arbitrary first session.
    */
   lastFocusedWorkspaceTerminalByProjectId.set(project.projectId, sessionId);
   appendTerminalFocusDebugLog("nativeFocusTrace.commandsPanelWorkspaceTerminalRemembered", {
@@ -14955,7 +15739,7 @@ function rememberFocusedWorkspaceTerminal(project: NativeProject, sessionId: str
   });
 }
 
-function rememberActiveProjectWorkspaceTerminalBeforeCommandsPanel(reason: string): void {
+function rememberActiveProjectWorkspaceTerminal(reason: string): void {
   const project = activeProject();
   const workspace = project.workspace;
   const group =
@@ -14967,13 +15751,21 @@ function rememberActiveProjectWorkspaceTerminalBeforeCommandsPanel(reason: strin
   }
 }
 
-function rememberedWorkspaceTerminalForCommandsPanel(project: NativeProject): string | undefined {
+function rememberActiveProjectWorkspaceTerminalBeforeCommandsPanel(reason: string): void {
+  rememberActiveProjectWorkspaceTerminal(reason);
+}
+
+function rememberedWorkspaceTerminal(project: NativeProject): string | undefined {
   const sessionId = lastFocusedWorkspaceTerminalByProjectId.get(project.projectId);
   if (!sessionId) {
     return undefined;
   }
   const session = findSessionRecordInProject(project, sessionId);
   return session?.kind === "terminal" && session.surface !== "commands" ? sessionId : undefined;
+}
+
+function rememberedWorkspaceTerminalForCommandsPanel(project: NativeProject): string | undefined {
+  return rememberedWorkspaceTerminal(project);
 }
 
 /**
@@ -15138,6 +15930,13 @@ function createCommandTerminal(
     title,
     type: "createTerminal",
   }, project, commandSession.sessionId, providerStartupText);
+  if (options.focusAfterCreate !== false) {
+    /*
+     * CDXC:CommandPaneHotkeys 2026-06-15-10:33:
+     * Newly split command terminals must take typing focus after native mounts the surface. Queue an explicit layout focus request in addition to the immediate focus command so Cmd+D in the Commands panel lands the cursor in the new pane instead of leaving first responder on the old command terminal.
+     */
+    queueNativeLayoutFocusRequest(commandSession.sessionId, "commandTerminalCreated");
+  }
   publish();
   if (options.focusAfterCreate !== false) {
     postNative({ sessionId: nativeSessionId, type: "focusTerminal" });
@@ -15302,12 +16101,13 @@ function removeCommandSessionFromPaneLayout(
     if (sessionIds.length === 1) {
       return { kind: "leaf", sessionId: sessionIds[0]! };
     }
+    const removedIndex = layout.sessionIds.indexOf(sessionId);
     return {
       ...layout,
       activeSessionId:
         layout.activeSessionId && sessionIds.includes(layout.activeSessionId)
           ? layout.activeSessionId
-          : sessionIds[0],
+          : sessionIds[Math.min(Math.max(removedIndex, 0), sessionIds.length - 1)] ?? sessionIds[0],
       sessionIds,
     };
   }
@@ -15321,6 +16121,30 @@ function removeCommandSessionFromPaneLayout(
     return children[0];
   }
   return { ...layout, children };
+}
+
+function resolveCommandPanelActiveSessionIdAfterRemoval(
+  panel: CommandsPanelState,
+  removedSessionId: string,
+  nextSessions: readonly TerminalSessionRecord[],
+  nextPaneLayout: SessionPaneLayoutNode | undefined,
+): string | undefined {
+  const nextSessionIds = new Set(nextSessions.map((session) => session.sessionId));
+  if (
+    panel.activeSessionId &&
+    panel.activeSessionId !== removedSessionId &&
+    nextSessionIds.has(panel.activeSessionId)
+  ) {
+    return panel.activeSessionId;
+  }
+  /*
+   * CDXC:CommandPaneHotkeys 2026-06-15-10:33:
+   * Cmd+W inside split command panes must close the command terminal that owns typing focus and then keep focus in the surviving command pane. Resolve the next command active id from the post-removal paneLayout owner, not from the first stored command session, so split geometry and tab right-then-left selection decide where typing goes next.
+   */
+  return (
+    collectActivePaneOwnerSessionIds(nextPaneLayout, { validSessionIds: nextSessionIds })[0] ??
+    nextSessions[0]?.sessionId
+  );
 }
 
 function setActiveCommandSessionInPaneLayout(
@@ -15890,6 +16714,40 @@ function setProjectEditorPersistedOpen(
   }
 }
 
+function setProjectBrowserPersistedState(
+  projectId: string,
+  browserState: NativeProjectBrowserRestoreState | undefined,
+  reason: string,
+): void {
+  /*
+  CDXC:ProjectBrowserTabs 2026-06-15-10:15:
+  The Browser top-mode tab group must survive workarea changes independently from projectEditor.isOpen. Store the active tab list on project.projectBrowser so closing or hiding the project editor only changes the visible mode, not the user's Browser tabs.
+  */
+  const nextProjectBrowser = normalizeStoredProjectBrowserRestoreState(browserState);
+  let didChange = false;
+  projects = projects.map((project) => {
+    if (project.projectId !== projectId) {
+      return project;
+    }
+    if (!nextProjectBrowser) {
+      if (!project.projectBrowser) {
+        return project;
+      }
+      didChange = true;
+      const { projectBrowser: _removedProjectBrowser, ...projectWithoutBrowser } = project;
+      return projectWithoutBrowser;
+    }
+    if (JSON.stringify(project.projectBrowser ?? null) === JSON.stringify(nextProjectBrowser)) {
+      return project;
+    }
+    didChange = true;
+    return { ...project, projectBrowser: nextProjectBrowser };
+  });
+  if (didChange) {
+    writeStoredProjects(reason);
+  }
+}
+
 function setProjectEditorCompanionPaneHidden(
   projectId: string,
   hidden: boolean,
@@ -15926,6 +16784,7 @@ function createProjectedSidebarSessionsForGroup(
     const sessionRecord = group.snapshot.sessions.find(
       (candidate) => candidate.sessionId === session.sessionId,
     );
+    const closeAfterDone = getCloseAfterDoneProjectionForProjectSession(projectId, session.sessionId);
     const delayedSend = getDelayedSendProjectionForProjectSession(projectId, session.sessionId);
     const sessionRoutingId =
       sessionRecord?.kind === "terminal"
@@ -15937,6 +16796,10 @@ function createProjectedSidebarSessionsForGroup(
       return {
         ...session,
         agentIcon: "t3",
+        closeAfterDone: closeAfterDone?.armed,
+        closeAfterDoneDeadlineAt: closeAfterDone?.deadlineAt,
+        closeAfterDoneRemainingLabel: closeAfterDone?.remainingLabel,
+        closeAfterDoneRemainingMs: closeAfterDone?.remainingMs,
         delayedSendDeadlineAt: delayedSend?.deadlineAt,
         delayedSendRemainingLabel: delayedSend?.remainingLabel,
         delayedSendRemainingMs: delayedSend?.remainingMs,
@@ -15959,6 +16822,10 @@ function createProjectedSidebarSessionsForGroup(
       const nativePaneState: NativePaneState = rawSleeping ? "unmounted" : "mounted";
       return {
         ...session,
+        closeAfterDone: closeAfterDone?.armed,
+        closeAfterDoneDeadlineAt: closeAfterDone?.deadlineAt,
+        closeAfterDoneRemainingLabel: closeAfterDone?.remainingLabel,
+        closeAfterDoneRemainingMs: closeAfterDone?.remainingMs,
         delayedSendDeadlineAt: delayedSend?.deadlineAt,
         delayedSendRemainingLabel: delayedSend?.remainingLabel,
         delayedSendRemainingMs: delayedSend?.remainingMs,
@@ -16030,6 +16897,10 @@ function createProjectedSidebarSessionsForGroup(
       agentSessionId:
         terminalState?.agentSessionId ??
         (sessionRecord?.kind === "terminal" ? sessionRecord.agentSessionId : session.agentSessionId),
+      closeAfterDone: closeAfterDone?.armed,
+      closeAfterDoneDeadlineAt: closeAfterDone?.deadlineAt,
+      closeAfterDoneRemainingLabel: closeAfterDone?.remainingLabel,
+      closeAfterDoneRemainingMs: closeAfterDone?.remainingMs,
       delayedSendDeadlineAt: delayedSend?.deadlineAt,
       delayedSendRemainingLabel: delayedSend?.remainingLabel,
       delayedSendRemainingMs: delayedSend?.remainingMs,
@@ -16205,6 +17076,7 @@ function createPresentationSidebarGroups(
     presentation,
     remoteAttachCarrierProjectIds: createNativePresentationRemoteAttachCarrierProjectIds(presentation),
     resolveAgentIcon: resolveNativeSidebarAgentIcon,
+    resolveCloseAfterDone: getCloseAfterDoneProjectionForProjectSession,
     resolveDelayedSend: getDelayedSendProjectionForProjectSession,
     resolveSessionRoutingId: createNativeSidebarSessionRoutingId,
     visibleSessionIds: new Set(activeSnapshot().visibleSessionIds),
@@ -16426,8 +17298,8 @@ function createRemotePresentationSidebarSession(
   index: number,
 ): SidebarSessionItem {
   const lifecycleState = presentationLifecycleStateForSidebar(presentation.lifecycleState);
-  const isLive = presentation.lifecycleState === "running";
-  const providerSessionState = providerSessionStateForGxserverPresentation(presentation.lifecycleState);
+  const providerSessionState = providerSessionStateForGxserverPresentation(presentation);
+  const isLive = providerSessionState === "exists";
   const agentIcon = resolveNativeSidebarAgentIcon(presentation.agentIcon ?? presentation.agentName ?? presentation.agentId);
   const sessionId = createRemotePresentationSessionId(machineId, projectId, presentation.sessionId);
   const isFocused = isRemoteAttachCarrierFocused(sessionId);
@@ -16458,7 +17330,7 @@ function createRemotePresentationSidebarSession(
     sessionKind: presentation.kind === "agent" ? "terminal" : presentation.kind,
     sessionNumber: String(index + 1),
     sessionPersistenceName: presentation.zmxName,
-    sessionPersistenceProvider: "zmx",
+    sessionPersistenceProvider: presentation.sessionPersistenceProvider,
     shortcutLabel: String(index + 1),
     terminalTitle: presentation.terminalTitle,
     titleObservation: presentation.titleObservation,
@@ -16942,6 +17814,7 @@ type PublishContext = {
 };
 
 function preparePublishContext(): PublishContext {
+  refreshCloseAfterDoneTimersForAllSessions();
   const didMaterializeVirtualPaneTabs = ensureActiveWorkspaceVirtualPaneTabs("publish");
   const didCreateNativeSession = ensureVisibleNativeSessions("publish");
   const sidebarMessage = buildSidebarMessage();
@@ -17725,6 +18598,7 @@ function clearStaleTerminalRuntimeStateBeforeWake(
   clearNativeSessionAttentionTracking(sessionId);
   nativeAttentionNotificationLastSentAtBySessionId.delete(sessionId);
   clearDelayedSendTimer(sessionId, projectId);
+  clearCloseAfterDoneTimer(sessionId, projectId, "staleTerminalRuntimeClearedForWake");
   appendTerminalFocusDebugLog("nativeSidebar.staleTerminalRuntimeStateClearedForWake", {
     projectId,
     reason,
@@ -17733,6 +18607,7 @@ function clearStaleTerminalRuntimeStateBeforeWake(
 }
 
 type NativeSessionStatusIndicatorCandidate = {
+  hasRunningZmxBacking: boolean;
   lastInteractionAt?: string;
   order: number;
   projectId: string;
@@ -17748,7 +18623,8 @@ function createNativeSessionStatusIndicatorCandidates(
    * CDXC:SessionStatusIndicators 2026-05-05-19:47
    * Floating AppKit circles summarize every open ghostex project session, not only
    * the active group's visible panes. Working means activity=`working`, while
-   * available covers idle live sessions and other non-attention sessions.
+   * available covers neutral rows; the displayed idle count is filtered by the
+   * later live-zmx eligibility rule.
    * CDXC:SessionStatusIndicators 2026-05-09-15:48
    * Menu bar status badges reuse this same candidate list and click routing.
    * #95d7f6 selects attention sessions; orange selects activity=`working`
@@ -17756,9 +18632,15 @@ function createNativeSessionStatusIndicatorCandidates(
    * CDXC:SessionStatusIndicators 2026-05-09-15:53
    * The status-indicator native contract now uses `working` for the orange
    * work state everywhere. Reserve `running` for live runtime state, including
-   * gray live-idle status counts.
+   * the filtered live-idle status count.
    * CDXC:SessionStatusIndicators 2026-06-02-18:23:
    * Floating and menu-bar indicators are visible sidebar chrome. When gxserver presentation is active, derive candidates from the same hydrate groups so stale native project/session rows cannot remain clickable through AppKit overlays.
+   *
+   * CDXC:SessionStatusIndicators 2026-06-15-12:42:
+   * Idle indicator numbers represent actual running zmx-backed agent
+   * terminals, not every neutral sidebar row. Carry live-zmx eligibility on
+   * each candidate so the floating buttons, menu bar badge, collapsed pet
+   * indicator, and idle click target all read from the same filtered count.
    */
   if (gxserverStartupSnapshot?.presentation && sidebarMessage) {
     return createNativeSessionStatusIndicatorCandidatesFromSidebarGroups(sidebarMessage.groups);
@@ -17772,15 +18654,7 @@ function createNativeSessionStatusIndicatorCandidates(
   for (const project of openProjects) {
     for (const group of project.workspace.groups) {
       for (const session of createProjectedSidebarSessionsForGroup(group)) {
-        const status = getNativeSessionStatusIndicatorStatus(session);
-        candidates.push({
-          lastInteractionAt: session.lastInteractionAt,
-          order,
-          projectId: project.projectId,
-          sessionId: session.sessionId,
-          status,
-          title: getNativePetOverlaySessionTitle(session),
-        });
+        candidates.push(createNativeSessionStatusIndicatorCandidate(project.projectId, session, order));
         order += 1;
       }
     }
@@ -17802,18 +18676,27 @@ function createNativeSessionStatusIndicatorCandidatesFromSidebarGroups(
       if (!candidateProjectId) {
         continue;
       }
-      candidates.push({
-        lastInteractionAt: session.lastInteractionAt,
-        order,
-        projectId: candidateProjectId,
-        sessionId: session.sessionId,
-        status: getNativeSessionStatusIndicatorStatus(session),
-        title: getNativePetOverlaySessionTitle(session),
-      });
+      candidates.push(createNativeSessionStatusIndicatorCandidate(candidateProjectId, session, order));
       order += 1;
     }
   }
   return candidates;
+}
+
+function createNativeSessionStatusIndicatorCandidate(
+  projectId: string,
+  session: SidebarSessionItem,
+  order: number,
+): NativeSessionStatusIndicatorCandidate {
+  return {
+    hasRunningZmxBacking: hasRunningZmxBackingForNativeIdleIndicator(session),
+    lastInteractionAt: session.lastInteractionAt,
+    order,
+    projectId,
+    sessionId: session.sessionId,
+    status: getNativeSessionStatusIndicatorStatus(session),
+    title: getNativePetOverlaySessionTitle(session),
+  };
 }
 
 
@@ -17829,6 +18712,34 @@ function getNativeSessionStatusIndicatorStatus(
   return "available";
 }
 
+function hasRunningZmxBackingForNativeIdleIndicator(session: SidebarSessionItem): boolean {
+  /**
+   * CDXC:SessionStatusIndicators 2026-06-15-12:42:
+   * The IDLE/available number is a live agent-terminal count. Require a
+   * terminal row with zmx persistence and a currently live provider or native
+   * pane so sleeping, done, browser, T3, and providerless rows do not inflate
+   * the menu bar, floating indicator, or pet overlay numbers.
+   */
+  if (session.sessionKind !== "terminal") {
+    return false;
+  }
+  if (session.sessionPersistenceProvider !== "zmx" || !textValue(session.sessionPersistenceName)) {
+    return false;
+  }
+  return (
+    session.providerSessionState === "exists" ||
+    session.nativePaneState === "mounted" ||
+    session.nativePaneState === "mounting" ||
+    session.isLive === true
+  );
+}
+
+function shouldCountNativeSessionStatusIndicatorCandidate(
+  candidate: NativeSessionStatusIndicatorCandidate,
+): boolean {
+  return candidate.status !== "available" || candidate.hasRunningZmxBacking;
+}
+
 function syncNativeSessionStatusIndicators(sidebarMessage?: SidebarHydrateMessage): void {
   const counts = {
     attention: 0,
@@ -17836,7 +18747,9 @@ function syncNativeSessionStatusIndicators(sidebarMessage?: SidebarHydrateMessag
     working: 0,
   };
   for (const candidate of createNativeSessionStatusIndicatorCandidates(sidebarMessage)) {
-    counts[candidate.status] += 1;
+    if (shouldCountNativeSessionStatusIndicatorCandidate(candidate)) {
+      counts[candidate.status] += 1;
+    }
   }
   postNative({
     attentionCount: counts.attention,
@@ -17937,14 +18850,7 @@ function createNativePetOverlayActivityCandidates(
         if (!session) {
           continue;
         }
-        candidates.push({
-          lastInteractionAt: session.lastInteractionAt,
-          order,
-          projectId: project.projectId,
-          sessionId: session.sessionId,
-          status: getNativeSessionStatusIndicatorStatus(session),
-          title: getNativePetOverlaySessionTitle(session),
-        });
+        candidates.push(createNativeSessionStatusIndicatorCandidate(project.projectId, session, order));
         order += 1;
       }
     }
@@ -17988,7 +18894,9 @@ function createNativePetOverlayStatusItems(
     working: 0,
   };
   for (const candidate of candidates) {
-    counts[candidate.status] += 1;
+    if (shouldCountNativeSessionStatusIndicatorCandidate(candidate)) {
+      counts[candidate.status] += 1;
+    }
   }
   if (counts.attention > 0 || counts.working > 0) {
     const items: NativePetOverlayStatusItem[] = [];
@@ -18003,9 +18911,9 @@ function createNativePetOverlayStatusItems(
   /**
    * CDXC:PetOverlay 2026-05-21-02:19:
    * When there are no done/attention or in-progress/working sessions, the
-   * collapsed pet indicator should still show one neutral badge with the total
-   * open-session count. At that point every candidate is `available`, so this
-   * available count is the total.
+   * collapsed pet indicator should still show one neutral badge. Since
+   * 2026-06-15-12:42, that neutral count is the running zmx-backed idle total
+   * instead of the total number of neutral sidebar rows.
    */
   return counts.available > 0 ? [{ count: counts.available, status: "available" }] : [];
 }
@@ -18120,6 +19028,7 @@ function selectNativeSessionStatusIndicatorTarget(
 ): NativeSessionStatusIndicatorCandidate | undefined {
   const candidates = createNativeSessionStatusIndicatorCandidates(buildSidebarMessage())
     .filter((candidate) => candidate.status === status)
+    .filter((candidate) => shouldCountNativeSessionStatusIndicatorCandidate(candidate))
     .sort(compareNativeSessionStatusIndicatorCandidates);
   if (candidates.length === 0) {
     return undefined;
@@ -18637,7 +19546,11 @@ let cuaDriverPermissionDetail = null;
 
 if (cuaDriverPath) {
   try {
-    const permissionOutput = execFileSync(cuaDriverPath, ["check_permissions"], {
+    /*
+     * CDXC:CuaPermissions 2026-06-16-02:27:
+     * Setup/status refreshes must be read-only. Pass prompt:false to Cua Driver so checking Desktop Control readiness cannot trigger macOS Accessibility or Screen Recording prompts while Ghostex is merely rebuilding or opening.
+     */
+    const permissionOutput = execFileSync(cuaDriverPath, ["check_permissions", JSON.stringify({ prompt: false })], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 5000,
@@ -18939,6 +19852,11 @@ function getNativePaneTitleBarActions(session: SessionRecord): NativeTerminalTit
    * in normal workspace pane menus. It merges the clicked workspace group's
    * split/tab tree into one pane while command terminals remain in the separate
    * Commands panel action set.
+   *
+   * CDXC:CloseAfterDone 2026-06-15-21:00:
+   * Terminal pane and tab context menus that expose Delayed Send must also expose
+   * Close After Done immediately below it. Keep this terminal-only so browser and
+   * T3 pane menus do not advertise a Done-state terminal timer they cannot run.
    */
   const popOutAction = session.isPoppedOut === true ? "restorePopOut" : "popOut";
   /**
@@ -18977,6 +19895,7 @@ function getNativePaneTitleBarActions(session: SessionRecord): NativeTerminalTit
     "mergeAllTabs",
     "rename",
     "delayedSend",
+    "closeAfterDone",
     "fork",
     "reload",
     popOutAction,
@@ -19827,6 +20746,9 @@ function createTerminal(
   /*
   CDXC:TerminalCreationFocus 2026-06-13-14:00:
   zmx New Terminal focus must wait until Swift reports terminalReady, then move through setActiveTerminalSet with a fresh layout focus request. A direct native focus before layout ownership includes the new tab can leave AppKit first responder on the new surface while hit-testing and pane ownership still belong to the previous tab.
+
+  CDXC:TerminalCreationFocus 2026-06-14-18:48:
+  Deferred zmx tab creation should still select the new tab immediately. Layout sync sends the pending session as a mounting placeholder owner, then terminalReady publishes again and replaces that placeholder with the real Ghostty surface.
   */
   markNativeTerminalSurfaceCreationPending(
     project.projectId,
@@ -20095,13 +21017,22 @@ function splitFocusedCommandPanelPane(
   targetSessionId: string,
   direction: SessionPaneSplitDirection,
 ): void {
+  /*
+   * CDXC:CommandPaneHotkeys 2026-06-15-11:16:
+   * The Commands panel supports command-terminal pane splits, but Cmd+Shift+D
+   * must not introduce vertical command-panel splits. Treat every command-pane
+   * split hotkey as the normal horizontal Cmd+D split so the new command
+   * terminal is created beside the focused command pane and receives focus.
+   */
+  const commandPanelSplitDirection: SessionPaneSplitDirection = "horizontal";
   logNativeHotkeyDebug("nativeHotkeys.commandPanelSplitFocusedPane", {
-    direction,
+    direction: commandPanelSplitDirection,
+    requestedDirection: direction,
     targetSessionId,
   });
   createCommandTerminal("Command Terminal", "", {
     focusAfterCreate: true,
-    targetSplitDirection: direction,
+    targetSplitDirection: commandPanelSplitDirection,
     targetSplitSessionId: targetSessionId,
   });
 }
@@ -22583,32 +23514,6 @@ function isCanonicalGxserverProjectSession(projectId: string, sessionId: string)
   return GXSERVER_CANONICAL_PROJECT_ID_PATTERN.test(projectId) && GXSERVER_CANONICAL_SESSION_ID_PATTERN.test(sessionId);
 }
 
-function shouldParkLastProjectSidebarSessionOnClose(
-  reference: ReturnType<typeof resolveSidebarSessionReference>,
-  presentationSession: GxserverPresentationSession | undefined,
-): boolean {
-  if (
-    !presentationSession ||
-    presentationSession.surface !== "workspace" ||
-    presentationSession.visibleInSidebarByDefault !== true ||
-    isQuickProject(reference.project) ||
-    reference.project.isChat === true
-  ) {
-    return false;
-  }
-  const visibleWorkspaceSessions = gxserverStartupSnapshot?.presentation?.sessions.filter(
-    (session) =>
-      session.projectId === reference.project.projectId &&
-      session.surface === "workspace" &&
-      session.visibleInSidebarByDefault === true &&
-      !isGxserverPresentationSessionLocallyHidden(session.projectId, session.sessionId),
-  ) ?? [];
-  return (
-    visibleWorkspaceSessions.length === 1 &&
-    visibleWorkspaceSessions[0]?.sessionId === reference.sessionId
-  );
-}
-
 function closeTerminal(
   sessionId: string,
   options: {
@@ -22626,21 +23531,15 @@ function closeTerminal(
     reference.project.projectId,
     reference.sessionId,
   );
-  const shouldParkLastProjectSession = shouldParkLastProjectSidebarSessionOnClose(
-    reference,
-    presentationSession,
-  );
   /*
-  CDXC:LocalFirstSidebar 2026-06-01-20:52:
-  Closing the last visible session in a normal project must not remove the project from the sidebar. Park that final session as sleeping through gxserver and keep its presentation row visible, while non-final closes still disappear immediately.
+  CDXC:LocalFirstSidebar 2026-06-15-20:14:
+  Closing the last visible terminal in a normal project is a real close, not an implicit sleep. Hide the closed row locally and let the gxserver project presentation remain, so the sidebar can render the empty-project New Session row instead of preserving a fake sleeping terminal.
   */
-  if (!shouldParkLastProjectSession) {
-    hideGxserverPresentationSessionLocally(
-      reference.project.projectId,
-      reference.sessionId,
-      "closeTerminal",
-    );
-  }
+  hideGxserverPresentationSessionLocally(
+    reference.project.projectId,
+    reference.sessionId,
+    "closeTerminal",
+  );
   const terminalState = terminalStateById.get(reference.sessionId);
   const sessionPersistenceProvider =
     terminalState?.sessionPersistenceProvider ??
@@ -22663,6 +23562,9 @@ function closeTerminal(
    */
   finishGitWorkflowToastForSession(reference.sessionId, "warning", "Session closed");
   if (sessionRecord?.kind === "terminal" && sessionRecord.surface === "commands") {
+    const wasCommandPanelActiveSession =
+      reference.project.commandsPanel.activeSessionId === reference.sessionId;
+    let postCloseCommandFocusSessionId: string | undefined;
     const commandTransitionOrigin =
       options.transitionOrigin ?? createCommandPaneTransitionOrigin(reference.project, reference.sessionId);
     const commandTransitionResult = applyGxserverSessionTransition(
@@ -22682,12 +23584,23 @@ function closeTerminal(
     updateProjectCommandsPanel(reference.project.projectId, (panel) => {
       const sessions = panel.sessions.filter((session) => session.sessionId !== reference.sessionId);
       const paneLayout = removeCommandSessionFromPaneLayout(panel.paneLayout, reference.sessionId);
+      const activeSessionId = resolveCommandPanelActiveSessionIdAfterRemoval(
+        panel,
+        reference.sessionId,
+        sessions,
+        paneLayout,
+      );
+      postCloseCommandFocusSessionId = activeSessionId;
+      /*
+       * CDXC:CommandsPanel 2026-06-15-23:23:
+       * Closing the last command-pane terminal after the workspace is empty must
+       * collapse the bottom Commands panel instead of preserving the last
+       * resize height as a visible empty native band.
+       */
       return {
         ...panel,
-        activeSessionId:
-          panel.activeSessionId === reference.sessionId
-            ? sessions[0]?.sessionId
-            : panel.activeSessionId,
+        activeSessionId,
+        isVisible: sessions.length > 0 ? panel.isVisible : false,
         paneLayout,
         sessions,
       };
@@ -22704,6 +23617,7 @@ function closeTerminal(
     clearNativeSessionAttentionTracking(reference.sessionId);
     nativeAttentionNotificationLastSentAtBySessionId.delete(reference.sessionId);
     clearDelayedSendTimer(reference.sessionId, reference.project.projectId);
+    clearCloseAfterDoneTimer(reference.sessionId, reference.project.projectId, "closeTerminal");
     if (shouldStopZmxThroughGxserver) {
       stopGxserverZmxSessionRuntime(reference.project.projectId, reference.sessionId, "closeTerminal");
     }
@@ -22714,24 +23628,18 @@ function closeTerminal(
     });
     publish();
     focusGxserverSessionTransitionTarget(commandTransitionResult.focusTarget, commandTransitionOrigin.kind);
+    if (!commandTransitionResult.focusTarget && wasCommandPanelActiveSession && postCloseCommandFocusSessionId) {
+      handleNativePaneTabSelected(postCloseCommandFocusSessionId);
+    }
     return;
   }
   const transitionOrigin = options.transitionOrigin ?? createProjectSessionListTransitionOrigin(reference.project);
   const transitionResult = applyGxserverSessionTransition(
     reference,
     sessionRecord,
-    shouldParkLastProjectSession ? "sleep" : "close",
+    "close",
     transitionOrigin,
   );
-  if (shouldParkLastProjectSession && !transitionResult.committed) {
-    appendSidebarRefreshDebugLog("nativeSidebar.closeSession.lastProjectSessionParkSkipped", {
-      projectId: reference.project.projectId,
-      requestedSessionId: sessionId,
-      resolvedSessionId: reference.sessionId,
-    });
-    publish();
-    return;
-  }
   if (transitionResult.handled) {
     shouldStopZmxThroughGxserver = false;
   }
@@ -22748,7 +23656,7 @@ function closeTerminal(
     reference.sessionId,
   );
   clearNativeSidebarCommandSessionBySessionId(reference.sessionId);
-  if (!shouldRemoveQuickTerminalContainer && !shouldParkLastProjectSession) {
+  if (!shouldRemoveQuickTerminalContainer) {
     rememberPreviousSession(reference.sessionId, reference.project);
   }
   let shouldRemoveProjectAfterClose = false;
@@ -22787,6 +23695,7 @@ function closeTerminal(
   clearNativeSessionAttentionTracking(reference.sessionId);
   nativeAttentionNotificationLastSentAtBySessionId.delete(reference.sessionId);
   clearDelayedSendTimer(reference.sessionId, reference.project.projectId);
+  clearCloseAfterDoneTimer(reference.sessionId, reference.project.projectId, "closeTerminal");
   if (shouldStopZmxThroughGxserver) {
     stopGxserverZmxSessionRuntime(reference.project.projectId, reference.sessionId, "closeTerminal");
   }
@@ -22863,6 +23772,17 @@ function focusTerminal(sessionId: string): void {
     });
   }
   const wasSleepingTerminal = sessionRecord?.kind === "terminal" && sessionRecord.isSleeping === true;
+  appendSidebarWakeScrollDebugLog("nativeFocusStart", {
+    focusTraceRequestId: sidebarCardFocusTrace?.requestId,
+    hadRecentSidebarCardFocusTrace: sidebarCardFocusTrace !== undefined,
+    hadNativeTerminalStateBefore: terminalState !== undefined,
+    requestedSessionId: sessionId,
+    resolvedProjectId: reference.project.projectId,
+    resolvedSessionId: reference.sessionId,
+    shouldKeepProjectEditorOpen,
+    wasSleepingTerminal,
+    ...summarizeSidebarWakeScrollNativeState(reference.project, reference.sessionId),
+  });
   const sessionPersistenceProvider =
     terminalState?.sessionPersistenceProvider ??
     (sessionRecord?.kind === "terminal" ? sessionRecord.sessionPersistenceProvider : undefined);
@@ -22936,6 +23856,20 @@ function focusTerminal(sessionId: string): void {
         restoreNativeTerminalSession(reference.project, session, "focus-command-session");
       }
     }
+    appendSidebarWakeScrollDebugLog("nativeFocusCommandPanelStateUpdated", {
+      focusTraceRequestId: sidebarCardFocusTrace?.requestId,
+      requestedSessionId: sessionId,
+      resolvedProjectId: reference.project.projectId,
+      resolvedSessionId: reference.sessionId,
+      ...summarizeSidebarWakeScrollNativeState(activeProject(), reference.sessionId),
+    });
+    appendSidebarWakeScrollDebugLog("nativeFocusPublishCommandPanel", {
+      focusTraceRequestId: sidebarCardFocusTrace?.requestId,
+      requestedSessionId: sessionId,
+      resolvedProjectId: reference.project.projectId,
+      resolvedSessionId: reference.sessionId,
+      ...summarizeSidebarWakeScrollNativeState(activeProject(), reference.sessionId),
+    });
     publishSidebarFocusUpdate();
     postNativeFocusTerminalForCurrentIntent(
       nativeSessionIdForProjectSidebarSession(
@@ -22981,6 +23915,17 @@ function focusTerminal(sessionId: string): void {
       : focusSidebarSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot,
   );
   const focusTargetAfter = summarizeSidebarSessionFocusTarget(activeProject(), reference.sessionId);
+  appendSidebarWakeScrollDebugLog("nativeFocusStateUpdated", {
+    focusTraceRequestId: sidebarCardFocusTrace?.requestId,
+    hadNativeTerminalStateBefore: terminalState !== undefined,
+    isProjectEditorCompanionPath: shouldKeepProjectEditorOpen,
+    requestedSessionId: sessionId,
+    resolvedProjectId: reference.project.projectId,
+    resolvedSessionId: reference.sessionId,
+    shouldRestoreProjectModeAfterFocus,
+    wasSleepingTerminal,
+    ...summarizeSidebarWakeScrollNativeState(activeProject(), reference.sessionId),
+  });
   if (!shouldKeepProjectEditorOpen) {
     queueNativeLayoutFocusRequest(reference.sessionId, "focusTerminal");
   }
@@ -23019,6 +23964,13 @@ function focusTerminal(sessionId: string): void {
       }
     }
     if (shouldKeepProjectEditorOpen) {
+      appendSidebarWakeScrollDebugLog("nativeFocusPublishProjectEditorRestoredWebPane", {
+        focusTraceRequestId: sidebarCardFocusTrace?.requestId,
+        requestedSessionId: sessionId,
+        resolvedProjectId: reference.project.projectId,
+        resolvedSessionId: reference.sessionId,
+        ...summarizeSidebarWakeScrollNativeState(activeProject(), reference.sessionId),
+      });
       publishSidebarFocusUpdate();
       postNativeFocusProjectEditorCompanionForCurrentIntent(
         nativeSessionIdForProjectSidebarSession(
@@ -23036,6 +23988,13 @@ function focusTerminal(sessionId: string): void {
         reference.sessionId,
       ),
       type: "focusWebPane",
+    });
+    appendSidebarWakeScrollDebugLog("nativeFocusPublishWebPane", {
+      focusTraceRequestId: sidebarCardFocusTrace?.requestId,
+      requestedSessionId: sessionId,
+      resolvedProjectId: reference.project.projectId,
+      resolvedSessionId: reference.sessionId,
+      ...summarizeSidebarWakeScrollNativeState(activeProject(), reference.sessionId),
     });
     publishSidebarFocusUpdate();
     return;
@@ -23103,6 +24062,14 @@ function focusTerminal(sessionId: string): void {
   }
   acknowledgeNativeTerminalAttention(reference.sessionId, "sidebar-focus");
   if (restoredSleepingTerminal) {
+    appendSidebarWakeScrollDebugLog("nativeFocusPublishRestoredSleepingTerminal", {
+      focusTraceRequestId: sidebarCardFocusTrace?.requestId,
+      requestedSessionId: sessionId,
+      resolvedProjectId: reference.project.projectId,
+      resolvedSessionId: reference.sessionId,
+      restoredSleepingTerminal,
+      ...summarizeSidebarWakeScrollNativeState(activeProject(), reference.sessionId),
+    });
     publishSidebarFocusUpdate();
     if (shouldKeepProjectEditorOpen) {
       /*
@@ -23125,6 +24092,14 @@ function focusTerminal(sessionId: string): void {
     return;
   }
   if (shouldKeepProjectEditorOpen) {
+    appendSidebarWakeScrollDebugLog("nativeFocusPublishProjectEditorDirectTerminal", {
+      focusTraceRequestId: sidebarCardFocusTrace?.requestId,
+      requestedSessionId: sessionId,
+      resolvedProjectId: reference.project.projectId,
+      resolvedSessionId: reference.sessionId,
+      restoredSleepingTerminal,
+      ...summarizeSidebarWakeScrollNativeState(activeProject(), reference.sessionId),
+    });
     publishSidebarFocusUpdate();
     postNativeFocusProjectEditorCompanionForCurrentIntent(
       nativeSessionIdForProjectSidebarSession(
@@ -23144,6 +24119,14 @@ function focusTerminal(sessionId: string): void {
     focusIntent,
     "focus-terminal-direct",
   );
+  appendSidebarWakeScrollDebugLog("nativeFocusPublishDirectTerminal", {
+    focusTraceRequestId: sidebarCardFocusTrace?.requestId,
+    requestedSessionId: sessionId,
+    resolvedProjectId: reference.project.projectId,
+    resolvedSessionId: reference.sessionId,
+    restoredSleepingTerminal,
+    ...summarizeSidebarWakeScrollNativeState(activeProject(), reference.sessionId),
+  });
   publishSidebarFocusUpdate();
 }
 
@@ -23307,6 +24290,13 @@ function runNativeHotkeyAction(
    */
   switch (action.kind) {
     case "createSession":
+      /*
+       * CDXC:SettingsDismissal 2026-06-15-14:07:
+       * New-session hotkeys should behave like the sidebar New Session row:
+       * close the workspace-scoped Settings modal before creating and focusing
+       * the new session in the native workspace.
+       */
+      closeAppModal("SettingsDismissal:nativeHotkeyCreateSession");
       createNativeSessionInCurrentContext(sourceSessionId);
       return;
     case "focusAdjacentGroup":
@@ -23314,9 +24304,6 @@ function runNativeHotkeyAction(
       return;
     case "focusDirection":
       focusNativeHotkeyDirection(action.direction, sourceSessionId);
-      return;
-    case "focusGroup":
-      focusNativeHotkeyGroupByIndex(action.groupIndex);
       return;
     case "focusSessionSlot":
       if (action.slotNumber === -1) {
@@ -23328,6 +24315,9 @@ function runNativeHotkeyAction(
         return;
       }
       focusNativeHotkeySessionSlot(action.slotNumber);
+      return;
+    case "jumpToProject":
+      jumpToNativeHotkeyProject(action.projectIndex);
       return;
     case "focusedPaneAction":
       /**
@@ -24186,18 +25176,6 @@ function focusProjectEditorCompanionHotkeyDirection(
   return true;
 }
 
-function focusNativeHotkeyGroupByIndex(groupIndex: number): void {
-  const targetGroup = activeProject().workspace.groups[groupIndex - 1];
-  if (!targetGroup) {
-    logNativeHotkeyDebug("nativeHotkeys.groupIndexMissing", {
-      groupCount: activeProject().workspace.groups.length,
-      groupIndex,
-    });
-    return;
-  }
-  focusNativeHotkeyGroup(targetGroup.groupId, "index");
-}
-
 function focusAdjacentNativeHotkeyGroup(direction: -1 | 1): void {
   const groups = activeProject().workspace.groups;
   if (groups.length === 0) {
@@ -24224,17 +25202,229 @@ function focusNativeHotkeyGroup(groupId: string, source: "index" | "next" | "pre
   logNativeHotkeyDebug("nativeHotkeys.groupFocused", { groupId, source });
 }
 
+type NativeHotkeyProjectSlot = {
+  groupId: string;
+  projectId: string;
+  terminalSessionIds: string[];
+};
+
+const NATIVE_HOTKEY_PROJECT_SLOT_SNAPSHOT_TTL_MS = 1500;
+type NativeHotkeyProjectSlotSnapshot = {
+  capturedAtMs: number;
+  slots: NativeHotkeyProjectSlot[];
+};
+let nativeHotkeyProjectSlotSnapshot: NativeHotkeyProjectSlotSnapshot | undefined;
+
+function jumpToNativeHotkeyProject(projectIndex: number): void {
+  const { reused, slots, snapshotAgeMs } = readNativeHotkeyProjectSlotSnapshot();
+  const target = slots[projectIndex - 1];
+  if (!target) {
+    logNativeHotkeyDebug("nativeHotkeys.projectSlotMissing", {
+      projectCount: slots.length,
+      projectIndex,
+      snapshotAgeMs,
+      snapshotReused: reused,
+      visibleSlotProjectIds: slots.slice(0, 9).map((slot) => slot.projectId),
+    });
+    return;
+  }
+
+  rememberActiveProjectWorkspaceTerminal("jumpToProjectBeforeSwitch");
+  const project =
+    findProject(target.projectId) ??
+    materializeNativeProjectFromGxserverPresentationProject(
+      target.projectId,
+      "jump-to-project-hotkey",
+    );
+  if (!project) {
+    logNativeHotkeyDebug("nativeHotkeys.projectSlotProjectMissing", {
+      groupId: target.groupId,
+      projectId: target.projectId,
+      projectIndex,
+      snapshotAgeMs,
+      snapshotReused: reused,
+      visibleSlotProjectIds: slots.slice(0, 9).map((slot) => slot.projectId),
+    });
+    return;
+  }
+
+  dispatchNativeHotkeyProjectJumpEvent(target);
+  activateWorkspaceSurfaceForProject(target.projectId);
+  focusProject(target.projectId);
+  const resolvedProject = findProject(target.projectId) ?? project;
+  const targetSessionId = resolveNativeHotkeyProjectJumpTerminalSessionId(
+    resolvedProject,
+    target,
+  );
+  if (targetSessionId) {
+    focusSidebarSession(targetSessionId);
+  }
+  logNativeHotkeyDebug("nativeHotkeys.projectJumpResolved", {
+    groupId: target.groupId,
+    projectCount: slots.length,
+    projectId: target.projectId,
+    projectIndex,
+    snapshotAgeMs,
+    snapshotReused: reused,
+    targetSessionId: targetSessionId ?? "",
+    visibleSlotProjectIds: slots.slice(0, 9).map((slot) => slot.projectId),
+  });
+}
+
+function readNativeHotkeyProjectSlotSnapshot(): {
+  reused: boolean;
+  slots: NativeHotkeyProjectSlot[];
+  snapshotAgeMs: number;
+} {
+  const nowMs = Date.now();
+  const previousSnapshot = nativeHotkeyProjectSlotSnapshot;
+  if (
+    previousSnapshot &&
+    nowMs - previousSnapshot.capturedAtMs <= NATIVE_HOTKEY_PROJECT_SLOT_SNAPSHOT_TTL_MS
+  ) {
+    return {
+      reused: true,
+      slots: previousSnapshot.slots,
+      snapshotAgeMs: nowMs - previousSnapshot.capturedAtMs,
+    };
+  }
+
+  const slots = createNativeHotkeyProjectSlots();
+  nativeHotkeyProjectSlotSnapshot = {
+    capturedAtMs: nowMs,
+    slots,
+  };
+  return {
+    reused: false,
+    slots,
+    snapshotAgeMs: 0,
+  };
+}
+
+function createNativeHotkeyProjectSlots(): NativeHotkeyProjectSlot[] {
+  /**
+   * CDXC:ProjectHotkeys 2026-06-15-11:12:
+   * Cmd+Ctrl+1..9 jumps across Projects rows, not workspace groups. Build the slot order from the same projected sidebar groups as SidebarApp, excluding Quick chats and remote machines, so hotkey numbers follow the visible Projects section instead of rendered DOM or active-workspace group order.
+   */
+  const presentationGroups = createPresentationSidebarGroups(gxserverStartupSnapshot?.presentation);
+  if (presentationGroups) {
+    return presentationGroups.flatMap((group) => {
+      const projectId = group.projectContext?.editor.projectId;
+      if (!projectId || group.isChatCollection === true || group.remoteMachineContext) {
+        return [];
+      }
+      return [
+        {
+          groupId: group.groupId,
+          projectId,
+          terminalSessionIds: group.sessions.flatMap((session) =>
+            session.sessionKind === "terminal" ? [session.sessionId] : [],
+          ),
+        },
+      ];
+    });
+  }
+
+  return orderNativeProjectsForSidebar(projects)
+    .filter((project) => project.isRecentProject !== true && !isQuickProject(project))
+    .map((project) => ({
+      groupId: createCombinedProjectGroupId(project.projectId),
+      projectId: project.projectId,
+      terminalSessionIds: getProjectWorkspaceTerminalSessionIds(project).map((sessionId) =>
+        projectScopedSidebarSessionId(project.projectId, sessionId),
+      ),
+    }));
+}
+
+function resolveNativeHotkeyProjectJumpTerminalSessionId(
+  project: NativeProject,
+  slot: NativeHotkeyProjectSlot,
+): string | undefined {
+  const rememberedSessionId = rememberedWorkspaceTerminal(project);
+  if (rememberedSessionId) {
+    return projectScopedSidebarSessionId(project.projectId, rememberedSessionId);
+  }
+
+  const activeGroup =
+    project.workspace.groups.find((group) => group.groupId === project.workspace.activeGroupId) ??
+    project.workspace.groups[0];
+  const focusedSessionId = activeGroup?.snapshot.focusedSessionId;
+  if (focusedSessionId && isProjectWorkspaceTerminal(project, focusedSessionId)) {
+    return projectScopedSidebarSessionId(project.projectId, focusedSessionId);
+  }
+
+  const firstLocalTerminalSessionId = getProjectWorkspaceTerminalSessionIds(project)[0];
+  if (firstLocalTerminalSessionId) {
+    return projectScopedSidebarSessionId(project.projectId, firstLocalTerminalSessionId);
+  }
+
+  return slot.terminalSessionIds.find((sessionId) => {
+    const combinedReference = parseCombinedProjectSessionId(sessionId);
+    return !combinedReference || combinedReference.projectId === project.projectId;
+  });
+}
+
+function getProjectWorkspaceTerminalSessionIds(project: NativeProject): string[] {
+  return project.workspace.groups.flatMap((group) =>
+    group.snapshot.visibleSessionIds.filter((sessionId) =>
+      isProjectWorkspaceTerminal(project, sessionId),
+    ),
+  );
+}
+
+function isProjectWorkspaceTerminal(project: NativeProject, sessionId: string): boolean {
+  const session = findSessionRecordInProject(project, sessionId);
+  return session?.kind === "terminal" && session.surface !== "commands";
+}
+
+function projectScopedSidebarSessionId(projectId: string, sessionId: string): string {
+  return parseCombinedProjectSessionId(sessionId)
+    ? sessionId
+    : createCombinedProjectSessionId(projectId, sessionId);
+}
+
+function dispatchNativeHotkeyProjectJumpEvent(target: NativeHotkeyProjectSlot): void {
+  if (!settings.expandCollapsedProjectsOnJump) {
+    return;
+  }
+  const detail: SidebarProjectJumpEventDetail = {
+    expandCollapsedProject: true,
+    groupId: target.groupId,
+    projectId: target.projectId,
+    showLessAfterExpand: settings.showLessForExpandedProjectJumps,
+  };
+  window.dispatchEvent(new CustomEvent(SIDEBAR_PROJECT_JUMP_EVENT, { detail }));
+}
+
 function focusNativeHotkeySessionSlot(slotNumber: number): void {
-  const sessionIds = getRenderedNativeHotkeySidebarSessionSlotIds();
+  const { reused, scopeGroupIds, sessionIds, snapshotAgeMs } = readNativeHotkeySessionSlotSnapshot();
+  const project = activeProject();
   const sessionId = sessionIds[slotNumber - 1];
   if (sessionId) {
+    logNativeHotkeyDebug("nativeHotkeys.sessionSlotResolved", {
+      activeProjectId: project.projectId,
+      activeProjectIsQuick: isQuickProject(project),
+      activeSessionsSortMode,
+      scopeGroupIds,
+      sessionCount: sessionIds.length,
+      slotNumber,
+      snapshotAgeMs,
+      snapshotReused: reused,
+      targetSessionId: sessionId,
+      visibleSlotSessionIds: sessionIds.slice(0, 9),
+    });
     focusSidebarSession(sessionId);
     return;
   }
   logNativeHotkeyDebug("nativeHotkeys.sessionSlotMissing", {
+    activeProjectId: project.projectId,
+    activeProjectIsQuick: isQuickProject(project),
     activeSessionsSortMode,
+    scopeGroupIds,
     sessionCount: sessionIds.length,
     slotNumber,
+    snapshotAgeMs,
+    snapshotReused: reused,
   });
 }
 
@@ -24263,64 +25453,154 @@ function focusAdjacentNativeHotkeySession(direction: -1 | 1): void {
   handleNativePaneTabSelected(nextSessionId);
 }
 
-function isNativeHotkeySidebarGroupExpanded(groupId: string): boolean {
-  const element = document.querySelector(
-    `[data-sidebar-group-id="${escapeNativeHotkeySelectorValue(groupId)}"]`,
-  );
-  if (!element) {
-    return true;
-  }
-  return (
-    element.getAttribute("data-collapsed") !== "true" &&
-    !element.closest(".reference-sidebar-collapsible-body[data-collapsed='true']")
-  );
-}
+const NATIVE_HOTKEY_SESSION_SLOT_SNAPSHOT_TTL_MS = 1500;
+type NativeHotkeySessionSlotSnapshot = {
+  capturedAtMs: number;
+  projectId: string;
+  sessionIds: string[];
+  sortMode: SidebarActiveSessionsSortMode;
+  scopeGroupIds: string[];
+};
+let nativeHotkeySessionSlotSnapshot: NativeHotkeySessionSlotSnapshot | undefined;
 
-function escapeNativeHotkeySelectorValue(value: string): string {
-  return typeof CSS !== "undefined" && typeof CSS.escape === "function"
-    ? CSS.escape(value)
-    : value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-type NativeRenderedHotkeySidebarSessionSlot = RenderedSidebarSessionSlot;
-
-function getRenderedNativeHotkeySidebarSessionSlotIds(): string[] {
-  return getRenderedNativeHotkeySidebarSessionSlots().map((slot) => slot.sessionId);
-}
-
-function getNativeHotkeySidebarSessionListRoot(): ParentNode | undefined {
+function getNativeHotkeySidebarSessionSlotIds(
+  project: NativeProject,
+): { scopeGroupIds: string[]; sessionIds: string[] } {
   /**
    * CDXC:Hotkeys 2026-06-13-07:33:
    * Cmd+number must read the actual sidebar session list, not every session-labeled control inside the native sidebar shell. The macOS wrapper can render tab or pane chrome with session IDs before the sidebar rows, and scanning the shell makes slot numbers follow storage/chrome order instead of the Last Active list the user sees.
+   *
+   * CDXC:Hotkeys 2026-06-14-19:30:
+   * Numbered session shortcuts need a short-lived row-order snapshot. In Last Active mode, each successful hotkey focus can update the target session's activity timestamp and reorder the sidebar before the next key in a rapid Cmd+1..9 sequence. Reuse the first rendered row snapshot for the shortcut burst so slot numbers stay tied to the list the user was scanning.
+   *
+   * CDXC:Hotkeys 2026-06-15-01:26:
+   * Numbered native shortcuts must be scoped to the active project. The combined sidebar renders Quick before Projects, but Cmd+1 in a normal project should select that project's first rendered row, not the first Quick row; only Quick-active projects use the Quick collection as their slot scope.
+   *
+   * CDXC:Hotkeys 2026-06-15-10:37:
+   * Native numbered slots must use the same projected group data and shared display-order reducer as SidebarApp. A 10:30 repro showed the DOM-derived slot list omitted the first visible project row, making Cmd+1 select the second row through Cmd+5 selecting the sixth row.
    */
-  return document.querySelector(".native-sidebar-main .session-groups-content") ?? undefined;
+  const groups = getNativeHotkeySidebarSessionSlotGroups(project);
+  const scopeGroupIds = groups.map((group) => group.groupId);
+  logNativeHotkeySessionSlotScopeMissing(project, scopeGroupIds);
+  const sessionIdsByGroup = Object.fromEntries(
+    groups.map((group) => [group.groupId, group.sessions.map((session) => session.sessionId)]),
+  );
+  const sessionsById = Object.fromEntries(
+    groups.flatMap((group) => group.sessions.map((session) => [session.sessionId, session])),
+  );
+  const displayLayout = createDisplaySessionLayout({
+    sessionIdsByGroup,
+    sessionsById,
+    sortMode: activeSessionsSortMode,
+    workspaceGroupIds: scopeGroupIds,
+  });
+  const projectSessionListCollapsedState = readSidebarProjectSessionListCollapsedState();
+  return {
+    scopeGroupIds,
+    sessionIds: displayLayout.groupIds.flatMap((groupId) => {
+      const group = groups.find((candidate) => candidate.groupId === groupId);
+      if (!group) {
+        return [];
+      }
+      const orderedSessionIds = displayLayout.sessionIdsByGroup[groupId] ?? [];
+      const projectSessionListStorageId = group.projectContext?.editor.projectId ?? group.groupId;
+      return getVisibleProjectSessionIds({
+        collapsedCount: settings.projectSessionListCollapsedCount,
+        isCollapsed:
+          Boolean(group.projectContext) &&
+          projectSessionListCollapsedState[projectSessionListStorageId] === true,
+        isProjectGroup: Boolean(group.projectContext),
+        isToggleEnabled: true,
+        sessionIds: orderedSessionIds,
+      });
+    }),
+  };
 }
 
-function getRenderedNativeHotkeySidebarSessionSlots(): NativeRenderedHotkeySidebarSessionSlot[] {
-  const root = getNativeHotkeySidebarSessionListRoot();
-  if (!root) {
-    logNativeHotkeyDebug("nativeHotkeys.sessionSlotRootMissing", {
-      activeSessionsSortMode,
-    });
-    return [];
+function readNativeHotkeySessionSlotSnapshot(): {
+  reused: boolean;
+  sessionIds: string[];
+  snapshotAgeMs: number;
+  scopeGroupIds: string[];
+} {
+  const nowMs = Date.now();
+  const project = activeProject();
+  const previousSnapshot = nativeHotkeySessionSlotSnapshot;
+  if (
+    previousSnapshot &&
+    previousSnapshot.projectId === project.projectId &&
+    previousSnapshot.sortMode === activeSessionsSortMode &&
+    nowMs - previousSnapshot.capturedAtMs <= NATIVE_HOTKEY_SESSION_SLOT_SNAPSHOT_TTL_MS
+  ) {
+    return {
+      reused: true,
+      sessionIds: previousSnapshot.sessionIds,
+      snapshotAgeMs: nowMs - previousSnapshot.capturedAtMs,
+      scopeGroupIds: previousSnapshot.scopeGroupIds,
+    };
   }
-  const seenSessionIds = new Set<string>();
-  const slots: NativeRenderedHotkeySidebarSessionSlot[] = [];
-  /**
-   * CDXC:Hotkeys 2026-06-05-21:17:
-   * Cmd+1..9 must follow the exact session rows currently painted in the native sidebar. A repro showed state/group-derived slot order could reserve hidden rows, so read mounted session cards in DOM order and skip collapsed or non-rendered ancestors instead of selecting from active-group inventory.
-   *
-   * CDXC:Hotkeys 2026-06-07-14:05:
-   * Previous/next session hotkeys use the same rendered rows but also read each row's sleeping state so traversal can skip sleeping sessions while still honoring expanded-group sidebar order.
-   */
-  for (const slot of readRenderedSidebarSessionSlots(root)) {
-    if (seenSessionIds.has(slot.sessionId)) {
-      continue;
+
+  const { scopeGroupIds, sessionIds } = getNativeHotkeySidebarSessionSlotIds(project);
+  nativeHotkeySessionSlotSnapshot = {
+    capturedAtMs: nowMs,
+    projectId: project.projectId,
+    sessionIds,
+    sortMode: activeSessionsSortMode,
+    scopeGroupIds,
+  };
+  return {
+    reused: false,
+    sessionIds,
+    snapshotAgeMs: 0,
+    scopeGroupIds,
+  };
+}
+
+function getNativeHotkeySidebarSessionSlotGroups(project: NativeProject): SidebarSessionGroup[] {
+  const presentationGroups = createPresentationSidebarGroups(gxserverStartupSnapshot?.presentation);
+  if (presentationGroups) {
+    if (isQuickProject(project)) {
+      return presentationGroups.filter((group) => group.groupId === COMBINED_CHATS_GROUP_ID);
     }
-    seenSessionIds.add(slot.sessionId);
-    slots.push(slot);
+    return presentationGroups.filter(
+      (group) => group.projectContext?.editor.projectId === project.projectId &&
+        !group.remoteMachineContext,
+    );
   }
-  return slots;
+
+  if (isQuickProject(project)) {
+    return createProjectedSidebarGroupsForProject(project).filter(
+      (group) => group.groupId !== COMMANDS_PANEL_SESSION_GROUP_ID,
+    );
+  }
+  const groups = createProjectedSidebarGroupsForProject(project).filter(
+    (group) => group.groupId !== COMMANDS_PANEL_SESSION_GROUP_ID,
+  );
+  return groups.map((group) => ({
+    ...group,
+    projectContext: {
+      canRemoveProject: true,
+      editor: createSidebarProjectEditorState(project),
+      path: project.path,
+      theme: project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
+      themeColor: project.themeColor,
+      worktree: project.worktree,
+    },
+  }));
+}
+
+function logNativeHotkeySessionSlotScopeMissing(
+  project: NativeProject,
+  scopeGroupIds: readonly string[],
+): void {
+  if (scopeGroupIds.length === 0) {
+    logNativeHotkeyDebug("nativeHotkeys.sessionSlotScopeMissing", {
+      activeProjectId: project.projectId,
+      activeProjectIsQuick: isQuickProject(project),
+      activeSessionsSortMode,
+      scopeGroupIds,
+    });
+  }
 }
 
 function promptRenameFocusedNativeHotkeySession(): void {
@@ -24338,7 +25618,12 @@ function promptRenameFocusedNativeHotkeySession(): void {
    * CDXC:AppModals 2026-04-28-16:18
    * Native hotkey rename must use the shared React modal host instead of
    * browser prompt UI, matching the no VS Code/native prompt requirement.
+   *
+   * CDXC:SettingsDismissal 2026-06-15-14:07:
+   * Rename is a modal replacement path. Close Settings first so the rename
+   * child window becomes the only active app-modal surface.
    */
+  closeAppModal("SettingsDismissal:nativeHotkeyRename");
   openAppModal({
     initialTitle: session.title || DEFAULT_TERMINAL_SESSION_TITLE,
     modal: "renameSession",
@@ -24886,11 +26171,27 @@ function setNativeSessionSleeping(
     reference.project.projectId,
     reference.sessionId,
   );
+  if (!sleeping) {
+    appendSidebarWakeScrollDebugLog("nativeSetSleepingStart", {
+      requestedSessionId: sessionId,
+      requestedSleeping: sleeping,
+      resolvedProjectId: reference.project.projectId,
+      resolvedSessionId: reference.sessionId,
+      ...summarizeSidebarWakeScrollNativeState(reference.project, reference.sessionId),
+    });
+  }
   if (!session) {
     if (!presentationSession || presentationSession.surface !== "workspace") {
       return;
     }
     if (!sleeping) {
+      appendSidebarWakeScrollDebugLog("nativeSetSleepingDelegatedFocus", {
+        requestedSessionId: sessionId,
+        requestedSleeping: sleeping,
+        resolvedProjectId: reference.project.projectId,
+        resolvedSessionId: reference.sessionId,
+        ...summarizeSidebarWakeScrollNativeState(reference.project, reference.sessionId),
+      });
       focusSidebarSession(sessionId);
       return;
     }
@@ -25021,7 +26322,33 @@ function setNativeSessionSleeping(
       );
     }
   }
+  if (!sleeping) {
+    appendSidebarWakeScrollDebugLog("nativeSetSleepingStateUpdated", {
+      requestedSessionId: sessionId,
+      requestedSleeping: sleeping,
+      resolvedProjectId: reference.project.projectId,
+      resolvedSessionId: reference.sessionId,
+      wasSleeping,
+      ...summarizeSidebarWakeScrollNativeState(
+        findProject(reference.project.projectId) ?? reference.project,
+        reference.sessionId,
+      ),
+    });
+  }
   if (options.publish !== false) {
+    if (!sleeping) {
+      appendSidebarWakeScrollDebugLog("nativeSetSleepingPublish", {
+        requestedSessionId: sessionId,
+        requestedSleeping: sleeping,
+        resolvedProjectId: reference.project.projectId,
+        resolvedSessionId: reference.sessionId,
+        wasSleeping,
+        ...summarizeSidebarWakeScrollNativeState(
+          findProject(reference.project.projectId) ?? reference.project,
+          reference.sessionId,
+        ),
+      });
+    }
     publish();
   }
   if (sleeping && options.focusTransition !== false) {
@@ -26215,6 +27542,7 @@ function replaceNativeTerminalWithFreshSession(
   clearNativeSessionAttentionTracking(reference.sessionId);
   nativeAttentionNotificationLastSentAtBySessionId.delete(reference.sessionId);
   clearDelayedSendTimer(reference.sessionId, reference.project.projectId);
+  clearCloseAfterDoneTimer(reference.sessionId, reference.project.projectId, "terminalRestart");
   updateProjectWorkspace(
     reference.project.projectId,
     (workspace) => removeSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot,
@@ -26309,6 +27637,7 @@ function handleNativeTerminalRestoreBlocked(
     "restore-blocked-missing-cwd",
   );
   clearNativeTerminalSurfaceCreationPending(reference.sessionId);
+  clearGxserverPresentationConfirmationPending(reference.sessionId);
   const shouldRemove = window.confirm(
     [
       "Session can't be restored.",
@@ -26409,6 +27738,7 @@ function restartNativeSession(sessionId: string): void {
   clearNativeSessionAttentionTracking(reference.sessionId);
   nativeAttentionNotificationLastSentAtBySessionId.delete(reference.sessionId);
   clearDelayedSendTimer(reference.sessionId, reference.project.projectId);
+  clearCloseAfterDoneTimer(reference.sessionId, reference.project.projectId, "terminalRestart");
   postNative({
     preservePersistenceSession: sessionPersistenceProvider === "zmx",
     sessionId: nativeSessionId,
@@ -26565,6 +27895,416 @@ function promptDelayedSend(sessionId: string): void {
     title: session.title || DEFAULT_TERMINAL_SESSION_TITLE,
     type: "open",
   });
+}
+
+function restoreCloseAfterDoneTimersFromStoredProjects(): void {
+  /**
+   * CDXC:CloseAfterDone 2026-06-15-21:00:
+   * Restart should keep armed Close After Done terminal rows armed, but should
+   * not persist a partially elapsed Done countdown. Re-arm the watcher from
+   * the terminal record and let the next publish start a fresh three-minute window
+   * only if the session is still marked Done.
+   */
+  for (const project of projects) {
+    for (const session of project.commandsPanel.sessions) {
+      restoreCloseAfterDoneTimerForStoredSession(project, session);
+    }
+    for (const group of project.workspace.groups) {
+      for (const session of group.snapshot.sessions) {
+        if (session.kind === "terminal") {
+          restoreCloseAfterDoneTimerForStoredSession(project, session);
+        }
+      }
+    }
+  }
+}
+
+function restoreCloseAfterDoneTimerForStoredSession(
+  project: NativeProject,
+  session: TerminalSessionRecord,
+): void {
+  if (session.closeAfterDone !== true) {
+    return;
+  }
+  installCloseAfterDoneWatcher(project.projectId, session.sessionId);
+}
+
+function setStoredCloseAfterDoneFlag(
+  projectId: string,
+  sessionId: string,
+  enabled: boolean,
+  reason: string,
+): boolean {
+  let didChange = false;
+  projects = projects.map((project) => {
+    if (project.projectId !== projectId) {
+      return project;
+    }
+
+    let projectDidChange = false;
+    const nextCommandSessions = project.commandsPanel.sessions.map((session) => {
+      const nextSession = updateTerminalSessionCloseAfterDoneFlag(session, sessionId, enabled);
+      projectDidChange ||= nextSession !== session;
+      return nextSession;
+    });
+    const nextGroups = project.workspace.groups.map((group) => {
+      let groupDidChange = false;
+      const nextSessions = group.snapshot.sessions.map((session) => {
+        if (session.kind !== "terminal") {
+          return session;
+        }
+        const nextSession = updateTerminalSessionCloseAfterDoneFlag(session, sessionId, enabled);
+        groupDidChange ||= nextSession !== session;
+        return nextSession;
+      });
+      projectDidChange ||= groupDidChange;
+      return groupDidChange
+        ? {
+            ...group,
+            snapshot: {
+              ...group.snapshot,
+              sessions: nextSessions,
+            },
+          }
+        : group;
+    });
+
+    if (!projectDidChange) {
+      return project;
+    }
+
+    didChange = true;
+    return {
+      ...project,
+      commandsPanel: {
+        ...project.commandsPanel,
+        sessions: nextCommandSessions,
+      },
+      workspace: {
+        ...project.workspace,
+        groups: nextGroups,
+      },
+    };
+  });
+
+  if (didChange) {
+    writeStoredProjects(reason);
+  }
+  return didChange;
+}
+
+function updateTerminalSessionCloseAfterDoneFlag(
+  session: TerminalSessionRecord,
+  sessionId: string,
+  enabled: boolean,
+): TerminalSessionRecord {
+  if (session.sessionId !== sessionId) {
+    return session;
+  }
+  if (enabled) {
+    if (session.closeAfterDone === true) {
+      return session;
+    }
+    return {
+      ...session,
+      closeAfterDone: true,
+    };
+  }
+  if (session.closeAfterDone !== true) {
+    return session;
+  }
+  const { closeAfterDone: _removedCloseAfterDone, ...sessionWithoutCloseAfterDone } = session;
+  return sessionWithoutCloseAfterDone;
+}
+
+function installCloseAfterDoneWatcher(projectId: string, sessionId: string): void {
+  const nativeSessionId = nativeSessionIdForProjectSidebarSession(projectId, sessionId);
+  if (closeAfterDoneTimerByNativeSessionId.has(nativeSessionId)) {
+    return;
+  }
+  closeAfterDoneTimerByNativeSessionId.set(nativeSessionId, {
+    projectId,
+    sessionId,
+  });
+}
+
+function toggleCloseAfterDone(sessionId: string): void {
+  const reference = resolveSidebarSessionReference(sessionId);
+  const session = findSessionRecordInProject(reference.project, reference.sessionId);
+  const presentationSession = findGxserverPresentationSession(
+    reference.project.projectId,
+    reference.sessionId,
+  );
+  if (session && session.kind !== "terminal") {
+    showNativeMessage("info", "Close After Done is only available for terminal sessions.");
+    return;
+  }
+  if (!session && !presentationSession) {
+    showNativeMessage("info", "Close After Done is only available for terminal sessions.");
+    return;
+  }
+
+  const nativeSessionId = nativeSessionIdForProjectSidebarSession(
+    reference.project.projectId,
+    reference.sessionId,
+  );
+  const isArmed =
+    closeAfterDoneTimerByNativeSessionId.has(nativeSessionId) ||
+    (session?.kind === "terminal" && session.closeAfterDone === true);
+  if (isArmed) {
+    clearCloseAfterDoneTimer(reference.sessionId, reference.project.projectId, "cancelCloseAfterDone");
+    publish();
+    showAppToast("info", "Close After Done canceled");
+    return;
+  }
+
+  /**
+   * CDXC:CloseAfterDone 2026-06-15-21:00:
+   * The context-menu action arms a watcher for the clicked terminal. If the
+   * row is already Done, the three-minute window starts now; otherwise it starts
+   * only after a later publish shows the session as Done continuously.
+   */
+  installCloseAfterDoneWatcher(reference.project.projectId, reference.sessionId);
+  setStoredCloseAfterDoneFlag(
+    reference.project.projectId,
+    reference.sessionId,
+    true,
+    "enableCloseAfterDone",
+  );
+  refreshCloseAfterDoneTimerForProjectSession(
+    reference.project.projectId,
+    reference.sessionId,
+    Date.now(),
+  );
+  publish();
+  showAppToast("info", "Close After Done enabled", "Closes after Done stays visible for 3m.");
+}
+
+function clearCloseAfterDoneTimer(
+  sessionId: string,
+  projectId?: string,
+  reason = "clearCloseAfterDone",
+): boolean {
+  const reference = projectId
+    ? { projectId, sessionId }
+    : resolveSidebarSessionReference(sessionId);
+  const resolvedProjectId = "project" in reference ? reference.project.projectId : reference.projectId;
+  const resolvedSessionId = "project" in reference ? reference.sessionId : reference.sessionId;
+  const nativeSessionId = nativeSessionIdForProjectSidebarSession(resolvedProjectId, resolvedSessionId);
+  const timer = closeAfterDoneTimerByNativeSessionId.get(nativeSessionId);
+  if (timer?.timeoutId !== undefined) {
+    window.clearTimeout(timer.timeoutId);
+  }
+  const hadTimer = closeAfterDoneTimerByNativeSessionId.delete(nativeSessionId);
+  const didUpdateStoredFlag = setStoredCloseAfterDoneFlag(
+    resolvedProjectId,
+    resolvedSessionId,
+    false,
+    reason,
+  );
+  stopCloseAfterDoneCountdownTickerIfIdle();
+  return hadTimer || didUpdateStoredFlag;
+}
+
+function refreshCloseAfterDoneTimersForAllSessions(): void {
+  const nowMs = Date.now();
+  for (const project of projects) {
+    for (const session of project.commandsPanel.sessions) {
+      if (session.closeAfterDone === true) {
+        installCloseAfterDoneWatcher(project.projectId, session.sessionId);
+      }
+    }
+    for (const group of project.workspace.groups) {
+      for (const session of group.snapshot.sessions) {
+        if (session.kind === "terminal" && session.closeAfterDone === true) {
+          installCloseAfterDoneWatcher(project.projectId, session.sessionId);
+        }
+      }
+    }
+  }
+
+  for (const timer of Array.from(closeAfterDoneTimerByNativeSessionId.values())) {
+    refreshCloseAfterDoneTimerForProjectSession(timer.projectId, timer.sessionId, nowMs);
+  }
+}
+
+function refreshCloseAfterDoneTimerForProjectSession(
+  projectId: string,
+  sessionId: string,
+  nowMs: number,
+): void {
+  const nativeSessionId = nativeSessionIdForProjectSidebarSession(projectId, sessionId);
+  const timer = closeAfterDoneTimerByNativeSessionId.get(nativeSessionId);
+  if (!timer) {
+    return;
+  }
+  if (!isCloseAfterDoneSessionMarkedDone(projectId, sessionId)) {
+    if (timer.timeoutId !== undefined) {
+      window.clearTimeout(timer.timeoutId);
+    }
+    closeAfterDoneTimerByNativeSessionId.set(nativeSessionId, {
+      projectId,
+      sessionId,
+    });
+    stopCloseAfterDoneCountdownTickerIfIdle();
+    return;
+  }
+  if (timer.deadlineAtMs !== undefined) {
+    ensureCloseAfterDoneCountdownTicker();
+    return;
+  }
+
+  const deadlineAtMs = nowMs + CLOSE_AFTER_DONE_DELAY_MS;
+  const timeoutId = window.setTimeout(() => {
+    completeCloseAfterDoneTimer(projectId, sessionId, deadlineAtMs);
+  }, CLOSE_AFTER_DONE_DELAY_MS);
+  closeAfterDoneTimerByNativeSessionId.set(nativeSessionId, {
+    deadlineAtMs,
+    doneSinceAtMs: nowMs,
+    projectId,
+    sessionId,
+    timeoutId,
+  });
+  ensureCloseAfterDoneCountdownTicker();
+}
+
+function completeCloseAfterDoneTimer(
+  projectId: string,
+  sessionId: string,
+  expectedDeadlineAtMs: number,
+): void {
+  const nativeSessionId = nativeSessionIdForProjectSidebarSession(projectId, sessionId);
+  const timer = closeAfterDoneTimerByNativeSessionId.get(nativeSessionId);
+  if (!timer || timer.deadlineAtMs !== expectedDeadlineAtMs) {
+    return;
+  }
+  if (!isCloseAfterDoneSessionMarkedDone(projectId, sessionId)) {
+    if (timer.timeoutId !== undefined) {
+      window.clearTimeout(timer.timeoutId);
+    }
+    closeAfterDoneTimerByNativeSessionId.set(nativeSessionId, { projectId, sessionId });
+    stopCloseAfterDoneCountdownTickerIfIdle();
+    publish();
+    return;
+  }
+
+  closeAfterDoneTimerByNativeSessionId.delete(nativeSessionId);
+  setStoredCloseAfterDoneFlag(projectId, sessionId, false, "closeAfterDoneFired");
+  stopCloseAfterDoneCountdownTickerIfIdle();
+  closeTerminal(createCombinedProjectSessionId(projectId, sessionId));
+}
+
+function isCloseAfterDoneSessionMarkedDone(projectId: string, sessionId: string): boolean {
+  const presentationSession = findGxserverPresentationSession(projectId, sessionId);
+  if (presentationSession) {
+    if (presentationSession.activity === "attention") {
+      return true;
+    }
+    /*
+     * CDXC:CloseAfterDone 2026-06-15-21:00:
+     * Agent sessions can finish by clearing Working back to Idle instead of
+     * publishing an Attention/Done marker. Treat non-working agent-backed
+     * terminal rows as done for Close After Done so the red clock starts fading
+     * for completed Codex/Claude/etc. sessions like the sidebar detail panel
+     * reports as Activity: idle.
+     */
+    return (
+      presentationSession.activity !== "working" &&
+      hasCloseAfterDoneAgentIdentity(presentationSession)
+    );
+  }
+  const terminalState = terminalStateById.get(sessionId);
+  if (terminalState?.activity === "attention") {
+    return true;
+  }
+  if (terminalState?.activity === "working") {
+    return false;
+  }
+  const project = findProject(projectId);
+  const session = project ? findSessionRecordInProject(project, sessionId) : undefined;
+  return hasCloseAfterDoneAgentIdentity({
+    agentName: terminalState?.agentName ?? (session?.kind === "terminal" ? session.agentName : undefined),
+    agentSessionId:
+      terminalState?.agentSessionId ?? (session?.kind === "terminal" ? session.agentSessionId : undefined),
+    agentSessionPath:
+      terminalState?.agentSessionPath ??
+      (session?.kind === "terminal" ? session.agentSessionPath : undefined),
+  });
+}
+
+function hasCloseAfterDoneAgentIdentity(input: {
+  agentIcon?: string;
+  agentId?: string;
+  agentName?: string;
+  agentSessionId?: string;
+  agentSessionPath?: string;
+}): boolean {
+  return Boolean(
+    input.agentSessionId?.trim() ||
+      input.agentSessionPath?.trim() ||
+      input.agentName?.trim() ||
+      input.agentId?.trim() ||
+      input.agentIcon?.trim(),
+  );
+}
+
+function getCloseAfterDoneProjectionForProjectSession(
+  projectId: string,
+  sessionId: string,
+): { armed: boolean; deadlineAt?: string; remainingLabel?: string; remainingMs?: number } | undefined {
+  const nativeSessionId = nativeSessionIdForProjectSidebarSession(projectId, sessionId);
+  const timer = closeAfterDoneTimerByNativeSessionId.get(nativeSessionId);
+  if (!timer) {
+    return undefined;
+  }
+  if (timer.deadlineAtMs === undefined) {
+    return { armed: true };
+  }
+  const remainingMs = timer.deadlineAtMs - Date.now();
+  if (remainingMs <= 0) {
+    return {
+      armed: true,
+      deadlineAt: new Date(timer.deadlineAtMs).toISOString(),
+      remainingLabel: formatDelayedSendCountdown(0),
+      remainingMs: 0,
+    };
+  }
+  return {
+    armed: true,
+    deadlineAt: new Date(timer.deadlineAtMs).toISOString(),
+    remainingLabel: formatDelayedSendCountdown(remainingMs),
+    remainingMs,
+  };
+}
+
+function ensureCloseAfterDoneCountdownTicker(): void {
+  if (closeAfterDoneCountdownTicker !== undefined) {
+    return;
+  }
+  closeAfterDoneCountdownTicker = window.setInterval(() => {
+    if (!hasActiveCloseAfterDoneCountdown()) {
+      stopCloseAfterDoneCountdownTickerIfIdle();
+      return;
+    }
+    publish();
+  }, 1_000);
+}
+
+function stopCloseAfterDoneCountdownTickerIfIdle(): void {
+  if (hasActiveCloseAfterDoneCountdown() || closeAfterDoneCountdownTicker === undefined) {
+    return;
+  }
+  window.clearInterval(closeAfterDoneCountdownTicker);
+  closeAfterDoneCountdownTicker = undefined;
+}
+
+function hasActiveCloseAfterDoneCountdown(): boolean {
+  for (const timer of closeAfterDoneTimerByNativeSessionId.values()) {
+    if (timer.deadlineAtMs !== undefined) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function normalizeDelayedSendDeadlineAt(value: string | undefined): string | undefined {
@@ -27908,12 +29648,12 @@ function cleanupExitedNativeCommandPaneSession(
   updateProjectCommandsPanel(reference.project.projectId, (panel) => {
     const sessions = panel.sessions.filter((session) => session.sessionId !== reference.sessionId);
     const paneLayout = removeCommandSessionFromPaneLayout(panel.paneLayout, reference.sessionId);
-    const activeSessionId =
-      panel.activeSessionId === reference.sessionId
-        ? sessions[0]?.sessionId
-        : panel.activeSessionId && sessions.some((session) => session.sessionId === panel.activeSessionId)
-          ? panel.activeSessionId
-          : sessions[0]?.sessionId;
+    const activeSessionId = resolveCommandPanelActiveSessionIdAfterRemoval(
+      panel,
+      reference.sessionId,
+      sessions,
+      paneLayout,
+    );
     return {
       ...panel,
       activeSessionId,
@@ -27929,6 +29669,7 @@ function cleanupExitedNativeCommandPaneSession(
   clearNativeSessionAttentionTracking(reference.sessionId);
   nativeAttentionNotificationLastSentAtBySessionId.delete(reference.sessionId);
   clearDelayedSendTimer(reference.sessionId, reference.project.projectId);
+  clearCloseAfterDoneTimer(reference.sessionId, reference.project.projectId, "commandSessionExited");
   /*
    * CDXC:ProjectSidebarOwnership 2026-06-02-17:06:
    * A command-pane terminal exit removes the macOS tab surface, but the backing
@@ -28011,7 +29752,7 @@ function runNativeSidebarCommand(
   if (command.actionType === "browser") {
     const browserUrl = command.url?.trim();
     if (!browserUrl) {
-      openNativeSidebarCommandEditor(command);
+      openNativeSidebarActionsSettings();
       return undefined;
     }
     appendActionCrashTraceDebugLog("nativeSidebar.actionCrashTrace.browserAction", {
@@ -28027,7 +29768,7 @@ function runNativeSidebarCommand(
       actionType: command.actionType,
       commandId: command.commandId,
     });
-    openNativeSidebarCommandEditor(command);
+    openNativeSidebarActionsSettings();
     return undefined;
   }
 
@@ -30806,7 +32547,18 @@ async function createProjectWorktreeFromPrompt(
       showAppToast("error", "Agent is unavailable", "Choose an agent with a configured command.");
       return;
     } else {
-      await createNativeWorktreeForAgentPrompt({ agent, prompt, sourceProject });
+      /*
+      CDXC:WorktreeModal 2026-06-15-11:30:
+      Add Worktree modal submit, including Enter from the first-prompt textarea,
+      should create the checkout through the existing toast-backed flow and then
+      switch typing focus to the newly created worktree agent terminal.
+      */
+      await createNativeWorktreeForAgentPrompt({
+        agent,
+        focusAfterCreate: true,
+        prompt,
+        sourceProject,
+      });
     }
   } catch (error) {
     showAppToast(
@@ -32307,13 +34059,59 @@ async function createNativePluginsBrowserChat(): Promise<void> {
    * project action. Create a projectless chat folder and place the Chromium
    * browser pane there so the active code project is not mutated by the click.
    */
+  await createNativeFixedBrowserChat({
+    directoryTitle: "plugins",
+    displayName: "Plugins",
+    storageReason: "createPluginsBrowserChat",
+    url: PLUGINS_BROWSER_CHAT_URL,
+  });
+}
+
+async function createNativeMobileBrowserChat(): Promise<void> {
+  /**
+   * CDXC:Mobile 2026-06-16-00:45:
+   * The primary-sidebar Mobile entry should mirror Plugins: create a named
+   * projectless browser chat under Chats instead of opening the link in the
+   * active project.
+   *
+   * CDXC:Mobile 2026-06-16-01:23:
+   * Seed Mobile with the Ghostex download page so the product site controls
+   * Android and iOS routing instead of a GitHub README anchor.
+   */
+  await createNativeFixedBrowserChat({
+    directoryTitle: "mobile",
+    displayName: "Mobile",
+    storageReason: "createMobileBrowserChat",
+    url: MOBILE_BROWSER_CHAT_URL,
+  });
+}
+
+async function createNativeFixedBrowserChat({
+  directoryTitle,
+  displayName,
+  storageReason,
+  url,
+}: {
+  directoryTitle: string;
+  displayName: string;
+  storageReason: string;
+  url: string;
+}): Promise<void> {
+  /*
+   * CDXC:FixedBrowserChats 2026-06-16-00:45:
+   * Fixed top-sidebar browser entries such as Plugins and Mobile must create
+   * quick Chats workspaces before opening Chromium so documentation/reference
+   * pages never mutate the currently active code project.
+   */
   const createdAt = new Date();
-  const chatPath = createNativeChatDirectoryPath("plugins", createdAt);
+  const chatPath = createNativeChatDirectoryPath(directoryTitle, createdAt);
   const result = await runNativeProcess("/bin/mkdir", ["-p", chatPath]);
   if (result.exitCode !== 0) {
     showNativeMessage(
       "error",
-      result.stderr.trim() || result.stdout.trim() || `Unable to create plugins chat: ${chatPath}`,
+      result.stderr.trim() ||
+        result.stdout.trim() ||
+        `Unable to create ${directoryTitle} chat: ${chatPath}`,
     );
     return;
   }
@@ -32326,7 +34124,7 @@ async function createNativePluginsBrowserChat(): Promise<void> {
         commandsPanel: createProjectCommandsPanelState(),
         isChat: true,
         isQuick: true,
-        name: "Plugins",
+        name: displayName,
         path: chatPath,
         projectId,
         quickKind: "browser",
@@ -32334,10 +34132,10 @@ async function createNativePluginsBrowserChat(): Promise<void> {
         workspace: createDefaultGroupedSessionWorkspaceSnapshot(),
       },
     ]);
-    writeStoredProjects("createPluginsBrowserChat");
+    writeStoredProjects(storageReason);
   }
   focusProject(projectId);
-  createNativeBrowserSession(PLUGINS_BROWSER_CHAT_URL);
+  createNativeBrowserSession(url);
 }
 
 async function openAgentsHubFileInDefaultEditor(filePath: string): Promise<void> {
@@ -35567,6 +37365,12 @@ function focusProject(projectId: string): void {
       if (project) {
         wakeProjectEditorSurface(project, editorSurfaceState.mode);
       }
+    } else {
+      projectEditorSurfaceByProjectId.set(projectId, {
+        ...editorSurfaceState,
+        lastAccessedAt: new Date().toISOString(),
+      });
+      enforceProjectEditorAwakeSurfaceLimit("focus-project", [projectId]);
     }
     publish();
     const project = findProject(projectId);
@@ -35666,6 +37470,10 @@ function forgetAwakeProjectEditorModes(projectId: string): void {
 
 function hasAwakeProjectEditorMode(projectId: string, mode: ProjectEditorSurfaceMode): boolean {
   return awakeProjectEditorModesByProjectId.get(projectId)?.has(mode) === true;
+}
+
+function hasAnyAwakeProjectEditorMode(projectId: string): boolean {
+  return (awakeProjectEditorModesByProjectId.get(projectId)?.size ?? 0) > 0;
 }
 
 function projectEditorErrorMessageForMode(mode: ProjectEditorSurfaceMode): string {
@@ -35839,6 +37647,56 @@ function scheduleProjectEditorSleep(projectId: string): void {
   projectEditorSleepTimeoutByProjectId.set(projectId, timeout);
 }
 
+function projectEditorSurfaceLastAccessedMs(surfaceState: ProjectEditorSurfaceState): number {
+  return nativeSessionTimestampMs(surfaceState.lastAccessedAt) ?? 0;
+}
+
+function enforceProjectEditorAwakeSurfaceLimit(
+  reason: string,
+  protectedProjectIds: readonly string[] = [],
+): void {
+  const awakeEntries = Array.from(projectEditorSurfaceByProjectId.entries()).filter(
+    ([projectId, surfaceState]) =>
+      surfaceState.isSleeping !== true && hasAnyAwakeProjectEditorMode(projectId),
+  );
+  if (awakeEntries.length <= PROJECT_EDITOR_AWAKE_SURFACE_LIMIT) {
+    return;
+  }
+  const protectedProjectIdSet = new Set(
+    [activeProjectId, ...protectedProjectIds].filter((projectId) => projectId.trim()),
+  );
+  const sleepCandidates = awakeEntries
+    .filter(([projectId, surfaceState]) => {
+      if (protectedProjectIdSet.has(projectId)) {
+        return false;
+      }
+      return !(projectId === activeProjectId && surfaceState.isOpen === true);
+    })
+    .sort(([, left], [, right]) => {
+      const leftAccessedAt = projectEditorSurfaceLastAccessedMs(left);
+      const rightAccessedAt = projectEditorSurfaceLastAccessedMs(right);
+      return leftAccessedAt - rightAccessedAt;
+    });
+  const sleepCount = Math.min(
+    sleepCandidates.length,
+    Math.max(0, awakeEntries.length - PROJECT_EDITOR_AWAKE_SURFACE_LIMIT),
+  );
+  if (sleepCount === 0) {
+    return;
+  }
+  if (isNativeSidebarDebugLoggingEnabled()) {
+    console.info("[ghostex-native-sidebar] project editor awake cap sleeping surfaces", {
+      awakeCount: awakeEntries.length,
+      limit: PROJECT_EDITOR_AWAKE_SURFACE_LIMIT,
+      reason,
+      sleepCount,
+    });
+  }
+  for (const [projectId] of sleepCandidates.slice(0, sleepCount)) {
+    sleepProjectEditorSurface(projectId);
+  }
+}
+
 function sleepProjectEditorSurface(projectId: string): void {
   const surfaceState = projectEditorSurfaceByProjectId.get(projectId);
   if (!surfaceState || (activeProjectId === projectId && surfaceState.isOpen)) {
@@ -35934,6 +37792,16 @@ function projectBrowserActiveUrlFromState(surfaceState: {
   return normalizeProjectBrowserUrl(surfaceState.url) ?? projectBrowserActiveTabFromState(surfaceState)?.url;
 }
 
+function projectBrowserStateHasRestorableTabs(surfaceState: {
+  browserTabs?: NativeProjectBrowserTabRestoreState[];
+}): boolean {
+  /*
+   * CDXC:ProjectBrowserTabs 2026-06-15-20:48:
+   * A remembered Browser state can be only a New Tab placeholder after the final loaded tab was closed. Reopen that address-only state instead of resolving a fresh project seed URL, otherwise closing the last tab would not save memory across Browser mode switches.
+   */
+  return normalizeProjectBrowserTabRestoreStates(surfaceState.browserTabs).length > 0;
+}
+
 function resolveProjectBrowserTabsForOpen(
   surfaceState: {
     activeBrowserTabId?: string;
@@ -35997,6 +37865,19 @@ function projectEditorRestoreStateFromSurface(
   return state;
 }
 
+function projectBrowserRestoreStateFromSurface(
+  surfaceState: ProjectEditorSurfaceState | undefined,
+): NativeProjectBrowserRestoreState | undefined {
+  if (surfaceState?.mode !== "git") {
+    return undefined;
+  }
+  return normalizeStoredProjectBrowserRestoreState({
+    activeBrowserTabId: surfaceState.activeBrowserTabId,
+    browserTabs: surfaceState.browserTabs,
+    url: surfaceState.url,
+  });
+}
+
 function areProjectEditorRestoreStatesEqual(
   left: NativeProjectEditorRestoreState | undefined,
   right: NativeProjectEditorRestoreState | undefined,
@@ -36016,25 +37897,35 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
         : undefined
       : nextMode === "tasks"
         ? surfaceState?.url
-        : (surfaceState?.mode === "code" ? surfaceState.url : undefined) ??
-          createCodeServerProjectEditorUrl(project.path);
-  if ((nextMode === "git" || nextMode === "tasks") && !url) {
+      : (surfaceState?.mode === "code" ? surfaceState.url : undefined) ??
+        createCodeServerProjectEditorUrl(project.path);
+  const browserTabsForWake =
+    nextMode === "git" ? normalizeProjectBrowserTabRestoreStates(surfaceState?.browserTabs) : [];
+  const activeBrowserTabForWake =
+    nextMode === "git"
+      ? browserTabsForWake.find((tab) => tab.id === surfaceState?.activeBrowserTabId) ??
+        browserTabsForWake[0]
+      : undefined;
+  const activeBrowserTabIsPlaceholder = activeBrowserTabForWake?.isPlaceholder === true;
+  if (
+    (nextMode === "git" && !url && browserTabsForWake.length === 0) ||
+    (nextMode === "tasks" && !url)
+  ) {
     return;
   }
-  if (nextMode === "code") {
-    appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarWakeStart", {
-      elapsedMs: performance.now() - startedAtMs,
-      hasAwakeCodeMode: hasAwakeProjectEditorMode(project.projectId, "code"),
-      incomingMode: mode,
-      nativeEditorId,
-      projectId: project.projectId,
-      projectPath: project.path,
-      surfaceIsOpen: surfaceState?.isOpen === true,
-      surfaceIsSleeping: surfaceState?.isSleeping === true,
-      surfaceMode: surfaceState?.mode,
-      surfaceStatus: surfaceState?.status,
-    });
-  }
+  const hasAwakeTargetMode = hasAwakeProjectEditorMode(project.projectId, nextMode);
+  appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarWakeStart", {
+    elapsedMs: performance.now() - startedAtMs,
+    hasAwakeTargetMode: hasAwakeProjectEditorMode(project.projectId, nextMode),
+    incomingMode: mode ?? "none",
+    nativeEditorId,
+    projectId: project.projectId,
+    surfaceIsOpen: surfaceState?.isOpen === true,
+    surfaceIsSleeping: surfaceState?.isSleeping === true,
+    surfaceMode: surfaceState?.mode ?? "none",
+    surfaceStatus: surfaceState?.status ?? "none",
+    targetMode: nextMode,
+  });
   cancelProjectEditorSleepTimer(project.projectId);
   projectEditorSurfaceByProjectId.set(project.projectId, {
     errorMessage: undefined,
@@ -36043,24 +37934,25 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
     lastAccessedAt: new Date().toISOString(),
     mode: nextMode,
     nativeEditorId,
-    status: hasAwakeProjectEditorMode(project.projectId, nextMode) ? "running" : "opening",
+    status: hasAwakeTargetMode || activeBrowserTabIsPlaceholder ? "running" : "opening",
     title: projectEditorSurfaceTitleForMode(project, nextMode),
-    url,
+    url: url ?? "",
     ...(nextMode === "git"
       ? {
           activeBrowserTabId: surfaceState?.activeBrowserTabId,
-          browserTabs: normalizeProjectBrowserTabRestoreStates(surfaceState?.browserTabs),
+          browserTabs: browserTabsForWake,
         }
       : {}),
   });
-  if (hasAwakeProjectEditorMode(project.projectId, nextMode)) {
+  if (hasAwakeTargetMode || activeBrowserTabIsPlaceholder) {
     cancelProjectEditorOpenTimer(project.projectId);
   } else {
     scheduleProjectEditorOpenTimeout(project.projectId);
   }
   rememberAwakeProjectEditorMode(project.projectId, nextMode);
+  enforceProjectEditorAwakeSurfaceLimit("wake-project-editor", [project.projectId]);
   if (nextMode === "code") {
-    appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarWakeBeforeStartRuntime", {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarWakeBeforeStartRuntime", {
       elapsedMs: performance.now() - startedAtMs,
       linkVscodeUserConfig: settings.codeServerLinkVscodeUserConfig,
       nativeEditorId,
@@ -36073,25 +37965,34 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
       type: "startCodeServerRuntime",
       vscodeUserConfigDir: codeServerVscodeUserConfigDirectory(),
     });
-    appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarWakeAfterStartRuntimePost", {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarWakeAfterStartRuntimePost", {
       elapsedMs: performance.now() - startedAtMs,
       nativeEditorId,
       projectId: project.projectId,
     });
   }
-  if (nextMode === "code") {
-    appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarWakeBeforeCreatePane", {
-      elapsedMs: performance.now() - startedAtMs,
-      nativeEditorId,
-      projectId: project.projectId,
-      urlLength: url?.length ?? 0,
-    });
-  }
+  appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarWakeBeforeCreatePane", {
+    browserTabCount:
+      nextMode === "git"
+        ? browserTabsForWake.length
+        : 0,
+    elapsedMs: performance.now() - startedAtMs,
+    hasUrl: Boolean(url),
+    nativeEditorId,
+    projectId: project.projectId,
+    targetMode: nextMode,
+  });
+  const browserHistoryScopeId =
+    nextMode === "git" ? projectBrowserHistoryScopeIdForProject(project) : undefined;
   postNative({
     ...(nextMode === "git"
       ? {
           activeBrowserTabId: surfaceState?.activeBrowserTabId,
-          browserTabs: normalizeProjectBrowserTabRestoreStates(surfaceState?.browserTabs),
+          browserHistory: browserHistoryScopeId
+            ? projectBrowserHistoryForScope(browserHistoryScopeId)
+            : undefined,
+          browserHistoryScopeId,
+          browserTabs: browserTabsForWake,
         }
       : {}),
     browserFeedbackTool: settings.browserFeedbackTool,
@@ -36103,15 +38004,14 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
     showsProjectTabs: nextMode === "git",
     title: projectEditorSurfaceTitleForMode(project, nextMode),
     type: "createProjectEditorPane",
-    url: url!,
+    url: url ?? "",
   });
-  if (nextMode === "code") {
-    appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarWakeAfterCreatePanePost", {
-      elapsedMs: performance.now() - startedAtMs,
-      nativeEditorId,
-      projectId: project.projectId,
-    });
-  }
+  appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarWakeAfterCreatePanePost", {
+    elapsedMs: performance.now() - startedAtMs,
+    nativeEditorId,
+    projectId: project.projectId,
+    targetMode: nextMode,
+  });
 }
 
 function restoreActiveProjectEditorAtStartup(): boolean {
@@ -36134,7 +38034,7 @@ function restoreActiveProjectEditorAtStartup(): boolean {
 
 function openProjectEditorForGroup(groupId: string): void {
   const startedAtMs = performance.now();
-  appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarOpenForGroupStart", {
+  appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarOpenForGroupStart", {
     activeProjectId,
     groupId,
   });
@@ -36145,7 +38045,7 @@ function openProjectEditorForGroup(groupId: string): void {
     return;
   }
   if (project.isChat === true || project.isRecentProject === true) {
-    appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarOpenForGroupSkippedProject", {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarOpenForGroupSkippedProject", {
       elapsedMs: performance.now() - startedAtMs,
       isChat: project.isChat === true,
       isRecentProject: project.isRecentProject === true,
@@ -36154,26 +38054,26 @@ function openProjectEditorForGroup(groupId: string): void {
     return;
   }
   if (activeProjectId !== project.projectId) {
-    appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarOpenForGroupBeforeFocusProject", {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarOpenForGroupBeforeFocusProject", {
       elapsedMs: performance.now() - startedAtMs,
       nextProjectId: project.projectId,
       previousProjectId: activeProjectId,
     });
     focusProject(project.projectId);
-    appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarOpenForGroupAfterFocusProject", {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarOpenForGroupAfterFocusProject", {
       elapsedMs: performance.now() - startedAtMs,
       projectId: project.projectId,
     });
   }
   const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
-  appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarOpenForGroupResolved", {
+  appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarOpenForGroupResolved", {
     elapsedMs: performance.now() - startedAtMs,
     projectId: project.projectId,
-    projectPath: project.path,
     surfaceIsOpen: surfaceState?.isOpen === true,
     surfaceIsSleeping: surfaceState?.isSleeping === true,
-    surfaceMode: surfaceState?.mode,
-    surfaceStatus: surfaceState?.status,
+    surfaceMode: surfaceState?.mode ?? "none",
+    surfaceStatus: surfaceState?.status ?? "none",
+    targetMode: "code",
   });
   if (
     surfaceState?.mode === "code" &&
@@ -36199,8 +38099,9 @@ function openProjectEditorForGroup(groupId: string): void {
       isSleeping: false,
       lastAccessedAt: new Date().toISOString(),
     });
+    enforceProjectEditorAwakeSurfaceLimit("focus-existing-code-editor", [project.projectId]);
     setProjectEditorPersistedOpen(project.projectId, true, "focusProjectEditor");
-    appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarOpenForGroupBeforeExistingFocusPost", {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarOpenForGroupBeforeExistingFocusPost", {
       elapsedMs: performance.now() - startedAtMs,
       nativeEditorId: surfaceState.nativeEditorId,
       projectId: project.projectId,
@@ -36208,7 +38109,7 @@ function openProjectEditorForGroup(groupId: string): void {
     postNative({ projectId: surfaceState.nativeEditorId, type: "focusProjectEditorPane" });
     void refreshProjectDiffStats(project.projectId);
     publish();
-    appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarOpenForGroupExistingDone", {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarOpenForGroupExistingDone", {
       elapsedMs: performance.now() - startedAtMs,
       nativeEditorId: surfaceState.nativeEditorId,
       projectId: project.projectId,
@@ -36235,13 +38136,13 @@ function openProjectEditorForGroup(groupId: string): void {
   });
   setProjectEditorPersistedOpen(project.projectId, true, "openProjectEditor");
   scheduleProjectEditorOpenTimeout(project.projectId);
-  appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarOpenForGroupBeforeWake", {
+  appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarOpenForGroupBeforeWake", {
     elapsedMs: performance.now() - startedAtMs,
     nativeEditorId: createNativeProjectEditorId(project.projectId, "code"),
     projectId: project.projectId,
   });
   wakeProjectEditorSurface(project);
-  appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarOpenForGroupAfterWake", {
+  appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarOpenForGroupAfterWake", {
     elapsedMs: performance.now() - startedAtMs,
     nativeEditorId: createNativeProjectEditorId(project.projectId, "code"),
     projectId: project.projectId,
@@ -36250,14 +38151,14 @@ function openProjectEditorForGroup(groupId: string): void {
     projectId: nativeProjectEditorIdForProject(project, "code"),
     type: "focusProjectEditorPane",
   });
-  appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarOpenForGroupAfterFocusPost", {
+  appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarOpenForGroupAfterFocusPost", {
     elapsedMs: performance.now() - startedAtMs,
     nativeEditorId: createNativeProjectEditorId(project.projectId, "code"),
     projectId: project.projectId,
   });
   void refreshProjectDiffStats(project.projectId);
   publish();
-  appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarOpenForGroupDone", {
+  appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarOpenForGroupDone", {
     elapsedMs: performance.now() - startedAtMs,
     nativeEditorId: createNativeProjectEditorId(project.projectId, "code"),
     projectId: project.projectId,
@@ -36267,13 +38168,13 @@ function openProjectEditorForGroup(groupId: string): void {
 function openActiveProjectEditorFromTitlebar(): void {
   const startedAtMs = performance.now();
   const project = activeProject();
-  appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarTitlebarHandlerStart", {
+  appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarTitlebarHandlerStart", {
     activeProjectId,
     projectId: project.projectId,
-    projectPath: project.path,
+    targetMode: "code",
   });
   if (project.isChat === true || project.isRecentProject === true) {
-    appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarTitlebarHandlerSkippedProject", {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarTitlebarHandlerSkippedProject", {
       elapsedMs: performance.now() - startedAtMs,
       isChat: project.isChat === true,
       isRecentProject: project.isRecentProject === true,
@@ -36289,7 +38190,7 @@ function openActiveProjectEditorFromTitlebar(): void {
    * decisions in the titlebar webview or Swift.
   */
   openProjectEditorForGroup(createCombinedProjectGroupId(project.projectId));
-  appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarTitlebarHandlerDone", {
+  appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarTitlebarHandlerDone", {
     elapsedMs: performance.now() - startedAtMs,
     projectId: project.projectId,
   });
@@ -36309,10 +38210,28 @@ function exitFocusModeFromTitlebar(): void {
 }
 
 function openAgentsModeFromTitlebar(): void {
+  const startedAtMs = performance.now();
   const project = activeProject();
   if (project.isChat === true || project.isRecentProject === true) {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarAgentsSkippedProject", {
+      elapsedMs: performance.now() - startedAtMs,
+      isChat: project.isChat === true,
+      isRecentProject: project.isRecentProject === true,
+      projectId: project.projectId,
+      targetMode: "agents",
+    });
     return;
   }
+  const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
+  appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarAgentsHandlerStart", {
+    activeProjectId,
+    projectId: project.projectId,
+    surfaceIsOpen: surfaceState?.isOpen === true,
+    surfaceIsSleeping: surfaceState?.isSleeping === true,
+    surfaceMode: surfaceState?.mode ?? "none",
+    surfaceStatus: surfaceState?.status ?? "none",
+    targetMode: "agents",
+  });
   /**
    * CDXC:ModeSwitcher 2026-05-15-12:38:
    * The Agents button is the inverse of Code mode: return the project workarea
@@ -36324,6 +38243,12 @@ function openAgentsModeFromTitlebar(): void {
     queueNativeLayoutFocusRequest(focusedSessionId, "titlebarAgentsMode");
   }
   publish();
+  appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarAgentsHandlerDone", {
+    elapsedMs: performance.now() - startedAtMs,
+    focusRequestQueued: Boolean(focusedSessionId),
+    projectId: project.projectId,
+    targetMode: "agents",
+  });
 }
 
 function toggleProjectEditorCompanionFromTitlebar(): void {
@@ -36333,7 +38258,7 @@ function toggleProjectEditorCompanionFromTitlebar(): void {
   }
   const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
   const nextHidden = project.projectEditorCompanionPaneHidden !== true;
-  appendTitlebarCodeLagDebugLog("titlebarCompanionToggle.sidebarReceived", {
+  appendModeSwitcherDebugLog("titlebarModeSwitch.companionToggle.sidebarReceived", {
     activeProjectId,
     nextProjectEditorCompanionPaneHidden: nextHidden,
     projectEditorCompanionPaneHidden: project.projectEditorCompanionPaneHidden === true,
@@ -36365,11 +38290,24 @@ function toggleProjectEditorCompanionFromTitlebar(): void {
 }
 
 function openProjectGitEditorSurface(project: NativeProject, seedUrl: string): void {
-  if (activeProjectId !== project.projectId) {
+  const startedAtMs = performance.now();
+  const didFocusProject = activeProjectId !== project.projectId;
+  if (didFocusProject) {
     focusProject(project.projectId);
   }
   const nativeEditorId = createNativeProjectEditorId(project.projectId, "git");
   const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
+  appendModeSwitcherDebugLog("titlebarModeSwitch.browserSurfaceStart", {
+    activeProjectChanged: didFocusProject,
+    hasSeedUrl: Boolean(seedUrl),
+    nativeEditorId,
+    projectId: project.projectId,
+    surfaceIsOpen: surfaceState?.isOpen === true,
+    surfaceIsSleeping: surfaceState?.isSleeping === true,
+    surfaceMode: surfaceState?.mode ?? "none",
+    surfaceStatus: surfaceState?.status ?? "none",
+    targetMode: "git",
+  });
   if (
     surfaceState?.mode === "git" &&
     surfaceState.isSleeping !== true &&
@@ -36386,19 +38324,47 @@ function openProjectGitEditorSurface(project: NativeProject, seedUrl: string): v
       isSleeping: false,
       lastAccessedAt: new Date().toISOString(),
     });
+    enforceProjectEditorAwakeSurfaceLimit("focus-existing-browser-editor", [project.projectId]);
+    setProjectBrowserPersistedState(
+      project.projectId,
+      projectBrowserRestoreStateFromSurface(surfaceState),
+      "focusProjectBrowser",
+    );
     setProjectEditorPersistedOpen(project.projectId, true, "focusProjectBrowser");
+    appendModeSwitcherDebugLog("titlebarModeSwitch.browserSurfaceBeforeExistingFocusPost", {
+      elapsedMs: performance.now() - startedAtMs,
+      nativeEditorId: surfaceState.nativeEditorId,
+      projectId: project.projectId,
+      targetMode: "git",
+    });
     postNative({ projectId: surfaceState.nativeEditorId, type: "focusProjectEditorPane" });
     publish();
+    appendModeSwitcherDebugLog("titlebarModeSwitch.browserSurfaceExistingDone", {
+      elapsedMs: performance.now() - startedAtMs,
+      nativeEditorId: surfaceState.nativeEditorId,
+      projectId: project.projectId,
+      targetMode: "git",
+    });
     return;
   }
   const browserState = resolveProjectBrowserTabsForOpen(
-    surfaceState?.mode === "git" ? surfaceState : undefined,
+    surfaceState?.mode === "git" ? surfaceState : project.projectBrowser,
     seedUrl,
   );
   const activeBrowserTab =
     browserState.browserTabs.find((tab) => tab.id === browserState.activeBrowserTabId) ??
     browserState.browserTabs[0]!;
+  const activeBrowserTabIsPlaceholder = activeBrowserTab.isPlaceholder === true;
   const browserUrl = activeBrowserTab.url;
+  appendModeSwitcherDebugLog("titlebarModeSwitch.browserSurfaceResolvedTabs", {
+    activeBrowserTabKnown: Boolean(browserState.activeBrowserTabId),
+    browserTabCount: browserState.browserTabs.length,
+    elapsedMs: performance.now() - startedAtMs,
+    isAwakeTargetMode: hasAwakeProjectEditorMode(project.projectId, "git"),
+    nativeEditorId,
+    projectId: project.projectId,
+    targetMode: "git",
+  });
 
   /**
    * CDXC:ModeSwitcher 2026-05-15-13:18:
@@ -36421,7 +38387,7 @@ function openProjectGitEditorSurface(project: NativeProject, seedUrl: string): v
    */
   cancelProjectEditorSleepTimer(project.projectId);
   const isAwakeGitPane = hasAwakeProjectEditorMode(project.projectId, "git");
-  if (isAwakeGitPane) {
+  if (isAwakeGitPane || activeBrowserTabIsPlaceholder) {
     cancelProjectEditorOpenTimer(project.projectId);
   } else {
     scheduleProjectEditorOpenTimeout(project.projectId);
@@ -36435,14 +38401,39 @@ function openProjectGitEditorSurface(project: NativeProject, seedUrl: string): v
     lastAccessedAt: new Date().toISOString(),
     mode: "git",
     nativeEditorId,
-    status: isAwakeGitPane ? "running" : "opening",
+    status: isAwakeGitPane || activeBrowserTabIsPlaceholder ? "running" : "opening",
     title: "Browser",
     url: browserUrl,
   });
+  setProjectBrowserPersistedState(
+    project.projectId,
+    {
+      activeBrowserTabId: browserState.activeBrowserTabId,
+      browserTabs: browserState.browserTabs,
+      url: browserUrl,
+    },
+    "openProjectBrowser",
+  );
   setProjectEditorPersistedOpen(project.projectId, true, "openProjectBrowser");
   rememberAwakeProjectEditorMode(project.projectId, "git");
+  enforceProjectEditorAwakeSurfaceLimit("open-browser-editor", [project.projectId]);
+  const browserHistoryScopeId = projectBrowserHistoryScopeIdForProject(project);
+  const browserHistory = recordProjectBrowserHistoryLaunch(project, {
+    title: activeBrowserTab.title,
+    url: browserUrl,
+  });
+  appendModeSwitcherDebugLog("titlebarModeSwitch.browserSurfaceBeforeCreatePanePost", {
+    browserTabCount: browserState.browserTabs.length,
+    elapsedMs: performance.now() - startedAtMs,
+    isAwakeTargetMode: isAwakeGitPane,
+    nativeEditorId,
+    projectId: project.projectId,
+    targetMode: "git",
+  });
   postNative({
     activeBrowserTabId: browserState.activeBrowserTabId,
+    browserHistory,
+    browserHistoryScopeId,
     browserTabs: browserState.browserTabs,
     browserFeedbackTool: settings.browserFeedbackTool,
     companionPaneHidden: project.projectEditorCompanionPaneHidden === true,
@@ -36459,14 +38450,33 @@ function openProjectGitEditorSurface(project: NativeProject, seedUrl: string): v
   stopCodeServerRuntimeIfEveryEditorSleeping();
   void refreshProjectDiffStats(project.projectId);
   publish();
+  appendModeSwitcherDebugLog("titlebarModeSwitch.browserSurfaceDone", {
+    elapsedMs: performance.now() - startedAtMs,
+    nativeEditorId,
+    projectId: project.projectId,
+    targetMode: "git",
+  });
 }
 
 function openProjectTasksEditorSurface(project: NativeProject, tasksUrl: string): void {
-  if (activeProjectId !== project.projectId) {
+  const startedAtMs = performance.now();
+  const didFocusProject = activeProjectId !== project.projectId;
+  if (didFocusProject) {
     focusProject(project.projectId);
   }
   const nativeEditorId = createNativeProjectEditorId(project.projectId, "tasks");
   const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
+  appendModeSwitcherDebugLog("titlebarModeSwitch.tasksSurfaceStart", {
+    activeProjectChanged: didFocusProject,
+    hasTasksUrl: Boolean(tasksUrl),
+    nativeEditorId,
+    projectId: project.projectId,
+    surfaceIsOpen: surfaceState?.isOpen === true,
+    surfaceIsSleeping: surfaceState?.isSleeping === true,
+    surfaceMode: surfaceState?.mode ?? "none",
+    surfaceStatus: surfaceState?.status ?? "none",
+    targetMode: "tasks",
+  });
   if (
     surfaceState?.mode === "tasks" &&
     surfaceState.url === tasksUrl &&
@@ -36484,8 +38494,21 @@ function openProjectTasksEditorSurface(project: NativeProject, tasksUrl: string)
 	      isSleeping: false,
 	      lastAccessedAt: new Date().toISOString(),
 	    });
+    enforceProjectEditorAwakeSurfaceLimit("focus-existing-project-editor", [project.projectId]);
+    appendModeSwitcherDebugLog("titlebarModeSwitch.tasksSurfaceBeforeExistingFocusPost", {
+      elapsedMs: performance.now() - startedAtMs,
+      nativeEditorId: surfaceState.nativeEditorId,
+      projectId: project.projectId,
+      targetMode: "tasks",
+    });
     postNative({ projectId: surfaceState.nativeEditorId, type: "focusProjectEditorPane" });
     publish();
+    appendModeSwitcherDebugLog("titlebarModeSwitch.tasksSurfaceExistingDone", {
+      elapsedMs: performance.now() - startedAtMs,
+      nativeEditorId: surfaceState.nativeEditorId,
+      projectId: project.projectId,
+      targetMode: "tasks",
+    });
     return;
   }
 
@@ -36523,6 +38546,14 @@ function openProjectTasksEditorSurface(project: NativeProject, tasksUrl: string)
     url: tasksUrl,
   });
   rememberAwakeProjectEditorMode(project.projectId, "tasks");
+  enforceProjectEditorAwakeSurfaceLimit("open-project-editor", [project.projectId]);
+  appendModeSwitcherDebugLog("titlebarModeSwitch.tasksSurfaceBeforeCreatePanePost", {
+    elapsedMs: performance.now() - startedAtMs,
+    isAwakeTargetMode: isAwakeTasksPane,
+    nativeEditorId,
+    projectId: project.projectId,
+    targetMode: "tasks",
+  });
   postNative({
     browserFeedbackTool: settings.browserFeedbackTool,
     companionPaneHidden: project.projectEditorCompanionPaneHidden === true,
@@ -36537,36 +38568,111 @@ function openProjectTasksEditorSurface(project: NativeProject, tasksUrl: string)
   stopCodeServerRuntimeIfEveryEditorSleeping();
   void refreshProjectDiffStats(project.projectId);
   publish();
+  appendModeSwitcherDebugLog("titlebarModeSwitch.tasksSurfaceDone", {
+    elapsedMs: performance.now() - startedAtMs,
+    nativeEditorId,
+    projectId: project.projectId,
+    targetMode: "tasks",
+  });
 }
 
 async function openGitHubProjectFromTitlebar(): Promise<void> {
+  const startedAtMs = performance.now();
   const project = activeProject();
   if (isQuickProject(project) || project.isRecentProject === true) {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.browserHandlerSkippedProject", {
+      elapsedMs: performance.now() - startedAtMs,
+      isQuick: isQuickProject(project),
+      isRecentProject: project.isRecentProject === true,
+      projectId: project.projectId,
+      targetMode: "git",
+    });
     return;
   }
   const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
-  if (surfaceState?.mode === "git") {
-    const rememberedUrl = projectBrowserActiveUrlFromState(surfaceState);
-    if (rememberedUrl) {
-      openProjectGitEditorSurface(project, rememberedUrl);
-      return;
-    }
+  appendModeSwitcherDebugLog("titlebarModeSwitch.browserHandlerStart", {
+    activeProjectId,
+    projectId: project.projectId,
+    surfaceIsOpen: surfaceState?.isOpen === true,
+    surfaceIsSleeping: surfaceState?.isSleeping === true,
+    surfaceMode: surfaceState?.mode ?? "none",
+    surfaceStatus: surfaceState?.status ?? "none",
+    targetMode: "git",
+  });
+  const rememberedBrowserState =
+    surfaceState?.mode === "git" ? surfaceState : project.projectBrowser;
+  const rememberedUrl = rememberedBrowserState
+    ? projectBrowserActiveUrlFromState(rememberedBrowserState)
+    : undefined;
+  if (rememberedBrowserState && (rememberedUrl || projectBrowserStateHasRestorableTabs(rememberedBrowserState))) {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.browserHandlerUsingRememberedTab", {
+      elapsedMs: performance.now() - startedAtMs,
+      projectId: project.projectId,
+      targetMode: "git",
+    });
+    openProjectGitEditorSurface(project, rememberedUrl ?? DEFAULT_PROJECT_BROWSER_URL);
+    return;
   }
+  appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedResolveStart", {
+    elapsedMs: performance.now() - startedAtMs,
+    projectId: project.projectId,
+    targetMode: "git",
+  });
   const browserSeedUrl = await resolveProjectBrowserSeedUrl(project);
+  appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedResolveDone", {
+    elapsedMs: performance.now() - startedAtMs,
+    projectId: project.projectId,
+    seedKind: browserSeedUrl === DEFAULT_PROJECT_BROWSER_URL ? "default" : "githubRemote",
+    targetMode: "git",
+  });
   openProjectGitEditorSurface(project, browserSeedUrl);
+  appendModeSwitcherDebugLog("titlebarModeSwitch.browserHandlerDone", {
+    elapsedMs: performance.now() - startedAtMs,
+    projectId: project.projectId,
+    targetMode: "git",
+  });
 }
 
 async function resolveProjectBrowserSeedUrl(project: NativeProject): Promise<string> {
+  const startedAtMs = performance.now();
   try {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedRepoCheckStart", {
+      projectId: project.projectId,
+      targetMode: "git",
+    });
     const repoCheck = await runGxserverGitActionForNativeProject(project, { action: "isInsideWorkTree" });
+    appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedRepoCheckDone", {
+      elapsedMs: performance.now() - startedAtMs,
+      exitCode: repoCheck.exitCode,
+      isInsideWorkTree: repoCheck.exitCode === 0 && repoCheck.stdout.trim() === "true",
+      projectId: project.projectId,
+      targetMode: "git",
+    });
     if (repoCheck.exitCode !== 0 || repoCheck.stdout.trim() !== "true") {
       return DEFAULT_PROJECT_BROWSER_URL;
     }
+    appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedRemoteCheckStart", {
+      elapsedMs: performance.now() - startedAtMs,
+      projectId: project.projectId,
+      targetMode: "git",
+    });
     const remote = await runGxserverGitActionForNativeProject(project, { action: "getOriginRemoteUrl" });
+    appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedRemoteCheckDone", {
+      elapsedMs: performance.now() - startedAtMs,
+      exitCode: remote.exitCode,
+      projectId: project.projectId,
+      targetMode: "git",
+    });
     if (remote.exitCode !== 0) {
       return DEFAULT_PROJECT_BROWSER_URL;
     }
     const githubUrl = normalizeGitHubRemoteUrl(remote.stdout);
+    appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedNormalizeDone", {
+      elapsedMs: performance.now() - startedAtMs,
+      hasGithubUrl: Boolean(githubUrl),
+      projectId: project.projectId,
+      targetMode: "git",
+    });
     if (!githubUrl) {
       return DEFAULT_PROJECT_BROWSER_URL;
     }
@@ -36579,16 +38685,34 @@ async function resolveProjectBrowserSeedUrl(project: NativeProject): Promise<str
      */
     return githubUrl;
   } catch (error) {
-    void error;
+    appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedResolveFailed", {
+      elapsedMs: performance.now() - startedAtMs,
+      errorName: error instanceof Error ? error.name : typeof error,
+      projectId: project.projectId,
+      targetMode: "git",
+    });
     return DEFAULT_PROJECT_BROWSER_URL;
   }
 }
 
 function openTasksPlaceholderFromTitlebar(): void {
+  const startedAtMs = performance.now();
   const project = activeProject();
   if (isQuickProject(project) || project.isRecentProject === true) {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.tasksHandlerSkippedProject", {
+      elapsedMs: performance.now() - startedAtMs,
+      isQuick: isQuickProject(project),
+      isRecentProject: project.isRecentProject === true,
+      projectId: project.projectId,
+      targetMode: "tasks",
+    });
     return;
   }
+  appendModeSwitcherDebugLog("titlebarModeSwitch.tasksHandlerStart", {
+    activeProjectId,
+    projectId: project.projectId,
+    targetMode: "tasks",
+  });
   /**
    * CDXC:ModeSwitcher 2026-05-15-14:42:
    * Project mode is a bundled React page hosted in the tasks-backed
@@ -36618,7 +38742,18 @@ function openTasksPlaceholderFromTitlebar(): void {
   url.searchParams.set("projectId", project.projectId);
   url.searchParams.set("projectEditorId", createNativeProjectEditorId(project.projectId, "tasks"));
   url.searchParams.set("beadsDisplayKey", boardMetadata.beadsDisplayKey);
+  appendModeSwitcherDebugLog("titlebarModeSwitch.tasksHandlerResolvedBoard", {
+    elapsedMs: performance.now() - startedAtMs,
+    hasBeadsDisplayKey: Boolean(boardMetadata.beadsDisplayKey),
+    projectId: project.projectId,
+    targetMode: "tasks",
+  });
   openProjectTasksEditorSurface(project, url.toString());
+  appendModeSwitcherDebugLog("titlebarModeSwitch.tasksHandlerDone", {
+    elapsedMs: performance.now() - startedAtMs,
+    projectId: project.projectId,
+    targetMode: "tasks",
+  });
 }
 
 function openRemoteProjectBoardForGroup(groupId: string): boolean {
@@ -36661,6 +38796,7 @@ function openRemoteProjectBoardForGroup(groupId: string): boolean {
     url: url.toString(),
   });
   rememberAwakeProjectEditorMode(scopedProjectId, "tasks");
+  enforceProjectEditorAwakeSurfaceLimit("open-remote-project-editor", [scopedProjectId]);
   scheduleProjectEditorOpenTimeout(scopedProjectId);
   postNative({
     browserFeedbackTool: settings.browserFeedbackTool,
@@ -37040,6 +39176,7 @@ function handleProjectEditorTabSelected(
     });
     cancelProjectEditorSleepTimer(project.projectId);
     rememberAwakeProjectEditorMode(project.projectId, "code");
+    enforceProjectEditorAwakeSurfaceLimit("quick-project-editor-tab-selected", [project.projectId]);
     publish();
     return;
   }
@@ -37097,6 +39234,24 @@ function handleProjectEditorTabSelected(
   });
   cancelProjectEditorSleepTimer(parsed.projectId);
   rememberAwakeProjectEditorMode(parsed.projectId, parsed.mode);
+  enforceProjectEditorAwakeSurfaceLimit("project-editor-tab-selected", [parsed.projectId]);
+  if (parsed.mode === "git") {
+    setProjectBrowserPersistedState(
+      parsed.projectId,
+      {
+        activeBrowserTabId,
+        browserTabs,
+        url: nextUrl,
+      },
+      "projectEditorTabSelected",
+    );
+    if (nextUrl) {
+      recordProjectBrowserHistoryVisit(project, {
+        title: activeBrowserTab?.title,
+        url: nextUrl,
+      });
+    }
+  }
   setProjectEditorPersistedOpen(parsed.projectId, true, "projectEditorTabSelected");
   void refreshProjectDiffStats(project.projectId);
   publish();
@@ -37896,6 +40051,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       postNative({ type: "restartGxserverFromTitlebar" });
       return;
     case "createSession":
+      closeAppModal("SettingsDismissal:nativeSidebarCreateSession");
       createNativeSessionInCurrentContext();
       return;
     case "runGhostexHotkeyAction":
@@ -37918,6 +40074,23 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "openPluginsBrowserChat":
       void createNativePluginsBrowserChat();
+      return;
+    case "openMobileBrowserChat":
+      void createNativeMobileBrowserChat();
+      return;
+    case "showAutomationsComingSoonToast":
+      /*
+       * CDXC:Automations 2026-06-16-00:47:
+       * The primary-sidebar Automations row is a visible teaser until the
+       * feature ships. Keep the response to one app toast with the requested
+       * message and do not open any project or modal surface.
+       *
+       * CDXC:Automations 2026-06-16-01:23:
+       * The full invite must remain readable in the toast. Keep the title short
+       * and move the Discord testing call-to-action into the description instead
+       * of placing all text in the truncating title line.
+       */
+      showAppToast("info", "Coming very soon!", "Join discord to help test this feature.");
       return;
     case "openAgentsHubPathInFinder":
       openNativeWorkspaceInFinder(message.path);
@@ -38196,6 +40369,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "promptRenameSession": {
       const session = findTerminalSession(message.sessionId);
       if (session) {
+        closeAppModal("SettingsDismissal:nativeSidebarPromptRename");
         openAppModal({
           initialTitle: session.title || DEFAULT_TERMINAL_SESSION_TITLE,
           modal: "renameSession",
@@ -38419,6 +40593,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "cancelDelayedSend":
       cancelDelayedSend(message.sessionId);
+      return;
+    case "toggleCloseAfterDone":
+      toggleCloseAfterDone(message.sessionId);
       return;
     case "fullReloadSession":
       if (parseRemotePresentationSessionId(message.sessionId)) {
@@ -38924,6 +41101,14 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "sidebarDebugLog":
       if (message.event === "repro.sidebarSessionFocusRequested") {
         recordSidebarCardFocusTrace(message.details);
+        appendSidebarWakeScrollDebugLog(
+          "cardFocusRequested",
+          summarizeSidebarWakeScrollCardFocusRequest(message.details),
+        );
+        return;
+      }
+      if (message.event.startsWith(SIDEBAR_WAKE_SCROLL_DEBUG_EVENT_PREFIX)) {
+        appendSidebarWakeScrollDebugLog(message.event, message.details);
         return;
       }
       if (message.event.startsWith("repro.pinnedSessionReorder.")) {
@@ -39501,6 +41686,24 @@ function syncNativeLayout(
     ...workspaceSleepingSessionIds,
     ...commandPanelSleepingSessionIds,
   ]);
+  const workspaceMountingSessionIds = visibleSessions
+    .filter((session) =>
+      isNativeTerminalSurfaceCreationPendingForProject(currentProject.projectId, session.sessionId),
+    )
+    .map((session) => nativeSessionIdForSidebarSession(session.sessionId));
+  const commandPanelMountingSessionIds = commandPanelVisibleSessions
+    .filter((session) =>
+      isNativeTerminalSurfaceCreationPendingForProject(currentProject.projectId, session.sessionId),
+    )
+    .map((session) => nativeSessionIdForSidebarSession(session.sessionId));
+  /*
+  CDXC:TerminalCreationFocus 2026-06-14-18:48:
+  Pending native creates are selected tabs, not sleeping tabs. Send them as mounting placeholders so AppKit can switch to the new tab immediately without pretending the pane is wakeable or waiting for terminalReady to attach tab chrome.
+  */
+  const mountingSessionIds = dedupeNativeSessionIds([
+    ...workspaceMountingSessionIds,
+    ...commandPanelMountingSessionIds,
+  ]);
   const attentionSessionIds: string[] = [];
   const sessionActivities: Record<string, "attention" | "sleeping" | "working"> = {};
   const sessionAgentIconColors: Record<string, string> = {};
@@ -39689,7 +41892,7 @@ function syncNativeLayout(
       : undefined;
   const sidebarCardFocusTrace = getRecentSidebarCardFocusTrace(snapshot.focusedSessionId);
   const titlebarResourceGroups = createTitlebarResourceGroups();
-  const nativeWorkspaceBackgroundColor = resolveNativeWorkspaceBackgroundColor(settings);
+  const nativeWorkspaceBackgroundColor = resolveNativeWorkspaceBackgroundColor();
   if (
     !latestNativeAgentHookStatus &&
     !nativeAgentHookStatusRequestInFlight &&
@@ -39804,6 +42007,7 @@ function syncNativeLayout(
     sessionActivities,
     sessionZmxInactiveIds,
     sleepingSessionIds,
+    mountingSessionIds,
     keepAwake: {
       activateOnExternalDisplay: settings.keepAwakeActivateOnExternalDisplay,
       activateOnLaunch: settings.keepAwakeActivateOnLaunch,
@@ -39839,6 +42043,12 @@ function syncNativeLayout(
      */
     showSessionIdInTerminalPanes: settings.showSessionIdInTerminalPanes,
     showProjectEditorDiffFileCount: settings.showProjectEditorDiffFileCount,
+    sidebarTheme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
+    customSidebarTitlebarColorsEnabled: settings.customSidebarTitlebarColorsEnabled,
+    customSidebarTitlebarForegroundColor: getSidebarTitlebarForegroundForBackground(
+      settings.customSidebarTitlebarBackgroundColor,
+    ),
+    customSidebarTitlebarBackgroundColor: settings.customSidebarTitlebarBackgroundColor,
     titlebarResourceGroups,
     type: "setActiveTerminalSet",
     workspaceOpenTargets: {
@@ -39914,12 +42124,13 @@ function syncNativeLayout(
     }
     lastPostedWorkspaceNativeLayoutShapeByProjectId.set(currentProject.projectId, nativeLayoutShape);
   }
-  if (command.activeProjectMode === "code" && layoutSyncResult.didPost) {
-    appendTitlebarCodeLagDebugLog("titlebarCodeLag.sidebarLayoutSyncPosted", {
+  if (layoutSyncResult.didPost && command.activeProjectMode !== undefined) {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarLayoutSyncPosted", {
       activeProjectEditorId: command.activeProjectEditorId,
       activeProjectEditorIsOpen: command.activeProjectEditorIsOpen,
       activeProjectEditorIsSleeping: command.activeProjectEditorIsSleeping,
       activeProjectEditorStatus: command.activeProjectEditorStatus,
+      activeProjectMode: command.activeProjectMode,
       activeProjectId: command.activeProjectId,
       didPostNativeLayoutSync,
       focusRequestId,
@@ -40764,14 +42975,28 @@ function formatNativeAppShotPrompt(
 ): string {
   const appName = appShot.appName?.trim() || "the frontmost app";
   const title = appShot.title?.trim();
-  const text = appShot.text?.trim();
+  const bundleIdentifier = appShot.bundleIdentifier?.trim();
+  const windowSize =
+    appShot.windowWidth && appShot.windowHeight
+      ? `${Math.round(appShot.windowWidth)} x ${Math.round(appShot.windowHeight)} px`
+      : undefined;
   const lines = [
-    `App shot from ${title ? `${appName} - ${title}` : appName}.`,
+    `App shot from ${appName}.`,
     "",
     `[Image #1](${appShot.imagePath})`,
   ];
-  if (text) {
-    lines.push("", "Available app text:", "", "```text", text.slice(0, APP_SHOT_TEXT_MAX_LENGTH), "```");
+  const metadata = [
+    `App: ${appName}`,
+    bundleIdentifier ? `Bundle ID: ${bundleIdentifier}` : undefined,
+    title ? `Window title: ${title}` : undefined,
+    windowSize ? `Window size: ${windowSize}` : undefined,
+  ].filter((line): line is string => Boolean(line));
+  /*
+  CDXC:AppShots 2026-06-15-02:01:
+  App Shot prompts should be instant screenshot context with cheap window metadata only. Do not include OCR, Accessibility tree text, or other app-content extraction in the agent prompt.
+  */
+  if (metadata.length) {
+    lines.push("", "Metadata:", "", ...metadata);
   }
   lines.push("", "Use this app shot as context for my next request.");
   return `${lines.join("\n")}\n`;
@@ -40876,6 +43101,16 @@ window.addEventListener("ghostex-native-host-event", (event) => {
         ? sidebarSessionIdForNativeSession(hostEvent.sourceSessionId)
         : undefined,
     );
+    return;
+  }
+  if (hostEvent.type === "nativeModifierState") {
+    /**
+     * CDXC:Hotkeys 2026-06-14-19:40:
+     * Native modifier state is consumed by the embedded SidebarApp's Cmd-hold
+     * overlay hook from the same DOM event. The native wrapper intentionally
+     * takes no action here so it does not convert a modifier-only event into a
+     * workspace command.
+     */
     return;
   }
   if (hostEvent.type === "sessionStatusIndicatorClicked") {
@@ -41059,6 +43294,9 @@ window.addEventListener("ghostex-native-host-event", (event) => {
             titleSource: "browser-auto",
           }).snapshot,
       );
+      recordBrowserSessionHistoryVisit(browserReference.project.projectId, browserReference.sessionId, {
+        title: hostEvent.title,
+      });
       publish();
       return;
     }
@@ -41090,6 +43328,9 @@ window.addEventListener("ghostex-native-host-event", (event) => {
           ).snapshot;
         },
       );
+      recordBrowserSessionHistoryVisit(browserReference.project.projectId, browserReference.sessionId, {
+        url: hostEvent.url,
+      });
       publish();
       return;
     }
@@ -41115,6 +43356,9 @@ window.addEventListener("ghostex-native-host-event", (event) => {
             hostEvent.faviconDataUrl,
           ).snapshot,
       );
+      recordBrowserSessionHistoryVisit(browserReference.project.projectId, browserReference.sessionId, {
+        faviconDataUrl: hostEvent.faviconDataUrl,
+      });
       publish();
       return;
     }
@@ -41275,6 +43519,9 @@ window.addEventListener("ghostex-native-host-event", (event) => {
       ) {
         clearNativeTerminalSurfaceCreationPending(sidebarSessionId);
       }
+      if (hostEvent.type === "terminalExited" || hostEvent.type === "terminalError") {
+        clearGxserverPresentationConfirmationPending(sidebarSessionId);
+      }
       appendSessionTitleDebugLog("nativeSidebar.nativeEventIgnored", {
         nativeSessionId: hostEvent.sessionId,
         reason: "terminal-state-missing",
@@ -41368,6 +43615,7 @@ window.addEventListener("ghostex-native-host-event", (event) => {
         return;
       }
       clearNativeTerminalSurfaceCreationPending(sidebarSessionId);
+      clearGxserverPresentationConfirmationPending(sidebarSessionId);
       if (
         handleRecentZmxAttachExitWithFullReload(
           sidebarSessionId,
@@ -41391,6 +43639,7 @@ window.addEventListener("ghostex-native-host-event", (event) => {
       void classifyCompletedAutomationRun(sidebarSessionId, hostEvent.text);
     } else if (hostEvent.type === "terminalError") {
       clearNativeTerminalSurfaceCreationPending(sidebarSessionId);
+      clearGxserverPresentationConfirmationPending(sidebarSessionId);
       terminalState.lifecycleState = "error";
       terminalState.terminalTitle = hostEvent.message;
       nativeWorkingStartedAtBySessionId.delete(sidebarSessionId);
@@ -42331,6 +44580,20 @@ function handleNativeTerminalTitleBarAction(
       case "expandCommandsPanel":
         openCommandsPanelForActiveProject();
         return;
+      case "close":
+        /*
+         * CDXC:CommandPaneHotkeys 2026-06-15-10:33:
+         * Cmd+W from a command-pane terminal is a terminal close command, not a Commands panel minimize command. Mark the focused command session active before closing so split command panes resolve the next focus target from that pane's tab/split context.
+         */
+        updateActiveProjectCommandsPanel((panel) => ({
+          ...panel,
+          activeSessionId: sessionId,
+          paneLayout: setActiveCommandSessionInPaneLayout(panel.paneLayout, sessionId),
+        }));
+        closeTerminal(sessionId, {
+          transitionOrigin: createCommandPaneTransitionOrigin(activeProject(), sessionId),
+        });
+        return;
       default:
         /**
          * CDXC:CommandsPanel 2026-05-15-13:35
@@ -42434,6 +44697,7 @@ function handleNativeTerminalTitleBarAction(
       return;
     }
     case "rename":
+      closeAppModal("SettingsDismissal:nativePaneRename");
       openAppModal({
         initialTitle: session.title || DEFAULT_TERMINAL_SESSION_TITLE,
         modal: "renameSession",
@@ -42443,6 +44707,9 @@ function handleNativeTerminalTitleBarAction(
       return;
     case "delayedSend":
       promptDelayedSend(sessionId);
+      return;
+    case "closeAfterDone":
+      toggleCloseAfterDone(sessionId);
       return;
     case "fork":
       if (session.kind === "terminal") {

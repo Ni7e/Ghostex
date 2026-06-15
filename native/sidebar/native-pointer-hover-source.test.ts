@@ -110,25 +110,50 @@ describe("native pointer hover boundary source", () => {
      * CDXC:TitlebarTooltips 2026-06-13-02:59:
      * Right-side titlebar icon tooltips must use the same AppTooltip wrapper as
      * sidebar buttons, not local titlebar-only data-tooltip pseudo-elements.
+     *
+     * CDXC:TitlebarTooltips 2026-06-15-13:34:
+     * Floating titlebar tooltip labels must not keep themselves open when the
+     * pointer moves onto the label. Assert that every titlebar AppTooltip root
+     * disables Base UI's hoverable popup behavior.
+     *
+     * CDXC:TitlebarTooltips 2026-06-15-16:40:
+     * Titlebar button hover labels should render higher via the shared
+     * tooltip positioner alignment offset, not with titlebar-only transforms.
+     *
+     * CDXC:TitlebarTooltips 2026-06-15-23:25:
+     * Titlebar hover labels should be shifted 2px farther up and made 6px
+     * shorter without changing sidebar tooltip geometry.
+     *
+     * CDXC:TitlebarTooltips 2026-06-16-01:19:
+     * Actions and Open In titlebar hover labels should state the button
+     * function before the right-click menu instruction.
      */
     expect(titlebarHostSource).toContain("import { AppTooltip, TooltipProvider } from");
     expect(titlebarHostSource).toContain("function TitlebarAppTooltip");
+    expect(titlebarHostSource).toContain("const TITLEBAR_TOOLTIP_ROOT_PROPS");
+    expect(titlebarHostSource).toContain("disableHoverablePopup: true");
+    expect(titlebarHostSource).toContain("Hovering the floating label itself must not keep it open");
+    expect(titlebarHostSource).toContain("const TITLEBAR_TOOLTIP_ALIGN_OFFSET_PX = -4;");
+    expect(titlebarHostSource).toContain("alignOffset = TITLEBAR_TOOLTIP_ALIGN_OFFSET_PX");
+    expect(titlebarHostSource).toContain("alignOffset={alignOffset}");
+    expect(titlebarHostSource).toContain(".titlebar-app-tooltip");
+    expect(titlebarHostSource).toContain("padding-bottom: 3px !important;");
+    expect(titlebarHostSource).toContain("padding-top: 3px !important;");
+    expect(
+      [...titlebarHostSource.matchAll(/<AppTooltip[\s\S]*?>/g)].every((match) =>
+        match[0].includes("{...TITLEBAR_TOOLTIP_ROOT_PROPS}"),
+      ),
+    ).toBe(true);
     expect(titlebarHostSource).not.toContain("<Tooltip>");
     expect(titlebarHostSource).not.toContain("<TooltipTrigger");
     expect(titlebarHostSource).not.toContain("<TooltipContent");
     expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Tips & Tricks">');
-    expect(titlebarHostSource).toContain(
-      '<TitlebarAppTooltip content="Click to toggle. Right-click for options.">',
-    );
+    expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Keep awake">');
     expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Resources Monitor">');
+    expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Git actions">');
+    expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Quick Actions. Right click for more options">');
     expect(titlebarHostSource).toContain(
-      '<TitlebarAppTooltip content="Commit. Right-click for more actions">',
-    );
-    expect(titlebarHostSource).toContain(
-      '<TitlebarAppTooltip content="Click to run. Right-click for actions.">',
-    );
-    expect(titlebarHostSource).toContain(
-      '<TitlebarAppTooltip content="Click to open. Right-click for targets.">',
+      '<TitlebarAppTooltip content="Open in an app. Right click for more options">',
     );
     expect(titlebarHostSource).not.toContain(".titlebar-update-button::after");
     expect(titlebarHostSource).not.toContain("content: attr(data-tooltip);");
@@ -147,6 +172,8 @@ describe("native pointer hover boundary source", () => {
     expect(titlebarHostSource).not.toContain(
       '<TooltipContent side="left">Click to open. Right-click for targets.</TooltipContent>',
     );
+    expect(titlebarHostSource).not.toContain("Click to run. Right-click for actions.");
+    expect(titlebarHostSource).not.toContain("Click to open. Right-click for targets.");
     expect(titlebarHostSource).not.toContain("[data-radix-popper-content-wrapper]");
     expect(titlebarHostSource).toContain(".titlebar-resource-tooltip");
     /*
@@ -174,22 +201,40 @@ describe("native pointer hover boundary source", () => {
      * metrics, or let native-pointer stale-hover CSS disable their clicks.
      *
      * CDXC:TitlebarResources 2026-06-13-02:07:
-     * CPU/RAM metrics should render as a centered usage cluster between the
-     * session text and fixed right-side action buttons.
+     * CPU/RAM metrics should render as one stable usage cluster without
+     * drifting into the action button area.
      *
      * CDXC:TitlebarResources 2026-06-13-02:13:
      * Resource Focus should dismiss the native child window after forwarding
      * focus, or the panel keeps covering the newly focused workspace and the
      * click appears to do nothing.
+     *
+     * CDXC:TitlebarResources 2026-06-14-16:50:
+     * The row-level Close action in Resources should match Sleep's neutral
+     * background, border, and icon color. Keep the destructive meaning in the
+     * X icon and label instead of restoring the previous red button palette.
+     *
+     * CDXC:TitlebarResources 2026-06-16-01:10:
+     * CPU/RAM metrics should be the far-right row column, with Focus and
+     * Sleep/Close immediately to their left.
      */
     expect(titlebarHostSource).toContain('className="titlebar-resource-metrics"');
     expect(titlebarHostSource).toMatch(
       /const focusResourceSession = \(sessionId: string\) => \{[\s\S]*postNative\(\{ sessionId, type: "focusResourceSessionFromTitlebar" \}\);[\s\S]*closeTitlebarDropdownPanel\(\);[\s\S]*\};/,
     );
-    expect(titlebarHostSource).toContain("grid-template-columns: minmax(0, 1fr) minmax(184px, 220px) 24px 24px");
+    expect(titlebarHostSource).toContain("grid-template-columns: minmax(0, 1fr) 24px 24px minmax(184px, 220px)");
     expect(titlebarHostSource).toContain("grid-template-columns: minmax(68px, 0.85fr) minmax(100px, 1fr)");
-    expect(titlebarHostSource).toContain("justify-self: center;");
+    expect(titlebarHostSource).toContain("grid-column: 4;");
+    expect(titlebarHostSource).toContain("justify-self: end;");
     expect(titlebarHostSource).toContain("background: rgba(255,255,255,0.055);");
+    expect(titlebarHostSource).toContain("Row-level Close should carry the same neutral background");
+    expect(titlebarHostSource).toMatch(
+      /\.titlebar-resource-kill-button \{[\s\S]*background: rgba\(255,255,255,0\.14\);[\s\S]*border-color: rgba\(255,255,255,0\.16\);[\s\S]*color: rgba\(255,255,255,0\.9\);[\s\S]*grid-column: 3;/,
+    );
+    expect(titlebarHostSource).toContain(".titlebar-resource-kill-button[data-action=\"quit\"]:focus-visible");
+    expect(titlebarHostSource).not.toContain("background: rgb(220 38 38);");
+    expect(titlebarHostSource).not.toContain("background: rgb(185 28 28);");
+    expect(titlebarHostSource).not.toContain("border-color: rgba(248,113,113,0.45);");
     expect(titlebarHostSource).not.toContain("actionTooltipTitle");
     expect(titlebarHostSource).not.toContain("actionTooltipBody");
     expect(titlebarHostSource).not.toContain(".titlebar-resource-row:hover");
@@ -209,6 +254,7 @@ describe("native pointer hover boundary source", () => {
     expect(workspaceThemeSource).toContain("Do not disable #root hit testing");
     expect(appTooltipSource).toContain("function setSidebarTooltipSuppressionBodyFlag(suppressed: boolean)");
     expect(appTooltipSource).toContain('side={side}');
+    expect(appTooltipSource).toContain('alignOffset={alignOffset}');
     expect(appTooltipSource).toContain('body.dataset.sidebarTooltipsSuppressed = "true"');
     expect(appTooltipSource).toContain("delete body.dataset.sidebarTooltipsSuppressed");
     expect(groupPanelsSource).toContain("This body flag is drag-only tooltip suppression");
