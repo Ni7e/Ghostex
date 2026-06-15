@@ -5,8 +5,17 @@ edition = "2024"
 publish = false
 build = "build.rs"
 
+[[bin]]
+name = "ghostex-gpui"
+path = "src/main.rs"
+
+[[bin]]
+name = "ghostex-gpui-cef-helper"
+path = "src/bin/ghostex_gpui_cef_helper.rs"
+
 [dependencies]
 anyhow = "1"
+cef = { path = "../../../_references/cef-rs/cef", default-features = false }
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
 gpui-component = { path = "../../../_references/gpui-component/crates/ui" }

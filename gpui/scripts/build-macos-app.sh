@@ -45,13 +45,8 @@ case "$GHOSTEX_MACOS_ARCH" in
 		;;
 esac
 
-CEF_ROOT="$REPO_ROOT/native/macos/ghostexHost/Vendor/cef-$GHOSTEX_MACOS_ARCH"
-CEF_HELPER="$REPO_ROOT/native/macos/ghostexHost/build/cef-$GHOSTEX_MACOS_ARCH/ghostex-cef-helper"
-
-if [[ ! -f "$CEF_ROOT/build/libcef_dll_wrapper/libcef_dll_wrapper.a" || ! -x "$CEF_HELPER" ]]; then
-	echo "CEF artifacts are missing; preparing vendored CEF for $GHOSTEX_MACOS_ARCH..." >&2
-	GHOSTEX_MACOS_ARCH="$GHOSTEX_MACOS_ARCH" "$REPO_ROOT/native/macos/ghostexHost/vendor-cef.sh" >/dev/null
-fi
+CEF_CACHE_DIR="$GPUI_DIR/build/cef-cache"
+export CEF_PATH="$CEF_CACHE_DIR"
 
 (
 	cd "$REPO_ROOT"
@@ -61,14 +56,20 @@ fi
 
 (
 	cd "$GPUI_DIR"
-	cargo build --release
+	cargo build --release --bins
 )
+
+CEF_FRAMEWORK="$(find "$CEF_CACHE_DIR" -path '*/Chromium Embedded Framework.framework' -type d -print -quit)"
+if [[ -z "$CEF_FRAMEWORK" || ! -d "$CEF_FRAMEWORK" ]]; then
+	echo "cef-rs did not produce a Chromium Embedded Framework under $CEF_CACHE_DIR" >&2
+	exit 1
+fi
 
 rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" "$APP_PATH/Contents/Frameworks"
 cp "$GPUI_DIR/target/release/ghostex-gpui" "$APP_PATH/Contents/MacOS/$APP_NAME"
 chmod 755 "$APP_PATH/Contents/MacOS/$APP_NAME"
-rsync -a --delete "$CEF_ROOT/Release/Chromium Embedded Framework.framework" "$APP_PATH/Contents/Frameworks/"
+rsync -a --delete "$CEF_FRAMEWORK" "$APP_PATH/Contents/Frameworks/"
 rsync -a --delete "$GPUI_DIR/dist/sidebar/" "$APP_PATH/Contents/Resources/sidebar/"
 
 cat >"$APP_PATH/Contents/Info.plist" <<EOF_PLIST
@@ -105,18 +106,18 @@ cat >"$APP_PATH/Contents/Info.plist" <<EOF_PLIST
 EOF_PLIST
 
 helper_names=(
-	"ghostex Helper"
-	"ghostex Helper (Alerts)"
-	"ghostex Helper (GPU)"
-	"ghostex Helper (Plugin)"
-	"ghostex Helper (Renderer)"
+	"$APP_NAME Helper"
+	"$APP_NAME Helper (Alerts)"
+	"$APP_NAME Helper (GPU)"
+	"$APP_NAME Helper (Plugin)"
+	"$APP_NAME Helper (Renderer)"
 )
 
 for helper_name in "${helper_names[@]}"; do
 	helper_app="$APP_PATH/Contents/Frameworks/$helper_name.app"
 	helper_macos="$helper_app/Contents/MacOS"
 	mkdir -p "$helper_macos"
-	cp "$CEF_HELPER" "$helper_macos/$helper_name"
+	cp "$GPUI_DIR/target/release/ghostex-gpui-cef-helper" "$helper_macos/$helper_name"
 	chmod 755 "$helper_macos/$helper_name"
 	cat >"$helper_app/Contents/Info.plist" <<EOF_HELPER
 <?xml version="1.0" encoding="UTF-8"?>
@@ -137,12 +138,15 @@ for helper_name in "${helper_names[@]}"; do
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>LSBackgroundOnly</key>
-	<true/>
+	<key>LSUIElement</key>
+	<string>1</string>
 </dict>
 </plist>
 EOF_HELPER
 done
+
+# CDXC:GPUIPhase1 2026-06-14-15:25:
+# The phase-1 shell now consumes Tauri's cef-rs CEF distribution instead of Ghostex's production CEF vendor tree. Build with a local CEF_PATH cache so cef-dll-sys downloads the version matching the Rust bindings, then package helper apps named after the GPUI executable because macOS CEF discovers helpers from the main bundle name.
 
 # CDXC:GPUIPhase1 2026-06-14-13:05:
 # The prototype rewrites helper app plists and copies the CEF framework into a new local bundle on every build. Re-sign the completed bundle ad hoc so macOS validates the nested helper apps and framework after packaging instead of running stale signatures from the source artifacts.
