@@ -38,7 +38,7 @@ Use the mobile apps to connect live to your Ghostex agent CLI sessions. APKs are
 
 #### Click the button to get the app:
 
-[![Download Android APK](https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white)](https://github.com/maddada/Ghostex/releases/download/v4.1.0/ghostex-android.apk) [![iPhone App Discord](https://img.shields.io/badge/iPhone-Test%20Flight-000000?logo=apple&logoColor=white)](https://discord.gg/df7b3G92CS)
+[![Download Android APK](https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white)](https://github.com/maddada/Ghostex/releases/latest/download/ghostex-android.apk) [![iPhone App Discord](https://img.shields.io/badge/iPhone-Test%20Flight-000000?logo=apple&logoColor=white)](https://discord.gg/df7b3G92CS)
 
 <p>
   <img width="250" alt="Ghostex Android companion app" src="https://github.com/user-attachments/assets/e7af9c54-e8ef-4e0b-a934-8b2f9ea56c70" />
@@ -47,9 +47,44 @@ Use the mobile apps to connect live to your Ghostex agent CLI sessions. APKs are
 
 ## Gallery
 
-### Architecture (client apps <-> gxserver daemon (local/remote machine) <-> zmx for persistence
+### Architecture (client apps <-> gxserver daemon <-> zmx persistence)
 
 <img width="3326" height="1514" alt="2026-06-12_Google Chrome_23-43-07@2x" src="https://github.com/user-attachments/assets/ecc84149-a9fc-4ec8-a387-af5ce35aa7be" />
+
+<!--
+CDXC:ReadmeScreenshots 2026-06-15-03:04:
+The GitHub README screenshots area starts with the user-ordered feature set: embedded VS Code, Agents terminal splits, Chromium Design mode, Beads Kanban, and Ctrl+G rich prompt editing.
+Use sanitized product screenshots only. Do not publish images that expose local project names, terminal transcripts, workspace paths, issue titles, or live account details.
+-->
+
+### Embedded VS Code based editor
+
+Great for working with markdown, reviewing code, and checking PRs (Github Extension is great!)
+
+<img width="3456" height="2068" alt="Ghostex embedded VS Code based editor" src="media/readme/ghostex-embedded-vscode-editor.png" />
+
+### Split your terminals and use keyboard hotkeys to jump between terminals in the Agents view
+
+<img width="3456" height="2068" alt="Ghostex split terminals in the Agents view" src="media/readme/ghostex-agents-terminal-splits.png" />
+
+### Embedded Chromium Browser with Design mode
+
+Also Comes with Devtools, Agent Browser Control, and Profiles.
+
+<img width="3456" height="2068" alt="Ghostex embedded Chromium Browser with Design mode" src="media/readme/ghostex-chromium-design-mode.png" />
+
+### Kanban board based on beads!
+
+Dump your notes here then let an orchestrator agent hand them off to other agents
+(App supports cross agent orchestration too)
+
+<img width="3456" height="2068" alt="Ghostex Kanban board based on beads" src="media/readme/ghostex-kanban-beads-board.png" />
+
+### Rich Prompt Editor with ctrl + g
+
+Edit your agent prompts with full hotkeys support and even image previews!
+
+<img width="2048" height="1221" alt="Ghostex Rich Prompt Editor with ctrl + g" src="media/readme/ghostex-rich-prompt-editor-ctrl-g.png" />
 
 ### T3code GUI panes and supported terminal CLIs
 

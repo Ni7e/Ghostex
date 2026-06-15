@@ -50,7 +50,7 @@
 - Sleep Below and Close Below target the rendered rows beneath the clicked session across project groups.
 - The Ghostex TUI uses a neutral gray-blue default theme, clearer Help/Hotkeys and Quit Ghostex labels, and broader built-in agent labels for restored sessions.
 - Embedded code-server packaging materializes target-architecture ripgrep binaries and uses authenticated GitHub artifact fetches during local release builds.
-- Android APK downloads point at the current 4.1.0 release package.
+- Android APK downloads point at GitHub's latest stable release package.
 - 4.0.3 improves Remote machine sessions with click-to-open SSH attach terminals, clearer remote setup failures, compact Remote settings, Quick section agent launching, safer titlebar mode availability, bundled editor defaults, quieter Sparkle update checks, stable sidebar resize chrome, and smaller installed macOS bundles.
 - Remote session and group clicks can open a local Ghostty terminal that SSH-attaches with the stable `ghostex attach --session-id --project-id` command while explicit copy actions still copy the same SSH command for external terminals.
 - Remote attach carrier terminals are hidden from the local Quick section so remote focus remains visually owned by the remote machine.
