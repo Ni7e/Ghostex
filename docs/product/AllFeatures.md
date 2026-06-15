@@ -1,6 +1,13 @@
 
 ## All features:
 
+- 4.14.0 improves native pane lifecycle and startup focus, refreshes sidebar/titlebar settings and custom chrome controls, adds Close After Done timers, strengthens gxserver provider-liveness projection, introduces the Rust gxserver packaging path, improves TUI edge navigation, centers the Android factory droid icon, and refreshes repository screenshots and download links.
+- New native terminals can stay selected while their surface is still mounting, startup focus is restored more predictably, and gxserver presentation catch-up no longer causes newly created splits to look stale.
+- Sidebar and titlebar settings include clearer sections, custom contrast/tint controls for app chrome, steadier mode switching and Resources behavior, richer native tooltips, and Discover Ghostex download entry points.
+- Close After Done can close completed sessions after a continuous done state, while previous-session restore, rename focus, project jumps, and session-card status projection are steadier.
+- Packaged gxserver can use the new Rust daemon package shape, and `gx server` command resolution can target explicit Rust binaries without silently falling back to reference JavaScript output.
+- Project editor, browser, App Shots, and app-modal surfaces have tighter lifecycle, persistence, and window behavior, including bounded awake editor surfaces and project browser restore/history state.
+- TUI session switcher navigation now clamps at list edges and repeats held Up/Down movement faster while still throttling raw terminal repeat bursts.
 - 4.12.0 adds session-first command palette search, command mode through `>`, stricter native pane focus, first-class sleeping pane placeholders, configurable Sidebar Tag filters, Electron split-layout focus, update/App Shots polish, long-list sidebar controls, richer session tooltips, and TUI switcher repeat throttling.
 - Cmd+P opens session search across current sessions, active projects, collapsed projects, and previous sessions, while Cmd+Shift+P opens command mode directly.
 - Native pane focus tracks the AppKit first responder and rendered pane geometry so focused borders, directional navigation, command panels, and project-editor companion panes line up with the surface receiving keyboard input.

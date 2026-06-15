@@ -20,6 +20,21 @@
 <!-- CDXC:Distribution 2026-06-13-16:52: Release notes for 4.11.0 must describe the next minor release as user-facing native layout, pane lifecycle, previous-session identity, sidebar, project-board, keybinding, and Android startup improvements before Sparkle, GitHub, Homebrew, and Android publication. -->
 <!-- CDXC:Distribution 2026-06-13-17:13: The 4.11.0 changelog must use Major and Minor top-level bullets with sub-bullets so public release notes stay easier to scan without dropping any user-facing shipped change. -->
 <!-- CDXC:Distribution 2026-06-14-02:03: Release notes for 4.12.0 must use Major and Minor top-level bullets with sub-bullets so public changelogs separate larger workflow changes from smaller polish while covering session search, pane focus, sleeping panes, sidebar tags, update UI, App Shots, and TUI changes. -->
+<!-- CDXC:Distribution 2026-06-16-02:38: Release notes for 4.14.0 must keep the Major and Minor top-level bullet structure, cover the native sidebar/titlebar, session lifecycle, packaged gxserver, TUI, Android, and documentation updates, and avoid implementation-only release mechanics. -->
+
+## 4.14.0 - 2026-06-16
+
+- Major
+  - Native session lifecycle handling is more resilient when creating, restoring, waking, and closing panes. Newly created terminals show a mounting placeholder while the terminal surface and gxserver presentation catch up, startup focus targets are preserved, and stale presentation updates are less likely to close a just-created split.
+  - The sidebar and titlebar experience has been refreshed with better settings navigation, custom sidebar/titlebar contrast and tint controls, steadier Resources and mode-switcher behavior, clearer native tooltips, and Discover Ghostex entry points for mobile download and onboarding flows.
+  - Session management adds Close After Done timers, improved previous-session search and restore behavior, project-jump events, richer session-card status projection, and more stable focus for rename, command palette, and native modal workflows.
+  - Packaged gxserver work now includes a Rust daemon packaging path, Rust-compatible validation, explicit gxserver binary resolution for `gx server` commands, and provider-liveness fields so clients can distinguish running, missing, sleeping, and persistence-disabled sessions.
+- Minor
+  - Project editor, browser, and App Shots surfaces received lifecycle and persistence polish, including bounded awake editor surfaces, project browser restore/history state, browser feedback dimensions, and more reliable app-modal window behavior.
+  - Native logging and privacy checks were tightened for mode switching, terminal focus, layout layering, pane reorder diagnostics, and terminal focus request policy.
+  - The TUI session switcher now clamps vertical navigation at the first and last selectable rows and repeats held Up and Down movement faster without applying raw terminal repeat bursts.
+  - Android and repository presentation polish includes the centered factory droid icon, latest-release Android download links, GitHub sponsor metadata, and checked-in README screenshots for core Ghostex workflows.
+  - GPUI prototype work adds a CEF helper process, AppKit hooks, titlebar assets, and build wiring for the next native-host exploration path.
 
 ## 4.12.0 - 2026-06-14
 
