@@ -2,11 +2,11 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   GXSERVER_LOCAL_API_HOST,
-  GXSERVER_LOCAL_API_PORT,
   GXSERVER_PRODUCT,
   GXSERVER_PROTOCOL_VERSION,
   type GxserverStatusResponse,
 } from "../protocol/index.js";
+import { readGxserverLocalApiPort } from "./constants.js";
 import { readGxserverAuthToken } from "./auth.js";
 import { isGxserverBuildIdentityReusable } from "./build-identity.js";
 import { fetchServerHealth, requestServerStop, requestServerStopAll } from "./http-client.js";
@@ -32,7 +32,7 @@ export async function getGxserverStatus(options: LifecycleOptions): Promise<Gxse
   if (metadata && isProcessRunning(metadata.pid)) {
     return {
       metadata,
-      message: `gxserver runtime metadata exists for pid ${metadata.pid}, but 127.0.0.1:${GXSERVER_LOCAL_API_PORT} is unreachable.`,
+      message: `gxserver runtime metadata exists for pid ${metadata.pid}, but 127.0.0.1:${readGxserverLocalApiPort()} is unreachable.`,
       ok: false,
       product: GXSERVER_PRODUCT,
       state: "unreachable",
@@ -71,7 +71,7 @@ export async function startGxserverBackground(options: LifecycleOptions): Promis
   }
 
   const cliPath = fileURLToPath(import.meta.url).replace(/lifecycle\.js$/, "cli.js");
-  const child = spawn(process.execPath, [cliPath, "--foreground"], {
+    const child = spawn(process.execPath, [cliPath, "--foreground"], {
     detached: true,
     stdio: "ignore",
   });
@@ -80,7 +80,7 @@ export async function startGxserverBackground(options: LifecycleOptions): Promis
   const status = await waitForRunning(options, 5000);
   if (status.state !== "running") {
     return {
-      message: `gxserver start launched pid ${child.pid ?? "unknown"} but health did not become ready on ${GXSERVER_LOCAL_API_HOST}:${GXSERVER_LOCAL_API_PORT}.`,
+      message: `gxserver start launched pid ${child.pid ?? "unknown"} but health did not become ready on ${GXSERVER_LOCAL_API_HOST}:${readGxserverLocalApiPort()}.`,
       ok: false,
       product: GXSERVER_PRODUCT,
       state: "starting",

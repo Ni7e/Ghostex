@@ -11,6 +11,7 @@ const gxserverRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 test("server package stages compiled daemon, system-Node launcher, and bundled zmx/zehn/bd", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "gxserver-package-test-"));
   const packageDir = path.join(gxserverRoot, "dist", `test-server-package-${process.pid}`);
+  const homebrewDir = path.join(gxserverRoot, "dist", `test-server-homebrew-${process.pid}`);
   try {
     const zmxBin = path.join(tempRoot, "zmx");
     const zehnBin = path.join(tempRoot, "zehn");
@@ -32,6 +33,8 @@ test("server package stages compiled daemon, system-Node launcher, and bundled z
         "--bd-bin",
         bdBin,
         "--generate-homebrew",
+        "--homebrew-dir",
+        homebrewDir,
       ],
       { cwd: gxserverRoot, encoding: "utf8" },
     );
@@ -52,9 +55,83 @@ test("server package stages compiled daemon, system-Node launcher, and bundled z
     await stat(path.join(packageDir, "bin", "zmx"));
     await stat(path.join(packageDir, "bin", "zehn"));
     await stat(path.join(packageDir, "bin", "bd"));
+    const formula = await readFile(path.join(homebrewDir, "gxserver.rb"), "utf8");
+    assert.match(formula, /depends_on "node@22"/);
+    assert.match(formula, /"npm", "ci", "--omit=dev"/);
   } finally {
     await rm(tempRoot, { force: true, recursive: true });
     await rm(packageDir, { force: true, recursive: true });
+    await rm(homebrewDir, { force: true, recursive: true });
+  }
+});
+
+test("Rust server package stages native daemon, protocol exports, and bundled zmx/zehn/bd without Node runtime metadata", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "gxserver-rust-package-test-"));
+  const packageDir = path.join(gxserverRoot, "dist", `test-rust-server-package-${process.pid}`);
+  const homebrewDir = path.join(gxserverRoot, "dist", `test-rust-homebrew-${process.pid}`);
+  try {
+    const rustBin = path.join(tempRoot, "gxserver");
+    const zmxBin = path.join(tempRoot, "zmx");
+    const zehnBin = path.join(tempRoot, "zehn");
+    const bdBin = path.join(tempRoot, "bd");
+    await makeExecutable(rustBin);
+    await makeExecutable(zmxBin);
+    await makeExecutable(zehnBin);
+    await makeExecutable(bdBin);
+
+    const packageResult = spawnSync(
+      "node",
+      [
+        "scripts/package-gxserver.mjs",
+        "--package-dir",
+        packageDir,
+        "--rust-bin",
+        rustBin,
+        "--zmx-bin",
+        zmxBin,
+        "--zehn-bin",
+        zehnBin,
+        "--bd-bin",
+        bdBin,
+        "--generate-homebrew",
+        "--homebrew-dir",
+        homebrewDir,
+      ],
+      { cwd: gxserverRoot, encoding: "utf8" },
+    );
+    assert.equal(packageResult.status, 0, packageResult.stderr || packageResult.stdout);
+
+    const checkResult = spawnSync("node", ["scripts/check-package.mjs", "--package-dir", packageDir], {
+      cwd: gxserverRoot,
+      encoding: "utf8",
+    });
+    assert.equal(checkResult.status, 0, checkResult.stderr || checkResult.stdout);
+
+    await stat(path.join(packageDir, "bin", "gxserver"));
+    await stat(path.join(packageDir, "dist", "protocol", "index.js"));
+    await stat(path.join(packageDir, "dist", "protocol", "index.d.ts"));
+    await assert.rejects(stat(path.join(packageDir, "dist", "src", "cli.js")), /ENOENT/);
+    await assert.rejects(stat(path.join(packageDir, "native-runtime.json")), /ENOENT/);
+    await assert.rejects(stat(path.join(packageDir, "package-lock.json")), /ENOENT/);
+
+    const manifest = JSON.parse(await readFile(path.join(packageDir, "package.json"), "utf8"));
+    assert.equal(manifest.bin.gxserver, "./bin/gxserver");
+    assert.equal(manifest.engines, undefined);
+    assert.equal(manifest.dependencies?.["better-sqlite3"], undefined);
+    assert.equal(manifest.exports["./protocol"].default, "./dist/protocol/index.js");
+    assert.equal(manifest.exports["./protocol"].types, "./dist/protocol/index.d.ts");
+
+    const buildIdentity = JSON.parse(await readFile(path.join(packageDir, "build-identity.json"), "utf8"));
+    assert.equal(buildIdentity.packageVersion, "0.1.0");
+    assert.equal(buildIdentity.buildIdentity.startsWith("gxserver:0.1.0:sha256:"), true);
+
+    const formula = await readFile(path.join(homebrewDir, "gxserver.rb"), "utf8");
+    assert.doesNotMatch(formula, /node@22|npm", "ci"|dist\/src\/cli\.js/);
+    assert.match(formula, /exec "#\{libexec\}\/bin\/gxserver" "\$@"/);
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true });
+    await rm(packageDir, { force: true, recursive: true });
+    await rm(homebrewDir, { force: true, recursive: true });
   }
 });
 
@@ -128,6 +205,7 @@ test("package check rejects bundled better-sqlite3 without native runtime metada
     await mkdir(path.join(packageDir, "node_modules", "better-sqlite3"), { recursive: true });
     await writeFile(path.join(packageDir, "dist", "src", "cli.js"), "");
     await writeFile(path.join(packageDir, "dist", "protocol", "index.js"), "");
+    await writeFile(path.join(packageDir, "dist", "protocol", "index.d.ts"), "");
     await writeFile(
       path.join(packageDir, "package.json"),
       JSON.stringify({ engines: { node: ">=22.0.0" }, version: "0.1.0" }),
@@ -201,6 +279,7 @@ async function writeMinimalPackage(packageDir: string): Promise<void> {
   await mkdir(path.join(packageDir, "bin"), { recursive: true });
   await writeFile(path.join(packageDir, "dist", "src", "cli.js"), "");
   await writeFile(path.join(packageDir, "dist", "protocol", "index.js"), "");
+  await writeFile(path.join(packageDir, "dist", "protocol", "index.d.ts"), "");
   await writeFile(
     path.join(packageDir, "package.json"),
     JSON.stringify({ engines: { node: ">=22.0.0" }, version: "0.1.0" }),

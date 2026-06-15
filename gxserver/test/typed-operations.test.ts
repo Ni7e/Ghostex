@@ -10,10 +10,12 @@ import {
   buildGitHubCommand,
   buildWorktreeCommand,
   GxserverTypedOperationError,
+  isExpectedNonZeroTypedOperationResult,
   runBeadsAction,
   runGitAction,
   runProjectSetupCommand,
   runWorktreeAction,
+  typedOperationLogLevel,
 } from "../src/typed-operations.js";
 import {
   normalizeExistingDirectoryPath,
@@ -778,6 +780,42 @@ printf '%s\\n' '[{"id":"gxserver-1","title":"response body is too large"}]'
   } finally {
     await rm(root, { force: true, recursive: true });
   }
+});
+
+test("typed operation log levels keep expected probe misses out of warnings", () => {
+  /*
+  CDXC:GxserverLogs 2026-06-15-20:39:
+  Expected negative probe results should remain visible when Debugging Mode is
+  enabled, but they are not product warnings and should not persist when
+  Debugging Mode is off.
+  */
+  const expectedProbeMiss = {
+    action: "isInsideWorkTree" as const,
+    exitCode: 1,
+    stderr: "",
+    stdout: "false",
+  };
+  assert.equal(isExpectedNonZeroTypedOperationResult(expectedProbeMiss), true);
+  assert.equal(typedOperationLogLevel(expectedProbeMiss), "info");
+  assert.equal(
+    typedOperationLogLevel({
+      action: "push" as const,
+      exitCode: 1,
+      stderr: "",
+      stdout: "",
+    }),
+    "warn",
+  );
+  assert.equal(
+    typedOperationLogLevel({
+      action: "prView" as const,
+      error: { code: "timeout", message: "Timed out.", timeoutMs: 50 },
+      exitCode: 1,
+      stderr: "",
+      stdout: "",
+    }),
+    "warn",
+  );
 });
 
 test("typed Git operations time out and return structured failures", async () => {

@@ -1109,6 +1109,27 @@ test("presentation snapshot treats existing provider rows as active when domain 
   assert.equal(snapshot.sessions[0]?.actions.sendMessage, true);
 });
 
+test("presentation snapshot does not infer provider liveness from running persistence-disabled rows", () => {
+  const project = projectFixture({});
+  const providerless = sessionFixture({
+    lifecycleState: "running",
+    providerState: { lifecycleState: "unknown", provider: "off", zmxName: "S90-P3lv0-G5tpf" },
+    runtimeSettings: { sessionPersistenceProvider: "off" },
+  });
+
+  const snapshot = projectGxserverPresentationSnapshot({
+    projects: [project],
+    revision: 4 as GxserverPresentationRevision,
+    sessions: [providerless],
+  });
+
+  assert.equal(snapshot.sessions[0]?.lifecycleState, "running");
+  assert.equal(snapshot.sessions[0]?.providerSessionState, "persistence-disabled");
+  assert.equal(snapshot.sessions[0]?.sessionPersistenceProvider, undefined);
+  assert.equal(snapshot.sessions[0]?.actions.focus, false);
+  assert.equal(snapshot.sessions[0]?.actions.sendMessage, false);
+});
+
 test("presentation snapshot orders pinned project sessions by sidebar order", () => {
   const project = projectFixture({});
   const first = sessionFixture({

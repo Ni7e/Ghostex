@@ -20,6 +20,7 @@ const nativeRuntimeFileName = "native-runtime.json";
 const args = parseArgs(process.argv.slice(2));
 const packageDir = path.resolve(args.packageDir ?? defaultPackageDir);
 const homebrewDir = path.resolve(args.homebrewDir ?? defaultHomebrewDir);
+const packageMode = args.rustBin ? "rust" : "typescript";
 
 /*
 CDXC:GxserverPackaging 2026-05-30-15:49:
@@ -35,30 +36,33 @@ await assertInsideDist(packageDir, "server package");
 if (args.generateHomebrew) {
   await assertInsideDist(homebrewDir, "Homebrew helper");
 }
+if (args.rustBin && args.includeNodeModules) {
+  throw new Error("--rust-bin packages the native Rust daemon and cannot be combined with --include-node-modules.");
+}
 
-await assertBuilt();
+await assertBuilt(packageMode);
 const zmxBin = await resolveToolBin("zmx", args.zmxBin);
 const zehnBin = await resolveToolBin("zehn", args.zehnBin);
 const bdBin = await resolveToolBin("bd", args.bdBin);
 
 await rm(packageDir, { force: true, recursive: true });
 await mkdir(packageDir, { recursive: true });
-await cp(path.join(distRoot, "src"), path.join(packageDir, "dist", "src"), { recursive: true });
-await cp(path.join(distRoot, "protocol"), path.join(packageDir, "dist", "protocol"), { recursive: true });
-await cp(path.join(gxserverRoot, "package.json"), path.join(packageDir, "package.json"));
-await cp(path.join(gxserverRoot, "package-lock.json"), path.join(packageDir, "package-lock.json"));
+if (packageMode === "rust") {
+  await stageRustPackage(packageDir, {
+    bdBin,
+    rustBin: args.rustBin,
+    zehnBin,
+    zmxBin,
+  });
+} else {
+  await stageTypeScriptPackage(packageDir, {
+    bdBin,
+    zehnBin,
+    zmxBin,
+  });
+}
 
-await mkdir(path.join(packageDir, "bin"), { recursive: true });
-await writeLauncher(path.join(packageDir, "bin", "gxserver"));
-await cp(zmxBin, path.join(packageDir, "bin", "zmx"));
-await cp(zehnBin, path.join(packageDir, "bin", "zehn"));
-await cp(bdBin, path.join(packageDir, "bin", "bd"));
-await chmod(path.join(packageDir, "bin", "gxserver"), executableMode);
-await chmod(path.join(packageDir, "bin", "zmx"), executableMode);
-await chmod(path.join(packageDir, "bin", "zehn"), executableMode);
-await chmod(path.join(packageDir, "bin", "bd"), executableMode);
-
-await writeFile(path.join(packageDir, "README.md"), serverReadme(), "utf8");
+await writeFile(path.join(packageDir, "README.md"), serverReadme(packageMode), "utf8");
 
 if (args.includeNodeModules) {
   if (!args.nativeNode) {
@@ -82,6 +86,7 @@ if (args.generateHomebrew) {
       sha256,
       url: args.homebrewUrl ?? `file://${tarballPath}`,
       version: await packageVersion(),
+      packageMode,
     }),
     "utf8",
   );
@@ -116,6 +121,8 @@ function parseArgs(argv) {
       parsed.nativeNode = requiredValue(argv, ++index, arg);
     } else if (arg === "--native-npm") {
       parsed.nativeNpm = requiredValue(argv, ++index, arg);
+    } else if (arg === "--rust-bin") {
+      parsed.rustBin = requiredValue(argv, ++index, arg);
     } else {
       throw new Error(`Unknown package-gxserver option: ${arg}`);
     }
@@ -138,9 +145,12 @@ async function assertInsideDist(candidatePath, label) {
   }
 }
 
-async function assertBuilt() {
-  await assertFile(path.join(distRoot, "src", "cli.js"), "Run `npm run build` in gxserver/ before packaging.");
+async function assertBuilt(mode) {
   await assertFile(path.join(distRoot, "protocol", "index.js"), "Run `npm run build` in gxserver/ before packaging.");
+  await assertFile(path.join(distRoot, "protocol", "index.d.ts"), "Run `npm run build` in gxserver/ before packaging.");
+  if (mode === "typescript") {
+    await assertFile(path.join(distRoot, "src", "cli.js"), "Run `npm run build` in gxserver/ before packaging.");
+  }
 }
 
 async function resolveToolBin(toolName, explicitPath) {
@@ -186,6 +196,66 @@ async function assertFile(filePath, guidance) {
     // Handled below.
   }
   throw new Error(`${filePath} is missing. ${guidance}`);
+}
+
+async function stageTypeScriptPackage(targetDir, tools) {
+  await cp(path.join(distRoot, "src"), path.join(targetDir, "dist", "src"), { recursive: true });
+  await cp(path.join(distRoot, "protocol"), path.join(targetDir, "dist", "protocol"), { recursive: true });
+  await cp(path.join(gxserverRoot, "package.json"), path.join(targetDir, "package.json"));
+  await cp(path.join(gxserverRoot, "package-lock.json"), path.join(targetDir, "package-lock.json"));
+
+  await mkdir(path.join(targetDir, "bin"), { recursive: true });
+  await writeLauncher(path.join(targetDir, "bin", "gxserver"));
+  await stageToolBinaries(targetDir, tools);
+  await chmod(path.join(targetDir, "bin", "gxserver"), executableMode);
+}
+
+async function stageRustPackage(targetDir, options) {
+  /*
+  CDXC:GxserverRustPackaging 2026-06-16-01:30:
+  Phase 8 needs a Rust package shape that keeps generated TypeScript protocol exports for clients while making the native gxserver binary the daemon entrypoint. Do not copy the JavaScript daemon, node_modules, or package-lock into this staged package.
+  */
+  await assertExecutableFile(options.rustBin, "Build Rust gxserver first with `cargo build --manifest-path gxserver-rs/Cargo.toml --release` or pass the desired compiled binary.");
+  await cp(path.join(distRoot, "protocol"), path.join(targetDir, "dist", "protocol"), { recursive: true });
+  await writeRustPackageManifest(targetDir);
+
+  await mkdir(path.join(targetDir, "bin"), { recursive: true });
+  await cp(options.rustBin, path.join(targetDir, "bin", "gxserver"));
+  await stageToolBinaries(targetDir, options);
+  await chmod(path.join(targetDir, "bin", "gxserver"), executableMode);
+}
+
+async function stageToolBinaries(targetDir, tools) {
+  await cp(tools.zmxBin, path.join(targetDir, "bin", "zmx"));
+  await cp(tools.zehnBin, path.join(targetDir, "bin", "zehn"));
+  await cp(tools.bdBin, path.join(targetDir, "bin", "bd"));
+  await chmod(path.join(targetDir, "bin", "zmx"), executableMode);
+  await chmod(path.join(targetDir, "bin", "zehn"), executableMode);
+  await chmod(path.join(targetDir, "bin", "bd"), executableMode);
+}
+
+async function writeRustPackageManifest(targetDir) {
+  const manifest = JSON.parse(await readFile(path.join(gxserverRoot, "package.json"), "utf8"));
+  await writeFile(
+    path.join(targetDir, "package.json"),
+    `${JSON.stringify({
+      name: manifest.name ?? "gxserver",
+      version: manifest.version ?? "0.0.0",
+      private: manifest.private ?? true,
+      description: manifest.description ?? "Ghostex gxserver daemon and shared protocol package.",
+      type: "module",
+      bin: {
+        gxserver: "./bin/gxserver",
+      },
+      exports: {
+        "./protocol": manifest.exports?.["./protocol"] ?? {
+          types: "./dist/protocol/index.d.ts",
+          default: "./dist/protocol/index.js",
+        },
+      },
+    }, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 async function writeLauncher(launcherPath) {
@@ -454,7 +524,30 @@ async function sha256File(filePath) {
   return createHash("sha256").update(await readFile(filePath)).digest("hex");
 }
 
-function homebrewFormula({ sha256, url, version }) {
+function homebrewFormula({ packageMode, sha256, url, version }) {
+  if (packageMode === "rust") {
+    return `class Gxserver < Formula
+  desc "Ghostex gxserver daemon for local and remote/headless project sessions"
+  homepage "https://github.com/maddada/Ghostex"
+  url "${url}"
+  sha256 "${sha256}"
+  license "MIT"
+  version "${version}"
+
+  def install
+    libexec.install Dir["*"]
+    (bin/"gxserver").write <<~EOS
+      #!/usr/bin/env bash
+      exec "#{libexec}/bin/gxserver" "$@"
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/gxserver --version")
+  end
+end
+`;
+  }
   return `class Gxserver < Formula
   desc "Ghostex gxserver daemon for local and remote/headless project sessions"
   homepage "https://github.com/maddada/Ghostex"
@@ -481,7 +574,27 @@ end
 `;
 }
 
-function serverReadme() {
+function serverReadme(packageMode) {
+  if (packageMode === "rust") {
+    return `# gxserver server package
+
+gxserver is the Ghostex daemon used by the desktop app and server-only remote installs.
+
+## Runtime dependency
+
+This package uses the bundled native gxserver executable in \`bin/gxserver\` and does not require Node.js or better-sqlite3 at runtime.
+
+## Commands
+
+- \`bin/gxserver\`: run gxserver in the foreground.
+- \`bin/gxserver start\`: start gxserver in the background.
+- \`bin/gxserver status --json\`: check runtime state for health/status automation.
+- \`bin/gxserver stop\`: stop only the gxserver control plane; zmx sessions are not killed.
+- \`bin/gxserver stop-all\`: kill gxserver-tracked zmx sessions, then stop the control plane.
+
+The package includes Ghostex's pinned zmx, zehn, and upstream Beads \`bd\` artifacts in \`bin/\`. Project board operations require the bundled \`bd\`; shell-installed \`bd\` is intentionally ignored so Ghostex and agent workflows share one pinned Beads binary.
+`;
+  }
   return `# gxserver server package
 
 gxserver is the Ghostex daemon used by the desktop app and server-only remote installs.

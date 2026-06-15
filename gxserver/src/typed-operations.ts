@@ -35,6 +35,16 @@ const GXSERVER_TYPED_OPERATION_COLOR_DISABLING_ENVIRONMENT_KEYS = [
   "NO_COLOR",
   "NODE_DISABLE_COLORS",
 ] as const;
+const EXPECTED_NONZERO_TYPED_OPERATION_ACTIONS = new Set([
+  "diffNoIndexAgainstNull",
+  "getOriginRemoteUrl",
+  "isInsideWorkTree",
+  "prView",
+  "remoteBranchExists",
+  "storageExists",
+  "upstreamCounts",
+  "verifyRef",
+]);
 
 export class GxserverTypedOperationError extends Error {
   readonly code: "badRequest" | "dependencyUnavailable" | "forbidden" | "notFound";
@@ -101,6 +111,25 @@ Typed Git, worktree, and Beads subprocesses must have bounded runtime and bounde
 CDXC:GxserverTypedOperations 2026-05-30-23:08:
 Beads board reads bypass the subprocess stdout cap because gxserver reads `.beads/issues.jsonl` directly for UI board state. Apply file-size, row-count, and serialized-response limits before returning `issues` so a remote Project board request cannot make gxserver load or JSON-encode unbounded board data.
 */
+export function isExpectedNonZeroTypedOperationResult(result: GxserverTypedOperationResult): boolean {
+  /*
+  CDXC:GxserverLogs 2026-06-15-20:39:
+  Several typed operations are probes where a non-zero exit code means "false"
+  or "not configured" rather than a product warning, such as repository checks,
+  missing upstreams, no matching remote branch, no current PR, or no Beads
+  storage. Keep those visible under Debugging Mode as info-level diagnostics,
+  but do not persist them as normal-mode warnings.
+  */
+  return result.exitCode !== 0 && !result.error && EXPECTED_NONZERO_TYPED_OPERATION_ACTIONS.has(result.action);
+}
+
+export function typedOperationLogLevel(result: GxserverTypedOperationResult): "info" | "warn" {
+  if (result.exitCode === 0 || isExpectedNonZeroTypedOperationResult(result)) {
+    return "info";
+  }
+  return "warn";
+}
+
 export function buildGitCommand(params: GxserverRunGitActionParams, cwd: string): GxserverProcessCommand {
   const action = normalizeGitAction(params.action);
   /*

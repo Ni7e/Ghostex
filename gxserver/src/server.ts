@@ -16,7 +16,6 @@ import {
 import { installGxserverAgentHooks, normalizeGxserverProcessPath, readGxserverAgentHookStatus } from "./agent-hooks.js";
 import {
   GXSERVER_CONTROL_PLANE_CAPABILITIES,
-  GXSERVER_LOCAL_API_HOST,
   GXSERVER_LOCAL_API_PORT,
   GXSERVER_PRODUCT,
   GXSERVER_PROTOCOL_VERSION,
@@ -95,11 +94,13 @@ import {
 import { getGxserverToolStatuses, requireBundledZmx, type GxserverResolvedTool } from "./toolchain.js";
 import {
   GxserverTypedOperationError,
+  isExpectedNonZeroTypedOperationResult,
   runBeadsAction,
   runGitAction,
   runGitHubAction,
   runProjectSetupCommand,
   runWorktreeAction,
+  typedOperationLogLevel,
 } from "./typed-operations.js";
 import {
   buildZmxAttachCommand,
@@ -127,7 +128,11 @@ import {
   type GxserverZmxCommandRunner,
   type GxserverZmxProcessIdentityReader,
 } from "./zmx-lifecycle.js";
-import { GxserverZmxTitleObserver, type GxserverZmxTitleObservationStateChange } from "./zmx-title-observer.js";
+import {
+  GxserverZmxTitleObserver,
+  isZmxTitleObservableSession,
+  type GxserverZmxTitleObservationStateChange,
+} from "./zmx-title-observer.js";
 import { GXSERVER_RENDERER_COMMAND_ACTIONS } from "../protocol/index.js";
 import type {
   GxserverAttachSessionMetadataParams,
@@ -230,6 +235,7 @@ export interface GxserverApiRuntime {
     runZsh?: GxserverZmxCommandRunner;
   };
 }
+
 type GxserverCreateSessionDomainParams = GxserverCreateSessionParams & { projectId: GxserverProjectId };
 
 /*
@@ -355,7 +361,7 @@ export async function runGxserverForeground(options: GxserverForegroundOptions):
   const metadata: GxserverRuntimeMetadata = {
     buildIdentity,
     pid: process.pid,
-    port: GXSERVER_LOCAL_API_PORT,
+    port: config.listeners.local.port as typeof GXSERVER_LOCAL_API_PORT,
     protocolVersion: GXSERVER_PROTOCOL_VERSION,
     serverId: identity.serverId,
     startedAt,
@@ -579,7 +585,7 @@ async function handleRequest(options: HandleRequestOptions): Promise<void> {
 
 async function routeRequest(options: HandleRequestOptions, requestId: string): Promise<GxserverEndpointPath | undefined> {
   const { listenerKind, request, response, runtime } = options;
-  const url = new URL(request.url ?? "/", `http://${GXSERVER_LOCAL_API_HOST}:${GXSERVER_LOCAL_API_PORT}`);
+  const url = new URL(request.url ?? "/", `http://${runtime.config.listeners.local.host}:${runtime.config.listeners.local.port}`);
   const endpoint = getGxserverEndpoint(url.pathname);
   applyCorsHeaders(request, response, runtime.config);
 
@@ -2336,6 +2342,7 @@ async function syncZmxTitleObserversFromRepository(
     return;
   }
   await runtime.zmxTitleObserver.syncSessions(repository.listSessions(), reason);
+  clearStaleZmxTitleObservationRuntimeSettings(runtime, repository, reason);
 }
 
 function scheduleZmxTitleObserverSync(
@@ -2357,7 +2364,7 @@ function observeZmxTitleForSession(runtime: GxserverApiRuntime, session: Gxserve
   if (!runtime.zmxTitleObserver) {
     return;
   }
-  void runtime.zmxTitleObserver.observeSession(session, reason).catch((error) =>
+  void runtime.zmxTitleObserver.syncSession(session, reason).catch((error) =>
     runtime.logger.log({
       details: { message: error instanceof Error ? error.message : String(error), reason },
       event: "zmxTitleObserver.observeFailed",
@@ -2378,6 +2385,11 @@ function recordZmxTitleObservationState(
     const repository = new GxserverDomainRepository(db, runtime.metadata.serverId);
     const session = repository.getSession(change.projectId, change.sessionId);
     if (!session) {
+      return;
+    }
+    if (!isZmxTitleObservableSession(session)) {
+      void runtime.zmxTitleObserver?.syncSession(session, change.reason);
+      clearSessionZmxTitleObservationRuntimeSetting(runtime, repository, session, "zmx-title-observer-cleared");
       return;
     }
     const runtimeSettings = {
@@ -2417,6 +2429,46 @@ function recordZmxTitleObservationState(
   } finally {
     db.close();
   }
+}
+
+function clearStaleZmxTitleObservationRuntimeSettings(
+  runtime: GxserverApiRuntime,
+  repository: GxserverDomainRepository,
+  reason: string,
+): void {
+  for (const session of repository.listSessions()) {
+    if (isZmxTitleObservableSession(session) || session.runtimeSettings.zmxTitleObservation === undefined) {
+      continue;
+    }
+    clearSessionZmxTitleObservationRuntimeSetting(runtime, repository, session, reason);
+  }
+}
+
+function clearSessionZmxTitleObservationRuntimeSetting(
+  runtime: GxserverApiRuntime,
+  repository: GxserverDomainRepository,
+  session: GxserverSessionDomainState,
+  reason: string,
+): void {
+  if (session.runtimeSettings.zmxTitleObservation === undefined) {
+    return;
+  }
+  const runtimeSettings = { ...session.runtimeSettings };
+  delete runtimeSettings.zmxTitleObservation;
+  /*
+  CDXC:SessionStatus 2026-06-15-17:32:
+  Stopped, sleeping, missing, and persistence-disabled sessions must not carry stale zmx title-observer retry state into presentation. Clear the coarse watcher health at the writer boundary so the sidebar does not treat unavailable title detection as a live focus target.
+  */
+  repository.updateSession({
+    projectId: session.projectId,
+    runtimeSettings,
+    sessionId: session.sessionId,
+  });
+  schedulePresentationSessionDelta(runtime, repository, {
+    projectId: session.projectId,
+    reason,
+    sessionId: session.sessionId,
+  });
 }
 
 function schedulePresentationProjectDelta(
@@ -3324,11 +3376,12 @@ async function handleTypedOperationEndpoint(
         argumentCount: result.command?.args.length,
         commandBuilt: result.command !== undefined,
         executable: result.command?.executable,
+        expectedNonZero: isExpectedNonZeroTypedOperationResult(result),
         exitCode: result.exitCode,
         operationError: result.error,
       },
       event: "typedOperation",
-      level: result.exitCode === 0 ? "info" : "warn",
+      level: typedOperationLogLevel(result),
       projectId: project.projectId,
       requestId,
       serverId: runtime.metadata.serverId,
@@ -3416,6 +3469,7 @@ async function dispatchZmxLifecycleEndpoint(
   switch (endpointPath) {
     case "/api/probeSessionProvider": {
       const { session, probe } = await probeAndCacheSessionProvider(runtime, repository, readSessionLifecycleParams(params));
+      observeZmxTitleForSession(runtime, session, "probe-session-provider");
       schedulePresentationSessionDelta(runtime, repository, {
         projectId: session.projectId,
         reason: "probe-session-provider",
@@ -3465,6 +3519,7 @@ async function dispatchZmxLifecycleEndpoint(
         requestId,
         agentSettings,
       );
+      observeZmxTitleForSession(runtime, result.session, "start-session-provider");
       schedulePresentationSessionDelta(runtime, repository, {
         projectId: result.session.projectId,
         reason: "start-session-provider",
@@ -3474,6 +3529,7 @@ async function dispatchZmxLifecycleEndpoint(
     }
     case "/api/transitionSession": {
       const result = await dispatchSessionTransitionEndpoint(runtime, repository, normalizeSessionTransitionParams(params));
+      scheduleZmxTitleObserverSync(runtime, repository, "transition-session");
       schedulePresentationSessionDelta(runtime, repository, {
         projectId: result.session.projectId,
         reason: "transition-session",
@@ -4623,7 +4679,7 @@ async function createAttachSessionMetadata(
       cwd: cwd ?? "",
       globalSessionRef: probedSession.globalRef,
       gxserverAuthTokenFile: runtime.paths.authTokenFile,
-      gxserverBaseUrl: `http://${GXSERVER_LOCAL_API_HOST}:${GXSERVER_LOCAL_API_PORT}`,
+      gxserverBaseUrl: `http://${runtime.config.listeners.local.host}:${runtime.config.listeners.local.port}`,
       gxserverProtocolVersion: GXSERVER_PROTOCOL_VERSION,
       promptEditor: normalizePromptEditorAttachMode(params.promptEditor),
       sessionName: zmxSessionName,
@@ -4801,7 +4857,7 @@ async function startSessionProvider(
         cwd,
         globalSessionRef: probedSession.globalRef,
         gxserverAuthTokenFile: runtime.paths.authTokenFile,
-        gxserverBaseUrl: `http://${GXSERVER_LOCAL_API_HOST}:${GXSERVER_LOCAL_API_PORT}`,
+        gxserverBaseUrl: `http://${runtime.config.listeners.local.host}:${runtime.config.listeners.local.port}`,
         gxserverProtocolVersion: GXSERVER_PROTOCOL_VERSION,
         sessionName: zmxSessionName,
         startupText: startupText!,
@@ -4811,7 +4867,7 @@ async function startSessionProvider(
         cwd,
         globalSessionRef: probedSession.globalRef,
         gxserverAuthTokenFile: runtime.paths.authTokenFile,
-        gxserverBaseUrl: `http://${GXSERVER_LOCAL_API_HOST}:${GXSERVER_LOCAL_API_PORT}`,
+        gxserverBaseUrl: `http://${runtime.config.listeners.local.host}:${runtime.config.listeners.local.port}`,
         gxserverProtocolVersion: GXSERVER_PROTOCOL_VERSION,
         sessionName: zmxSessionName,
         zmxExecutablePath: zmx.executablePath,
@@ -5322,7 +5378,7 @@ interface HandleUpgradeOptions {
 async function handleUpgrade(options: HandleUpgradeOptions): Promise<void> {
   const { head, listenerKind, request, runtime, socket } = options;
   const requestId = getRequestId(request);
-  const url = new URL(request.url ?? "/", `http://${GXSERVER_LOCAL_API_HOST}:${GXSERVER_LOCAL_API_PORT}`);
+  const url = new URL(request.url ?? "/", `http://${runtime.config.listeners.local.host}:${runtime.config.listeners.local.port}`);
   const endpoint = getGxserverEndpoint(url.pathname);
 
   const reject = (statusCode: number, body: unknown): void => {

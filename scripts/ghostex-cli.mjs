@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, realpathSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, realpathSync } from "node:fs";
 import { appendFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
@@ -3805,7 +3805,7 @@ function resolveGxserverCliLaunch() {
     process.env.GHOSTEX_GXSERVER_CLI ?? process.env.GHOSTEX_GXSERVER_BIN ?? "",
   ).trim();
   if (explicitCli) {
-    return resolveGxserverCliLaunchForPath(explicitCli);
+    return resolveGxserverCliLaunchForPath(explicitCli, { explicit: true });
   }
 
   const cliDir = path.dirname(fileURLToPath(import.meta.url));
@@ -3816,25 +3816,70 @@ function resolveGxserverCliLaunch() {
     findGhostexSourceRoot(process.cwd()),
   ]);
   for (const root of roots) {
-    const cliPath = path.join(root, "gxserver", "dist", "src", "cli.js");
-    if (fileExistsSync(cliPath)) {
-      return resolveGxserverCliLaunchForPath(cliPath);
+    const launch = resolveGxserverCliLaunchFromRoot(root);
+    if (launch) {
+      return launch;
     }
   }
 
   throw new Error(
-    "gxserver CLI build output is missing. Run `npm run build` in gxserver/ for development, or reinstall Ghostex so gxserver/dist/src/cli.js is present.",
+    "Bundled Rust gxserver is missing. Rebuild or reinstall Ghostex so Web/gxserver/bin/gxserver is present, or set GHOSTEX_GXSERVER_CLI/BIN for an explicit source/reference daemon.",
   );
 }
 
-function resolveGxserverCliLaunchForPath(cliPath) {
-  const resolvedPath = path.resolve(cliPath);
+function resolveGxserverCliLaunchFromRoot(root) {
+  if (!root) {
+    return undefined;
+  }
+  /*
+   * CDXC:GxserverRustPackaging 2026-06-16-10:35:
+   * Phase 8 installed `gx server ...` commands should launch the packaged Rust daemon from Web/gxserver/bin/gxserver by default. Keep TypeScript usable only through explicit GHOSTEX_GXSERVER_CLI/BIN paths so protocol reference builds cannot silently become the packaged daemon.
+   */
+  for (const candidate of [
+    path.join(root, "gxserver", "bin", "gxserver"),
+    path.join(root, "native", "macos", "ghostexHost", "Web", "gxserver", "bin", "gxserver"),
+  ]) {
+    if (fileExistsSync(candidate)) {
+      return resolveGxserverCliLaunchForPath(candidate);
+    }
+  }
+  return undefined;
+}
+
+function resolveGxserverCliLaunchForPath(cliPath, options = {}) {
+  const resolvedPath = resolveGxserverCliPath(cliPath, options);
   if (!fileExistsSync(resolvedPath)) {
     throw new Error(`gxserver CLI path does not exist: ${resolvedPath}`);
   }
-  return path.extname(resolvedPath) === ".js"
-    ? { args: [resolvedPath], command: process.execPath, cwd: undefined, env: process.env }
-    : { args: [], command: resolvedPath, cwd: undefined, env: process.env };
+  if (path.extname(resolvedPath) === ".js") {
+    return { args: [resolvedPath], command: process.execPath, cwd: undefined, env: process.env };
+  }
+  if (!isExecutableFileSync(resolvedPath)) {
+    throw new Error(`gxserver binary is not executable: ${resolvedPath}`);
+  }
+  return { args: [], command: resolvedPath, cwd: undefined, env: process.env };
+}
+
+function resolveGxserverCliPath(cliPath, options = {}) {
+  const normalizedPath = String(cliPath ?? "").trim();
+  if (!normalizedPath) {
+    return path.resolve("");
+  }
+  if (path.isAbsolute(normalizedPath) || !options.explicit) {
+    return path.resolve(normalizedPath);
+  }
+  /*
+   * CDXC:GxserverRustPort 2026-06-14-21:09:
+   * Phase 2 Rust opt-in uses the existing GHOSTEX_GXSERVER_CLI/BIN hooks. Resolve explicit relative paths against the current shell and source-root hints so developers can point `gx server ...` at gxserver-rs/target/debug/gxserver without changing the TypeScript default or falling back when the opt-in path is wrong.
+   */
+  const sourceRoot = findGhostexSourceRoot(process.cwd());
+  const candidates = uniquePaths([
+    path.resolve(process.cwd(), normalizedPath),
+    process.env.GHOSTEX_SOURCE_ROOT && path.join(process.env.GHOSTEX_SOURCE_ROOT, normalizedPath),
+    process.env.ghostex_REPO_ROOT && path.join(process.env.ghostex_REPO_ROOT, normalizedPath),
+    sourceRoot && path.join(sourceRoot, normalizedPath),
+  ]);
+  return candidates.find(fileExistsSync) ?? path.resolve(normalizedPath);
 }
 
 function resolveGhostexTuiLaunch(flags = {}) {
@@ -4035,6 +4080,15 @@ function uniquePaths(paths) {
 function fileExistsSync(filePath) {
   try {
     realpathSync(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isExecutableFileSync(filePath) {
+  try {
+    accessSync(filePath, fsConstants.X_OK);
     return true;
   } catch {
     return false;
@@ -5731,6 +5785,8 @@ export {
   readAndroidReadinessSettings,
   requestGxserverRpc,
   resolveBundledBeadsLaunchFromRoot,
+  resolveGxserverCliLaunchFromRoot,
+  resolveGxserverCliLaunchForPath,
   resolveGxserverServerTarget,
   resolveListedSessions,
   resolveGhostexTuiLaunchFromRoot,

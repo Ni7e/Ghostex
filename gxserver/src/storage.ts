@@ -2,11 +2,11 @@ import Database from "better-sqlite3";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {
   GXSERVER_LOCAL_API_HOST,
-  GXSERVER_LOCAL_API_PORT,
   GXSERVER_PRODUCT,
   type GxserverListenerConfig,
   type GxserverMigrationStatus,
 } from "../protocol/index.js";
+import { readGxserverLocalApiPort } from "./constants.js";
 import type { GxserverPaths } from "./paths.js";
 import { createTailscaleRemoteListenerConfig, normalizeRemoteListenerConfig } from "./remote-listener.js";
 
@@ -823,8 +823,12 @@ The local API is always a full loopback listener on 127.0.0.1:58744. The remote/
 
 CDXC:GxserverApi 2026-05-30-23:34:
 Config must not silently move the local API because runtime metadata, status checks, CLI callers, and native/sidebar clients use the fixed 127.0.0.1:58744 contract. Startup fails with a clear validation error when config.json attempts to override listeners.local.host or listeners.local.port, while remote listener host/port remain configurable.
+
+CDXC:GxserverRustPort 2026-06-14-21:58:
+The Rust-port compatibility harness may explicitly select a dev-only local port through GHOSTEX_GXSERVER_DEV_PORT. Treat that port as the listener default only for that process environment, keeping config.json overrides invalid and preserving 58744 as the product protocol default.
 */
 export function createDefaultGxserverConfig(): GxserverConfig {
+  const localPort = readGxserverLocalApiPort();
   return {
     cors: {
       allowedOrigins: [...DEFAULT_GXSERVER_CORS_ALLOWED_ORIGINS],
@@ -835,7 +839,7 @@ export function createDefaultGxserverConfig(): GxserverConfig {
         enabled: true,
         host: GXSERVER_LOCAL_API_HOST,
         kind: "local",
-        port: GXSERVER_LOCAL_API_PORT,
+        port: localPort,
       },
       remote: {
         ...createTailscaleRemoteListenerConfig({ enabled: false }),

@@ -33,6 +33,8 @@ import {
   readAndroidReadinessSettings,
   requestGxserverRpc,
   resolveBundledBeadsLaunchFromRoot,
+  resolveGxserverCliLaunchFromRoot,
+  resolveGxserverCliLaunchForPath,
   resolveGxserverServerTarget,
   resolveGhostexTuiLaunchFromRoot,
   resolveListedSessions,
@@ -302,6 +304,113 @@ printf 'forwarded:%s\\n' "$1"
       expect(result.stderr).toBe("");
       expect(result.stdout).toContain("forwarded:status");
       expect((await readFile(markerPath, "utf8")).trim().split("\n")).toEqual(["status", "--json"]);
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  test("forwards gx server subcommands to an explicit gxserver binary path", async () => {
+    /*
+     * CDXC:GxserverRustPort 2026-06-14-21:09:
+     * Phase 2 Rust CLI opt-in uses GHOSTEX_GXSERVER_BIN as a hard selection. A relative gxserver-rs/target/debug/gxserver path must resolve from the caller's development root and must not fall back to the TypeScript CLI.
+     */
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-gxserver-rust-bin-"));
+    const markerPath = path.join(tempDir, "argv.txt");
+    const gxserverBinPath = path.join(tempDir, "gxserver-rs", "target", "debug", "gxserver");
+    try {
+      await mkdir(path.dirname(gxserverBinPath), { recursive: true });
+      await writeFile(
+        gxserverBinPath,
+        `#!/bin/sh
+printf '%s\\n' "$@" > ${JSON.stringify(markerPath)}
+printf 'rust-forwarded:%s\\n' "$1"
+`,
+      );
+      await chmod(gxserverBinPath, 0o755);
+
+      const result = await execFileAsync(process.execPath, [
+        path.resolve("scripts/ghostex-cli.mjs"),
+        "server",
+        "status",
+        "--json",
+      ], {
+        cwd: tempDir,
+        env: {
+          ...process.env,
+          GHOSTEX_GXSERVER_BIN: "gxserver-rs/target/debug/gxserver",
+        },
+      });
+
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("rust-forwarded:status");
+      expect((await readFile(markerPath, "utf8")).trim().split("\n")).toEqual(["status", "--json"]);
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  test("resolves bundled Rust gxserver from app resources without falling back to TypeScript output", async () => {
+    /*
+     * CDXC:GxserverRustPackaging 2026-06-16-10:35:
+     * Phase 8 packaged `gx server ...` defaults to Web/gxserver/bin/gxserver. TypeScript dist output remains a reference/explicit target, not an automatic packaged daemon fallback.
+     */
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-gxserver-rust-default-"));
+    try {
+      const rustRoot = path.join(tempDir, "rust-app");
+      const rustBinPath = path.join(rustRoot, "gxserver", "bin", "gxserver");
+      const referenceCliPath = path.join(rustRoot, "gxserver", "dist", "src", "cli.js");
+      await mkdir(path.dirname(rustBinPath), { recursive: true });
+      await mkdir(path.dirname(referenceCliPath), { recursive: true });
+      await writeFile(rustBinPath, "#!/bin/sh\n");
+      await writeFile(referenceCliPath, "console.log('reference');\n");
+      await chmod(rustBinPath, 0o755);
+
+      expect(resolveGxserverCliLaunchFromRoot(rustRoot)).toMatchObject({
+        args: [],
+        command: rustBinPath,
+      });
+
+      const referenceOnlyRoot = path.join(tempDir, "reference-only");
+      await mkdir(path.join(referenceOnlyRoot, "gxserver", "dist", "src"), { recursive: true });
+      await writeFile(path.join(referenceOnlyRoot, "gxserver", "dist", "src", "cli.js"), "console.log('reference');\n");
+      expect(resolveGxserverCliLaunchFromRoot(referenceOnlyRoot)).toBeUndefined();
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  test("does not fall back to TypeScript when explicit gxserver binary is invalid", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-gxserver-missing-bin-"));
+    try {
+      await expect(execFileAsync(process.execPath, [
+        path.resolve("scripts/ghostex-cli.mjs"),
+        "server",
+        "status",
+        "--json",
+      ], {
+        cwd: tempDir,
+        env: {
+          ...process.env,
+          GHOSTEX_GXSERVER_BIN: "gxserver-rs/target/debug/gxserver",
+        },
+      })).rejects.toMatchObject({
+        stdout: expect.stringContaining("gxserver CLI path does not exist"),
+      });
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  test("rejects a non-executable explicit gxserver binary before launch", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-gxserver-nonexec-bin-"));
+    const gxserverBinPath = path.join(tempDir, "gxserver-rs", "target", "debug", "gxserver");
+    try {
+      await mkdir(path.dirname(gxserverBinPath), { recursive: true });
+      await writeFile(gxserverBinPath, "#!/bin/sh\n");
+
+      expect(() => resolveGxserverCliLaunchForPath(gxserverBinPath, { explicit: true })).toThrow(
+        /gxserver binary is not executable/u,
+      );
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }

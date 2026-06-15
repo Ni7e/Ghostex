@@ -106,6 +106,8 @@ export function projectPresentationSession(
   const titleProjection = projectSessionTitle(session);
   const activityState = normalizePresentationActivityState(session.runtimeSettings.agentActivity, generatedAt);
   const titleObservation = normalizeTitleObservationState(session.runtimeSettings.zmxTitleObservation);
+  const providerSessionState = providerSessionStateForDomainSession(session);
+  const sessionPersistenceProvider = sessionPersistenceProviderForDomainSession(session);
   const agentName = readText(session.runtimeSettings.agentName) ?? session.agentId;
   const agentSessionId = readText(session.runtimeSettings.agentSessionId);
   const agentSessionPath = readText(session.runtimeSettings.agentSessionPath);
@@ -147,9 +149,11 @@ export function projectPresentationSession(
     kind: session.kind,
     lastActiveAt: presentationLastActiveAt,
     lifecycleState,
+    providerSessionState,
     ...(titleProjection.primaryTitle !== undefined ? { primaryTitle: titleProjection.primaryTitle } : {}),
     projectId: session.projectId,
     sessionId: session.sessionId,
+    ...(sessionPersistenceProvider ? { sessionPersistenceProvider } : {}),
     ...(session.sessionTag ? { sessionTag: session.sessionTag } : {}),
     ...(session.sidebarOrder !== undefined ? { sidebarOrder: session.sidebarOrder } : {}),
     sortKey: sessionSortKey(session),
@@ -182,9 +186,10 @@ function presentationSessionActions(
   const isRunning = lifecycleState === "running";
   const isSleeping = lifecycleState === "sleeping";
   const isStopped = lifecycleState === "stopped";
-  const providerExists = hasActiveProviderSession(session);
-  const isLive = isRunning || providerExists;
-  const canAttach = isRunning || isSleeping || providerExists;
+  const providerSessionState = providerSessionStateForDomainSession(session);
+  const providerExists = providerSessionState === "exists";
+  const isLive = providerExists;
+  const canAttach = providerExists || (isRunning && providerSessionState === "unknown") || isSleeping;
   const canInteract = isLive && !isSleeping && !isStopped;
   return {
     acknowledgeAttention: activity === "attention",
@@ -213,7 +218,40 @@ function effectivePresentationLifecycleState(
 }
 
 function hasActiveProviderSession(session: GxserverSessionDomainState): boolean {
-  return session.lifecycleState !== "stopped" && session.providerState.lifecycleState === "exists";
+  return session.lifecycleState !== "stopped" && providerSessionStateForDomainSession(session) === "exists";
+}
+
+/*
+CDXC:GxserverPresentation 2026-06-15-17:32:
+Sidebar rows need provider liveness separately from domain lifecycle. A row can be `running` because native has a mounted pane, while gxserver still knows the zmx provider is missing or persistence is disabled; publish that distinction so clients do not treat every running row as a valid zmx focus target.
+*/
+function providerSessionStateForDomainSession(
+  session: GxserverSessionDomainState,
+): GxserverPresentationSession["providerSessionState"] {
+  const provider = readSessionPersistenceProvider(session);
+  if (provider === "off") {
+    return "persistence-disabled";
+  }
+  switch (session.providerState.lifecycleState) {
+    case "exists":
+      return "exists";
+    case "missing":
+      return "missing";
+    case "unknown":
+    default:
+      return "unknown";
+  }
+}
+
+function sessionPersistenceProviderForDomainSession(
+  session: GxserverSessionDomainState,
+): GxserverPresentationSession["sessionPersistenceProvider"] | undefined {
+  const provider = readSessionPersistenceProvider(session);
+  return provider === "tmux" || provider === "zellij" || provider === "zmx" ? provider : undefined;
+}
+
+function readSessionPersistenceProvider(session: GxserverSessionDomainState): string | undefined {
+  return readText(session.runtimeSettings.sessionPersistenceProvider) ?? readText(session.providerState.provider);
 }
 
 export function isActivePresentationSession(session: GxserverSessionDomainState): boolean {

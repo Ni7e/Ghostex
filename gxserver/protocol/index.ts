@@ -1056,6 +1056,12 @@ export interface GxserverPresentationSessionActions {
   wake: boolean;
 }
 
+/*
+CDXC:GxserverPresentation 2026-06-15-17:32:
+Presentation clients need provider liveness as a first-class field because domain lifecycle and native pane lifecycle are separate resources. A row can remain visible while its zmx provider is missing or persistence is disabled, and clients must not infer provider existence from `running` alone.
+*/
+export type GxserverPresentationProviderSessionState = "exists" | "missing" | "persistence-disabled" | "unknown";
+
 export interface GxserverPresentationProject {
   createdAt: string;
   groupIds: readonly string[];
@@ -1096,8 +1102,10 @@ export interface GxserverPresentationSession {
   kind: GxserverSessionKind;
   lastActiveAt?: string;
   lifecycleState: GxserverDomainLifecycleState;
+  providerSessionState: GxserverPresentationProviderSessionState;
   projectId: GxserverProjectId;
   sessionId: GxserverSessionId;
+  sessionPersistenceProvider?: "tmux" | "zmx" | "zellij";
   sessionTag?: GxserverSessionTag;
   sidebarOrder?: number;
   sortKey: string;

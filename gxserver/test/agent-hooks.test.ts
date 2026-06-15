@@ -562,6 +562,11 @@ test("gxserver notify hook exits cleanly with open stdin and concurrent events",
           prompt: `prompt ${index}`,
           session_id: `codex-runtime-${index}`,
         }),
+        /*
+        CDXC:AgentHooks 2026-06-14-23:15:
+        This test intentionally starts many hook scripts at once to catch shared-state races. Allow extra process-startup time so loaded CI/dev machines validate hook exit behavior instead of failing on Node startup contention.
+        */
+        timeoutMs: 10_000,
       })),
     );
     for (const result of results) {
@@ -657,6 +662,7 @@ test("gxserver notify hook maps Claude Stop to idle and installs Claude lifecycl
         status: "attention",
         transcript_path: "/Users/person/.claude/projects/-repo/9970b270-b39f-4d63-a764-fa8d88083995.jsonl",
       }),
+      timeoutMs: 10_000,
     });
 
     assert.equal(result.code, 0);

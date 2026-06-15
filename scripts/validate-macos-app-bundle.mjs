@@ -51,7 +51,6 @@ async function validateBundledCodeServerRuntime({ arch, resourcesRoot }) {
   const codeServerVscodeEntrypoint = path.join(codeServerRoot, "lib", "vscode", "out", "server-main.js");
   const codeServerVscodeRipgrep = path.join(codeServerRoot, "lib", "vscode", "node_modules", "@vscode", "ripgrep", "bin", "rg");
   const obsoleteWebNode = path.join(resourcesRoot, "bin", "node");
-  const gxserverRuntimePath = path.join(resourcesRoot, "gxserver", "native-runtime.json");
 
   /*
    CDXC:CodeServerRuntime 2026-06-09-17:06:
@@ -63,7 +62,6 @@ async function validateBundledCodeServerRuntime({ arch, resourcesRoot }) {
     codeServerEntrypoint,
     codeServerVscodeEntrypoint,
     codeServerVscodeRipgrep,
-    gxserverRuntimePath,
   ]);
   if (existsSync(obsoleteWebNode)) {
     throw new MacosAppBundleValidationError(
@@ -78,6 +76,37 @@ async function validateBundledCodeServerRuntime({ arch, resourcesRoot }) {
   await assertMachOContainsArch(codeServerVscodeRipgrep, arch);
   runFile(codeServerVscodeRipgrep, ["--version"], { label: "VS Code ripgrep --version smoke test" });
 
+  await validateBundledGxserverRuntime({ arch, resourcesRoot });
+}
+
+async function validateBundledGxserverRuntime({ arch, resourcesRoot }) {
+  const gxserverRoot = path.join(resourcesRoot, "gxserver");
+  const gxserverRuntimePath = path.join(gxserverRoot, "native-runtime.json");
+  const rustGxserverBinary = path.join(gxserverRoot, "bin", "gxserver");
+  const bundledDatabaseModulePath = path.join(
+    gxserverRoot,
+    "node_modules",
+    "better-sqlite3",
+    "build",
+    "Release",
+    "better_sqlite3.node",
+  );
+  /*
+   CDXC:GxserverRustPackaging 2026-06-16-01:30:
+   Phase 8 app validation must accept the Rust gxserver package shape without Node ABI metadata while still rejecting stale TypeScript packages that lost native-runtime.json. A Rust package is identified by its native bin/gxserver plus no bundled better-sqlite3 module.
+   */
+  if (existsSync(rustGxserverBinary) && !existsSync(gxserverRuntimePath) && !existsSync(bundledDatabaseModulePath)) {
+    await assertRequiredPaths(arch, "bundled Rust gxserver resource", [
+      rustGxserverBinary,
+      path.join(gxserverRoot, "build-identity.json"),
+      path.join(gxserverRoot, "dist", "protocol", "index.js"),
+      path.join(gxserverRoot, "dist", "protocol", "index.d.ts"),
+    ]);
+    await assertMachOContainsArch(rustGxserverBinary, arch);
+    return;
+  }
+
+  await assertRequiredPaths(arch, "gxserver native runtime metadata", [gxserverRuntimePath]);
   const nativeRuntime = JSON.parse(await readFile(gxserverRuntimePath, "utf8"));
   if (
     nativeRuntime.nodeMajor !== 22 ||
@@ -91,10 +120,7 @@ async function validateBundledCodeServerRuntime({ arch, resourcesRoot }) {
       `${arch} gxserver native-runtime.json must target bundled Node 22, record NODE_MODULE_VERSION, and include better-sqlite3.`,
     );
   }
-  await assertMachOContainsArch(
-    path.join(resourcesRoot, "gxserver", "node_modules", "better-sqlite3", "build", "Release", "better_sqlite3.node"),
-    arch,
-  );
+  await assertMachOContainsArch(bundledDatabaseModulePath, arch);
 }
 
 async function validateBundledResourceShape({ arch, resourcesRoot, expectedNodePtyPrebuild }) {

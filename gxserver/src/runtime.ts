@@ -1,12 +1,12 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import {
-  GXSERVER_LOCAL_API_PORT,
   GXSERVER_PRODUCT,
   GXSERVER_PROTOCOL_VERSION,
   type GxserverRuntimeMetadata,
   type GxserverServerHealthResponse,
   type GxserverStatusResponse,
 } from "../protocol/index.js";
+import { readGxserverLocalApiPort } from "./constants.js";
 import type { GxserverPaths } from "./paths.js";
 
 export async function writeRuntimeMetadata(
@@ -23,7 +23,7 @@ export async function readRuntimeMetadata(paths: GxserverPaths): Promise<Gxserve
     if (
       typeof parsed.buildIdentity === "string" &&
       typeof parsed.pid === "number" &&
-      parsed.port === GXSERVER_LOCAL_API_PORT &&
+      parsed.port === readGxserverLocalApiPort() &&
       parsed.protocolVersion === GXSERVER_PROTOCOL_VERSION &&
       typeof parsed.serverId === "string" &&
       typeof parsed.startedAt === "string" &&

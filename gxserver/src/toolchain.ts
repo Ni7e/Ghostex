@@ -209,8 +209,21 @@ function bundledToolCandidates(
   const gxserverRoot = options.gxserverRoot ?? defaultGxserverRoot();
   const repoRoot = options.repoRoot ?? path.resolve(gxserverRoot, "..");
   const resourcesPath = options.resourcesPath ?? defaultResourcesPath();
+  const sourceRoot = options.repoRoot ?? defaultSourceRoot();
 
   return dedupeCandidates([
+    /*
+    CDXC:GxserverRustPort 2026-06-15-18:06:
+    Phase 5 source-tree compatibility runs need the TypeScript daemon to resolve the same Ghostex-managed zmx artifact as Rust without consulting PATH. Honor an explicit source-root environment override only as another pinned development layout.
+    */
+    ...(sourceRoot
+      ? [
+          {
+            executablePath: path.join(sourceRoot, tool, "zig-out", "bin", tool),
+            source: "devSubmodule" as const,
+          },
+        ]
+      : []),
     {
       executablePath: path.join(repoRoot, tool, "zig-out", "bin", tool),
       source: "devSubmodule",
@@ -373,6 +386,11 @@ function defaultGxserverRoot(): string {
 
 function defaultResourcesPath(): string | undefined {
   return (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+}
+
+function defaultSourceRoot(): string | undefined {
+  const candidate = process.env.GHOSTEX_SOURCE_ROOT ?? process.env.ghostex_REPO_ROOT;
+  return candidate && path.isAbsolute(candidate) ? candidate : undefined;
 }
 
 function isWsl(options: GxserverToolchainLayoutOptions): boolean {

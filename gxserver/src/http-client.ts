@@ -1,6 +1,5 @@
 import {
   GXSERVER_LOCAL_API_HOST,
-  GXSERVER_LOCAL_API_PORT,
   GXSERVER_PRODUCT,
   GXSERVER_PROTOCOL_VERSION,
   type GxserverAuthToken,
@@ -8,8 +7,7 @@ import {
   type GxserverServerHealthResponse,
 } from "../protocol/index.js";
 import { GXSERVER_PROTOCOL_HEADER } from "./api.js";
-
-const LOCAL_BASE_URL = `http://${GXSERVER_LOCAL_API_HOST}:${GXSERVER_LOCAL_API_PORT}`;
+import { readGxserverLocalApiPort } from "./constants.js";
 
 export class GxserverProtocolMismatchError extends Error {
   readonly mismatch: GxserverProtocolMismatch;
@@ -81,7 +79,7 @@ async function fetchLocalJson(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
   try {
-    const response = await fetch(`${LOCAL_BASE_URL}${path}`, {
+    const response = await fetch(`http://${GXSERVER_LOCAL_API_HOST}:${readGxserverLocalApiPort()}${path}`, {
       headers: {
         [GXSERVER_PROTOCOL_HEADER]: String(GXSERVER_PROTOCOL_VERSION),
         ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),

@@ -15,6 +15,7 @@ const installDir = process.env.INSTALL_DIR || "/Applications";
 const protocolVersion = 1;
 const gxserverBaseUrl = "http://127.0.0.1:58744";
 const startEnvironment = withoutColorDisablingEnvironment(process.env);
+const gxserverOptInLaunchEnvironmentKeys = ["GHOSTEX_GXSERVER_CLI", "GHOSTEX_GXSERVER_BIN"];
 
 validateStartArguments(process.argv.slice(2), process.env.GHOSTEX_APP_VARIANT);
 /*
@@ -33,6 +34,11 @@ Ghostex-dev local starts were removed because agents were launching the alternat
 */
 const appName = "Ghostex";
 const bundleId = "com.madda.ghostex.host";
+/*
+CDXC:MacOSPermissions 2026-06-16-02:27:
+Screen Recording TCC grants follow the app's code-signing requirement. Local starts must prefer a stable Apple signing identity when one is available instead of ad-hoc cdhash-only signatures, otherwise rebuilt Ghostex binaries can look like new screen-capture clients even with the same bundle id and /Applications path.
+*/
+const localStartCodeSignIdentity = resolveLocalStartCodeSignIdentity(startEnvironment);
 const buildEnv = {
   ...startEnvironment,
   CONFIGURATION: configuration,
@@ -40,7 +46,9 @@ const buildEnv = {
   GHOSTEX_APP_DISPLAY_NAME: appName,
   GHOSTEX_APP_VARIANT: "prod",
   GHOSTEX_BUNDLE_ID: bundleId,
+  GHOSTEX_CODE_SIGN_IDENTITY: localStartCodeSignIdentity,
   GHOSTEX_HOME_DIRECTORY_NAME: ".ghostex",
+  GHOSTEX_LOCAL_START: "1",
   GHOSTEX_MACOS_ARCH: arch,
   GHOSTEX_SHARED_HOME_DIRECTORY_NAME: ".ghostex",
 };
@@ -139,6 +147,42 @@ function resolveLocalStartConfiguration(explicitConfiguration) {
     return normalized;
   }
   return "Release";
+}
+
+function resolveLocalStartCodeSignIdentity(environment) {
+  if (Object.hasOwn(environment, "GHOSTEX_CODE_SIGN_IDENTITY")) {
+    return environment.GHOSTEX_CODE_SIGN_IDENTITY ?? "";
+  }
+  const identities = listCodeSigningIdentities(environment);
+  const preferredIdentity =
+    identities.find((identity) => identity.name.startsWith("Apple Development: ")) ??
+    identities.find((identity) => identity.name.startsWith("Mac Developer: ")) ??
+    identities.find((identity) => identity.name.startsWith("Developer ID Application: ")) ??
+    identities.find((identity) => identity.name.startsWith("Apple Distribution: "));
+  if (preferredIdentity) {
+    return preferredIdentity.name;
+  }
+  console.warn(
+    "No Apple code-signing identity was found; falling back to ad-hoc signing. macOS may ask for Screen Recording again after Ghostex rebuilds.",
+  );
+  return "-";
+}
+
+function listCodeSigningIdentities(environment) {
+  const result = spawnSync("security", ["find-identity", "-v", "-p", "codesigning"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: environment,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.error || result.status !== 0) {
+    return [];
+  }
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.match(/^\s*\d+\)\s+([A-Fa-f0-9]{40})\s+"([^"]+)"/))
+    .filter(Boolean)
+    .map((match) => ({ hash: match[1], name: match[2] }));
 }
 
 function normalizeMacosArch(value) {
@@ -456,7 +500,7 @@ async function installAndOpenApp(appPath) {
   Install local builds to the stable /Applications app path before launching so macOS Accessibility permission remains attached to the same signed app identity across rebuilds.
 
   CDXC:LocalStartGxserver 2026-06-07-12:02:
-  A local start must prove the installed, signed gxserver bundle can load its native database module with the same Node runtime the macOS app will resolve. Run that preflight after codesign and before `open` so a bad native module signature or Node ABI stops the launch instead of letting the sidebar emit misleading health and Git API failures.
+  A local start must prove the installed, signed gxserver bundle has a launchable daemon shape. Rust packages validate native daemon markers directly; legacy JavaScript packages still validate the database module against the same Node runtime the macOS app will resolve.
 
   CDXC:CodeServerSubmodule 2026-06-07-11:20:
   Dev local starts launch Ghostex through LaunchServices from /Applications, which gives the app cwd `/` and drops the invoking shell environment. Publish the repo root and root code-server submodule path through launchd only for dev-env starts so production `bun run start` stays release-shaped and uses bundled app resources.
@@ -471,7 +515,7 @@ async function installAndOpenApp(appPath) {
   Local starts should mirror the already signed build product into /Applications incrementally and verify the copied signature before signing. Re-sign only when verification fails so unchanged CEF, gxserver node_modules, and app resources do not get re-copied and re-signed on every relaunch.
 
   CDXC:LocalStartFast 2026-06-07-17:32:
-  Outer app verification is not enough for bundled Node modules: linker-signed `.node` files can verify on disk but fail the runtime load preflight. Refuse the skip path when a preflighted native module is still linker-signed so local starts produce a launchable app instead of stopping after the rebuild.
+  Outer app verification is not enough for legacy bundled Node modules: linker-signed `.node` files can verify on disk but fail the runtime load preflight. Refuse the skip path when a preflighted native module is still linker-signed so local starts produce a launchable app instead of stopping after the rebuild.
   */
   syncInstalledAppBundle(appPath);
   ensureInstalledAppCodeSignature(installedApp);
@@ -490,11 +534,13 @@ function ensureInstalledAppCodeSignature(appPath) {
     console.log(`Installed ${appName} signature is current; skipping re-sign.`);
     return;
   }
-  run(path.join(hostScriptDir, "codesign-ghostex-host.sh"), [appPath]);
+  run(path.join(hostScriptDir, "codesign-ghostex-host.sh"), [appPath], { env: buildEnv });
 }
 
 function hasReusableInstalledAppCodeSignature(appPath) {
-  return hasValidInstalledAppCodeSignature(appPath) && !hasLinkerSignedBundledNativeModules(appPath);
+  return hasValidInstalledAppCodeSignature(appPath) &&
+    hasExpectedInstalledAppSigningIdentity(appPath) &&
+    !hasLinkerSignedBundledNativeModules(appPath);
 }
 
 function hasValidInstalledAppCodeSignature(appPath) {
@@ -508,6 +554,42 @@ function hasValidInstalledAppCodeSignature(appPath) {
     throw result.error;
   }
   return result.status === 0;
+}
+
+function hasExpectedInstalledAppSigningIdentity(appPath) {
+  const signatureDetails = readCodeSignatureDetails(appPath);
+  if (!signatureDetails) {
+    return false;
+  }
+  return signatureDetailsMatchesExpectedIdentity(signatureDetails);
+}
+
+function readCodeSignatureDetails(codePath) {
+  const result = spawnSync("codesign", ["-dv", "--verbose=4", codePath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: startEnvironment,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    return "";
+  }
+  return `${result.stderr}\n${result.stdout}`;
+}
+
+function signatureDetailsMatchesExpectedIdentity(signatureDetails) {
+  const identity = localStartCodeSignIdentity.trim();
+  if (identity === "-") {
+    return signatureDetails.includes("Signature=adhoc");
+  }
+  if (/^[A-Fa-f0-9]{40}$/.test(identity)) {
+    return !signatureDetails.includes("Signature=adhoc") &&
+      !signatureDetails.includes("TeamIdentifier=not set");
+  }
+  return signatureDetails.includes(`Authority=${identity}`);
 }
 
 function hasLinkerSignedBundledNativeModules(appPath) {
@@ -555,9 +637,10 @@ function publishLaunchServicesDevelopmentEnvironment() {
 function prepareLaunchServicesEnvironment() {
   if (shouldPublishLaunchServicesDevelopmentEnvironment()) {
     publishLaunchServicesDevelopmentEnvironment();
-    return;
+  } else {
+    clearLaunchServicesDevelopmentEnvironment();
   }
-  clearLaunchServicesDevelopmentEnvironment();
+  publishLaunchServicesGxserverOptInEnvironment();
 }
 
 function shouldPublishLaunchServicesDevelopmentEnvironment() {
@@ -576,12 +659,31 @@ function clearLaunchServicesDevelopmentEnvironment() {
   }
 }
 
+function publishLaunchServicesGxserverOptInEnvironment() {
+  /*
+  CDXC:GxserverRustPort 2026-06-14-21:09:
+  Phase 2 keeps TypeScript gxserver as the default, but an explicit local-start GHOSTEX_GXSERVER_CLI/BIN must reach the LaunchServices-started macOS app so developers can opt into gxserver-rs without stale launchd variables silently selecting Rust later.
+  */
+  for (const key of gxserverOptInLaunchEnvironmentKeys) {
+    const value = process.env[key]?.trim();
+    if (value) {
+      run("launchctl", ["setenv", key, value], { stdio: "ignore" });
+    } else {
+      run("launchctl", ["unsetenv", key], { allowFailure: true, stdio: "ignore" });
+    }
+  }
+}
+
 function preflightInstalledGxserverBundle(appPath) {
   const gxserverRoot = path.join(appPath, "Contents", "Resources", "Web", "gxserver");
   if (!existsSync(gxserverRoot)) {
     throw new Error(`Installed ${appName} is missing the bundled gxserver package.`);
   }
   verifyInstalledAppCodeSignature(appPath);
+  if (isBundledRustGxserverPackage(gxserverRoot)) {
+    preflightBundledRustGxserverPackage(gxserverRoot);
+    return;
+  }
   const runtime = readBundledGxserverNativeRuntime(appPath);
   const nodeResolution = resolveBundledNodeForGxserverPreflight(appPath, runtime);
   const dependencyError = gxserverNodeDependencyError(nodeResolution, runtime);
@@ -589,6 +691,38 @@ function preflightInstalledGxserverBundle(appPath) {
     throw new Error(dependencyError);
   }
   bundledNativeModulePreflightPaths(gxserverRoot, runtime);
+}
+
+function isBundledRustGxserverPackage(gxserverRoot) {
+  const runtimePath = path.join(gxserverRoot, "native-runtime.json");
+  const bundledDatabaseModulePath = path.join(
+    gxserverRoot,
+    "node_modules",
+    "better-sqlite3",
+    "build",
+    "Release",
+    "better_sqlite3.node",
+  );
+  return existsSync(path.join(gxserverRoot, "bin", "gxserver")) &&
+    !existsSync(runtimePath) &&
+    !existsSync(bundledDatabaseModulePath);
+}
+
+function preflightBundledRustGxserverPackage(gxserverRoot) {
+  /*
+  CDXC:GxserverRustPackaging 2026-06-16-01:30:
+  Phase 8 Rust gxserver packages do not need Node ABI metadata or JavaScript database-addon preflight. Local start should validate the native daemon package markers directly and leave code-server Node validation to the shared app-bundle validator.
+  */
+  for (const requiredPath of [
+    path.join(gxserverRoot, "bin", "gxserver"),
+    path.join(gxserverRoot, "build-identity.json"),
+    path.join(gxserverRoot, "dist", "protocol", "index.js"),
+    path.join(gxserverRoot, "dist", "protocol", "index.d.ts"),
+  ]) {
+    if (!existsSync(requiredPath)) {
+      throw new Error(`Installed ${appName} is missing a required Rust gxserver package resource.`);
+    }
+  }
 }
 
 function verifyInstalledAppCodeSignature(appPath) {

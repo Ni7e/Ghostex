@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const gxserverRoot = path.resolve(scriptDir, "..");
 const distRoot = path.join(gxserverRoot, "dist");
-const packageDir = path.resolve(process.argv.includes("--package-dir") ? process.argv[process.argv.indexOf("--package-dir") + 1] : path.join(distRoot, "server-package"));
+const defaultPackageDir = path.join(distRoot, "server-package");
+const packageDir = path.resolve(process.argv.includes("--package-dir") ? process.argv[process.argv.indexOf("--package-dir") + 1] : defaultPackageDir);
 const formulaPath = path.join(distRoot, "homebrew", "gxserver.rb");
 const appNativeNodeMajor = 22;
 
@@ -19,23 +20,30 @@ CDXC:GxserverPackagingChecks 2026-06-08-10:46:
 Project board first-open behavior depends on a bundled upstream Beads CLI. Treat `bin/bd` as a required package executable beside zmx and zehn so release artifacts cannot silently fall back to a missing PATH dependency.
 */
 await assertInsideDist(packageDir, "server package");
-await assertFile(path.join(packageDir, "dist", "src", "cli.js"));
+const packageMode = await detectPackageMode(packageDir);
 await assertFile(path.join(packageDir, "dist", "protocol", "index.js"));
+await assertFile(path.join(packageDir, "dist", "protocol", "index.d.ts"));
 await assertFile(path.join(packageDir, "build-identity.json"));
 await assertFile(path.join(packageDir, "package.json"));
-await assertFile(path.join(packageDir, "package-lock.json"));
+if (packageMode === "typescript") {
+  await assertFile(path.join(packageDir, "dist", "src", "cli.js"));
+  await assertFile(path.join(packageDir, "package-lock.json"));
+} else {
+  await assertAbsent(path.join(packageDir, "dist", "src", "cli.js"), "Rust gxserver package must not stage the JavaScript daemon.");
+  await assertAbsent(path.join(packageDir, "package-lock.json"), "Rust gxserver package must not carry npm runtime metadata.");
+}
 await assertExecutable(path.join(packageDir, "bin", "gxserver"));
 await assertExecutable(path.join(packageDir, "bin", "zmx"));
 await assertExecutable(path.join(packageDir, "bin", "zehn"));
 await assertExecutable(path.join(packageDir, "bin", "bd"));
 await assertNoBundledNodeRuntime(packageDir);
 await assertNoMacosUiDependency(packageDir);
-const packageVersion = await assertPackageManifest(path.join(packageDir, "package.json"));
+const packageVersion = await assertPackageManifest(path.join(packageDir, "package.json"), packageMode);
 await assertBuildIdentity(path.join(packageDir, "build-identity.json"), packageVersion);
-await assertNativeRuntimeContract(packageDir);
+await assertNativeRuntimeContract(packageDir, packageMode);
 
-if (await exists(formulaPath)) {
-  await assertHomebrewFormula(formulaPath);
+if (packageDir === defaultPackageDir && (await exists(formulaPath))) {
+  await assertHomebrewFormula(formulaPath, packageMode);
 }
 
 console.log(`gxserver package checks passed for ${packageDir}`);
@@ -45,6 +53,17 @@ async function assertInsideDist(candidatePath, label) {
   if (relative.startsWith("..") || path.isAbsolute(relative) || relative === "") {
     throw new Error(`${label} output must be under ${distRoot}.`);
   }
+}
+
+async function detectPackageMode(root) {
+  if (await exists(path.join(root, "dist", "src", "cli.js"))) {
+    return "typescript";
+  }
+  /*
+  CDXC:GxserverRustPackaging 2026-06-16-01:30:
+  Phase 8 adds a Rust package shape where bin/gxserver is the daemon entrypoint and dist/protocol remains for TypeScript clients. Accept that shape without requiring Node, npm lockfiles, or better-sqlite3 metadata.
+  */
+  return "rust";
 }
 
 async function assertFile(filePath) {
@@ -68,10 +87,34 @@ async function exists(filePath) {
   }
 }
 
-async function assertPackageManifest(manifestPath) {
+async function assertAbsent(filePath, message) {
+  if (await exists(filePath)) {
+    throw new Error(message);
+  }
+}
+
+async function assertPackageManifest(manifestPath, packageMode) {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  if (!manifest.engines?.node || !String(manifest.engines.node).includes(">=22")) {
-    throw new Error("gxserver package manifest must declare Node >=22.");
+  if (packageMode === "typescript") {
+    if (!manifest.engines?.node || !String(manifest.engines.node).includes(">=22")) {
+      throw new Error("gxserver package manifest must declare Node >=22.");
+    }
+    return manifest.version ?? "0.0.0";
+  }
+  if (manifest.engines?.node) {
+    throw new Error("Rust gxserver package manifest must not declare a Node runtime requirement.");
+  }
+  if (manifest.bin?.gxserver !== "./bin/gxserver") {
+    throw new Error("Rust gxserver package manifest must point bin.gxserver at ./bin/gxserver.");
+  }
+  if (manifest.dependencies?.["better-sqlite3"] || manifest.devDependencies?.["@types/better-sqlite3"]) {
+    throw new Error("Rust gxserver package manifest must not depend on better-sqlite3.");
+  }
+  if (!manifest.exports?.["./protocol"]?.default || !manifest.exports?.["./protocol"]?.types) {
+    throw new Error("Rust gxserver package manifest must preserve the ./protocol export.");
+  }
+  if (!manifest.version) {
+    throw new Error("Rust gxserver package manifest must declare a package version.");
   }
   return manifest.version ?? "0.0.0";
 }
@@ -88,8 +131,17 @@ async function assertBuildIdentity(identityPath, version) {
   }
 }
 
-async function assertNativeRuntimeContract(root) {
+async function assertNativeRuntimeContract(root, packageMode) {
   const hasBundledBetterSqlite = await exists(path.join(root, "node_modules", "better-sqlite3"));
+  if (packageMode === "rust") {
+    if (hasBundledBetterSqlite) {
+      throw new Error("Rust gxserver package must not bundle better-sqlite3.");
+    }
+    if (await exists(path.join(root, "native-runtime.json"))) {
+      throw new Error("Rust gxserver package must not include gxserver native-runtime.json.");
+    }
+    return;
+  }
   if (!hasBundledBetterSqlite) {
     return;
   }
@@ -116,8 +168,17 @@ async function assertNativeRuntimeContract(root) {
   }
 }
 
-async function assertHomebrewFormula(homebrewFormulaPath) {
+async function assertHomebrewFormula(homebrewFormulaPath, packageMode) {
   const formula = await readFile(homebrewFormulaPath, "utf8");
+  if (packageMode === "rust") {
+    if (formula.includes('depends_on "node@22"') || formula.includes('"npm", "ci"') || formula.includes("dist/src/cli.js")) {
+      throw new Error("Rust Homebrew gxserver formula must not install Node or npm dependencies.");
+    }
+    if (!formula.includes('exec "#{libexec}/bin/gxserver" "$@"')) {
+      throw new Error("Rust Homebrew gxserver formula must launch the packaged native binary.");
+    }
+    return;
+  }
   if (!formula.includes('depends_on "node@22"')) {
     throw new Error("Homebrew gxserver formula must declare node@22.");
   }
