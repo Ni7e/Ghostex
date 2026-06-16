@@ -1,5 +1,6 @@
 
 <!-- CDXC:Distribution 2026-06-16-14:27: The 4.14.0 public feature index needs to match the final release notes for the packaged `gx 2` TUI path, beta-gated browser/tool controls, support-log retention, titlebar Git sync, first-run feature sequencing, and sanitized repository screenshots. -->
+<!-- CDXC:Distribution 2026-06-16-20:37: Public release-facing docs should avoid historical desktop-runtime references while preserving the user-facing behavior summaries for split-layout focus, previous-session restore, integrations, and bundled runtime ownership. -->
 
 ## All features:
 
@@ -15,14 +16,14 @@
 - Browser and project surfaces avoid blank new-tab states, keep beta toolbar controls opt-in, preserve floating prompt-editor work during lifecycle closes, and reveal newly created project sessions more reliably.
 - Native and gxserver support logs prune old history and sample high-volume diagnostics while keeping privacy checks tightened for troubleshooting bundles.
 - TUI session switcher navigation now clamps at list edges and repeats held Up/Down movement faster while still throttling raw terminal repeat bursts.
-- 4.12.0 adds session-first command palette search, command mode through `>`, stricter native pane focus, first-class sleeping pane placeholders, configurable Sidebar Tag filters, Electron split-layout focus, update/App Shots polish, long-list sidebar controls, richer session tooltips, and TUI switcher repeat throttling.
+- 4.12.0 adds session-first command palette search, command mode through `>`, stricter native pane focus, first-class sleeping pane placeholders, configurable Sidebar Tag filters, split-layout focus, update/App Shots polish, long-list sidebar controls, richer session tooltips, and TUI switcher repeat throttling.
 - Cmd+P opens session search across current sessions, active projects, collapsed projects, and previous sessions, while Cmd+Shift+P opens command mode directly.
 - Native pane focus tracks the AppKit first responder and rendered pane geometry so focused borders, directional navigation, command panels, and project-editor companion panes line up with the surface receiving keyboard input.
 - Sleeping pane placeholders keep selected pane and tab chrome visible, show "Press Any Key to Wake", and wake the terminal in place from normal key presses.
 - Sidebar Tag filters can be reordered, hidden, disabled, and reset from Settings without hidden or disabled tags continuing to filter sessions.
-- Electron pane focus follows split-layout geometry and retries terminal focus for more reliable keyboard navigation.
+- Pane focus follows split-layout geometry and retries terminal focus for more reliable keyboard navigation.
 - Sparkle update download animation, App Shots beta defaults, long project list expansion, session tooltip state text, native modal/window polish, and TUI switcher arrow-repeat handling are refreshed for 4.12.0.
-- 4.11.0 improves native layout ownership, pane/tab lifecycle recovery, terminal focus after creation and restore, Previous Sessions identity, sidebar/search polish, denser Project Board workflows, current Claude Code and Codex keybindings, Electron previous-session restore, and Android empty-service startup recovery.
+- 4.11.0 improves native layout ownership, pane/tab lifecycle recovery, terminal focus after creation and restore, Previous Sessions identity, sidebar/search polish, denser Project Board workflows, current Claude Code and Codex keybindings, previous-session restore, and Android empty-service startup recovery.
 - Native titlebar, sidebar, divider, pane, webview, and terminal regions use stricter non-overlapping ownership so clicks, hovers, and focus land on the intended surface.
 - New terminals, forks, and restored panes wait for terminal-ready state before focus moves, keeping keyboard focus on the session the user just opened or restored.
 - Pane tabs stay better synchronized through gxserver reconnects, sleep, wake, close, and remote-backed presentation updates.
@@ -31,7 +32,7 @@
 - Sidebar cards, overflow menus, command palette input, active search, and first-launch or skill-install status rows are tighter and easier to scan.
 - Project Board and Tickets workflows use denser cards, clearer placeholders, and easier-to-read bulk actions and group labels.
 - Claude Code and Codex terminal keybindings match the current prompt-editor and terminal shortcut model.
-- Electron Previous Sessions mirrors macOS previous-session identity preservation, and Android handles empty-service startup recovery more reliably.
+- Previous Sessions mirrors macOS previous-session identity preservation, and Android handles empty-service startup recovery more reliably.
 - 4.10.0 improves native workspace and titlebar integration, preserves split panes during passive restore, adds safer `ghostex`/`gx` command wrappers, expands agent/mobile/App Shots support, refreshes sidebar/settings/titlebar workflows, and strengthens packaged runtime validation for Apple Silicon releases.
 - Native workspace panes, directly mounted project-tab titlebars, app modal windows, and toast routing are integrated with the macOS host for more reliable click routing and focus behavior.
 - Passive sidebar terminal restore preserves workspace split layouts instead of merging panes while session rows and pane tabs resync.
@@ -43,10 +44,10 @@
 - Kiro CLI and OMP can report hook-backed agent status, mobile clients can ingest hook sidecar status, Claude bare `/rename` flows stage first-prompt titles more reliably, and live-process identity repair recognizes path-based agent executables.
 - App Shots can stage captured desktop context in the focused or recent live agent session instead of only Codex, and create the configured default prompt-agent session only when no agent target is available.
 - Sidebar and settings workflows include a collapse command/hotkey, Copy Session Details, Ghostty settings folded into the main settings sections, lazy Agent Hub file loading, and a default Accept All mode setting.
-- Android, iOS, Electron, TUI, and zehn integrations are refreshed for gxserver status, shared app toasts, status colors, grouped history search, and active-request iOS refresh indicators.
+- Android, iOS, TUI, and zehn integrations are refreshed for gxserver status, shared app toasts, status colors, grouped history search, and active-request iOS refresh indicators.
 - Packaged macOS runtime validation checks the bundled code-server Node 22 runtime, ripgrep, T3 Code native helpers, Beads, and source-map pruning without executing sealed native modules during validation.
 - 4.1.5 improves bundled-runtime hook reliability, Claude wake recovery for migrated sessions, sidebar sleep semantics, project-board Beads prefix alignment, Chromium zoom controls, Show less/Close menu settings, remote edit entry points, stale zmx wake activity suppression, and arm64-only macOS distribution.
-- Installed agent hooks, gxserver resume lookup, native sidebar state helpers, and Electron command-pane updates run through Ghostex-owned bundled runtimes instead of `/usr/bin/python3` or user-installed Node interpreters.
+- Installed agent hooks, gxserver resume lookup, native sidebar state helpers, and command-pane updates run through Ghostex-owned bundled runtimes instead of `/usr/bin/python3` or user-installed Node interpreters.
 - Claude sessions migrated from Ghostex 3.6 can wake more reliably because gxserver repair backfills transcript paths and saved resume commands before `claude --resume`.
 - Context-menu Sleep defers to zmx provider shutdown instead of showing a sleeping row while the provider stays alive; Wake and intentional close flows still show immediate sleeping feedback until the host snapshot confirms state.
 - Project board ticket creation reconciles each project's Beads issue prefix before mutations, and local board actions send both project id and project path for safer gxserver routing.
