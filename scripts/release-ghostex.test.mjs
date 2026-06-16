@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   ReleaseError,
   buildGithubReleaseNotes,
+  isHomebrewHostToolchainVersionError,
   renderGhostexCask,
   renderGhostexCaskForTap,
   selectLatestAndroidBuildTool,
@@ -134,5 +135,23 @@ describe("Ghostex release automation helpers", () => {
         "apksigner",
       ),
     ).toBe("/sdk/build-tools/35.0.0/apksigner");
+  });
+
+  test("detects Homebrew host toolchain version diagnostics narrowly", () => {
+    /*
+     * CDXC:ReleaseAutomation 2026-06-16-20:32:
+     * Release automation may skip only local Homebrew validation commands that
+     * are blocked by the host's Xcode/CLT minimum-version diagnostic. Other
+     * Homebrew failures must still fail so cask mistakes do not ship.
+     */
+    expect(
+      isHomebrewHostToolchainVersionError(
+        "Error: Your Xcode (26.5) at /Applications/Xcode.app is too outdated.",
+      ),
+    ).toBe(true);
+    expect(
+      isHomebrewHostToolchainVersionError("Error: Your Command Line Tools are too outdated."),
+    ).toBe(true);
+    expect(isHomebrewHostToolchainVersionError("Error: Cask is missing a sha256.")).toBe(false);
   });
 });

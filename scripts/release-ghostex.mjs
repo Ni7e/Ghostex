@@ -391,6 +391,41 @@ function isGitNetworkResolutionError(error) {
   return /Could not resolve host|unable to access/i.test(message);
 }
 
+function isHomebrewHostToolchainVersionError(error) {
+  const message = String(error?.message ?? error);
+  return (
+    /Your Xcode .*too outdated/i.test(message) ||
+    /Your Command Line Tools are too outdated/i.test(message)
+  );
+}
+
+async function runOptionalHomebrewHostValidation(command, options = {}) {
+  /*
+   * CDXC:ReleaseAutomation 2026-06-16-20:32:
+   * Homebrew can reject local audit/style/fetch commands on macOS beta hosts
+   * when Xcode/CLT lags Homebrew's newest minimum, even though the Ghostex cask
+   * can still be rendered, syntax-checked, pushed, and validated from the tap.
+   * Treat only that host-toolchain diagnostic as a skippable local validation
+   * gap; cask syntax, canonical cask validation, git push, GitHub assets, and
+   * raw live-cask validation remain mandatory.
+   */
+  try {
+    await run(command, options);
+    return true;
+  } catch (error) {
+    if (!isHomebrewHostToolchainVersionError(error)) {
+      throw error;
+    }
+    console.warn(
+      [
+        "Warning: skipping local Homebrew validation because this host's Xcode/CLT is below Homebrew's current minimum.",
+        `Skipped: ${command}`,
+      ].join("\n"),
+    );
+    return false;
+  }
+}
+
 async function readGitHubHttpsCredentials() {
   const creds = await capture("printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill");
   const username = creds.match(/^username=(.+)$/m)?.[1];
@@ -897,10 +932,13 @@ async function verifyHomebrewReleaseReadiness(version) {
      * reversible. Use a rendered placeholder cask and syntax/audit probes that
      * do not depend on the future DMG URL already existing.
      */
-    await run(`HOMEBREW_NO_INSTALL_FROM_API=1 brew audit --cask --skip-style ${shellQuote(config.caskPath)}`, {
-      cwd: tapDir,
-      timeoutMs: releaseTimeouts.brewFetchMs,
-    });
+    await runOptionalHomebrewHostValidation(
+      `HOMEBREW_NO_INSTALL_FROM_API=1 brew audit --cask --skip-style ${shellQuote(config.caskPath)}`,
+      {
+        cwd: tapDir,
+        timeoutMs: releaseTimeouts.brewFetchMs,
+      },
+    );
   } finally {
     await rm(tapDir, { recursive: true, force: true });
   }
@@ -1855,8 +1893,16 @@ async function updateHomebrew(version, artifacts, options) {
    validation and treat unrelated brew update failures as non-blocking once the
    Ghostex cask validates directly.
    */
-  await run(`HOMEBREW_NO_INSTALL_FROM_API=1 brew style --fix --except-cops Homebrew/OSDependsOn ${shellQuote(config.caskPath)}`, { cwd: tapDir });
-  await run(`HOMEBREW_NO_INSTALL_FROM_API=1 brew style --except-cops Homebrew/OSDependsOn ${shellQuote(config.caskPath)}`, { cwd: tapDir });
+  const localStyleValidationAvailable = await runOptionalHomebrewHostValidation(
+    `HOMEBREW_NO_INSTALL_FROM_API=1 brew style --fix --except-cops Homebrew/OSDependsOn ${shellQuote(config.caskPath)}`,
+    { cwd: tapDir },
+  );
+  if (localStyleValidationAvailable) {
+    await runOptionalHomebrewHostValidation(
+      `HOMEBREW_NO_INSTALL_FROM_API=1 brew style --except-cops Homebrew/OSDependsOn ${shellQuote(config.caskPath)}`,
+      { cwd: tapDir },
+    );
+  }
   cask = await readFile(caskFile, "utf8");
   validateGhostexCask(cask, { version, sha256: arm.sha256 });
   await run(`git diff -- ${shellQuote(config.caskPath)}`, { cwd: tapDir });
@@ -1866,23 +1912,65 @@ async function updateHomebrew(version, artifacts, options) {
   const tapCommit = await capture("git rev-parse HEAD", { cwd: tapDir });
 
   if (!options.skipBrewFetch) {
+    let localBrewValidationAvailable = true;
+    let shouldValidateLiveCaskFromTap = false;
     try {
       await run("HOMEBREW_NO_INSTALL_FROM_API=1 brew update --force", { timeoutMs: releaseTimeouts.brewFetchMs });
     } catch (error) {
-      console.warn(
-        `Warning: brew update failed; continuing with direct Ghostex cask validation.\n${String(error.message ?? error)}`,
+      if (isHomebrewHostToolchainVersionError(error)) {
+        localBrewValidationAvailable = false;
+        console.warn(
+          "Warning: skipping local Homebrew fetch validation because this host's Xcode/CLT is below Homebrew's current minimum.",
+        );
+      } else {
+        console.warn(
+          `Warning: brew update failed; continuing with direct Ghostex cask validation.\n${String(error.message ?? error)}`,
+        );
+      }
+    }
+    if (localBrewValidationAvailable) {
+      localBrewValidationAvailable = await runOptionalHomebrewHostValidation(
+        "HOMEBREW_NO_INSTALL_FROM_API=1 brew info --cask maddada/tap/ghostex",
+        {
+          timeoutMs: releaseTimeouts.brewFetchMs,
+        },
       );
     }
-    await run("HOMEBREW_NO_INSTALL_FROM_API=1 brew info --cask maddada/tap/ghostex", {
-      timeoutMs: releaseTimeouts.brewFetchMs,
-    });
-    const liveCask = await capture("HOMEBREW_NO_INSTALL_FROM_API=1 brew cat --cask maddada/tap/ghostex", {
-      timeoutMs: releaseTimeouts.brewFetchMs,
-    });
-    validateGhostexCask(liveCask, { version, sha256: arm.sha256 });
-    await run("HOMEBREW_NO_INSTALL_FROM_API=1 brew fetch --force --cask --arch=arm maddada/tap/ghostex", {
-      timeoutMs: releaseTimeouts.brewFetchMs,
-    });
+    if (localBrewValidationAvailable) {
+      try {
+        const liveCask = await capture("HOMEBREW_NO_INSTALL_FROM_API=1 brew cat --cask maddada/tap/ghostex", {
+          timeoutMs: releaseTimeouts.brewFetchMs,
+        });
+        validateGhostexCask(liveCask, { version, sha256: arm.sha256 });
+      } catch (error) {
+        if (!isHomebrewHostToolchainVersionError(error)) {
+          throw error;
+        }
+        localBrewValidationAvailable = false;
+        console.warn(
+          "Warning: skipping local Homebrew cask read because this host's Xcode/CLT is below Homebrew's current minimum.",
+        );
+      }
+    }
+    if (localBrewValidationAvailable) {
+      const localFetchValidationAvailable = await runOptionalHomebrewHostValidation(
+        "HOMEBREW_NO_INSTALL_FROM_API=1 brew fetch --force --cask --arch=arm maddada/tap/ghostex",
+        {
+          timeoutMs: releaseTimeouts.brewFetchMs,
+        },
+      );
+      shouldValidateLiveCaskFromTap = !localFetchValidationAvailable;
+    } else {
+      shouldValidateLiveCaskFromTap = true;
+    }
+    if (shouldValidateLiveCaskFromTap) {
+      const liveCask = await capture(
+        `curl -fsSL ${shellQuote(`https://raw.githubusercontent.com/maddada/homebrew-tap/main/${config.caskPath}`)}`,
+        { timeoutMs: releaseTimeouts.brewFetchMs },
+      );
+      validateGhostexCask(liveCask, { version, sha256: arm.sha256 });
+      console.warn("Validated the live Homebrew cask from the tap because local brew fetch validation is unavailable.");
+    }
   }
 
   return { tapDir, tapCommit };
@@ -2133,6 +2221,7 @@ async function main() {
 export {
   ReleaseError,
   buildGithubReleaseNotes,
+  isHomebrewHostToolchainVersionError,
   releaseBuildVersion,
   renderGhostexCask,
   renderGhostexCaskForTap,
