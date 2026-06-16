@@ -119,4 +119,23 @@ describe("native pane focused border source", () => {
     expect(layerGeometrySource).toContain("setPaneBorderFrame(");
     expect(terminalWorkspaceSourceWithoutHelper).not.toMatch(/borderView\.frame\s*=/);
   });
+
+  test("keeps focus border thinner than attention and command borders", () => {
+    /*
+     * CDXC:NativePaneChrome 2026-06-16-19:27:
+     * Focus chrome should be one point thinner without weakening attention/done
+     * or inactive command borders, so source coverage requires distinct width
+     * constants and an explicit focused-state branch.
+     */
+    const paneBorderLayerSource = sourceBetween(
+      "final class TerminalPaneBorderLayer: CAShapeLayer",
+      "private func bottomLeftRoundedBorderPath",
+    );
+
+    expect(paneBorderLayerSource).toContain("private static let focusedBorderWidth: CGFloat = 1");
+    expect(paneBorderLayerSource).toContain("private static let attentionBorderWidth: CGFloat = 2");
+    expect(paneBorderLayerSource).toContain("private static let inactiveCommandBorderWidth: CGFloat = 2");
+    expect(paneBorderLayerSource).toContain("case .focused:\n      return Self.focusedBorderWidth");
+    expect(paneBorderLayerSource).toContain("case .attention:\n      return Self.attentionBorderWidth");
+  });
 });

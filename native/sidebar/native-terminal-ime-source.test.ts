@@ -21,12 +21,11 @@ describe("native terminal IME input", () => {
     expect(surfaceClassIndex).toBeGreaterThan(-1);
     expect(keyDownIndex).toBeGreaterThan(surfaceClassIndex);
     expect(terminalWorkspaceSource).toContain("CDXC:NativeIME 2026-06-13-01:28");
-    expect(terminalWorkspaceSource).toContain("CDXC:NativeIME 2026-06-13-02:22");
-    expect(terminalWorkspaceSource).toContain("CDXC:NativeIME 2026-06-13-02:32");
     expect(terminalWorkspaceSource).toContain("CDXC:NativeIME 2026-06-13-03:35");
-    expect(keyDownSource).toContain("shouldBypassTextInput(for: event, action: action, surface: surface)");
+    expect(terminalWorkspaceSource).toContain("CDXC:NativeIME 2026-06-16-17:38");
+    expect(keyDownSource).toContain("shouldBypassTextInput(for: event)");
     expect(keyDownSource).toContain("sendKeyEvent(event, action: action, includeText: false, composing: false)");
-    expect(keyDownSource.indexOf("shouldBypassTextInput(for: event")).toBeLessThan(
+    expect(keyDownSource.indexOf("shouldBypassTextInput(for: event)")).toBeLessThan(
       keyDownSource.indexOf("let markedTextBefore = hasMarkedText()"),
     );
     expect(keyDownSource).toContain("let markedTextBefore = hasMarkedText()");
@@ -52,19 +51,17 @@ describe("native terminal IME input", () => {
     expect(sendKeySource).toContain("return firstByte >= 0x20");
   });
 
-  test("preserves Ghostty keybindings before AppKit IME interpretation", () => {
+  test("bypasses AppKit text interpretation only for command/control shortcuts", () => {
     const bypassIndex = terminalWorkspaceSource.indexOf("private func shouldBypassTextInput");
     const escapeHelperIndex = terminalWorkspaceSource.indexOf("private func sendTerminalEscapeSideBandIfNeeded", bypassIndex);
     const bypassSource = terminalWorkspaceSource.slice(bypassIndex, escapeHelperIndex);
 
     expect(bypassSource).toContain("guard !hasMarkedText() else");
-    expect(bypassSource).toContain("if isGhosttyKeyBinding(event, action: action, surface: surface)");
-    expect(bypassSource).toContain("var keyEvent = event.ghosttyKeyEvent(action)");
-    expect(bypassSource).toContain("if let text = event.characters, !text.isEmpty");
-    expect(bypassSource).toContain("ghostty_surface_key_is_binding(surface, keyEvent, &bindingFlags)");
-    expect(bypassSource.indexOf("isGhosttyKeyBinding")).toBeLessThan(
-      bypassSource.indexOf("flags.contains(.command)"),
-    );
+    expect(bypassSource).toContain("let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)");
+    expect(bypassSource).toContain("return flags.contains(.command) || flags.contains(.control)");
+    expect(bypassSource).not.toContain("shouldInterpretAsPrintableText");
+    expect(bypassSource).not.toContain("isGhosttyKeyBinding");
+    expect(bypassSource).not.toContain("ghostty_surface_key_is_binding");
   });
 
   test("loads current Ghostty config filename before legacy config", () => {

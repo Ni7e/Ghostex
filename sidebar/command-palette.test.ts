@@ -258,6 +258,25 @@ describe("command palette source contracts", () => {
     expect(sidebarStylesSource).toContain("border: 0 !important;");
   });
 
+  test("routes visible native command-palette typing into the search input", () => {
+    /*
+     * CDXC:CommandPalette 2026-06-16-19:24:
+     * When the macOS command palette is open, plain typing and paste must go
+     * to the palette input even after native/WebKit focus handoffs.
+     */
+    expect(commandPaletteSource).toContain("const COMMAND_PALETTE_INPUT_SELECTOR");
+    expect(commandPaletteSource).toContain("function findCommandPaletteInput()");
+    expect(commandPaletteSource).toContain("function isCommandPaletteTextKey(event: KeyboardEvent)");
+    expect(commandPaletteSource).toContain("insertIntoCommandPaletteInput(event.key)");
+    expect(commandPaletteSource).toContain("insertIntoCommandPaletteInput(text)");
+    expect(commandPaletteSource).toContain(
+      'window.addEventListener("keydown", handlePaletteKeyDown, { capture: true });',
+    );
+    expect(commandPaletteSource).toContain(
+      'document.addEventListener("paste", handlePalettePaste, { capture: true });',
+    );
+  });
+
   test("keeps session search copy and single-row selection styling scoped", () => {
     /*
      * CDXC:CommandPalette 2026-06-13-22:22:

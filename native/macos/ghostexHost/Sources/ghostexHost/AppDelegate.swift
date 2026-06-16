@@ -81,6 +81,7 @@ private let ghostexDefaultSidebarTitlebarBackgroundDarknessPercent = 93
 private let ghostexMinimumSidebarTitlebarBackgroundDarknessPercent = 85
 private let ghostexMaximumSidebarTitlebarBackgroundDarknessPercent = 100
 private let ghostexSidebarTitlebarBackgroundTintStrength = 0.12
+private let ghostexCustomTitlebarBackgroundBrightnessFactor: CGFloat = 0.85
 
 private struct SidebarTitlebarCustomChromeColors {
   let enabled: Bool
@@ -1959,7 +1960,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     else {
       return
     }
-    (window?.contentView as? ghostexRootView)?.updateSettingsModalWorkspaceFrameIfNeeded()
+    (window?.contentView as? ghostexRootView)?.updateAppModalChildWindowFramesIfNeeded()
   }
 
   func windowDidResize(_ notification: Notification) {
@@ -1967,7 +1968,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     if let window {
       scheduleMainWindowTrafficLightPositioning(on: window)
     }
-    (window?.contentView as? ghostexRootView)?.updateSettingsModalWorkspaceFrameIfNeeded()
+    (window?.contentView as? ghostexRootView)?.updateAppModalChildWindowFramesIfNeeded()
     /**
      CDXC:ZmxPersistenceRefresh 2026-05-18-15:44:
      Main-window resize changes the frame of every surfaced terminal pane without using TerminalWorkspaceView's split resize handlers.
@@ -6006,6 +6007,8 @@ final class ghostexRootView: NSView {
   private var activeNativeAppModalKind: String?
   private var nativeAppModalWindowController: AppModalWindowController?
   private var commandPaletteNativeAppModalWindowController: AppModalWindowController?
+  private var onboardingAppModalBackdropPanel: AppModalBackdropPanel?
+  private weak var onboardingAppModalBackdropParentWindow: NSWindow?
   private var nativeToastController: NativeAppToastController?
   private var sidebarWorkspaceFocusRequestId: UInt64 = 0
   private var floatingPromptEditorReturnFocusRequestId: UInt64 = 0
@@ -6013,8 +6016,9 @@ final class ghostexRootView: NSView {
   /*
    CDXC:FirstLaunchSetup 2026-06-16-07:58:
    The automatic first-run flow opens Highlighted Features before firstLaunchSetup.
-   Store the follow-up request in AppKit because outside-click dismissal closes
-   the native child window without relying on React's close button callback.
+   Store the follow-up request in AppKit because close can arrive through
+   React controls, Escape, or native close handling without relying on a
+   React-only callback.
    */
   private var shouldOpenFirstLaunchSetupAfterDiscoverClose = false
   private var latestModalHostSidebarState: [String: Any]?
@@ -6225,6 +6229,10 @@ final class ghostexRootView: NSView {
       self?.sourceCEFDragOverlaySnapshot() ?? [:]
     }
     workspaceView.setSidebarSide(sidebarSide)
+    workspaceView.setCustomSidebarTitlebarNativeChrome(
+      enabled: customSidebarTitlebarColorsEnabled,
+      foregroundHex: customSidebarTitlebarForegroundColor,
+      backgroundHex: customSidebarTitlebarBackgroundColor)
     /*
      CDXC:ReactTitlebar 2026-06-11-13:22:
      Titlebar dropdowns now use native child windows and the titlebar webview is
@@ -6276,6 +6284,9 @@ final class ghostexRootView: NSView {
     configureRootChromeLayers()
     sidebarView.setValue(false, forKey: "drawsBackground")
     titlebarChromeWebView.setValue(false, forKey: "drawsBackground")
+    titlebarChromeView.layer?.backgroundColor = currentTitlebarChromeBackgroundColor().cgColor
+    titlebarChromeWebView.wantsLayer = true
+    titlebarChromeWebView.layer?.backgroundColor = currentTitlebarChromeBackgroundColor().cgColor
     sidebarView.navigationDelegate = self
     addSubview(workspaceView)
     /**
@@ -7873,6 +7884,27 @@ final class ghostexRootView: NSView {
         background: customSidebarTitlebarBackgroundColor))
   }
 
+  private func currentTitlebarChromeBackgroundColor() -> NSColor {
+    let sidebarColor = currentSidebarTitlebarChromeBackgroundColor()
+    guard customSidebarTitlebarColorsEnabled,
+      let rgbColor = sidebarColor.usingColorSpace(.sRGB)
+    else {
+      return sidebarColor
+    }
+    /*
+     CDXC:SidebarTitlebarColors 2026-06-16-18:46:
+     The custom titlebar visual trial should render the titlebar 15% darker
+     than the sidebar while leaving preset themes, modals, dropdowns, and the
+     sidebar background unchanged. Derive it from the resolved sidebar color so
+     contrast and tint settings still have one persisted source of truth.
+     */
+    return NSColor(
+      srgbRed: max(0, min(1, rgbColor.redComponent * ghostexCustomTitlebarBackgroundBrightnessFactor)),
+      green: max(0, min(1, rgbColor.greenComponent * ghostexCustomTitlebarBackgroundBrightnessFactor)),
+      blue: max(0, min(1, rgbColor.blueComponent * ghostexCustomTitlebarBackgroundBrightnessFactor)),
+      alpha: rgbColor.alphaComponent)
+  }
+
   private func applySidebarChromeTheme(
     _ theme: String,
     customColorsEnabled: Bool? = nil,
@@ -7886,14 +7918,20 @@ final class ghostexRootView: NSView {
      native modal child windows, and titlebar dropdown child windows all sit
      outside the React sidebar DOM.
      CDXC:SidebarTitlebarColors 2026-06-15-11:24:
-     Custom foreground/background colors repaint only the sidebar/titlebar
-     backing surfaces. Modal and titlebar-dropdown controllers intentionally
-     continue receiving the normalized preset theme so overlay surfaces do not
-     inherit the experimental sidebar/titlebar override.
+     Custom foreground/background colors repaint the sidebar/titlebar backing
+     surfaces plus the AppKit-owned workspace tab bar and Browser address-bar
+     buttons. Modal and titlebar-dropdown controllers intentionally continue
+     receiving the normalized preset theme so overlay surfaces do not inherit
+     the experimental sidebar/titlebar override.
      CDXC:SidebarTitlebarColors 2026-06-15-13:22:
      Keep the foreground parameter for protocol compatibility, but do not apply
      it directly. Derive foreground from the resolved background color whenever
      custom color payloads arrive.
+     CDXC:SidebarTitlebarColors 2026-06-16-16:27:
+     Native pane tab strips, their action-button separators, and Browser toolbar
+     buttons are AppKit chrome, not React DOM. Push the resolved experimental
+     palette into TerminalWorkspaceView at the same writer boundary that
+     repaints the sidebar and React titlebar backing layers.
      */
     sidebarChromeTheme = normalizedSidebarChromeTheme(theme)
     if let customColorsEnabled {
@@ -7909,14 +7947,21 @@ final class ghostexRootView: NSView {
         forBackground: self.customSidebarTitlebarBackgroundColor)
     }
     let chromeColor = currentSidebarTitlebarChromeBackgroundColor()
+    let titlebarChromeColor = currentTitlebarChromeBackgroundColor()
     window?.backgroundColor = chromeColor
     wantsLayer = true
     layer?.backgroundColor = chromeColor.cgColor
     sidebarView.wantsLayer = true
     sidebarView.layer?.backgroundColor = chromeColor.cgColor
+    titlebarChromeView.wantsLayer = true
+    titlebarChromeView.layer?.backgroundColor = titlebarChromeColor.cgColor
     titlebarChromeWebView.wantsLayer = true
-    titlebarChromeWebView.layer?.backgroundColor = chromeColor.cgColor
+    titlebarChromeWebView.layer?.backgroundColor = titlebarChromeColor.cgColor
     startupOverlayView.layer?.backgroundColor = chromeColor.cgColor
+    workspaceView.setCustomSidebarTitlebarNativeChrome(
+      enabled: customSidebarTitlebarColorsEnabled,
+      foregroundHex: customSidebarTitlebarForegroundColor,
+      backgroundHex: customSidebarTitlebarBackgroundColor)
     nativeAppModalWindowController?.setSidebarTheme(sidebarChromeTheme)
     commandPaletteNativeAppModalWindowController?.setSidebarTheme(sidebarChromeTheme)
     titlebarDropdownPanelController?.setSidebarTheme(sidebarChromeTheme)
@@ -7989,8 +8034,9 @@ final class ghostexRootView: NSView {
        titlebar/dropdown chrome together.
        CDXC:SidebarTitlebarColors 2026-06-15-11:24:
        Layout sync also carries optional custom sidebar/titlebar colors. Apply
-       them to native sidebar/titlebar backing layers only, while keeping the
-       forwarded sidebarTheme as the titlebar/dropdown preset theme.
+       them to native sidebar/titlebar backing layers, workspace tab bars, and
+       Browser address-bar buttons, while keeping the forwarded sidebarTheme as
+       the titlebar/dropdown preset theme.
        */
       let resolvedSidebarTheme = command.sidebarTheme ?? sidebarChromeTheme
       applySidebarChromeTheme(
@@ -8588,10 +8634,21 @@ final class ghostexRootView: NSView {
      invalid top-level JSON types before the sidebar can receive the command.
      Encode command ids as JSON string literals so terminal actions reach the
      command-pane runner.
+
+     CDXC:TitlebarActions 2026-06-16-18:31:
+     Quick Actions selected from the titlebar dropdown run inside a native child
+     WKWebView. Relay the selected command id to the main titlebar webview before
+     forwarding execution so the visible titlebar button changes to the latest
+     action immediately and its next click reruns that action.
      */
     guard let commandIdJson = Self.javascriptStringLiteral(command.commandId) else {
       return
     }
+    titlebarChromeWebView.evaluateJavaScript(
+      """
+      window.__ghostex_TITLEBAR__?.setLastActionCommandId?.(\(commandIdJson));
+      undefined;
+      """)
     sidebarView.evaluateJavaScript(
       """
       window.__ghostex_NATIVE_SIDEBAR__?.runSidebarCommandFromTitlebar?.(\(commandIdJson));
@@ -10108,6 +10165,9 @@ final class ghostexRootView: NSView {
       for: modal,
       parentWindow: window,
       preferredContentFrame: preferredContentFrame)
+    if !isPrewarmOpen {
+      updateOnboardingAppModalBackdrop(for: modal)
+    }
     controller.open(
       modal: modal,
       message: message,
@@ -10218,6 +10278,90 @@ final class ghostexRootView: NSView {
       preferredContentFrame: contentScreenFrame)
   }
 
+  fileprivate func updateAppModalChildWindowFramesIfNeeded() {
+    updateSettingsModalWorkspaceFrameIfNeeded()
+    updateOnboardingAppModalBackdropFrameIfNeeded()
+  }
+
+  private func shouldShowOnboardingAppModalBackdrop(for modal: String?) -> Bool {
+    switch modal {
+    case "discoverGhostex", "firstLaunchSetup", "tipsAndTricks":
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func makeOnboardingAppModalBackdropPanel(parentWindow: NSWindow) -> AppModalBackdropPanel {
+    /*
+     CDXC:AppModals 2026-06-16-19:50:
+     First Time Setup and Highlighted Features need a native 40% black backdrop
+     covering the whole app. Use a visible AppKit child panel behind the modal
+     panel so parent-window clicks are absorbed without a web overlay, then
+     remove the panel when no onboarding modal needs it.
+     */
+    let panel = AppModalBackdropPanel(
+      contentRect: parentWindow.frame,
+      styleMask: [.borderless, .nonactivatingPanel],
+      backing: .buffered,
+      defer: false)
+    panel.backgroundColor = .clear
+    panel.collectionBehavior = [.fullScreenAuxiliary]
+    panel.hasShadow = false
+    panel.hidesOnDeactivate = false
+    panel.isMovable = false
+    panel.isOpaque = false
+    panel.isReleasedWhenClosed = false
+    panel.level = parentWindow.level
+
+    let contentView = AppModalBackdropView(frame: CGRect(origin: .zero, size: parentWindow.frame.size))
+    contentView.autoresizingMask = [.width, .height]
+    contentView.wantsLayer = true
+    contentView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.4).cgColor
+    panel.contentView = contentView
+    return panel
+  }
+
+  private func updateOnboardingAppModalBackdrop(for modal: String?) {
+    guard shouldShowOnboardingAppModalBackdrop(for: modal),
+      let window
+    else {
+      removeOnboardingAppModalBackdrop()
+      return
+    }
+    let panel = onboardingAppModalBackdropPanel ?? makeOnboardingAppModalBackdropPanel(parentWindow: window)
+    onboardingAppModalBackdropPanel = panel
+    if onboardingAppModalBackdropParentWindow !== window {
+      onboardingAppModalBackdropParentWindow?.removeChildWindow(panel)
+      window.addChildWindow(panel, ordered: .above)
+      onboardingAppModalBackdropParentWindow = window
+    }
+    panel.level = window.level
+    panel.setFrame(window.frame, display: true)
+    panel.orderFront(nil)
+  }
+
+  private func updateOnboardingAppModalBackdropFrameIfNeeded() {
+    guard let panel = onboardingAppModalBackdropPanel,
+      let window
+    else {
+      return
+    }
+    panel.level = window.level
+    panel.setFrame(window.frame, display: true)
+  }
+
+  private func removeOnboardingAppModalBackdrop() {
+    guard let panel = onboardingAppModalBackdropPanel else {
+      return
+    }
+    onboardingAppModalBackdropParentWindow?.removeChildWindow(panel)
+    panel.orderOut(nil)
+    panel.contentView = nil
+    onboardingAppModalBackdropParentWindow = nil
+    onboardingAppModalBackdropPanel = nil
+  }
+
   private func takeFirstLaunchSetupAfterDiscoverClose(closingModal: String?) -> Bool {
     guard closingModal == "discoverGhostex" else {
       shouldOpenFirstLaunchSetupAfterDiscoverClose = false
@@ -10273,6 +10417,7 @@ final class ghostexRootView: NSView {
     activeNativeAppModalKind = nil
     appModalPresentationPending = false
     updateSidebarModalBackdrop()
+    updateOnboardingAppModalBackdrop(for: nil)
     if openFirstLaunchSetupAfterDiscoverIfNeeded(closingModal: closingModal) {
       return
     }
@@ -10293,6 +10438,7 @@ final class ghostexRootView: NSView {
     activeNativeAppModalKind = nil
     appModalPresentationPending = false
     updateSidebarModalBackdrop()
+    updateOnboardingAppModalBackdrop(for: nil)
     if openFirstLaunchSetupAfterDiscoverIfNeeded(closingModal: closingModal) {
       return
     }
@@ -10350,6 +10496,7 @@ final class ghostexRootView: NSView {
       nativeAppModalWindowController?.close(sendReactClose: true)
     }
     updateSidebarModalBackdrop()
+    updateOnboardingAppModalBackdrop(for: nil)
     if openFirstLaunchSetupAfterDiscoverIfNeeded(closingModal: closingModal) {
       return
     }
@@ -11031,7 +11178,7 @@ final class ghostexRootView: NSView {
     workspaceView.setSidebarSide(side)
     setTitlebarSidebarSide(side)
     needsLayout = true
-    updateSettingsModalWorkspaceFrameIfNeeded()
+    updateAppModalChildWindowFramesIfNeeded()
   }
 
   func toggleSidebarCollapsed() {
@@ -11054,7 +11201,7 @@ final class ghostexRootView: NSView {
     }
     setTitlebarSidebarCollapsed(isSidebarCollapsed)
     needsLayout = true
-    updateSettingsModalWorkspaceFrameIfNeeded()
+    updateAppModalChildWindowFramesIfNeeded()
     workspaceView.scheduleZmxPersistenceRefreshForSurfacedTerminalsAfterResize(reason: "sidebarCollapseToggle")
   }
 
@@ -11135,7 +11282,7 @@ final class ghostexRootView: NSView {
       divider.refreshCursorAfterVisibilityChange()
     }
     workspaceView.frame = frames.workspace
-    updateSettingsModalWorkspaceFrameIfNeeded()
+    updateAppModalChildWindowFramesIfNeeded()
     /*
      CDXC:AppToasts 2026-06-13-19:57:
      Native macOS toasts should appear from the bottom center of the app window,
@@ -13720,9 +13867,15 @@ private final class NativeAppToastController {
 private final class NativeAppToastView: NSView {
   private static let actionGap: CGFloat = 14
   private static let actionHeight: CGFloat = 24
+  private static let descriptionFont = NSFont.systemFont(ofSize: 14, weight: .regular)
+  private static let descriptionTopGap: CGFloat = 2
   private static let horizontalPadding: CGFloat = 20
   private static let iconSize: CGFloat = 18
   private static let iconTextGap: CGFloat = 14
+  private static let minimumDescriptionHeight: CGFloat = 18
+  private static let minimumHeight: CGFloat = 52
+  private static let titleHeight: CGFloat = 22
+  private static let verticalPadding: CGFloat = 13
 
   private let actionButton = NativeToastActionButton()
   private let descriptionField = NSTextField(labelWithString: "")
@@ -13748,9 +13901,11 @@ private final class NativeAppToastView: NSView {
     titleField.lineBreakMode = .byTruncatingTail
     titleField.textColor = NSColor(srgbRed: 244.0 / 255.0, green: 244.0 / 255.0, blue: 245.0 / 255.0, alpha: 1)
     titleField.usesSingleLineMode = true
-    descriptionField.font = .systemFont(ofSize: 14, weight: .regular)
-    descriptionField.lineBreakMode = .byTruncatingTail
-    descriptionField.maximumNumberOfLines = 2
+    descriptionField.font = Self.descriptionFont
+    descriptionField.lineBreakMode = .byWordWrapping
+    descriptionField.maximumNumberOfLines = 0
+    descriptionField.cell?.wraps = true
+    descriptionField.cell?.isScrollable = false
     descriptionField.textColor = NSColor(srgbRed: 212.0 / 255.0, green: 212.0 / 255.0, blue: 216.0 / 255.0, alpha: 1)
 
     addSubview(spinnerView)
@@ -13812,22 +13967,69 @@ private final class NativeAppToastView: NSView {
       : actionFrame.minX - Self.actionGap
     let textWidth = max(40, textRight - leadingContentX)
     if hasDescription {
-      titleField.frame = CGRect(x: leadingContentX, y: 13, width: textWidth, height: 22)
-      descriptionField.frame = CGRect(x: leadingContentX, y: 37, width: textWidth, height: bounds.height - 49)
+      let descriptionHeight = Self.measuredDescriptionHeight(
+        request.description ?? "",
+        width: textWidth)
+      titleField.frame = CGRect(
+        x: leadingContentX,
+        y: Self.verticalPadding,
+        width: textWidth,
+        height: Self.titleHeight)
+      descriptionField.frame = CGRect(
+        x: leadingContentX,
+        y: Self.verticalPadding + Self.titleHeight + Self.descriptionTopGap,
+        width: textWidth,
+        height: descriptionHeight)
     } else {
       titleField.frame = CGRect(
         x: leadingContentX,
-        y: floor((bounds.height - 22) / 2),
+        y: floor((bounds.height - Self.titleHeight) / 2),
         width: textWidth,
-        height: 22)
+        height: Self.titleHeight)
       descriptionField.frame = .zero
     }
   }
 
   private static func preferredSize(for request: NativeAppToastRequest, width: CGFloat) -> CGSize {
-    let hasDescription = request.description != nil
-    let baseHeight: CGFloat = hasDescription ? 72 : 52
-    return CGSize(width: width, height: baseHeight)
+    /**
+     CDXC:AppToasts 2026-06-16-18:41:
+     Native toasts must size themselves from wrapped description text instead
+     of a fixed 72px two-line frame. Git error messages can be longer than two
+     lines, so measure the current title/action/spinner layout width and grow
+     the panel height before AppKit lays out the toast stack.
+     */
+    guard let description = request.description else {
+      return CGSize(width: width, height: Self.minimumHeight)
+    }
+    let textWidth = Self.textWidth(for: request, width: width)
+    let descriptionHeight = Self.measuredDescriptionHeight(description, width: textWidth)
+    let textHeight =
+      Self.verticalPadding * 2 + Self.titleHeight + Self.descriptionTopGap + descriptionHeight
+    return CGSize(width: width, height: ceil(max(Self.minimumHeight, textHeight)))
+  }
+
+  private static func textWidth(for request: NativeAppToastRequest, width: CGFloat) -> CGFloat {
+    let actionWidth = request.action.map { NativeToastActionButton.preferredWidth(for: $0.label) } ?? 0
+    let leadingContentX = Self.horizontalPadding
+      + (request.showsSpinner ? Self.iconSize + Self.iconTextGap : 0)
+    let trailingContentWidth = actionWidth > 0 ? actionWidth + Self.actionGap : 0
+    return max(40, width - Self.horizontalPadding - leadingContentX - trailingContentWidth)
+  }
+
+  private static func measuredDescriptionHeight(_ text: String, width: CGFloat) -> CGFloat {
+    guard !text.isEmpty else {
+      return Self.minimumDescriptionHeight
+    }
+    let paragraphStyle = NSMutableParagraphStyle()
+    paragraphStyle.lineBreakMode = .byWordWrapping
+    let bounds = (text as NSString).boundingRect(
+      with: CGSize(width: width, height: CGFloat.greatestFiniteMagnitude),
+      options: [.usesLineFragmentOrigin, .usesFontLeading],
+      attributes: [
+        .font: Self.descriptionFont,
+        .paragraphStyle: paragraphStyle,
+      ])
+    return max(Self.minimumDescriptionHeight, ceil(bounds.height))
   }
 }
 
@@ -13844,6 +14046,10 @@ private final class NativeToastActionButton: NSView {
   }
 
   var preferredWidth: CGFloat {
+    Self.preferredWidth(for: title)
+  }
+
+  static func preferredWidth(for title: String) -> CGFloat {
     let size = (title as NSString).size(withAttributes: [
       .font: NSFont.systemFont(ofSize: 14, weight: .medium)
     ])
@@ -14069,6 +14275,17 @@ private final class AppModalWindowPanel: NSPanel {
     }
     return nextFrame
   }
+}
+
+private final class AppModalBackdropPanel: NSPanel {
+  override var canBecomeKey: Bool { false }
+  override var canBecomeMain: Bool { false }
+}
+
+private final class AppModalBackdropView: NSView {
+  override func mouseDown(with event: NSEvent) {}
+  override func rightMouseDown(with event: NSEvent) {}
+  override func otherMouseDown(with event: NSEvent) {}
 }
 
 private final class AppModalWindowWebView: WKWebView {
@@ -14496,6 +14713,16 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
         "msSinceOpen": elapsedSinceOpenMs(),
       ])
     panel.makeKeyAndOrderFront(nil)
+    if modal == "commandPalette", let webView {
+      /*
+       CDXC:CommandPalette 2026-06-16-19:24:
+       Cmd+Shift+P should leave the visible native command-palette child window
+       as the AppKit typing target. Make its WKWebView first responder when the
+       panel becomes key so React's palette input can receive the opening focus
+       request and all subsequent text input.
+       */
+      panel.makeFirstResponder(webView)
+    }
     NSApp.activate(ignoringOtherApps: true)
   }
 
@@ -14707,10 +14934,10 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
      close the modal because those clicks cannot reach the React backdrop inside
      the modal WKWebView.
 
-     CDXC:HighlightedFeatures 2026-06-16-08:17:
-     Highlighted Features uses the same compact native child-window pattern.
-     Parent-window outside clicks cannot reach its React Dialog backdrop, so use
-     the existing outside-mouse-down close monitor for this modal id too.
+     CDXC:HighlightedFeatures 2026-06-16-19:50:
+     Highlighted Features should ignore outside clicks and close from its
+     in-modal X, Escape, or native close lifecycle. Do not install the compact
+     outside-click monitor for discoverGhostex.
      */
     outsideEventMonitor = NSEvent.addLocalMonitorForEvents(
       matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
@@ -14736,7 +14963,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
 
   private func shouldCloseFromOutsideMouseDown(modal: String) -> Bool {
     switch modal {
-    case "commandPalette", "renameSession", "previousSessions", "discoverGhostex":
+    case "commandPalette", "renameSession", "previousSessions":
       return true
     default:
       return false

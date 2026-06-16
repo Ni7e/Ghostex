@@ -1,13 +1,9 @@
 import {
-  IconBrowser,
   IconChevronLeft,
   IconChevronRight,
-  IconCode,
-  IconLayoutKanban,
-  IconPencil,
-  IconStack2,
+  IconX,
 } from "@tabler/icons-react";
-import { useEffect, useId, useMemo, useState, type ComponentType } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import type { SidebarTheme } from "../shared/session-grid-contract";
@@ -25,7 +21,6 @@ export type DiscoverGhostexModalProps = {
 
 type DiscoverGhostexFeature = {
   description: string;
-  icon: ComponentType<{ className?: string; size?: number; stroke?: number }>;
   id: string;
   imageAlt: string;
   imageSrc: string;
@@ -63,14 +58,12 @@ type DiscoverGhostexFeature = {
  * Embedded Editor, Kanban Board & Beads, and Full Layout Freedom.
  *
  * CDXC:HighlightedFeatures 2026-06-16-12:15:
- * The feature tour closes through outside-click/Escape/native modal handling,
- * not an in-modal X button. Keep the title in a fixed-width column so every
- * feature page wraps consistently, and keep the top-left feature icon compact.
+ * Earlier Highlighted Features closed through outside-click/Escape/native
+ * modal handling and did not show an in-modal X button.
  *
  * CDXC:HighlightedFeatures 2026-06-16-12:35:
  * The title should no longer be width-limited. Put the subtitle directly under
- * the title in the same text stack, with the compact feature icon in its own
- * left column.
+ * the title in the same text stack.
  *
  * CDXC:HighlightedFeatures 2026-06-16-12:45:
  * Thumbnail previews should not carry extra overlay icons. Keep the thumbnails
@@ -85,10 +78,24 @@ type DiscoverGhostexFeature = {
  * Keep carousel arrows beside the main screenshot instead of over it. The main
  * screenshot should render with an even quiet outline, and bottom thumbnails
  * should not have persistent outlines.
+ *
+ * CDXC:HighlightedFeatures 2026-06-16-18:27:
+ * Some authored screenshots have transparent rounded window corners. Do not
+ * put feature-tile backgrounds behind screenshots, because those backgrounds
+ * bleed through the image alpha at the corners.
+ *
+ * CDXC:HighlightedFeatures 2026-06-16-18:48:
+ * Do not show a feature icon beside the Highlighted Features title. The modal
+ * header should be title/subtitle text only so the screenshots are the primary
+ * visual signal.
+ *
+ * CDXC:HighlightedFeatures 2026-06-16-19:50:
+ * Highlighted Features should not dismiss from outside clicks. Close it from
+ * the top-right X button, Escape, or native close paths while keeping the X
+ * aligned with the First Time Setup modal close button.
  */
 const DISCOVER_GHOSTEX_FEATURES: readonly DiscoverGhostexFeature[] = [
   {
-    icon: IconPencil,
     id: "rich-prompt-editor",
     thumbnailTitle: "Rich Prompt Editor",
     title: "Rich Prompt Editor with Ctrl + G",
@@ -97,7 +104,6 @@ const DISCOVER_GHOSTEX_FEATURES: readonly DiscoverGhostexFeature[] = [
     imageSrc: richPromptEditorImage,
   },
   {
-    icon: IconBrowser,
     id: "chromium-design-mode",
     thumbnailTitle: "Browser & Design Mode",
     title: "Chromium Browser with Design Mode",
@@ -107,7 +113,6 @@ const DISCOVER_GHOSTEX_FEATURES: readonly DiscoverGhostexFeature[] = [
     imageSrc: chromiumDesignModeImage,
   },
   {
-    icon: IconCode,
     id: "embedded-vscode-editor",
     thumbnailTitle: "Full Embedded Editor",
     title: "Full VS Code Based Editor Built-in",
@@ -117,7 +122,6 @@ const DISCOVER_GHOSTEX_FEATURES: readonly DiscoverGhostexFeature[] = [
     imageSrc: embeddedVscodeEditorImage,
   },
   {
-    icon: IconLayoutKanban,
     id: "beads-kanban-board",
     thumbnailTitle: "Kanban Board & Beads",
     title: "Manage Your Project on a Kanban board",
@@ -127,7 +131,6 @@ const DISCOVER_GHOSTEX_FEATURES: readonly DiscoverGhostexFeature[] = [
     imageSrc: kanbanBeadsBoardImage,
   },
   {
-    icon: IconStack2,
     id: "layout-freedom",
     thumbnailTitle: "Full Layout Freedom",
     title: "Full Layout Freedom",
@@ -154,7 +157,6 @@ export function DiscoverGhostexModal({
     [activeFeatureId],
   );
   const activeFeature = DISCOVER_GHOSTEX_FEATURES[activeFeatureIndex];
-  const ActiveFeatureIcon = activeFeature.icon;
   const activateRelativeFeature = (offset: -1 | 1) => {
     const nextFeatureIndex =
       (activeFeatureIndex + offset + DISCOVER_GHOSTEX_FEATURES.length) %
@@ -170,6 +172,7 @@ export function DiscoverGhostexModal({
 
   return (
     <Dialog
+      disablePointerDismissal
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
           onClose();
@@ -189,6 +192,14 @@ export function DiscoverGhostexModal({
         <DialogHeader className="sr-only">
           <DialogTitle id={titleId}>Highlighted Features</DialogTitle>
         </DialogHeader>
+        <button
+          aria-label="Close Highlighted Features"
+          className="ghostex-modal-icon-close"
+          onClick={onClose}
+          type="button"
+        >
+          <IconX aria-hidden="true" />
+        </button>
 
         <div className="discover-ghostex-body">
           <section
@@ -198,9 +209,6 @@ export function DiscoverGhostexModal({
             role="tabpanel"
           >
             <div className="discover-ghostex-feature-copy">
-              <span className="discover-ghostex-feature-icon">
-                <ActiveFeatureIcon aria-hidden="true" size={15} stroke={1.8} />
-              </span>
               <div className="discover-ghostex-feature-heading">
                 <h2 className="discover-ghostex-feature-title" id="discover-ghostex-feature-title">
                   {activeFeature.title}

@@ -143,6 +143,22 @@ const PANE_ACTION_COMMAND_IDS = [
 
 const COMMAND_PALETTE_PREVIOUS_SESSIONS_LIMIT = 20;
 const COMMAND_PALETTE_PREVIOUS_SESSIONS_QUERY_DEBOUNCE_MS = 200;
+const COMMAND_PALETTE_INPUT_SELECTOR = '[data-ghostex-command-palette-input="true"]';
+
+function findCommandPaletteInput(): HTMLInputElement | null {
+  return document.querySelector<HTMLInputElement>(COMMAND_PALETTE_INPUT_SELECTOR);
+}
+
+function isCommandPaletteTextKey(event: KeyboardEvent): boolean {
+  return (
+    event.key.length === 1 &&
+    event.key !== "Dead" &&
+    !event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.isComposing
+  );
+}
 
 export function CommandPalette({
   collapsedGroupsById = {},
@@ -302,18 +318,114 @@ export function CommandPalette({
     sessionSections.some((section) => section.items.length > 0) ||
     filteredPreviousSessions.length > 0;
 
+  const focusCommandPaletteInput = () => {
+    const input = findCommandPaletteInput();
+    input?.focus();
+    return input;
+  };
+
+  const insertIntoCommandPaletteInput = (text: string) => {
+    if (text.length === 0) {
+      return;
+    }
+    const input = focusCommandPaletteInput();
+    if (!input) {
+      return;
+    }
+    const selectionStart = input.selectionStart ?? input.value.length;
+    const selectionEnd = input.selectionEnd ?? input.value.length;
+    const nextValue =
+      input.value.slice(0, selectionStart) + text + input.value.slice(selectionEnd);
+    const nextSelection = selectionStart + text.length;
+    setInputValue(nextValue);
+    window.requestAnimationFrame(() => {
+      const focusedInput = focusCommandPaletteInput();
+      focusedInput?.setSelectionRange(nextSelection, nextSelection);
+    });
+  };
+
   useLayoutEffect(() => {
     const selection = pendingModeSwitchSelectionRef.current;
     if (!selection) {
       return;
     }
     pendingModeSwitchSelectionRef.current = undefined;
-    const input = document.querySelector<HTMLInputElement>(
-      '[data-ghostex-command-palette-input="true"]',
-    );
+    const input = focusCommandPaletteInput();
     input?.focus();
     input?.setSelectionRange(selection.start, selection.end);
   }, [inputValue]);
+
+  useLayoutEffect(() => {
+    if (!isOpen || isPrewarm) {
+      return;
+    }
+    /*
+     * CDXC:CommandPalette 2026-06-16-19:24:
+     * When the native macOS command-palette child window is open, every plain
+     * text input should target the palette search field. Focus the field after
+     * each visible open request and after WebKit/AppKit focus handoffs so a
+     * visible palette never leaves typing behind on the terminal or dialog body.
+     */
+    focusCommandPaletteInput();
+    const animationFrameId = window.requestAnimationFrame(focusCommandPaletteInput);
+    const timeoutIds = [0, 50, 150].map((delay) =>
+      window.setTimeout(focusCommandPaletteInput, delay),
+    );
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      for (const timeoutId of timeoutIds) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [isOpen, isPrewarm, openRequestSequence]);
+
+  useEffect(() => {
+    if (!isOpen || isPrewarm) {
+      return;
+    }
+
+    const focusAfterCurrentEvent = () => {
+      window.setTimeout(focusCommandPaletteInput, 0);
+    };
+    const handlePaletteKeyDown = (event: KeyboardEvent) => {
+      const input = findCommandPaletteInput();
+      if (!input || document.activeElement === input) {
+        return;
+      }
+      focusCommandPaletteInput();
+      if (!isCommandPaletteTextKey(event)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      insertIntoCommandPaletteInput(event.key);
+    };
+    const handlePalettePaste = (event: ClipboardEvent) => {
+      const input = findCommandPaletteInput();
+      if (!input || document.activeElement === input) {
+        return;
+      }
+      const text = event.clipboardData?.getData("text") ?? "";
+      if (!text) {
+        focusCommandPaletteInput();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      insertIntoCommandPaletteInput(text);
+    };
+
+    window.addEventListener("focus", focusAfterCurrentEvent);
+    window.addEventListener("focusin", focusAfterCurrentEvent);
+    window.addEventListener("keydown", handlePaletteKeyDown, { capture: true });
+    document.addEventListener("paste", handlePalettePaste, { capture: true });
+    return () => {
+      window.removeEventListener("focus", focusAfterCurrentEvent);
+      window.removeEventListener("focusin", focusAfterCurrentEvent);
+      window.removeEventListener("keydown", handlePaletteKeyDown, { capture: true });
+      document.removeEventListener("paste", handlePalettePaste, { capture: true });
+    };
+  }, [isOpen, isPrewarm]);
 
   useEffect(() => {
     if (!isOpen) {

@@ -2,6 +2,8 @@ import type { ghostexSettings } from "./ghostex-settings";
 
 export const FIRST_LAUNCH_SETUP_SEEN_STORAGE_KEY = "ghostex-native-first-launch-setup-seen";
 export const FIRST_LAUNCH_SETUP_CURRENT_REVISION = "2026-06-07-first-launch-refresh";
+export const HIGHLIGHTED_FEATURES_SEEN_STORAGE_KEY = "ghostex-native-highlighted-features-seen";
+export const HIGHLIGHTED_FEATURES_CURRENT_REVISION = "2026-06-16-highlighted-features-launch";
 
 type FirstLaunchSetupSeenStorage = Pick<Storage, "getItem" | "setItem">;
 
@@ -26,6 +28,12 @@ type FirstLaunchSetupSeenStorage = Pick<Storage, "getItem" | "setItem">;
  * revision string instead of a forever boolean. Legacy `true` values should
  * reopen the refreshed setup once, then store this revision to avoid repeated
  * prompts on later launches.
+ *
+ * CDXC:HighlightedFeatures 2026-06-16-18:55:
+ * Highlighted Features is a product-update announcement as well as first-run
+ * intro. Store a separate revision marker so existing users who already
+ * completed first-launch setup still see the new feature tour once after
+ * updating, while future launches and manual replays remain independent.
  */
 export type FirstLaunchSetupMainSettingKey =
   | keyof ghostexSettings
@@ -69,4 +77,18 @@ export function markCurrentFirstLaunchSetupSeen(
   revision = FIRST_LAUNCH_SETUP_CURRENT_REVISION,
 ): void {
   storage.setItem(FIRST_LAUNCH_SETUP_SEEN_STORAGE_KEY, revision);
+}
+
+export function hasSeenCurrentHighlightedFeatures(
+  storage: FirstLaunchSetupSeenStorage,
+  revision = HIGHLIGHTED_FEATURES_CURRENT_REVISION,
+): boolean {
+  return storage.getItem(HIGHLIGHTED_FEATURES_SEEN_STORAGE_KEY) === revision;
+}
+
+export function markCurrentHighlightedFeaturesSeen(
+  storage: FirstLaunchSetupSeenStorage,
+  revision = HIGHLIGHTED_FEATURES_CURRENT_REVISION,
+): void {
+  storage.setItem(HIGHLIGHTED_FEATURES_SEEN_STORAGE_KEY, revision);
 }

@@ -738,9 +738,10 @@ struct SetActiveTerminalSet: Decodable {
    React sidebar layout sync carries the resolved app theme because AppKit owns
    titlebar and native child-window backing colors outside the sidebar DOM.
    CDXC:SidebarTitlebarColors 2026-06-15-11:24:
-   Custom chrome colors ride with layout sync but are scoped to sidebar and
-   titlebar surfaces only; modal and dropdown controllers keep reading
-   sidebarTheme for their preset background.
+   Custom chrome colors ride with layout sync but are scoped to sidebar,
+   titlebar, native workspace tab bars, and Browser address-bar button surfaces
+   only; modal and dropdown controllers keep reading sidebarTheme for their
+   preset background.
    CDXC:SidebarTitlebarColors 2026-06-15-13:22:
    Foreground is still decoded for compatibility with existing web bundles, but
    the host derives the applied foreground from the resolved custom background.
@@ -750,6 +751,10 @@ struct SetActiveTerminalSet: Decodable {
    CDXC:SidebarTitlebarColors 2026-06-15-15:15:
    Layout sync keeps the hex protocol shape while Settings presents the source
    control as Background Contrast.
+   CDXC:SidebarTitlebarColors 2026-06-16-16:27:
+   The same hex payload now themes native pane-tab switchers, their action
+   separators, and Browser toolbar buttons because those controls are AppKit
+   chrome outside React.
    */
   let sidebarTheme: String?
   let customSidebarTitlebarColorsEnabled: Bool?

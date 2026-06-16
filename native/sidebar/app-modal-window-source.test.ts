@@ -9,6 +9,10 @@ const modalStylesSource = readFileSync(
   new URL("../../sidebar/styles/modals.css", import.meta.url),
   "utf8",
 );
+const delayedSendModalSource = readFileSync(
+  new URL("../../sidebar/delayed-send-modal.tsx", import.meta.url),
+  "utf8",
+);
 const sidebarStylesSource = readFileSync(
   new URL("../../sidebar/styles.css", import.meta.url),
   "utf8",
@@ -146,6 +150,30 @@ describe("native app modal window source", () => {
     expect(nativeToastController).toContain("x: floor(screenAnchorFrame.midX - size.width / 2)");
   });
 
+  test("sizes native app toasts from wrapped description text", () => {
+    /*
+    CDXC:AppToasts 2026-06-16-18:41:
+    Native app toasts should measure wrapped description text and grow the
+    panel height instead of using a fixed two-line frame that can cut off Git
+    error messages.
+    */
+    const nativeToastView = sourceBetween(
+      appDelegateSource,
+      "private final class NativeAppToastView",
+      "private final class NativeToastActionButton",
+    );
+    expect(nativeToastView).toContain("descriptionField.lineBreakMode = .byWordWrapping");
+    expect(nativeToastView).toContain("descriptionField.maximumNumberOfLines = 0");
+    expect(nativeToastView).toContain("descriptionField.cell?.wraps = true");
+    expect(nativeToastView).toContain("measuredDescriptionHeight(description, width: textWidth)");
+    expect(nativeToastView).toContain("boundingRect(");
+    expect(nativeToastView).not.toContain("descriptionField.lineBreakMode = .byTruncatingTail");
+    expect(nativeToastView).not.toContain("let baseHeight: CGFloat = hasDescription ? 72 : 52");
+    expect(nativeToastView).not.toContain(
+      "descriptionField.frame = CGRect(x: leadingContentX, y: 37, width: textWidth, height: bounds.height - 49)",
+    );
+  });
+
   test("opens first-launch setup 90px taller than the generic management modals", () => {
     /*
     CDXC:FirstLaunchSetup 2026-06-12-07:13:
@@ -262,6 +290,10 @@ describe("native app modal window source", () => {
     Settings is a full-workspace native child window. Main-window resize,
     sidebar collapse, and sidebar side changes should reframe Settings to the
     current workspace instead of closing it or keeping the old frame.
+
+    CDXC:AppModals 2026-06-16-19:50:
+    Resize/layout refreshes now go through the shared child-window frame helper
+    so Settings and the onboarding AppKit backdrop stay aligned together.
     */
     const resizeStart = sourceBetween(
       appDelegateSource,
@@ -269,12 +301,12 @@ describe("native app modal window source", () => {
       "func windowDidResize(_ notification: Notification)",
     );
     expect(resizeStart).toContain("resizedWindow === mainWindow");
-    expect(resizeStart).toContain("updateSettingsModalWorkspaceFrameIfNeeded()");
+    expect(resizeStart).toContain("updateAppModalChildWindowFramesIfNeeded()");
 
     const updateSettingsFrame = sourceBetween(
       appDelegateSource,
       "fileprivate func updateSettingsModalWorkspaceFrameIfNeeded()",
-      "private func closeNativeAppModalWindow",
+      "private func shouldShowOnboardingAppModalBackdrop",
     );
     expect(updateSettingsFrame).toContain('currentModalKind == "settings"');
     expect(updateSettingsFrame).toContain("preferredNativeAppModalContentFrame(");
@@ -286,7 +318,7 @@ describe("native app modal window source", () => {
       "func setSidebarSide(_ side: SidebarSide)",
       "private func setTitlebarSidebarCollapsed",
     );
-    expect(rootChrome).toContain("updateSettingsModalWorkspaceFrameIfNeeded()");
+    expect(rootChrome).toContain("updateAppModalChildWindowFramesIfNeeded()");
 
     const appModalWindowController = sourceBetween(
       appDelegateSource,
@@ -342,6 +374,20 @@ describe("native app modal window source", () => {
     expect(titlebarHostSource).toContain("if (!debuggingMode) {");
     expect(titlebarHostSource).toContain("projectState.debuggingMode");
     expect(titlebarHostSource).toContain("nativeSidebar.actionCrashTrace.titlebarClick");
+  });
+
+  test("relays dropdown Quick Action selection to the main titlebar button", () => {
+    /*
+    CDXC:TitlebarActions 2026-06-16-18:31:
+    The Quick Actions dropdown runs in a native child WKWebView, so selecting an
+    action there must explicitly update the main titlebar WKWebView's selected
+    action id before forwarding execution to the sidebar runner.
+    */
+    expect(titlebarHostSource).toContain("setLastActionCommandId: (commandId: string) => void");
+    expect(titlebarHostSource).toContain("setLastActionCommandId: (commandId) => {");
+    expect(titlebarHostSource).toContain("setSelectedActionCommandId(commandId);");
+    expect(appDelegateSource).toContain("setLastActionCommandId?.(\\(commandIdJson))");
+    expect(appDelegateSource).toContain("runSidebarCommandFromTitlebar?.(\\(commandIdJson))");
   });
 
   test("rotates AppDelegate-owned support logs", () => {
@@ -669,6 +715,35 @@ describe("native app modal window source", () => {
     expect(minimumContentSize).toContain("return CGSize(width: 472, height: 269)");
   });
 
+  test("keeps Delayed Send duration input to hours and minutes", () => {
+    /*
+    CDXC:DelayedSend 2026-06-16-17:57:
+    Delayed Send should expose only hours and minutes. The modal must not render a seconds input, active timers should prefill by rounding up to whole minutes, and native must reject sub-minute or non-whole-minute bridge requests.
+    */
+    expect(delayedSendModalSource).toContain('aria-label="Hours"');
+    expect(delayedSendModalSource).toContain('aria-label="Minutes"');
+    expect(delayedSendModalSource).not.toContain('aria-label="Seconds"');
+    expect(delayedSendModalSource).not.toContain("setSeconds");
+    expect(delayedSendModalSource).toContain("Enter a delay between 1 minute and 24 days.");
+    expect(delayedSendModalSource).toContain("Math.ceil(delayMs / MINUTE_MS)");
+
+    const durationGrid = sourceBetween(
+      modalStylesSource,
+      ".delayed-send-duration-grid {",
+      ".session-rename-form",
+    );
+    expect(durationGrid).toContain("grid-template-columns: repeat(2, minmax(0, 1fr));");
+
+    const delayedSendValidation = sourceBetween(
+      nativeSidebarSource,
+      "function scheduleDelayedSend(",
+      "function cancelDelayedSend(",
+    );
+    expect(delayedSendValidation).toContain("DELAYED_SEND_MIN_DELAY_MS");
+    expect(delayedSendValidation).toContain("Number.isInteger(delayMs / DELAYED_SEND_MIN_DELAY_MS)");
+    expect(delayedSendValidation).toContain("Choose a Delayed Send timer between 1 minute and 24 days.");
+  });
+
   test("sizes the macOS Command Palette to the adjusted native content area", () => {
     /*
     CDXC:CommandPalette 2026-06-12-05:04:
@@ -744,6 +819,11 @@ describe("native app modal window source", () => {
     Configure Action, Rename Session, and Previous Sessions are compact native
     child-window modals too, so they must close on parent-window mouse-downs
     outside their NSPanel.
+
+    CDXC:HighlightedFeatures 2026-06-16-19:50:
+    Highlighted Features should not use the compact outside-click close monitor.
+    It closes from its in-modal X, Escape, or native close lifecycle while the
+    native backdrop absorbs parent-window clicks.
     */
     const dispatchNativeHotkey = sourceBetween(
       appDelegateSource,
@@ -783,10 +863,10 @@ describe("native app modal window source", () => {
     expect(appModalWindowController).toContain("installOutsideEventMonitorIfNeeded(for: modal)");
     expect(appModalWindowController).toContain("guard shouldCloseFromOutsideMouseDown(modal: modal)");
     expect(appModalWindowController).toContain(
-      'case "commandPalette", "renameSession", "previousSessions", "discoverGhostex":',
+      'case "commandPalette", "renameSession", "previousSessions":',
     );
     expect(appModalWindowController).toContain(
-      "Highlighted Features uses the same compact native child-window pattern.",
+      "Do not install the compact\n     outside-click monitor for discoverGhostex.",
     );
     expect(appModalWindowController).toContain(
       "matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]",
@@ -796,6 +876,50 @@ describe("native app modal window source", () => {
     expect(appModalWindowController).toContain("self.closeFromOutsideMouseDown()");
     expect(appModalWindowController).toContain('onClosed("outsideMouseDown", closedModal)');
     expect(appModalWindowController).toContain("removeOutsideEventMonitor()");
+  });
+
+  test("shows an AppKit backdrop behind first-launch and highlighted-feature modals", () => {
+    /*
+    CDXC:AppModals 2026-06-16-19:50:
+    First Time Setup and Highlighted Features should dim and block the full app
+    behind them with a native 40% black AppKit child panel, then remove that
+    panel when those onboarding modals close.
+    */
+    expect(appDelegateSource).toContain("private var onboardingAppModalBackdropPanel: AppModalBackdropPanel?");
+    expect(appDelegateSource).toContain("private final class AppModalBackdropPanel: NSPanel");
+    expect(appDelegateSource).toContain("private final class AppModalBackdropView: NSView");
+    expect(appDelegateSource).toContain("override var canBecomeKey: Bool { false }");
+    expect(appDelegateSource).toContain("override func mouseDown(with event: NSEvent) {}");
+
+    const backdropHelpers = sourceBetween(
+      appDelegateSource,
+      "private func shouldShowOnboardingAppModalBackdrop",
+      "private func takeFirstLaunchSetupAfterDiscoverClose",
+    );
+    expect(backdropHelpers).toContain('case "discoverGhostex", "firstLaunchSetup", "tipsAndTricks":');
+    expect(backdropHelpers).toContain("NSColor.black.withAlphaComponent(0.4)");
+    expect(backdropHelpers).toContain("styleMask: [.borderless, .nonactivatingPanel]");
+    expect(backdropHelpers).toContain("window.addChildWindow(panel, ordered: .above)");
+    expect(backdropHelpers).toContain("panel.setFrame(window.frame, display: true)");
+    expect(backdropHelpers).toContain("removeOnboardingAppModalBackdrop()");
+    expect(backdropHelpers).toContain("panel.orderOut(nil)");
+
+    const openNativeModal = sourceBetween(
+      appDelegateSource,
+      "private func openNativeAppModalWindow(",
+      "private func rememberFirstLaunchSetupAfterDiscoverCloseRequest",
+    );
+    expect(openNativeModal).toContain("updateOnboardingAppModalBackdrop(for: modal)");
+
+    const closeNativeModal = sourceBetween(
+      appDelegateSource,
+      "private func closeNativeAppModalWindow",
+      "private func dispatchNativeAppModalWindowMessage",
+    );
+    expect(closeNativeModal).toContain("updateOnboardingAppModalBackdrop(for: nil)");
+
+    expect(appDelegateSource).toContain("fileprivate func updateAppModalChildWindowFramesIfNeeded()");
+    expect(appDelegateSource).toContain("updateOnboardingAppModalBackdropFrameIfNeeded()");
   });
 
   test("prewarms and reuses the macOS Command Palette native window", () => {
@@ -864,6 +988,22 @@ describe("native app modal window source", () => {
     expect(presentedHandler).toContain("activeNativeAppModalKind = modal");
     expect(presentedHandler).toContain("appModalWindowController(for: modal)?.presentIfCurrent(modal: modal)");
     expect(presentedHandler).not.toContain("nativeAppModalWindowController?.presentIfCurrent(modal: modal)");
+  });
+
+  test("makes the native command palette WebView first responder when presented", () => {
+    /*
+    CDXC:CommandPalette 2026-06-16-19:24:
+    The visible macOS command-palette child window must own keyboard focus so
+    Cmd+Shift+P opens directly into a typeable search field.
+    */
+    const presentIfCurrent = sourceBetween(
+      appDelegateSource,
+      "func presentIfCurrent(modal: String?)",
+      "func presentBackgroundPrewarmIfCurrent(modal: String?)",
+    );
+    expect(presentIfCurrent).toContain("panel.makeKeyAndOrderFront(nil)");
+    expect(presentIfCurrent).toContain('if modal == "commandPalette", let webView');
+    expect(presentIfCurrent).toContain("panel.makeFirstResponder(webView)");
   });
 
   test("keeps the prewarmed rich prompt editor mounted for the first Ctrl+G", () => {

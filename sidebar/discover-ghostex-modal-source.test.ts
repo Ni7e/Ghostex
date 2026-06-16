@@ -88,12 +88,17 @@ describe("discover ghostex modal source", () => {
 
     CDXC:HighlightedFeatures 2026-06-16-14:33:
     Checked-in README media is sanitized before release so repository images do
-    not expose private workspace content. Verify PNG identity and full visual
-    dimensions instead of relying on compressed byte size.
+    not expose private workspace content. Verify PNG identity, full visual
+    dimensions, and enough encoded detail to reject abstract skeleton PNGs that
+    have the right canvas size but not real product pixels.
     */
     for (const imagePath of featureScreenshotPaths) {
       const imageUrl = new URL(imagePath, import.meta.url);
-      const { height, width } = readPngSize(readFileSync(imageUrl));
+      const imageData = readFileSync(imageUrl);
+      const { height, width } = readPngSize(imageData);
+      expect(imageData.byteLength, `${imagePath} should contain real screenshot detail`).toBeGreaterThan(
+        100_000,
+      );
       expect(width, `${imagePath} should keep full screenshot width`).toBeGreaterThanOrEqual(2000);
       expect(height, `${imagePath} should keep full screenshot height`).toBeGreaterThanOrEqual(
         1200,
@@ -104,23 +109,39 @@ describe("discover ghostex modal source", () => {
   test("keeps feature copy above a full-width contained image", () => {
     /*
     CDXC:HighlightedFeatures 2026-06-16-12:35:
-    The modal should put title and subtitle in one unrestricted text stack beside
-    the compact feature icon, fit the complete screenshot, use quiet outlines
-    inside the modal, and use the same slight roundness tokens as Settings.
+    The modal should put title and subtitle in one unrestricted text stack, fit
+    the complete screenshot, use quiet outlines inside the modal, and use the
+    same slight roundness tokens as Settings.
 
     CDXC:HighlightedFeatures 2026-06-16-14:08:
     Carousel arrows should sit beside the screenshot, not on top of it, and the
     screenshot outline should render evenly around rounded corners.
+
+    CDXC:HighlightedFeatures 2026-06-16-18:27:
+    Feature screenshot frames must stay transparent so PNG alpha corners do not
+    reveal an artificial background behind the authored screenshot.
+
+    CDXC:HighlightedFeatures 2026-06-16-18:48:
+    The header should not render a feature icon; title and subtitle own the full
+    copy row.
+
+    CDXC:HighlightedFeatures 2026-06-16-19:50:
+    Highlighted Features should have an explicit top-right X button and should
+    not close when the user clicks outside the dialog.
     */
     expect(discoverModalSource).toContain("discover-ghostex-feature-heading");
+    expect(discoverModalSource).toContain("disablePointerDismissal");
     expect(discoverModalSource).toContain("showCloseButton={false}");
-    expect(discoverModalSource).toContain("size={15}");
+    expect(discoverModalSource).toContain('aria-label="Close Highlighted Features"');
+    expect(discoverModalSource).toContain('className="ghostex-modal-icon-close"');
+    expect(discoverModalSource).toContain("<IconX aria-hidden=\"true\" />");
     expect(discoverModalSource).toContain("IconChevronLeft");
     expect(discoverModalSource).toContain("IconChevronRight");
     expect(discoverModalSource).toContain("activateRelativeFeature(-1)");
     expect(discoverModalSource).toContain("activateRelativeFeature(1)");
     expect(discoverModalSource).toContain("%\n      DISCOVER_GHOSTEX_FEATURES.length");
     expect(discoverModalSource).not.toContain("discover-ghostex-thumbnail-icon");
+    expect(discoverModalSource).not.toContain("discover-ghostex-feature-icon");
     const featureHeadingMarkup = sourceBetween(
       discoverModalSource,
       '<div className="discover-ghostex-feature-heading">',
@@ -143,26 +164,18 @@ describe("discover ghostex modal source", () => {
       ".ghostex-settings-shadcn .discover-ghostex-feature-heading {",
     );
     expect(featureCopyStyles).toContain("gap: 0.625rem;");
-    expect(featureCopyStyles).toContain("grid-template-columns: 1.75rem minmax(0, 1fr);");
+    expect(featureCopyStyles).toContain("grid-template-columns: minmax(0, 1fr);");
     expect(featureCopyStyles).toContain("justify-content: stretch;");
 
     const featureHeadingStyles = sourceBetween(
       sidebarStylesSource,
       ".ghostex-settings-shadcn .discover-ghostex-feature-heading {",
-      ".ghostex-settings-shadcn .discover-ghostex-feature-icon {",
+      ".ghostex-settings-shadcn .discover-ghostex-feature-title {",
     );
     expect(featureHeadingStyles).toContain("gap: 0.25rem;");
     expect(featureHeadingStyles).not.toContain("grid-template-columns:");
     expect(featureHeadingStyles).not.toMatch(/(^|\n)\s*width:/);
-
-    const featureIconStyles = sourceBetween(
-      sidebarStylesSource,
-      ".ghostex-settings-shadcn .discover-ghostex-feature-icon {",
-      ".ghostex-settings-shadcn .discover-ghostex-feature-title {",
-    );
-    expect(featureIconStyles).toContain("border-radius: var(--settings-radius-compact);");
-    expect(featureIconStyles).toContain("height: 1.75rem;");
-    expect(featureIconStyles).toContain("width: 1.75rem;");
+    expect(sidebarStylesSource).not.toContain(".discover-ghostex-feature-icon");
 
     const featureTitleStyles = sourceBetween(
       sidebarStylesSource,
@@ -245,6 +258,10 @@ describe("discover ghostex modal source", () => {
     CDXC:HighlightedFeatures 2026-06-16-14:08:
     Thumbnail previews should not have persistent outlines, including the active
     thumbnail state.
+
+    CDXC:HighlightedFeatures 2026-06-16-18:27:
+    Thumbnail visuals should not add tile backgrounds behind alpha-cornered
+    screenshots; only the bottom caption owns a dark text background.
     */
     const firstThumbnailMarkup = sourceBetween(
       discoverModalSource,
@@ -287,7 +304,7 @@ describe("discover ghostex modal source", () => {
       ".ghostex-settings-shadcn .discover-ghostex-thumbnail-visual {",
       ".ghostex-settings-shadcn .discover-ghostex-thumbnail-image {",
     );
-    expect(thumbnailVisualStyles).toContain("background: color-mix(in srgb, var(--background) 90%, #000 10%);");
+    expect(thumbnailVisualStyles).toContain("background: transparent;");
     expect(thumbnailVisualStyles).toContain("border: 0;");
     expect(thumbnailVisualStyles).toContain("border-radius: var(--settings-radius-section);");
 
@@ -296,6 +313,7 @@ describe("discover ghostex modal source", () => {
       ".ghostex-settings-shadcn .discover-ghostex-thumbnail-button[data-active=\"true\"]\n  .discover-ghostex-thumbnail-visual {",
       ".ghostex-settings-shadcn .discover-ghostex-thumbnail-button[data-active=\"true\"]\n  .discover-ghostex-thumbnail-image {",
     );
+    expect(thumbnailActiveVisualStyles).toContain("background: transparent;");
     expect(thumbnailActiveVisualStyles).not.toContain("border-color:");
 
     const thumbnailActiveImageStyles = sourceBetween(

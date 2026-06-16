@@ -1,18 +1,25 @@
 import { describe, expect, test } from "vitest";
 import {
+  HIGHLIGHTED_FEATURES_CURRENT_REVISION,
+  HIGHLIGHTED_FEATURES_SEEN_STORAGE_KEY,
   FIRST_LAUNCH_PREFERENCES_MAIN_SETTING_KEYS,
   FIRST_LAUNCH_SETUP_CURRENT_REVISION,
   FIRST_LAUNCH_SETUP_SEEN_STORAGE_KEY,
   FIRST_LAUNCH_SETUP_VISIBLE_MAIN_SETTINGS,
+  hasSeenCurrentHighlightedFeatures,
   hasSeenCurrentFirstLaunchSetup,
   isFirstLaunchSetupMainSettingVisible,
+  markCurrentHighlightedFeaturesSeen,
   markCurrentFirstLaunchSetupSeen,
 } from "./first-launch-setup-settings";
 
-function createFirstLaunchSetupStorage(initialValue?: string) {
+function createFirstLaunchSetupStorage(initialValue?: string, highlightedFeaturesValue?: string) {
   const values = new Map<string, string>();
   if (initialValue !== undefined) {
     values.set(FIRST_LAUNCH_SETUP_SEEN_STORAGE_KEY, initialValue);
+  }
+  if (highlightedFeaturesValue !== undefined) {
+    values.set(HIGHLIGHTED_FEATURES_SEEN_STORAGE_KEY, highlightedFeaturesValue);
   }
   return {
     getItem: (key: string) => values.get(key) ?? null,
@@ -83,5 +90,25 @@ describe("first launch setup visible settings", () => {
     const storage = createFirstLaunchSetupStorage(FIRST_LAUNCH_SETUP_CURRENT_REVISION);
 
     expect(hasSeenCurrentFirstLaunchSetup(storage)).toBe(true);
+  });
+
+  test("tracks highlighted features as a separate update announcement revision", () => {
+    /**
+     * CDXC:HighlightedFeatures 2026-06-16-18:55:
+     * Existing users may already have the current first-launch setup marker, so
+     * Highlighted Features needs its own revision marker to show once after
+     * update without reopening the setup flow on later launches.
+     */
+    const storage = createFirstLaunchSetupStorage(FIRST_LAUNCH_SETUP_CURRENT_REVISION);
+
+    expect(hasSeenCurrentFirstLaunchSetup(storage)).toBe(true);
+    expect(hasSeenCurrentHighlightedFeatures(storage)).toBe(false);
+
+    markCurrentHighlightedFeaturesSeen(storage);
+
+    expect(storage.read(HIGHLIGHTED_FEATURES_SEEN_STORAGE_KEY)).toBe(
+      HIGHLIGHTED_FEATURES_CURRENT_REVISION,
+    );
+    expect(hasSeenCurrentHighlightedFeatures(storage)).toBe(true);
   });
 });

@@ -25,12 +25,17 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("first-launch highlighted features sequence source", () => {
-  test("starts automatic onboarding with Discover before setup", () => {
+  test("starts automatic onboarding and update announcement with Discover", () => {
     /*
      * CDXC:FirstLaunchSetup 2026-06-16-07:58:
      * The automatic first-run path should show Highlighted Features first, then
      * continue into firstLaunchSetup after the feature tour closes. Manual
      * overflow opens remain standalone because only startup sends the
+     * follow-up flag.
+     *
+     * CDXC:HighlightedFeatures 2026-06-16-18:55:
+     * Existing users who already completed first-launch setup should still see
+     * Highlighted Features once after updating, without carrying the setup
      * follow-up flag.
      */
     const firstLaunchStartup = sourceBetween(
@@ -38,11 +43,19 @@ describe("first-launch highlighted features sequence source", () => {
       "function openFirstLaunchSetupOnFirstLaunch(): void",
       "function showOSIntegrationOnboardingOnFirstLaunch(): void",
     );
+    expect(firstLaunchStartup).toContain(
+      "const hasSeenFirstLaunchSetup = hasSeenCurrentFirstLaunchSetup(localStorage);",
+    );
+    expect(firstLaunchStartup).toContain("!hasSeenCurrentHighlightedFeatures(localStorage)");
+    expect(firstLaunchStartup).toContain("markCurrentHighlightedFeaturesSeen(localStorage);");
     expect(firstLaunchStartup).toContain('modal: "discoverGhostex"');
-    expect(firstLaunchStartup).toContain("showFirstLaunchSetupOnClose: true");
+    expect(firstLaunchStartup).toContain("showFirstLaunchSetupOnClose: !hasSeenFirstLaunchSetup");
     expect(firstLaunchStartup).toContain("markCurrentFirstLaunchSetupSeen(localStorage);");
     expect(firstLaunchStartup.indexOf('modal: "discoverGhostex"')).toBeLessThan(
       firstLaunchStartup.indexOf("markCurrentFirstLaunchSetupSeen(localStorage);"),
+    );
+    expect(firstLaunchStartup.indexOf("markCurrentHighlightedFeaturesSeen(localStorage);")).toBeLessThan(
+      firstLaunchStartup.indexOf('modal: "discoverGhostex"'),
     );
     expect(firstLaunchStartup).not.toContain('modal: "firstLaunchSetup"');
 
@@ -72,8 +85,9 @@ describe("first-launch highlighted features sequence source", () => {
   test("continues into setup from native Discover close paths", () => {
     /*
      * CDXC:FirstLaunchSetup 2026-06-16-07:58:
-     * Highlighted Features can close from React controls, Escape, AppKit close handling, or
-     * parent-window outside clicks. The follow-up setup open must live in the
+     * Highlighted Features can close from React controls, Escape, or AppKit
+     * close handling. Parent-window outside clicks are ignored by the
+     * Highlighted Features modal, so the follow-up setup open must live in the
      * native close lifecycle rather than a React-only onClose callback.
      */
     expect(appDelegateSource).toContain(

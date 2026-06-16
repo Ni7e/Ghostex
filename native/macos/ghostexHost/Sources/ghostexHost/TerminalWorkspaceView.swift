@@ -68,6 +68,91 @@ private func nativePaneColor(fromHex hex: String?) -> NSColor? {
   )
 }
 
+private func normalizedNativePaneHexColor(_ hex: String?, fallback: String) -> String {
+  guard let hex else {
+    return fallback
+  }
+  let value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")).uppercased()
+  guard value.count == 6, UInt32(value, radix: 16) != nil else {
+    return fallback
+  }
+  return "#\(value)"
+}
+
+private func nativePaneChromeColorByBlending(
+  background: NSColor,
+  foreground: NSColor,
+  foregroundFraction: CGFloat,
+  alpha: CGFloat = 1
+) -> NSColor {
+  let backgroundRgb = background.usingColorSpace(.sRGB) ?? background
+  let foregroundRgb = foreground.usingColorSpace(.sRGB) ?? foreground
+  let fraction = min(max(foregroundFraction, 0), 1)
+  return NSColor(
+    calibratedRed: backgroundRgb.redComponent + (foregroundRgb.redComponent - backgroundRgb.redComponent) * fraction,
+    green: backgroundRgb.greenComponent + (foregroundRgb.greenComponent - backgroundRgb.greenComponent) * fraction,
+    blue: backgroundRgb.blueComponent + (foregroundRgb.blueComponent - backgroundRgb.blueComponent) * fraction,
+    alpha: alpha)
+}
+
+private struct NativeSidebarTitlebarChromeColors: Equatable {
+  let enabled: Bool
+  let foregroundHex: String
+  let backgroundHex: String
+  let foreground: NSColor
+  let background: NSColor
+  let separator: NSColor
+
+  /*
+   CDXC:SidebarTitlebarColors 2026-06-16-16:27:
+   The experimental sidebar/titlebar contrast and tint controls also theme AppKit-owned native pane tab strips, their button separators, and Browser address-bar buttons. Resolve the shared native palette once so React titlebar, pane tabs, and browser toolbar chrome do not drift.
+   */
+  static let disabled = resolved(
+    enabled: false,
+    foregroundHex: "#D8D8D8",
+    backgroundHex: "#0E0E0E")
+
+  static func resolved(
+    enabled: Bool,
+    foregroundHex: String?,
+    backgroundHex: String?
+  ) -> NativeSidebarTitlebarChromeColors {
+    let normalizedForegroundHex = normalizedNativePaneHexColor(foregroundHex, fallback: "#D8D8D8")
+    let normalizedBackgroundHex = normalizedNativePaneHexColor(backgroundHex, fallback: "#0E0E0E")
+    let foreground = nativePaneColor(fromHex: normalizedForegroundHex)
+      ?? NSColor(calibratedRed: 0xD8 / 255, green: 0xD8 / 255, blue: 0xD8 / 255, alpha: 1)
+    let background = nativePaneColor(fromHex: normalizedBackgroundHex)
+      ?? NSColor(calibratedRed: 0x0E / 255, green: 0x0E / 255, blue: 0x0E / 255, alpha: 1)
+    return NativeSidebarTitlebarChromeColors(
+      enabled: enabled,
+      foregroundHex: normalizedForegroundHex,
+      backgroundHex: normalizedBackgroundHex,
+      foreground: foreground,
+      background: background,
+      separator: Self.separatorColor(for: background))
+  }
+
+  static func == (lhs: NativeSidebarTitlebarChromeColors, rhs: NativeSidebarTitlebarChromeColors) -> Bool {
+    lhs.enabled == rhs.enabled
+      && lhs.foregroundHex == rhs.foregroundHex
+      && lhs.backgroundHex == rhs.backgroundHex
+  }
+
+  private static func separatorColor(for background: NSColor) -> NSColor {
+    let rgb = background.usingColorSpace(.sRGB) ?? background
+    let averageChannel = Int(round(((rgb.redComponent + rgb.greenComponent + rgb.blueComponent) / 3) * 255))
+    let separatorChannel =
+      averageChannel < 17
+        ? max(20, min(37, Int(round(37 - CGFloat(averageChannel) * 0.8))))
+        : 6
+    return NSColor(
+      calibratedRed: CGFloat(separatorChannel) / 255,
+      green: CGFloat(separatorChannel) / 255,
+      blue: CGFloat(separatorChannel) / 255,
+      alpha: 1)
+  }
+}
+
 private let nativeTerminalColorEnvironmentKeys = [
   "ANSI_COLORS_DISABLED",
   "CI",
@@ -2502,6 +2587,7 @@ final class TerminalWorkspaceView: NSView {
   private var browserHistoryItemsByScopeId: [String: [NativeBrowserHistoryItem]] = [:]
   private var webPaneSessions: [String: WebPaneSession] = [:]
   private var projectEditorPaneSessions: [String: ProjectEditorPaneSession] = [:]
+  private var customSidebarTitlebarNativeChrome = NativeSidebarTitlebarChromeColors.disabled
   private var webPaneFaviconTasksBySessionId: [String: Task<Void, Never>] = [:]
   private var completedWebPaneLoadSessionIds = Set<String>()
   private var pendingAuthenticatedWebPaneLoadSessionIds = Set<String>()
@@ -3724,6 +3810,7 @@ final class TerminalWorkspaceView: NSView {
     let titleBarView = TerminalSessionTitleBarView(
       title: normalizedTerminalSessionTitle(command.title, sessionId: command.sessionId)
     )
+    titleBarView.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
     titleBarView.setDebugContext(ownerSessionId: command.sessionId, paneKind: "terminal")
     titleBarView.setOverlayInteractionSuppressed(suppressNativeChromeInteractivity)
     titleBarView.translatesAutoresizingMaskIntoConstraints = false
@@ -4354,6 +4441,7 @@ final class TerminalWorkspaceView: NSView {
         return true
       }
     )
+    hostView.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
     hostView.setBrowserHistoryItems(browserHistoryItems(scopeId: command.browserHistoryScopeId))
     hostView.translatesAutoresizingMaskIntoConstraints = false
     if let chromiumView {
@@ -4426,6 +4514,7 @@ final class TerminalWorkspaceView: NSView {
       title: normalizedTerminalSessionTitle(command.title, sessionId: command.sessionId),
       actions: TerminalSessionTitleBarView.webPaneCreationActions
     )
+    titleBarView.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
     titleBarView.setDebugContext(ownerSessionId: command.sessionId, paneKind: "web")
     titleBarView.setOverlayInteractionSuppressed(suppressNativeChromeInteractivity)
     titleBarView.translatesAutoresizingMaskIntoConstraints = false
@@ -4860,6 +4949,7 @@ final class TerminalWorkspaceView: NSView {
     let titleBarView: TerminalSessionTitleBarView?
     if command.showsProjectTabs == true {
       let view = TerminalSessionTitleBarView(title: command.projectTitle ?? command.title, actions: [])
+      view.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
       view.setDebugContext(ownerSessionId: command.projectId, paneKind: "projectEditorGit")
       view.setOverlayInteractionSuppressed(suppressNativeChromeInteractivity)
       view.setShowsTabAddButton(true)
@@ -5128,6 +5218,7 @@ final class TerminalWorkspaceView: NSView {
         return true
       }
     )
+    hostView.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
     hostView.setBrowserHistoryItems(browserHistoryItems)
     hostView.translatesAutoresizingMaskIntoConstraints = true
     if let chromiumView {
@@ -9576,7 +9667,13 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     let responseTarget = ProjectBeadsBridgeResponseTarget(webView: webView)
-    Task.detached(priority: .userInitiated) {
+    /*
+     CDXC:ProjectBoardLocalFirst 2026-06-16-20:01:
+     Generated ticket titles are secondary board polish after local card insertion.
+     Run that prompt-agent bridge work at utility priority so title generation cannot compete with interactive board mutations, drag/drop, or pane input at user-initiated priority.
+     */
+    let taskPriority: TaskPriority = request.action == "generateTitle" ? .utility : .userInitiated
+    Task.detached(priority: taskPriority) {
       let response = await Self.runProjectBeadsBridgeRequest(request)
       await MainActor.run {
         guard let webView = responseTarget.webView else {
@@ -9877,6 +9974,7 @@ final class TerminalWorkspaceView: NSView {
     process.environment = projectBoardNativeProcessEnvironment()
     process.standardOutput = stdoutPipe
     process.standardError = stderrPipe
+    process.qualityOfService = .utility
     try process.run()
     process.waitUntilExit()
     if process.terminationStatus != 0 {
@@ -11388,6 +11486,48 @@ final class TerminalWorkspaceView: NSView {
      */
     suppressNativeChromeInteractivity = suppressed
     applyNativeChromeInteractivitySuppression()
+  }
+
+  func setCustomSidebarTitlebarNativeChrome(
+    enabled: Bool,
+    foregroundHex: String,
+    backgroundHex: String
+  ) {
+    let nextChrome = NativeSidebarTitlebarChromeColors.resolved(
+      enabled: enabled,
+      foregroundHex: foregroundHex,
+      backgroundHex: backgroundHex)
+    guard customSidebarTitlebarNativeChrome != nextChrome else {
+      return
+    }
+    customSidebarTitlebarNativeChrome = nextChrome
+    applyCustomSidebarTitlebarNativeChrome()
+  }
+
+  private func applyCustomSidebarTitlebarNativeChrome() {
+    /*
+     CDXC:SidebarTitlebarColors 2026-06-16-16:27:
+     Custom sidebar/titlebar tint and contrast should extend to native tabs in the main workspace switcher and Browser address-bar buttons, but not to modal or dropdown surfaces. Repaint every AppKit owner that can outlive a Settings change instead of waiting for relayout.
+     */
+    for session in sessions.values {
+      session.titleBarView.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
+    }
+    for session in webPaneSessions.values {
+      session.titleBarView.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
+      session.hostView.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
+    }
+    for session in projectEditorPaneSessions.values {
+      session.titleBarView?.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
+      for hostView in projectEditorHostViews(session) {
+        hostView.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
+      }
+    }
+    for session in sleepingPanePlaceholderSessions.values {
+      session.titleBarView.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
+    }
+    for controller in poppedOutPaneControllers.values {
+      controller.titleBarView.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
+    }
   }
 
   private func applyNativeChromeInteractivitySuppression() {
@@ -13388,6 +13528,7 @@ final class TerminalWorkspaceView: NSView {
     let popOutTitleBarView = TerminalSessionTitleBarView(
       title: title,
       actions: poppedOutPaneTitleBarActions(sessionId: sessionId))
+    popOutTitleBarView.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
     let popOutPaneKind = sessions[sessionId] != nil ? "poppedOutTerminal" : "poppedOutWeb"
     popOutTitleBarView.setDebugContext(ownerSessionId: sessionId, paneKind: popOutPaneKind)
     /**
@@ -13737,6 +13878,7 @@ final class TerminalWorkspaceView: NSView {
     let titleBarView = TerminalSessionTitleBarView(
       title: normalizedTerminalSessionTitle(sessionTitles[sessionId], sessionId: sessionId)
     )
+    titleBarView.setCustomSidebarTitlebarChrome(customSidebarTitlebarNativeChrome)
     titleBarView.setDebugContext(ownerSessionId: sessionId, paneKind: "sleepingPlaceholder")
     titleBarView.setOverlayInteractionSuppressed(suppressNativeChromeInteractivity)
     titleBarView.translatesAutoresizingMaskIntoConstraints = false
@@ -19021,14 +19163,11 @@ final class GhostexGhosttySurfaceView: NSView {
 	   CDXC:NativeIME 2026-06-13-01:28:
 	   CJK and dead-key input must run normal text keyDown events through AppKit's NSTextInputClient pipeline so macOS can create marked text, candidate windows, and committed composition text. Keep Ghostex overlay/search/image-paste guards before the IME route, then send exactly one terminal result: committed text, a composing-suppressed raw key, or a normal Ghostty key event.
 
-	   CDXC:NativeIME 2026-06-13-02:22:
-	   Ghostty keybindings must keep priority over AppKit text interpretation when IME is not already composing. Ask Ghostty whether the exact key event is a current binding before entering interpretKeyEvents so configured bindings like Shift+Enter and active key-table entries still work without hard-coded hotkey lists.
-
-	   CDXC:NativeIME 2026-06-13-02:32:
-	   The keybinding probe and raw forward path must use Ghostty's AppKit key-event construction instead of a partial local clone. Keep binding forwards text-free so a detected binding cannot fall through as a plain Enter payload when the action is consumed or remapped.
-
 	   CDXC:NativeIME 2026-06-13-03:35:
 	   AppKit may report Shift+Enter as interpreted control text after the IME route. Only committed preedit text should lose its original keycode/modifiers; normal interpreted control keys must be re-encoded by Ghostty from the raw event so Shift+Enter and similar bindings stay distinct from plain Enter.
+
+	   CDXC:NativeIME 2026-06-16-17:38:
+	   Plain printable keys, including Space, must stay on the NSTextInputClient route. CLI raw-mode apps such as Claude Code need literal text bytes for printable input; only command/control shortcuts should bypass AppKit before interpretation.
 	   */
 	  override func keyDown(with event: NSEvent) {
     onTerminalUserInput?(self)
@@ -19064,7 +19203,7 @@ final class GhostexGhosttySurfaceView: NSView {
       return
 	    }
 	    let action: ghostty_input_action_e = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
-	    if shouldBypassTextInput(for: event, action: action, surface: surface) {
+	    if shouldBypassTextInput(for: event) {
 	      sendTerminalEscapeSideBandIfNeeded(event, composing: false)
 	      sendKeyEvent(event, action: action, includeText: false, composing: false)
 	      onKeyDownProbe?(self, event, "forwarded")
@@ -19118,35 +19257,13 @@ final class GhostexGhosttySurfaceView: NSView {
   }
 
 	  private func shouldBypassTextInput(
-	    for event: NSEvent,
-	    action: ghostty_input_action_e,
-	    surface: ghostty_surface_t
+	    for event: NSEvent
 	  ) -> Bool {
 	    guard !hasMarkedText() else {
 	      return false
 	    }
-	    if isGhosttyKeyBinding(event, action: action, surface: surface) {
-	      return true
-	    }
 	    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 	    return flags.contains(.command) || flags.contains(.control)
-	  }
-
-	  private func isGhosttyKeyBinding(
-	    _ event: NSEvent,
-	    action: ghostty_input_action_e,
-	    surface: ghostty_surface_t
-	  ) -> Bool {
-	    var keyEvent = event.ghosttyKeyEvent(action)
-	    var bindingFlags = ghostty_binding_flags_e(0)
-	    if let text = event.characters, !text.isEmpty {
-	      return text.withCString { ptr in
-	        keyEvent.text = ptr
-	        return ghostty_surface_key_is_binding(surface, keyEvent, &bindingFlags)
-	      }
-	    }
-	    keyEvent.text = nil
-	    return ghostty_surface_key_is_binding(surface, keyEvent, &bindingFlags)
 	  }
 
   private func sendTerminalEscapeSideBandIfNeeded(_ event: NSEvent, composing: Bool) {
@@ -21984,6 +22101,7 @@ private final class TerminalTitleBarTabButton: NSButton {
   private var identityFaviconImage: NSImage?
   private var isFocusedPane = true
   private var chromeRole: TerminalPaneChromeRole = .workspace
+  private var customSidebarTitlebarChrome = NativeSidebarTitlebarChromeColors.disabled
   private var delayedSendRemainingLabel: String?
   private var isSleepingTab = false
   private var isZmxInactiveTab = false
@@ -22095,6 +22213,14 @@ private final class TerminalTitleBarTabButton: NSButton {
     updateChrome()
   }
 
+  fileprivate func setCustomSidebarTitlebarChrome(_ chrome: NativeSidebarTitlebarChromeColors) {
+    guard customSidebarTitlebarChrome != chrome else {
+      return
+    }
+    customSidebarTitlebarChrome = chrome
+    updateChrome()
+  }
+
   fileprivate func setShowsCommandTrailingSeparator(_ showsSeparator: Bool) {
     guard showsCommandTrailingSeparator != showsSeparator else {
       return
@@ -22116,13 +22242,19 @@ private final class TerminalTitleBarTabButton: NSButton {
      as other unsurfaced tab siblings so the pane's surfaced session is the
      obvious tab. ZMX inactivity owns the moon marker separately from this
      parked-tab visual treatment.
+
+     CDXC:SidebarTitlebarColors 2026-06-16-18:24:
+     Custom-tinted native workspace tabs need darker inactive tab fills than the
+     preset tab chrome. Keep the active tab's contrast but reduce the inactive
+     white overlay so non-focused tabs do not look like raised selected surfaces
+     when the sidebar/titlebar contrast slider lightens the base background.
      */
     if chromeRole == .workspace {
       let isSurfacedWorkspaceTab = isActiveTab && !isSleepingTab
       let overlayAlpha =
-        isSurfacedWorkspaceTab
-        ? CGFloat(0.13)
-        : CGFloat(0.06)
+        customSidebarTitlebarChrome.enabled
+        ? (isSurfacedWorkspaceTab ? CGFloat(0.13) : CGFloat(0.025))
+        : (isSurfacedWorkspaceTab ? CGFloat(0.13) : CGFloat(0.06))
       return NSColor(calibratedWhite: 1, alpha: overlayAlpha)
     }
     let overlayAlpha =
@@ -22796,6 +22928,9 @@ private final class TerminalTitleBarTabButton: NSButton {
     let baseAlpha: CGFloat = isSurfacedWorkspaceTab ? 0.98 : 0.82
     let sleepAlpha: CGFloat = isSleepingTab ? 0.48 : 1
     let resolvedSleepAlpha: CGFloat = chromeRole == .workspace ? 1 : sleepAlpha
+    if chromeRole == .workspace, customSidebarTitlebarChrome.enabled {
+      return customSidebarTitlebarChrome.foreground.withAlphaComponent(baseAlpha * resolvedSleepAlpha)
+    }
     return NSColor(
       calibratedWhite: baseWhite,
       alpha: baseAlpha * resolvedSleepAlpha)
@@ -23010,14 +23145,22 @@ private final class TerminalTitleBarTabButton: NSButton {
 
     context.saveGState()
     context.addPath(controlPath)
-    context.setFillColor(
-      hoveredInlineAction == .close
-        ? Self.inlineButtonHoverBackgroundColor
-        : Self.inlineButtonBackgroundColor)
+    context.setFillColor(inlineActionBackgroundColor(isHovered: hoveredInlineAction == .close))
     context.fillPath()
     context.restoreGState()
 
     drawInlineCloseSymbol(in: closeButtonFrame)
+  }
+
+  private func inlineActionBackgroundColor(isHovered: Bool) -> CGColor {
+    guard chromeRole == .workspace, customSidebarTitlebarChrome.enabled else {
+      return isHovered ? Self.inlineButtonHoverBackgroundColor : Self.inlineButtonBackgroundColor
+    }
+    return nativePaneChromeColorByBlending(
+      background: customSidebarTitlebarChrome.background,
+      foreground: customSidebarTitlebarChrome.foreground,
+      foregroundFraction: isHovered ? 0.18 : 0.12
+    ).cgColor
   }
 
   private func drawInlineCloseSymbol(in frame: CGRect) {
@@ -23027,7 +23170,7 @@ private final class TerminalTitleBarTabButton: NSButton {
     let insetX: CGFloat = 5.8
     let insetY: CGFloat = 5.8
     context.saveGState()
-    context.setStrokeColor(Self.inlineButtonIconColor)
+    context.setStrokeColor(inlineActionIconColor())
     context.setLineWidth(1.5)
     context.setLineCap(.round)
     context.move(to: CGPoint(x: frame.minX + insetX, y: frame.minY + insetY))
@@ -23036,6 +23179,13 @@ private final class TerminalTitleBarTabButton: NSButton {
     context.addLine(to: CGPoint(x: frame.minX + insetX, y: frame.maxY - insetY))
     context.strokePath()
     context.restoreGState()
+  }
+
+  private func inlineActionIconColor() -> CGColor {
+    guard chromeRole == .workspace, customSidebarTitlebarChrome.enabled else {
+      return Self.inlineButtonIconColor
+    }
+    return customSidebarTitlebarChrome.foreground.cgColor
   }
 
   private func drawTintedSymbol(
@@ -23303,6 +23453,7 @@ private final class TerminalSessionTitleBarView: NSView {
   private var agentIconImage: NSImage?
   private var activity: NativeTerminalActivity?
   private var chromeRole: TerminalPaneChromeRole = .workspace
+  private var customSidebarTitlebarChrome = NativeSidebarTitlebarChromeColors.disabled
   private var faviconImage: NSImage?
   private var isFocusedPane = false
   private var layoutHiddenActions = Set<TerminalTitleBarAction>()
@@ -23486,6 +23637,7 @@ private final class TerminalSessionTitleBarView: NSView {
       button.onTabActionRequested = { [weak self] sessionId, action in
         self?.onTabActionRequested?(sessionId, action)
       }
+      button.setCustomSidebarTitlebarChrome(customSidebarTitlebarChrome)
       tabButtons.append(button)
       tabContentView.addSubview(button)
       button.setAllowsClose(allowsTabClosing)
@@ -23499,6 +23651,7 @@ private final class TerminalSessionTitleBarView: NSView {
       button.setActive(tab.sessionId == activeSessionId)
       button.setSleeping(tab.isSleeping)
       button.setZmxInactive(tab.isZmxInactive)
+      button.setCustomSidebarTitlebarChrome(customSidebarTitlebarChrome)
       button.setDelayedSendRemainingLabel(nil)
       button.setContextMenuActions(tab.actions)
       button.setAllowsClose(allowsTabClosing && tab.allowsClose)
@@ -23569,6 +23722,36 @@ private final class TerminalSessionTitleBarView: NSView {
     needsLayout = true
   }
 
+  fileprivate func setCustomSidebarTitlebarChrome(_ chrome: NativeSidebarTitlebarChromeColors) {
+    guard customSidebarTitlebarChrome != chrome else {
+      return
+    }
+    customSidebarTitlebarChrome = chrome
+    applyCustomSidebarTitlebarChrome()
+  }
+
+  private func applyCustomSidebarTitlebarChrome() {
+    layer?.backgroundColor = backgroundColor(for: chromeRole)
+    bottomBorderLayer.backgroundColor = tabBarSeparatorColor(for: chromeRole)
+    titleLabel.textColor = titleColor(for: chromeRole)
+    for button in tabButtons {
+      button.setCustomSidebarTitlebarChrome(customSidebarTitlebarChrome)
+    }
+    for separatorLayer in actionSeparatorLayers {
+      separatorLayer.backgroundColor = actionSeparatorColor(for: chromeRole)
+    }
+    setStickyActiveTabButtonChrome()
+    syncCommandTabBarActionButtonChrome()
+    if chromeRole == .workspace {
+      let isWorkspaceTabbedChrome = !tabItems.isEmpty
+      setWorkspaceTabBarActionChrome(for: tabAddButton, enabled: isWorkspaceTabbedChrome)
+      setWorkspaceTabBarActionChrome(for: tabBrowserButton, enabled: isWorkspaceTabbedChrome)
+      setWorkspaceTabBarActionChrome(for: actionMenuButton, enabled: isWorkspaceTabbedChrome)
+    }
+    needsLayout = true
+    needsDisplay = true
+  }
+
   fileprivate func setChromeRole(_ role: TerminalPaneChromeRole) {
     guard chromeRole != role else {
       return
@@ -23595,7 +23778,7 @@ private final class TerminalSessionTitleBarView: NSView {
       setWorkspaceTabBarActionChrome(for: tabBrowserButton, enabled: false)
       setWorkspaceTabBarActionChrome(for: actionMenuButton, enabled: false)
     }
-    stickyActiveTabButton.normalBackgroundColor = Self.stickyActiveTabButtonBackgroundColor
+    setStickyActiveTabButtonChrome()
     for button in tabButtons {
       button.setChromeRole(role)
     }
@@ -23819,7 +24002,10 @@ private final class TerminalSessionTitleBarView: NSView {
   }
 
   private func backgroundColor(for role: TerminalPaneChromeRole) -> CGColor {
-    role == .commands ? Self.commandBackgroundColor : Self.backgroundColor
+    if role == .workspace, customSidebarTitlebarChrome.enabled {
+      return customSidebarTitlebarChrome.background.cgColor
+    }
+    return role == .commands ? Self.commandBackgroundColor : Self.backgroundColor
   }
 
   private func borderColor(for role: TerminalPaneChromeRole) -> CGColor {
@@ -23827,11 +24013,66 @@ private final class TerminalSessionTitleBarView: NSView {
   }
 
   private func tabBarSeparatorColor(for role: TerminalPaneChromeRole) -> CGColor {
-    role == .commands ? Self.commandBorderColor : Self.tabBarSeparatorColor
+    if role == .workspace, customSidebarTitlebarChrome.enabled {
+      return customSidebarTitlebarChrome.separator.cgColor
+    }
+    return role == .commands ? Self.commandBorderColor : Self.tabBarSeparatorColor
   }
 
   private func titleColor(for role: TerminalPaneChromeRole) -> NSColor {
-    Self.titleColor
+    if role == .workspace, customSidebarTitlebarChrome.enabled {
+      return customSidebarTitlebarChrome.foreground
+    }
+    return Self.titleColor
+  }
+
+  private func actionSeparatorColor(for role: TerminalPaneChromeRole) -> CGColor {
+    if role == .workspace, customSidebarTitlebarChrome.enabled {
+      return customSidebarTitlebarChrome.separator.cgColor
+    }
+    return Self.actionSeparatorColor
+  }
+
+  private func workspaceTabBarActionBackgroundColor(for role: TerminalPaneChromeRole) -> CGColor {
+    if role == .workspace, customSidebarTitlebarChrome.enabled {
+      return customSidebarTitlebarChrome.background.cgColor
+    }
+    return Self.workspaceTabBarActionBackgroundColor
+  }
+
+  private func workspaceTabBarActionTintColor(for role: TerminalPaneChromeRole) -> NSColor {
+    if role == .workspace, customSidebarTitlebarChrome.enabled {
+      return customSidebarTitlebarChrome.foreground
+    }
+    return nativePaneTabBarIconButtonTintColor
+  }
+
+  private func workspaceTabBarActionLeftBorderColor(for role: TerminalPaneChromeRole) -> CGColor {
+    if role == .workspace, customSidebarTitlebarChrome.enabled {
+      return customSidebarTitlebarChrome.separator.cgColor
+    }
+    return Self.workspaceTabBarActionLeftBorderColor
+  }
+
+  private func stickyActiveTabButtonBackgroundColor(for role: TerminalPaneChromeRole) -> CGColor {
+    if role == .workspace, customSidebarTitlebarChrome.enabled {
+      return customSidebarTitlebarChrome.background.cgColor
+    }
+    return Self.stickyActiveTabButtonBackgroundColor
+  }
+
+  private func stickyActiveTabButtonBorderColor(for role: TerminalPaneChromeRole) -> CGColor {
+    if role == .workspace, customSidebarTitlebarChrome.enabled {
+      return customSidebarTitlebarChrome.separator.cgColor
+    }
+    return Self.stickyActiveTabButtonBorderColor
+  }
+
+  private func stickyActiveTabButtonTintColor(for role: TerminalPaneChromeRole) -> NSColor {
+    if role == .workspace, customSidebarTitlebarChrome.enabled {
+      return customSidebarTitlebarChrome.foreground
+    }
+    return Self.stickyActiveTabButtonTintColor
   }
 
   override func scrollWheel(with event: NSEvent) {
@@ -24936,10 +25177,10 @@ private final class TerminalSessionTitleBarView: NSView {
       stickyActiveTabButton.leftBorderWidth = 0
       stickyActiveTabButton.leftBorderColor = nil
       stickyActiveTabButton.rightBorderWidth = 1
-      stickyActiveTabButton.rightBorderColor = Self.stickyActiveTabButtonBorderColor
+      stickyActiveTabButton.rightBorderColor = stickyActiveTabButtonBorderColor(for: chromeRole)
     case .trailing:
       stickyActiveTabButton.leftBorderWidth = 1
-      stickyActiveTabButton.leftBorderColor = Self.stickyActiveTabButtonBorderColor
+      stickyActiveTabButton.leftBorderColor = stickyActiveTabButtonBorderColor(for: chromeRole)
       stickyActiveTabButton.rightBorderWidth = 0
       stickyActiveTabButton.rightBorderColor = nil
     }
@@ -25087,9 +25328,9 @@ private final class TerminalSessionTitleBarView: NSView {
   ) {
     if enabled {
       button.setTabBarIconChrome(
-        backgroundColor: Self.workspaceTabBarActionBackgroundColor,
-        tintColor: nativePaneTabBarIconButtonTintColor,
-        leftBorderColor: Self.workspaceTabBarActionLeftBorderColor,
+        backgroundColor: workspaceTabBarActionBackgroundColor(for: chromeRole),
+        tintColor: workspaceTabBarActionTintColor(for: chromeRole),
+        leftBorderColor: workspaceTabBarActionLeftBorderColor(for: chromeRole),
         leftBorderWidth: 1)
     } else {
       button.resetTabBarIconChrome()
@@ -25575,16 +25816,22 @@ private final class TerminalSessionTitleBarView: NSView {
     stickyActiveTabButton.action = #selector(performStickyActiveTabButton(_:))
     stickyActiveTabButton.sendAction(on: [.leftMouseDown])
     stickyActiveTabButton.chromeCornerRadius = 0
-    stickyActiveTabButton.normalBackgroundColor = Self.stickyActiveTabButtonBackgroundColor
-    stickyActiveTabButton.hoverBackgroundColor = Self.stickyActiveTabButtonBackgroundColor
-    stickyActiveTabButton.activeBackgroundColor = Self.stickyActiveTabButtonBackgroundColor
-    stickyActiveTabButton.normalContentTintColor = Self.stickyActiveTabButtonTintColor
-    stickyActiveTabButton.hoverContentTintColor = Self.stickyActiveTabButtonTintColor
-    stickyActiveTabButton.activeContentTintColor = Self.stickyActiveTabButtonTintColor
+    setStickyActiveTabButtonChrome()
     stickyActiveTabButton.wantsLayer = true
     stickyActiveTabButton.layer?.borderWidth = 0
     stickyActiveTabButton.layer?.borderColor = nil
     hideStickyActiveTabButton()
+  }
+
+  private func setStickyActiveTabButtonChrome() {
+    let backgroundColor = stickyActiveTabButtonBackgroundColor(for: chromeRole)
+    let tintColor = stickyActiveTabButtonTintColor(for: chromeRole)
+    stickyActiveTabButton.normalBackgroundColor = backgroundColor
+    stickyActiveTabButton.hoverBackgroundColor = backgroundColor
+    stickyActiveTabButton.activeBackgroundColor = backgroundColor
+    stickyActiveTabButton.normalContentTintColor = tintColor
+    stickyActiveTabButton.hoverContentTintColor = tintColor
+    stickyActiveTabButton.activeContentTintColor = tintColor
   }
 
   private func configureActionMenuButton() {
@@ -25634,7 +25881,7 @@ private final class TerminalSessionTitleBarView: NSView {
     while actionSeparatorLayers.count < desiredCount {
       let separatorLayer = CALayer()
       configurePassiveTitlebarLayer(separatorLayer)
-      separatorLayer.backgroundColor = Self.actionSeparatorColor
+      separatorLayer.backgroundColor = actionSeparatorColor(for: chromeRole)
       separatorLayer.frame = .zero
       separatorLayer.isHidden = true
       actionSeparatorLayers.append(separatorLayer)
@@ -25667,6 +25914,7 @@ private final class TerminalSessionTitleBarView: NSView {
     let shouldShowSeparators = actionButtons.count > 1
     for separatorLayer in actionSeparatorLayers {
       let visible = shouldShowSeparators && !separatorLayer.frame.isEmpty
+      separatorLayer.backgroundColor = actionSeparatorColor(for: chromeRole)
       separatorLayer.isHidden = !visible
       separatorLayer.opacity = visible ? 1 : 0
     }
@@ -26109,6 +26357,10 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   private static let browserHistoryMenuMaxWidth: CGFloat = 350
   private static let browserHistoryMenuEstimatedChromeWidth: CGFloat = 58
   private static let feedbackToolUnavailableTooltip = "This site disallows using this tool"
+  private static let browserToolbarDefaultBackgroundColor = NSColor.black
+  private static let browserToolbarDefaultButtonTintColor = NSColor(calibratedWhite: 0.86, alpha: 0.82)
+  private static let browserToolbarDefaultSecurityTintColor = NSColor(calibratedWhite: 0.78, alpha: 0.9)
+  private static let browserToolbarDefaultAddressTextColor = NSColor(calibratedWhite: 0.94, alpha: 0.95)
 
   private var browserView: NSView
   private weak var chromiumView: GhostexCEFBrowserView?
@@ -26126,6 +26378,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   private let toolbarView = NSView(frame: .zero)
   private var browserFeedbackTool: BrowserFeedbackTool
   private var showBetaFeatures: Bool
+  private var customSidebarTitlebarChrome = NativeSidebarTitlebarChromeColors.disabled
   private var browserHistoryItems: [NativeBrowserHistoryItem] = []
   private var browserHistoryVisibleLimit = WebPaneHostView.browserHistoryPageSize
   private var browserHistoryMenuAnchorPointInWindow: NSPoint?
@@ -26375,6 +26628,20 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     showBetaFeatures
   }
 
+  private var toolbarButtons: [TerminalTitleBarActionButton] {
+    [
+      backButton,
+      forwardButton,
+      reloadButton,
+      zoomButton,
+      reactGrabButton,
+      historyButton,
+      profileButton,
+      appearanceButton,
+      devToolsButton,
+    ]
+  }
+
   func setBrowserFeedbackTool(_ value: String?) {
     browserFeedbackTool = BrowserFeedbackTool.normalized(value)
     updateBrowserFeedbackToolButton()
@@ -26386,6 +26653,57 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     }
     showBetaFeatures = value
     updateBrowserBetaFeatureButtonVisibility()
+  }
+
+  fileprivate func setCustomSidebarTitlebarChrome(_ chrome: NativeSidebarTitlebarChromeColors) {
+    guard customSidebarTitlebarChrome != chrome else {
+      return
+    }
+    customSidebarTitlebarChrome = chrome
+    applyCustomSidebarTitlebarChrome()
+  }
+
+  private func applyCustomSidebarTitlebarChrome() {
+    guard showsBrowserToolbar else {
+      return
+    }
+    toolbarView.layer?.backgroundColor = browserToolbarBackgroundColor().cgColor
+    for button in toolbarButtons {
+      if customSidebarTitlebarChrome.enabled {
+        button.setTabBarIconChrome(
+          backgroundColor: customSidebarTitlebarChrome.background.cgColor,
+          tintColor: customSidebarTitlebarChrome.foreground)
+      } else {
+        button.resetTabBarIconChrome()
+        button.normalBackgroundColor = nil
+        button.hoverBackgroundColor = NSColor.clear.cgColor
+        button.activeBackgroundColor = NSColor.clear.cgColor
+        button.normalContentTintColor = Self.browserToolbarDefaultButtonTintColor
+        button.hoverContentTintColor = Self.browserToolbarDefaultButtonTintColor
+        button.activeContentTintColor = Self.browserToolbarDefaultButtonTintColor
+      }
+    }
+    securityIcon.contentTintColor = browserToolbarSecurityTintColor()
+    addressField.textColor = browserToolbarAddressTextColor()
+    needsDisplay = true
+  }
+
+  private func browserToolbarBackgroundColor() -> NSColor {
+    customSidebarTitlebarChrome.enabled
+      ? customSidebarTitlebarChrome.background
+      : Self.browserToolbarDefaultBackgroundColor
+  }
+
+  private func browserToolbarSecurityTintColor() -> NSColor {
+    customSidebarTitlebarChrome.enabled
+      ? customSidebarTitlebarChrome.foreground.withAlphaComponent(0.9)
+      : Self.browserToolbarDefaultSecurityTintColor
+  }
+
+  private func browserToolbarAddressTextColor() -> NSColor {
+    customSidebarTitlebarChrome.enabled
+      ? customSidebarTitlebarChrome.foreground.withAlphaComponent(0.95)
+      : Self.browserToolbarDefaultAddressTextColor
   }
 
   func setBrowserHistoryItems(_ items: [NativeBrowserHistoryItem]) {
@@ -26680,9 +26998,9 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     toolbarView.translatesAutoresizingMaskIntoConstraints = true
     toolbarView.autoresizesSubviews = false
     toolbarView.wantsLayer = true
-    toolbarView.layer?.backgroundColor = NSColor.black.cgColor
+    toolbarView.layer?.backgroundColor = browserToolbarBackgroundColor().cgColor
 
-    [backButton, forwardButton, reloadButton, zoomButton, reactGrabButton, historyButton, profileButton, appearanceButton, devToolsButton].forEach {
+    toolbarButtons.forEach {
       button in
       button.target = self
       toolbarView.addSubview(button)
@@ -26701,7 +27019,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     updateBrowserBetaFeatureButtonVisibility()
 
     securityIcon.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Secure connection")
-    securityIcon.contentTintColor = NSColor(calibratedWhite: 0.78, alpha: 0.9)
+    securityIcon.contentTintColor = browserToolbarSecurityTintColor()
     securityIcon.imageScaling = .scaleProportionallyDown
     toolbarView.addSubview(securityIcon)
 
@@ -26716,13 +27034,14 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     addressField.isSelectable = true
     addressField.focusRingType = .none
     addressField.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-    addressField.textColor = NSColor(calibratedWhite: 0.94, alpha: 0.95)
+    addressField.textColor = browserToolbarAddressTextColor()
     addressField.placeholderString = "Search or enter address"
     addressField.lineBreakMode = .byTruncatingMiddle
     addressField.cell?.lineBreakMode = .byTruncatingMiddle
     addressField.cell?.usesSingleLineMode = true
     addressField.cell?.wraps = false
     toolbarView.addSubview(addressField)
+    applyCustomSidebarTitlebarChrome()
 
     /**
      CDXC:BrowserPanes 2026-05-02-17:03
@@ -27557,13 +27876,19 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     systemSymbolName: String,
     fallbackTitle: String,
     tooltip: String
-  ) -> NSButton {
-    let button = NSButton(title: "", target: nil, action: nil)
+  ) -> TerminalTitleBarActionButton {
+    let button = TerminalTitleBarActionButton(title: "", target: nil, action: nil)
     button.bezelStyle = .texturedRounded
     button.isBordered = false
     button.imagePosition = .imageOnly
     button.toolTip = NativeTooltip.text(tooltip)
-    button.contentTintColor = NSColor(calibratedWhite: 0.86, alpha: 0.82)
+    button.normalContentTintColor = Self.browserToolbarDefaultButtonTintColor
+    button.hoverContentTintColor = Self.browserToolbarDefaultButtonTintColor
+    button.activeContentTintColor = Self.browserToolbarDefaultButtonTintColor
+    button.normalBackgroundColor = nil
+    button.hoverBackgroundColor = NSColor.clear.cgColor
+    button.activeBackgroundColor = NSColor.clear.cgColor
+    button.chromeCornerRadius = 0
     button.focusRingType = .none
     if let image = NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: tooltip) {
       button.image = image
@@ -28878,7 +29203,14 @@ final class TerminalPaneBorderLayer: CAShapeLayer {
     alpha: 1
   ).cgColor
   private static let roundedBottomCornerRadius: CGFloat = 12
-  private static let activeBorderWidth: CGFloat = 2
+  /*
+   CDXC:NativePaneChrome 2026-06-16-19:27:
+   Focus chrome should read lighter than attention/done chrome. Keep the
+   focused outline one point thinner while preserving the existing attention
+   and inactive command border weights.
+   */
+  private static let focusedBorderWidth: CGFloat = 1
+  private static let attentionBorderWidth: CGFloat = 2
   private static let inactiveCommandBorderWidth: CGFloat = 2
 
   private var chromeRole: TerminalPaneChromeRole = .workspace
@@ -29063,9 +29395,14 @@ final class TerminalPaneBorderLayer: CAShapeLayer {
     if state == .none && hidesInactiveCommandBorder {
       return 0
     }
-    return state == .none && chromeRole == .commands
-      ? Self.inactiveCommandBorderWidth
-      : Self.activeBorderWidth
+    switch state {
+    case .focused:
+      return Self.focusedBorderWidth
+    case .attention:
+      return Self.attentionBorderWidth
+    case .none:
+      return chromeRole == .commands ? Self.inactiveCommandBorderWidth : 0
+    }
   }
 
   private func borderPath(in bounds: CGRect) -> CGPath {
