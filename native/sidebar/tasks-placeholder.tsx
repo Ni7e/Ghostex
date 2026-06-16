@@ -190,11 +190,20 @@ type ProjectBeadsWebKitWindow = Window & {
   };
 };
 
+type ProjectBoardIdleWindow = Window & {
+  requestIdleCallback?: (
+    callback: () => void,
+    options?: { timeout?: number },
+  ) => number;
+};
+
 const BRIDGE_REQUEST_PREFIX = "__GHOSTEX_PROJECT_BEADS_REQUEST__";
 const BRIDGE_RESPONSE_EVENT = "ghostex-project-beads-response";
 const PROJECT_BOARD_RESPONSE_EVENT = "ghostex-project-board-response";
 const PROJECT_BOARD_IMAGE_RESPONSE_EVENT = "ghostex-project-board-image-response";
 const PROJECT_BOARD_AUTO_REFRESH_INTERVAL_MS = 8_000;
+const PROJECT_BOARD_GENERATED_TITLE_DELAY_MS = 2_000;
+const PROJECT_BOARD_GENERATED_TITLE_IDLE_TIMEOUT_MS = 10_000;
 const PROJECT_BOARD_LABEL_REFRESH_INTERVAL_MS = 60_000;
 const PROJECT_BOARD_MAX_DEPENDENCY_OPTIONS = 600;
 const PROJECT_BOARD_MAX_VISIBLE_TICKETS_PER_COLUMN = 120;
@@ -434,6 +443,17 @@ function upsertProjectBoardTicket(tickets: BoardTicket[], ticket: BoardTicket): 
   return nextTickets;
 }
 
+function scheduleProjectBoardGeneratedTitle(work: () => void): void {
+  window.setTimeout(() => {
+    const requestIdleCallback = (window as ProjectBoardIdleWindow).requestIdleCallback;
+    if (requestIdleCallback) {
+      requestIdleCallback(work, { timeout: PROJECT_BOARD_GENERATED_TITLE_IDLE_TIMEOUT_MS });
+      return;
+    }
+    work();
+  }, PROJECT_BOARD_GENERATED_TITLE_DELAY_MS);
+}
+
 function ProjectBoardApp() {
   const urlSearchParams = new URLSearchParams(window.location.search);
   const projectName = urlSearchParams.get("projectName") || "Project";
@@ -574,6 +594,10 @@ function ProjectBoardApp() {
    * CDXC:ProjectBoardLocalFirst 2026-06-16-13:16:
    * Kanban create and drag/drop interactions must update the board from local React state as soon as Beads returns a bead id or the user drops a card.
    * Keep status moves, generated titles, dependency/label mutations, and full Beads refreshes as background reconciliation so the page stays responsive while durable storage catches up.
+   *
+   * CDXC:ProjectBoardLocalFirst 2026-06-16-20:01:
+   * Generated titles and label vocabulary refreshes must not run as immediate follow-up work after local ticket insertion.
+   * Defer generated-title prompt-agent work to idle time, and refresh all labels only when the create flow introduced a label that is not already in the board's local label vocabulary.
    */
   const isRefreshingRef = useRef(false);
   const issuesSignatureRef = useRef("");
@@ -1264,6 +1288,8 @@ function ProjectBoardApp() {
       const title = shouldGenerateTitle ? PROJECT_BOARD_GENERATING_TITLE : requestedTitle;
       const estimate = tshirtToEstimate(draft.tshirt);
       const issueIdsBeforeCreate = new Set(allIssues.map((issue) => issue.id));
+      const knownLabelSet = new Set(knownLabels);
+      const shouldRefreshLabelsAfterCreate = draft.labels.some((label) => !knownLabelSet.has(label));
       const createdPayload = await runBeads({
         action: "create",
         description: prompt,
@@ -1405,7 +1431,7 @@ function ProjectBoardApp() {
               labels: draft.labels,
             });
           }
-          await loadTickets({ includeLabels: true, mode: "background" });
+          await loadTickets({ includeLabels: shouldRefreshLabelsAfterCreate, mode: "background" });
         } catch (error) {
           if (
             pendingCreateStatusToken !== undefined &&
@@ -1414,13 +1440,15 @@ function ProjectBoardApp() {
             pendingStatusMovesRef.current.delete(createdIssueId);
           }
           setErrorMessage(error instanceof Error ? error.message : "Could not finish creating the ticket.");
-          void loadTickets({ includeLabels: true, mode: "background" });
+          void loadTickets({ includeLabels: shouldRefreshLabelsAfterCreate, mode: "background" });
         }
       };
 
       void reconcileCreatedTicket().then(() => {
         if (shouldGenerateTitle) {
-          void generateCreatedTicketTitle(createdIssueId);
+          scheduleProjectBoardGeneratedTitle(() => {
+            void generateCreatedTicketTitle(createdIssueId);
+          });
         }
       });
       logProjectBoardDebug("projectBoard.createTicket.completed", {
