@@ -207,6 +207,27 @@ button,
   --settings-focus-border-color: color-mix(in srgb, var(--foreground) 58%, var(--border) 42%);
 }
 
+.settings-select-content {
+  /*
+   * CDXC:SettingsDropdowns 2026-06-16-17:02:
+   * Settings dropdown popups are portaled outside .ghostex-settings-shadcn.
+   * Set their accent tokens directly on the popup so focused and hovered menu
+   * rows use an unsaturated context-menu gray instead of the active theme tint.
+   */
+  --accent: var(--app-context-menu-hover-background, #202020);
+  --accent-foreground: var(--popover-foreground, currentColor);
+}
+
+.settings-select-content [data-slot="select-item"]:is(:hover, :focus, :focus-visible),
+.settings-select-content [data-slot="select-item"][aria-selected="true"],
+.settings-select-content [data-slot="select-item"][data-highlighted],
+.settings-select-content [data-slot="select-item"][data-selected],
+.settings-select-content [data-slot="select-item"][data-state="checked"] {
+  background: var(--app-context-menu-hover-background, #202020) !important;
+  color: var(--accent-foreground);
+  outline: none;
+}
+
 /*
  * CDXC:SquareTheme 2026-05-29:
  * The app chrome now uses squared controls everywhere. Keep this as a final
@@ -1779,6 +1800,16 @@ button,
  Keep carousel arrows outside the main screenshot so controls do not cover
  product detail. Use an even shadow outline on the screenshot itself to avoid
  heavy rounded-corner artifacts, and remove persistent thumbnail outlines.
+
+ CDXC:HighlightedFeatures 2026-06-16-18:27:
+ Several highlighted-feature screenshots include alpha at their rounded window
+ corners. Keep screenshot and thumbnail frames transparent so no artificial
+ tile background bleeds through those transparent image corners.
+
+ CDXC:HighlightedFeatures 2026-06-16-18:48:
+ The highlighted-feature header should not show a leading feature icon. Let the
+ title/subtitle own the full header width and keep the modal visually focused
+ on the screenshots.
 */
 .ghostex-settings-shadcn.discover-ghostex-modal-dialog {
   grid-template-rows: minmax(0, 1fr);
@@ -1805,7 +1836,7 @@ button,
   align-items: start;
   display: grid;
   gap: 0.625rem;
-  grid-template-columns: 1.75rem minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   justify-content: stretch;
   min-width: 0;
   padding-inline: 0.125rem;
@@ -1816,18 +1847,6 @@ button,
   display: grid;
   gap: 0.25rem;
   min-width: 0;
-}
-
-.ghostex-settings-shadcn .discover-ghostex-feature-icon {
-  align-items: center;
-  background: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: var(--settings-radius-compact);
-  color: var(--foreground);
-  display: inline-flex;
-  height: 1.75rem;
-  justify-content: center;
-  width: 1.75rem;
 }
 
 .ghostex-settings-shadcn .discover-ghostex-feature-title {
@@ -1964,7 +1983,7 @@ button,
 
 .ghostex-settings-shadcn .discover-ghostex-thumbnail-visual {
   align-items: center;
-  background: color-mix(in srgb, var(--background) 90%, #000 10%);
+  background: transparent;
   border: 0;
   border-radius: var(--settings-radius-section);
   color: var(--muted-foreground);
@@ -1990,7 +2009,7 @@ button,
 
 .ghostex-settings-shadcn .discover-ghostex-thumbnail-button[data-active="true"]
   .discover-ghostex-thumbnail-visual {
-  background: color-mix(in srgb, var(--primary) 7%, var(--background));
+  background: transparent;
   color: var(--foreground);
 }
 
@@ -2043,6 +2062,10 @@ button,
   min-height: 0;
 }
 
+.ghostex-settings-shadcn .settings-main-scroll [data-slot="scroll-area-viewport"] {
+  padding-bottom: 3.75rem;
+}
+
 .ghostex-settings-shadcn .settings-page-width {
   /*
    * CDXC:SettingsLayout 2026-06-16-08:12:
@@ -2074,18 +2097,24 @@ button,
   z-index: 1;
 }
 
+.ghostex-settings-shadcn .settings-show-advanced-anchor {
+  align-items: center;
+  bottom: 1rem;
+  display: flex;
+  left: 1.25rem;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+
 .ghostex-settings-shadcn .settings-show-advanced-toggle {
   /*
    * CDXC:SettingsAdvanced 2026-06-16-01:35:
    * Show Advanced is a browsing filter for the first Settings page.
    *
-   * CDXC:SettingsAdvanced 2026-06-16-01:53:
-   * The toggle belongs to the right of the modal header, styled as quiet header
-   * chrome so it changes Settings density without competing with tabs/search.
-   *
-   * CDXC:SettingsAdvanced 2026-06-16-02:02:
-   * Size the toggle to its content beside the Settings title. Do not push it to
-   * the top-right corner where the modal close button lives.
+   * CDXC:SettingsAdvanced 2026-06-16-16:32:
+   * Anchor the toggle in the modal's bottom-left chrome and keep the control
+   * content-sized so it reads as a low-priority density filter.
    */
   align-items: center;
   background: color-mix(in srgb, var(--muted) 36%, transparent);
@@ -2097,6 +2126,7 @@ button,
   justify-content: space-between;
   min-height: 2.25rem;
   padding: 0.375rem 0.625rem;
+  pointer-events: auto;
   width: max-content;
 }
 
@@ -2181,13 +2211,32 @@ button,
   outline: none;
 }
 
+.ghostex-settings-shadcn .group-title-input {
+  /*
+   * CDXC:SettingsFocus 2026-06-16-17:05:
+   * The Settings action icon picker trigger reuses the sidebar group title
+   * input class. Keep its resting border neutral inside Settings so the focus
+   * treatment is the only visible state change.
+   */
+  border-color: var(--input);
+  box-shadow: none;
+}
+
 .ghostex-settings-shadcn [data-slot="input"]:is(:focus, :focus-visible),
-.ghostex-settings-shadcn [data-slot="textarea"]:is(:focus, :focus-visible) {
+.ghostex-settings-shadcn [data-slot="textarea"]:is(:focus, :focus-visible),
+.ghostex-settings-shadcn [data-slot="select-trigger"]:is(:focus, :focus-visible),
+.ghostex-settings-shadcn .group-title-input:is(:focus, :focus-visible),
+.ghostex-settings-shadcn .settings-management-edit-button:focus-visible {
   /*
    * CDXC:SettingsSearch 2026-06-15-11:30:
    * Settings text inputs and textareas should use the same focus treatment as
    * the Settings search box: muted border on the existing control, no outer
    * shadcn ring.
+   *
+   * CDXC:SettingsFocus 2026-06-16-17:02:
+   * Settings select triggers, action icon picker triggers, and management row
+   * edit buttons should use the same neutral focus border as text fields
+   * instead of theme-accent blue.
    */
   border-color: var(--settings-focus-border-color);
   box-shadow: none;
@@ -2224,10 +2273,6 @@ button,
     align-items: flex-start;
     flex-direction: column;
     gap: 0.625rem;
-  }
-
-  .ghostex-settings-shadcn .settings-show-advanced-toggle {
-    width: max-content;
   }
 }
 
@@ -2409,6 +2454,40 @@ button,
   min-width: 0;
   position: relative;
   width: max-content;
+}
+
+.ghostex-settings-shadcn .settings-row-advanced-button {
+  /*
+   * CDXC:SettingsAdvanced 2026-06-16-18:22:
+   * Advanced setting arrows must stay visible without row hover so users can
+   * scan advanced rows immediately. Give the marker a little left-side air so
+   * it does not visually run into the setting label.
+   */
+  align-items: center;
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: color-mix(in srgb, #7dd3fc 88%, var(--foreground) 12%);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 1rem;
+  justify-content: center;
+  margin-left: 0.125rem;
+  opacity: 1;
+  padding: 0 !important;
+  pointer-events: auto;
+  width: 1rem;
+}
+
+.ghostex-settings-shadcn .settings-row-advanced-button svg {
+  height: 0.75rem;
+  width: 0.75rem;
+}
+
+.ghostex-settings-shadcn .settings-row-advanced-button:hover,
+.ghostex-settings-shadcn .settings-row-advanced-button:focus-visible {
+  background: transparent !important;
+  color: color-mix(in srgb, #bae6fd 92%, var(--foreground) 8%);
 }
 
 /* CDXC:Settings 2026-04-26-22:29: Section title pills in the settings modal

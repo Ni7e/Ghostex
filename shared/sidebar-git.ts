@@ -102,6 +102,21 @@ export function hasSidebarGitDiffStat(
   return state.additions > 0 || state.deletions > 0;
 }
 
+export function hasSidebarGitRemoteCommitDelta(
+  state: Pick<SidebarGitState, "aheadCount" | "behindCount">,
+): boolean {
+  /**
+   * CDXC:TitlebarGit 2026-06-16-18:41:
+   * Remote sync availability and titlebar copy share one normalized ahead/behind
+   * check so a synced branch cannot run the sync action while the Commits row
+   * shows ↑0 ↓0.
+   */
+  return (
+    Math.max(0, Math.trunc(state.behindCount)) > 0 ||
+    Math.max(0, Math.trunc(state.aheadCount)) > 0
+  );
+}
+
 export function normalizeSidebarGitAction(candidate: string | undefined): SidebarGitAction {
   return candidate === "push" || candidate === "pr" ? candidate : "commit";
 }

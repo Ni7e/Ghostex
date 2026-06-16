@@ -3851,6 +3851,7 @@ export function SidebarApp({
           onToggleMenu={toggleOverflowMenu}
           searchInputRef={searchInputRef}
           sessionSearchQuery={sessionSearchQuery}
+          showBetaFeatures={settings?.showBetaFeatures === true}
           setSessionSearchQuery={setSessionSearchQuery}
         />
         {renderFloatingOverflowMenu(topControlOptions)}
@@ -4477,6 +4478,7 @@ function SidebarReferenceTopChrome({
   onToggleMenu,
   searchInputRef,
   sessionSearchQuery,
+  showBetaFeatures,
   setSessionSearchQuery,
 }: {
   isOverflowMenuOpen: boolean;
@@ -4491,6 +4493,7 @@ function SidebarReferenceTopChrome({
   onToggleMenu: (trigger: HTMLElement) => void;
   searchInputRef: RefObject<HTMLInputElement | null>;
   sessionSearchQuery: string;
+  showBetaFeatures: boolean;
   setSessionSearchQuery: (query: string) => void;
 }) {
   /**
@@ -4538,6 +4541,12 @@ function SidebarReferenceTopChrome({
    * CDXC:Plugins 2026-06-16-01:29:
    * Hide the Plugins sidebar affordance for now instead of keeping it as an
    * Agents Hub secondary action.
+   *
+   * CDXC:AgentsHub 2026-06-16-19:35:
+   * Agents Hub is beta-only, so the primary sidebar entry should appear only
+   * after Enable beta settings is enabled. Keep the row-level overflow menu on
+   * the first visible primary item so hiding Agents Hub does not hide global
+   * sidebar actions.
    */
   return (
     <header className="reference-sidebar-top">
@@ -4550,16 +4559,28 @@ function SidebarReferenceTopChrome({
         <IconArrowRight className="reference-sidebar-window-icon" size={17} stroke={1.9} />
       </div>
       <nav aria-label="Sidebar primary navigation" className="reference-sidebar-primary-nav">
-        <SidebarReferenceAgentsHubNavItem
-          isOverflowMenuOpen={isOverflowMenuOpen}
-          onOpenAgentsHub={onOpenAgentsHub}
-          onToggleMenu={onToggleMenu}
-        />
-        <SidebarReferenceNavButton
-          icon={IconClock}
-          label="Automations"
-          onClick={onOpenAutomations}
-        />
+        {showBetaFeatures ? (
+          <SidebarReferenceAgentsHubNavItem
+            isOverflowMenuOpen={isOverflowMenuOpen}
+            onOpenAgentsHub={onOpenAgentsHub}
+            onToggleMenu={onToggleMenu}
+          />
+        ) : (
+          <SidebarReferenceOverflowNavItem
+            icon={IconClock}
+            isOverflowMenuOpen={isOverflowMenuOpen}
+            label="Automations"
+            onClick={onOpenAutomations}
+            onToggleMenu={onToggleMenu}
+          />
+        )}
+        {showBetaFeatures ? (
+          <SidebarReferenceNavButton
+            icon={IconClock}
+            label="Automations"
+            onClick={onOpenAutomations}
+          />
+        ) : null}
         <SidebarReferenceNavButton
           icon={IconDeviceMobile}
           label="Mobile"
@@ -4580,6 +4601,30 @@ function SidebarReferenceTopChrome({
   );
 }
 
+function SidebarReferenceOverflowNavItem({
+  icon,
+  isOverflowMenuOpen,
+  label,
+  onClick,
+  onToggleMenu,
+}: {
+  icon: TablerIcon;
+  isOverflowMenuOpen: boolean;
+  label: string;
+  onClick: () => void;
+  onToggleMenu: (trigger: HTMLElement) => void;
+}) {
+  return (
+    <div className="reference-sidebar-nav-item">
+      <SidebarReferenceNavButton icon={icon} label={label} onClick={onClick} />
+      <SidebarReferenceOverflowAction
+        isOverflowMenuOpen={isOverflowMenuOpen}
+        onToggleMenu={onToggleMenu}
+      />
+    </div>
+  );
+}
+
 function SidebarReferenceAgentsHubNavItem({
   isOverflowMenuOpen,
   onOpenAgentsHub,
@@ -4596,24 +4641,39 @@ function SidebarReferenceAgentsHubNavItem({
         label="Agents Hub"
         onClick={onOpenAgentsHub}
       />
-      <button
-        aria-controls="sidebar-overflow-menu"
-        aria-expanded={isOverflowMenuOpen}
-        aria-haspopup="menu"
-        aria-label="More"
-        className="reference-sidebar-hover-action reference-sidebar-hover-action-tooltip reference-sidebar-overflow-action"
-        data-sidebar-overflow-trigger="true"
-        data-tooltip="More"
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onToggleMenu(event.currentTarget);
-        }}
-        type="button"
-      >
-        <IconMenu2Filled aria-hidden="true" size={15} />
-      </button>
+      <SidebarReferenceOverflowAction
+        isOverflowMenuOpen={isOverflowMenuOpen}
+        onToggleMenu={onToggleMenu}
+      />
     </div>
+  );
+}
+
+function SidebarReferenceOverflowAction({
+  isOverflowMenuOpen,
+  onToggleMenu,
+}: {
+  isOverflowMenuOpen: boolean;
+  onToggleMenu: (trigger: HTMLElement) => void;
+}) {
+  return (
+    <button
+      aria-controls="sidebar-overflow-menu"
+      aria-expanded={isOverflowMenuOpen}
+      aria-haspopup="menu"
+      aria-label="More"
+      className="reference-sidebar-hover-action reference-sidebar-hover-action-tooltip reference-sidebar-overflow-action"
+      data-sidebar-overflow-trigger="true"
+      data-tooltip="More"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleMenu(event.currentTarget);
+      }}
+      type="button"
+    >
+      <IconMenu2Filled aria-hidden="true" size={15} />
+    </button>
   );
 }
 

@@ -283,6 +283,19 @@ function SettingsTextarea({
   );
 }
 
+function SettingsSelectContent({
+  className,
+  ...props
+}: ComponentProps<typeof SelectContent>) {
+  /*
+   * CDXC:SettingsDropdowns 2026-06-16-16:58:
+   * Settings Select popups are portaled outside the Settings dialog subtree.
+   * Carry a stable class on the popup so row hover, focus, and selected states
+   * can stay neutral gray instead of inheriting saturated app accent styling.
+   */
+  return <SelectContent className={cn("settings-select-content", className)} {...props} />;
+}
+
 const HOTKEY_SETTINGS_SECTIONS: readonly HotkeySettingsSectionDefinition[] = [
   {
     id: "general",
@@ -583,18 +596,19 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
  * Show Beta features is a persisted advanced setting, while Show Advanced
  * remains only a local browsing filter. Keep the beta gate hidden from ordinary
  * settings browsing until users enable the advanced density view or search for it.
+ *
+ * CDXC:SettingsAdvanced 2026-06-16-18:19:
+ * Hide last-active timestamps, completion sounds, macOS attention notification, action-completion sound, Sidebar Tags, and the sidebar interface-size slider are common preferences. Keep them visible without Show Advanced while leaving terminal, debugging, storage, and lower-frequency utility controls advanced.
  */
 const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "browserFeedbackTool",
   "sidebarDefaultWidthPx",
   "projectSessionListCollapsedCount",
-  "agentManagerZoomPercent",
   "createSessionOnSidebarDoubleClick",
   "hideFloatingSessionStatusIndicators",
   "hideSessionAgentIconUntilHover",
   "hideBrowserFaviconUntilHover",
   "showCloseButtonOnSessionCards",
-  "hideLastActiveTimeOnSessionCards",
   "showSessionCloseContextMenuAction",
   "workspaceActivePaneBorderColor",
   "workspaceBackgroundColor",
@@ -646,12 +660,7 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "keepAwakeBatteryThresholdPercent",
   "keepAwakeDeactivateOnLowPowerMode",
   "keepAwakeDeactivateOnUserSwitch",
-  "completionBellEnabled",
-  "completionSound",
-  "showMacOSAttentionNotifications",
   "attentionNotificationActions",
-  "actionCompletionSound",
-  "sidebarSessionTagListItems",
   "ghostexFolderStats",
   "showBetaFeatures",
   "debuggingMode",
@@ -1417,8 +1426,8 @@ export function SettingsModal({
       },
       {
         key: "agentManagerZoomPercent",
-        subtitle: "Scale the agent manager UI.",
-        title: "Agent Manager Zoom",
+        subtitle: "Scale the sidebar interface.",
+        title: "Sidebar Interface Size",
       },
       {
         key: "createSessionOnSidebarDoubleClick",
@@ -2161,26 +2170,6 @@ export function SettingsModal({
               <DialogTitle className="ghostex-modal-heading-title">
                 {isFirstLaunchSetup ? "Get started" : "Settings"}
               </DialogTitle>
-              {/*
-               * CDXC:SettingsAdvanced 2026-06-16-01:35:
-               * Show Advanced is a local browsing filter for the first Settings page, not a persisted app preference.
-               *
-               * CDXC:SettingsAdvanced 2026-06-16-01:53:
-               * The Show Advanced toggle belongs to the right of the Settings modal header so users can change page density without scanning the section rail.
-               *
-               * CDXC:SettingsAdvanced 2026-06-16-02:02:
-               * Place Show Advanced immediately to the right of the Settings title, not at the modal's top-right edge, because the close button owns that corner.
-               */}
-              {!isFirstLaunchSetup ? (
-                <label className="settings-show-advanced-toggle" htmlFor={showAdvancedSettingsId}>
-                  <span className="settings-show-advanced-copy">Show Advanced</span>
-                  <Switch
-                    checked={showAdvancedSettings}
-                    id={showAdvancedSettingsId}
-                    onCheckedChange={setShowAdvancedSettings}
-                  />
-                </label>
-              ) : null}
             </div>
             {isFirstLaunchSetup ? (
               <p className="mt-2 text-sm text-muted-foreground">
@@ -2388,9 +2377,13 @@ export function SettingsModal({
               />
               ) : null}
               {mainSettingVisible(settingsSearch.sidebar, "agentManagerZoomPercent") ? (
+              /*
+               * CDXC:SidebarInterface 2026-06-16-18:19:
+               * Keep the persisted agentManagerZoomPercent key for compatibility, but label the Settings control as Sidebar Interface Size because it changes the visible sidebar interface scale.
+               */
               <SliderNumberField
-                description="Scale the agent manager UI."
-                label="Agent Manager Zoom"
+                description="Scale the sidebar interface."
+                label="Sidebar Interface Size"
                 {...getSettingModificationProps("agentManagerZoomPercent")}
                 max={200}
                 min={50}
@@ -3816,6 +3809,25 @@ export function SettingsModal({
           </TabsContent>
           ) : null}
           </Tabs>
+          {/*
+           * CDXC:SettingsAdvanced 2026-06-16-01:35:
+           * Show Advanced is a local browsing filter for the first Settings page, not a persisted app preference.
+           *
+           * CDXC:SettingsAdvanced 2026-06-16-16:32:
+           * The Show Advanced control should live in the Settings modal's bottom-left chrome instead of beside the Settings title. Show it only on the General settings page because it filters that page's advanced rows.
+           */}
+          {!isFirstLaunchSetup && activeTab === "settings" ? (
+            <div className="settings-show-advanced-anchor">
+              <label className="settings-show-advanced-toggle" htmlFor={showAdvancedSettingsId}>
+                <span className="settings-show-advanced-copy">Show Advanced</span>
+                <Switch
+                  checked={showAdvancedSettings}
+                  id={showAdvancedSettingsId}
+                  onCheckedChange={setShowAdvancedSettings}
+                />
+              </label>
+            </div>
+          ) : null}
         </TooltipProvider>
       </DialogContent>
     </Dialog>
@@ -5250,7 +5262,7 @@ function IntegrationsSettingsTab({
                 <SelectTrigger aria-label="App Shots hotkey" className="w-[190px]">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SettingsSelectContent>
                   <SelectGroup>
                     {APP_SHOTS_HOTKEY_OPTIONS.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
@@ -5258,7 +5270,7 @@ function IntegrationsSettingsTab({
                       </SelectItem>
                     ))}
                   </SelectGroup>
-                </SelectContent>
+                </SettingsSelectContent>
               </Select>
             </div>
           </IntegrationSettingsRow>
@@ -6055,7 +6067,7 @@ function AgentSettingsEditor({
           <SelectTrigger className="h-10 w-full px-3 text-sm" id={agentTypeId}>
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SettingsSelectContent>
             <SelectGroup>
               <SelectItem value="custom">Custom</SelectItem>
               {DEFAULT_SIDEBAR_AGENTS.map((agent) => (
@@ -6064,7 +6076,7 @@ function AgentSettingsEditor({
                 </SelectItem>
               ))}
             </SelectGroup>
-          </SelectContent>
+          </SettingsSelectContent>
         </Select>
       </Field>
       <Field className="gap-2.5">
@@ -6116,7 +6128,7 @@ function AgentSettingsEditor({
           <SelectTrigger className="h-10 w-full px-3 text-sm" id={acceptAllModeId}>
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SettingsSelectContent>
             <SelectGroup>
               {AGENT_ACCEPT_ALL_MODE_SELECT_ITEMS.map((item) => (
                 <SelectItem key={item.value} value={item.value}>
@@ -6124,7 +6136,7 @@ function AgentSettingsEditor({
                 </SelectItem>
               ))}
             </SelectGroup>
-          </SelectContent>
+          </SettingsSelectContent>
         </Select>
       </Field>
       <div className="flex justify-end gap-3">
@@ -6507,12 +6519,12 @@ function ActionSettingsEditor({
             <SelectTrigger className="h-10 w-full px-3 text-sm" id={actionTypeId}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SettingsSelectContent>
               <SelectGroup>
                 <SelectItem value="terminal">Terminal</SelectItem>
                 <SelectItem value="browser">Browser</SelectItem>
               </SelectGroup>
-            </SelectContent>
+            </SettingsSelectContent>
           </Select>
         </Field>
       )}
@@ -7300,7 +7312,7 @@ function GtePromptEditingField({
           <SelectTrigger className="h-10 w-full px-3 text-sm" id={id}>
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SettingsSelectContent>
             <SelectGroup>
               {PROMPT_EDITOR_BACKEND_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
@@ -7308,7 +7320,7 @@ function GtePromptEditingField({
                 </SelectItem>
               ))}
             </SelectGroup>
-          </SelectContent>
+          </SettingsSelectContent>
         </Select>
         <Button
           className="h-9 w-fit px-3 text-sm"
@@ -7701,7 +7713,7 @@ function SelectField({
         <SelectTrigger className="h-10 w-full px-3 text-sm" disabled={disabled} id={id}>
           <SelectValue />
         </SelectTrigger>
-        <SelectContent className={contentClassName} showScrollButtons={showScrollButtons}>
+        <SettingsSelectContent className={contentClassName} showScrollButtons={showScrollButtons}>
           <SelectGroup>
             {options.map((option) => (
               <SelectItem key={option.value} value={option.value}>
@@ -7709,7 +7721,7 @@ function SelectField({
               </SelectItem>
             ))}
           </SelectGroup>
-        </SelectContent>
+        </SettingsSelectContent>
       </Select>
       {supportingContent}
     </SettingRow>
@@ -7777,7 +7789,7 @@ function PetPickerField({
             <SelectTrigger className="h-10 w-full px-3 text-sm" id={id}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SettingsSelectContent>
               <SelectGroup>
                 {PET_OPTIONS.map((option) => (
                   <SelectItem key={option.id} value={option.id}>
@@ -7785,7 +7797,7 @@ function PetPickerField({
                   </SelectItem>
                 ))}
               </SelectGroup>
-            </SelectContent>
+            </SettingsSelectContent>
           </Select>
           <div className="truncate text-xs text-muted-foreground">{selectedPet.description}</div>
         </div>
@@ -7840,7 +7852,7 @@ function SoundField({
           <SelectTrigger className="h-10 w-full px-3 text-sm" id={id}>
             <SelectValue />
           </SelectTrigger>
-          <SelectContent className="max-h-72" showScrollButtons={false}>
+          <SettingsSelectContent className="max-h-72" showScrollButtons={false}>
             <SelectGroup>
               {COMPLETION_SOUND_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
@@ -7848,7 +7860,7 @@ function SoundField({
                 </SelectItem>
               ))}
             </SelectGroup>
-          </SelectContent>
+          </SettingsSelectContent>
         </Select>
         <Tooltip>
           <TooltipTrigger
@@ -8566,6 +8578,10 @@ function SidebarTagListSettingsRow({
  * up-arrow affordance beside the label actions, immediately before the info
  * button when one is present, so the label stays compact while hover explains
  * the row as an Advanced Setting.
+ *
+ * CDXC:SettingsAdvanced 2026-06-16-18:22:
+ * The advanced up-arrow is a persistent scan marker, not hover-only chrome, and
+ * needs a small gap from the label so advanced rows are visible at rest.
  */
 function SettingRow({
   advanced,

@@ -137,6 +137,7 @@ import {
 import { normalizeSessionRecord } from "../../shared/session-grid-state-helpers";
 import {
   createDefaultSidebarGitState,
+  hasSidebarGitRemoteCommitDelta,
   type SidebarGitAction,
   type SidebarGitState,
 } from "../../shared/sidebar-git";
@@ -224,7 +225,9 @@ import {
   isCursorAgentTranscriptPath,
 } from "../../shared/cursor-cli-session";
 import {
+  hasSeenCurrentHighlightedFeatures,
   hasSeenCurrentFirstLaunchSetup,
+  markCurrentHighlightedFeaturesSeen,
   markCurrentFirstLaunchSetupSeen,
 } from "../../shared/first-launch-setup-settings";
 import {
@@ -1353,6 +1356,13 @@ const FIRST_PROMPT_AUTO_RENAME_POLL_MS = 2_000;
 const AUTO_SUBMIT_STAGED_RENAME_DELAY_MS = 1_000;
 const NATIVE_SETTLED_TERMINAL_TITLE_SYNC_DELAY_MS = 1_500;
 const DELAYED_SEND_MAX_DELAY_MS = 2_147_483_647;
+/**
+ * CDXC:DelayedSend 2026-06-16-17:57:
+ * Delayed Send is configured in whole hours and minutes, not seconds. Keep
+ * native validation at one minute and whole-minute increments so bridge callers
+ * cannot schedule sub-minute sends after the modal dropped the seconds field.
+ */
+const DELAYED_SEND_MIN_DELAY_MS = 60_000;
 const DELAYED_SEND_RESTORE_FIRE_GRACE_MS = 2_000;
 /**
  * CDXC:CloseAfterDone 2026-06-16-01:48:
@@ -8109,9 +8119,29 @@ function openTipsAndTricksOnFirstLaunch(): void {
  * first-launch setup modal only after that modal closes. Keep this sequencing
  * on the automatic startup path so the manual overflow-menu Highlighted
  * Features action remains replayable without launching setup afterward.
+ *
+ * CDXC:HighlightedFeatures 2026-06-16-18:55:
+ * Existing installs that already completed first-launch setup should still see
+ * the new Highlighted Features tour once after updating. Check and write a
+ * separate feature-tour seen revision before the first-launch setup early
+ * return, while only new installs carry the setup follow-up flag.
  */
 function openFirstLaunchSetupOnFirstLaunch(): void {
-  if (hasSeenCurrentFirstLaunchSetup(localStorage)) {
+  const hasSeenFirstLaunchSetup = hasSeenCurrentFirstLaunchSetup(localStorage);
+  if (!hasSeenCurrentHighlightedFeatures(localStorage)) {
+    markCurrentHighlightedFeaturesSeen(localStorage);
+    openAppModal({
+      modal: "discoverGhostex",
+      showFirstLaunchSetupOnClose: !hasSeenFirstLaunchSetup,
+      type: "open",
+    });
+    if (!hasSeenFirstLaunchSetup) {
+      markCurrentFirstLaunchSetupSeen(localStorage);
+    }
+    return;
+  }
+
+  if (hasSeenFirstLaunchSetup) {
     return;
   }
 
@@ -12436,6 +12466,15 @@ async function runSidebarGitAction(
   }
 
   if (action === "syncRemote") {
+    if (!hasSidebarGitRemoteCommitDelta(gitState)) {
+      /*
+       * CDXC:TitlebarGit 2026-06-16-18:41:
+       * Titlebar opens request a fresh Git-state refresh, but stale child-window
+       * clicks can still arrive. Treat a zero-remote-delta branch as a no-op
+       * before showing a running toast or invoking pull/push.
+       */
+      return;
+    }
     let toastId: string | undefined;
     try {
       toastId = showRunningAppToast(resolveSidebarGitStartedTitle(action), activeProject().name);
@@ -28819,8 +28858,14 @@ function scheduleDelayedSend(sessionId: string, delayMs: number): void {
     showNativeMessage("info", "Delayed Send is only available for terminal sessions.");
     return;
   }
-  if (!Number.isFinite(delayMs) || delayMs <= 0 || delayMs > DELAYED_SEND_MAX_DELAY_MS) {
-    showNativeMessage("warning", "Choose a Delayed Send timer between 1 second and 24 days.");
+  const isWholeMinuteDelay = Number.isInteger(delayMs / DELAYED_SEND_MIN_DELAY_MS);
+  if (
+    !Number.isFinite(delayMs) ||
+    delayMs < DELAYED_SEND_MIN_DELAY_MS ||
+    delayMs > DELAYED_SEND_MAX_DELAY_MS ||
+    !isWholeMinuteDelay
+  ) {
+    showNativeMessage("warning", "Choose a Delayed Send timer between 1 minute and 24 days.");
     return;
   }
 

@@ -4,6 +4,7 @@ import {
   createDefaultSidebarGitState,
   getSidebarGitActionCategory,
   getSidebarGitDisabledReason,
+  hasSidebarGitRemoteCommitDelta,
   resolveSidebarGitPrimaryActionState,
 } from "./sidebar-git";
 
@@ -104,6 +105,20 @@ describe("buildSidebarGitMenuItems", () => {
       "Multicommit & Release",
       "Release",
     ]);
+  });
+});
+
+describe("hasSidebarGitRemoteCommitDelta", () => {
+  test("should treat zero and negative remote counts as synced", () => {
+    expect(hasSidebarGitRemoteCommitDelta({ aheadCount: 0, behindCount: 0 })).toBe(false);
+    expect(hasSidebarGitRemoteCommitDelta({ aheadCount: -1, behindCount: 0 })).toBe(false);
+    expect(hasSidebarGitRemoteCommitDelta({ aheadCount: 0, behindCount: -1 })).toBe(false);
+  });
+
+  test("should detect either ahead or behind remote counts", () => {
+    expect(hasSidebarGitRemoteCommitDelta({ aheadCount: 1, behindCount: 0 })).toBe(true);
+    expect(hasSidebarGitRemoteCommitDelta({ aheadCount: 0, behindCount: 1 })).toBe(true);
+    expect(hasSidebarGitRemoteCommitDelta({ aheadCount: 2.7, behindCount: 0 })).toBe(true);
   });
 });
 

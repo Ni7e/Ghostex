@@ -36,6 +36,12 @@ export type DelayedSendModalProps = {
  * Reopening Delayed Send for an active timer must show the current remaining
  * countdown, prefill the duration controls from that remaining time, and allow
  * cancellation so users can verify or change the pending Enter keypress.
+ *
+ * CDXC:DelayedSend 2026-06-16-17:57:
+ * Users should configure delayed-send timers only in whole hours and minutes.
+ * Round active remaining deadlines up to the next whole minute when prefilling
+ * so editing an existing timer cannot silently shorten a sub-minute remainder
+ * and seconds never reappear as an input.
  */
 export function DelayedSendModal({
   delayedSendDeadlineAt,
@@ -48,10 +54,8 @@ export function DelayedSendModal({
 }: DelayedSendModalProps) {
   const [hours, setHours] = useState("0");
   const [minutes, setMinutes] = useState("5");
-  const [seconds, setSeconds] = useState("0");
   const hoursInputId = useId();
   const minutesInputId = useId();
-  const secondsInputId = useId();
   const minutesInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -63,7 +67,6 @@ export function DelayedSendModal({
     const duration = remainingMs > 0 ? durationPartsFromMs(remainingMs) : undefined;
     setHours(String(duration?.hours ?? 0));
     setMinutes(String(duration?.minutes ?? 5));
-    setSeconds(String(duration?.seconds ?? 0));
     const animationFrame = window.requestAnimationFrame(() => {
       /*
        * CDXC:DelayedSend 2026-05-21-12:21:
@@ -83,8 +86,8 @@ export function DelayedSendModal({
     return null;
   }
 
-  const delayMs = getDelayMs(hours, minutes, seconds);
-  const isValidDelay = delayMs > 0 && delayMs <= MAX_DELAY_MS;
+  const delayMs = getDelayMs(hours, minutes);
+  const isValidDelay = delayMs >= MINUTE_MS && delayMs <= MAX_DELAY_MS;
   const hasActiveTimer = Boolean(delayedSendRemainingLabel);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -130,6 +133,7 @@ export function DelayedSendModal({
                   id={hoursInputId}
                   min={0}
                   onChange={(event) => setHours(event.currentTarget.value)}
+                  step={1}
                   type="number"
                   value={hours}
                 />
@@ -143,23 +147,13 @@ export function DelayedSendModal({
                   onChange={(event) => setMinutes(event.currentTarget.value)}
                   onFocus={(event) => event.currentTarget.select()}
                   ref={minutesInputRef}
+                  step={1}
                   type="number"
                   value={minutes}
                 />
               </Field>
-              <Field>
-                <FieldLabel htmlFor={secondsInputId}>Seconds</FieldLabel>
-                <Input
-                  aria-label="Seconds"
-                  id={secondsInputId}
-                  min={0}
-                  onChange={(event) => setSeconds(event.currentTarget.value)}
-                  type="number"
-                  value={seconds}
-                />
-              </Field>
             </div>
-            <FieldDescription>Enter a delay between 1 second and 24 days.</FieldDescription>
+            <FieldDescription>Enter a delay between 1 minute and 24 days.</FieldDescription>
           </FieldGroup>
           <DialogFooter>
             {hasActiveTimer ? (
@@ -180,20 +174,16 @@ export function DelayedSendModal({
   );
 }
 
-function getDelayMs(hours: string, minutes: string, seconds: string): number {
-  return (
-    parseDurationPart(hours) * HOUR_MS +
-    parseDurationPart(minutes) * MINUTE_MS +
-    parseDurationPart(seconds) * SECOND_MS
-  );
+function getDelayMs(hours: string, minutes: string): number {
+  return parseDurationPart(hours) * HOUR_MS + parseDurationPart(minutes) * MINUTE_MS;
 }
 
 function parseDurationPart(value: string): number {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return 0;
+  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) {
+    return Number.NaN;
   }
-  return Math.floor(parsed);
+  return parsed;
 }
 
 function getRemainingMs(deadlineAt: string | undefined): number {
@@ -207,10 +197,9 @@ function getRemainingMs(deadlineAt: string | undefined): number {
   return Math.max(0, deadlineMs - Date.now());
 }
 
-function durationPartsFromMs(delayMs: number): { hours: number; minutes: number; seconds: number } {
-  const totalSeconds = Math.max(1, Math.ceil(delayMs / SECOND_MS));
-  const hours = Math.floor(totalSeconds / 3_600);
-  const minutes = Math.floor((totalSeconds % 3_600) / 60);
-  const seconds = totalSeconds % 60;
-  return { hours, minutes, seconds };
+function durationPartsFromMs(delayMs: number): { hours: number; minutes: number } {
+  const totalMinutes = Math.max(1, Math.ceil(delayMs / MINUTE_MS));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return { hours, minutes };
 }

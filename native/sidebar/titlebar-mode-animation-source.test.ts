@@ -3,6 +3,14 @@ import { describe, expect, test } from "vitest";
 
 const titlebarHostSource = readFileSync(new URL("./titlebar-host.tsx", import.meta.url), "utf8");
 
+function sourceBetween(source: string, start: string, end: string): string {
+  const startIndex = source.indexOf(start);
+  const endIndex = source.indexOf(end, startIndex + start.length);
+  expect(startIndex).toBeGreaterThanOrEqual(0);
+  expect(endIndex).toBeGreaterThan(startIndex);
+  return source.slice(startIndex, endIndex);
+}
+
 describe("titlebar mode active state source", () => {
   test("uses an instant active pill while preserving the commented Motion restore point", () => {
     /*
@@ -19,5 +27,28 @@ describe("titlebar mode active state source", () => {
     expect(titlebarHostSource).not.toMatch(/^\s*<motion\.div$/m);
     expect(titlebarHostSource).toContain("*   <motion.div");
     expect(titlebarHostSource).not.toContain('transition={{ type: "spring", bounce: 0.3, duration: 0.6 }}');
+  });
+
+  test("shows right-side disabled reasons for project-only mode tabs", () => {
+    /*
+     * CDXC:ModeSwitcher 2026-06-16-16:00:
+     * Disabled Browser and Kanban tabs need a right-side AppTooltip explaining
+     * that Quick-session users must switch to a project before opening those
+     * project views. The buttons must stay hoverable, so do not use native
+     * disabled on the visible mode-switcher tabs.
+     */
+    const visibleModeSwitcherSource = sourceBetween(
+      titlebarHostSource,
+      "function TitlebarModeSwitcher({",
+      "function parseSharedSettings(candidate: unknown): unknown",
+    );
+
+    expect(titlebarHostSource).toContain('"Switch to a project to access this view"');
+    expect(visibleModeSwitcherSource).toContain(
+      "content={mode.disabled ? mode.disabledReason : undefined}",
+    );
+    expect(visibleModeSwitcherSource).toContain('side="right"');
+    expect(visibleModeSwitcherSource).toContain("if (mode.disabled) {\n                return;\n              }");
+    expect(visibleModeSwitcherSource).not.toContain("disabled={mode.disabled}");
   });
 });

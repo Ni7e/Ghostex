@@ -20,6 +20,7 @@ import {
   IconGitCompare,
   IconGitCommit,
   IconGitPullRequest,
+  IconHistory,
   IconInfoCircle,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
@@ -101,6 +102,7 @@ import {
   buildSidebarGitMenuItems,
   createDefaultSidebarGitState,
   getSidebarGitDisabledReason,
+  hasSidebarGitRemoteCommitDelta,
   resolveSidebarGitPrimaryActionState,
   type SidebarGitAction,
   type SidebarGitState,
@@ -136,6 +138,12 @@ type TitlebarOpenTargetsSettings = {
   customTargets: CustomWorkspaceOpenTarget[];
   hiddenTargetIds: string[];
 };
+
+/*
+ * CDXC:TipsAndTricks 2026-06-16-19:42:
+ * The Tips & Tricks header needs a Changelog action that opens the full Ghostex GitHub releases page as an in-project browser session, keeping release history inside the current workspace instead of the system browser.
+ */
+const GHOSTEX_CHANGELOG_URL = "https://github.com/maddada/ghostex/releases";
 
 type TitlebarSidebarActionsSettings = {
   commands: SidebarCommandButton[];
@@ -384,6 +392,7 @@ declare global {
     __ghostex_TITLEBAR__?: {
       closeOpenDropdowns: () => void;
       setActiveProjectState: (state: Partial<TitlebarProjectState>) => void;
+      setLastActionCommandId: (commandId: string) => void;
       setNativeDropdownOpen: (kind: TitlebarDropdownPanelKind | undefined) => void;
       setNativePointerInside: (isInside: boolean) => void;
       setWindowFocused: (isFocused: boolean) => void;
@@ -397,9 +406,11 @@ const KEEP_AWAKE_RUNTIME_STORAGE_KEY = "ghostex.titlebar.keepAwakeRuntime";
 const KEEP_AWAKE_RUNTIME_SYNC_STORAGE_KEY = "ghostex.titlebar.keepAwakeRuntimeSync";
 const KEEP_AWAKE_RUNTIME_CHANGED_EVENT = "ghostex:titlebar-keep-awake-runtime-changed";
 const KEEP_AWAKE_LID_SLEEP_STORAGE_KEY = "ghostex.titlebar.lidSleepPrevention";
+const TITLEBAR_GIT_STATE_CACHE_STORAGE_PREFIX = "ghostex.titlebar.gitState.";
 const TITLEBAR_TIPS_READ_STORAGE_KEY = "ghostex.titlebar.tips.readIds";
 const KEEP_AWAKE_POWER_CHECK_INTERVAL_MS = 30_000;
 const KEEP_AWAKE_ADMIN_PROCESS_TIMEOUT_MS = 120_000;
+const CUSTOM_TITLEBAR_BACKGROUND_BRIGHTNESS_FACTOR = 0.85;
 /**
  * CDXC:NativeWindowChrome 2026-05-25-07:16:
  * The macOS app titlebar should now be 35px tall, not the earlier 45px. Keep the React titlebar height in sync with Swift's native reservation so web controls and AppKit traffic-light centering share one chrome height.
@@ -527,8 +538,15 @@ function createTitlebarDropdownPanelPreferredSize(
       );
     }
     case "git":
+      /*
+       * CDXC:TitlebarGit 2026-06-16-15:15:
+       * The Git dropdown separates repository status from runnable commands
+       * with Status and Actions section labels. Include those fixed label rows
+       * in the child-window height so the native dropdown does not clip actions.
+       */
       return compactTitlebarDropdownPanelSize(
-        titlebarMenuHeight(Math.max(1, counts.gitItemCount) + 3, { separatorCount: 1 }),
+        titlebarMenuHeight(Math.max(1, counts.gitItemCount) + 3, { separatorCount: 1 }) +
+          TITLEBAR_DROPDOWN_MENU_LABEL_HEIGHT * 2,
       );
     case "keepAwake":
       return compactTitlebarDropdownPanelSize(
@@ -881,10 +899,12 @@ function TitlebarAppTooltip({
 
 function postTitlebarSidebarCommand(
   message:
+    | { type: "openBrowserPane"; url: string }
     | { type: "openHighlightedFeatures" }
     | { type: "openWorkspaceWelcome" }
     | { type: "requestAgentHookStatus" }
-    | { type: "requestGhostexCliStatus" },
+    | { type: "requestGhostexCliStatus" }
+    | { type: "refreshGitState" },
 ): void {
   /*
   CDXC:AgentHooks 2026-06-07-11:05:
@@ -898,9 +918,17 @@ function postTitlebarSidebarCommand(
   instead of probing from the isolated titlebar webview.
 
   CDXC:TipsAndTricks 2026-06-16-08:17:
-  Tips & Tricks header actions should launch Highlighted Features and the setup
+  Tips & Tricks header actions should launch the Features tour and the setup
   flow through the sidebar command bridge because the native sidebar owns app
   modal presentation.
+
+  CDXC:TipsAndTricks 2026-06-16-19:42:
+  The Changelog header action should reuse the sidebar browser-pane command so
+  the releases page opens in the current project as a new browser session.
+
+  CDXC:TitlebarGit 2026-06-16-18:41:
+  Opening the titlebar Git menu should request fresh Git stats through the
+  sidebar-owned bridge before showing the dropdown, including right-click opens.
   */
   window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
     message,
@@ -1864,12 +1892,20 @@ function App() {
   const viewGhostexGuideFromTips = useCallback(() => {
     /*
      * CDXC:TipsAndTricks 2026-06-16-10:04:
-     * The Tips & Tricks header should send users to Highlighted Features with a
-     * filled star action and to the setup guide through a View Ghostex Guide
-     * action. Keep the sidebar-owned workspace welcome bridge as the guide entry
-     * point because that surface owns setup and onboarding repair.
+     * The Tips & Tricks header should send users to Features with a filled star
+     * action and to the setup guide through a Setup Ghostex action. Keep the
+     * sidebar-owned workspace welcome bridge as the guide entry point because
+     * that surface owns setup and onboarding repair.
      */
     postTitlebarSidebarCommand({ type: "openWorkspaceWelcome" });
+  }, []);
+  const openChangelogFromTips = useCallback(() => {
+    /*
+     * CDXC:TipsAndTricks 2026-06-16-19:42:
+     * The Tips & Tricks header should expose the release changelog on the far
+     * right and open it as a normal current-project browser session.
+     */
+    postTitlebarSidebarCommand({ type: "openBrowserPane", url: GHOSTEX_CHANGELOG_URL });
   }, []);
   const closeTitlebarDropdownPanel = useCallback(() => {
     postNative({ type: "closeTitlebarDropdownPanel" });
@@ -2221,8 +2257,22 @@ function App() {
       setNativePointerInside: setTitlebarNativePointerInside,
       setWindowFocused: setTitlebarWindowFocused,
       setNativeDropdownOpen,
+      setLastActionCommandId: (commandId) => {
+        /*
+         * CDXC:TitlebarActions 2026-06-16-18:31:
+         * Quick Actions run from the native dropdown panel must immediately
+         * become the main titlebar button action. The dropdown is a separate
+         * WKWebView, so native relays the chosen command id back into the main
+         * titlebar bridge instead of waiting for a reload to reread localStorage.
+         */
+        setSelectedActionCommandId(commandId);
+      },
       setActiveProjectState: (state) => {
-        setProjectState((current) => mergeTitlebarProjectState(current, state));
+        setProjectState((current) => {
+          const next = mergeTitlebarProjectState(current, state);
+          cacheTitlebarGitState(next);
+          return next;
+        });
       },
     };
     if (isRecord(window.__ghostex_PENDING_TITLEBAR_PROJECT_STATE__)) {
@@ -2468,11 +2518,20 @@ function App() {
   };
 
   const runGitAction = (action: SidebarGitAction) => {
+    /*
+     * CDXC:TitlebarGit 2026-06-16-18:41:
+     * If the Commits row shows no remote delta, a stale titlebar child-window
+     * click should be inert instead of starting an unnecessary pull/push flow.
+     */
+    if (action === "syncRemote" && !hasSidebarGitRemoteCommitDelta(projectState.git)) {
+      return;
+    }
     closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarGitAction");
     postNative({ action, type: "runSidebarGitActionFromTitlebar" });
   };
   const openGitMenuFromTitlebar = useCallback(
     (event: { currentTarget: HTMLElement }) => {
+      postTitlebarSidebarCommand({ type: "refreshGitState" });
       showTitlebarDropdownPanel("git", event.currentTarget);
     },
     [showTitlebarDropdownPanel],
@@ -2961,7 +3020,7 @@ function App() {
    * Browser + tabs follow the same destination rule: project GitHub remote when available, otherwise Google.
    */
   const browserModeDisabledReason = projectState.projectIsQuick
-    ? "Quick sessions do not have a project Browser view."
+    ? "Switch to a project to access this view"
     : undefined;
   /*
    * CDXC:ModeSwitcher 2026-06-08-18:39:
@@ -2969,9 +3028,14 @@ function App() {
    * there for the same active-context reason as Browser mode. Disable the
    * titlebar tab/button before click dispatch instead of opening an empty
    * project-board surface.
+   *
+   * CDXC:ModeSwitcher 2026-06-16-16:00:
+   * Disabled Browser and Kanban mode tabs should explain the project-context
+   * requirement directly on hover. Use one shared message for Quick sessions so
+   * users know switching to a project unlocks those views.
    */
   const kanbanModeDisabledReason = projectState.projectIsQuick
-    ? "Quick sessions do not have a Kanban project view."
+    ? "Switch to a project to access this view"
     : undefined;
 
   const openGitMode = () => {
@@ -3104,6 +3168,9 @@ function App() {
     }
 
     if (projectState.customSidebarTitlebarColorsEnabled) {
+      const titlebarBackgroundColor = getCustomTitlebarBackgroundForSidebarBackground(
+        projectState.customSidebarTitlebarBackgroundColor,
+      );
       /**
        * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
        * The React titlebar is a separate WKWebView from the sidebar. Apply the
@@ -3119,15 +3186,21 @@ function App() {
        * CDXC:SidebarTitlebarColors 2026-06-15-15:01:
        * Custom titlebar separators darken as the slider-selected background gets
        * lighter, but only inside the real titlebar host.
+       *
+       * CDXC:SidebarTitlebarColors 2026-06-16-18:46:
+       * The visual trial keeps the sidebar at the selected custom background
+       * while rendering the titlebar 15% darker. Compute the titlebar token
+       * here so imported sidebar styles inside this WKWebView align with the
+       * AppKit titlebar backing layer.
        */
       document.body.dataset.customSidebarTitlebarColors = "true";
       document.body.style.setProperty(
         "--app-titlebar-background",
-        projectState.customSidebarTitlebarBackgroundColor,
+        titlebarBackgroundColor,
       );
       document.body.style.setProperty(
         "--custom-sidebar-titlebar-background-color",
-        projectState.customSidebarTitlebarBackgroundColor,
+        titlebarBackgroundColor,
       );
       document.body.style.setProperty(
         "--custom-sidebar-titlebar-foreground-color",
@@ -3139,9 +3212,7 @@ function App() {
       );
       document.body.style.setProperty(
         "--titlebar-button-border-color",
-        getTitlebarButtonSeparatorColorForBackground(
-          projectState.customSidebarTitlebarBackgroundColor,
-        ),
+        getTitlebarButtonSeparatorColorForBackground(titlebarBackgroundColor),
       );
     } else {
       delete document.body.dataset.customSidebarTitlebarColors;
@@ -3190,6 +3261,7 @@ function App() {
           onGxserverStart={startGxserverDaemon}
           onGxserverStop={stopGxserverDaemon}
           onMarkTipRead={markTipRead}
+          onOpenChangelog={openChangelogFromTips}
           onOpenHighlightedFeatures={openHighlightedFeaturesFromTips}
           onOpenNoticeSettings={openNoticeSettings}
           onOpenPowerSettings={openPowerSettings}
@@ -3656,6 +3728,7 @@ function TitlebarDropdownPanelSurface({
   onGxserverStart,
   onGxserverStop,
   onMarkTipRead,
+  onOpenChangelog,
   onOpenHighlightedFeatures,
   onOpenNoticeSettings,
   onOpenPowerSettings,
@@ -3701,6 +3774,7 @@ function TitlebarDropdownPanelSurface({
   onGxserverStart: () => void;
   onGxserverStop: () => void;
   onMarkTipRead: (tipId: string) => void;
+  onOpenChangelog: () => void;
   onOpenHighlightedFeatures: () => void;
   onOpenNoticeSettings: (target: TitlebarNotice["settingsTarget"]) => void;
   onOpenPowerSettings: () => void;
@@ -3745,6 +3819,7 @@ function TitlebarDropdownPanelSurface({
     onClose();
   };
   const isPanelDarkTheme = getTitlebarThemeVariant(sidebarTheme) === "dark";
+  const gitBranchLabel = titlebarGitBranchLabel(git.branch);
 
   return (
     <div
@@ -3774,6 +3849,7 @@ function TitlebarDropdownPanelSurface({
           <TitlebarTipsMenu
             notices={notices}
             onMarkRead={onMarkTipRead}
+            onOpenChangelog={() => closeAfter(onOpenChangelog)}
             onOpenHighlightedFeatures={() => closeAfter(onOpenHighlightedFeatures)}
             onOpenNoticeSettings={(target) => closeAfter(() => onOpenNoticeSettings(target))}
             onViewGhostexGuide={() => closeAfter(onViewGhostexGuide)}
@@ -3857,10 +3933,9 @@ function TitlebarDropdownPanelSurface({
           {/*
             CDXC:TitlebarGit 2026-06-15-23:25:
             The titlebar Git dropdown should expose branch context, colored
-            working-tree line stats, remote tracking counts, and a sync action
-            before Commit. Keep branch and working-tree stats rows non-clickable
-            so the first real command is the explicit remote-sync row, followed
-            by the existing Git action list.
+            working-tree change stats, remote tracking counts, and a sync action
+            before Commit. Branch and working-tree stats are compact status
+            controls above the existing Git action list.
 
             CDXC:TitlebarGit 2026-06-15-23:25:
             Titlebar Git rows must call the same titlebar Git action bridge as
@@ -3874,33 +3949,84 @@ function TitlebarDropdownPanelSurface({
             Sync with Main remains a separate workflow action in the command list
             so normal branches can sync with origin without entering the
             worktree-only agent flow.
+
+            CDXC:TitlebarGit 2026-06-16-15:15:
+            Status and Actions labels should divide read-only branch/diff/remote
+            state from runnable Git commands. The Changes row uses a code icon so
+            it does not read like the remote-sync compare action below it.
+
+            CDXC:TitlebarGit 2026-06-16-19:03:
+            The status block is a label/value table: Branch, Changes, and Commits
+            stay left-aligned while their values are right-aligned. Commits
+            always shows ↑ahead then ↓behind, including ↑0 ↓0 when no sync is
+            needed. The branch value is a tooltip-backed copy target.
+
+            CDXC:TitlebarGit 2026-06-16-19:10:
+            The full Branch row is a copy target, not only the visible branch
+            value. The Changes/files row opens the Commit review screen like the
+            Commit action. Tooltips must explain both click targets.
+
+            CDXC:TitlebarGit 2026-06-16-19:19:
+            The changed-files stat label should read Changes instead of Lines.
           */}
-          <div className="titlebar-open-menu-item titlebar-git-meta-row" role="presentation">
-            <IconGitCommit aria-hidden="true" className="titlebar-git-icon" size={15} stroke={1.8} />
-            <span className="titlebar-git-branch-field">
-              <span className="titlebar-git-meta-label">Branch:</span>
-              <span className="titlebar-git-branch-name">{titlebarGitBranchLabel(git.branch)}</span>
-            </span>
-          </div>
-          <div className="titlebar-open-menu-item titlebar-git-meta-row" role="presentation">
-            <IconGitCompare aria-hidden="true" className="titlebar-git-icon" size={15} stroke={1.8} />
-            <TitlebarGitStatPair firstCount={git.additions} label="Lines" secondCount={git.deletions} />
-          </div>
+          <div className="titlebar-menu-section-label">Status</div>
+          <AppTooltip
+            {...TITLEBAR_TOOLTIP_ROOT_PROPS}
+            content={
+              <span className="titlebar-git-branch-tooltip-copy">
+                <span>{gitBranchLabel}</span>
+                <span>Click to copy branch name</span>
+              </span>
+            }
+            contentClassName="titlebar-git-branch-tooltip whitespace-normal text-left"
+            side="left"
+            sideOffset={6}
+          >
+            <button
+              aria-label={`Copy branch ${gitBranchLabel}`}
+              className="titlebar-open-menu-item titlebar-git-meta-row titlebar-git-copy-branch-row"
+              onClick={() => {
+                void navigator.clipboard.writeText(gitBranchLabel);
+              }}
+              type="button"
+            >
+              <IconGitCommit aria-hidden="true" className="titlebar-git-icon" size={15} stroke={1.8} />
+              <span className="titlebar-git-branch-field">
+                <span className="titlebar-git-meta-label">Branch</span>
+                <span className="titlebar-git-branch-name">
+                  {gitBranchLabel}
+                </span>
+              </span>
+            </button>
+          </AppTooltip>
+          <AppTooltip
+            {...TITLEBAR_TOOLTIP_ROOT_PROPS}
+            content="Open commit screen"
+            contentClassName="titlebar-git-action-tooltip"
+            side="left"
+            sideOffset={6}
+          >
+            <TitlebarPanelMenuItem onClick={() => closeAfter(() => onRunGitAction("commit"))}>
+              <IconCode aria-hidden="true" className="titlebar-git-icon" size={15} stroke={1.8} />
+              <TitlebarGitStatPair firstCount={git.additions} label="Changes" secondCount={git.deletions} />
+            </TitlebarPanelMenuItem>
+          </AppTooltip>
           <TitlebarPanelMenuItem
             disabled={titlebarGitRemoteSyncDisabledReason(git) !== undefined}
             onClick={() => closeAfter(() => onRunGitAction("syncRemote"))}
           >
             {getTitlebarGitActionIcon("syncRemote")}
             <TitlebarGitStatPair
-              firstCount={git.behindCount}
-              firstPrefix="↓"
+              firstCount={git.aheadCount}
+              firstPrefix="↑"
               label="Commits"
-              secondCount={git.aheadCount}
-              secondPrefix="↑"
+              secondCount={git.behindCount}
+              secondPrefix="↓"
               tone="commits"
             />
           </TitlebarPanelMenuItem>
           <TitlebarPanelMenuSeparator />
+          <div className="titlebar-menu-section-label">Actions</div>
           {gitItems.map((item) => (
             <TitlebarPanelMenuItem
               disabled={item.disabled}
@@ -4042,6 +4168,53 @@ function getTitlebarThemeVariant(theme: SidebarTheme): "dark" | "light" {
   return theme.startsWith("light-") || theme === "plain-light" ? "light" : "dark";
 }
 
+type TitlebarRgbColor = {
+  blue: number;
+  green: number;
+  red: number;
+};
+
+function parseTitlebarHexRgbColor(color: string): TitlebarRgbColor | undefined {
+  const normalized = color.trim().toLowerCase();
+  const match = /^#([0-9a-f]{6})$/u.exec(normalized);
+  if (!match) {
+    return undefined;
+  }
+
+  const hex = match[1];
+  return {
+    red: Number.parseInt(hex.slice(0, 2), 16),
+    green: Number.parseInt(hex.slice(2, 4), 16),
+    blue: Number.parseInt(hex.slice(4, 6), 16),
+  };
+}
+
+function formatTitlebarHexRgbColor({ red, green, blue }: TitlebarRgbColor): string {
+  const formatChannel = (channel: number) =>
+    Math.min(255, Math.max(0, Math.round(channel))).toString(16).padStart(2, "0");
+  return `#${formatChannel(red)}${formatChannel(green)}${formatChannel(blue)}`;
+}
+
+function getCustomTitlebarBackgroundForSidebarBackground(backgroundColor: string): string {
+  /**
+   * CDXC:SidebarTitlebarColors 2026-06-16-18:46:
+   * The custom titlebar visual trial should be derived from the selected
+   * sidebar background at 85% brightness, not persisted as a second setting.
+   * Keep invalid values unchanged so the existing theme fallback path remains
+   * responsible for bad input.
+   */
+  const color = parseTitlebarHexRgbColor(backgroundColor);
+  if (!color) {
+    return backgroundColor;
+  }
+
+  return formatTitlebarHexRgbColor({
+    red: color.red * CUSTOM_TITLEBAR_BACKGROUND_BRIGHTNESS_FACTOR,
+    green: color.green * CUSTOM_TITLEBAR_BACKGROUND_BRIGHTNESS_FACTOR,
+    blue: color.blue * CUSTOM_TITLEBAR_BACKGROUND_BRIGHTNESS_FACTOR,
+  });
+}
+
 function getTitlebarButtonSeparatorColorForBackground(backgroundColor: string): string {
   /**
    * CDXC:SidebarTitlebarColors 2026-06-15-15:01:
@@ -4053,19 +4226,32 @@ function getTitlebarButtonSeparatorColorForBackground(backgroundColor: string): 
    * A 90 contrast background made the previous separator curve nearly match
    * the background. Darken separators much faster as the background lightens so
    * the button dividers stay visible throughout the 85-100 slider range.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-16-15:52:
+   * The 93 contrast + white tint default computes to #141414. The previous
+   * curve crossed over there and returned #151515, making 1px titlebar button
+   * separators disappear. Keep very dark backgrounds on the subtle lighter
+   * separator curve, then switch to the dark divider floor once the background
+   * reaches the new default range.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-16-19:36:
+   * After the titlebar became 15% darker than the sidebar, the 93 contrast
+   * titlebar resolves near #111111 and should not use the near-black separator
+   * floor. Keep very dark titlebars on a lighter divider floor so separators
+   * between titlebar items stay visible instead of blending into the chrome.
    */
-  const normalized = backgroundColor.trim().toLowerCase();
-  const match = /^#([0-9a-f]{6})$/u.exec(normalized);
-  if (!match) {
+  const color = parseTitlebarHexRgbColor(backgroundColor);
+  if (!color) {
     return "#252525";
   }
 
-  const hex = match[1];
-  const red = Number.parseInt(hex.slice(0, 2), 16);
-  const green = Number.parseInt(hex.slice(2, 4), 16);
-  const blue = Number.parseInt(hex.slice(4, 6), 16);
-  const averageChannel = Math.round((red + green + blue) / 3);
-  const separatorChannel = Math.max(6, Math.min(37, Math.round(37 - averageChannel * 0.8)));
+  const averageChannel = Math.round((color.red + color.green + color.blue) / 3);
+  const separatorChannel =
+    averageChannel <= 22
+      ? 37
+      : averageChannel <= 34
+        ? Math.max(18, Math.min(37, Math.round(37 - (averageChannel - 22) * 1.5)))
+        : 6;
   const separatorHex = separatorChannel.toString(16).padStart(2, "0");
   return `#${separatorHex}${separatorHex}${separatorHex}`;
 }
@@ -4076,6 +4262,10 @@ function mergeTitlebarProjectState(
 ): TitlebarProjectState {
   const customSidebarTitlebarBackgroundColor =
     state.customSidebarTitlebarBackgroundColor ?? current.customSidebarTitlebarBackgroundColor;
+  const projectIdentity = {
+    projectId: state.projectId ?? current.projectId,
+    projectPath: state.projectPath ?? current.projectPath,
+  };
   return {
     ...current,
     ...state,
@@ -4087,7 +4277,7 @@ function mergeTitlebarProjectState(
     ghostexCliStatus: state.ghostexCliStatus ?? current.ghostexCliStatus,
     debuggingMode: state.debuggingMode ?? current.debuggingMode,
     diffStats: state.diffStats ?? current.diffStats,
-    git: state.git ?? current.git,
+    git: resolveTitlebarGitStateForMerge(current.git, state.git, projectIdentity),
     gxserverDaemon: state.gxserverDaemon ?? current.gxserverDaemon,
     keepAwake: state.keepAwake ?? current.keepAwake,
     browserTabs: state.browserTabs ?? current.browserTabs,
@@ -4114,6 +4304,179 @@ function mergeTitlebarProjectState(
     updateAvailable: state.updateAvailable ?? current.updateAvailable,
     updateDownloading: state.updateDownloading ?? current.updateDownloading,
   };
+}
+
+function resolveTitlebarGitStateForMerge(
+  current: SidebarGitState,
+  incoming: SidebarGitState | undefined,
+  projectIdentity: Pick<TitlebarProjectState, "projectId" | "projectPath">,
+): SidebarGitState {
+  const cached = readCachedTitlebarGitState(projectIdentity);
+  if (incoming === undefined) {
+    return shouldHydrateMissingTitlebarGitStateFromCache(current, cached) ? cached : current;
+  }
+  if (shouldUseCachedTitlebarGitState(incoming, cached)) {
+    /*
+     * CDXC:TitlebarGit 2026-06-16-19:19:
+     * Git refresh publishes a transient busy/default state before branch and
+     * diff probes finish. Keep the last cached project Git snapshot visible
+     * during that refresh so titlebar dropdowns do not flash detached/default
+     * metadata before the real branch result arrives.
+     */
+    return {
+      ...cached,
+      confirmSuggestedCommit: incoming.confirmSuggestedCommit,
+      generateCommitBody: incoming.generateCommitBody,
+      isBusy: incoming.isBusy,
+      primaryAction: incoming.primaryAction,
+    };
+  }
+  return incoming;
+}
+
+function shouldHydrateMissingTitlebarGitStateFromCache(
+  current: SidebarGitState,
+  cached: SidebarGitState | undefined,
+): cached is SidebarGitState {
+  return cached !== undefined && !isCacheableTitlebarGitState(current);
+}
+
+function shouldUseCachedTitlebarGitState(
+  incoming: SidebarGitState,
+  cached: SidebarGitState | undefined,
+): cached is SidebarGitState {
+  return (
+    cached !== undefined &&
+    incoming.isBusy &&
+    incoming.branch === null &&
+    (cached.branch !== null || cached.isRepo)
+  );
+}
+
+function cacheTitlebarGitState(state: TitlebarProjectState): void {
+  const cacheKey = titlebarGitStateCacheKey(state);
+  if (cacheKey === undefined || state.git.isBusy || !isCacheableTitlebarGitState(state.git)) {
+    return;
+  }
+  localStorage.setItem(cacheKey, JSON.stringify(state.git));
+}
+
+function isCacheableTitlebarGitState(state: SidebarGitState): boolean {
+  return (
+    state.isRepo ||
+    state.hasCheckedGitHubRemote ||
+    state.branch !== null ||
+    state.files.length > 0
+  );
+}
+
+function readCachedTitlebarGitState(
+  projectIdentity: Pick<TitlebarProjectState, "projectId" | "projectPath">,
+): SidebarGitState | undefined {
+  const cacheKey = titlebarGitStateCacheKey(projectIdentity);
+  if (cacheKey === undefined) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(localStorage.getItem(cacheKey) || "null");
+    return normalizeCachedTitlebarGitState(parsed);
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeCachedTitlebarGitState(value: unknown): SidebarGitState | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const baseState = createDefaultSidebarGitState();
+  return {
+    ...baseState,
+    additions: readCachedTitlebarNumber(value.additions),
+    aheadCount: readCachedTitlebarNumber(value.aheadCount),
+    behindCount: readCachedTitlebarNumber(value.behindCount),
+    branch: typeof value.branch === "string" ? value.branch : null,
+    confirmSuggestedCommit: value.confirmSuggestedCommit === true,
+    deletions: readCachedTitlebarNumber(value.deletions),
+    generateCommitBody: value.generateCommitBody !== false,
+    hasCheckedGitHubRemote: value.hasCheckedGitHubRemote === true,
+    hasGitHubCli: value.hasGitHubCli === true,
+    hasGitHubRemote: value.hasGitHubRemote === true,
+    hasOriginRemote: value.hasOriginRemote === true,
+    hasUpstream: value.hasUpstream === true,
+    hasWorkingTreeChanges: value.hasWorkingTreeChanges === true,
+    files: normalizeCachedTitlebarGitFiles(value.files),
+    isBusy: value.isBusy === true,
+    isRepo: value.isRepo === true,
+    isWorktree: value.isWorktree === true,
+    pr: normalizeCachedTitlebarGitPullRequest(value.pr),
+    primaryAction: normalizeCachedTitlebarGitAction(value.primaryAction, baseState.primaryAction),
+    worktreeName: typeof value.worktreeName === "string" ? value.worktreeName : undefined,
+  };
+}
+
+function normalizeCachedTitlebarGitAction(
+  value: unknown,
+  fallback: SidebarGitAction,
+): SidebarGitAction {
+  return value === "commit" ||
+    value === "push" ||
+    value === "pr" ||
+    value === "syncRemote" ||
+    value === "syncMain" ||
+    value === "multiRelease" ||
+    value === "release"
+    ? value
+    : fallback;
+}
+
+function normalizeCachedTitlebarGitPullRequest(value: unknown): SidebarGitState["pr"] {
+  if (
+    !isRecord(value) ||
+    typeof value.title !== "string" ||
+    typeof value.url !== "string" ||
+    (value.state !== "open" && value.state !== "closed" && value.state !== "merged")
+  ) {
+    return null;
+  }
+  return {
+    number:
+      typeof value.number === "number" && Number.isFinite(value.number)
+        ? value.number
+        : undefined,
+    state: value.state,
+    title: value.title,
+    url: value.url,
+  };
+}
+
+function normalizeCachedTitlebarGitFiles(value: unknown): SidebarGitState["files"] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((file) => {
+    if (!isRecord(file) || typeof file.path !== "string") {
+      return [];
+    }
+    return [{
+      additions: readCachedTitlebarNumber(file.additions),
+      deletions: readCachedTitlebarNumber(file.deletions),
+      path: file.path,
+    }];
+  });
+}
+
+function readCachedTitlebarNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function titlebarGitStateCacheKey(
+  projectIdentity: Pick<TitlebarProjectState, "projectId" | "projectPath">,
+): string | undefined {
+  const projectKey = projectIdentity.projectId || projectIdentity.projectPath;
+  return projectKey
+    ? `${TITLEBAR_GIT_STATE_CACHE_STORAGE_PREFIX}${encodeURIComponent(projectKey)}`
+    : undefined;
 }
 
 function formatToggleSidebarTooltipLabel(hotkey: string | undefined): string {
@@ -4192,7 +4555,9 @@ function createInitialProjectState(bootstrap: Record<string, unknown>): Titlebar
    * object at document start; merge it here so Resources does not briefly or
    * permanently render default state when the post-load bridge push races React.
    */
-  return mergeTitlebarProjectState(initialState, bootstrap as Partial<TitlebarProjectState>);
+  const mergedState = mergeTitlebarProjectState(initialState, bootstrap as Partial<TitlebarProjectState>);
+  cacheTitlebarGitState(mergedState);
+  return mergedState;
 }
 
 function readInitialTitlebarUpdateAvailable(bootstrap: Record<string, unknown>): boolean {
@@ -4393,6 +4758,7 @@ async function readKeepAwakePowerSnapshot(options: {
 function TitlebarTipsMenu({
   notices,
   onMarkRead,
+  onOpenChangelog,
   onOpenHighlightedFeatures,
   onOpenNoticeSettings,
   onViewGhostexGuide,
@@ -4401,6 +4767,7 @@ function TitlebarTipsMenu({
 }: {
   notices: TitlebarNotice[];
   onMarkRead: (tipId: string) => void;
+  onOpenChangelog: () => void;
   onOpenHighlightedFeatures: () => void;
   onOpenNoticeSettings: (target: TitlebarNotice["settingsTarget"]) => void;
   onViewGhostexGuide: () => void;
@@ -4416,22 +4783,31 @@ function TitlebarTipsMenu({
         </div>
         <div className="titlebar-tips-actions">
           <button
-            aria-label="Open Highlighted Features"
+            aria-label="Open Features"
             className="titlebar-tips-action-button"
             onClick={onOpenHighlightedFeatures}
             type="button"
           >
             <IconStarFilled aria-hidden="true" size={14} />
-            <span>Highlighted Features</span>
+            <span>Features</span>
           </button>
           <button
-            aria-label="View Ghostex Guide"
+            aria-label="Setup Ghostex"
             className="titlebar-tips-action-button"
             onClick={onViewGhostexGuide}
             type="button"
           >
             <IconBook2 aria-hidden="true" size={14} stroke={1.9} />
-            <span>View Ghostex Guide</span>
+            <span>Setup Ghostex</span>
+          </button>
+          <button
+            aria-label="Open Changelog"
+            className="titlebar-tips-action-button"
+            onClick={onOpenChangelog}
+            type="button"
+          >
+            <IconHistory aria-hidden="true" size={14} stroke={1.9} />
+            <span>Changelog</span>
           </button>
         </div>
       </div>
@@ -5576,17 +5952,20 @@ function TitlebarModeSwitcher({
       ) : null}
       {modes.map((mode) => {
         const isActive = mode.value === activeMode;
-        return (
+        const modeButton = (
           <button
-            aria-disabled={mode.disabled === true}
-            aria-selected={isActive}
+            aria-disabled={mode.disabled === true ? true : undefined}
             aria-label={mode.disabledReason ?? mode.label}
+            aria-selected={isActive}
             className="titlebar-mode-tab"
             data-active={String(isActive)}
             data-disabled={String(mode.disabled === true)}
-            disabled={mode.disabled}
-            key={mode.value}
-            onClick={mode.onSelect}
+            onClick={() => {
+              if (mode.disabled) {
+                return;
+              }
+              mode.onSelect();
+            }}
             role="tab"
             style={{ transformStyle: "preserve-3d" }}
             type="button"
@@ -5613,6 +5992,22 @@ function TitlebarModeSwitcher({
               {mode.meta ? <span className="titlebar-mode-meta">{mode.meta}</span> : null}
             </span>
           </button>
+        );
+        /*
+         * CDXC:ModeSwitcher 2026-06-16-16:00:
+         * Disabled titlebar mode tabs still need hover and focus events so the
+         * same AppTooltip used by Keep Awake and Resources can show the reason.
+         * Keep native disabled off this button path and guard selection in the
+         * click handler instead; place disabled explanations on the right side.
+         */
+        return (
+          <TitlebarAppTooltip
+            content={mode.disabled ? mode.disabledReason : undefined}
+            key={mode.value}
+            side="right"
+          >
+            {modeButton}
+          </TitlebarAppTooltip>
         );
       })}
     </div>
@@ -5760,21 +6155,30 @@ function TitlebarGitStatPair({
 
   return (
     <span className="titlebar-git-stat-pair" data-tone={tone}>
-      <span className="titlebar-git-meta-label">{label}:</span>
-      <span className={firstStatClassName}>
-        {firstPrefix}
-        {formatTitlebarGitStatCount(firstCount)}
-      </span>
-      <span className={secondStatClassName}>
-        {secondPrefix}
-        {formatTitlebarGitStatCount(secondCount)}
+      <span className="titlebar-git-meta-label">{label}</span>
+      <span className="titlebar-git-stat-values">
+        <span className={firstStatClassName}>
+          {firstPrefix}
+          {formatTitlebarGitStatCount(firstCount)}
+        </span>
+        <span className={secondStatClassName}>
+          {secondPrefix}
+          {formatTitlebarGitStatCount(secondCount)}
+        </span>
       </span>
     </span>
   );
 }
 
 function titlebarGitRemoteSyncDisabledReason(state: SidebarGitState): string | undefined {
-  return getSidebarGitDisabledReason(state, "syncRemote");
+  const disabledReason = getSidebarGitDisabledReason(state, "syncRemote");
+  if (disabledReason !== undefined) {
+    return disabledReason;
+  }
+  if (!hasSidebarGitRemoteCommitDelta(state)) {
+    return "No remote commits to sync.";
+  }
+  return undefined;
 }
 
 function readLastOpenTargetId(): string {
@@ -6657,7 +7061,7 @@ styleElement.textContent = `
   /*
    * CDXC:TitlebarGit 2026-06-16-00:00:
    * Git dropdown rows need one visual rhythm: fixed icon column, shared menu
-   * font, and left-aligned content. Keep branch, changed-line stats, sync, and
+   * font, and left-aligned content. Keep branch, changed-file stats, sync, and
    * action rows on the same grid so the menu does not look like separate
    * components stacked together.
    *
@@ -6671,9 +7075,9 @@ styleElement.textContent = `
    * dense enough that medium-weight text reads too heavy in the dark menu.
    *
    * CDXC:TitlebarGit 2026-06-16-07:31:
-   * Long changed-line counts such as +9999 and -9999 must start from the left
-   * of their stat cells in the macOS titlebar Git menu. Keep fixed stat cells
-   * for stable spacing, but do not right-align the digits inside them.
+   * Long changed-file counts such as +9999 and -9999 should share the same
+   * right-aligned value edge as Branch and Commits in the macOS titlebar Git
+   * menu.
    *
    * CDXC:TitlebarGit 2026-06-16-07:31:
    * Working-tree stats and the remote-sync row should use the same compact
@@ -6681,15 +7085,29 @@ styleElement.textContent = `
    * capped four-digit counts while reducing the visual gap between short values.
    *
    * CDXC:TitlebarGit 2026-06-16-09:49:
-   * The changed-line stat row ends with Lines, and the remote-sync row uses
-   * neutral down/up commit arrows ending with Commits. Keep the two number cells
-   * and suffix label in one flex gap system so the suffix does not change the
-   * spacing between the numbers.
+   * The changed-file stat row is labeled Changes, and the remote-sync row uses
+   * neutral down/up commit arrows labeled Commits. Keep the two number cells and
+   * label in one gap system so the labels do not change number spacing.
    *
    * CDXC:TitlebarGit 2026-06-16-13:31:
    * Git metadata rows in the titlebar dropdown should read label-first:
-   * Branch:, Lines:, and Commits:. Labels use inherited row typography so
+   * Branch, Changes, and Commits. Labels use inherited row typography so
    * branch, stat, and action rows match the rest of the menu.
+   *
+   * CDXC:TitlebarGit 2026-06-16-15:11:
+   * Branch, Changes, and Commits must occupy the same label-column width so
+   * the branch value, line counts, and commit counts start on one vertical
+   * alignment line inside the titlebar Git dropdown.
+   *
+   * CDXC:TitlebarGit 2026-06-16-18:41:
+   * Git metadata labels should not include trailing punctuation; the shared
+   * label column provides alignment without needing Branch, Changes, or Commits
+   * to end with a colon.
+   *
+   * CDXC:TitlebarGit 2026-06-16-19:03:
+   * Status rows are a label/value table: labels stay left-aligned while branch,
+   * line counts, and commit counts share a right-aligned value edge. The
+   * commits value always uses ↑ahead ↓behind, including the zero state.
    */
   .titlebar-git-menu .titlebar-open-menu-item {
     --titlebar-git-value-color: rgba(255,255,255,0.86);
@@ -6730,42 +7148,77 @@ styleElement.textContent = `
   .titlebar-git-menu .titlebar-git-icon + span {
     grid-column: 2;
   }
-  .titlebar-git-meta-row {
-    pointer-events: none;
-  }
   .titlebar-git-branch-field {
     align-items: center;
-    display: inline-flex;
-    gap: 6px;
+    display: grid;
+    gap: 12px;
     grid-column: 2;
+    grid-template-columns: 62px minmax(0, 1fr);
     min-width: 0;
+    width: 100%;
   }
   .titlebar-git-meta-label {
     color: var(--titlebar-git-value-color);
     font: inherit;
-    min-width: 0;
+    min-width: 62px;
+    text-align: left;
     white-space: nowrap;
+    width: 62px;
   }
   .titlebar-git-branch-name {
     color: var(--titlebar-git-value-color);
     font: inherit;
+    justify-self: end;
+    max-width: 100%;
     min-width: 0;
     overflow: hidden;
-    text-align: left;
+    text-align: right;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .titlebar-git-copy-branch-row {
+    cursor: copy !important;
+  }
+  .titlebar-git-branch-tooltip {
+    /*
+     * CDXC:TitlebarGit 2026-06-16-19:03:
+     * Long branch names should be inspectable before copying, but the tooltip
+     * must stay compact inside the titlebar dropdown child window.
+     */
+    max-width: 250px;
+  }
+  .titlebar-git-branch-tooltip-copy {
+    /*
+     * CDXC:TitlebarGit 2026-06-16-19:10:
+     * The branch tooltip must explain the full-row copy action while still
+     * exposing the full branch name in a compact 250px popup.
+     */
+    display: grid;
+    gap: 3px;
+  }
   .titlebar-git-stat-pair {
     align-items: center;
-    display: inline-flex;
-    gap: 6px;
+    display: grid;
+    gap: 12px;
     grid-column: 2;
-    justify-self: start;
+    grid-template-columns: 62px minmax(0, 1fr);
+    width: 100%;
+  }
+  .titlebar-git-stat-values {
+    display: inline-flex;
+    /*
+     * CDXC:TitlebarGit 2026-06-16-19:10:
+     * Files and Commits rows should keep their paired numbers visually close
+     * while the whole value group remains right-aligned.
+     */
+    gap: 4px;
+    justify-self: end;
+    min-width: 0;
   }
   .titlebar-git-stat {
     font: inherit;
-    min-width: 38px;
-    text-align: left;
+    min-width: 48px;
+    text-align: right;
   }
   .titlebar-git-stat-pair[data-tone="commits"] .titlebar-git-stat {
     color: var(--titlebar-git-value-color);
@@ -6884,14 +7337,18 @@ styleElement.textContent = `
     /*
      * CDXC:TipsAndTricks 2026-06-16-10:04:
      * Tips & Tricks header actions should use matching button widths, point to
-     * Highlighted Features and View Ghostex Guide, and omit the previous unread
+     * Features and Setup Ghostex, and omit the previous unread
      * text summary from the top-right action row.
+     *
+     * CDXC:TipsAndTricks 2026-06-16-19:42:
+     * Add Changelog as the rightmost equal-width header action so release notes
+     * are available without changing the existing titlebar Tips layout model.
      */
     display: grid;
     gap: 10px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     margin-left: auto;
-    width: 320px;
+    width: 390px;
   }
   .titlebar-tips-action-button {
     align-items: center;

@@ -12,13 +12,11 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("native titlebar Tips & Tricks source", () => {
-  test("uses highlighted features and guide actions", () => {
+  test("uses features, setup, and changelog actions", () => {
     /*
-     * CDXC:TipsAndTricks 2026-06-16-10:04:
+     * CDXC:TipsAndTricks 2026-06-16-19:42:
      * The Tips & Tricks header should not expose a bulk Read all button.
-     * It should instead open Highlighted Features with a filled star and View
-     * Ghostex Guide with guide wording while individual tips keep their per-row
-     * read controls.
+     * It should instead open Features with a filled star, Setup Ghostex with guide wording, and Changelog as an in-project browser session while individual tips keep their per-row read controls.
      */
     const menuSource = sourceBetween(
       titlebarHostSource,
@@ -26,26 +24,32 @@ describe("native titlebar Tips & Tricks source", () => {
       "function TitlebarTipsSection",
     );
 
-    expect(menuSource).toContain("Highlighted Features");
-    expect(menuSource).toContain("View Ghostex Guide");
+    expect(menuSource).toContain("Features");
+    expect(menuSource).toContain("Setup Ghostex");
+    expect(menuSource).toContain("Changelog");
     expect(menuSource).toContain("IconStarFilled");
     expect(menuSource).toContain("IconBook2");
+    expect(menuSource).toContain("IconHistory");
     expect(menuSource).toContain("onOpenHighlightedFeatures");
     expect(menuSource).toContain("onViewGhostexGuide");
+    expect(menuSource).toContain("onOpenChangelog");
+    expect(menuSource).not.toContain(">Highlighted Features<");
+    expect(menuSource).not.toContain(">View Ghostex Guide<");
+    expect(menuSource).not.toContain("Open Highlighted Features");
     expect(menuSource).not.toContain("Read all");
     expect(menuSource).not.toContain("onMarkAllRead");
     expect(menuSource).not.toContain("Run Setup Flow");
     expect(menuSource).not.toContain("titlebar-tips-summary");
     expect(titlebarHostSource).toContain('type: "openHighlightedFeatures"');
     expect(titlebarHostSource).toContain('type: "openWorkspaceWelcome"');
+    expect(titlebarHostSource).toContain('type: "openBrowserPane", url: GHOSTEX_CHANGELOG_URL');
+    expect(titlebarHostSource).toContain("https://github.com/maddada/ghostex/releases");
   });
 
   test("keeps tips actions equal width and clickable controls pointer based", () => {
     /*
-     * CDXC:TipsAndTricks 2026-06-16-10:04:
-     * The Tips & Tricks panel should make both header actions the same width,
-     * remove the top-right unread text summary, and use pointer cursors for
-     * clickable controls.
+     * CDXC:TipsAndTricks 2026-06-16-19:42:
+     * The Tips & Tricks panel should make all three header actions the same width, remove the top-right unread text summary, and use pointer cursors for clickable controls.
      */
     const stylesSource = sourceBetween(
       titlebarHostSource,
@@ -53,8 +57,8 @@ describe("native titlebar Tips & Tricks source", () => {
       ".titlebar-resources-info-button",
     );
 
-    expect(stylesSource).toContain("grid-template-columns: repeat(2, minmax(0, 1fr));");
-    expect(stylesSource).toContain("width: 320px;");
+    expect(stylesSource).toContain("grid-template-columns: repeat(3, minmax(0, 1fr));");
+    expect(stylesSource).toContain("width: 390px;");
     expect(stylesSource).toContain(".titlebar-tips-panel button:not(:disabled)");
     expect(stylesSource).toContain("cursor: pointer;");
     expect(stylesSource).not.toContain(".titlebar-tips-summary");

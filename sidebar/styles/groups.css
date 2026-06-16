@@ -763,6 +763,18 @@
   justify-content: flex-start;
 }
 
+.group-agent-menu-item[data-selected="true"],
+.group-agent-menu-item:hover,
+.group-agent-menu-item:focus-visible {
+  /*
+   * CDXC:ProjectAgents 2026-06-16-16:42:
+   * The macOS sidebar agent selector menu should use an unsaturated gray row
+   * surface on hover, focus, and selected states instead of tinting rows with
+   * the active theme accent.
+   */
+  background: var(--app-context-menu-hover-background, #202020);
+}
+
 .group-agent-menu-item[data-selected="true"] {
   /*
    * CDXC:ProjectAgents 2026-05-10-14:18

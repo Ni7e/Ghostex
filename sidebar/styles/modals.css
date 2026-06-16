@@ -3227,7 +3227,13 @@ html:has(body.app-modal-host-native-window-body) {
 .command-icon-picker-option:focus-visible,
 .command-icon-picker-option[data-checked="true"],
 .command-icon-picker-option[data-selected="true"] {
-  background: color-mix(in srgb, var(--app-button-background) 16%, var(--app-card-active) 84%);
+  /*
+   * CDXC:SettingsDropdowns 2026-06-16-17:05:
+   * The Settings action icon dropdown should highlight hovered, focused, and
+   * selected options with the same unsaturated gray as app context menus
+   * instead of mixing in the active theme accent.
+   */
+  background: var(--app-context-menu-hover-background, #202020);
   outline: none;
 }
 
@@ -3499,7 +3505,11 @@ html:has(body.app-modal-host-native-window-body) {
   /**
    * CDXC:DelayedSend 2026-05-11-11:56
    * The timer dialog should be compact enough for the full-window modal host
-   * while still giving hours, minutes, and seconds stable columns.
+   * while still giving hours and minutes stable columns.
+   *
+   * CDXC:DelayedSend 2026-06-16-17:57:
+   * Delayed Send no longer exposes seconds because scheduled sends should use
+   * only useful whole-minute precision.
    */
   max-width: min(460px, calc(100vw - 2rem));
 }
@@ -3517,7 +3527,7 @@ html:has(body.app-modal-host-native-window-body) {
 .delayed-send-duration-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .session-rename-form {
