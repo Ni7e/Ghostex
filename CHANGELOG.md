@@ -21,6 +21,7 @@
 <!-- CDXC:Distribution 2026-06-13-17:13: The 4.11.0 changelog must use Major and Minor top-level bullets with sub-bullets so public release notes stay easier to scan without dropping any user-facing shipped change. -->
 <!-- CDXC:Distribution 2026-06-14-02:03: Release notes for 4.12.0 must use Major and Minor top-level bullets with sub-bullets so public changelogs separate larger workflow changes from smaller polish while covering session search, pane focus, sleeping panes, sidebar tags, update UI, App Shots, and TUI changes. -->
 <!-- CDXC:Distribution 2026-06-16-02:38: Release notes for 4.14.0 must keep the Major and Minor top-level bullet structure, cover the native sidebar/titlebar, session lifecycle, packaged gxserver, TUI, Android, and documentation updates, and avoid implementation-only release mechanics. -->
+<!-- CDXC:Distribution 2026-06-16-15:55: Final 4.14.0 notes must also cover the `gx 2` experimental TUI path, beta-gated browser/tooling surfaces, support-log retention, direct titlebar Git sync, first-run feature sequencing, and sanitized repository screenshots before Sparkle, GitHub, Homebrew, and Android publication. -->
 
 ## 4.14.0 - 2026-06-16
 
@@ -29,11 +30,15 @@
   - The sidebar and titlebar experience has been refreshed with better settings navigation, custom sidebar/titlebar contrast and tint controls, steadier Resources and mode-switcher behavior, clearer native tooltips, and Discover Ghostex entry points for mobile download and onboarding flows.
   - Session management adds Close After Done timers, improved previous-session search and restore behavior, project-jump events, richer session-card status projection, and more stable focus for rename, command palette, and native modal workflows.
   - Packaged gxserver work now includes a Rust daemon packaging path, Rust-compatible validation, explicit gxserver binary resolution for `gx server` commands, and provider-liveness fields so clients can distinguish running, missing, sleeping, and persistence-disabled sessions.
+  - The installed CLI adds an experimental `gx 2` / `ghostex 2` TUI path backed by a packaged `ghostex-tui2` binary, while the default `gx` TUI remains unchanged.
+  - First-run and Highlighted Features flows now show a replayable feature tour, then continue into setup with beta-only controls hidden behind a single Advanced Settings gate.
 - Minor
   - Project editor, browser, and App Shots surfaces received lifecycle and persistence polish, including bounded awake editor surfaces, project browser restore/history state, browser feedback dimensions, and more reliable app-modal window behavior.
-  - Native logging and privacy checks were tightened for mode switching, terminal focus, layout layering, pane reorder diagnostics, and terminal focus request policy.
+  - Native and gxserver logging now trims old support-log history, samples high-volume diagnostic events, and keeps privacy checks tightened for mode switching, terminal focus, layout layering, pane reorder diagnostics, and terminal focus request policy.
   - The TUI session switcher now clamps vertical navigation at the first and last selectable rows and repeats held Up and Down movement faster without applying raw terminal repeat bursts.
-  - Android and repository presentation polish includes the centered factory droid icon, latest-release Android download links, GitHub sponsor metadata, and checked-in README screenshots for core Ghostex workflows.
+  - Titlebar Git controls add a direct remote sync action for normal branches with an upstream or origin remote.
+  - Browser and project surfaces avoid blank new-tab states, expose beta toolbar controls only when enabled, preserve floating prompt-editor work during app lifecycle closes, and reveal newly created project sessions more reliably.
+  - Android and repository presentation polish includes the centered factory droid icon, latest-release Android download links, GitHub sponsor metadata, and sanitized checked-in README media for core Ghostex workflows.
   - GPUI prototype work adds a CEF helper process, AppKit hooks, titlebar assets, and build wiring for the next native-host exploration path.
 
 ## 4.12.0 - 2026-06-14

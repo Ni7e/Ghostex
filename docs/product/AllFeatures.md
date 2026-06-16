@@ -1,12 +1,19 @@
 
+<!-- CDXC:Distribution 2026-06-16-14:27: The 4.14.0 public feature index needs to match the final release notes for the packaged `gx 2` TUI path, beta-gated browser/tool controls, support-log retention, titlebar Git sync, first-run feature sequencing, and sanitized repository screenshots. -->
+
 ## All features:
 
-- 4.14.0 improves native pane lifecycle and startup focus, refreshes sidebar/titlebar settings and custom chrome controls, adds Close After Done timers, strengthens gxserver provider-liveness projection, introduces the Rust gxserver packaging path, improves TUI edge navigation, centers the Android factory droid icon, and refreshes repository screenshots and download links.
+- 4.14.0 improves native pane lifecycle and startup focus, refreshes sidebar/titlebar settings and custom chrome controls, adds Close After Done timers, strengthens gxserver provider-liveness projection, introduces the Rust gxserver packaging path, adds the experimental packaged `gx 2` TUI path, improves TUI edge navigation, centers the Android factory droid icon, and refreshes repository screenshots and download links.
 - New native terminals can stay selected while their surface is still mounting, startup focus is restored more predictably, and gxserver presentation catch-up no longer causes newly created splits to look stale.
 - Sidebar and titlebar settings include clearer sections, custom contrast/tint controls for app chrome, steadier mode switching and Resources behavior, richer native tooltips, and Discover Ghostex download entry points.
+- First-run and Highlighted Features flows can show a replayable feature tour before continuing into setup, and beta-only browser/tooling controls stay hidden behind the Advanced Settings beta gate.
 - Close After Done can close completed sessions after a continuous done state, while previous-session restore, rename focus, project jumps, and session-card status projection are steadier.
 - Packaged gxserver can use the new Rust daemon package shape, and `gx server` command resolution can target explicit Rust binaries without silently falling back to reference JavaScript output.
+- Installed `ghostex` and `gx` commands can launch the experimental packaged `ghostex-tui2` experience with `ghostex 2` or `gx 2` while the default TUI remains stable.
+- Titlebar Git controls include a direct remote sync action for normal branches with an upstream or origin remote.
 - Project editor, browser, App Shots, and app-modal surfaces have tighter lifecycle, persistence, and window behavior, including bounded awake editor surfaces and project browser restore/history state.
+- Browser and project surfaces avoid blank new-tab states, keep beta toolbar controls opt-in, preserve floating prompt-editor work during lifecycle closes, and reveal newly created project sessions more reliably.
+- Native and gxserver support logs prune old history and sample high-volume diagnostics while keeping privacy checks tightened for troubleshooting bundles.
 - TUI session switcher navigation now clamps at list edges and repeats held Up/Down movement faster while still throttling raw terminal repeat bursts.
 - 4.12.0 adds session-first command palette search, command mode through `>`, stricter native pane focus, first-class sleeping pane placeholders, configurable Sidebar Tag filters, Electron split-layout focus, update/App Shots polish, long-list sidebar controls, richer session tooltips, and TUI switcher repeat throttling.
 - Cmd+P opens session search across current sessions, active projects, collapsed projects, and previous sessions, while Cmd+Shift+P opens command mode directly.
