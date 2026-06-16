@@ -13,6 +13,7 @@ ZEHN_ROOT="${ZEHN_ROOT:-$REPO_ROOT/zehn}"
 GXSERVER_RS_ROOT="${GXSERVER_RS_ROOT:-$REPO_ROOT/gxserver-rs}"
 BEADS_ROOT="${BEADS_ROOT:-${GHOSTEX_BEADS_ROOT:-}}"
 TUI_ROOT="${TUI_ROOT:-$REPO_ROOT/tui}"
+TUI2_ROOT="${TUI2_ROOT:-$REPO_ROOT/tui2}"
 CODE_SERVER_ROOT="${CODE_SERVER_ROOT:-${GHOSTEX_CODE_SERVER_ROOT:-$REPO_ROOT/code-server}}"
 CODE_SERVER_APP_NODE_VERSION="${CODE_SERVER_APP_NODE_VERSION:-}"
 if [[ -z "$CODE_SERVER_APP_NODE_VERSION" && -f "$CODE_SERVER_ROOT/.node-version" ]]; then
@@ -684,6 +685,27 @@ build_tui_if_needed() {
 	write_cache_stamp "ghostex-tui-$GHOSTEX_MACOS_ARCH" "$build_digest"
 }
 
+build_tui2_if_needed() {
+	local output_path="$TUI2_ROOT/target/$TUI_CARGO_TARGET/release/ghostex-tui2"
+	local cargo_version build_digest
+	cargo_version="$("$TUI_CARGO_BIN" --version 2>/dev/null || true)"
+	build_digest="$(fingerprint_inputs \
+		--value "ghostex-tui2-build-v1" \
+		--value "target=$TUI_CARGO_TARGET" \
+		--value "cargo=$cargo_version" \
+		--value "zig=$ZIG_VERSION" \
+		--path "$TUI2_ROOT/src" \
+		--path "$TUI2_ROOT/Cargo.toml" \
+		--path "$TUI2_ROOT/Cargo.lock")"
+	if cache_matches "ghostex-tui2-$GHOSTEX_MACOS_ARCH" "$build_digest" "$output_path"; then
+		echo "ghostex-tui2 is current; skipping Cargo build."
+		return 0
+	fi
+
+	env ZIG="$ZIG_BIN" "$TUI_CARGO_BIN" build --release --bin ghostex-tui2 --manifest-path "$TUI2_ROOT/Cargo.toml" --target "$TUI_CARGO_TARGET"
+	write_cache_stamp "ghostex-tui2-$GHOSTEX_MACOS_ARCH" "$build_digest"
+}
+
 gxserver_rust_cargo_target() {
 	case "$GHOSTEX_MACOS_ARCH" in
 		arm64)
@@ -1272,6 +1294,16 @@ Initialize or provide the TUI source before building the app bundle.
 EOF
 	exit 1
 fi
+# CDXC:GhostexTui2 2026-06-16-22:52: The experimental upstream-Herdr sidebar TUI is launched by `gx 2`/`ghostex 2` and must be packaged as Web/bin/ghostex-tui2 so the installed CLI works from any directory while the default `gx` TUI remains unchanged.
+if [[ ! -f "$TUI2_ROOT/Cargo.toml" ]]; then
+	cat >&2 <<EOF
+Ghostex TUI2 source is missing:
+  $TUI2_ROOT
+
+Initialize or provide the TUI2 source before building the app bundle.
+EOF
+	exit 1
+fi
 case "$GHOSTEX_MACOS_ARCH" in
 	arm64)
 		TUI_CARGO_TARGET="aarch64-apple-darwin"
@@ -1296,6 +1328,9 @@ fi
 build_tui_if_needed
 cp "$TUI_ROOT/target/$TUI_CARGO_TARGET/release/ghostex-tui" "$WEB_DIR/bin/ghostex-tui"
 chmod 755 "$WEB_DIR/bin/ghostex-tui"
+build_tui2_if_needed
+cp "$TUI2_ROOT/target/$TUI_CARGO_TARGET/release/ghostex-tui2" "$WEB_DIR/bin/ghostex-tui2"
+chmod 755 "$WEB_DIR/bin/ghostex-tui2"
 # CDXC:AgentHistorySearch 2026-05-29-12:27: Ghostex bundles the pinned zehn submodule as Web/bin/zehn so `gx find` and `gx f` run the reviewed prompt-history search tool even when the user's PATH contains no zehn or a different zehn build. `gx s` is intentionally left as the existing sessions alias, and `gx search` is not a public alias.
 if [[ ! -f "$ZEHN_ROOT/build.zig" ]]; then
 	cat >&2 <<EOF

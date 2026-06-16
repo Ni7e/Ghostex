@@ -1,5 +1,9 @@
 node_modules/
 build/
+!tui2/vendor/libghostty-vt/src/build/
+!tui2/vendor/libghostty-vt/src/build/**
+!tui2/vendor/libghostty-vt/src/apprt/gtk/build/
+!tui2/vendor/libghostty-vt/src/apprt/gtk/build/**
 dist/
 out/
 artifacts/
@@ -23,12 +27,17 @@ native/macos/ghostexHost/CLI/
 native/macos/zmuxHost/Web/
 native/macos/ghostexHost/Vendor/
 native/macos/ghostexHost/build/
+native/macos/ghostexHost/DerivedData/
 native/macos/ghostexHost/ghostexHost.xcodeproj/
 native/macos/ghostexHost/ghostex.xcodeproj/
 tmp/
 # CDXC:PublicRelease 2026-04-27-05:36: Keep generated Storybook output,
 # native build products, and runtime logs out of the public repository while
 # preserving each developer's local copies.
+# CDXC:GhostexTui2 2026-06-16-16:02: The vendored libghostty-vt dependency has
+# source directories literally named src/build. Unignore those exact source
+# paths so the packaged `gx 2` TUI can build from a fresh clone while ordinary
+# generated build/ directories remain ignored.
 # CDXC:AgentInstructions 2026-06-13-09:26: Track the repo AGENTS.md so Ghostex
 # native layout and hit-testing requirements travel with app source instead of
 # living only as a local ignored instruction file. Keep private agent skill
@@ -43,6 +52,7 @@ tmp/
 # release/downloads so release outputs are grouped together while the old
 # downloads/*.apk ignore remains as a guard for stale local scripts.
 # CDXC:CliInstall 2026-06-07-13:53: The macOS build stages app-bundled CLI launchers under native/macos/ghostexHost/CLI before Xcode copies them into Contents/Resources/CLI. Keep that folder ignored like Web because it is generated from scripts/ghostex-cli.mjs, scripts/ghostex-cli-launcher.sh, and scripts/skills.
+# CDXC:RepoSafety 2026-06-16-15:48: Xcode DerivedData is local compiler cache and may include machine-specific build products. Keep the full native host DerivedData tree ignored instead of relying on the generic build/ rule that only catches one nested directory.
 # CDXC:RepoSafety 2026-05-27-10:44: Image-generation scratch outputs under
 # tmp/imagegen are intermediate asset experiments, not source assets. Commit
 # only the selected asset destination so releases stay source-only and

@@ -12,6 +12,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+class FloatingMonacoBridgeClosedError extends Error {
+  constructor() {
+    super("Ghostex bridge closed while the floating Monaco prompt editor was open.");
+    this.name = "FloatingMonacoBridgeClosedError";
+  }
+}
+
 const DEFAULT_PORT = 58743;
 // CDXC:GxserverBootstrap 2026-05-30-15:39: gxserver owns 58744 in the hard cutover, so the ghostex-dev native bridge must use 58742 for legacy bridge automation commands instead of competing with the daemon API.
 const DEV_PORT = 58742;
@@ -105,6 +112,7 @@ const DEFAULT_PICKER_AGENT_INDICATOR = { color: "#9ca3af", label: "UNK" };
 
 const COMMANDS = new Map([
   ["sessions", sessionsCommand],
+  ["2", ghostexTui2Command],
   ["s", sessionsCommand],
   ["list-sessions", sessionsCommand],
   ["ls", sessionsCommand],
@@ -3203,17 +3211,18 @@ async function floatingMonacoEditorCommand(args) {
         type: "openFloatingEditor",
       }),
     );
-    const status = await waitForStatus(
+    const status = await waitForFloatingMonacoStatus(
       statusFile,
-      (nextStatus) => nextStatus.match(/^saved$/m) || nextStatus.match(/^cancelled$/m),
+      socket,
       Number(flags.exitTimeoutMs ?? 0),
     );
     process.exitCode = status.match(/^saved$/m) ? 0 : 1;
   } catch (error) {
+    const bridgeClosed = error instanceof FloatingMonacoBridgeClosedError;
     await appendFloatingEditorLog({
       error: error instanceof Error ? error.message : String(error),
-      event: "cli.monaco_fallback_inline",
-      filePath: resolvedFilePath,
+      event: bridgeClosed ? "cli.monaco_bridge_closed_inline_recovery" : "cli.monaco_fallback_inline",
+      ...(bridgeClosed ? {} : { filePath: resolvedFilePath }),
       requestId,
     });
     await runEditorInline(["vi", resolvedFilePath], cwd);
@@ -3317,18 +3326,46 @@ async function resolveExecutable(command) {
   return stdout.trim().split(/\r?\n/)[0] || command;
 }
 
-async function waitForStatus(statusFile, predicate, timeoutMs) {
+async function waitForStatus(statusFile, predicate, timeoutMs, abortError) {
   const startedAt = Date.now();
   while (true) {
     const status = await readFile(statusFile, "utf8").catch(() => "");
     if (predicate(status)) {
       return status;
     }
+    const error = abortError?.();
+    if (error) {
+      throw error;
+    }
     if (timeoutMs > 0 && Date.now() - startedAt > timeoutMs) {
       throw new Error(`Timed out waiting for floating editor status at ${statusFile}.`);
     }
     await sleep(100);
   }
+}
+
+async function waitForFloatingMonacoStatus(statusFile, socket, timeoutMs) {
+  /**
+   * CDXC:PromptEditor 2026-06-16-13:09:
+   * If the macOS app crashes while Monaco prompt editing is open, native
+   * cannot write the saved/cancelled status file. React/native live-write the
+   * prompt draft to the edited file, so the CLI must notice the bridge close
+   * and reopen that preserved file inline instead of waiting forever or
+   * auto-submitting an unsaved draft.
+   */
+  let bridgeClosed = false;
+  const markBridgeClosed = () => {
+    bridgeClosed = true;
+  };
+  addSocketListener(socket, "close", markBridgeClosed, { once: true });
+  addSocketListener(socket, "end", markBridgeClosed, { once: true });
+  addSocketListener(socket, "error", markBridgeClosed, { once: true });
+  return waitForStatus(
+    statusFile,
+    (nextStatus) => nextStatus.match(/^saved$/m) || nextStatus.match(/^cancelled$/m),
+    timeoutMs,
+    () => bridgeClosed ? new FloatingMonacoBridgeClosedError() : undefined,
+  );
 }
 
 async function runEditorInline(commandArgs, cwd) {
@@ -3705,6 +3742,29 @@ async function ghostexTuiCommand(args) {
   });
 }
 
+async function ghostexTui2Command(args) {
+  const { flags } = parseArgs(args);
+  /**
+   * CDXC:GhostexTui2 2026-06-16-22:52:
+   * `gx 2` and `ghostex 2` launch the experimental upstream-Herdr-based TUI
+   * while keeping gxserver as the session inventory and attach authority.
+   * Keep this separate from bare `gx` until the upstream-style sidebar UX is
+   * validated enough to replace the current TUI.
+   */
+  if (!isInteractiveTerminal()) {
+    await interactiveSessionPickerCommand(args);
+    return;
+  }
+  const tui = resolveGhostexTui2Launch(flags);
+  await runInteractiveProcess(tui.command, tui.args, {
+    env: {
+      ...process.env,
+      ...tui.env,
+      GHOSTEX_TUI_CLI_COMMAND: `${shellQuote(process.execPath)} ${shellQuote(fileURLToPath(import.meta.url))}`,
+    },
+  });
+}
+
 async function zehnSearchCommand(args) {
   const launch = resolveZehnLaunch();
   const zehnArgs = await resolveZehnSearchArgs(args);
@@ -3926,6 +3986,30 @@ function resolveGhostexTuiLaunch(flags = {}) {
   );
 }
 
+function resolveGhostexTui2Launch(flags = {}) {
+  const explicitBin = String(flags.tui2Bin ?? process.env.GHOSTEX_TUI2_BIN ?? "").trim();
+  if (explicitBin) {
+    return { args: ["--ghostex", "--no-session"], command: explicitBin, env: {} };
+  }
+  const cliDir = path.dirname(fileURLToPath(import.meta.url));
+  const repoRoot = path.resolve(cliDir, "..");
+  const roots = uniquePaths([
+    ...ghostexBundledWebResourceRoots(cliDir),
+    repoRoot,
+    process.env.GHOSTEX_SOURCE_ROOT,
+    findGhostexSourceRoot(process.cwd()),
+  ]);
+  for (const root of roots) {
+    const launch = resolveGhostexTui2LaunchFromRoot(root);
+    if (launch) {
+      return launch;
+    }
+  }
+  throw new Error(
+    "Ghostex TUI2 binary was not found. Build it with `cargo build --bin ghostex-tui2 --manifest-path tui2/Cargo.toml`, pass `--tui2-bin <path>`, or set GHOSTEX_TUI2_BIN.",
+  );
+}
+
 function resolveBundledBeadsLaunch() {
   const cliDir = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(cliDir, "..");
@@ -4002,6 +4086,49 @@ function resolveGhostexTuiLaunchFromRoot(root) {
   }
   return {
     args: ["run", "--quiet", "--bin", "ghostex-tui", "--manifest-path", manifestPath],
+    command: "cargo",
+    env: ghostexTuiCargoEnv(),
+  };
+}
+
+function resolveGhostexTui2LaunchFromRoot(root) {
+  if (!root) {
+    return undefined;
+  }
+  const bundledBin = path.join(root, "bin", "ghostex-tui2");
+  if (fileExistsSync(bundledBin)) {
+    return { args: ["--ghostex", "--no-session"], command: bundledBin, env: {} };
+  }
+  const debugBin = path.join(root, "tui2", "target", "debug", "ghostex-tui2");
+  const releaseBin = path.join(root, "tui2", "target", "release", "ghostex-tui2");
+  if (fileExistsSync(releaseBin)) {
+    return { args: ["--ghostex", "--no-session"], command: releaseBin, env: {} };
+  }
+  if (fileExistsSync(debugBin)) {
+    return { args: ["--ghostex", "--no-session"], command: debugBin, env: {} };
+  }
+  const manifestPath = path.join(root, "tui2", "Cargo.toml");
+  if (!fileExistsSync(manifestPath)) {
+    return undefined;
+  }
+  /**
+   * CDXC:GhostexTui2 2026-06-16-22:52:
+   * Source checkouts should not require a preinstalled experimental binary.
+   * Cargo fallback keeps `gx 2` usable immediately from the zmux repository
+   * while production bundles can ship a reviewed `bin/ghostex-tui2`.
+   */
+  return {
+    args: [
+      "run",
+      "--quiet",
+      "--bin",
+      "ghostex-tui2",
+      "--manifest-path",
+      manifestPath,
+      "--",
+      "--ghostex",
+      "--no-session",
+    ],
     command: "cargo",
     env: ghostexTuiCargoEnv(),
   };
@@ -5351,8 +5478,9 @@ function usage() {
   /**
    * CDXC:CliHelp 2026-05-15-20:33
    * The public Ghostex help menu should follow the organized zellij/zmx shape: a short product description, compact usage lines, aligned command groups with aliases beside the command name, and separate explanatory sections for selectors and workflows that would make the command table noisy.
-   */
+  */
   const sessionCommands = [
+    formatHelpCommand("2 [--tui2-bin path]", "Launch the experimental upstream-Herdr Ghostex TUI"),
     formatHelpCommand("sessions | s | ls [--ungrouped|-u] [--json]", "List running terminal sessions"),
     formatHelpCommand("find | f [zehn args...]", "Search agent prompt history with bundled zehn"),
     formatHelpCommand("android-check [--json]", "Verify this Mac is ready for Ghostex Android"),
@@ -5792,6 +5920,7 @@ export {
   resolveGxserverServerTarget,
   resolveListedSessions,
   resolveGhostexTuiLaunchFromRoot,
+  resolveGhostexTui2LaunchFromRoot,
   resolveZehnLaunchFromRoot,
   sendGxserverCliAction,
   serverUsage,

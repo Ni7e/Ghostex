@@ -37,6 +37,7 @@ import {
   resolveGxserverCliLaunchForPath,
   resolveGxserverServerTarget,
   resolveGhostexTuiLaunchFromRoot,
+  resolveGhostexTui2LaunchFromRoot,
   resolveListedSessions,
   resolveZehnLaunchFromRoot,
   sendGxserverCliAction,
@@ -474,6 +475,28 @@ printf 'rust-forwarded:%s\\n' "$1"
     }
   });
 
+  test("documents and resolves the experimental upstream-Herdr Ghostex TUI", async () => {
+    /**
+     * CDXC:GhostexTui2 2026-06-16-22:52:
+     * `gx 2` should be a real launcher for the upstream-Herdr-based experiment,
+     * not an unknown command that falls through to help.
+     */
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-tui2-"));
+    try {
+      const tuiBin = path.join(tempDir, "bin", "ghostex-tui2");
+      await mkdir(path.dirname(tuiBin), { recursive: true });
+      await writeFile(tuiBin, "#!/bin/sh\n");
+
+      expect(usage()).toContain("2 [--tui2-bin path]");
+      expect(resolveGhostexTui2LaunchFromRoot(tempDir)).toMatchObject({
+        args: ["--ghostex", "--no-session"],
+        command: tuiBin,
+      });
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
   test("gx find passes Accept All to zehn from gxserver settings unless user overrides it", () => {
     /**
      * CDXC:AgentHistorySearch 2026-06-04-23:31:
@@ -592,6 +615,81 @@ printf 'rust-forwarded:%s\\n' "$1"
         title: "Prompt Editor",
         type: "openFloatingEditor",
       });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  test("reopens preserved Monaco prompt inline when the native bridge closes before status", async () => {
+    /**
+     * CDXC:PromptEditor 2026-06-16-13:09:
+     * A macOS app crash cannot write the Monaco prompt editor status file. The
+     * CLI should detect the bridge close and reopen the already live-written
+     * prompt file inline, preserving the draft without auto-submitting it.
+     */
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-fme-crash-test-"));
+    const homeDir = path.join(tempDir, "home");
+    const binDir = path.join(tempDir, "bin");
+    const editFile = path.join(tempDir, "prompt.md");
+    const markerFile = path.join(tempDir, "inline-vi-args.txt");
+    const viPath = path.join(binDir, "vi");
+    const receivedMessages = [];
+    const server = net.createServer((socket) => {
+      let buffer = "";
+      socket.setEncoding("utf8");
+      socket.on("data", async (chunk) => {
+        buffer += chunk;
+        let newlineIndex = buffer.indexOf("\n");
+        while (newlineIndex >= 0) {
+          const line = buffer.slice(0, newlineIndex);
+          buffer = buffer.slice(newlineIndex + 1);
+          if (line) {
+            const message = JSON.parse(line);
+            receivedMessages.push(message);
+            await writeFile(editFile, "autosaved draft\n");
+            socket.end();
+          }
+          newlineIndex = buffer.indexOf("\n");
+        }
+      });
+    });
+    await mkdir(path.join(homeDir, "cli"), { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    await writeFile(path.join(homeDir, "cli", "bridge-token"), "test-token\n");
+    await writeFile(editFile, "prompt text\n");
+    await writeFile(
+      viPath,
+      `#!/bin/sh
+printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
+`,
+    );
+    await chmod(viPath, 0o755);
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    try {
+      const result = await execFileAsync(process.execPath, [
+        path.resolve("scripts/ghostex-cli.mjs"),
+        "floating-monaco-editor",
+        editFile,
+        "--port",
+        String(address.port),
+        "--timeout-ms",
+        "1000",
+        "--exit-timeout-ms",
+        "5000",
+      ], {
+        env: {
+          ...process.env,
+          GHOSTEX_HOME: homeDir,
+          PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+        },
+      });
+
+      expect(result.stderr).toBe("");
+      expect(receivedMessages).toHaveLength(1);
+      expect((await readFile(markerFile, "utf8")).trim()).toBe(editFile);
+      expect(await readFile(editFile, "utf8")).toBe("autosaved draft\n");
     } finally {
       await new Promise((resolve) => server.close(resolve));
       await rm(tempDir, { force: true, recursive: true });
