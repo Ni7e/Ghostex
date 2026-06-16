@@ -22,25 +22,51 @@
 <!-- CDXC:Distribution 2026-06-14-02:03: Release notes for 4.12.0 must use Major and Minor top-level bullets with sub-bullets so public changelogs separate larger workflow changes from smaller polish while covering session search, pane focus, sleeping panes, sidebar tags, update UI, App Shots, and TUI changes. -->
 <!-- CDXC:Distribution 2026-06-16-02:38: Release notes for 4.14.0 must keep the Major and Minor top-level bullet structure, cover the native sidebar/titlebar, session lifecycle, packaged gxserver, TUI, Android, and documentation updates, and avoid implementation-only release mechanics. -->
 <!-- CDXC:Distribution 2026-06-16-15:55: Final 4.14.0 notes must also cover the `gx 2` experimental TUI path, beta-gated browser/tooling surfaces, support-log retention, direct titlebar Git sync, first-run feature sequencing, and sanitized repository screenshots before Sparkle, GitHub, Homebrew, and Android publication. -->
+<!-- CDXC:Distribution 2026-06-16-21:03: The published 4.14.0 notes should use shorter grouped bullets with sub-bullets, call out substantial performance improvements, simplified settings and app surfaces, coming automations, dark theme colors with light colors coming soon, and thank @saleem-hadad for UX help. -->
 
 ## 4.14.0 - 2026-06-16
 
 - Major
-  - Native session lifecycle handling is more resilient when creating, restoring, waking, and closing panes. Newly created terminals show a mounting placeholder while the terminal surface and gxserver presentation catch up, startup focus targets are preserved, and stale presentation updates are less likely to close a just-created split.
-  - The sidebar and titlebar experience has been refreshed with better settings navigation, custom sidebar/titlebar contrast and tint controls, steadier Resources and mode-switcher behavior, clearer native tooltips, and Discover Ghostex entry points for mobile download and onboarding flows.
-  - Session management adds Close After Done timers, improved previous-session search and restore behavior, project-jump events, richer session-card status projection, and more stable focus for rename, command palette, and native modal workflows.
-  - Packaged gxserver work now includes a Rust daemon packaging path, Rust-compatible validation, explicit gxserver binary resolution for `gx server` commands, and provider-liveness fields so clients can distinguish running, missing, sleeping, and persistence-disabled sessions.
-  - The installed CLI adds an experimental `gx 2` / `ghostex 2` TUI path backed by a packaged `ghostex-tui2` binary, while the default `gx` TUI remains unchanged.
-  - First-run and Highlighted Features flows now show a replayable feature tour, then continue into setup with beta-only controls hidden behind a single Advanced Settings gate.
+  - UX and settings
+    - Settings and many parts of the app have been simplified.
+    - Sidebar and titlebar controls are easier to scan and tune.
+    - Discover Ghostex now includes clearer mobile download and onboarding entry points.
+  - Performance and reliability
+    - Performance has been improved substantially across app startup, sidebar refreshes, session restore, and packaged runtime flows.
+    - Creating, restoring, waking, and closing panes is steadier.
+    - New terminals show a mounting placeholder while the terminal surface catches up.
+    - Startup focus targets are preserved more reliably.
+  - Sessions and gxserver
+    - Close After Done timers can close completed sessions after they stay done.
+    - Previous-session search, restore, project jumps, rename focus, and command-palette focus are more stable.
+    - gxserver status now distinguishes running, missing, sleeping, and persistence-disabled sessions more clearly.
+    - Packaged gxserver now includes the Rust daemon packaging path and stricter packaged-runtime validation.
+  - Theme and onboarding
+    - Dark theme colors are now in place.
+    - Light theme colors are coming soon.
+    - First-run and Highlighted Features now show a replayable feature tour before setup.
 - Minor
-  - Project editor, browser, and App Shots surfaces received lifecycle and persistence polish, including bounded awake editor surfaces, project browser restore/history state, browser feedback dimensions, and more reliable app-modal window behavior.
-  - Native and gxserver logging now trims old support-log history, samples high-volume diagnostic events, and keeps privacy checks tightened for mode switching, terminal focus, layout layering, pane reorder diagnostics, and terminal focus request policy.
-  - The TUI session switcher now clamps vertical navigation at the first and last selectable rows and repeats held Up and Down movement faster without applying raw terminal repeat bursts.
-  - The packaged `zehn` history search now opens as a flat relevance list by default, keeps day-group browsing available behind Ctrl-D, and filters weak scattered matches before ranking.
-  - Titlebar Git controls add a direct remote sync action for normal branches with an upstream or origin remote.
-  - Browser and project surfaces avoid blank new-tab states, expose beta toolbar controls only when enabled, preserve floating prompt-editor work during app lifecycle closes, and reveal newly created project sessions more reliably.
-  - Android and repository presentation polish includes the centered factory droid icon, latest-release Android download links, GitHub sponsor metadata, and sanitized checked-in README media for core Ghostex workflows.
-  - GPUI prototype work adds a CEF helper process, AppKit hooks, titlebar assets, and build wiring for the next native-host exploration path.
+  - CLI, TUI, and automations
+    - The installed CLI adds the experimental `gx 2` / `ghostex 2` TUI path.
+    - The default `gx` TUI remains unchanged.
+    - Automations are coming soon.
+    - The TUI session switcher clamps vertical navigation at list edges.
+    - Held Up and Down movement repeats faster without raw terminal repeat bursts.
+  - Browser, projects, and App Shots
+    - Project editor, browser, and App Shots surfaces have tighter lifecycle and persistence behavior.
+    - Browser and project surfaces avoid blank new-tab states.
+    - Floating prompt-editor work is preserved during app lifecycle closes.
+    - Newly created project sessions appear more reliably.
+  - Git, history, and diagnostics
+    - Titlebar Git controls add a direct remote sync action.
+    - `zehn` history search now opens as a flat relevance list by default.
+    - Day-group browsing remains available behind Ctrl-D.
+    - Support logs trim old history, sample high-volume diagnostics, and keep privacy checks tightened.
+  - Mobile, docs, and community
+    - Android includes the centered factory droid icon.
+    - Android download links now point at the latest release.
+    - Checked-in README media was sanitized for core Ghostex workflows.
+    - Huge thank you to @saleem-hadad for helping a ton with improving the app's UX.
 
 ## 4.12.0 - 2026-06-14
 
