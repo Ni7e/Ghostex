@@ -8,6 +8,63 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>4.14.1</title>
+            <pubDate>Tue, 16 Jun 2026 22:00:34 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.14.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>41401</sparkle:version>
+            <sparkle:shortVersionString>4.14.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 4.14.0
+
+- Major
+  - UX and settings
+    - Settings and many parts of the app have been simplified.
+    - Sidebar and titlebar controls are easier to scan and tune.
+    - Discover Ghostex now includes clearer mobile download and onboarding entry points.
+  - Performance and reliability
+    - Performance has been improved substantially across app startup, sidebar refreshes, session restore, and packaged runtime flows.
+    - Creating, restoring, waking, and closing panes is steadier.
+    - New terminals show a mounting placeholder while the terminal surface catches up.
+    - Startup focus targets are preserved more reliably.
+  - Sessions and gxserver
+    - Close After Done timers can close completed sessions after they stay done.
+    - Previous-session search, restore, project jumps, rename focus, and command-palette focus are more stable.
+    - gxserver status now distinguishes running, missing, sleeping, and persistence-disabled sessions more clearly.
+    - Packaged gxserver now includes the Rust daemon packaging path and stricter packaged-runtime validation.
+  - Theme and onboarding
+    - Dark theme colors are now in place.
+    - Light theme colors are coming soon.
+    - First-run and Highlighted Features now show a replayable feature tour before setup.
+- Minor
+  - CLI, TUI, and automations
+    - The installed CLI adds the experimental `gx 2` / `ghostex 2` TUI path.
+    - The default `gx` TUI remains unchanged.
+    - Automations are coming soon.
+    - The TUI session switcher clamps vertical navigation at list edges.
+    - Held Up and Down movement repeats faster without raw terminal repeat bursts.
+  - Browser, projects, and App Shots
+    - 4.14.1 keeps image thumbnails in the floating prompt editor clickable across the whole thumbnail shelf.
+    - Project editor, browser, and App Shots surfaces have tighter lifecycle and persistence behavior.
+    - Browser and project surfaces avoid blank new-tab states.
+    - Floating prompt-editor work is preserved during app lifecycle closes.
+    - Newly created project sessions appear more reliably.
+  - Git, history, and diagnostics
+    - Titlebar Git controls add a direct remote sync action.
+    - `zehn` history search now opens as a flat relevance list by default.
+    - Day-group browsing remains available behind Ctrl-D.
+    - Support logs trim old history, sample high-volume diagnostics, and keep privacy checks tightened.
+  - Mobile, docs, and community
+    - Android includes the centered factory droid icon.
+    - Android download links now point at the latest release.
+    - Checked-in README media was sanitized for core Ghostex workflows.
+    - Huge thank you to @saleem-hadad for helping a ton with improving the app's UX.
+
+[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.14.0)
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.14.0/ghostex-4.14.1-arm64.dmg" length="580470189" type="application/octet-stream" sparkle:edSignature="gIWmFacSexfD4zDRd87mALBqqA6XWaD/D0CvP4WVjoISHXkRtAyaUxNKib6MHrXyqFiAUji/IHq1R9NWgc0JDw=="/>
+        </item>
+        <item>
             <title>4.14.0</title>
             <pubDate>Tue, 16 Jun 2026 20:49:24 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.14.0</sparkle:fullReleaseNotesLink>
@@ -168,30 +225,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.1.5/ghostex-4.1.5-arm64.dmg" length="566561128" type="application/octet-stream" sparkle:edSignature="wodw3b4pt8dmGi2UEiRDBl92wQlMRPwRQc+B93RGf5sn1yfVpz+je9Yb/hQHFFaK2e4+2d8wujNKT6w4hpvnCw=="/>
         </item>
         <item>
-            <title>4.1.0</title>
-            <pubDate>Wed, 10 Jun 2026 08:21:18 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.1.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>40100</sparkle:version>
-            <sparkle:shortVersionString>4.1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 4.1.0
-
-- Remote machines can now save SSH passwords in macOS Keychain, use them for SSH/SCP/tunnel connections without storing raw passwords in settings, and show clearer saved-password state and authentication guidance.
-- Agent hook and session-state updates now reject cross-wired agent identities, reducing cases where one agent terminal could inherit another row's title, status, completion state, or resume identity.
-- Ctrl+G prompt editing and Monaco prompt-editor dismissal return focus to the correct terminal more reliably, including sessions launched through gxserver global references.
-- Sidebar presentation updates apply smaller live patches for session groups and HUD chrome, reducing sidebar refresh churn and terminal focus steals while sessions are added, removed, reordered, or updated.
-- Session context menus are safer and cleaner: Copy Resume and Copy Attach Command are hidden by default behind an explicit setting, and Sleep Below / Close Below now target the rendered rows beneath the clicked card across project groups.
-- Remote sections, Recent Projects search, active sidebar search, titlebar resource copy, command icons, tag menus, drag handles, and sidebar panel spacing received visual polish for denser daily use.
-- The Ghostex TUI now uses a neutral gray-blue default theme, clearer Help/Hotkeys and Quit Ghostex labels, and broader built-in agent labels so restored desktop sessions are easier to recognize from the terminal switcher.
-- Embedded code-server packaging is more reliable across Apple Silicon and Intel builds, including target-architecture ripgrep materialization and authenticated GitHub artifact fetches during release builds.
-- The Android download badge now points at the 4.1.0 release APK.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.1.0)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.1.0/ghostex-4.1.0-arm64.dmg" length="565571616" type="application/octet-stream" sparkle:edSignature="vu5j6JyrewamNzP3Yg+KTa9XgE4TCTAITfGUtCYaD+ul6+WZlBkS0dhH9raGraoxTpMW4EujKa+2TRaqrpr7AA=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -203,6 +236,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: 4jFHJyzbfxjNXSE7jZWf5DZNL2Ct9WiC0LvV6DO2lZeMz6BLFycej7AMCv04Gs6qTRqAmXeE4HEswuKuS9vwBQ==
-length: 18239
+edSignature: B5pIXcP7cm5kIDvgP0Uq0Y+DffmKm90z/kUvzLgtQruUTQ2VMBxsWE+RUjAGIaQdw0prF3SOxNW0Bccl+WWVAQ==
+length: 19214
 -->

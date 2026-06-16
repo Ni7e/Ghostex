@@ -23,6 +23,7 @@
 <!-- CDXC:Distribution 2026-06-16-02:38: Release notes for 4.14.0 must keep the Major and Minor top-level bullet structure, cover the native sidebar/titlebar, session lifecycle, packaged gxserver, TUI, Android, and documentation updates, and avoid implementation-only release mechanics. -->
 <!-- CDXC:Distribution 2026-06-16-15:55: Final 4.14.0 notes must also cover the `gx 2` experimental TUI path, beta-gated browser/tooling surfaces, support-log retention, direct titlebar Git sync, first-run feature sequencing, and sanitized repository screenshots before Sparkle, GitHub, Homebrew, and Android publication. -->
 <!-- CDXC:Distribution 2026-06-16-21:03: The published 4.14.0 notes should use shorter grouped bullets with sub-bullets, call out substantial performance improvements, simplified settings and app surfaces, coming automations, dark theme colors with light colors coming soon, and thank @saleem-hadad for UX help. -->
+<!-- CDXC:Distribution 2026-06-16-21:38: The tiny 4.14.1 patch package should stay grouped with the 4.14.0 release page while Sparkle, GitHub assets, and Homebrew point downloads at the 4.14.1 build. -->
 
 ## 4.14.0 - 2026-06-16
 
@@ -53,6 +54,7 @@
     - The TUI session switcher clamps vertical navigation at list edges.
     - Held Up and Down movement repeats faster without raw terminal repeat bursts.
   - Browser, projects, and App Shots
+    - 4.14.1 keeps image thumbnails in the floating prompt editor clickable across the whole thumbnail shelf.
     - Project editor, browser, and App Shots surfaces have tighter lifecycle and persistence behavior.
     - Browser and project surfaces avoid blank new-tab states.
     - Floating prompt-editor work is preserved during app lifecycle closes.

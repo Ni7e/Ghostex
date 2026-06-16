@@ -16,7 +16,7 @@ settings:
     # CDXC:AutoUpdate 2026-06-16-20:41: Sparkle compares CFBundleVersion, not
     # only CFBundleShortVersionString. Release builds use semver-derived numeric
     # build values so each public update is greater than earlier installs.
-    CURRENT_PROJECT_VERSION: 41400
+    CURRENT_PROJECT_VERSION: 41401
     GENERATE_INFOPLIST_FILE: YES
     LD_RUNPATH_SEARCH_PATHS:
       - "$(inherited)"
@@ -26,7 +26,7 @@ settings:
     # publish a notarized Developer ID Ghostex app whose bundle metadata
     # matches the GitHub arm64 release asset, Sparkle appcast, and the
     # Apple Silicon Ghostex update feed.
-    MARKETING_VERSION: "4.14.0"
+    MARKETING_VERSION: "4.14.1"
     SDKROOT: macosx
     SWIFT_VERSION: "5.0"
     # CDXC:ChromiumBrowserPanes 2026-05-04-16:38: Swift needs both Ghostty's
