@@ -36,6 +36,7 @@
   - Project editor, browser, and App Shots surfaces received lifecycle and persistence polish, including bounded awake editor surfaces, project browser restore/history state, browser feedback dimensions, and more reliable app-modal window behavior.
   - Native and gxserver logging now trims old support-log history, samples high-volume diagnostic events, and keeps privacy checks tightened for mode switching, terminal focus, layout layering, pane reorder diagnostics, and terminal focus request policy.
   - The TUI session switcher now clamps vertical navigation at the first and last selectable rows and repeats held Up and Down movement faster without applying raw terminal repeat bursts.
+  - The packaged `zehn` history search now opens as a flat relevance list by default, keeps day-group browsing available behind Ctrl-D, and filters weak scattered matches before ranking.
   - Titlebar Git controls add a direct remote sync action for normal branches with an upstream or origin remote.
   - Browser and project surfaces avoid blank new-tab states, expose beta toolbar controls only when enabled, preserve floating prompt-editor work during app lifecycle closes, and reveal newly created project sessions more reliably.
   - Android and repository presentation polish includes the centered factory droid icon, latest-release Android download links, GitHub sponsor metadata, and sanitized checked-in README media for core Ghostex workflows.
