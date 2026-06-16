@@ -2045,6 +2045,8 @@ function renderGhostexCask({ version, sha256 }) {
   # CDXC:CliInstall 2026-06-12-09:31: Homebrew writes wrapper files in
   # HOMEBREW_PREFIX/bin instead of binary symlinks into Ghostex.app because
   # macOS can kill direct app-bundled script execution during policy assessment.
+  # CDXC:HomebrewRelease 2026-06-16-20:54: Keep preflight errors wrapped so
+  # automated tap pushes pass brew style after publication.
   preflight do
     commands = ["ghostex", "gx"]
     commands.each do |command|
@@ -2065,7 +2067,10 @@ function renderGhostexCask({ version, sha256 }) {
         next if command_target.include?("ghostex.app/Contents/Resources/Web/cli/#{command}")
         next if command == "ghostex" && command_target.include?("ghostex.app/Contents/MacOS/ghostex")
 
-        raise "Ghostex cannot install the #{command} CLI because #{command_path} already exists. Remove or rename the existing #{command} command, then reinstall Ghostex."
+        raise [
+          "Ghostex cannot install the #{command} CLI because #{command_path} already exists.",
+          "Remove or rename the existing #{command} command, then reinstall Ghostex.",
+        ].join(" ")
       end
     end
   end
