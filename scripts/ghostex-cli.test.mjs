@@ -349,31 +349,45 @@ printf 'rust-forwarded:%s\\n' "$1"
     }
   });
 
-  test("resolves bundled Rust gxserver from app resources without falling back to TypeScript output", async () => {
+  test("resolves bundled TypeScript gxserver from app resources before binary fallback", async () => {
     /*
-     * CDXC:GxserverRustPackaging 2026-06-16-10:35:
-     * Phase 8 packaged `gx server ...` defaults to Web/gxserver/bin/gxserver. TypeScript dist output remains a reference/explicit target, not an automatic packaged daemon fallback.
+     * CDXC:GxserverPackaging 2026-06-16-03:10:
+     * This deployment release makes packaged `gx server ...` default to Web/gxserver/dist/src/cli.js. Keep Web/gxserver/bin/gxserver as a fallback so Rust opt-in packages and older bundles still launch.
      */
-    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-gxserver-rust-default-"));
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-gxserver-typescript-default-"));
     try {
-      const rustRoot = path.join(tempDir, "rust-app");
-      const rustBinPath = path.join(rustRoot, "gxserver", "bin", "gxserver");
-      const referenceCliPath = path.join(rustRoot, "gxserver", "dist", "src", "cli.js");
+      const appRoot = path.join(tempDir, "typescript-app");
+      const rustBinPath = path.join(appRoot, "gxserver", "bin", "gxserver");
+      const referenceCliPath = path.join(appRoot, "gxserver", "dist", "src", "cli.js");
       await mkdir(path.dirname(rustBinPath), { recursive: true });
       await mkdir(path.dirname(referenceCliPath), { recursive: true });
       await writeFile(rustBinPath, "#!/bin/sh\n");
       await writeFile(referenceCliPath, "console.log('reference');\n");
       await chmod(rustBinPath, 0o755);
 
-      expect(resolveGxserverCliLaunchFromRoot(rustRoot)).toMatchObject({
-        args: [],
-        command: rustBinPath,
+      expect(resolveGxserverCliLaunchFromRoot(appRoot)).toMatchObject({
+        args: [referenceCliPath],
+        command: process.execPath,
       });
 
       const referenceOnlyRoot = path.join(tempDir, "reference-only");
-      await mkdir(path.join(referenceOnlyRoot, "gxserver", "dist", "src"), { recursive: true });
-      await writeFile(path.join(referenceOnlyRoot, "gxserver", "dist", "src", "cli.js"), "console.log('reference');\n");
-      expect(resolveGxserverCliLaunchFromRoot(referenceOnlyRoot)).toBeUndefined();
+      const referenceOnlyCliPath = path.join(referenceOnlyRoot, "gxserver", "dist", "src", "cli.js");
+      await mkdir(path.dirname(referenceOnlyCliPath), { recursive: true });
+      await writeFile(referenceOnlyCliPath, "console.log('reference');\n");
+      expect(resolveGxserverCliLaunchFromRoot(referenceOnlyRoot)).toMatchObject({
+        args: [referenceOnlyCliPath],
+        command: process.execPath,
+      });
+
+      const binaryOnlyRoot = path.join(tempDir, "binary-only");
+      const binaryOnlyPath = path.join(binaryOnlyRoot, "gxserver", "bin", "gxserver");
+      await mkdir(path.dirname(binaryOnlyPath), { recursive: true });
+      await writeFile(binaryOnlyPath, "#!/bin/sh\n");
+      await chmod(binaryOnlyPath, 0o755);
+      expect(resolveGxserverCliLaunchFromRoot(binaryOnlyRoot)).toMatchObject({
+        args: [],
+        command: binaryOnlyPath,
+      });
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }

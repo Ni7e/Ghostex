@@ -59,6 +59,19 @@ case "$GHOSTEX_MACOS_ARCH" in
 		;;
 esac
 BUILD_CACHE_DIR="${GHOSTEX_BUILD_CACHE_DIR:-$REPO_ROOT/build/$GHOSTEX_MACOS_ARCH/build-cache}"
+GHOSTEX_GXSERVER_PACKAGE_MODE="${GHOSTEX_GXSERVER_PACKAGE_MODE:-typescript}"
+case "$GHOSTEX_GXSERVER_PACKAGE_MODE" in
+	typescript | ts)
+		GHOSTEX_GXSERVER_PACKAGE_MODE="typescript"
+		;;
+	rust | rs)
+		GHOSTEX_GXSERVER_PACKAGE_MODE="rust"
+		;;
+	*)
+		echo "Unsupported GHOSTEX_GXSERVER_PACKAGE_MODE: $GHOSTEX_GXSERVER_PACKAGE_MODE" >&2
+		exit 1
+		;;
+esac
 
 acquire_local_start_lock_if_needed() {
 	if [[ "${GHOSTEX_START_LOCK_HELD:-}" == "1" || "${GHOSTEX_BUILD_LOCK_HELD:-}" == "1" ]]; then
@@ -842,7 +855,7 @@ EOF
 	write_cache_stamp "beads-$GHOSTEX_MACOS_ARCH" "$build_digest"
 }
 
-gxserver_package_supports_macos_arch() {
+gxserver_rust_package_supports_macos_arch() {
 	local target_dir="$1"
 	local binary_path
 	if [[ ! -x "$target_dir/bin/bd" ]]; then
@@ -860,36 +873,85 @@ gxserver_package_supports_macos_arch() {
 	return 0
 }
 
+gxserver_typescript_package_supports_macos_arch() {
+	local target_dir="$1"
+	local binary_path
+	if [[ ! -x "$target_dir/bin/gxserver" || ! -x "$target_dir/bin/bd" ]]; then
+		return 1
+	fi
+	for binary_path in \
+		"$target_dir/bin/zmx" \
+		"$target_dir/bin/zehn" \
+		"$WEB_DIR/bin/bd" \
+		"$target_dir/node_modules/better-sqlite3/build/Release/better_sqlite3.node"; do
+		if ! binary_supports_macos_arch "$binary_path" "$GHOSTEX_MACOS_ARCH"; then
+			return 1
+		fi
+	done
+	return 0
+}
+
+gxserver_package_supports_macos_arch() {
+	local target_dir="$1"
+	if [[ "$GHOSTEX_GXSERVER_PACKAGE_MODE" == "rust" ]]; then
+		gxserver_rust_package_supports_macos_arch "$target_dir"
+	else
+		gxserver_typescript_package_supports_macos_arch "$target_dir"
+	fi
+}
+
 package_gxserver_if_needed() {
 	local package_dir="$REPO_ROOT/gxserver/dist/server-package"
 	local target_dir="$WEB_DIR/gxserver"
-	local rust_bin package_digest
+	local package_digest rust_bin
 	# CDXC:GxserverPackaging 2026-05-30-15:49: The macOS app bundles the same gxserver server package used by standalone installs. The app only starts/reuses gxserver through packaged resources and does not own shutdown, so app resources must include the gxserver daemon plus pinned zmx/zehn/bd artifacts.
 	#
 	# CDXC:LocalStartFast 2026-06-07-16:23: gxserver packaging should skip work when gxserver runtime sources, package metadata, packager code, bundled zmx/zehn/bd binaries, and generated protocol inputs are unchanged.
 	#
-	# CDXC:GxserverPackaging 2026-06-08-12:17: gxserver used to couple app packaging to code-server's bundled Node runtime. Phase 8 keeps code-server as a separate app resource and removes gxserver's Node ABI from the daemon package fingerprint.
+	# CDXC:GxserverPackaging 2026-06-08-12:17: gxserver TypeScript packages must use code-server's bundled Node runtime and record Node ABI metadata, while Rust packages omit Node runtime metadata because the daemon binary owns startup.
 	#
 	# CDXC:ProjectBoardBeads 2026-06-08-10:46: Package the full upstream Beads CLI with gxserver so Project/Kanban opens without PATH setup. The app build stages exactly one `bd` binary for GHOSTEX_MACOS_ARCH, keeping arm and Intel app artifacts arch-specific instead of shipping a universal Beads binary.
 	#
-	# CDXC:GxserverRustPackaging 2026-06-16-10:35: Phase 8 macOS builds now package the Rust gxserver daemon by default while preserving generated TypeScript protocol exports. Keep Node as a build-time protocol compiler only; the app gxserver package must not depend on Node ABI metadata or a JavaScript database addon at runtime.
-	rust_bin="$(build_gxserver_rust_if_needed)"
-	package_digest="$(fingerprint_inputs \
-		--value "gxserver-package-v5" \
-		--value "arch=$GHOSTEX_MACOS_ARCH" \
-		--value "rust=$(path_identity "$rust_bin")" \
-		--path "$REPO_ROOT/gxserver/protocol" \
-		--path "$REPO_ROOT/gxserver/package.json" \
-		--path "$REPO_ROOT/gxserver/package-lock.json" \
-		--path "$REPO_ROOT/gxserver/tsconfig.json" \
-		--path "$REPO_ROOT/gxserver/scripts/package-gxserver.mjs" \
-		--path "$GXSERVER_RS_ROOT/src" \
-		--path "$GXSERVER_RS_ROOT/Cargo.toml" \
-		--path "$GXSERVER_RS_ROOT/Cargo.lock" \
-		--path "$WEB_DIR/bin/zmx" \
-		--path "$WEB_DIR/bin/zehn" \
-		--path "$WEB_DIR/bin/bd")"
+	# CDXC:GxserverRustPackaging 2026-06-16-10:35: Rust gxserver packaging preserves generated TypeScript protocol exports and is still available for cutover validation through GHOSTEX_GXSERVER_PACKAGE_MODE=rust.
+	#
+	# CDXC:GxserverPackaging 2026-06-16-03:06: The current release needs to ship the TypeScript gxserver daemon while Rust remains available behind GHOSTEX_GXSERVER_PACKAGE_MODE=rust. Keep the mode explicit in the package fingerprint so release artifacts cannot reuse a stale Rust package when switching back to TypeScript.
+	if [[ "$GHOSTEX_GXSERVER_PACKAGE_MODE" == "rust" ]]; then
+		rust_bin="$(build_gxserver_rust_if_needed)"
+		package_digest="$(fingerprint_inputs \
+			--value "gxserver-package-v6" \
+			--value "mode=rust" \
+			--value "arch=$GHOSTEX_MACOS_ARCH" \
+			--value "rust=$(path_identity "$rust_bin")" \
+			--path "$REPO_ROOT/gxserver/protocol" \
+			--path "$REPO_ROOT/gxserver/package.json" \
+			--path "$REPO_ROOT/gxserver/package-lock.json" \
+			--path "$REPO_ROOT/gxserver/tsconfig.json" \
+			--path "$REPO_ROOT/gxserver/scripts/package-gxserver.mjs" \
+			--path "$GXSERVER_RS_ROOT/src" \
+			--path "$GXSERVER_RS_ROOT/Cargo.toml" \
+			--path "$GXSERVER_RS_ROOT/Cargo.lock" \
+			--path "$WEB_DIR/bin/zmx" \
+			--path "$WEB_DIR/bin/zehn" \
+			--path "$WEB_DIR/bin/bd")"
+	else
+		package_digest="$(fingerprint_inputs \
+			--value "gxserver-package-v6" \
+			--value "mode=typescript" \
+			--value "arch=$GHOSTEX_MACOS_ARCH" \
+			--value "node=$GXSERVER_NODE_BIN:$GXSERVER_NODE_VERSION:$GXSERVER_NODE_MODULE_VERSION" \
+			--path "$REPO_ROOT/gxserver/src" \
+			--path "$REPO_ROOT/gxserver/protocol" \
+			--path "$REPO_ROOT/gxserver/package.json" \
+			--path "$REPO_ROOT/gxserver/package-lock.json" \
+			--path "$REPO_ROOT/gxserver/tsconfig.json" \
+			--path "$REPO_ROOT/gxserver/scripts/package-gxserver.mjs" \
+			--path "$WEB_DIR/code-server/lib/node" \
+			--path "$WEB_DIR/bin/zmx" \
+			--path "$WEB_DIR/bin/zehn" \
+			--path "$WEB_DIR/bin/bd")"
+	fi
 	if cache_matches "gxserver-package-$GHOSTEX_MACOS_ARCH" "$package_digest" "$package_dir/build-identity.json" "$target_dir/build-identity.json" "$target_dir/bin/gxserver" "$target_dir/dist/protocol/index.js" "$target_dir/dist/protocol/index.d.ts" &&
+		{ [[ "$GHOSTEX_GXSERVER_PACKAGE_MODE" == "rust" ]] || [[ -f "$target_dir/native-runtime.json" && -f "$target_dir/dist/src/cli.js" ]]; } &&
 		gxserver_package_supports_macos_arch "$target_dir"; then
 		# CDXC:GxserverPackaging 2026-06-08-16:23: Web/gxserver is also shared across dual-architecture release passes. Do not accept a cache hit unless the staged gxserver, zmx, zehn, and bd binaries match the requested architecture, or Intel and arm64 DMGs can silently inherit the previous pass's native artifacts.
 		echo "gxserver package is current; skipping package rebuild."
@@ -898,9 +960,14 @@ package_gxserver_if_needed() {
 
 	(
 		cd "$REPO_ROOT/gxserver"
-		echo "Packaging Rust gxserver with $rust_bin"
 		env PATH="$GXSERVER_NODE_DIR:$PATH" "$GXSERVER_NPM_BIN" run build
-		env PATH="$GXSERVER_NODE_DIR:$PATH" "$GXSERVER_NODE_BIN" scripts/package-gxserver.mjs --rust-bin "$rust_bin" --zmx-bin "$WEB_DIR/bin/zmx" --zehn-bin "$WEB_DIR/bin/zehn" --bd-bin "$WEB_DIR/bin/bd"
+		if [[ "$GHOSTEX_GXSERVER_PACKAGE_MODE" == "rust" ]]; then
+			echo "Packaging Rust gxserver with $rust_bin"
+			env PATH="$GXSERVER_NODE_DIR:$PATH" "$GXSERVER_NODE_BIN" scripts/package-gxserver.mjs --rust-bin "$rust_bin" --zmx-bin "$WEB_DIR/bin/zmx" --zehn-bin "$WEB_DIR/bin/zehn" --bd-bin "$WEB_DIR/bin/bd"
+		else
+			echo "Packaging TypeScript gxserver with $GXSERVER_NODE_BIN ($GXSERVER_NODE_VERSION, NODE_MODULE_VERSION $GXSERVER_NODE_MODULE_VERSION)"
+			env PATH="$GXSERVER_NODE_DIR:$PATH" "$GXSERVER_NPM_BIN" run package:app -- --zmx-bin "$WEB_DIR/bin/zmx" --zehn-bin "$WEB_DIR/bin/zehn" --bd-bin "$WEB_DIR/bin/bd" --native-node "$GXSERVER_NODE_BIN" --native-npm "$GXSERVER_NPM_BIN"
+		fi
 	)
 	rm -rf "$target_dir"
 	cp -R "$package_dir" "$target_dir"
@@ -908,7 +975,7 @@ package_gxserver_if_needed() {
 	write_cache_stamp "gxserver-package-$GHOSTEX_MACOS_ARCH" "$package_digest"
 }
 
-# CDXC:CodeServerRuntime 2026-06-08-12:17: code-server is the only bundled Node owner in the macOS app. Build code-server with Node 22 and stage that runtime inside Web/code-server/lib/node; gxserver Phase 8 packaging uses Rust and no longer depends on this Node runtime at daemon startup.
+# CDXC:CodeServerRuntime 2026-06-08-12:17: code-server owns the bundled Node runtime in the macOS app. Build code-server with Node 22 and stage that runtime inside Web/code-server/lib/node; TypeScript gxserver release packages reuse that runtime instead of shipping a duplicate Node.
 CODE_SERVER_NODE_BIN="$(prepare_code_server_app_node_runtime)"
 CODE_SERVER_NODE_DIR="$(cd "$(dirname "$CODE_SERVER_NODE_BIN")" && pwd)"
 CODE_SERVER_NPM_BIN="$CODE_SERVER_NODE_DIR/npm"
@@ -942,6 +1009,7 @@ if [[ "$GXSERVER_NODE_MAJOR" != "$CODE_SERVER_APP_NODE_MAJOR" ]]; then
 	echo "Ghostex app gxserver packaging must use code-server's bundled Node.js $CODE_SERVER_APP_NODE_MAJOR, got $GXSERVER_NODE_VERSION at $GXSERVER_NODE_BIN." >&2
 	exit 1
 fi
+GXSERVER_NODE_MODULE_VERSION="$("$GXSERVER_NODE_BIN" -p 'process.versions.modules')"
 
 T3CODE_NODE_BIN="${T3CODE_NODE:-$(resolve_t3code_node || true)}"
 if [[ -z "$T3CODE_NODE_BIN" ]]; then

@@ -33,7 +33,8 @@ describe("native pane focused border source", () => {
     expect(borderPredicateSource).toContain("isFocusedPaneBorderEligible(for: sessionId)");
     expect(borderPredicateSource).toContain("projectEditorCompanionSessionId == sessionId");
     expect(borderPredicateSource).toContain("activeSessionIds.contains(sessionId)");
-    expect(borderPredicateSource).toContain("sleepingSessionIds.contains(sessionId)");
+    expect(borderPredicateSource).toContain("isPlaceholderPaneSession(sessionId)");
+    expect(terminalWorkspaceSource).toContain("sleepingSessionIds.contains(sessionId) || isMountingPlaceholderSession(sessionId)");
     expect(borderPredicateSource).not.toContain("orderedVisiblePaneOwnerSessionIds().count > 1");
 
     const terminalFrameSource = sourceBetween(

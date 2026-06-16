@@ -3823,7 +3823,7 @@ function resolveGxserverCliLaunch() {
   }
 
   throw new Error(
-    "Bundled Rust gxserver is missing. Rebuild or reinstall Ghostex so Web/gxserver/bin/gxserver is present, or set GHOSTEX_GXSERVER_CLI/BIN for an explicit source/reference daemon.",
+    "Bundled gxserver TypeScript CLI or gxserver binary is missing. Rebuild or reinstall Ghostex so Web/gxserver is present, or set GHOSTEX_GXSERVER_CLI/BIN for an explicit source/reference daemon.",
   );
 }
 
@@ -3832,10 +3832,12 @@ function resolveGxserverCliLaunchFromRoot(root) {
     return undefined;
   }
   /*
-   * CDXC:GxserverRustPackaging 2026-06-16-10:35:
-   * Phase 8 installed `gx server ...` commands should launch the packaged Rust daemon from Web/gxserver/bin/gxserver by default. Keep TypeScript usable only through explicit GHOSTEX_GXSERVER_CLI/BIN paths so protocol reference builds cannot silently become the packaged daemon.
+   * CDXC:GxserverPackaging 2026-06-16-03:10:
+   * The current deployment release should route installed `gx server ...` commands to the TypeScript gxserver package by default. Prefer its JavaScript CLI when it exists, then keep the packaged binary launcher as a fallback for Rust opt-in packages and older bundles.
    */
   for (const candidate of [
+    path.join(root, "gxserver", "dist", "src", "cli.js"),
+    path.join(root, "native", "macos", "ghostexHost", "Web", "gxserver", "dist", "src", "cli.js"),
     path.join(root, "gxserver", "bin", "gxserver"),
     path.join(root, "native", "macos", "ghostexHost", "Web", "gxserver", "bin", "gxserver"),
   ]) {

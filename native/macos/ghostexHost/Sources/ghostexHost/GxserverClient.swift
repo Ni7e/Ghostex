@@ -165,8 +165,8 @@ final class GxserverClient {
    CDXC:GxserverRustPort 2026-06-14-21:09:
    Phase 2 Rust testing used explicit opt-in through GHOSTEX_GXSERVER_CLI/BIN. Keep those hard-selection hooks for source/reference testing, skip Node validation for native gxserver binaries, and report fixed-port startup failures instead of silently switching daemons.
 
-   CDXC:GxserverRustPackaging 2026-06-16-10:35:
-   Phase 8 app bundles launch Web/gxserver/bin/gxserver as the default daemon. Explicit gxserver selections still refuse to stop a different fixed-port owner, but the packaged default may restart an older build after the build identity check.
+  CDXC:GxserverStartup 2026-06-16-03:08:
+   The current deployment release needs the TypeScript gxserver daemon by default. Prefer the packaged TypeScript CLI when it is present, while keeping explicit Rust selections and packaged Rust fallback testable without changing release behavior.
   */
   func startOrReuse(allowStart: Bool? = nil) async -> GxserverClientStatus {
     let shouldStart = allowStart ?? alwaysStartOnLaunch
@@ -230,7 +230,7 @@ final class GxserverClient {
         authToken: readAuthToken(),
         health: nil,
         message:
-          "Bundled Rust gxserver is missing. Run `bun run build` for development, or reinstall Ghostex so Web/gxserver/bin/gxserver is present.",
+          "Bundled gxserver TypeScript CLI or gxserver binary is missing. Run `bun run build` for development, or reinstall Ghostex so Web/gxserver is present.",
         ok: false,
         state: "missingGxserverCli"
       )
@@ -796,7 +796,7 @@ final class GxserverClient {
 
     guard let defaultPlan = resolveDefaultGxserverLaunchPlan() else {
       return .failure(
-        message: "Bundled Rust gxserver is missing. Run `bun run build` for development, or reinstall Ghostex so Web/gxserver/bin/gxserver is present.",
+        message: "Bundled gxserver TypeScript CLI or gxserver binary is missing. Run `bun run build` for development, or reinstall Ghostex so Web/gxserver is present.",
         explicit: false
       )
     }
@@ -841,17 +841,39 @@ final class GxserverClient {
   }
 
   private func resolveDefaultGxserverLaunchPlan() -> GxserverLaunchPlan? {
-    var candidates: [URL] = []
+    var cliCandidates: [URL] = []
+    if let webCli = Bundle.main.resourceURL?.appendingPathComponent("Web/gxserver/dist/src/cli.js") {
+      cliCandidates.append(webCli)
+    }
+    if let resourceCli = Bundle.main.resourceURL?.appendingPathComponent("gxserver/dist/src/cli.js") {
+      cliCandidates.append(resourceCli)
+    }
+    cliCandidates.append(contentsOf: gxserverDevelopmentRoots().flatMap {
+      [
+        $0.appendingPathComponent("native/macos/ghostexHost/Web/gxserver/dist/src/cli.js"),
+        $0.appendingPathComponent("gxserver/dist/src/cli.js"),
+      ]
+    })
+    if let cliURL = cliCandidates.first(where: { fileManager.fileExists(atPath: $0.path) }) {
+      return GxserverLaunchPlan(
+        executableURL: cliURL,
+        expectedBuildIdentity: expectedBundledBuildIdentity(for: cliURL),
+        isExplicitSelection: false,
+        kind: .javascriptCli
+      )
+    }
+
+    var binaryCandidates: [URL] = []
     if let webBinary = Bundle.main.resourceURL?.appendingPathComponent("Web/gxserver/bin/gxserver") {
-      candidates.append(webBinary)
+      binaryCandidates.append(webBinary)
     }
     if let resourceBinary = Bundle.main.resourceURL?.appendingPathComponent("gxserver/bin/gxserver") {
-      candidates.append(resourceBinary)
+      binaryCandidates.append(resourceBinary)
     }
-    candidates.append(contentsOf: gxserverDevelopmentRoots().map {
+    binaryCandidates.append(contentsOf: gxserverDevelopmentRoots().map {
       $0.appendingPathComponent("native/macos/ghostexHost/Web/gxserver/bin/gxserver")
     })
-    guard let binaryURL = candidates.first(where: { fileManager.isExecutableFile(atPath: $0.path) }) else {
+    guard let binaryURL = binaryCandidates.first(where: { fileManager.isExecutableFile(atPath: $0.path) }) else {
       return nil
     }
     return GxserverLaunchPlan(
