@@ -152,6 +152,15 @@ describe("Ghostex release automation helpers", () => {
     expect(
       isHomebrewHostToolchainVersionError("Error: Your Command Line Tools are too outdated."),
     ).toBe(true);
+    expect(
+      isHomebrewHostToolchainVersionError(
+        [
+          "Command failed (1): HOMEBREW_NO_INSTALL_FROM_API=1 brew audit --cask --skip-style 'Casks/ghostex.rb'",
+          "Error: Your Xcode (26.5) at /Applications/Xcode.app is too outdated.",
+          "Error: Your Command Line Tools are too outdated.",
+        ].join("\n"),
+      ),
+    ).toBe(true);
     expect(isHomebrewHostToolchainVersionError("Error: Cask is missing a sha256.")).toBe(false);
   });
 });

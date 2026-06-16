@@ -408,9 +408,20 @@ async function runOptionalHomebrewHostValidation(command, options = {}) {
    * Treat only that host-toolchain diagnostic as a skippable local validation
    * gap; cask syntax, canonical cask validation, git push, GitHub assets, and
    * raw live-cask validation remain mandatory.
+   *
+   * CDXC:ReleaseAutomation 2026-06-16-20:39:
+   * Homebrew host-toolchain diagnostics are written to child stderr. Capture
+   * optional Homebrew validation output so the classifier can distinguish that
+   * local host issue from real cask failures before rethrowing.
    */
   try {
-    await run(command, options);
+    const result = await run(command, { ...options, stdio: "pipe" });
+    if (result.stdout.trim()) {
+      console.log(result.stdout.trim());
+    }
+    if (result.stderr.trim()) {
+      console.error(result.stderr.trim());
+    }
     return true;
   } catch (error) {
     if (!isHomebrewHostToolchainVersionError(error)) {
