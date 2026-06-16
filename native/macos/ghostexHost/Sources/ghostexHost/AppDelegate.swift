@@ -14199,6 +14199,12 @@ private final class AppModalWindowPanel: NSPanel {
      resize handle in React. Match that exact corner affordance at the AppKit
      window-event boundary so the shown handle and the real resize gesture stay
      aligned without adding a transparent web hit-test overlay.
+
+     CDXC:PromptEditor 2026-06-16-21:32:
+     The image thumbnail shelf sits on the bottom edge of the rich prompt
+     editor. Do not reserve the whole bottom edge for native drag or resize
+     handling; only the explicit bottom-right resize handle may intercept
+     bottom-edge input so any point on a thumbnail can open the preview.
      */
     if promptEditorBottomRightResizeHandleSize > 0,
       point.x >= frame.width - promptEditorBottomRightResizeHandleSize,
@@ -14212,9 +14218,6 @@ private final class AppModalWindowPanel: NSPanel {
     }
     if point.x >= frame.width - promptEditorResizeMargin {
       edges.insert(.right)
-    }
-    if point.y <= promptEditorResizeMargin {
-      edges.insert(.bottom)
     }
     return edges
   }

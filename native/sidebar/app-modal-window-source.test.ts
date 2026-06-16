@@ -67,6 +67,9 @@ describe("native app modal window source", () => {
     /*
     CDXC:PromptEditor 2026-06-16-10:23:
     The native child-window prompt editor needs a visible bottom-right resize handle with a resize cursor, and every visible part of an image thumbnail should open the image preview except the explicit remove button.
+
+    CDXC:PromptEditor 2026-06-16-21:32:
+    The bottom thumbnail shelf must own normal WebKit clicks. Native prompt-window drag/resize handling may intercept only the explicit bottom-right resize handle, not the whole bottom edge.
     */
     const nativeResizeRule = sourceBetween(
       modalStylesSource,
@@ -90,6 +93,14 @@ describe("native app modal window source", () => {
     expect(modalHostSource).toContain("onPointerDown={isNativeWindowSurface ? undefined : startResize}");
     expect(appDelegateSource).toContain("promptEditorBottomRightResizeHandleSize");
     expect(appDelegateSource).toContain("return [.right, .bottom]");
+    const promptEditorResizeEdges = sourceBetween(
+      appDelegateSource,
+      "private func promptEditorResizeEdges(for point: CGPoint) -> ResizeEdges {",
+      "private func resizePromptEditorWindow(from event: NSEvent, edges: ResizeEdges) {",
+    );
+    expect(promptEditorResizeEdges).not.toContain("point.y <= promptEditorResizeMargin");
+    expect(promptEditorResizeEdges).toContain("point.x <= promptEditorResizeMargin");
+    expect(promptEditorResizeEdges).toContain("point.x >= frame.width - promptEditorResizeMargin");
     expect(appDelegateSource).toContain(
       "panel.promptEditorBottomRightResizeHandleSize = Self.floatingPromptEditorResizeHandleSize",
     );
