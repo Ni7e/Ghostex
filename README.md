@@ -61,30 +61,30 @@ Use sanitized product screenshots only. Do not publish images that expose local 
 
 Great for working with markdown, reviewing code, and checking PRs (Github Extension is great!)
 
-<img width="3456" height="2068" alt="Ghostex embedded VS Code based editor" src="media/readme/ghostex-embedded-vscode-editor.png" />
+<img width="3456" height="2068" alt="image" src="https://github.com/user-attachments/assets/986fbece-d0de-4739-8515-f3c2a7437b92" />
 
 ### Split your terminals and use keyboard hotkeys to jump between terminals in the Agents view
 
-<img width="3456" height="2068" alt="Ghostex split terminals in the Agents view" src="media/readme/ghostex-agents-terminal-splits.png" />
+<img width="3456" height="2068" alt="image" src="https://github.com/user-attachments/assets/c92c5ec9-0021-42fb-9628-0cee62c48e86" />
 
 ### Embedded Chromium Browser with Design mode
 
 Also Comes with Devtools, Agent Browser Control, and Profiles.
 
-<img width="3456" height="2068" alt="Ghostex embedded Chromium Browser with Design mode" src="media/readme/ghostex-chromium-design-mode.png" />
+<img width="3456" height="2068" alt="image" src="https://github.com/user-attachments/assets/ce9fbe6b-8c2b-41f1-88f6-67d8254846e5" />
 
 ### Kanban board based on beads!
 
 Dump your notes here then let an orchestrator agent hand them off to other agents
 (App supports cross agent orchestration too)
 
-<img width="3456" height="2068" alt="Ghostex Kanban board based on beads" src="media/readme/ghostex-kanban-beads-board.png" />
+<img width="3456" height="2068" alt="image" src="https://github.com/user-attachments/assets/85543937-85f1-4171-b2d0-6ee7264beddd" />
 
 ### Rich Prompt Editor with ctrl + g
 
 Edit your agent prompts with full hotkeys support and even image previews!
 
-<img width="2048" height="1221" alt="Ghostex Rich Prompt Editor with ctrl + g" src="media/readme/ghostex-rich-prompt-editor-ctrl-g.png" />
+<img width="2048" height="1221" alt="image" src="https://github.com/user-attachments/assets/b51ec92e-04cf-4d8f-933c-fc2a13638a1d" />
 
 ### T3code GUI panes and supported terminal CLIs
 
