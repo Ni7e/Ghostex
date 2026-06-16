@@ -89,8 +89,8 @@ export const MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT = 50;
 export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_FOREGROUND_COLOR = "#d8d8d8";
 export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_DARK_FOREGROUND_COLOR = "#262626";
 export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR = "#0e0e0e";
-export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR = "#808080";
-export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 95;
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR = "#ffffff";
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 93;
 export const MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 85;
 export const MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 100;
 const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_STRENGTH = 0.12;
@@ -190,6 +190,11 @@ export function getSidebarTitlebarBackgroundForDarkness(
    * Add a web-only tint picker without returning to arbitrary background
    * colors. Apply a small hue offset around the contrast-selected gray so tint
    * changes are subtle and neutral #808080 preserves the original gray.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-16-14:28:
+   * Default custom chrome should now use 93 contrast with white tint. White
+   * remains neutral in the hue-offset algorithm because all channels match,
+   * while saved non-neutral tints still introduce only a small hue offset.
    */
   const darkness = clampSidebarTitlebarBackgroundDarknessPercent(darknessPercent);
   const baseChannel =
@@ -285,6 +290,13 @@ export type ghostexSettings = {
   customSessionTitleGenerationCommand: string;
   browserFeedbackTool: BrowserFeedbackTool;
   browserOpenMode: BrowserOpenMode;
+  /**
+   * CDXC:BetaFeatures 2026-06-16-13:08:
+   * Beta features are user-facing experimental surfaces that should stay hidden
+   * by default. Settings owns one advanced opt-in so every beta surface can be
+   * audited from the Beta section before it appears in the app.
+   */
+  showBetaFeatures: boolean;
   codeServerLinkVscodeUserConfig: boolean;
   codeServerUseVscodeInsidersUserConfig: boolean;
   customDefaultEditorCommand: string;
@@ -613,6 +625,12 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   browserOpenMode: "browser-pane",
   /**
+   * CDXC:BetaFeatures 2026-06-16-13:08:
+   * New installs and missing persisted settings should keep beta-only surfaces
+   * hidden until the user enables Show Beta features from Advanced Settings.
+   */
+  showBetaFeatures: false,
+  /**
    * CDXC:EditorPanes 2026-05-06-15:00
    * Embedded code-server editor panes can reuse the user's local VS Code
    * user settings. A separate Insiders toggle switches the linked source
@@ -786,12 +804,15 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * Floating and menu bar desktop status badges stay independently controlled.
    *
    * CDXC:SessionStatusIndicators 2026-06-15-02:01:
-   * Floating session indicators start hidden for new installs, so the Show Floating Session Indicators setting is off by default. Keep the menu bar session indicator visible unless that separate setting changes.
+   * Floating session indicators previously started hidden for new installs, while the menu bar session indicator stayed visible unless that separate setting changed.
    *
    * CDXC:SessionStatusIndicators 2026-06-15-14:00:
    * Sidebar presets must not provide the floating indicator value. Store the first-run default here so applying a sidebar preset preserves whatever the user chose for the macOS floating badge.
+   *
+   * CDXC:SessionStatusIndicators 2026-06-16-09:20:
+   * Show Floating Session Indicators should be on by default, even though the toggle remains an Advanced Settings row. Missing settings should therefore show the desktop badge unless an existing user value explicitly hides it.
    */
-  hideFloatingSessionStatusIndicators: true,
+  hideFloatingSessionStatusIndicators: false,
   hideMenuBarSessionStatusIndicators:
     SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideMenuBarSessionStatusIndicators,
   petOverlayEnabled: false,
@@ -883,9 +904,14 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * labels the same control Background Contrast.
    *
    * CDXC:SidebarTitlebarColors 2026-06-15-15:28:
-   * The tint picker defaults to neutral #808080. The tint algorithm uses hue
-   * offset around the selected contrast gray, so this default does not change
-   * Dark Gray chrome.
+   * The tint picker originally defaulted to neutral #808080. The tint
+   * algorithm uses hue offset around the selected contrast gray, so neutral
+   * same-channel tints do not change Dark Gray chrome.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-16-14:28:
+   * The custom chrome default is now 93 contrast with white #FFFFFF tint.
+   * Store the computed default background with those controls so Settings,
+   * native startup, and protocol snapshots agree.
    *
    * CDXC:SettingsTheming 2026-06-15-21:35:
    * Background Contrast and Background Tint are standard Theming controls.
@@ -898,7 +924,10 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
     DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
   customSidebarTitlebarBackgroundDarknessPercent:
     DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
-  customSidebarTitlebarBackgroundColor: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR,
+  customSidebarTitlebarBackgroundColor: getSidebarTitlebarBackgroundForDarkness(
+    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
+    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
+  ),
   /**
    * CDXC:GhosttyDefaults 2026-05-22-12:29:
    * New Ghostex terminals should default to the requested GitHub Dark terminal
@@ -1170,6 +1199,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       : DEFAULT_ghostex_SETTINGS.sessionPersistenceProvider,
     ),
   );
+  const rawLegacyCustomSidebarTitlebarBackgroundColor =
+    source.customSidebarTitlebarBackgroundColor;
+  const hasValidLegacyCustomSidebarTitlebarBackgroundColor =
+    typeof rawLegacyCustomSidebarTitlebarBackgroundColor === "string" &&
+    /^#[0-9a-f]{6}$/u.test(rawLegacyCustomSidebarTitlebarBackgroundColor.trim().toLowerCase());
   const legacyCustomSidebarTitlebarBackgroundColor = normalizeSidebarTitlebarHexColor(
     readString(
       source,
@@ -1178,12 +1212,23 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     ),
     DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundColor,
   );
+  /**
+   * CDXC:SidebarTitlebarColors 2026-06-16-14:28:
+   * Missing Settings should use the explicit 93 contrast default instead of
+   * reverse-mapping the default background hex, because that reverse mapping
+   * cannot exactly invert the slider's channel curve. Only valid legacy saved
+   * background colors should continue to seed the slider during migration.
+   */
+  const customSidebarTitlebarBackgroundDarknessFallback =
+    hasValidLegacyCustomSidebarTitlebarBackgroundColor
+      ? getSidebarTitlebarBackgroundDarknessForColor(legacyCustomSidebarTitlebarBackgroundColor)
+      : DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundDarknessPercent;
   const customSidebarTitlebarBackgroundDarknessPercent =
     clampSidebarTitlebarBackgroundDarknessPercent(
       readNumber(
         source,
         "customSidebarTitlebarBackgroundDarknessPercent",
-        getSidebarTitlebarBackgroundDarknessForColor(legacyCustomSidebarTitlebarBackgroundColor),
+        customSidebarTitlebarBackgroundDarknessFallback,
       ),
     );
   const customSidebarTitlebarBackgroundTintColor = normalizeSidebarTitlebarHexColor(
@@ -1257,6 +1302,16 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
      */
     browserOpenMode: normalizeBrowserOpenMode(
       readString(source, "browserOpenMode", DEFAULT_ghostex_SETTINGS.browserOpenMode),
+    ),
+    /**
+     * CDXC:BetaFeatures 2026-06-16-13:08:
+     * Normalize the beta gate as a strict boolean so stale or malformed settings
+     * cannot expose beta-only OS Integration or browser address-bar controls.
+     */
+    showBetaFeatures: readBoolean(
+      source,
+      "showBetaFeatures",
+      DEFAULT_ghostex_SETTINGS.showBetaFeatures,
     ),
     /**
      * CDXC:EditorPanes 2026-06-08-20:12:

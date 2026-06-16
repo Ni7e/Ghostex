@@ -113,6 +113,9 @@ test("Git command construction is allowlisted and keeps file paths project-relat
   const merge = buildGitCommand({ action: "merge", branch: "feature/a", projectPath: "/repo" }, "/repo");
   assert.deepEqual(merge.args, ["merge", "feature/a"]);
 
+  const pullFastForward = buildGitCommand({ action: "pullFastForward", projectPath: "/repo" }, "/repo");
+  assert.deepEqual(pullFastForward.args, ["pull", "--ff-only"]);
+
   const remoteBranchExists = buildGitCommand(
     { action: "remoteBranchExists", branch: "feature/a", projectPath: "/repo", remoteName: "origin" },
     "/repo",

@@ -3,6 +3,25 @@ import Foundation
 enum SidebarRefreshDebugLog {
   private static let maxLogFileBytes: UInt64 = 25 * 1024 * 1024
   private static let maxRotatedLogFiles = 3
+  private static let highVolumeSampleInterval: TimeInterval = 5
+  private static let sampledEvents = Set([
+    "messageApplied",
+    "messageReceived",
+    "nativeSidebar.gxserver.presentationActivity.localFirst",
+    "nativeSidebar.gxserver.presentationDelta.applied",
+    "nativeSidebar.gxserver.presentationDelta.sidebarPatch",
+    "nativeSidebar.gxserver.presentationLifecycle.localFirst",
+    "nativeSidebar.gxserver.presentationPaneChrome.applied",
+    "nativeSidebar.gxserver.presentationProject.materializeSkipped",
+    "nativeSidebar.gxserver.presentationProject.materialized",
+    "nativeSidebar.gxserver.status",
+    "nativeSidebar.remoteGxserver.presentationDelta.applied",
+    "nativeSidebar.remoteGxserver.presentationLifecycle.localFirst",
+    "renderStateChanged",
+    "sidebar.refresh.messageApplied",
+    "sidebar.refresh.messageReceived",
+    "sidebar.refresh.renderStateChanged",
+  ])
   private static let logDateFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZ"
@@ -11,6 +30,7 @@ enum SidebarRefreshDebugLog {
     return formatter
   }()
   private static var didCreateLogsDirectory = false
+  private static var sampleStateByEvent: [String: LogSampleState] = [:]
 
   /**
    CDXC:SidebarRefreshDiagnostics 2026-05-11-12:32
@@ -31,10 +51,24 @@ enum SidebarRefreshDebugLog {
     }
     let logsDirectory = GhostexAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("sidebar-refresh-debug.log")
-    let payload: [String: Any] = [
+    var payload: [String: Any] = [
       "details": parseDetailsPayload(details),
       "event": event,
     ]
+    /*
+     CDXC:SidebarRefreshDiagnostics 2026-06-16-12:22:
+     Sidebar refresh logs must stay useful when Debugging Mode is left on. Sample message/render/presentation-delta events at the Swift writer boundary, including the prefixed `sidebar.refresh.*` names used by the React sidebar, so every caller shares the same support-bundle line cap behavior.
+     */
+    if !isNativePersistentLogImportantDiagnostic(event),
+      !shouldWriteSampledLogEvent(
+        event: event,
+        sampledEvents: sampledEvents,
+        sampleInterval: highVolumeSampleInterval,
+        stateByEvent: &sampleStateByEvent,
+        payload: &payload)
+    {
+      return
+    }
     let line = "[\(logDateFormatter.string(from: Date()))] \(serialize(NativeLogPrivacy.sanitizePayload(payload)))\n"
 
     do {

@@ -5,29 +5,29 @@ import {
 } from "./settings-modal-tabs";
 
 describe("settings modal tabs", () => {
-  test("hides macOS OS Integration unless Debugging Mode is enabled", () => {
+  test("hides macOS OS Integration unless beta features are enabled", () => {
     /*
-     * CDXC:OSIntegration 2026-06-15-14:00:
+     * CDXC:BetaFeatures 2026-06-16-13:08:
      * Settings should not expose macOS OS Integration during ordinary app use.
-     * A direct or remembered OS Integration tab request must land on Settings
-     * unless Debugging Mode makes the debug-only tab visible.
+     * A direct or remembered OS Integration tab request must land on General
+     * unless Show Beta features makes the beta-only tab visible.
      */
     expect(
       shouldShowOSIntegrationSettingsTab({
-        debuggingMode: false,
         isFirstLaunchSetup: false,
+        showBetaFeatures: false,
       }),
     ).toBe(false);
     expect(
       shouldShowOSIntegrationSettingsTab({
-        debuggingMode: true,
         isFirstLaunchSetup: true,
+        showBetaFeatures: true,
       }),
     ).toBe(false);
     expect(
       shouldShowOSIntegrationSettingsTab({
-        debuggingMode: true,
         isFirstLaunchSetup: false,
+        showBetaFeatures: true,
       }),
     ).toBe(true);
 

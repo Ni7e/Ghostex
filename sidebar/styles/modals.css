@@ -177,7 +177,14 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .app-modal-host-native-window-body .floating-prompt-editor-resize {
-  display: none;
+  /*
+   * CDXC:PromptEditor 2026-06-16-10:23:
+   * Native child-window prompt editors still resize through AppKit, but users
+   * need a visible bottom-right affordance and resize cursor in the WKWebView
+   * surface that matches the native resize handle.
+   */
+  display: block;
+  pointer-events: auto;
 }
 
 .floating-prompt-editor-titlebar {
@@ -363,18 +370,36 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .floating-prompt-editor-image-thumb:hover,
+.floating-prompt-editor-image-thumb:focus-within,
 .floating-prompt-editor-image-thumb:focus-visible {
   border-color: rgb(255 255 255 / 28%);
 }
 
-.floating-prompt-editor-image-thumb img {
+.floating-prompt-editor-image-open {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: default;
+  display: block;
+  inset: 0;
+  padding: 0;
+  position: absolute;
+  text-align: inherit;
+}
+
+.floating-prompt-editor-image-open:focus-visible {
+  outline: 1px solid rgb(255 255 255 / 42%);
+  outline-offset: -2px;
+}
+
+.floating-prompt-editor-image-open img {
   display: block;
   height: 100%;
   object-fit: cover;
   width: 100%;
 }
 
-.floating-prompt-editor-image-thumb span {
+.floating-prompt-editor-image-open span {
   background:
     linear-gradient(135deg, transparent 0 45%, rgb(255 255 255 / 18%) 46% 54%, transparent 55%),
     rgb(255 255 255 / 5%);
@@ -401,6 +426,7 @@ html:has(body.app-modal-host-native-window-body) {
   top: 3px;
   transition: opacity 120ms ease;
   width: 16px;
+  z-index: 2;
 }
 
 .floating-prompt-editor-image-remove svg {
@@ -507,6 +533,7 @@ html:has(body.app-modal-host-native-window-body) {
   position: absolute;
   right: 0;
   width: 24px;
+  z-index: 3;
 }
 
 .floating-prompt-editor-resize::before {
@@ -1959,7 +1986,11 @@ html:has(body.app-modal-host-native-window-body) {
 /*
  * CDXC:SettingsDensity 2026-06-15-20:53:
  * Main Settings rows should keep explanatory copy out of the default layout to reduce crowding. Reserve a small info target beside the label, reveal it on row hover or focus, and constrain the right-side tooltip to a readable 350px max width.
+ *
+ * CDXC:SettingsAdvanced 2026-06-16-10:40:
+ * Advanced settings use a light blue up-arrow icon instead of the former text tag. Keep it directly before the hover-only info button so advanced state and row details read as one compact label action group.
  */
+.settings-row-advanced-button,
 .settings-row-info-button {
   align-items: center;
   border: 0;
@@ -1977,21 +2008,33 @@ html:has(body.app-modal-host-native-window-body) {
   width: 18px;
 }
 
+.settings-row-advanced-button {
+  color: color-mix(in srgb, #7dd3fc 72%, var(--muted-foreground) 28%);
+}
+
+.settings-row-advanced-button svg,
 .settings-row-info-button svg {
   height: 15px;
   width: 15px;
 }
 
+.settings-row:hover .settings-row-advanced-button,
 .settings-row:hover .settings-row-info-button,
+.settings-row:focus-within .settings-row-advanced-button,
 .settings-row:focus-within .settings-row-info-button {
   opacity: 1;
   pointer-events: auto;
+}
+
+.settings-row-advanced-button:is(:hover, :focus-visible) {
+  color: color-mix(in srgb, #bae6fd 82%, var(--foreground) 18%);
 }
 
 .settings-row-info-button:is(:hover, :focus-visible) {
   color: var(--foreground);
 }
 
+.settings-row-advanced-button:focus-visible,
 .settings-row-info-button:focus-visible {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 45%, transparent);
 }
@@ -2066,7 +2109,6 @@ html:has(body.app-modal-host-native-window-body) {
 .command-config-modal-shadcn [data-slot="select-trigger"],
 .command-config-modal-shadcn .command-config-textarea-shadcn,
 .command-config-modal-shadcn .command-icon-picker-trigger,
-.command-config-modal-shadcn .command-icon-color-text,
 .command-config-modal-shadcn .command-icon-picker-search {
   font-family: inherit;
   font-size: 14px;
@@ -2077,7 +2119,6 @@ html:has(body.app-modal-host-native-window-body) {
 .command-config-modal-shadcn [data-slot="textarea"]:is(:focus, :focus-visible),
 .command-config-modal-shadcn .command-config-input:is(:focus, :focus-visible),
 .command-config-modal-shadcn .command-config-textarea-shadcn:is(:focus, :focus-visible),
-.command-config-modal-shadcn .command-icon-color-text:is(:focus, :focus-visible),
 .command-config-modal-shadcn .command-icon-picker-search:is(:focus, :focus-visible),
 .command-config-modal-shadcn .command-icon-picker-trigger:is(:focus, :focus-visible) {
   /*
@@ -2123,8 +2164,7 @@ html:has(body.app-modal-host-native-window-body) {
   padding: 0 12px;
 }
 
-.command-config-modal-shadcn .command-icon-picker-search,
-.command-config-modal-shadcn .command-icon-color-text {
+.command-config-modal-shadcn .command-icon-picker-search {
   background: color-mix(in srgb, var(--input) 30%, transparent);
   border: 1px solid var(--input);
   border-radius: 0;
@@ -3205,44 +3245,6 @@ html:has(body.app-modal-host-native-window-body) {
   text-align: center;
 }
 
-.command-icon-color-row {
-  align-items: center;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 40px minmax(0, 1fr);
-}
-
-.command-icon-color-swatch {
-  appearance: none;
-  background: none;
-  border: 1px solid color-mix(in srgb, var(--app-border) 92%, transparent);
-  border-radius: 0;
-  cursor: pointer;
-  height: 38px;
-  padding: 3px;
-  width: 40px;
-}
-
-.command-icon-color-swatch:disabled,
-.command-icon-color-text:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.command-icon-color-swatch::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-
-.command-icon-color-swatch::-webkit-color-swatch {
-  border: 0;
-  border-radius: 0;
-}
-
-.command-icon-color-swatch::-moz-color-swatch {
-  border: 0;
-  border-radius: 0;
-}
-
 .command-config-toggle {
   align-items: flex-start;
   background: color-mix(in srgb, var(--app-card-active) 92%, transparent);
@@ -3677,9 +3679,22 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .settings-tab-scroll {
+  /*
+   * CDXC:SettingsLayout 2026-06-16-08:12:
+   * Settings tabs without a left section rail should still center their content
+   * in the same 770px readable column used by General and Hotkeys.
+   */
+  align-items: center;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   overflow-y: auto;
   padding: 16px;
+}
+
+.settings-tab-scroll > * {
+  max-width: 770px;
+  width: 100%;
 }
 
 .projects-settings-layout {
@@ -4178,4 +4193,48 @@ html:has(body.app-modal-host-native-window-body) {
   gap: 10px;
   justify-content: flex-end;
   padding-top: 6px;
+}
+
+/*
+ * CDXC:SettingsRoundness 2026-06-16-08:22:
+ * Bespoke Settings tab surfaces do not all use shadcn data-slot attributes.
+ * Apply the same small settings-scoped radii here so Remote, Projects, and
+ * management rows match the central Settings control radius without changing
+ * non-Settings modals.
+ *
+ * CDXC:SettingsRoundness 2026-06-16-08:33:
+ * Keep these bespoke Settings surfaces tied to the subtle radius tokens:
+ * 2px compact, 3px normal, 7px large, and adaptive 7px/10%.
+ */
+.ghostex-settings-shadcn :is(
+  .projects-settings-selector-trigger,
+  .projects-settings-selector-popover,
+  .settings-management-help-button,
+  .settings-management-icon,
+  .settings-management-row,
+  .settings-modal-section,
+  .settings-project-command-card,
+  .settings-remote-machine-card,
+  .settings-remote-machine-empty,
+  .settings-remote-machine-input,
+  .settings-project-command-textarea
+) {
+  border-radius: var(--settings-radius-control);
+}
+
+.ghostex-settings-shadcn :is(
+  .projects-settings-selector-icon,
+  .projects-settings-selector-option[data-slot="command-item"] > svg:first-child,
+  .settings-remote-machine-add-icon,
+  .settings-remote-machine-empty-icon
+) {
+  border-radius: var(--settings-radius-adaptive);
+}
+
+.ghostex-settings-shadcn :is(
+  .settings-project-command-card,
+  .settings-remote-machine-card,
+  .settings-remote-machine-empty
+) {
+  border-radius: var(--settings-radius-section);
 }

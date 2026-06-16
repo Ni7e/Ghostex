@@ -401,6 +401,20 @@ enum NativeLogPrivacyTests {
     assertTrue(!sourceDragJson.contains("codex --ask private request"), "source drag logs must not include command text")
     assertTrue(!sourceDragJson.contains("secret-token"), "source drag logs must not include secrets")
 
+    /*
+     CDXC:DiagnosticsPrivacy 2026-06-16-12:22:
+     Free-form native log lines can include localized error strings from system
+     APIs. Sanitize and flatten those messages before writing so one caller
+     cannot inject multiline support-log entries containing paths or secrets.
+     */
+    let sanitizedLine = NativeLogPrivacy.sanitizeLogLine(
+      "first line\nsecond line /Users/person/dev/private-customer token=secret-token")
+
+    assertTrue(sanitizedLine.contains("first line\\nsecond line"), "line sanitizer should preserve newline position as escaped text")
+    assertTrue(!sanitizedLine.contains("\n"), "line sanitizer must not leave raw newlines")
+    assertTrue(!sanitizedLine.contains("/Users/person"), "line sanitizer must not include paths")
+    assertTrue(!sanitizedLine.contains("secret-token"), "line sanitizer must not include secrets")
+
     assertTrue(
       isNativePersistentLogImportantDiagnostic("nativeSidebar.gxserver.sessionTitleEventFailed"),
       "failed native diagnostic events should persist in normal mode")

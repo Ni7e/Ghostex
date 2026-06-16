@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { DiscoverGhostexModal } from "./discover-ghostex-modal";
 
 const meta = {
-  title: "Sidebar/Discover Ghostex Modal",
+  title: "Sidebar/Highlighted Features Modal",
   parameters: {
     layout: "fullscreen",
   },

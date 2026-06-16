@@ -31,25 +31,31 @@ describe("sidebar overflow menu source", () => {
 
     const firstCommandPaletteIndex = overflowMenuSource.indexOf("commandPaletteMenuLabel");
     expect(sidebarAppSource).toContain("getCommandPaletteOverflowMenuLabel");
-    expect(sidebarAppSource).toContain('hotkeyLabel.replace("CMD"');
-    expect(sidebarAppSource).toContain('replace("SHIFT"');
-    expect(sidebarAppSource).toContain('return "CMD";');
-    expect(sidebarAppSource).toContain('return "SHIFT";');
+    expect(sidebarAppSource).toContain("literal plus characters");
+    expect(sidebarAppSource).toContain('return "⌘";');
+    expect(sidebarAppSource).toContain('return "⇧";');
     expect(firstCommandPaletteIndex).toBeGreaterThanOrEqual(0);
     expect(firstCommandPaletteIndex).toBeLessThan(overflowMenuSource.indexOf("Wake Pet"));
     expect(firstCommandPaletteIndex).toBeLessThan(overflowMenuSource.indexOf("Pinned Prompts"));
     expect(overflowMenuSource).toContain("onOpenCommandPalette");
+
+    const hotkeyFormatter = sourceBetween(
+      "function formatOverflowMenuTextHotkey(hotkey: string): string",
+      "function formatOverflowMenuTextHotkeyPart(part: string): string",
+    );
+    expect(hotkeyFormatter).toContain('.join("")');
+    expect(hotkeyFormatter).not.toContain('.join("+")');
   });
 
-  test("keeps Setup Flow above Discover Ghostex when hooks are missing", () => {
+  test("keeps Setup Flow above Highlighted Features when hooks are missing", () => {
     /*
      * CDXC:FirstLaunchSetup 2026-06-16-00:56:
      * The overflow menu should keep the original first-launch setup flow as a
-     * Setup Flow item directly above Discover Ghostex so onboarding tasks and
+     * Setup Flow item directly above Highlighted Features so onboarding tasks and
      * the replayable feature tour are both discoverable.
      *
-     * CDXC:DiscoverGhostex 2026-06-16-00:26:
-     * The overflow menu's help action is named Discover Ghostex and opens the
+     * CDXC:HighlightedFeatures 2026-06-16-08:17:
+     * The overflow menu's help action is named Highlighted Features and opens the
      * replayable feature tour. It must not become a hook-install notice when
      * agent hooks are missing because setup repair belongs to Settings and
      * first-launch onboarding.
@@ -60,9 +66,9 @@ describe("sidebar overflow menu source", () => {
     );
 
     expect(overflowMenuSource).toContain("Setup Flow");
-    expect(overflowMenuSource).toContain("Discover Ghostex");
+    expect(overflowMenuSource).toContain("Highlighted Features");
     expect(overflowMenuSource.indexOf("Setup Flow")).toBeLessThan(
-      overflowMenuSource.indexOf("Discover Ghostex"),
+      overflowMenuSource.indexOf("Highlighted Features"),
     );
     expect(sidebarAppSource).toContain('modal: "firstLaunchSetup"');
     expect(sidebarAppSource).toContain('modal: "discoverGhostex"');

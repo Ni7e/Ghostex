@@ -50,11 +50,21 @@ describe("native pane tab titlebar hit testing", () => {
      * CDXC:GxserverLogs 2026-06-15-20:39:
      * Pane-tab diagnostics can stay available under Debugging Mode, but the
      * persistent file must rotate so support bundles remain bounded.
+     *
+     * CDXC:PaneTabs 2026-06-16-12:22:
+     * Cursor, mouse-drag, and layout diagnostics should be sampled in the
+     * native-pane-tabs writer so Debugging Mode preserves repro signals without
+     * writing one line per resize or titlebar tick.
      */
     expect(nativePaneReorderReproLogSource).toContain("native-pane-tabs-debug.log");
     expect(nativePaneReorderReproLogSource).toContain("NativePaneReproLogRotation.rotateIfNeeded");
     expect(nativePaneReorderReproLogSource).toContain("25 * 1024 * 1024");
     expect(nativePaneReorderReproLogSource).toContain("maxRotatedLogFiles = 3");
+    expect(nativePaneReorderReproLogSource).toContain("private static let highVolumeSampleInterval: TimeInterval = 5");
+    expect(nativePaneReorderReproLogSource).toContain("shouldWriteSampledLogEvent(");
+    expect(nativePaneReorderReproLogSource).toContain('"nativePaneResize.handle.mouseDragged"');
+    expect(nativePaneReorderReproLogSource).toContain('"nativePaneTabs.geometry.layout"');
+    expect(nativePaneReorderReproLogSource).toContain('"nativeSidebarResize.handle.resetCursorRects"');
   });
 
   test("keeps sidebar and divider as non-overlapping native regions", () => {

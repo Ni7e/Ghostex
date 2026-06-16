@@ -1121,6 +1121,15 @@ export type SidebarToExtensionMessage =
       type: "openWorkspaceWelcome";
     }
   | {
+      /*
+       * CDXC:HighlightedFeatures 2026-06-16-08:17:
+       * The titlebar Tips & Tricks panel can open the replayable highlighted
+       * features modal. Keep the request in the sidebar command contract so
+       * the native sidebar remains the single owner of app modal presentation.
+       */
+      type: "openHighlightedFeatures";
+    }
+  | {
       /**
        * CDXC:NativeWorkspacePicker 2026-05-08-18:45
        * The reference Projects header add button should open the trusted native

@@ -124,6 +124,7 @@ export type NativeGhosttyHostCommand =
       cwd?: string;
       projectId?: string;
       sessionId: string;
+      showBetaFeatures?: boolean;
       threadId?: string;
       title: string;
       type: "createWebPane";
@@ -238,8 +239,14 @@ export type NativeGhosttyHostCommand =
         visitedAt: string;
       }>;
       browserHistoryScopeId?: string;
+      showBetaFeatures?: boolean;
       mode?: "code" | "git" | "tasks";
       companionPaneHidden?: boolean;
+      /**
+       * CDXC:ProjectBrowserTabs 2026-06-16-12:02:
+       * Browser + tabs need a project-scoped non-blank URL separate from the active tab URL. Sidebar resolves this to the project's GitHub remote URL or Google before native creates the tab.
+       */
+      newBrowserTabUrl?: string;
       projectId: string;
       projectTitle?: string;
       showsBrowserToolbar?: boolean;
@@ -321,6 +328,13 @@ export type NativeGhosttyHostCommand =
       attentionSessionIds?: string[];
       backgroundColor?: string;
       debuggingMode?: boolean;
+      /**
+       * CDXC:BetaFeatures 2026-06-16-13:08:
+       * Native AppKit browser chrome is outside the React settings tree. Carry
+       * the persisted beta gate in layout sync so existing browser panes hide or
+       * show beta address-bar buttons immediately when Settings changes.
+       */
+      showBetaFeatures?: boolean;
       focusRequestId?: number;
       focusedSessionId?: string;
       /**

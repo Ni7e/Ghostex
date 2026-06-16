@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createGxserverLogger, normalizeLogEntry } from "../src/logger.js";
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  createGxserverLogger,
+  normalizeLogEntry,
+  pruneGxserverLogLines,
+  scheduleGxserverLogLineRetention,
+} from "../src/logger.js";
 import { getGxserverPaths } from "../src/paths.js";
 
 test("JSONL logger writes one parseable camelCase entry per line", async () => {
@@ -115,6 +121,41 @@ test("JSONL logger rotates oversized gxserver log files before appending", async
   }
 });
 
+test("JSONL retention keeps active split file and deletes older gxserver rotations", async () => {
+  const homeDir = await mkdtemp(path.join(tmpdir(), "gxserver-logs-retention-"));
+  try {
+    const paths = getGxserverPaths(homeDir);
+    await mkdir(paths.logsDir, { recursive: true });
+    await writeFile(paths.logFile, ["old-active", "new-active-1", "new-active-2"].join("\n") + "\n", "utf8");
+    await writeFile(`${paths.logFile}.1`, ["old-rotated", "new-rotated-1", "new-rotated-2"].join("\n") + "\n", "utf8");
+    await writeFile(`${paths.logFile}.2`, ["older-rotated", "older-rotated-2"].join("\n") + "\n", "utf8");
+
+    await pruneGxserverLogLines(paths, 2);
+
+    assert.deepEqual((await readFile(paths.logFile, "utf8")).trim().split("\n"), ["new-active-1", "new-active-2"]);
+    await assertFileMissing(`${paths.logFile}.1`);
+    await assertFileMissing(`${paths.logFile}.2`);
+  } finally {
+    await rm(homeDir, { force: true, recursive: true });
+  }
+});
+
+test("JSONL retention can be scheduled after logger startup", async () => {
+  const homeDir = await mkdtemp(path.join(tmpdir(), "gxserver-logs-retention-scheduled-"));
+  try {
+    const paths = getGxserverPaths(homeDir);
+    await mkdir(paths.logsDir, { recursive: true });
+    await writeFile(paths.logFile, ["old", "new-1", "new-2"].join("\n") + "\n", "utf8");
+
+    scheduleGxserverLogLineRetention(paths, { delayMs: 1, maxLines: 2 });
+    await delay(30);
+
+    assert.deepEqual((await readFile(paths.logFile, "utf8")).trim().split("\n"), ["new-1", "new-2"]);
+  } finally {
+    await rm(homeDir, { force: true, recursive: true });
+  }
+});
+
 test("log normalization keeps optional identity fields absent when unknown", () => {
   assert.deepEqual(normalizeLogEntry({ event: "storageMigrated", level: "info", ts: "now" }), {
     ts: "now",
@@ -122,6 +163,16 @@ test("log normalization keeps optional identity fields absent when unknown", () 
     event: "storageMigrated",
   });
 });
+
+async function assertFileMissing(filePath: string): Promise<void> {
+  try {
+    await readFile(filePath, "utf8");
+  } catch (error) {
+    assert.equal((error as NodeJS.ErrnoException).code, "ENOENT");
+    return;
+  }
+  assert.fail(`expected ${filePath} to be missing`);
+}
 
 test("log normalization redacts project/session names, paths, command text, urls, and secrets", () => {
   const normalized = normalizeLogEntry({

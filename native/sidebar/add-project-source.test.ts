@@ -49,10 +49,11 @@ describe("native sidebar add project source", () => {
       "if (activeSnapshot().sessions.length === 0)",
     );
     const publishIndex = addProjectSource.indexOf("publish();", addProjectSource.indexOf("focusProject(projectId);"));
-    const createTerminalIndex = addProjectSource.indexOf("createTerminal(DEFAULT_TERMINAL_SESSION_TITLE)");
+    const createTerminalIndex = addProjectSource.indexOf("createTerminal(DEFAULT_TERMINAL_SESSION_TITLE,");
 
     expect(afterFocusBeforeEmptyCheck).toContain("publish();");
     expect(publishIndex).toBeGreaterThan(addProjectSource.indexOf("focusProject(projectId);"));
     expect(publishIndex).toBeLessThan(createTerminalIndex);
+    expect(addProjectSource).toContain("revealFocusedSidebarSessionAfterCreate: true");
   });
 });

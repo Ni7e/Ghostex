@@ -541,6 +541,7 @@ const SIDEBAR_STARTUP_REPRO_WINDOW_MS = 15_000;
 const RECENT_PROJECTS_TOOLTIP_SCROLL_SETTLE_MS = 180;
 const SIDEBAR_POINTER_DRAG_REORDER_THRESHOLD_PX = 8;
 const SIDEBAR_GXSERVER_UNAVAILABLE_GROUP_ID = "gxserver-unavailable";
+const SIDEBAR_GXSERVER_UNAVAILABLE_EMPTY_STATE_DELAY_MS = 20_000;
 const SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY = "ghostex-sidebar-ui-collapse-state";
 const GHOSTEX_DISCORD_URL = "https://discord.gg/df7b3G92CS";
 const MIN_SESSION_SEARCH_QUERY_LENGTH = 2;
@@ -684,7 +685,11 @@ function readSidebarProjectJumpEventDetail(event: Event): SidebarProjectJumpEven
     typeof candidate.groupId !== "string" ||
     typeof candidate.projectId !== "string" ||
     typeof candidate.expandCollapsedProject !== "boolean" ||
-    typeof candidate.showLessAfterExpand !== "boolean"
+    typeof candidate.showLessAfterExpand !== "boolean" ||
+    (
+      candidate.revealFocusedSession !== undefined &&
+      typeof candidate.revealFocusedSession !== "boolean"
+    )
   ) {
     return undefined;
   }
@@ -692,6 +697,7 @@ function readSidebarProjectJumpEventDetail(event: Event): SidebarProjectJumpEven
     expandCollapsedProject: candidate.expandCollapsedProject,
     groupId: candidate.groupId,
     projectId: candidate.projectId,
+    revealFocusedSession: candidate.revealFocusedSession === true ? true : undefined,
     showLessAfterExpand: candidate.showLessAfterExpand,
   };
 }
@@ -756,6 +762,9 @@ export function SidebarApp({
   const [ overflowMenuAnchor, setOverflowMenuAnchor ] = useState<HTMLElement>();
   const [ overflowMenuPosition, setOverflowMenuPosition ] = useState<FloatingMenuPosition>();
   const [ isSessionSearchSelectionVisible, setIsSessionSearchSelectionVisible ] = useState(false);
+  const [ focusedSessionRevealRequestId, setFocusedSessionRevealRequestId ] = useState(0);
+  const [ showGxserverUnavailableEmptyState, setShowGxserverUnavailableEmptyState ] =
+    useState(false);
   const [ selectedSessionSearchResult, setSelectedSessionSearchResult ] =
     useState<SidebarSessionSearchSelection>();
   const pendingCreateGroupRef = useRef(false);
@@ -869,6 +878,34 @@ export function SidebarApp({
   const buildStamp = useSidebarStore((state) =>
     state.hud.debuggingMode ? state.hud.buildStamp : undefined,
   );
+  const hasGxserverUnavailablePlaceholder = Boolean(
+    groupsById[ SIDEBAR_GXSERVER_UNAVAILABLE_GROUP_ID ],
+  );
+
+  useEffect(() => {
+    if (!hasGxserverUnavailablePlaceholder) {
+      setShowGxserverUnavailableEmptyState(false);
+      return;
+    }
+
+    /*
+     * CDXC:GxserverPresentation 2026-06-16-09:35:
+     * When gxserver is off or missing during startup, the sidebar must not show
+     * the raw synthetic status project row. Keep the Projects body blank while
+     * startup can still recover, then after 20 seconds show the two-line restart
+     * guidance using the exact reference-sidebar empty-state typography shared
+     * with "No projects."
+     */
+    setShowGxserverUnavailableEmptyState(false);
+    const timeoutId = window.setTimeout(() => {
+      setShowGxserverUnavailableEmptyState(true);
+    }, SIDEBAR_GXSERVER_UNAVAILABLE_EMPTY_STATE_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [ hasGxserverUnavailablePlaceholder ]);
+
   const effectiveSettings = settings ?? DEFAULT_ghostex_SETTINGS;
   const sidebarSessionTagListItems = useMemo(
     () => normalizeSidebarSessionTagListItems(effectiveSettings.sidebarSessionTagListItems),
@@ -2044,6 +2081,7 @@ export function SidebarApp({
     () =>
       displayedWorkspaceGroupIds.filter(
         (groupId) =>
+          groupId !== SIDEBAR_GXSERVER_UNAVAILABLE_GROUP_ID &&
           !groupsById[ groupId ]?.isChatCollection &&
           !groupsById[ groupId ]?.remoteMachineContext,
       ),
@@ -2177,26 +2215,42 @@ export function SidebarApp({
     [ collapsedGroupsById, displayedReferenceProjectGroupIds ],
   );
   const handleSidebarProjectJump = useEffectEvent((detail: SidebarProjectJumpEventDetail) => {
+    const shouldRevealFocusedSession = detail.revealFocusedSession === true;
+    const requestFocusedSessionReveal = () => {
+      if (!shouldRevealFocusedSession) {
+        return;
+      }
+      setFocusedSessionRevealRequestId((requestId) => requestId + 1);
+    };
+
     if (
       !detail.expandCollapsedProject ||
       !displayedReferenceProjectGroupIds.includes(detail.groupId)
     ) {
+      requestFocusedSessionReveal();
       return;
     }
 
     const wasProjectCollapsed = collapsedGroupsById[ detail.groupId ] === true;
     const wasSectionCollapsed = isReferenceProjectsCollapsed;
     if (!wasProjectCollapsed && !wasSectionCollapsed) {
+      requestFocusedSessionReveal();
       return;
     }
 
     /**
      * CDXC:ProjectHotkeys 2026-06-15-11:12:
      * Jump to Project shortcuts are navigation in the visible Projects sidebar area. When configured, a keyboard jump must reveal a collapsed target row immediately through React state, and the optional Show less write is only applied when that project row was actually expanded by the jump.
+     *
+     * CDXC:SidebarSessionReveal 2026-06-16-07:55:
+     * Project/worktree creation can ask this same event to retry focused-row
+     * scrolling after the target project has been expanded, because a new
+     * gxserver row may arrive after the first focus hydrate.
      */
     postSidebarCollapseStateLog("projectJumpAutoExpand", {
       projectGroupCount: displayedReferenceProjectGroupIds.length,
       groupHash: hashSidebarCollapseDebugId(detail.groupId),
+      revealFocusedSession: shouldRevealFocusedSession,
       showLessAfterExpand: detail.showLessAfterExpand,
       wasProjectCollapsed,
       wasSectionCollapsed,
@@ -2214,6 +2268,7 @@ export function SidebarApp({
         });
       }
     }
+    requestFocusedSessionReveal();
   });
   useEffect(() => {
     const handleProjectJumpEvent = (event: Event) => {
@@ -2410,6 +2465,15 @@ export function SidebarApp({
    * same visual role as the existing "No Quick Sessions" group placeholder.
    */
   const shouldHideReferenceSectionsForSearchEmptyState = shouldShowSessionSearchEmptyState;
+  const referenceProjectsEmptyState = showGxserverUnavailableEmptyState ? (
+    <div className="reference-sidebar-empty-state">
+      Unable to load sessions.
+      <br />
+      Restart Ghostex to try again.
+    </div>
+  ) : hasGxserverUnavailablePlaceholder ? null : (
+    <div className="reference-sidebar-empty-state">No projects</div>
+  );
   const {
     hasOverflow: sessionGroupsHaveScrollableOverflow,
     showBottomGlow: showSessionGroupsBottomGlow,
@@ -2580,7 +2644,7 @@ export function SidebarApp({
         window.clearTimeout(afterSettledTimeoutId);
       }
     };
-  }, [ focusedSessionId ]);
+  }, [ focusedSessionId, focusedSessionRevealRequestId ]);
 
   const unlockCompletionSoundPlayback = useEffectEvent(() => {
     void prepareCompletionSoundPlayback((soundEvent, details) => {
@@ -3585,9 +3649,14 @@ export function SidebarApp({
     setIsOverflowMenuOpen(false);
     /**
      * CDXC:DiscoverGhostex 2026-06-16-00:26:
-     * The overflow help entry opens Discover Ghostex, a replayable feature tour
+     * The overflow help entry opens the replayable feature tour
      * that is separate from first-launch setup. Keep hook repair inside Settings
      * and onboarding while this menu item stays focused on discovery.
+     *
+     * CDXC:HighlightedFeatures 2026-06-16-08:17:
+     * The replayable feature-tour entry is user-facing as Highlighted Features.
+     * Keep the existing discoverGhostex modal id so first-run sequencing and
+     * native modal sizing continue to use the same implementation.
      */
     openAppModal({ modal: "discoverGhostex", type: "open" });
   };
@@ -3597,7 +3666,7 @@ export function SidebarApp({
     /**
      * CDXC:FirstLaunchSetup 2026-06-16-00:56:
      * The overflow menu must expose the original first-launch setup flow as its
-     * own Setup Flow item immediately above Discover Ghostex, so users can
+     * own Setup Flow item immediately above Highlighted Features, so users can
      * reopen onboarding tasks without replacing the feature-tour entry.
      */
     openAppModal({ modal: "firstLaunchSetup", type: "open" });
@@ -4025,7 +4094,7 @@ export function SidebarApp({
                           />
                         ))
                       ) : (
-                        <div className="reference-sidebar-empty-state">No projects</div>
+                        referenceProjectsEmptyState
                       )}
                     </div>
                   ) : null}
@@ -5738,10 +5807,15 @@ function getScratchPadMenuLabel(isScratchPadOpen: boolean): string {
 
 function getCommandPaletteOverflowMenuLabel(hotkey: string): string {
   const hotkeyLabel = formatOverflowMenuTextHotkey(hotkey);
-  return hotkeyLabel ? `Commands [${hotkeyLabel.replace("CMD", "⌘").replace("SHIFT", "⇧").replace("CTRL", "⌃").replace("ALT", "⌥")}]` : "Commands";
+  return hotkeyLabel ? `Commands [${hotkeyLabel}]` : "Commands";
 }
 
 function formatOverflowMenuTextHotkey(hotkey: string): string {
+  /*
+   * CDXC:SidebarHotkeys 2026-06-16-08:17:
+   * The overflow-menu command-palette shortcut should read like native compact
+   * shortcut text without literal plus characters, e.g. `⌘⇧P`.
+   */
   const normalizedHotkey = normalizeHotkeyText(hotkey);
   if (!normalizedHotkey) {
     return "";
@@ -5752,7 +5826,7 @@ function formatOverflowMenuTextHotkey(hotkey: string): string {
       chord
         .split("+")
         .map(formatOverflowMenuTextHotkeyPart)
-        .join("+"),
+        .join(""),
     )
     .join(" ");
 }
@@ -5760,13 +5834,13 @@ function formatOverflowMenuTextHotkey(hotkey: string): string {
 function formatOverflowMenuTextHotkeyPart(part: string): string {
   switch (part) {
     case "cmd":
-      return "CMD";
+      return "⌘";
     case "ctrl":
-      return "CTRL";
+      return "⌃";
     case "alt":
-      return "ALT";
+      return "⌥";
     case "shift":
-      return "SHIFT";
+      return "⇧";
     case "up":
       return "UP";
     case "right":
@@ -6001,7 +6075,7 @@ function renderFloatingOverflowMenu({
                   size={14}
                   stroke={1.8}
                 />
-                Discover Ghostex
+                Highlighted Features
               </button>
             </div>
             <div className="session-context-menu-divider" role="separator" />

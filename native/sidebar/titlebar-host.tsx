@@ -2,6 +2,7 @@ import {
   IconAlertTriangle,
   IconArrowsDiagonal2,
   IconArrowsDiagonalMinimize,
+  IconBook2,
   IconBox,
   IconCheck,
   IconChevronDown,
@@ -29,6 +30,7 @@ import {
   IconRocket,
   IconSearch,
   IconSettings,
+  IconStarFilled,
   IconSquareMinus,
   IconStackPush,
   IconTerminal2,
@@ -877,7 +879,13 @@ function TitlebarAppTooltip({
   );
 }
 
-function postTitlebarSidebarCommand(message: { type: "requestAgentHookStatus" } | { type: "requestGhostexCliStatus" }): void {
+function postTitlebarSidebarCommand(
+  message:
+    | { type: "openHighlightedFeatures" }
+    | { type: "openWorkspaceWelcome" }
+    | { type: "requestAgentHookStatus" }
+    | { type: "requestGhostexCliStatus" },
+): void {
   /*
   CDXC:AgentHooks 2026-06-07-11:05:
   Opening Tips & Tricks should refresh gxserver hook status instead of relying
@@ -888,6 +896,11 @@ function postTitlebarSidebarCommand(message: { type: "requestAgentHookStatus" } 
   CDXC:CliInstall 2026-06-07-15:26:
   Tips & Tricks CLI notices must use the native sidebar's real PATH inspection
   instead of probing from the isolated titlebar webview.
+
+  CDXC:TipsAndTricks 2026-06-16-08:17:
+  Tips & Tricks header actions should launch Highlighted Features and the setup
+  flow through the sidebar command bridge because the native sidebar owns app
+  modal presentation.
   */
   window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
     message,
@@ -1836,26 +1849,27 @@ function App() {
       return next;
     });
   }, []);
-  const markAllTipsRead = useCallback(() => {
-    setReadTipIds((current) => {
-      const next = new Set(current);
-      let changed = false;
-      for (const tip of TITLEBAR_TIPS) {
-        if (!next.has(tip.id)) {
-          next.add(tip.id);
-          changed = true;
-        }
-      }
-      if (!changed) {
-        return current;
-      }
-      writeStoredTitlebarTipIds(next);
-      return next;
-    });
-  }, []);
   const requestRuntimeStatusForTips = useCallback(() => {
     postTitlebarSidebarCommand({ type: "requestAgentHookStatus" });
     postTitlebarSidebarCommand({ type: "requestGhostexCliStatus" });
+  }, []);
+  const openHighlightedFeaturesFromTips = useCallback(() => {
+    /*
+     * CDXC:TipsAndTricks 2026-06-16-08:17:
+     * The Tips & Tricks header should send users to the replayable highlighted
+     * features modal instead of exposing a bulk "Read all" action.
+     */
+    postTitlebarSidebarCommand({ type: "openHighlightedFeatures" });
+  }, []);
+  const viewGhostexGuideFromTips = useCallback(() => {
+    /*
+     * CDXC:TipsAndTricks 2026-06-16-10:04:
+     * The Tips & Tricks header should send users to Highlighted Features with a
+     * filled star action and to the setup guide through a View Ghostex Guide
+     * action. Keep the sidebar-owned workspace welcome bridge as the guide entry
+     * point because that surface owns setup and onboarding repair.
+     */
+    postTitlebarSidebarCommand({ type: "openWorkspaceWelcome" });
   }, []);
   const closeTitlebarDropdownPanel = useCallback(() => {
     postNative({ type: "closeTitlebarDropdownPanel" });
@@ -2940,8 +2954,11 @@ function App() {
    * CDXC:ProjectBrowserTabs 2026-06-13-00:12:
    * The top project browser mode is now user-facing Browser mode. Keep it
    * disabled only for Quick/projectless contexts; real projects without a
-   * GitHub remote still open Browser mode with the Ghostex repository as the
-   * first tab so the control is always useful.
+   * GitHub remote still open Browser mode with Google as the first tab so the
+   * control is always useful without showing an app-created about:blank page.
+   *
+   * CDXC:ProjectBrowserTabs 2026-06-16-12:02:
+   * Browser + tabs follow the same destination rule: project GitHub remote when available, otherwise Google.
    */
   const browserModeDisabledReason = projectState.projectIsQuick
     ? "Quick sessions do not have a project Browser view."
@@ -3172,14 +3189,15 @@ function App() {
           onGxserverRestart={restartGxserverDaemon}
           onGxserverStart={startGxserverDaemon}
           onGxserverStop={stopGxserverDaemon}
-          onMarkAllTipsRead={markAllTipsRead}
           onMarkTipRead={markTipRead}
+          onOpenHighlightedFeatures={openHighlightedFeaturesFromTips}
           onOpenNoticeSettings={openNoticeSettings}
           onOpenPowerSettings={openPowerSettings}
           onOpenTarget={openTarget}
           onQuitResources={quitResourceBundles}
           onRunAction={runSidebarAction}
           onRunGitAction={runGitAction}
+          onViewGhostexGuide={viewGhostexGuideFromTips}
           onSetResourceItemsCollapsed={setResourceItemsCollapsed}
           onSleepInactiveSessions={sleepInactiveTerminalSessions}
           onStartKeepAwake={startKeepAwake}
@@ -3637,8 +3655,8 @@ function TitlebarDropdownPanelSurface({
   onGxserverRestart,
   onGxserverStart,
   onGxserverStop,
-  onMarkAllTipsRead,
   onMarkTipRead,
+  onOpenHighlightedFeatures,
   onOpenNoticeSettings,
   onOpenPowerSettings,
   onOpenTarget,
@@ -3649,6 +3667,7 @@ function TitlebarDropdownPanelSurface({
   onSleepInactiveSessions,
   onStartKeepAwake,
   onStopKeepAwake,
+  onViewGhostexGuide,
   onToggleResourceCollapse,
   orphanBundles,
   resourceProcessSnapshotReady,
@@ -3681,21 +3700,22 @@ function TitlebarDropdownPanelSurface({
   onGxserverRestart: () => void;
   onGxserverStart: () => void;
   onGxserverStop: () => void;
-  onMarkAllTipsRead: () => void;
   onMarkTipRead: (tipId: string) => void;
+  onOpenHighlightedFeatures: () => void;
   onOpenNoticeSettings: (target: TitlebarNotice["settingsTarget"]) => void;
   onOpenPowerSettings: () => void;
   onOpenTarget: (target: ResolvedOpenTarget | undefined) => void;
   onQuitResources: (bundles: ResourceProcessBundle[]) => void;
   onRunAction: (command: SidebarCommandButton | undefined) => void;
   onRunGitAction: (action: SidebarGitAction) => void;
-    onSetResourceItemsCollapsed: (
-      targets: readonly ResourceItemCollapseTarget[],
-      collapsed: boolean,
-    ) => void;
+  onSetResourceItemsCollapsed: (
+    targets: readonly ResourceItemCollapseTarget[],
+    collapsed: boolean,
+  ) => void;
   onSleepInactiveSessions: () => void;
   onStartKeepAwake: (durationMinutes?: KeepAwakeDurationMinutes) => Promise<void>;
   onStopKeepAwake: () => Promise<void>;
+  onViewGhostexGuide: () => void;
   onToggleResourceCollapse: (key: string) => void;
   orphanBundles: ResourceProcessBundle[];
   resourceProcessSnapshotReady: boolean;
@@ -3753,9 +3773,10 @@ function TitlebarDropdownPanelSurface({
         <div className="titlebar-open-menu titlebar-tips-menu rounded-none border-border/80 p-0 text-[13px] text-foreground shadow-2xl">
           <TitlebarTipsMenu
             notices={notices}
-            onMarkAllRead={onMarkAllTipsRead}
             onMarkRead={onMarkTipRead}
+            onOpenHighlightedFeatures={() => closeAfter(onOpenHighlightedFeatures)}
             onOpenNoticeSettings={(target) => closeAfter(() => onOpenNoticeSettings(target))}
+            onViewGhostexGuide={() => closeAfter(onViewGhostexGuide)}
             readTips={readTips}
             unreadTips={unreadTips}
           />
@@ -3836,40 +3857,51 @@ function TitlebarDropdownPanelSurface({
           {/*
             CDXC:TitlebarGit 2026-06-15-23:25:
             The titlebar Git dropdown should expose branch context, colored
-            working-tree line stats, and a sync-with-main action before Commit.
-            Keep branch and stats rows non-clickable so the first real command is
-            the explicit sync row, followed by the existing Git action list.
+            working-tree line stats, remote tracking counts, and a sync action
+            before Commit. Keep branch and working-tree stats rows non-clickable
+            so the first real command is the explicit remote-sync row, followed
+            by the existing Git action list.
 
             CDXC:TitlebarGit 2026-06-15-23:25:
-            The sync row must call the same titlebar Git action bridge as Commit,
-            Push, and PR. The sidebar-owned Git pipeline refreshes status before
-            running the operation and republishes the updated state to both the
-            dropdown child window and the sidebar project chrome.
+            Titlebar Git rows must call the same titlebar Git action bridge as
+            Commit, Push, and PR. The sidebar-owned Git pipeline refreshes
+            status before running the operation and republishes the updated
+            state to both the dropdown child window and the sidebar project
+            chrome.
+
+            CDXC:TitlebarGit 2026-06-16-07:31:
+            The always-visible sync row is now remote push/pull sync. Worktree
+            Sync with Main remains a separate workflow action in the command list
+            so normal branches can sync with origin without entering the
+            worktree-only agent flow.
           */}
           <div className="titlebar-open-menu-item titlebar-git-meta-row" role="presentation">
             <IconGitCommit aria-hidden="true" className="titlebar-git-icon" size={15} stroke={1.8} />
-            <span className="titlebar-git-branch-name">{titlebarGitBranchLabel(git.branch)}</span>
+            <span className="titlebar-git-branch-field">
+              <span className="titlebar-git-meta-label">Branch:</span>
+              <span className="titlebar-git-branch-name">{titlebarGitBranchLabel(git.branch)}</span>
+            </span>
           </div>
           <div className="titlebar-open-menu-item titlebar-git-meta-row" role="presentation">
             <IconGitCompare aria-hidden="true" className="titlebar-git-icon" size={15} stroke={1.8} />
-            <span className="titlebar-git-stat-pair">
-              <span className="titlebar-git-stat titlebar-git-stat-additions">
-                +{formatTitlebarGitStatCount(git.additions)}
-              </span>
-              <span className="titlebar-git-stat titlebar-git-stat-deletions">
-                -{formatTitlebarGitStatCount(git.deletions)}
-              </span>
-            </span>
+            <TitlebarGitStatPair firstCount={git.additions} label="Lines" secondCount={git.deletions} />
           </div>
           <TitlebarPanelMenuItem
-            disabled={titlebarGitSyncMainDisabledReason(git) !== undefined}
-            onClick={() => closeAfter(() => onRunGitAction("syncMain"))}
+            disabled={titlebarGitRemoteSyncDisabledReason(git) !== undefined}
+            onClick={() => closeAfter(() => onRunGitAction("syncRemote"))}
           >
-            {getTitlebarGitActionIcon("syncMain")}
-            <span>{titlebarGitSyncMainLabel(git)}</span>
+            {getTitlebarGitActionIcon("syncRemote")}
+            <TitlebarGitStatPair
+              firstCount={git.behindCount}
+              firstPrefix="↓"
+              label="Commits"
+              secondCount={git.aheadCount}
+              secondPrefix="↑"
+              tone="commits"
+            />
           </TitlebarPanelMenuItem>
           <TitlebarPanelMenuSeparator />
-          {gitItems.filter((item) => item.action !== "syncMain").map((item) => (
+          {gitItems.map((item) => (
             <TitlebarPanelMenuItem
               disabled={item.disabled}
               key={item.action}
@@ -4360,20 +4392,21 @@ async function readKeepAwakePowerSnapshot(options: {
 
 function TitlebarTipsMenu({
   notices,
-  onMarkAllRead,
   onMarkRead,
+  onOpenHighlightedFeatures,
   onOpenNoticeSettings,
+  onViewGhostexGuide,
   readTips,
   unreadTips,
 }: {
   notices: TitlebarNotice[];
-  onMarkAllRead: () => void;
   onMarkRead: (tipId: string) => void;
+  onOpenHighlightedFeatures: () => void;
   onOpenNoticeSettings: (target: TitlebarNotice["settingsTarget"]) => void;
+  onViewGhostexGuide: () => void;
   readTips: TitlebarTip[];
   unreadTips: TitlebarTip[];
 }) {
-  const unreadTotal = notices.length + unreadTips.length;
   return (
     <div className="titlebar-tips-panel" onClick={(event) => event.stopPropagation()}>
       <div className="titlebar-tips-header">
@@ -4383,16 +4416,23 @@ function TitlebarTipsMenu({
         </div>
         <div className="titlebar-tips-actions">
           <button
-            aria-label="Mark all tips as read"
+            aria-label="Open Highlighted Features"
             className="titlebar-tips-action-button"
-            disabled={unreadTips.length === 0}
-            onClick={onMarkAllRead}
+            onClick={onOpenHighlightedFeatures}
             type="button"
           >
-            <IconCheck aria-hidden="true" size={14} stroke={1.9} />
-            <span>Read all</span>
+            <IconStarFilled aria-hidden="true" size={14} />
+            <span>Highlighted Features</span>
           </button>
-          <span className="titlebar-tips-summary">{unreadTotal} unread</span>
+          <button
+            aria-label="View Ghostex Guide"
+            className="titlebar-tips-action-button"
+            onClick={onViewGhostexGuide}
+            type="button"
+          >
+            <IconBook2 aria-hidden="true" size={14} stroke={1.9} />
+            <span>View Ghostex Guide</span>
+          </button>
         </div>
       </div>
       <div className="titlebar-tips-scroll">
@@ -5230,14 +5270,16 @@ function TitlebarResourceBundle({
               <span className="titlebar-resource-child-name">
                 {getResourceChildProcessName(bundle, process)} pid {process.pid}
               </span>
-              <span className="titlebar-resource-metric">
-                <IconCpu aria-hidden="true" size={12} stroke={1.8} />
-                {formatWholePercent(process.cpu)}
-              </span>
-              <span className="titlebar-resource-metric">
-                <IconDeviceDesktop aria-hidden="true" size={12} stroke={1.8} />
-                {formatWholeMemory(process.rssMb)}
-              </span>
+              <div className="titlebar-resource-child-metrics" aria-label="Child process resource usage">
+                <span className="titlebar-resource-metric">
+                  <IconCpu aria-hidden="true" size={12} stroke={1.8} />
+                  {formatWholePercent(process.cpu)}
+                </span>
+                <span className="titlebar-resource-metric">
+                  <IconDeviceDesktop aria-hidden="true" size={12} stroke={1.8} />
+                  {formatWholeMemory(process.rssMb)}
+                </span>
+              </div>
             </div>
           ))}
         </div>
@@ -5654,7 +5696,7 @@ function getOpenTargetIcon(target: ResolvedOpenTarget): ReactNode {
 }
 
 function getTitlebarGitActionIcon(action: SidebarGitAction): ReactNode {
-  if (action === "syncMain") {
+  if (action === "syncMain" || action === "syncRemote") {
     return (
       <IconGitCompare aria-hidden="true" className="titlebar-git-icon" size={15} stroke={1.8} />
     );
@@ -5692,12 +5734,47 @@ function titlebarGitBranchLabel(branch: string | null): string {
   return branch?.trim() || "(detached HEAD)";
 }
 
-function titlebarGitSyncMainLabel(state: SidebarGitState): string {
-  return `+${formatTitlebarGitStatCount(state.behindCount)} / +${formatTitlebarGitStatCount(state.aheadCount)}`;
+function TitlebarGitStatPair({
+  firstCount,
+  firstPrefix = "+",
+  label,
+  secondCount,
+  secondPrefix = "-",
+  tone = "changes",
+}: {
+  firstCount: number;
+  firstPrefix?: string;
+  label: string;
+  secondCount: number;
+  secondPrefix?: string;
+  tone?: "changes" | "commits";
+}) {
+  const firstStatClassName =
+    tone === "changes"
+      ? "titlebar-git-stat titlebar-git-stat-additions"
+      : "titlebar-git-stat";
+  const secondStatClassName =
+    tone === "changes"
+      ? "titlebar-git-stat titlebar-git-stat-deletions"
+      : "titlebar-git-stat";
+
+  return (
+    <span className="titlebar-git-stat-pair" data-tone={tone}>
+      <span className="titlebar-git-meta-label">{label}:</span>
+      <span className={firstStatClassName}>
+        {firstPrefix}
+        {formatTitlebarGitStatCount(firstCount)}
+      </span>
+      <span className={secondStatClassName}>
+        {secondPrefix}
+        {formatTitlebarGitStatCount(secondCount)}
+      </span>
+    </span>
+  );
 }
 
-function titlebarGitSyncMainDisabledReason(state: SidebarGitState): string | undefined {
-  return getSidebarGitDisabledReason(state, "syncMain");
+function titlebarGitRemoteSyncDisabledReason(state: SidebarGitState): string | undefined {
+  return getSidebarGitDisabledReason(state, "syncRemote");
 }
 
 function readLastOpenTargetId(): string {
@@ -5742,10 +5819,15 @@ function getSidebarActionLabel(command: SidebarCommandButton): string {
 
 function getSidebarActionIcon(command: SidebarCommandButton | undefined): ReactNode {
   if (command?.icon) {
+    /*
+     * CDXC:TitlebarActions 2026-06-16-07:48:
+     * User-configured action icons must inherit titlebar chrome color instead
+     * of using per-action colors. The titlebar action menu should read as one
+     * native control group with glyphs matching the adjacent menu icons.
+     */
     return (
       <SidebarCommandIconGlyph
         className="quick-action-icon"
-        color={command.iconColor}
         icon={command.icon}
         size={16}
         stroke={1.8}
@@ -6584,14 +6666,30 @@ styleElement.textContent = `
    * Disabled sync rows should not switch to a separate gray family; keep the
    * same text color system and use icon/row opacity only for availability.
    *
-   * CDXC:TitlebarGit 2026-06-16-00:08:
-   * Do not label the compact branch, change-stat, or sync rows with extra words.
-   * Use one left-aligned content column so long values never wrap into a second
-   * grid line under a right-aligned value column.
-   *
    * CDXC:TitlebarGit 2026-06-16-00:18:
    * Keep Git dropdown row text light. The compact metadata and action rows are
    * dense enough that medium-weight text reads too heavy in the dark menu.
+   *
+   * CDXC:TitlebarGit 2026-06-16-07:31:
+   * Long changed-line counts such as +9999 and -9999 must start from the left
+   * of their stat cells in the macOS titlebar Git menu. Keep fixed stat cells
+   * for stable spacing, but do not right-align the digits inside them.
+   *
+   * CDXC:TitlebarGit 2026-06-16-07:31:
+   * Working-tree stats and the remote-sync row should use the same compact
+   * two-cell layout without a slash divider. Keep the cells wide enough for the
+   * capped four-digit counts while reducing the visual gap between short values.
+   *
+   * CDXC:TitlebarGit 2026-06-16-09:49:
+   * The changed-line stat row ends with Lines, and the remote-sync row uses
+   * neutral down/up commit arrows ending with Commits. Keep the two number cells
+   * and suffix label in one flex gap system so the suffix does not change the
+   * spacing between the numbers.
+   *
+   * CDXC:TitlebarGit 2026-06-16-13:31:
+   * Git metadata rows in the titlebar dropdown should read label-first:
+   * Branch:, Lines:, and Commits:. Labels use inherited row typography so
+   * branch, stat, and action rows match the rest of the menu.
    */
   .titlebar-git-menu .titlebar-open-menu-item {
     --titlebar-git-value-color: rgba(255,255,255,0.86);
@@ -6635,10 +6733,23 @@ styleElement.textContent = `
   .titlebar-git-meta-row {
     pointer-events: none;
   }
+  .titlebar-git-branch-field {
+    align-items: center;
+    display: inline-flex;
+    gap: 6px;
+    grid-column: 2;
+    min-width: 0;
+  }
+  .titlebar-git-meta-label {
+    color: var(--titlebar-git-value-color);
+    font: inherit;
+    min-width: 0;
+    white-space: nowrap;
+  }
   .titlebar-git-branch-name {
     color: var(--titlebar-git-value-color);
     font: inherit;
-    grid-column: 2;
+    min-width: 0;
     overflow: hidden;
     text-align: left;
     text-overflow: ellipsis;
@@ -6647,14 +6758,17 @@ styleElement.textContent = `
   .titlebar-git-stat-pair {
     align-items: center;
     display: inline-flex;
-    gap: 10px;
+    gap: 6px;
     grid-column: 2;
     justify-self: start;
   }
   .titlebar-git-stat {
     font: inherit;
-    min-width: 42px;
-    text-align: right;
+    min-width: 38px;
+    text-align: left;
+  }
+  .titlebar-git-stat-pair[data-tone="commits"] .titlebar-git-stat {
+    color: var(--titlebar-git-value-color);
   }
   .titlebar-git-stat-additions {
     color: rgb(74, 222, 128);
@@ -6754,7 +6868,6 @@ styleElement.textContent = `
   }
   .titlebar-tips-title,
   .titlebar-tips-actions,
-  .titlebar-tips-summary,
   .titlebar-tips-section-heading,
   .titlebar-tip-read-button,
   .titlebar-tip-read-state {
@@ -6768,8 +6881,17 @@ styleElement.textContent = `
     min-width: 0;
   }
   .titlebar-tips-actions {
+    /*
+     * CDXC:TipsAndTricks 2026-06-16-10:04:
+     * Tips & Tricks header actions should use matching button widths, point to
+     * Highlighted Features and View Ghostex Guide, and omit the previous unread
+     * text summary from the top-right action row.
+     */
+    display: grid;
     gap: 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     margin-left: auto;
+    width: 320px;
   }
   .titlebar-tips-action-button {
     align-items: center;
@@ -6784,6 +6906,16 @@ styleElement.textContent = `
     justify-content: center;
     padding: 0 8px;
     white-space: nowrap;
+    width: 100%;
+  }
+  .titlebar-tips-panel button:not(:disabled),
+  .titlebar-tips-panel [role="button"]:not([aria-disabled="true"]) {
+    /*
+     * CDXC:TipsAndTricks 2026-06-16-10:04:
+     * Every actionable control inside the Tips & Tricks panel should expose the
+     * pointer cursor so clickable rows and buttons advertise their interaction.
+     */
+    cursor: pointer;
   }
   .titlebar-tips-action-button:not(:disabled):hover {
     background: rgba(255,255,255,0.14);
@@ -6792,11 +6924,6 @@ styleElement.textContent = `
   .titlebar-tips-action-button:disabled {
     color: rgba(255,255,255,0.3);
     cursor: default;
-  }
-  .titlebar-tips-summary {
-    color: rgba(255,255,255,0.62);
-    font: 650 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-    white-space: nowrap;
   }
   .titlebar-tips-scroll {
     display: grid;
@@ -6943,6 +7070,23 @@ styleElement.textContent = `
     grid-template-rows: auto minmax(0, 1fr);
     max-height: min(760px, calc(100vh - 46px));
     overflow: hidden;
+  }
+  .titlebar-resources-panel button:not(:disabled) {
+    /*
+     * CDXC:TitlebarResources 2026-06-16-10:36:
+     * Resources should show the pointer cursor only over real button controls.
+     * CPU/RAM metric chips are read-only status, so they override expandable row
+     * pointer inheritance back to the default cursor below.
+     *
+     * CDXC:TitlebarResources 2026-06-16-12:34:
+     * The Resources modal should not show a hand cursor over expandable row
+     * chrome in the macOS titlebar. Keep expansion clickable through the row
+     * handler, but reserve pointer cursor feedback for explicit buttons only.
+     */
+    cursor: pointer;
+  }
+  .titlebar-resources-panel button:disabled {
+    cursor: default;
   }
   .titlebar-resources-header {
     align-items: center;
@@ -7155,8 +7299,17 @@ styleElement.textContent = `
     gap: 5px;
   }
   .titlebar-resources-scroll {
+    /*
+     * CDXC:TitlebarResources 2026-06-16-09:49:
+     * Resources sections must stay stacked at the top of the fixed-height child
+     * panel when few rows are visible. Keep implicit grid rows content-sized
+     * and align the grid content to the start so spare height remains after the
+     * final section instead of expanding gaps between sections.
+     */
+    align-content: start;
     display: grid;
     gap: 0;
+    grid-auto-rows: max-content;
     max-height: min(700px, calc(100vh - 104px));
     overflow: auto;
     padding: 8px 10px 10px;
@@ -7406,23 +7559,32 @@ styleElement.textContent = `
      * CPU and RAM must always occupy the far-right row area. Focus and
      * Sleep/Close sit immediately to the left of the metrics so usage values
      * stay aligned at the panel edge across all resource rows.
+     *
+     * CDXC:TitlebarResources 2026-06-16-07:37:
+     * Resource row action buttons must stay on the same line as the CPU/RAM
+     * cards. Explicitly pin every row item to grid row 1 so reordered or
+     * conditionally missing controls cannot create a second implicit row.
+     *
+     * CDXC:TitlebarResources 2026-06-16-07:37:
+     * CPU and RAM cards should keep the smaller collapsed-row dimensions at
+     * every hierarchy level. Use one fixed metrics cluster for parent rows and
+     * expanded child-process rows instead of allowing parent rows to stretch.
      */
     align-items: center;
     display: grid;
     gap: 8px;
-    grid-template-columns: minmax(0, 1fr) 24px 24px minmax(184px, 220px);
+    grid-template-columns: minmax(0, 1fr) 24px 24px 200px;
     min-height: 44px;
     overflow: hidden;
     padding: 7px 8px;
     position: relative;
   }
-  .titlebar-resource-row[data-expandable="true"] {
-    cursor: pointer;
-  }
   .titlebar-resource-main {
     align-items: center;
     display: grid;
     gap: 8px;
+    grid-column: 1;
+    grid-row: 1;
     grid-template-columns: 20px 28px minmax(0, 1fr);
     min-width: 0;
   }
@@ -7492,16 +7654,24 @@ styleElement.textContent = `
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .titlebar-resource-metrics {
+  .titlebar-resource-metrics,
+  .titlebar-resource-child-metrics {
     align-items: center;
+    cursor: default;
     display: grid;
     gap: 8px;
-    grid-column: 4;
-    grid-template-columns: minmax(68px, 0.85fr) minmax(100px, 1fr);
+    grid-template-columns: 86px 106px;
     justify-self: end;
-    max-width: 220px;
-    min-width: 184px;
-    width: 100%;
+    max-width: 200px;
+    min-width: 200px;
+    width: 200px;
+  }
+  .titlebar-resource-metrics {
+    grid-column: 4;
+    grid-row: 1;
+  }
+  .titlebar-resource-child-metrics {
+    grid-column: 2;
   }
   .titlebar-resource-metric {
     align-items: center;
@@ -7509,6 +7679,7 @@ styleElement.textContent = `
     border: 1px solid rgba(255,255,255,0.105);
     box-sizing: border-box;
     color: rgba(255,255,255,0.88);
+    cursor: default;
     display: inline-flex;
     font: 400 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     font-variant-numeric: tabular-nums;
@@ -7546,6 +7717,8 @@ styleElement.textContent = `
      */
     border-color: rgba(255,255,255,0.16);
     grid-column: 2;
+    grid-row: 1;
+    justify-self: center;
   }
   .titlebar-resource-focus-button:hover,
   .titlebar-resource-focus-button:focus-visible {
@@ -7564,6 +7737,8 @@ styleElement.textContent = `
     border-color: rgba(255,255,255,0.16);
     color: rgba(255,255,255,0.9);
     grid-column: 3;
+    grid-row: 1;
+    justify-self: center;
   }
   .titlebar-resource-kill-button[data-action="sleep"] {
     background: rgba(255,255,255,0.14);
@@ -7585,8 +7760,8 @@ styleElement.textContent = `
   .titlebar-resource-child-row {
     align-items: center;
     display: grid;
-    gap: 10px;
-    grid-template-columns: minmax(220px, 1fr) 86px 106px;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) 200px;
     min-height: 24px;
   }
   .titlebar-resources-empty {

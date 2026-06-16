@@ -2214,6 +2214,7 @@ final class TerminalWorkspaceView: NSView {
     var chromiumView: GhostexCEFBrowserView?
     var hostView: WebPaneHostView
     let mode: String
+    var newBrowserTabUrl: String
     let projectId: String
     let projectTitle: String
     let showsProjectTabs: Bool
@@ -2474,6 +2475,11 @@ final class TerminalWorkspaceView: NSView {
   private static let cefNativeDragHoverMinimumDistance: CGFloat = 3
   private static let sourceCEFDragDiagnosticConsolePrefix = "__GHOSTEX_SOURCE_CEF_DND_DIAGNOSTIC__"
   private static let browserPaneApplicationNameForUserAgent = "Version/18.4 Safari/605.1.15"
+  /*
+   CDXC:ProjectBrowserTabs 2026-06-16-12:02:
+   Browser new tabs created by Ghostex should never intentionally target about:blank. If sidebar does not provide a valid project GitHub remote URL, native uses Google as the last-resort destination before allocating CEF.
+   */
+  private static let projectBrowserDefaultNewTabURL = "https://www.google.com/"
   private static let floatingEditorMargin: CGFloat = 24
   private static let floatingEditorMinimumHeight: CGFloat = 260
   private static let floatingEditorMinimumWidth: CGFloat = 420
@@ -2529,6 +2535,7 @@ final class TerminalWorkspaceView: NSView {
   private var sessionTitles = [String: String]()
   private var zmxInactiveSessionIds = Set<String>()
   private var showSessionIdInTerminalPanes = false
+  private var showBetaFeatures = false
   private var activeProjectEditorId: String?
   private var focusedSessionId: String?
   private var lastEmittedFocusedSessionId: String?
@@ -4119,6 +4126,23 @@ final class TerminalWorkspaceView: NSView {
     return browserHistoryItemsByScopeId[scopeId] ?? []
   }
 
+  private func applyShowBetaFeaturesToBrowserToolbars() {
+    /*
+     CDXC:BetaFeatures 2026-06-16-13:08:
+     Show Beta features controls AppKit-owned browser address-bar buttons, not
+     only React Settings tabs. Apply the setting to every open standalone Browser
+     pane and project Browser tab whenever layout sync reports a changed gate.
+     */
+    for session in webPaneSessions.values {
+      session.hostView.setShowBetaFeatures(showBetaFeatures)
+    }
+    for session in projectEditorPaneSessions.values {
+      for hostView in projectEditorHostViews(session) {
+        hostView.setShowBetaFeatures(showBetaFeatures)
+      }
+    }
+  }
+
   private func normalizedBrowserHistoryItems(_ items: [NativeBrowserHistoryItem]) -> [NativeBrowserHistoryItem] {
     var byURL: [String: NativeBrowserHistoryItem] = [:]
     for item in items {
@@ -4161,6 +4185,7 @@ final class TerminalWorkspaceView: NSView {
         "url": command.url,
       ])
       existingSession.hostView.setBrowserFeedbackTool(browserFeedbackTool)
+      existingSession.hostView.setShowBetaFeatures(command.showBetaFeatures == true)
       if existingSession.isManagedT3Pane, isManagedT3Pane {
         webPaneSessions[command.sessionId] = WebPaneSession(
           browserTitleObservation: existingSession.browserTitleObservation,
@@ -4300,6 +4325,7 @@ final class TerminalWorkspaceView: NSView {
       showsBrowserToolbar: !isManagedT3Pane,
       initialAddress: command.url,
       browserFeedbackTool: browserFeedbackTool,
+      showBetaFeatures: command.showBetaFeatures == true,
       onFocus: { [weak self] in
         self?.focusWebPane(sessionId: command.sessionId, reason: "browserToolbar")
       },
@@ -4318,6 +4344,14 @@ final class TerminalWorkspaceView: NSView {
       },
       onShowImportSettings: { [weak self] in
         self?.showBrowserImportSettings(sessionId: command.sessionId)
+      },
+      onHistoryNavigation: { [weak self] url in
+        /*
+         CDXC:BrowserHistory 2026-06-16-13:30:
+         Selecting a History row in an Agents/workspace Browser pane should open a sibling browser tab instead of replacing the current page. Reuse the same sidebar-owned new-tab event as CEF popup intents so native does not duplicate workspace tab placement state.
+         */
+        self?.sendEvent(.browserOpenInNewTabRequested(sourceSessionId: command.sessionId, url: url.absoluteString))
+        return true
       }
     )
     hostView.setBrowserHistoryItems(browserHistoryItems(scopeId: command.browserHistoryScopeId))
@@ -4757,17 +4791,20 @@ final class TerminalWorkspaceView: NSView {
     rememberBrowserHistorySnapshot(scopeId: command.browserHistoryScopeId, items: command.browserHistory)
     let browserFeedbackTool = Self.normalizedBrowserFeedbackTool(command.browserFeedbackTool)
     let requestedMode = command.mode ?? projectEditorModeFromNativeEditorId(command.projectId) ?? "code"
+    let newBrowserTabUrl = projectEditorBrowserNewTabURL(command.newBrowserTabUrl, fallback: command.url)
     if let existingSession = projectEditorPaneSessions[command.projectId] {
       var nextSession = existingSession
-      for tab in nextSession.tabs {
-        tab.hostView.setBrowserFeedbackTool(browserFeedbackTool)
+      nextSession.newBrowserTabUrl = newBrowserTabUrl
+      for hostView in projectEditorHostViews(nextSession) {
+        hostView.setBrowserFeedbackTool(browserFeedbackTool)
+        hostView.setShowBetaFeatures(command.showBetaFeatures == true)
       }
       if existingSession.mode == "git", requestedMode == "git" {
         /**
          CDXC:ProjectBrowserTabs 2026-06-13-00:12:
          Re-clicking Browser mode should surface the existing project Browser
          tab group exactly as the user left it. Do not rewrite the active tab to
-         the seed GitHub/Ghostex URL while the native Browser pane is already
+         the seed GitHub/default URL while the native Browser pane is already
          alive.
          */
         nextSession.title = command.title
@@ -4838,7 +4875,7 @@ final class TerminalWorkspaceView: NSView {
         guard action == .newTerminal else { return }
         self?.addProjectEditorGitTab(
           projectId: command.projectId,
-          url: command.url,
+          url: newBrowserTabUrl,
           title: "Browser",
           reason: "projectEditorGitTabAddButton")
       }
@@ -4871,6 +4908,7 @@ final class TerminalWorkspaceView: NSView {
           url: command.url,
           browserHistoryItems: browserHistoryItems(scopeId: command.browserHistoryScopeId),
           browserFeedbackTool: browserFeedbackTool,
+          showBetaFeatures: command.showBetaFeatures == true,
           showsBrowserToolbar: command.showsBrowserToolbar ?? false,
           showsInitialLoadingOverlay: true,
           reason: "createProjectEditorPaneNew")
@@ -4885,6 +4923,7 @@ final class TerminalWorkspaceView: NSView {
           url: tab.url,
           browserHistoryItems: browserHistoryItems(scopeId: command.browserHistoryScopeId),
           browserFeedbackTool: browserFeedbackTool,
+          showBetaFeatures: command.showBetaFeatures == true,
           showsBrowserToolbar: command.showsBrowserToolbar ?? false,
           showsInitialLoadingOverlay: true,
           reason: "createProjectEditorPaneRestoredTab")
@@ -4898,6 +4937,7 @@ final class TerminalWorkspaceView: NSView {
       chromiumView: initialActiveTab.chromiumView,
       hostView: initialActiveTab.hostView,
       mode: requestedMode,
+      newBrowserTabUrl: newBrowserTabUrl,
       projectId: command.projectId,
       projectTitle: command.projectTitle ?? command.title,
       showsProjectTabs: command.showsProjectTabs ?? false,
@@ -4943,6 +4983,7 @@ final class TerminalWorkspaceView: NSView {
     url: String,
     browserHistoryItems: [NativeBrowserHistoryItem] = [],
     browserFeedbackTool: String,
+    showBetaFeatures: Bool,
     showsBrowserToolbar: Bool,
     showsInitialLoadingOverlay: Bool,
     reason: String,
@@ -4963,6 +5004,9 @@ final class TerminalWorkspaceView: NSView {
      layout, focus, and toolbar commands.
      */
     let useWebKitProjectView = !isPlaceholder && projectEditorModeFromNativeEditorId(projectId) == "tasks"
+    let tabUrl = isPlaceholder
+      ? url
+      : (normalizedProjectEditorBrowserURL(url) ?? Self.projectBrowserDefaultNewTabURL)
     let chromiumView: GhostexCEFBrowserView?
     let webView: WKWebView?
     let browserView: NSView
@@ -5027,7 +5071,7 @@ final class TerminalWorkspaceView: NSView {
     } else {
       let projectChromiumView = GhostexCEFBrowserView(
         frame: .zero,
-        initialURL: "about:blank",
+        initialURL: tabUrl,
         profileIdentifier: "default")
       projectChromiumView.trustedClipboardOrigin = NativeCodeServerRuntimeLauncher.origin
       projectChromiumView.translatesAutoresizingMaskIntoConstraints = true
@@ -5041,8 +5085,9 @@ final class TerminalWorkspaceView: NSView {
       webView: webView,
       showsBrowserToolbar: showsBrowserToolbar,
       showsInitialLoadingOverlay: showsInitialLoadingOverlay && !isPlaceholder,
-      initialAddress: isPlaceholder ? nil : url,
+      initialAddress: isPlaceholder ? nil : tabUrl,
       browserFeedbackTool: browserFeedbackTool,
+      showBetaFeatures: showBetaFeatures,
       onFocus: { [weak self] in
         self?.focusProjectEditorPaneFromUserInteraction(
           projectId: projectId,
@@ -5070,6 +5115,17 @@ final class TerminalWorkspaceView: NSView {
           tabId: tabId,
           url: url.absoluteString,
           reason: "projectEditorBrowserAddressCommit") ?? false
+      },
+      onHistoryNavigation: { [weak self] url in
+        /*
+         CDXC:BrowserHistory 2026-06-16-13:30:
+         Selecting a History row in project Browser mode should create a new Browser tab instead of navigating the active tab. Keep this native-side so history clicks match the tab-strip + button and CEF popup behavior without a React round trip.
+         */
+        self?.addProjectEditorGitTab(
+          projectId: projectId,
+          url: url.absoluteString,
+          reason: "projectEditorBrowserHistory")
+        return true
       }
     )
     hostView.setBrowserHistoryItems(browserHistoryItems)
@@ -5086,7 +5142,7 @@ final class TerminalWorkspaceView: NSView {
       isPlaceholder: isPlaceholder,
       webView: webView,
       title: title,
-      url: url)
+      url: tabUrl)
   }
 
   private func makeProjectEditorBrowserPlaceholderView() -> NSView {
@@ -5137,6 +5193,17 @@ final class TerminalWorkspaceView: NSView {
       return nil
     }
     return trimmed
+  }
+
+  private func projectEditorBrowserNewTabURL(_ value: String?, fallback: String) -> String {
+    /*
+     CDXC:ProjectBrowserTabs 2026-06-16-12:02:
+     Browser + tabs should open the project GitHub remote resolved by sidebar, or Google when no remote is available. Reject about:blank and malformed values before a CEF view is allocated so app-created tabs do not get stuck on a blank loading page.
+     */
+    if let value, let normalized = normalizedProjectEditorBrowserURL(value) {
+      return normalized
+    }
+    return normalizedProjectEditorBrowserURL(fallback) ?? Self.projectBrowserDefaultNewTabURL
   }
 
   private func normalizedProjectEditorBrowserTitle(
@@ -5291,8 +5358,11 @@ final class TerminalWorkspaceView: NSView {
           /*
            CDXC:ProjectBrowserTabs 2026-06-16-01:46:
            The Browser New Tab placeholder is not a real loaded browser tab. Keep it selectable for address entry, but remove close chrome and close hit testing so users cannot close the lightweight placeholder itself.
+
+           CDXC:ProjectBrowserTabs 2026-06-16-12:59:
+           A New Tab placeholder should become closable once another Browser tab exists. Only the final placeholder is protected so closing the last real Browser tab still saves CEF memory without leaving the Browser tab strip empty.
           */
-          allowsClose: !tab.isPlaceholder,
+          allowsClose: !tab.isPlaceholder || session.tabs.count > 1,
           /*
            CDXC:SessionFocusMode 2026-05-28-13:22:
            Project editor tabs are browser tabs inside one editor pane, not terminal split panes, so their titlebar items must opt out of pane focus mode while still satisfying the shared tab item contract.
@@ -5556,13 +5626,15 @@ final class TerminalWorkspaceView: NSView {
     guard let session = projectEditorPaneSessions[projectId] else {
       return
     }
+    let tabUrl = projectEditorBrowserNewTabURL(url, fallback: session.newBrowserTabUrl)
     let tab = makeProjectEditorBrowserTab(
       projectId: projectId,
       tabId: createProjectEditorGitTabId(),
-      title: title ?? projectEditorTabTitle(for: url, fallback: "Browser"),
-      url: url,
+      title: title ?? projectEditorTabTitle(for: tabUrl, fallback: "Browser"),
+      url: tabUrl,
       browserHistoryItems: browserHistoryItems(scopeId: session.browserHistoryScopeId),
       browserFeedbackTool: session.hostView.browserFeedbackToolRawValue,
+      showBetaFeatures: session.hostView.showsBetaFeatureToolbarButtons,
       showsBrowserToolbar: true,
       showsInitialLoadingOverlay: true,
       reason: reason)
@@ -5573,7 +5645,7 @@ final class TerminalWorkspaceView: NSView {
     addSubview(tab.hostView)
     moveOffscreen(tab.hostView)
     markProjectEditorBrowserTabLoaded(projectId: projectId, tabId: tab.tabId)
-    loadProjectEditorPaneWhenReady(projectId: projectId, url: tab.url, reason: reason)
+    loadProjectEditorPaneWhenReady(projectId: projectId, url: tabUrl, reason: reason)
     setProjectEditorTabHostVisibility(nextSession, isActive: activeProjectEditorId == projectId)
     syncProjectEditorTabBars()
     focusProjectEditorPane(projectId: projectId, reason: reason)
@@ -5607,16 +5679,20 @@ final class TerminalWorkspaceView: NSView {
     /*
      CDXC:ProjectBrowserTabs 2026-06-15-20:48:
      The New Tab placeholder must not allocate CEF until the user commits an address. Once that happens, create the browser in the existing tab slot and run the normal project-editor load path so Browser memory stays zero while idle but behavior matches a real tab after navigation.
+
+     CDXC:ProjectBrowserTabs 2026-06-16-12:02:
+     Realizing a placeholder still rejects about:blank before CEF creation; if an older caller supplies a blank URL, use the session's project-scoped new-tab URL instead of opening a stuck blank page.
      */
+    let tabUrl = projectEditorBrowserNewTabURL(url, fallback: session.newBrowserTabUrl)
     let chromiumView = GhostexCEFBrowserView(
       frame: .zero,
-      initialURL: "about:blank",
+      initialURL: tabUrl,
       profileIdentifier: "default")
     chromiumView.trustedClipboardOrigin = NativeCodeServerRuntimeLauncher.origin
     chromiumView.translatesAutoresizingMaskIntoConstraints = true
     configureProjectEditorChromiumCallbacks(chromiumView, projectId: projectId, reason: reason)
     installSourceCEFDragPageDiagnosticsIfNeeded(chromiumView, projectId: projectId, reason: reason)
-    let title = projectEditorTabTitle(for: url, fallback: "Browser")
+    let title = projectEditorTabTitle(for: tabUrl, fallback: "Browser")
     session.tabs[tabIndex] = ProjectEditorBrowserTab(
       tabId: tab.tabId,
       chromiumView: chromiumView,
@@ -5625,7 +5701,7 @@ final class TerminalWorkspaceView: NSView {
       isPlaceholder: false,
       webView: nil,
       title: title,
-      url: url)
+      url: tabUrl)
     session = projectEditorSession(session, activating: tab.tabId)
     projectEditorPaneSessions[projectId] = session
     tab.hostView.replaceHostedBrowserView(
@@ -5636,7 +5712,7 @@ final class TerminalWorkspaceView: NSView {
     setProjectEditorTabHostVisibility(session, isActive: activeProjectEditorId == projectId)
     syncProjectEditorTabBars()
     focusProjectEditorPane(projectId: projectId, reason: reason)
-    loadProjectEditorPaneWhenReady(projectId: projectId, url: url, reason: reason)
+    loadProjectEditorPaneWhenReady(projectId: projectId, url: tabUrl, reason: reason)
     sendProjectEditorTabSelected(projectId: projectId)
     return true
   }
@@ -5670,6 +5746,7 @@ final class TerminalWorkspaceView: NSView {
         url: "",
         browserHistoryItems: browserHistoryItems(scopeId: session.browserHistoryScopeId),
         browserFeedbackTool: session.hostView.browserFeedbackToolRawValue,
+        showBetaFeatures: session.hostView.showsBetaFeatureToolbarButtons,
         showsBrowserToolbar: true,
         showsInitialLoadingOverlay: false,
         reason: "projectEditorGitLastTabClosed")
@@ -6947,6 +7024,7 @@ final class TerminalWorkspaceView: NSView {
     let previousSessionTitleBarActions = sessionTitleBarActions
     let previousSessionTitles = sessionTitles
     let previousZmxInactiveSessionIds = zmxInactiveSessionIds
+    let previousShowBetaFeatures = showBetaFeatures
     let shouldApplyPaneOwnerSelection =
       command.paneOwnerSelectionChanged == true && !shouldRelayout
     let responderSessionIdBefore = currentResponderSessionId()
@@ -7019,6 +7097,10 @@ final class TerminalWorkspaceView: NSView {
     mountingSessionIds = Set(command.mountingSessionIds ?? [])
     clickToWakeSleepingSessions = command.clickToWakeSleepingSessions ?? true
     showSessionIdInTerminalPanes = command.showSessionIdInTerminalPanes == true
+    showBetaFeatures = command.showBetaFeatures == true
+    if previousShowBetaFeatures != showBetaFeatures {
+      applyShowBetaFeaturesToBrowserToolbars()
+    }
     activeProjectEditorId = nextActiveProjectEditorId
     let shouldRefreshPaneTabMetadata =
       previousSessionFocusModeAvailableSessionIds != sessionFocusModeAvailableSessionIds
@@ -10453,12 +10535,11 @@ final class TerminalWorkspaceView: NSView {
     let nextURL = url?.trimmingCharacters(in: .whitespacesAndNewlines)
     if isProjectEditorPlaceholderURL(nextURL) {
       /**
-      CDXC:ProjectBrowserTabs 2026-06-13-00:28:
-      First-open Browser tabs are created with an internal about:blank CEF
-      placeholder before the intended URL is loaded. That placeholder
-       must never replace the visible tab URL/title or the session URL, because
-       the loader uses the intended URL as the navigation contract for the first
-       Browser view render.
+       CDXC:ProjectBrowserTabs 2026-06-13-00:28:
+       CEF can still report an internal about:blank during browser creation or renderer startup. That placeholder must never replace the visible tab URL/title or the session URL, because the loader uses the intended URL as the navigation contract for the Browser view render.
+
+       CDXC:ProjectBrowserTabs 2026-06-16-12:02:
+       Ghostex-created Browser tabs now pass their intended destination into CEF directly, so about:blank here is only a defensive metadata filter, not an app-selected navigation target.
        */
       NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.gitTab.placeholderMetadataIgnored", [
         "activeTabId": session.activeTabId,
@@ -26019,6 +26100,14 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   private static let toolbarItemGap: CGFloat = 10
   private static let addressMinimumWidth: CGFloat = 180
   private static let browserHistoryPageSize = 20
+  private static let browserHistoryMenuIconSize = CGSize(width: 16, height: 16)
+  private static let browserHistoryMenuIconCanvasSize = CGSize(width: 16, height: 24)
+  /*
+   CDXC:BrowserHistory 2026-06-16-11:58:
+   The native History dropdown should not grow across the whole browser view when a page title is long. Keep the total menu width within a 350px budget by truncating displayed title/URL text before AppKit measures the NSMenuItem, while the tooltip still carries the full title and URL.
+   */
+  private static let browserHistoryMenuMaxWidth: CGFloat = 350
+  private static let browserHistoryMenuEstimatedChromeWidth: CGFloat = 58
   private static let feedbackToolUnavailableTooltip = "This site disallows using this tool"
 
   private var browserView: NSView
@@ -26033,10 +26122,13 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   private let onShowProfilePicker: (() -> Void)?
   private let onShowImportSettings: (() -> Void)?
   private let onAddressNavigation: ((URL) -> Bool)?
+  private let onHistoryNavigation: ((URL) -> Bool)?
   private let toolbarView = NSView(frame: .zero)
   private var browserFeedbackTool: BrowserFeedbackTool
+  private var showBetaFeatures: Bool
   private var browserHistoryItems: [NativeBrowserHistoryItem] = []
   private var browserHistoryVisibleLimit = WebPaneHostView.browserHistoryPageSize
+  private var browserHistoryMenuAnchorPointInWindow: NSPoint?
   var chromiumLiveResizeBackingHeight: CGFloat? {
     didSet {
       if chromiumLiveResizeBackingHeight != oldValue {
@@ -26103,12 +26195,14 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     showsInitialLoadingOverlay: Bool = false,
     initialAddress: String? = nil,
     browserFeedbackTool: String? = nil,
+    showBetaFeatures: Bool = false,
     onFocus: (() -> Void)? = nil,
     onOpenDevTools: (() -> Void)? = nil,
     onInjectFeedbackTool: (() -> Void)? = nil,
     onShowProfilePicker: (() -> Void)? = nil,
     onShowImportSettings: (() -> Void)? = nil,
-    onAddressNavigation: ((URL) -> Bool)? = nil
+    onAddressNavigation: ((URL) -> Bool)? = nil,
+    onHistoryNavigation: ((URL) -> Bool)? = nil
   ) {
     self.browserView = browserView
     self.chromiumView = chromiumView
@@ -26116,6 +26210,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     self.browserFindBar = chromiumView.map { BrowserFindBarView(chromiumView: $0) }
     self.showsBrowserToolbar = showsBrowserToolbar
     self.browserFeedbackTool = BrowserFeedbackTool.normalized(browserFeedbackTool)
+    self.showBetaFeatures = showBetaFeatures
     self.initialLoadingOverlayView =
       showsInitialLoadingOverlay ? ProjectEditorInitialLoadingOverlayView(frame: .zero) : nil
     self.onFocus = onFocus
@@ -26124,6 +26219,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     self.onShowProfilePicker = onShowProfilePicker
     self.onShowImportSettings = onShowImportSettings
     self.onAddressNavigation = onAddressNavigation
+    self.onHistoryNavigation = onHistoryNavigation
     super.init(frame: .zero)
     translatesAutoresizingMaskIntoConstraints = true
     autoresizesSubviews = true
@@ -26275,9 +26371,21 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     browserFeedbackTool.rawValue
   }
 
+  var showsBetaFeatureToolbarButtons: Bool {
+    showBetaFeatures
+  }
+
   func setBrowserFeedbackTool(_ value: String?) {
     browserFeedbackTool = BrowserFeedbackTool.normalized(value)
     updateBrowserFeedbackToolButton()
+  }
+
+  func setShowBetaFeatures(_ value: Bool) {
+    guard showBetaFeatures != value else {
+      return
+    }
+    showBetaFeatures = value
+    updateBrowserBetaFeatureButtonVisibility()
   }
 
   func setBrowserHistoryItems(_ items: [NativeBrowserHistoryItem]) {
@@ -26590,6 +26698,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     updateBrowserFeedbackToolButton()
     profileButton.action = #selector(showProfilePicker)
     appearanceButton.action = #selector(showAppearanceMenu)
+    updateBrowserBetaFeatureButtonVisibility()
 
     securityIcon.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Secure connection")
     securityIcon.contentTintColor = NSColor(calibratedWhite: 0.78, alpha: 0.9)
@@ -26662,6 +26771,11 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
      The History button belongs immediately left of the profile button in the
      real toolbar layout. Keep it in the right-button run instead of overlaying
      the address field so hit-testing remains normal AppKit sibling geometry.
+
+     CDXC:BetaFeatures 2026-06-16-13:08:
+     Profile and color-scheme buttons remain in this normal right-button run only
+     when Show Beta features is enabled; when hidden, the address field takes
+     their space through the same sibling-frame calculation.
      */
     let rightButtons = [zoomButton, reactGrabButton, historyButton, profileButton, appearanceButton, devToolsButton].filter { !$0.isHidden }
     var rightX = toolbarView.bounds.width - Self.toolbarHorizontalPadding
@@ -26699,6 +26813,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     forwardButton.isEnabled = canGoForward()
     reloadButton.toolTip = NativeTooltip.text(isPageLoading() ? "Stop Loading" : "Reload")
     updatePageZoomButton()
+    updateBrowserBetaFeatureButtonVisibility()
     updateBrowserFeedbackToolButton()
     let lockSymbol = URL(string: currentURLString() ?? "")?.scheme == "https" ? "lock.fill" : "globe"
     securityIcon.image = NSImage(systemSymbolName: lockSymbol, accessibilityDescription: nil)
@@ -26932,6 +27047,25 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     }
   }
 
+  private func updateBrowserBetaFeatureButtonVisibility() {
+    /*
+     CDXC:BetaFeatures 2026-06-16-13:08:
+     Profiles and browser color-scheme controls are beta browser address-bar
+     buttons. Hide the actual AppKit buttons when Show Beta features is off so
+     their hit areas and address-field width disappear together through normal
+     sibling layout.
+     */
+    let shouldHideBetaButtons = !showBetaFeatures
+    if profileButton.isHidden != shouldHideBetaButtons {
+      profileButton.isHidden = shouldHideBetaButtons
+      needsLayout = true
+    }
+    if appearanceButton.isHidden != shouldHideBetaButtons {
+      appearanceButton.isHidden = shouldHideBetaButtons
+      needsLayout = true
+    }
+  }
+
   @objc private func injectFeedbackTool() {
     guard !Self.browserFeedbackToolUnavailable(urlString: currentURLString()) else {
       updateBrowserFeedbackToolButton()
@@ -26959,9 +27093,19 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   private func showBrowserHistoryMenu(resetVisibleLimit: Bool) {
     if resetVisibleLimit {
       browserHistoryVisibleLimit = Self.browserHistoryPageSize
+      browserHistoryMenuAnchorPointInWindow = resolvedBrowserHistoryMenuAnchorPointInWindow()
     }
     onFocus?()
     let menu = NSMenu(title: "History")
+    /*
+     CDXC:BrowserHistory 2026-06-16-13:30:
+     The History dropdown should keep a stable button-anchored position after Show More, label itself with a top "History" row, top-align favicon/browser glyphs with the first text line, and open selected links in a new tab rather than replacing the current page.
+     */
+    let titleItem = NSMenuItem(title: "History", action: nil, keyEquivalent: "")
+    titleItem.isEnabled = false
+    titleItem.attributedTitle = Self.browserHistoryMenuHeaderTitle()
+    menu.addItem(titleItem)
+    menu.addItem(NSMenuItem.separator())
     let visibleItems = Array(browserHistoryItems.prefix(browserHistoryVisibleLimit))
     if visibleItems.isEmpty {
       let emptyItem = NSMenuItem(title: "No History", action: nil, keyEquivalent: "")
@@ -26990,7 +27134,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
         menu.addItem(showMoreItem)
       }
     }
-    NSMenu.popUpContextMenu(menu, with: syntheticMenuEvent(), for: historyButton)
+    NSMenu.popUpContextMenu(menu, with: browserHistoryMenuEvent(), for: historyButton)
   }
 
   @objc private func showMoreHistoryItems(_ sender: NSMenuItem) {
@@ -27009,6 +27153,9 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       return
     }
     onFocus?()
+    if onHistoryNavigation?(url) == true {
+      return
+    }
     navigateBrowserToolbar(to: url, reason: "historyMenu")
   }
 
@@ -27020,34 +27167,63 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     return URL(string: item.url)?.host ?? "Browser"
   }
 
+  private static func browserHistoryMenuHeaderTitle() -> NSAttributedString {
+    NSAttributedString(
+      string: "History",
+      attributes: [
+        .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+        .foregroundColor: NSColor.secondaryLabelColor,
+      ])
+  }
+
   private static func browserHistoryMenuTitle(for item: NativeBrowserHistoryItem) -> NSAttributedString {
-    let title = browserHistoryTitle(for: item)
-    let url = truncatedBrowserHistoryURL(item.url)
+    let titleFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
+    let urlFont = NSFont.systemFont(ofSize: 11, weight: .regular)
+    let title = truncatedBrowserHistoryMenuText(browserHistoryTitle(for: item), font: titleFont)
+    let url = truncatedBrowserHistoryMenuText(item.url, font: urlFont)
     let text = "\(title)\n\(url)"
     let attributed = NSMutableAttributedString(string: text)
     let titleRange = NSRange(location: 0, length: (title as NSString).length)
     let urlRange = NSRange(location: titleRange.length + 1, length: (url as NSString).length)
     attributed.addAttributes(
       [
-        .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+        .font: titleFont,
         .foregroundColor: NSColor.labelColor,
       ],
       range: titleRange)
     attributed.addAttributes(
       [
-        .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+        .font: urlFont,
         .foregroundColor: NSColor.secondaryLabelColor,
       ],
       range: urlRange)
     return attributed
   }
 
-  private static func truncatedBrowserHistoryURL(_ value: String) -> String {
+  private static func truncatedBrowserHistoryMenuText(_ value: String, font: NSFont) -> String {
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard trimmed.count > 72 else {
+    let maxTextWidth = max(120, browserHistoryMenuMaxWidth - browserHistoryMenuEstimatedChromeWidth)
+    guard browserHistoryMenuTextWidth(trimmed, font: font) > maxTextWidth else {
       return trimmed
     }
-    return "\(trimmed.prefix(72))..."
+    let characters = Array(trimmed)
+    var lowerBound = 0
+    var upperBound = characters.count
+    while lowerBound < upperBound {
+      let midpoint = (lowerBound + upperBound + 1) / 2
+      let candidate = String(characters.prefix(midpoint)).trimmingCharacters(in: .whitespaces)
+      if browserHistoryMenuTextWidth("\(candidate)...", font: font) <= maxTextWidth {
+        lowerBound = midpoint
+      } else {
+        upperBound = midpoint - 1
+      }
+    }
+    let prefix = String(characters.prefix(lowerBound)).trimmingCharacters(in: .whitespaces)
+    return prefix.isEmpty ? "..." : "\(prefix)..."
+  }
+
+  private static func browserHistoryMenuTextWidth(_ value: String, font: NSFont) -> CGFloat {
+    (value as NSString).size(withAttributes: [.font: font]).width
   }
 
   private static func browserHistoryMenuImage(faviconDataUrl: String?) -> NSImage? {
@@ -27056,12 +27232,93 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       let data = Data(base64Encoded: String(faviconDataUrl[faviconDataUrl.index(after: commaIndex)...])),
       let image = NSImage(data: data)
     {
-      image.size = CGSize(width: 16, height: 16)
-      return image
+      return topAlignedBrowserHistoryMenuImage(image)
     }
-    let image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
-    image?.size = CGSize(width: 16, height: 16)
+    return topAlignedBrowserHistoryMenuImage(browserHistoryFallbackMenuImage())
+  }
+
+  private static func topAlignedBrowserHistoryMenuImage(_ sourceImage: NSImage) -> NSImage {
+    /*
+     CDXC:BrowserHistory 2026-06-16-13:30:
+     AppKit centers NSMenuItem images against the full two-line row height. Wrap each 16px favicon or browser fallback in a taller transparent canvas with the glyph drawn near the top so the icon reads aligned with the page-title line.
+     */
+    let image = NSImage(size: browserHistoryMenuIconCanvasSize)
+    image.lockFocus()
+    NSGraphicsContext.current?.imageInterpolation = .high
+    sourceImage.draw(
+      in: NSRect(
+        x: 0,
+        y: browserHistoryMenuIconCanvasSize.height - browserHistoryMenuIconSize.height - 2,
+        width: browserHistoryMenuIconSize.width,
+        height: browserHistoryMenuIconSize.height),
+      from: .zero,
+      operation: .sourceOver,
+      fraction: 1)
+    image.unlockFocus()
+    image.isTemplate = sourceImage.isTemplate
     return image
+  }
+
+  private static func browserHistoryFallbackMenuImage() -> NSImage {
+    /*
+     CDXC:BrowserHistory 2026-06-16-13:05:
+     History rows without page favicons still need a visible browser identity icon. Draw a small browser-window glyph locally instead of relying on an optional SF Symbol or SVG decoder path, while preserving real favicons when present.
+     */
+    let image = NSImage(size: CGSize(width: 16, height: 16))
+    image.lockFocus()
+    NSGraphicsContext.current?.shouldAntialias = true
+    let strokeColor = NSColor(calibratedWhite: 0.86, alpha: 0.9)
+    let fillColor = NSColor(calibratedWhite: 0.86, alpha: 0.12)
+    let bodyRect = NSRect(x: 2.5, y: 3, width: 11, height: 10)
+    let bodyPath = NSBezierPath(roundedRect: bodyRect, xRadius: 2, yRadius: 2)
+    fillColor.setFill()
+    bodyPath.fill()
+    strokeColor.setStroke()
+    bodyPath.lineWidth = 1.3
+    bodyPath.stroke()
+    let toolbarPath = NSBezierPath()
+    toolbarPath.move(to: NSPoint(x: 3, y: 10))
+    toolbarPath.line(to: NSPoint(x: 13.5, y: 10))
+    toolbarPath.lineWidth = 1.1
+    toolbarPath.stroke()
+    for centerX in [5.0, 7.0, 9.0] {
+      NSBezierPath(ovalIn: NSRect(x: centerX - 0.45, y: 11.35, width: 0.9, height: 0.9)).fill()
+    }
+    image.unlockFocus()
+    image.isTemplate = false
+    return image
+  }
+
+  private func resolvedBrowserHistoryMenuAnchorPointInWindow() -> NSPoint {
+    if let currentEvent = NSApp.currentEvent,
+      let eventWindow = currentEvent.window,
+      let window,
+      eventWindow === window
+    {
+      let hostPoint = convert(currentEvent.locationInWindow, from: nil)
+      let toolbarPoint = convert(hostPoint, to: toolbarView)
+      if historyButton.frame.contains(toolbarPoint) {
+        return currentEvent.locationInWindow
+      }
+    }
+    return historyButton.convert(
+      NSPoint(x: historyButton.bounds.midX, y: historyButton.bounds.minY),
+      to: nil)
+  }
+
+  private func browserHistoryMenuEvent() -> NSEvent {
+    let anchorPoint = browserHistoryMenuAnchorPointInWindow ?? resolvedBrowserHistoryMenuAnchorPointInWindow()
+    return NSEvent.mouseEvent(
+      with: .leftMouseDown,
+      location: anchorPoint,
+      modifierFlags: [],
+      timestamp: ProcessInfo.processInfo.systemUptime,
+      windowNumber: window?.windowNumber ?? 0,
+      context: nil,
+      eventNumber: 0,
+      clickCount: 1,
+      pressure: 1
+    )!
   }
 
   @objc private func showProfilePicker() {

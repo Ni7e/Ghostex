@@ -221,6 +221,8 @@ describe("native sidebar hotkey source", () => {
 
     expect(sidebarAppSource).toContain("SIDEBAR_PROJECT_JUMP_EVENT");
     expect(sidebarAppSource).toContain("projectJumpAutoExpand");
+    expect(sidebarAppSource).toContain("revealFocusedSession");
+    expect(sidebarAppSource).toContain("focusedSessionRevealRequestId");
     expect(sidebarAppSource).toContain("writeProjectSessionListCollapsedState({");
     expect(sidebarAppSource).toContain("...readProjectSessionListCollapsedState()");
     expect(sidebarAppSource).toContain('action.kind === "jumpToProject"');

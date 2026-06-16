@@ -76,8 +76,8 @@ private let ghostexDefaultSidebarChromeTheme = "dark-2"
 private let ghostexDefaultSidebarTitlebarForegroundColor = "#d8d8d8"
 private let ghostexDefaultSidebarTitlebarDarkForegroundColor = "#262626"
 private let ghostexDefaultSidebarTitlebarBackgroundColor = "#0e0e0e"
-private let ghostexDefaultSidebarTitlebarBackgroundTintColor = "#808080"
-private let ghostexDefaultSidebarTitlebarBackgroundDarknessPercent = 95
+private let ghostexDefaultSidebarTitlebarBackgroundTintColor = "#ffffff"
+private let ghostexDefaultSidebarTitlebarBackgroundDarknessPercent = 93
 private let ghostexMinimumSidebarTitlebarBackgroundDarknessPercent = 85
 private let ghostexMaximumSidebarTitlebarBackgroundDarknessPercent = 100
 private let ghostexSidebarTitlebarBackgroundTintStrength = 0.12
@@ -154,10 +154,20 @@ private func sidebarTitlebarBackgroundColor(
    code should treat it as the value behind the Settings Contrast control.
    CDXC:SidebarTitlebarColors 2026-06-15-15:28:
    Native startup must apply the same subtle web-picker tint as shared Settings.
-   Neutral #808080 should preserve the original gray, while tinted colors only
-   offset hue around the contrast-selected channel.
+   Neutral same-channel tints should preserve the original gray, while tinted
+   colors only offset hue around the contrast-selected channel.
+   CDXC:SidebarTitlebarColors 2026-06-16-14:28:
+   Default custom chrome now starts at 93 contrast with white #FFFFFF tint.
+   Missing Settings must use that explicit default; only valid legacy saved
+   background colors should seed startup contrast during migration.
    */
-  let fallbackDarkness = sidebarTitlebarBackgroundDarknessPercent(forColor: rawColor)
+  let trimmedRawColor = rawColor?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  let hasValidLegacyBackgroundColor =
+    trimmedRawColor?.range(of: "^#[0-9a-f]{6}$", options: .regularExpression) != nil
+  let fallbackDarkness =
+    hasValidLegacyBackgroundColor
+    ? sidebarTitlebarBackgroundDarknessPercent(forColor: trimmedRawColor)
+    : ghostexDefaultSidebarTitlebarBackgroundDarknessPercent
   let rawNumber = (rawValue as? NSNumber)?.doubleValue
   let darkness: Int
   if let rawNumber {
@@ -817,7 +827,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
   }()
   private static let sharedLogMaxFileBytes: UInt64 = 25 * 1024 * 1024
   private static let sharedLogMaxRotatedFiles = 3
+  private static let sharedLogMaxRetainedLines = 25_000
+  private static let sharedLogRetentionStartupDelay: TimeInterval = 60
+  private static let nativeHostLifecycleSampleInterval: TimeInterval = 5
+  private static let sampledNativeHostLifecycleEvents = Set([
+    "activationBoundaryInput",
+    "workspaceApplicationActivated",
+  ])
   private static var createdLogDirectories = Set<String>()
+  private static var nativeHostLifecycleSampleStateByEvent: [String: LogSampleState] = [:]
   nonisolated(unsafe) let ghostty: GhostexGhosttyApp
   let undoManager = UndoManager()
   private let ghosttyConfigSelection: GhosttyConfigSelection
@@ -936,6 +954,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     Self.appendNativeHostLifecycleLog(
       "applicationDidFinishLaunching pid=\(ProcessInfo.processInfo.processIdentifier) workspacePath=\(workspacePath)"
     )
+    Self.scheduleSupportLogLineRetentionAfterStartup()
     MainActor.assumeIsolated {
       installMainMenu()
       /**
@@ -1005,6 +1024,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     sparkleAvailabilityProbeTimer?.invalidate()
     sparkleAvailabilityProbeTimer = nil
     persistMainWindowChrome()
+    (window?.contentView as? ghostexRootView)?.saveActiveFloatingPromptEditorForAppLifecycleClose(
+      reason: "applicationWillTerminate")
     (window?.contentView as? ghostexRootView)?.persistNativeChromeForAppLifecycle()
     Self.appendNativeHostLifecycleLog(
       "applicationWillTerminate pid=\(ProcessInfo.processInfo.processIdentifier) windowVisible=\(window?.isVisible ?? false) keyWindow=\(window?.isKeyWindow ?? false)"
@@ -1680,9 +1701,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     guard NativeDebugLogging.isEnabled else {
       return
     }
+    guard let message = sampledNativeHostLifecycleMessage(message) else {
+      return
+    }
     let logsDirectory = GhostexAppStorage.logsDirectory
     let logURL = logsDirectory.appendingPathComponent("native-host-lifecycle.log")
     appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "native host lifecycle")
+  }
+
+  private static func sampledNativeHostLifecycleMessage(_ message: String) -> String? {
+    let event = message.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? message
+    guard sampledNativeHostLifecycleEvents.contains(event) else {
+      return message
+    }
+    var payload: [String: Any] = [:]
+    /*
+     CDXC:CrashDiagnostics 2026-06-16-12:22:
+     Native lifecycle logs should not duplicate every focus/input boundary while Debugging Mode is on. Sample activation-boundary and workspace-activation breadcrumbs by event prefix, then append the suppressed count to the next retained line so support keeps burst context without hundreds of routine lines.
+     */
+    guard shouldWriteSampledLogEvent(
+      event: event,
+      sampledEvents: sampledNativeHostLifecycleEvents,
+      sampleInterval: nativeHostLifecycleSampleInterval,
+      stateByEvent: &nativeHostLifecycleSampleStateByEvent,
+      payload: &payload)
+    else {
+      return nil
+    }
+    guard let suppressedCount = payload["suppressedSinceLastWrite"] else {
+      return message
+    }
+    return "\(message) suppressedSinceLastWrite=\(suppressedCount)"
   }
 
   fileprivate static func persistSharedSidebarStorage(_ command: PersistSharedSidebarStorage) {
@@ -1770,6 +1819,117 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     logURL.deletingLastPathComponent().appendingPathComponent("\(logURL.lastPathComponent).\(index)")
   }
 
+  private static func scheduleSupportLogLineRetentionAfterStartup() {
+    /*
+     CDXC:Diagnostics 2026-06-16-12:22:
+     Support bundles must stay zip-friendly even after days of Debugging Mode. Wait one minute after app startup so launch diagnostics finish, then trim retained shared support logs instead of hiding current failures behind unbounded history.
+
+     CDXC:Diagnostics 2026-06-16-14:09:
+     Startup retention now keeps one current split file per support-log basename and deletes older rotated siblings from the same split group before trimming the retained file to 25,000 lines. Prefer the unrotated active file when it exists because writers append there after startup.
+     */
+    let logsDirectory = GhostexAppStorage.logsDirectory
+    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + Self.sharedLogRetentionStartupDelay) {
+      Self.pruneSupportLogLines(in: logsDirectory, maxLines: Self.sharedLogMaxRetainedLines)
+    }
+  }
+
+  private static func pruneSupportLogLines(in logsDirectory: URL, maxLines: Int) {
+    let manager = FileManager.default
+    guard let enumerator = manager.enumerator(
+      at: logsDirectory,
+      includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+      options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants])
+    else {
+      return
+    }
+    var fileURLsByBaseName: [String: [URL]] = [:]
+    for case let fileURL as URL in enumerator {
+      let resourceValues = try? fileURL.resourceValues(forKeys: [.isRegularFileKey])
+      guard resourceValues?.isRegularFile == true,
+        let baseName = sharedSupportLogBaseName(fileURL.lastPathComponent)
+      else {
+        continue
+      }
+      fileURLsByBaseName[baseName, default: []].append(fileURL)
+    }
+    for fileURLs in fileURLsByBaseName.values {
+      guard let retainedLogURL = preferredSharedSupportLogFile(in: fileURLs) else {
+        continue
+      }
+      for fileURL in fileURLs where !sameFileURL(fileURL, retainedLogURL) {
+        do {
+          try manager.removeItem(at: fileURL)
+        } catch {
+          logger.warning("failed to remove older support log split: \(NativeLogPrivacy.sanitizeLogLine(error.localizedDescription))")
+        }
+      }
+      do {
+        try pruneSupportLogFile(retainedLogURL, maxLines: maxLines)
+      } catch {
+        logger.warning("failed to prune support log lines: \(NativeLogPrivacy.sanitizeLogLine(error.localizedDescription))")
+      }
+    }
+  }
+
+  private static func pruneSupportLogFile(_ logURL: URL, maxLines: Int) throws {
+    guard maxLines > 0 else {
+      return
+    }
+    var lines = try String(contentsOf: logURL, encoding: .utf8).components(separatedBy: "\n")
+    let hadTrailingNewline = lines.last == ""
+    if hadTrailingNewline {
+      lines.removeLast()
+    }
+    guard lines.count > maxLines else {
+      return
+    }
+    let retained = lines.suffix(maxLines).joined(separator: "\n") + "\n"
+    try retained.write(to: logURL, atomically: true, encoding: .utf8)
+  }
+
+  private static func isSharedSupportLogFile(_ fileName: String) -> Bool {
+    sharedSupportLogBaseName(fileName) != nil
+  }
+
+  private static func sharedSupportLogBaseName(_ fileName: String) -> String? {
+    let baseName = fileNameWithoutRotationSuffix(fileName)
+    guard baseName.hasSuffix(".log") || baseName.hasSuffix(".jsonl") else {
+      return nil
+    }
+    return baseName
+  }
+
+  private static func preferredSharedSupportLogFile(in fileURLs: [URL]) -> URL? {
+    if let activeLogURL = fileURLs.first(where: { fileURL in
+      fileURL.lastPathComponent == fileNameWithoutRotationSuffix(fileURL.lastPathComponent)
+    }) {
+      return activeLogURL
+    }
+    return fileURLs.max { lhs, rhs in
+      sharedSupportLogModificationDate(lhs) < sharedSupportLogModificationDate(rhs)
+    }
+  }
+
+  private static func sharedSupportLogModificationDate(_ fileURL: URL) -> Date {
+    (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+      ?? .distantPast
+  }
+
+  private static func sameFileURL(_ lhs: URL, _ rhs: URL) -> Bool {
+    lhs.standardizedFileURL.path == rhs.standardizedFileURL.path
+  }
+
+  private static func fileNameWithoutRotationSuffix(_ fileName: String) -> String {
+    guard let dotIndex = fileName.lastIndex(of: ".") else {
+      return fileName
+    }
+    let suffix = fileName[fileName.index(after: dotIndex)...]
+    guard !suffix.isEmpty, suffix.allSatisfy({ $0.isNumber }) else {
+      return fileName
+    }
+    return String(fileName[..<dotIndex])
+  }
+
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     /**
      CDXC:CrashDiagnostics 2026-04-27-18:31
@@ -1784,6 +1944,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
   func windowWillClose(_ notification: Notification) {
     persistMainWindowChrome()
     removeMainWindowTrafficLightLayoutObservers()
+    (window?.contentView as? ghostexRootView)?.saveActiveFloatingPromptEditorForAppLifecycleClose(
+      reason: "mainWindowWillClose")
     (window?.contentView as? ghostexRootView)?.persistNativeChromeForAppLifecycle()
     Self.appendNativeHostLifecycleLog(
       "windowWillClose title=\(window?.title ?? "<missing>") visibleBeforeClose=\(window?.isVisible ?? false)"
@@ -5798,6 +5960,7 @@ final class ghostexRootView: NSView {
   private static let commandPalettePrewarmRetryDelay: TimeInterval = 0.75
   private static let floatingPromptEditorPrewarmRequestId = "ghostex-floating-prompt-editor-prewarm"
   private static let floatingPromptEditorPrewarmDelay: TimeInterval = 0.75
+  private static let floatingPromptEditorPrewarmRetryDelay: TimeInterval = 0.75
 
   private static func promptEditorMonotonicMilliseconds() -> Int {
     Int((ProcessInfo.processInfo.systemUptime * 1000).rounded())
@@ -5847,6 +6010,13 @@ final class ghostexRootView: NSView {
   private var sidebarWorkspaceFocusRequestId: UInt64 = 0
   private var floatingPromptEditorReturnFocusRequestId: UInt64 = 0
   private var appModalReturnFocusSessionId: String?
+  /*
+   CDXC:FirstLaunchSetup 2026-06-16-07:58:
+   The automatic first-run flow opens Highlighted Features before firstLaunchSetup.
+   Store the follow-up request in AppKit because outside-click dismissal closes
+   the native child window without relying on React's close button callback.
+   */
+  private var shouldOpenFirstLaunchSetupAfterDiscoverClose = false
   private var latestModalHostSidebarState: [String: Any]?
   private var activeFloatingPromptEditor: ActiveFloatingPromptEditor?
   private var hasPrewarmedCommandPalette = false
@@ -5855,6 +6025,7 @@ final class ghostexRootView: NSView {
   private var hasRetriedCommandPalettePrewarm = false
   private var hasPrewarmedFloatingPromptEditor = false
   private var hasScheduledFloatingPromptEditorPrewarm = false
+  private var hasPendingFloatingPromptEditorPrewarmRetry = false
   private var isPrewarmingFloatingPromptEditor = false
   private var floatingPromptEditorPrewarmTempFileURL: URL?
   private var isFloatingPromptEditorActiveForUserInput: Bool {
@@ -6498,6 +6669,40 @@ final class ghostexRootView: NSView {
     }
   }
 
+  private func scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: String) {
+    guard hasScheduledFloatingPromptEditorPrewarm,
+      !hasPrewarmedFloatingPromptEditor,
+      !isPrewarmingFloatingPromptEditor,
+      !hasPendingFloatingPromptEditorPrewarmRetry,
+      activeFloatingPromptEditor == nil
+    else {
+      return
+    }
+    /*
+     CDXC:PromptEditor 2026-06-16-10:23:
+     App launch must reliably warm the real native prompt-editor WKWebView and
+     Monaco instance. Startup tours or other native child-window work can make
+     the first scheduled attempt skip; keep one lightweight retry pending until
+     the actual prompt-editor host reports ready instead of allowing a permanent
+     cold first Ctrl+G after launch.
+     */
+    hasPendingFloatingPromptEditorPrewarmRetry = true
+    PromptEditorDebugLog.append(
+      event: "native.prewarm.retryScheduled",
+      details: [
+        "reason": reason,
+        "requestId": Self.floatingPromptEditorPrewarmRequestId,
+      ])
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.floatingPromptEditorPrewarmRetryDelay) {
+      [weak self] in
+      guard let self else {
+        return
+      }
+      self.hasPendingFloatingPromptEditorPrewarmRetry = false
+      self.prewarmFloatingPromptEditorIfNeeded()
+    }
+  }
+
   private func prewarmCommandPaletteIfNeeded() {
     guard !hasPrewarmedCommandPalette, !isPrewarmingCommandPalette else {
       return
@@ -6676,7 +6881,8 @@ final class ghostexRootView: NSView {
     }
     guard activeFloatingPromptEditor == nil,
       activeNativeAppModalKind == nil,
-      !appModalPresentationPending
+      !appModalPresentationPending,
+      !isPrewarmingCommandPalette
     else {
       PromptEditorDebugLog.append(
         event: "native.prewarm.skipped",
@@ -6684,9 +6890,11 @@ final class ghostexRootView: NSView {
           "activeNativeAppModalKind": activeNativeAppModalKind ?? "",
           "appModalPresentationPending": appModalPresentationPending,
           "hasActiveFloatingPromptEditor": activeFloatingPromptEditor != nil,
+          "isPrewarmingCommandPalette": isPrewarmingCommandPalette,
           "reason": "modalBusy",
           "requestId": Self.floatingPromptEditorPrewarmRequestId,
         ])
+      scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "modalBusy")
       return
     }
     guard window != nil else {
@@ -6696,6 +6904,7 @@ final class ghostexRootView: NSView {
           "reason": "missingWindow",
           "requestId": Self.floatingPromptEditorPrewarmRequestId,
         ])
+      scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "missingWindow")
       return
     }
 
@@ -6713,6 +6922,7 @@ final class ghostexRootView: NSView {
           "reason": "tempFileFailed",
           "requestId": Self.floatingPromptEditorPrewarmRequestId,
         ])
+      scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "tempFileFailed")
       return
     }
 
@@ -6760,6 +6970,7 @@ final class ghostexRootView: NSView {
       cleanupFloatingPromptEditorPrewarmTempFile()
       isPrewarmingFloatingPromptEditor = false
       activeFloatingPromptEditor = nil
+      scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "openNativeWindowFailed")
     }
   }
 
@@ -6797,6 +7008,7 @@ final class ghostexRootView: NSView {
     activeFloatingPromptEditor = nil
     appModalPresentationPending = false
     cleanupFloatingPromptEditorPrewarmTempFile()
+    scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: reason)
   }
 
   private func finishFloatingPromptEditorPrewarm() {
@@ -6966,6 +7178,55 @@ final class ghostexRootView: NSView {
       "top": bounds.height - rootFrame.maxY,
       "width": rootFrame.width,
     ])
+  }
+
+  private func updateFloatingPromptEditorDraft(message: [String: Any]) {
+    guard let requestId = message["requestId"] as? String,
+      let active = activeFloatingPromptEditor,
+      active.requestId == requestId,
+      !isPrewarmingFloatingPromptEditor
+    else {
+      return
+    }
+    let text = message["text"] as? String ?? ""
+    do {
+      try text.write(toFile: active.filePath, atomically: true, encoding: .utf8)
+      PromptEditorDebugLog.append(
+        event: "native.draftUpdate",
+        details: [
+          "requestId": active.requestId,
+          "textLength": text.count,
+        ])
+    } catch {
+      AppDelegate.appendAppModalErrorLog(
+        area: "PromptEditor:draftUpdate",
+        message: "Failed to update prompt editor draft file: \(error.localizedDescription)",
+        stack: nil
+      )
+    }
+  }
+
+  func saveActiveFloatingPromptEditorForAppLifecycleClose(reason: String) {
+    guard let active = activeFloatingPromptEditor,
+      !isPrewarmingFloatingPromptEditor
+    else {
+      return
+    }
+    /*
+     CDXC:PromptEditor 2026-06-16-10:36:
+     Closing the app or main window must not discard prompt editor text. React
+     live-writes every Monaco change to the prompt temp file, so lifecycle
+     teardown can mark that current file saved without waiting on WebKit while
+     the native child window is already closing.
+     */
+    PromptEditorDebugLog.append(
+      event: "native.lifecycleClose.save",
+      details: [
+        "reason": reason,
+        "requestId": active.requestId,
+      ])
+    writeFloatingPromptEditorStatusFile(active.statusFile, status: "saved")
+    finishFloatingPromptEditor(reason: reason)
   }
 
   private func saveFloatingPromptEditor(message: [String: Any]) {
@@ -9828,6 +10089,7 @@ final class ghostexRootView: NSView {
     if shouldIgnoreDuplicateNativeAppModalOpen(message: message, modal: modal) {
       return true
     }
+    rememberFirstLaunchSetupAfterDiscoverCloseRequest(message: message, modal: modal)
     if modal == "commandPalette", !isPrewarmOpen {
       promoteCommandPalettePrewarmToUserOpen()
     }
@@ -9857,6 +10119,24 @@ final class ghostexRootView: NSView {
       updateSidebarModalBackdrop()
     }
     return true
+  }
+
+  private func rememberFirstLaunchSetupAfterDiscoverCloseRequest(
+    message: [String: Any],
+    modal: String
+  ) {
+    /*
+     CDXC:FirstLaunchSetup 2026-06-16-07:58:
+     Only the automatic startup Highlighted Features open should chain into
+     firstLaunchSetup. Manual Discover opens omit this flag and must remain a
+     standalone replayable tour.
+     */
+    if modal == "discoverGhostex" {
+      shouldOpenFirstLaunchSetupAfterDiscoverClose =
+        message["showFirstLaunchSetupOnClose"] as? Bool == true
+      return
+    }
+    shouldOpenFirstLaunchSetupAfterDiscoverClose = false
   }
 
   private func shouldIgnoreDuplicateNativeAppModalOpen(
@@ -9938,6 +10218,33 @@ final class ghostexRootView: NSView {
       preferredContentFrame: contentScreenFrame)
   }
 
+  private func takeFirstLaunchSetupAfterDiscoverClose(closingModal: String?) -> Bool {
+    guard closingModal == "discoverGhostex" else {
+      shouldOpenFirstLaunchSetupAfterDiscoverClose = false
+      return false
+    }
+    guard shouldOpenFirstLaunchSetupAfterDiscoverClose else {
+      return false
+    }
+    shouldOpenFirstLaunchSetupAfterDiscoverClose = false
+    return true
+  }
+
+  private func openFirstLaunchSetupAfterDiscoverIfNeeded(closingModal: String?) -> Bool {
+    guard takeFirstLaunchSetupAfterDiscoverClose(closingModal: closingModal) else {
+      return false
+    }
+    /*
+     CDXC:FirstLaunchSetup 2026-06-16-07:58:
+     When the automatic Highlighted Features intro closes, open firstLaunchSetup
+     from the native child-window lifecycle so close button, Escape, and
+     outside-click dismissal all continue into the setup modal.
+     */
+    return openNativeAppModalWindow(
+      message: ["modal": "firstLaunchSetup", "type": "open"],
+      modal: "firstLaunchSetup")
+  }
+
   private func closeNativeAppModalWindow(reason: String, sendReactClose: Bool) {
     if activeNativeAppModalKind == "floatingPromptEditor"
       || nativeAppModalWindowController?.currentModalKind == "floatingPromptEditor"
@@ -9949,6 +10256,7 @@ final class ghostexRootView: NSView {
       return
     }
     let returnFocusSessionId = appModalReturnFocusSessionId
+    let closingModal = activeNativeAppModalKind ?? activeAppModalWindowController()?.currentModalKind
     AppDelegate.appendAgentDetectionDebugLog(
       event: "nativeBridge.appModal.nativeWindow.close",
       details: "reason=\(reason) modal=\(activeNativeAppModalKind ?? "<none>") sendReactClose=\(sendReactClose)"
@@ -9965,6 +10273,10 @@ final class ghostexRootView: NSView {
     activeNativeAppModalKind = nil
     appModalPresentationPending = false
     updateSidebarModalBackdrop()
+    if openFirstLaunchSetupAfterDiscoverIfNeeded(closingModal: closingModal) {
+      return
+    }
+    scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "modalClosed")
     restoreAppModalReturnFocusIfNeeded(sessionId: returnFocusSessionId, reason: reason)
   }
 
@@ -9977,9 +10289,14 @@ final class ghostexRootView: NSView {
       return
     }
     let returnFocusSessionId = appModalReturnFocusSessionId
+    let closingModal = modal
     activeNativeAppModalKind = nil
     appModalPresentationPending = false
     updateSidebarModalBackdrop()
+    if openFirstLaunchSetupAfterDiscoverIfNeeded(closingModal: closingModal) {
+      return
+    }
+    scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "modalClosed")
     restoreAppModalReturnFocusIfNeeded(sessionId: returnFocusSessionId, reason: reason)
   }
 
@@ -10003,6 +10320,7 @@ final class ghostexRootView: NSView {
 
   private func closeAppModalHost(reason: String) {
     let returnFocusSessionId = appModalReturnFocusSessionId
+    let closingModal = activeNativeAppModalKind ?? activeAppModalWindowController()?.currentModalKind
     AppDelegate.appendAgentDetectionDebugLog(
       event: "nativeBridge.appModal.close.received",
       details: "reason=\(reason) returnFocusSessionId=\(returnFocusSessionId ?? "<none>") rootModalHostMounted=false"
@@ -10032,6 +10350,10 @@ final class ghostexRootView: NSView {
       nativeAppModalWindowController?.close(sendReactClose: true)
     }
     updateSidebarModalBackdrop()
+    if openFirstLaunchSetupAfterDiscoverIfNeeded(closingModal: closingModal) {
+      return
+    }
+    scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "modalClosed")
     restoreAppModalReturnFocusIfNeeded(sessionId: returnFocusSessionId, reason: reason)
   }
 
@@ -11226,6 +11548,8 @@ final class ghostexRootView: NSView {
       let errorMessage = message["message"] as? String ?? String(describing: message)
       let stack = message["stack"] as? String
       AppDelegate.appendAppModalErrorLog(area: area, message: errorMessage, stack: stack)
+    case "floatingPromptEditorDraftUpdate":
+      updateFloatingPromptEditorDraft(message: message)
     case "floatingPromptEditorSave":
       saveFloatingPromptEditor(message: message)
     case "floatingPromptEditorPasteImage":
@@ -11347,6 +11671,7 @@ final class ghostexRootView: NSView {
         )
       }
       if isPrewarmingFloatingPromptEditor {
+        appModalWindowController(for: modal)?.presentBackgroundPrewarmIfCurrent(modal: modal)
         return
       }
       appModalPresentationPending = false
@@ -13626,6 +13951,7 @@ private final class AppModalWindowPanel: NSPanel {
   var promptEditorTitleDragHeight: CGFloat = 0
   var promptEditorTitleDragExcludedTrailingWidth: CGFloat = 0
   var promptEditorResizeMargin: CGFloat = 0
+  var promptEditorBottomRightResizeHandleSize: CGFloat = 0
   var promptEditorMinimumContentSize = CGSize(width: 180, height: 260)
 
   override var canBecomeKey: Bool { true }
@@ -13660,6 +13986,19 @@ private final class AppModalWindowPanel: NSPanel {
   private func promptEditorResizeEdges(for point: CGPoint) -> ResizeEdges {
     guard promptEditorResizeMargin > 0 else {
       return []
+    }
+    /*
+     CDXC:PromptEditor 2026-06-16-10:23:
+     The native child-window prompt editor exposes a visible bottom-right
+     resize handle in React. Match that exact corner affordance at the AppKit
+     window-event boundary so the shown handle and the real resize gesture stay
+     aligned without adding a transparent web hit-test overlay.
+     */
+    if promptEditorBottomRightResizeHandleSize > 0,
+      point.x >= frame.width - promptEditorBottomRightResizeHandleSize,
+      point.y <= promptEditorBottomRightResizeHandleSize
+    {
+      return [.right, .bottom]
     }
     var edges: ResizeEdges = []
     if point.x <= promptEditorResizeMargin {
@@ -13764,6 +14103,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   private static let minimumSize = CGSize(width: 520, height: 360)
   private static let floatingPromptEditorMinimumSize = CGSize(width: 180, height: 260)
   private static let floatingPromptEditorResizeMargin: CGFloat = 8
+  private static let floatingPromptEditorResizeHandleSize: CGFloat = 24
   private static let floatingPromptEditorTitleDragHeight: CGFloat = 32
   private static let floatingPromptEditorTrailingActionReserve: CGFloat = 170
 
@@ -13939,6 +14279,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     if modal == "floatingPromptEditor" {
       panel.promptEditorMinimumContentSize = Self.floatingPromptEditorMinimumSize
       panel.promptEditorResizeMargin = Self.floatingPromptEditorResizeMargin
+      panel.promptEditorBottomRightResizeHandleSize = Self.floatingPromptEditorResizeHandleSize
       panel.promptEditorTitleDragHeight = Self.floatingPromptEditorTitleDragHeight
       panel.promptEditorTitleDragExcludedTrailingWidth =
         Self.floatingPromptEditorTrailingActionReserve
@@ -14145,6 +14486,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     else {
       return
     }
+    resetPanelBackgroundPrewarmState()
     if panel.parent !== parentWindow {
       parentWindow.addChildWindow(panel, ordered: .above)
     }
@@ -14155,6 +14497,34 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       ])
     panel.makeKeyAndOrderFront(nil)
     NSApp.activate(ignoringOtherApps: true)
+  }
+
+  func presentBackgroundPrewarmIfCurrent(modal: String?) {
+    guard modal == currentModal,
+      let parentWindow,
+      let panel
+    else {
+      return
+    }
+    /*
+     CDXC:PromptEditor 2026-06-16-10:41:
+     Launch prewarm must put the prompt editor through the same live native
+     child-window path as the first Ctrl+G open. Order the reusable panel while
+     fully transparent and mouse-ignored so WebKit/React/Monaco run as a real
+     attached window without creating an invisible interactive layer over the
+     workspace.
+     */
+    if panel.parent !== parentWindow {
+      parentWindow.addChildWindow(panel, ordered: .above)
+    }
+    panel.ignoresMouseEvents = true
+    panel.alphaValue = 0
+    logPromptWindowEvent(
+      "nativeWindow.prewarmPresent",
+      details: [
+        "msSinceOpen": elapsedSinceOpenMs(),
+      ])
+    panel.orderFront(nil)
   }
 
   func dispatch(_ message: [String: Any]) {
@@ -14259,6 +14629,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     removeOutsideEventMonitor()
     isProgrammaticClose = true
     parentWindow?.removeChildWindow(panel!)
+    resetPanelBackgroundPrewarmState()
     panel?.orderOut(nil)
     isProgrammaticClose = false
     currentModal = nil
@@ -14296,6 +14667,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     if let panel {
       parentWindow?.removeChildWindow(panel)
       panel.delegate = nil
+      resetPanelBackgroundPrewarmState()
       panel.orderOut(nil)
       panel.contentView = nil
     }
@@ -14309,6 +14681,11 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     isReady = false
     openStartedAtMs = nil
     webViewLoadStartedAtMs = nil
+  }
+
+  private func resetPanelBackgroundPrewarmState() {
+    panel?.ignoresMouseEvents = false
+    panel?.alphaValue = 1
   }
 
   private func installOutsideEventMonitorIfNeeded(for modal: String) {
@@ -14330,8 +14707,8 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
      close the modal because those clicks cannot reach the React backdrop inside
      the modal WKWebView.
 
-     CDXC:DiscoverGhostex 2026-06-16-02:01:
-     Discover Ghostex uses the same compact native child-window pattern.
+     CDXC:HighlightedFeatures 2026-06-16-08:17:
+     Highlighted Features uses the same compact native child-window pattern.
      Parent-window outside clicks cannot reach its React Dialog backdrop, so use
      the existing outside-mouse-down close monitor for this modal id too.
      */
@@ -14515,8 +14892,8 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return CGSize(width: 1120, height: 850)
     case "discoverGhostex":
       /*
-       CDXC:DiscoverGhostex 2026-06-16-00:26:
-       The Discover Ghostex tour uses the first-launch modal footprint so its left copy, large feature placeholder, and bottom thumbnail strip fit without clipping.
+       CDXC:HighlightedFeatures 2026-06-16-08:17:
+       The Highlighted Features tour uses the first-launch modal footprint so its left copy, large feature placeholder, and bottom thumbnail strip fit without clipping.
        */
       return CGSize(width: 1120, height: 850)
     case "gitFileDiff":
@@ -14752,7 +15129,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     case "firstLaunchSetup", "tipsAndTricks":
       return "Tips & Tricks"
     case "discoverGhostex":
-      return "Discover Ghostex"
+      return "Highlighted Features"
     case "firstUserMessage":
       return "First Message"
     case "floatingPromptEditor":
@@ -14789,6 +15166,18 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return "Ghostex"
     }
   }
+}
+
+private final class TitlebarDropdownPanel: NSPanel {
+  /*
+   CDXC:TitlebarDropdowns 2026-06-16-09:22:
+   Titlebar dropdown child windows host WKWebView content with hover-revealed
+   controls. They must be keyable panels, not nonactivating panels, so WebKit
+   receives normal hover and mouse-move delivery in Resources, Git, Tips, Keep
+   Awake, Actions, Open In, and mode menus.
+   */
+  override var canBecomeKey: Bool { true }
+  override var canBecomeMain: Bool { false }
 }
 
 private final class TitlebarDropdownPanelController: NSObject, NSWindowDelegate, WKNavigationDelegate {
@@ -14880,12 +15269,13 @@ private final class TitlebarDropdownPanelController: NSObject, NSWindowDelegate,
 
     let size = constrainedSize(preferredSize ?? defaultSize(for: kind), parentWindow: parentWindow)
     let frame = panelFrame(size: size, parentWindow: parentWindow)
-    let panel = NSPanel(
+    let panel = TitlebarDropdownPanel(
       contentRect: frame,
-      styleMask: [.borderless, .nonactivatingPanel],
+      styleMask: [.borderless],
       backing: .buffered,
       defer: false
     )
+    panel.acceptsMouseMovedEvents = true
     panel.backgroundColor = ghostexModalBackgroundColor(for: sidebarTheme)
     panel.collectionBehavior = [.fullScreenAuxiliary, .transient]
     panel.delegate = self
@@ -14932,7 +15322,10 @@ private final class TitlebarDropdownPanelController: NSObject, NSWindowDelegate,
       return
     }
     parentWindow.addChildWindow(panel, ordered: .above)
-    panel.orderFront(nil)
+    panel.makeKeyAndOrderFront(nil)
+    if let webView {
+      panel.makeFirstResponder(webView)
+    }
     onNativeDropdownOpenChanged(kind)
   }
 

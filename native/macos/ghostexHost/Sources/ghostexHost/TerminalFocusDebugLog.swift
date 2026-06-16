@@ -3,6 +3,7 @@ import Foundation
 enum TerminalFocusDebugLog {
   private static let maxLogFileBytes: UInt64 = 25 * 1024 * 1024
   private static let maxRotatedLogFiles = 3
+  private static let highVolumeSampleInterval: TimeInterval = 5
   private static let noisyEvents = Set([
     "nativeSidebar.postNative",
     "nativeHotkeys.appKitKeyEquivalent",
@@ -25,6 +26,16 @@ enum TerminalFocusDebugLog {
     "nativeWorkspace.windowFirstResponderChanged.programmaticSkipped",
     "nativeWorkspace.writeTerminalText",
   ])
+  private static let sampledEvents = Set([
+    "nativeFocusTrace.surfaceKeyDown",
+    "nativeFocusTrace.windowKeyDownDispatch",
+    "nativeFocusTrace.surfaceTextInput",
+    "nativeHost.activationBoundary.inputEvent",
+    "nativeWorkspace.ghosttyKeyText.suppressedPrivateUse",
+    "nativeWorkspace.zmxPersistenceViewportRefresh.ifStale",
+    "nativeWorkspace.zmxPersistenceViewportRefresh.resizeScheduled",
+    "nativeWorkspace.zmxPersistenceViewportRefresh.sent",
+  ])
   private static let logDateFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZ"
@@ -33,6 +44,7 @@ enum TerminalFocusDebugLog {
     return formatter
   }()
   private static var didCreateLogsDirectory = false
+  private static var sampleStateByEvent: [String: LogSampleState] = [:]
 
   /**
    CDXC:NativeTerminalFocus 2026-05-08-16:41
@@ -82,6 +94,20 @@ enum TerminalFocusDebugLog {
 
     var payload = details
     payload["event"] = event
+    /*
+     CDXC:NativeTerminalFocus 2026-06-16-12:22:
+     Debugging Mode can stay on during normal terminal work, so keydown, text-input, activation-boundary, and zmx viewport probes must not write one support-bundle line per user input. Sample those high-volume events at the writer boundary and carry a suppressed count on the next emitted line so support still sees burst size without megabyte-scale logs.
+     */
+    if !isImportantDiagnostic,
+      !shouldWriteSampledLogEvent(
+        event: event,
+        sampledEvents: sampledEvents,
+        sampleInterval: highVolumeSampleInterval,
+        stateByEvent: &sampleStateByEvent,
+        payload: &payload)
+    {
+      return
+    }
     let serializedPayload = serialize(NativeLogPrivacy.sanitizePayload(payload))
     let line = "[\(logDateFormatter.string(from: Date()))] \(serializedPayload)\n"
 
@@ -151,6 +177,43 @@ enum TerminalFocusDebugLog {
 
 func nullableLogString(_ value: String?) -> Any {
   value ?? NSNull()
+}
+
+struct LogSampleState {
+  var lastWrittenAt: Date
+  var suppressedCount: Int
+}
+
+func shouldWriteSampledLogEvent(
+  event: String,
+  sampledEvents: Set<String>,
+  sampleInterval: TimeInterval,
+  stateByEvent: inout [String: LogSampleState],
+  payload: inout [String: Any],
+  now: Date = Date()
+) -> Bool {
+  guard sampledEvents.contains(event) else {
+    return true
+  }
+  if var state = stateByEvent[event] {
+    if now.timeIntervalSince(state.lastWrittenAt) < sampleInterval {
+      state.suppressedCount += 1
+      stateByEvent[event] = state
+      return false
+    }
+    if state.suppressedCount > 0 {
+      payload["suppressedSinceLastWrite"] = state.suppressedCount
+    }
+  }
+  stateByEvent[event] = LogSampleState(lastWrittenAt: now, suppressedCount: 0)
+  return true
+}
+
+func singleLineLogText(_ message: String) -> String {
+  message
+    .replacingOccurrences(of: "\r\n", with: "\\n")
+    .replacingOccurrences(of: "\r", with: "\\n")
+    .replacingOccurrences(of: "\n", with: "\\n")
 }
 
 func isNativePersistentLogImportantDiagnostic(_ event: String) -> Bool {
@@ -228,7 +291,7 @@ enum NativeLogPrivacy {
   }
 
   static func sanitizeLogLine(_ message: String) -> String {
-    redactSensitiveText(message)
+    singleLineLogText(redactSensitiveText(message))
   }
 
   private static func sanitizeValue(_ value: Any, key: String) -> Any {

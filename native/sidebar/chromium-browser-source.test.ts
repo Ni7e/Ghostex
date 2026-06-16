@@ -257,19 +257,63 @@ describe("chromium browser source", () => {
     expect(projectEditorTabSelectedSource).toContain("setProjectBrowserPersistedState(");
   });
 
+  test("opens Browser new tabs to the project GitHub remote or Google", () => {
+    /*
+     * CDXC:ProjectBrowserTabs 2026-06-16-12:02:
+     * Opening a native Browser + tab should use the project's GitHub remote URL, or Google when no GitHub remote is available. Ghostex-created Browser tabs should not intentionally start on about:blank because that can leave CEF looking stuck on a loading blank page.
+     */
+    expect(nativeSidebarSource).toContain('const DEFAULT_PROJECT_BROWSER_URL = "https://www.google.com/";');
+    expect(nativeSidebarSource).toContain("newBrowserTabUrl?: string;");
+    expect(sharedHostProtocolSource).toContain("newBrowserTabUrl?: string;");
+    expect(hostProtocolSource).toContain("let newBrowserTabUrl: String?");
+    expect(terminalWorkspaceSource).toContain('private static let projectBrowserDefaultNewTabURL = "https://www.google.com/"');
+    expect(terminalWorkspaceSource).toContain("let newBrowserTabUrl = projectEditorBrowserNewTabURL(command.newBrowserTabUrl, fallback: command.url)");
+    expect(terminalWorkspaceSource).toContain("url: newBrowserTabUrl");
+    expect(terminalWorkspaceSource).toContain("initialURL: tabUrl");
+    expect(terminalWorkspaceSource).not.toContain('initialURL: "about:blank"');
+
+    const browserOpenSource = sourceBetween(
+      nativeSidebarSource,
+      "function openProjectGitEditorSurface",
+      "function openProjectTasksEditorSurface",
+    );
+    expect(browserOpenSource).toContain("newBrowserTabUrl: string = seedUrl");
+    expect(browserOpenSource).toContain("const browserNewTabUrl = normalizeProjectBrowserUrl(newBrowserTabUrl) ?? DEFAULT_PROJECT_BROWSER_URL;");
+    expect(browserOpenSource).toContain("newBrowserTabUrl: browserNewTabUrl");
+
+    const browserHandlerSource = sourceBetween(
+      nativeSidebarSource,
+      "async function openGitHubProjectFromTitlebar",
+      "async function resolveProjectBrowserSeedUrl",
+    );
+    expect(browserHandlerSource).toContain("openProjectGitEditorSurface(project, rememberedUrl ?? browserSeedUrl, browserSeedUrl);");
+    expect(browserHandlerSource).toContain("openProjectGitEditorSurface(project, browserSeedUrl, browserSeedUrl);");
+
+    const browserSeedSource = sourceBetween(
+      nativeSidebarSource,
+      "async function resolveProjectBrowserSeedUrl",
+      "function openTasksPlaceholderFromTitlebar",
+    );
+    expect(browserSeedSource).toContain("return DEFAULT_PROJECT_BROWSER_URL;");
+    expect(browserSeedSource).toContain("return githubUrl;");
+  });
+
   test("resets the last Browser top-mode tab to a non-CEF placeholder", () => {
     /*
      * CDXC:ProjectBrowserTabs 2026-06-15-20:48:
      * Closing the last Browser top-mode tab should free the Chromium view while keeping one New Tab placeholder with the address bar. The placeholder persists through React/native tab state and becomes a CEF-backed browser only when the user commits an address.
      *
      * CDXC:ProjectBrowserTabs 2026-06-16-01:46:
-     * The New Tab placeholder is selectable but not closable, because it is the memory-saving empty browser state rather than a real browser tab.
+     * The final New Tab placeholder is selectable but not closable, because it is the memory-saving empty browser state rather than a real browser tab.
+     *
+     * CDXC:ProjectBrowserTabs 2026-06-16-12:59:
+     * The New Tab placeholder becomes closable when another Browser tab exists. Only the final placeholder remains protected so the tab strip cannot be emptied.
      */
     expect(sharedHostProtocolSource).toContain("isPlaceholder?: boolean;");
     expect(nativeSidebarSource).toContain("isPlaceholder?: boolean;");
     expect(hostProtocolSource).toContain("let isPlaceholder: Bool?");
     expect(terminalWorkspaceSource).toContain("var isPlaceholder: Bool");
-    expect(terminalWorkspaceSource).toContain("allowsClose: !tab.isPlaceholder");
+    expect(terminalWorkspaceSource).toContain("allowsClose: !tab.isPlaceholder || session.tabs.count > 1");
     expect(terminalWorkspaceSource).toContain("button.setAllowsClose(allowsTabClosing && tab.allowsClose)");
     expect(terminalWorkspaceSource).toContain("makeProjectEditorBrowserPlaceholderView()");
     expect(terminalWorkspaceSource).toContain("realizeProjectEditorBrowserPlaceholderTab(");
@@ -385,6 +429,14 @@ describe("chromium browser source", () => {
      * immediately left of Profile. Its menu reads project-family history owned
      * by the sidebar, de-duplicates URLs, starts with the latest 20, and pages
      * additional rows through Show More while retaining no more than 140 links.
+     * Long page titles and URLs must truncate before NSMenu measures the row so
+     * the dropdown stays within the 350px max-width budget.
+     * Rows without page favicons should still show a browser icon instead of
+     * leaving the menu image column empty.
+     * Show More must reopen the larger menu at the original History button
+     * anchor, the menu must label itself with "History", icons should align with
+     * the title line, and selecting a row should open a new tab instead of
+     * replacing the current page.
      */
     expect(sharedHostProtocolSource).toContain('type: "setBrowserHistory";');
     expect(sharedHostProtocolSource).toContain("browserHistoryScopeId: string;");
@@ -402,6 +454,7 @@ describe("chromium browser source", () => {
       "private static func describeFrame",
     );
     expect(toolbarSource).toContain("private static let browserHistoryPageSize = 20");
+    expect(toolbarSource).toContain("private static let browserHistoryMenuMaxWidth: CGFloat = 350");
     expect(terminalWorkspaceSource).toContain("private static let browserHistoryMaxItems = 140");
     expect(terminalWorkspaceSource).toContain(".prefix(Self.browserHistoryMaxItems)");
     expect(toolbarSource).toContain("private let historyButton = WebPaneHostView.makeToolbarButton(");
@@ -411,8 +464,24 @@ describe("chromium browser source", () => {
     );
     expect(toolbarSource).toContain("Array(browserHistoryItems.prefix(browserHistoryVisibleLimit))");
     expect(toolbarSource).toContain("NSMenuItem.separator()");
+    expect(toolbarSource).toContain('titleItem.attributedTitle = Self.browserHistoryMenuHeaderTitle()');
+    expect(toolbarSource).toContain("browserHistoryMenuAnchorPointInWindow = resolvedBrowserHistoryMenuAnchorPointInWindow()");
+    expect(toolbarSource).toContain("NSMenu.popUpContextMenu(menu, with: browserHistoryMenuEvent(), for: historyButton)");
     expect(toolbarSource).toContain('title: "Show More"');
+    expect(toolbarSource).toContain("onHistoryNavigation?(url) == true");
+    expect(toolbarSource).toContain("private static func browserHistoryMenuHeaderTitle() -> NSAttributedString");
     expect(toolbarSource).toContain("NativeTooltip.browserHistory(");
+    expect(toolbarSource).toContain("truncatedBrowserHistoryMenuText(");
+    expect(toolbarSource).toContain("browserHistoryMenuTextWidth(");
+    expect(toolbarSource).toContain("private static let browserHistoryMenuIconCanvasSize = CGSize(width: 16, height: 24)");
+    expect(toolbarSource).toContain("return topAlignedBrowserHistoryMenuImage(image)");
+    expect(toolbarSource).toContain("private static func topAlignedBrowserHistoryMenuImage(_ sourceImage: NSImage) -> NSImage");
+    expect(toolbarSource).toContain("return topAlignedBrowserHistoryMenuImage(browserHistoryFallbackMenuImage())");
+    expect(toolbarSource).toContain("private static func browserHistoryFallbackMenuImage() -> NSImage");
+    expect(toolbarSource).toContain("History rows without page favicons still need a visible browser identity icon.");
+    expect(toolbarSource).toContain("private func browserHistoryMenuEvent() -> NSEvent");
+    expect(terminalWorkspaceSource).toContain(".browserOpenInNewTabRequested(sourceSessionId: command.sessionId, url: url.absoluteString)");
+    expect(terminalWorkspaceSource).toContain('reason: "projectEditorBrowserHistory"');
   });
 
   test("caps native tooltip text width through shared helper", () => {

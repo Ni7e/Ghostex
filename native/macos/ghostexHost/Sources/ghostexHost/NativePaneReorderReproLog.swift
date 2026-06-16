@@ -68,6 +68,19 @@ enum NativePaneReorderReproLog {
 }
 
 enum NativePaneTabDragReproLog {
+  private static let highVolumeSampleInterval: TimeInterval = 5
+  private static let sampledEvents = Set([
+    "nativePaneResize.handle.cursorUpdate",
+    "nativePaneResize.handle.mouseDragged",
+    "nativePaneResize.handles.layering",
+    "nativePaneResize.projectEditorCompanion.dragged",
+    "nativePaneTabs.button.mouseDragged",
+    "nativePaneTabs.geometry.layout",
+    "nativePaneTabs.root.hitTest.titleBarPrepass",
+    "nativeSidebarResize.handle.cursorRefresh",
+    "nativeSidebarResize.handle.resetCursorRects",
+    "serializationFailed",
+  ])
   private static let logDateFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZ"
@@ -76,6 +89,7 @@ enum NativePaneTabDragReproLog {
     return formatter
   }()
   private static var didCreateLogsDirectory = false
+  private static var sampleStateByEvent: [String: LogSampleState] = [:]
 
   /**
    CDXC:PaneTabs 2026-05-11-08:33
@@ -105,6 +119,19 @@ enum NativePaneTabDragReproLog {
 
     var payload = details
     payload["event"] = event
+    /*
+     CDXC:PaneTabs 2026-06-16-12:22:
+     Pane-tab, resize-rail, and sidebar-divider diagnostics can fire from cursor rect resets, mouse drags, and relayout loops while Debugging Mode is left on. Sample those repeated event names in the shared writer and include suppressed counts on the next emitted line so long repros stay readable.
+     */
+    if !shouldWriteSampledLogEvent(
+      event: event,
+      sampledEvents: sampledEvents,
+      sampleInterval: highVolumeSampleInterval,
+      stateByEvent: &sampleStateByEvent,
+      payload: &payload)
+    {
+      return
+    }
     let line = "[\(logDateFormatter.string(from: Date()))] \(serialize(NativeLogPrivacy.sanitizePayload(payload)))\n"
 
     do {

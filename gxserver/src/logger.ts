@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { appendFile, mkdir, rename, rm, stat } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { GxserverLogEntry, GxserverLogLevel } from "../protocol/index.js";
 import type { GxserverPaths } from "./paths.js";
@@ -20,6 +20,9 @@ const REDACTED_SECRET = "[redacted:secret]";
 const DEBUGGING_MODE_SETTINGS_CACHE_MS = 1_000;
 const GXSERVER_LOG_FILE_MAX_BYTES = 25 * 1024 * 1024;
 const GXSERVER_LOG_FILE_MAX_ROTATIONS = 3;
+const GXSERVER_LOG_FILE_MAX_LINES = 25_000;
+const GXSERVER_LOG_RETENTION_STARTUP_DELAY_MS = 60_000;
+const scheduledRetentionLogFiles = new Set<string>();
 
 interface DebuggingModeCache {
   checkedAtMs: number;
@@ -47,6 +50,7 @@ Preview fields are user-owned content by default because they commonly contain t
 */
 export function createGxserverLogger(paths: GxserverPaths): GxserverLogger {
   const debuggingModeCache: DebuggingModeCache = { checkedAtMs: 0, enabled: false };
+  scheduleGxserverLogLineRetention(paths);
   return {
     async log(entry: GxserverLogInput): Promise<void> {
       if (!shouldPersistGxserverLogEntry(entry.level, () => readDebuggingModeEnabled(paths, debuggingModeCache))) {
@@ -58,6 +62,42 @@ export function createGxserverLogger(paths: GxserverPaths): GxserverLogger {
       await appendFile(paths.logFile, `${line}\n`, "utf8");
     },
   };
+}
+
+export function scheduleGxserverLogLineRetention(
+  paths: GxserverPaths,
+  options: { delayMs?: number; maxLines?: number } = {},
+): void {
+  const maxLines = options.maxLines ?? GXSERVER_LOG_FILE_MAX_LINES;
+  const delayMs = options.delayMs ?? GXSERVER_LOG_RETENTION_STARTUP_DELAY_MS;
+  const scheduleKey = `${paths.logFile}:${maxLines}`;
+  if (scheduledRetentionLogFiles.has(scheduleKey)) {
+    return;
+  }
+  scheduledRetentionLogFiles.add(scheduleKey);
+  /*
+  CDXC:GxserverLogs 2026-06-16-12:22:
+  gxserver JSONL rotations can carry old warning storms long after the current daemon is quiet. Wait one minute after logger startup, then trim retained `gxserver.jsonl*` output so support bundles stay bounded without interrupting the current diagnostic stream.
+
+  CDXC:GxserverLogs 2026-06-16-14:09:
+  Retention now keeps only the active/latest gxserver split file and deletes older `gxserver.jsonl.N` siblings before trimming the retained file to 25,000 lines. Prefer the unrotated active file when it exists because the daemon writes there after startup.
+  */
+  const timer = setTimeout(() => {
+    void pruneGxserverLogLines(paths, maxLines).catch(() => {
+      // Retention is best-effort cleanup; logging this failure would recurse into the same support file.
+    });
+  }, delayMs);
+  timer.unref();
+}
+
+export async function pruneGxserverLogLines(paths: GxserverPaths, maxLines = GXSERVER_LOG_FILE_MAX_LINES): Promise<void> {
+  const logFiles = gxserverLogFiles(paths.logFile);
+  const retainedLogFile = await retainedGxserverLogFile(paths.logFile, logFiles);
+  if (!retainedLogFile) {
+    return;
+  }
+  await Promise.all(logFiles.filter((logFile) => logFile !== retainedLogFile).map((logFile) => rm(logFile, { force: true })));
+  await pruneLogFileToMaxLines(retainedLogFile, maxLines);
 }
 
 export function normalizeLogEntry(entry: GxserverLogInput): GxserverLogEntry {
@@ -163,6 +203,61 @@ async function readFileSize(filePath: string): Promise<number> {
 
 function rotatedGxserverLogFile(logFile: string, index: number): string {
   return `${logFile}.${index}`;
+}
+
+function gxserverLogFiles(logFile: string): string[] {
+  return [
+    logFile,
+    ...Array.from({ length: GXSERVER_LOG_FILE_MAX_ROTATIONS }, (_, index) => rotatedGxserverLogFile(logFile, index + 1)),
+  ];
+}
+
+async function retainedGxserverLogFile(activeLogFile: string, logFiles: string[]): Promise<string | undefined> {
+  const activeStats = await statLogFile(activeLogFile);
+  if (activeStats?.isFile()) {
+    return activeLogFile;
+  }
+  let retainedLogFile: string | undefined;
+  let retainedMtimeMs = Number.NEGATIVE_INFINITY;
+  for (const logFile of logFiles) {
+    const stats = await statLogFile(logFile);
+    if (stats?.isFile() && stats.mtimeMs > retainedMtimeMs) {
+      retainedLogFile = logFile;
+      retainedMtimeMs = stats.mtimeMs;
+    }
+  }
+  return retainedLogFile;
+}
+
+async function statLogFile(logFile: string) {
+  try {
+    return await stat(logFile);
+  } catch (error) {
+    if (isNodeErrorCode(error, "ENOENT")) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function pruneLogFileToMaxLines(logFile: string, maxLines: number): Promise<void> {
+  if (maxLines <= 0) {
+    return;
+  }
+  let content: string;
+  try {
+    content = await readFile(logFile, "utf8");
+  } catch (error) {
+    if (isNodeErrorCode(error, "ENOENT")) {
+      return;
+    }
+    throw error;
+  }
+  const lines = content.endsWith("\n") ? content.slice(0, -1).split("\n") : content.split("\n");
+  if (lines.length <= maxLines) {
+    return;
+  }
+  await writeFile(logFile, `${lines.slice(-maxLines).join("\n")}\n`, "utf8");
 }
 
 function isNodeErrorCode(error: unknown, code: string): boolean {

@@ -2,6 +2,7 @@ export type SidebarGitAction =
   | "commit"
   | "push"
   | "pr"
+  | "syncRemote"
   | "syncMain"
   | "multiRelease"
   | "release";
@@ -194,11 +195,27 @@ export function getSidebarGitDisabledReason(
   }
 
   if (!state.branch) {
-    return "Create and checkout a branch before pushing or creating a PR.";
+    return action === "syncRemote"
+      ? "Create and checkout a branch before syncing."
+      : "Create and checkout a branch before pushing or creating a PR.";
   }
 
   if (action === "syncMain") {
     return state.isWorktree ? undefined : "Open a worktree project to sync with main.";
+  }
+
+  if (action === "syncRemote") {
+    /**
+     * CDXC:TitlebarGit 2026-06-16-07:31:
+     * The macOS titlebar sync row is a direct remote branch sync, not the
+     * worktree-only Sync with Main agent workflow. Enable it for any checked-out
+     * branch with an upstream or an origin remote so normal projects can pull
+     * and push from the titlebar menu.
+     */
+    if (state.hasUpstream || state.hasOriginRemote) {
+      return undefined;
+    }
+    return 'Add an "origin" remote or set an upstream before syncing.';
   }
 
   if (state.behindCount > 0) {

@@ -3,6 +3,21 @@ import Foundation
 enum NativeLayoutLayeringDebugLog {
   private static let maxLogFileBytes: UInt64 = 25 * 1024 * 1024
   private static let maxRotatedLogFiles = 3
+  private static let highVolumeSampleInterval: TimeInterval = 5
+  private static let sampledEvents = Set([
+    "nativeFocusTrace.paneContentHitRoutedByLayout",
+    "nativePaneLayoutTrace.layoutSync.posted",
+    "nativePaneLayoutTrace.paneOwnerSelectionApplied",
+    "nativePaneLayoutTrace.paneTabSelected.applied",
+    "nativePaneLayoutTrace.paneTabSelected.received",
+    "nativePaneLayoutTrace.paneTabSelected.unchanged",
+    "nativePaneLayoutTrace.terminalFocused.applied",
+    "nativePaneLayoutTrace.terminalFocused.received",
+    "nativeWorkspace.hitTest.projectEditorActiveOverBrowserPoint",
+    "nativeWorkspace.projectEditor.layout.active",
+    "nativeWorkspace.setActiveTerminalSet.applied",
+    "nativeWorkspace.setActiveTerminalSet.received",
+  ])
   private static let logDateFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZ"
@@ -11,6 +26,7 @@ enum NativeLayoutLayeringDebugLog {
     return formatter
   }()
   private static var didCreateLogsDirectory = false
+  private static var sampleStateByEvent: [String: LogSampleState] = [:]
 
   /**
    CDXC:WorkspaceLayeringDiagnostics 2026-05-28-04:36:
@@ -40,6 +56,20 @@ enum NativeLayoutLayeringDebugLog {
 
     var payload = details
     payload["event"] = event
+    /*
+     CDXC:WorkspaceLayeringDiagnostics 2026-06-16-12:22:
+     Layout and hit-test investigations need transition evidence, not one line for every repeated focus, active-layout, or pane-selection tick. Sample known high-volume Debugging Mode events at the writer boundary and preserve burst size as `suppressedSinceLastWrite`.
+     */
+    if !isImportantDiagnostic,
+      !shouldWriteSampledLogEvent(
+        event: event,
+        sampledEvents: sampledEvents,
+        sampleInterval: highVolumeSampleInterval,
+        stateByEvent: &sampleStateByEvent,
+        payload: &payload)
+    {
+      return
+    }
     let line = "[\(logDateFormatter.string(from: Date()))] \(serialize(NativeLogPrivacy.sanitizePayload(payload)))\n"
 
     do {

@@ -110,6 +110,24 @@ describe("normalizeghostexSettings", () => {
     ]);
   });
 
+  test("defaults beta features off and normalizes the beta gate", () => {
+    /*
+     * CDXC:BetaFeatures 2026-06-16-13:08:
+     * Show Beta features should be disabled for new installs and missing
+     * settings, with only an explicit boolean true exposing beta-only surfaces.
+     */
+    expect(DEFAULT_ghostex_SETTINGS.showBetaFeatures).toBe(false);
+    expect(normalizeghostexSettings({})).toMatchObject({
+      showBetaFeatures: false,
+    });
+    expect(normalizeghostexSettings({ showBetaFeatures: true })).toMatchObject({
+      showBetaFeatures: true,
+    });
+    expect(normalizeghostexSettings({ showBetaFeatures: "true" })).toMatchObject({
+      showBetaFeatures: false,
+    });
+  });
+
   test("normalizes the default prompt agent setting", () => {
     /**
      * CDXC:PromptAgents 2026-05-28-07:15:
@@ -768,16 +786,30 @@ describe("normalizeghostexSettings", () => {
      * CDXC:SettingsTheming 2026-06-15-21:35:
      * The old custom contrast enable toggle is retired. Normalize the retained
      * compatibility field to true so visible Theming controls always apply.
+     *
+     * CDXC:SidebarTitlebarColors 2026-06-16-14:28:
+     * The custom chrome default is 93 contrast with white #FFFFFF tint. Missing
+     * settings must use that explicit slider default, while valid legacy saved
+     * background colors still seed the slider during migration.
      */
     expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarColorsEnabled).toBe(true);
     expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarForegroundColor).toBe("#d8d8d8");
-    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor).toBe("#808080");
-    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundDarknessPercent).toBe(95);
-    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundColor).toBe("#0e0e0e");
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor).toBe("#ffffff");
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundDarknessPercent).toBe(93);
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundColor).toBe("#141414");
     expect(normalizeghostexSettings({})).toMatchObject({
       customSidebarTitlebarColorsEnabled: true,
       customSidebarTitlebarForegroundColor: "#d8d8d8",
-      customSidebarTitlebarBackgroundTintColor: "#808080",
+      customSidebarTitlebarBackgroundTintColor: "#ffffff",
+      customSidebarTitlebarBackgroundDarknessPercent: 93,
+      customSidebarTitlebarBackgroundColor: "#141414",
+    });
+    expect(
+      normalizeghostexSettings({
+        customSidebarTitlebarBackgroundColor: "#0e0e0e",
+      }),
+    ).toMatchObject({
+      customSidebarTitlebarBackgroundTintColor: "#ffffff",
       customSidebarTitlebarBackgroundDarknessPercent: 95,
       customSidebarTitlebarBackgroundColor: "#0e0e0e",
     });
@@ -806,7 +838,7 @@ describe("normalizeghostexSettings", () => {
     ).toMatchObject({
       customSidebarTitlebarColorsEnabled: true,
       customSidebarTitlebarForegroundColor: "#d8d8d8",
-      customSidebarTitlebarBackgroundTintColor: "#808080",
+      customSidebarTitlebarBackgroundTintColor: "#ffffff",
       customSidebarTitlebarBackgroundDarknessPercent: 85,
       customSidebarTitlebarBackgroundColor: "#2a2a2a",
     });
@@ -817,12 +849,12 @@ describe("normalizeghostexSettings", () => {
       }),
     ).toMatchObject({
       customSidebarTitlebarForegroundColor: "#d8d8d8",
-      customSidebarTitlebarBackgroundDarknessPercent: 95,
-      customSidebarTitlebarBackgroundColor: "#0e0e0e",
+      customSidebarTitlebarBackgroundDarknessPercent: 93,
+      customSidebarTitlebarBackgroundColor: "#141414",
     });
   });
 
-  test("defaults floating session status indicators off and keeps four selectable sizes", () => {
+  test("defaults floating session status indicators on and keeps four selectable sizes", () => {
     /**
      * CDXC:SessionStatusIndicators 2026-05-07-18:20
      * Medium is the default because it is 50% of the current approved X-Large
@@ -834,18 +866,23 @@ describe("normalizeghostexSettings", () => {
      * while remaining independent from the selected indicator size.
      *
      * CDXC:SessionStatusIndicators 2026-06-15-02:01:
-     * Floating status badges are disabled by default so new installs do not show
-     * desktop floating session indicators unless the user enables that surface.
+     * Floating status badges originally started disabled so new installs did
+     * not show desktop floating session indicators unless the user enabled that
+     * surface.
      *
      * CDXC:SessionStatusIndicators 2026-06-15-14:00:
      * The floating status toggle remains an explicit Status Indicators setting,
      * so normalization should preserve it without relying on sidebar preset data.
+     *
+     * CDXC:SessionStatusIndicators 2026-06-16-09:20:
+     * New installs should show floating session indicators by default. Existing
+     * explicit hide/show values still normalize without preset involvement.
      */
-    expect(DEFAULT_ghostex_SETTINGS.hideFloatingSessionStatusIndicators).toBe(true);
+    expect(DEFAULT_ghostex_SETTINGS.hideFloatingSessionStatusIndicators).toBe(false);
     expect(DEFAULT_ghostex_SETTINGS.hideMenuBarSessionStatusIndicators).toBe(false);
     expect(DEFAULT_ghostex_SETTINGS.sessionStatusIndicatorSize).toBe("medium");
     expect(normalizeghostexSettings({})).toMatchObject({
-      hideFloatingSessionStatusIndicators: true,
+      hideFloatingSessionStatusIndicators: false,
       hideMenuBarSessionStatusIndicators: false,
       sessionStatusIndicatorSize: "medium",
     });

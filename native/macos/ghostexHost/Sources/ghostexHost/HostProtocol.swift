@@ -454,6 +454,7 @@ struct CreateWebPane: Decodable {
   let cwd: String?
   let projectId: String?
   let sessionId: String
+  let showBetaFeatures: Bool?
   let threadId: String?
   let title: String
   let url: String
@@ -572,8 +573,14 @@ struct CreateProjectEditorPane: Decodable {
   let browserFeedbackTool: String?
   let companionPaneHidden: Bool?
   let mode: String?
+  /*
+   CDXC:ProjectBrowserTabs 2026-06-16-12:02:
+   Browser new-tab creation needs a project-scoped non-blank URL separate from the active tab URL. The sidebar resolves this to the project's GitHub remote URL or Google before native creates a CEF tab.
+   */
+  let newBrowserTabUrl: String?
   let projectId: String
   let projectTitle: String?
+  let showBetaFeatures: Bool?
   let showsBrowserToolbar: Bool?
   let showsProjectTabs: Bool?
   let title: String
@@ -650,6 +657,13 @@ struct SetActiveTerminalSet: Decodable {
   let commandsPanelMode: String?
   let clickToWakeSleepingSessions: Bool?
   let debuggingMode: Bool?
+  /**
+   CDXC:BetaFeatures 2026-06-16-13:08:
+   React Settings owns the persisted beta gate, but AppKit owns browser address
+   bar buttons. Decode the flag in layout sync so existing native browser panes
+   can hide or show beta toolbar controls without being recreated.
+   */
+  let showBetaFeatures: Bool?
   let focusRequestId: Int?
   /**
    CDXC:PaneFocus 2026-06-13-23:13:

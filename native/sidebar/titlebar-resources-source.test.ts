@@ -12,6 +12,82 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("native titlebar Resources source", () => {
+  test("keeps sparse resource sections packed at the top of the panel", () => {
+    /*
+     * CDXC:TitlebarResources 2026-06-16-09:49:
+     * Resources sections must not stretch apart when too few items fill the
+     * fixed-height dropdown. Extra height belongs below the final section.
+     */
+    const scrollStylesMatch = titlebarHostSource.match(
+      /\n  \.titlebar-resources-scroll \{[\s\S]*?\n  \.titlebar-resources-scroll\[data-loading="true"\]/,
+    );
+    expect(scrollStylesMatch).not.toBeNull();
+    const scrollStyles = scrollStylesMatch?.[0] ?? "";
+
+    expect(titlebarHostSource).toContain("CDXC:TitlebarResources 2026-06-16-09:49:");
+    expect(scrollStyles).toContain("align-content: start;");
+    expect(scrollStyles).toContain("grid-auto-rows: max-content;");
+  });
+
+  test("shows pointer cursor only on actual resource buttons", () => {
+    /*
+     * CDXC:TitlebarResources 2026-06-16-10:36:
+     * CPU/RAM metric chips are read-only status, even inside expandable rows.
+     * Keep pointer cursor reserved for enabled Resources buttons.
+     *
+     * CDXC:TitlebarResources 2026-06-16-12:34:
+     * The macOS titlebar Resources modal should not show the hand cursor over
+     * expandable row chrome; only explicit enabled buttons get pointer feedback.
+     */
+    const buttonCursorStyles = sourceBetween(
+      titlebarHostSource,
+      ".titlebar-resources-panel button:not(:disabled) {",
+      ".titlebar-resources-header {",
+    );
+    const rowStyles = sourceBetween(
+      titlebarHostSource,
+      ".titlebar-resource-row {",
+      ".titlebar-resources-empty {",
+    );
+
+    expect(titlebarHostSource).toContain("CDXC:TitlebarResources 2026-06-16-10:36:");
+    expect(titlebarHostSource).toContain("CDXC:TitlebarResources 2026-06-16-12:34:");
+    expect(buttonCursorStyles).toContain("cursor: pointer;");
+    expect(buttonCursorStyles).toContain(".titlebar-resources-panel button:disabled");
+    expect(buttonCursorStyles).toContain("cursor: default;");
+    expect(rowStyles).not.toContain('.titlebar-resource-row[data-expandable="true"]');
+    expect(rowStyles).toMatch(/\.titlebar-resource-metrics,\s*\.titlebar-resource-child-metrics \{[\s\S]*cursor: default;/);
+    expect(rowStyles).toMatch(/\.titlebar-resource-metric \{[\s\S]*cursor: default;/);
+  });
+
+  test("keeps row actions and fixed metric cards aligned across hierarchy levels", () => {
+    /*
+     * CDXC:TitlebarResources 2026-06-16-07:37:
+     * Resources row buttons must remain on the same line as CPU/RAM metrics,
+     * and expanded child-process CPU/RAM cards must use the same smaller fixed
+     * widths as parent rows.
+     */
+    const rowMarkup = sourceBetween(
+      titlebarHostSource,
+      '<div className="titlebar-resource-metrics" aria-label="Resource usage">',
+      "function getResourceChildProcessName",
+    );
+    const rowStyles = sourceBetween(
+      titlebarHostSource,
+      ".titlebar-resource-row {",
+      ".titlebar-resources-empty {",
+    );
+
+    expect(rowMarkup).toContain('className="titlebar-resource-child-metrics"');
+    expect(rowStyles).toContain("grid-template-columns: minmax(0, 1fr) 24px 24px 200px");
+    expect(rowStyles).toContain("grid-template-columns: 86px 106px");
+    expect(rowStyles).toContain("grid-template-columns: minmax(0, 1fr) 200px");
+    expect(rowStyles).toMatch(/\.titlebar-resource-main \{[\s\S]*grid-row: 1;/);
+    expect(rowStyles).toMatch(/\.titlebar-resource-metrics \{[\s\S]*grid-row: 1;/);
+    expect(rowStyles).toMatch(/\.titlebar-resource-focus-button \{[\s\S]*grid-row: 1;/);
+    expect(rowStyles).toMatch(/\.titlebar-resource-kill-button \{[\s\S]*grid-row: 1;/);
+  });
+
   test("does not double-wrap gxserver presentation session ids for row actions", () => {
     /*
      * CDXC:TitlebarResources 2026-06-15-15:27:

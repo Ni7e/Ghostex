@@ -459,6 +459,7 @@ export type GxserverGitAction =
   | "listRemotes"
   | "listUntracked"
   | "merge"
+  | "pullFastForward"
   | "push"
   | "pushSetUpstream"
   | "remoteBranchExists"

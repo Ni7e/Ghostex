@@ -11,35 +11,24 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   DEFAULT_SIDEBAR_COMMAND_ICON,
-  DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
   getSidebarCommandIconLabel,
-  normalizeSidebarCommandIconColor,
   type SidebarCommandIcon,
 } from "../shared/sidebar-command-icons";
 import { SIDEBAR_COMMAND_ICON_OPTIONS, SidebarCommandIconGlyph } from "./sidebar-command-icon";
 
 export type CommandIconPickerProps = {
   icon?: SidebarCommandIcon;
-  iconColor: string;
   onIconChange: (icon: SidebarCommandIcon) => void;
-  onIconColorChange: (iconColor: string) => void;
 };
 
 export function CommandIconPicker({
   icon,
-  iconColor,
   onIconChange,
-  onIconColorChange,
 }: CommandIconPickerProps) {
-  const [colorText, setColorText] = useState(iconColor);
   const [isOpen, setIsOpen] = useState(false);
   const [iconListElement, setIconListElement] = useState<HTMLDivElement | null>(null);
   const labelId = useId();
   const selectedIcon = icon ?? DEFAULT_SIDEBAR_COMMAND_ICON;
-
-  useEffect(() => {
-    setColorText(iconColor);
-  }, [iconColor]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -70,19 +59,6 @@ export function CommandIconPicker({
     };
   }, [iconListElement, isOpen]);
 
-  const commitColorText = () => {
-    const normalizedColor = normalizeSidebarCommandIconColor(colorText);
-    if (!normalizedColor) {
-      setColorText(iconColor);
-      return;
-    }
-
-    if (normalizedColor !== iconColor) {
-      onIconColorChange(normalizedColor);
-    }
-    setColorText(normalizedColor);
-  };
-
   return (
     <div className="command-icon-picker-fields">
       <div className="command-config-field command-icon-picker-field">
@@ -102,7 +78,6 @@ export function CommandIconPicker({
                   <span aria-hidden="true" className="command-button-icon-shell">
                     <SidebarCommandIconGlyph
                       className="command-button-leading-icon"
-                      color={iconColor}
                       icon={selectedIcon}
                       size={16}
                     />
@@ -143,6 +118,11 @@ export function CommandIconPicker({
                * CommandInput sits inside InputGroup without an inline-start addon,
                * so add pl-3 here to match other Settings fields; InputGroup only
                * applies horizontal inset when start/end addons are present.
+               *
+               * CDXC:CommandIcons 2026-06-16-07:48:
+               * Action icons inherit the surrounding titlebar/settings glyph
+               * color. Do not expose or apply per-action icon colors because
+               * action glyphs should match the titlebar icons beside them.
                */}
               <CommandInput
                 aria-label="Search icons"
@@ -166,10 +146,6 @@ export function CommandIconPicker({
                       key={option.icon}
                       onSelect={() => {
                         onIconChange(option.icon);
-                        if (!normalizeSidebarCommandIconColor(colorText)) {
-                          onIconColorChange(DEFAULT_SIDEBAR_COMMAND_ICON_COLOR);
-                          setColorText(DEFAULT_SIDEBAR_COMMAND_ICON_COLOR);
-                        }
                         setIsOpen(false);
                       }}
                       value={option.label}
@@ -177,11 +153,6 @@ export function CommandIconPicker({
                       <span aria-hidden="true" className="command-button-icon-shell">
                         <SidebarCommandIconGlyph
                           className="command-button-leading-icon"
-                          color={
-                            selectedIcon === option.icon
-                              ? iconColor
-                              : DEFAULT_SIDEBAR_COMMAND_ICON_COLOR
-                          }
                           icon={option.icon}
                           size={16}
                         />
@@ -195,30 +166,6 @@ export function CommandIconPicker({
           </PopoverContent>
         </Popover>
       </div>
-      <label className="command-config-field">
-        <span className="command-config-label">Icon Color</span>
-        <div className="command-icon-color-row">
-          <input
-            aria-label="Icon color"
-            className="command-icon-color-swatch"
-            onChange={(event) => {
-              onIconColorChange(event.currentTarget.value);
-              setColorText(event.currentTarget.value);
-            }}
-            type="color"
-            value={iconColor}
-          />
-          <input
-            className="group-title-input command-config-input command-icon-color-text"
-            inputMode="text"
-            onBlur={commitColorText}
-            onChange={(event) => setColorText(event.currentTarget.value)}
-            placeholder={DEFAULT_SIDEBAR_COMMAND_ICON_COLOR}
-            spellCheck={false}
-            value={colorText}
-          />
-        </div>
-      </label>
     </div>
   );
 }

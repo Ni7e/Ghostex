@@ -98,4 +98,39 @@ describe("local-first sidebar close source", () => {
       "isVisible: sessions.length > 0 ? panel.isVisible : false",
     );
   });
+
+  test("keeps project-editor mode when hiding commands with the companion collapsed", () => {
+    /*
+     * CDXC:CommandsPanel 2026-06-16-08:19:
+     * Hiding the Commands panel from Source, Browser, or Kanban with the
+     * companion pane collapsed must not restore workspace-terminal focus and
+     * implicitly switch the titlebar back to Agents. The explicit Agents button
+     * remains responsible for restoring the last focused workspace terminal.
+     */
+    const hideCommandsPanelSource = sourceBetween(
+      nativeSidebarSource,
+      "function hideCommandsPanelForActiveProject(): void {",
+      "function toggleCommandsPanelForActiveProject(): void {",
+    );
+    const commandsPanelFocusPolicySource = sourceBetween(
+      nativeSidebarSource,
+      "function shouldRestoreSessionFocusAfterCommandsPanelHide",
+      "function focusProjectEditorCompanionSessionAfterExpand",
+    );
+    const agentsModeSource = sourceBetween(
+      nativeSidebarSource,
+      "function openAgentsModeFromTitlebar(): void {",
+      "function toggleProjectEditorCompanionFromTitlebar(): void {",
+    );
+
+    expect(hideCommandsPanelSource).toContain("shouldRestoreSessionFocusAfterCommandsPanelHide(project)");
+    expect(commandsPanelFocusPolicySource).toContain("surfaceState?.isOpen !== true");
+    expect(commandsPanelFocusPolicySource).toContain("project.projectEditorCompanionPaneHidden !== true");
+    expect(agentsModeSource.indexOf("agentsModeFocusSessionIdForProject(project)")).toBeLessThan(
+      agentsModeSource.indexOf("activateWorkspaceSurfaceForProject(project.projectId)"),
+    );
+    expect(agentsModeSource).toContain(
+      "focusTerminal(createCombinedProjectSessionId(project.projectId, focusSessionId));",
+    );
+  });
 });

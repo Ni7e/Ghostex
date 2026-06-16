@@ -161,6 +161,12 @@ type TicketFormDraft = {
   tshirt?: TshirtSize;
 };
 
+type PendingBoardStatusMove = {
+  beadsStatus: string;
+  statusKey: BoardStatusKey;
+  token: number;
+};
+
 type ConversationActionState =
   | { kind: "associate"; beadId: string }
   | { kind: "jump"; linkId: string }
@@ -389,6 +395,45 @@ function createEmptyTicketFormDraft(): TicketFormDraft {
   };
 }
 
+function applyPendingBoardStatusMoves(
+  issues: BeadsIssue[],
+  pendingMoves: Map<string, PendingBoardStatusMove>,
+): BeadsIssue[] {
+  if (pendingMoves.size === 0) {
+    return issues;
+  }
+  let changed = false;
+  const nextIssues = issues.map((issue) => {
+    const pendingMove = pendingMoves.get(issue.id);
+    if (!pendingMove || issue.status === pendingMove.beadsStatus) {
+      return issue;
+    }
+    changed = true;
+    return { ...issue, status: pendingMove.beadsStatus };
+  });
+  return changed ? nextIssues : issues;
+}
+
+function upsertProjectBoardIssue(issues: BeadsIssue[], issue: BeadsIssue): BeadsIssue[] {
+  const index = issues.findIndex((candidate) => candidate.id === issue.id);
+  if (index === -1) {
+    return [...issues, issue];
+  }
+  const nextIssues = [...issues];
+  nextIssues[index] = { ...nextIssues[index], ...issue };
+  return nextIssues;
+}
+
+function upsertProjectBoardTicket(tickets: BoardTicket[], ticket: BoardTicket): BoardTicket[] {
+  const index = tickets.findIndex((candidate) => candidate.id === ticket.id);
+  if (index === -1) {
+    return [...tickets, ticket];
+  }
+  const nextTickets = [...tickets];
+  nextTickets[index] = { ...nextTickets[index], ...ticket };
+  return nextTickets;
+}
+
 function ProjectBoardApp() {
   const urlSearchParams = new URLSearchParams(window.location.search);
   const projectName = urlSearchParams.get("projectName") || "Project";
@@ -425,6 +470,8 @@ function ProjectBoardApp() {
   const [newTicketStartLocation, setNewTicketStartLocation] =
     useState<ProjectBoardStartLocation>("currentProject");
   const createInFlightRef = useRef(false);
+  const pendingStatusMovesRef = useRef(new Map<string, PendingBoardStatusMove>());
+  const pendingStatusMoveSerialRef = useRef(0);
   const [deleteConfirmingTicketId, setDeleteConfirmingTicketId] = useState("");
   const [ticketContextMenu, setTicketContextMenu] = useState<TicketContextMenuState>();
   const [contextMenuDeletingTicketId, setContextMenuDeletingTicketId] = useState("");
@@ -523,6 +570,10 @@ function ProjectBoardApp() {
    * CDXC:ProjectBoardForms 2026-06-09-15:36:
    * Typing in New automation, edit-ticket, or new-ticket fields must never blank the Project/Kanban page.
    * Snapshot input values before functional state updates because React clears event currentTarget after dispatch and delayed updaters cannot safely read from the event object.
+   *
+   * CDXC:ProjectBoardLocalFirst 2026-06-16-13:16:
+   * Kanban create and drag/drop interactions must update the board from local React state as soon as Beads returns a bead id or the user drops a card.
+   * Keep status moves, generated titles, dependency/label mutations, and full Beads refreshes as background reconciliation so the page stays responsive while durable storage catches up.
    */
   const isRefreshingRef = useRef(false);
   const issuesSignatureRef = useRef("");
@@ -739,6 +790,78 @@ function ProjectBoardApp() {
     [conversationState.debuggingMode, projectEditorId, projectId, projectPath, remoteMachineId],
   );
 
+  const setLocalTicketStatus = useCallback(
+    (ticketId: string, statusKey: BoardStatusKey, beadsStatus: string) => {
+      setAllIssues((current) =>
+        current.map((candidate) =>
+          candidate.id === ticketId ? { ...candidate, status: beadsStatus } : candidate,
+        ),
+      );
+      setTickets((current) =>
+        current.map((candidate) =>
+          candidate.id === ticketId
+            ? { ...candidate, boardStatus: statusKey, status: beadsStatus }
+            : candidate,
+        ),
+      );
+      setDetail((current) =>
+        current.ticket?.id === ticketId
+          ? {
+              ...current,
+              status: statusKey,
+              ticket: { ...current.ticket, boardStatus: statusKey, status: beadsStatus },
+            }
+          : current,
+      );
+    },
+    [],
+  );
+
+  const upsertLocalIssue = useCallback(
+    (issue: BeadsIssue) => {
+      setAllIssues((current) => upsertProjectBoardIssue(current, issue));
+      setTickets((current) => {
+        const localTicket = toCreatedBoardTicket(issue, current, displayKey);
+        return localTicket ? upsertProjectBoardTicket(current, localTicket) : current;
+      });
+      setDetail((current) =>
+        current.ticket?.id === issue.id
+          ? {
+              ...current,
+              description: issue.description ?? current.description,
+              labels: issue.labels ?? current.labels,
+              priority:
+                issue.priority === undefined ? current.priority : prioritySelectValue(issue.priority),
+              status: beadsStatusToBoardStatus(issue.status),
+              title: issue.title,
+              tshirt: estimateToTshirt(issue.estimate),
+              ticket: {
+                ...current.ticket,
+                ...issue,
+                boardStatus: beadsStatusToBoardStatus(issue.status),
+                displayId: current.ticket.displayId,
+              },
+            }
+          : current,
+      );
+    },
+    [displayKey],
+  );
+
+  const setLocalTicketTitle = useCallback((ticketId: string, title: string) => {
+    setAllIssues((current) =>
+      current.map((candidate) => (candidate.id === ticketId ? { ...candidate, title } : candidate)),
+    );
+    setTickets((current) =>
+      current.map((candidate) => (candidate.id === ticketId ? { ...candidate, title } : candidate)),
+    );
+    setDetail((current) =>
+      current.ticket?.id === ticketId
+        ? { ...current, title, ticket: { ...current.ticket, title } }
+        : current,
+    );
+  }, []);
+
   const loadTickets = useCallback(async (options: BoardRefreshOptions = {}) => {
     const mode = options.mode ?? "manual";
     const includeLabels = options.includeLabels ?? mode !== "background";
@@ -759,7 +882,8 @@ function ProjectBoardApp() {
         await ensureWorkflowStatuses(runBeads);
       }
       const payload = await runBeads({ action: "listIssues" });
-      const issues = normalizeBeadsPayload<BeadsIssue[]>(payload, Array.isArray(payload) ? payload : []);
+      const rawIssues = normalizeBeadsPayload<BeadsIssue[]>(payload, Array.isArray(payload) ? payload : []);
+      const issues = applyPendingBoardStatusMoves(rawIssues, pendingStatusMovesRef.current);
       const issuesSignature = `${displayKey}:${createIssuesSignature(issues)}`;
       if (issuesSignature !== issuesSignatureRef.current) {
         issuesSignatureRef.current = issuesSignature;
@@ -978,24 +1102,31 @@ function ProjectBoardApp() {
     if (!column || !ticket || ticket.boardStatus === statusKey) {
       return;
     }
-    setTickets((current) =>
-      current.map((candidate) =>
-        candidate.id === ticketId
-          ? { ...candidate, boardStatus: statusKey, status: column.beadsStatus }
-          : candidate,
-      ),
-    );
+    const token = pendingStatusMoveSerialRef.current + 1;
+    pendingStatusMoveSerialRef.current = token;
+    pendingStatusMovesRef.current.set(ticketId, {
+      beadsStatus: column.beadsStatus,
+      statusKey,
+      token,
+    });
+    setLocalTicketStatus(ticketId, statusKey, column.beadsStatus);
     try {
       await runBeads({
         action: "updateStatus",
         issueId: ticketId,
         status: column.beadsStatus,
       });
-      await loadTickets({ includeLabels: false, mode: "mutation" });
+      if (pendingStatusMovesRef.current.get(ticketId)?.token !== token) {
+        return;
+      }
+      pendingStatusMovesRef.current.delete(ticketId);
+      void loadTickets({ includeLabels: false, mode: "background" });
     } catch (error) {
-      setTickets((current) =>
-        current.map((candidate) => (candidate.id === ticketId ? ticket : candidate)),
-      );
+      if (pendingStatusMovesRef.current.get(ticketId)?.token !== token) {
+        return;
+      }
+      pendingStatusMovesRef.current.delete(ticketId);
+      setLocalTicketStatus(ticketId, ticket.boardStatus, ticket.status);
       setErrorMessage(error instanceof Error ? error.message : "Could not move the ticket.");
     }
   };
@@ -1162,61 +1293,6 @@ function ProjectBoardApp() {
           title,
         });
       }
-      if (startAfterCreate && createdIssue?.id) {
-        const createdTicket = toCreatedBoardTicket(createdIssue, allIssues, displayKey);
-        if (createdTicket) {
-          logProjectBoardDebug("projectBoard.createTicket.startAfterCreate.requested", {
-            beadId: createdTicket.id,
-            displayId: createdTicket.displayId,
-            startLocation,
-          });
-          const didStart = await startTicketWork(createdTicket, { startLocation });
-          if (!didStart) {
-            return;
-          }
-          didStartCreatedTicket = true;
-        }
-      }
-      if (createdIssue?.id) {
-        await syncDependencies(createdIssue.id, draft.blockedByIds, draft.blockingIds);
-        if (draft.status !== "todo" && !didStartCreatedTicket) {
-          await runBeads({
-            action: "updateStatus",
-            issueId: createdIssue.id,
-            status: boardStatusBeadsValue(draft.status),
-          });
-          createdIssue = {
-            ...createdIssue,
-            status: boardStatusBeadsValue(draft.status),
-          };
-        }
-        if (draft.labels.length > 0) {
-          await runBeads({
-            action: "setLabels",
-            issueId: createdIssue.id,
-            labels: draft.labels,
-          });
-        }
-      }
-      const refreshedPayload = await runBeads({ action: "listIssues" });
-      const refreshedIssues = normalizeBeadsPayload<BeadsIssue[]>(
-        refreshedPayload,
-        Array.isArray(refreshedPayload) ? refreshedPayload : [],
-      );
-      const refreshedTickets = toBoardTickets(refreshedIssues, displayKey);
-      if (!createdIssue?.id) {
-        createdIssue = resolveCreatedIssueFromRefresh(refreshedIssues, issueIdsBeforeCreate, {
-          description: prompt,
-          title,
-        });
-      }
-      setAllIssues(refreshedIssues);
-      setTickets(refreshedTickets);
-      const refreshLabelsAfterCreate = () => {
-        void loadTickets({ includeLabels: true, mode: "mutation" }).catch((error) => {
-          console.warn("Project board post-create label refresh failed.", error);
-        });
-      };
       const generateCreatedTicketTitle = async (issueId: string) => {
         try {
           const promptAgentId = selectedAgentId || conversationState.defaultAgentId;
@@ -1243,7 +1319,8 @@ function ProjectBoardApp() {
             issueId,
             title: generatedTitle,
           });
-          await loadTickets({ includeLabels: false, mode: "mutation" });
+          setLocalTicketTitle(issueId, generatedTitle);
+          await loadTickets({ includeLabels: false, mode: "background" });
           logProjectBoardDebug("projectBoard.createTicket.titleGeneration.completed", {
             beadId: issueId,
             generatedTitleLength: generatedTitle.length,
@@ -1260,13 +1337,38 @@ function ProjectBoardApp() {
           }
         }
       };
-      if (!startAfterCreate) {
-        await loadTickets({ includeLabels: true, mode: "mutation" });
+
+      if (!createdIssue?.id) {
+        throw new Error("Created ticket was not found after create.");
       }
-      if (startAfterCreate && createdIssue?.id && !didStartCreatedTicket) {
-        const createdTicket = refreshedTickets.find((ticket) => ticket.id === createdIssue.id);
+
+      const targetBeadsStatus = boardStatusBeadsValue(draft.status);
+      const parsedPriority = Number.parseInt(draft.priority, 10);
+      let pendingCreateStatusToken: number | undefined;
+      if (!startAfterCreate && draft.status !== "todo") {
+        pendingCreateStatusToken = pendingStatusMoveSerialRef.current + 1;
+        pendingStatusMoveSerialRef.current = pendingCreateStatusToken;
+        pendingStatusMovesRef.current.set(createdIssue.id, {
+          beadsStatus: targetBeadsStatus,
+          statusKey: draft.status,
+          token: pendingCreateStatusToken,
+        });
+      }
+      createdIssue = {
+        ...createdIssue,
+        description: createdIssue.description ?? prompt,
+        ...(estimate !== undefined ? { estimate } : {}),
+        labels: draft.labels.length > 0 ? draft.labels : createdIssue.labels,
+        priority: Number.isFinite(parsedPriority) ? parsedPriority : createdIssue.priority,
+        status: targetBeadsStatus,
+        title,
+      };
+      upsertLocalIssue(createdIssue);
+
+      if (startAfterCreate) {
+        const createdTicket = toCreatedBoardTicket(createdIssue, allIssues, displayKey);
         if (!createdTicket) {
-          throw new Error("Created ticket was not found after refresh.");
+          throw new Error("Created ticket was not available for start.");
         }
         logProjectBoardDebug("projectBoard.createTicket.startAfterCreate.requested", {
           beadId: createdTicket.id,
@@ -1274,23 +1376,55 @@ function ProjectBoardApp() {
           startLocation,
         });
         const didStart = await startTicketWork(createdTicket, { startLocation });
-        if (!didStart) {
-          return;
-        }
-        didStartCreatedTicket = true;
-      }
-      if (didStartCreatedTicket) {
-        refreshLabelsAfterCreate();
-      }
-      if (shouldGenerateTitle && createdIssue?.id) {
-        if (startAfterCreate) {
-          void generateCreatedTicketTitle(createdIssue.id);
-        } else {
-          await generateCreatedTicketTitle(createdIssue.id);
+        if (didStart) {
+          didStartCreatedTicket = true;
         }
       }
+
+      const createdIssueId = createdIssue.id;
+      const reconcileCreatedTicket = async () => {
+        try {
+          await syncDependencies(createdIssueId, draft.blockedByIds, draft.blockingIds);
+          if (draft.status !== "todo" && !didStartCreatedTicket) {
+            await runBeads({
+              action: "updateStatus",
+              issueId: createdIssueId,
+              status: targetBeadsStatus,
+            });
+            if (
+              pendingCreateStatusToken !== undefined &&
+              pendingStatusMovesRef.current.get(createdIssueId)?.token === pendingCreateStatusToken
+            ) {
+              pendingStatusMovesRef.current.delete(createdIssueId);
+            }
+          }
+          if (draft.labels.length > 0) {
+            await runBeads({
+              action: "setLabels",
+              issueId: createdIssueId,
+              labels: draft.labels,
+            });
+          }
+          await loadTickets({ includeLabels: true, mode: "background" });
+        } catch (error) {
+          if (
+            pendingCreateStatusToken !== undefined &&
+            pendingStatusMovesRef.current.get(createdIssueId)?.token === pendingCreateStatusToken
+          ) {
+            pendingStatusMovesRef.current.delete(createdIssueId);
+          }
+          setErrorMessage(error instanceof Error ? error.message : "Could not finish creating the ticket.");
+          void loadTickets({ includeLabels: true, mode: "background" });
+        }
+      };
+
+      void reconcileCreatedTicket().then(() => {
+        if (shouldGenerateTitle) {
+          void generateCreatedTicketTitle(createdIssueId);
+        }
+      });
       logProjectBoardDebug("projectBoard.createTicket.completed", {
-        beadId: createdIssue?.id ?? "",
+        beadId: createdIssueId,
         startAfterCreate,
         startLocation,
       });
@@ -1379,17 +1513,39 @@ function ProjectBoardApp() {
       if (response.payload) {
         setConversationState(response.payload);
       }
-      await runBeads({
+      const token = pendingStatusMoveSerialRef.current + 1;
+      pendingStatusMoveSerialRef.current = token;
+      pendingStatusMovesRef.current.set(ticket.id, {
+        beadsStatus: "in_progress",
+        statusKey: "in_progress",
+        token,
+      });
+      setLocalTicketStatus(ticket.id, "in_progress", "in_progress");
+      void runBeads({
         action: "updateStatus",
         issueId: ticket.id,
         status: "in_progress",
-      });
+      })
+        .then(() => {
+          if (pendingStatusMovesRef.current.get(ticket.id)?.token !== token) {
+            return;
+          }
+          pendingStatusMovesRef.current.delete(ticket.id);
+          void loadTickets({ includeLabels: false, mode: "background" });
+        })
+        .catch((error) => {
+          if (pendingStatusMovesRef.current.get(ticket.id)?.token !== token) {
+            return;
+          }
+          pendingStatusMovesRef.current.delete(ticket.id);
+          setErrorMessage(error instanceof Error ? error.message : "Could not move the ticket.");
+          void loadTickets({ includeLabels: false, mode: "background" });
+        });
       setErrorMessage("");
       logProjectBoardDebug("projectBoard.createStart.startWork.completed", {
         beadId: ticket.id,
         startLocation,
       });
-      await loadTickets({ includeLabels: false, mode: "mutation" });
       return true;
     } catch (error) {
       logProjectBoardDebug("projectBoard.createStart.startWork.failed", {

@@ -858,12 +858,11 @@ function FirstLaunchWelcomePage({ vscode }: { vscode?: WebviewApi }) {
             </div>
           </div>
           <p>
-            Thanks to everyone trying Ghostex! For the next period we&apos;re focusing entirely on
+            Thanks to everyone trying Ghostex!
+
+            For the next period we&apos;re focusing entirely on
             polish, performance, and bug fixes, pausing new features until the app is reliable and
-            enjoyable. Special thanks to <strong>@gsxdsm</strong> who has joined to help us make the
-            app better in no time! He&apos;s the maintainer of Automaker and Fusion (4k+ stars ADEs),
-            and he brings a wealth of experience when it comes to ADE development from his work on
-            numerous Agentic Engineering projects.
+            enjoyable.
           </p>
           <p>
             So please keep the bug reports and UX feedback coming. v4.10.0 completes the move to the

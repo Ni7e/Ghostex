@@ -217,14 +217,22 @@ describe("native pointer hover boundary source", () => {
      * CDXC:TitlebarResources 2026-06-16-01:10:
      * CPU/RAM metrics should be the far-right row column, with Focus and
      * Sleep/Close immediately to their left.
+     *
+     * CDXC:TitlebarResources 2026-06-16-07:37:
+     * Resource row action buttons should stay on the same grid row as metrics,
+     * and CPU/RAM cards should use the same fixed smaller dimensions for
+     * parent rows and expanded child-process rows.
      */
     expect(titlebarHostSource).toContain('className="titlebar-resource-metrics"');
+    expect(titlebarHostSource).toContain('className="titlebar-resource-child-metrics"');
     expect(titlebarHostSource).toMatch(
       /const focusResourceSession = \(sessionId: string\) => \{[\s\S]*postNative\(\{ sessionId, type: "focusResourceSessionFromTitlebar" \}\);[\s\S]*closeTitlebarDropdownPanel\(\);[\s\S]*\};/,
     );
-    expect(titlebarHostSource).toContain("grid-template-columns: minmax(0, 1fr) 24px 24px minmax(184px, 220px)");
-    expect(titlebarHostSource).toContain("grid-template-columns: minmax(68px, 0.85fr) minmax(100px, 1fr)");
+    expect(titlebarHostSource).toContain("grid-template-columns: minmax(0, 1fr) 24px 24px 200px");
+    expect(titlebarHostSource).toContain("grid-template-columns: 86px 106px");
+    expect(titlebarHostSource).toContain("grid-template-columns: minmax(0, 1fr) 200px");
     expect(titlebarHostSource).toContain("grid-column: 4;");
+    expect(titlebarHostSource).toContain("grid-row: 1;");
     expect(titlebarHostSource).toContain("justify-self: end;");
     expect(titlebarHostSource).toContain("background: rgba(255,255,255,0.055);");
     expect(titlebarHostSource).toContain("Row-level Close should carry the same neutral background");

@@ -246,10 +246,6 @@ import {
   type SidebarCommandRunMode,
   type StoredSidebarCommand,
 } from "../../shared/sidebar-commands";
-import {
-  DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
-  normalizeSidebarCommandIconColor,
-} from "../../shared/sidebar-command-icons";
 import { SidebarCommandIconGlyph } from "../../sidebar/sidebar-command-icon";
 import { SIDEBAR_REFRESH_DEBUG_EVENT_PREFIX } from "../../sidebar/sidebar-refresh-debug-log";
 import {
@@ -459,6 +455,7 @@ type NativeHostCommand =
       cwd?: string;
       projectId?: string;
       sessionId: string;
+      showBetaFeatures?: boolean;
       threadId?: string;
       title: string;
       type: "createWebPane";
@@ -505,8 +502,14 @@ type NativeHostCommand =
       browserFeedbackTool?: "react-grab" | "agentation";
       browserHistory?: NativeProjectBrowserHistoryItem[];
       browserHistoryScopeId?: string;
+      showBetaFeatures?: boolean;
       companionPaneHidden?: boolean;
       mode?: ProjectEditorSurfaceMode;
+      /*
+       * CDXC:ProjectBrowserTabs 2026-06-16-12:02:
+       * Native Browser + tabs use this project-scoped destination instead of reusing the active tab URL; it is the project's GitHub remote URL when available, otherwise Google.
+       */
+      newBrowserTabUrl?: string;
       projectId: string;
       projectTitle?: string;
       showsBrowserToolbar?: boolean;
@@ -558,6 +561,13 @@ type NativeHostCommand =
       attentionSessionIds?: string[];
       backgroundColor?: string;
       debuggingMode?: boolean;
+      /**
+       * CDXC:BetaFeatures 2026-06-16-13:08:
+       * Native browser toolbars are AppKit-owned, so layout sync carries the
+       * persisted beta gate beside Debugging Mode and other settings-derived
+       * chrome values.
+       */
+      showBetaFeatures?: boolean;
       activeProjectEditorId?: string;
       focusRequestId?: number;
       /**
@@ -1287,6 +1297,10 @@ const localFirstHiddenPresentationProjects = new Map<
   string,
   { hiddenAt: string; projectId: string; reason: string }
 >();
+const pendingSidebarActiveSessionRevealBySessionId = new Map<
+  string,
+  { projectId: string; reason: string; sessionId: string; startedAt: number }
+>();
 const SETTINGS_STORAGE_KEY = "ghostex-native-settings";
 const AGENTS_STORAGE_KEY = "ghostex-native-agents";
 const AGENT_ORDER_STORAGE_KEY = "ghostex-native-agent-order";
@@ -1547,7 +1561,11 @@ let gitState = createDefaultSidebarGitState(
  * delays before closing their native Chromium surfaces.
  */
 const CODE_SERVER_EDITOR_ORIGIN = "http://127.0.0.1:3775";
-const DEFAULT_PROJECT_BROWSER_URL = "https://github.com/maddada/Ghostex";
+/*
+ * CDXC:ProjectBrowserTabs 2026-06-16-12:02:
+ * Browser tabs created by Ghostex should never intentionally open about:blank because CEF can leave that page looking stuck in a loading state. When a project has no GitHub remote URL for the Browser new-tab destination, open Google instead.
+ */
+const DEFAULT_PROJECT_BROWSER_URL = "https://www.google.com/";
 const PROJECT_EDITOR_OPEN_TIMEOUT_MS = 10 * 1000;
 const AUTO_SLEEP_MONITOR_INTERVAL_MS = 60 * 1000;
 const AUTO_SLEEP_MINUTE_MS = 60 * 1000;
@@ -2366,6 +2384,94 @@ function takeNativeTerminalSurfaceCreationPending(
 
 function clearNativeTerminalSurfaceCreationPending(sessionId: string): void {
   pendingNativeTerminalSurfaceCreationBySessionId.delete(sessionId);
+}
+
+function requestSidebarActiveSessionReveal(projectId: string, reason: string): void {
+  const normalizedProjectId = projectId.trim();
+  if (!normalizedProjectId) {
+    return;
+  }
+
+  /*
+   * CDXC:SidebarSessionReveal 2026-06-16-07:55:
+   * Adding a project or creating a worktree launches an active session before
+   * the Projects scroll area necessarily shows that project row. Reuse the
+   * project-jump event to expand the Projects area, then ask SidebarApp to run
+   * its focused-session scroll command after React has rendered the row.
+   */
+  const detail: SidebarProjectJumpEventDetail = {
+    expandCollapsedProject: true,
+    groupId: createCombinedProjectGroupId(normalizedProjectId),
+    projectId: normalizedProjectId,
+    revealFocusedSession: true,
+    showLessAfterExpand: false,
+  };
+  window.requestAnimationFrame(() => {
+    window.dispatchEvent(new CustomEvent(SIDEBAR_PROJECT_JUMP_EVENT, { detail }));
+  });
+  appendSidebarRefreshDebugLog("nativeSidebar.sidebarActiveSessionReveal.requested", {
+    projectId: normalizedProjectId,
+    reason,
+  });
+}
+
+function requestSidebarActiveSessionRevealWhenRenderable(
+  projectId: string,
+  sessionId: string,
+  reason: string,
+): void {
+  if (
+    gxserverStartupSnapshot?.presentation &&
+    !findGxserverPresentationSession(projectId, sessionId)
+  ) {
+    pendingSidebarActiveSessionRevealBySessionId.set(sessionId, {
+      projectId,
+      reason,
+      sessionId,
+      startedAt: Date.now(),
+    });
+    appendSidebarRefreshDebugLog("nativeSidebar.sidebarActiveSessionReveal.pendingPresentation", {
+      projectId,
+      reason,
+      sessionId,
+    });
+    return;
+  }
+
+  pendingSidebarActiveSessionRevealBySessionId.delete(sessionId);
+  requestSidebarActiveSessionReveal(projectId, reason);
+}
+
+function flushPendingSidebarActiveSessionRevealForSession(
+  projectId: string,
+  sessionId: string,
+  reason: string,
+): void {
+  const pending = pendingSidebarActiveSessionRevealBySessionId.get(sessionId);
+  if (!pending || pending.projectId !== projectId) {
+    return;
+  }
+  pendingSidebarActiveSessionRevealBySessionId.delete(sessionId);
+  appendSidebarRefreshDebugLog("nativeSidebar.sidebarActiveSessionReveal.presentationReady", {
+    elapsedMs: Date.now() - pending.startedAt,
+    projectId,
+    reason,
+    sessionId,
+  });
+  requestSidebarActiveSessionReveal(projectId, `${pending.reason}:${reason}`);
+}
+
+function flushPendingSidebarActiveSessionRevealsForPresentation(
+  presentation: GxserverPresentationSnapshot,
+  reason: string,
+): void {
+  for (const session of presentation.sessions) {
+    flushPendingSidebarActiveSessionRevealForSession(
+      session.projectId,
+      session.sessionId,
+      reason,
+    );
+  }
 }
 
 function markGxserverPresentationConfirmationPending(
@@ -3493,6 +3599,7 @@ function clearStaleGxserverLocalSessionRuntime(
   const nativeSessionId = forgetNativeSessionMappingForProject(projectId, sessionId);
   clearNativeSidebarCommandSessionBySessionId(sessionId);
   terminalStateById.delete(sessionId);
+  pendingSidebarActiveSessionRevealBySessionId.delete(sessionId);
   forgetRemoteAttachLocalSessionForSidebarSession(createCombinedProjectSessionId(projectId, sessionId));
   clearSettledTerminalTitleSync(sessionId);
   forgetProviderSessionState(projectId, sessionId);
@@ -3540,6 +3647,7 @@ function applyGxserverPresentationSnapshot(snapshot: GxserverPresentationSnapsho
     startupFocusQueued,
   });
   publish();
+  flushPendingSidebarActiveSessionRevealsForPresentation(nextSnapshot, `snapshot:${reason}`);
 }
 
 function applyGxserverPresentationDelta(delta: GxserverPresentationDelta, revision: number): void {
@@ -3598,11 +3706,25 @@ function applyGxserverPresentationDelta(delta: GxserverPresentationDelta, revisi
   });
   if (!lastPublishedSidebarMessage) {
     publish();
+    if ("session" in delta) {
+      flushPendingSidebarActiveSessionRevealForSession(
+        delta.session.projectId,
+        delta.session.sessionId,
+        `delta:${delta.type}`,
+      );
+    }
     return;
   }
   publishSidebarPatch((sidebarMessage) =>
     publishGxserverPresentationSidebarPatch(delta, sidebarMessage),
   );
+  if ("session" in delta) {
+    flushPendingSidebarActiveSessionRevealForSession(
+      delta.session.projectId,
+      delta.session.sessionId,
+      `delta:${delta.type}`,
+    );
+  }
 }
 
 function applyGxserverPresentationSessionsToNativePaneChrome(
@@ -4422,6 +4544,7 @@ function markNativeTerminalCreateFailed(
 ): void {
   clearNativeTerminalSurfaceCreationPending(sessionId);
   clearGxserverPresentationConfirmationPending(sessionId);
+  pendingSidebarActiveSessionRevealBySessionId.delete(sessionId);
   const terminalState = terminalStateById.get(sessionId);
   if (terminalState) {
     terminalState.lifecycleState = "error";
@@ -4510,6 +4633,11 @@ async function postNativeCreateTerminalWithGxserverAttach(
     focusIntent?: NativeSidebarFocusIntent;
     focusSurface?: NativeSidebarFocusSurface;
     intent?: "attach" | "wake";
+    revealFocusedSidebarSessionAfterCreate?: {
+      projectId: string;
+      reason: string;
+      sessionId: string;
+    };
   } = {},
 ): Promise<void> {
   if (command.sessionPersistenceProvider !== "zmx") {
@@ -4638,6 +4766,13 @@ async function postNativeCreateTerminalWithGxserverAttach(
     shellAttachCommand: attach.attachCommand,
   });
   publish();
+  if (options.revealFocusedSidebarSessionAfterCreate) {
+    requestSidebarActiveSessionRevealWhenRenderable(
+      options.revealFocusedSidebarSessionAfterCreate.projectId,
+      options.revealFocusedSidebarSessionAfterCreate.sessionId,
+      options.revealFocusedSidebarSessionAfterCreate.reason,
+    );
+  }
   if (options.focusAfterCreate === true) {
     const focusSurface = options.focusSurface ?? "workspaceTerminal";
     if (focusSurface === "projectEditorCompanion") {
@@ -5271,11 +5406,23 @@ function shouldPersistSidebarRefreshDebugLog(event: string): boolean {
 }
 
 function isHighVolumeSidebarRefreshDebugEvent(event: string): boolean {
+  /*
+   * CDXC:SidebarRefreshDiagnostics 2026-06-16-12:22:
+   * The native/sidebar sampler must match the full persisted event names, not
+   * only local helper suffixes. React sidebar events arrive as
+   * `sidebar.refresh.*`, and gxserver delta patch diagnostics arrive as
+   * `.presentationDelta.sidebarPatch`; sample both before crossing into the
+   * native writer.
+   */
   return (
     event === "messageReceived" ||
     event === "messageApplied" ||
     event === "renderStateChanged" ||
+    event === "sidebar.refresh.messageReceived" ||
+    event === "sidebar.refresh.messageApplied" ||
+    event === "sidebar.refresh.renderStateChanged" ||
     event.endsWith(".presentationDelta.applied") ||
+    event.endsWith(".presentationDelta.sidebarPatch") ||
     event.endsWith(".presentationPaneChrome.applied") ||
     event.endsWith(".presentationActivity.localFirst") ||
     event.endsWith(".presentationLifecycle.localFirst") ||
@@ -6188,6 +6335,7 @@ function createNativeBrowserSession(
     browserHistoryScopeId,
     cwd: project.path,
     sessionId: nativeSessionId,
+    showBetaFeatures: settings.showBetaFeatures,
     title: session.title || title || "Browser",
     type: "createWebPane",
     url: normalizedUrl,
@@ -6329,6 +6477,7 @@ function navigateExistingBrowserSession(
     browserFeedbackTool: settings.browserFeedbackTool,
     cwd: project.path,
     sessionId: nativeSessionId,
+    showBetaFeatures: settings.showBetaFeatures,
     title,
     type: "createWebPane",
     url: normalizedUrl,
@@ -7954,13 +8103,23 @@ function openTipsAndTricksOnFirstLaunch(): void {
  * After Tips & Tricks on the first run, show a filtered Settings onboarding
  * modal so users can configure the small set of launch defaults before using
  * Ghostex.
+ *
+ * CDXC:FirstLaunchSetup 2026-06-16-07:58:
+ * First-run onboarding now starts with Highlighted Features and opens the
+ * first-launch setup modal only after that modal closes. Keep this sequencing
+ * on the automatic startup path so the manual overflow-menu Highlighted
+ * Features action remains replayable without launching setup afterward.
  */
 function openFirstLaunchSetupOnFirstLaunch(): void {
   if (hasSeenCurrentFirstLaunchSetup(localStorage)) {
     return;
   }
 
-  openAppModal({ modal: "firstLaunchSetup", type: "open" });
+  openAppModal({
+    modal: "discoverGhostex",
+    showFirstLaunchSetupOnClose: true,
+    type: "open",
+  });
   markCurrentFirstLaunchSetupSeen(localStorage);
 }
 
@@ -11751,6 +11910,12 @@ async function runRemoteSidebarGitAction(
       );
       return;
     }
+    if (action === "syncRemote") {
+      await syncRemoteCurrentBranch(remoteReference, remoteGitState);
+      void refreshRemoteProjectDiffStats(remoteReference);
+      showAppToast("success", "Remote sync complete", projectTitle);
+      return;
+    }
     if (action === "syncMain") {
       const presentationProject = getRemotePresentationProject(remoteReference);
       if (!presentationProject || !normalizeNativeProjectWorktreeMetadata(presentationProject.worktree)) {
@@ -11988,6 +12153,35 @@ async function pushRemoteCurrentBranch(
   if (push.exitCode !== 0) {
     throw new Error(gxserverGitTypedOperationFailureMessage(push, "Could not push remote branch."));
   }
+}
+
+async function syncRemoteCurrentBranch(
+  remoteReference: { machineId: string; projectId: string },
+  remoteGitState: Pick<SidebarGitState, "aheadCount" | "branch" | "hasOriginRemote" | "hasUpstream">,
+): Promise<void> {
+  /*
+   * CDXC:TitlebarGit 2026-06-16-07:31:
+   * The titlebar remote-sync button should pull from the configured upstream
+   * with fast-forward-only semantics, then push any remaining ahead commits.
+   * Do not merge, rebase, autostash, or silently fall back; Git failures should
+   * remain visible so users can resolve divergent or dirty worktrees directly.
+   */
+  const branch = remoteGitState.branch;
+  if (!branch) {
+    throw new Error("Create and checkout a branch before syncing.");
+  }
+  if (remoteGitState.hasUpstream) {
+    const pull = await runRemoteGxserverGitAction(remoteReference, { action: "pullFastForward" });
+    if (pull.exitCode !== 0) {
+      throw new Error(gxserverGitTypedOperationFailureMessage(pull, "Could not pull remote branch."));
+    }
+    const nextGitState = await readRemoteSidebarGitState(remoteReference);
+    if (nextGitState.aheadCount > 0) {
+      await pushRemoteCurrentBranch(remoteReference, nextGitState);
+    }
+    return;
+  }
+  await pushRemoteCurrentBranch(remoteReference, remoteGitState);
 }
 
 async function createRemotePullRequest(
@@ -12241,6 +12435,28 @@ async function runSidebarGitAction(
     return;
   }
 
+  if (action === "syncRemote") {
+    let toastId: string | undefined;
+    try {
+      toastId = showRunningAppToast(resolveSidebarGitStartedTitle(action), activeProject().name);
+      gitState = { ...gitState, isBusy: true };
+      publish();
+      await syncCurrentBranchWithRemote();
+      await refreshGitState();
+      finishRunningAppToast(toastId, "success", resolveSidebarGitFinishedTitle(action), activeProject().name);
+    } catch (error) {
+      gitState = { ...gitState, isBusy: false };
+      publish();
+      finishRunningAppToast(
+        toastId,
+        "error",
+        `${resolveSidebarGitActionNoun(action)} failed`,
+        error instanceof Error ? error.message : "Remote sync failed.",
+      );
+    }
+    return;
+  }
+
   let toastId: string | undefined;
   try {
     if (shouldPromptSidebarGitAction(options)) {
@@ -12317,10 +12533,16 @@ function resolveSidebarGitActionNoun(action: SidebarGitAction): string {
   if (action === "pr") {
     return "Pull request";
   }
+  if (action === "syncRemote") {
+    return "Remote sync";
+  }
   return "Commit";
 }
 
 function resolveSidebarGitStartedTitle(action: SidebarGitAction): string {
+  if (action === "syncRemote") {
+    return "Syncing remote";
+  }
   if (action === "push") {
     return gitState.hasWorkingTreeChanges ? "Committing and pushing" : "Pushing";
   }
@@ -12331,6 +12553,9 @@ function resolveSidebarGitStartedTitle(action: SidebarGitAction): string {
 }
 
 function resolveSidebarGitFinishedTitle(action: SidebarGitAction): string {
+  if (action === "syncRemote") {
+    return "Remote sync complete";
+  }
   if (action === "push") {
     return "Push complete";
   }
@@ -14083,6 +14308,32 @@ async function pushCurrentBranch(): Promise<void> {
   }
 }
 
+async function syncCurrentBranchWithRemote(): Promise<void> {
+  /*
+   * CDXC:TitlebarGit 2026-06-16-07:31:
+   * Titlebar remote sync is a direct pull/push branch operation for normal
+   * projects. Pull with `--ff-only` when an upstream exists, refresh the branch
+   * counters, then push any commits still ahead through the same push helper as
+   * the sidebar Git action.
+   */
+  const branch = gitState.branch;
+  if (!branch) {
+    throw new Error("Create and checkout a branch before syncing.");
+  }
+  if (gitState.hasUpstream) {
+    const pull = await runGxserverGitActionForNativeProject(activeProject(), { action: "pullFastForward" });
+    if (pull.exitCode !== 0) {
+      throw new Error(gxserverGitTypedOperationFailureMessage(pull, "Could not pull branch."));
+    }
+    await refreshGitState();
+    if (gitState.aheadCount > 0) {
+      await pushCurrentBranch();
+    }
+    return;
+  }
+  await pushCurrentBranch();
+}
+
 async function openOrCreatePullRequest(): Promise<void> {
   if (gitState.pr?.state === "open") {
     createNativeBrowserSession(gitState.pr.url);
@@ -15766,6 +16017,43 @@ function rememberedWorkspaceTerminal(project: NativeProject): string | undefined
 
 function rememberedWorkspaceTerminalForCommandsPanel(project: NativeProject): string | undefined {
   return rememberedWorkspaceTerminal(project);
+}
+
+function focusedWorkspaceSessionIdForProject(project: NativeProject): string | undefined {
+  const activeGroup =
+    project.workspace.groups.find((group) => group.groupId === project.workspace.activeGroupId) ??
+    project.workspace.groups[0];
+  return activeGroup?.snapshot.focusedSessionId;
+}
+
+function agentsModeFocusSessionIdForProject(project: NativeProject): string | undefined {
+  /*
+   * CDXC:CommandsPanel 2026-06-16-08:19:
+   * Explicit Agents-mode navigation after using Source, Browser, or Kanban should restore keyboard focus to the last real workspace terminal, not to a command-pane terminal or whichever sidebar session was selected for the project-editor companion.
+   */
+  return rememberedWorkspaceTerminal(project) ?? focusedWorkspaceSessionIdForProject(project);
+}
+
+function shouldRestoreSessionFocusAfterCommandsPanelHide(project: NativeProject): boolean {
+  const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
+  /*
+   * CDXC:CommandsPanel 2026-06-16-08:19:
+   * Collapsing or emptying the Commands panel is not an Agents-mode request. If Source, Browser, or Kanban is still open with the companion pane hidden, keep that top-mode surface active instead of restoring workspace-terminal focus and implicitly switching to Agents. When the companion is visible, the normal focus path may retarget that visible companion session.
+   */
+  return surfaceState?.isOpen !== true || project.projectEditorCompanionPaneHidden !== true;
+}
+
+function focusProjectEditorCompanionSessionAfterExpand(project: NativeProject): boolean {
+  const sessionId = focusedWorkspaceSessionIdForProject(project);
+  if (!sessionId) {
+    return false;
+  }
+  /*
+   * CDXC:ProjectEditorCompanion 2026-06-16-08:19:
+   * Expanding the Source/Browser/Kanban companion pane is a terminal-focus intent for the session the companion will render. Route through the sidebar focus path after unhiding so native retargets the companion surface instead of leaving focus in a collapsed Commands panel or the editor body.
+   */
+  focusTerminal(createCombinedProjectSessionId(project.projectId, sessionId));
+  return true;
 }
 
 /**
@@ -17517,11 +17805,12 @@ function getNativeWorktreeMetadataForPresentationProject(
 }
 
 function createGxserverUnavailableSidebarGroups(): SidebarSessionGroup[] {
-  const state = currentGxserverStatus.state || "unknown";
-  const title = state === "stopped" ? "gxserver stopped" : "gxserver unavailable";
   /*
   CDXC:GxserverPresentation 2026-06-01-15:08:
   Hard cutover means missing gxserver presentation is not permission to revive the old macOS session tree. Publish an explicit unavailable group with no locally reconstructed sessions until gxserver supplies a fresh presentation snapshot.
+
+  CDXC:GxserverPresentation 2026-06-16-09:35:
+  Missing gxserver presentation should keep the Projects list visually silent at first. Preserve the synthetic group ID only for React collapse-state timing; React owns the 20-second delayed user copy so raw gxserver status text never appears in the sidebar.
   */
   return [
     {
@@ -17543,7 +17832,7 @@ function createGxserverUnavailableSidebarGroups(): SidebarSessionGroup[] {
       kind: "workspace",
       layoutVisibleCount: 1,
       sessions: [],
-      title,
+      title: "",
       viewMode: "grid",
       visibleCount: 1,
     },
@@ -20020,6 +20309,7 @@ type LaunchAgentTerminalOptions = {
   initialPromptText?: string;
   initialPresentation?: "background" | "focused";
   queueProviderStartupText?: boolean;
+  revealFocusedSidebarSessionAfterCreate?: boolean;
   restoredFromSessionId?: GxserverSessionId;
   sessionTag?: SidebarSessionTag;
   sidebarOrder?: number;
@@ -20798,9 +21088,23 @@ function createTerminal(
     */
     deferWorkspaceFocusUntilTerminalReady: shouldDeferZmxWorkspaceFocusUntilTerminalReady,
     focusAfterCreate: shouldDeferZmxWorkspaceFocusUntilTerminalReady,
+    revealFocusedSidebarSessionAfterCreate: options?.revealFocusedSidebarSessionAfterCreate === true
+      ? {
+          projectId: project.projectId,
+          reason: options.diagnosticSource ?? "createTerminal",
+          sessionId: session.sessionId,
+        }
+      : undefined,
   });
   if (sessionPersistenceProvider !== "zmx") {
     publish();
+    if (options?.revealFocusedSidebarSessionAfterCreate === true) {
+      requestSidebarActiveSessionRevealWhenRenderable(
+        project.projectId,
+        session.sessionId,
+        options.diagnosticSource ?? "createTerminal",
+      );
+    }
   }
   appendSidebarRefreshDebugLog("nativeSidebar.createTerminal.afterPublish", {
     agentName,
@@ -20974,12 +21278,13 @@ function toggleFocusedCommandsPanelForActiveProject(): void {
 }
 
 function hideCommandsPanelForActiveProject(): void {
-  const restoreSessionId = rememberedWorkspaceTerminalForCommandsPanel(activeProject());
+  const project = activeProject();
+  const restoreSessionId = rememberedWorkspaceTerminalForCommandsPanel(project);
   updateActiveProjectCommandsPanel((panel) => ({
     ...panel,
     isVisible: false,
   }));
-  if (restoreSessionId) {
+  if (restoreSessionId && shouldRestoreSessionFocusAfterCommandsPanelHide(project)) {
     focusTerminal(restoreSessionId);
     return;
   }
@@ -21638,6 +21943,7 @@ function restoreNativeBrowserSession(
     browserFeedbackTool: settings.browserFeedbackTool,
     cwd: project.path,
     sessionId: nativeSessionId,
+    showBetaFeatures: settings.showBetaFeatures,
     title: session.title || browserPaneTitleFromUrl(session.browser.url),
     type: "createWebPane",
     url: session.browser.url,
@@ -31621,7 +31927,9 @@ async function addProject(
   */
   publish();
   if (activeSnapshot().sessions.length === 0) {
-    createTerminal(DEFAULT_TERMINAL_SESSION_TITLE);
+    createTerminal(DEFAULT_TERMINAL_SESSION_TITLE, "", undefined, undefined, {
+      revealFocusedSidebarSessionAfterCreate: true,
+    });
     return;
   }
 }
@@ -32467,6 +32775,7 @@ async function createNativeWorktreeForAgentPrompt(input: {
   showAppToast("info", "Opening agent", agent.name);
   const session = await launchAgentTerminal(agent, undefined, {
     focusAfterCreate: input.focusAfterCreate,
+    revealFocusedSidebarSessionAfterCreate: input.focusAfterCreate !== false,
   });
   if (!session || session.kind !== "terminal") {
     throw new Error("Could not create an agent session in the worktree.");
@@ -38000,6 +38309,7 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
     mode: nextMode,
     projectId: nativeEditorId,
     projectTitle: projectEditorTitle(project),
+    showBetaFeatures: settings.showBetaFeatures,
     showsBrowserToolbar: nextMode === "git",
     showsProjectTabs: nextMode === "git",
     title: projectEditorSurfaceTitleForMode(project, nextMode),
@@ -38236,16 +38546,28 @@ function openAgentsModeFromTitlebar(): void {
    * CDXC:ModeSwitcher 2026-05-15-12:38:
    * The Agents button is the inverse of Code mode: return the project workarea
    * to its session panes while keeping the combined sessions sidebar visible.
+   *
+   * CDXC:CommandsPanel 2026-06-16-08:19:
+   * Agents mode is the explicit place to restore the last focused workspace terminal after Source/Browser/Kanban or Commands-panel interactions. Resolve that terminal before deactivating the project-editor surface so the layout focus request targets the terminal the user last used.
    */
+  const focusSessionId = agentsModeFocusSessionIdForProject(project);
   activateWorkspaceSurfaceForProject(project.projectId);
-  const focusedSessionId = activeSnapshot().focusedSessionId;
-  if (focusedSessionId) {
-    queueNativeLayoutFocusRequest(focusedSessionId, "titlebarAgentsMode");
+  if (focusSessionId) {
+    focusTerminal(createCombinedProjectSessionId(project.projectId, focusSessionId));
+    appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarAgentsHandlerDone", {
+      elapsedMs: performance.now() - startedAtMs,
+      focusRequestQueued: true,
+      focusSessionSource:
+        rememberedWorkspaceTerminal(project) === focusSessionId ? "rememberedWorkspaceTerminal" : "focusedWorkspaceSession",
+      projectId: project.projectId,
+      targetMode: "agents",
+    });
+    return;
   }
   publish();
   appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarAgentsHandlerDone", {
     elapsedMs: performance.now() - startedAtMs,
-    focusRequestQueued: Boolean(focusedSessionId),
+    focusRequestQueued: false,
     projectId: project.projectId,
     targetMode: "agents",
   });
@@ -38286,19 +38608,24 @@ function toggleProjectEditorCompanionFromTitlebar(): void {
     nextHidden,
     "toggleProjectEditorCompanionFromTitlebar",
   );
+  if (!nextHidden && focusProjectEditorCompanionSessionAfterExpand(project)) {
+    return;
+  }
   publish();
 }
 
-function openProjectGitEditorSurface(project: NativeProject, seedUrl: string): void {
+function openProjectGitEditorSurface(project: NativeProject, seedUrl: string, newBrowserTabUrl: string = seedUrl): void {
   const startedAtMs = performance.now();
   const didFocusProject = activeProjectId !== project.projectId;
   if (didFocusProject) {
     focusProject(project.projectId);
   }
+  const browserNewTabUrl = normalizeProjectBrowserUrl(newBrowserTabUrl) ?? DEFAULT_PROJECT_BROWSER_URL;
   const nativeEditorId = createNativeProjectEditorId(project.projectId, "git");
   const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
   appendModeSwitcherDebugLog("titlebarModeSwitch.browserSurfaceStart", {
     activeProjectChanged: didFocusProject,
+    hasNewBrowserTabUrl: Boolean(browserNewTabUrl),
     hasSeedUrl: Boolean(seedUrl),
     nativeEditorId,
     projectId: project.projectId,
@@ -38383,7 +38710,10 @@ function openProjectGitEditorSurface(project: NativeProject, seedUrl: string): v
    * Browser mode should restore the project's previous Browser tab list and
    * active tab. If the project has never opened Browser mode, seed the first
    * tab with the project's GitHub URL when one exists; otherwise use the
-   * Ghostex repository URL instead of disabling the top Browser control.
+   * default non-blank Browser URL instead of disabling the top Browser control.
+   *
+   * CDXC:ProjectBrowserTabs 2026-06-16-12:02:
+   * Browser new tabs use the same project GitHub remote URL, or Google when the project has no GitHub remote, so the native + button never opens an app-owned about:blank page.
    */
   cancelProjectEditorSleepTimer(project.projectId);
   const isAwakeGitPane = hasAwakeProjectEditorMode(project.projectId, "git");
@@ -38438,8 +38768,10 @@ function openProjectGitEditorSurface(project: NativeProject, seedUrl: string): v
     browserFeedbackTool: settings.browserFeedbackTool,
     companionPaneHidden: project.projectEditorCompanionPaneHidden === true,
     mode: "git",
+    newBrowserTabUrl: browserNewTabUrl,
     projectId: nativeEditorId,
     projectTitle: projectEditorTitle(project),
+    showBetaFeatures: settings.showBetaFeatures,
     showsBrowserToolbar: true,
     showsProjectTabs: true,
     title: "Browser",
@@ -38560,6 +38892,7 @@ function openProjectTasksEditorSurface(project: NativeProject, tasksUrl: string)
     mode: "tasks",
     projectId: nativeEditorId,
     projectTitle: projectEditorTitle(project),
+    showBetaFeatures: settings.showBetaFeatures,
     title: "Project",
     type: "createProjectEditorPane",
     url: tasksUrl,
@@ -38605,12 +38938,13 @@ async function openGitHubProjectFromTitlebar(): Promise<void> {
     ? projectBrowserActiveUrlFromState(rememberedBrowserState)
     : undefined;
   if (rememberedBrowserState && (rememberedUrl || projectBrowserStateHasRestorableTabs(rememberedBrowserState))) {
+    const browserSeedUrl = await resolveProjectBrowserSeedUrl(project);
     appendModeSwitcherDebugLog("titlebarModeSwitch.browserHandlerUsingRememberedTab", {
       elapsedMs: performance.now() - startedAtMs,
       projectId: project.projectId,
       targetMode: "git",
     });
-    openProjectGitEditorSurface(project, rememberedUrl ?? DEFAULT_PROJECT_BROWSER_URL);
+    openProjectGitEditorSurface(project, rememberedUrl ?? browserSeedUrl, browserSeedUrl);
     return;
   }
   appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedResolveStart", {
@@ -38625,7 +38959,7 @@ async function openGitHubProjectFromTitlebar(): Promise<void> {
     seedKind: browserSeedUrl === DEFAULT_PROJECT_BROWSER_URL ? "default" : "githubRemote",
     targetMode: "git",
   });
-  openProjectGitEditorSurface(project, browserSeedUrl);
+  openProjectGitEditorSurface(project, browserSeedUrl, browserSeedUrl);
   appendModeSwitcherDebugLog("titlebarModeSwitch.browserHandlerDone", {
     elapsedMs: performance.now() - startedAtMs,
     projectId: project.projectId,
@@ -38679,9 +39013,10 @@ async function resolveProjectBrowserSeedUrl(project: NativeProject): Promise<str
     /**
      * CDXC:ProjectBrowserTabs 2026-06-13-00:12:
      * Browser mode starts with the project's GitHub remote only for projects
-     * that have one. Projects without a GitHub remote still open Browser mode
-     * to Ghostex's repository, and projects with existing Browser tabs reuse
-     * those tabs before this seed path runs.
+     * that have one.
+     *
+     * CDXC:ProjectBrowserTabs 2026-06-16-12:02:
+     * Projects without a GitHub remote use Google for first-open and native new-tab destinations; projects with existing Browser tabs reuse those tabs while still passing this destination to native for future + tabs.
      */
     return githubUrl;
   } catch (error) {
@@ -38804,6 +39139,7 @@ function openRemoteProjectBoardForGroup(groupId: string): boolean {
     mode: "tasks",
     projectId: nativeEditorId,
     projectTitle: `${remoteMachine.name} · ${project.title}`,
+    showBetaFeatures: settings.showBetaFeatures,
     title: "Project",
     type: "createProjectEditorPane",
     url: url.toString(),
@@ -39490,9 +39826,6 @@ function saveSidebarCommand(
   const name = message.name.trim();
   const command = message.command?.trim();
   const url = message.url?.trim();
-  const iconColor = message.icon
-    ? (normalizeSidebarCommandIconColor(message.iconColor) ?? DEFAULT_SIDEBAR_COMMAND_ICON_COLOR)
-    : undefined;
 
   if (!name && !message.icon) {
     return;
@@ -39513,7 +39846,13 @@ function saveSidebarCommand(
     isDefault: isDefaultSidebarCommandId(commandId),
     name,
     playCompletionSound: message.actionType === "terminal" ? message.playCompletionSound : false,
-    ...(message.icon ? { icon: message.icon, iconColor } : {}),
+    /*
+     * CDXC:TitlebarActions 2026-06-16-07:48:
+     * Settings no longer writes per-action icon colors. Persist only the glyph
+     * choice so native titlebar actions inherit the titlebar's default icon
+     * color like the surrounding controls.
+     */
+    ...(message.icon ? { icon: message.icon } : {}),
     ...(message.actionType === "browser" ? { url } : { command }),
   };
   const nextCommandTitle = getNativeSidebarActionTitle(nextCommand);
@@ -40213,6 +40552,15 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     }
     case "openWorkspaceWelcome":
       openAppModal({ modal: "firstLaunchSetup", type: "open" });
+      return;
+    case "openHighlightedFeatures":
+      /*
+       * CDXC:HighlightedFeatures 2026-06-16-08:17:
+       * The Tips & Tricks panel and sidebar overflow menu should expose the
+       * replayable feature-tour modal as Highlighted Features while reusing
+       * the existing discoverGhostex modal id and lifecycle.
+       */
+      openAppModal({ modal: "discoverGhostex", type: "open" });
       return;
     case "openExternalUrl":
       openNativeExternalUrl(message.url);
@@ -41969,6 +42317,7 @@ function syncNativeLayout(
     activeProjectEditorStatus: currentProjectEditor.status,
     appTitle: nativeAppTitleForProject(currentProject),
     debuggingMode: settings.debuggingMode,
+    showBetaFeatures: settings.showBetaFeatures,
     activeProjectId: currentProject.projectId,
     activeProjectIconDataUrl: resolveWorkspaceProjectIconDataUrl(currentProject),
     activeProjectIsQuick: isQuickProject(currentProject),

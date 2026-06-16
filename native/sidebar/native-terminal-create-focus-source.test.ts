@@ -101,8 +101,16 @@ describe("native terminal create focus source", () => {
       "async function createProjectWorktreeFromPrompt",
       "async function openExistingRemoteWorktreeProject",
     );
+    const worktreeAgentCreateSource = sourceBetween(
+      nativeSidebarSource,
+      "async function createNativeWorktreeForAgentPrompt",
+      "async function createProjectWorktreeFromPrompt",
+    );
     expect(worktreeCreateSource).toContain("await createNativeWorktreeForAgentPrompt({");
     expect(worktreeCreateSource).toContain("focusAfterCreate: true,");
+    expect(worktreeAgentCreateSource).toContain(
+      "revealFocusedSidebarSessionAfterCreate: input.focusAfterCreate !== false",
+    );
     expect(worktreeCreateSource).toContain('showAppToast("warning", "Worktree prompt is empty")');
     expect(worktreeCreateSource).toContain('showAppToast("error", "Agent is unavailable"');
   });

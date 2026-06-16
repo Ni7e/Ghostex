@@ -127,6 +127,7 @@ type AppModalHostMessage =
       prewarm?: boolean;
       requestId?: string;
       sessionId?: string;
+      showFirstLaunchSetupOnClose?: boolean;
       statusFile?: string;
       threadId?: string;
       title?: string;
@@ -176,6 +177,7 @@ type AppModalHostMessage =
     }
   | { details?: string; event: string; type: "debugLog" }
   | { requestId: string; type: "floatingPromptEditorCloseAndSave" }
+  | { filePath: string; requestId: string; text: string; type: "floatingPromptEditorDraftUpdate" }
   | {
       error?: string;
       imagePath?: string;
@@ -713,6 +715,7 @@ function FloatingPromptEditorModal({
   const pendingImagePreviewRequestIdsRef = useRef<Map<string, string>>(new Map());
   const pendingImagePasteRequestIdsRef = useRef<Set<string>>(new Set());
   const savedCloseAndSaveRequestIdRef = useRef<string | undefined>(undefined);
+  const lastDraftUpdateTextRef = useRef<string | undefined>(undefined);
   /**
    * CDXC:PromptEditor 2026-06-13-13:48:
    * The floating prompt editor is a native child window, so React must not
@@ -720,6 +723,51 @@ function FloatingPromptEditorModal({
    * move, resize, focus, and event delivery.
    */
   const isNativeWindowSurface = window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow";
+
+  /**
+   * CDXC:PromptEditor 2026-06-16-10:36:
+   * Prompt text must survive normal app/window close even when the user never
+   * presses Save. Keep the native temp prompt file current from Monaco content
+   * changes so AppKit lifecycle teardown can mark the latest draft saved
+   * without asking WebKit for text while the child window is closing.
+   */
+  const postDraftUpdate = (
+    text: string,
+    reason: "contentChanged" | "pageLifecycle",
+    options: { force?: boolean } = {},
+  ) => {
+    if (!editor || editor.isPrewarm) {
+      return;
+    }
+    if (!options.force && lastDraftUpdateTextRef.current === text) {
+      return;
+    }
+    lastDraftUpdateTextRef.current = text;
+    appendPromptEditorDebugLog("react.draftUpdate", {
+      reason,
+      requestId: editor.requestId,
+      textLength: text.length,
+    });
+    postAppModalHostMessage(
+      {
+        filePath: editor.filePath,
+        requestId: editor.requestId,
+        text,
+        type: "floatingPromptEditorDraftUpdate",
+      },
+      "PromptEditor:draftUpdate",
+    );
+  };
+
+  const refreshEditorTextDerivedState = (
+    monacoEditor: MonacoEditorInstance,
+    reason: "contentChanged" | "pageLifecycle",
+    options: { force?: boolean } = {},
+  ) => {
+    const text = monacoEditor.getValue();
+    setImagePreviews(parsePromptEditorImagePreviews(text));
+    postDraftUpdate(text, reason, options);
+  };
 
   useEffect(() => {
     return () => {
@@ -756,6 +804,7 @@ function FloatingPromptEditorModal({
       setOpenImagePreview(undefined);
       setIsCancelConfirming(false);
       setIsSaving(false);
+      lastDraftUpdateTextRef.current = undefined;
       failedImagePreviewPathsRef.current.clear();
       pendingImagePreviewPathRequestsRef.current.clear();
       pendingImagePreviewRequestIdsRef.current.clear();
@@ -767,6 +816,7 @@ function FloatingPromptEditorModal({
     setImagePreviewDataUrls({});
     setImagePreviews(parsePromptEditorImagePreviews(editor.initialText));
     setOpenImagePreview(undefined);
+    lastDraftUpdateTextRef.current = editor.initialText;
     failedImagePreviewPathsRef.current.clear();
     pendingImagePreviewPathRequestsRef.current.clear();
     pendingImagePreviewRequestIdsRef.current.clear();
@@ -836,7 +886,7 @@ function FloatingPromptEditorModal({
           setImagePreviews(parsePromptEditorImagePreviews(existingEditor.getValue()));
           editorContentListenerRef.current?.dispose();
           editorContentListenerRef.current = existingEditor.onDidChangeModelContent(() => {
-            setImagePreviews(parsePromptEditorImagePreviews(existingEditor.getValue()));
+            refreshEditorTextDerivedState(existingEditor, "contentChanged");
           });
           const updateDurationMs = Math.round(performance.now() - updateStartedAt);
           if (editor.isPrewarm) {
@@ -933,7 +983,7 @@ function FloatingPromptEditorModal({
         const caretPosition = monacoEditor.getPosition();
         setImagePreviews(parsePromptEditorImagePreviews(monacoEditor.getValue()));
         editorContentListenerRef.current = monacoEditor.onDidChangeModelContent(() => {
-          setImagePreviews(parsePromptEditorImagePreviews(monacoEditor.getValue()));
+          refreshEditorTextDerivedState(monacoEditor, "contentChanged");
         });
         if (editor.isPrewarm) {
           appendPromptEditorDebugLog("react.monaco.prewarmReady", {
@@ -985,6 +1035,32 @@ function FloatingPromptEditorModal({
   useEffect(() => {
     editorRef.current?.layout();
   }, [frame.height, frame.width, imagePreviews.length]);
+
+  useEffect(() => {
+    if (!isOpen || !editor || editor.isPrewarm) {
+      return;
+    }
+    const flushDraftUpdate = () => {
+      const monacoEditor = editorRef.current;
+      if (!monacoEditor) {
+        return;
+      }
+      refreshEditorTextDerivedState(monacoEditor, "pageLifecycle", { force: true });
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flushDraftUpdate();
+      }
+    };
+    window.addEventListener("pagehide", flushDraftUpdate);
+    window.addEventListener("beforeunload", flushDraftUpdate);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pagehide", flushDraftUpdate);
+      window.removeEventListener("beforeunload", flushDraftUpdate);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [editor?.requestId, isOpen]);
 
   useEffect(() => {
     if (!openImagePreview || imagePreviews.some((preview) => preview.id === openImagePreview.id)) {
@@ -1455,6 +1531,7 @@ function FloatingPromptEditorModal({
   const focusEditorFromPanelPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
     const target = event.target;
     const isMonacoPointer = target instanceof Element && target.closest(".floating-prompt-editor-monaco");
+    const isResizePointer = target instanceof Element && target.closest(".floating-prompt-editor-resize");
     const monacoEditor = editorRef.current;
     /**
      * CDXC:PromptEditor 2026-05-17-02:15:
@@ -1467,17 +1544,23 @@ function FloatingPromptEditorModal({
      * Monaco owns its text-surface pointer events, including right-click context
      * menus. Do not run the panel-level delayed refocus for Monaco targets,
      * because that blur/focus cycle can immediately dismiss Monaco's menu.
+     *
+     * CDXC:PromptEditor 2026-06-16-10:23:
+     * The native child-window prompt editor has a visible bottom-right resize
+     * affordance. Do not convert clicks on that handle into editor-focus clicks;
+     * AppKit owns the matching resize gesture while CSS owns the cursor.
      */
     appendPromptEditorDebugLog("react.panelPointerDown", {
       documentHasFocus: document.hasFocus(),
       hasEditorRef: monacoEditor !== null,
       isMonacoPointer: Boolean(isMonacoPointer),
+      isResizePointer: Boolean(isResizePointer),
       pointerType: event.pointerType,
       requestId: editor.requestId,
       targetClass:
         target instanceof Element && typeof target.className === "string" ? target.className : null,
     });
-    if (isMonacoPointer) {
+    if (isMonacoPointer || isResizePointer) {
       return;
     }
 
@@ -1564,21 +1647,24 @@ function FloatingPromptEditorModal({
               const dataUrl = imagePreviewDataUrls[preview.path];
               return (
                 <div
-                  aria-label={`Open image preview ${preview.path}`}
                   className="floating-prompt-editor-image-thumb"
                   key={preview.id}
-                  onClick={() => setOpenImagePreview(preview)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setOpenImagePreview(preview);
-                    }
-                  }}
-                  role="button"
-                  tabIndex={0}
                   title={preview.path}
                 >
-                  {dataUrl ? <img alt="" src={dataUrl} /> : <span aria-hidden="true" />}
+                  {/*
+                   * CDXC:PromptEditor 2026-06-16-10:23:
+                   * The entire visible image thumbnail should open the preview.
+                   * Keep removal as a separate small button above this full-area
+                   * button so only the explicit remove control is excluded.
+                   */}
+                  <button
+                    aria-label={`Open image preview ${preview.path}`}
+                    className="floating-prompt-editor-image-open"
+                    onClick={() => setOpenImagePreview(preview)}
+                    type="button"
+                  >
+                    {dataUrl ? <img alt="" src={dataUrl} /> : <span aria-hidden="true" />}
+                  </button>
                   <button
                     aria-label={`Remove image ${preview.path}`}
                     className="floating-prompt-editor-image-remove"
@@ -1596,14 +1682,12 @@ function FloatingPromptEditorModal({
             })}
           </div>
         ) : null}
-        {isNativeWindowSurface ? null : (
-          <div
-            aria-label="Resize prompt editor"
-            className="floating-prompt-editor-resize"
-            onPointerDown={startResize}
-            role="separator"
-          />
-        )}
+        <div
+          aria-label="Resize prompt editor"
+          className="floating-prompt-editor-resize"
+          onPointerDown={isNativeWindowSurface ? undefined : startResize}
+          role="separator"
+        />
       </section>
       {openImagePreview && imagePreviewDataUrls[openImagePreview.path] ? (
         <div

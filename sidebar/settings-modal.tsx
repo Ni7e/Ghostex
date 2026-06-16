@@ -86,6 +86,7 @@ import {
 import {
   IconAsterisk,
   IconAlertTriangle,
+  IconArrowBigUp,
   IconChevronDown,
   IconChevronRight,
   IconCircleCheckFilled,
@@ -147,7 +148,6 @@ import {
   SESSION_TITLE_GENERATION_AGENT_OPTIONS,
   SIDEBAR_SETTINGS_PRESETS,
   SIDEBAR_SIDE_OPTIONS,
-  SIDEBAR_THEME_SETTING_OPTIONS,
   applySidebarSettingsPreset,
   getSessionTitleGenerationCommandPreview,
   getSidebarSettingsPresetId,
@@ -206,7 +206,6 @@ import {
 } from "../shared/sidebar-commands";
 import {
   DEFAULT_SIDEBAR_COMMAND_ICON,
-  DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
   type SidebarCommandIcon,
 } from "../shared/sidebar-command-icons";
 import {
@@ -391,6 +390,7 @@ type SettingsSectionNavigationItem<SectionId extends string> = {
 };
 
 type SettingModificationProps = {
+  advanced?: boolean;
   isModified?: boolean;
   onResetToDefault?: () => void;
 };
@@ -412,7 +412,8 @@ type MainSettingsSectionId =
   | "autoSleep"
   | "power"
   | "sounds"
-  | "storage";
+  | "storage"
+  | "beta";
 
 export type MainSettingsInitialSectionId = MainSettingsSectionId;
 
@@ -553,27 +554,51 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "actionCompletionSound",
   ],
   storage: [],
+  /*
+   * CDXC:BetaFeatures 2026-06-16-13:08:
+   * The Beta section belongs directly above Debugging and currently owns the
+   * single advanced Show Beta features gate plus the list of beta surfaces that
+   * become visible when that gate is enabled.
+   */
+  beta: ["showBetaFeatures"],
 };
 
 /*
  * CDXC:SettingsAdvanced 2026-06-16-01:35:
- * The first Settings page should default to everyday controls and hide precision tuning, support/debug toggles, context-menu utilities, disabled theme work, and provider-specific terminal options until users enable Show Advanced. Search still exposes matching advanced controls so discoverability is not tied to browsing mode.
+ * The first Settings page should default to everyday controls and hide precision tuning, support/debug toggles, context-menu utilities, and provider-specific terminal options until users enable Show Advanced. Search still exposes matching advanced controls so discoverability is not tied to browsing mode.
  *
  * CDXC:SettingsAdvanced 2026-06-16-01:53:
  * Show Advanced belongs to the right of the Settings modal header rather than the section rail, because it changes the density of the full General page.
+ *
+ * CDXC:SettingsAdvanced 2026-06-16-08:12:
+ * Browser feedback, Storage, session-card chrome, Workspace tuning, and Terminal Behavior controls are advanced-only browsing rows because the default General page should stay focused on common setup and daily preferences.
+ *
+ * CDXC:SettingsTheming 2026-06-16-08:58:
+ * Theming controls should remain visible without Show Advanced. Do not mark Theme, Background Contrast, or Background Tint as advanced rows.
+ *
+ * CDXC:SettingsAdvanced 2026-06-16-09:20:
+ * Empty-sidebar double-click creation remains a low-frequency interaction preference and should hide behind Show Advanced. Status Indicators should keep only the floating desktop indicator toggle advanced; its size, the menu bar indicator, Wake Pet, and Pet picker are normal settings.
+ *
+ * CDXC:BetaFeatures 2026-06-16-13:08:
+ * Show Beta features is a persisted advanced setting, while Show Advanced
+ * remains only a local browsing filter. Keep the beta gate hidden from ordinary
+ * settings browsing until users enable the advanced density view or search for it.
  */
 const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
+  "browserFeedbackTool",
   "sidebarDefaultWidthPx",
   "projectSessionListCollapsedCount",
   "agentManagerZoomPercent",
-  "sidebarTheme",
-  "customSidebarTitlebarBackgroundDarknessPercent",
-  "customSidebarTitlebarBackgroundTintColor",
-  "sessionStatusIndicatorSize",
-  "selectedPetId",
+  "createSessionOnSidebarDoubleClick",
+  "hideFloatingSessionStatusIndicators",
+  "hideSessionAgentIconUntilHover",
+  "hideBrowserFaviconUntilHover",
+  "showCloseButtonOnSessionCards",
+  "hideLastActiveTimeOnSessionCards",
   "showSessionCloseContextMenuAction",
   "workspaceActivePaneBorderColor",
   "workspaceBackgroundColor",
+  "clickToWakeSleepingSessions",
   "commandsPanelDefaultHeightPx",
   "ghosttySettingsActions",
   "terminalFontWeight",
@@ -584,7 +609,10 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "promptEditorBackend",
   "customPromptEditorCommand",
   "terminalScrollbackLimitMb",
+  "terminalCopyOnSelect",
+  "terminalConfirmCloseSurface",
   "terminalClipboardTrimTrailingSpaces",
+  "terminalClipboardPasteProtection",
   "terminalPastePreviewableImages",
   "terminalMouseHideWhileTyping",
   "terminalScrollbar",
@@ -592,24 +620,40 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "terminalMouseScrollMultiplierDiscrete",
   "terminalScrollToBottomWhenTyping",
   "codeServerUseVscodeInsidersUserConfig",
+  "codeServerLinkVscodeUserConfig",
   "hideProjectHeaderDiffStats",
   "showProjectEditorDiffFileCount",
   "showUntrackedProjectDiffWhenNoTrackedChanges",
+  "autoSleepCodeEditorEnabled",
   "autoSleepCodeEditorIdleMinutes",
+  "autoSleepGitEditorEnabled",
   "autoSleepGitEditorIdleMinutes",
+  "autoSleepProjectEditorEnabled",
   "autoSleepProjectEditorIdleMinutes",
+  "autoSleepBrowserSessionsEnabled",
   "autoSleepBrowserIdleMinutes",
+  "autoSleepAgentSessionsEnabled",
   "autoSleepAgentIdleMinutes",
   "autoSleepRequireAgentResumeCommand",
   "autoSleepFavoriteAgentSessions",
+  "hideKeepAwakeTitlebarControl",
+  "keepAwakeDefaultDurationMinutes",
+  "keepAwakeAllowDisplaySleep",
+  "keepAwakePreventLidSleep",
   "keepAwakeActivateOnLaunch",
   "keepAwakeActivateOnExternalDisplay",
   "keepAwakeDeactivateBelowBatteryThreshold",
   "keepAwakeBatteryThresholdPercent",
   "keepAwakeDeactivateOnLowPowerMode",
   "keepAwakeDeactivateOnUserSwitch",
+  "completionBellEnabled",
+  "completionSound",
+  "showMacOSAttentionNotifications",
+  "attentionNotificationActions",
   "actionCompletionSound",
   "sidebarSessionTagListItems",
+  "ghostexFolderStats",
+  "showBetaFeatures",
   "debuggingMode",
   "showSessionCommandCopyActions",
   "showSessionDetailsCopyAction",
@@ -836,14 +880,14 @@ export function SettingsModal({
   const [activeMainSettingsSectionId, setActiveMainSettingsSectionId] =
     useState<MainSettingsSectionId>("sidebar");
   const showOSIntegrationSettingsTab = shouldShowOSIntegrationSettingsTab({
-    debuggingMode: draft.debuggingMode,
     isFirstLaunchSetup,
+    showBetaFeatures: draft.showBetaFeatures,
   });
   const [activeTab, setActiveTabState] = useState<SettingsModalTab>(() =>
     getInitialSettingsModalTab(initialTab, {
       showOSIntegrationSettingsTab: shouldShowOSIntegrationSettingsTab({
-        debuggingMode: normalizedInitialSettings.debuggingMode,
         isFirstLaunchSetup,
+        showBetaFeatures: normalizedInitialSettings.showBetaFeatures,
       }),
     }),
   );
@@ -862,6 +906,7 @@ export function SettingsModal({
   const statusIndicatorsSectionRef = useRef<HTMLDivElement>(null);
   const sessionCardsSectionRef = useRef<HTMLDivElement>(null);
   const debuggingSectionRef = useRef<HTMLDivElement>(null);
+  const betaSectionRef = useRef<HTMLDivElement>(null);
   const agentsOnboardingSectionRef = useRef<HTMLDivElement>(null);
   const sidebarSectionRef = useRef<HTMLDivElement>(null);
   const themingSectionRef = useRef<HTMLDivElement>(null);
@@ -1389,8 +1434,7 @@ export function SettingsModal({
     theming: getSettingsSectionSearch(settingsSearchQuery, "Theming", [
       {
         key: "sidebarTheme",
-        options: SIDEBAR_THEME_SETTING_OPTIONS,
-        subtitle: "Choose the sidebar color scheme.",
+        subtitle: "Light theme coming soon.",
         title: "Theme",
       },
       {
@@ -1641,6 +1685,19 @@ export function SettingsModal({
         title: "Command Pane Default Height",
       },
     ]),
+    beta: getSettingsSectionSearch(settingsSearchQuery, "Beta", [
+      /*
+       * CDXC:BetaFeatures 2026-06-16-13:08:
+       * Settings search should find the advanced beta gate by label and by the
+       * concrete surfaces it enables so the required Beta list stays discoverable.
+       */
+      {
+        key: "showBetaFeatures",
+        subtitle:
+          "Show beta-only surfaces: OS Integration settings, Browser Profiles, and Browser color scheme.",
+        title: "Show Beta features",
+      },
+    ]),
     debugging: getSettingsSectionSearch(settingsSearchQuery, "Debugging", [
       /*
        * CDXC:DiagnosticsSettings 2026-06-06-07:09:
@@ -1731,6 +1788,12 @@ export function SettingsModal({
     },
     { id: "storage", ref: storageSectionRef, searchResult: settingsSearch.storage, title: "Storage" },
     {
+      id: "beta",
+      ref: betaSectionRef,
+      searchResult: settingsSearch.beta,
+      title: "Beta",
+    },
+    {
       id: "debugging",
       ref: debuggingSectionRef,
       searchResult: settingsSearch.debugging,
@@ -1799,10 +1862,11 @@ export function SettingsModal({
       sessionCards: sessionCardsSectionRef,
       sidebar: sidebarSectionRef,
       sounds: soundsSectionRef,
-	      statusIndicators: statusIndicatorsSectionRef,
-	      storage: storageSectionRef,
-	      sidebarTags: sidebarTagsSectionRef,
-	      debugging: debuggingSectionRef,
+      beta: betaSectionRef,
+      statusIndicators: statusIndicatorsSectionRef,
+      storage: storageSectionRef,
+      sidebarTags: sidebarTagsSectionRef,
+      debugging: debuggingSectionRef,
 	      terminal: ghosttyTerminalSectionRef,
 	      terminalBehavior: ghosttyBehaviorSectionRef,
 	      terminalScrolling: ghosttyScrollingSectionRef,
@@ -1993,6 +2057,7 @@ export function SettingsModal({
   const getSettingModificationProps = <Key extends keyof ghostexSettings>(
     key: Key,
   ): Required<SettingModificationProps> => ({
+    advanced: isAdvancedMainSetting(String(key)),
     isModified: !Object.is(
       (pendingSettingsRef.current ?? draft)[key],
       DEFAULT_ghostex_SETTINGS[key],
@@ -2102,6 +2167,9 @@ export function SettingsModal({
                *
                * CDXC:SettingsAdvanced 2026-06-16-01:53:
                * The Show Advanced toggle belongs to the right of the Settings modal header so users can change page density without scanning the section rail.
+               *
+               * CDXC:SettingsAdvanced 2026-06-16-02:02:
+               * Place Show Advanced immediately to the right of the Settings title, not at the modal's top-right edge, because the close button owns that corner.
                */}
               {!isFirstLaunchSetup ? (
                 <label className="settings-show-advanced-toggle" htmlFor={showAdvancedSettingsId}>
@@ -2220,8 +2288,8 @@ export function SettingsModal({
                   </Button>
                 ))}
             </aside>
-          <ScrollArea className="h-full min-h-0">
-          <div className="flex flex-col gap-6 px-5 pb-5">
+          <ScrollArea className="settings-main-scroll h-full min-h-0">
+          <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
             {isFirstLaunchSetup && mainSectionVisible("agents", settingsSearch.sidebar) ? (
               <SettingsSection sectionRef={agentsOnboardingSectionRef} title="Agents">
                 {mainSettingVisible(settingsSearch.sidebar, "agentAcceptAllEnabled") ? (
@@ -2333,6 +2401,10 @@ export function SettingsModal({
               />
               ) : null}
               {mainSettingVisible(settingsSearch.sidebar, "createSessionOnSidebarDoubleClick") ? (
+              /*
+               * CDXC:SidebarSessions 2026-06-16-09:20:
+               * Creating sessions by double-clicking empty sidebar space is a low-frequency interaction preference, so hide it behind Show Advanced while keeping rename-on-card-double-click as a normal sidebar behavior setting.
+               */
               <ToggleField
                 checked={draft.createSessionOnSidebarDoubleClick}
                 description="Create a session from empty sidebar space."
@@ -2360,11 +2432,16 @@ export function SettingsModal({
                   General settings needs Theming as the second section, separate
                   from Sidebar layout controls.
 
-                  CDXC:SettingsAdvanced 2026-06-16-01:35:
-                  Theming remains a distinct section, but its disabled theme
-                  selector and precision sidebar/titlebar color controls are
-                  advanced Settings rows because they are lower-frequency visual
-                  tuning controls.
+                  CDXC:SettingsTheming 2026-06-16-01:35:
+                  Theming remains a distinct section on the General settings
+                  page so theme-related controls scan separately from Sidebar
+                  layout controls.
+
+                  CDXC:SettingsTheming 2026-06-16-08:58:
+                  Theme selection is not ready for the Settings UI. Hide the
+                  dropdown control and show a simple "Light theme coming soon"
+                  message while keeping all Theming rows visible without Show
+                  Advanced.
 
                   CDXC:SidebarTitlebarColors 2026-06-15-13:22:
                   Users should only pick the sidebar/titlebar background. The
@@ -2391,16 +2468,10 @@ export function SettingsModal({
                   color panel instead of the in-app picker requested here.
                 */}
                 {mainSettingVisible(settingsSearch.theming, "sidebarTheme") ? (
-                  <SelectField
-                    description="Themes are coming soon."
-                    disabled
+                  <StaticNoteField
                     label="Theme"
-                    {...getSettingModificationProps("sidebarTheme")}
-                    onChange={(value) =>
-                      updateDraft("sidebarTheme", value as ghostexSettings["sidebarTheme"])
-                    }
-                    options={SIDEBAR_THEME_SETTING_OPTIONS}
-                    value="dark-2"
+                    surface="plain"
+                    value="Light theme coming soon"
                   />
                 ) : null}
                 {mainSettingVisible(
@@ -2841,6 +2912,7 @@ export function SettingsModal({
                  * Selecting gte must not describe or launch a popup. gte runs in the terminal that invoked Ctrl+G, while Monaco remains the popup editor.
                  */
                 <GtePromptEditingField
+                  advanced={getSettingModificationProps("promptEditorBackend").advanced}
                   backend={draft.promptEditorBackend}
                   isModified={getSettingModificationProps("promptEditorBackend").isModified}
                   onInstall={() => onInstallGte?.()}
@@ -3088,6 +3160,7 @@ export function SettingsModal({
                   checkbox only changes the linked config directory. */}
               {mainSettingVisible(settingsSearch.editor, "codeServerLinkVscodeUserConfig") ? (
               <ToggleField
+                advanced={isAdvancedMainSetting("codeServerLinkVscodeUserConfig")}
                 checked={draft.codeServerLinkVscodeUserConfig}
                 description="Use local VS Code settings instead of the bundled editor defaults."
                 label="Use VS Code settings"
@@ -3096,6 +3169,7 @@ export function SettingsModal({
               ) : null}
               {mainSettingVisible(settingsSearch.editor, "codeServerUseVscodeInsidersUserConfig") ? (
               <ToggleField
+                advanced={isAdvancedMainSetting("codeServerUseVscodeInsidersUserConfig")}
                 checked={draft.codeServerUseVscodeInsidersUserConfig}
                 description="Use the VS Code Insiders user settings directory."
                 disabled={!draft.codeServerLinkVscodeUserConfig}
@@ -3425,6 +3499,7 @@ export function SettingsModal({
                   system notification permission outside ghostex settings. */}
               {mainSettingVisible(settingsSearch.sounds, "attentionNotificationActions") ? (
               <ActionButtonPairField
+                advanced={isAdvancedMainSetting("attentionNotificationActions")}
                 actions={[
                   {
                     label: "Test agent task completion",
@@ -3453,7 +3528,10 @@ export function SettingsModal({
             ) : null}
 
             {mainSectionVisible("sidebarTags", settingsSearch.sidebarTags) ? (
-              <SettingsSection sectionRef={sidebarTagsSectionRef} title="Sidebar Tags">
+              <SettingsSection
+                sectionRef={sidebarTagsSectionRef}
+                title="Sidebar Tags"
+              >
                 {mainSettingVisible(settingsSearch.sidebarTags, "sidebarSessionTagListItems") ? (
                   <SidebarTagListSettingsField
                     isModified={
@@ -3483,6 +3561,37 @@ export function SettingsModal({
                   stats={ghostexFolderStats}
                 />
               </div>
+            ) : null}
+
+            {mainSectionVisible("beta", settingsSearch.beta) ? (
+              <SettingsSection sectionRef={betaSectionRef} title="Beta">
+                {mainSettingVisible(settingsSearch.beta, "showBetaFeatures") ? (
+                  <>
+                    {/*
+                     * CDXC:BetaFeatures 2026-06-16-13:08:
+                     * The Beta section must keep a current visible inventory of
+                     * every surface enabled by Show Beta features. Update this
+                     * list whenever a new beta-gated Settings tab or browser
+                     * address-bar control is added or removed.
+                     */}
+                    <ToggleField
+                      checked={draft.showBetaFeatures}
+                      description="Show beta-only settings and browser address-bar controls."
+                      label="Show Beta features"
+                      {...getSettingModificationProps("showBetaFeatures")}
+                      onChange={(checked) => updateDraft("showBetaFeatures", checked)}
+                    />
+                    <div className="rounded-[var(--settings-radius-control)] border border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                      <div className="mb-2 font-medium text-foreground">Enabled when on</div>
+                      <ul className="grid gap-1.5">
+                        <li>OS Integration settings tab</li>
+                        <li>Browser address bar: Profiles</li>
+                        <li>Browser address bar: Color scheme</li>
+                      </ul>
+                    </div>
+                  </>
+                ) : null}
+              </SettingsSection>
             ) : null}
 
             {mainSectionVisible("debugging", settingsSearch.debugging) ? (
@@ -3728,7 +3837,6 @@ type SettingsCommandDraft = {
   command?: string;
   commandId?: string;
   icon?: SidebarCommandIcon;
-  iconColor?: string;
   name: string;
   playCompletionSound: boolean;
   url?: string;
@@ -4554,7 +4662,7 @@ function OpenTargetsSettingsTab({
 
   return (
     <ScrollArea className="h-full min-h-0">
-      <div className="flex flex-col gap-6 px-5 pb-5">
+      <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
         <SettingsSection title="Open In">
           {/* CDXC:TitlebarOpenIn 2026-05-11-00:22
               Users need a Settings tab opened from the titlebar dropdown to
@@ -4748,7 +4856,7 @@ function OSIntegrationSettingsTab({
     Boolean(status?.terminalLinkDefaultBundleId && status.terminalLinkDefaultBundleId === ghostexBundleId);
   return (
     <ScrollArea className="h-full min-h-0">
-      <div className="flex flex-col gap-6 px-5 pb-5">
+      <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
         <SettingsSection title="Defaults">
           {/*
            * CDXC:OSIntegration 2026-05-27-18:06:
@@ -5003,7 +5111,7 @@ function IntegrationsSettingsTab({
 
   return (
     <ScrollArea className="h-full min-h-0">
-      <div className="flex flex-col gap-6 px-5 pb-5">
+      <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
         {/*
          * CDXC:IntegrationsSetup 2026-05-27-04:17:
          * Settings owns one Integrations tab for post-onboarding setup. Keep
@@ -5431,7 +5539,7 @@ function AgentsSettingsTab({
 
   return (
     <ScrollArea className="h-full min-h-0">
-      <div className="flex flex-col gap-6 px-5 pb-5">
+      <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
         {!editorState ? (
           <SettingsSection title="Agent Hooks">
             <details className="group w-full">
@@ -6091,7 +6199,6 @@ function ActionsSettingsTab({ vscode }: { vscode?: WebviewApi }) {
       command: draft.command,
       commandId: draft.commandId,
       icon: draft.icon,
-      iconColor: draft.iconColor,
       name: draft.name,
       playCompletionSound: draft.playCompletionSound,
       type: "saveSidebarCommand",
@@ -6140,7 +6247,7 @@ function ActionsSettingsTab({ vscode }: { vscode?: WebviewApi }) {
 
   return (
     <ScrollArea className="h-full min-h-0">
-      <div className="flex flex-col gap-6 px-5 pb-5">
+      <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
         {!editorState && !hasConfiguredActions ? (
           <div className="flex items-start gap-3 border border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
             <IconInfoCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-foreground" />
@@ -6337,7 +6444,6 @@ function ActionSettingsEditor({
   const [icon, setIcon] = useState<SidebarCommandIcon>(
     draft.icon ?? DEFAULT_SIDEBAR_COMMAND_ICON,
   );
-  const [iconColor, setIconColor] = useState(draft.iconColor ?? DEFAULT_SIDEBAR_COMMAND_ICON_COLOR);
   const [name, setName] = useState(draft.name);
   const [playCompletionSound, setPlayCompletionSound] = useState(draft.playCompletionSound);
   const [url, setUrl] = useState(
@@ -6374,7 +6480,6 @@ function ActionSettingsEditor({
     command: actionType === "terminal" ? command.trim() : undefined,
     commandId: draft.commandId,
     icon,
-    iconColor,
     name: trimmedName,
     playCompletionSound: actionType === "terminal" ? playCompletionSound : false,
     url: actionType === "browser" ? url.trim() : undefined,
@@ -6434,9 +6539,7 @@ function ActionSettingsEditor({
       </Field>
       <CommandIconPicker
         icon={icon}
-        iconColor={iconColor}
         onIconChange={setIcon}
-        onIconColorChange={setIconColor}
       />
       {actionType === "browser" ? (
         <Field className="gap-2.5">
@@ -6721,8 +6824,11 @@ function HotkeysSettingsTab({
           </Button>
         ))}
       </aside>
-      <ScrollArea className="h-full min-h-0" onScrollCapture={handleHotkeySettingsScrollCapture}>
-        <div className="flex flex-col gap-6 px-5 pb-5">
+      <ScrollArea
+        className="settings-main-scroll h-full min-h-0"
+        onScrollCapture={handleHotkeySettingsScrollCapture}
+      >
+        <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
           {visibleSections.map((section) => (
             <SettingsSection
               key={section.id}
@@ -6818,7 +6924,6 @@ function SettingsAgentIcon({ agent }: { agent: SidebarAgentButton }) {
 function SettingsActionIcon({ command }: { command: SidebarCommandButton }) {
   return (
     <SidebarCommandIconGlyph
-      color={command.iconColor ?? DEFAULT_SIDEBAR_COMMAND_ICON_COLOR}
       icon={command.icon ?? DEFAULT_SIDEBAR_COMMAND_ICON}
       stroke={1.8}
     />
@@ -6861,7 +6966,6 @@ function createSettingsCommandDraft(actionType: SidebarActionType): SettingsComm
     command: actionType === "terminal" ? "" : undefined,
     commandId: undefined,
     icon: DEFAULT_SIDEBAR_COMMAND_ICON,
-    iconColor: DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
     name: "",
     playCompletionSound: actionType === "terminal",
     url: actionType === "browser" ? DEFAULT_BROWSER_ACTION_URL : undefined,
@@ -6875,7 +6979,6 @@ function createSettingsCommandDraftFromButton(command: SidebarCommandButton): Se
     command: command.command,
     commandId: command.commandId,
     icon: command.icon ?? DEFAULT_SIDEBAR_COMMAND_ICON,
-    iconColor: command.iconColor ?? DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
     name: command.name,
     playCompletionSound: command.playCompletionSound,
     url: command.url,
@@ -7168,12 +7271,14 @@ function GhosttySettingsActions({
 }
 
 function GtePromptEditingField({
+  advanced,
   backend,
   isModified,
   onChange,
   onInstall,
   onResetToDefault,
 }: {
+  advanced?: boolean;
   backend: PromptEditorBackend;
   isModified?: boolean;
   onChange: (backend: PromptEditorBackend) => void;
@@ -7183,6 +7288,7 @@ function GtePromptEditingField({
   const id = useId();
   return (
     <SettingRow
+      advanced={advanced}
       description="Choose which editor new terminals use when Ctrl+G asks the shell to edit prompt text."
       htmlFor={id}
       isModified={isModified}
@@ -7376,6 +7482,7 @@ function SettingsSection({
 }
 
 function SliderNumberField({
+  advanced,
   description,
   isModified,
   label,
@@ -7387,6 +7494,7 @@ function SliderNumberField({
   step,
   value,
 }: {
+  advanced?: boolean;
   description?: string;
   label: string;
   max: number;
@@ -7440,6 +7548,7 @@ function SliderNumberField({
 
   return (
     <SettingRow
+      advanced={advanced}
       description={description}
       htmlFor={id}
       isModified={isModified}
@@ -7499,11 +7608,13 @@ function formatSliderNumber(value: number, step: number): string {
 }
 
 function ActionButtonField({
+  advanced,
   children,
   description,
   label,
   onClick,
 }: {
+  advanced?: boolean;
   children: ReactNode;
   description?: string;
   label: string;
@@ -7511,7 +7622,7 @@ function ActionButtonField({
 }) {
   const id = useId();
   return (
-    <SettingRow description={description} htmlFor={id} label={label}>
+    <SettingRow advanced={advanced} description={description} htmlFor={id} label={label}>
       <Button className="h-10 w-full justify-start px-3 text-sm" id={id} onClick={onClick} type="button">
         {children}
       </Button>
@@ -7520,17 +7631,19 @@ function ActionButtonField({
 }
 
 function ActionButtonPairField({
+  advanced,
   actions,
   description,
   label,
 }: {
+  advanced?: boolean;
   actions: ReadonlyArray<{ label: string; onClick: () => void }>;
   description?: string;
   label: string;
 }) {
   const id = useId();
   return (
-    <SettingRow description={description} htmlFor={id} label={label}>
+    <SettingRow advanced={advanced} description={description} htmlFor={id} label={label}>
       <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
         {actions.map((action, index) => (
           <Button
@@ -7550,6 +7663,7 @@ function ActionButtonPairField({
 }
 
 function SelectField({
+  advanced,
   contentClassName,
   description,
   disabled,
@@ -7562,6 +7676,7 @@ function SelectField({
   supportingContent,
   value,
 }: {
+  advanced?: boolean;
   contentClassName?: string;
   description?: string;
   disabled?: boolean;
@@ -7575,6 +7690,7 @@ function SelectField({
   const id = useId();
   return (
     <SettingRow
+      advanced={advanced}
       description={description}
       htmlFor={id}
       isModified={isModified}
@@ -7600,26 +7716,44 @@ function SelectField({
   );
 }
 
-function StaticNoteField({ description, label }: { description: string; label: string }) {
+function StaticNoteField({
+  advanced,
+  description,
+  label,
+  surface = "boxed",
+  value = "Not available",
+}: {
+  advanced?: boolean;
+  description?: string;
+  label: string;
+  surface?: "boxed" | "plain";
+  value?: string;
+}) {
   const id = useId();
   return (
-    <SettingRow description={description} htmlFor={id} label={label}>
+    <SettingRow advanced={advanced} description={description} htmlFor={id} label={label}>
       <div
-        className="rounded-none border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
+        className={
+          surface === "plain"
+            ? "text-sm text-muted-foreground"
+            : "rounded-none border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
+        }
         id={id}
       >
-        Not available
+        {value}
       </div>
     </SettingRow>
   );
 }
 
 function PetPickerField({
+  advanced,
   isModified,
   onChange,
   onResetToDefault,
   value,
 }: {
+  advanced?: boolean;
   onChange: (value: PetId) => void;
   value: PetId;
 } & SettingModificationProps) {
@@ -7627,6 +7761,7 @@ function PetPickerField({
   const selectedPet = PET_OPTIONS.find((option) => option.id === value) ?? PET_OPTIONS[0]!;
   return (
     <SettingRow
+      advanced={advanced}
       description="Choose the pet sprite."
       htmlFor={id}
       isModified={isModified}
@@ -7660,6 +7795,7 @@ function PetPickerField({
 }
 
 function SoundField({
+  advanced,
   description,
   isModified,
   label,
@@ -7668,6 +7804,7 @@ function SoundField({
   onResetToDefault,
   value,
 }: {
+  advanced?: boolean;
   description?: string;
   label: string;
   onChange: (value: CompletionSoundSetting) => void;
@@ -7688,6 +7825,7 @@ function SoundField({
   const id = useId();
   return (
     <SettingRow
+      advanced={advanced}
       description={description}
       htmlFor={id}
       isModified={isModified}
@@ -7736,6 +7874,7 @@ function SoundField({
 }
 
 function TextField({
+  advanced,
   description,
   isModified,
   label,
@@ -7744,6 +7883,7 @@ function TextField({
   placeholder,
   value,
 }: {
+  advanced?: boolean;
   description?: string;
   label: string;
   onChange: (value: string) => void;
@@ -7753,6 +7893,7 @@ function TextField({
   const id = useId();
   return (
     <SettingRow
+      advanced={advanced}
       description={description}
       htmlFor={id}
       isModified={isModified}
@@ -7771,17 +7912,19 @@ function TextField({
 }
 
 function DisabledCommandPreviewField({
+  advanced,
   description,
   label,
   value,
 }: {
+  advanced?: boolean;
   description?: string;
   label: string;
   value: string;
 }) {
   const id = useId();
   return (
-    <SettingRow description={description} htmlFor={id} label={label}>
+    <SettingRow advanced={advanced} description={description} htmlFor={id} label={label}>
       <SettingsTextarea
         className="min-h-24 resize-none px-3 py-2 font-mono text-xs leading-5"
         disabled
@@ -7794,6 +7937,7 @@ function DisabledCommandPreviewField({
 }
 
 function ColorField({
+  advanced,
   description,
   isModified,
   label,
@@ -7801,6 +7945,7 @@ function ColorField({
   onResetToDefault,
   value,
 }: {
+  advanced?: boolean;
   description?: string;
   label: string;
   onChange: (value: string) => void;
@@ -7810,6 +7955,7 @@ function ColorField({
   const colorValue = normalizeColorInputValue(value);
   return (
     <SettingRow
+      advanced={advanced}
       description={description}
       htmlFor={id}
       isModified={isModified}
@@ -7836,7 +7982,8 @@ function ColorField({
 }
 
 const SIDEBAR_TITLEBAR_TINT_SWATCHES: ReadonlyArray<{ label: string; value: string }> = [
-  { label: "Neutral", value: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR },
+  { label: "White", value: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR },
+  { label: "Neutral Gray", value: "#808080" },
   { label: "Blue", value: "#336699" },
   { label: "Sky", value: "#2f6f8f" },
   { label: "Cyan", value: "#287c7f" },
@@ -7855,6 +8002,7 @@ const SIDEBAR_TITLEBAR_TINT_SWATCHES: ReadonlyArray<{ label: string; value: stri
 ];
 
 function WebColorPickerField({
+  advanced,
   description,
   isModified,
   label,
@@ -7863,6 +8011,7 @@ function WebColorPickerField({
   onResetToDefault,
   value,
 }: {
+  advanced?: boolean;
   description?: string;
   label: string;
   onChange: (value: string) => void;
@@ -7902,6 +8051,7 @@ function WebColorPickerField({
 
   return (
     <SettingRow
+      advanced={advanced}
       description={description}
       htmlFor={id}
       isModified={isModified}
@@ -8071,6 +8221,7 @@ function rgbToHexColor(color: { blue: number; green: number; red: number }): str
 
 function SidebarPresetField({
   activePresetId,
+  advanced,
   description,
   isModified,
   label,
@@ -8078,6 +8229,7 @@ function SidebarPresetField({
   onResetToDefault,
 }: {
   activePresetId?: SidebarSettingsPresetId;
+  advanced?: boolean;
   description?: string;
   label: string;
   onChange: (presetId: SidebarSettingsPresetId) => void;
@@ -8085,6 +8237,7 @@ function SidebarPresetField({
   const id = useId();
   return (
     <SettingRow
+      advanced={advanced}
       description={description}
       htmlFor={id}
       isModified={isModified}
@@ -8122,6 +8275,7 @@ function SidebarPresetField({
 }
 
 function ToggleField({
+  advanced,
   checked,
   description,
   disabled,
@@ -8130,6 +8284,7 @@ function ToggleField({
   onChange,
   onResetToDefault,
 }: {
+  advanced?: boolean;
   checked: boolean;
   description?: string;
   disabled?: boolean;
@@ -8139,6 +8294,7 @@ function ToggleField({
   const id = useId();
   return (
     <SettingRow
+      advanced={advanced}
       description={description}
       htmlFor={id}
       isModified={isModified}
@@ -8404,8 +8560,15 @@ function SidebarTagListSettingsRow({
  * modal needs to stay dense and scannable. Reveal a compact info trigger only
  * while the row is hovered or focused, then show the description in a
  * right-side tooltip capped at 350px.
+ *
+ * CDXC:SettingsAdvanced 2026-06-16-10:40:
+ * Advanced rows should no longer use a text badge. Mark them with a light blue
+ * up-arrow affordance beside the label actions, immediately before the info
+ * button when one is present, so the label stays compact while hover explains
+ * the row as an Advanced Setting.
  */
 function SettingRow({
+  advanced,
   children,
   description,
   htmlFor,
@@ -8413,6 +8576,7 @@ function SettingRow({
   label,
   onResetToDefault,
 }: {
+  advanced?: boolean;
   children: ReactNode;
   description?: string;
   htmlFor: string;
@@ -8423,14 +8587,17 @@ function SettingRow({
   return (
     <Field className="settings-row gap-2.5" orientation="vertical">
       <FieldContent>
-        <FieldTitle className="relative text-sm">
-          {isModified && onResetToDefault ? (
-            <ModifiedSettingResetButton label={label} onResetToDefault={onResetToDefault} />
-          ) : null}
-          <FieldLabel className="text-sm" htmlFor={htmlFor}>
-            {label}
-          </FieldLabel>
-          {description ? <SettingDescriptionTooltip description={description} label={label} /> : null}
+        <FieldTitle className="settings-row-title text-sm">
+          <span className="settings-row-label-line">
+            {isModified && onResetToDefault ? (
+              <ModifiedSettingResetButton label={label} onResetToDefault={onResetToDefault} />
+            ) : null}
+            <FieldLabel className="text-sm" htmlFor={htmlFor}>
+              {label}
+            </FieldLabel>
+            {advanced ? <AdvancedSettingTooltip label={label} /> : null}
+            {description ? <SettingDescriptionTooltip description={description} label={label} /> : null}
+          </span>
         </FieldTitle>
         {description ? (
           <FieldDescription className="sr-only">{description}</FieldDescription>
@@ -8438,6 +8605,25 @@ function SettingRow({
       </FieldContent>
       <div className="min-w-0">{children}</div>
     </Field>
+  );
+}
+
+function AdvancedSettingTooltip({ label }: { label: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            aria-label={`${label} is an advanced setting`}
+            className="settings-row-advanced-button"
+            type="button"
+          >
+            <IconArrowBigUp aria-hidden="true" />
+          </button>
+        }
+      />
+      <TooltipContent sideOffset={6}>Advanced Setting</TooltipContent>
+    </Tooltip>
   );
 }
 

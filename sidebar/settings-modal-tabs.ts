@@ -14,19 +14,19 @@ export type SettingsModalTabVisibilityOptions = {
 };
 
 export function shouldShowOSIntegrationSettingsTab({
-  debuggingMode,
   isFirstLaunchSetup,
+  showBetaFeatures,
 }: {
-  debuggingMode: boolean;
   isFirstLaunchSetup: boolean;
+  showBetaFeatures: boolean;
 }): boolean {
   /*
-   * CDXC:OSIntegration 2026-06-15-14:00:
-   * The macOS OS Integration settings are a Debugging Mode surface. Hide the tab
-   * during ordinary Settings use, including first-launch setup, so default app
-   * handler controls are available only while debug UI is enabled.
+   * CDXC:BetaFeatures 2026-06-16-13:08:
+   * OS Integration is currently a beta Settings tab. Hide it during ordinary
+   * Settings use and first-launch setup until the user enables Show Beta
+   * features from the Advanced Beta section.
    */
-  return debuggingMode && !isFirstLaunchSetup;
+  return showBetaFeatures && !isFirstLaunchSetup;
 }
 
 export function resolveSettingsModalTabForVisibility(

@@ -90,6 +90,37 @@ describe("native sidebar bulk sleep cascade source", () => {
     expect(sidebarRefreshDebugLogSource).toContain("parseDetailsPayload(details)");
   });
 
+  test("samples high-volume sidebar refresh diagnostics on both React and native writers", () => {
+    /*
+     * CDXC:SidebarRefreshDiagnostics 2026-06-16-12:22:
+     * Sidebar refresh diagnostics must sample the same persisted event names in
+     * React and Swift so `sidebar.refresh.*` and presentation-delta patch loops
+     * cannot bypass the support-bundle noise controls.
+     */
+    const reactRefreshSampler = sourceBetween(
+      nativeSidebarSource,
+      "function isHighVolumeSidebarRefreshDebugEvent(event: string): boolean {",
+      "function shouldSampleSidebarRefreshDebugLog(event: string, intervalMs: number): boolean",
+    );
+    expect(nativeSidebarSource).toContain("const SIDEBAR_REFRESH_DEBUG_LOG_SAMPLE_MS = 5_000;");
+    expect(reactRefreshSampler).toContain('event === "sidebar.refresh.messageReceived"');
+    expect(reactRefreshSampler).toContain('event === "sidebar.refresh.messageApplied"');
+    expect(reactRefreshSampler).toContain('event === "sidebar.refresh.renderStateChanged"');
+    expect(reactRefreshSampler).toContain('event.endsWith(".presentationDelta.sidebarPatch")');
+
+    const nativeRefreshSampler = sourceBetween(
+      sidebarRefreshDebugLogSource,
+      "private static let sampledEvents = Set([",
+      "private static let logDateFormatter",
+    );
+    expect(sidebarRefreshDebugLogSource).toContain("private static let highVolumeSampleInterval: TimeInterval = 5");
+    expect(nativeRefreshSampler).toContain('"sidebar.refresh.messageReceived"');
+    expect(nativeRefreshSampler).toContain('"sidebar.refresh.messageApplied"');
+    expect(nativeRefreshSampler).toContain('"sidebar.refresh.renderStateChanged"');
+    expect(nativeRefreshSampler).toContain('"nativeSidebar.gxserver.presentationDelta.sidebarPatch"');
+    expect(sidebarRefreshDebugLogSource).toContain("shouldWriteSampledLogEvent(");
+  });
+
   test("routes multi-session sleep actions through the sleep cascade", () => {
     const setSessionsSleepingSource = sourceBetween(
       nativeSidebarSource,

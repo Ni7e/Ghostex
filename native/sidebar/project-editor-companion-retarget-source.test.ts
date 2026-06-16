@@ -171,4 +171,31 @@ describe("project editor companion retarget source", () => {
     );
     expect(sidebarCommandSource).toContain("kind: .projectEditorCompanion");
   });
+
+  test("expanding the companion focuses the rendered companion session", () => {
+    /*
+     * CDXC:ProjectEditorCompanion 2026-06-16-08:19:
+     * Reopening the Source/Browser/Kanban companion pane should focus the
+     * selected companion session, especially after the Commands panel was
+     * collapsed without switching back to Agents.
+     */
+    const helperSource = sourceBetween(
+      nativeSidebarSource,
+      "function focusProjectEditorCompanionSessionAfterExpand",
+      "/**\n * CDXC:CommandsPanel 2026-05-14-09:41",
+    );
+    const toggleSource = sourceBetween(
+      nativeSidebarSource,
+      "function toggleProjectEditorCompanionFromTitlebar(): void {",
+      "function openProjectGitEditorSurface",
+    );
+
+    expect(helperSource).toContain("focusedWorkspaceSessionIdForProject(project)");
+    expect(helperSource).toContain(
+      "focusTerminal(createCombinedProjectSessionId(project.projectId, sessionId));",
+    );
+    expect(toggleSource).toContain(
+      "if (!nextHidden && focusProjectEditorCompanionSessionAfterExpand(project))",
+    );
+  });
 });

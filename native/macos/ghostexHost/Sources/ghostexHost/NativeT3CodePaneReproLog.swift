@@ -5,6 +5,7 @@ import WebKit
 enum NativeT3CodePaneReproLog {
   private static let maxLogFileBytes: UInt64 = 25 * 1024 * 1024
   private static let maxRotatedLogFiles = 3
+  private static let highVolumeSampleInterval: TimeInterval = 5
   private static let logger = Logger(
     subsystem: "com.madda.ghostex.host", category: "native-t3-code-pane-repro")
   private static let noisyEvents = Set([
@@ -18,6 +19,19 @@ enum NativeT3CodePaneReproLog {
     "nativeWorkspace.t3WebPane.layout.deferred",
     "nativeWorkspace.t3WebPane.layout.deferredPin",
   ])
+  private static let sampledEvents = Set([
+    "nativeWorkspace.chromiumBrowserPane.cef.internalGeometry",
+    "nativeWorkspace.chromiumBrowserPane.cef.layout",
+    "nativeWorkspace.chromiumBrowserPane.pageViewport",
+    "nativeWorkspace.projectEditor.cef.console",
+    "nativeWorkspace.projectEditor.cef.sourceDragDiagnostic",
+    "nativeWorkspace.projectEditor.cef.sourceDragDiagnostic.nativeMouse",
+    "nativeWorkspace.projectEditor.cef.sourceDragDiagnostics.pageProbe.injected",
+    "nativeWorkspace.projectEditor.companion.sync",
+    "nativeWorkspace.projectEditor.companionHiddenPreference.applied",
+    "nativeWorkspace.projectEditor.companionHiddenPreference.apply",
+    "nativeWorkspace.projectEditor.focus.applied",
+  ])
   private static let logDateFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZ"
@@ -26,6 +40,7 @@ enum NativeT3CodePaneReproLog {
     return formatter
   }()
   private static var didCreateLogsDirectory = false
+  private static var sampleStateByEvent: [String: LogSampleState] = [:]
 
   /**
    CDXC:T3Code 2026-05-08-16:41
@@ -51,6 +66,20 @@ enum NativeT3CodePaneReproLog {
 
     var payload = details
     payload["event"] = event
+    /*
+     CDXC:T3Code 2026-06-16-12:22:
+     Source CEF drag probes, console forwarding, and companion sync diagnostics are useful during repros but can repeat for every drag/mouse/layout tick. Sample these routine Debugging Mode events in the writer and include suppressed counts so support can see burst volume without 25 MB rotations per session.
+     */
+    if !isImportantDiagnostic,
+      !shouldWriteSampledLogEvent(
+        event: event,
+        sampledEvents: sampledEvents,
+        sampleInterval: highVolumeSampleInterval,
+        stateByEvent: &sampleStateByEvent,
+        payload: &payload)
+    {
+      return
+    }
     let line = "[\(logDateFormatter.string(from: Date()))] \(serialize(NativeLogPrivacy.sanitizePayload(payload)))\n"
 
     do {

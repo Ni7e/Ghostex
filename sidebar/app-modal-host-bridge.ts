@@ -42,6 +42,7 @@ export type OpenAppModalMessage =
         | "agentConfig"
         | "commandPalette"
         | "delayedSend"
+        | "discoverGhostex"
         | "firstUserMessage"
         | "floatingPromptEditor"
         | "gitFileDiff"
@@ -53,6 +54,18 @@ export type OpenAppModalMessage =
         | "t3ThreadId"
         | "worktree"
       >;
+      type: "open";
+    }
+  | {
+      /*
+       * CDXC:FirstLaunchSetup 2026-06-16-07:58:
+       * Automatic first-run onboarding should open the replayable Discover
+       * Ghostex tour before firstLaunchSetup. Keep the follow-up flag scoped
+       * to this modal open so manual overflow-menu Discover launches stay a
+       * standalone tour.
+       */
+      modal: "discoverGhostex";
+      showFirstLaunchSetupOnClose?: boolean;
       type: "open";
     }
   | {

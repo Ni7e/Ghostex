@@ -147,6 +147,11 @@ export function buildGitCommand(params: GxserverRunGitActionParams, cwd: string)
   the checkout is removed. Keep those branch probes and deletions in typed Git
   operations, use safe `branch -d`, and redact branch names from returned command
   metadata for the new cleanup actions.
+
+  CDXC:TitlebarGit 2026-06-16-07:31:
+  The macOS titlebar remote-sync action needs a typed pull path that updates the
+  current branch only when Git can fast-forward it. Do not add a merge/rebase
+  fallback; surface non-fast-forward or dirty-worktree failures to the caller.
   */
   switch (action) {
     case "addAll": {
@@ -240,6 +245,8 @@ export function buildGitCommand(params: GxserverRunGitActionParams, cwd: string)
     }
     case "countFileLines":
       throw new GxserverTypedOperationError("badRequest", "countFileLines is handled by gxserver without spawning a subprocess.");
+    case "pullFastForward":
+      return { args: ["pull", "--ff-only"], cwd, executable: "git" };
     case "push":
       return { args: ["push"], cwd, executable: "git" };
     case "pushSetUpstream":
@@ -1324,6 +1331,7 @@ function normalizeGitAction(action: unknown): GxserverGitAction {
     action === "listRemotes" ||
     action === "listUntracked" ||
     action === "merge" ||
+    action === "pullFastForward" ||
     action === "push" ||
     action === "pushSetUpstream" ||
     action === "remoteBranchExists" ||

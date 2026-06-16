@@ -59,6 +59,62 @@ describe("native app modal window source", () => {
     expect(appDelegateSource).not.toContain("native.hitRegion");
   });
 
+  test("shows the native prompt editor resize handle and opens previews from the full thumbnail", () => {
+    /*
+    CDXC:PromptEditor 2026-06-16-10:23:
+    The native child-window prompt editor needs a visible bottom-right resize handle with a resize cursor, and every visible part of an image thumbnail should open the image preview except the explicit remove button.
+    */
+    const nativeResizeRule = sourceBetween(
+      modalStylesSource,
+      ".app-modal-host-native-window-body .floating-prompt-editor-resize {",
+      ".floating-prompt-editor-titlebar {",
+    );
+    expect(nativeResizeRule).toContain("display: block");
+    expect(nativeResizeRule).not.toContain("display: none");
+
+    const resizeRule = sourceBetween(
+      modalStylesSource,
+      "\n.floating-prompt-editor-resize {",
+      "\n.floating-prompt-editor-resize::before",
+    );
+    expect(resizeRule).toContain("cursor: nwse-resize");
+    expect(resizeRule).toContain("height: 24px");
+    expect(resizeRule).toContain("width: 24px");
+
+    expect(modalHostSource).toContain('className="floating-prompt-editor-image-open"');
+    expect(modalHostSource).toContain('onClick={() => setOpenImagePreview(preview)}');
+    expect(modalHostSource).toContain("onPointerDown={isNativeWindowSurface ? undefined : startResize}");
+    expect(appDelegateSource).toContain("promptEditorBottomRightResizeHandleSize");
+    expect(appDelegateSource).toContain("return [.right, .bottom]");
+    expect(appDelegateSource).toContain(
+      "panel.promptEditorBottomRightResizeHandleSize = Self.floatingPromptEditorResizeHandleSize",
+    );
+  });
+
+  test("keeps prompt editor text through app and window close", () => {
+    /*
+    CDXC:PromptEditor 2026-06-16-10:36:
+    Prompt editor text must not be lost when the app or main window closes before the user presses Save. React should live-write Monaco edits to the native prompt file, and AppKit lifecycle close should mark that current draft saved instead of cancelling the editor.
+    */
+    expect(modalHostSource).toContain('type: "floatingPromptEditorDraftUpdate"');
+    expect(modalHostSource).toContain("postDraftUpdate");
+    expect(modalHostSource).toContain("refreshEditorTextDerivedState");
+    expect(modalHostSource).toContain('refreshEditorTextDerivedState(existingEditor, "contentChanged")');
+    expect(modalHostSource).toContain('refreshEditorTextDerivedState(monacoEditor, "contentChanged")');
+    expect(modalHostSource).toContain('refreshEditorTextDerivedState(monacoEditor, "pageLifecycle", { force: true })');
+
+    expect(appDelegateSource).toContain('case "floatingPromptEditorDraftUpdate":');
+    expect(appDelegateSource).toContain("updateFloatingPromptEditorDraft(message: message)");
+    expect(appDelegateSource).toContain("func saveActiveFloatingPromptEditorForAppLifecycleClose(reason: String)");
+    expect(appDelegateSource).toContain("writeFloatingPromptEditorStatusFile(active.statusFile, status: \"saved\")");
+    expect(appDelegateSource).toContain(
+      "saveActiveFloatingPromptEditorForAppLifecycleClose(\n      reason: \"mainWindowWillClose\")",
+    );
+    expect(appDelegateSource).toContain(
+      "saveActiveFloatingPromptEditorForAppLifecycleClose(\n      reason: \"applicationWillTerminate\")",
+    );
+  });
+
   test("animates native app toasts from the bottom center of the app window", () => {
     /*
     CDXC:AppToasts 2026-06-13-19:57:
@@ -96,8 +152,8 @@ describe("native app modal window source", () => {
     The macOS first-launch setup modal must open 90px taller than its old 1120x760 native child window so onboarding steps with hook status and footer actions are not clipped.
     Keep Agents Hub at the generic management-modal height while firstLaunchSetup and the legacy tipsAndTricks alias use the taller frame.
 
-    CDXC:DiscoverGhostex 2026-06-16-00:26:
-    Discover Ghostex uses the same 1120x850 native child-window footprint while keeping its own modal id and title.
+    CDXC:HighlightedFeatures 2026-06-16-08:17:
+    Highlighted Features uses the same 1120x850 native child-window footprint while keeping the existing discoverGhostex modal id.
     */
     const defaultSize = sourceBetween(
       appDelegateSource,
@@ -116,7 +172,7 @@ describe("native app modal window source", () => {
       "private final class TitlebarDropdownPanelController",
     );
     expect(modalTitle).toContain('case "discoverGhostex":');
-    expect(modalTitle).toContain('return "Discover Ghostex"');
+    expect(modalTitle).toContain('return "Highlighted Features"');
   });
 
   test("opens Settings over the exact macOS workspace area", () => {
@@ -169,6 +225,35 @@ describe("native app modal window source", () => {
     expect(settingsStyles).toContain("max-height: 100vh;");
     expect(settingsStyles).toContain("max-width: 100vw;");
     expect(settingsStyles).toContain("width: 100vw;");
+  });
+
+  test("opens titlebar dropdown panels as keyable child windows for hover", () => {
+    /*
+    CDXC:TitlebarDropdowns 2026-06-16-09:22:
+    Resources, Git, Tips, Keep Awake, Actions, Open In, and mode dropdowns all
+    use the titlebar child-window controller. Those panels must be keyable and
+    mouse-move aware so WKWebView hover detection works like Settings instead
+    of inheriting nonactivating-panel hover gaps.
+    */
+    const dropdownPanelClass = sourceBetween(
+      appDelegateSource,
+      "private final class TitlebarDropdownPanel",
+      "private final class TitlebarDropdownPanelController",
+    );
+    expect(dropdownPanelClass).toContain("override var canBecomeKey: Bool { true }");
+    expect(dropdownPanelClass).toContain("override var canBecomeMain: Bool { false }");
+
+    const dropdownController = sourceBetween(
+      appDelegateSource,
+      "private final class TitlebarDropdownPanelController",
+      "final class ReactTitlebarChromeView",
+    );
+    expect(dropdownController).toContain("let panel = TitlebarDropdownPanel(");
+    expect(dropdownController).toContain("styleMask: [.borderless]");
+    expect(dropdownController).toContain("panel.acceptsMouseMovedEvents = true");
+    expect(dropdownController).toContain("panel.makeKeyAndOrderFront(nil)");
+    expect(dropdownController).toContain("panel.makeFirstResponder(webView)");
+    expect(dropdownController).not.toContain(".nonactivatingPanel");
   });
 
   test("reframes Settings when workspace geometry changes", () => {
@@ -265,11 +350,33 @@ describe("native app modal window source", () => {
     Shared AppDelegate log files such as native-host-lifecycle should rotate at
     the common support-bundle limit instead of growing without bound during long
     Debugging Mode sessions.
+
+    CDXC:Diagnostics 2026-06-16-12:22:
+    App startup should also schedule a one-minute delayed line-retention pass so
+    shared support logs stay bounded even when old debug storms predate byte
+    rotation.
+
+    CDXC:Diagnostics 2026-06-16-14:09:
+    Retention should keep one current split file per `.log`/`.jsonl` basename,
+    delete older rotated siblings from that group, then trim the retained file
+    to 25,000 lines.
     */
     expect(appDelegateSource).toContain("sharedLogMaxFileBytes: UInt64 = 25 * 1024 * 1024");
     expect(appDelegateSource).toContain("sharedLogMaxRotatedFiles = 3");
+    expect(appDelegateSource).toContain("sharedLogMaxRetainedLines = 25_000");
+    expect(appDelegateSource).toContain("sharedLogRetentionStartupDelay: TimeInterval = 60");
     expect(appDelegateSource).toContain("rotateSharedLogIfNeeded(logURL: logURL");
+    expect(appDelegateSource).toContain("Self.scheduleSupportLogLineRetentionAfterStartup()");
+    expect(appDelegateSource).toContain("private static func scheduleSupportLogLineRetentionAfterStartup()");
+    expect(appDelegateSource).toContain("private static func pruneSupportLogFile(_ logURL: URL, maxLines: Int) throws");
+    expect(appDelegateSource).toContain("private static func sharedSupportLogBaseName(_ fileName: String) -> String?");
+    expect(appDelegateSource).toContain("private static func preferredSharedSupportLogFile(in fileURLs: [URL]) -> URL?");
+    expect(appDelegateSource).toContain("try manager.removeItem(at: fileURL)");
+    expect(appDelegateSource).toContain('baseName.hasSuffix(".log") || baseName.hasSuffix(".jsonl")');
     expect(appDelegateSource).toContain("native-host-lifecycle.log");
+    expect(appDelegateSource).toContain("sampledNativeHostLifecycleMessage");
+    expect(appDelegateSource).toContain('"activationBoundaryInput"');
+    expect(appDelegateSource).toContain('"workspaceApplicationActivated"');
   });
 
   test("ignores duplicate native app-modal opens except command-palette mode switches", () => {
@@ -413,6 +520,11 @@ describe("native app modal window source", () => {
     CDXC:ModalTextFocus 2026-06-15-11:30:
     Editable text fields and textareas in app modals should use the same focus
     look as Settings search: white input border, no outer shadcn focus ring.
+
+    CDXC:ModalTextFocus 2026-06-16-14:33:
+    Settings text controls now share the Settings search focus token instead of
+    hard-coding white, so theme tuning can change one variable without
+    reintroducing the outer shadcn ring.
     */
     const modalTextFocusStyles = sourceBetween(
       modalStylesSource,
@@ -434,7 +546,7 @@ describe("native app modal window source", () => {
     expect(settingsTextFocusStyles).toContain(
       '.ghostex-settings-shadcn [data-slot="textarea"]:is(:focus, :focus-visible)',
     );
-    expect(settingsTextFocusStyles).toContain("border-color: #fff;");
+    expect(settingsTextFocusStyles).toContain("border-color: var(--settings-focus-border-color);");
     expect(settingsTextFocusStyles).toContain("box-shadow: none;");
     expect(settingsTextFocusStyles).toContain("outline: none;");
   });
@@ -674,7 +786,7 @@ describe("native app modal window source", () => {
       'case "commandPalette", "renameSession", "previousSessions", "discoverGhostex":',
     );
     expect(appModalWindowController).toContain(
-      "Discover Ghostex uses the same compact native child-window pattern.",
+      "Highlighted Features uses the same compact native child-window pattern.",
     );
     expect(appModalWindowController).toContain(
       "matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]",
@@ -758,13 +870,52 @@ describe("native app modal window source", () => {
     /*
     CDXC:PromptEditor 2026-06-13-11:09:
     Ctrl+G rich prompt editor prewarm must keep the hidden native child-window host and mounted Monaco editor alive so the first real prompt open swaps the buffer and focuses immediately instead of recreating Monaco.
+
+    CDXC:PromptEditor 2026-06-16-10:23:
+    Launch-time prompt-editor prewarm must retry when another startup modal or pending child-window presentation blocks the first attempt, so a busy launch cannot leave the first Ctrl+G cold.
+
+    CDXC:PromptEditor 2026-06-16-10:41:
+    Prompt-editor prewarm must briefly order the native child window in a transparent non-interactive background state so WebKit, React, and Monaco become live the same way they do after the first real Ctrl+G open.
     */
+    expect(appDelegateSource).toContain("private static let floatingPromptEditorPrewarmRetryDelay");
+    expect(appDelegateSource).toContain("private var hasPendingFloatingPromptEditorPrewarmRetry");
+    expect(appDelegateSource).toContain("private func scheduleFloatingPromptEditorPrewarmRetryIfNeeded");
+    expect(appDelegateSource).toContain('event: "native.prewarm.retryScheduled"');
+    expect(appDelegateSource).toContain(
+      'scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "modalBusy")',
+    );
+    expect(appDelegateSource).toContain(
+      'scheduleFloatingPromptEditorPrewarmRetryIfNeeded(reason: "modalClosed")',
+    );
+
     const finishPrewarm = sourceBetween(
       appDelegateSource,
       "private func finishFloatingPromptEditorPrewarm()",
       "private func cleanupFloatingPromptEditorPrewarmTempFile()",
     );
     expect(finishPrewarm).toContain('sendReactClose: false');
+
+    const presentedHandler = sourceBetween(
+      appDelegateSource,
+      'case "presented":',
+      'case "close":',
+    );
+    expect(presentedHandler).toContain(
+      "appModalWindowController(for: modal)?.presentBackgroundPrewarmIfCurrent(modal: modal)",
+    );
+
+    const appModalWindowController = sourceBetween(
+      appDelegateSource,
+      "private final class AppModalWindowController",
+      "private final class TitlebarDropdownPanel",
+    );
+    expect(appModalWindowController).toContain("func presentBackgroundPrewarmIfCurrent(modal: String?)");
+    expect(appModalWindowController).toContain("panel.ignoresMouseEvents = true");
+    expect(appModalWindowController).toContain("panel.alphaValue = 0");
+    expect(appModalWindowController).toContain("panel.orderFront(nil)");
+    expect(appModalWindowController).toContain("private func resetPanelBackgroundPrewarmState()");
+    expect(appModalWindowController).toContain("panel?.ignoresMouseEvents = false");
+    expect(appModalWindowController).toContain("panel?.alphaValue = 1");
 
     const monacoRequestEffect = sourceBetween(
       modalHostSource,

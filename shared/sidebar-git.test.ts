@@ -118,6 +118,7 @@ describe("getSidebarGitActionCategory", () => {
 
     expect(getSidebarGitActionCategory(state, "commit")).toBe("direct");
     expect(getSidebarGitActionCategory(state, "push")).toBe("direct");
+    expect(getSidebarGitActionCategory(state, "syncRemote")).toBe("direct");
     expect(getSidebarGitActionCategory(state, "pr")).toBe("agent");
     expect(getSidebarGitActionCategory(state, "syncMain")).toBe("agent");
     expect(getSidebarGitActionCategory(state, "multiRelease")).toBe("agent");
@@ -178,6 +179,20 @@ describe("getSidebarGitDisabledReason", () => {
           isWorktree: true,
         },
         "syncMain",
+      ),
+    ).toBeUndefined();
+  });
+
+  test("should allow remote sync for normal branches with an upstream", () => {
+    expect(
+      getSidebarGitDisabledReason(
+        {
+          ...createDefaultSidebarGitState("commit"),
+          branch: "main",
+          hasUpstream: true,
+          isRepo: true,
+        },
+        "syncRemote",
       ),
     ).toBeUndefined();
   });
