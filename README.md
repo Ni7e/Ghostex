@@ -47,19 +47,6 @@ Use the mobile apps to connect live to your Ghostex agent CLI sessions. APKs are
 
 ## Gallery
 
-### Architecture (client apps <-> gxserver daemon <-> zmx persistence)
-
-<img width="3326" height="1514" alt="2026-06-12_Google Chrome_23-43-07@2x" src="https://github.com/user-attachments/assets/ecc84149-a9fc-4ec8-a387-af5ce35aa7be" />
-
-<!--
-CDXC:ReadmeScreenshots 2026-06-15-03:04:
-The GitHub README screenshots area starts with the user-ordered feature set: embedded VS Code, Agents terminal splits, Chromium Design mode, Beads Kanban, and Ctrl+G rich prompt editing.
-Use sanitized product screenshots only. Do not publish images that expose local project names, terminal transcripts, workspace paths, issue titles, or live account details.
-
-CDXC:ReadmeScreenshots 2026-06-17-09:57:
-Duplicate gallery entries should be merged into their first occurrence. Keep the first screenshot and first description, preserve any second-entry-only feature detail in the first text, and remove the older second screenshot.
--->
-
 ### Embedded VS Code based editor
 
 Great for working with markdown, reviewing code, and checking PRs (Github Extension is great!). It also loads on demand for file edits, PR checks, and git workflows.
@@ -100,6 +87,10 @@ Ghostex works with Claude Code, Codex CLI, OpenCode, Pi Agent, Gemini, Copilot, 
 Ghostex supports notifications, menu bar indicators, minimal floating counters, and session status at a glance.
 
 <img width="331" height="309" alt="Ghostex notification indicator" src="https://github.com/user-attachments/assets/ad0f7af5-b0e9-4b24-988c-cb6bf02c6c9f" />
+
+### Architecture (client apps <-> gxserver daemon <-> zmx persistence)
+
+<img width="3326" height="1514" alt="2026-06-12_Google Chrome_23-43-07@2x" src="https://github.com/user-attachments/assets/ecc84149-a9fc-4ec8-a387-af5ce35aa7be" />
 
 ## Highlights
 
