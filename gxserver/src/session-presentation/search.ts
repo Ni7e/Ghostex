@@ -21,6 +21,29 @@ export function searchGxserverPresentationSessions(
   state: GxserverPresentationReadModel,
   params: GxserverPresentationSearchParams,
 ): GxserverPresentationSearchResponse {
+  const { candidates, limit, offset, projectsById } = collectPresentationSearchCandidates(state, params);
+  const sortedCandidates = candidates.sort((left, right) => compareSessionRecency(left.session, right.session));
+  const page = sortedCandidates.slice(offset, offset + limit);
+  return {
+    cursor: offset + limit < sortedCandidates.length ? String(offset + limit) : undefined,
+    results: page.map(({ match, session }) =>
+      toSearchResult(projectsById.get(session.projectId), session, match ?? { field: "title" as const }),
+    ),
+  };
+}
+
+function collectPresentationSearchCandidates(
+  state: GxserverPresentationReadModel,
+  params: GxserverPresentationSearchParams,
+): {
+  candidates: Array<{
+    match: GxserverPresentationSearchResult["match"] | undefined;
+    session: GxserverSessionDomainState;
+  }>;
+  limit: number;
+  offset: number;
+  projectsById: Map<string, GxserverProjectDomainState>;
+} {
   const limit = normalizeLimit(params.limit);
   const offset = normalizeCursor(params.cursor);
   const includeActive = params.includeActive !== false;
@@ -36,15 +59,12 @@ export function searchGxserverPresentationSessions(
       return (active && includeActive) || (!active && includePrevious);
     })
     .map((session) => ({ match: matchSession(projectsById.get(session.projectId), session, query), session }))
-    .filter((candidate) => !query || candidate.match)
-    .sort((left, right) => compareSessionRecency(left.session, right.session));
-
-  const page = candidates.slice(offset, offset + limit);
+    .filter((candidate) => !query || candidate.match);
   return {
-    cursor: offset + limit < candidates.length ? String(offset + limit) : undefined,
-    results: page.map(({ match, session }) =>
-      toSearchResult(projectsById.get(session.projectId), session, match ?? { field: "title" as const }),
-    ),
+    candidates,
+    limit,
+    offset,
+    projectsById,
   };
 }
 
@@ -58,8 +78,11 @@ export function searchGxserverPreviousSessions(
 
   CDXC:PreviousSessions 2026-06-07-05:28:
   Command-pane runs such as `bun run start` are reusable tool output, not restorable workspace history. Exclude the commands surface in gxserver before pin/favorite/title exceptions so every client receives the same Previous Sessions list without adding local modal filters.
+
+  CDXC:PreviousSessions 2026-06-17-17:06:
+  The Previous Sessions modal is a close-history surface. Sort and page stopped rows by the provider close timestamp instead of lastActiveAt so a session closed now is immediately near the top even if its last user activity was older.
   */
-  return searchGxserverPresentationSessions(
+  const { candidates, limit, offset, projectsById } = collectPresentationSearchCandidates(
     {
       projects: state.projects,
       sessions: state.sessions.filter(isPreviousSessionHistoryCandidate),
@@ -70,6 +93,17 @@ export function searchGxserverPreviousSessions(
       includePrevious: true,
     },
   );
+  const sortedCandidates = candidates.sort((left, right) =>
+    comparePreviousSessionClosedRecency(left.session, right.session),
+  );
+  const page = sortedCandidates.slice(offset, offset + limit);
+  return {
+    cursor: offset + limit < sortedCandidates.length ? String(offset + limit) : undefined,
+    results: page.map(({ match, session }) => ({
+      ...toSearchResult(projectsById.get(session.projectId), session, match ?? { field: "title" as const }),
+      closedAt: resolvePreviousSessionClosedAt(session),
+    })),
+  };
 }
 
 function toSearchResult(
@@ -209,6 +243,22 @@ function compareSessionRecency(left: GxserverSessionDomainState, right: Gxserver
   const rightTime = resolvePresentationSessionLastActiveAt(right);
   const byTime = rightTime.localeCompare(leftTime);
   return byTime || left.sessionId.localeCompare(right.sessionId);
+}
+
+function comparePreviousSessionClosedRecency(
+  left: GxserverSessionDomainState,
+  right: GxserverSessionDomainState,
+): number {
+  const byTime = resolvePreviousSessionClosedAt(right).localeCompare(resolvePreviousSessionClosedAt(left));
+  return byTime || left.sessionId.localeCompare(right.sessionId);
+}
+
+function resolvePreviousSessionClosedAt(session: GxserverSessionDomainState): string {
+  const providerClosedAt =
+    session.lifecycleState === "stopped" && session.providerState.lifecycleState === "missing"
+      ? readText(session.providerState.probedAt)
+      : undefined;
+  return providerClosedAt ?? session.updatedAt ?? session.createdAt;
 }
 
 function normalizeQuery(query: unknown): string {

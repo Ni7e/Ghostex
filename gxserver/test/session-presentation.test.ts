@@ -1421,6 +1421,80 @@ test("previous sessions search hides placeholder inactive rows but keeps restora
   assert.equal(JSON.stringify(trustedResult).includes("Private user prompt"), false);
 });
 
+test("previous sessions search ranks stopped rows by close time instead of last activity", () => {
+  const project = projectFixture({ name: "Ghostex" });
+  const closedNow = sessionFixture({
+    agentId: "codex",
+    lastActiveAt: "2026-06-01T09:00:00.000Z",
+    lifecycleState: "stopped",
+    providerState: {
+      lifecycleState: "missing",
+      probedAt: "2026-06-06T12:00:00.000Z",
+      provider: "zmx",
+      zmxName: "S90-P3lv0-G1close",
+    },
+    runtimeSettings: { titleSource: "terminal-auto" },
+    sessionId: "G1close",
+    title: "Closed recently",
+    updatedAt: "2026-06-06T12:00:00.000Z",
+    zmxName: "S90-P3lv0-G1close",
+  });
+  const activeEarlierClose = sessionFixture({
+    agentId: "codex",
+    lastActiveAt: "2026-06-07T09:00:00.000Z",
+    lifecycleState: "stopped",
+    providerState: {
+      lifecycleState: "missing",
+      probedAt: "2026-06-05T12:00:00.000Z",
+      provider: "zmx",
+      zmxName: "S90-P3lv0-G2active",
+    },
+    runtimeSettings: { titleSource: "terminal-auto" },
+    sessionId: "G2active",
+    title: "Active before close",
+    updatedAt: "2026-06-05T12:00:00.000Z",
+    zmxName: "S90-P3lv0-G2active",
+  });
+  const metadataEditedEarlierClose = sessionFixture({
+    agentId: "codex",
+    lastActiveAt: "2026-06-04T09:00:00.000Z",
+    lifecycleState: "stopped",
+    providerState: {
+      lifecycleState: "missing",
+      probedAt: "2026-06-04T12:00:00.000Z",
+      provider: "zmx",
+      zmxName: "S90-P3lv0-G3meta",
+    },
+    runtimeSettings: { titleSource: "terminal-auto" },
+    sessionId: "G3meta",
+    title: "Metadata edited after close",
+    updatedAt: "2026-06-08T12:00:00.000Z",
+    zmxName: "S90-P3lv0-G3meta",
+  });
+
+  /*
+  CDXC:PreviousSessions 2026-06-17-17:06:
+  Closing a stale-but-restorable session should put it near the top of Previous Sessions. This endpoint must rank by provider close time, not by lastActiveAt or later metadata updatedAt changes.
+  */
+  const search = searchGxserverPreviousSessions(
+    { projects: [project], sessions: [activeEarlierClose, metadataEditedEarlierClose, closedNow] },
+    { includeActive: false, includePrevious: true },
+  );
+
+  assert.deepEqual(
+    search.results.map((result) => result.sessionId),
+    ["G1close", "G2active", "G3meta"],
+  );
+  assert.deepEqual(
+    search.results.map((result) => result.closedAt),
+    [
+      "2026-06-06T12:00:00.000Z",
+      "2026-06-05T12:00:00.000Z",
+      "2026-06-04T12:00:00.000Z",
+    ],
+  );
+});
+
 test("presentation projects sanitized zmx title-observer health", () => {
   const project = projectFixture({});
   const session = sessionFixture({
