@@ -93,6 +93,11 @@ type DiscoverGhostexFeature = {
  * Highlighted Features should not dismiss from outside clicks. Close it from
  * the top-right X button, Escape, or native close paths while keeping the X
  * aligned with the First Time Setup modal close button.
+ *
+ * CDXC:HighlightedFeatures 2026-06-16-21:26:
+ * Use the exact supplied PNG screenshots copied into media/readme for the five
+ * feature images. Do not generate replacement imagery or substitute derived
+ * variants, because the modal is meant to show those specific product captures.
  */
 const DISCOVER_GHOSTEX_FEATURES: readonly DiscoverGhostexFeature[] = [
   {
