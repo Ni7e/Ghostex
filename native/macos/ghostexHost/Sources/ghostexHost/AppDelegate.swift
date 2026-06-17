@@ -81,7 +81,7 @@ private let ghostexDefaultSidebarTitlebarBackgroundDarknessPercent = 93
 private let ghostexMinimumSidebarTitlebarBackgroundDarknessPercent = 85
 private let ghostexMaximumSidebarTitlebarBackgroundDarknessPercent = 100
 private let ghostexSidebarTitlebarBackgroundTintStrength = 0.12
-private let ghostexCustomTitlebarBackgroundBrightnessFactor: CGFloat = 0.85
+private let ghostexCustomTitlebarBackgroundBrightnessFactor: CGFloat = 0.80
 
 private struct SidebarTitlebarCustomChromeColors {
   let enabled: Bool
@@ -318,8 +318,13 @@ private let ghostexAppTitlebarHeight: CGFloat = 35
  app titlebar by the configured visual offset. Keep this as a named visual-down
  offset so flipped and non-flipped AppKit titlebar coordinate systems apply the
  same requirement.
+
+ CDXC:NativeWindowChrome 2026-06-17-18:25:
+ The main macOS titlebar row should move 2px higher after visual review. Set
+ the prior traffic-light visual-down offset back to zero so AppKit buttons align
+ with the raised React titlebar controls without adding a second correction path.
  */
-private let ghostexTrafficLightVisualDownOffset: CGFloat = 2
+private let ghostexTrafficLightVisualDownOffset: CGFloat = 0
 /**
  CDXC:NativeWindowChrome 2026-05-28-14:59:
  The main app window must not resize or restore below 500px wide by 400px tall.
@@ -7892,11 +7897,12 @@ final class ghostexRootView: NSView {
       return sidebarColor
     }
     /*
-     CDXC:SidebarTitlebarColors 2026-06-16-18:46:
-     The custom titlebar visual trial should render the titlebar 15% darker
-     than the sidebar while leaving preset themes, modals, dropdowns, and the
-     sidebar background unchanged. Derive it from the resolved sidebar color so
-     contrast and tint settings still have one persisted source of truth.
+     CDXC:SidebarTitlebarColors 2026-06-17-12:50:
+     The custom titlebar visual trial should render the titlebar 20% darker
+     than the sidebar, replacing the earlier 15% offset, while leaving preset
+     themes, modals, dropdowns, and the sidebar background unchanged. Derive it
+     from the resolved sidebar color so contrast and tint settings still have
+     one persisted source of truth.
      */
     return NSColor(
       srgbRed: max(0, min(1, rgbColor.redComponent * ghostexCustomTitlebarBackgroundBrightnessFactor)),
@@ -14298,6 +14304,16 @@ private final class AppModalWindowWebView: WKWebView {
   var nativeWindowTitleDragHeight: CGFloat = 0
   var nativeWindowTitleDragExcludedTrailingWidth: CGFloat = 0
 
+  override var mouseDownCanMoveWindow: Bool {
+    /*
+     CDXC:PromptEditor 2026-06-17-17:04:
+     The native rich prompt editor should move only from the explicit titlebar
+     drag band. The bottom image thumbnail shelf is regular WebKit content, so
+     the WKWebView must not advertise itself as movable window background.
+     */
+    return false
+  }
+
   override func mouseDown(with event: NSEvent) {
     guard nativeWindowTitleDragHeight > 0 else {
       super.mouseDown(with: event)
@@ -14305,7 +14321,19 @@ private final class AppModalWindowWebView: WKWebView {
     }
 
     let point = convert(event.locationInWindow, from: nil)
-    let isInTitleDragBand = point.y >= bounds.height - nativeWindowTitleDragHeight
+    /*
+     CDXC:PromptEditor 2026-06-17-17:04:
+     WKWebView uses flipped local coordinates, so the visual top titlebar is
+     low local y. Do not treat the bottom thumbnail shelf as the titlebar drag
+     band, or dragging/clicking image thumbnails moves the editor instead of
+     opening the preview.
+     */
+    let isInTitleDragBand: Bool
+    if isFlipped {
+      isInTitleDragBand = point.y <= nativeWindowTitleDragHeight
+    } else {
+      isInTitleDragBand = point.y >= bounds.height - nativeWindowTitleDragHeight
+    }
     let isInTrailingControlArea =
       point.x >= bounds.width - nativeWindowTitleDragExcludedTrailingWidth
     guard isInTitleDragBand, !isInTrailingControlArea else {
@@ -15170,9 +15198,15 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     case "delayedSend":
       /*
        CDXC:DelayedSend 2026-06-12-04:07:
-       Delayed Send is a small timer dialog. Size and lock the native child window to 472x269 so AppKit does not inherit the generic app-modal frame or clamp it back up through the shared minimum.
+       Delayed Send is a small timer dialog. Size and lock the native child window to its compact modal-specific frame so AppKit does not inherit the generic app-modal frame or clamp it back up through the shared minimum.
+
+       CDXC:DelayedSend 2026-06-17-17:01:
+       The seconds input was removed, but the remaining title, fields, helper
+       text, and footer still need more vertical WebView room in the native
+       child window. Keep the compact 472px width while raising the locked
+       height so the dialog never requires scrolling to reach Set Timer.
        */
-      return CGSize(width: 472, height: 269)
+      return CGSize(width: 472, height: 336)
     case "pinnedPrompts", "daemonSessions":
       return CGSize(width: 760, height: 680)
     case "scratchPad", "addRepository", "remoteProjectPicker":
@@ -15310,7 +15344,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   private func minimumContentSize(for modal: String?) -> CGSize {
     switch modal {
     case "delayedSend":
-      return CGSize(width: 472, height: 269)
+      return CGSize(width: 472, height: 336)
     case "floatingPromptEditor":
       return Self.floatingPromptEditorMinimumSize
     case "settings":
