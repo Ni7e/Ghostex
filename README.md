@@ -47,15 +47,15 @@ Use the mobile apps to connect live to your Ghostex agent CLI sessions. APKs are
 
 ## Gallery
 
+### Split your terminals and use keyboard hotkeys to jump between terminals in the Agents view
+
+<img width="3456" height="2068" alt="image" src="https://github.com/user-attachments/assets/c92c5ec9-0021-42fb-9628-0cee62c48e86" />
+
 ### Embedded VS Code based editor
 
 Great for working with markdown, reviewing code, and checking PRs (Github Extension is great!). It also loads on demand for file edits, PR checks, and git workflows.
 
 <img width="3456" height="2068" alt="image" src="https://github.com/user-attachments/assets/986fbece-d0de-4739-8515-f3c2a7437b92" />
-
-### Split your terminals and use keyboard hotkeys to jump between terminals in the Agents view
-
-<img width="3456" height="2068" alt="image" src="https://github.com/user-attachments/assets/c92c5ec9-0021-42fb-9628-0cee62c48e86" />
 
 ### Embedded Chromium Browser with Design mode
 
