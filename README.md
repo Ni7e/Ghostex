@@ -55,11 +55,14 @@ Use the mobile apps to connect live to your Ghostex agent CLI sessions. APKs are
 CDXC:ReadmeScreenshots 2026-06-15-03:04:
 The GitHub README screenshots area starts with the user-ordered feature set: embedded VS Code, Agents terminal splits, Chromium Design mode, Beads Kanban, and Ctrl+G rich prompt editing.
 Use sanitized product screenshots only. Do not publish images that expose local project names, terminal transcripts, workspace paths, issue titles, or live account details.
+
+CDXC:ReadmeScreenshots 2026-06-17-09:57:
+Duplicate gallery entries should be merged into their first occurrence. Keep the first screenshot and first description, preserve any second-entry-only feature detail in the first text, and remove the older second screenshot.
 -->
 
 ### Embedded VS Code based editor
 
-Great for working with markdown, reviewing code, and checking PRs (Github Extension is great!)
+Great for working with markdown, reviewing code, and checking PRs (Github Extension is great!). It also loads on demand for file edits, PR checks, and git workflows.
 
 <img width="3456" height="2068" alt="image" src="https://github.com/user-attachments/assets/986fbece-d0de-4739-8515-f3c2a7437b92" />
 
@@ -69,7 +72,7 @@ Great for working with markdown, reviewing code, and checking PRs (Github Extens
 
 ### Embedded Chromium Browser with Design mode
 
-Also Comes with Devtools, Agent Browser Control, and Profiles.
+Also Comes with Devtools, Agent Browser Control, Profiles, and MCP access.
 
 <img width="3456" height="2068" alt="image" src="https://github.com/user-attachments/assets/ce9fbe6b-8c2b-41f1-88f6-67d8254846e5" />
 
@@ -82,37 +85,15 @@ Dump your notes here then let an orchestrator agent hand them off to other agent
 
 ### Rich Prompt Editor with ctrl + g
 
-Edit your agent prompts with full hotkeys support and even image previews!
+Edit your agent prompts with full hotkeys support and even image previews! Includes Monaco-based and TUI-based editor modes.
 
 <img width="2048" height="1221" alt="image" src="https://github.com/user-attachments/assets/b51ec92e-04cf-4d8f-933c-fc2a13638a1d" />
 
 ### T3code GUI panes and supported terminal CLIs
 
-<img width="3322" height="2060" alt="Ghostex T3code panes and supported terminal CLIs" src="https://github.com/user-attachments/assets/49862e2d-1edd-4647-8161-5afb25ed8341" />
-
-### Rich prompt editor
-
-Two prompt editor modes are included: Monaco-based and TUI-based.
-
-<img width="2048" height="1270" alt="Ghostex rich prompt editor modes" src="https://github.com/user-attachments/assets/a94c00ea-d373-4d72-acc9-b6a16318b4b3" />
-
-### Agent CLI support
-
 Ghostex works with Claude Code, Codex CLI, OpenCode, Pi Agent, Gemini, Copilot, and other terminal-based agent CLIs.
 
-<img width="1664" height="1035" alt="Ghostex supported agent CLIs" src="https://github.com/user-attachments/assets/932497a7-8b68-480f-ae05-13df08571e47" />
-
-### Embedded Chromium browser with DevTools and profiles.
-
-Chromium-based browser panes include DevTools, profiles, and MCP access.
-
-<img width="1000" alt="Ghostex sidebar with terminal and browser panes" src="media/readme/ghostex-browser-pane.png" />
-
-### Embedded VS Code based editor and Git + PRs manager
-
-The fully featured VS Code-based editor loads on demand for file edits, PR checks, Markdown, and git workflows.
-
-<img width="3327" height="2065" alt="Ghostex embedded code editor" src="https://github.com/user-attachments/assets/f1cc7d00-7098-44fe-bc29-590ae03ea8e9" />
+<img width="3322" height="2060" alt="Ghostex T3code panes and supported terminal CLIs" src="https://github.com/user-attachments/assets/49862e2d-1edd-4647-8161-5afb25ed8341" />
 
 ### Notifications and status
 
