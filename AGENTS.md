@@ -1,5 +1,7 @@
 # Rules for Agents working in this Repository
 
+## Never run "bun run start" or any command that would restart the app unless I ask you to.
+
 ## Repository Search Routing
 
 This repository contains Ghostex app code plus large imported/vendored terminal code. Start searches in the smallest app-owned area that matches the task, and only expand after the first pass doesn't find what you need.
