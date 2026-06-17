@@ -24,6 +24,20 @@
 <!-- CDXC:Distribution 2026-06-16-15:55: Final 4.14.0 notes must also cover the `gx 2` experimental TUI path, beta-gated browser/tooling surfaces, support-log retention, direct titlebar Git sync, first-run feature sequencing, and sanitized repository screenshots before Sparkle, GitHub, Homebrew, and Android publication. -->
 <!-- CDXC:Distribution 2026-06-16-21:03: The published 4.14.0 notes should use shorter grouped bullets with sub-bullets, call out substantial performance improvements, simplified settings and app surfaces, coming automations, dark theme colors with light colors coming soon, and thank @saleem-hadad for UX help. -->
 <!-- CDXC:Distribution 2026-06-16-21:38: The tiny 4.14.1 patch package should stay grouped with the 4.14.0 release page while Sparkle, GitHub assets, and Homebrew point downloads at the 4.14.1 build. -->
+<!-- CDXC:Distribution 2026-06-17-09:48: Release 4.14.2 must ship from committed main with the latest supplied Highlighted Features PNGs included in the app bundle, not from hidden stash state or older packaged images. -->
+
+## 4.14.2 - 2026-06-17
+
+- Major
+  - Highlighted Features and screenshots
+    - The macOS app bundle now includes the latest supplied Highlighted Features screenshots instead of the older package images.
+    - The feature tour and README media use the exact committed PNG captures for the agent splits, Chromium design mode, embedded editor, Kanban board, and rich prompt editor views.
+  - Titlebar Actions
+    - Custom titlebar Actions are preserved on startup when gxserver has not imported action content yet.
+    - Legacy saved Action icon colors are stripped so Action icons inherit the native chrome color consistently.
+- Minor
+  - Native pane chrome
+    - Focused pane borders keep their top and right edges visible against clipped pane edges.
 
 ## 4.14.0 - 2026-06-16
 

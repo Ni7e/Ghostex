@@ -1,9 +1,11 @@
 
 <!-- CDXC:Distribution 2026-06-16-14:27: The 4.14.0 public feature index needs to match the final release notes for the packaged `gx 2` TUI path, beta-gated browser/tool controls, support-log retention, titlebar Git sync, first-run feature sequencing, and sanitized repository screenshots. -->
 <!-- CDXC:Distribution 2026-06-16-20:37: Public release-facing docs should avoid historical desktop-runtime references while preserving the user-facing behavior summaries for split-layout focus, previous-session restore, integrations, and bundled runtime ownership. -->
+<!-- CDXC:Distribution 2026-06-17-09:48: The 4.14.2 public feature index must document that the latest committed Highlighted Features screenshots are packaged, custom titlebar Actions survive startup sync, and focused pane borders remain visible. -->
 
 ## All features:
 
+- 4.14.2 packages the latest supplied Highlighted Features screenshots, preserves custom titlebar Actions during startup gxserver sync, strips legacy per-action icon colors so icons inherit native chrome color, and keeps focused pane borders visible on clipped top and right edges.
 - 4.14.0 improves native pane lifecycle and startup focus, refreshes sidebar/titlebar settings and custom chrome controls, adds Close After Done timers, strengthens gxserver provider-liveness projection, introduces the Rust gxserver packaging path, adds the experimental packaged `gx 2` TUI path, improves TUI edge navigation, centers the Android factory droid icon, and refreshes repository screenshots and download links.
 - New native terminals can stay selected while their surface is still mounting, startup focus is restored more predictably, and gxserver presentation catch-up no longer causes newly created splits to look stale.
 - Sidebar and titlebar settings include clearer sections, custom contrast/tint controls for app chrome, steadier mode switching and Resources behavior, richer native tooltips, and Discover Ghostex download entry points.
