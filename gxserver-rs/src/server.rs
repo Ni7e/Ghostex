@@ -121,6 +121,11 @@ const RENDERER_COMMAND_ACTIONS: &[&str] = &[
     "openBrowserPane",
     "openPaths",
     "restartSession",
+    /*
+    CDXC:GenerateTitleSkill 2026-06-17-17:02:
+    Generated-title `ghostex rename-command` now enters gxserver as a renderer command so macOS can submit Claude Code `/rename <title>` with a real native Enter event instead of zmx carriage-return text. Keep Rust's action allow-list in lockstep with the TypeScript daemon before full cutover.
+    */
+    "renameCommand",
     "runCommand",
     "saveAgent",
     "sendMessage",
@@ -1775,5 +1780,19 @@ fn _permission_name(permission: ApiPermission) -> &'static str {
         ApiPermission::FullLocal => "fullLocal",
         ApiPermission::RemoteAllowed => "remoteAllowed",
         ApiPermission::RemoteBlocked => "remoteBlocked",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RENDERER_COMMAND_ACTIONS;
+
+    #[test]
+    fn renderer_command_actions_include_generated_title_rename() {
+        /*
+        CDXC:GenerateTitleSkill 2026-06-17-17:02:
+        Rust gxserver must accept the same renderer `renameCommand` action as the TypeScript daemon so a full cutover keeps Claude Code generated-title renames on the native Enter path.
+        */
+        assert!(RENDERER_COMMAND_ACTIONS.contains(&"renameCommand"));
     }
 }

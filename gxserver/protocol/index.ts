@@ -61,6 +61,7 @@ export const GXSERVER_RENDERER_COMMAND_ACTIONS = [
   "openBrowserPane",
   "openPaths",
   "restartSession",
+  "renameCommand",
   "runCommand",
   "saveAgent",
   "sendMessage",
@@ -1200,6 +1201,11 @@ export interface GxserverPresentationSearchResult {
   agentName?: string;
   agentSessionId?: string;
   agentSessionPath?: string;
+  /**
+   * CDXC:PreviousSessions 2026-06-17-17:06:
+   * Previous Sessions list/search responses expose close time separately from lastActiveAt so clients can group and sort restore rows by when the session was closed while still rendering Last Active from actual user activity.
+   */
+  closedAt?: string;
   createdAt: string;
   cwd?: string;
   displayTitle?: string;
