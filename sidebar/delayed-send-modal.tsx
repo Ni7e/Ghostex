@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -42,6 +42,11 @@ export type DelayedSendModalProps = {
  * Round active remaining deadlines up to the next whole minute when prefilling
  * so editing an existing timer cannot silently shorten a sub-minute remainder
  * and seconds never reappear as an input.
+ *
+ * CDXC:DelayedSend 2026-06-17-17:01:
+ * The minutes field is the primary edit target now that seconds are gone.
+ * Focus and select it through the dialog's open focus path and the native
+ * WebView frame settle pass so opening the timer is immediately type-to-replace.
  */
 export function DelayedSendModal({
   delayedSendDeadlineAt,
@@ -57,6 +62,17 @@ export function DelayedSendModal({
   const hoursInputId = useId();
   const minutesInputId = useId();
   const minutesInputRef = useRef<HTMLInputElement>(null);
+  const focusMinutesInput = useCallback(() => {
+    minutesInputRef.current?.focus();
+    minutesInputRef.current?.select();
+  }, []);
+  const handleOpenAutoFocus = useCallback(
+    (event: { preventDefault: () => void }) => {
+      event.preventDefault();
+      focusMinutesInput();
+    },
+    [focusMinutesInput],
+  );
 
   useEffect(() => {
     if (!isOpen) {
@@ -74,13 +90,12 @@ export function DelayedSendModal({
        * merely place a caret there, so typing immediately replaces the common
        * duration value without requiring Cmd+A or manual deletion.
        */
-      minutesInputRef.current?.focus();
-      minutesInputRef.current?.select();
+      focusMinutesInput();
     });
     return () => {
       window.cancelAnimationFrame(animationFrame);
     };
-  }, [delayedSendDeadlineAt, isOpen]);
+  }, [delayedSendDeadlineAt, focusMinutesInput, isOpen]);
 
   if (!isOpen) {
     return null;
@@ -109,6 +124,7 @@ export function DelayedSendModal({
     >
       <DialogContent
         className="command-config-modal-shadcn delayed-send-modal-shadcn font-sans"
+        onOpenAutoFocus={handleOpenAutoFocus}
         showCloseButton={false}
       >
         <form className="delayed-send-form" onSubmit={submit}>
@@ -142,6 +158,7 @@ export function DelayedSendModal({
                 <FieldLabel htmlFor={minutesInputId}>Minutes</FieldLabel>
                 <Input
                   aria-label="Minutes"
+                  autoFocus
                   id={minutesInputId}
                   min={0}
                   onChange={(event) => setMinutes(event.currentTarget.value)}
