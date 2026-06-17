@@ -12,6 +12,7 @@ import {
 
 type MergeGxserverProjectActionsResult = {
   changed: boolean;
+  retainedLocalOwnerIds: string[];
   restoredOwnerIds: string[];
   store: ProjectSidebarCommandsStore;
 };
@@ -41,10 +42,14 @@ export function mergeGxserverProjectActionsIntoCommandsStore(
   store: ProjectSidebarCommandsStore,
   gxserverProjects: readonly GxserverProjectDomainState[],
   ownerIdByProjectId: Readonly<Record<string, string>> = {},
-  options: { mode?: GxserverProjectActionsSyncMode } = {},
+  options: {
+    mode?: GxserverProjectActionsSyncMode;
+    preserveLocalWhenGxserverEmpty?: boolean;
+  } = {},
 ): MergeGxserverProjectActionsResult {
   const mode = options.mode ?? "hydrateMissing";
   let changed = false;
+  const retainedLocalOwnerIds: string[] = [];
   const restoredOwnerIds: string[] = [];
   const nextStore: ProjectSidebarCommandsStore = { ...store };
   const sourceProjects =
@@ -70,6 +75,25 @@ export function mergeGxserverProjectActionsIntoCommandsStore(
       continue;
     }
     const existingState = nextStore[ownerProjectId];
+    /*
+    CDXC:ProjectActions 2026-06-17-07:40:
+    First startup after an app update can still have the user's titlebar Action
+    definitions in the WK local render cache while the gxserver project row has
+    no imported action content. Preserve that local state during startup so an
+    empty daemon row cannot erase Actions before native mirrors the retained
+    state back into gxserver. Later projectUpdated deltas and explicit
+    updateProject responses keep using replace mode without this protection.
+    */
+    if (
+      mode === "replaceFromGxserver" &&
+      options.preserveLocalWhenGxserverEmpty === true &&
+      existingState &&
+      hasProjectSidebarCommandsStateContent(existingState) &&
+      !hasProjectSidebarCommandsStateContent(gxserverState)
+    ) {
+      retainedLocalOwnerIds.push(ownerProjectId);
+      continue;
+    }
     if (
       mode === "hydrateMissing" &&
       existingState &&
@@ -87,7 +111,7 @@ export function mergeGxserverProjectActionsIntoCommandsStore(
     restoredOwnerIds.push(ownerProjectId);
     changed = true;
   }
-  return { changed, restoredOwnerIds, store: nextStore };
+  return { changed, retainedLocalOwnerIds, restoredOwnerIds, store: nextStore };
 }
 
 export function hasProjectSidebarCommandsStateContent(

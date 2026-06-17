@@ -8750,13 +8750,23 @@ function projectCommandsOwnerIdByProjectId(): Record<string, string> {
 function syncProjectCommandsStoreFromGxserverProjects(
   gxserverProjects: NativeSidebarGxserverStartupSnapshot["projects"],
   mode: "hydrateMissing" | "replaceFromGxserver" = "replaceFromGxserver",
+  options: { preserveLocalWhenGxserverEmpty?: boolean } = {},
 ): string[] {
   const result = mergeGxserverProjectActionsIntoCommandsStore(
     projectCommandsByProjectId,
     gxserverProjects,
     projectCommandsOwnerIdByProjectId(),
-    { mode },
+    { mode, preserveLocalWhenGxserverEmpty: options.preserveLocalWhenGxserverEmpty },
   );
+  if (result.retainedLocalOwnerIds.length > 0) {
+    for (const ownerProjectId of result.retainedLocalOwnerIds) {
+      const retainedState = result.store[ownerProjectId];
+      if (!retainedState) {
+        continue;
+      }
+      persistProjectCommandsStateToGxserver(ownerProjectId, retainedState);
+    }
+  }
   if (!result.changed) {
     return [];
   }
@@ -8781,6 +8791,9 @@ function syncSidebarSharedProjectCacheFromGxserverProjects(
   const restoredProjectActionOwnerIds = syncProjectCommandsStoreFromGxserverProjects(
     gxserverProjects,
     "replaceFromGxserver",
+    {
+      preserveLocalWhenGxserverEmpty: reason === "startupSnapshot",
+    },
   );
   const restoredAgents = syncSidebarAgentsFromGxserverProjects(
     gxserverProjects,

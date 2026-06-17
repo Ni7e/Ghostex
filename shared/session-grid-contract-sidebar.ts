@@ -1767,7 +1767,6 @@ export type SidebarToExtensionMessage =
       closeTerminalOnExit: boolean;
       commandId?: string;
       icon?: SidebarCommandIcon;
-      iconColor?: string;
       name: string;
       playCompletionSound: boolean;
       command?: string;

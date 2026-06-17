@@ -190,6 +190,52 @@ describe("gxserver project actions hydration", () => {
     });
   });
 
+  test("preserves local actions on startup when gxserver has no imported action content", () => {
+    /*
+    CDXC:ProjectActions 2026-06-17-07:40:
+    Regression coverage for the titlebar Actions data-loss report: the first
+    Mac app startup after an update must not replace a non-empty local Actions
+    cache with an empty gxserver project row before native can mirror the local
+    definitions back into gxserver.
+    */
+    const result = mergeGxserverProjectActionsIntoCommandsStore(
+      {
+        Pparent: {
+          commands: [
+            {
+              actionType: "terminal",
+              closeTerminalOnExit: false,
+              command: "npm run ship",
+              commandId: "ship",
+              isDefault: false,
+              name: "Ship",
+              playCompletionSound: true,
+            },
+          ],
+          deletedDefaultCommandIds: ["test"],
+          order: ["ship"],
+        },
+      },
+      [
+        project("Pparent", {
+          customCommandOrder: [],
+          customCommands: [],
+          deletedDefaultCommandIds: [],
+        }),
+      ],
+      {},
+      {
+        mode: "replaceFromGxserver",
+        preserveLocalWhenGxserverEmpty: true,
+      },
+    );
+
+    expect(result.changed).toBe(false);
+    expect(result.retainedLocalOwnerIds).toEqual(["Pparent"]);
+    expect(result.store.Pparent?.commands.map((command) => command.commandId)).toEqual(["ship"]);
+    expect(result.store.Pparent?.deletedDefaultCommandIds).toEqual(["test"]);
+  });
+
   test("does not clear parent actions from an empty worktree child project", () => {
     const result = mergeGxserverProjectActionsIntoCommandsStore(
       {

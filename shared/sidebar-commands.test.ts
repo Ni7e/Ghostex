@@ -7,7 +7,6 @@ import {
   normalizeStoredSidebarCommands,
   SIDEBAR_UNCONFIGURED_TERMINAL_COMMAND_LABEL,
 } from "./sidebar-commands";
-import { DEFAULT_SIDEBAR_COMMAND_ICON_COLOR } from "./sidebar-command-icons";
 
 describe("createSidebarCommandButtons", () => {
   test("should expose the default terminal action slots when no actions are configured", () => {
@@ -151,7 +150,6 @@ describe("createSidebarCommandButtons", () => {
         expect.objectContaining({
           commandId: "custom-tests",
           icon: "bug",
-          iconColor: "#92b4ff",
           name: "",
           playCompletionSound: true,
         }),
@@ -294,12 +292,10 @@ describe("normalizeStoredSidebarCommands", () => {
     expect(
       normalizeStoredSidebarCommands([
         {
-          closeTerminalOnExit: false,
           command: "  vp dev  ",
           commandId: " dev ",
           isDefault: true,
           name: "  Dev server ",
-          playCompletionSound: true,
         },
       ]),
     ).toEqual([
@@ -315,11 +311,10 @@ describe("normalizeStoredSidebarCommands", () => {
     ]);
   });
 
-  test("should normalize browser actions and reject invalid values", () => {
+  test("should infer legacy browser actions from saved urls and reject invalid values", () => {
     expect(
       normalizeStoredSidebarCommands([
         {
-          actionType: "browser",
           commandId: " docs ",
           isDefault: false,
           name: " Docs ",
@@ -347,7 +342,13 @@ describe("normalizeStoredSidebarCommands", () => {
     ]);
   });
 
-  test("should normalize command icons and fall back to the default icon color", () => {
+  test("should normalize command icons and strip legacy icon colors", () => {
+    /*
+     * CDXC:ProjectActions 2026-06-17-07:40:
+     * Existing users may have saved per-action icon colors from older builds.
+     * Updating the Mac app must keep the Action command while stripping the
+     * removed color field so titlebar action glyphs inherit chrome color.
+     */
     expect(
       normalizeStoredSidebarCommands([
         {
@@ -368,7 +369,29 @@ describe("normalizeStoredSidebarCommands", () => {
         command: "pnpm dev",
         commandId: "devtools",
         icon: "terminal",
-        iconColor: DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
+        isDefault: false,
+        name: "",
+        playCompletionSound: true,
+      },
+    ]);
+  });
+
+  test("should keep runnable actions with empty labels", () => {
+    expect(
+      normalizeStoredSidebarCommands([
+        {
+          command: "npm run ci",
+          commandId: "ci",
+          isDefault: false,
+          name: "",
+        },
+      ]),
+    ).toEqual([
+      {
+        actionType: "terminal",
+        closeTerminalOnExit: false,
+        command: "npm run ci",
+        commandId: "ci",
         isDefault: false,
         name: "",
         playCompletionSound: true,

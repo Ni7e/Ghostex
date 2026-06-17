@@ -126,6 +126,11 @@ describe("native pane focused border source", () => {
      * Focus chrome should be one point thinner without weakening attention/done
      * or inactive command borders, so source coverage requires distinct width
      * constants and an explicit focused-state branch.
+     *
+     * CDXC:NativePaneChrome 2026-06-17-09:38:
+     * The one-point focused outline needs its top and right path edges pulled
+     * inward by one point so those sides stay visible when pane chrome clips at
+     * the layer edge.
      */
     const paneBorderLayerSource = sourceBetween(
       "final class TerminalPaneBorderLayer: CAShapeLayer",
@@ -137,5 +142,11 @@ describe("native pane focused border source", () => {
     expect(paneBorderLayerSource).toContain("private static let inactiveCommandBorderWidth: CGFloat = 2");
     expect(paneBorderLayerSource).toContain("case .focused:\n      return Self.focusedBorderWidth");
     expect(paneBorderLayerSource).toContain("case .attention:\n      return Self.attentionBorderWidth");
+    expect(paneBorderLayerSource).toContain("private static let focusedTopRightEdgeInset: CGFloat = 1");
+    expect(paneBorderLayerSource).toContain(
+      "let topRightInset = state == .focused ? Self.focusedTopRightEdgeInset : 0",
+    );
+    expect(paneBorderLayerSource).toContain("width: bounds.width - inset * 2 - topRightInset");
+    expect(paneBorderLayerSource).toContain("height: bounds.height - inset * 2 - topRightInset");
   });
 });

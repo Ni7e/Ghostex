@@ -74,12 +74,6 @@ export type SidebarCommandIcon = (typeof SIDEBAR_COMMAND_ICON_IDS)[number];
  * placeholder behavior.
  */
 export const DEFAULT_SIDEBAR_COMMAND_ICON: SidebarCommandIcon = "playerPlay";
-/*
- * CDXC:CommandIcons 2026-06-09-09:32:
- * Action and command icon pickers should default to neutral #cfcfcf so new glyphs
- * match the macOS sidebar chrome instead of the older blue-tinted default.
- */
-export const DEFAULT_SIDEBAR_COMMAND_ICON_COLOR = "#cfcfcf";
 
 export function isSidebarCommandIcon(value: unknown): value is SidebarCommandIcon {
   return (

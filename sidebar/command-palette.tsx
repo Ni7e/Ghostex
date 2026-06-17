@@ -38,10 +38,7 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import type { SidebarCommandButton } from "../shared/sidebar-commands";
-import {
-  DEFAULT_SIDEBAR_COMMAND_ICON,
-  DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
-} from "../shared/sidebar-command-icons";
+import { DEFAULT_SIDEBAR_COMMAND_ICON } from "../shared/sidebar-command-icons";
 import {
   GHOSTEX_HOTKEY_DEFINITIONS,
   normalizeHotkeyText,
@@ -726,7 +723,6 @@ export function CommandPalette({
                         onSelect={() => runProjectCommand(command)}
                       >
                         <SidebarCommandIconGlyph
-                          color={command.iconColor ?? DEFAULT_SIDEBAR_COMMAND_ICON_COLOR}
                           icon={command.icon ?? DEFAULT_SIDEBAR_COMMAND_ICON}
                           stroke={1.8}
                         />

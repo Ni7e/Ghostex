@@ -1,7 +1,5 @@
 import {
-  DEFAULT_SIDEBAR_COMMAND_ICON_COLOR,
   isSidebarCommandIcon,
-  normalizeSidebarCommandIconColor,
   type SidebarCommandIcon,
 } from "./sidebar-command-icons";
 
@@ -57,7 +55,6 @@ export type SidebarCommandButton = {
   command?: string;
   commandId: string;
   icon?: SidebarCommandIcon;
-  iconColor?: string;
   isDefault: boolean;
   name: string;
   playCompletionSound: boolean;
@@ -69,6 +66,12 @@ export type StoredSidebarCommand = {
   closeTerminalOnExit: boolean;
   commandId: string;
   icon?: SidebarCommandIcon;
+  /**
+   * CDXC:ProjectActions 2026-06-17-07:40:
+   * Legacy storage may still contain per-action icon colors from older Mac app
+   * builds. Keep this input field decodable, but normalization strips it so
+   * titlebar Action buttons cannot persist or render custom icon colors.
+   */
   iconColor?: string;
   isDefault: boolean;
   name: string;
@@ -140,6 +143,14 @@ export function normalizeStoredSidebarCommands(candidate: unknown): StoredSideba
     return [];
   }
 
+  /**
+   * CDXC:ProjectActions 2026-06-17-07:40:
+   * Mac app updates must not drop existing titlebar Actions because older saved
+   * records still carry the removed per-action icon color field or lack newer
+   * optional fields. Treat iconColor as legacy input only, infer browser
+   * actions from saved URLs when actionType is absent, and default optional
+   * terminal behavior flags while preserving the runnable action definition.
+   */
   const normalizedCommands: StoredSidebarCommand[] = [];
   const seenCommandIds = new Set<string>();
 
@@ -158,15 +169,11 @@ export function normalizeStoredSidebarCommands(candidate: unknown): StoredSideba
     };
     const commandId = partialItem.commandId?.trim();
     const name = partialItem.name?.trim() ?? "";
-    const actionType = normalizeActionType(partialItem.actionType);
+    const actionType = normalizeActionType(partialItem.actionType, partialItem.url);
     const icon = isSidebarCommandIcon(partialItem.icon) ? partialItem.icon : undefined;
-    const iconColor = icon
-      ? (normalizeSidebarCommandIconColor(partialItem.iconColor) ??
-        DEFAULT_SIDEBAR_COMMAND_ICON_COLOR)
-      : undefined;
     const isDefault =
       partialItem.isDefault === true || (commandId ? isDefaultSidebarCommandId(commandId) : false);
-    if (!commandId || seenCommandIds.has(commandId) || (name.length === 0 && !icon)) {
+    if (!commandId || seenCommandIds.has(commandId)) {
       continue;
     }
 
@@ -183,7 +190,7 @@ export function normalizeStoredSidebarCommands(candidate: unknown): StoredSideba
         isDefault,
         name,
         playCompletionSound: false,
-        ...(icon ? { icon, iconColor } : {}),
+        ...(icon ? { icon } : {}),
         url,
       });
       seenCommandIds.add(commandId);
@@ -191,13 +198,16 @@ export function normalizeStoredSidebarCommands(candidate: unknown): StoredSideba
     }
 
     const command = partialItem.command?.trim();
-    if (!command || typeof partialItem.closeTerminalOnExit !== "boolean") {
+    if (!command) {
       continue;
     }
 
     normalizedCommands.push({
       actionType,
-      closeTerminalOnExit: partialItem.closeTerminalOnExit,
+      closeTerminalOnExit:
+        typeof partialItem.closeTerminalOnExit === "boolean"
+          ? partialItem.closeTerminalOnExit
+          : false,
       command,
       commandId,
       isDefault,
@@ -206,7 +216,7 @@ export function normalizeStoredSidebarCommands(candidate: unknown): StoredSideba
         typeof partialItem.playCompletionSound === "boolean"
           ? partialItem.playCompletionSound
           : true,
-      ...(icon ? { icon, iconColor } : {}),
+      ...(icon ? { icon } : {}),
     });
     seenCommandIds.add(commandId);
   }
@@ -262,7 +272,7 @@ function normalizeStoredCommandButton(command: StoredSidebarCommand): SidebarCom
         isDefault: command.isDefault,
         name: command.name,
         playCompletionSound: false,
-        ...(command.icon ? { icon: command.icon, iconColor: command.iconColor } : {}),
+        ...(command.icon ? { icon: command.icon } : {}),
         url: command.url,
       }
     : {
@@ -273,13 +283,19 @@ function normalizeStoredCommandButton(command: StoredSidebarCommand): SidebarCom
         isDefault: command.isDefault,
         name: command.name,
         playCompletionSound: command.playCompletionSound,
-        ...(command.icon ? { icon: command.icon, iconColor: command.iconColor } : {}),
+        ...(command.icon ? { icon: command.icon } : {}),
         url: undefined,
       };
 }
 
-function normalizeActionType(value: string | undefined): SidebarActionType {
-  return value === "browser" ? "browser" : "terminal";
+function normalizeActionType(value: string | undefined, url: string | undefined): SidebarActionType {
+  if (value === "browser") {
+    return "browser";
+  }
+  if (value === "terminal") {
+    return "terminal";
+  }
+  return url?.trim() ? "browser" : "terminal";
 }
 
 function orderSidebarCommandButtons(

@@ -8168,9 +8168,12 @@ final class ghostexRootView: NSView {
           if let icon = command.icon {
             item["icon"] = icon
           }
-          if let iconColor = command.iconColor {
-            item["iconColor"] = iconColor
-          }
+          /**
+           CDXC:TitlebarActions 2026-06-17-07:40:
+           Titlebar Action icons must inherit native chrome color. Do not
+           forward legacy per-action icon colors from decoded sidebarActions
+           payloads because old saved records can still contain that field.
+           */
           if let url = command.url {
             item["url"] = url
           }

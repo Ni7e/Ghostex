@@ -29212,6 +29212,14 @@ final class TerminalPaneBorderLayer: CAShapeLayer {
   private static let focusedBorderWidth: CGFloat = 1
   private static let attentionBorderWidth: CGFloat = 2
   private static let inactiveCommandBorderWidth: CGFloat = 2
+  /*
+   CDXC:NativePaneChrome 2026-06-17-09:38:
+   The one-point focused border can disappear against the pane's clipped top
+   and right edges. Pull only those two focused edges inward by one point so the
+   full typing-target outline is visible without shifting the left or bottom
+   edges.
+   */
+  private static let focusedTopRightEdgeInset: CGFloat = 1
 
   private var chromeRole: TerminalPaneChromeRole = .workspace
   private var hidesInactiveCommandBorder = false
@@ -29407,7 +29415,13 @@ final class TerminalPaneBorderLayer: CAShapeLayer {
 
   private func borderPath(in bounds: CGRect) -> CGPath {
     let inset = currentBorderWidth() / 2
-    let rect = bounds.insetBy(dx: inset, dy: inset)
+    let topRightInset = state == .focused ? Self.focusedTopRightEdgeInset : 0
+    let rect = CGRect(
+      x: bounds.minX + inset,
+      y: bounds.minY + inset,
+      width: bounds.width - inset * 2 - topRightInset,
+      height: bounds.height - inset * 2 - topRightInset
+    )
     guard rect.width > 0, rect.height > 0 else {
       return CGMutablePath()
     }

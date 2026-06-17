@@ -938,7 +938,6 @@ struct TitlebarSidebarCommand: Decodable {
   let command: String?
   let commandId: String
   let icon: String?
-  let iconColor: String?
   let isDefault: Bool?
   let name: String
   let playCompletionSound: Bool?
