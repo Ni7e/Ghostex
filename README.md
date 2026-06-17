@@ -82,21 +82,23 @@ Ghostex works with Claude Code, Codex CLI, OpenCode, Pi Agent, Gemini, Copilot, 
 
 <img width="3322" height="2060" alt="Ghostex T3code panes and supported terminal CLIs" src="https://github.com/user-attachments/assets/49862e2d-1edd-4647-8161-5afb25ed8341" />
 
-### Notifications and status
-
-Ghostex supports notifications, menu bar indicators, minimal floating counters, and session status at a glance.
-
-<img width="331" height="309" alt="Ghostex notification indicator" src="https://github.com/user-attachments/assets/ad0f7af5-b0e9-4b24-988c-cb6bf02c6c9f" />
-
 ### Previous Sessions Search
 
 Fuzzy search in all your previous sessions accross agents by typing a few words from your prompts then press enter to resume that session!
 
 <img width="3456" height="2066" alt="image" src="https://github.com/user-attachments/assets/85bfd614-d352-4f30-8501-f2a47d001f88" />
 
-### Architecture (client apps <-> gxserver daemon <-> zmx persistence)
+### Extensible Architecture (client apps <-> gxserver daemon <-> zmx persistence)
+
+This architecture allows your to install just the gxserver daemon on any remote machine then control the agents on that machine from any client device (macOS/iOS/Android for now. Need help for Win/Linux)
 
 <img width="3326" height="1514" alt="2026-06-12_Google Chrome_23-43-07@2x" src="https://github.com/user-attachments/assets/ecc84149-a9fc-4ec8-a387-af5ce35aa7be" />
+
+### Notifications and status
+
+Ghostex supports notifications, menu bar indicators, minimal floating counters, and session status at a glance.
+
+<img width="331" height="309" alt="Ghostex notification indicator" src="https://github.com/user-attachments/assets/ad0f7af5-b0e9-4b24-988c-cb6bf02c6c9f" />
 
 ## Highlights
 
