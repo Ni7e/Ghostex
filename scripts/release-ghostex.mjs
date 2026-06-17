@@ -1261,7 +1261,14 @@ async function packageReleaseDmg(version, artifactDir, entry) {
   const finalDmg = path.join(artifactDir, `ghostex-${version}-${entry.arch}.dmg`);
   const stagedApp = path.join(stagingDir, config.stagedAppName);
 
-  await run(`cp -R ${shellQuote(entry.appPath)} ${shellQuote(stagedApp)}`);
+  /*
+   CDXC:ReleaseAutomation 2026-06-17-09:54:
+   Release DMG staging copies the signed app bundle after code-server and nested
+   native payloads have been materialized. Use ditto for the bundle copy so a
+   transient filesystem entry under a large packaged runtime cannot make cp -R
+   abort after validation has already passed.
+   */
+  await run(`ditto ${shellQuote(entry.appPath)} ${shellQuote(stagedApp)}`);
   await run(`ln -s /Applications ${shellQuote(path.join(stagingDir, "Applications"))}`);
   await run(`hdiutil create -volname ghostex -srcfolder ${shellQuote(stagingDir)} -format UDZO ${shellQuote(finalDmg)}`);
   const preStapleSha = await capture(`shasum -a 256 ${shellQuote(finalDmg)} | awk '{print $1}'`);
