@@ -76,7 +76,7 @@ Edit your agent prompts with full hotkeys support and even image previews! Inclu
 
 <img width="2048" height="1221" alt="image" src="https://github.com/user-attachments/assets/b51ec92e-04cf-4d8f-933c-fc2a13638a1d" />
 
-### T3code GUI panes and supported terminal CLIs
+### Supports all of the popular Agent CLIs and T3code GUI Panes
 
 Ghostex works with Claude Code, Codex CLI, OpenCode, Pi Agent, Gemini, Copilot, and other terminal-based agent CLIs.
 
@@ -87,6 +87,12 @@ Ghostex works with Claude Code, Codex CLI, OpenCode, Pi Agent, Gemini, Copilot, 
 Ghostex supports notifications, menu bar indicators, minimal floating counters, and session status at a glance.
 
 <img width="331" height="309" alt="Ghostex notification indicator" src="https://github.com/user-attachments/assets/ad0f7af5-b0e9-4b24-988c-cb6bf02c6c9f" />
+
+### Previous Sessions Search
+
+Fuzzy search in all your previous sessions accross agents by typing a few words from your prompts then press enter to resume that session!
+
+<img width="3456" height="2066" alt="image" src="https://github.com/user-attachments/assets/85bfd614-d352-4f30-8501-f2a47d001f88" />
 
 ### Architecture (client apps <-> gxserver daemon <-> zmx persistence)
 
