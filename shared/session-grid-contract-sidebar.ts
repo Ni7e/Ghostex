@@ -1819,6 +1819,14 @@ export type SidebarToExtensionMessage =
       projectId: string;
     }
   | {
+      /*
+       * CDXC:ProjectSettings 2026-06-17-17:13:
+       * The Projects settings selector lists durable project rows, so Settings must be able to remove any selected project through the same native removeProject path used by project headers instead of limiting deletion to sidebar context menus.
+       */
+      type: "removeProject";
+      projectId: string;
+    }
+  | {
       acceptAllMode?: AgentAcceptAllMode;
       type: "saveSidebarAgent";
       agentId?: string;

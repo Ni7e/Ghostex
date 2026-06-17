@@ -4390,6 +4390,20 @@ function ProjectsSettingsPanel({
     });
   };
 
+  const removeSelectedProject = () => {
+    if (!selectedProject) {
+      return;
+    }
+    const shouldRemove = window.confirm(`Remove ${selectedProject.name} from Ghostex?`);
+    if (!shouldRemove) {
+      return;
+    }
+    vscode?.postMessage({
+      projectId: selectedProject.projectId,
+      type: "removeProject",
+    });
+  };
+
   if (projects.length === 0) {
     return (
       <div className="settings-tab-scroll scroll-mask-y">
@@ -4493,6 +4507,19 @@ function ProjectsSettingsPanel({
               </Command>
             </PopoverContent>
           </Popover>
+          {/*
+           * CDXC:ProjectSettings 2026-06-17-17:13:
+           * Users can manage projects from Settings after selecting them, including removing any listed project such as test/build entries that may not be convenient to delete from the visible sidebar.
+           */}
+          <Button
+            aria-label={selectedProject ? `Remove ${selectedProject.name}` : "Remove project"}
+            disabled={!selectedProject}
+            onClick={removeSelectedProject}
+            type="button"
+            variant="outline"
+          >
+            <IconTrash aria-hidden="true" />
+          </Button>
         </div>
         <Card className="settings-project-command-card">
           <CardContent className="flex flex-col gap-4 p-4">
