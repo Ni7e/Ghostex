@@ -41,8 +41,8 @@ Use the mobile apps to connect live to your Ghostex agent CLI sessions. APKs are
 [![Download Android APK](https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white)](https://github.com/maddada/Ghostex/releases/latest/download/ghostex-android.apk) [![iPhone App Discord](https://img.shields.io/badge/iPhone-Test%20Flight-000000?logo=apple&logoColor=white)](https://discord.gg/df7b3G92CS)
 
 <p>
-  <img width="250" alt="Ghostex Android companion app" src="https://github.com/user-attachments/assets/e7af9c54-e8ef-4e0b-a934-8b2f9ea56c70" />
-  <img width="250" alt="Ghostex iPhone companion app" src="https://github.com/user-attachments/assets/563dbb8a-5a9d-4db7-8946-1dfc383e09c8" />
+  <img width="250" alt="image" src="https://github.com/user-attachments/assets/39573501-2b33-4491-b3e9-a0fb15e00957" />
+  <img width="250" src="https://github.com/user-attachments/assets/563dbb8a-5a9d-4db7-8946-1dfc383e09c8" />
 </p>
 
 ## Gallery
