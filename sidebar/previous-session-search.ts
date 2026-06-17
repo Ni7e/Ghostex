@@ -114,6 +114,10 @@ export function getNextPreviousSessionsModalSelection({
 export function groupPreviousSessionsByDay(
   previousSessions: readonly SidebarPreviousSessionItem[],
 ): PreviousSessionsModalDayGroup[] {
+  /*
+  CDXC:PreviousSessions 2026-06-17-17:06:
+  The modal's date groups represent when sessions were closed, not when they were last active. Sort by closedAt before grouping so newly closed sessions appear first even when their lastInteractionAt is older than other history rows.
+  */
   const formatter = new Intl.DateTimeFormat(undefined, {
     day: "numeric",
     month: "long",
@@ -121,8 +125,9 @@ export function groupPreviousSessionsByDay(
     year: "numeric",
   });
   const sessionsByDay = new Map<string, SidebarPreviousSessionItem[]>();
+  const sortedSessions = sortPreviousSessionsByClosedAt(previousSessions);
 
-  for (const session of previousSessions) {
+  for (const session of sortedSessions) {
     const date = new Date(session.closedAt);
     const key = Number.isNaN(date.getTime()) ? "Unknown day" : formatter.format(date);
     const grouped = sessionsByDay.get(key);
@@ -138,6 +143,12 @@ export function groupPreviousSessionsByDay(
     dayLabel,
     sessions,
   }));
+}
+
+export function sortPreviousSessionsByClosedAt(
+  previousSessions: readonly SidebarPreviousSessionItem[],
+): SidebarPreviousSessionItem[] {
+  return [...previousSessions].sort(comparePreviousSessionsByClosedAt);
 }
 
 export function filterSidebarSessionItems<T extends SidebarSearchableSession>(
@@ -219,8 +230,13 @@ function dedupePreviousSessionsByProjectAndTitle(
   /**
    * CDXC:PreviousSessions 2026-05-11-09:04
    * Previous Sessions must not show duplicate historical cards for the same
-   * project and session name. Keep only the latest closed/active item before
+   * project and session name. Keep only the latest closed item before
    * search so both the modal and sidebar search share the same unique list.
+   *
+   * CDXC:PreviousSessions 2026-06-17-17:06:
+   * Duplicate pruning follows closedAt rather than lastInteractionAt because a
+   * just-closed session must remain the restorable row even if an older
+   * duplicate had more recent terminal activity.
    */
   const dedupedByKey = new Map<
     string,
@@ -270,10 +286,21 @@ function createPreviousSessionDedupeKey(session: SidebarPreviousSessionItem): st
 }
 
 function getPreviousSessionDedupeTimestamp(session: SidebarPreviousSessionItem): number {
-  const lastInteractionTimestamp = parsePreviousSessionTimestamp(session.lastInteractionAt);
   const closedTimestamp = parsePreviousSessionTimestamp(session.closedAt);
+  const lastInteractionTimestamp = parsePreviousSessionTimestamp(session.lastInteractionAt);
 
-  return Math.max(lastInteractionTimestamp, closedTimestamp);
+  return closedTimestamp || lastInteractionTimestamp;
+}
+
+function comparePreviousSessionsByClosedAt(
+  left: SidebarPreviousSessionItem,
+  right: SidebarPreviousSessionItem,
+): number {
+  return (
+    parsePreviousSessionTimestamp(right.closedAt) -
+      parsePreviousSessionTimestamp(left.closedAt) ||
+    left.historyId.localeCompare(right.historyId)
+  );
 }
 
 function parsePreviousSessionTimestamp(value: string | undefined): number {

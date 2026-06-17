@@ -14473,7 +14473,7 @@ async function requestPreviousSessionsFromGxserver(input: {
       sessionTags: input.sessionTags,
     });
     const items = [...localItems, ...remoteItems]
-      .sort(comparePreviousSessionItemsByRecentActivity)
+      .sort(comparePreviousSessionItemsByClosedTime)
       .slice(0, limit);
     previousSessions = items;
     /*
@@ -14511,7 +14511,7 @@ function gxserverSearchResultToPreviousSessionItem(
   options: { historyIdPrefix?: string; projectNamePrefix?: string } = {},
 ): SidebarPreviousSessionItem {
   const title = result.displayTitle || result.primaryTitle || result.title || "Previous Session";
-  const closedAt = result.lastActiveAt ?? result.updatedAt ?? result.createdAt;
+  const closedAt = result.closedAt ?? result.updatedAt ?? result.createdAt;
   const agentName = result.agentName ?? result.agentId;
   const agentIcon = resolveNativeSidebarAgentIcon(result.agentIcon ?? agentName);
   const sessionPersistenceProvider = result.sessionPersistenceProvider ?? "zmx";
@@ -14541,6 +14541,9 @@ function gxserverSearchResultToPreviousSessionItem(
 
   CDXC:PreviousSessions 2026-06-13-15:36:
   Gxserver search is now the canonical previous-session archive for P/G rows. Project compact server identity into both the visible SidebarPreviousSessionItem and the archived terminal record so stopped agent sessions keep their logo and restore refs after close without using native history fallback state.
+
+  CDXC:PreviousSessions 2026-06-17-17:06:
+  Previous Sessions rows must group and sort by close time, not last active time. Read gxserver's explicit closedAt and keep lastActiveAt only as lastInteractionAt for the card's activity label.
   */
   return {
     activity: result.lifecycleState === "running" ? "idle" : "idle",
@@ -14626,16 +14629,15 @@ async function requestRemotePreviousSessionsFromConnectedMachines(input: {
   return results.flat();
 }
 
-function comparePreviousSessionItemsByRecentActivity(
+function comparePreviousSessionItemsByClosedTime(
   left: SidebarPreviousSessionItem,
   right: SidebarPreviousSessionItem,
 ): number {
-  return previousSessionTime(right) - previousSessionTime(left);
+  return previousSessionClosedTime(right) - previousSessionClosedTime(left);
 }
 
-function previousSessionTime(session: SidebarPreviousSessionItem): number {
-  const value = session.lastInteractionAt ?? session.closedAt;
-  const time = value ? Date.parse(value) : Number.NaN;
+function previousSessionClosedTime(session: SidebarPreviousSessionItem): number {
+  const time = Date.parse(session.closedAt);
   return Number.isFinite(time) ? time : 0;
 }
 
@@ -41584,6 +41586,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "setProjectBeadsDirectory":
       setProjectBeadsDirectory(message.projectId, message.directory);
+      return;
+    case "removeProject":
+      removeProject(message.projectId);
       return;
     case "saveSidebarAgent":
       saveSidebarAgent(message);

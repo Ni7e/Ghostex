@@ -4,6 +4,7 @@ import {
   filterPreviousSessions,
   filterPreviousSessionsModalItems,
   getNextPreviousSessionsModalSelection,
+  groupPreviousSessionsByDay,
   removePreviousSessionByHistoryId,
 } from "./previous-session-search";
 
@@ -93,6 +94,7 @@ describe("filterPreviousSessions", () => {
         alias: "Duplicate title",
         closedAt: "2026-03-24T10:00:00.000Z",
         historyId: "history-old",
+        lastInteractionAt: "2026-03-25T12:00:00.000Z",
         projectName: "ghostex",
         projectPath: "/Users/madda/dev/_active/ghostex",
       }),
@@ -116,6 +118,37 @@ describe("filterPreviousSessions", () => {
     expect(filterPreviousSessions(previousSessions, "")).toMatchObject([
       { historyId: "history-other-project" },
       { historyId: "history-new" },
+    ]);
+  });
+});
+
+describe("groupPreviousSessionsByDay", () => {
+  test("should order groups and rows by closed time instead of last active time", () => {
+    const previousSessions = [
+      createPreviousSession({
+        closedAt: "2026-06-01T12:00:00.000Z",
+        historyId: "history-old-activity",
+        lastInteractionAt: "2026-06-03T12:00:00.000Z",
+      }),
+      createPreviousSession({
+        closedAt: "2026-06-02T10:00:00.000Z",
+        historyId: "history-newer-close",
+        lastInteractionAt: "2026-06-01T10:00:00.000Z",
+      }),
+      createPreviousSession({
+        closedAt: "2026-06-02T14:00:00.000Z",
+        historyId: "history-newest-close",
+        lastInteractionAt: "2026-06-01T09:00:00.000Z",
+      }),
+    ];
+
+    const groups = groupPreviousSessionsByDay(previousSessions);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.flatMap((group) => group.sessions.map((session) => session.historyId))).toEqual([
+      "history-newest-close",
+      "history-newer-close",
+      "history-old-activity",
     ]);
   });
 });

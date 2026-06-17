@@ -8,6 +8,7 @@ import {
   getNextPreviousSessionsModalSelection,
   groupPreviousSessionsByDay,
   removePreviousSessionByHistoryId,
+  sortPreviousSessionsByClosedAt,
 } from "./previous-session-search";
 import { SessionHistoryCard } from "./session-history-card";
 import { useSidebarStore } from "./sidebar-store";
@@ -122,9 +123,13 @@ export function PreviousSessionsModal({
       }),
     [modalPreviousSessions, searchQuery, selectedSessionTagFilters],
   );
-  const groupedSessions = useMemo(
-    () => groupPreviousSessionsByDay(filteredSessions),
+  const visibleSessions = useMemo(
+    () => sortPreviousSessionsByClosedAt(filteredSessions),
     [filteredSessions],
+  );
+  const groupedSessions = useMemo(
+    () => groupPreviousSessionsByDay(visibleSessions),
+    [visibleSessions],
   );
   const canShowModal = isOpen && (hasInitialLoadResolved || hasInitialLoadTimedOut);
   const hasTagFilters = selectedSessionTagFilters.length > 0;
@@ -133,7 +138,7 @@ export function PreviousSessionsModal({
     const nextHistoryId = getNextPreviousSessionsModalSelection({
       currentHistoryId: selectedHistoryIdRef.current,
       direction,
-      sessions: filteredSessions,
+      sessions: visibleSessions,
     });
     if (!nextHistoryId) {
       return false;
@@ -254,7 +259,7 @@ export function PreviousSessionsModal({
     return () => {
       document.removeEventListener("keydown", handleKeyDown, true);
     };
-  }, [filteredSessions, isOpen, isTagFilterMenuOpen, onClose]);
+  }, [visibleSessions, isOpen, isTagFilterMenuOpen, onClose]);
 
   useEffect(() => {
     selectedHistoryIdRef.current = selectedHistoryId;
@@ -265,13 +270,13 @@ export function PreviousSessionsModal({
       return;
     }
 
-    if (filteredSessions.some((session) => session.historyId === selectedHistoryId)) {
+    if (visibleSessions.some((session) => session.historyId === selectedHistoryId)) {
       return;
     }
 
     selectedHistoryIdRef.current = undefined;
     setSelectedHistoryId(undefined);
-  }, [filteredSessions, selectedHistoryId]);
+  }, [visibleSessions, selectedHistoryId]);
 
   useEffect(() => {
     if (!isTagFilterMenuOpen) {

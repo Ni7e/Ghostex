@@ -70,6 +70,9 @@ describe("native app modal window source", () => {
 
     CDXC:PromptEditor 2026-06-16-21:32:
     The bottom thumbnail shelf must own normal WebKit clicks. Native prompt-window drag/resize handling may intercept only the explicit bottom-right resize handle, not the whole bottom edge.
+
+    CDXC:PromptEditor 2026-06-17-17:04:
+    WKWebView reports flipped local coordinates, so the native titlebar drag band must be the visual top edge, not the bottom image shelf. The WebView should also reject generic background window movement.
     */
     const nativeResizeRule = sourceBetween(
       modalStylesSource,
@@ -103,6 +106,19 @@ describe("native app modal window source", () => {
     expect(promptEditorResizeEdges).toContain("point.x >= frame.width - promptEditorResizeMargin");
     expect(appDelegateSource).toContain(
       "panel.promptEditorBottomRightResizeHandleSize = Self.floatingPromptEditorResizeHandleSize",
+    );
+    const promptEditorWebView = sourceBetween(
+      appDelegateSource,
+      "private final class AppModalWindowWebView: WKWebView {",
+      "private final class AppModalWindowController: NSObject",
+    );
+    expect(promptEditorWebView).toContain("override var mouseDownCanMoveWindow: Bool");
+    expect(promptEditorWebView).toContain("return false");
+    expect(promptEditorWebView).toContain("let isInTitleDragBand: Bool");
+    expect(promptEditorWebView).toContain("if isFlipped");
+    expect(promptEditorWebView).toContain("isInTitleDragBand = point.y <= nativeWindowTitleDragHeight");
+    expect(promptEditorWebView).toContain(
+      "isInTitleDragBand = point.y >= bounds.height - nativeWindowTitleDragHeight",
     );
   });
 
@@ -695,10 +711,13 @@ describe("native app modal window source", () => {
     expect(nativeSidebarSource).not.toContain('modal: "commandConfig"');
   });
 
-  test("keeps Delayed Send fixed at 472x269 in the macOS app", () => {
+  test("keeps Delayed Send fixed at 472x336 in the macOS app", () => {
     /*
     CDXC:DelayedSend 2026-06-12-04:07:
-    Delayed Send must open as a fixed 472x269 macOS child window, including a matching modal-specific minimum because the shared app-modal minimum is larger than this timer dialog.
+    Delayed Send must open as a fixed compact macOS child window, including a matching modal-specific minimum because the shared app-modal minimum is larger than this timer dialog.
+
+    CDXC:DelayedSend 2026-06-17-17:01:
+    The fixed delayed-send child window needs 336px of height so the full React timer form is visible without scrolling after the seconds control was removed.
     */
     const defaultSize = sourceBetween(
       appDelegateSource,
@@ -706,7 +725,7 @@ describe("native app modal window source", () => {
       "private func constrainedSize(_ size: CGSize, parentWindow: NSWindow) -> CGSize",
     );
     expect(defaultSize).toContain('case "delayedSend":');
-    expect(defaultSize).toContain("return CGSize(width: 472, height: 269)");
+    expect(defaultSize).toContain("return CGSize(width: 472, height: 336)");
 
     const shouldLockContentSize = sourceBetween(
       appDelegateSource,
@@ -723,7 +742,7 @@ describe("native app modal window source", () => {
       "private func appModalStyleMask(for modal: String) -> NSWindow.StyleMask",
     );
     expect(minimumContentSize).toContain('case "delayedSend":');
-    expect(minimumContentSize).toContain("return CGSize(width: 472, height: 269)");
+    expect(minimumContentSize).toContain("return CGSize(width: 472, height: 336)");
   });
 
   test("keeps Delayed Send duration input to hours and minutes", () => {
@@ -733,6 +752,8 @@ describe("native app modal window source", () => {
     */
     expect(delayedSendModalSource).toContain('aria-label="Hours"');
     expect(delayedSendModalSource).toContain('aria-label="Minutes"');
+    expect(delayedSendModalSource).toContain("autoFocus");
+    expect(delayedSendModalSource).toContain("focusMinutesInput");
     expect(delayedSendModalSource).not.toContain('aria-label="Seconds"');
     expect(delayedSendModalSource).not.toContain("setSeconds");
     expect(delayedSendModalSource).toContain("Enter a delay between 1 minute and 24 days.");
@@ -744,6 +765,24 @@ describe("native app modal window source", () => {
       ".session-rename-form",
     );
     expect(durationGrid).toContain("grid-template-columns: repeat(2, minmax(0, 1fr));");
+
+    const nativeDelayedSendStyles = sourceBetween(
+      modalStylesSource,
+      ".app-modal-host-native-window-body .delayed-send-modal-shadcn {",
+      ".delayed-send-form",
+    );
+    expect(nativeDelayedSendStyles).toContain("height: 100vh;");
+    expect(nativeDelayedSendStyles).toContain("max-height: 100vh;");
+    expect(nativeDelayedSendStyles).toContain("overflow: hidden;");
+    expect(nativeDelayedSendStyles).toContain("padding: 24px;");
+
+    const nativeDelayedSendFormStyles = sourceBetween(
+      modalStylesSource,
+      ".app-modal-host-native-window-body .delayed-send-modal-shadcn .delayed-send-form {",
+      ".delayed-send-form",
+    );
+    expect(nativeDelayedSendFormStyles).toContain("height: 100%;");
+    expect(nativeDelayedSendFormStyles).toContain("justify-content: space-between;");
 
     const delayedSendValidation = sourceBetween(
       nativeSidebarSource,
@@ -887,6 +926,28 @@ describe("native app modal window source", () => {
     expect(appModalWindowController).toContain("self.closeFromOutsideMouseDown()");
     expect(appModalWindowController).toContain('onClosed("outsideMouseDown", closedModal)');
     expect(appModalWindowController).toContain("removeOutsideEventMonitor()");
+  });
+
+  test("top-aligns Previous Sessions inside its macOS native child window", () => {
+    /*
+    CDXC:PreviousSessions 2026-06-17-12:02:
+    The macOS Previous Sessions modal should keep the title, search field, and rows at the top of the fixed child window instead of centering the shorter result list vertically.
+    */
+    const previousSessionsRootRule = sourceBetween(
+      modalStylesSource,
+      ".app-modal-host-native-window-body .confirm-modal-root:has(.previous-sessions-modal) {",
+      ".app-modal-host-body .previous-sessions-modal {",
+    );
+    expect(previousSessionsRootRule).toContain("align-items: start");
+    expect(previousSessionsRootRule).toContain("justify-items: center");
+
+    const previousSessionsNativeRule = sourceBetween(
+      modalStylesSource,
+      ".app-modal-host-native-window-body .previous-sessions-modal {",
+      ".app-modal-host-body .pinned-prompts-modal,",
+    );
+    expect(previousSessionsNativeRule).toContain("margin: 0 auto auto");
+    expect(previousSessionsNativeRule).toContain("max-height: calc(100vh - 16px)");
   });
 
   test("shows an AppKit backdrop behind first-launch and highlighted-feature modals", () => {
