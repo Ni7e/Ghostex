@@ -12,13 +12,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-class FloatingMonacoBridgeClosedError extends Error {
-  constructor() {
-    super("Ghostex bridge closed while the floating Monaco prompt editor was open.");
-    this.name = "FloatingMonacoBridgeClosedError";
-  }
-}
-
 const DEFAULT_PORT = 58743;
 // CDXC:GxserverBootstrap 2026-05-30-15:39: gxserver owns 58744 in the hard cutover, so the ghostex-dev native bridge must use 58742 for legacy bridge automation commands instead of competing with the daemon API.
 const DEV_PORT = 58742;
@@ -3199,11 +3192,10 @@ async function floatingMonacoEditorCommand(args) {
     );
     process.exitCode = status.match(/^saved$/m) ? 0 : 1;
   } catch (error) {
-    const bridgeClosed = error instanceof FloatingMonacoBridgeClosedError;
     await appendFloatingEditorLog({
       error: error instanceof Error ? error.message : String(error),
-      event: bridgeClosed ? "cli.monaco_bridge_closed_inline_recovery" : "cli.monaco_fallback_inline",
-      ...(bridgeClosed ? {} : { filePath: resolvedFilePath }),
+      event: "cli.monaco_fallback_inline",
+      filePath: resolvedFilePath,
       requestId,
     });
     await runEditorInline(["vi", resolvedFilePath], cwd);
@@ -3307,16 +3299,12 @@ async function resolveExecutable(command) {
   return stdout.trim().split(/\r?\n/)[0] || command;
 }
 
-async function waitForStatus(statusFile, predicate, timeoutMs, abortError) {
+async function waitForStatus(statusFile, predicate, timeoutMs) {
   const startedAt = Date.now();
   while (true) {
     const status = await readFile(statusFile, "utf8").catch(() => "");
     if (predicate(status)) {
       return status;
-    }
-    const error = abortError?.();
-    if (error) {
-      throw error;
     }
     if (timeoutMs > 0 && Date.now() - startedAt > timeoutMs) {
       throw new Error(`Timed out waiting for floating editor status at ${statusFile}.`);
@@ -3327,12 +3315,11 @@ async function waitForStatus(statusFile, predicate, timeoutMs, abortError) {
 
 async function waitForFloatingMonacoStatus(statusFile, socket, timeoutMs) {
   /**
-   * CDXC:PromptEditor 2026-06-16-13:09:
-   * If the macOS app crashes while Monaco prompt editing is open, native
-   * cannot write the saved/cancelled status file. React/native live-write the
-   * prompt draft to the edited file, so the CLI must notice the bridge close
-   * and reopen that preserved file inline instead of waiting forever or
-   * auto-submitting an unsaved draft.
+   * CDXC:PromptEditor 2026-06-18-04:42:
+   * If the macOS app crashes while Monaco prompt editing is open, native cannot
+   * run the normal save callback. React/native already live-write the prompt
+   * draft to the edited file, so a bridge close should mark that current file
+   * saved from the CLI instead of reopening inline or waiting forever.
    */
   let bridgeClosed = false;
   const markBridgeClosed = () => {
@@ -3341,12 +3328,26 @@ async function waitForFloatingMonacoStatus(statusFile, socket, timeoutMs) {
   addSocketListener(socket, "close", markBridgeClosed, { once: true });
   addSocketListener(socket, "end", markBridgeClosed, { once: true });
   addSocketListener(socket, "error", markBridgeClosed, { once: true });
-  return waitForStatus(
-    statusFile,
-    (nextStatus) => nextStatus.match(/^saved$/m) || nextStatus.match(/^cancelled$/m),
-    timeoutMs,
-    () => bridgeClosed ? new FloatingMonacoBridgeClosedError() : undefined,
-  );
+  const startedAt = Date.now();
+  while (true) {
+    const status = await readFile(statusFile, "utf8").catch(() => "");
+    if (status.match(/^saved$/m) || status.match(/^cancelled$/m)) {
+      return status;
+    }
+    if (bridgeClosed) {
+      await sleep(100);
+      const finalStatus = await readFile(statusFile, "utf8").catch(() => "");
+      if (finalStatus.match(/^saved$/m) || finalStatus.match(/^cancelled$/m)) {
+        return finalStatus;
+      }
+      await writeFile(statusFile, "saved\n");
+      return "saved\n";
+    }
+    if (timeoutMs > 0 && Date.now() - startedAt > timeoutMs) {
+      throw new Error(`Timed out waiting for floating editor status at ${statusFile}.`);
+    }
+    await sleep(100);
+  }
 }
 
 async function runEditorInline(commandArgs, cwd) {

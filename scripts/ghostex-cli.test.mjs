@@ -621,12 +621,13 @@ printf 'rust-forwarded:%s\\n' "$1"
     }
   });
 
-  test("reopens preserved Monaco prompt inline when the native bridge closes before status", async () => {
+  test("marks preserved Monaco prompt saved when the native bridge closes before status", async () => {
     /**
-     * CDXC:PromptEditor 2026-06-16-13:09:
+     * CDXC:PromptEditor 2026-06-18-04:42:
      * A macOS app crash cannot write the Monaco prompt editor status file. The
-     * CLI should detect the bridge close and reopen the already live-written
-     * prompt file inline, preserving the draft without auto-submitting it.
+     * prompt file is already live-written by the app, so the CLI should detect
+     * the bridge close and mark that current file saved instead of reopening an
+     * inline editor.
      */
     const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-fme-crash-test-"));
     const homeDir = path.join(tempDir, "home");
@@ -678,6 +679,8 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
         "1000",
         "--exit-timeout-ms",
         "5000",
+        "--keep-temp",
+        "true",
       ], {
         env: {
           ...process.env,
@@ -688,10 +691,15 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
 
       expect(result.stderr).toBe("");
       expect(receivedMessages).toHaveLength(1);
-      expect((await readFile(markerFile, "utf8")).trim()).toBe(editFile);
+      expect(await readFile(receivedMessages[0].statusFile, "utf8")).toBe("saved\n");
+      expect(await readFile(markerFile, "utf8").catch(() => "")).toBe("");
       expect(await readFile(editFile, "utf8")).toBe("autosaved draft\n");
     } finally {
       await new Promise((resolve) => server.close(resolve));
+      if (receivedMessages[0]?.statusFile) {
+        await rm(path.dirname(receivedMessages[0].statusFile), { force: true, recursive: true })
+          .catch(() => undefined);
+      }
       await rm(tempDir, { force: true, recursive: true });
     }
   });
