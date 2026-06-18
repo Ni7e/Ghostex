@@ -8,6 +8,53 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>4.20.0</title>
+            <pubDate>Thu, 18 Jun 2026 06:25:37 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.20.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>42000</sparkle:version>
+            <sparkle:shortVersionString>4.20.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 4.20.0
+
+- Major
+  - Command palette and session search
+    - Cmd+Shift+P now exposes more app-level commands, including Previous Sessions, pinned prompts, running sessions, Scratch Pad, Agents Hub, Actions, Open Targets, Hotkeys, setup, changelog, quick terminal, quick browser tab, Automations, and project actions.
+    - Open Current Project in Finder and visible Open In targets can be launched from command mode without leaving the current workspace.
+    - Cmd+P session search is focused on visible session titles, so hidden metadata such as project paths and generic default agent titles no longer pull unrelated sessions into results.
+    - Previous-session search ranks stopped sessions by close time and hides placeholder agent names while keeping meaningful user and agent titles searchable.
+  - Setup, Tips, and tutorial flow
+    - First-launch setup is simplified to Welcome, Agent Hooks, and Bundled Agent Skills.
+    - Skipping hook or bundled-skill setup now shows a focused warning with the install action beside the deliberate continue action.
+    - The Features entry points now open a dedicated Ghostty tutorial video modal, with the older Highlighted Features tour kept out of the main flow.
+    - The titlebar Tips menu is shorter and clearer, adds Docs, keeps Features, Setup, and Changelog handy, and can install missing agent hooks directly from its warning notice.
+  - Agent hooks and recovery controls
+    - Advanced Settings adds searchable Uninstall Hooks and Uninstall Skills actions for removing Ghostex-owned setup artifacts.
+    - gxserver can uninstall Ghostex-owned hook entries from supported agent CLI configs without touching user-managed provider hooks.
+    - Agent hook status checks prioritize Codex, Claude, and Pi first, then continue through the rest of the supported agent CLIs so setup status appears progressively.
+    - Hook warnings now explain that automatic session naming, In Progress/Needs Attention state, and sleep/resume reliability depend on current hooks.
+- Minor
+  - Native pane and titlebar polish
+    - Sleeping a terminal now keeps its split slot as a wake placeholder instead of collapsing the layout.
+    - Blank titlebar dragging is more reliable across the WebKit-to-native handoff.
+    - Open Folder now opens the selected workspace folder itself in Finder instead of revealing it from the parent folder.
+    - Native app modal sizing and tutorial video loading are tuned for the new help surfaces.
+  - Sidebar and settings polish
+    - Empty sidebars with no projects now guide first-time users toward the Projects plus button.
+    - Settings Actions editors can delete both custom actions and default actions from the edit surface.
+    - Projects settings include a project removal control.
+    - Highlighted Features arrow and keyboard navigation stop at the first and last item instead of wrapping.
+  - CLI, delayed send, and docs
+    - The CLI preserves live-written Monaco prompt edits as saved if the native bridge closes before the normal status callback.
+    - Delayed Send focuses the minutes field more reliably in native child windows and pressing Enter in the duration fields schedules the timer.
+    - README screenshots, Android/iOS download presentation, previous-session search docs, and feature-gallery copy were refreshed for the current app.
+    - The local agent instructions now explicitly avoid restarting the app unless requested.
+
+[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.20.0)
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.20.0/ghostex-4.20.0-arm64.dmg" length="571495942" type="application/octet-stream" sparkle:edSignature="fThU6aE1/fYEGf4BOLaO4xjR4vQELQMWSevxl94+SZBbY/hl2z08Joccx2C7e+OctGZ9eHf1HFTCMk4KIJgVBg=="/>
+        </item>
+        <item>
             <title>4.14.2</title>
             <pubDate>Wed, 17 Jun 2026 10:01:21 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.14.2</sparkle:fullReleaseNotesLink>
@@ -201,32 +248,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.11.0/ghostex-4.11.0-arm64.dmg" length="571680076" type="application/octet-stream" sparkle:edSignature="UgodWTxNyTbw6lByvUoOKtJSU/P8PMoiepzbkVG+ctT7Tv5GJ8Bfb6DVcCvxzVoUvy1lNeSbwrUyd/deTedQAQ=="/>
         </item>
         <item>
-            <title>4.10.0</title>
-            <pubDate>Fri, 12 Jun 2026 12:56:40 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.10.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>41000</sparkle:version>
-            <sparkle:shortVersionString>4.10.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 4.10.0
-
-- Native workspace panes, direct project-tab titlebars, app modal windows, and toast routing are better integrated with the macOS host, reducing click-routing misses and titlebar/sidebar focus churn.
-- Passive sidebar terminal restore and workspace-pane materialization preserve split layouts instead of merging restored panes while the sidebar catches up.
-- Project Board and GitHub mode focus are steadier during passive refreshes, and directly mounted project tab titlebars route clicks to the intended workspace surface.
-- Worktree deletion can clean up related branch metadata from the UI, while prompt-editor capability routing and terminal Escape reporting reduce stale agent attention after dismissed work.
-- The titlebar adds a compact sidebar collapse button beside the project name, hides empty Tips unread sections, and makes Resources recovery clearer with Restart plus Reload App when gxserver is off.
-- Add Worktree, Git Commit, and other native child-window modals have tighter macOS sizing and padding so compact dialogs stay compact while commit review gains room on the right diff side.
-- The `ghostex` and `gx` CLI commands use gxserver session inventory, add a sidebar toggle, and install as wrapper commands outside `Ghostex.app` so macOS policy assessment does not kill direct app-bundled script execution.
-- Agent support expands with Kiro CLI and OMP hook sidecars, mobile session status ingestion, Claude bare `/rename` staging for first-prompt titles, path-based live-process identity repair, and a default Accept All mode setting.
-- App Shots now stage captured desktop context in the focused or recent live agent session instead of being Codex-only, and create the configured default prompt-agent session only when no agent target is available.
-- Sidebar and settings polish includes a collapse command/hotkey, Copy Session Details, Ghostty settings folded into the main settings sections, and Agent Hub file contents loaded only when opened.
-- Packaged macOS runtime validation now checks the bundled code-server Node 22 runtime, ripgrep, T3 Code native helpers, Beads, and source-map pruning without executing sealed native modules during validation.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.10.0)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.10.0/ghostex-4.10.0-arm64.dmg" length="563078102" type="application/octet-stream" sparkle:edSignature="H2oWq//fNdStEBJfNXb7S9n/W8Mvr1jKIboP871BYB9oCQG2EEj/1N7N1BfNoCysztxGtuEqW9UPUih/zl0DBg=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -238,6 +259,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: 9dIYt0iXW5Bu6ii34pJrT5fA0OyfCFu2hA8IqHb7zpu/IBoKuZP8E0g9L2OJfgmzBmsS78wAvUJUPT5nUaUDDw==
-length: 18698
+edSignature: QRwajm5Sy+dpxWFTdXmAdGIfTVYmv63z7/DAoWCWtRFy82YVVRSlEnGpRncQDhICvPEAs/SAEXIPsdpuAIJqAA==
+length: 19929
 -->
