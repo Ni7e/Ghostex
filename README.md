@@ -57,6 +57,12 @@ Great for working with markdown, reviewing code, and checking PRs (Github Extens
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/986fbece-d0de-4739-8515-f3c2a7437b92" />
 
+### Supports all of the popular Agent CLIs and T3code GUI Panes
+
+Ghostex works with Claude Code, Codex CLI, OpenCode, Pi Agent, Gemini, Copilot, and other terminal-based agent CLIs.
+
+<img width="1200" alt="Ghostex T3code panes and supported terminal CLIs" src="https://github.com/user-attachments/assets/49862e2d-1edd-4647-8161-5afb25ed8341" />
+
 ### Embedded Chromium Browser with Design mode
 
 Also Comes with Devtools, Agent Browser Control, Profiles, and MCP access.
@@ -75,12 +81,6 @@ Dump your notes here then let an orchestrator agent hand them off to other agent
 Edit your agent prompts with full hotkeys support and even image previews! Includes Monaco-based and TUI-based editor modes.
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/b51ec92e-04cf-4d8f-933c-fc2a13638a1d" />
-
-### Supports all of the popular Agent CLIs and T3code GUI Panes
-
-Ghostex works with Claude Code, Codex CLI, OpenCode, Pi Agent, Gemini, Copilot, and other terminal-based agent CLIs.
-
-<img width="1200" alt="Ghostex T3code panes and supported terminal CLIs" src="https://github.com/user-attachments/assets/49862e2d-1edd-4647-8161-5afb25ed8341" />
 
 ### Previous Sessions Search
 
