@@ -84,6 +84,7 @@ export type GxserverEndpointPath =
   | "/api/updateAgentSettings"
   | "/api/readAgentHookStatus"
   | "/api/installAgentHooks"
+  | "/api/uninstallAgentHooks"
   | "/api/ingestAgentHookEvent"
   | "/api/createSession"
   | "/api/createAgentSession"
@@ -324,6 +325,10 @@ export interface GxserverInstallAgentHooksParams {
 
 export interface GxserverInstallAgentHooksResult extends GxserverReadAgentHookStatusResult {
   installedPaths: readonly string[];
+}
+
+export interface GxserverUninstallAgentHooksResult extends GxserverReadAgentHookStatusResult {
+  removedPaths: readonly string[];
 }
 
 export interface GxserverIngestAgentHookEventParams extends GxserverSessionLifecycleParams {

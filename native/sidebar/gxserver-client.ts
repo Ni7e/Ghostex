@@ -309,6 +309,17 @@ export function createNativeSidebarGxserverClient(
     );
   }
 
+  async function uninstallAgentHooks(agentIds?: readonly string[]): Promise<GxserverReadAgentHookStatusResult> {
+    /*
+    CDXC:AgentHooks 2026-06-18-02:54:
+    Advanced Settings can uninstall all Ghostex-owned hook integrations through gxserver so provider-specific file cleanup remains daemon-owned instead of being duplicated in the renderer or native sidebar.
+    */
+    return rpc<GxserverReadAgentHookStatusResult>(
+      "/api/uninstallAgentHooks",
+      agentIds ? { agentIds } : {},
+    );
+  }
+
   async function fetchPresentationSnapshot(): Promise<GxserverPresentationSnapshot> {
     /*
     CDXC:GxserverPresentation 2026-06-01-15:08:
@@ -622,6 +633,7 @@ export function createNativeSidebarGxserverClient(
     deleteWorktreeProject,
     forkSession,
     installAgentHooks,
+    uninstallAgentHooks,
     fetchPresentationSnapshot,
     fetchStartupSnapshot,
     fetchWakeSessionMetadata,
@@ -937,6 +949,8 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "check agent hook status";
     case "/api/installAgentHooks":
       return "install agent hooks";
+    case "/api/uninstallAgentHooks":
+      return "uninstall agent hooks";
     case "/api/createSession":
       return "create the session";
     case "/api/createAgentSession":

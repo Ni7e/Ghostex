@@ -13,7 +13,7 @@ import {
   isRemoteEndpointAllowed,
   readProtocolVersion,
 } from "./api.js";
-import { installGxserverAgentHooks, normalizeGxserverProcessPath, readGxserverAgentHookStatus } from "./agent-hooks.js";
+import { installGxserverAgentHooks, normalizeGxserverProcessPath, readGxserverAgentHookStatus, uninstallGxserverAgentHooks } from "./agent-hooks.js";
 import {
   GXSERVER_CONTROL_PLANE_CAPABILITIES,
   GXSERVER_LOCAL_API_PORT,
@@ -5008,7 +5008,7 @@ function isDomainStateEndpoint(path: GxserverEndpointPath): boolean {
 }
 
 function isAgentHookEndpoint(path: GxserverEndpointPath): boolean {
-  return path === "/api/readAgentHookStatus" || path === "/api/installAgentHooks";
+  return path === "/api/readAgentHookStatus" || path === "/api/installAgentHooks" || path === "/api/uninstallAgentHooks";
 }
 
 async function handleAgentHookEndpoint(
@@ -5026,7 +5026,9 @@ async function handleAgentHookEndpoint(
   const params = readRpcParams(body);
   const result = path === "/api/installAgentHooks"
     ? await installGxserverAgentHooks(runtime.paths, params as GxserverInstallAgentHooksParams)
-    : await readGxserverAgentHookStatus(runtime.paths, params as GxserverReadAgentHookStatusParams);
+    : path === "/api/uninstallAgentHooks"
+      ? await uninstallGxserverAgentHooks(runtime.paths, params as GxserverInstallAgentHooksParams)
+      : await readGxserverAgentHookStatus(runtime.paths, params as GxserverReadAgentHookStatusParams);
   return {
     ok: true,
     product: GXSERVER_PRODUCT,

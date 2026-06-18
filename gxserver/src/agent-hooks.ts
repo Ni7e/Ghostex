@@ -10,6 +10,7 @@ import type {
   GxserverInstallAgentHooksResult,
   GxserverReadAgentHookStatusParams,
   GxserverReadAgentHookStatusResult,
+  GxserverUninstallAgentHooksResult,
 } from "../protocol/index.js";
 import type { GxserverPaths } from "./paths.js";
 
@@ -317,6 +318,39 @@ export async function installGxserverAgentHooks(
   return {
     ...status,
     installedPaths,
+  };
+}
+
+export async function uninstallGxserverAgentHooks(
+  paths: Pick<GxserverPaths, "homeDir">,
+  params: GxserverInstallAgentHooksParams = {},
+): Promise<GxserverUninstallAgentHooksResult> {
+  const hookPaths = createGxserverAgentHookPaths(paths);
+  const agentIds = normalizeAgentIds(params.agentIds);
+  const removedPaths = new Set<string>();
+  /*
+  CDXC:AgentHooks 2026-06-18-02:54:
+  Advanced Settings needs an explicit Uninstall Hooks action. Remove only Ghostex-owned hook commands, marked blocks, plugin registrations, and Ghostex extension files so user-managed provider hooks remain intact.
+  */
+  for (const agentId of agentIds) {
+    const definition = HOOK_DEFINITIONS_BY_ID.get(agentId);
+    if (!definition) {
+      continue;
+    }
+    for (const removedPath of await uninstallAgentHook(definition, hookPaths)) {
+      removedPaths.add(removedPath);
+    }
+  }
+  try {
+    await unlink(hookPaths.notifyHookPath);
+    removedPaths.add(hookPaths.notifyHookPath);
+  } catch {
+    // The shared notify hook is absent when hooks were already removed.
+  }
+  const status = await readGxserverAgentHookStatus(paths, { agentIds, autoUpgradeInstalled: false });
+  return {
+    ...status,
+    removedPaths: [...removedPaths],
   };
 }
 
@@ -867,6 +901,51 @@ async function installAgentHook(
   return installedPaths;
 }
 
+async function uninstallAgentHook(
+  definition: GxserverAgentHookDefinition,
+  hookPaths: GxserverAgentHookPaths,
+): Promise<string[]> {
+  if (definition.format === "opencode") {
+    return uninstallOpenCodeHook(hookPaths);
+  }
+  const configPaths = await hookConfigPaths(definition, hookPaths);
+  const command = commandForAgent(definition, hookPaths.notifyHookPath);
+  if (definition.format === "pluginFile") {
+    const configPath = configPaths[0];
+    if (!configPath) return [];
+    const text = await readFileText(configPath);
+    if (!textContainsGhostexOwnedHookCommand(text)) {
+      return [];
+    }
+    try {
+      await unlink(configPath);
+      return [configPath];
+    } catch {
+      return [];
+    }
+  }
+  if (definition.format === "markedYaml") {
+    const configPath = configPaths[0];
+    if (!configPath) return [];
+    const beginMarker = `# ghostex hooks ${definition.agentId} begin`;
+    const endMarker = `# ghostex hooks ${definition.agentId} end`;
+    const currentText = await readFileText(configPath);
+    const nextText = `${withoutMarkedBlock(currentText.split(/\r?\n/u), beginMarker, endMarker).join("\n").replace(/\n*$/u, "")}\n`;
+    if (currentText === nextText) {
+      return [];
+    }
+    await writeFile(configPath, nextText, "utf8");
+    return [configPath];
+  }
+  const removedPaths: string[] = [];
+  for (const configPath of configPaths) {
+    if (await removeJsonHook(configPath, definition, command)) {
+      removedPaths.push(configPath);
+    }
+  }
+  return removedPaths;
+}
+
 function buildPluginFileSource(agentId: string, notifyHookPath: string): string {
   switch (agentId) {
     case "amp":
@@ -928,6 +1007,58 @@ async function mergeJsonHook(configPath: string, definition: GxserverAgentHookDe
   }
   await mkdir(path.dirname(configPath), { recursive: true });
   await writeFile(configPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+}
+
+async function removeJsonHook(configPath: string, definition: GxserverAgentHookDefinition, command: string): Promise<boolean> {
+  const currentText = await readFileText(configPath);
+  if (!currentText.trim()) {
+    return false;
+  }
+  const data = readJsonObject(currentText);
+  const events = allHookEvents(definition);
+  let changed = false;
+  if (definition.format === "antigravity") {
+    const ghostex = isObject(data.ghostex) ? data.ghostex : undefined;
+    if (ghostex) {
+      for (const eventName of events) {
+        if (!Array.isArray(ghostex[eventName])) {
+          continue;
+        }
+        const nextEntries = ghostex[eventName].filter((entry) => !isGhostexOwnedHookCommand(entry, command));
+        changed = changed || nextEntries.length !== ghostex[eventName].length;
+        ghostex[eventName] = nextEntries;
+      }
+    }
+  } else if (definition.format === "flatJson" || definition.format === "kiroJson") {
+    const hooks = isObject(data.hooks) ? data.hooks : undefined;
+    if (hooks) {
+      for (const eventName of events) {
+        if (!Array.isArray(hooks[eventName])) {
+          continue;
+        }
+        const nextEntries = hooks[eventName].filter((entry) => !isGhostexOwnedHookCommand(entry, command));
+        changed = changed || nextEntries.length !== hooks[eventName].length;
+        hooks[eventName] = nextEntries;
+      }
+    }
+  } else {
+    const hooks = isObject(data.hooks) ? data.hooks : undefined;
+    if (hooks) {
+      for (const eventName of events) {
+        if (!Array.isArray(hooks[eventName])) {
+          continue;
+        }
+        const nextGroups = mergeNestedHookGroups(hooks[eventName], command);
+        changed = changed || JSON.stringify(nextGroups) !== JSON.stringify(hooks[eventName]);
+        hooks[eventName] = nextGroups;
+      }
+    }
+  }
+  if (!changed) {
+    return false;
+  }
+  await writeFile(configPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  return true;
 }
 
 function allHookEvents(definition: GxserverAgentHookDefinition): string[] {
@@ -2087,6 +2218,31 @@ async function updateOpenCodeConfigPluginRegistration(configPath: string): Promi
   data.plugin = nextPlugins;
   await mkdir(path.dirname(configPath), { recursive: true });
   await writeFile(configPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+}
+
+async function uninstallOpenCodeHook(hookPaths: GxserverAgentHookPaths): Promise<string[]> {
+  const removedPaths = new Set<string>();
+  const configText = await readFileText(hookPaths.opencodeConfigPath);
+  if (configText.trim()) {
+    const data = readJsonObject(configText);
+    const plugins = Array.isArray(data.plugin) ? data.plugin : [];
+    const nextPlugins = plugins.filter((plugin) => !isOpenCodeSessionPluginRegistration(plugin));
+    if (nextPlugins.length !== plugins.length) {
+      data.plugin = nextPlugins;
+      await writeFile(hookPaths.opencodeConfigPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+      removedPaths.add(hookPaths.opencodeConfigPath);
+    }
+  }
+  const pluginText = await readFileText(hookPaths.opencodePluginPath);
+  if (pluginText.includes(OPENCODE_PLUGIN_MARKER) || textContainsGhostexOwnedHookCommand(pluginText)) {
+    try {
+      await unlink(hookPaths.opencodePluginPath);
+      removedPaths.add(hookPaths.opencodePluginPath);
+    } catch {
+      // The plugin file may already be absent.
+    }
+  }
+  return [...removedPaths];
 }
 
 function isOpenCodeSessionPluginRegistration(value: unknown): boolean {

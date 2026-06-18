@@ -29,6 +29,7 @@ export const GXSERVER_ENDPOINTS: readonly GxserverEndpointDescriptor[] = [
   */
   descriptor("/api/readAgentHookStatus", "fullLocal", true, true, "http"),
   descriptor("/api/installAgentHooks", "fullLocal", true, true, "http"),
+  descriptor("/api/uninstallAgentHooks", "fullLocal", true, true, "http"),
   descriptor("/api/ingestAgentHookEvent", "remoteAllowed", true, true, "http"),
   descriptor("/api/createSession", "remoteAllowed", true, true, "http"),
   descriptor("/api/createAgentSession", "remoteAllowed", true, true, "http"),
