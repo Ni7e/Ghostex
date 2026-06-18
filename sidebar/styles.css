@@ -583,6 +583,7 @@ button,
   min-height: 0;
   overflow: auto;
   padding: 1.25rem;
+  position: relative;
 }
 
 .ghostex-settings-shadcn .settings-persistence-warning {
@@ -1328,7 +1329,23 @@ button,
  Setup install actions belong inside the relevant integration panel while the
  footer stays focused on modal navigation. Missing optional integrations show a
  warning panel after Continue, then allow the user to proceed deliberately.
+
+ CDXC:FirstLaunchSetup 2026-06-18-02:38:
+ Continuing without first-launch hooks or bundled skills should show an in-modal
+ warning overlay, and the primary install action belongs at the bottom right so
+ users have a clear repair action before deliberately continuing.
 */
+.ghostex-settings-shadcn .first-launch-setup-warning-backdrop {
+  align-items: center;
+  background: rgb(0 0 0 / 52%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 1.25rem;
+  position: absolute;
+  z-index: 5;
+}
+
 .ghostex-settings-shadcn .first-launch-setup-warning {
   align-items: flex-start;
   background: color-mix(in srgb, #f59e0b 11%, var(--card));
@@ -1337,7 +1354,9 @@ button,
   display: grid;
   gap: 0.75rem;
   grid-template-columns: auto minmax(0, 1fr);
+  max-width: 34rem;
   padding: 0.875rem;
+  width: min(100%, 34rem);
 }
 
 .ghostex-settings-shadcn .first-launch-setup-warning-icon {
@@ -1376,6 +1395,7 @@ button,
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  justify-content: flex-end;
 }
 
 /*
@@ -1685,11 +1705,6 @@ button,
   justify-content: flex-end;
 }
 
-.ghostex-settings-shadcn .first-launch-setup-hooks-refresh-button {
-  min-width: 2.25rem;
-  padding-inline: 0.625rem;
-}
-
 .ghostex-settings-shadcn .first-launch-setup-footer {
   align-items: center;
   border-top: 1px solid var(--border);
@@ -1891,6 +1906,30 @@ button,
   width: 100%;
 }
 
+/*
+ CDXC:GhostexTutorialVideo 2026-06-18-04:49:
+ The copied Highlighted Features shell must become a one-page tutorial video modal. Remove the carousel side columns for this modal only and let the YouTube player fill all remaining body space under the required title.
+*/
+.ghostex-settings-shadcn .watch-ghostex-video-visual {
+  align-items: stretch;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ghostex-settings-shadcn .watch-ghostex-video-frame {
+  background: #000;
+  border: 0;
+  border-radius: var(--settings-radius-section);
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--foreground) 18%, var(--border));
+  display: block;
+  height: calc(100% - 1px);
+  margin: 0.5px;
+  max-height: calc(100% - 1px);
+  max-width: calc(100% - 1px);
+  min-height: 0;
+  min-width: 0;
+  width: calc(100% - 1px);
+}
+
 .ghostex-settings-shadcn .discover-ghostex-feature-image {
   background: transparent;
   border: 0;
@@ -1935,6 +1974,11 @@ button,
 .ghostex-settings-shadcn .discover-ghostex-feature-nav-button:hover {
   background: rgb(0 0 0 / 68%);
   border-color: rgb(255 255 255 / 20%);
+}
+
+.ghostex-settings-shadcn .discover-ghostex-feature-nav-button:disabled {
+  cursor: default;
+  opacity: 0.38;
 }
 
 .ghostex-settings-shadcn .discover-ghostex-feature-nav-button:focus-visible {

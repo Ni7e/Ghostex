@@ -139,4 +139,32 @@ describe("native pane tab sleeping placeholders", () => {
     expect(placeholderContentSource).toContain("(UInt32(97)...UInt32(122)).contains(scalar.value)");
     expect(placeholderContentSource).toContain("(UInt32(48)...UInt32(57)).contains(scalar.value)");
   });
+
+  test("sleep teardown preserves split placeholders instead of pruning layout", () => {
+    /*
+     * CDXC:SessionSleep 2026-06-18-03:10:
+     * Sidebar Sleep closes the renderer but must keep the pane as a black wake
+     * placeholder. Native close cleanup therefore needs an explicit preserve
+     * flag instead of treating sleep like a tab/pane close that prunes splits.
+     */
+    const hostProtocolSource = readFileSync(
+      new URL("../macos/ghostexHost/Sources/ghostexHost/HostProtocol.swift", import.meta.url),
+      "utf8",
+    );
+    const sidebarSource = readFileSync(
+      new URL("native-sidebar.tsx", import.meta.url),
+      "utf8",
+    );
+    const closeSource = sourceSection(
+      "private func closeTerminal(",
+      "  /**\n   CDXC:T3Code",
+    );
+
+    expect(hostProtocolSource).toContain("let preserveLayoutPlaceholder: Bool?");
+    expect(sidebarSource).toContain("preserveLayoutPlaceholder: true");
+    expect(closeSource).toContain("preserveLayoutPlaceholder: Bool = false");
+    expect(closeSource).toContain("if preserveLayoutPlaceholder {");
+    expect(closeSource).toContain("sleepingSessionIds.insert(sessionId)");
+    expect(closeSource).toContain("} else {\n      terminalLayout = prunedLayout(removing: sessionId, from: terminalLayout)\n    }");
+  });
 });

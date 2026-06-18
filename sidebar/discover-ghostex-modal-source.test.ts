@@ -132,7 +132,13 @@ describe("discover ghostex modal source", () => {
     expect(discoverModalSource).toContain("IconChevronRight");
     expect(discoverModalSource).toContain("activateRelativeFeature(-1)");
     expect(discoverModalSource).toContain("activateRelativeFeature(1)");
-    expect(discoverModalSource).toContain("%\n      DISCOVER_GHOSTEX_FEATURES.length");
+    expect(discoverModalSource).toContain("Math.min(");
+    expect(discoverModalSource).toContain("Math.max(0, activeFeatureIndex + offset)");
+    expect(discoverModalSource).toContain('event.key === "ArrowLeft"');
+    expect(discoverModalSource).toContain('event.key === "ArrowRight"');
+    expect(discoverModalSource).toContain("disabled={!canActivatePreviousFeature}");
+    expect(discoverModalSource).toContain("disabled={!canActivateNextFeature}");
+    expect(discoverModalSource).not.toContain("%\n      DISCOVER_GHOSTEX_FEATURES.length");
     expect(discoverModalSource).not.toContain("discover-ghostex-thumbnail-icon");
     expect(discoverModalSource).not.toContain("discover-ghostex-feature-icon");
     const featureHeadingMarkup = sourceBetween(
@@ -225,6 +231,7 @@ describe("discover ghostex modal source", () => {
     expect(featureNavButtonStyles).toContain("position: relative;");
     expect(featureNavButtonStyles).not.toContain("top: 50%;");
     expect(featureNavButtonStyles).toContain("border: 0.5px solid");
+    expect(sidebarStylesSource).toContain(".ghostex-settings-shadcn .discover-ghostex-feature-nav-button:disabled");
 
     const featureNavLeftStyles = sourceBetween(
       sidebarStylesSource,

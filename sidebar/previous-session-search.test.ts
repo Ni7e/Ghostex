@@ -2,6 +2,7 @@ import { describe, expect, test } from "vite-plus/test";
 import type { SidebarPreviousSessionItem } from "../shared/session-grid-contract";
 import {
   filterPreviousSessions,
+  filterSidebarSessionItems,
   filterPreviousSessionsModalItems,
   getNextPreviousSessionsModalSelection,
   groupPreviousSessionsByDay,
@@ -56,6 +57,39 @@ describe("filterPreviousSessions", () => {
       { historyId: "history-1" },
       { historyId: "history-2" },
       { historyId: "history-3" },
+    ]);
+  });
+
+  test("should exclude default agent session names from searched sessions", () => {
+    const sessions = [
+      createPreviousSession({
+        alias: "Pi Agent Session",
+        historyId: "history-default-pi",
+        sessionId: "session-default-pi",
+      }),
+      createPreviousSession({
+        alias: "Codex Agent Session",
+        historyId: "history-default-codex",
+        sessionId: "session-default-codex",
+      }),
+      createPreviousSession({
+        alias: "Review Pi agent behavior",
+        historyId: "history-real-title",
+        sessionId: "session-real-title",
+      }),
+    ];
+
+    /*
+     * CDXC:SessionSearch 2026-06-18-00:01:
+     * Default agent CLI names are creation placeholders, so active sidebar
+     * search and previous-session search must omit them while preserving real
+     * user/agent titles that mention the same agent.
+     */
+    expect(filterSidebarSessionItems(sessions, "agent").map((session) => session.sessionId)).toEqual([
+      "session-real-title",
+    ]);
+    expect(filterPreviousSessions(sessions, "agent").map((session) => session.historyId)).toEqual([
+      "history-real-title",
     ]);
   });
 

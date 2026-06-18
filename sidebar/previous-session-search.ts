@@ -4,6 +4,7 @@ import type {
   SidebarSessionItem,
   SidebarSessionTag,
 } from "../shared/session-grid-contract";
+import { isDefaultSessionSearchTitle } from "../shared/session-grid-contract";
 import { getEffectiveSidebarSessionTag, getSidebarSessionTagLabel } from "../shared/session-tags";
 import { getSessionHistoryCardTitle } from "./session-history-card-title";
 
@@ -156,11 +157,12 @@ export function filterSidebarSessionItems<T extends SidebarSearchableSession>(
   query: string,
 ): T[] {
   const normalizedQuery = normalizeSessionSearchValue(query);
+  const searchableSessions = filterDefaultNamedSessionSearchItems(sessions);
   if (!normalizedQuery) {
-    return [...sessions];
+    return searchableSessions;
   }
 
-  const searchRecords = sessions.map((session, itemIndex) =>
+  const searchRecords = searchableSessions.map((session, itemIndex) =>
     createSidebarSessionSearchRecord(session, itemIndex),
   );
   const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
@@ -168,7 +170,7 @@ export function filterSidebarSessionItems<T extends SidebarSearchableSession>(
     queryTokens.length > 0 && queryTokens.every((token) => token.length <= 3);
 
   if (shouldUseAbbreviationMatching) {
-    return sessions.filter((_, itemIndex) =>
+    return searchableSessions.filter((_, itemIndex) =>
       matchesNormalizedQueryTokens(searchRecords[itemIndex]?.searchText ?? "", queryTokens),
     );
   }
@@ -178,7 +180,7 @@ export function filterSidebarSessionItems<T extends SidebarSearchableSession>(
     fuse.search(normalizedQuery).map((result) => result.item.itemIndex),
   );
 
-  return sessions.filter((_, itemIndex) => matchedItemIndexes.has(itemIndex));
+  return searchableSessions.filter((_, itemIndex) => matchedItemIndexes.has(itemIndex));
 }
 
 export function matchesSidebarSessionSearchQuery(
@@ -186,6 +188,19 @@ export function matchesSidebarSessionSearchQuery(
   query: string,
 ): boolean {
   return filterSidebarSessionItems([session], query).length > 0;
+}
+
+export function filterDefaultNamedSessionSearchItems<T extends SidebarSearchableSession>(
+  sessions: readonly T[],
+): T[] {
+  /*
+   * CDXC:SessionSearch 2026-06-18-00:01:
+   * Sidebar and command-palette session search should not surface placeholder
+   * names from supported agent CLIs. Filter at the search helper boundary so
+   * current sessions, local previous-session results, and remote previous
+   * results share the same exact default-title exclusion.
+   */
+  return sessions.filter((session) => !isDefaultSessionSearchTitle(getSessionHistoryCardTitle(session)));
 }
 
 function createSidebarSessionSearchRecord<T extends SidebarSearchableSession>(

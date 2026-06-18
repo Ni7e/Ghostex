@@ -15,6 +15,7 @@ import {
   getSessionShortcutLabel,
   getVisiblePrimaryTitle,
   getVisibleTerminalTitle,
+  isDefaultSessionSearchTitle,
   normalizeSessionRenameTitle,
   normalizeTerminalTitle,
 } from "./session-grid-contract";
@@ -603,6 +604,14 @@ describe("visible primary titles", () => {
     expect(items[0]?.primaryTitle).toBe(DEFAULT_TERMINAL_SESSION_TITLE);
     expect(items[1]?.alias).toBe(createSessionAlias(2, 1));
     expect(items[1]?.primaryTitle).toBe(DEFAULT_TERMINAL_SESSION_TITLE);
+  });
+
+  test("should classify supported default agent session titles as search placeholders", () => {
+    expect(isDefaultSessionSearchTitle("Pi Agent Session")).toBe(true);
+    expect(isDefaultSessionSearchTitle("Codex Agent Session")).toBe(true);
+    expect(isDefaultSessionSearchTitle("Cursor Agent Session")).toBe(true);
+    expect(isDefaultSessionSearchTitle("Claude Code Agent Session")).toBe(true);
+    expect(isDefaultSessionSearchTitle("Review Pi agent behavior")).toBe(false);
   });
 });
 

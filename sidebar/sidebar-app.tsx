@@ -30,6 +30,7 @@ import {
   IconLayoutSidebar,
   IconMenu2Filled,
   IconPencil,
+  IconPlayerPlay,
   IconPlus,
   IconPlusFilled,
   IconRefresh,
@@ -132,7 +133,11 @@ import {
 import { useScrollGlowState } from "./use-scroll-glow-state";
 import type { WebviewApi } from "./webview-api";
 import { createDisplaySessionLayout } from "../shared/active-sessions-sort";
-import { filterPreviousSessions, filterSidebarSessionItems } from "./previous-session-search";
+import {
+  filterDefaultNamedSessionSearchItems,
+  filterPreviousSessions,
+  filterSidebarSessionItems,
+} from "./previous-session-search";
 import {
   getEffectiveSessionTag,
   getSidebarSessionTagLabel,
@@ -2149,11 +2154,15 @@ export function SidebarApp({
     },
   );
   const filteredPreviousSessions = useMemo(
-    () =>
-      !isSessionSearchFiltering
-        ? []
-        : (remoteSessionSearchPreviousSessions ??
-          filterPreviousSessions(previousSessions, normalizedSessionSearchQuery)),
+    () => {
+      if (!isSessionSearchFiltering) {
+        return [];
+      }
+      const searchResults =
+        remoteSessionSearchPreviousSessions ??
+        filterPreviousSessions(previousSessions, normalizedSessionSearchQuery);
+      return filterDefaultNamedSessionSearchItems(searchResults);
+    },
     [
       isSessionSearchFiltering,
       normalizedSessionSearchQuery,
@@ -2465,6 +2474,13 @@ export function SidebarApp({
    * same visual role as the existing "No Quick Sessions" group placeholder.
    */
   const shouldHideReferenceSectionsForSearchEmptyState = shouldShowSessionSearchEmptyState;
+  /**
+   * CDXC:SidebarProjectsEmptyState 2026-06-18-06:01:
+   * A sidebar with zero rendered project groups should guide first-time setup from the same left-aligned Projects empty-state block as the previous "No projects" placeholder. Tie the copy to the visible Projects label and its hover plus action instead of adding a separate card or fallback surface.
+   */
+  const hasAnySidebarProjectGroups =
+    displayedReferenceProjectGroupIds.length > 0 ||
+    Object.values(remoteProjectGroupIdsByMachineId).some((projectGroupIds) => projectGroupIds.length > 0);
   const referenceProjectsEmptyState = showGxserverUnavailableEmptyState ? (
     <div className="reference-sidebar-empty-state">
       Unable to load sessions.
@@ -2472,7 +2488,18 @@ export function SidebarApp({
       Restart Ghostex to try again.
     </div>
   ) : hasGxserverUnavailablePlaceholder ? null : (
-    <div className="reference-sidebar-empty-state">No projects</div>
+    <div className="reference-sidebar-empty-state">
+      {hasAnySidebarProjectGroups ? (
+        "No projects"
+      ) : (
+        <>
+          No Projects Added.
+          <br />
+          <br />
+          {"Hover over the Projects label and click on the plus button to add your first project and get started!"}
+        </>
+      )}
+    </div>
   );
   const {
     hasOverflow: sessionGroupsHaveScrollableOverflow,
@@ -3654,11 +3681,24 @@ export function SidebarApp({
      * and onboarding while this menu item stays focused on discovery.
      *
      * CDXC:HighlightedFeatures 2026-06-16-08:17:
-     * The replayable feature-tour entry is user-facing as Highlighted Features.
-     * Keep the existing discoverGhostex modal id so first-run sequencing and
-     * native modal sizing continue to use the same implementation.
+     * The replayable feature-tour entry used the discoverGhostex modal id for
+     * first-run sequencing and native modal sizing.
+     *
+     * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
+     * Keep the overflow Features entry available, but route it to the tutorial
+     * video modal so the old Highlighted Features modal remains unused.
      */
-    openAppModal({ modal: "discoverGhostex", type: "open" });
+    openAppModal({ modal: "watchGhostexVideo", type: "open" });
+  };
+
+  const openGhostexTutorialVideo = () => {
+    setIsOverflowMenuOpen(false);
+    /**
+     * CDXC:GhostexTutorialVideo 2026-06-18-04:49:
+     * The sidebar help menu should expose the copied Highlighted Features shell
+     * as a separate Tutorial Video modal with the supplied Ghostty walkthrough.
+     */
+    openAppModal({ modal: "watchGhostexVideo", type: "open" });
   };
 
   const openFirstLaunchSetup = () => {
@@ -3666,7 +3706,7 @@ export function SidebarApp({
     /**
      * CDXC:FirstLaunchSetup 2026-06-16-00:56:
      * The overflow menu must expose the original first-launch setup flow as its
-     * own Setup Flow item immediately above Highlighted Features, so users can
+     * own Setup Flow item immediately above Features, so users can
      * reopen onboarding tasks without replacing the feature-tour entry.
      */
     openAppModal({ modal: "firstLaunchSetup", type: "open" });
@@ -3825,6 +3865,7 @@ export function SidebarApp({
     onOpenFirstLaunchSetup: openFirstLaunchSetup,
     onOpenHelp: openDiscoverGhostex,
     onOpenHotkeys: openHotkeys,
+    onOpenTutorialVideo: openGhostexTutorialVideo,
     onShowRunning: openRunningSessions,
     onTogglePetOverlay: togglePetOverlay,
     onTogglePinnedPrompts: togglePinnedPrompts,
@@ -5926,6 +5967,7 @@ type RenderSidebarTopControlsOptions = {
   onOpenFirstLaunchSetup: () => void;
   onOpenHelp: () => void;
   onOpenHotkeys: () => void;
+  onOpenTutorialVideo: () => void;
   onShowRunning: () => void;
   onTogglePetOverlay: () => void;
   onTogglePinnedPrompts: () => void;
@@ -5947,6 +5989,7 @@ function renderFloatingOverflowMenu({
   onOpenFirstLaunchSetup,
   onOpenHelp,
   onOpenHotkeys,
+  onOpenTutorialVideo,
   onShowRunning,
   onTogglePetOverlay,
   onTogglePinnedPrompts,
@@ -6135,7 +6178,21 @@ function renderFloatingOverflowMenu({
                   size={14}
                   stroke={1.8}
                 />
-                Highlighted Features
+                Features
+              </button>
+              <button
+                className="session-context-menu-item"
+                onClick={onOpenTutorialVideo}
+                role="menuitem"
+                type="button"
+              >
+                <IconPlayerPlay
+                  aria-hidden="true"
+                  className="session-context-menu-icon"
+                  size={14}
+                  stroke={1.8}
+                />
+                Tutorial Video
               </button>
             </div>
             <div className="session-context-menu-divider" role="separator" />

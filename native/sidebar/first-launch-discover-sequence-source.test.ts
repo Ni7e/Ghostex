@@ -25,39 +25,29 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("first-launch highlighted features sequence source", () => {
-  test("starts automatic onboarding and update announcement with Discover", () => {
+  test("opens the tutorial video directly on first startup", () => {
     /*
-     * CDXC:FirstLaunchSetup 2026-06-16-07:58:
-     * The automatic first-run path should show Highlighted Features first, then
-     * continue into firstLaunchSetup after the feature tour closes. Manual
-     * overflow opens remain standalone because only startup sends the
-     * follow-up flag.
-     *
-     * CDXC:HighlightedFeatures 2026-06-16-18:55:
-     * Existing users who already completed first-launch setup should still see
-     * Highlighted Features once after updating, without carrying the setup
-     * follow-up flag.
+     * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
+     * Startup should show the tutorial video when the current setup revision
+     * has not been seen. Highlighted Features is marked seen so the old modal
+     * stays unused.
      */
     const firstLaunchStartup = sourceBetween(
       nativeSidebarSource,
       "function openFirstLaunchSetupOnFirstLaunch(): void",
       "function showOSIntegrationOnboardingOnFirstLaunch(): void",
     );
-    expect(firstLaunchStartup).toContain(
-      "const hasSeenFirstLaunchSetup = hasSeenCurrentFirstLaunchSetup(localStorage);",
-    );
+    expect(firstLaunchStartup).toContain("hasSeenCurrentFirstLaunchSetup(localStorage)");
     expect(firstLaunchStartup).toContain("!hasSeenCurrentHighlightedFeatures(localStorage)");
     expect(firstLaunchStartup).toContain("markCurrentHighlightedFeaturesSeen(localStorage);");
-    expect(firstLaunchStartup).toContain('modal: "discoverGhostex"');
-    expect(firstLaunchStartup).toContain("showFirstLaunchSetupOnClose: !hasSeenFirstLaunchSetup");
+    expect(firstLaunchStartup).toContain('openAppModal({ modal: "watchGhostexVideo", type: "open" });');
     expect(firstLaunchStartup).toContain("markCurrentFirstLaunchSetupSeen(localStorage);");
-    expect(firstLaunchStartup.indexOf('modal: "discoverGhostex"')).toBeLessThan(
+    expect(firstLaunchStartup.indexOf('openAppModal({ modal: "watchGhostexVideo", type: "open" });')).toBeLessThan(
       firstLaunchStartup.indexOf("markCurrentFirstLaunchSetupSeen(localStorage);"),
     );
-    expect(firstLaunchStartup.indexOf("markCurrentHighlightedFeaturesSeen(localStorage);")).toBeLessThan(
-      firstLaunchStartup.indexOf('modal: "discoverGhostex"'),
-    );
     expect(firstLaunchStartup).not.toContain('modal: "firstLaunchSetup"');
+    expect(firstLaunchStartup).not.toContain('modal: "discoverGhostex"');
+    expect(firstLaunchStartup).not.toContain("showFirstLaunchSetupOnClose");
 
     const bridgeDiscoverOpen = sourceBetween(
       appModalHostBridgeSource,
@@ -78,7 +68,8 @@ describe("first-launch highlighted features sequence source", () => {
       "const openDiscoverGhostex = () => {",
       "const openFirstLaunchSetup = () => {",
     );
-    expect(manualDiscoverLauncher).toContain('openAppModal({ modal: "discoverGhostex", type: "open" });');
+    expect(manualDiscoverLauncher).toContain('openAppModal({ modal: "watchGhostexVideo", type: "open" });');
+    expect(manualDiscoverLauncher).not.toContain('openAppModal({ modal: "discoverGhostex", type: "open" });');
     expect(manualDiscoverLauncher).not.toContain("showFirstLaunchSetupOnClose");
   });
 

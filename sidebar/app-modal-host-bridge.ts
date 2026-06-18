@@ -14,6 +14,7 @@ export type AppModalKind =
   | "configureAgents"
   | "daemonSessions"
   | "discoverGhostex"
+  | "watchGhostexVideo"
   | "floatingPromptEditor"
   | "gitFileDiff"
   | "deleteWorktree"

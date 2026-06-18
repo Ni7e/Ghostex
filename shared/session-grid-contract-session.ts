@@ -206,6 +206,7 @@ const DEFAULT_SESSION_AGENT_TITLE_NAMES = new Map<string, string>([
   ["π", "Pi"],
   ["t3", "T3 Code"],
 ]);
+const DEFAULT_SESSION_SEARCH_PLACEHOLDER_TITLES = createDefaultSessionSearchPlaceholderTitles();
 const ELLIPSIZED_PATH_TITLE_PATTERN = /^(?:…|\.\.\.)[\\/]/u;
 const WINDOWS_DEFAULT_POWERSHELL_TITLE_PATTERN =
   /^[a-z]:\\windows\\system32\\windowspowershell\\v1\.0\\powershell\.exe(?:\s+\.)?$/iu;
@@ -479,6 +480,28 @@ export function createAgentSessionDefaultTitle(agentName: string | undefined): s
     : DEFAULT_TERMINAL_SESSION_TITLE;
 }
 
+function createDefaultSessionSearchPlaceholderTitles(): Set<string> {
+  const titles = new Set(IGNORED_PLACEHOLDER_SESSION_TITLES);
+  for (const title of IGNORED_PLACEHOLDER_SESSION_TITLES) {
+    if (title === DEFAULT_TERMINAL_SESSION_TITLE.toLowerCase() || !title.endsWith(" session")) {
+      continue;
+    }
+    titles.add(title.replace(/\s+session$/u, " agent session"));
+  }
+  for (const agentTitleName of new Set(DEFAULT_SESSION_AGENT_TITLE_NAMES.values())) {
+    const normalizedAgentTitleName = agentTitleName.trim().replace(/\s+/g, " ").toLowerCase();
+    if (!normalizedAgentTitleName) {
+      continue;
+    }
+    titles.add(`${normalizedAgentTitleName} session`);
+    titles.add(`${normalizedAgentTitleName} agent session`);
+    if (normalizedAgentTitleName.endsWith(" cli")) {
+      titles.add(`${normalizedAgentTitleName.slice(0, -" cli".length)} agent session`);
+    }
+  }
+  return titles;
+}
+
 export function isNumericSessionAlias(alias: string | undefined): boolean {
   return /^\d+$/.test(alias?.trim() ?? "");
 }
@@ -725,6 +748,21 @@ export function isGhostPlaceholderSessionTitle(title: string): boolean {
   return GHOST_PLACEHOLDER_SESSION_TITLE_PATTERN.test(normalizedTitle);
 }
 
+export function isDefaultSessionSearchTitle(title: string | undefined): boolean {
+  const normalizedTitle = title?.trim().replace(/\s+/g, " ");
+  if (!normalizedTitle) {
+    return false;
+  }
+  /*
+   * CDXC:SessionSearch 2026-06-18-00:01:
+   * Session search should be a jump-to-named-work surface. Creation defaults
+   * from supported agent CLIs, including `Pi Agent Session`, are placeholders
+   * and must not appear as search hits until the agent or user gives the
+   * session a meaningful title.
+   */
+  return isIgnoredPlaceholderSessionTitle(normalizedTitle);
+}
+
 const SESSION_RENAME_UNSUPPORTED_GLYPH_PATTERN =
   /[^\p{L}\p{N} !"#$%&'()*+,\-.\/:;<=>?@[\\\]^_`{|}~]/gu;
 
@@ -898,7 +936,7 @@ function isIgnoredPlaceholderSessionTitle(title: string): boolean {
     getCodexSessionIdFromTitle(normalizedTitle) !== undefined ||
     isGhostPlaceholderSessionTitle(normalizedTitle) ||
     AGENT_STATUS_WORD_TITLE_PATTERN.test(normalizedTitle) ||
-    IGNORED_PLACEHOLDER_SESSION_TITLES.has(normalizedTitle.toLowerCase()) ||
+    DEFAULT_SESSION_SEARCH_PLACEHOLDER_TITLES.has(normalizedTitle.toLowerCase()) ||
     isPathLikeTerminalTitle(normalizedTitle)
   );
 }

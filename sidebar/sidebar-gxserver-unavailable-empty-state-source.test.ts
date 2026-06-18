@@ -63,6 +63,10 @@ describe("gxserver unavailable sidebar empty state source", () => {
     expect(emptyStateSource).toContain("Unable to load sessions.");
     expect(emptyStateSource).toContain("<br />");
     expect(emptyStateSource).toContain("Restart Ghostex to try again.");
+    expect(emptyStateSource).toContain("No Projects Added.");
+    expect(emptyStateSource).toContain(
+      "Hover over the Projects label and click on the plus button to add your first project and get started!",
+    );
     expect(nativePlaceholderSource).toContain('title: "",');
     expect(nativePlaceholderSource).not.toContain('"gxserver unavailable"');
     expect(nativePlaceholderSource).not.toContain('"gxserver stopped"');

@@ -207,8 +207,11 @@ describe("native app modal window source", () => {
     The macOS first-launch setup modal must open 90px taller than its old 1120x760 native child window so onboarding steps with hook status and footer actions are not clipped.
     Keep Agents Hub at the generic management-modal height while firstLaunchSetup and the legacy tipsAndTricks alias use the taller frame.
 
-    CDXC:HighlightedFeatures 2026-06-16-08:17:
-    Highlighted Features uses the same 1120x850 native child-window footprint while keeping the existing discoverGhostex modal id.
+    CDXC:HighlightedFeatures 2026-06-18-02:02:
+    Highlighted Features uses a shorter 1120x750 native child-window footprint while keeping the existing discoverGhostex modal id.
+
+    CDXC:GhostexTutorialVideo 2026-06-18-04:49:
+    The copied tutorial video modal should use the same 1120x750 native child-window footprint so its one embedded player fills the modal.
     */
     const defaultSize = sourceBetween(
       appDelegateSource,
@@ -219,15 +222,20 @@ describe("native app modal window source", () => {
     expect(defaultSize).toContain("return CGSize(width: 1120, height: 760)");
     expect(defaultSize).toContain('case "firstLaunchSetup", "tipsAndTricks":');
     expect(defaultSize).toContain("return CGSize(width: 1120, height: 850)");
-    expect(defaultSize).toContain('case "discoverGhostex":');
+    expect(defaultSize).toContain('case "discoverGhostex", "watchGhostexVideo":');
+    expect(defaultSize).toContain("return CGSize(width: 1120, height: 750)");
 
     const modalTitle = sourceBetween(
       appDelegateSource,
       "private func title(for modal: String) -> String",
       "private final class TitlebarDropdownPanelController",
     );
+    expect(modalTitle).toContain('case "firstLaunchSetup", "tipsAndTricks":');
+    expect(modalTitle).toContain('return "Tips"');
     expect(modalTitle).toContain('case "discoverGhostex":');
     expect(modalTitle).toContain('return "Highlighted Features"');
+    expect(modalTitle).toContain('case "watchGhostexVideo":');
+    expect(modalTitle).toContain('return "Tutorial Video"');
   });
 
   test("opens Settings over the exact macOS workspace area", () => {
@@ -280,6 +288,32 @@ describe("native app modal window source", () => {
     expect(settingsStyles).toContain("max-height: 100vh;");
     expect(settingsStyles).toContain("max-width: 100vw;");
     expect(settingsStyles).toContain("width: 100vw;");
+  });
+
+  test("loads the tutorial video modal host with an HTTPS base URL", () => {
+    /*
+    CDXC:GhostexTutorialVideo 2026-06-18-05:35:
+    Third-party iframe playback can fail when the modal host is loaded from
+    file:// without a valid HTTP referrer. The tutorial video modal should load
+    the generated modal-host HTML string with a stable HTTPS base URL while
+    keeping normal local-file loading for other modals.
+    */
+    const appModalWindowController = sourceBetween(
+      appDelegateSource,
+      "private final class AppModalWindowController",
+      "private final class TitlebarDropdownPanel",
+    );
+    expect(appModalWindowController).toContain(
+      'private static let ghostexTutorialVideoEmbedBaseURL = URL(string: "https://ghostex.local/")!',
+    );
+    expect(appModalWindowController).toContain('if loadedModal == "watchGhostexVideo"');
+    expect(appModalWindowController).toContain("String(contentsOf: builtModalHost, encoding: .utf8)");
+    expect(appModalWindowController).toContain(
+      "baseURL: Self.ghostexTutorialVideoEmbedBaseURL",
+    );
+    expect(appModalWindowController).toContain(
+      "webView.loadFileURL(builtModalHost, allowingReadAccessTo: webAssets)",
+    );
   });
 
   test("opens titlebar dropdown panels as keyable child windows for hover", () => {
@@ -711,6 +745,38 @@ describe("native app modal window source", () => {
     expect(nativeSidebarSource).not.toContain('modal: "commandConfig"');
   });
 
+  test("lets Settings Actions editor delete default and custom actions", () => {
+    /*
+    CDXC:ActionsSettings 2026-06-18-10:11:
+    Users can open default Actions such as Build or Test from Settings and must still be able to delete them from that edit surface. The Settings editor should route Delete through the same native deleteSidebarCommand path that records default-action removals in deletedDefaultCommandIds.
+    */
+    const actionEditorSource = sourceBetween(
+      settingsModalSource,
+      "function ActionSettingsEditor({",
+      "function getSettingsCommandDraftTitle(",
+    );
+    expect(actionEditorSource).toContain("onDelete?: () => void");
+    expect(actionEditorSource).toContain("variant=\"destructive\"");
+    expect(actionEditorSource).toContain("<IconTrash aria-hidden=\"true\" data-icon=\"inline-start\" />");
+
+    const actionsTabSource = sourceBetween(
+      settingsModalSource,
+      "function ActionsSettingsTab",
+      "function SettingsCommandRow",
+    );
+    expect(actionsTabSource).toContain("const editorCommandId = editorState?.draft.commandId");
+    expect(actionsTabSource).toContain("deleteCommand(editorCommandId)");
+    expect(actionsTabSource).toContain('type: "deleteSidebarCommand"');
+
+    const nativeDeleteSource = sourceBetween(
+      nativeSidebarSource,
+      "function deleteSidebarCommand(commandId: string): void",
+      "function syncSidebarCommandOrder(",
+    );
+    expect(nativeDeleteSource).toContain("isDefaultSidebarCommandId(commandId)");
+    expect(nativeDeleteSource).toContain("writeDeletedDefaultCommandIds");
+  });
+
   test("keeps Delayed Send fixed at 472x336 in the macOS app", () => {
     /*
     CDXC:DelayedSend 2026-06-12-04:07:
@@ -754,6 +820,11 @@ describe("native app modal window source", () => {
     expect(delayedSendModalSource).toContain('aria-label="Minutes"');
     expect(delayedSendModalSource).toContain("autoFocus");
     expect(delayedSendModalSource).toContain("focusMinutesInput");
+    expect(delayedSendModalSource).toContain("scheduleMinutesFocus");
+    expect(delayedSendModalSource).toContain("focus({ preventScroll: true })");
+    expect(delayedSendModalSource).toContain("window.setTimeout(focusMinutesInput");
+    expect(delayedSendModalSource).toContain("submitFromDurationInput");
+    expect(delayedSendModalSource).toContain('event.key !== "Enter"');
     expect(delayedSendModalSource).not.toContain('aria-label="Seconds"');
     expect(delayedSendModalSource).not.toContain("setSeconds");
     expect(delayedSendModalSource).toContain("Enter a delay between 1 minute and 24 days.");
@@ -956,6 +1027,10 @@ describe("native app modal window source", () => {
     First Time Setup and Highlighted Features should dim and block the full app
     behind them with a native 40% black AppKit child panel, then remove that
     panel when those onboarding modals close.
+
+    CDXC:GhostexTutorialVideo 2026-06-18-04:49:
+    The copied tutorial video modal should use the same native backdrop as
+    Highlighted Features while its own dialog owns close behavior.
     */
     expect(appDelegateSource).toContain("private var onboardingAppModalBackdropPanel: AppModalBackdropPanel?");
     expect(appDelegateSource).toContain("private final class AppModalBackdropPanel: NSPanel");
@@ -968,7 +1043,7 @@ describe("native app modal window source", () => {
       "private func shouldShowOnboardingAppModalBackdrop",
       "private func takeFirstLaunchSetupAfterDiscoverClose",
     );
-    expect(backdropHelpers).toContain('case "discoverGhostex", "firstLaunchSetup", "tipsAndTricks":');
+    expect(backdropHelpers).toContain('case "discoverGhostex", "watchGhostexVideo", "firstLaunchSetup", "tipsAndTricks":');
     expect(backdropHelpers).toContain("NSColor.black.withAlphaComponent(0.4)");
     expect(backdropHelpers).toContain("styleMask: [.borderless, .nonactivatingPanel]");
     expect(backdropHelpers).toContain("window.addChildWindow(panel, ordered: .above)");

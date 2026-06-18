@@ -5,8 +5,11 @@ import type {
   SidebarSessionItem,
 } from "../shared/session-grid-contract";
 import {
+  createCommandPaletteCurrentSessionItems,
   createCommandPaletteSessionSections,
+  createPreviousSessionSearchText,
   filterCommandPaletteCurrentSessionItems,
+  filterCommandPalettePreviousSessions,
   getCommandPaletteCommandQuery,
   getCommandPaletteModeSwitchSelectionRange,
   getCommandPaletteQueryForRequestedMode,
@@ -25,6 +28,15 @@ const commandPaletteSearchSource = readFileSync(
 );
 const commandInputSource = readFileSync(
   new URL("../components/ui/command.tsx", import.meta.url),
+  "utf8",
+);
+const modalHostSource = readFileSync(new URL("../native/sidebar/modal-host.tsx", import.meta.url), "utf8");
+const nativeSidebarSource = readFileSync(
+  new URL("../native/sidebar/native-sidebar.tsx", import.meta.url),
+  "utf8",
+);
+const sessionGridContractSource = readFileSync(
+  new URL("../shared/session-grid-contract-sidebar.ts", import.meta.url),
   "utf8",
 );
 const sidebarStylesSource = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
@@ -65,16 +77,26 @@ describe("command palette modes", () => {
     expect(getCommandPaletteModeSwitchSelectionRange("agent")).toEqual({ start: 0, end: 5 });
   });
 
-  test("filters current sessions by session metadata and project label", () => {
+  test("filters current sessions by visible title only", () => {
     const reviewSession = createSession({
       alias: "Claude Review",
-      detail: "Terminal",
+      detail: "testing hidden detail",
       sessionId: "session-review",
     });
     const sourceSession = createSession({
       alias: "Source Shell",
       detail: "Terminal",
       sessionId: "session-source",
+    });
+    const settingsSession = createSession({
+      alias: "Project Settings Delete Issue",
+      detail: "Terminal",
+      sessionId: "session-settings",
+    });
+    const defaultAgentSession = createSession({
+      alias: "Pi Agent Session",
+      detail: "Terminal",
+      sessionId: "session-default-agent",
     });
     const items: CommandPaletteCurrentSessionItem[] = [
       {
@@ -85,17 +107,68 @@ describe("command palette modes", () => {
         session: reviewSession,
       },
       {
-        groupId: "group-docs",
+        groupId: "group-testing",
         groupIsActive: false,
-        projectLabel: "Docs",
-        searchText: "Source Shell Docs",
+        projectLabel: "Testing Project",
+        searchText: "Source Shell",
         session: sourceSession,
+      },
+      {
+        groupId: "group-settings",
+        groupIsActive: false,
+        projectLabel: "Ghostex",
+        searchText: "Project Settings Delete Issue",
+        session: settingsSession,
+      },
+      {
+        groupId: "group-default-agent",
+        groupIsActive: false,
+        projectLabel: "Ghostex",
+        searchText: "Pi Agent Session",
+        session: defaultAgentSession,
       },
     ];
 
+    /*
+     * CDXC:CommandPalette 2026-06-17-22:39:
+     * Cmd+P session search must be a title jump, not a metadata search. A
+     * typed title query should not match hidden details, project labels, or
+     * near-looking words such as Settings when the user typed testing.
+     *
+     * CDXC:SessionSearch 2026-06-18-00:01:
+     * Default agent CLI names are placeholders, so Cmd+P should omit them even
+     * when the query text would otherwise match the default title exactly.
+     */
     expect(filterCommandPaletteCurrentSessionItems(items, "claude")).toEqual([items[0]]);
-    expect(filterCommandPaletteCurrentSessionItems(items, "docs")).toEqual([items[1]]);
-    expect(filterCommandPaletteCurrentSessionItems(items, "")).toEqual(items);
+    expect(filterCommandPaletteCurrentSessionItems(items, "source")).toEqual([items[1]]);
+    expect(filterCommandPaletteCurrentSessionItems(items, "testing")).toEqual([]);
+    expect(filterCommandPaletteCurrentSessionItems(items, "pi")).toEqual([]);
+    expect(
+      createCommandPaletteCurrentSessionItems({
+        groupsById: {
+          "group-testing": {
+            projectContext: { path: "/Users/madda/dev/_active/testing-project" },
+            title: "Testing Project",
+          },
+        },
+        sessionIdsByGroup: { "group-testing": [sourceSession.sessionId] },
+        sessionsById: { [sourceSession.sessionId]: sourceSession },
+        workspaceGroupIds: ["group-testing"],
+      })[0]?.searchText,
+    ).toBe("Source Shell");
+    expect(filterCommandPaletteCurrentSessionItems(items, "")).toEqual([
+      items[0],
+      items[1],
+      items[2],
+    ]);
+    expect(
+      createCommandPaletteCurrentSessionItems({
+        groupsById: { "group-default-agent": { title: "Ghostex" } },
+        sessionIdsByGroup: { "group-default-agent": [defaultAgentSession.sessionId] },
+        sessionsById: { [defaultAgentSession.sessionId]: defaultAgentSession },
+        workspaceGroupIds: ["group-default-agent"],
+      }),
+    ).toEqual([]);
   });
 
   test("orders session sections and sorts each section by last active descending", () => {
@@ -237,6 +310,38 @@ describe("command palette modes", () => {
       ),
     ).toEqual(["history-newer", "history-closed-only", "history-older"]);
   });
+
+  test("filters previous sessions by title only", () => {
+    const matching = createPreviousSession({
+      alias: "Testing Session",
+      closedAt: "2026-06-13T12:00:00.000Z",
+      historyId: "history-testing",
+      projectPath: "/Users/madda/dev/_active/not-a-match",
+      sessionId: "session-testing",
+    });
+    const hiddenProjectMatch = createPreviousSession({
+      alias: "Prompt Editor Losing Content",
+      closedAt: "2026-06-13T12:00:00.000Z",
+      historyId: "history-hidden-project",
+      projectPath: "/Users/madda/dev/_active/testing-project",
+      sessionId: "session-hidden-project",
+    });
+    const defaultAgentSession = createPreviousSession({
+      alias: "Pi Agent Session",
+      closedAt: "2026-06-13T12:00:00.000Z",
+      historyId: "history-default-agent",
+      sessionId: "session-default-agent",
+    });
+
+    expect(
+      filterCommandPalettePreviousSessions([matching, hiddenProjectMatch, defaultAgentSession], "testing"),
+    ).toEqual([matching]);
+    expect(filterCommandPalettePreviousSessions([defaultAgentSession], "pi")).toEqual([]);
+    expect(filterCommandPalettePreviousSessions([matching, defaultAgentSession], "")).toEqual([
+      matching,
+    ]);
+    expect(createPreviousSessionSearchText(hiddenProjectMatch)).toBe("Prompt Editor Losing Content");
+  });
 });
 
 describe("command palette source contracts", () => {
@@ -277,6 +382,74 @@ describe("command palette source contracts", () => {
     );
   });
 
+  test("exposes global app modals and main-window actions in command mode", () => {
+    /*
+     * CDXC:CommandPalette 2026-06-18-03:32:
+     * Cmd+Shift+P should open global app surfaces directly from command mode,
+     * including Previous Sessions plus the Features, Setup, and
+     * Changelog actions from the Tips header.
+     *
+     * CDXC:CommandPalette 2026-06-18-04:53:
+     * The setup command should render as Setup while search metadata keeps
+     * Ghostex setup and onboarding discoverable.
+     *
+     * CDXC:GhostexTutorialVideo 2026-06-18-04:49:
+     * Command mode should include the dedicated tutorial video entry so users
+     * can open the one-video walkthrough without replacing the Features tour.
+     *
+     * CDXC:CommandPalette 2026-06-18-03:46:
+     * Main-window buttons Add Project, Search by Text, Quick Terminal, Quick
+     * Browser Tab, Automations, Open Current Project in Finder, and visible
+     * Open In targets should be command-palette rows too. Mobile, Discord,
+     * Recent Projects, and section collapse controls are intentionally omitted.
+     */
+    expect(commandPaletteSource).toContain("const APP_MODAL_PALETTE_COMMANDS");
+    expect(commandPaletteSource).toContain("Previous Sessions");
+    expect(commandPaletteSource).toContain("Pinned Prompts");
+    expect(commandPaletteSource).toContain("Running Sessions");
+    expect(commandPaletteSource).toContain("Scratch Pad");
+    expect(commandPaletteSource).toContain("Agents Hub");
+    expect(commandPaletteSource).toContain("Configure Agents");
+    expect(commandPaletteSource).toContain("Actions");
+    expect(commandPaletteSource).toContain("Open Targets");
+    expect(commandPaletteSource).toContain("Hotkeys");
+    expect(commandPaletteSource).toContain("Features");
+    expect(commandPaletteSource).toContain("Tutorial Video");
+    expect(commandPaletteSource).toContain('title: "Setup"');
+    expect(commandPaletteSource).toContain("Changelog");
+    expect(commandPaletteSource).toContain("Add Project");
+    expect(commandPaletteSource).toContain("Search by Text");
+    expect(commandPaletteSource).toContain("Quick Terminal");
+    expect(commandPaletteSource).toContain("Quick Browser Tab");
+    expect(commandPaletteSource).toContain("Automations");
+    expect(commandPaletteSource).toContain("Open Current Project in Finder");
+    expect(commandPaletteSource).toContain("function createOpenTargetPaletteCommands");
+    expect(commandPaletteSource).toContain("Open In: ${target.label}");
+    expect(commandPaletteSource).toContain('openAppModal({ modal: command.modal, type: "open" });');
+    expect(commandPaletteSource).toContain("vscode.postMessage(command.message);");
+    expect(commandPaletteSource).toContain('message: { type: "pickWorkspaceFolder" }');
+    expect(commandPaletteSource).toContain('message: { type: "searchPreviousSessionsByText" }');
+    expect(commandPaletteSource).toContain('message: { type: "createChat" }');
+    expect(commandPaletteSource).toContain('message: { type: "openBrowserChat" }');
+    expect(commandPaletteSource).toContain('message: { type: "showAutomationsComingSoonToast" }');
+    expect(commandPaletteSource).toContain('message: { type: "openCurrentProjectInFinder" }');
+    expect(commandPaletteSource).toContain('message: { type: "openGhostexTutorialVideo" }');
+    expect(commandPaletteSource).toContain('message: { type: "openWorkspaceWelcome" }');
+    expect(commandPaletteSource).toContain(
+      'message: { type: "openBrowserPane", url: GHOSTEX_CHANGELOG_URL }',
+    );
+    expect(commandPaletteSource).toContain('type: "openCurrentProjectInTarget"');
+    expect(commandPaletteSource).toContain("function getBuiltInCommandKey");
+    expect(modalHostSource).toContain("openTargetSettings={settings}");
+    expect(sessionGridContractSource).toContain('type: "openCurrentProjectInFinder"');
+    expect(sessionGridContractSource).toContain('type: "openGhostexTutorialVideo"');
+    expect(sessionGridContractSource).toContain('type: "openCurrentProjectInTarget"');
+    expect(nativeSidebarSource).toContain("function openCurrentProjectInFinderFromCommandPalette()");
+    expect(nativeSidebarSource).toContain("function openCurrentProjectInTargetFromCommandPalette");
+    expect(nativeSidebarSource).toContain('case "openCurrentProjectInFinder":');
+    expect(nativeSidebarSource).toContain('case "openCurrentProjectInTarget":');
+  });
+
   test("keeps session search copy and single-row selection styling scoped", () => {
     /*
      * CDXC:CommandPalette 2026-06-13-22:22:
@@ -308,37 +481,59 @@ describe("command palette source contracts", () => {
 
 function createSession(
   overrides: Pick<SidebarSessionItem, "alias" | "detail" | "sessionId"> &
-    Partial<Pick<SidebarSessionItem, "isFocused" | "lastInteractionAt">>,
+    Partial<
+      Pick<
+        SidebarSessionItem,
+        "displayTitle" | "isFocused" | "lastInteractionAt" | "primaryTitle" | "terminalTitle"
+      >
+    >,
 ): SidebarSessionItem {
   return {
     activity: "idle",
     alias: overrides.alias,
     column: 0,
     detail: overrides.detail,
+    displayTitle: overrides.displayTitle,
     isFocused: overrides.isFocused ?? false,
     isRunning: true,
     isVisible: true,
     lastInteractionAt: overrides.lastInteractionAt,
+    primaryTitle: overrides.primaryTitle,
     row: 0,
     sessionId: overrides.sessionId,
     shortcutLabel: "",
+    terminalTitle: overrides.terminalTitle,
   };
 }
 
 function createPreviousSession(
   overrides: Pick<SidebarPreviousSessionItem, "closedAt" | "historyId" | "sessionId"> &
-    Partial<Pick<SidebarPreviousSessionItem, "lastInteractionAt">>,
+    Partial<
+      Pick<
+        SidebarPreviousSessionItem,
+        | "alias"
+        | "displayTitle"
+        | "lastInteractionAt"
+        | "primaryTitle"
+        | "projectPath"
+        | "terminalTitle"
+      >
+    >,
 ): SidebarPreviousSessionItem {
   return {
     ...createSession({
-      alias: overrides.sessionId,
+      alias: overrides.alias ?? overrides.sessionId,
       detail: "Terminal",
+      displayTitle: overrides.displayTitle,
       lastInteractionAt: overrides.lastInteractionAt,
+      primaryTitle: overrides.primaryTitle,
       sessionId: overrides.sessionId,
+      terminalTitle: overrides.terminalTitle,
     }),
     closedAt: overrides.closedAt,
     historyId: overrides.historyId,
     isGeneratedName: false,
     isRestorable: true,
+    projectPath: overrides.projectPath,
   };
 }

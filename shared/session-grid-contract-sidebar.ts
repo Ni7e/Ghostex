@@ -820,12 +820,26 @@ export type SidebarToExtensionMessage =
        * CDXC:AgentHookSettings 2026-05-23-10:05:
        * Settings -> Agents can refresh hook status and trigger the existing hook installer, but native remains the owner of config paths, executable checks, and hook-file mutation.
        *
+       * CDXC:FirstLaunchSetup 2026-06-18-02:38:
+       * First launch narrows hook setup to Codex, Claude, and Pi by passing
+       * agentIds while Settings can omit agentIds to inspect the full supported
+       * provider set.
+       */
+      type:
+        | "requestAgentHookStatus"
+        | "installAgentHooks"
+        | "installAgentHooksFromTitlebarNotice"
+        | "uninstallAgentHooks";
+      agentIds?: readonly string[];
+    }
+  | {
+      /**
        * CDXC:FirstLaunchSetup 2026-05-26-17:12:
        * First launch CLI setup must distinguish a missing CLI from an app that
        * was already installed through Homebrew. Native owns PATH inspection so
        * the production modal and Storybook mock can share the same UI contract.
        */
-      type: "requestAgentHookStatus" | "installAgentHooks" | "requestGhostexCliStatus";
+      type: "requestGhostexCliStatus";
     }
   | {
       /**
@@ -840,6 +854,7 @@ export type SidebarToExtensionMessage =
         | "installComputerUseSkill"
         | "installAgentOrchestrationSkill"
         | "installGenerateTitleSkill"
+        | "uninstallBundledAgentSkills"
         | "installCuaDriver";
     }
   | {
@@ -1126,9 +1141,25 @@ export type SidebarToExtensionMessage =
        * The titlebar Tips & Tricks panel can open the replayable highlighted
        * features modal. Keep the request in the sidebar command contract so
        * the native sidebar remains the single owner of app modal presentation.
+       *
+       * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
+       * Keep this legacy command for callers, but native routes it to the
+       * tutorial video modal so Highlighted Features can remain unused.
        */
       type: "openHighlightedFeatures";
     }
+  | {
+     /*
+      * CDXC:GhostexTutorialVideo 2026-06-18-04:49:
+      * Help surfaces need a dedicated request for the one-page Ghostex tutorial
+       * video modal.
+       *
+       * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
+       * Current Features/help entry points should open this video modal while
+       * leaving the old Highlighted Features modal unused.
+      */
+     type: "openGhostexTutorialVideo";
+   }
   | {
       /**
        * CDXC:NativeWorkspacePicker 2026-05-08-18:45
@@ -1136,6 +1167,27 @@ export type SidebarToExtensionMessage =
        * folder picker.
        */
       type: "pickWorkspaceFolder";
+    }
+  | {
+      /*
+       * CDXC:CommandPalette 2026-06-18-03:46:
+       * Cmd+Shift+P exposes the main-window Open In actions. The modal host
+       * sends only a target id; native resolves it against the active project,
+       * current Settings visibility, and detected target availability so the
+       * palette does not carry workspace paths or duplicate titlebar launch
+       * rules.
+       */
+      targetId: string;
+      type: "openCurrentProjectInTarget";
+    }
+  | {
+      /*
+       * CDXC:CommandPalette 2026-06-18-03:46:
+       * Open Current Project in Finder is a global command-palette action that
+       * mirrors the main titlebar Open In affordance without sending a raw path
+       * through React.
+       */
+      type: "openCurrentProjectInFinder";
     }
   | {
       /**

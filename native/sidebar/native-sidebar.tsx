@@ -12,6 +12,7 @@ import {
   type AppToastLevel,
   type AppToastOptions,
 } from "../../shared/app-toast-contract";
+import { BUNDLED_GHOSTEX_AGENT_SKILLS } from "../../shared/ghostex-agent-skills";
 import {
   createNativeGxserverRequest,
   parseNativeGxserverResponse,
@@ -464,7 +465,18 @@ type NativeHostCommand =
       type: "createWebPane";
       url: string;
     }
-  | { preservePersistenceSession?: boolean; sessionId: string; type: "closeTerminal" }
+  | {
+      /**
+       * CDXC:SessionSleep 2026-06-18-03:10:
+       * Sleep closes the live Ghostty renderer but keeps the native pane slot as
+       * a black wake placeholder. Mark those closes explicitly so native cleanup
+       * does not prune the split/tree before the sidebar layout sync arrives.
+       */
+      preserveLayoutPlaceholder?: boolean;
+      preservePersistenceSession?: boolean;
+      sessionId: string;
+      type: "closeTerminal";
+    }
   | { sessionId: string; type: "closeWebPane" }
   | { sessionId: string; type: "focusTerminal" }
   | {
@@ -2144,6 +2156,7 @@ let latestNativeAgentHookStatus: SidebarAgentHookStatusMessage | undefined;
 let latestNativeGhostexCliStatus: SidebarGhostexCliStatusMessage | undefined;
 let nativeAgentHookStatusRequestInFlight = false;
 let nativeAgentHookStatusAutoRequestQueued = false;
+const nativeAgentHookPriorityStatusAgentIds = ["codex", "claude", "pi"] as const;
 type NativePaneState = "mounted" | "mounting" | "unmounted";
 type ProviderSessionState = "exists" | "missing" | "persistence-disabled" | "unknown";
 type ProviderSessionStateLookupOptions = {
@@ -6230,6 +6243,74 @@ function openNativeWorkspaceInSelectedIde(
   });
 }
 
+function openCurrentProjectInFinderFromCommandPalette(): void {
+  const workspacePath = activeProject().path;
+  if (!workspacePath) {
+    return;
+  }
+  /*
+   * CDXC:CommandPalette 2026-06-18-03:46:
+   * The command palette's Open Current Project in Finder action must resolve
+   * the active workspace path inside native-sidebar, matching titlebar Open In
+   * while avoiding path payloads from the modal host.
+   */
+  openNativeWorkspaceInFinder(workspacePath);
+}
+
+function openCurrentProjectInTargetFromCommandPalette(targetId: string): void {
+  const workspacePath = activeProject().path;
+  if (!workspacePath) {
+    return;
+  }
+  const hiddenTargetIds = new Set(settings.workspaceOpenTargetHiddenIds);
+  const builtInTarget = BUILT_IN_WORKSPACE_OPEN_TARGETS.find(
+    (target) => target.id === targetId && target.id !== "finder" && !hiddenTargetIds.has(target.id),
+  );
+  if (builtInTarget) {
+    const availableTargetIds = new Set(settings.workspaceOpenTargetAvailability.availableTargetIds);
+    if (!availableTargetIds.has(builtInTarget.id)) {
+      return;
+    }
+    const resolvedCommand = settings.workspaceOpenTargetAvailability.resolvedCommands[builtInTarget.id];
+    const resolvedAppName = settings.workspaceOpenTargetAvailability.resolvedAppNames[builtInTarget.id];
+    if (builtInTarget.targetApp && resolvedCommand) {
+      openNativeWorkspaceInSelectedIde(workspacePath, builtInTarget.targetApp);
+      return;
+    }
+    if (resolvedCommand) {
+      void runNativeProcess("/usr/bin/env", [
+        resolvedCommand,
+        ...(builtInTarget.baseArgs ?? []),
+        workspacePath,
+      ]);
+      return;
+    }
+    if (resolvedAppName) {
+      void runNativeProcess("/usr/bin/open", ["-a", resolvedAppName, workspacePath]);
+      return;
+    }
+    const command = builtInTarget.commands?.[0];
+    if (command) {
+      void runNativeProcess("/usr/bin/env", [
+        command,
+        ...(builtInTarget.baseArgs ?? []),
+        workspacePath,
+      ]);
+    }
+    return;
+  }
+
+  const customTarget = settings.customWorkspaceOpenTargets.find((target) => target.id === targetId);
+  if (!customTarget) {
+    return;
+  }
+  void runNativeProcess("/usr/bin/env", [
+    customTarget.command,
+    ...customTarget.args,
+    workspacePath,
+  ]);
+}
+
 function openNativeBrowserWindow(url: string): BrowserSessionRecord | undefined {
   return createNativeBrowserSession(url);
 }
@@ -7112,6 +7193,50 @@ async function installNativeGenerateTitleSkill(showSuccessMessage = true): Promi
   );
   await requestNativeGhostexCliStatus();
   return false;
+}
+
+async function uninstallNativeBundledAgentSkills(): Promise<void> {
+  /**
+   * CDXC:AgentSkills 2026-06-18-02:54:
+   * Advanced Settings exposes one Uninstall Skills action for the bundled Ghostex agent skills. Remove only the shared catalog skill directories from ~/agents/skills so user-authored skills are not affected.
+   */
+  const result = await runNativeNodeScript(
+    String.raw`
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
+const skillNames = JSON.parse(process.argv[1] || "[]");
+const skillsRoot = path.join(os.homedir(), "agents", "skills");
+const removed = [];
+for (const skillName of skillNames) {
+  const safeName = String(skillName || "").trim();
+  if (!safeName || safeName.includes("/") || safeName.includes("\\")) {
+    continue;
+  }
+  const skillPath = path.join(skillsRoot, safeName);
+  try {
+    fs.rmSync(skillPath, { force: true, recursive: true });
+    removed.push(skillPath);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+console.log(JSON.stringify({ removed }));
+`,
+    [JSON.stringify(BUNDLED_GHOSTEX_AGENT_SKILLS.map((skill) => skill.skillName))],
+    { timeoutMs: 30_000 },
+  );
+  if (result.exitCode === 0) {
+    showAppToast("success", "Bundled agent skills uninstalled", "You can install them again from Settings.");
+  } else {
+    showNativeMessage(
+      "error",
+      `Bundled agent skill uninstall failed: ${(result.stderr || result.stdout || "uninstall failed").trim()}`,
+    );
+  }
+  await requestNativeGhostexCliStatus();
 }
 
 async function installNativeCuaDriver(): Promise<void> {
@@ -8115,41 +8240,31 @@ function openTipsAndTricksOnFirstLaunch(): void {
  * Ghostex.
  *
  * CDXC:FirstLaunchSetup 2026-06-16-07:58:
- * First-run onboarding now starts with Highlighted Features and opens the
- * first-launch setup modal only after that modal closes. Keep this sequencing
- * on the automatic startup path so the manual overflow-menu Highlighted
- * Features action remains replayable without launching setup afterward.
+ * First-run onboarding previously started with Highlighted Features and opened
+ * the first-launch setup modal only after that modal closed.
  *
  * CDXC:HighlightedFeatures 2026-06-16-18:55:
  * Existing installs that already completed first-launch setup should still see
- * the new Highlighted Features tour once after updating. Check and write a
- * separate feature-tour seen revision before the first-launch setup early
- * return, while only new installs carry the setup follow-up flag.
+ * the new Highlighted Features tour once after updating. Keep the separate
+ * feature-tour seen revision so older storage state can still be normalized.
+ *
+ * CDXC:FirstLaunchSetup 2026-06-18-02:29:
+ * Startup previously showed the shortened first-time setup flow directly
+ * instead of chaining it behind Highlighted Features.
+ *
+ * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
+ * New-user startup should show the tutorial video modal instead of Highlighted
+ * Features or setup. Mark the existing first-launch and highlighted-features
+ * revision flags so the startup slot is consumed after the video appears once.
  */
 function openFirstLaunchSetupOnFirstLaunch(): void {
-  const hasSeenFirstLaunchSetup = hasSeenCurrentFirstLaunchSetup(localStorage);
   if (!hasSeenCurrentHighlightedFeatures(localStorage)) {
     markCurrentHighlightedFeaturesSeen(localStorage);
-    openAppModal({
-      modal: "discoverGhostex",
-      showFirstLaunchSetupOnClose: !hasSeenFirstLaunchSetup,
-      type: "open",
-    });
-    if (!hasSeenFirstLaunchSetup) {
-      markCurrentFirstLaunchSetupSeen(localStorage);
-    }
+  }
+  if (hasSeenCurrentFirstLaunchSetup(localStorage)) {
     return;
   }
-
-  if (hasSeenFirstLaunchSetup) {
-    return;
-  }
-
-  openAppModal({
-    modal: "discoverGhostex",
-    showFirstLaunchSetupOnClose: true,
-    type: "open",
-  });
+  openAppModal({ modal: "watchGhostexVideo", type: "open" });
   markCurrentFirstLaunchSetupSeen(localStorage);
 }
 
@@ -19582,7 +19697,7 @@ function sanitizeNativePathPart(value: string): string {
   return value.replace(/[^a-z0-9._-]+/giu, "-").replace(/^-+|-+$/g, "") || "session";
 }
 
-async function installNativeAgentHooksFromSettings(): Promise<void> {
+async function installNativeAgentHooksFromSettings(agentIds?: readonly string[]): Promise<void> {
   try {
     /*
 	    CDXC:AgentHooks 2026-06-07-08:51:
@@ -19595,7 +19710,7 @@ async function installNativeAgentHooksFromSettings(): Promise<void> {
 	    may auto-upgrade proven Ghostex-owned stale hooks during status reads so
 	    app updates repair broken hook versions without asking users to reinstall.
 	    */
-    await gxserverClient.installAgentHooks();
+    await gxserverClient.installAgentHooks(agentIds);
     showAppToast("success", "Agent hooks installed", "Agent status hooks were installed or repaired.");
   } catch (error) {
     showNativeMessage(
@@ -19603,11 +19718,58 @@ async function installNativeAgentHooksFromSettings(): Promise<void> {
       error instanceof Error ? error.message : "Agent hook install failed.",
     );
   } finally {
+    void requestNativeAgentHookStatus(agentIds);
+  }
+}
+
+async function installNativeAgentHooksFromTitlebarNotice(): Promise<void> {
+  const toastId = "toast-agent-hooks-titlebar-install";
+  try {
+    /*
+    CDXC:AgentHooks 2026-06-18-03:22:
+    Clicking the titlebar Tips hook warning should install hooks directly. Keep
+    the progress and completion feedback in one toast slot, then tell users to
+    restart running agent CLI sessions so the new hook config is picked up.
+    */
+    showAppToast("info", "Installing agent hooks", "Configuring Ghostex hooks for installed agent CLIs...", { toastId });
+    await gxserverClient.installAgentHooks();
+    showAppToast(
+      "success",
+      "Agent hooks installed",
+      "Please restart all your agent CLI sessions so they pick up the new hooks.",
+      { toastId },
+    );
+  } catch (error) {
+    showAppToast(
+      "error",
+      "Agent hook install failed",
+      error instanceof Error ? error.message : "Ghostex could not install agent hooks.",
+      { toastId },
+    );
+  } finally {
     void requestNativeAgentHookStatus();
   }
 }
 
-async function requestNativeAgentHookStatus(): Promise<void> {
+async function uninstallNativeAgentHooksFromSettings(agentIds?: readonly string[]): Promise<void> {
+  try {
+    /*
+    CDXC:AgentHooks 2026-06-18-02:54:
+    Advanced Settings owns the explicit Uninstall Hooks action. Route it through gxserver so removing hooks uses the same provider-aware ownership rules as installing and status checks.
+    */
+    await gxserverClient.uninstallAgentHooks(agentIds);
+    showAppToast("success", "Agent hooks uninstalled", "Ghostex-owned hook entries were removed.");
+  } catch (error) {
+    showNativeMessage(
+      "error",
+      error instanceof Error ? error.message : "Agent hook uninstall failed.",
+    );
+  } finally {
+    void requestNativeAgentHookStatus(agentIds);
+  }
+}
+
+async function requestNativeAgentHookStatus(agentIds?: readonly string[]): Promise<void> {
 	  /**
 	   * CDXC:AgentHooks 2026-06-07-08:51:
 	   * Agent hook status is gxserver-owned. Settings, first launch, and Tips &
@@ -19618,13 +19780,27 @@ async function requestNativeAgentHookStatus(): Promise<void> {
 	   * A status request may auto-upgrade existing Ghostex-owned hooks, but it must
 	   * never install missing hooks. gxserver owns that distinction so all clients
 	   * share the same migration behavior.
+     *
+
+     * CDXC:AgentHooks 2026-06-18-02:54:
+     * First-launch and Settings can request the full supported provider set.
+     * Status checks still prioritize Codex, Claude, and Pi, then continue
+     * through lower-priority providers so the UI does not sit blocked behind
+     * every provider probe.
 	   */
   if (nativeAgentHookStatusRequestInFlight) {
     return;
   }
   nativeAgentHookStatusRequestInFlight = true;
   try {
-    postAgentHookStatus((await gxserverClient.readAgentHookStatus()) as SidebarAgentHookStatusMessage);
+    for (const agentId of orderedNativeAgentHookStatusAgentIds(agentIds)) {
+      const nextStatus = (await gxserverClient.readAgentHookStatus([agentId])) as SidebarAgentHookStatusMessage;
+      postAgentHookStatus(
+        latestNativeAgentHookStatus
+          ? mergeAgentHookStatusMessages(latestNativeAgentHookStatus, nextStatus)
+          : nextStatus,
+      );
+    }
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Unable to inspect agent hook status.";
@@ -19638,6 +19814,19 @@ async function requestNativeAgentHookStatus(): Promise<void> {
   }
 }
 
+function orderedNativeAgentHookStatusAgentIds(agentIds?: readonly string[]): string[] {
+  const requestedAgentIds =
+    agentIds && agentIds.length > 0
+      ? agentIds
+      : DEFAULT_SIDEBAR_AGENTS.flatMap((agent) => agent.agentId === "t3" ? [] : [agent.agentId]);
+  const normalized = [...new Set(requestedAgentIds.map((agentId) => String(agentId).trim()).filter(Boolean))];
+  const requested = new Set(normalized);
+  return [
+    ...nativeAgentHookPriorityStatusAgentIds.filter((agentId) => requested.has(agentId)),
+    ...normalized.filter((agentId) => !nativeAgentHookPriorityStatusAgentIds.includes(agentId as (typeof nativeAgentHookPriorityStatusAgentIds)[number])),
+  ];
+}
+
 function mergeAgentHookStatusMessages(
   nativeStatus: SidebarAgentHookStatusMessage,
   gxserverStatus: SidebarAgentHookStatusMessage,
@@ -19645,6 +19834,7 @@ function mergeAgentHookStatusMessages(
   const gxserverAgents = new Map((gxserverStatus.agents ?? []).map((agent) => [agent.agentId, agent]));
   return {
     ...nativeStatus,
+    ...gxserverStatus,
     agents: [
       ...(nativeStatus.agents ?? []).filter((agent) => !gxserverAgents.has(agent.agentId)),
       ...gxserverAgents.values(),
@@ -26510,6 +26700,7 @@ function stopNativeSleepingSessionRuntime(
     stopGxserverZmxSessionRuntime(project.projectId, sessionId, "sleepSession");
   }
   postNative({
+    preserveLayoutPlaceholder: true,
     preservePersistenceSession: shouldStopZmxThroughGxserver,
     sessionId: nativeSessionId,
     type: "closeTerminal",
@@ -40507,10 +40698,16 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       void saveAgentsHubFile(message.filePath, message.content);
       return;
     case "requestAgentHookStatus":
-      void requestNativeAgentHookStatus();
+      void requestNativeAgentHookStatus(message.agentIds);
       return;
     case "installAgentHooks":
-      void installNativeAgentHooksFromSettings();
+      void installNativeAgentHooksFromSettings(message.agentIds);
+      return;
+    case "installAgentHooksFromTitlebarNotice":
+      void installNativeAgentHooksFromTitlebarNotice();
+      return;
+    case "uninstallAgentHooks":
+      void uninstallNativeAgentHooksFromSettings(message.agentIds);
       return;
     case "requestGhostexCliStatus":
       void requestNativeGhostexCliStatus();
@@ -40529,6 +40726,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "installGenerateTitleSkill":
       void installNativeGenerateTitleSkill();
+      return;
+    case "uninstallBundledAgentSkills":
+      void uninstallNativeBundledAgentSkills();
       return;
     case "installCuaDriver":
       void installNativeCuaDriver();
@@ -40616,17 +40816,38 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "openHighlightedFeatures":
       /*
        * CDXC:HighlightedFeatures 2026-06-16-08:17:
-       * The Tips & Tricks panel and sidebar overflow menu should expose the
-       * replayable feature-tour modal as Highlighted Features while reusing
-       * the existing discoverGhostex modal id and lifecycle.
+       * The Tips & Tricks panel and sidebar overflow menu previously exposed
+       * the replayable feature-tour modal through this command.
+       *
+       * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
+       * Keep the old command name for compatibility, but route it to the
+       * tutorial video modal so Highlighted Features remains unused.
        */
-      openAppModal({ modal: "discoverGhostex", type: "open" });
+      openAppModal({ modal: "watchGhostexVideo", type: "open" });
+      return;
+    case "openGhostexTutorialVideo":
+      /*
+       * CDXC:GhostexTutorialVideo 2026-06-18-04:49:
+       * Help surfaces open the tutorial video in its own app-modal kind so the
+       * single-video walkthrough has a dedicated route.
+       *
+       * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
+       * Features/help surfaces now use the video modal instead of the old
+       * Highlighted Features modal.
+       */
+      openAppModal({ modal: "watchGhostexVideo", type: "open" });
       return;
     case "openExternalUrl":
       openNativeExternalUrl(message.url);
       return;
     case "pickWorkspaceFolder":
       postNative({ type: "pickWorkspaceFolder" });
+      return;
+    case "openCurrentProjectInFinder":
+      openCurrentProjectInFinderFromCommandPalette();
+      return;
+    case "openCurrentProjectInTarget":
+      openCurrentProjectInTargetFromCommandPalette(message.targetId);
       return;
     case "reconnectRemoteMachine":
       reconnectRemoteMachine(message.remoteMachineId, {

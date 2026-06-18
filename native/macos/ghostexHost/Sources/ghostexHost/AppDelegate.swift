@@ -3544,10 +3544,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       if let root = window?.contentView as? ghostexRootView {
         root.closeTerminal(
           sessionId: command.sessionId,
+          preserveLayoutPlaceholder: command.preserveLayoutPlaceholder == true,
           preservePersistenceSession: command.preservePersistenceSession == true)
       } else {
         workspaceView?.closeTerminal(
           sessionId: command.sessionId,
+          preserveLayoutPlaceholder: command.preserveLayoutPlaceholder == true,
           preservePersistenceSession: command.preservePersistenceSession == true)
       }
     case .closeWebPane(let command):
@@ -5001,7 +5003,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
 
   @MainActor private func openWorkspaceInFinder(_ command: OpenWorkspaceInFinder) {
     let path = command.workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else {
+    var isDirectory: ObjCBool = false
+    guard !path.isEmpty, FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
       showMessage(.init(level: .warning, message: "Workspace folder does not exist."))
       return
     }
@@ -5012,10 +5015,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
      workspace folder through the platform file viewer instead of routing through a URL opener or
      creating a fallback path when the project record is wrong.
 
-     CDXC:WorkspaceActions 2026-06-04-13:39
-     Keep the native reveal implementation while using Open Folder as the user-facing label so filesystem actions are OS-agnostic.
+     CDXC:WorkspaceActions 2026-06-18-03:46
+     Open Folder must open the workspace directory itself in Finder instead of revealing it from its parent folder, because users expect this action to land inside the selected project folder.
      */
-    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path, isDirectory: true)])
+    NSWorkspace.shared.open(URL(fileURLWithPath: path, isDirectory: true))
   }
 
   @MainActor private func openWorkspaceInIde(_ command: OpenWorkspaceInIde) {
@@ -5775,6 +5778,7 @@ private final class NativeSettingsStore {
 
 final class TitlebarChromeWebView: WKWebView {
   var onBlankTitlebarMouseDown: ((NSEvent) -> Void)?
+  private static let leftMouseButtonMask = 1
   private var activeMouseDownEvent: NSEvent?
 
   override var mouseDownCanMoveWindow: Bool {
@@ -5795,19 +5799,34 @@ final class TitlebarChromeWebView: WKWebView {
      cannot reach the wrapper behind it. Keep the current WebKit mouseDown event
      available for the synchronous React background callback; buttons keep normal
      WebKit event handling and never call this native drag hook.
+
+     CDXC:ReactTitlebar 2026-06-18-05:12:
+     Blank titlebar drag requests cross WebKit, React, and the native script
+     bridge, so clearing the cached mouseDown on the next main-queue turn can
+     drop legitimate drags when that handoff arrives slightly later. Keep the
+     event until a drag consumes it, the left button is released, or the next
+     mouseDown replaces it.
      */
     activeMouseDownEvent = event
     super.mouseDown(with: event)
-    DispatchQueue.main.async { [weak self, weak event] in
-      guard let self, self.activeMouseDownEvent === event else {
-        return
-      }
-      self.activeMouseDownEvent = nil
+    if activeMouseDownEvent === event
+      && NSEvent.pressedMouseButtons & Self.leftMouseButtonMask != Self.leftMouseButtonMask
+    {
+      activeMouseDownEvent = nil
     }
+  }
+
+  override func mouseUp(with event: NSEvent) {
+    activeMouseDownEvent = nil
+    super.mouseUp(with: event)
   }
 
   func performBlankTitlebarMouseDownFromWebContent() {
     guard let event = activeMouseDownEvent else {
+      return
+    }
+    guard NSEvent.pressedMouseButtons & Self.leftMouseButtonMask == Self.leftMouseButtonMask else {
+      activeMouseDownEvent = nil
       return
     }
     activeMouseDownEvent = nil
@@ -6769,7 +6788,11 @@ final class ghostexRootView: NSView {
     updateSidebarModalBackdrop()
   }
 
-  func closeTerminal(sessionId: String, preservePersistenceSession: Bool = false) {
+  func closeTerminal(
+    sessionId: String,
+    preserveLayoutPlaceholder: Bool = false,
+    preservePersistenceSession: Bool = false
+  ) {
     if activeFloatingPromptEditor?.originatingSessionId == sessionId {
       /**
        CDXC:PromptEditor 2026-05-13-09:48
@@ -6786,6 +6809,7 @@ final class ghostexRootView: NSView {
     }
     workspaceView.closeTerminal(
       sessionId: sessionId,
+      preserveLayoutPlaceholder: preserveLayoutPlaceholder,
       preservePersistenceSession: preservePersistenceSession)
   }
 
@@ -8806,6 +8830,7 @@ final class ghostexRootView: NSView {
     case .closeTerminal(let command):
       closeTerminal(
         sessionId: command.sessionId,
+        preserveLayoutPlaceholder: command.preserveLayoutPlaceholder == true,
         preservePersistenceSession: command.preservePersistenceSession == true)
     case .closeWebPane(let command):
       workspaceView.closeWebPane(sessionId: command.sessionId)
@@ -10294,7 +10319,7 @@ final class ghostexRootView: NSView {
 
   private func shouldShowOnboardingAppModalBackdrop(for modal: String?) -> Bool {
     switch modal {
-    case "discoverGhostex", "firstLaunchSetup", "tipsAndTricks":
+    case "discoverGhostex", "watchGhostexVideo", "firstLaunchSetup", "tipsAndTricks":
       return true
     default:
       return false
@@ -14357,6 +14382,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   private static let floatingPromptEditorResizeHandleSize: CGFloat = 24
   private static let floatingPromptEditorTitleDragHeight: CGFloat = 32
   private static let floatingPromptEditorTrailingActionReserve: CGFloat = 170
+  private static let ghostexTutorialVideoEmbedBaseURL = URL(string: "https://ghostex.local/")!
 
   private let hostId: String
   private let scriptBridge: SidebarScriptBridge
@@ -15076,6 +15102,23 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       )
       return
     }
+    if loadedModal == "watchGhostexVideo",
+      let modalHostHTML = try? String(contentsOf: builtModalHost, encoding: .utf8)
+    {
+      /*
+       CDXC:GhostexTutorialVideo 2026-06-18-05:35:
+       Third-party video embeds can reject playback from WKWebView documents
+       loaded from file:// because the embed request lacks a valid HTTP referrer.
+       Load the already generated inline modal-host HTML with a stable HTTPS base
+       URL for the video-only modal so external iframes receive a valid origin
+       without changing local-file loading for Monaco or other app modals.
+       */
+      webView.loadHTMLString(
+        modalHostHTML,
+        baseURL: Self.ghostexTutorialVideoEmbedBaseURL
+      )
+      return
+    }
     webView.loadFileURL(builtModalHost, allowingReadAccessTo: webAssets)
   }
 
@@ -15151,12 +15194,18 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
        Keep the legacy Tips & Tricks modal id aligned because it routes to the same first-launch setup surface.
        */
       return CGSize(width: 1120, height: 850)
-    case "discoverGhostex":
+    case "discoverGhostex", "watchGhostexVideo":
       /*
        CDXC:HighlightedFeatures 2026-06-16-08:17:
        The Highlighted Features tour uses the first-launch modal footprint so its left copy, large feature placeholder, and bottom thumbnail strip fit without clipping.
+
+       CDXC:HighlightedFeatures 2026-06-18-02:02:
+       Highlighted Features should be 100px shorter than the first-launch setup window now that it no longer has the bottom thumbnail strip.
+
+       CDXC:GhostexTutorialVideo 2026-06-18-04:49:
+       The copied tutorial video modal should use the same 1120x750 native child-window footprint as Highlighted Features so the single embedded player fills the modal under its title.
        */
-      return CGSize(width: 1120, height: 850)
+      return CGSize(width: 1120, height: 750)
     case "gitFileDiff":
       return CGSize(width: 1180, height: 820)
     case "gitCommit":
@@ -15394,9 +15443,15 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     case "previousSessions":
       return "Previous Sessions"
     case "firstLaunchSetup", "tipsAndTricks":
-      return "Tips & Tricks"
+      /*
+       CDXC:TipsAndTricks 2026-06-18-05:16:
+       User-facing native modal titles should use the shorter "Tips" copy while keeping the legacy tipsAndTricks route mapped to the same first-launch setup surface.
+       */
+      return "Tips"
     case "discoverGhostex":
       return "Highlighted Features"
+    case "watchGhostexVideo":
+      return "Tutorial Video"
     case "firstUserMessage":
       return "First Message"
     case "floatingPromptEditor":

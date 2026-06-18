@@ -47,18 +47,25 @@ describe("sidebar overflow menu source", () => {
     expect(hotkeyFormatter).not.toContain('.join("+")');
   });
 
-  test("keeps Setup Flow above Highlighted Features when hooks are missing", () => {
+  test("keeps Setup Flow above Features when hooks are missing", () => {
     /*
      * CDXC:FirstLaunchSetup 2026-06-16-00:56:
      * The overflow menu should keep the original first-launch setup flow as a
-     * Setup Flow item directly above Highlighted Features so onboarding tasks and
-     * the replayable feature tour are both discoverable.
+     * Setup Flow item directly above Features so onboarding tasks and replayable
+     * help are both discoverable.
      *
      * CDXC:HighlightedFeatures 2026-06-16-08:17:
-     * The overflow menu's help action is named Highlighted Features and opens the
-     * replayable feature tour. It must not become a hook-install notice when
-     * agent hooks are missing because setup repair belongs to Settings and
-     * first-launch onboarding.
+     * The overflow menu's help action used to open the replayable feature tour.
+     * It must not become a hook-install notice when agent hooks are missing
+     * because setup repair belongs to Settings and first-launch onboarding.
+     *
+     * CDXC:GhostexTutorialVideo 2026-06-18-04:49:
+     * The overflow menu should expose the one-video Ghostty tutorial as a
+     * separate help item without replacing Setup Flow or Features.
+     *
+     * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
+     * The Features help item should also route to the tutorial video modal so
+     * the old Highlighted Features modal remains unused.
      */
     const overflowMenuSource = sourceBetween(
       "function renderFloatingOverflowMenu({",
@@ -66,12 +73,16 @@ describe("sidebar overflow menu source", () => {
     );
 
     expect(overflowMenuSource).toContain("Setup Flow");
-    expect(overflowMenuSource).toContain("Highlighted Features");
+    expect(overflowMenuSource).toContain("Features");
+    expect(overflowMenuSource).toContain("Tutorial Video");
     expect(overflowMenuSource.indexOf("Setup Flow")).toBeLessThan(
-      overflowMenuSource.indexOf("Highlighted Features"),
+      overflowMenuSource.indexOf("Features"),
+    );
+    expect(overflowMenuSource.indexOf("Features")).toBeLessThan(
+      overflowMenuSource.indexOf("Tutorial Video"),
     );
     expect(sidebarAppSource).toContain('modal: "firstLaunchSetup"');
-    expect(sidebarAppSource).toContain('modal: "discoverGhostex"');
+    expect(sidebarAppSource).toContain('modal: "watchGhostexVideo"');
     expect(overflowMenuSource).not.toContain("hasMissingAgentHooks");
     expect(overflowMenuSource).not.toContain("sidebar-hook-warning-menu-item");
     expect(overflowMenuSource).not.toContain("Agent hooks");

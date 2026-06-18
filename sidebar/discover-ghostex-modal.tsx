@@ -3,7 +3,7 @@ import {
   IconChevronRight,
   IconX,
 } from "@tabler/icons-react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState, type KeyboardEvent } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import type { SidebarTheme } from "../shared/session-grid-contract";
@@ -102,6 +102,10 @@ type DiscoverGhostexFeature = {
  * Remove the bottom thumbnail strip from Highlighted Features. The modal should
  * navigate only with the main image arrow buttons so the bottom of the dialog
  * stays focused on the active screenshot.
+ *
+ * CDXC:HighlightedFeatures 2026-06-18-02:02:
+ * Highlighted Features keyboard and arrow-button navigation should stop at the
+ * first and last authored feature instead of wrapping back to the opposite end.
  */
 const DISCOVER_GHOSTEX_FEATURES: readonly DiscoverGhostexFeature[] = [
   {
@@ -161,11 +165,26 @@ export function DiscoverGhostexModal({
     [activeFeatureId],
   );
   const activeFeature = DISCOVER_GHOSTEX_FEATURES[activeFeatureIndex];
+  const canActivatePreviousFeature = activeFeatureIndex > 0;
+  const canActivateNextFeature = activeFeatureIndex < DISCOVER_GHOSTEX_FEATURES.length - 1;
   const activateRelativeFeature = (offset: -1 | 1) => {
-    const nextFeatureIndex =
-      (activeFeatureIndex + offset + DISCOVER_GHOSTEX_FEATURES.length) %
-      DISCOVER_GHOSTEX_FEATURES.length;
+    const nextFeatureIndex = Math.min(
+      DISCOVER_GHOSTEX_FEATURES.length - 1,
+      Math.max(0, activeFeatureIndex + offset),
+    );
+    if (nextFeatureIndex === activeFeatureIndex) {
+      return;
+    }
     setActiveFeatureId(DISCOVER_GHOSTEX_FEATURES[nextFeatureIndex].id);
+  };
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      activateRelativeFeature(-1);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      activateRelativeFeature(1);
+    }
   };
 
   useEffect(() => {
@@ -191,6 +210,7 @@ export function DiscoverGhostexModal({
           getSidebarThemeVariant(theme) === "dark" && "dark",
         )}
         data-sidebar-theme={theme}
+        onKeyDown={handleKeyDown}
         showCloseButton={false}
       >
         <DialogHeader className="sr-only">
@@ -226,6 +246,7 @@ export function DiscoverGhostexModal({
               <button
                 aria-label="Previous highlighted feature"
                 className="discover-ghostex-feature-nav-button discover-ghostex-feature-nav-button-left"
+                disabled={!canActivatePreviousFeature}
                 onClick={() => activateRelativeFeature(-1)}
                 type="button"
               >
@@ -240,6 +261,7 @@ export function DiscoverGhostexModal({
               <button
                 aria-label="Next highlighted feature"
                 className="discover-ghostex-feature-nav-button discover-ghostex-feature-nav-button-right"
+                disabled={!canActivateNextFeature}
                 onClick={() => activateRelativeFeature(1)}
                 type="button"
               >

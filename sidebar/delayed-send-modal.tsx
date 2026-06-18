@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -47,6 +55,11 @@ export type DelayedSendModalProps = {
  * The minutes field is the primary edit target now that seconds are gone.
  * Focus and select it through the dialog's open focus path and the native
  * WebView frame settle pass so opening the timer is immediately type-to-replace.
+ *
+ * CDXC:DelayedSend 2026-06-18-11:08:
+ * The native child window can become key after React's first focus pass, so
+ * retry minutes focus over the first few animation frames/timeouts. Pressing
+ * Enter while editing the duration must schedule the timer immediately.
  */
 export function DelayedSendModal({
   delayedSendDeadlineAt,
@@ -62,16 +75,46 @@ export function DelayedSendModal({
   const hoursInputId = useId();
   const minutesInputId = useId();
   const minutesInputRef = useRef<HTMLInputElement>(null);
+  const focusRetryTimeoutIdsRef = useRef<number[]>([]);
+  const focusRetryAnimationFrameIdsRef = useRef<number[]>([]);
   const focusMinutesInput = useCallback(() => {
-    minutesInputRef.current?.focus();
-    minutesInputRef.current?.select();
+    const input = minutesInputRef.current;
+    if (!input) {
+      return;
+    }
+    input.focus({ preventScroll: true });
+    input.select();
   }, []);
+  const clearScheduledMinutesFocus = useCallback(() => {
+    for (const timeoutId of focusRetryTimeoutIdsRef.current) {
+      window.clearTimeout(timeoutId);
+    }
+    for (const animationFrameId of focusRetryAnimationFrameIdsRef.current) {
+      window.cancelAnimationFrame(animationFrameId);
+    }
+    focusRetryTimeoutIdsRef.current = [];
+    focusRetryAnimationFrameIdsRef.current = [];
+  }, []);
+  const scheduleMinutesFocus = useCallback(() => {
+    clearScheduledMinutesFocus();
+    focusMinutesInput();
+    const firstAnimationFrameId = window.requestAnimationFrame(() => {
+      focusMinutesInput();
+      const secondAnimationFrameId = window.requestAnimationFrame(focusMinutesInput);
+      focusRetryAnimationFrameIdsRef.current.push(secondAnimationFrameId);
+    });
+    focusRetryAnimationFrameIdsRef.current.push(firstAnimationFrameId);
+    for (const delayMs of [25, 75, 150, 300]) {
+      const timeoutId = window.setTimeout(focusMinutesInput, delayMs);
+      focusRetryTimeoutIdsRef.current.push(timeoutId);
+    }
+  }, [clearScheduledMinutesFocus, focusMinutesInput]);
   const handleOpenAutoFocus = useCallback(
     (event: { preventDefault: () => void }) => {
       event.preventDefault();
-      focusMinutesInput();
+      scheduleMinutesFocus();
     },
-    [focusMinutesInput],
+    [scheduleMinutesFocus],
   );
 
   useEffect(() => {
@@ -83,19 +126,17 @@ export function DelayedSendModal({
     const duration = remainingMs > 0 ? durationPartsFromMs(remainingMs) : undefined;
     setHours(String(duration?.hours ?? 0));
     setMinutes(String(duration?.minutes ?? 5));
-    const animationFrame = window.requestAnimationFrame(() => {
-      /*
-       * CDXC:DelayedSend 2026-05-21-12:21:
-       * Opening or editing Delayed Send should select the minutes field, not
-       * merely place a caret there, so typing immediately replaces the common
-       * duration value without requiring Cmd+A or manual deletion.
-       */
-      focusMinutesInput();
-    });
+    /*
+     * CDXC:DelayedSend 2026-05-21-12:21:
+     * Opening or editing Delayed Send should select the minutes field, not
+     * merely place a caret there, so typing immediately replaces the common
+     * duration value without requiring Cmd+A or manual deletion.
+     */
+    scheduleMinutesFocus();
     return () => {
-      window.cancelAnimationFrame(animationFrame);
+      clearScheduledMinutesFocus();
     };
-  }, [delayedSendDeadlineAt, focusMinutesInput, isOpen]);
+  }, [clearScheduledMinutesFocus, delayedSendDeadlineAt, isOpen, scheduleMinutesFocus]);
 
   if (!isOpen) {
     return null;
@@ -110,6 +151,13 @@ export function DelayedSendModal({
     if (!isValidDelay) {
       return;
     }
+    onConfirm(delayMs);
+  };
+  const submitFromDurationInput = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter" || event.nativeEvent.isComposing || !isValidDelay) {
+      return;
+    }
+    event.preventDefault();
     onConfirm(delayMs);
   };
 
@@ -149,6 +197,7 @@ export function DelayedSendModal({
                   id={hoursInputId}
                   min={0}
                   onChange={(event) => setHours(event.currentTarget.value)}
+                  onKeyDown={submitFromDurationInput}
                   step={1}
                   type="number"
                   value={hours}
@@ -163,6 +212,7 @@ export function DelayedSendModal({
                   min={0}
                   onChange={(event) => setMinutes(event.currentTarget.value)}
                   onFocus={(event) => event.currentTarget.select()}
+                  onKeyDown={submitFromDurationInput}
                   ref={minutesInputRef}
                   step={1}
                   type="number"

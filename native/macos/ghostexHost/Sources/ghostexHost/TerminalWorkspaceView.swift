@@ -4042,10 +4042,15 @@ final class TerminalWorkspaceView: NSView {
     return nextSessionName
   }
 
-  func closeTerminal(sessionId: String, preservePersistenceSession: Bool = false) {
+  func closeTerminal(
+    sessionId: String,
+    preserveLayoutPlaceholder: Bool = false,
+    preservePersistenceSession: Bool = false
+  ) {
     closeTerminal(
       sessionId: sessionId,
       requestGhosttyClose: true,
+      preserveLayoutPlaceholder: preserveLayoutPlaceholder,
       preservePersistenceSession: preservePersistenceSession,
       reason: "closeTerminal")
   }
@@ -4076,6 +4081,7 @@ final class TerminalWorkspaceView: NSView {
   private func closeTerminal(
     sessionId: String,
     requestGhosttyClose: Bool,
+    preserveLayoutPlaceholder: Bool = false,
     preservePersistenceSession: Bool = false,
     reason: String
   ) {
@@ -4098,6 +4104,7 @@ final class TerminalWorkspaceView: NSView {
         "hasSurface": session.view.surface != nil,
         "processExited": processExited,
         "preservePersistenceSession": preservePersistenceSession,
+        "preserveLayoutPlaceholder": preserveLayoutPlaceholder,
         "reason": reason,
         "requestGhosttyClose": requestGhosttyClose,
         "sessionId": sessionId,
@@ -4135,7 +4142,18 @@ final class TerminalWorkspaceView: NSView {
       foregroundPid: session.view.surfaceModel?.foregroundPID ?? session.foregroundPid,
       reason: reason)
     session.containerView.removeFromSuperview()
-    terminalLayout = prunedLayout(removing: sessionId, from: terminalLayout)
+    if preserveLayoutPlaceholder {
+      /*
+       CDXC:SessionSleep 2026-06-18-03:10:
+       Sidebar Sleep is a renderer teardown, not a pane close. Keep the session
+       id in terminalLayout and mark it sleeping so the next layout pass draws
+       the Press Any Key to Wake placeholder in the same split slot instead of
+       collapsing to the surviving sibling.
+      */
+      sleepingSessionIds.insert(sessionId)
+    } else {
+      terminalLayout = prunedLayout(removing: sessionId, from: terminalLayout)
+    }
     attentionSessionIds.remove(sessionId)
     if focusedSessionId == sessionId {
       focusedSessionId = nil

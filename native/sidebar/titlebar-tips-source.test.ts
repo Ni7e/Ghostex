@@ -16,7 +16,15 @@ describe("native titlebar Tips & Tricks source", () => {
     /*
      * CDXC:TipsAndTricks 2026-06-16-19:42:
      * The Tips & Tricks header should not expose a bulk Read all button.
-     * It should instead open Features with a filled star, Setup Ghostex with guide wording, and Changelog as an in-project browser session while individual tips keep their per-row read controls.
+     * It should instead open Features with a filled star, Setup with guide wording, and Changelog as an in-project browser session while individual tips keep their per-row read controls.
+     *
+     * CDXC:TipsAndTricks 2026-06-18-04:53:
+     * The header should use the shorter Tips text, add Docs as an in-project
+     * browser action, and shorten the setup label to Setup.
+     *
+     * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
+     * The Features button should open the tutorial video modal while leaving
+     * the old Highlighted Features modal unused.
      */
     const menuSource = sourceBetween(
       titlebarHostSource,
@@ -24,15 +32,21 @@ describe("native titlebar Tips & Tricks source", () => {
       "function TitlebarTipsSection",
     );
 
+    expect(menuSource).toContain("Docs");
+    expect(menuSource).toContain("<span>Tips</span>");
     expect(menuSource).toContain("Features");
-    expect(menuSource).toContain("Setup Ghostex");
+    expect(menuSource).toContain("Setup");
     expect(menuSource).toContain("Changelog");
     expect(menuSource).toContain("IconStarFilled");
     expect(menuSource).toContain("IconBook2");
+    expect(menuSource).toContain("IconTool");
     expect(menuSource).toContain("IconHistory");
+    expect(menuSource).toContain("onOpenDocs");
     expect(menuSource).toContain("onOpenHighlightedFeatures");
     expect(menuSource).toContain("onViewGhostexGuide");
     expect(menuSource).toContain("onOpenChangelog");
+    expect(menuSource).not.toContain("<span>Tips & Tricks</span>");
+    expect(menuSource).not.toContain("Setup Ghostex");
     expect(menuSource).not.toContain(">Highlighted Features<");
     expect(menuSource).not.toContain(">View Ghostex Guide<");
     expect(menuSource).not.toContain("Open Highlighted Features");
@@ -40,7 +54,8 @@ describe("native titlebar Tips & Tricks source", () => {
     expect(menuSource).not.toContain("onMarkAllRead");
     expect(menuSource).not.toContain("Run Setup Flow");
     expect(menuSource).not.toContain("titlebar-tips-summary");
-    expect(titlebarHostSource).toContain('type: "openHighlightedFeatures"');
+    expect(titlebarHostSource).toContain('type: "openBrowserPane", url: GHOSTEX_DOCS_URL');
+    expect(titlebarHostSource).toContain('type: "openGhostexTutorialVideo"');
     expect(titlebarHostSource).toContain('type: "openWorkspaceWelcome"');
     expect(titlebarHostSource).toContain('type: "openBrowserPane", url: GHOSTEX_CHANGELOG_URL');
     expect(titlebarHostSource).toContain("https://github.com/maddada/ghostex/releases");
@@ -57,8 +72,8 @@ describe("native titlebar Tips & Tricks source", () => {
       ".titlebar-resources-info-button",
     );
 
-    expect(stylesSource).toContain("grid-template-columns: repeat(3, minmax(0, 1fr));");
-    expect(stylesSource).toContain("width: 390px;");
+    expect(stylesSource).toContain("grid-template-columns: repeat(4, minmax(0, 1fr));");
+    expect(stylesSource).toContain("width: 420px;");
     expect(stylesSource).toContain(".titlebar-tips-panel button:not(:disabled)");
     expect(stylesSource).toContain("cursor: pointer;");
     expect(stylesSource).not.toContain(".titlebar-tips-summary");
@@ -79,5 +94,33 @@ describe("native titlebar Tips & Tricks source", () => {
     expect(titlebarHostSource).toContain("headers read as labels only");
     expect(sectionSource).toContain("count > 0 ? children");
     expect(titlebarHostSource).not.toContain("titlebar-tips-section-count");
+  });
+
+  test("warns from Tips when installed agent CLIs are missing hooks", () => {
+    /*
+     * CDXC:AgentHooks 2026-06-18-03:08:
+     * The titlebar Tips dropdown must show a non-dismissable notice when
+     * installed agent CLIs are missing or using stale hooks, even before a live
+     * agent session exists, and the copy must name session naming, status, and
+     * sleep/resume reliability.
+     */
+    const noticeSource = sourceBetween(
+      titlebarHostSource,
+      "function createTitlebarMissingAgentHooksNotice",
+      "function isTitlebarLiveTerminalAgentSession",
+    );
+
+    expect(noticeSource).toContain("getDefaultSidebarAgentById(status.agentId)");
+    expect(noticeSource).toContain("!status.cliInstalled");
+    expect(noticeSource).toContain("Warning: Agent hooks aren't installed for agent CLIs");
+    expect(noticeSource).toContain("Please install the hooks by clicking this notification.");
+    expect(noticeSource).toContain("Automatic session renaming");
+    expect(noticeSource).toContain("In Progress/Needs Attention status");
+    expect(noticeSource).toContain("sleeping or resuming agent sessions will not work correctly");
+    expect(noticeSource).toContain('action: "installAgentHooks"');
+    expect(noticeSource).toContain('settingsTarget: "agentHooks"');
+    expect(titlebarHostSource).toContain('postNative({ type: "installAgentHooksFromTitlebarNotice" });');
+    expect(titlebarHostSource).toContain('title="Notices"');
+    expect(titlebarHostSource).toContain("installAgentHooksFromTipsNotice");
   });
 });

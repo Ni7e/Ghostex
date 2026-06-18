@@ -426,13 +426,14 @@ type MainSettingsSectionId =
   | "power"
   | "sounds"
   | "storage"
-  | "beta";
+  | "beta"
+  | "hooksSkills";
 
 export type MainSettingsInitialSectionId = MainSettingsSectionId;
 
 const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
   MainSettingsSectionId,
-  readonly FirstLaunchSetupMainSettingKey[]
+  readonly string[]
 > = {
   agents: ["agentAcceptAllEnabled"],
   sidebar: [
@@ -574,6 +575,7 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
    * become visible when that gate is enabled.
    */
   beta: ["showBetaFeatures"],
+  hooksSkills: ["uninstallAgentHooks", "uninstallBundledAgentSkills"],
 };
 
 /*
@@ -599,6 +601,9 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
  *
  * CDXC:SettingsAdvanced 2026-06-16-18:19:
  * Hide last-active timestamps, completion sounds, macOS attention notification, action-completion sound, Sidebar Tags, and the sidebar interface-size slider are common preferences. Keep them visible without Show Advanced while leaving terminal, debugging, storage, and lower-frequency utility controls advanced.
+ *
+ * CDXC:SettingsAdvanced 2026-06-18-02:54:
+ * Hook and bundled-skill uninstall actions are advanced recovery controls at the bottom of General Settings. Search should still find them by "uninstall hooks" and "uninstall skills" so users can remove setup artifacts without browsing every tab.
  */
 const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "browserFeedbackTool",
@@ -666,6 +671,8 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "debuggingMode",
   "showSessionCommandCopyActions",
   "showSessionDetailsCopyAction",
+  "uninstallAgentHooks",
+  "uninstallBundledAgentSkills",
 ]);
 
 type HotkeySettingsSectionId =
@@ -817,6 +824,8 @@ export type SettingsModalProps = {
   onPlayCompletionSound?: (sound: CompletionSoundSetting) => void;
   onRequestMacOSNotificationPermission?: () => void;
   onInstallAgentHooks?: () => void;
+  onUninstallAgentHooks?: () => void;
+  onUninstallBundledAgentSkills?: () => void;
   onRequestAgentHookStatus?: () => void;
   onRequestGhostexCliStatus?: () => void;
   onRequestGhostexFolderStats?: () => void;
@@ -863,6 +872,8 @@ export function SettingsModal({
   onPlayCompletionSound,
   onRequestMacOSNotificationPermission,
   onInstallAgentHooks,
+  onUninstallAgentHooks,
+  onUninstallBundledAgentSkills,
   onRequestAgentHookStatus,
   onRequestGhostexCliStatus,
   onRequestGhostexFolderStats,
@@ -916,6 +927,7 @@ export function SettingsModal({
   const sessionCardsSectionRef = useRef<HTMLDivElement>(null);
   const debuggingSectionRef = useRef<HTMLDivElement>(null);
   const betaSectionRef = useRef<HTMLDivElement>(null);
+  const hooksSkillsSectionRef = useRef<HTMLDivElement>(null);
   const agentsOnboardingSectionRef = useRef<HTMLDivElement>(null);
   const sidebarSectionRef = useRef<HTMLDivElement>(null);
   const themingSectionRef = useRef<HTMLDivElement>(null);
@@ -1731,6 +1743,18 @@ export function SettingsModal({
         title: "Show Copy details option",
       },
     ]),
+    hooksSkills: getSettingsSectionSearch(settingsSearchQuery, "Hooks & Skills", [
+      {
+        key: "uninstallAgentHooks",
+        subtitle: "Remove Ghostex-owned hook entries from supported agent CLI configs.",
+        title: "Uninstall hooks",
+      },
+      {
+        key: "uninstallBundledAgentSkills",
+        subtitle: "Remove bundled Ghostex agent skills from ~/agents/skills.",
+        title: "Uninstall skills",
+      },
+    ]),
   };
   const mainSettingsSectionNavigation: Array<{
     id: MainSettingsSectionId;
@@ -1808,6 +1832,12 @@ export function SettingsModal({
       searchResult: settingsSearch.debugging,
       title: "Debugging",
     },
+    {
+      id: "hooksSkills",
+      ref: hooksSkillsSectionRef,
+      searchResult: settingsSearch.hooksSkills,
+      title: "Hooks & Skills",
+    },
   ];
   const hasVisibleMainSettings = mainSettingsSectionNavigation.some((section) =>
     hasVisibleSettingsSearchResult(section.searchResult),
@@ -1832,7 +1862,10 @@ export function SettingsModal({
   ) => {
     if (isFirstLaunchSetup) {
       return MAIN_SETTINGS_SECTION_SETTING_KEYS[sectionId].some((settingKey) =>
-        isFirstLaunchSetupMainSettingVisible(settingKey, visibleFirstLaunchMainSettings),
+        isFirstLaunchSetupMainSettingVisible(
+          settingKey as FirstLaunchSetupMainSettingKey,
+          visibleFirstLaunchMainSettings,
+        ),
       );
     }
     return shouldShowSettingsSection(sectionResult, showAdvancedSettings);
@@ -1872,6 +1905,7 @@ export function SettingsModal({
       sidebar: sidebarSectionRef,
       sounds: soundsSectionRef,
       beta: betaSectionRef,
+      hooksSkills: hooksSkillsSectionRef,
       statusIndicators: statusIndicatorsSectionRef,
       storage: storageSectionRef,
       sidebarTags: sidebarTagsSectionRef,
@@ -3633,6 +3667,44 @@ export function SettingsModal({
                       onChange={(checked) => updateDraft("showSessionDetailsCopyAction", checked)}
                     />
                   </>
+                ) : null}
+              </SettingsSection>
+            ) : null}
+
+            {mainSectionVisible("hooksSkills", settingsSearch.hooksSkills) ? (
+              <SettingsSection
+                description="Remove Ghostex-owned setup artifacts. You can install hooks and bundled skills again from Integrations."
+                sectionRef={hooksSkillsSectionRef}
+                title="Hooks & Skills"
+              >
+                {mainSettingVisible(settingsSearch.hooksSkills, "uninstallAgentHooks") ||
+                mainSettingVisible(settingsSearch.hooksSkills, "uninstallBundledAgentSkills") ? (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {mainSettingVisible(settingsSearch.hooksSkills, "uninstallAgentHooks") ? (
+                      <Button
+                        className="h-10 px-4 text-sm"
+                        disabled={agentHookStatusLoading || !onUninstallAgentHooks}
+                        onClick={onUninstallAgentHooks}
+                        type="button"
+                        variant="outline"
+                      >
+                        <IconTrash aria-hidden="true" data-icon="inline-start" />
+                        Uninstall Hooks
+                      </Button>
+                    ) : null}
+                    {mainSettingVisible(settingsSearch.hooksSkills, "uninstallBundledAgentSkills") ? (
+                      <Button
+                        className="h-10 px-4 text-sm"
+                        disabled={ghostexCliStatusLoading || !onUninstallBundledAgentSkills}
+                        onClick={onUninstallBundledAgentSkills}
+                        type="button"
+                        variant="outline"
+                      >
+                        <IconTrash aria-hidden="true" data-icon="inline-start" />
+                        Uninstall Skills
+                      </Button>
+                    ) : null}
+                  </div>
                 ) : null}
               </SettingsSection>
             ) : null}
@@ -6220,6 +6292,10 @@ function ActionsSettingsTab({ vscode }: { vscode?: WebviewApi }) {
     () => orderedCommands.some((command) => isSidebarCommandConfigured(command)),
     [orderedCommands],
   );
+  const editorCommandId = editorState?.draft.commandId;
+  const deleteEditorCommand = editorCommandId
+    ? () => deleteCommand(editorCommandId)
+    : undefined;
 
   const openCreateCommandEditor = (actionType: SidebarActionType) => {
     setEditorState({
@@ -6341,6 +6417,7 @@ function ActionsSettingsTab({ vscode }: { vscode?: WebviewApi }) {
               existingCommands={commands}
               lockedActionType={editorState.lockedActionType}
               onCancel={() => setEditorState(undefined)}
+              onDelete={deleteEditorCommand}
               onSave={saveCommand}
             />
           ) : (
@@ -6469,12 +6546,14 @@ function ActionSettingsEditor({
   existingCommands,
   lockedActionType,
   onCancel,
+  onDelete,
   onSave,
 }: {
   draft: SettingsCommandDraft;
   existingCommands: readonly SidebarCommandButton[];
   lockedActionType?: SidebarActionType;
   onCancel: () => void;
+  onDelete?: () => void;
   onSave: (draft: SettingsCommandDraft) => void;
 }) {
   const [actionType, setActionType] = useState<SidebarActionType>(draft.actionType);
@@ -6637,13 +6716,27 @@ function ActionSettingsEditor({
           </Field>
         </>
       )}
-      <div className="flex justify-end gap-3">
-        <Button onClick={onCancel} type="button" variant="outline">
-          Cancel
-        </Button>
-        <Button disabled={isSaveDisabled} onClick={() => onSave(getDraft())} type="button">
-          Save
-        </Button>
+      {/*
+       * CDXC:ActionsSettings 2026-06-18-10:11:
+       * Settings > Actions must let users delete any selected action from the edit surface itself, including default Build/Test actions whose deletion is represented by deletedDefaultCommandIds. Keep this wired to the same deleteSidebarCommand path as the row trash button so default and custom actions share one behavior.
+       */}
+      <div className="flex items-center justify-between gap-3">
+        {onDelete ? (
+          <Button onClick={onDelete} type="button" variant="destructive">
+            <IconTrash aria-hidden="true" data-icon="inline-start" />
+            Delete
+          </Button>
+        ) : (
+          <span aria-hidden="true" />
+        )}
+        <div className="flex justify-end gap-3">
+          <Button onClick={onCancel} type="button" variant="outline">
+            Cancel
+          </Button>
+          <Button disabled={isSaveDisabled} onClick={() => onSave(getDraft())} type="button">
+            Save
+          </Button>
+        </div>
       </div>
     </>
   );

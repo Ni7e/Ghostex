@@ -144,6 +144,13 @@ export type NativeGhosttyHostCommand =
       type: "openFloatingEditor";
     }
   | {
+      /**
+       * CDXC:SessionSleep 2026-06-18-03:10:
+       * Sleep closes the live Ghostty renderer but keeps the native pane slot as
+       * a black wake placeholder. Mark those closes explicitly so native cleanup
+       * does not prune the split/tree before the sidebar layout sync arrives.
+       */
+      preserveLayoutPlaceholder?: boolean;
       preservePersistenceSession?: boolean;
       sessionId: string;
       type: "closeTerminal";

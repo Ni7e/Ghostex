@@ -35,6 +35,7 @@ import {
   IconSquareMinus,
   IconStackPush,
   IconTerminal2,
+  IconTool,
   IconUpload,
   IconUser,
   IconWorld,
@@ -66,6 +67,7 @@ import {
 } from "../../shared/sidebar-commands";
 import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "../../sidebar/agent-logos";
 import {
+  getDefaultSidebarAgentById,
   getDefaultSidebarAgentByIcon,
   type SidebarAgentIcon,
 } from "../../shared/sidebar-agents";
@@ -142,8 +144,12 @@ type TitlebarOpenTargetsSettings = {
 /*
  * CDXC:TipsAndTricks 2026-06-16-19:42:
  * The Tips & Tricks header needs a Changelog action that opens the full Ghostex GitHub releases page as an in-project browser session, keeping release history inside the current workspace instead of the system browser.
+ *
+ * CDXC:TipsAndTricks 2026-06-18-04:53:
+ * The tips panel header should not repeat the Tips & Tricks label in text. Expose Docs as a first-row action and keep documentation inside the current workspace browser session.
  */
 const GHOSTEX_CHANGELOG_URL = "https://github.com/maddada/ghostex/releases";
+const GHOSTEX_DOCS_URL = "https://ghostex.dev/docs";
 
 type TitlebarSidebarActionsSettings = {
   commands: SidebarCommandButton[];
@@ -208,6 +214,7 @@ type TitlebarTip = {
 };
 
 type TitlebarNotice = {
+  action?: "installAgentHooks" | "openSettings";
   body: string;
   icon: TitlebarTipIcon;
   id: string;
@@ -333,6 +340,7 @@ type NativeTitlebarCommand =
   | { type: "stopGxserverFromTitlebar" }
   | { type: "restartGxserverFromTitlebar" }
   | { enabled: boolean; type: "setGxserverAlwaysStartFromTitlebar" }
+  | { type: "installAgentHooksFromTitlebarNotice" }
   | { sessionId: string; type: "focusResourceSessionFromTitlebar" }
   | { sessionIds: string[]; type: "sleepInactiveSessionsFromTitlebar" }
   | { projectIds: string[]; sessionIds: string[]; type: "quitResourcesFromTitlebar" }
@@ -709,8 +717,7 @@ function createTitlebarMissingAgentHooksNotice(
   const hookStatusByAgentId = new Map(
     agentHookStatus.agents.map((status) => [status.agentId, status]),
   );
-  const missingLiveAgents = new Map<string, string>();
-  const outdatedLiveAgents = new Map<string, string>();
+  const liveSupportedAgentIds = new Set<string>();
   for (const group of resourceGroups) {
     for (const session of group.sessions) {
       if (!isTitlebarLiveTerminalAgentSession(session)) {
@@ -720,52 +727,67 @@ function createTitlebarMissingAgentHooksNotice(
       if (!agent || agent.agentId === "t3") {
         continue;
       }
-      const status = hookStatusByAgentId.get(agent.agentId);
-      if (!status || status.status === "installed" || status.status === "notRequired") {
-        continue;
-      }
-      if (status.status === "updateRequired") {
-        outdatedLiveAgents.set(agent.agentId, agent.name);
-      } else {
-        missingLiveAgents.set(agent.agentId, agent.name);
-      }
+      liveSupportedAgentIds.add(agent.agentId);
     }
   }
-  const agentNames = [...outdatedLiveAgents.values(), ...missingLiveAgents.values()];
+  const missingAgents = new Map<string, string>();
+  const outdatedAgents = new Map<string, string>();
+  for (const status of agentHookStatus.agents) {
+    if (!status.cliInstalled || status.status === "installed" || status.status === "notRequired" || status.status === "cliMissing") {
+      continue;
+    }
+    const agent = getDefaultSidebarAgentById(status.agentId);
+    if (!agent || agent.agentId === "t3") {
+      continue;
+    }
+    if (status.status === "updateRequired") {
+      outdatedAgents.set(agent.agentId, agent.name);
+    } else {
+      missingAgents.set(agent.agentId, agent.name);
+    }
+  }
+  const prioritizedAgentNames = [
+    ...[...outdatedAgents].filter(([agentId]) => liveSupportedAgentIds.has(agentId)).map(([, name]) => name),
+    ...[...missingAgents].filter(([agentId]) => liveSupportedAgentIds.has(agentId)).map(([, name]) => name),
+    ...[...outdatedAgents].filter(([agentId]) => !liveSupportedAgentIds.has(agentId)).map(([, name]) => name),
+    ...[...missingAgents].filter(([agentId]) => !liveSupportedAgentIds.has(agentId)).map(([, name]) => name),
+  ];
+  const agentNames = prioritizedAgentNames;
   if (agentNames.length === 0) {
     return undefined;
   }
 
   /**
    * CDXC:AgentHookSettings 2026-06-07-08:51:
-   * Live supported agents without installed Ghostex hooks should surface in
-   * Tips & Tricks as non-dismissable runtime notices. Hooks power gxserver's
-   * working/attention status transitions, exact resume metadata, and
-   * first-message naming, so read-once tips are the wrong model while affected
-   * sessions are still running.
+   * Installed agent CLIs without current Ghostex hooks should surface in Tips
+   * & Tricks as non-dismissable runtime notices. Hooks power reliable session
+   * status, first-message naming, and sleep/resume identity; read-once tips are
+   * the wrong model while the machine still has missing or stale hook setup.
    *
    * CDXC:AgentHooks 2026-06-07-11:05:
    * gxserver now distinguishes old Ghostex hooks from absent hooks. The
    * titlebar notice should ask users to update old hooks instead of saying they
    * are not installed, because the reliable fix is migration to the current
    * gxserver ingest hook rather than accepting stale native-era artifacts.
+   *
+   * CDXC:AgentHooks 2026-06-18-03:08:
+   * The titlebar Tips dropdown must warn even before a live agent session is
+   * running when installed CLIs are missing hooks. Copy should explicitly name
+   * auto session naming, session status, and sleep/resume reliability.
    */
   const formattedAgents = formatTitlebarNoticeNameList(agentNames);
   const plural = agentNames.length > 1;
-  const hasOutdatedHooks = outdatedLiveAgents.size > 0;
-  const hasMissingHooks = missingLiveAgents.size > 0;
+  const hasOutdatedHooks = outdatedAgents.size > 0;
+  const hasMissingHooks = missingAgents.size > 0;
   const action = hasOutdatedHooks && hasMissingHooks ? "setup" : hasOutdatedHooks ? "update" : "install";
   const actionVerb = action === "setup" ? "set up" : action === "update" ? "updated" : "installed";
   return {
-    body: `${formattedAgents} ${plural ? "need" : "needs"} ${plural ? "their" : "its"} Ghostex ${plural ? "hooks" : "hook"} ${actionVerb}. Working/done statuses, attention state, resume metadata, and first-message session naming can be unreliable until hooks are ${action === "setup" ? "installed or updated" : actionVerb}.`,
+    action: "installAgentHooks",
+    body: `Please install the hooks by clicking this notification. Automatic session renaming, In Progress/Needs Attention status, and sleeping or resuming agent sessions will not work correctly until hooks are ${action === "setup" ? "installed or updated" : actionVerb}.`,
     icon: "warning",
-    id: `agent-hooks-${action}-${[...outdatedLiveAgents.keys(), ...missingLiveAgents.keys()].sort().join("-")}`,
+    id: `agent-hooks-${action}-${[...outdatedAgents.keys(), ...missingAgents.keys()].sort().join("-")}`,
     settingsTarget: "agentHooks",
-    title: action === "setup"
-      ? "Set up hooks for live agents"
-      : action === "update"
-        ? plural ? "Update hooks for live agents" : `${formattedAgents} hook needs update`
-        : plural ? "Install hooks for live agents" : `${formattedAgents} hook is missing`,
+    title: "Warning: Agent hooks aren't installed for agent CLIs",
   };
 }
 
@@ -908,7 +930,7 @@ function TitlebarAppTooltip({
 function postTitlebarSidebarCommand(
   message:
     | { type: "openBrowserPane"; url: string }
-    | { type: "openHighlightedFeatures" }
+    | { type: "openGhostexTutorialVideo" }
     | { type: "openWorkspaceWelcome" }
     | { type: "requestAgentHookStatus" }
     | { type: "requestGhostexCliStatus" }
@@ -926,9 +948,13 @@ function postTitlebarSidebarCommand(
   instead of probing from the isolated titlebar webview.
 
   CDXC:TipsAndTricks 2026-06-16-08:17:
-  Tips & Tricks header actions should launch the Features tour and the setup
+  Tips & Tricks header actions should launch Features and setup
   flow through the sidebar command bridge because the native sidebar owns app
   modal presentation.
+
+  CDXC:GhostexTutorialVideo 2026-06-18-05:31:
+  The Features action now opens the tutorial video modal through the sidebar
+  command bridge, leaving the old Highlighted Features modal unused.
 
   CDXC:TipsAndTricks 2026-06-16-19:42:
   The Changelog header action should reuse the sidebar browser-pane command so
@@ -1894,18 +1920,30 @@ function App() {
      * CDXC:TipsAndTricks 2026-06-16-08:17:
      * The Tips & Tricks header should send users to the replayable highlighted
      * features modal instead of exposing a bulk "Read all" action.
+     *
+     * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
+     * The Tips modal keeps the Features button label, but clicking it should
+     * open the tutorial video modal. Leave the old Highlighted Features modal
+     * unused instead of deleting its implementation.
      */
-    postTitlebarSidebarCommand({ type: "openHighlightedFeatures" });
+    postTitlebarSidebarCommand({ type: "openGhostexTutorialVideo" });
   }, []);
   const viewGhostexGuideFromTips = useCallback(() => {
     /*
      * CDXC:TipsAndTricks 2026-06-16-10:04:
      * The Tips & Tricks header should send users to Features with a filled star
-     * action and to the setup guide through a Setup Ghostex action. Keep the
+     * action and to the setup guide through a Setup action. Keep the
      * sidebar-owned workspace welcome bridge as the guide entry point because
      * that surface owns setup and onboarding repair.
+     *
+     * CDXC:TipsAndTricks 2026-06-18-04:53:
+     * The setup action label should be the shorter "Setup" copy so the header
+     * can also fit Docs, Features, and Changelog without truncating action text.
      */
     postTitlebarSidebarCommand({ type: "openWorkspaceWelcome" });
+  }, []);
+  const openDocsFromTips = useCallback(() => {
+    postTitlebarSidebarCommand({ type: "openBrowserPane", url: GHOSTEX_DOCS_URL });
   }, []);
   const openChangelogFromTips = useCallback(() => {
     /*
@@ -2749,19 +2787,14 @@ function App() {
     });
   };
 
-  const openAgentHooksSettings = () => {
+  const installAgentHooksFromTipsNotice = () => {
     /**
-     * CDXC:AgentHookSettings 2026-06-07-08:51:
-     * Missing-hook Tips notices are actionable runtime warnings. Clicking one
-     * should open Settings on the Integrations tab because that page exposes
-     * the direct Agent Hooks install row without requiring an expanded details
-     * panel.
+     * CDXC:AgentHooks 2026-06-18-03:22:
+     * The missing-hook Tips warning should be an install action, not only a
+     * Settings deep-link. Native owns the install and toast lifecycle so the
+     * titlebar remains a thin UI surface.
      */
-    window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
-      initialTab: "integrations",
-      modal: "settings",
-      type: "open",
-    });
+    postNative({ type: "installAgentHooksFromTitlebarNotice" });
   };
 
   const openDebuggingModeSettings = () => {
@@ -2788,9 +2821,14 @@ function App() {
     });
   };
 
-  const openNoticeSettings = (target: TitlebarNotice["settingsTarget"]) => {
+  const handleNoticeAction = (notice: TitlebarNotice) => {
+    if (notice.action === "installAgentHooks") {
+      installAgentHooksFromTipsNotice();
+      return;
+    }
+    const target = notice.settingsTarget;
     if (target === "agentHooks") {
-      openAgentHooksSettings();
+      installAgentHooksFromTipsNotice();
       return;
     }
     if (target === "debuggingMode") {
@@ -3270,8 +3308,9 @@ function App() {
           onGxserverStop={stopGxserverDaemon}
           onMarkTipRead={markTipRead}
           onOpenChangelog={openChangelogFromTips}
+          onOpenDocs={openDocsFromTips}
           onOpenHighlightedFeatures={openHighlightedFeaturesFromTips}
-          onOpenNoticeSettings={openNoticeSettings}
+          onOpenNoticeSettings={handleNoticeAction}
           onOpenPowerSettings={openPowerSettings}
           onOpenTarget={openTarget}
           onQuitResources={quitResourceBundles}
@@ -3495,17 +3534,21 @@ function App() {
              * Tips & Tricks should sit before Keep Awake in the top-right
              * titlebar control order, keeping the info/help affordance closer to
              * the mode switcher while power controls remain farther right.
+             *
+             * CDXC:ReactTitlebar 2026-06-18-05:16:
+             * User-facing titlebar labels should use the shorter "Tips" copy
+             * while the underlying tips menu behavior stays unchanged.
              */}
             <ButtonGroup
               className="titlebar-open-group titlebar-tips-group"
               data-titlebar-dropdown-anchor
             >
-              <TitlebarAppTooltip content="Tips & Tricks">
+              <TitlebarAppTooltip content="Tips">
                 <Button
                   aria-label={
                     unreadTips.length + notices.length > 0
-                      ? `Tips and tricks, ${unreadTips.length + notices.length} unread`
-                      : "Tips and tricks"
+                      ? `Tips, ${unreadTips.length + notices.length} unread`
+                      : "Tips"
                   }
                   className="titlebar-session-button titlebar-tips-button"
                   data-state={nativeDropdownOpen === "tips" ? "open" : undefined}
@@ -3737,6 +3780,7 @@ function TitlebarDropdownPanelSurface({
   onGxserverStop,
   onMarkTipRead,
   onOpenChangelog,
+  onOpenDocs,
   onOpenHighlightedFeatures,
   onOpenNoticeSettings,
   onOpenPowerSettings,
@@ -3783,8 +3827,9 @@ function TitlebarDropdownPanelSurface({
   onGxserverStop: () => void;
   onMarkTipRead: (tipId: string) => void;
   onOpenChangelog: () => void;
+  onOpenDocs: () => void;
   onOpenHighlightedFeatures: () => void;
-  onOpenNoticeSettings: (target: TitlebarNotice["settingsTarget"]) => void;
+  onOpenNoticeSettings: (notice: TitlebarNotice) => void;
   onOpenPowerSettings: () => void;
   onOpenTarget: (target: ResolvedOpenTarget | undefined) => void;
   onQuitResources: (bundles: ResourceProcessBundle[]) => void;
@@ -3858,8 +3903,9 @@ function TitlebarDropdownPanelSurface({
             notices={notices}
             onMarkRead={onMarkTipRead}
             onOpenChangelog={() => closeAfter(onOpenChangelog)}
+            onOpenDocs={() => closeAfter(onOpenDocs)}
             onOpenHighlightedFeatures={() => closeAfter(onOpenHighlightedFeatures)}
-            onOpenNoticeSettings={(target) => closeAfter(() => onOpenNoticeSettings(target))}
+            onOpenNoticeSettings={(notice) => closeAfter(() => onOpenNoticeSettings(notice))}
             onViewGhostexGuide={() => closeAfter(onViewGhostexGuide)}
             readTips={readTips}
             unreadTips={unreadTips}
@@ -4767,6 +4813,7 @@ function TitlebarTipsMenu({
   notices,
   onMarkRead,
   onOpenChangelog,
+  onOpenDocs,
   onOpenHighlightedFeatures,
   onOpenNoticeSettings,
   onViewGhostexGuide,
@@ -4776,8 +4823,9 @@ function TitlebarTipsMenu({
   notices: TitlebarNotice[];
   onMarkRead: (tipId: string) => void;
   onOpenChangelog: () => void;
+  onOpenDocs: () => void;
   onOpenHighlightedFeatures: () => void;
-  onOpenNoticeSettings: (target: TitlebarNotice["settingsTarget"]) => void;
+  onOpenNoticeSettings: (notice: TitlebarNotice) => void;
   onViewGhostexGuide: () => void;
   readTips: TitlebarTip[];
   unreadTips: TitlebarTip[];
@@ -4787,9 +4835,18 @@ function TitlebarTipsMenu({
       <div className="titlebar-tips-header">
         <div className="titlebar-tips-title">
           <IconInfoCircle aria-hidden="true" size={18} stroke={1.8} />
-          <span>Tips & Tricks</span>
+          <span>Tips</span>
         </div>
         <div className="titlebar-tips-actions">
+          <button
+            aria-label="Open Docs"
+            className="titlebar-tips-action-button"
+            onClick={onOpenDocs}
+            type="button"
+          >
+            <IconBook2 aria-hidden="true" size={14} stroke={1.9} />
+            <span>Docs</span>
+          </button>
           <button
             aria-label="Open Features"
             className="titlebar-tips-action-button"
@@ -4800,13 +4857,13 @@ function TitlebarTipsMenu({
             <span>Features</span>
           </button>
           <button
-            aria-label="Setup Ghostex"
+            aria-label="Setup"
             className="titlebar-tips-action-button"
             onClick={onViewGhostexGuide}
             type="button"
           >
-            <IconBook2 aria-hidden="true" size={14} stroke={1.9} />
-            <span>Setup Ghostex</span>
+            <IconTool aria-hidden="true" size={14} stroke={1.9} />
+            <span>Setup</span>
           </button>
           <button
             aria-label="Open Changelog"
@@ -4830,7 +4887,7 @@ function TitlebarTipsMenu({
               <TitlebarNoticeRow
                 key={notice.id}
                 notice={notice}
-                onOpenSettings={() => onOpenNoticeSettings(notice.settingsTarget)}
+                onOpenSettings={() => onOpenNoticeSettings(notice)}
               />
             ))}
           </TitlebarTipsSection>
@@ -7345,18 +7402,22 @@ styleElement.textContent = `
     /*
      * CDXC:TipsAndTricks 2026-06-16-10:04:
      * Tips & Tricks header actions should use matching button widths, point to
-     * Features and Setup Ghostex, and omit the previous unread
+     * Features and Setup, and omit the previous unread
      * text summary from the top-right action row.
      *
      * CDXC:TipsAndTricks 2026-06-16-19:42:
      * Add Changelog as the rightmost equal-width header action so release notes
      * are available without changing the existing titlebar Tips layout model.
+     *
+     * CDXC:TipsAndTricks 2026-06-18-04:53:
+     * Add Docs as a fourth equal-width action and keep the labels short enough
+     * that all actions fit in the native titlebar dropdown.
      */
     display: grid;
     gap: 10px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     margin-left: auto;
-    width: 390px;
+    width: 420px;
   }
   .titlebar-tips-action-button {
     align-items: center;

@@ -81,7 +81,7 @@ export type FirstLaunchSetupModalProps = {
   isOpen: boolean;
   onClose: () => void;
   onChange: (settings: ghostexSettings) => void;
-  onInstallAgentHooks?: () => void;
+  onInstallAgentHooks?: (agentIds?: readonly string[]) => void;
   onInstallAgentOrchestrationSkill?: () => void;
   onInstallBrowserControl?: () => void;
   onInstallComputerUseSkill?: () => void;
@@ -90,7 +90,7 @@ export type FirstLaunchSetupModalProps = {
   onInstallGhostexCli?: () => void;
   onOpenAccessibilityPreferences?: () => void;
   onOpenScreenRecordingPreferences?: () => void;
-  onRequestAgentHookStatus?: () => void;
+  onRequestAgentHookStatus?: (agentIds?: readonly string[]) => void;
   onRequestGhostexCliStatus?: () => void;
   settings?: ghostexSettings;
   theme?: SidebarTheme;
@@ -134,7 +134,7 @@ type FirstLaunchGuidePage = {
   title: string;
 };
 
-type FirstLaunchContinueWarning = "hooks" | "browserControl" | "desktopCua";
+type FirstLaunchContinueWarning = "hooks" | "skills" | "browserControl" | "desktopCua";
 
 const FIRST_LAUNCH_INTRO_BENEFITS: readonly FirstLaunchBenefit[] = [
   {
@@ -204,16 +204,22 @@ const FIRST_LAUNCH_CLI_MOBILE_BENEFITS: readonly FirstLaunchMobileBenefit[] = [
     title: "Ghostex Browser Use",
   },
 ];
+/*
+ * CDXC:FirstLaunchSetup 2026-06-18-02:29:
+ * The first-time launch modal should keep only Welcome, Agent Hooks, and
+ * Bundled Agent Skills in the visible sequence. Leave the other page components
+ * and guide data in this file so they can be restored or reused without losing
+ * the previous setup content.
+ *
+ * CDXC:FirstLaunchSetup 2026-06-18-02:54:
+ * First-launch hook setup should show every supported agent CLI. Native status
+ * checks still prioritize Codex, Claude, and Pi, then continue through the
+ * secondary providers one at a time so the page fills progressively.
+ */
 const FIRST_LAUNCH_SETUP_PAGES: readonly FirstLaunchSetupPage[] = [
   "welcome",
-  "preferences",
   "hooks",
-  "cli",
   "skills",
-  "browserControl",
-  "desktopCua",
-  "agentsSessions",
-  "remoteAccess",
 ];
 
 const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
@@ -425,6 +431,10 @@ const FIRST_LAUNCH_GUIDE_PAGE_BY_ID = new Map(
   FIRST_LAUNCH_GUIDE_PAGES.map((page) => [page.page, page]),
 );
 
+function getVisibleFirstLaunchSetupPage(page: FirstLaunchSetupPage): FirstLaunchSetupPage {
+  return FIRST_LAUNCH_SETUP_PAGES.includes(page) ? page : "welcome";
+}
+
 const FIRST_LAUNCH_CONTINUE_WARNINGS: Record<
   FirstLaunchContinueWarning,
   {
@@ -434,12 +444,23 @@ const FIRST_LAUNCH_CONTINUE_WARNINGS: Record<
     title: string;
   }
 > = {
+  /*
+   * CDXC:FirstLaunchSetup 2026-06-18-02:54:
+   * First-launch warnings should tell users that Settings can remove all Ghostex hooks or bundled skills later by searching Uninstall Hooks or Uninstall Skills with Show Advanced enabled.
+   */
   hooks: {
     actionLabel: "Continue without hooks",
     description:
-      "Ghostex will not notify you when agents enter In Progress or Needs Attention, and it will not automatically name agent sessions from the first message until hooks are installed. You can install them later from Settings > Integrations or by launching this setup flow from the sidebar overflow menu.",
+      "Ghostex will not notify you when agents enter In Progress or Needs Attention, and it will not automatically name agent sessions from the first message until hooks are installed. You can install them later from Settings > Integrations, or uninstall all Ghostex hooks from Settings by searching Uninstall Hooks with Show Advanced enabled.",
     installLabel: "Install Hooks",
     title: "Continue without agent hooks?",
+  },
+  skills: {
+    actionLabel: "Continue without skills",
+    description:
+      "Agents will not discover Ghostex Browser Use, Ghostex Computer Use, Agent Orchestration, or Generate Title until the bundled skills are installed. You can install them later from Settings > Integrations, or uninstall all bundled Ghostex skills from Settings by searching Uninstall Skills with Show Advanced enabled.",
+    installLabel: "Install Missing Skills",
+    title: "Continue without bundled agent skills?",
   },
   browserControl: {
     actionLabel: "Continue without Ghostex Browser Use",
@@ -652,7 +673,9 @@ export function FirstLaunchSetupModal({
   theme = "dark-blue",
   vscode,
 }: FirstLaunchSetupModalProps) {
-  const [activePage, setActivePage] = useState<FirstLaunchSetupPage>(initialPage);
+  const [activePage, setActivePage] = useState<FirstLaunchSetupPage>(
+    getVisibleFirstLaunchSetupPage(initialPage),
+  );
   const [continueWarning, setContinueWarning] = useState<FirstLaunchContinueWarning>();
 
   useEffect(() => {
@@ -669,7 +692,7 @@ export function FirstLaunchSetupModal({
 
   useEffect(() => {
     if (isOpen) {
-      setActivePage(initialPage);
+      setActivePage(getVisibleFirstLaunchSetupPage(initialPage));
       setContinueWarning(undefined);
     }
   }, [initialPage, isOpen]);
@@ -678,26 +701,40 @@ export function FirstLaunchSetupModal({
   const hookStatusByAgentId = new Map(
     agentHookStatus?.agents.map((status) => [status.agentId, status]) ?? [],
   );
-  const installedHookCount =
-    agentHookStatus?.agents.filter(
-      (status) => status.status === "installed" || status.status === "notRequired",
-    ).length ?? 0;
+  const firstLaunchHooksReady = areFirstLaunchAgentHooksReady(agentHookStatus);
+  const firstLaunchBundledSkillsReady = areFirstLaunchBundledSkillsInstalled(ghostexCliStatus);
   const activePageIndex = Math.max(0, FIRST_LAUNCH_SETUP_PAGES.indexOf(activePage));
   const isLastPage = activePageIndex === FIRST_LAUNCH_SETUP_PAGES.length - 1;
   const previousPage = FIRST_LAUNCH_SETUP_PAGES[Math.max(0, activePageIndex - 1)];
   const nextPage =
     FIRST_LAUNCH_SETUP_PAGES[Math.min(FIRST_LAUNCH_SETUP_PAGES.length - 1, activePageIndex + 1)];
+  const installFirstLaunchAgentHooks = () => onInstallAgentHooks?.();
+  const installMissingBundledSkills =
+    ghostexCliStatus?.installed === true && !firstLaunchBundledSkillsReady
+      ? () => {
+          if (ghostexCliStatus.browserSkillInstalled !== true) {
+            onInstallBrowserControl?.();
+          }
+          if (ghostexCliStatus.computerUseSkillInstalled !== true) {
+            onInstallComputerUseSkill?.();
+          }
+          if (ghostexCliStatus.agentOrchestrationSkillInstalled !== true) {
+            onInstallAgentOrchestrationSkill?.();
+          }
+          if (ghostexCliStatus.generateTitleSkillInstalled !== true) {
+            onInstallGenerateTitleSkill?.();
+          }
+        }
+      : undefined;
   const activeContinueWarning = getFirstLaunchContinueWarning({
     activePage,
-    agentHookStatus,
-    ghostexCliStatus,
-    ghostexCliStatusLoading,
-    installedHookCount,
+    firstLaunchBundledSkillsReady,
+    firstLaunchHooksReady,
   });
 
   const navigateToPage = (page: FirstLaunchSetupPage) => {
     setContinueWarning(undefined);
-    setActivePage(page);
+    setActivePage(getVisibleFirstLaunchSetupPage(page));
   };
 
   const advance = () => {
@@ -715,6 +752,12 @@ export function FirstLaunchSetupModal({
     }
     advance();
   };
+
+  useEffect(() => {
+    if (continueWarning && !activeContinueWarning) {
+      setContinueWarning(undefined);
+    }
+  }, [activeContinueWarning, continueWarning]);
 
   return (
     <Dialog
@@ -755,8 +798,7 @@ export function FirstLaunchSetupModal({
               agentHookStatusLoading={agentHookStatusLoading}
               hookStatusByAgentId={hookStatusByAgentId}
               hookTone={hookTone}
-              onInstallAgentHooks={onInstallAgentHooks}
-              onRequestAgentHookStatus={onRequestAgentHookStatus}
+              onInstallAgentHooks={installFirstLaunchAgentHooks}
             />
           ) : activePage === "cli" ? (
             <FirstLaunchCliPage
@@ -772,7 +814,6 @@ export function FirstLaunchSetupModal({
               onInstallBrowserControl={onInstallBrowserControl}
               onInstallComputerUseSkill={onInstallComputerUseSkill}
               onInstallGenerateTitleSkill={onInstallGenerateTitleSkill}
-              onRequestGhostexCliStatus={onRequestGhostexCliStatus}
             />
           ) : (
             <FirstLaunchGuidePageView
@@ -789,9 +830,10 @@ export function FirstLaunchSetupModal({
             <FirstLaunchContinueWarningView
               kind={continueWarning}
               onContinue={advance}
-              onInstallAgentHooks={onInstallAgentHooks}
+              onInstallAgentHooks={installFirstLaunchAgentHooks}
               onInstallBrowserControl={onInstallBrowserControl}
               onInstallCuaDriver={onInstallCuaDriver}
+              onInstallMissingSkills={installMissingBundledSkills}
             />
           ) : null}
         </div>
@@ -1206,13 +1248,11 @@ function FirstLaunchHooksPage({
   hookStatusByAgentId,
   hookTone,
   onInstallAgentHooks,
-  onRequestAgentHookStatus,
 }: {
   agentHookStatusLoading: boolean;
   hookStatusByAgentId: ReadonlyMap<string, SidebarAgentHookStatusItem>;
   hookTone: SidebarAgentHookStatus | "checking" | "unknown";
   onInstallAgentHooks?: () => void;
-  onRequestAgentHookStatus?: () => void;
 }) {
   const hasUpdateRequiredHooks = [...hookStatusByAgentId.values()].some(
     (status) => status.status === "updateRequired",
@@ -1313,17 +1353,6 @@ function FirstLaunchHooksPage({
           </div>
           <div className="first-launch-setup-hooks-actions">
             <Button
-              disabled={!onRequestAgentHookStatus || agentHookStatusLoading}
-              aria-label="Refresh agent hook status"
-              className="first-launch-setup-hooks-refresh-button"
-              onClick={onRequestAgentHookStatus}
-              title="Refresh agent hook status"
-              type="button"
-              variant="outline"
-            >
-              <IconRefresh aria-hidden="true" />
-            </Button>
-            <Button
               disabled={!onInstallAgentHooks || agentHookStatusLoading}
               onClick={onInstallAgentHooks}
               type="button"
@@ -1345,40 +1374,50 @@ function FirstLaunchContinueWarningView({
   onInstallAgentHooks,
   onInstallBrowserControl,
   onInstallCuaDriver,
+  onInstallMissingSkills,
 }: {
   kind: FirstLaunchContinueWarning;
   onContinue: () => void;
   onInstallAgentHooks?: () => void;
   onInstallBrowserControl?: () => void;
   onInstallCuaDriver?: () => void;
+  onInstallMissingSkills?: () => void;
 }) {
   const warning = FIRST_LAUNCH_CONTINUE_WARNINGS[kind];
   const installAction =
     kind === "hooks"
       ? onInstallAgentHooks
+      : kind === "skills"
+        ? onInstallMissingSkills
       : kind === "browserControl"
         ? onInstallBrowserControl
         : onInstallCuaDriver;
 
   return (
-    <section className="first-launch-setup-warning" role="alert">
-      <div className="first-launch-setup-warning-icon">
-        <IconAlertTriangle aria-hidden="true" size={18} />
-      </div>
-      <div className="first-launch-setup-warning-copy">
-        <h3>{warning.title}</h3>
-        <p>{warning.description}</p>
-        <div className="first-launch-setup-warning-actions">
-          <Button disabled={!installAction} onClick={installAction} type="button" variant="outline">
-            <IconDownload aria-hidden="true" data-icon="inline-start" />
-            {warning.installLabel}
-          </Button>
-          <Button onClick={onContinue} type="button" variant="ghost">
-            {warning.actionLabel}
-          </Button>
+    <div className="first-launch-setup-warning-backdrop">
+      <section
+        aria-modal="true"
+        className="first-launch-setup-warning"
+        role="alertdialog"
+      >
+        <div className="first-launch-setup-warning-icon">
+          <IconAlertTriangle aria-hidden="true" size={18} />
         </div>
-      </div>
-    </section>
+        <div className="first-launch-setup-warning-copy">
+          <h3>{warning.title}</h3>
+          <p>{warning.description}</p>
+          <div className="first-launch-setup-warning-actions">
+            <Button onClick={onContinue} type="button" variant="ghost">
+              {warning.actionLabel}
+            </Button>
+            <Button disabled={!installAction} onClick={installAction} type="button">
+              <IconDownload aria-hidden="true" data-icon="inline-start" />
+              {warning.installLabel}
+            </Button>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1389,7 +1428,6 @@ function FirstLaunchSkillsPage({
   onInstallBrowserControl,
   onInstallComputerUseSkill,
   onInstallGenerateTitleSkill,
-  onRequestGhostexCliStatus,
 }: {
   ghostexCliStatus?: SidebarGhostexCliStatusMessage;
   ghostexCliStatusLoading: boolean;
@@ -1397,7 +1435,6 @@ function FirstLaunchSkillsPage({
   onInstallBrowserControl?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
-  onRequestGhostexCliStatus?: () => void;
 }) {
   return (
     <section className="first-launch-setup-guide-page" aria-labelledby="first-launch-skills-title">
@@ -1425,7 +1462,6 @@ function FirstLaunchSkillsPage({
           computerUse: onInstallComputerUseSkill,
           generateTitle: onInstallGenerateTitleSkill,
         }}
-        onRefreshStatus={onRequestGhostexCliStatus}
         showHeader={false}
       />
     </section>
@@ -1770,36 +1806,44 @@ function getFirstLaunchHookStatusGroups(
 
 function getFirstLaunchContinueWarning({
   activePage,
-  agentHookStatus,
-  ghostexCliStatus,
-  ghostexCliStatusLoading,
-  installedHookCount,
+  firstLaunchBundledSkillsReady,
+  firstLaunchHooksReady,
 }: {
   activePage: FirstLaunchSetupPage;
-  agentHookStatus?: SidebarAgentHookStatusMessage;
-  ghostexCliStatus?: SidebarGhostexCliStatusMessage;
-  ghostexCliStatusLoading: boolean;
-  installedHookCount: number;
+  firstLaunchBundledSkillsReady: boolean;
+  firstLaunchHooksReady: boolean;
 }): FirstLaunchContinueWarning | undefined {
-  if (activePage === "hooks" && agentHookStatus && installedHookCount === 0) {
+  if (activePage === "hooks" && !firstLaunchHooksReady) {
     return "hooks";
   }
-  if (
-    activePage === "browserControl" &&
-    !ghostexCliStatusLoading &&
-    ghostexCliStatus?.browserSkillInstalled !== true
-  ) {
-    return "browserControl";
-  }
-  if (
-    activePage === "desktopCua" &&
-    !ghostexCliStatusLoading &&
-    (ghostexCliStatus?.cuaDriverInstalled !== true ||
-      ghostexCliStatus?.computerUseSkillInstalled !== true)
-  ) {
-    return "desktopCua";
+  if (activePage === "skills" && !firstLaunchBundledSkillsReady) {
+    return "skills";
   }
   return undefined;
+}
+
+function areFirstLaunchAgentHooksReady(
+  agentHookStatus: SidebarAgentHookStatusMessage | undefined,
+): boolean {
+  if (!agentHookStatus || agentHookStatus.errorMessage) {
+    return false;
+  }
+  const statusByAgentId = new Map(agentHookStatus.agents.map((status) => [status.agentId, status]));
+  return FIRST_LAUNCH_HOOK_SUPPORTED_AGENTS.every((agent) => {
+    const status = statusByAgentId.get(agent.agentId)?.status;
+    return status === "installed" || status === "notRequired";
+  });
+}
+
+function areFirstLaunchBundledSkillsInstalled(
+  ghostexCliStatus: SidebarGhostexCliStatusMessage | undefined,
+): boolean {
+  return (
+    ghostexCliStatus?.browserSkillInstalled === true &&
+    ghostexCliStatus.computerUseSkillInstalled === true &&
+    ghostexCliStatus.agentOrchestrationSkillInstalled === true &&
+    ghostexCliStatus.generateTitleSkillInstalled === true
+  );
 }
 
 function getFirstLaunchHookTone(

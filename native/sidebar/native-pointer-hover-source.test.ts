@@ -25,6 +25,14 @@ const sidebarBridgeSource = readFileSync(
   "utf8",
 );
 
+function sourceBetween(source: string, start: string, end: string): string {
+  const startIndex = source.indexOf(start);
+  expect(startIndex).toBeGreaterThanOrEqual(0);
+  const endIndex = source.indexOf(end, startIndex + start.length);
+  expect(endIndex).toBeGreaterThan(startIndex);
+  return source.slice(startIndex, endIndex);
+}
+
 describe("native pointer hover boundary source", () => {
   test("keeps AppKit pointer ownership wired as tooltip cleanup instead of persistent hover gates", () => {
     /*
@@ -79,6 +87,15 @@ describe("native pointer hover boundary source", () => {
     expect(appDelegateSource).toContain("performBlankTitlebarMouseDownFromWebContent");
     expect(appDelegateSource).toContain("handleBlankTitlebarMouseDown");
     expect(appDelegateSource).toContain("activeMouseDownEvent");
+    const titlebarChromeWebViewSource = sourceBetween(
+      appDelegateSource,
+      "final class TitlebarChromeWebView: WKWebView",
+      "final class SidebarWebView: WKWebView",
+    );
+    expect(titlebarChromeWebViewSource).toContain("private static let leftMouseButtonMask = 1");
+    expect(titlebarChromeWebViewSource).toContain("override func mouseUp(with event: NSEvent)");
+    expect(titlebarChromeWebViewSource).toContain("NSEvent.pressedMouseButtons & Self.leftMouseButtonMask");
+    expect(titlebarChromeWebViewSource).not.toContain("DispatchQueue.main.async");
 
     expect(nativeSidebarSource).toContain("function setNativeSidebarPointerInside(isInside: boolean): void");
     expect(nativeSidebarSource).toContain("function setSidebarNativePointerState(isInside: boolean): void");
@@ -147,7 +164,7 @@ describe("native pointer hover boundary source", () => {
     expect(titlebarHostSource).not.toContain("<Tooltip>");
     expect(titlebarHostSource).not.toContain("<TooltipTrigger");
     expect(titlebarHostSource).not.toContain("<TooltipContent");
-    expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Tips & Tricks">');
+    expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Tips">');
     expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Keep awake">');
     expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Resources Monitor">');
     expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Git actions">');
@@ -158,7 +175,7 @@ describe("native pointer hover boundary source", () => {
     expect(titlebarHostSource).not.toContain(".titlebar-update-button::after");
     expect(titlebarHostSource).not.toContain("content: attr(data-tooltip);");
     expect(titlebarHostSource).not.toContain(".titlebar-open-group > .titlebar-session-button[data-tooltip]::after");
-    expect(titlebarHostSource).not.toContain('<TooltipContent side="left">Tips & Tricks</TooltipContent>');
+    expect(titlebarHostSource).not.toContain('<TooltipContent side="left">Tips</TooltipContent>');
     expect(titlebarHostSource).not.toContain(
       '<TooltipContent side="left">Click to toggle. Right-click for options.</TooltipContent>',
     );

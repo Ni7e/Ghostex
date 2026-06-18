@@ -2,7 +2,7 @@ import type {
   SidebarPreviousSessionItem,
   SidebarSessionItem,
 } from "../shared/session-grid-contract";
-import { filterSidebarSessionItems } from "./previous-session-search";
+import { isDefaultSessionSearchTitle } from "../shared/session-grid-contract";
 import { getSessionHistoryCardTitle } from "./session-history-card-title";
 
 /*
@@ -110,11 +110,15 @@ export function createCommandPaletteCurrentSessionItems({
       if (!session) {
         continue;
       }
+      const searchText = createCurrentSessionTitleSearchText(session);
+      if (isDefaultSessionSearchTitle(searchText)) {
+        continue;
+      }
       items.push({
         groupId,
         groupIsActive: group?.isActive === true,
         projectLabel,
-        searchText: createCurrentSessionSearchText(session, group),
+        searchText,
         session,
       });
     }
@@ -227,35 +231,33 @@ export function filterCommandPaletteCurrentSessionItems(
 ): CommandPaletteCurrentSessionItem[] {
   const normalizedQuery = query.trim();
   if (!normalizedQuery) {
-    return [...items];
+    return items.filter((item) => !isDefaultSessionSearchTitle(item.searchText));
   }
-  const matchedSessionIds = new Set(
-    filterSidebarSessionItems(
-      items.map((item) => item.session),
-      normalizedQuery,
-    ).map((session) => session.sessionId),
-  );
-  return items.filter(
-    (item) =>
-      matchedSessionIds.has(item.session.sessionId) ||
-      matchesCommandPaletteSearchQuery(item.searchText, normalizedQuery),
+  return items.filter((item) =>
+    !isDefaultSessionSearchTitle(item.searchText) &&
+    matchesCommandPaletteTitleSearchQuery(item.searchText, normalizedQuery),
   );
 }
 
 export function createPreviousSessionSearchText(session: SidebarPreviousSessionItem): string {
-  return [
-    getSessionHistoryCardTitle(session),
-    session.alias,
-    session.displayTitle,
-    session.primaryTitle,
-    session.terminalTitle,
-    session.detail,
-    session.sessionNumber,
-    session.projectName,
-    session.projectPath,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  return getSessionHistoryCardTitle(session);
+}
+
+export function filterCommandPalettePreviousSessions(
+  sessions: readonly SidebarPreviousSessionItem[],
+  query: string,
+): SidebarPreviousSessionItem[] {
+  const normalizedQuery = query.trim();
+  const searchableSessions = sessions.filter(
+    (session) => !isDefaultSessionSearchTitle(createPreviousSessionSearchText(session)),
+  );
+  if (!normalizedQuery) {
+    return searchableSessions;
+  }
+
+  return searchableSessions.filter((session) =>
+    matchesCommandPaletteTitleSearchQuery(createPreviousSessionSearchText(session), normalizedQuery),
+  );
 }
 
 export function getPreviousSessionProjectLabel(
@@ -313,6 +315,12 @@ function matchesCommandPaletteSearchQuery(searchText: string, query: string): bo
   return queryTokens.every((token) => fuzzyIncludes(normalizedSearchText, token));
 }
 
+function matchesCommandPaletteTitleSearchQuery(searchText: string, query: string): boolean {
+  const normalizedSearchText = normalizeCommandPaletteSearchValue(searchText);
+  const queryTokens = normalizeCommandPaletteSearchValue(query).split(/\s+/).filter(Boolean);
+  return queryTokens.every((token) => normalizedSearchText.includes(token));
+}
+
 function normalizeCommandPaletteSearchValue(value: string | undefined): string {
   if (!value) {
     return "";
@@ -342,23 +350,18 @@ function fuzzyIncludes(text: string, query: string): boolean {
   return query.length === 0;
 }
 
-function createCurrentSessionSearchText(
-  session: SidebarSessionItem,
-  group: CommandPaletteSessionGroup | undefined,
-): string {
-  return [
-    session.alias,
-    session.displayTitle,
-    session.primaryTitle,
-    session.terminalTitle,
-    session.detail,
-    session.sessionNumber,
-    group?.title,
-    group?.projectContext?.path,
-    group?.remoteMachineContext?.machineName,
-  ]
-    .filter(Boolean)
-    .join(" ");
+function createCurrentSessionTitleSearchText(session: SidebarSessionItem): string {
+  /*
+   * CDXC:CommandPalette 2026-06-17-22:39:
+   * Cmd+P is a session-title jump surface. Searching hidden metadata such as
+   * project paths, provider details, session numbers, or shared "Terminal"
+   * labels makes unrelated sessions appear for ordinary title queries, so keep
+   * both filtering and CommandItem values limited to the same title priority
+   * the palette row presents. Use token containment for session titles so
+   * `testing` does not fuzzily match `Settings` or letters stitched across an
+   * unrelated title.
+   */
+  return getSessionHistoryCardTitle(session);
 }
 
 function getCurrentSessionProjectLabel(

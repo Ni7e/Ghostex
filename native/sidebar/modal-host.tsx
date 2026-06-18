@@ -24,6 +24,7 @@ import {
 import { SessionRenameModal } from "../../sidebar/session-rename-modal";
 import { T3BrowserAccessModal } from "../../sidebar/t3-browser-access-modal";
 import { T3ThreadIdModal } from "../../sidebar/t3-thread-id-modal";
+import { WatchGhostexVideoModal } from "../../sidebar/watch-ghostex-video-modal";
 import { FirstLaunchSetupModal } from "../../sidebar/first-launch-setup-modal";
 import { GitFileDiffModal, type GitFileDiffModalDraft } from "../../sidebar/git-file-diff-modal";
 import { GitCommitModal, type GitCommitModalDraft } from "../../sidebar/git-commit-modal";
@@ -66,6 +67,7 @@ type AppModalKind =
   | "daemonSessions"
   | "delayedSend"
   | "discoverGhostex"
+  | "watchGhostexVideo"
   | "hotkeys"
   | "gitCommit"
   | "gitFileDiff"
@@ -2264,6 +2266,7 @@ function AppModalHost() {
           }
         }}
         openRequestSequence={commandPaletteOpenRequestSequence}
+        openTargetSettings={settings}
         petOverlayEnabled={settings?.petOverlayEnabled}
         vscode={vscode}
       />
@@ -2552,6 +2555,14 @@ function AppModalHost() {
           setAgentHookStatusLoading(true);
           vscode.postMessage({ type: "installAgentHooks" });
         }}
+        onUninstallAgentHooks={() => {
+          setAgentHookStatusLoading(true);
+          vscode.postMessage({ type: "uninstallAgentHooks" });
+        }}
+        onUninstallBundledAgentSkills={() => {
+          setGhostexCliStatusLoading(true);
+          vscode.postMessage({ type: "uninstallBundledAgentSkills" });
+        }}
         onTestAgentTaskCompletion={() => {
           vscode.postMessage({ type: "testAgentTaskCompletion" });
         }}
@@ -2571,6 +2582,11 @@ function AppModalHost() {
         onClose={closeModal}
         theme={theme}
       />
+      <WatchGhostexVideoModal
+        isOpen={activeModal === "watchGhostexVideo"}
+        onClose={closeModal}
+        theme={theme}
+      />
       <FirstLaunchSetupModal
         agentHookStatus={agentHookStatus}
         agentHookStatusLoading={agentHookStatusLoading}
@@ -2584,9 +2600,9 @@ function AppModalHost() {
           });
         }}
         onClose={closeModal}
-        onInstallAgentHooks={() => {
+        onInstallAgentHooks={(agentIds) => {
           setAgentHookStatusLoading(true);
-          vscode.postMessage({ type: "installAgentHooks" });
+          vscode.postMessage({ agentIds, type: "installAgentHooks" });
         }}
         onInstallGhostexCli={() => {
           setGhostexCliStatusLoading(true);
@@ -2618,9 +2634,9 @@ function AppModalHost() {
         onOpenScreenRecordingPreferences={() => {
           vscode.postMessage({ type: "openScreenRecordingPreferences" });
         }}
-        onRequestAgentHookStatus={() => {
+        onRequestAgentHookStatus={(agentIds) => {
           setAgentHookStatusLoading(true);
-          vscode.postMessage({ type: "requestAgentHookStatus" });
+          vscode.postMessage({ agentIds, type: "requestAgentHookStatus" });
         }}
         onRequestGhostexCliStatus={() => {
           setGhostexCliStatusLoading(true);
@@ -3671,6 +3687,7 @@ function isModalRenderable({
     case "previousSessions":
     case "scratchPad":
     case "discoverGhostex":
+    case "watchGhostexVideo":
     case "tipsAndTricks":
     case "firstLaunchSetup":
       return true;

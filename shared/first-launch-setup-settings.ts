@@ -1,7 +1,7 @@
 import type { ghostexSettings } from "./ghostex-settings";
 
 export const FIRST_LAUNCH_SETUP_SEEN_STORAGE_KEY = "ghostex-native-first-launch-setup-seen";
-export const FIRST_LAUNCH_SETUP_CURRENT_REVISION = "2026-06-07-first-launch-refresh";
+export const FIRST_LAUNCH_SETUP_CURRENT_REVISION = "2026-06-18-short-first-launch";
 export const HIGHLIGHTED_FEATURES_SEEN_STORAGE_KEY = "ghostex-native-highlighted-features-seen";
 export const HIGHLIGHTED_FEATURES_CURRENT_REVISION = "2026-06-16-highlighted-features-launch";
 
@@ -34,6 +34,12 @@ type FirstLaunchSetupSeenStorage = Pick<Storage, "getItem" | "setItem">;
  * intro. Store a separate revision marker so existing users who already
  * completed first-launch setup still see the new feature tour once after
  * updating, while future launches and manual replays remain independent.
+ *
+ * CDXC:FirstLaunchSetup 2026-06-18-02:29:
+ * The visible first-time setup flow is shortened to Welcome, Agent Hooks, and
+ * Bundled Agent Skills. Bump the setup revision so installs that were silently
+ * marked seen by the temporary no-startup-flow behavior get this shorter setup
+ * once.
  */
 export type FirstLaunchSetupMainSettingKey =
   | keyof ghostexSettings

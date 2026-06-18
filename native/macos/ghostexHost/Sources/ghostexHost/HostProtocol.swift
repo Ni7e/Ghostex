@@ -474,6 +474,13 @@ struct OpenFloatingEditor: Decodable {
 }
 
 struct SessionCommand: Decodable {
+  /**
+   CDXC:SessionSleep 2026-06-18-03:10:
+   Sleep closes the live Ghostty renderer but keeps the native pane slot as a
+   black wake placeholder. Decode this separately from persistence-provider
+   preservation because it controls native split/tree cleanup only.
+  */
+  let preserveLayoutPlaceholder: Bool?
   let preservePersistenceSession: Bool?
   let sessionId: String
 }

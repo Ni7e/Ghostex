@@ -92,6 +92,17 @@ describe("first launch setup visible settings", () => {
     expect(hasSeenCurrentFirstLaunchSetup(storage)).toBe(true);
   });
 
+  test("treats the pre-shortened setup revision as stale", () => {
+    /**
+     * CDXC:FirstLaunchSetup 2026-06-18-02:29:
+     * The shortened Welcome / Agent Hooks / Bundled Agent Skills flow should
+     * open once even for installs that stored the previous setup revision.
+     */
+    const storage = createFirstLaunchSetupStorage("2026-06-07-first-launch-refresh");
+
+    expect(hasSeenCurrentFirstLaunchSetup(storage)).toBe(false);
+  });
+
   test("tracks highlighted features as a separate update announcement revision", () => {
     /**
      * CDXC:HighlightedFeatures 2026-06-16-18:55:

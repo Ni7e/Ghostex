@@ -16,6 +16,57 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("first launch setup modal source", () => {
+  test("limits the visible first-launch sequence to welcome, hooks, and bundled skills", () => {
+    /*
+    CDXC:FirstLaunchSetup 2026-06-18-02:29:
+    The first-time launch modal should only show Welcome, Agent Hooks, and
+    Bundled Agent Skills while retaining the older page components in source for
+    future reuse.
+    */
+    const visiblePages = sourceBetween(
+      firstLaunchSetupModalSource,
+      "const FIRST_LAUNCH_SETUP_PAGES",
+      "const FIRST_LAUNCH_GUIDE_PAGES",
+    );
+
+    expect(visiblePages).toMatch(/"welcome",\s*"hooks",\s*"skills"/u);
+    expect(visiblePages).not.toContain('"preferences"');
+    expect(visiblePages).not.toContain('"cli"');
+    expect(visiblePages).not.toContain('"browserControl"');
+    expect(visiblePages).not.toContain('"desktopCua"');
+    expect(visiblePages).not.toContain('"agentsSessions"');
+    expect(visiblePages).not.toContain('"remoteAccess"');
+    expect(firstLaunchSetupModalSource).toContain("function getVisibleFirstLaunchSetupPage");
+    expect(firstLaunchSetupModalSource).toContain('return FIRST_LAUNCH_SETUP_PAGES.includes(page) ? page : "welcome";');
+    expect(firstLaunchSetupModalSource).toContain('const FIRST_LAUNCH_HOOK_SUPPORTED_AGENTS = DEFAULT_SIDEBAR_AGENTS.filter');
+    expect(firstLaunchSetupModalSource).toContain('agent.agentId !== "t3"');
+    expect(firstLaunchSetupModalSource).not.toContain("const FIRST_LAUNCH_HOOK_AGENT_IDS");
+    expect(firstLaunchSetupModalSource).toContain("function FirstLaunchPreferencesPage");
+    expect(firstLaunchSetupModalSource).toContain("function FirstLaunchCliPage");
+    expect(firstLaunchSetupModalSource).toContain("function FirstLaunchGuidePageView");
+  });
+
+  test("warns before skipping first-launch hooks or bundled skills", () => {
+    /*
+    CDXC:FirstLaunchSetup 2026-06-18-02:38:
+    Continuing from the first-launch Hook or Bundled Agent Skills steps without
+    installing should open a warning overlay. Install actions should live in the
+    overlay's bottom-right action row, and first-launch setup pages should not
+    expose manual refresh buttons.
+    */
+    expect(firstLaunchSetupModalSource).toContain('type FirstLaunchContinueWarning = "hooks" | "skills"');
+    expect(firstLaunchSetupModalSource).toContain("areFirstLaunchAgentHooksReady(agentHookStatus)");
+    expect(firstLaunchSetupModalSource).toContain("areFirstLaunchBundledSkillsInstalled(ghostexCliStatus)");
+    expect(firstLaunchSetupModalSource).toContain('title: "Continue without bundled agent skills?"');
+    expect(firstLaunchSetupModalSource).toContain('className="first-launch-setup-warning-backdrop"');
+    expect(firstLaunchSetupModalSource).toContain('role="alertdialog"');
+    expect(firstLaunchSetupModalSource).toContain("onInstallMissingSkills={installMissingBundledSkills}");
+    expect(firstLaunchSetupModalSource).not.toContain('title="Refresh agent hook status"');
+    expect(firstLaunchSetupModalSource).not.toContain("onRefreshStatus={onRequestGhostexCliStatus}");
+    expect(sidebarStylesSource).toContain(".ghostex-settings-shadcn .first-launch-setup-warning-backdrop");
+    expect(sidebarStylesSource).toContain("justify-content: flex-end;");
+  });
+
   test("shows Recommended as the leftmost default sidebar-style preset", () => {
     /*
     CDXC:FirstLaunchPreferences 2026-06-13-03:28:
