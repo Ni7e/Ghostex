@@ -25,6 +25,42 @@
 <!-- CDXC:Distribution 2026-06-16-21:03: The published 4.14.0 notes should use shorter grouped bullets with sub-bullets, call out substantial performance improvements, simplified settings and app surfaces, coming automations, dark theme colors with light colors coming soon, and thank @saleem-hadad for UX help. -->
 <!-- CDXC:Distribution 2026-06-16-21:38: The tiny 4.14.1 patch package should stay grouped with the 4.14.0 release page while Sparkle, GitHub assets, and Homebrew point downloads at the 4.14.1 build. -->
 <!-- CDXC:Distribution 2026-06-17-09:48: Release 4.14.2 must ship from committed main with the latest supplied Highlighted Features PNGs included in the app bundle, not from hidden stash state or older packaged images. -->
+<!-- CDXC:Distribution 2026-06-18-06:14: Release notes for 4.20.0 must cover the user-facing setup, tutorial, command palette, hook recovery, session search, native pane, CLI, README, and sidebar polish shipped after 4.14.2 while keeping the required Major and Minor top-level bullet structure. -->
+
+## 4.20.0 - 2026-06-18
+
+- Major
+  - Command palette and session search
+    - Cmd+Shift+P now exposes more app-level commands, including Previous Sessions, pinned prompts, running sessions, Scratch Pad, Agents Hub, Actions, Open Targets, Hotkeys, setup, changelog, quick terminal, quick browser tab, Automations, and project actions.
+    - Open Current Project in Finder and visible Open In targets can be launched from command mode without leaving the current workspace.
+    - Cmd+P session search is focused on visible session titles, so hidden metadata such as project paths and generic default agent titles no longer pull unrelated sessions into results.
+    - Previous-session search ranks stopped sessions by close time and hides placeholder agent names while keeping meaningful user and agent titles searchable.
+  - Setup, Tips, and tutorial flow
+    - First-launch setup is simplified to Welcome, Agent Hooks, and Bundled Agent Skills.
+    - Skipping hook or bundled-skill setup now shows a focused warning with the install action beside the deliberate continue action.
+    - The Features entry points now open a dedicated Ghostty tutorial video modal, with the older Highlighted Features tour kept out of the main flow.
+    - The titlebar Tips menu is shorter and clearer, adds Docs, keeps Features, Setup, and Changelog handy, and can install missing agent hooks directly from its warning notice.
+  - Agent hooks and recovery controls
+    - Advanced Settings adds searchable Uninstall Hooks and Uninstall Skills actions for removing Ghostex-owned setup artifacts.
+    - gxserver can uninstall Ghostex-owned hook entries from supported agent CLI configs without touching user-managed provider hooks.
+    - Agent hook status checks prioritize Codex, Claude, and Pi first, then continue through the rest of the supported agent CLIs so setup status appears progressively.
+    - Hook warnings now explain that automatic session naming, In Progress/Needs Attention state, and sleep/resume reliability depend on current hooks.
+- Minor
+  - Native pane and titlebar polish
+    - Sleeping a terminal now keeps its split slot as a wake placeholder instead of collapsing the layout.
+    - Blank titlebar dragging is more reliable across the WebKit-to-native handoff.
+    - Open Folder now opens the selected workspace folder itself in Finder instead of revealing it from the parent folder.
+    - Native app modal sizing and tutorial video loading are tuned for the new help surfaces.
+  - Sidebar and settings polish
+    - Empty sidebars with no projects now guide first-time users toward the Projects plus button.
+    - Settings Actions editors can delete both custom actions and default actions from the edit surface.
+    - Projects settings include a project removal control.
+    - Highlighted Features arrow and keyboard navigation stop at the first and last item instead of wrapping.
+  - CLI, delayed send, and docs
+    - The CLI preserves live-written Monaco prompt edits as saved if the native bridge closes before the normal status callback.
+    - Delayed Send focuses the minutes field more reliably in native child windows and pressing Enter in the duration fields schedules the timer.
+    - README screenshots, Android/iOS download presentation, previous-session search docs, and feature-gallery copy were refreshed for the current app.
+    - The local agent instructions now explicitly avoid restarting the app unless requested.
 
 ## 4.14.2 - 2026-06-17
 
