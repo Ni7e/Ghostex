@@ -148,8 +148,38 @@ final class NativeHostBridge {
     }
     client.authenticate()
     do {
-      onCommand(try decoder.decode(HostCommand.self, from: data))
+      let command = try decoder.decode(HostCommand.self, from: data)
+      if case .openFloatingEditor(let editorCommand) = command {
+        /*
+         CDXC:PromptEditor 2026-06-19-16:45:
+         Ctrl+G latency repros need to know when the authenticated localhost bridge
+         has handed the prompt-editor command to AppKit. Log only request ids,
+         booleans, counts, and payload size so bridge timing can be correlated
+         with CLI and native-window stages without persisting paths or command text.
+         */
+        PromptEditorDebugLog.append(
+          event: "nativeBridge.command.decoded",
+          details: [
+            "commandType": "openFloatingEditor",
+            "editorKind": editorCommand.editorKind ?? "",
+            "envCount": editorCommand.env?.count ?? 0,
+            "hasCwd": editorCommand.cwd?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+            "hasFilePath": editorCommand.filePath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+            "hasOriginatingSessionId": editorCommand.originatingSessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+            "hasStatusFile": editorCommand.statusFile?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+            "payloadByteCount": data.count,
+            "requestId": editorCommand.requestId ?? "",
+          ])
+      }
+      onCommand(command)
     } catch {
+      PromptEditorDebugLog.append(
+        event: "nativeBridge.command.decodeFailed",
+        details: [
+          "errorDomain": (error as NSError).domain,
+          "errorCode": (error as NSError).code,
+          "payloadByteCount": data.count,
+        ])
       send(.terminalError(sessionId: "bridge", message: error.localizedDescription))
     }
   }

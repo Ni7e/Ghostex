@@ -2,7 +2,7 @@
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, realpathSync } from "node:fs";
-import { appendFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
 import { homedir, tmpdir } from "node:os";
@@ -2990,6 +2990,7 @@ async function promptEditorCommand(args) {
    * capability; missing capability means gte so SSH, mobile, and TUI attaches
    * never open a host-only Monaco popup by accident.
    */
+  const selectionStartedAt = Date.now();
   const { flags, rest } = parseArgs(args);
   const filePath = rest.find((arg) => arg && arg.trim() !== "");
   if (!filePath) {
@@ -2999,13 +3000,16 @@ async function promptEditorCommand(args) {
   const cwd = path.resolve(String(flags.cwd ?? process.cwd()));
   const resolvedFilePath = path.resolve(cwd, filePath);
   const backend = promptEditorBackendFromEnvironment();
+  const capabilityStartedAt = Date.now();
   const clientCapability = await zmxPromptEditorCapability();
+  const capabilityDurationMs = Date.now() - capabilityStartedAt;
   const selection = selectPromptEditorCommand({
     backend,
     clientCapability,
     filePath: resolvedFilePath,
   });
   const originatingSessionId = promptEditorOriginatingSessionIdFromEnvironment();
+  const selectionDurationMs = Date.now() - selectionStartedAt;
 
   await appendFloatingEditorLog({
     backend,
@@ -3020,7 +3024,15 @@ async function promptEditorCommand(args) {
   });
 
   if (selection.kind === "monaco") {
-    await floatingMonacoEditorCommand(args);
+    await floatingMonacoEditorCommand(args, {
+      backend,
+      capabilityDurationMs,
+      clientCapability: clientCapability ?? "",
+      hasGlobalSessionRef: Boolean(process.env.GHOSTEX_GLOBAL_SESSION_REF),
+      hasOriginatingSessionId: Boolean(originatingSessionId),
+      selectionDurationMs,
+      selectionKind: selection.kind,
+    });
     return;
   }
   await runEditorInline(selection.commandArgs, cwd);
@@ -3118,7 +3130,7 @@ function normalizedEnvironmentString(value) {
   return trimmed || undefined;
 }
 
-async function floatingMonacoEditorCommand(args) {
+async function floatingMonacoEditorCommand(args, promptEditorSelectionTrace = {}) {
   /**
    * CDXC:PromptEditor 2026-05-31-10:24:
    * Monaco prompt editing is still rendered by the running macOS app, not
@@ -3135,6 +3147,7 @@ async function floatingMonacoEditorCommand(args) {
   const port = bridgePortFromFlags(flags);
   const timeoutMs = Number(flags.timeoutMs ?? 5_000);
   const cwd = path.resolve(String(flags.cwd ?? process.cwd()));
+  const commandStartedAt = Date.now();
   const requestId = `floating-monaco-editor-${Date.now().toString(36)}-${Math.random()
     .toString(36)
     .slice(2, 8)}`;
@@ -3142,6 +3155,26 @@ async function floatingMonacoEditorCommand(args) {
   const statusFile = path.join(workDir, "status");
   const resolvedFilePath = path.resolve(cwd, filePath);
   const originatingSessionId = promptEditorOriginatingSessionIdFromEnvironment();
+  const inputByteCount = await stat(resolvedFilePath).then((fileStat) => fileStat.size).catch(() => null);
+
+  /*
+   * CDXC:PromptEditor 2026-06-19-16:45:
+   * Intermittent Ctrl+G slowness can happen before native receives the bridge
+   * command. Add safe CLI timeline breadcrumbs to the same prompt-editor debug
+   * log so repros can separate prompt-editor selection, bridge auth/connect,
+   * native open, React state, and Monaco work without recording paths or prompt
+   * text.
+   */
+  await appendPromptEditorTimelineLog("cli.monaco.requestPrepared", {
+    ...promptEditorSelectionTrace,
+    commandElapsedMs: Date.now() - commandStartedAt,
+    hasInputFile: true,
+    hasOriginatingSessionId: Boolean(originatingSessionId),
+    inputByteCount,
+    port,
+    requestId,
+    timeoutMs,
+  });
 
   await appendFloatingEditorLog({
     cwd,
@@ -3155,8 +3188,20 @@ async function floatingMonacoEditorCommand(args) {
 
   let socket;
   try {
+    const authStartedAt = Date.now();
     const authToken = await readBridgeAuthToken(flags);
+    await appendPromptEditorTimelineLog("cli.monaco.authReady", {
+      authDurationMs: Date.now() - authStartedAt,
+      requestId,
+    });
+    const connectStartedAt = Date.now();
     socket = await connectBridge(port);
+    await appendPromptEditorTimelineLog("cli.monaco.bridgeConnected", {
+      connectDurationMs: Date.now() - connectStartedAt,
+      port,
+      requestId,
+    });
+    const sendStartedAt = Date.now();
     socket.send(
       JSON.stringify({
         authToken,
@@ -3171,13 +3216,29 @@ async function floatingMonacoEditorCommand(args) {
         type: "openFloatingEditor",
       }),
     );
+    await appendPromptEditorTimelineLog("cli.monaco.bridgeCommandSent", {
+      requestId,
+      sendDurationMs: Date.now() - sendStartedAt,
+    });
+    const waitStartedAt = Date.now();
     const status = await waitForFloatingMonacoStatus(
       statusFile,
       socket,
       Number(flags.exitTimeoutMs ?? 0),
     );
+    await appendPromptEditorTimelineLog("cli.monaco.statusResolved", {
+      finalStatus: status.match(/^saved$/m) ? "saved" : status.match(/^cancelled$/m) ? "cancelled" : "unknown",
+      requestId,
+      totalDurationMs: Date.now() - commandStartedAt,
+      waitDurationMs: Date.now() - waitStartedAt,
+    });
     process.exitCode = status.match(/^saved$/m) ? 0 : 1;
   } catch (error) {
+    await appendPromptEditorTimelineLog("cli.monaco.failed", {
+      errorName: error instanceof Error ? error.name : typeof error,
+      requestId,
+      totalDurationMs: Date.now() - commandStartedAt,
+    });
     await appendFloatingEditorLog({
       error: error instanceof Error ? error.message : String(error),
       event: "cli.monaco_fallback_inline",
@@ -3358,6 +3419,10 @@ function floatingEditorLogPath() {
   return path.join(homedir(), "Library", "Logs", "ghostex", "floating-editor.log");
 }
 
+function promptEditorTimelineLogPath() {
+  return path.join(LOG_DIR, "native-prompt-editor-debug.log");
+}
+
 async function appendFloatingEditorLog(details) {
   /**
    * CDXC:Diagnostics 2026-05-16-07:23:
@@ -3378,6 +3443,77 @@ async function appendFloatingEditorLog(details) {
       timestamp: new Date().toISOString(),
     })}\n`,
   );
+}
+
+async function appendPromptEditorTimelineLog(event, details = {}) {
+  if (!(await readDebuggingMode())) {
+    return;
+  }
+  const logPath = promptEditorTimelineLogPath();
+  await mkdir(path.dirname(logPath), { recursive: true });
+  const payload = sanitizePromptEditorTimelinePayload({
+    ...details,
+    event,
+    source: "ghostex-cli",
+  });
+  await appendFile(logPath, `[${new Date().toISOString()}] ${JSON.stringify(payload)}\n`);
+}
+
+function sanitizePromptEditorTimelinePayload(payload) {
+  return Object.fromEntries(
+    Object.entries(payload).map(([key, value]) => [key, sanitizePromptEditorTimelineValue(key, value)]),
+  );
+}
+
+function sanitizePromptEditorTimelineValue(key, value) {
+  if (value === undefined) {
+    return null;
+  }
+  if (value === null || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  const normalizedKey = String(key).toLowerCase();
+  if (Array.isArray(value)) {
+    return { count: value.length, redacted: true };
+  }
+  if (typeof value === "object") {
+    return sanitizePromptEditorTimelinePayload(value);
+  }
+  const text = String(value);
+  if (normalizedKey.includes("token") || normalizedKey.includes("secret") || normalizedKey.includes("auth")) {
+    return "[redacted:secret]";
+  }
+  if (
+    normalizedKey.includes("path") ||
+    normalizedKey.includes("cwd") ||
+    normalizedKey.includes("dir") ||
+    normalizedKey.includes("file") ||
+    text.match(/^(~\/|\/Users\/|\/Volumes\/|\/private\/|\/tmp\/|\/var\/folders\/)/u)
+  ) {
+    return "[redacted:path]";
+  }
+  if (normalizedKey.includes("url") || text.match(/^https?:\/\//iu)) {
+    return "[redacted:url]";
+  }
+  if (normalizedKey.includes("command") || normalizedKey.includes("text") || normalizedKey.includes("message")) {
+    return "[redacted]";
+  }
+  if (
+    normalizedKey === "event" ||
+    normalizedKey === "source" ||
+    normalizedKey === "requestid" ||
+    normalizedKey === "backend" ||
+    normalizedKey === "clientcapability" ||
+    normalizedKey === "selectionkind" ||
+    normalizedKey === "finalstatus" ||
+    normalizedKey === "errorname"
+  ) {
+    return text.replace(/[\r\n]/gu, "\\n");
+  }
+  return "[redacted]";
 }
 
 async function readDebuggingMode() {

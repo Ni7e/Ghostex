@@ -1075,14 +1075,6 @@ static bool GhostexCEFOriginsMatch(NSString* lhs, NSString* rhs) {
   return leftOrigin.length > 0 && [leftOrigin isEqualToString:rightOrigin];
 }
 
-static NSString* GhostexCEFNormalizedPreferredColorScheme(NSString* value) {
-  NSString* normalized = [[value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
-  if ([normalized isEqualToString:@"light"] || [normalized isEqualToString:@"dark"]) {
-    return normalized;
-  }
-  return nil;
-}
-
 static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestContext> requestContext,
                                                           NSString* trustedOrigin) {
   NSString* normalizedOrigin = GhostexCEFNormalizedOrigin(trustedOrigin);
@@ -1111,7 +1103,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   NSView* cefView_;
   NSString* currentURLString_;
   NSString* pageTitle_;
-  NSString* preferredColorScheme_;
+  BOOL forcesLightPageAppearance_;
   BOOL canGoBack_;
   BOOL canGoForward_;
   BOOL isLoading_;
@@ -1120,7 +1112,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   NSUInteger layoutPass_;
   NSUInteger internalGeometryDiagnosticSequence_;
   NSUInteger viewportDiagnosticSequence_;
-  int preferredColorSchemeDevToolsMessageID_;
+  int pageAppearanceDevToolsMessageID_;
   NSTimeInterval lastInternalGeometryDiagnosticAt_;
   NSTimeInterval lastViewportDiagnosticAt_;
   NSRect lastInternalGeometryDiagnosticBounds_;
@@ -1128,7 +1120,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
 }
 - (void)ghostexCEFPinHostedViewToBoundsWithReason:(NSString*)reason;
 - (void)ghostexCEFDidCreateBrowser:(CefRefPtr<CefBrowser>)browser;
-- (void)ghostexCEFApplyPreferredColorSchemeIfPossible;
+- (void)ghostexCEFApplyPageAppearanceMediaIfPossible;
 @end
 
 @implementation GhostexCEFBrowserView
@@ -1197,7 +1189,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   cefView_.autoresizingMask = NSViewNotSizable;
   [self ghostexCEFPinHostedViewToBoundsWithReason:@"createBrowser"];
   [self setNeedsLayout:YES];
-  [self ghostexCEFApplyPreferredColorSchemeIfPossible];
+  [self ghostexCEFApplyPageAppearanceMediaIfPossible];
 
   if (initialURL_.length > 0 && !didGiveInitialURLToBrowserCreate_) {
     [self loadURLString:initialURL_];
@@ -1512,36 +1504,35 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   return browser_ ? browser_->GetHost()->GetZoomLevel() : 0.0;
 }
 
-- (void)setPreferredColorScheme:(NSString*)colorScheme {
-  NSString* normalized = GhostexCEFNormalizedPreferredColorScheme(colorScheme);
-  BOOL isSame = (preferredColorScheme_ == nil && normalized == nil) || [preferredColorScheme_ isEqualToString:normalized];
-  preferredColorScheme_ = [normalized copy];
-  if (!isSame) {
-    [self ghostexCEFApplyPreferredColorSchemeIfPossible];
+- (void)setForcesLightPageAppearance:(BOOL)forcesLightPageAppearance {
+  if (forcesLightPageAppearance_ == forcesLightPageAppearance) {
+    return;
   }
+  forcesLightPageAppearance_ = forcesLightPageAppearance;
+  [self ghostexCEFApplyPageAppearanceMediaIfPossible];
 }
 
-- (void)ghostexCEFApplyPreferredColorSchemeIfPossible {
+- (void)ghostexCEFApplyPageAppearanceMediaIfPossible {
   if (!browser_) {
     return;
   }
   /*
-  CDXC:ChromiumBrowserPanes 2026-06-18-22:50:
-  Chromium does not use AppKit's per-view appearance for page media queries. Browser color-scheme menu choices must become DevTools `Emulation.setEmulatedMedia` updates so sites observe System, Light, or Dark through `prefers-color-scheme` instead of the menu merely storing a value.
+  CDXC:BrowserPageAppearance 2026-06-19-11:47:
+  Browser panes no longer expose System/Light/Dark controls or per-origin persistence. Toolbar browser pages should always boot as light because CEF otherwise inherits macOS dark appearance before page scripts run, which made Excalidraw+ choose its dark landing-page CSS after app restart.
   */
   CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
   params->SetString("media", "");
   CefRefPtr<CefListValue> features = CefListValue::Create();
-  if (preferredColorScheme_.length > 0) {
+  if (forcesLightPageAppearance_) {
     CefRefPtr<CefDictionaryValue> feature = CefDictionaryValue::Create();
     feature->SetString("name", "prefers-color-scheme");
-    feature->SetString("value", [preferredColorScheme_ UTF8String]);
+    feature->SetString("value", "light");
     features->SetDictionary(0, feature);
   }
   params->SetList("features", features);
-  preferredColorSchemeDevToolsMessageID_ += 1;
+  pageAppearanceDevToolsMessageID_ += 1;
   browser_->GetHost()->ExecuteDevToolsMethod(
-    preferredColorSchemeDevToolsMessageID_,
+    pageAppearanceDevToolsMessageID_,
     CefString("Emulation.setEmulatedMedia"),
     params);
 }
@@ -1599,16 +1590,17 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   }
 
   client_ = new GhostexCEFBrowserClient(self);
-  NSString* creationURL = initialURL_.length > 0 ? initialURL_ : @"about:blank";
-  didGiveInitialURLToBrowserCreate_ = initialURL_.length > 0;
+  BOOL shouldStageInitialURL = forcesLightPageAppearance_ && initialURL_.length > 0;
+  NSString* creationURL = shouldStageInitialURL ? @"about:blank" : (initialURL_.length > 0 ? initialURL_ : @"about:blank");
+  didGiveInitialURLToBrowserCreate_ = !shouldStageInitialURL && initialURL_.length > 0;
   bool runsUnderGPUI = NSApp && [NSStringFromClass([NSApp class]) isEqualToString:@"GPUIApplication"];
   if (runsUnderGPUI) {
     /*
     CDXC:GPUIPhase1 2026-06-14-13:24:
     GPUI integrates CEF through external_message_pump instead of CEF's blocking run loop. In that host, synchronous browser creation can fail even with a valid AppKit child frame, so use CEF's async CreateBrowser path and attach the returned native Chromium view from OnAfterCreated.
 
-    CDXC:GPUIPhase1 2026-06-14-13:15:
-    Async GPUI browser creation must receive the intended initial URL directly. Creating about:blank first and loading from OnAfterCreated can lose the first navigation while Chromium is still finishing browser-info wiring, leaving the main browser target blank even though later address-bar navigation works.
+    CDXC:BrowserPageAppearance 2026-06-19-11:47:
+    Toolbar browser panes that force light page appearance must create about:blank first, apply Chromium media emulation, and only then load the real URL. Loading the real URL directly lets early page scripts observe the inherited dark macOS preference before Ghostex can correct it.
     */
     bool started = CefBrowserHost::CreateBrowser(
       windowInfo,
@@ -1633,7 +1625,10 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
 
   /*
   CDXC:ChromiumBrowserPanes 2026-06-18-23:58:
-  Cmd+N browser panes in the normal app should start CEF on the requested page, not about:blank followed by a second LoadURL. Passing the initial URL into CreateBrowserSync removes one visible blank-render turn while preserving the GPUI async behavior above.
+  Non-toolbar CEF panes can still start on the requested page directly, avoiding a visible blank-render turn for editor surfaces.
+
+  CDXC:BrowserPageAppearance 2026-06-19-11:47:
+  Toolbar browser panes intentionally stage the first public navigation behind about:blank so the fixed light page appearance is in place before sites such as Excalidraw+ evaluate `prefers-color-scheme`.
   */
   browser_ = CefBrowserHost::CreateBrowserSync(
     windowInfo,
@@ -1659,7 +1654,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   cefView_.autoresizingMask = NSViewNotSizable;
   [self ghostexCEFPinHostedViewToBoundsWithReason:@"createBrowser"];
   [self setNeedsLayout:YES];
-  [self ghostexCEFApplyPreferredColorSchemeIfPossible];
+  [self ghostexCEFApplyPageAppearanceMediaIfPossible];
 
   if (initialURL_.length > 0 && !didGiveInitialURLToBrowserCreate_) {
     [self loadURLString:initialURL_];
@@ -1672,6 +1667,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
     self.urlChangedHandler(currentURLString_);
   }
   if (browser_ && urlString.length > 0) {
+    [self ghostexCEFApplyPageAppearanceMediaIfPossible];
     browser_->GetMainFrame()->LoadURL(CefString([urlString UTF8String]));
   }
 }

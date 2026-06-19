@@ -81,6 +81,7 @@ import type {
 } from "../../shared/session-grid-contract-sidebar";
 import { resolveSidebarTheme, type SidebarTheme } from "../../shared/session-grid-contract";
 import {
+  getSidebarTitlebarGradientColors,
   getSidebarTitlebarForegroundForBackground,
   KEEP_AWAKE_DURATION_OPTIONS,
   normalizeghostexSettings,
@@ -160,6 +161,7 @@ type TitlebarOpenTargetsSettings = {
 const GHOSTEX_CHANGELOG_URL = "https://github.com/maddada/ghostex/releases";
 const GHOSTEX_DOCS_URL = "https://ghostex.dev/docs";
 const GHOSTEX_DISCORD_URL = "https://discord.gg/df7b3G92CS";
+const TITLEBAR_GRADIENT_BLEND_START_PERCENT = 40;
 
 type TitlebarSidebarActionsSettings = {
   commands: SidebarCommandButton[];
@@ -174,6 +176,7 @@ type TitlebarKeepAwakeSettings = {
   deactivateOnLowPowerMode: boolean;
   deactivateOnUserSwitch: boolean;
   defaultDurationMinutes: KeepAwakeDurationMinutes;
+  featureEnabled: boolean;
   hideTitlebarControl: boolean;
   preventLidSleep: boolean;
 };
@@ -431,7 +434,6 @@ const TITLEBAR_GIT_STATE_CACHE_STORAGE_PREFIX = "ghostex.titlebar.gitState.";
 const TITLEBAR_TIPS_READ_STORAGE_KEY = "ghostex.titlebar.tips.readIds";
 const KEEP_AWAKE_POWER_CHECK_INTERVAL_MS = 30_000;
 const KEEP_AWAKE_ADMIN_PROCESS_TIMEOUT_MS = 120_000;
-const CUSTOM_TITLEBAR_BACKGROUND_BRIGHTNESS_FACTOR = 0.80;
 /**
  * CDXC:NativeWindowChrome 2026-05-25-07:16:
  * The macOS app titlebar should now be 35px tall, not the earlier 45px. Keep the React titlebar height in sync with Swift's native reservation so web controls and AppKit traffic-light centering share one chrome height.
@@ -1853,6 +1855,7 @@ function App() {
   const [resourceProcesses, setResourceProcesses] = useState<ResourceProcess[]>([]);
   const sidebarCollapseChevronPointsRight =
     projectState.sidebarSide === "right" ? !projectState.sidebarCollapsed : projectState.sidebarCollapsed;
+  const keepAwakeFeatureEnabled = projectState.keepAwake.featureEnabled === true;
   /*
    * CDXC:TitlebarResources 2026-06-11-18:13:
    * The native Resources child panel should not render zero-memory or missing-session rows while the first `ps` snapshot is still loading.
@@ -2781,6 +2784,10 @@ function App() {
 
   const startKeepAwake = useCallback(
     async (durationMinutes: KeepAwakeDurationMinutes = projectState.keepAwake.defaultDurationMinutes) => {
+      if (!keepAwakeFeatureEnabled) {
+        setKeepAwakeAutoStartSuppressed(true);
+        return;
+      }
       if (keepAwakeRuntime) {
         await stopKeepAwake({ suppressAutoStart: false });
       }
@@ -2811,7 +2818,13 @@ function App() {
       localStorage.setItem(KEEP_AWAKE_RUNTIME_STORAGE_KEY, JSON.stringify(nextRuntime));
       publishKeepAwakeRuntimeSync({ suppressAutoStart: false });
     },
-    [keepAwakeRuntime, projectState.keepAwake.allowDisplaySleep, projectState.keepAwake.defaultDurationMinutes, stopKeepAwake],
+    [
+      keepAwakeFeatureEnabled,
+      keepAwakeRuntime,
+      projectState.keepAwake.allowDisplaySleep,
+      projectState.keepAwake.defaultDurationMinutes,
+      stopKeepAwake,
+    ],
   );
 
   const openKeepAwakeMenuFromTitlebar = useCallback(
@@ -2946,11 +2959,30 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!projectState.keepAwake.activateOnLaunch || keepAwakeRuntime || keepAwakeAutoStartSuppressed) {
+    /*
+     * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
+     * Keep Awake is beta-gated. If the user turns Show Beta features off while
+     * caffeinate is running, stop the hidden runtime instead of leaving a
+     * titlebar-invisible power assertion active.
+     */
+    if (keepAwakeFeatureEnabled || !keepAwakeRuntime) {
+      return;
+    }
+    void stopKeepAwake({ suppressAutoStart: true });
+  }, [keepAwakeFeatureEnabled, keepAwakeRuntime, stopKeepAwake]);
+
+  useEffect(() => {
+    if (
+      !keepAwakeFeatureEnabled ||
+      !projectState.keepAwake.activateOnLaunch ||
+      keepAwakeRuntime ||
+      keepAwakeAutoStartSuppressed
+    ) {
       return;
     }
     void startKeepAwake();
   }, [
+    keepAwakeFeatureEnabled,
     keepAwakeAutoStartSuppressed,
     keepAwakeRuntime,
     projectState.keepAwake.activateOnLaunch,
@@ -2958,7 +2990,9 @@ function App() {
   ]);
 
   useEffect(() => {
-    const desired = Boolean(keepAwakeRuntime && projectState.keepAwake.preventLidSleep);
+    const desired = Boolean(
+      keepAwakeFeatureEnabled && keepAwakeRuntime && projectState.keepAwake.preventLidSleep,
+    );
     const ghostexEnabledLidSleepPrevention =
       localStorage.getItem(KEEP_AWAKE_LID_SLEEP_STORAGE_KEY) === "enabled";
     if (!desired && !ghostexEnabledLidSleepPrevention) {
@@ -2994,7 +3028,7 @@ function App() {
         window.clearInterval(interval);
       }
     };
-  }, [keepAwakeRuntime, projectState.keepAwake.preventLidSleep]);
+  }, [keepAwakeFeatureEnabled, keepAwakeRuntime, projectState.keepAwake.preventLidSleep]);
 
   useEffect(() => {
     if (!keepAwakeRuntime) {
@@ -3021,6 +3055,7 @@ function App() {
 
   useEffect(() => {
     const shouldCheckExternalDisplay =
+      keepAwakeFeatureEnabled &&
       !keepAwakeRuntime &&
       !keepAwakeAutoStartSuppressed &&
       projectState.keepAwake.activateOnExternalDisplay;
@@ -3073,6 +3108,7 @@ function App() {
     return () => window.clearInterval(interval);
   }, [
     keepAwakeAutoStartSuppressed,
+    keepAwakeFeatureEnabled,
     keepAwakeRuntime,
     projectState.keepAwake.activateOnExternalDisplay,
     projectState.keepAwake.batteryThresholdPercent,
@@ -3271,9 +3307,10 @@ function App() {
     }
 
     if (projectState.customSidebarTitlebarColorsEnabled) {
-      const titlebarBackgroundColor = getCustomTitlebarBackgroundForSidebarBackground(
+      const titlebarGradientColors = getSidebarTitlebarGradientColors(
         projectState.customSidebarTitlebarBackgroundColor,
       );
+      const titlebarBackground = `linear-gradient(90deg, ${titlebarGradientColors.titlebarLeft} 0%, ${titlebarGradientColors.titlebarLeft} ${TITLEBAR_GRADIENT_BLEND_START_PERCENT}%, ${titlebarGradientColors.titlebarRight} 100%)`;
       /**
        * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
        * The React titlebar is a separate WKWebView from the sidebar. Apply the
@@ -3290,20 +3327,28 @@ function App() {
        * Custom titlebar separators darken as the slider-selected background gets
        * lighter, but only inside the real titlebar host.
        *
-       * CDXC:SidebarTitlebarColors 2026-06-17-12:50:
-       * The visual trial keeps the sidebar at the selected custom background
-       * while rendering the titlebar 20% darker, replacing the earlier 15%
-       * offset. Compute the titlebar token here so imported sidebar styles
-       * inside this WKWebView align with the AppKit titlebar backing layer.
+       * CDXC:SidebarTitlebarColors 2026-06-19-12:33:
+       * The titlebar should start with the sidebar gradient's top color and
+       * use a separate surface token for the gradient paint.
+       *
+       * CDXC:SidebarTitlebarColors 2026-06-19-13:26:
+       * Keep the titlebar's left 40% on the sidebar top stop so it blends with
+       * the sidebar edge, then fade to the sidebar bottom stop at the right.
+       * The titlebar gradient should now darken across the strip rather than
+       * brighten at the right edge.
        */
       document.body.dataset.customSidebarTitlebarColors = "true";
       document.body.style.setProperty(
         "--app-titlebar-background",
-        titlebarBackgroundColor,
+        titlebarGradientColors.titlebarLeft,
+      );
+      document.body.style.setProperty(
+        "--app-titlebar-surface-background",
+        titlebarBackground,
       );
       document.body.style.setProperty(
         "--custom-sidebar-titlebar-background-color",
-        titlebarBackgroundColor,
+        titlebarGradientColors.titlebarLeft,
       );
       document.body.style.setProperty(
         "--custom-sidebar-titlebar-foreground-color",
@@ -3315,11 +3360,12 @@ function App() {
       );
       document.body.style.setProperty(
         "--titlebar-button-border-color",
-        getTitlebarButtonSeparatorColorForBackground(titlebarBackgroundColor),
+        getTitlebarButtonSeparatorColorForBackground(titlebarGradientColors.titlebarLeft),
       );
     } else {
       delete document.body.dataset.customSidebarTitlebarColors;
       document.body.style.removeProperty("--app-titlebar-background");
+      document.body.style.removeProperty("--app-titlebar-surface-background");
       document.body.style.removeProperty("--app-foreground");
       document.body.style.removeProperty("--custom-sidebar-titlebar-background-color");
       document.body.style.removeProperty("--custom-sidebar-titlebar-foreground-color");
@@ -3329,6 +3375,7 @@ function App() {
     return () => {
       delete document.body.dataset.customSidebarTitlebarColors;
       document.body.style.removeProperty("--app-titlebar-background");
+      document.body.style.removeProperty("--app-titlebar-surface-background");
       document.body.style.removeProperty("--app-foreground");
       document.body.style.removeProperty("--custom-sidebar-titlebar-background-color");
       document.body.style.removeProperty("--custom-sidebar-titlebar-foreground-color");
@@ -3639,7 +3686,7 @@ function App() {
                 </Button>
               </TitlebarAppTooltip>
             </ButtonGroup>
-            {!projectState.keepAwake.hideTitlebarControl ? (
+            {keepAwakeFeatureEnabled && !projectState.keepAwake.hideTitlebarControl ? (
               <ButtonGroup
                 className="titlebar-open-group titlebar-keep-awake-group"
                 data-titlebar-dropdown-anchor
@@ -4419,32 +4466,6 @@ function parseTitlebarHexRgbColor(color: string): TitlebarRgbColor | undefined {
   };
 }
 
-function formatTitlebarHexRgbColor({ red, green, blue }: TitlebarRgbColor): string {
-  const formatChannel = (channel: number) =>
-    Math.min(255, Math.max(0, Math.round(channel))).toString(16).padStart(2, "0");
-  return `#${formatChannel(red)}${formatChannel(green)}${formatChannel(blue)}`;
-}
-
-function getCustomTitlebarBackgroundForSidebarBackground(backgroundColor: string): string {
-  /**
-   * CDXC:SidebarTitlebarColors 2026-06-17-12:50:
-   * The custom titlebar visual trial should be derived from the selected
-   * sidebar background at 80% brightness, replacing the earlier 85% brightness
-   * offset, not persisted as a second setting. Keep invalid values unchanged so
-   * the existing theme fallback path remains responsible for bad input.
-   */
-  const color = parseTitlebarHexRgbColor(backgroundColor);
-  if (!color) {
-    return backgroundColor;
-  }
-
-  return formatTitlebarHexRgbColor({
-    red: color.red * CUSTOM_TITLEBAR_BACKGROUND_BRIGHTNESS_FACTOR,
-    green: color.green * CUSTOM_TITLEBAR_BACKGROUND_BRIGHTNESS_FACTOR,
-    blue: color.blue * CUSTOM_TITLEBAR_BACKGROUND_BRIGHTNESS_FACTOR,
-  });
-}
-
 function getTitlebarButtonSeparatorColorForBackground(backgroundColor: string): string {
   /**
    * CDXC:SidebarTitlebarColors 2026-06-15-15:01:
@@ -4464,11 +4485,11 @@ function getTitlebarButtonSeparatorColorForBackground(backgroundColor: string): 
    * separator curve, then switch to the dark divider floor once the background
    * reaches the new default range.
    *
-   * CDXC:SidebarTitlebarColors 2026-06-17-12:50:
-   * After the titlebar became 20% darker than the sidebar, the 93 contrast
-   * titlebar resolves near #111111 and should not use the near-black separator
-   * floor. Keep very dark titlebars on a lighter divider floor so separators
-   * between titlebar items stay visible instead of blending into the chrome.
+   * CDXC:SidebarTitlebarColors 2026-06-19-12:33:
+   * The titlebar now paints a horizontal gradient but separators use the solid
+   * left stop. Keep very dark left stops on a lighter divider floor so
+   * separators between titlebar items stay visible instead of blending into the
+   * chrome.
    */
   const color = parseTitlebarHexRgbColor(backgroundColor);
   if (!color) {
@@ -4815,6 +4836,13 @@ function readInitialTitlebarUpdateDownloading(bootstrap: Record<string, unknown>
 function createTitlebarKeepAwakeSettings(
   settings: ReturnType<typeof normalizeghostexSettings>,
 ): TitlebarKeepAwakeSettings {
+  /*
+   * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
+   * The macOS Keep Awake feature is beta-only. Build the titlebar-facing state
+   * with one effective visibility flag so startup, Settings sync, and native
+   * child dropdown windows all hide the button when Show Beta features is off.
+   */
+  const featureEnabled = settings.showBetaFeatures;
   return {
     activateOnExternalDisplay: settings.keepAwakeActivateOnExternalDisplay,
     activateOnLaunch: settings.keepAwakeActivateOnLaunch,
@@ -4824,7 +4852,8 @@ function createTitlebarKeepAwakeSettings(
     deactivateOnLowPowerMode: settings.keepAwakeDeactivateOnLowPowerMode,
     deactivateOnUserSwitch: settings.keepAwakeDeactivateOnUserSwitch,
     defaultDurationMinutes: settings.keepAwakeDefaultDurationMinutes,
-    hideTitlebarControl: settings.hideKeepAwakeTitlebarControl,
+    featureEnabled,
+    hideTitlebarControl: !featureEnabled || settings.hideKeepAwakeTitlebarControl,
     preventLidSleep: settings.keepAwakePreventLidSleep,
   };
 }
@@ -6538,7 +6567,7 @@ const styles = {
   },
   titlebar: {
     alignItems: "center",
-    background: "var(--app-titlebar-background)",
+    background: "var(--app-titlebar-surface-background, var(--app-titlebar-background))",
     display: "flex",
     height: TITLEBAR_HEIGHT,
     justifyContent: "center",

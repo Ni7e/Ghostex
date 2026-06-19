@@ -77,11 +77,27 @@ private let ghostexDefaultSidebarTitlebarForegroundColor = "#d8d8d8"
 private let ghostexDefaultSidebarTitlebarDarkForegroundColor = "#262626"
 private let ghostexDefaultSidebarTitlebarBackgroundColor = "#0e0e0e"
 private let ghostexDefaultSidebarTitlebarBackgroundTintColor = "#ffffff"
-private let ghostexDefaultSidebarTitlebarBackgroundDarknessPercent = 93
+private let ghostexDefaultSidebarTitlebarBackgroundDarknessPercent = 95
 private let ghostexMinimumSidebarTitlebarBackgroundDarknessPercent = 85
 private let ghostexMaximumSidebarTitlebarBackgroundDarknessPercent = 100
-private let ghostexSidebarTitlebarBackgroundTintStrength = 0.12
-private let ghostexCustomTitlebarBackgroundBrightnessFactor: CGFloat = 0.80
+private let ghostexSidebarTitlebarDarkTintBackgrounds: [String: String] = [
+  "#000000": "#000000",
+  "#ffffff": "#0e0e0e",
+  "#808080": "#0e0e0e",
+  "#4f6672": "#0c0e10",
+  "#884444": "#0d0005",
+  "#8a5330": "#100502",
+  "#8a6a2f": "#110a02",
+  "#657a3f": "#0c1005",
+  "#3f7a5f": "#031006",
+  "#2f7d66": "#03100c",
+  "#287c7f": "#031011",
+  "#336699": "#0c0e11",
+  "#4f5f96": "#080912",
+  "#6c4f8f": "#0a0611",
+  "#854f7a": "#100611",
+  "#8a4f5f": "#100409",
+]
 
 private struct SidebarTitlebarCustomChromeColors {
   let enabled: Bool
@@ -121,6 +137,82 @@ private func clampedSidebarTitlebarColorChannel(_ value: Double) -> Int {
   min(255, max(0, Int(value.rounded())))
 }
 
+private func sidebarTitlebarRgbComponents(
+  forColor rawColor: String?,
+  fallback: String
+) -> (red: Double, green: Double, blue: Double)? {
+  let color = normalizedSidebarTitlebarHexColor(rawColor, fallback: fallback)
+  var rgb: UInt64 = 0
+  guard Scanner(string: String(color.dropFirst())).scanHexInt64(&rgb) else {
+    return nil
+  }
+  return (
+    red: Double((rgb >> 16) & 0xff),
+    green: Double((rgb >> 8) & 0xff),
+    blue: Double(rgb & 0xff)
+  )
+}
+
+private func sidebarTitlebarTintDirection(
+  forColor color: (red: Double, green: Double, blue: Double)
+) -> (red: Double, green: Double, blue: Double) {
+  let average = (color.red + color.green + color.blue) / 3.0
+  let redDirection = color.red - average
+  let greenDirection = color.green - average
+  let blueDirection = color.blue - average
+  let magnitude = max(abs(redDirection), abs(greenDirection), abs(blueDirection))
+  if magnitude < 0.5 {
+    return (0.0, 0.0, 0.0)
+  }
+  return (redDirection / magnitude, greenDirection / magnitude, blueDirection / magnitude)
+}
+
+private func sidebarTitlebarDefaultDarkTintBackground(
+  forTintColor tintColor: String
+) -> (red: Double, green: Double, blue: Double) {
+  if let calibratedBackground = ghostexSidebarTitlebarDarkTintBackgrounds[tintColor],
+    let calibrated = sidebarTitlebarRgbComponents(
+      forColor: calibratedBackground,
+      fallback: ghostexDefaultSidebarTitlebarBackgroundColor)
+  {
+    return calibrated
+  }
+  guard let tint = sidebarTitlebarRgbComponents(
+    forColor: tintColor,
+    fallback: ghostexDefaultSidebarTitlebarBackgroundTintColor)
+  else {
+    return (14.0, 14.0, 14.0)
+  }
+  let channelRange = max(tint.red, tint.green, tint.blue) - min(tint.red, tint.green, tint.blue)
+  if channelRange < 1.0 {
+    return (14.0, 14.0, 14.0)
+  }
+  let direction = sidebarTitlebarTintDirection(forColor: tint)
+  return (
+    red: 14.0 + direction.red * 4.0,
+    green: 14.0 + direction.green * 4.0,
+    blue: 14.0 + direction.blue * 4.0
+  )
+}
+
+private func scaledSidebarTitlebarDarkTintBackground(
+  _ background: (red: Double, green: Double, blue: Double),
+  darkness: Int
+) -> (red: Double, green: Double, blue: Double) {
+  if darkness == ghostexMaximumSidebarTitlebarBackgroundDarknessPercent {
+    return (0.0, 0.0, 0.0)
+  }
+  let defaultRange = Double(
+    ghostexMaximumSidebarTitlebarBackgroundDarknessPercent -
+      ghostexDefaultSidebarTitlebarBackgroundDarknessPercent)
+  let scale = Double(ghostexMaximumSidebarTitlebarBackgroundDarknessPercent - darkness) / defaultRange
+  return (
+    red: background.red * scale,
+    green: background.green * scale,
+    blue: background.blue * scale
+  )
+}
+
 private func sidebarTitlebarBackgroundDarknessPercent(forColor rawColor: String?) -> Int {
   let color = normalizedSidebarTitlebarHexColor(
     rawColor,
@@ -145,7 +237,7 @@ private func sidebarTitlebarBackgroundColor(
    CDXC:SidebarTitlebarColors 2026-06-15-13:45:
    The custom sidebar/titlebar background is now a user-facing contrast slider.
    Native startup should prefer the numeric darkness value and derive the same
-   grayscale background as React, falling back to legacy saved hex colors only
+   calibrated dark background as React, falling back to legacy saved hex colors only
    for migration.
    CDXC:SidebarTitlebarColors 2026-06-15-15:01:
    Clamp startup contrast to the 85-100 range so AppKit-owned chrome cannot
@@ -154,13 +246,16 @@ private func sidebarTitlebarBackgroundColor(
    The saved field still uses the darkness name for compatibility, but native
    code should treat it as the value behind the Settings Contrast control.
    CDXC:SidebarTitlebarColors 2026-06-15-15:28:
-   Native startup must apply the same subtle web-picker tint as shared Settings.
-   Neutral same-channel tints should preserve the original gray, while tinted
-   colors only offset hue around the contrast-selected channel.
+   Native startup must apply the same web-picker tint result as shared Settings.
+   Neutral same-channel tints should preserve the original gray.
    CDXC:SidebarTitlebarColors 2026-06-16-14:28:
-   Default custom chrome now starts at 93 contrast with white #FFFFFF tint.
+   Default custom chrome now starts at 95 contrast with white #FFFFFF tint.
    Missing Settings must use that explicit default; only valid legacy saved
    background colors should seed startup contrast during migration.
+   CDXC:SidebarTitlebarColors 2026-06-19-14:20:
+   Startup chrome should mirror shared Settings: visible tint swatches map to
+   calibrated very-dark applied backgrounds, white/black/gray remain neutral,
+   and the Contrast slider scales those dark targets before React hydrates.
    */
   let trimmedRawColor = rawColor?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
   let hasValidLegacyBackgroundColor =
@@ -176,29 +271,14 @@ private func sidebarTitlebarBackgroundColor(
   } else {
     darkness = fallbackDarkness
   }
-  let channel: Int
-  if darkness == 100 {
-    channel = 0
-  } else {
-    channel = min(255, Int((280.0 * ((100.0 - Double(darkness)) / 100.0)).rounded()))
-  }
   let tintColor = normalizedSidebarTitlebarHexColor(
     rawTintColor,
     fallback: ghostexDefaultSidebarTitlebarBackgroundTintColor)
-  var tintRgb: UInt64 = 0
-  guard Scanner(string: String(tintColor.dropFirst())).scanHexInt64(&tintRgb) else {
-    return String(format: "#%02x%02x%02x", channel, channel, channel)
-  }
-  let tintRed = Double((tintRgb >> 16) & 0xff)
-  let tintGreen = Double((tintRgb >> 8) & 0xff)
-  let tintBlue = Double(tintRgb & 0xff)
-  let tintAverage = (tintRed + tintGreen + tintBlue) / 3.0
-  let red = clampedSidebarTitlebarColorChannel(
-    Double(channel) + (tintRed - tintAverage) * ghostexSidebarTitlebarBackgroundTintStrength)
-  let green = clampedSidebarTitlebarColorChannel(
-    Double(channel) + (tintGreen - tintAverage) * ghostexSidebarTitlebarBackgroundTintStrength)
-  let blue = clampedSidebarTitlebarColorChannel(
-    Double(channel) + (tintBlue - tintAverage) * ghostexSidebarTitlebarBackgroundTintStrength)
+  let defaultBackground = sidebarTitlebarDefaultDarkTintBackground(forTintColor: tintColor)
+  let scaledBackground = scaledSidebarTitlebarDarkTintBackground(defaultBackground, darkness: darkness)
+  let red = clampedSidebarTitlebarColorChannel(scaledBackground.red)
+  let green = clampedSidebarTitlebarColorChannel(scaledBackground.green)
+  let blue = clampedSidebarTitlebarColorChannel(scaledBackground.blue)
   return String(format: "#%02x%02x%02x", red, green, blue)
 }
 
@@ -224,6 +304,40 @@ private func sidebarTitlebarForegroundColor(forBackground rawColor: String?) -> 
     return ghostexDefaultSidebarTitlebarDarkForegroundColor
   }
   return ghostexDefaultSidebarTitlebarForegroundColor
+}
+
+private func sidebarTitlebarGradientTopColor(forBackground rawColor: String?) -> NSColor {
+  /*
+   CDXC:SidebarTitlebarColors 2026-06-19-12:33:
+   Custom sidebar chrome now paints a fixed-strength gradient. Native backing
+   layers cannot show the React gradient before the webviews render, so use the
+   sidebar gradient's top stop for window, sidebar, startup, and titlebar
+   backing color while the DOM paints the visible gradients.
+
+   CDXC:SidebarTitlebarColors 2026-06-19-14:20:
+   Same-channel applied tint backgrounds should not inherit the old cool
+   fallback direction. Use a zero gradient vector for neutral white, black, and
+   gray selections so native startup chrome stays neutral.
+   */
+  let color = normalizedSidebarTitlebarHexColor(
+    rawColor,
+    fallback: ghostexDefaultSidebarTitlebarBackgroundColor)
+  var rgb: UInt64 = 0
+  guard Scanner(string: String(color.dropFirst())).scanHexInt64(&rgb) else {
+    return NSColor(srgbRed: 0.055, green: 0.055, blue: 0.055, alpha: 1.0)
+  }
+  let red = Double((rgb >> 16) & 0xff)
+  let green = Double((rgb >> 8) & 0xff)
+  let blue = Double(rgb & 0xff)
+  let direction = sidebarTitlebarTintDirection(forColor: (red: red, green: green, blue: blue))
+  let topRed = clampedSidebarTitlebarColorChannel(red + direction.red * 2.0)
+  let topGreen = clampedSidebarTitlebarColorChannel(green + direction.green * 2.0)
+  let topBlue = clampedSidebarTitlebarColorChannel(blue + direction.blue * 2.0)
+  return NSColor(
+    srgbRed: CGFloat(topRed) / 255.0,
+    green: CGFloat(topGreen) / 255.0,
+    blue: CGFloat(topBlue) / 255.0,
+    alpha: 1.0)
 }
 
 private func ghostexColorFromHex(_ rawColor: String, fallback: NSColor) -> NSColor {
@@ -3535,6 +3649,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     case .createWebPane(let command):
       workspaceView?.createWebPane(command)
     case .openFloatingEditor(let command):
+      PromptEditorDebugLog.append(
+        event: "nativeHost.command.openFloatingEditor",
+        details: [
+          "editorKind": command.editorKind ?? "",
+          "hasRootView": window?.contentView is ghostexRootView,
+          "requestId": command.requestId ?? "",
+        ])
       if let root = window?.contentView as? ghostexRootView {
         root.openFloatingEditor(command)
       } else {
@@ -5445,7 +5566,7 @@ private final class NativeSettingsStore {
      normalized custom background.
      CDXC:SidebarTitlebarColors 2026-06-15-13:45:
      The background is now a user-facing contrast slider. Prefer the numeric
-     darkness setting and derive a grayscale hex background before React
+     darkness setting and derive a calibrated dark hex background before React
      hydrates.
      CDXC:SidebarTitlebarColors 2026-06-15-15:15:
      Keep reading the existing darkness setting key while Settings labels the
@@ -5950,12 +6071,19 @@ final class ghostexRootView: NSView {
   private static let sidebarMaxWidth: CGFloat = 520
   /*
    CDXC:NativeSidebarChrome 2026-06-15-20:46:
-   The sidebar WKWebView and React sidebar component should meet the workarea at
-   the same right edge. Keep the native divider frame to the visible 1pt
-   separator instead of reserving a 6pt transparent resize strip that reads as
-   padding beside the sidebar buttons.
+   The sidebar WKWebView and React sidebar component must not extend under
+   hidden native resize hit targets. Sidebar resize ownership should come from
+   a concrete sibling divider region rather than transparent overlap on top of
+   sidebar content.
+
+   CDXC:NativeSidebarChrome 2026-06-19-14:38:
+   Match the main workspace split-pane resize model for the sidebar boundary:
+   reserve one real five-point AppKit rail between the sidebar and workspace,
+   let that rail alone own cursor and drag delivery, and keep the visible
+   separator as a one-point line inside the rail instead of using input monitors
+   or expanded hit-test routing.
    */
-  private static let dividerWidth: CGFloat = 1
+  private static let dividerWidth: CGFloat = 5
   /**
    CDXC:NativeWindowChrome 2026-05-30-06:23:
    The main work area needs a #252525 separator below the React titlebar
@@ -6648,9 +6776,22 @@ final class ghostexRootView: NSView {
 
   func openFloatingEditor(_ command: OpenFloatingEditor) {
     guard command.editorKind == "monaco" else {
+      PromptEditorDebugLog.append(
+        event: "native.open.routeLegacyFloatingEditor",
+        details: [
+          "editorKind": command.editorKind ?? "",
+          "requestId": command.requestId ?? "",
+        ])
       workspaceView.openFloatingEditor(command)
       return
     }
+    PromptEditorDebugLog.append(
+      event: "native.open.routeNativePromptEditor",
+      details: [
+        "hasPrewarmed": hasPrewarmedFloatingPromptEditor,
+        "isPrewarming": isPrewarmingFloatingPromptEditor,
+        "requestId": command.requestId ?? "",
+      ])
     openFloatingPromptEditor(command)
   }
 
@@ -6819,23 +6960,78 @@ final class ghostexRootView: NSView {
   }
 
   private func openFloatingPromptEditor(_ command: OpenFloatingEditor) {
+    let openStartedAtMs = Self.promptEditorMonotonicMilliseconds()
+    let requestId = command.requestId ?? "floating-monaco-editor-\(UUID().uuidString)"
     let interruptedPrewarm = isPrewarmingFloatingPromptEditor
+    PromptEditorDebugLog.append(
+      event: "native.open.received",
+      details: [
+        "activeAppModalKind": activeAppModalKind ?? "",
+        "activeNativeAppModalKind": activeNativeAppModalKind ?? "",
+        "appModalPresentationPending": appModalPresentationPending,
+        "controllerState": nativeAppModalWindowController?.reusableHostDebugState(for: "floatingPromptEditor") ?? [:],
+        "hasFilePath": command.filePath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+        "hasPrewarmed": hasPrewarmedFloatingPromptEditor,
+        "hasStatusFile": command.statusFile?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+        "interruptedPrewarm": interruptedPrewarm,
+        "isPrewarming": isPrewarmingFloatingPromptEditor,
+        "openStartedAtMs": openStartedAtMs,
+        "requestId": requestId,
+      ])
     if interruptedPrewarm {
       promoteFloatingPromptEditorPrewarmToUserOpen()
     }
-    let openStartedAtMs = Self.promptEditorMonotonicMilliseconds()
-    let requestId = command.requestId ?? "floating-monaco-editor-\(UUID().uuidString)"
     guard let filePath = command.filePath?.trimmingCharacters(in: .whitespacesAndNewlines),
       !filePath.isEmpty
     else {
-      writeFloatingPromptEditorStatusFile(command.statusFile, status: "cancelled")
+      PromptEditorDebugLog.append(
+        event: "native.open.cancelledBeforeRead",
+        details: [
+          "elapsedMs": max(0, Self.promptEditorMonotonicMilliseconds() - openStartedAtMs),
+          "reason": "missingFilePath",
+          "requestId": requestId,
+        ])
+      writeFloatingPromptEditorStatusFile(command.statusFile, status: "cancelled", requestId: requestId)
       return
     }
-    let initialText = (try? String(contentsOfFile: filePath, encoding: .utf8)) ?? ""
+    let fileReadStartedAtMs = Self.promptEditorMonotonicMilliseconds()
+    let initialText: String
+    do {
+      initialText = try String(contentsOfFile: filePath, encoding: .utf8)
+      PromptEditorDebugLog.append(
+        event: "native.open.fileRead",
+        details: [
+          "elapsedFromOpenMs": max(0, Self.promptEditorMonotonicMilliseconds() - openStartedAtMs),
+          "readDurationMs": max(0, Self.promptEditorMonotonicMilliseconds() - fileReadStartedAtMs),
+          "requestId": requestId,
+          "textLength": initialText.count,
+        ])
+    } catch {
+      let nsError = error as NSError
+      initialText = ""
+      PromptEditorDebugLog.append(
+        event: "native.open.fileReadFailed",
+        details: [
+          "elapsedFromOpenMs": max(0, Self.promptEditorMonotonicMilliseconds() - openStartedAtMs),
+          "errorCode": nsError.code,
+          "errorDomain": nsError.domain,
+          "readDurationMs": max(0, Self.promptEditorMonotonicMilliseconds() - fileReadStartedAtMs),
+          "requestId": requestId,
+        ])
+    }
     let language = "markdown"
     let originatingSessionId = ghostexNativeFocusSessionId(from: command.originatingSessionId)
     if let activeFloatingPromptEditor {
-      writeFloatingPromptEditorStatusFile(activeFloatingPromptEditor.statusFile, status: "cancelled")
+      PromptEditorDebugLog.append(
+        event: "native.open.previousActiveCancelled",
+        details: [
+          "previousRequestId": activeFloatingPromptEditor.requestId,
+          "requestId": requestId,
+        ])
+      writeFloatingPromptEditorStatusFile(
+        activeFloatingPromptEditor.statusFile,
+        status: "cancelled",
+        requestId: activeFloatingPromptEditor.requestId)
     }
     activeFloatingPromptEditor = ActiveFloatingPromptEditor(
       filePath: filePath,
@@ -6861,10 +7057,21 @@ final class ghostexRootView: NSView {
      AppKit owns movement, resizing, focus, and hit testing without placing a
      transparent web layer above the workspace.
      */
+    let frameStartedAtMs = Self.promptEditorMonotonicMilliseconds()
     let initialFrame = floatingPromptEditorInitialFrame(originatingSessionId: originatingSessionId)
+    let preferredContentFrame = floatingPromptEditorScreenContentFrame(fromTopLeftFrame: initialFrame)
+    PromptEditorDebugLog.append(
+      event: "native.open.frameResolved",
+      details: [
+        "elapsedFromOpenMs": max(0, Self.promptEditorMonotonicMilliseconds() - openStartedAtMs),
+        "frameDurationMs": max(0, Self.promptEditorMonotonicMilliseconds() - frameStartedAtMs),
+        "hasOriginatingSessionId": originatingSessionId != nil,
+        "requestId": requestId,
+      ])
     PromptEditorDebugLog.append(
       event: "native.open",
       details: [
+        "elapsedFromOpenMs": max(0, Self.promptEditorMonotonicMilliseconds() - openStartedAtMs),
         "initialTextLength": initialText.count,
         "interruptedPrewarm": interruptedPrewarm,
         "nativeWindow": true,
@@ -6891,9 +7098,16 @@ final class ghostexRootView: NSView {
     let opened = openNativeAppModalWindow(
       message: openMessage,
       modal: "floatingPromptEditor",
-      preferredContentFrame: floatingPromptEditorScreenContentFrame(fromTopLeftFrame: initialFrame))
+      preferredContentFrame: preferredContentFrame)
+    PromptEditorDebugLog.append(
+      event: "native.open.windowOpenReturned",
+      details: [
+        "elapsedFromOpenMs": max(0, Self.promptEditorMonotonicMilliseconds() - openStartedAtMs),
+        "opened": opened,
+        "requestId": requestId,
+      ])
     if !opened {
-      writeFloatingPromptEditorStatusFile(command.statusFile, status: "cancelled")
+      writeFloatingPromptEditorStatusFile(command.statusFile, status: "cancelled", requestId: requestId)
       activeFloatingPromptEditor = nil
     }
   }
@@ -7270,7 +7484,7 @@ final class ghostexRootView: NSView {
         "reason": reason,
         "requestId": active.requestId,
       ])
-    writeFloatingPromptEditorStatusFile(active.statusFile, status: "saved")
+    writeFloatingPromptEditorStatusFile(active.statusFile, status: "saved", requestId: active.requestId)
     finishFloatingPromptEditor(reason: reason)
   }
 
@@ -7284,7 +7498,7 @@ final class ghostexRootView: NSView {
     let text = message["text"] as? String ?? ""
     do {
       try text.write(toFile: active.filePath, atomically: true, encoding: .utf8)
-      writeFloatingPromptEditorStatusFile(active.statusFile, status: "saved")
+      writeFloatingPromptEditorStatusFile(active.statusFile, status: "saved", requestId: active.requestId)
       finishFloatingPromptEditor(reason: "saved")
     } catch {
       AppDelegate.appendAppModalErrorLog(
@@ -7596,7 +7810,7 @@ final class ghostexRootView: NSView {
     else {
       return
     }
-    writeFloatingPromptEditorStatusFile(active.statusFile, status: "cancelled")
+    writeFloatingPromptEditorStatusFile(active.statusFile, status: "cancelled", requestId: active.requestId)
     finishFloatingPromptEditor(reason: "cancelled")
   }
 
@@ -7846,12 +8060,24 @@ final class ghostexRootView: NSView {
     }
   }
 
-  private func writeFloatingPromptEditorStatusFile(_ statusFile: String?, status: String) {
+  private func writeFloatingPromptEditorStatusFile(
+    _ statusFile: String?,
+    status: String,
+    requestId: String? = nil
+  ) {
     guard let statusFile = statusFile?.trimmingCharacters(in: .whitespacesAndNewlines),
       !statusFile.isEmpty
     else {
+      PromptEditorDebugLog.append(
+        event: "native.status.writeSkipped",
+        details: [
+          "reason": "missingStatusFile",
+          "requestId": requestId ?? "",
+          "status": status,
+        ])
       return
     }
+    let startedAtMs = Self.promptEditorMonotonicMilliseconds()
     do {
       let url = URL(fileURLWithPath: statusFile)
       try FileManager.default.createDirectory(
@@ -7859,7 +8085,24 @@ final class ghostexRootView: NSView {
         withIntermediateDirectories: true
       )
       try "\(status)\n".write(to: url, atomically: true, encoding: .utf8)
+      PromptEditorDebugLog.append(
+        event: "native.status.write",
+        details: [
+          "durationMs": max(0, Self.promptEditorMonotonicMilliseconds() - startedAtMs),
+          "requestId": requestId ?? "",
+          "status": status,
+        ])
     } catch {
+      let nsError = error as NSError
+      PromptEditorDebugLog.append(
+        event: "native.status.writeFailed",
+        details: [
+          "durationMs": max(0, Self.promptEditorMonotonicMilliseconds() - startedAtMs),
+          "errorCode": nsError.code,
+          "errorDomain": nsError.domain,
+          "requestId": requestId ?? "",
+          "status": status,
+        ])
       AppDelegate.appendAppModalErrorLog(
         area: "PromptEditor:status",
         message: "Failed to write prompt editor status \(status): \(error.localizedDescription)",
@@ -7910,7 +8153,10 @@ final class ghostexRootView: NSView {
   }
 
   private func currentSidebarTitlebarChromeBackgroundColor() -> NSColor {
-    ghostexSidebarTitlebarChromeBackgroundColor(
+    if customSidebarTitlebarColorsEnabled {
+      return sidebarTitlebarGradientTopColor(forBackground: customSidebarTitlebarBackgroundColor)
+    }
+    return ghostexSidebarTitlebarChromeBackgroundColor(
       for: sidebarChromeTheme,
       customColors: SidebarTitlebarCustomChromeColors(
         enabled: customSidebarTitlebarColorsEnabled,
@@ -7919,25 +8165,15 @@ final class ghostexRootView: NSView {
   }
 
   private func currentTitlebarChromeBackgroundColor() -> NSColor {
-    let sidebarColor = currentSidebarTitlebarChromeBackgroundColor()
-    guard customSidebarTitlebarColorsEnabled,
-      let rgbColor = sidebarColor.usingColorSpace(.sRGB)
-    else {
-      return sidebarColor
-    }
     /*
-     CDXC:SidebarTitlebarColors 2026-06-17-12:50:
-     The custom titlebar visual trial should render the titlebar 20% darker
-     than the sidebar, replacing the earlier 15% offset, while leaving preset
-     themes, modals, dropdowns, and the sidebar background unchanged. Derive it
-     from the resolved sidebar color so contrast and tint settings still have
-     one persisted source of truth.
+     CDXC:SidebarTitlebarColors 2026-06-19-12:33:
+     The titlebar's native backing should match the sidebar gradient's top stop.
+     CDXC:SidebarTitlebarColors 2026-06-19-13:26:
+     The React titlebar paints the visible horizontal gradient from that top
+     stop to the darker sidebar bottom stop, while this solid layer prevents transparent startup edges from
+     flashing a different shade.
      */
-    return NSColor(
-      srgbRed: max(0, min(1, rgbColor.redComponent * ghostexCustomTitlebarBackgroundBrightnessFactor)),
-      green: max(0, min(1, rgbColor.greenComponent * ghostexCustomTitlebarBackgroundBrightnessFactor)),
-      blue: max(0, min(1, rgbColor.blueComponent * ghostexCustomTitlebarBackgroundBrightnessFactor)),
-      alpha: rgbColor.alphaComponent)
+    return currentSidebarTitlebarChromeBackgroundColor()
   }
 
   private func applySidebarChromeTheme(
@@ -8155,6 +8391,8 @@ final class ghostexRootView: NSView {
         "deactivateOnLowPowerMode": keepAwake.deactivateOnLowPowerMode,
         "deactivateOnUserSwitch": keepAwake.deactivateOnUserSwitch,
         "defaultDurationMinutes": keepAwake.defaultDurationMinutes,
+        "featureEnabled": keepAwake.featureEnabled ?? false,
+        "hideTitlebarControl": keepAwake.hideTitlebarControl ?? true,
         "preventLidSleep": keepAwake.preventLidSleep,
       ]
     }
@@ -8838,6 +9076,12 @@ final class ghostexRootView: NSView {
     case .createWebPane(let command):
       workspaceView.createWebPane(command)
     case .openFloatingEditor(let command):
+      PromptEditorDebugLog.append(
+        event: "nativeSidebar.command.openFloatingEditor",
+        details: [
+          "editorKind": command.editorKind ?? "",
+          "requestId": command.requestId ?? "",
+        ])
       openFloatingEditor(command)
     case .closeTerminal(let command):
       closeTerminal(
@@ -10180,7 +10424,16 @@ final class ghostexRootView: NSView {
     modal: String,
     preferredContentFrame: CGRect? = nil
   ) -> Bool {
+    let startedAtMs = Self.promptEditorMonotonicMilliseconds()
     guard let window else {
+      if modal == "floatingPromptEditor" {
+        PromptEditorDebugLog.append(
+          event: "nativeWindow.request.failed",
+          details: [
+            "reason": "missingParentWindow",
+            "requestId": message["requestId"] as? String ?? "",
+          ])
+      }
       AppDelegate.appendAppModalErrorLog(
         area: "AppModals:nativeWindow",
         message: "Cannot open native app modal window without a parent window.",
@@ -10189,7 +10442,25 @@ final class ghostexRootView: NSView {
       return false
     }
     let isPrewarmOpen = message["prewarm"] as? Bool == true
+    if modal == "floatingPromptEditor" {
+      PromptEditorDebugLog.append(
+        event: "nativeWindow.request.start",
+        details: [
+          "controllerState": appModalWindowController(for: modal)?.reusableHostDebugState(for: modal) ?? [:],
+          "isPrewarm": isPrewarmOpen,
+          "preferredFrameProvided": preferredContentFrame != nil,
+          "requestId": message["requestId"] as? String ?? "",
+        ])
+    }
     if shouldIgnoreDuplicateNativeAppModalOpen(message: message, modal: modal) {
+      if modal == "floatingPromptEditor" {
+        PromptEditorDebugLog.append(
+          event: "nativeWindow.request.duplicateIgnored",
+          details: [
+            "elapsedMs": max(0, Self.promptEditorMonotonicMilliseconds() - startedAtMs),
+            "requestId": message["requestId"] as? String ?? "",
+          ])
+      }
       return true
     }
     rememberFirstLaunchSetupAfterDiscoverCloseRequest(message: message, modal: modal)
@@ -10211,6 +10482,15 @@ final class ghostexRootView: NSView {
       for: modal,
       parentWindow: window,
       preferredContentFrame: preferredContentFrame)
+    if modal == "floatingPromptEditor" {
+      PromptEditorDebugLog.append(
+        event: "nativeWindow.request.frameResolved",
+        details: [
+          "elapsedMs": max(0, Self.promptEditorMonotonicMilliseconds() - startedAtMs),
+          "hasResolvedPreferredFrame": resolvedPreferredContentFrame != nil,
+          "requestId": message["requestId"] as? String ?? "",
+        ])
+    }
     if !isPrewarmOpen {
       updateOnboardingAppModalBackdrop(for: modal)
     }
@@ -10221,6 +10501,15 @@ final class ghostexRootView: NSView {
       webAssets: Self.resolveWebAssets(),
       latestSidebarState: latestModalHostSidebarState,
       preferredContentFrame: resolvedPreferredContentFrame)
+    if modal == "floatingPromptEditor" {
+      PromptEditorDebugLog.append(
+        event: "nativeWindow.request.controllerOpenReturned",
+        details: [
+          "controllerState": controller.reusableHostDebugState(for: modal),
+          "elapsedMs": max(0, Self.promptEditorMonotonicMilliseconds() - startedAtMs),
+          "requestId": message["requestId"] as? String ?? "",
+        ])
+    }
     if !isPrewarmOpen {
       updateSidebarModalBackdrop()
     }
@@ -10285,7 +10574,7 @@ final class ghostexRootView: NSView {
     if let preferredContentFrame {
       return preferredContentFrame
     }
-    guard modal == "settings" else {
+    guard isSettingsWorkspaceAppModal(modal) else {
       return nil
     }
     /*
@@ -10294,13 +10583,22 @@ final class ghostexRootView: NSView {
      divider, and titlebar as separate native siblings. Use the same computed
      workspace frame that lays out terminal/browser panes, then convert that
      content rect to screen coordinates for the AppKit child window.
+
+     CDXC:SettingsLayout 2026-06-19-13:37:
+     Titlebar Configure entries for Quick Actions and Open in App route to the
+     unified Settings dialog with modal ids such as configureActions and
+     openTargets. Treat every Settings-family id as a workspace-owned Settings
+     surface so those entry points do not inherit the compact centered modal
+     frame.
      */
     let workspaceFrame = rootLayoutFrames().workspace
     return parentWindow.convertToScreen(convert(workspaceFrame, to: nil))
   }
 
   fileprivate func updateSettingsModalWorkspaceFrameIfNeeded() {
-    guard nativeAppModalWindowController?.currentModalKind == "settings" else {
+    guard let modal = nativeAppModalWindowController?.currentModalKind,
+      isSettingsWorkspaceAppModal(modal)
+    else {
       return
     }
     /*
@@ -10309,17 +10607,22 @@ final class ghostexRootView: NSView {
      workspace geometry changes while it stays open. Recompute the native child
      window frame when the main window, sidebar collapse state, or sidebar side
      changes instead of closing Settings or leaving the old frame onscreen.
+
+     CDXC:SettingsLayout 2026-06-19-13:37:
+     Reframe the active Settings-family modal by its actual modal id so Actions,
+     Open Targets, Agents, and Hotkeys entry points continue to fill the
+     available workspace after main-window/sidebar geometry changes.
      */
     guard let window,
       let contentScreenFrame = preferredNativeAppModalContentFrame(
-        for: "settings",
+        for: modal,
         parentWindow: window,
         preferredContentFrame: nil)
     else {
       return
     }
     nativeAppModalWindowController?.updateContentFrame(
-      modal: "settings",
+      modal: modal,
       parentWindow: window,
       preferredContentFrame: contentScreenFrame)
   }
@@ -10440,7 +10743,10 @@ final class ghostexRootView: NSView {
       || nativeAppModalWindowController?.currentModalKind == "floatingPromptEditor"
     {
       if let active = activeFloatingPromptEditor {
-        writeFloatingPromptEditorStatusFile(active.statusFile, status: "cancelled")
+        writeFloatingPromptEditorStatusFile(
+          active.statusFile,
+          status: "cancelled",
+          requestId: active.requestId)
       }
       finishFloatingPromptEditor(reason: reason)
       return
@@ -10474,7 +10780,10 @@ final class ghostexRootView: NSView {
   private func nativeAppModalWindowDidClose(reason: String, modal: String?) {
     if modal == "floatingPromptEditor" {
       if let active = activeFloatingPromptEditor {
-        writeFloatingPromptEditorStatusFile(active.statusFile, status: "cancelled")
+        writeFloatingPromptEditorStatusFile(
+          active.statusFile,
+          status: "cancelled",
+          requestId: active.requestId)
       }
       finishFloatingPromptEditor(reason: reason, closeNativeWindow: false)
       return
@@ -11311,9 +11620,15 @@ final class ghostexRootView: NSView {
      sidebar hit-test exclusions; the visible divider owns only its own frame.
 
      CDXC:NativeSidebarChrome 2026-06-15-20:46:
-     The divider frame is now the exact visible 1pt separator, so the WKWebView
-     no longer leaves a transparent native strip between the React sidebar and
-     the workspace boundary.
+     The sidebar WKWebView should stop at the divider sibling instead of
+     rendering beneath native resize hit area. Do not make sidebar content fill
+     under the rail and then rely on exclusions to recover click ownership.
+
+     CDXC:NativeSidebarChrome 2026-06-19-14:38:
+     The divider frame is now the full five-point resize rail, matching
+     workspace split handles. Keep it as a strict sibling region and draw the
+     one-point separator within that frame so AppKit normal traversal owns
+     resizing without monitors, overlays, or root hit-test expansion.
      */
     let shouldRefreshDividerCursorAfterLayout =
       isSidebarCollapsed && !divider.isHidden && divider.needsCursorRefreshBeforeHide()
@@ -11391,9 +11706,15 @@ final class ghostexRootView: NSView {
      leave the resize cursor active after the pointer leaves the divider.
 
      CDXC:NativeSidebarChrome 2026-06-15-20:46:
-     Keep the divider view aligned to the visible separator instead of covering
-     transparent sidebar pixels; otherwise the native host creates a right-side
-     gap that the React sidebar cannot fill.
+     Keep the divider as a concrete sibling region instead of covering sidebar
+     pixels with transparent native hit area; otherwise React sidebar controls
+     and native resize ownership compete for the same screen space.
+
+     CDXC:NativeSidebarChrome 2026-06-19-14:38:
+     The requested larger sidebar grab target should use the same model as
+     workspace pane splitters: one concrete reserved AppKit rail between sibling
+     regions. Do not add event monitors, broad parent routing, or overlapping
+     invisible hit strips for this resize path.
     */
     addSubview(sidebarView, positioned: .above, relativeTo: titlebarChromeView)
     addSubview(divider, positioned: .above, relativeTo: sidebarView)
@@ -11510,9 +11831,15 @@ final class ghostexRootView: NSView {
      sidebar boundary instead of the outside window edge.
 
      CDXC:NativeLayout 2026-06-13-09:02:
-     The sidebar divider must be exactly the visible native divider width. Do not
-     extend it over workspace pane gaps or adjacent content; those pixels belong
-     to the workspace region and should not become an invisible sidebar grab area.
+     The sidebar divider must be exactly the reserved native divider region. Do
+     not extend it over workspace pane gaps or adjacent content; those pixels
+     belong to the workspace region and should not become an invisible sidebar
+     grab area.
+
+     CDXC:NativeSidebarChrome 2026-06-19-14:38:
+     Sidebar resize now follows the workspace split-pane rail width: reserve a
+     real five-point divider between sidebar and workspace siblings, then keep
+     the one-point visible separator pinned to the sidebar edge inside that rail.
      */
     let sidebarX: CGFloat
     let dividerX: CGFloat
@@ -11546,9 +11873,9 @@ final class ghostexRootView: NSView {
     let separatorWidth = Self.workareaSeparatorWidth
     let sidebarWorkareaBorderX: CGFloat
     if sidebarSide == .left {
-      sidebarWorkareaBorderX = max(workspaceFrame.minX - separatorWidth, 0)
+      sidebarWorkareaBorderX = dividerFrame.minX
     } else {
-      sidebarWorkareaBorderX = min(workspaceFrame.maxX, max(bounds.width - separatorWidth, 0))
+      sidebarWorkareaBorderX = max(dividerFrame.maxX - separatorWidth, dividerFrame.minX)
     }
     let sidebarWorkareaBorderFrame = CGRect(
       x: sidebarWorkareaBorderX,
@@ -13285,9 +13612,15 @@ final class PaneResizeHandleView: NSView {
    adding a separate border view.
 
    CDXC:NativeSidebarChrome 2026-06-15-20:46:
-   The handle frame must stay the same width as the visible separator. A wider
-   transparent hit target appears as native padding between the WKWebView-hosted
-   sidebar component and the workspace boundary.
+   The handle must not become a transparent overlay on top of sidebar pixels. If
+   the grab target is wider than the separator, reserve that width as normal
+   AppKit layout between the sidebar and workspace.
+
+   CDXC:NativeSidebarChrome 2026-06-19-14:38:
+   The handle frame is now the five-point concrete sidebar resize rail, matching
+   workspace split panes. Draw only the one-point separator inside that rail so
+   the visual boundary remains precise while normal AppKit hit traversal gets a
+   wider drag target.
    */
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
@@ -14386,6 +14719,21 @@ private final class AppModalWindowWebView: WKWebView {
   }
 }
 
+private func isSettingsWorkspaceAppModal(_ modal: String?) -> Bool {
+  /*
+   CDXC:SettingsLayout 2026-06-19-13:37:
+   These modal ids all render the unified Settings dialog in the native modal
+   host. Keep the native frame decision shared so direct Settings opens and
+   titlebar Configure opens fill the same workspace area.
+   */
+  switch modal {
+  case "settings", "configureAgents", "configureActions", "openTargets", "hotkeys":
+    return true
+  default:
+    return false
+  }
+}
+
 private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavigationDelegate {
   private static let screenMargin: CGFloat = 24
   private static let minimumSize = CGSize(width: 520, height: 360)
@@ -14506,6 +14854,16 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
      first visible palette open on the hot path without sharing state with
      Monaco prompt-editor prewarm.
      */
+    let openEntryStartedAtMs = Self.monotonicMilliseconds()
+    logPromptWindowEvent(
+      "nativeWindow.open.entry",
+      details: [
+        "controllerState": reusableHostDebugState(for: modal),
+        "isPrewarm": message["prewarm"] as? Bool == true,
+        "modal": modal,
+        "preferredFrameProvided": preferredContentFrame != nil,
+        "requestId": message["requestId"] as? String ?? "",
+      ])
     if canReuseHost(for: modal) {
       reuseHost(
         modal: modal,
@@ -14516,6 +14874,13 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return
     }
     close(sendReactClose: false)
+    logPromptWindowEvent(
+      "nativeWindow.open.freshAfterClose",
+      details: [
+        "elapsedMs": max(0, Self.monotonicMilliseconds() - openEntryStartedAtMs),
+        "modal": modal,
+        "requestId": message["requestId"] as? String ?? "",
+      ])
     self.parentWindow = parentWindow
     self.loadedModal = modal
     setSidebarTheme(Self.sidebarTheme(from: latestSidebarState))
@@ -14529,11 +14894,13 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     logPromptWindowEvent(
       "nativeWindow.open.start",
       details: [
+        "elapsedMs": max(0, Self.monotonicMilliseconds() - openEntryStartedAtMs),
         "isReusableHost": false,
         "modal": modal,
         "requestId": message["requestId"] as? String ?? "",
       ])
 
+    let frameStartedAtMs = Self.monotonicMilliseconds()
     let size = constrainedSize(
       preferredContentFrame?.size ?? defaultSize(for: modal),
       parentWindow: parentWindow,
@@ -14543,6 +14910,14 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       size: size,
       parentWindow: parentWindow,
       modal: modal)
+    logPromptWindowEvent(
+      "nativeWindow.open.contentFrameResolved",
+      details: [
+        "durationMs": max(0, Self.monotonicMilliseconds() - frameStartedAtMs),
+        "modal": modal,
+        "requestId": message["requestId"] as? String ?? "",
+      ])
+    let panelStartedAtMs = Self.monotonicMilliseconds()
     let panel = AppModalWindowPanel(
       contentRect: contentFrame,
       styleMask: appModalStyleMask(for: modal),
@@ -14579,7 +14954,15 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     }
     panel.title = title(for: modal)
     configurePanelChrome(panel, modal: modal)
+    logPromptWindowEvent(
+      "nativeWindow.open.panelCreated",
+      details: [
+        "durationMs": max(0, Self.monotonicMilliseconds() - panelStartedAtMs),
+        "modal": modal,
+        "requestId": message["requestId"] as? String ?? "",
+      ])
 
+    let webViewStartedAtMs = Self.monotonicMilliseconds()
     let webView = AppModalWindowWebView(
       frame: CGRect(origin: .zero, size: contentFrame.size),
       configuration: makeConfiguration())
@@ -14600,6 +14983,13 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     webView.layer?.backgroundColor = ghostexModalBackgroundColor(for: sidebarTheme).cgColor
     webView.setValue(false, forKey: "drawsBackground")
     panel.contentView = webView
+    logPromptWindowEvent(
+      "nativeWindow.open.webViewCreated",
+      details: [
+        "durationMs": max(0, Self.monotonicMilliseconds() - webViewStartedAtMs),
+        "modal": modal,
+        "requestId": message["requestId"] as? String ?? "",
+      ])
 
     self.panel = panel
     self.webView = webView
@@ -14685,6 +15075,18 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       && webView != nil
   }
 
+  func reusableHostDebugState(for modal: String) -> [String: Any] {
+    [
+      "canReuseHost": canReuseHost(for: modal),
+      "currentModal": currentModal ?? "",
+      "hasPanel": panel != nil,
+      "hasWebView": webView != nil,
+      "isReady": isReady,
+      "isVisible": panel?.isVisible == true,
+      "loadedModal": loadedModal ?? "",
+    ]
+  }
+
   private static func isReusableHostModal(_ modal: String) -> Bool {
     modal == "floatingPromptEditor" || modal == "commandPalette"
   }
@@ -14701,18 +15103,21 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     self.pendingOpenMessage = nil
     self.pendingMessages = []
     if let latestSidebarState {
-      self.latestSidebarState = latestSidebarState
+    self.latestSidebarState = latestSidebarState
     }
     self.openStartedAtMs = Self.monotonicMilliseconds()
+    let reuseStartedAtMs = openStartedAtMs ?? Self.monotonicMilliseconds()
     logPromptWindowEvent(
       "nativeWindow.open.reuse",
       details: [
+        "controllerState": reusableHostDebugState(for: modal),
         "isReady": isReady,
         "modal": modal,
         "requestId": message["requestId"] as? String ?? "",
       ])
 
     if let panel {
+      let frameStartedAtMs = Self.monotonicMilliseconds()
       let size = constrainedSize(
         preferredContentFrame?.size ?? defaultSize(for: modal),
         parentWindow: parentWindow,
@@ -14729,6 +15134,13 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
         panel.contentMinSize = size
         panel.contentMaxSize = size
       }
+      logPromptWindowEvent(
+        "nativeWindow.open.reuseFrameApplied",
+        details: [
+          "durationMs": max(0, Self.monotonicMilliseconds() - frameStartedAtMs),
+          "modal": modal,
+          "requestId": message["requestId"] as? String ?? "",
+        ])
     }
     if message["prewarm"] as? Bool == true {
       removeOutsideEventMonitor()
@@ -14738,12 +15150,26 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
 
     guard isReady else {
       pendingOpenMessage = message
+      logPromptWindowEvent(
+        "nativeWindow.open.reusePendingReady",
+        details: [
+          "elapsedMs": max(0, Self.monotonicMilliseconds() - reuseStartedAtMs),
+          "modal": modal,
+          "requestId": message["requestId"] as? String ?? "",
+        ])
       return
     }
     if let latestSidebarState = self.latestSidebarState {
       dispatch(latestSidebarState)
     }
     dispatch(message)
+    logPromptWindowEvent(
+      "nativeWindow.open.reuseDispatched",
+      details: [
+        "elapsedMs": max(0, Self.monotonicMilliseconds() - reuseStartedAtMs),
+        "modal": modal,
+        "requestId": message["requestId"] as? String ?? "",
+      ])
   }
 
   func hostReady(latestSidebarState: [String: Any]?) {
@@ -14751,7 +15177,9 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     logPromptWindowEvent(
       "nativeWindow.hostReady",
       details: [
+        "hasPendingOpenMessage": pendingOpenMessage != nil,
         "msSinceOpen": elapsedSinceOpenMs(),
+        "pendingMessageCount": pendingMessages.count,
       ])
     if let latestSidebarState {
       self.latestSidebarState = latestSidebarState
@@ -14775,6 +15203,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     else {
       return
     }
+    let presentStartedAtMs = Self.monotonicMilliseconds()
     resetPanelBackgroundPrewarmState()
     if panel.parent !== parentWindow {
       parentWindow.addChildWindow(panel, ordered: .above)
@@ -14796,6 +15225,12 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       panel.makeFirstResponder(webView)
     }
     NSApp.activate(ignoringOtherApps: true)
+    logPromptWindowEvent(
+      "nativeWindow.present.completed",
+      details: [
+        "durationMs": max(0, Self.monotonicMilliseconds() - presentStartedAtMs),
+        "msSinceOpen": elapsedSinceOpenMs(),
+      ])
   }
 
   func presentBackgroundPrewarmIfCurrent(modal: String?) {
@@ -14846,10 +15281,11 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       }
       return
     }
-    if loadedModal == "floatingPromptEditor",
-      (message["modal"] as? String) == "floatingPromptEditor"
-        || (message["type"] as? String)?.hasPrefix("floatingPromptEditor") == true
-    {
+    let isPromptEditorMessage =
+      loadedModal == "floatingPromptEditor"
+      && ((message["modal"] as? String) == "floatingPromptEditor"
+        || (message["type"] as? String)?.hasPrefix("floatingPromptEditor") == true)
+    if isPromptEditorMessage {
       logPromptWindowEvent(
         "nativeWindow.dispatch",
         details: [
@@ -14870,12 +15306,23 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       )
       return
     }
+    let dispatchStartedAtMs = Self.monotonicMilliseconds()
     webView.evaluateJavaScript(
       """
       window.dispatchEvent(new CustomEvent('ghostex-app-modal-host-message', { detail: \(json) }));
       undefined;
       """
     ) { _, error in
+      if isPromptEditorMessage {
+        self.logPromptWindowEvent(
+          error == nil ? "nativeWindow.dispatch.completed" : "nativeWindow.dispatch.failed",
+          details: [
+            "durationMs": max(0, Self.monotonicMilliseconds() - dispatchStartedAtMs),
+            "messageModal": message["modal"] as? String ?? "",
+            "messageType": message["type"] as? String ?? "",
+            "requestId": message["requestId"] as? String ?? "",
+          ])
+      }
       if let error {
         AppDelegate.appendAppModalErrorLog(
           area: "AppModals:nativeWindow",
@@ -15104,6 +15551,8 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     logPromptWindowEvent(
       "nativeWindow.webView.loadStart",
       details: [
+        "assetExists": FileManager.default.fileExists(
+          atPath: webAssets.appendingPathComponent("modal-host.html").path),
         "modal": loadedModal ?? "",
       ])
     let builtModalHost = webAssets.appendingPathComponent("modal-host.html")
@@ -15394,7 +15843,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   }
 
   private func shouldUseExactContentFrame(modal: String?) -> Bool {
-    modal == "settings"
+    isSettingsWorkspaceAppModal(modal)
   }
 
   private func shouldLockContentSize(modal: String) -> Bool {
@@ -15408,12 +15857,17 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return CGSize(width: 472, height: 336)
     case "floatingPromptEditor":
       return Self.floatingPromptEditorMinimumSize
-    case "settings":
+    case "settings", "configureAgents", "configureActions", "openTargets", "hotkeys":
       /*
        CDXC:AppModals 2026-06-15-10:12:
        Settings inherits the exact workspace content frame from the root view.
        Do not let the generic modal minimum expand a narrow workspace over the
        sidebar or titlebar when the main window is small.
+
+       CDXC:SettingsLayout 2026-06-19-13:37:
+       Settings-family routes share the same minimum because configureActions,
+       openTargets, configureAgents, and hotkeys are initial-tab requests for
+       the full Settings surface, not compact management dialogs.
        */
       return CGSize(width: 1, height: 1)
     default:

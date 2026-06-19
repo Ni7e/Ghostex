@@ -238,20 +238,29 @@ describe("native app modal window source", () => {
     expect(modalTitle).toContain('return "Tutorial Video"');
   });
 
-  test("opens Settings over the exact macOS workspace area", () => {
+  test("opens Settings-family modals over the exact macOS workspace area", () => {
     /*
     CDXC:AppModals 2026-06-15-10:12:
     Settings must cover the whole workspace area while leaving the sidebar,
     divider, and titlebar owned by their existing native sibling frames.
+
+    CDXC:SettingsLayout 2026-06-19-13:37:
+    Configure from Quick Actions and Open in App opens the unified Settings
+    dialog on the Actions/Open Targets tabs, so those modal ids must use the
+    same workspace-sized native child window as direct Settings.
     */
     const preferredFrame = sourceBetween(
       appDelegateSource,
       "private func preferredNativeAppModalContentFrame(",
       "private func closeNativeAppModalWindow",
     );
-    expect(preferredFrame).toContain('guard modal == "settings"');
+    expect(preferredFrame).toContain("guard isSettingsWorkspaceAppModal(modal)");
     expect(preferredFrame).toContain("let workspaceFrame = rootLayoutFrames().workspace");
     expect(preferredFrame).toContain("parentWindow.convertToScreen(convert(workspaceFrame, to: nil))");
+    expect(appDelegateSource).toContain("private func isSettingsWorkspaceAppModal(_ modal: String?) -> Bool");
+    expect(appDelegateSource).toContain(
+      'case "settings", "configureAgents", "configureActions", "openTargets", "hotkeys":',
+    );
 
     const openNativeModal = sourceBetween(
       appDelegateSource,
@@ -271,8 +280,10 @@ describe("native app modal window source", () => {
     );
     expect(appModalWindowController).toContain("if shouldUseExactContentFrame(modal: modal)");
     expect(appModalWindowController).toContain("private func shouldUseExactContentFrame(modal: String?) -> Bool");
-    expect(appModalWindowController).toContain('modal == "settings"');
-    expect(appModalWindowController).toContain('case "settings":');
+    expect(appModalWindowController).toContain("isSettingsWorkspaceAppModal(modal)");
+    expect(appModalWindowController).toContain(
+      'case "settings", "configureAgents", "configureActions", "openTargets", "hotkeys":',
+    );
     expect(appModalWindowController).toContain("return CGSize(width: 1, height: 1)");
 
     const settingsStyles = sourceBetween(
@@ -355,6 +366,11 @@ describe("native app modal window source", () => {
     CDXC:AppModals 2026-06-16-19:50:
     Resize/layout refreshes now go through the shared child-window frame helper
     so Settings and the onboarding AppKit backdrop stay aligned together.
+
+    CDXC:SettingsLayout 2026-06-19-13:37:
+    Initial-tab Settings routes such as configureActions and openTargets need
+    the same reframe behavior as direct Settings after any workspace geometry
+    change.
     */
     const resizeStart = sourceBetween(
       appDelegateSource,
@@ -369,9 +385,12 @@ describe("native app modal window source", () => {
       "fileprivate func updateSettingsModalWorkspaceFrameIfNeeded()",
       "private func shouldShowOnboardingAppModalBackdrop",
     );
-    expect(updateSettingsFrame).toContain('currentModalKind == "settings"');
+    expect(updateSettingsFrame).toContain("let modal = nativeAppModalWindowController?.currentModalKind");
+    expect(updateSettingsFrame).toContain("isSettingsWorkspaceAppModal(modal)");
     expect(updateSettingsFrame).toContain("preferredNativeAppModalContentFrame(");
+    expect(updateSettingsFrame).toContain("for: modal");
     expect(updateSettingsFrame).toContain("nativeAppModalWindowController?.updateContentFrame(");
+    expect(updateSettingsFrame).toContain("modal: modal");
     expect(updateSettingsFrame).not.toContain("closeNativeAppModalWindow(");
 
     const rootChrome = sourceBetween(
@@ -827,7 +846,12 @@ describe("native app modal window source", () => {
     expect(delayedSendModalSource).toContain('event.key !== "Enter"');
     expect(delayedSendModalSource).not.toContain('aria-label="Seconds"');
     expect(delayedSendModalSource).not.toContain("setSeconds");
-    expect(delayedSendModalSource).toContain("Enter a delay between 1 minute and 24 days.");
+    expect(delayedSendModalSource).not.toContain("Enter a delay between 1 minute and 24 days.");
+    expect(delayedSendModalSource).toContain('className="delayed-send-footer"');
+    expect(delayedSendModalSource).toContain('className="delayed-send-cancel-row"');
+    expect(delayedSendModalSource).toContain(
+      'data-has-active-timer={hasActiveTimer ? "true" : "false"}',
+    );
     expect(delayedSendModalSource).toContain("Math.ceil(delayMs / MINUTE_MS)");
 
     const durationGrid = sourceBetween(
@@ -854,6 +878,19 @@ describe("native app modal window source", () => {
     );
     expect(nativeDelayedSendFormStyles).toContain("height: 100%;");
     expect(nativeDelayedSendFormStyles).toContain("justify-content: space-between;");
+
+    const delayedSendFooterStyles = sourceBetween(
+      modalStylesSource,
+      ".delayed-send-footer {",
+      ".session-rename-form",
+    );
+    expect(delayedSendFooterStyles).toContain("display: grid;");
+    expect(delayedSendFooterStyles).toContain("grid-template-columns: minmax(0, 1fr);");
+    expect(delayedSendFooterStyles).toContain(
+      '.delayed-send-cancel-row[data-has-active-timer="true"]',
+    );
+    expect(delayedSendFooterStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr));");
+    expect(delayedSendFooterStyles).toContain("width: 100%;");
 
     const delayedSendValidation = sourceBetween(
       nativeSidebarSource,

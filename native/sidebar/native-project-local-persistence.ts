@@ -22,6 +22,9 @@ export function createLocalPersistableSessionRecord<T extends SessionRecord>(ses
   CDXC:DelayedSend 2026-06-02-19:07:
   Delayed Send timers are still macOS current-window behavior: gxserver can shape launch plans from delayed-send input, but live timer scheduling and restart re-arming remain in the native sidebar until a gxserver timer API exists. Keep `delayedSendDeadlineAt` as a local timer field, not shared session identity.
 
+  CDXC:DelayedSend 2026-06-19-14:55:
+  Restart should resume Delayed Send from the last locally saved remaining-duration checkpoint instead of spending countdown time while Ghostex is closed. Keep `delayedSendRemainingMs` with the deadline in this macOS pane/layout cache.
+
   CDXC:CloseAfterDone 2026-06-15-21:00:
   Close After Done is also macOS current-window timer behavior. Preserve only
   the armed flag locally so restart can re-arm the three-minute Done watcher
@@ -36,6 +39,7 @@ export function createLocalPersistableSessionRecord<T extends SessionRecord>(ses
     closeAfterDone: session.closeAfterDone === true ? true : undefined,
     createdAt: GXSERVER_LOCAL_SESSION_PLACEHOLDER_CREATED_AT,
     delayedSendDeadlineAt: session.delayedSendDeadlineAt,
+    delayedSendRemainingMs: normalizeLocalDelayedSendRemainingMs(session.delayedSendRemainingMs),
     displayId: session.sessionId,
     isPoppedOut: session.isPoppedOut,
     kind: "terminal",
@@ -48,4 +52,11 @@ export function createLocalPersistableSessionRecord<T extends SessionRecord>(ses
     titleSource: "placeholder",
   };
   return sanitized as T;
+}
+
+function normalizeLocalDelayedSendRemainingMs(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  return Math.ceil(value);
 }

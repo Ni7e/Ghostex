@@ -7,6 +7,9 @@ describe("native project local persistence", () => {
     /*
     CDXC:ProjectSidebarOwnership 2026-06-02-19:07:
     Native owns the current-window pane/tab layout after the gxserver split. Canonical G-session local persistence may keep placement fields and the macOS-owned delayed-send timer deadline, while gxserver-owned identity, title, lifecycle, provider, agent, pin, and favorite fields must be stripped at the writer boundary.
+
+    CDXC:DelayedSend 2026-06-19-14:55:
+    Canonical G-session local persistence must also keep the delayed-send remaining-duration checkpoint so restart can resume from the latest saved countdown position instead of spending time while Ghostex was closed.
     */
     const session: TerminalSessionRecord = {
       agentName: "codex",
@@ -18,6 +21,7 @@ describe("native project local persistence", () => {
       commandTitle: "Stale Command",
       createdAt: "2026-06-02T10:00:00.000Z",
       delayedSendDeadlineAt: "2026-06-02T10:05:00.000Z",
+      delayedSendRemainingMs: 180_000.4,
       displayId: "old-display",
       isFavorite: true,
       isPinned: true,
@@ -47,6 +51,7 @@ describe("native project local persistence", () => {
       column: 2,
       createdAt: "1970-01-01T00:00:00.000Z",
       delayedSendDeadlineAt: "2026-06-02T10:05:00.000Z",
+      delayedSendRemainingMs: 180_001,
       displayId: "G1abc",
       isPoppedOut: true,
       kind: "terminal",

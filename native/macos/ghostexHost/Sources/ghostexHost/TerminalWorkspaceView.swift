@@ -2585,11 +2585,6 @@ final class TerminalWorkspaceView: NSView {
   private static let browserHistoryMaxItems = 140
   private var sessions: [String: TerminalSession] = [:]
   private var browserHistoryItemsByScopeId: [String: [NativeBrowserHistoryItem]] = [:]
-  /*
-   CDXC:BrowserColorScheme 2026-06-19-08:34:
-   Native mirrors the sidebar's per-project browser color-scheme map only for open AppKit hosts. The sidebar remains the durable owner; native updates this cache immediately after menu selections so all same-project Browser panes apply the new origin rule on their next navigation.
-   */
-  private var browserColorSchemesByProjectId: [String: [String: String]] = [:]
   private var webPaneSessions: [String: WebPaneSession] = [:]
   private var projectEditorPaneSessions: [String: ProjectEditorPaneSession] = [:]
   private var customSidebarTitlebarNativeChrome = NativeSidebarTitlebarChromeColors.disabled
@@ -4236,86 +4231,6 @@ final class TerminalWorkspaceView: NSView {
     return browserHistoryItemsByScopeId[scopeId] ?? []
   }
 
-  private func rememberBrowserColorSchemes(
-    projectId rawProjectId: String?,
-    schemes rawSchemes: [String: String]?
-  ) {
-    guard let projectId = normalizedBrowserColorSchemeProjectId(rawProjectId),
-      let rawSchemes
-    else {
-      return
-    }
-    /*
-     CDXC:BrowserColorScheme 2026-06-19-08:34:
-     Create-pane commands carry the sidebar's persisted color-scheme choices for the current project. Normalize them at the native boundary so open CEF hosts never apply malformed origins or unsupported values while still defaulting missing origins to Light.
-     */
-    let schemes = WebPaneHostView.normalizedBrowserColorSchemeMap(rawSchemes)
-    browserColorSchemesByProjectId[projectId] = schemes
-    applyBrowserColorSchemes(schemes, projectId: projectId)
-  }
-
-  private func browserColorSchemes(projectId rawProjectId: String?) -> [String: String] {
-    guard let projectId = normalizedBrowserColorSchemeProjectId(rawProjectId) else {
-      return [:]
-    }
-    return browserColorSchemesByProjectId[projectId] ?? [:]
-  }
-
-  private func setBrowserColorScheme(
-    projectId rawProjectId: String?,
-    origin rawOrigin: String,
-    colorScheme rawColorScheme: String
-  ) {
-    guard let projectId = normalizedBrowserColorSchemeProjectId(rawProjectId),
-      let origin = WebPaneHostView.browserColorSchemeOriginKey(for: rawOrigin),
-      let colorScheme = WebPaneHostView.normalizedBrowserColorSchemeRawValue(rawColorScheme)
-    else {
-      return
-    }
-    var schemes = browserColorSchemesByProjectId[projectId] ?? [:]
-    guard schemes[origin] != colorScheme else {
-      return
-    }
-    schemes[origin] = colorScheme
-    browserColorSchemesByProjectId[projectId] = schemes
-    applyBrowserColorSchemes(schemes, projectId: projectId)
-    sendEvent(.browserColorSchemeSelected(projectId: projectId, origin: origin, colorScheme: colorScheme))
-  }
-
-  private func applyBrowserColorSchemes(
-    _ schemes: [String: String],
-    projectId: String
-  ) {
-    for session in webPaneSessions.values where session.projectId == projectId {
-      session.hostView.setBrowserColorSchemes(schemes)
-    }
-    for session in projectEditorPaneSessions.values where normalizedBrowserColorSchemeProjectId(session.projectId) == projectId {
-      for tab in session.tabs {
-        tab.hostView.setBrowserColorSchemes(schemes)
-      }
-    }
-  }
-
-  private func normalizedBrowserColorSchemeProjectId(_ value: String?) -> String? {
-    guard let rawProjectId = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-      !rawProjectId.isEmpty
-    else {
-      return nil
-    }
-    let prefix = "project-editor:"
-    if rawProjectId.hasPrefix(prefix),
-      let modeSeparator = rawProjectId.range(of: ":", options: .backwards)
-    {
-      let mode = String(rawProjectId[modeSeparator.upperBound...])
-      if mode == "code" || mode == "git" || mode == "tasks" {
-        let encodedStart = rawProjectId.index(rawProjectId.startIndex, offsetBy: prefix.count)
-        let encodedProjectId = String(rawProjectId[encodedStart..<modeSeparator.lowerBound])
-        return encodedProjectId.removingPercentEncoding ?? encodedProjectId
-      }
-    }
-    return rawProjectId
-  }
-
   private func applyShowBetaFeaturesToBrowserToolbars() {
     /*
      CDXC:BetaFeatures 2026-06-16-13:08:
@@ -4359,11 +4274,7 @@ final class TerminalWorkspaceView: NSView {
     let initialUrl = URL(string: command.url)
     let isManagedT3Pane = initialUrl.map(NativeT3RuntimeLauncher.isManagedRuntimeURL) ?? false
     let browserFeedbackTool = Self.normalizedBrowserFeedbackTool(command.browserFeedbackTool)
-    let browserColorSchemeProjectId = command.projectId ?? webPaneSessions[command.sessionId]?.projectId
     rememberBrowserHistorySnapshot(scopeId: command.browserHistoryScopeId, items: command.browserHistory)
-    rememberBrowserColorSchemes(
-      projectId: browserColorSchemeProjectId,
-      schemes: command.browserColorSchemes)
     appendLayoutLayeringDebugLog("nativeWorkspace.createWebPane.received", details: [
       "commandSessionId": command.sessionId,
       "commandTitle": command.title,
@@ -4380,7 +4291,6 @@ final class TerminalWorkspaceView: NSView {
       ])
       existingSession.hostView.setBrowserFeedbackTool(browserFeedbackTool)
       existingSession.hostView.setShowBetaFeatures(command.showBetaFeatures == true)
-      existingSession.hostView.setBrowserColorSchemes(browserColorSchemes(projectId: browserColorSchemeProjectId))
       if existingSession.isManagedT3Pane, isManagedT3Pane {
         webPaneSessions[command.sessionId] = WebPaneSession(
           browserTitleObservation: existingSession.browserTitleObservation,
@@ -4520,7 +4430,6 @@ final class TerminalWorkspaceView: NSView {
       showsBrowserToolbar: !isManagedT3Pane,
       initialAddress: command.url,
       browserFeedbackTool: browserFeedbackTool,
-      browserColorSchemes: browserColorSchemes(projectId: command.projectId),
       showBetaFeatures: command.showBetaFeatures == true,
       onFocus: { [weak self] in
         self?.focusWebPane(sessionId: command.sessionId, reason: "browserToolbar")
@@ -4540,12 +4449,6 @@ final class TerminalWorkspaceView: NSView {
       },
       onShowImportSettings: { [weak self] in
         self?.showBrowserImportSettings(sessionId: command.sessionId)
-      },
-      onBrowserColorSchemeSelected: { [weak self] origin, colorScheme in
-        self?.setBrowserColorScheme(
-          projectId: command.projectId,
-          origin: origin,
-          colorScheme: colorScheme)
       },
       onHistoryNavigation: { [weak self] url in
         /*
@@ -4574,7 +4477,6 @@ final class TerminalWorkspaceView: NSView {
           title: chromiumView?.pageTitle,
           url: url,
           reason: "chromiumUrlChanged")
-        hostView?.applyBrowserColorSchemeForNavigation(urlString: url, reason: "chromiumUrlChanged")
         hostView?.refreshBrowserToolbar(reason: "chromiumUrlChanged")
       }
       chromiumView.faviconURLChangedHandler = { [weak self] faviconURL in
@@ -4994,7 +4896,6 @@ final class TerminalWorkspaceView: NSView {
       command.companionPaneHidden,
       reason: "createProjectEditorPane")
     rememberBrowserHistorySnapshot(scopeId: command.browserHistoryScopeId, items: command.browserHistory)
-    rememberBrowserColorSchemes(projectId: command.projectId, schemes: command.browserColorSchemes)
     let browserFeedbackTool = Self.normalizedBrowserFeedbackTool(command.browserFeedbackTool)
     let requestedMode = command.mode ?? projectEditorModeFromNativeEditorId(command.projectId) ?? "code"
     let newBrowserTabUrl = projectEditorBrowserNewTabURL(command.newBrowserTabUrl, fallback: command.url)
@@ -5004,7 +4905,6 @@ final class TerminalWorkspaceView: NSView {
       for hostView in projectEditorHostViews(nextSession) {
         hostView.setBrowserFeedbackTool(browserFeedbackTool)
         hostView.setShowBetaFeatures(command.showBetaFeatures == true)
-        hostView.setBrowserColorSchemes(browserColorSchemes(projectId: command.projectId))
       }
       if existingSession.mode == "git", requestedMode == "git" {
         /**
@@ -5114,7 +5014,6 @@ final class TerminalWorkspaceView: NSView {
           tabId: createProjectEditorGitTabId(),
           title: projectEditorTabTitle(for: command.url, fallback: command.title),
           url: command.url,
-          browserColorSchemes: browserColorSchemes(projectId: command.projectId),
           browserHistoryItems: browserHistoryItems(scopeId: command.browserHistoryScopeId),
           browserFeedbackTool: browserFeedbackTool,
           showBetaFeatures: command.showBetaFeatures == true,
@@ -5130,7 +5029,6 @@ final class TerminalWorkspaceView: NSView {
           isPlaceholder: tab.isPlaceholder == true,
           title: tab.title,
           url: tab.url,
-          browserColorSchemes: browserColorSchemes(projectId: command.projectId),
           browserHistoryItems: browserHistoryItems(scopeId: command.browserHistoryScopeId),
           browserFeedbackTool: browserFeedbackTool,
           showBetaFeatures: command.showBetaFeatures == true,
@@ -5191,7 +5089,6 @@ final class TerminalWorkspaceView: NSView {
     isPlaceholder: Bool = false,
     title: String,
     url: String,
-    browserColorSchemes: [String: String] = [:],
     browserHistoryItems: [NativeBrowserHistoryItem] = [],
     browserFeedbackTool: String,
     showBetaFeatures: Bool,
@@ -5214,7 +5111,9 @@ final class TerminalWorkspaceView: NSView {
      project-editor session points at whichever tab is active for existing
      layout, focus, and toolbar commands.
      */
-    let useWebKitProjectView = !isPlaceholder && projectEditorModeFromNativeEditorId(projectId) == "tasks"
+    let projectEditorMode = projectEditorModeFromNativeEditorId(projectId)
+    let useWebKitProjectView = !isPlaceholder && projectEditorMode == "tasks"
+    let usesDeferredCodeServerNavigation = !isPlaceholder && projectEditorMode == "code"
     let tabUrl = isPlaceholder
       ? url
       : (normalizedProjectEditorBrowserURL(url) ?? Self.projectBrowserDefaultNewTabURL)
@@ -5280,9 +5179,14 @@ final class TerminalWorkspaceView: NSView {
       webView = projectWebView
       browserView = projectWebView
     } else {
+      /*
+       CDXC:EditorPanes 2026-06-19-11:50:
+       First Source-tab open after app restart must not let Chromium navigate to code-server before the native readiness wait has passed. Start code-mode CEF panes on about:blank and keep the real tabUrl as session state so loadProjectEditorPaneWhenReady remains the only code-server navigation path; this prevents the intermediate code-server "page not found" document from painting before VS Code loads.
+       */
+      let initialChromiumURL = usesDeferredCodeServerNavigation ? "about:blank" : tabUrl
       let projectChromiumView = GhostexCEFBrowserView(
         frame: .zero,
-        initialURL: tabUrl,
+        initialURL: initialChromiumURL,
         profileIdentifier: "default")
       projectChromiumView.trustedClipboardOrigin = NativeCodeServerRuntimeLauncher.origin
       projectChromiumView.translatesAutoresizingMaskIntoConstraints = true
@@ -5298,7 +5202,6 @@ final class TerminalWorkspaceView: NSView {
       showsInitialLoadingOverlay: showsInitialLoadingOverlay && !isPlaceholder,
       initialAddress: isPlaceholder ? nil : tabUrl,
       browserFeedbackTool: browserFeedbackTool,
-      browserColorSchemes: browserColorSchemes,
       showBetaFeatures: showBetaFeatures,
       onFocus: { [weak self] in
         self?.focusProjectEditorPaneFromUserInteraction(
@@ -5320,12 +5223,6 @@ final class TerminalWorkspaceView: NSView {
       },
       onShowImportSettings: { [weak self] in
         self?.showProjectEditorImportSettings(projectId: projectId)
-      },
-      onBrowserColorSchemeSelected: { [weak self] origin, colorScheme in
-        self?.setBrowserColorScheme(
-          projectId: projectId,
-          origin: origin,
-          colorScheme: colorScheme)
       },
       onAddressNavigation: { [weak self] url in
         self?.realizeProjectEditorBrowserPlaceholderTab(
@@ -5851,7 +5748,6 @@ final class TerminalWorkspaceView: NSView {
       tabId: createProjectEditorGitTabId(),
       title: title ?? projectEditorTabTitle(for: tabUrl, fallback: "Browser"),
       url: tabUrl,
-      browserColorSchemes: browserColorSchemes(projectId: projectId),
       browserHistoryItems: browserHistoryItems(scopeId: session.browserHistoryScopeId),
       browserFeedbackTool: session.hostView.browserFeedbackToolRawValue,
       showBetaFeatures: session.hostView.showsBetaFeatureToolbarButtons,
@@ -5964,7 +5860,6 @@ final class TerminalWorkspaceView: NSView {
         isPlaceholder: true,
         title: "New Tab",
         url: "",
-        browserColorSchemes: browserColorSchemes(projectId: projectId),
         browserHistoryItems: browserHistoryItems(scopeId: session.browserHistoryScopeId),
         browserFeedbackTool: session.hostView.browserFeedbackToolRawValue,
         showBetaFeatures: session.hostView.showsBetaFeatureToolbarButtons,
@@ -10416,7 +10311,6 @@ final class TerminalWorkspaceView: NSView {
           "urlKind": Self.modeSwitcherDebugURLKind(url),
       ])
       if let chromiumView = session.chromiumView {
-        session.hostView.applyBrowserColorSchemeForNavigation(urlString: url, reason: reason)
         chromiumView.loadURLString(url)
       } else if let webView = session.webView, let parsedURL = URL(string: url) {
         if parsedURL.isFileURL {
@@ -10477,7 +10371,6 @@ final class TerminalWorkspaceView: NSView {
               message: message))
           return
         }
-        session.hostView.applyBrowserColorSchemeForNavigation(urlString: url, reason: reason)
         session.chromiumView?.loadURLString(url)
         session.hostView.refreshHostedWebView(reason: reason)
       }
@@ -10537,7 +10430,6 @@ final class TerminalWorkspaceView: NSView {
         title: nil,
         url: url)
       let hostView = self?.projectEditorHostView(projectId: projectId, chromiumView: chromiumView)
-      hostView?.applyBrowserColorSchemeForNavigation(urlString: url, reason: "projectEditorUrlChanged")
       hostView?.refreshBrowserToolbar(reason: "projectEditorUrlChanged")
       if let session = self?.projectEditorPaneSessions[projectId],
         session.mode == "git",
@@ -14704,7 +14596,6 @@ final class TerminalWorkspaceView: NSView {
         "sessionId": sessionId,
         "url": url.absoluteString,
       ])
-      session.hostView.applyBrowserColorSchemeForNavigation(urlString: url.absoluteString, reason: reason)
       session.chromiumView?.loadURLString(url.absoluteString)
       return
     }
@@ -26521,95 +26412,6 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     }
   }
 
-  private enum BrowserPaneThemeMode: String {
-    case system
-    case light
-    case dark
-
-    var title: String {
-      switch self {
-      case .system:
-        return "System"
-      case .light:
-        return "Light"
-      case .dark:
-        return "Dark"
-      }
-    }
-
-    var symbolName: String {
-      switch self {
-      case .system:
-        return "circle.lefthalf.filled"
-      case .light:
-        return "sun.max"
-      case .dark:
-        return "moon"
-      }
-    }
-
-    var preferredColorSchemeOverride: String? {
-      switch self {
-      case .system:
-        return nil
-      case .light:
-        return "light"
-      case .dark:
-        return "dark"
-      }
-    }
-  }
-
-  fileprivate static func normalizedBrowserColorSchemeRawValue(_ value: String?) -> String? {
-    guard let value,
-      BrowserPaneThemeMode(rawValue: value) != nil
-    else {
-      return nil
-    }
-    return value
-  }
-
-  fileprivate static func browserColorSchemeOriginKey(for urlString: String?) -> String? {
-    guard let trimmed = urlString?.trimmingCharacters(in: .whitespacesAndNewlines),
-      !trimmed.isEmpty,
-      let components = URLComponents(string: trimmed),
-      let scheme = components.scheme?.lowercased(),
-      scheme == "http" || scheme == "https",
-      let rawHost = components.host?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")),
-      !rawHost.isEmpty
-    else {
-      return nil
-    }
-    let port = components.port ?? (scheme == "http" ? 80 : 443)
-    return "\(scheme)://\(rawHost):\(port)"
-  }
-
-  fileprivate static func normalizedBrowserColorSchemeMap(_ schemes: [String: String]?) -> [String: String] {
-    guard let schemes else {
-      return [:]
-    }
-    var normalized: [String: String] = [:]
-    for (origin, rawMode) in schemes {
-      guard let originKey = browserColorSchemeOriginKey(for: origin),
-        let mode = normalizedBrowserColorSchemeRawValue(rawMode)
-      else {
-        continue
-      }
-      normalized[originKey] = mode
-    }
-    return normalized
-  }
-
-  private static func browserColorSchemeModesByOrigin(_ schemes: [String: String]) -> [String: BrowserPaneThemeMode] {
-    var modes: [String: BrowserPaneThemeMode] = [:]
-    for (origin, rawMode) in normalizedBrowserColorSchemeMap(schemes) {
-      if let mode = BrowserPaneThemeMode(rawValue: rawMode) {
-        modes[origin] = mode
-      }
-    }
-    return modes
-  }
-
   private static let browserToolbarHeight: CGFloat = 40
   private static let toolbarButtonSize = CGSize(width: 28, height: 28)
   private static let toolbarHorizontalPadding: CGFloat = 12
@@ -26641,7 +26443,6 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   private let onInjectFeedbackTool: (() -> Void)?
   private let onShowProfilePicker: (() -> Void)?
   private let onShowImportSettings: (() -> Void)?
-  private let onBrowserColorSchemeSelected: ((String, String) -> Void)?
   private let onAddressNavigation: ((URL) -> Bool)?
   private let onHistoryNavigation: ((URL) -> Bool)?
   private let toolbarView = NSView(frame: .zero)
@@ -26700,18 +26501,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     fallbackTitle: "P",
     tooltip: "Browser Profile"
   )
-  private let appearanceButton = WebPaneHostView.makeToolbarButton(
-    systemSymbolName: "sun.max",
-    fallbackTitle: "A",
-    tooltip: "Toggle Page Appearance"
-  )
   private var navigationObservations: [NSKeyValueObservation] = []
-  /*
-   CDXC:BrowserPanes 2026-06-18-22:50:
-   CEF browser panes should present sites as if the hidden address-bar color-scheme menu is set to Light by default, not System. Apply the mode through the same menu path on creation and CEF replacement so `prefers-color-scheme` starts in light mode even when Show Beta features keeps the button hidden.
-   */
-  private var browserThemeMode: BrowserPaneThemeMode = .light
-  private var browserColorSchemeModesByOrigin: [String: BrowserPaneThemeMode] = [:]
   private var isEditingAddress = false
 
   init(
@@ -26722,14 +26512,12 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     showsInitialLoadingOverlay: Bool = false,
     initialAddress: String? = nil,
     browserFeedbackTool: String? = nil,
-    browserColorSchemes: [String: String] = [:],
     showBetaFeatures: Bool = false,
     onFocus: (() -> Void)? = nil,
     onOpenDevTools: (() -> Void)? = nil,
     onInjectFeedbackTool: (() -> Void)? = nil,
     onShowProfilePicker: (() -> Void)? = nil,
     onShowImportSettings: (() -> Void)? = nil,
-    onBrowserColorSchemeSelected: ((String, String) -> Void)? = nil,
     onAddressNavigation: ((URL) -> Bool)? = nil,
     onHistoryNavigation: ((URL) -> Bool)? = nil
   ) {
@@ -26739,7 +26527,6 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     self.browserFindBar = chromiumView.map { BrowserFindBarView(chromiumView: $0) }
     self.showsBrowserToolbar = showsBrowserToolbar
     self.browserFeedbackTool = BrowserFeedbackTool.normalized(browserFeedbackTool)
-    self.browserColorSchemeModesByOrigin = Self.browserColorSchemeModesByOrigin(browserColorSchemes)
     self.showBetaFeatures = showBetaFeatures
     self.initialLoadingOverlayView =
       showsInitialLoadingOverlay ? ProjectEditorInitialLoadingOverlayView(frame: .zero) : nil
@@ -26748,7 +26535,6 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     self.onInjectFeedbackTool = onInjectFeedbackTool
     self.onShowProfilePicker = onShowProfilePicker
     self.onShowImportSettings = onShowImportSettings
-    self.onBrowserColorSchemeSelected = onBrowserColorSchemeSelected
     self.onAddressNavigation = onAddressNavigation
     self.onHistoryNavigation = onHistoryNavigation
     super.init(frame: .zero)
@@ -26761,9 +26547,9 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     browserView.translatesAutoresizingMaskIntoConstraints = true
     browserView.autoresizingMask = []
     browserView.frame = bounds
+    applyFixedBrowserPageAppearanceIfNeeded()
     if showsBrowserToolbar {
       configureBrowserToolbar(initialAddress: initialAddress)
-      applyBrowserColorSchemeForNavigation(urlString: initialAddress, reason: "initial")
       addSubview(toolbarView)
     }
     addSubview(browserView)
@@ -26873,6 +26659,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     webView = nextWebView
     browserView.translatesAutoresizingMaskIntoConstraints = true
     browserView.autoresizingMask = []
+    applyFixedBrowserPageAppearanceIfNeeded()
     addSubview(browserView)
     if let chromiumView {
       let findBar = BrowserFindBarView(chromiumView: chromiumView)
@@ -26884,11 +26671,6 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       }
       browserFindBar = findBar
       addSubview(findBar)
-    }
-    if showsBrowserToolbar {
-      applyBrowserColorSchemeForNavigation(
-        urlString: browserColorSchemeURLString(),
-        reason: "replaceHostedBrowserView")
     }
     refreshHostedWebView(reason: reason)
     updateBrowserToolbarState()
@@ -26921,7 +26703,6 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       reactGrabButton,
       historyButton,
       profileButton,
-      appearanceButton,
       devToolsButton,
     ]
   }
@@ -27003,24 +26784,16 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       max(Self.browserHistoryPageSize, items.count))
   }
 
-  func setBrowserColorSchemes(_ schemes: [String: String]) {
-    browserColorSchemeModesByOrigin = Self.browserColorSchemeModesByOrigin(schemes)
-    applyBrowserColorSchemeForNavigation(
-      urlString: browserColorSchemeURLString(),
-      reason: "setBrowserColorSchemes")
-  }
-
-  func applyBrowserColorSchemeForNavigation(urlString: String?, reason _: String) {
+  private func applyFixedBrowserPageAppearanceIfNeeded() {
     guard showsBrowserToolbar else {
       return
     }
     /*
-     CDXC:BrowserColorScheme 2026-06-19-08:34:
-     Each top-level browser navigation resolves the current http(s) origin to a stored project preference. When none exists, keep the browser in Light mode instead of System, matching the hidden beta address-bar control's default selection.
+     CDXC:BrowserPageAppearance 2026-06-19-11:47:
+     Browser address bars no longer expose a System/Light/Dark control or persist per-origin choices. Browser panes always request light page appearance at the renderer boundary so sites do not inherit Ghostex's dark macOS chrome and misread `prefers-color-scheme` during startup.
      */
-    let origin = Self.browserColorSchemeOriginKey(for: urlString)
-    let mode = origin.flatMap { browserColorSchemeModesByOrigin[$0] } ?? .light
-    applyBrowserThemeMode(mode, persistsSelection: false)
+    webView?.appearance = NSAppearance(named: .aqua)
+    chromiumView?.setForcesLightPageAppearance(true)
   }
 
   func refreshHostedWebView(reason: String) {
@@ -27319,7 +27092,6 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     historyButton.action = #selector(showHistoryMenu)
     updateBrowserFeedbackToolButton()
     profileButton.action = #selector(showProfilePicker)
-    appearanceButton.action = #selector(showAppearanceMenu)
     updateBrowserBetaFeatureButtonVisibility()
 
     securityIcon.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Secure connection")
@@ -27386,7 +27158,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     /**
      CDXC:BrowserPanes 2026-05-02-17:13
      The browser address row should match the reference chrome exactly: the
-     selected feedback tool, history, profile, theme, and DevTools live to the right of the URL field.
+     selected feedback tool, history, profile, and DevTools live to the right of the URL field.
      Import remains a profile-menu action instead of a fifth always-visible
      toolbar button so the pane chrome does not drift from the expected layout.
 
@@ -27396,11 +27168,15 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
      the address field so hit-testing remains normal AppKit sibling geometry.
 
      CDXC:BetaFeatures 2026-06-16-13:08:
-     Profile and color-scheme buttons remain in this normal right-button run only
-     when Show Beta features is enabled; when hidden, the address field takes
-     their space through the same sibling-frame calculation.
+     The profile button remains in this normal right-button run only when Show
+     Beta features is enabled; when hidden, the address field takes its space
+     through the same sibling-frame calculation.
+
+     CDXC:BrowserPageAppearance 2026-06-19-11:47:
+     The browser appearance menu was removed. Page appearance is fixed to light
+     at the CEF/WKWebView boundary instead of exposing a stateful toolbar choice.
      */
-    let rightButtons = [zoomButton, reactGrabButton, historyButton, profileButton, appearanceButton, devToolsButton].filter { !$0.isHidden }
+    let rightButtons = [zoomButton, reactGrabButton, historyButton, profileButton, devToolsButton].filter { !$0.isHidden }
     var rightX = toolbarView.bounds.width - Self.toolbarHorizontalPadding
     for button in rightButtons.reversed() {
       rightX -= Self.toolbarButtonSize.width
@@ -27459,18 +27235,6 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
 
   private func currentURLString() -> String? {
     chromiumView?.currentURLString ?? webView?.url?.absoluteString
-  }
-
-  private func browserColorSchemeURLString() -> String? {
-    let current = currentURLString()?.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let current, !current.isEmpty, current.lowercased() != "about:blank" {
-      return current
-    }
-    let address = addressField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !address.isEmpty {
-      return address
-    }
-    return current
   }
 
   private static func browserFeedbackToolUnavailable(urlString: String?) -> Bool {
@@ -27631,7 +27395,6 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
 
   private func navigateBrowserToolbar(to url: URL, reason _: String) {
     addressField.stringValue = url.absoluteString
-    applyBrowserColorSchemeForNavigation(urlString: url.absoluteString, reason: "browserToolbarNavigation")
     if onAddressNavigation?(url) == true {
       updateBrowserToolbarState()
     } else if let chromiumView {
@@ -27686,18 +27449,13 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
   private func updateBrowserBetaFeatureButtonVisibility() {
     /*
      CDXC:BetaFeatures 2026-06-16-13:08:
-     Profiles and browser color-scheme controls are beta browser address-bar
-     buttons. Hide the actual AppKit buttons when Show Beta features is off so
-     their hit areas and address-field width disappear together through normal
-     sibling layout.
+     Browser Profiles remains a beta address-bar button. Hide the actual AppKit
+     button when Show Beta features is off so its hit area and address-field
+     width disappear together through normal sibling layout.
      */
     let shouldHideBetaButtons = !showBetaFeatures
     if profileButton.isHidden != shouldHideBetaButtons {
       profileButton.isHidden = shouldHideBetaButtons
-      needsLayout = true
-    }
-    if appearanceButton.isHidden != shouldHideBetaButtons {
-      appearanceButton.isHidden = shouldHideBetaButtons
       needsLayout = true
     }
   }
@@ -27967,71 +27725,6 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     scheduleBrowserToolbarActionDiagnostics(action: "profile")
   }
 
-  @objc private func showAppearanceMenu() {
-    logBrowserToolbarActionDiagnostics(action: "appearance", phase: "before", details: [
-      "currentURL": currentURLString() ?? NSNull(),
-      "windowNumber": window?.windowNumber ?? NSNull(),
-    ])
-    onFocus?()
-    let menu = NSMenu(title: "Browser Theme")
-    for mode in [BrowserPaneThemeMode.system, .light, .dark] {
-      let item = NSMenuItem(title: mode.title, action: #selector(selectAppearanceMode(_:)), keyEquivalent: "")
-      item.identifier = NSUserInterfaceItemIdentifier(mode.rawValue)
-      item.target = self
-      item.state = mode == browserThemeMode ? .on : .off
-      menu.addItem(item)
-    }
-    NSMenu.popUpContextMenu(
-      menu,
-      with: syntheticMenuEvent(),
-      for: appearanceButton
-    )
-    logBrowserToolbarActionDiagnostics(action: "appearance", phase: "after")
-    scheduleBrowserToolbarActionDiagnostics(action: "appearance")
-  }
-
-  @objc private func selectAppearanceMode(_ sender: NSMenuItem) {
-    guard let rawValue = sender.identifier?.rawValue,
-      let mode = BrowserPaneThemeMode(rawValue: rawValue)
-    else {
-      return
-    }
-    /**
-     CDXC:BrowserPanes 2026-05-02-17:32:
-     The browser theme top-bar control mirrors the reference System/Light/Dark menu. Apply the choice directly to the embedded browser surface so compatible pages update in place without replacing the browser pane or using overlay UI.
-
-     CDXC:ChromiumBrowserPanes 2026-06-18-22:50:
-     CEF must use Chromium's page color-scheme emulation rather than a stored no-op. Selecting System clears the emulation, while Light and Dark update page `prefers-color-scheme` immediately.
-
-     CDXC:BrowserColorScheme 2026-06-19-08:34:
-     A menu click is an explicit per-project/per-origin preference, even when the user selects System. Persist only user selections; navigation-resolved Light defaults must not create stored entries.
-     */
-    applyBrowserThemeMode(mode, persistsSelection: true)
-  }
-
-  private func applyBrowserThemeMode(_ mode: BrowserPaneThemeMode, persistsSelection: Bool = false) {
-    browserThemeMode = mode
-    if let webView {
-      switch mode {
-      case .system:
-        webView.appearance = nil
-      case .light:
-        webView.appearance = NSAppearance(named: .aqua)
-      case .dark:
-        webView.appearance = NSAppearance(named: .darkAqua)
-      }
-    }
-    chromiumView?.setPreferredColorScheme(mode.preferredColorSchemeOverride)
-    appearanceButton.image = NSImage(systemSymbolName: mode.symbolName, accessibilityDescription: "Browser Theme")
-    guard persistsSelection,
-      let origin = Self.browserColorSchemeOriginKey(for: browserColorSchemeURLString())
-    else {
-      return
-    }
-    browserColorSchemeModesByOrigin[origin] = mode
-    onBrowserColorSchemeSelected?(origin, mode.rawValue)
-  }
-
   @objc private func showImportSettings() {
     logBrowserToolbarActionDiagnostics(action: "importSettings", phase: "before", details: [
       "currentURL": currentURLString() ?? NSNull(),
@@ -28069,9 +27762,6 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     }
     if profileButton.frame.contains(point) {
       return "profileButton"
-    }
-    if appearanceButton.frame.contains(point) {
-      return "appearanceButton"
     }
     if devToolsButton.frame.contains(point) {
       return "devToolsButton"
@@ -28115,9 +27805,6 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     }
     if profileButton.frame.contains(point) {
       return profileButton
-    }
-    if appearanceButton.frame.contains(point) {
-      return appearanceButton
     }
     if devToolsButton.frame.contains(point) {
       return devToolsButton

@@ -181,8 +181,15 @@ export type TerminalSessionRecord = BaseSessionRecord & {
    * Provider-backed delayed sends must survive app restart with the terminal
    * session that owns the prompt. Persist the absolute deadline on the terminal
    * record so restore can wake the session and re-arm the pending Enter key.
+   *
+   * CDXC:DelayedSend 2026-06-19-14:55:
+   * Restart should resume Delayed Send near its last in-app countdown position
+   * instead of consuming time while Ghostex is closed. Persist the latest
+   * remaining-duration checkpoint beside the live deadline so native can build
+   * a fresh deadline on startup.
    */
   delayedSendDeadlineAt?: string;
+  delayedSendRemainingMs?: number;
   /**
    * CDXC:SessionLastActive 2026-05-17-02:45:
    * Last Active is durable sidebar metadata for terminal sessions. Persist it
@@ -256,6 +263,7 @@ export type CreateSessionRecordOptions =
       closeAfterDone?: boolean;
       commandTitle?: string;
       delayedSendDeadlineAt?: string;
+      delayedSendRemainingMs?: number;
       displayId?: string;
       initialPresentation?: "background" | "focused";
       kind?: "terminal";

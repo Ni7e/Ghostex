@@ -91,6 +91,44 @@ enum NativeLogPrivacyTests {
     assertTrue(numericTelemetryJson.contains("\"hasError\":false"), "false booleans should remain boolean")
     assertTrue(numericTelemetryJson.contains("\"isAwakeTargetMode\":true"), "true booleans should remain boolean")
 
+    /*
+     CDXC:PromptEditor 2026-06-19-16:45:
+     Ctrl+G speed repro logs need stage-level timings across CLI, native bridge,
+     native child-window, React, and Monaco. Keep request ids, booleans, counts,
+     and durations visible while redacting prompt text, file/status paths, URLs,
+     commands, and credentials before the support-bundle log is written.
+     */
+    let promptEditorTimingPayload = NativeLogPrivacy.sanitizePayload([
+      "commandText": "codex --ask private request",
+      "durationMs": 17,
+      "event": "modalHost.react.monaco.createdAndFocused",
+      "filePath": "/Users/person/dev/private-customer/prompt.md",
+      "focusDurationMs": 0,
+      "hasExistingEditor": true,
+      "initialText": "private prompt text",
+      "openToEditorReadyMs": 24,
+      "requestId": "floating-monaco-editor-fixture",
+      "statusFile": "/var/folders/private/status",
+      "textLength": 128,
+      "token": "secret-token",
+      "url": "https://example.test/private?token=secret-token",
+    ])
+    let promptEditorTimingJson = serializePrivacyTestPayload(promptEditorTimingPayload)
+
+    assertTrue(promptEditorTimingJson.contains("modalHost.react.monaco.createdAndFocused"), "prompt timing event should remain visible")
+    assertTrue(promptEditorTimingJson.contains("floating-monaco-editor-fixture"), "prompt timing request id should remain visible")
+    assertTrue(promptEditorTimingJson.contains("\"durationMs\":17"), "prompt timing duration should remain numeric")
+    assertTrue(promptEditorTimingJson.contains("\"focusDurationMs\":0"), "prompt timing zero durations should remain numeric")
+    assertTrue(promptEditorTimingJson.contains("\"openToEditorReadyMs\":24"), "prompt timing open-to-ready duration should remain numeric")
+    assertTrue(promptEditorTimingJson.contains("\"textLength\":128"), "prompt timing text length should remain numeric")
+    assertTrue(promptEditorTimingJson.contains("\"hasExistingEditor\":true"), "prompt timing boolean state should remain boolean")
+    assertTrue(!promptEditorTimingJson.contains("private prompt text"), "prompt timing logs must not include prompt text")
+    assertTrue(!promptEditorTimingJson.contains("/Users/person"), "prompt timing logs must not include file paths")
+    assertTrue(!promptEditorTimingJson.contains("/var/folders"), "prompt timing logs must not include status paths")
+    assertTrue(!promptEditorTimingJson.contains("codex --ask private request"), "prompt timing logs must not include command text")
+    assertTrue(!promptEditorTimingJson.contains("secret-token"), "prompt timing logs must not include secrets")
+    assertTrue(!promptEditorTimingJson.contains("private?token"), "prompt timing logs must not include full URLs or query strings")
+
     let hotkeyReproPayload = NativeLogPrivacy.sanitizePayload([
       "actionId": "focusNextSession",
       "commandText": "codex --ask private request",

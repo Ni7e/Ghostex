@@ -583,7 +583,11 @@ printf 'rust-forwarded:%s\\n' "$1"
       });
     });
     await mkdir(path.join(homeDir, "cli"), { recursive: true });
+    await mkdir(path.join(homeDir, "state"), { recursive: true });
     await writeFile(path.join(homeDir, "cli", "bridge-token"), "test-token\n");
+    await writeFile(path.join(homeDir, "state", "native-sidebar-settings.json"), JSON.stringify({
+      debuggingMode: true,
+    }));
     await writeFile(editFile, "prompt text\n");
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
@@ -615,6 +619,17 @@ printf 'rust-forwarded:%s\\n' "$1"
         title: "Prompt Editor",
         type: "openFloatingEditor",
       });
+      const promptDebugLog = await readFile(
+        path.join(homeDir, "logs", "native-prompt-editor-debug.log"),
+        "utf8",
+      );
+      expect(promptDebugLog).toContain("cli.monaco.requestPrepared");
+      expect(promptDebugLog).toContain("cli.monaco.bridgeConnected");
+      expect(promptDebugLog).toContain("cli.monaco.statusResolved");
+      expect(promptDebugLog).not.toContain(editFile);
+      expect(promptDebugLog).not.toContain("prompt text");
+      expect(promptDebugLog).not.toContain("test-token");
+      expect(promptDebugLog).not.toContain("statusFile");
     } finally {
       await new Promise((resolve) => server.close(resolve));
       await rm(tempDir, { force: true, recursive: true });

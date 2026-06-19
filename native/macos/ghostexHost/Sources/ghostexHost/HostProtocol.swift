@@ -449,11 +449,6 @@ struct CreateTerminal: Decodable {
 
 struct CreateWebPane: Decodable {
   let browserFeedbackTool: String?
-  /*
-   CDXC:BrowserColorScheme 2026-06-19-08:34:
-   Browser panes receive sidebar-owned System/Light/Dark preferences keyed by exact http(s) origin, including effective port. Native applies the matching entry on navigation and keeps Light as the missing-entry default.
-   */
-  let browserColorSchemes: [String: String]?
   let browserHistory: [NativeBrowserHistoryItem]?
   let browserHistoryScopeId: String?
   let cwd: String?
@@ -579,11 +574,6 @@ struct NativeBrowserHistoryItem: Codable {
 
 struct CreateProjectEditorPane: Decodable {
   let activeBrowserTabId: String?
-  /*
-   CDXC:BrowserColorScheme 2026-06-19-08:34:
-   Project Browser tabs use the same per-project origin color-scheme map as standalone Browser panes so restored tabs reopen with the user's prior appearance selection.
-   */
-  let browserColorSchemes: [String: String]?
   let browserHistory: [NativeBrowserHistoryItem]?
   let browserHistoryScopeId: String?
   let browserTabs: [ProjectEditorBrowserTabState]?
@@ -856,6 +846,14 @@ struct TitlebarKeepAwakeSettings: Decodable {
   let deactivateOnLowPowerMode: Bool
   let deactivateOnUserSwitch: Bool
   let defaultDurationMinutes: Int
+  /**
+   CDXC:TitlebarKeepAwake 2026-06-19-13:13:
+   Keep Awake is beta-gated in the macOS titlebar. Decode the beta availability
+   and effective hide flag from layout sync so AppKit can forward them to the
+   isolated titlebar webview without inferring Settings state.
+   */
+  let featureEnabled: Bool?
+  let hideTitlebarControl: Bool?
   let preventLidSleep: Bool
 }
 
@@ -1433,7 +1431,6 @@ enum HostEvent: Encodable {
   case terminalTitleChanged(sessionId: String, title: String, sessionPersistenceName: String?)
   case browserFaviconChanged(sessionId: String, faviconDataUrl: String?)
   case browserUrlChanged(sessionId: String, url: String)
-  case browserColorSchemeSelected(projectId: String, origin: String, colorScheme: String)
   case browserOpenInNewTabRequested(sourceSessionId: String, url: String)
   case terminalTitleBarAction(sessionId: String, action: TerminalTitleBarAction)
   case paneReorderRequested(sourceSessionId: String, targetSessionId: String, placement: PaneDropPlacement?)
@@ -1514,8 +1511,6 @@ enum HostEvent: Encodable {
     case windowWidth
     case faviconDataUrl
     case url
-    case origin
-    case colorScheme
     case activeTabId
     case tabs
     case projectEditorId
@@ -1625,15 +1620,6 @@ enum HostEvent: Encodable {
       try container.encode("browserUrlChanged", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)
       try container.encode(url, forKey: .url)
-    case .browserColorSchemeSelected(let projectId, let origin, let colorScheme):
-      /**
-       CDXC:BrowserColorScheme 2026-06-19-08:34:
-       The hidden beta toolbar appearance menu remains user-controllable. Report explicit System/Light/Dark selections by project and exact origin so the sidebar can persist them across app restarts without making native own project storage.
-       */
-      try container.encode("browserColorSchemeSelected", forKey: .type)
-      try container.encode(projectId, forKey: .projectId)
-      try container.encode(origin, forKey: .origin)
-      try container.encode(colorScheme, forKey: .colorScheme)
     case .browserOpenInNewTabRequested(let sourceSessionId, let url):
       /**
        CDXC:BrowserTabs 2026-06-13-00:00:

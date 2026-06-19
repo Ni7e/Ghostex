@@ -2236,7 +2236,14 @@ function ProjectBoardApp() {
         <>
           {errorMessage ? <ProjectBoardNotice message={errorMessage} /> : null}
           <DragDropProvider onDragEnd={handleDragEnd}>
-            <section className="project-board-lanes" aria-label="Project issue board">
+            {/*
+              CDXC:ScrollFades 2026-06-19-14:16:
+              Kanban uses a horizontal board scroller plus vertical lane
+              scrollers. Apply the shared Codex-style masks to the scroll
+              containers themselves so lane headers and custom scrollbars stay
+              crisp while overflowing cards fade at the edges.
+            */}
+            <section className="project-board-lanes horizontal-scroll-fade-mask" aria-label="Project issue board">
               {BOARD_COLUMNS.map((column) => (
                 <BoardLane
                   column={column}
@@ -2561,7 +2568,7 @@ function ProjectBoardApp() {
             </DialogDescription>
           </DialogHeader>
           <div
-            className="project-ticket-dialog-body"
+            className="project-ticket-dialog-body vertical-scroll-fade-mask"
             onKeyDown={(event) => handleCmdEnter(event, () => void saveTicketDetail())}
           >
             <TicketMetaFields
@@ -2785,7 +2792,7 @@ function ProjectBoardApp() {
             </DialogDescription>
           </DialogHeader>
           <div
-            className="project-ticket-dialog-body"
+            className="project-ticket-dialog-body vertical-scroll-fade-mask"
             onKeyDown={(event) => handleCmdEnter(event, () => void createTicket())}
           >
             <TicketMetaFields
@@ -3646,7 +3653,11 @@ function BoardLane({
           </Button>
         </div>
       </header>
-      <div className="project-board-lane-scroll" onScroll={updateScrollThumb} ref={scrollRef}>
+      <div
+        className="project-board-lane-scroll vertical-scroll-fade-mask"
+        onScroll={updateScrollThumb}
+        ref={scrollRef}
+      >
         <div className="project-board-card-stack">
           {visibleTickets.map((ticket) => (
             <TicketCard
@@ -3985,7 +3996,7 @@ function AutomationDefinitionList({
     );
   }
   return (
-    <section className="project-automation-list" aria-label="Automations">
+    <section className="project-automation-list vertical-scroll-fade-mask" aria-label="Automations">
       {automations.map((automation) => {
         const lastRun = runs.find((run) => run.automationId === automation.id);
         const unreadCount = runs.filter(
@@ -4124,7 +4135,7 @@ function AutomationRunList({
     );
   }
   return (
-    <section className="project-automation-run-list" aria-label="Automation runs">
+    <section className="project-automation-run-list vertical-scroll-fade-mask" aria-label="Automation runs">
       {runs.map((run) => {
         const automation = automations.find((candidate) => candidate.id === run.automationId);
         const agentLabel = automation ? automationAgentLabel(agents, automation.agentId) : "Unknown agent";
@@ -4262,7 +4273,7 @@ function AutomationDefinitionDetail({
   const agentIcon = agent ? resolveAutomationAgentIcon(agent) : undefined;
   const isBusy = actionId === automation.id;
   return (
-    <section className="project-automation-detail" aria-label="Automation details">
+    <section className="project-automation-detail vertical-scroll-fade-mask" aria-label="Automation details">
       <div className="project-automation-detail-header">
         <div>
           <span data-enabled={automation.enabled}>{automation.enabled ? "Enabled" : "Paused"}</span>
@@ -4405,7 +4416,7 @@ function AutomationRunDetail({
   const isBusy = actionId === run.id;
   const isActiveRun = isAutomationRunActive(run);
   return (
-    <section className="project-automation-detail" aria-label="Automation run details">
+    <section className="project-automation-detail vertical-scroll-fade-mask" aria-label="Automation run details">
       <div className="project-automation-detail-header">
         <div>
           <span data-status={run.status}>{automationRunStatusLabel(run.status)}</span>
@@ -5517,6 +5528,7 @@ styleElement.textContent = `
   }
 
   .project-automation-split .project-automation-detail:not(.project-automation-detail--empty) {
+    --edge-fade-distance: 16px;
     overflow: auto;
     padding: 16px;
   }
@@ -5532,6 +5544,7 @@ styleElement.textContent = `
 
   .project-automation-list,
   .project-automation-run-list {
+    --edge-fade-distance: 16px;
     display: grid;
     flex: 1 1 auto;
     gap: 10px;
@@ -5694,6 +5707,7 @@ styleElement.textContent = `
   }
 
   .project-automation-detail:not(.project-automation-detail--empty) {
+    --edge-fade-distance: 16px;
     overflow: auto;
   }
 
@@ -6040,7 +6054,14 @@ styleElement.textContent = `
      * CDXC:ProjectBoardLanes 2026-06-19-09:59:
      * Kanban cards need more usable width, so swimlanes should sit directly beside each other instead of spending horizontal space on gutters.
      * Keep the existing lane grid structure and let the lane border act as the visible separator.
+     *
+     * CDXC:ScrollFades 2026-06-19-14:16:
+     * The Project Board should use the same Codex-style edge fade as the
+     * sidebar scroll surface. The board strip owns the horizontal fade while
+     * each lane body owns its vertical fade, leaving lane headers and custom
+     * scrollbars unmasked.
      */
+    --edge-fade-distance: 18px;
     gap: 0;
     grid-template-columns: repeat(6, minmax(218px, 1fr));
     min-height: 0;
@@ -6151,6 +6172,7 @@ styleElement.textContent = `
   .project-board-lane[data-tone="green"] .project-board-lane-dot { background: #95d7f6; }
 
   .project-board-lane-scroll {
+    --edge-fade-distance: 18px;
     flex: 1 1 auto;
     min-height: 0;
     overflow-x: hidden;
@@ -6474,6 +6496,7 @@ styleElement.textContent = `
   }
 
   .project-ticket-dialog-body {
+    --edge-fade-distance: 16px;
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -6810,6 +6833,7 @@ styleElement.textContent = `
   }
 
   .project-ticket-comment-list {
+    --edge-fade-distance: 14px;
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.08);
     max-height: 180px;

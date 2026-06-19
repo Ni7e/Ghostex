@@ -656,6 +656,8 @@ type NativeHostCommand =
         deactivateOnLowPowerMode: boolean;
         deactivateOnUserSwitch: boolean;
         defaultDurationMinutes: ghostexSettings["keepAwakeDefaultDurationMinutes"];
+        featureEnabled: boolean;
+        hideTitlebarControl: boolean;
         preventLidSleep: boolean;
       };
       gxserverDaemon?: NativeGxserverDaemonStatus;
@@ -1386,6 +1388,13 @@ const DELAYED_SEND_MAX_DELAY_MS = 2_147_483_647;
  * cannot schedule sub-minute sends after the modal dropped the seconds field.
  */
 const DELAYED_SEND_MIN_DELAY_MS = 60_000;
+/*
+ * CDXC:DelayedSend 2026-06-19-14:55:
+ * App restart should resume delayed sends near the countdown point the user
+ * last saw. Save remaining-duration checkpoints once per minute; the live
+ * deadline still drives in-app countdowns and the actual Enter timeout.
+ */
+const DELAYED_SEND_PERSIST_INTERVAL_MS = 60_000;
 const DELAYED_SEND_RESTORE_FIRE_GRACE_MS = 2_000;
 /**
  * CDXC:CloseAfterDone 2026-06-16-01:48:
@@ -2297,6 +2306,7 @@ type CloseAfterDoneTimerState = {
  */
 const delayedSendTimerByNativeSessionId = new Map<string, DelayedSendTimerState>();
 let delayedSendCountdownTicker: number | undefined;
+let delayedSendPersistenceTicker: number | undefined;
 restoreDelayedSendTimersFromStoredProjects();
 /**
  * CDXC:CloseAfterDone 2026-06-15-21:00:
@@ -29076,15 +29086,28 @@ function normalizeDelayedSendDeadlineAt(value: string | undefined): string | und
   return normalized && !Number.isNaN(Date.parse(normalized)) ? normalized : undefined;
 }
 
+function normalizeDelayedSendRemainingMs(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  return Math.ceil(value);
+}
+
 function isTerminalDelayedSendPersistenceEligible(session: TerminalSessionRecord): boolean {
   const provider = session.sessionPersistenceProvider ?? (session.tmuxSessionName ? "tmux" : undefined);
-  return provider === "zmx" || provider === "tmux" || provider === "zellij";
+  return (
+    provider === "zmx" ||
+    provider === "tmux" ||
+    provider === "zellij" ||
+    isGxserverBackedLocalPersistedSession(session.sessionId)
+  );
 }
 
 function hasRestorableDelayedSendDeadline(session: TerminalSessionRecord): boolean {
   return (
-    isTerminalDelayedSendPersistenceEligible(session) &&
-    normalizeDelayedSendDeadlineAt(session.delayedSendDeadlineAt) !== undefined
+    normalizeDelayedSendRemainingMs(session.delayedSendRemainingMs) !== undefined ||
+    (isTerminalDelayedSendPersistenceEligible(session) &&
+      normalizeDelayedSendDeadlineAt(session.delayedSendDeadlineAt) !== undefined)
   );
 }
 
@@ -29096,9 +29119,12 @@ function restoreDelayedSendTimersFromStoredProjects(): void {
   /**
    * CDXC:DelayedSend 2026-05-21-12:21:
    * Restart must remember active Delayed Send timers for persisted terminal
-   * sessions and wake those sessions so the pending Enter key still fires. Use
-   * the stored terminal deadline as the single source of truth and give expired
-   * deadlines a short grace window so native restore can attach before sending.
+   * sessions and wake those sessions so the pending Enter key still fires.
+   *
+   * CDXC:DelayedSend 2026-06-19-14:55:
+   * Restart should not spend timer duration while Ghostex is closed. Prefer the
+   * saved remaining-duration checkpoint, then fall back to the legacy absolute
+   * deadline with the old grace behavior for existing stored records.
    */
   for (const project of projects) {
     for (const session of project.commandsPanel.sessions) {
@@ -29121,29 +29147,35 @@ function restoreDelayedSendTimerForStoredSession(
   if (!hasRestorableDelayedSendDeadline(session)) {
     return;
   }
+  const remainingCheckpointMs = normalizeDelayedSendRemainingMs(session.delayedSendRemainingMs);
   const deadlineAt = normalizeDelayedSendDeadlineAt(session.delayedSendDeadlineAt);
-  if (!deadlineAt) {
+  if (remainingCheckpointMs === undefined && !deadlineAt) {
     return;
   }
   const nativeSessionId = nativeSessionIdForProjectSidebarSession(project.projectId, session.sessionId);
   if (delayedSendTimerByNativeSessionId.has(nativeSessionId)) {
     return;
   }
-  const deadlineAtMs = Date.parse(deadlineAt);
-  const restoreDelayMs = Math.max(
-    DELAYED_SEND_RESTORE_FIRE_GRACE_MS,
-    deadlineAtMs - Date.now(),
-  );
+  const restoreDelayMs =
+    remainingCheckpointMs !== undefined
+      ? Math.max(DELAYED_SEND_RESTORE_FIRE_GRACE_MS, remainingCheckpointMs)
+      : Math.max(
+          DELAYED_SEND_RESTORE_FIRE_GRACE_MS,
+          Date.parse(deadlineAt!) - Date.now(),
+        );
+  const deadlineAtMs =
+    remainingCheckpointMs !== undefined ? Date.now() + restoreDelayMs : Date.parse(deadlineAt!);
   installDelayedSendTimer(project.projectId, session.sessionId, deadlineAtMs, restoreDelayMs);
 }
 
-function setStoredDelayedSendDeadline(
+function setStoredDelayedSendState(
   projectId: string,
   sessionId: string,
-  deadlineAt: string | undefined,
+  state: { deadlineAt?: string; remainingMs?: number } | undefined,
   reason: string,
 ): boolean {
-  const normalizedDeadlineAt = normalizeDelayedSendDeadlineAt(deadlineAt);
+  const normalizedDeadlineAt = normalizeDelayedSendDeadlineAt(state?.deadlineAt);
+  const normalizedRemainingMs = normalizeDelayedSendRemainingMs(state?.remainingMs);
   let didChange = false;
   projects = projects.map((project) => {
     if (project.projectId !== projectId) {
@@ -29152,10 +29184,11 @@ function setStoredDelayedSendDeadline(
 
     let projectDidChange = false;
     const nextCommandSessions = project.commandsPanel.sessions.map((session) => {
-      const nextSession = updateTerminalSessionDelayedSendDeadline(
+      const nextSession = updateTerminalSessionDelayedSendState(
         session,
         sessionId,
         normalizedDeadlineAt,
+        normalizedRemainingMs,
       );
       projectDidChange ||= nextSession !== session;
       return nextSession;
@@ -29166,10 +29199,11 @@ function setStoredDelayedSendDeadline(
         if (session.kind !== "terminal") {
           return session;
         }
-        const nextSession = updateTerminalSessionDelayedSendDeadline(
+        const nextSession = updateTerminalSessionDelayedSendState(
           session,
           sessionId,
           normalizedDeadlineAt,
+          normalizedRemainingMs,
         );
         groupDidChange ||= nextSession !== session;
         return nextSession;
@@ -29210,25 +29244,31 @@ function setStoredDelayedSendDeadline(
   return didChange;
 }
 
-function updateTerminalSessionDelayedSendDeadline(
+function updateTerminalSessionDelayedSendState(
   session: TerminalSessionRecord,
   sessionId: string,
   deadlineAt: string | undefined,
+  remainingMs: number | undefined,
 ): TerminalSessionRecord {
   if (session.sessionId !== sessionId) {
     return session;
   }
-  if (normalizeDelayedSendDeadlineAt(session.delayedSendDeadlineAt) === deadlineAt) {
+  if (
+    normalizeDelayedSendDeadlineAt(session.delayedSendDeadlineAt) === deadlineAt &&
+    normalizeDelayedSendRemainingMs(session.delayedSendRemainingMs) === remainingMs
+  ) {
     return session;
   }
-  if (deadlineAt) {
-    return {
-      ...session,
-      delayedSendDeadlineAt: deadlineAt,
-    };
-  }
-  const { delayedSendDeadlineAt: _removedDelayedSendDeadlineAt, ...sessionWithoutDeadline } = session;
-  return sessionWithoutDeadline;
+  const {
+    delayedSendDeadlineAt: _removedDelayedSendDeadlineAt,
+    delayedSendRemainingMs: _removedDelayedSendRemainingMs,
+    ...sessionWithoutDelayedSendState
+  } = session;
+  return {
+    ...sessionWithoutDelayedSendState,
+    ...(deadlineAt ? { delayedSendDeadlineAt: deadlineAt } : {}),
+    ...(remainingMs !== undefined ? { delayedSendRemainingMs: remainingMs } : {}),
+  };
 }
 
 function installDelayedSendTimer(
@@ -29245,8 +29285,9 @@ function installDelayedSendTimer(
 
   const timeout = window.setTimeout(() => {
     delayedSendTimerByNativeSessionId.delete(nativeSessionId);
-    setStoredDelayedSendDeadline(projectId, sessionId, undefined, "delayedSendFired");
+    setStoredDelayedSendState(projectId, sessionId, undefined, "delayedSendFired");
     stopDelayedSendCountdownTickerIfIdle();
+    stopDelayedSendPersistenceTickerIfIdle();
     publish();
     const currentProject = findProject(projectId);
     const currentSession = currentProject
@@ -29268,6 +29309,7 @@ function installDelayedSendTimer(
     timeoutId: timeout,
   });
   ensureDelayedSendCountdownTicker();
+  ensureDelayedSendPersistenceTicker();
 }
 
 function scheduleDelayedSend(sessionId: string, delayMs: number): void {
@@ -29298,13 +29340,21 @@ function scheduleDelayedSend(sessionId: string, delayMs: number): void {
    * The pending Enter needs to remain inspectable and cancellable until it
    * fires, so record the exact deadline and refresh published UI countdowns
    * once per second while any Delayed Send timer exists.
+   *
+   * CDXC:DelayedSend 2026-06-19-14:55:
+   * Delayed Send should resume after app restart from roughly where the
+   * countdown had reached. Store both the live absolute deadline and an initial
+   * remaining-duration checkpoint, then refresh that checkpoint once per
+   * minute while the timer is active.
    */
   const deadlineAtMs = Date.now() + delayMs;
   installDelayedSendTimer(reference.project.projectId, reference.sessionId, deadlineAtMs, delayMs);
-  setStoredDelayedSendDeadline(
+  setStoredDelayedSendState(
     reference.project.projectId,
     reference.sessionId,
-    isTerminalDelayedSendPersistenceEligible(session) ? new Date(deadlineAtMs).toISOString() : undefined,
+    isTerminalDelayedSendPersistenceEligible(session)
+      ? { deadlineAt: new Date(deadlineAtMs).toISOString(), remainingMs: delayMs }
+      : undefined,
     "scheduleDelayedSend",
   );
   publish();
@@ -29347,8 +29397,9 @@ function clearDelayedSendTimer(sessionId: string, projectId?: string): boolean {
   }
   window.clearTimeout(timer.timeoutId);
   delayedSendTimerByNativeSessionId.delete(nativeSessionId);
-  setStoredDelayedSendDeadline(timer.projectId, timer.sessionId, undefined, "cancelDelayedSend");
+  setStoredDelayedSendState(timer.projectId, timer.sessionId, undefined, "cancelDelayedSend");
   stopDelayedSendCountdownTickerIfIdle();
+  stopDelayedSendPersistenceTickerIfIdle();
   return true;
 }
 
@@ -29396,12 +29447,52 @@ function ensureDelayedSendCountdownTicker(): void {
   }, 1_000);
 }
 
+function ensureDelayedSendPersistenceTicker(): void {
+  if (delayedSendPersistenceTicker !== undefined) {
+    return;
+  }
+  delayedSendPersistenceTicker = window.setInterval(() => {
+    if (delayedSendTimerByNativeSessionId.size === 0) {
+      stopDelayedSendPersistenceTickerIfIdle();
+      return;
+    }
+    persistDelayedSendRemainingCheckpoints("delayedSendRemainingCheckpoint");
+  }, DELAYED_SEND_PERSIST_INTERVAL_MS);
+}
+
 function stopDelayedSendCountdownTickerIfIdle(): void {
   if (delayedSendTimerByNativeSessionId.size > 0 || delayedSendCountdownTicker === undefined) {
     return;
   }
   window.clearInterval(delayedSendCountdownTicker);
   delayedSendCountdownTicker = undefined;
+}
+
+function stopDelayedSendPersistenceTickerIfIdle(): void {
+  if (delayedSendTimerByNativeSessionId.size > 0 || delayedSendPersistenceTicker === undefined) {
+    return;
+  }
+  window.clearInterval(delayedSendPersistenceTicker);
+  delayedSendPersistenceTicker = undefined;
+}
+
+function persistDelayedSendRemainingCheckpoints(reason: string): void {
+  const nowMs = Date.now();
+  for (const timer of delayedSendTimerByNativeSessionId.values()) {
+    const remainingMs = normalizeDelayedSendRemainingMs(timer.deadlineAtMs - nowMs);
+    if (remainingMs === undefined) {
+      continue;
+    }
+    setStoredDelayedSendState(
+      timer.projectId,
+      timer.sessionId,
+      {
+        deadlineAt: new Date(timer.deadlineAtMs).toISOString(),
+        remainingMs,
+      },
+      reason,
+    );
+  }
 }
 
 function formatDelayedSendDelay(delayMs: number): string {
@@ -42856,6 +42947,15 @@ function syncNativeLayout(
       deactivateOnLowPowerMode: settings.keepAwakeDeactivateOnLowPowerMode,
       deactivateOnUserSwitch: settings.keepAwakeDeactivateOnUserSwitch,
       defaultDurationMinutes: settings.keepAwakeDefaultDurationMinutes,
+      /*
+       * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
+       * Keep Awake is beta-only in the macOS titlebar. Layout sync sends both
+       * the beta availability and the effective hide flag so the isolated
+       * titlebar can hide the button and stop runtime automation as soon as
+       * Show Beta features is disabled.
+       */
+      featureEnabled: settings.showBetaFeatures,
+      hideTitlebarControl: !settings.showBetaFeatures || settings.hideKeepAwakeTitlebarControl,
       preventLidSleep: settings.keepAwakePreventLidSleep,
     },
     gxserverDaemon: currentGxserverDaemonStatusForTitlebar(),

@@ -251,6 +251,8 @@ type FloatingPromptEditorState = {
   initialText: string;
   isPrewarm?: boolean;
   language: string;
+  nativeOpenStartedAtMs?: number;
+  reactOpenMessageReceivedAt: number;
   requestId: string;
   statusFile?: string;
   title: string;
@@ -826,7 +828,9 @@ function FloatingPromptEditorModal({
       hasInitialFrame: editor.initialFrame !== undefined,
       initialTextLength: editor.initialText.length,
       isPrewarm: editor.isPrewarm === true,
+      nativeOpenStartedAtMs: editor.nativeOpenStartedAtMs ?? null,
       requestId: editor.requestId,
+      stateCommitDurationMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
     });
   }, [editor?.requestId, isOpen]);
 
@@ -851,6 +855,7 @@ function FloatingPromptEditorModal({
     appendPromptEditorDebugLog("react.monaco.loadStart", {
       hasExistingEditor: editorRef.current !== null,
       hasExistingMonaco: Boolean(window.monaco),
+      openToMonacoLoadStartMs: Math.round(loadStartedAt - editor.reactOpenMessageReceivedAt),
       requestId: editor.requestId,
     });
     loadModalHostMonaco()
@@ -860,6 +865,7 @@ function FloatingPromptEditorModal({
           hasExistingEditor: editorRef.current !== null,
           hasExistingMonaco: Boolean(window.monaco),
           loadDurationMs,
+          openToMonacoLoadReadyMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
           requestId: editor.requestId,
         });
         if (disposed || !containerRef.current || !window.monaco) {
@@ -883,9 +889,13 @@ function FloatingPromptEditorModal({
           const updateStartedAt = performance.now();
           existingEditor.setValue(editor.initialText);
           moveMonacoCaretToEnd(existingEditor, editor.initialText);
+          const layoutStartedAt = performance.now();
           existingEditor.layout();
+          const layoutDurationMs = Math.round(performance.now() - layoutStartedAt);
           const caretPosition = existingEditor.getPosition();
+          const imageParseStartedAt = performance.now();
           setImagePreviews(parsePromptEditorImagePreviews(existingEditor.getValue()));
+          const imageParseDurationMs = Math.round(performance.now() - imageParseStartedAt);
           editorContentListenerRef.current?.dispose();
           editorContentListenerRef.current = existingEditor.onDidChangeModelContent(() => {
             refreshEditorTextDerivedState(existingEditor, "contentChanged");
@@ -894,9 +904,12 @@ function FloatingPromptEditorModal({
           if (editor.isPrewarm) {
             appendPromptEditorDebugLog("react.monaco.prewarmReady", {
               loadDurationMs,
+              openToEditorReadyMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
               requestId: editor.requestId,
               reusedEditor: true,
               textLength: existingEditor.getValue().length,
+              imageParseDurationMs,
+              layoutDurationMs,
               updateDurationMs,
             });
             postAppModalHostMessage(
@@ -908,12 +921,18 @@ function FloatingPromptEditorModal({
             );
             return;
           }
+          const focusStartedAt = performance.now();
           existingEditor.focus?.();
+          const focusDurationMs = Math.round(performance.now() - focusStartedAt);
           appendPromptEditorDebugLog("react.monaco.reusedAndFocused", {
             caretColumn: caretPosition?.column ?? null,
             caretLine: caretPosition?.lineNumber ?? null,
             documentHasFocus: document.hasFocus(),
+            focusDurationMs,
+            imageParseDurationMs,
+            layoutDurationMs,
             loadDurationMs,
+            openToEditorReadyMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
             requestId: editor.requestId,
             textLength: existingEditor.getValue().length,
             updateDurationMs,
@@ -983,14 +1002,18 @@ function FloatingPromptEditorModal({
         moveMonacoCaretToEnd(monacoEditor, editor.initialText);
         const createDurationMs = Math.round(performance.now() - createStartedAt);
         const caretPosition = monacoEditor.getPosition();
+        const imageParseStartedAt = performance.now();
         setImagePreviews(parsePromptEditorImagePreviews(monacoEditor.getValue()));
+        const imageParseDurationMs = Math.round(performance.now() - imageParseStartedAt);
         editorContentListenerRef.current = monacoEditor.onDidChangeModelContent(() => {
           refreshEditorTextDerivedState(monacoEditor, "contentChanged");
         });
         if (editor.isPrewarm) {
           appendPromptEditorDebugLog("react.monaco.prewarmReady", {
             createDurationMs,
+            imageParseDurationMs,
             loadDurationMs,
+            openToEditorReadyMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
             requestId: editor.requestId,
             textLength: monacoEditor.getValue().length,
           });
@@ -1003,18 +1026,28 @@ function FloatingPromptEditorModal({
           );
           return;
         }
+        const focusStartedAt = performance.now();
         monacoEditor.focus?.();
+        const focusDurationMs = Math.round(performance.now() - focusStartedAt);
         appendPromptEditorDebugLog("react.monaco.createdAndFocused", {
           caretColumn: caretPosition?.column ?? null,
           caretLine: caretPosition?.lineNumber ?? null,
           createDurationMs,
           documentHasFocus: document.hasFocus(),
+          focusDurationMs,
+          imageParseDurationMs,
           loadDurationMs,
+          openToEditorReadyMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
           requestId: editor.requestId,
           textLength: monacoEditor.getValue().length,
         });
       })
       .catch((error) => {
+        appendPromptEditorDebugLog("react.monaco.failed", {
+          errorName: error instanceof Error ? error.name : typeof error,
+          openToFailureMs: Math.round(performance.now() - editor.reactOpenMessageReceivedAt),
+          requestId: editor.requestId,
+        });
         postAppModalHostMessage(
           {
             area: "PromptEditor:monaco",
@@ -2052,6 +2085,9 @@ function AppModalHost() {
     if (activeModal === "floatingPromptEditor" && floatingPromptEditor) {
       appendPromptEditorDebugLog("react.presented", {
         documentHasFocus: document.hasFocus(),
+        openToPresentedMs: Math.round(
+          performance.now() - floatingPromptEditor.reactOpenMessageReceivedAt,
+        ),
         requestId: floatingPromptEditor.requestId,
       });
     }
@@ -2537,9 +2573,6 @@ function AppModalHost() {
         }}
         onOpenGhostexFolder={() => {
           vscode.postMessage({ type: "openGhostexFolder" });
-        }}
-        onOpenFirstLaunchSetup={() => {
-          vscode.postMessage({ type: "openWorkspaceWelcome" });
         }}
         onRequestMacOSNotificationPermission={() => {
           vscode.postMessage({ type: "requestMacOSNotificationPermission" });
@@ -3028,6 +3061,7 @@ function useModalStateFromNative() {
             setWorktree(undefined);
             setWorktreeDelete(undefined);
           } else if (message.modal === "floatingPromptEditor") {
+            const openMessageReceivedAt = performance.now();
             if (
               typeof message.requestId !== "string" ||
               typeof message.filePath !== "string" ||
@@ -3035,7 +3069,10 @@ function useModalStateFromNative() {
             ) {
               throw new Error("Floating prompt editor request is missing required state.");
             }
+            const trimStartedAt = performance.now();
             const initialText = trimPromptEditorTrailingSpaces(message.initialText);
+            const nativeOpenStartedAtMs =
+              typeof message.nativeOpenStartedAtMs === "number" ? message.nativeOpenStartedAtMs : undefined;
             /**
              * CDXC:PromptEditor 2026-05-13-09:48
              * Ctrl+G Monaco prompt editing is rendered by the app-modal host
@@ -3056,17 +3093,21 @@ function useModalStateFromNative() {
              * host instead of the full-workspace overlay, so React renders the
              * same Monaco surface without owning workspace hit testing, window
              * movement, or window resizing.
+             *
+             * CDXC:PromptEditor 2026-06-19-16:45:
+             * Slow Ctrl+G repros need stage-level React timings after native
+             * dispatch. Keep request ids, durations, booleans, and text lengths
+             * in the prompt-editor debug log so the bottleneck can be isolated
+             * without storing prompt text, paths, or command content.
              */
             appendPromptEditorDebugLog("react.openMessage", {
               hasInitialFrame: message.initialFrame !== undefined,
               initialTextLength: initialText.length,
               isPrewarm: message.prewarm === true,
-              nativeOpenStartedAtMs:
-                typeof message.nativeOpenStartedAtMs === "number"
-                  ? message.nativeOpenStartedAtMs
-                  : null,
+              nativeOpenStartedAtMs: nativeOpenStartedAtMs ?? null,
               nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
               requestId: message.requestId,
+              trimDurationMs: Math.round(performance.now() - trimStartedAt),
             });
             setFloatingPromptEditor({
               filePath: message.filePath,
@@ -3074,9 +3115,16 @@ function useModalStateFromNative() {
               initialText,
               isPrewarm: message.prewarm === true,
               language: "markdown",
+              nativeOpenStartedAtMs,
+              reactOpenMessageReceivedAt: openMessageReceivedAt,
               requestId: message.requestId,
               statusFile: message.statusFile,
               title: message.title || "Prompt Editor",
+            });
+            appendPromptEditorDebugLog("react.openMessage.stateQueued", {
+              isPrewarm: message.prewarm === true,
+              queueDurationMs: Math.round(performance.now() - openMessageReceivedAt),
+              requestId: message.requestId,
             });
             setConfig({});
             setDelayedSend(undefined);
@@ -3331,6 +3379,12 @@ function useModalStateFromNative() {
           setActiveModalRequestId(
             typeof message.requestId === "string" ? message.requestId : undefined,
           );
+          if (message.modal === "floatingPromptEditor" && typeof message.requestId === "string") {
+            appendPromptEditorDebugLog("react.activeModal.stateQueued", {
+              isPrewarm: message.prewarm === true,
+              requestId: message.requestId,
+            });
+          }
           setActiveModal(message.modal);
           return;
         }

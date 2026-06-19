@@ -99,10 +99,17 @@ describe("native pane tab titlebar hit testing", () => {
     expect(layoutSource).not.toContain("visualSidebarFrame");
     expect(layoutSource).not.toContain("resizeLayoutRecordExclusion");
     expect(appDelegateSource).not.toContain("sidebarResizeEdgeExtension");
-    expect(appDelegateSource).toContain("private static let dividerWidth: CGFloat = 1");
+    expect(appDelegateSource).toContain("private static let dividerWidth: CGFloat = 5");
     expect(appDelegateSource).not.toContain("private static let dividerWidth: CGFloat = 6");
     expect(appDelegateSource).toContain(
-      "Keep the native divider frame to the visible 1pt\n   separator instead of reserving a 6pt transparent resize strip",
+      "reserve one real five-point AppKit rail between the sidebar and workspace",
+    );
+    expect(appDelegateSource).toContain(
+      "without monitors, overlays, or root hit-test expansion",
+    );
+    expect(appDelegateSource).toContain("sidebarWorkareaBorderX = dividerFrame.minX");
+    expect(appDelegateSource).toContain(
+      "sidebarWorkareaBorderX = max(dividerFrame.maxX - separatorWidth, dividerFrame.minX)",
     );
     expect(appDelegateSource).not.toContain("final class SidebarModalBackdropView");
     expect(appDelegateSource).not.toContain("NonInteractiveChromeLineView");

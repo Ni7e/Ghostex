@@ -580,6 +580,7 @@ export function createSessionRecord(
     createdAt,
     closeAfterDone: options?.closeAfterDone === true ? true : undefined,
     delayedSendDeadlineAt: normalizeTerminalDelayedSendDeadlineAt(options?.delayedSendDeadlineAt),
+    delayedSendRemainingMs: normalizeTerminalDelayedSendRemainingMs(options?.delayedSendRemainingMs),
     displayId,
     isFavorite: options?.sessionTag === "favorite" ? true : undefined,
     kind: "terminal",
@@ -632,6 +633,13 @@ function normalizeTerminalCommandTitle(value: string | undefined): string | unde
 function normalizeTerminalDelayedSendDeadlineAt(value: string | undefined): string | undefined {
   const normalizedValue = value?.trim();
   return normalizedValue && !Number.isNaN(Date.parse(normalizedValue)) ? normalizedValue : undefined;
+}
+
+function normalizeTerminalDelayedSendRemainingMs(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  return Math.ceil(value);
 }
 
 export function normalizeTerminalAgentSessionIdentity(value: string | undefined): string | undefined {
