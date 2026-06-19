@@ -1,6 +1,8 @@
 # Rules for Agents working in this Repository
 
-## Never run "bun run start" or any command that would restart the app unless I ask you to.
+## Rules for running commands
+
+- Never run "bun run start" or any command that would restart the app unless I ask you to.
 
 ## Repository Search Routing
 
