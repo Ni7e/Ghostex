@@ -30,70 +30,46 @@
 <!-- CDXC:Distribution 2026-06-19-10:23: Release notes for 4.21.0 must include all user-facing work since v4.20.0, preserve the Major and Minor top-level bullet structure, and credit external human contributors by GitHub username while skipping maddada, claude, codex, and automation accounts. -->
 <!-- CDXC:Distribution 2026-06-19-15:28: The reissued 4.21.0 release notes must merge the later settings, sidebar, native prompt-editor, Source-pane, and Delayed Send changes into the original 4.21.0 notes before GitHub, Sparkle, Homebrew, and Android assets are overwritten from the latest main. -->
 <!-- CDXC:Distribution 2026-06-19-16:11: Release notes for 4.21.1 must cover fresh agent startup materialization, focused-session command actions, Git commit modal polish, and Chromium page-canvas appearance fixes while preserving Major and Minor top-level bullets. -->
+<!-- CDXC:Distribution 2026-06-19-20:37: Release notes for 4.21.3 and the previous two public sections must be shorter and simpler: use only Major and Minor top-level bullets with direct user-facing sub-bullets, while still covering Settings focus, Browser appearance, status-menu clicks, Resources, agent prompt chunking, and Rust gxserver parity. -->
+
+## 4.21.3 - 2026-06-19
+
+- Major
+  - Settings text fields, dropdowns, and color pickers keep focus while changes save.
+  - Browser panes follow the current macOS light or dark appearance again.
+  - Resources now shows running terminal sessions even when their pane is not loaded.
+  - The experimental Rust gxserver path now covers more agent, hook, skill, log, session, and project operations.
+- Minor
+  - Status menu right-click and Control-click actions work again from the macOS menu bar.
+  - Agent prompts send in smaller chunks so Cursor is less likely to collapse them into paste chips.
+  - The titlebar Resources and update controls have cleaner icon alignment.
 
 ## 4.21.1 - 2026-06-19
 
 - Major
-  - Fresh agent startup and CLI orchestration
-    - `ghostex create-agent` now creates and starts the gxserver provider in one step, so follow-up messages land in a live agent process instead of a shell prompt.
-    - Fresh agent panes consume the queued first-launch command once and no longer treat raw Ghostex `G...` session IDs as provider resume titles.
-    - The Rust gxserver and zmx path now follows the same queued-startup behavior as the TypeScript server.
-  - Focused session commands
-    - Sleep Focused Session, Wake Focused Session, Close Focused Session, and Close After Done are available from the command palette and Hotkeys settings.
-    - Option+Shift+S sleeps the focused terminal by default; wake, close, and timer actions are available to bind without taking over existing Cmd+W behavior.
-    - Native hotkeys and command-palette actions target the terminal that owns AppKit focus, including command-pane terminals.
-  - Browser page appearance
-    - Browser panes now force both light page media and a white default page canvas for public pages.
-    - Transparent pages that leave the document background unset no longer reveal the dark editor backing color.
+  - `ghostex create-agent` now starts the agent process immediately after creating the session.
+  - Fresh agent panes no longer resume against raw Ghostex `G...` session IDs.
+  - Sleep, Wake, Close, and Close After Done are available from the command palette and Hotkeys.
+  - Browser panes use a light page canvas for transparent public pages.
 - Minor
-  - Git commit modal polish
-    - The branch header is quieter and the Select and Show All controls now live beneath the changed-file tree.
-    - Changed-file stats stay visible in the lower file footer without competing with the branch name.
-  - Reliability coverage
-    - Added coverage for queued agent startup consumption, command-palette focused actions, native hotkey dispatch, and Rust gxserver parity.
+  - Option+Shift+S sleeps the focused terminal by default.
+  - Focused-session actions target command-pane terminals correctly.
+  - The Git commit review sidebar is quieter and easier to scan.
 
 ## 4.21.0 - 2026-06-19
 
 - Major
-  - Agent setup and default agents
-    - Bundled Ghostex agent skills now install through gxserver's shared skill installer instead of copying into one legacy folder.
-    - Skill setup can detect Ghostex skills in global Codex, Claude, shared agent, plugin-cache, and repository skill locations.
-    - Default Prompt Agent is now gxserver-owned with global Accept All, so Settings, first launch, Git helpers, Project Board starts, and worktree prompts share one selection across clients.
-    - Custom, hidden, or temporarily unavailable default agents are shown as unavailable instead of silently falling back to Codex.
-  - Browser appearance and titlebar controls
-    - Browser System, Light, and Dark choices now persist per project and exact web origin, including default ports, for standalone Browser panes and Project Browser tabs.
-    - Restored browser panes receive the saved project appearance map before navigation, while missing origins still default to Light.
-    - The far-right titlebar Settings menu is cleaner, shows Settings, Hotkeys, and Commands shortcuts in a right-aligned column, and adds Cmd+. for opening Hotkeys.
-    - Native tab-bar overflow menus no longer duplicate per-session commands; right-clicking a tab still exposes scoped Rename, Delayed Send, Close After Done, Fork, Reload, and Pop Out actions.
-    - Custom sidebar and titlebar colors now use calibrated dark tint presets, neutral white/black/gray choices stay neutral, and the native titlebar blends into the sidebar before darkening across the window.
-  - Sidebar navigation and session management
-    - The top Search row now becomes an inline search input instead of swapping into a boxed field, keeping the reference sidebar calmer while filtering.
-    - Manual session drag-and-drop now shows the exact before/after insertion line over session rows and empty groups.
-    - Right-clicking the visual gap between session rows opens the session menu for the row above, while project context menus stay scoped to project headers.
-  - Project Board performance and readability
-    - Kanban label suggestions now come from already-loaded board issues and successful local mutations instead of blocking on global label inventory reads.
-    - Beads label counts are derived from the board list output when label inventory is requested, avoiding the slower per-issue label scan.
-    - Kanban cards are brighter than their lane panels, and swimlanes sit side by side with one shared separator so cards get more usable width.
+  - Agent setup is simpler, with gxserver-owned skill installs and Default Prompt Agent settings.
+  - Browser appearance and titlebar settings are cleaner and persist per project and origin.
+  - Sidebar search, session drag-and-drop, and gap right-click menus are easier to use.
+  - Project Board labels load faster and Kanban cards are easier to read.
 - Minor
-  - First-launch and Settings polish
-    - The hook warning now skips the confirmation overlay once Claude, Codex, OpenCode, or Pi already has current Ghostex hooks.
-    - OpenCode hook status is prioritized with the primary first-launch providers.
-    - First-launch warnings use the normal modal surface instead of brown warning colors.
-    - Show Advanced now lives inside the Settings section sidebar instead of floating separately from the navigation rail.
-    - Settings and Hotkeys search now centers over the settings content column while the section sidebar starts at the tab row.
-  - Browser and sidebar fixes
-    - Native Browser panes now start on the requested initial URL instead of briefly opening blank. Thanks @cuttothechaseo.
-    - Sidebar section header actions no longer overlap their labels on tighter layouts. Thanks @cuttothechaseo.
-    - The Recent Projects Commands Pane hover action no longer falls through to the drawer toggle when clicked.
-  - Source pane and native chrome polish
-    - First Source-tab opens after restart now wait for code-server readiness before navigating, avoiding transient page-not-found screens.
-    - Changing Source-pane VS Code settings-link options waits briefly before restarting code-server, so rapid Settings edits apply once using the final choice.
-    - Only awake Source panes trigger that restart.
-    - Delayed Send restores from the last saved remaining-duration checkpoint after app restart instead of consuming time while Ghostex is closed.
-    - The native pane action button now uses a compact layout icon, the titlebar Settings button has a slightly wider right-side hit area, and the sidebar/workspace divider uses a real AppKit resize rail.
-  - Scrolling and support polish
-    - Sidebar lists, menus, selects, command panels, and Project Board lanes have cleaner scroll fades that make overflow easier to read without adding heavy borders.
-    - Ctrl+G prompt-editor and native modal timing diagnostics are more useful in Debugging Mode while continuing to redact prompt text, paths, command text, URLs, tokens, and passwords.
+  - First-launch and Settings screens are calmer and easier to scan.
+  - Browser panes open the requested initial URL more reliably. Thanks @cuttothechaseo.
+  - Sidebar section header actions no longer overlap their labels. Thanks @cuttothechaseo.
+  - Source panes wait for code-server readiness before opening.
+  - Delayed Send timers restore correctly after restarting Ghostex.
+  - Scroll fades and debug diagnostics are cleaner while keeping private data redacted.
 
 ## 4.20.1 - 2026-06-19
 
