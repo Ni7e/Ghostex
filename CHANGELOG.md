@@ -28,6 +28,7 @@
 <!-- CDXC:Distribution 2026-06-18-06:14: Release notes for 4.20.0 must cover the user-facing setup, tutorial, command palette, hook recovery, session search, native pane, CLI, README, and sidebar polish shipped after 4.14.2 while keeping the required Major and Minor top-level bullet structure. -->
 <!-- CDXC:Distribution 2026-06-19-06:40: Release notes for 4.20.1 must cover the user-facing titlebar Settings menu move, CEF browser color-scheme behavior, debounced Source settings restarts, and pane action icon polish while preserving the Major and Minor top-level bullet structure. -->
 <!-- CDXC:Distribution 2026-06-19-10:23: Release notes for 4.21.0 must include all user-facing work since v4.20.0, preserve the Major and Minor top-level bullet structure, and credit external human contributors by GitHub username while skipping maddada, claude, codex, and automation accounts. -->
+<!-- CDXC:Distribution 2026-06-19-15:28: The reissued 4.21.0 release notes must merge the later settings, sidebar, native prompt-editor, Source-pane, and Delayed Send changes into the original 4.21.0 notes before GitHub, Sparkle, Homebrew, and Android assets are overwritten from the latest main. -->
 
 ## 4.21.0 - 2026-06-19
 
@@ -42,6 +43,11 @@
     - Restored browser panes receive the saved project appearance map before navigation, while missing origins still default to Light.
     - The far-right titlebar Settings menu is cleaner, shows Settings, Hotkeys, and Commands shortcuts in a right-aligned column, and adds Cmd+. for opening Hotkeys.
     - Native tab-bar overflow menus no longer duplicate per-session commands; right-clicking a tab still exposes scoped Rename, Delayed Send, Close After Done, Fork, Reload, and Pop Out actions.
+    - Custom sidebar and titlebar colors now use calibrated dark tint presets, neutral white/black/gray choices stay neutral, and the native titlebar blends into the sidebar before darkening across the window.
+  - Sidebar navigation and session management
+    - The top Search row now becomes an inline search input instead of swapping into a boxed field, keeping the reference sidebar calmer while filtering.
+    - Manual session drag-and-drop now shows the exact before/after insertion line over session rows and empty groups.
+    - Right-clicking the visual gap between session rows opens the session menu for the row above, while project context menus stay scoped to project headers.
   - Project Board performance and readability
     - Kanban label suggestions now come from already-loaded board issues and successful local mutations instead of blocking on global label inventory reads.
     - Beads label counts are derived from the board list output when label inventory is requested, avoiding the slower per-issue label scan.
@@ -52,14 +58,20 @@
     - OpenCode hook status is prioritized with the primary first-launch providers.
     - First-launch warnings use the normal modal surface instead of brown warning colors.
     - Show Advanced now lives inside the Settings section sidebar instead of floating separately from the navigation rail.
+    - Settings and Hotkeys search now centers over the settings content column while the section sidebar starts at the tab row.
   - Browser and sidebar fixes
     - Native Browser panes now start on the requested initial URL instead of briefly opening blank. Thanks @cuttothechaseo.
     - Sidebar section header actions no longer overlap their labels on tighter layouts. Thanks @cuttothechaseo.
     - The Recent Projects Commands Pane hover action no longer falls through to the drawer toggle when clicked.
   - Source pane and native chrome polish
+    - First Source-tab opens after restart now wait for code-server readiness before navigating, avoiding transient page-not-found screens.
     - Changing Source-pane VS Code settings-link options waits briefly before restarting code-server, so rapid Settings edits apply once using the final choice.
     - Only awake Source panes trigger that restart.
-    - The native pane action button now uses a compact layout icon and the titlebar Settings button has a slightly wider right-side hit area.
+    - Delayed Send restores from the last saved remaining-duration checkpoint after app restart instead of consuming time while Ghostex is closed.
+    - The native pane action button now uses a compact layout icon, the titlebar Settings button has a slightly wider right-side hit area, and the sidebar/workspace divider uses a real AppKit resize rail.
+  - Scrolling and support polish
+    - Sidebar lists, menus, selects, command panels, and Project Board lanes have cleaner scroll fades that make overflow easier to read without adding heavy borders.
+    - Ctrl+G prompt-editor and native modal timing diagnostics are more useful in Debugging Mode while continuing to redact prompt text, paths, command text, URLs, tokens, and passwords.
 
 ## 4.20.1 - 2026-06-19
 
