@@ -30,8 +30,14 @@ describe("code-server startup failure bridge", () => {
       "function wakeProjectEditorSurface",
       "function restoreActiveProjectEditorAtStartup",
     );
+    const startRuntimeHelper = sourceBetween(
+      nativeSidebarSource,
+      "function postStartCodeServerRuntimeForProject",
+      "function nativeGhostexHomeDirectory",
+    );
     expect(wakeProjectEditor).toContain("projectId: nativeEditorId");
-    expect(wakeProjectEditor).toContain('type: "startCodeServerRuntime"');
+    expect(wakeProjectEditor).toContain("postStartCodeServerRuntimeForProject(project);");
+    expect(startRuntimeHelper).toContain('type: "startCodeServerRuntime"');
 
     const hostEventHandler = sourceBetween(
       nativeSidebarSource,

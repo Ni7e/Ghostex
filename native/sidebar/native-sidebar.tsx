@@ -1629,6 +1629,12 @@ let gxserverPresentationRecoveryAttempt = 0;
 let lastGxserverPresentationTabReconciliationLogKey: string | undefined;
 const sessionFocusPreviousProjectModeByProjectId = new Map<string, ProjectEditorSurfaceMode>();
 const awakeProjectEditorModesByProjectId = new Map<string, Set<ProjectEditorSurfaceMode>>();
+/**
+ * CDXC:EditorPanes 2026-06-18-23:36:
+ * VS Code settings-link changes should restart the shared code-server runtime only after the user has stopped toggling the setting. A five-second debounce lets the last Settings action win and avoids rapid stop/start churn while Source panes are open.
+ */
+const CODE_SERVER_RUNTIME_SETTINGS_RESTART_DEBOUNCE_MS = 5_000;
+let pendingCodeServerRuntimeSettingsRestartTimeout: number | undefined;
 type ProjectEditorSurfaceState = {
   activeBrowserTabId?: string;
   browserTabs?: NativeProjectBrowserTabRestoreState[];
@@ -7993,25 +7999,68 @@ function syncCodeServerRuntimeSettings(
   if (!codeServerSettingsChanged) {
     return;
   }
-  const awakeProjectIds = Array.from(projectEditorSurfaceByProjectId.entries())
-    .filter(([, surfaceState]) => surfaceState.isOpen === true && surfaceState.isSleeping !== true)
+  scheduleCodeServerRuntimeSettingsRestart();
+}
+
+function awakeCodeServerProjectIds(): string[] {
+  return Array.from(projectEditorSurfaceByProjectId.entries())
+    .filter(
+      ([projectId, surfaceState]) =>
+        surfaceState.isOpen === true &&
+        surfaceState.isSleeping !== true &&
+        hasAwakeProjectEditorMode(projectId, "code"),
+    )
     .map(([projectId]) => projectId);
+}
+
+function cancelPendingCodeServerRuntimeSettingsRestart(): void {
+  if (pendingCodeServerRuntimeSettingsRestartTimeout === undefined) {
+    return;
+  }
+  window.clearTimeout(pendingCodeServerRuntimeSettingsRestartTimeout);
+  pendingCodeServerRuntimeSettingsRestartTimeout = undefined;
+}
+
+function scheduleCodeServerRuntimeSettingsRestart(): void {
+  cancelPendingCodeServerRuntimeSettingsRestart();
+  const awakeProjectIds = awakeCodeServerProjectIds();
   if (!awakeProjectIds.length) {
     return;
   }
-  /**
-   * CDXC:EditorPanes 2026-05-06-15:00
-   * code-server settings-link flags are process launch options. Restart the
-   * shared runtime for currently awake editor panes when these settings change
-   * so the embedded editor starts with the selected VS Code config source.
+
+  /*
+   * CDXC:EditorPanes 2026-06-18-23:36:
+   * code-server consumes VS Code settings-link choices only at process launch. When the user changes those Settings while Source panes are awake, debounce the restart and re-read `settings` at fire time so quick on/off or Stable/Insiders changes apply only the final selection.
    */
-  postNative({ type: "stopCodeServerRuntime" });
-  for (const projectId of awakeProjectIds) {
-    const project = findProject(projectId);
-    if (project) {
-      wakeProjectEditorSurface(project);
-    }
+  pendingCodeServerRuntimeSettingsRestartTimeout = window.setTimeout(() => {
+    pendingCodeServerRuntimeSettingsRestartTimeout = undefined;
+    restartCodeServerRuntimeForLatestSettings();
+  }, CODE_SERVER_RUNTIME_SETTINGS_RESTART_DEBOUNCE_MS);
+  appendModeSwitcherDebugLog("titlebarModeSwitch.codeServerSettingsRestartScheduled", {
+    awakeProjectCount: awakeProjectIds.length,
+    delayMs: CODE_SERVER_RUNTIME_SETTINGS_RESTART_DEBOUNCE_MS,
+    linkVscodeUserConfig: settings.codeServerLinkVscodeUserConfig,
+    useVscodeInsidersUserConfig: settings.codeServerUseVscodeInsidersUserConfig,
+  });
+}
+
+function restartCodeServerRuntimeForLatestSettings(): void {
+  const projects = awakeCodeServerProjectIds()
+    .map((projectId) => findProject(projectId))
+    .filter((project): project is NativeProject => Boolean(project));
+  if (!projects.length) {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.codeServerSettingsRestartSkipped", {
+      reason: "no-awake-source-pane",
+    });
+    return;
   }
+  appendModeSwitcherDebugLog("titlebarModeSwitch.codeServerSettingsRestartStart", {
+    awakeProjectCount: projects.length,
+    linkVscodeUserConfig: settings.codeServerLinkVscodeUserConfig,
+    useVscodeInsidersUserConfig: settings.codeServerUseVscodeInsidersUserConfig,
+  });
+  postNative({ type: "stopCodeServerRuntime" });
+  postStartCodeServerRuntimeForProject(projects[0]!);
 }
 
 function syncAutoSleepSettings(
@@ -19667,6 +19716,16 @@ function codeServerVscodeUserConfigDirectory(): string {
    */
   const appName = settings.codeServerUseVscodeInsidersUserConfig ? "Code - Insiders" : "Code";
   return `${nativeHomeDirectory()}/Library/Application Support/${appName}/User`;
+}
+
+function postStartCodeServerRuntimeForProject(project: NativeProject): void {
+  postNative({
+    cwd: project.path,
+    linkVscodeUserConfig: settings.codeServerLinkVscodeUserConfig,
+    projectId: nativeProjectEditorIdForProject(project, "code"),
+    type: "startCodeServerRuntime",
+    vscodeUserConfigDir: codeServerVscodeUserConfigDirectory(),
+  });
 }
 
 function nativeGhostexHomeDirectory(): string {
@@ -38518,13 +38577,7 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
       nativeEditorId,
       projectId: project.projectId,
     });
-    postNative({
-      cwd: project.path,
-      linkVscodeUserConfig: settings.codeServerLinkVscodeUserConfig,
-      projectId: nativeEditorId,
-      type: "startCodeServerRuntime",
-      vscodeUserConfigDir: codeServerVscodeUserConfigDirectory(),
-    });
+    postStartCodeServerRuntimeForProject(project);
     appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarWakeAfterStartRuntimePost", {
       elapsedMs: performance.now() - startedAtMs,
       nativeEditorId,
@@ -39899,9 +39952,7 @@ function toggleCommandsPanelFromTitlebar(): void {
 function togglePetOverlayFromTitlebar(): void {
   /**
    * CDXC:PetOverlay 2026-05-17-02:03:
-   * The sidebar overflow menu and command palette both use this pet-awake
-   * toggle. Persist it through the same settings owner as the modal so the
-   * overlay, sidebar label, and shared settings snapshot stay synchronized.
+   * The titlebar Settings menu and command palette both use this pet-awake toggle. Persist it through the same settings owner as the modal so the overlay and shared settings snapshot stay synchronized.
    */
   saveSettings({
     ...settings,
@@ -40816,8 +40867,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "openHighlightedFeatures":
       /*
        * CDXC:HighlightedFeatures 2026-06-16-08:17:
-       * The Tips & Tricks panel and sidebar overflow menu previously exposed
-       * the replayable feature-tour modal through this command.
+       * The Tips & Tricks panel previously exposed the replayable feature-tour modal through this command.
        *
        * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
        * Keep the old command name for compatibility, but route it to the
