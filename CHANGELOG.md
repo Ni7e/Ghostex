@@ -26,6 +26,25 @@
 <!-- CDXC:Distribution 2026-06-16-21:38: The tiny 4.14.1 patch package should stay grouped with the 4.14.0 release page while Sparkle, GitHub assets, and Homebrew point downloads at the 4.14.1 build. -->
 <!-- CDXC:Distribution 2026-06-17-09:48: Release 4.14.2 must ship from committed main with the latest supplied Highlighted Features PNGs included in the app bundle, not from hidden stash state or older packaged images. -->
 <!-- CDXC:Distribution 2026-06-18-06:14: Release notes for 4.20.0 must cover the user-facing setup, tutorial, command palette, hook recovery, session search, native pane, CLI, README, and sidebar polish shipped after 4.14.2 while keeping the required Major and Minor top-level bullet structure. -->
+<!-- CDXC:Distribution 2026-06-19-06:40: Release notes for 4.20.1 must cover the user-facing titlebar Settings menu move, CEF browser color-scheme behavior, debounced Source settings restarts, and pane action icon polish while preserving the Major and Minor top-level bullet structure. -->
+
+## 4.20.1 - 2026-06-19
+
+- Major
+  - Titlebar Settings menu
+    - Global app actions now live in the far-right titlebar Settings menu instead of the sidebar overflow menu.
+    - The menu includes Settings, Commands, Hotkeys, Wake Pet, Pinned Prompts, Scratch Pad, Running when debugging UI is enabled, and Join Discord.
+    - The sidebar is simpler, with the Commands Pane launcher moved onto the Recent Projects header as a hover action.
+  - Browser appearance
+    - Chromium browser panes now default pages to Light mode, even when the hidden browser toolbar color-scheme control is not visible.
+    - System, Light, and Dark browser appearance choices now update page `prefers-color-scheme` behavior in Chromium panes instead of only storing the menu value.
+- Minor
+  - Source pane settings
+    - Changing VS Code settings-link options now waits briefly before restarting the shared code-server runtime, so rapid Settings changes apply once using the final choice.
+    - Only awake Source panes trigger that restart, reducing unnecessary runtime churn.
+  - Native pane polish
+    - The native pane action button now uses a compact layout icon instead of the old hamburger glyph.
+    - First-launch setup copy points users back to Settings > Integrations for later setup tasks.
 
 ## 4.20.0 - 2026-06-18
 
