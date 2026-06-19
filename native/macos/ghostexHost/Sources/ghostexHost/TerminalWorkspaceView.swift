@@ -26547,7 +26547,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     browserView.translatesAutoresizingMaskIntoConstraints = true
     browserView.autoresizingMask = []
     browserView.frame = bounds
-    applyFixedBrowserPageAppearanceIfNeeded()
+    applySystemBrowserPageAppearanceIfNeeded()
     if showsBrowserToolbar {
       configureBrowserToolbar(initialAddress: initialAddress)
       addSubview(toolbarView)
@@ -26659,7 +26659,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     webView = nextWebView
     browserView.translatesAutoresizingMaskIntoConstraints = true
     browserView.autoresizingMask = []
-    applyFixedBrowserPageAppearanceIfNeeded()
+    applySystemBrowserPageAppearanceIfNeeded()
     addSubview(browserView)
     if let chromiumView {
       let findBar = BrowserFindBarView(chromiumView: chromiumView)
@@ -26784,16 +26784,16 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       max(Self.browserHistoryPageSize, items.count))
   }
 
-  private func applyFixedBrowserPageAppearanceIfNeeded() {
+  private func applySystemBrowserPageAppearanceIfNeeded() {
     guard showsBrowserToolbar else {
       return
     }
     /*
-     CDXC:BrowserPageAppearance 2026-06-19-16:07:
-     Browser address bars no longer expose a System/Light/Dark control or persist per-origin choices. Browser panes always request light page appearance at the renderer boundary; CEF also owns a white page canvas for transparent sites, so public pages do not reveal the dark editor backing color.
+     CDXC:BrowserPageAppearance 2026-06-19-18:13:
+     Browser address bars no longer expose manual System/Light/Dark controls or persist per-origin choices. Browser panes follow macOS effective appearance at the renderer boundary; CEF also owns a matching default page canvas for transparent sites, so public pages do not reveal a backing color that disagrees with the system scheme.
      */
-    webView?.appearance = NSAppearance(named: .aqua)
-    chromiumView?.setForcesLightPageAppearance(true)
+    webView?.appearance = nil
+    chromiumView?.setUsesSystemPageAppearance(true)
   }
 
   func refreshHostedWebView(reason: String) {
@@ -27172,9 +27172,10 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
      Beta features is enabled; when hidden, the address field takes its space
      through the same sibling-frame calculation.
 
-     CDXC:BrowserPageAppearance 2026-06-19-11:47:
-     The browser appearance menu was removed. Page appearance is fixed to light
-     at the CEF/WKWebView boundary instead of exposing a stateful toolbar choice.
+     CDXC:BrowserPageAppearance 2026-06-19-18:13:
+     The browser appearance menu was removed. Page appearance follows the macOS
+     effective appearance at the CEF/WKWebView boundary instead of exposing a
+     stateful toolbar choice.
      */
     let rightButtons = [zoomButton, reactGrabButton, historyButton, profileButton, devToolsButton].filter { !$0.isHidden }
     var rightX = toolbarView.bounds.width - Self.toolbarHorizontalPadding
