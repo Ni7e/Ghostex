@@ -81,7 +81,12 @@ final class SessionStatusIndicatorController {
     if let button = menuBarStatusItem.button {
       button.action = #selector(MenuBarSessionStatusIndicatorTarget.clicked(_:))
       button.imagePosition = .imageOnly
-      _ = button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+      /*
+       CDXC:SessionStatusIndicators 2026-06-19-18:19:
+       macOS 27 no longer reliably delivers the menu bar button's right-click through the rightMouseUp target-action path. Attach the lifecycle menu as the NSStatusBarButton contextual menu and reserve target-action for left-click status focusing, matching AppKit's rightMouseDown and Control-click contextual-menu model.
+       */
+      button.menu = menuBarClickTarget.menu
+      _ = button.sendAction(on: [.leftMouseUp])
       button.target = menuBarClickTarget
     }
   }
@@ -680,8 +685,9 @@ private final class MenuBarSessionStatusIndicatorTarget: NSObject {
 
      CDXC:SessionStatusIndicators 2026-06-15-11:34:
      Left click must keep the same status-focus behavior as floating badges,
-     while right click opens the app lifecycle menu. Do not attach the menu to
-     NSStatusItem.menu because AppKit would show it for ordinary left clicks.
+     while right click opens the app lifecycle menu. Attach the menu to the
+     NSStatusBarButton view instead of NSStatusItem.menu so AppKit owns
+     contextual-menu delivery without showing the menu for ordinary left clicks.
      */
     menu.autoenablesItems = false
     menu.addItem(menuItem(title: "Open Ghostex", action: #selector(openGhostexApp(_:))))
@@ -698,8 +704,7 @@ private final class MenuBarSessionStatusIndicatorTarget: NSObject {
 
   @objc func clicked(_ sender: NSStatusBarButton) {
     let event = NSApp.currentEvent
-    if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
-      showMenu(from: sender, event: event)
+    if event?.modifierFlags.contains(.control) == true {
       return
     }
     guard !items.isEmpty else {
@@ -718,16 +723,6 @@ private final class MenuBarSessionStatusIndicatorTarget: NSObject {
       return
     }
     onClick(status)
-  }
-
-  private func showMenu(from sender: NSStatusBarButton, event: NSEvent?) {
-    sender.highlight(true)
-    if let event {
-      NSMenu.popUpContextMenu(menu, with: event, for: sender)
-    } else {
-      menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.minY), in: sender)
-    }
-    sender.highlight(false)
   }
 
   @objc private func openGhostexApp(_ sender: NSMenuItem) {
