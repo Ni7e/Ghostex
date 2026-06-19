@@ -36,6 +36,7 @@ import {
   IconStars,
   IconTerminal2,
   IconWindowMaximize,
+  IconX,
 } from "@tabler/icons-react";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -224,8 +225,12 @@ const PANE_ACTION_COMMAND_IDS = [
   "mergeAllTabs",
   "renameActiveSession",
   "delayedSend",
+  "closeAfterDone",
   "forkSession",
   "reloadSession",
+  "sleepFocusedSession",
+  "wakeFocusedSession",
+  "closeFocusedSession",
   "popOutPane",
 ] as const satisfies readonly ghostexHotkeyDefinition["id"][];
 
@@ -961,6 +966,12 @@ export function CommandPalette({
           palette, matching the pane menu order shown in native chrome while
           still using shared configurable hotkey definitions.
 
+          CDXC:FocusedSessionActions 2026-06-19-15:43:
+          Sleep, Wake, Close, and Close After Done are focused-session commands
+          even when only Sleep has a default shortcut. Keep them in the Pane
+          Actions group so users can run them from the palette and bind them in
+          Hotkeys without needing a sidebar row context.
+
           CDXC:AddRepository 2026-05-29-11:45:
           Clone Repository should be available from the command palette as a Ghostex built-in command and open the same full-window clone modal as the Projects header button, without going through configurable project actions. */}
       <Command shouldFilter={false}>
@@ -1395,11 +1406,23 @@ function FocusedPaneCommandIcon({ action }: { action: ghostexFocusedPaneAction }
   if (action === "delayedSend") {
     return <IconClock aria-hidden="true" />;
   }
+  if (action === "closeAfterDone") {
+    return <IconClock aria-hidden="true" />;
+  }
   if (action === "forkSession") {
     return <IconGitFork aria-hidden="true" />;
   }
   if (action === "reloadSession") {
     return <IconRefresh aria-hidden="true" />;
+  }
+  if (action === "sleepFocusedSession") {
+    return <IconMoon aria-hidden="true" />;
+  }
+  if (action === "wakeFocusedSession") {
+    return <IconPlayerPlay aria-hidden="true" />;
+  }
+  if (action === "closeFocusedSession") {
+    return <IconX aria-hidden="true" />;
   }
   if (action === "popOutPane") {
     return <IconExternalLink aria-hidden="true" />;

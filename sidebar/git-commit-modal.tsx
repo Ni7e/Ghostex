@@ -365,16 +365,21 @@ export function GitCommitModal({
    *
    * CDXC:TitlebarGit 2026-06-08-04:07:
    * The commit review modal should match t3code's tighter source-control review
-   * controls: remove the Files and Diff headings, keep the branch summary on
-   * the same row as Edit, place three icon-only tooltip diff controls in the
-   * diff header, and use hover-only 5px transparent-gutter scrollbars on the
-   * file tree and diff body without scroll-mask overflow fades.
+   * controls: remove the Files and Diff headings, keep the branch summary
+   * compact, place three icon-only tooltip diff controls in the diff header, and
+   * use hover-only 5px transparent-gutter scrollbars on the file tree and diff
+   * body without scroll-mask overflow fades.
    *
    * CDXC:TitlebarGit 2026-06-08-09:41:
    * Commit review should open directly into the review workspace without a
-   * visible title/subtitle row. Keep Select and Show All beside Branch, let
-   * Show All concatenate every changed-file patch in the diff pane, and persist
-   * diff display options globally across projects and app restarts.
+   * visible title/subtitle row. Let Show All concatenate every changed-file
+   * patch in the diff pane, and persist diff display options globally across
+   * projects and app restarts.
+   *
+   * CDXC:TitlebarGit 2026-06-19-15:43:
+   * The commit review branch header should read as plain branch text without a
+   * visible "Branch" label or pill background. Select and Show All belong below
+   * the changed-files tree so they do not compete with the branch name.
    */
   return (
     <>
@@ -409,8 +414,7 @@ export function GitCommitModal({
                   <div className="git-commit-files-heading">
                     {draft.branch !== undefined ? (
                       <div className="git-commit-branch-row">
-                        <span className="command-config-label">Branch</span>
-                        <span className="git-commit-branch-name">
+                        <span aria-label="Branch" className="git-commit-branch-name">
                           {draft.branch ?? "(detached HEAD)"}
                         </span>
                       </div>
@@ -421,25 +425,6 @@ export function GitCommitModal({
                       </span>
                     ) : null}
                   </div>
-                  {changedFiles.length > 0 ? (
-                    <div className="git-commit-files-actions">
-                      <button
-                        className="git-commit-files-edit-button"
-                        onClick={() => setIsEditingFiles((current) => !current)}
-                        type="button"
-                      >
-                        {isEditingFiles ? "Done" : "Select"}
-                      </button>
-                      <button
-                        className="git-commit-files-show-all-button"
-                        data-active={inlineDiffMode === "all" ? "true" : "false"}
-                        onClick={showAllInlineFileDiffs}
-                        type="button"
-                      >
-                        Show All
-                      </button>
-                    </div>
-                  ) : null}
                 </div>
                 {changedFiles.length > 0 ? (
                   <>
@@ -480,10 +465,29 @@ export function GitCommitModal({
                         selectedPath={inlineDiffMode === "file" ? selectedDiffFilePath : undefined}
                       />
                     </div>
-                    <div className="git-commit-files-summary">
-                      <span className="changed-files-tree-additions">+{selectedStats.additions}</span>
-                      <span className="changed-files-tree-stat-divider">/</span>
-                      <span className="changed-files-tree-deletions">-{selectedStats.deletions}</span>
+                    <div className="git-commit-files-footer">
+                      <div className="git-commit-files-actions">
+                        <button
+                          className="git-commit-files-edit-button"
+                          onClick={() => setIsEditingFiles((current) => !current)}
+                          type="button"
+                        >
+                          {isEditingFiles ? "Done" : "Select"}
+                        </button>
+                        <button
+                          className="git-commit-files-show-all-button"
+                          data-active={inlineDiffMode === "all" ? "true" : "false"}
+                          onClick={showAllInlineFileDiffs}
+                          type="button"
+                        >
+                          Show All
+                        </button>
+                      </div>
+                      <div className="git-commit-files-summary">
+                        <span className="changed-files-tree-additions">+{selectedStats.additions}</span>
+                        <span className="changed-files-tree-stat-divider">/</span>
+                        <span className="changed-files-tree-deletions">-{selectedStats.deletions}</span>
+                      </div>
                     </div>
                   </>
                 ) : (

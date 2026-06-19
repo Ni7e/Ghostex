@@ -2328,8 +2328,13 @@ html:has(body.app-modal-host-native-window-body) {
   /*
    * CDXC:TitlebarGit 2026-06-08-04:07:
    * The commit file panel no longer has a separate "Files" label. Keep the
-   * branch summary and Edit action in one compact header row so the file tree
-   * starts higher and matches the t3code review density.
+   * branch summary compact so the file tree starts higher and matches the
+   * t3code review density.
+   *
+   * CDXC:TitlebarGit 2026-06-19-15:43:
+   * The branch header should be plain text without the visible "Branch" label
+   * or a branch-name card. Move Select and Show All into the bottom file footer
+   * so the file tree header stays visually quiet.
    */
   background: color-mix(in srgb, var(--input) 16%, transparent);
   border: 1px solid color-mix(in srgb, var(--input) 82%, transparent);
@@ -2351,16 +2356,12 @@ html:has(body.app-modal-host-native-window-body) {
 
 .git-commit-branch-name {
   align-items: center;
-  background: color-mix(in srgb, var(--foreground) 6%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
   color: color-mix(in srgb, var(--foreground) 92%, var(--muted-foreground) 8%);
-  display: inline-flex;
+  display: block;
   font-size: 14px;
   font-weight: 800;
-  min-height: 30px;
   min-width: 0;
   overflow: hidden;
-  padding: 0 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2393,6 +2394,14 @@ html:has(body.app-modal-host-native-window-body) {
   display: flex;
   flex: none;
   gap: 6px;
+}
+
+.git-commit-files-footer {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
 }
 
 .git-commit-files-edit-button,
@@ -2552,6 +2561,7 @@ html:has(body.app-modal-host-native-window-body) {
 
 .git-commit-files-summary {
   display: flex;
+  flex: none;
   font-family: var(--git-review-mono-font, "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace);
   font-size: 13px;
   font-weight: 800;

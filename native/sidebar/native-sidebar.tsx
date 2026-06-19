@@ -25092,8 +25092,14 @@ function runNativeHotkeyAction(
        * the same focused-session titlebar handler as the native pane menu, so
        * browser, split, merge, fork, reload, delay, and pop-out behavior stays
        * scoped to the user's current pane.
+       *
+       * CDXC:FocusedSessionActions 2026-06-19-15:43:
+       * Focused-session Sleep, Close, and Close After Done must target the
+       * live AppKit source session when native focus is inside the Commands
+       * panel. Thread sourceSessionId through the shared focused-pane action
+       * path instead of using the remembered workspace session unconditionally.
        */
-      runFocusedPaneHotkeyAction(action.focusedPaneAction);
+      runFocusedPaneHotkeyAction(action.focusedPaneAction, sourceSessionId);
       return;
     case "moveSidebar":
       moveSidebarToOtherSide();
@@ -25141,7 +25147,7 @@ function runNativeHotkeyAction(
       openAppModal({ modal: "hotkeys", type: "open" });
       return;
     case "renameActiveSession":
-      promptRenameFocusedNativeHotkeySession();
+      promptRenameFocusedNativeHotkeySession(sourceSessionId);
       return;
     case "runActionSlot":
       /**
@@ -25188,10 +25194,36 @@ function switchNativeWorkareaView(view: "agents" | "github" | "kanban" | "source
   }
 }
 
-function runFocusedPaneHotkeyAction(action: ghostexFocusedPaneAction): void {
-  const focusedSessionId = activeSnapshot().focusedSessionId;
+function runFocusedPaneHotkeyAction(
+  action: ghostexFocusedPaneAction,
+  sourceSessionId?: string,
+): void {
+  const snapshot = activeSnapshot();
+  const focusedSessionId = getNativeHotkeyFocusedSidebarSessionId(snapshot, sourceSessionId);
   if (!focusedSessionId) {
-    logNativeHotkeyDebug("nativeHotkeys.focusedPaneActionNoFocusedSession", { action });
+    logNativeHotkeyDebug("nativeHotkeys.focusedPaneActionNoFocusedSession", {
+      action,
+      sourceSessionId,
+      workspaceFocusedSessionId: snapshot.focusedSessionId,
+    });
+    return;
+  }
+  if (action === "wakeFocusedSession") {
+    const session = findTerminalSession(focusedSessionId);
+    if (session?.isSleeping !== true) {
+      logNativeHotkeyDebug("nativeHotkeys.wakeFocusedSessionNotSleeping", {
+        focusedSessionId,
+        sourceSessionId,
+      });
+      return;
+    }
+    /*
+     * CDXC:FocusedSessionActions 2026-06-19-15:43:
+     * Wake Focused Session restores only a focused sleeping terminal. Keep the
+     * guard here because Wake is a command-palette and bindable action, not a
+     * visible titlebar button that only appears for sleeping placeholders.
+     */
+    setNativeSessionSleeping(focusedSessionId, false);
     return;
   }
   if (action === "popOutPane") {
@@ -25206,7 +25238,7 @@ function runFocusedPaneHotkeyAction(action: ghostexFocusedPaneAction): void {
 }
 
 function focusedPaneHotkeyActionToTitlebarAction(
-  action: Exclude<ghostexFocusedPaneAction, "popOutPane">,
+  action: Exclude<ghostexFocusedPaneAction, "popOutPane" | "wakeFocusedSession">,
 ): NativeTerminalTitleBarAction {
   switch (action) {
     case "openBrowserPane":
@@ -25217,10 +25249,16 @@ function focusedPaneHotkeyActionToTitlebarAction(
       return "mergeAllTabs";
     case "delayedSend":
       return "delayedSend";
+    case "closeAfterDone":
+      return "closeAfterDone";
     case "forkSession":
       return "fork";
     case "reloadSession":
       return "reload";
+    case "sleepFocusedSession":
+      return "sleep";
+    case "closeFocusedSession":
+      return "close";
   }
 }
 
@@ -26376,10 +26414,14 @@ function logNativeHotkeySessionSlotScopeMissing(
   }
 }
 
-function promptRenameFocusedNativeHotkeySession(): void {
-  const focusedSessionId = activeSnapshot().focusedSessionId;
+function promptRenameFocusedNativeHotkeySession(sourceSessionId?: string): void {
+  const snapshot = activeSnapshot();
+  const focusedSessionId = getNativeHotkeyFocusedSidebarSessionId(snapshot, sourceSessionId);
   if (!focusedSessionId) {
-    logNativeHotkeyDebug("nativeHotkeys.renameNoFocusedSession", {});
+    logNativeHotkeyDebug("nativeHotkeys.renameNoFocusedSession", {
+      sourceSessionId,
+      workspaceFocusedSessionId: snapshot.focusedSessionId,
+    });
     return;
   }
   const session = findTerminalSession(focusedSessionId);
@@ -26395,6 +26437,12 @@ function promptRenameFocusedNativeHotkeySession(): void {
    * CDXC:SettingsDismissal 2026-06-15-14:07:
    * Rename is a modal replacement path. Close Settings first so the rename
    * child window becomes the only active app-modal surface.
+   *
+   * CDXC:FocusedSessionActions 2026-06-19-15:43:
+   * Rename already exists as a focused-session command. Resolve it through the
+   * same live source-session helper as Sleep, Close, and Close After Done so
+   * command-palette and hotkey execution target the command-pane terminal when
+   * that terminal owns AppKit focus.
    */
   closeAppModal("SettingsDismissal:nativeHotkeyRename");
   openAppModal({
@@ -45537,6 +45585,25 @@ function handleNativeTerminalTitleBarAction(
         closeTerminal(sessionId, {
           transitionOrigin: createCommandPaneTransitionOrigin(activeProject(), sessionId),
         });
+        return;
+      case "sleep":
+        /*
+         * CDXC:FocusedSessionActions 2026-06-19-15:43:
+         * Sleep Focused Session should work for the command terminal that owns
+         * live focus, not only workspace terminals. Route through
+         * setNativeSessionSleeping so command-pane lifecycle transitions keep
+         * their existing gxserver transition origin and placeholder behavior.
+         */
+        setNativeSessionSleeping(sessionId, true);
+        return;
+      case "closeAfterDone":
+        /*
+         * CDXC:FocusedSessionActions 2026-06-19-15:43:
+         * Close After Done is a terminal-scoped focused-session command. Allow
+         * command terminals to use the same timer handler as workspace
+         * terminals so command-palette execution and hotkeys match tab chrome.
+         */
+        toggleCloseAfterDone(sessionId);
         return;
       default:
         /**

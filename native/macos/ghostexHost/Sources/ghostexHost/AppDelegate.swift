@@ -5350,6 +5350,12 @@ private final class NativeSettingsStore {
     */
     "createSession": "cmd+t",
     /**
+     CDXC:FocusedSessionActions 2026-06-19-15:43:
+     Focused-session Sleep, Wake, Close, and Close After Done live in the shared hotkey model. Only Sleep gets a default native AppKit shortcut, Option+Shift+S, while Wake, Close, and Close After Done stay unassigned so existing Cmd-W menu behavior and user choices are not changed.
+     */
+    "closeAfterDone": "",
+    "closeFocusedSession": "",
+    /**
      CDXC:CommandPalette 2026-05-17-01:32:
      Pane context-menu actions also need configurable defaults at the AppKit
      boundary so terminal-focused shortcuts can dispatch the same focused-pane
@@ -5427,6 +5433,8 @@ private final class NativeSettingsStore {
     "reloadSession": "ctrl+shift+r",
     "renameActiveSession": "cmd+r",
     "rotatePanesClockwise": "ctrl+shift+l",
+    "sleepFocusedSession": "alt+shift+s",
+    "wakeFocusedSession": "",
     /**
      CDXC:ActionsHotkeys 2026-05-17-01:18:
      Action hotkeys launch the first five Actions by their current list order,

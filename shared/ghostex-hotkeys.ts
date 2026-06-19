@@ -1,6 +1,8 @@
 import type { SessionGridDirection, TerminalViewMode } from "./session-grid-contract-core";
 
 export type ghostexHotkeyActionId =
+  | "closeAfterDone"
+  | "closeFocusedSession"
   | "createSession"
   | "delayedSend"
   | "forkSession"
@@ -16,7 +18,9 @@ export type ghostexHotkeyActionId =
   | "reloadSession"
   | "renameActiveSession"
   | "rotatePanesClockwise"
+  | "sleepFocusedSession"
   | "toggleSidebarCollapsed"
+  | "wakeFocusedSession"
   | "focusPreviousGroup"
   | "focusNextGroup"
   | "focusPreviousSession"
@@ -38,13 +42,17 @@ export type ghostexHotkeyActionId =
 export type ghostexHotkeySettings = Partial<Record<ghostexHotkeyActionId, string>>;
 
 export type ghostexFocusedPaneAction =
+  | "closeAfterDone"
+  | "closeFocusedSession"
   | "delayedSend"
   | "forkSession"
   | "mergeAllTabs"
   | "openBrowserPane"
   | "popOutPane"
   | "reloadSession"
-  | "rotatePanesClockwise";
+  | "rotatePanesClockwise"
+  | "sleepFocusedSession"
+  | "wakeFocusedSession";
 
 export type ghostexHotkeyAction =
   | { id: ghostexHotkeyActionId; kind: "createSession" }
@@ -255,6 +263,17 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     title: "Delayed Send",
   },
   {
+    action: { focusedPaneAction: "closeAfterDone", id: "closeAfterDone", kind: "focusedPaneAction" },
+    /**
+     * CDXC:FocusedSessionActions 2026-06-19-15:43:
+     * Focused-session commands that already exist in native pane menus should also be configurable hotkey actions and command-palette rows. Close After Done starts unassigned so adding discoverability does not introduce a new default shortcut.
+     */
+    defaultKey: "",
+    description: "Toggle Close After Done for the focused terminal session.",
+    id: "closeAfterDone",
+    title: "Close After Done",
+  },
+  {
     action: { focusedPaneAction: "forkSession", id: "forkSession", kind: "focusedPaneAction" },
     defaultKey: "ctrl+shift+f",
     description: "Fork the focused session.",
@@ -267,6 +286,51 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: "Reload the focused session.",
     id: "reloadSession",
     title: "Reload Session",
+  },
+  {
+    action: {
+      focusedPaneAction: "sleepFocusedSession",
+      id: "sleepFocusedSession",
+      kind: "focusedPaneAction",
+    },
+    /**
+     * CDXC:FocusedSessionActions 2026-06-19-15:43:
+     * Option+Shift+S is the default Sleep Focused Session shortcut. Store it in the shared model so Settings, command-palette display, sidebar DOM dispatch, and terminal-focused AppKit dispatch all resolve the same focused session action.
+     */
+    defaultKey: "alt+shift+s",
+    description: "Sleep the focused terminal session.",
+    id: "sleepFocusedSession",
+    title: "Sleep Focused Session",
+  },
+  {
+    action: {
+      focusedPaneAction: "wakeFocusedSession",
+      id: "wakeFocusedSession",
+      kind: "focusedPaneAction",
+    },
+    /**
+     * CDXC:FocusedSessionActions 2026-06-19-15:43:
+     * Wake is the inverse focused-session lifecycle command. Keep it unassigned by default but available in Hotkeys and command palette so sleeping focused tabs can be restored without a row-specific sidebar click.
+     */
+    defaultKey: "",
+    description: "Wake the focused sleeping terminal session.",
+    id: "wakeFocusedSession",
+    title: "Wake Focused Session",
+  },
+  {
+    action: {
+      focusedPaneAction: "closeFocusedSession",
+      id: "closeFocusedSession",
+      kind: "focusedPaneAction",
+    },
+    /**
+     * CDXC:FocusedSessionActions 2026-06-19-15:43:
+     * Close is already available from pane/tab chrome and Cmd+W, but it should be bindable and runnable from the command palette without claiming a second default shortcut.
+     */
+    defaultKey: "",
+    description: "Close the focused pane or session.",
+    id: "closeFocusedSession",
+    title: "Close Focused Session",
   },
   {
     action: { focusedPaneAction: "popOutPane", id: "popOutPane", kind: "focusedPaneAction" },

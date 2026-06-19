@@ -356,6 +356,15 @@ describe("native sidebar hotkey source", () => {
       "splitFocusedNativePane(action.direction, sourceSessionId);",
     );
     expect(nativeSidebarSource).toContain(
+      "runFocusedPaneHotkeyAction(action.focusedPaneAction, sourceSessionId);",
+    );
+    expect(nativeSidebarSource).toContain(
+      "promptRenameFocusedNativeHotkeySession(sourceSessionId);",
+    );
+    expect(nativeSidebarSource).toContain(
+      "getNativeHotkeyFocusedSidebarSessionId(snapshot, sourceSessionId)",
+    );
+    expect(nativeSidebarSource).toContain(
       "targetTabGroupSessionId: commandSourceSessionId",
     );
     expect(nativeSidebarSource).toContain("function splitFocusedCommandPanelPane(");
@@ -372,9 +381,19 @@ describe("native sidebar hotkey source", () => {
       "function resolveCommandPanelActiveSessionIdAfterRemoval(",
     );
     expect(nativeSidebarSource).toContain('case "close":');
+    expect(nativeSidebarSource).toContain('case "sleep":');
+    expect(nativeSidebarSource).toContain('case "closeAfterDone":');
+    expect(nativeSidebarSource).toContain('action === "wakeFocusedSession"');
     expect(nativeSidebarSource).toContain(
       "transitionOrigin: createCommandPaneTransitionOrigin(activeProject(), sessionId)",
     );
+    expect(nativeSidebarSource).toContain("setNativeSessionSleeping(sessionId, true);");
+    expect(nativeSidebarSource).toContain("setNativeSessionSleeping(focusedSessionId, false);");
+    expect(nativeSidebarSource).toContain("toggleCloseAfterDone(sessionId);");
+    expect(nativeAppDelegateSource).toContain('"sleepFocusedSession": "alt+shift+s"');
+    expect(nativeAppDelegateSource).toContain('"wakeFocusedSession": ""');
+    expect(nativeAppDelegateSource).toContain('"closeFocusedSession": ""');
+    expect(nativeAppDelegateSource).toContain('"closeAfterDone": ""');
     expect(nativeTerminalWorkspaceSource).toContain(
       "Cmd+W should close the command terminal that owns first responder",
     );
