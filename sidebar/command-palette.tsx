@@ -175,7 +175,6 @@ type AppModalPaletteCommandId =
   | "actions"
   | "agentsHub"
   | "configureAgents"
-  | "hotkeys"
   | "openTargets"
   | "pinnedPrompts"
   | "previousSessions"
@@ -299,14 +298,6 @@ const APP_MODAL_PALETTE_COMMANDS = [
     modal: "openTargets",
     searchText: "Open Targets open in editors settings modal",
     title: "Open Targets",
-  },
-  {
-    commandId: "hotkeys",
-    hotkey: "",
-    kind: "appModal",
-    modal: "hotkeys",
-    searchText: "Hotkeys keyboard shortcuts settings modal",
-    title: "Hotkeys",
   },
 ] as const satisfies readonly BuiltInPaletteCommand[];
 
@@ -1283,6 +1274,9 @@ function BuiltInCommandIcon({ command }: { command: BuiltInPaletteCommand }) {
   }
   if (action.kind === "openSettings") {
     return <IconSettings aria-hidden="true" />;
+  }
+  if (action.kind === "openHotkeys") {
+    return <IconKeyboard aria-hidden="true" />;
   }
   if (action.kind === "moveSidebar") {
     return <IconLayoutSidebarRightExpand aria-hidden="true" />;

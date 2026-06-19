@@ -424,6 +424,8 @@ type NativeProjectBrowserHistoryItem = {
   url: string;
   visitedAt: string;
 };
+type NativeBrowserColorScheme = "system" | "light" | "dark";
+type NativeProjectBrowserColorSchemes = Record<string, NativeBrowserColorScheme>;
 type NativeGxserverDaemonStatus = {
   alwaysStart: boolean;
   message?: string;
@@ -454,6 +456,7 @@ type NativeHostCommand =
     }
   | {
       browserFeedbackTool?: "react-grab" | "agentation";
+      browserColorSchemes?: NativeProjectBrowserColorSchemes;
       browserHistory?: NativeProjectBrowserHistoryItem[];
       browserHistoryScopeId?: string;
       cwd?: string;
@@ -515,6 +518,7 @@ type NativeHostCommand =
       activeBrowserTabId?: string;
       browserTabs?: NativeProjectBrowserTabRestoreState[];
       browserFeedbackTool?: "react-grab" | "agentation";
+      browserColorSchemes?: NativeProjectBrowserColorSchemes;
       browserHistory?: NativeProjectBrowserHistoryItem[];
       browserHistoryScopeId?: string;
       showBetaFeatures?: boolean;
@@ -676,6 +680,7 @@ type NativeHostCommand =
       sidebarActions?: {
         commands: SidebarCommandButton[];
       };
+      hotkeys?: ghostexSettings["hotkeys"];
       agentHookStatus?: SidebarAgentHookStatusMessage;
       ghostexCliStatus?: SidebarGhostexCliStatusMessage;
       sessionPersistenceProvider?: ghostexSettings["sessionPersistenceProvider"];
@@ -938,6 +943,12 @@ type NativeHostEvent =
     }
   | { faviconDataUrl?: string; sessionId: string; type: "browserFaviconChanged" }
   | { sessionId: string; type: "browserUrlChanged"; url: string }
+  | {
+      colorScheme: NativeBrowserColorScheme;
+      origin: string;
+      projectId: string;
+      type: "browserColorSchemeSelected";
+    }
   | { sourceSessionId: string; type: "browserOpenInNewTabRequested"; url: string }
   | {
       action: NativeTerminalTitleBarAction;
@@ -1744,6 +1755,11 @@ type NativeProject = {
   name: string;
   path: string;
   projectBrowser?: NativeProjectBrowserRestoreState;
+  /**
+   * CDXC:BrowserColorScheme 2026-06-19-08:34:
+   * Browser color-scheme choices are project-specific and keyed by exact URL origin including protocol, full host/subdomain, and effective port. Missing entries intentionally default to Light so the hidden beta toolbar control behaves as if Light is selected until the user chooses System or Dark for that project origin.
+   */
+  projectBrowserColorSchemes?: NativeProjectBrowserColorSchemes;
   projectBrowserHistory?: NativeProjectBrowserHistoryItem[];
   projectEditorCompanionPaneHidden?: boolean;
   projectEditor?: NativeProjectEditorRestoreState;
@@ -2162,7 +2178,13 @@ let latestNativeAgentHookStatus: SidebarAgentHookStatusMessage | undefined;
 let latestNativeGhostexCliStatus: SidebarGhostexCliStatusMessage | undefined;
 let nativeAgentHookStatusRequestInFlight = false;
 let nativeAgentHookStatusAutoRequestQueued = false;
-const nativeAgentHookPriorityStatusAgentIds = ["codex", "claude", "pi"] as const;
+/*
+ * CDXC:AgentHooks 2026-06-19-08:42:
+ * First launch can stop warning as soon as Codex, Claude, OpenCode, or Pi has
+ * current hooks. Probe these providers before lower-priority CLIs so partial
+ * status updates contain the rows that decide the warning gate.
+ */
+const nativeAgentHookPriorityStatusAgentIds = ["codex", "claude", "opencode", "pi"] as const;
 type NativePaneState = "mounted" | "mounting" | "unmounted";
 type ProviderSessionState = "exists" | "missing" | "persistence-disabled" | "unknown";
 type ProviderSessionStateLookupOptions = {
@@ -3199,9 +3221,13 @@ async function refreshGxserverStartupSnapshot(reason: string): Promise<boolean> 
       /*
       CDXC:GxserverAgentSettings 2026-06-02-22:23:
       First launch after moving global Accept All into gxserver must preserve the user's existing macOS-local setting. Only when gxserver has no stored agent settings record, write the local render-cache value once before treating daemon state as authoritative.
+
+      CDXC:GxserverAgentSettings 2026-06-19-08:58:
+      Default Prompt Agent moved into the same gxserver metadata record. Seed both settings together during the first daemon-owned write so an existing macOS-local default agent is not replaced by Codex while gxserver initializes its canonical row.
       */
       const migratedAgentSettings = await gxserverClient.updateAgentSettings({
         agentAcceptAllEnabled: settings.agentAcceptAllEnabled,
+        defaultPromptAgentId: settings.defaultPromptAgentId,
       });
       snapshot.agentSettings = migratedAgentSettings;
       snapshot.agentSettingsIsPersisted = true;
@@ -6428,9 +6454,11 @@ function createNativeBrowserSession(
   });
   postNative({
     browserFeedbackTool: settings.browserFeedbackTool,
+    browserColorSchemes: projectBrowserColorSchemes(project),
     browserHistory,
     browserHistoryScopeId,
     cwd: project.path,
+    projectId: project.projectId,
     sessionId: nativeSessionId,
     showBetaFeatures: settings.showBetaFeatures,
     title: session.title || title || "Browser",
@@ -6572,7 +6600,9 @@ function navigateExistingBrowserSession(
   const nativeSessionId = nativeSessionIdForProjectSidebarSession(project.projectId, session.sessionId);
   postNative({
     browserFeedbackTool: settings.browserFeedbackTool,
+    browserColorSchemes: projectBrowserColorSchemes(project),
     cwd: project.path,
+    projectId: project.projectId,
     sessionId: nativeSessionId,
     showBetaFeatures: settings.showBetaFeatures,
     title,
@@ -7926,15 +7956,24 @@ function syncGxserverAgentSettings(
   previousSettings: ghostexSettings,
   reason: string,
 ): void {
-  if (nextSettings.agentAcceptAllEnabled === previousSettings.agentAcceptAllEnabled) {
+  if (
+    nextSettings.agentAcceptAllEnabled === previousSettings.agentAcceptAllEnabled &&
+    nextSettings.defaultPromptAgentId === previousSettings.defaultPromptAgentId
+  ) {
     return;
   }
   /*
   CDXC:GxserverAgentSettings 2026-06-02-22:23:
   Settings UI changes for global Accept All must write through `/api/updateAgentSettings`; local settings storage is only the synchronous render cache. Do not mirror this value into project launchSettings or rebuild agent commands in macOS, because gxserver owns inherited agent launch policy for every client.
+
+  CDXC:GxserverAgentSettings 2026-06-19-08:58:
+  Default Prompt Agent is gxserver-owned for the same reason: every client should resolve Git helper prompts, project-board starts, and worktree first prompts from one daemon setting while the sidebar keeps only a render cache.
   */
   void gxserverClient
-    .updateAgentSettings({ agentAcceptAllEnabled: nextSettings.agentAcceptAllEnabled })
+    .updateAgentSettings({
+      agentAcceptAllEnabled: nextSettings.agentAcceptAllEnabled,
+      defaultPromptAgentId: nextSettings.defaultPromptAgentId,
+    })
     .then((agentSettings) => {
       applyGxserverAgentSettingsToLocalSettings(agentSettings, `${reason}:persistResponse`);
     })
@@ -7951,20 +7990,29 @@ function applyGxserverAgentSettingsToLocalSettings(
   agentSettings: GxserverAgentSettings,
   reason: string,
 ): boolean {
-  if (settings.agentAcceptAllEnabled === agentSettings.agentAcceptAllEnabled) {
+  if (
+    settings.agentAcceptAllEnabled === agentSettings.agentAcceptAllEnabled &&
+    settings.defaultPromptAgentId === agentSettings.defaultPromptAgentId
+  ) {
     return false;
   }
+  const defaultPromptAgentChanged = settings.defaultPromptAgentId !== agentSettings.defaultPromptAgentId;
   /*
   CDXC:GxserverAgentSettings 2026-06-02-22:23:
   Startup and gxserver update responses replace the local render cache for global Accept All. This keeps Settings controls aligned with daemon-owned agent policy without letting macOS localStorage become a competing source for launch command behavior.
+
+  CDXC:GxserverAgentSettings 2026-06-19-08:58:
+  Also replace the local Default Prompt Agent cache from gxserver responses. Preserving custom ids here is intentional; command availability belongs to the current agent registry and should be surfaced by launch UI instead of rewriting the setting to Codex.
   */
   settings = normalizeghostexSettings({
     ...settings,
     agentAcceptAllEnabled: agentSettings.agentAcceptAllEnabled,
+    defaultPromptAgentId: agentSettings.defaultPromptAgentId,
   });
   persistSharedSettingsSnapshot(settings);
   appendSidebarRefreshDebugLog("nativeSidebar.gxserver.agentSettings.localSync", {
     agentAcceptAllEnabled: agentSettings.agentAcceptAllEnabled,
+    defaultPromptAgentChanged,
     reason,
   });
   publish();
@@ -10516,6 +10564,9 @@ function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
     (normalizedProjectEditor?.mode === "git"
       ? normalizeStoredProjectBrowserRestoreState(normalizedProjectEditor)
       : undefined);
+  const normalizedProjectBrowserColorSchemes = normalizeProjectBrowserColorSchemes(
+    project.projectBrowserColorSchemes,
+  );
   const normalizedProject: NativeProject = {
       icon: normalizeWorkspaceProjectIcon(project.icon) ?? normalizeLegacyWorkspaceProjectIcon(project),
       iconDataUrl: normalizeWorkspaceProjectIconDataUrl(project.iconDataUrl),
@@ -10527,6 +10578,9 @@ function normalizeStoredNativeProject(candidate: unknown): NativeProject[] {
       name: project.name?.trim() || projectNameFromPath(path),
       path,
       projectBrowser: normalizedProjectBrowser,
+      ...(Object.keys(normalizedProjectBrowserColorSchemes).length > 0
+        ? { projectBrowserColorSchemes: normalizedProjectBrowserColorSchemes }
+        : {}),
       projectBrowserHistory: normalizeProjectBrowserHistory(project.projectBrowserHistory),
       projectEditorCompanionPaneHidden: project.projectEditorCompanionPaneHidden === true,
       projectEditor: normalizedProjectEditor,
@@ -10920,6 +10974,94 @@ function normalizeProjectBrowserUrl(candidate: unknown): string | undefined {
  * Project Browser history retains at most 140 de-duplicated links per main-project/worktree family. Revisited URLs replace their older occurrence with a fresh visitedAt timestamp so they move back to the top instead of accumulating duplicates.
  */
 const PROJECT_BROWSER_HISTORY_MAX_ITEMS = 140;
+
+function normalizeBrowserColorScheme(candidate: unknown): NativeBrowserColorScheme | undefined {
+  return candidate === "system" || candidate === "light" || candidate === "dark"
+    ? candidate
+    : undefined;
+}
+
+function browserColorSchemeOriginKey(candidate: unknown): string | undefined {
+  const trimmed = typeof candidate === "string" ? candidate.trim() : "";
+  if (!trimmed) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol !== "http:" && protocol !== "https:") {
+      return undefined;
+    }
+    const hostname = parsed.hostname.toLowerCase().replace(/\.+$/u, "");
+    if (!hostname) {
+      return undefined;
+    }
+    const port =
+      parsed.port ||
+      (protocol === "http:"
+        ? "80"
+        : "443");
+    return `${protocol}//${hostname}:${port}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeProjectBrowserColorSchemes(candidate: unknown): NativeProjectBrowserColorSchemes {
+  /*
+   * CDXC:BrowserColorScheme 2026-06-19-08:34:
+   * Persist only explicit System/Light/Dark selections for http(s) origins. The key includes the effective default port so same protocol+host navigations normalize to one preference while alternate ports remain independent.
+   */
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return {};
+  }
+  const schemes: NativeProjectBrowserColorSchemes = {};
+  for (const [origin, rawScheme] of Object.entries(candidate as Record<string, unknown>)) {
+    const originKey = browserColorSchemeOriginKey(origin);
+    const colorScheme = normalizeBrowserColorScheme(rawScheme);
+    if (originKey && colorScheme) {
+      schemes[originKey] = colorScheme;
+    }
+  }
+  return schemes;
+}
+
+function projectBrowserColorSchemes(project: NativeProject): NativeProjectBrowserColorSchemes {
+  return normalizeProjectBrowserColorSchemes(project.projectBrowserColorSchemes);
+}
+
+function handleBrowserColorSchemeSelected(
+  hostEvent: Extract<NativeHostEvent, { type: "browserColorSchemeSelected" }>,
+): void {
+  const projectId = projectIdFromProjectEditorId(hostEvent.projectId);
+  const origin = browserColorSchemeOriginKey(hostEvent.origin);
+  const colorScheme = normalizeBrowserColorScheme(hostEvent.colorScheme);
+  if (!origin || !colorScheme) {
+    return;
+  }
+  let didChange = false;
+  projects = projects.map((project) => {
+    if (project.projectId !== projectId) {
+      return project;
+    }
+    const previous = projectBrowserColorSchemes(project);
+    if (previous[origin] === colorScheme) {
+      return project;
+    }
+    didChange = true;
+    return {
+      ...project,
+      projectBrowserColorSchemes: {
+        ...previous,
+        [origin]: colorScheme,
+      },
+    };
+  });
+  if (didChange) {
+    writeStoredProjects("browserColorSchemeSelected");
+    publish();
+  }
+}
 
 function normalizeProjectBrowserHistory(candidate: unknown): NativeProjectBrowserHistoryItem[] {
   if (!Array.isArray(candidate)) {
@@ -13258,11 +13400,14 @@ function resolvePromptAgentId(agentId?: string): string | undefined {
   if (requestedAgent?.command?.trim()) {
     return requestedAgent.agentId;
   }
-  const codexAgent = resolveSidebarAgentButtonById(DEFAULT_PROMPT_AGENT_ID);
-  if (codexAgent?.command?.trim()) {
-    return codexAgent.agentId;
-  }
-  return agents.find((agent) => agent.agentId !== "t3" && agent.command?.trim())?.agentId;
+  /*
+   * CDXC:GxserverAgentSettings 2026-06-19-08:58:
+   * The gxserver-owned Default Prompt Agent must not silently launch Codex or
+   * the first available agent when the saved id is hidden, custom-but-missing,
+   * or commandless. Return unavailable so Git helpers, App Shots, project-board
+   * starts, and worktree prompts show their existing configure-agent errors.
+   */
+  return undefined;
 }
 
 function resolveDefaultPromptAgent(agentId?: string): SidebarAgentButton | undefined {
@@ -19843,9 +19988,9 @@ async function requestNativeAgentHookStatus(agentIds?: readonly string[]): Promi
 
      * CDXC:AgentHooks 2026-06-18-02:54:
      * First-launch and Settings can request the full supported provider set.
-     * Status checks still prioritize Codex, Claude, and Pi, then continue
-     * through lower-priority providers so the UI does not sit blocked behind
-     * every provider probe.
+     * Status checks still prioritize Codex, Claude, OpenCode, and Pi, then
+     * continue through lower-priority providers so the UI does not sit blocked
+     * behind every provider probe.
 	   */
   if (nativeAgentHookStatusRequestInFlight) {
     return;
@@ -22244,7 +22389,9 @@ function restoreNativeBrowserSession(
   const nativeSessionId = rememberNativeSessionMapping(project.projectId, session.sessionId);
   postNative({
     browserFeedbackTool: settings.browserFeedbackTool,
+    browserColorSchemes: projectBrowserColorSchemes(project),
     cwd: project.path,
+    projectId: project.projectId,
     sessionId: nativeSessionId,
     showBetaFeatures: settings.showBetaFeatures,
     title: session.title || browserPaneTitleFromUrl(session.browser.url),
@@ -24975,6 +25122,13 @@ function runNativeHotkeyAction(
       return;
     case "openSettings":
       openAppModal({ modal: "settings", type: "open" });
+      return;
+    case "openHotkeys":
+      /**
+       * CDXC:Hotkeys 2026-06-19-00:35:
+       * Cmd+. is the menu-advertised Hotkeys shortcut. Native hotkey dispatch should open the existing Hotkeys app-modal directly so terminal focus and sidebar focus share the same configured command.
+       */
+      openAppModal({ modal: "hotkeys", type: "open" });
       return;
     case "renameActiveSession":
       promptRenameFocusedNativeHotkeySession();
@@ -38605,6 +38759,7 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
             ? projectBrowserHistoryForScope(browserHistoryScopeId)
             : undefined,
           browserHistoryScopeId,
+          browserColorSchemes: projectBrowserColorSchemes(project),
           browserTabs: browserTabsForWake,
         }
       : {}),
@@ -39066,6 +39221,7 @@ function openProjectGitEditorSurface(project: NativeProject, seedUrl: string, ne
   });
   postNative({
     activeBrowserTabId: browserState.activeBrowserTabId,
+    browserColorSchemes: projectBrowserColorSchemes(project),
     browserHistory,
     browserHistoryScopeId,
     browserTabs: browserState.browserTabs,
@@ -42706,6 +42862,7 @@ function syncNativeLayout(
     sidebarActions: {
       commands,
     },
+    hotkeys: settings.hotkeys,
     agentHookStatus: latestNativeAgentHookStatus,
     ghostexCliStatus: latestNativeGhostexCliStatus,
     /**
@@ -43851,6 +44008,10 @@ window.addEventListener("ghostex-native-host-event", (event) => {
       hostEvent.activeTabId,
       hostEvent.tabs,
     );
+    return;
+  }
+  if (hostEvent.type === "browserColorSchemeSelected") {
+    handleBrowserColorSchemeSelected(hostEvent);
     return;
   }
   if (hostEvent.type === "browserOpenInNewTabRequested") {

@@ -114,6 +114,11 @@ export type NativeGhosttyHostCommand =
     }
   | {
       browserFeedbackTool?: "react-grab" | "agentation";
+      /**
+       * CDXC:BrowserColorScheme 2026-06-19-08:34:
+       * Browser color-scheme preferences are sidebar-owned project state keyed by exact http(s) origin, including effective default ports. Native applies the selected System/Light/Dark value on navigation, with Light as the missing-entry default.
+       */
+      browserColorSchemes?: Record<string, "system" | "light" | "dark">;
       browserHistory?: Array<{
         faviconDataUrl?: string;
         title: string;
@@ -235,6 +240,11 @@ export type NativeGhosttyHostCommand =
         url: string;
       }>;
       browserFeedbackTool?: "react-grab" | "agentation";
+      /**
+       * CDXC:BrowserColorScheme 2026-06-19-08:34:
+       * Project Browser mode receives the same per-project origin preference map as standalone Browser panes so restored tabs apply the user's previous selection before navigation.
+       */
+      browserColorSchemes?: Record<string, "system" | "light" | "dark">;
       /**
        * CDXC:BrowserHistory 2026-06-15-10:25:
        * Browser toolbar history is project-family state shared by the main project and its worktrees. The sidebar owns that family scope, then sends de-duplicated URL history snapshots to native so AppKit can render the address-bar menu without learning worktree relationships.
@@ -531,6 +541,12 @@ export type NativeGhosttyHostEvent =
       sessionId: string;
       type: "browserUrlChanged";
       url: string;
+    }
+  | {
+      colorScheme: "system" | "light" | "dark";
+      origin: string;
+      projectId: string;
+      type: "browserColorSchemeSelected";
     }
   | {
       /**

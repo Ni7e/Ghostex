@@ -2,7 +2,6 @@ import {
   IconAlertTriangle,
   IconArrowsDiagonal2,
   IconArrowsDiagonalMinimize,
-  IconBookmark,
   IconBook2,
   IconBox,
   IconCheck,
@@ -29,7 +28,6 @@ import {
   IconKeyboard,
   IconMenu2,
   IconMoon,
-  IconPencil,
   IconPlayerPlay,
   IconRefresh,
   IconRocket,
@@ -90,6 +88,10 @@ import {
   type SidebarSide,
   type SessionPersistenceProvider,
 } from "../../shared/ghostex-settings";
+import {
+  normalizeghostexHotkeySettings,
+  type ghostexHotkeySettings,
+} from "../../shared/ghostex-hotkeys";
 import {
   BUILT_IN_WORKSPACE_OPEN_TARGETS,
   type CustomWorkspaceOpenTarget,
@@ -281,6 +283,7 @@ type TitlebarProjectState = {
   sidebarCollapsed: boolean;
   sidebarSide: SidebarSide;
   sidebarActions: TitlebarSidebarActionsSettings;
+  hotkeys: ghostexHotkeySettings;
   showProjectEditorDiffFileCount: boolean;
   sessionPersistenceProvider: SessionPersistenceProvider;
   toggleSidebarHotkeyLabel: string;
@@ -531,7 +534,6 @@ function createTitlebarDropdownPanelPreferredSize(
     gitItemCount: number;
     keepAwakeIsRunning: boolean;
     modeOptionCount: number;
-    settingsShowRunning: boolean;
     targetCount: number;
   },
 ): TitlebarDropdownPanelSize {
@@ -593,7 +595,7 @@ function createTitlebarDropdownPanelPreferredSize(
       );
     case "settings":
       return compactTitlebarDropdownPanelSize(
-        titlebarMenuHeight(counts.settingsShowRunning ? 8 : 7, { separatorCount: 2 }),
+        titlebarMenuHeight(5, { separatorCount: 2 }),
       );
   }
 }
@@ -1833,7 +1835,6 @@ function App() {
         gitItemCount: 1,
         keepAwakeIsRunning: false,
         modeOptionCount: 4,
-        settingsShowRunning: false,
         targetCount: 0,
       }),
   );
@@ -2627,31 +2628,6 @@ function App() {
     postNative({ type: "togglePetOverlayFromTitlebar" });
   };
 
-  const openTitlebarSettingsMenuPinnedPrompts = () => {
-    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarPinnedPromptsMenu");
-    window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
-      modal: "pinnedPrompts",
-      type: "open",
-    });
-  };
-
-  const openTitlebarSettingsMenuScratchPad = () => {
-    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarScratchPadMenu");
-    window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
-      modal: "scratchPad",
-      type: "open",
-    });
-  };
-
-  const openTitlebarSettingsMenuRunning = () => {
-    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarRunningMenu");
-    window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
-      modal: "daemonSessions",
-      type: "open",
-    });
-    postTitlebarSidebarCommand({ type: "refreshDaemonSessions" });
-  };
-
   const openTitlebarSettingsMenuDiscord = () => {
     closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarDiscordMenu");
     postNative({ type: "openExternalUrl", url: GHOSTEX_DISCORD_URL });
@@ -3260,13 +3236,11 @@ function App() {
         gitItemCount: gitMenuItems.length,
         keepAwakeIsRunning: Boolean(keepAwakeRuntime),
         modeOptionCount: titlebarModes.length,
-        settingsShowRunning: projectState.debuggingMode,
         targetCount: visibleTargets.length,
       }),
     [
       gitMenuItems.length,
       keepAwakeRuntime,
-      projectState.debuggingMode,
       titlebarModes.length,
       visibleActions.length,
       visibleTargets.length,
@@ -3396,9 +3370,6 @@ function App() {
           onOpenSettingsMenuCommands={openTitlebarSettingsMenuCommands}
           onOpenSettingsMenuDiscord={openTitlebarSettingsMenuDiscord}
           onOpenSettingsMenuHotkeys={openTitlebarSettingsMenuHotkeys}
-          onOpenSettingsMenuPinnedPrompts={openTitlebarSettingsMenuPinnedPrompts}
-          onOpenSettingsMenuRunning={openTitlebarSettingsMenuRunning}
-          onOpenSettingsMenuScratchPad={openTitlebarSettingsMenuScratchPad}
           onOpenSettingsMenuSettings={openTitlebarSettingsMenuSettings}
           onOpenNoticeSettings={handleNoticeAction}
           onOpenPowerSettings={openPowerSettings}
@@ -3419,7 +3390,7 @@ function App() {
           readTips={readTips}
           resourceGroupViews={resourceViews.groupViews}
           selectedActionCommandId={selectedActionCommandId}
-          settingsShowRunning={projectState.debuggingMode}
+          hotkeys={projectState.hotkeys}
           sidebarTheme={projectState.sidebarTheme}
           sessionPersistenceProvider={
             projectState.sessionPersistenceProvider === "off"
@@ -3909,9 +3880,6 @@ function TitlebarDropdownPanelSurface({
   onOpenSettingsMenuCommands,
   onOpenSettingsMenuDiscord,
   onOpenSettingsMenuHotkeys,
-  onOpenSettingsMenuPinnedPrompts,
-  onOpenSettingsMenuRunning,
-  onOpenSettingsMenuScratchPad,
   onOpenSettingsMenuSettings,
   onOpenNoticeSettings,
   onOpenPowerSettings,
@@ -3932,7 +3900,7 @@ function TitlebarDropdownPanelSurface({
   readTips,
   resourceGroupViews,
   selectedActionCommandId,
-  settingsShowRunning,
+  hotkeys,
   sidebarTheme,
   sessionPersistenceProvider,
   visibleActions,
@@ -3965,9 +3933,6 @@ function TitlebarDropdownPanelSurface({
   onOpenSettingsMenuCommands: () => void;
   onOpenSettingsMenuDiscord: () => void;
   onOpenSettingsMenuHotkeys: () => void;
-  onOpenSettingsMenuPinnedPrompts: () => void;
-  onOpenSettingsMenuRunning: () => void;
-  onOpenSettingsMenuScratchPad: () => void;
   onOpenSettingsMenuSettings: () => void;
   onOpenNoticeSettings: (notice: TitlebarNotice) => void;
   onOpenPowerSettings: () => void;
@@ -3991,7 +3956,7 @@ function TitlebarDropdownPanelSurface({
   readTips: TitlebarTip[];
   resourceGroupViews: ResourceGroupView[];
   selectedActionCommandId: string | undefined;
-  settingsShowRunning: boolean;
+  hotkeys: ghostexHotkeySettings;
   sidebarTheme: SidebarTheme;
   sessionPersistenceProvider: Exclude<SessionPersistenceProvider, "off"> | undefined;
   visibleActions: SidebarCommandButton[];
@@ -4015,6 +3980,7 @@ function TitlebarDropdownPanelSurface({
   };
   const isPanelDarkTheme = getTitlebarThemeVariant(sidebarTheme) === "dark";
   const gitBranchLabel = titlebarGitBranchLabel(git.branch);
+  const settingsMenuHotkeys = normalizeghostexHotkeySettings(hotkeys);
 
   return (
     <div
@@ -4295,43 +4261,45 @@ function TitlebarDropdownPanelSurface({
         <div className="titlebar-open-menu titlebar-settings-menu min-w-[220px] rounded-none border-border/80 p-1 text-[13px] text-foreground shadow-2xl">
           {/*
            * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
-           * The far-right titlebar Settings menu replaces the sidebar footer Settings row and sidebar overflow menu. Keep the requested order exact, show Running only while Debugging UI is enabled, and use the same compact native child-window menu chrome as Actions.
+           * The far-right titlebar Settings menu replaces the sidebar footer Settings row and sidebar overflow menu. Use the same compact native child-window menu chrome as Actions.
+           *
+           * CDXC:TitlebarSettingsMenu 2026-06-19-00:35:
+           * Menu rows need right-aligned shortcut labels. Commands must be titled "Commands" with Cmd+Shift+P in the shortcut column, and Pinned Prompts plus Scratch Pad stay hidden from this dropdown while remaining available elsewhere in the app.
            */}
           <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuSettings)}>
-            <IconSettings aria-hidden="true" size={16} />
-            <span>Settings</span>
+            <TitlebarSettingsMenuItemContent
+              icon={<IconSettings aria-hidden="true" size={16} />}
+              label="Settings"
+              shortcut={formatTitlebarSettingsMenuShortcut(settingsMenuHotkeys.openSettings)}
+            />
+          </TitlebarPanelMenuItem>
+          <TitlebarPanelMenuSeparator />
+          <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuHotkeys)}>
+            <TitlebarSettingsMenuItemContent
+              icon={<IconKeyboard aria-hidden="true" size={16} />}
+              label="Hotkeys"
+              shortcut={formatTitlebarSettingsMenuShortcut(settingsMenuHotkeys.openHotkeys)}
+            />
           </TitlebarPanelMenuItem>
           <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuCommands)}>
-            <IconCommand aria-hidden="true" size={16} />
-            <span>Commands [⌘⇧P]</span>
-          </TitlebarPanelMenuItem>
-          <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuHotkeys)}>
-            <IconKeyboard aria-hidden="true" size={16} />
-            <span>Hotkeys</span>
+            <TitlebarSettingsMenuItemContent
+              icon={<IconCommand aria-hidden="true" size={16} />}
+              label="Commands"
+              shortcut={formatTitlebarSettingsMenuShortcut(settingsMenuHotkeys.openCommandPalette)}
+            />
           </TitlebarPanelMenuItem>
           <TitlebarPanelMenuSeparator />
           <TitlebarPanelMenuItem onClick={() => closeAfter(onWakePetFromSettingsMenu)}>
-            <IconRobotFace aria-hidden="true" size={16} />
-            <span>Wake Pet</span>
+            <TitlebarSettingsMenuItemContent
+              icon={<IconRobotFace aria-hidden="true" size={16} />}
+              label="Wake Pet"
+            />
           </TitlebarPanelMenuItem>
-          <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuPinnedPrompts)}>
-            <IconBookmark aria-hidden="true" size={16} />
-            <span>Pinned Prompts</span>
-          </TitlebarPanelMenuItem>
-          <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuScratchPad)}>
-            <IconPencil aria-hidden="true" size={16} />
-            <span>Scratch Pad</span>
-          </TitlebarPanelMenuItem>
-          {settingsShowRunning ? (
-            <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuRunning)}>
-              <IconHistory aria-hidden="true" size={16} />
-              <span>Running</span>
-            </TitlebarPanelMenuItem>
-          ) : null}
-          <TitlebarPanelMenuSeparator />
           <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuDiscord)}>
-            <IconUsersGroup aria-hidden="true" size={16} />
-            <span>Join Discord</span>
+            <TitlebarSettingsMenuItemContent
+              icon={<IconUsersGroup aria-hidden="true" size={16} />}
+              label="Join Discord"
+            />
           </TitlebarPanelMenuItem>
         </div>
       ) : null}
@@ -4394,6 +4362,28 @@ function TitlebarPanelMenuItem({
       {children}
     </button>
   );
+}
+
+function TitlebarSettingsMenuItemContent({
+  icon,
+  label,
+  shortcut,
+}: {
+  icon: ReactNode;
+  label: string;
+  shortcut?: string;
+}) {
+  return (
+    <>
+      <span className="titlebar-settings-menu-icon">{icon}</span>
+      <span className="titlebar-settings-menu-label">{label}</span>
+      <span className="titlebar-settings-menu-shortcut">{shortcut ?? ""}</span>
+    </>
+  );
+}
+
+function formatTitlebarSettingsMenuShortcut(hotkey: string | undefined): string {
+  return hotkey ? formatSidebarHotkeyLabel(hotkey) : "";
 }
 
 function TitlebarPanelMenuSeparator() {
@@ -4519,6 +4509,7 @@ function mergeTitlebarProjectState(
     diffStats: state.diffStats ?? current.diffStats,
     git: resolveTitlebarGitStateForMerge(current.git, state.git, projectIdentity),
     gxserverDaemon: state.gxserverDaemon ?? current.gxserverDaemon,
+    hotkeys: normalizeghostexHotkeySettings(state.hotkeys ?? current.hotkeys),
     keepAwake: state.keepAwake ?? current.keepAwake,
     browserTabs: state.browserTabs ?? current.browserTabs,
     projectEditorCompanionPaneHidden:
@@ -4754,6 +4745,7 @@ function createInitialProjectState(bootstrap: Record<string, unknown>): Titlebar
       alwaysStart: true,
       state: "unknown",
     },
+    hotkeys: settings.hotkeys,
     keepAwake: createTitlebarKeepAwakeSettings(settings),
     projectEditorCompanionPaneHidden: false,
     projectIsQuick: false,
@@ -6906,6 +6898,15 @@ styleElement.textContent = `
     padding: 0 12px;
     width: 42px;
   }
+  .titlebar-settings-menu-button {
+    /*
+     * CDXC:TitlebarSettingsMenu 2026-06-19-08:56:
+     * The far-right overflow/settings button needs 3px more right-side hit area than the other icon buttons. Keep the generic titlebar button width unchanged and widen only this rightmost Settings menu trigger.
+     */
+    padding-left: 12px;
+    padding-right: 15px;
+    width: 45px;
+  }
   .titlebar-git-main-button {
     gap: 0;
     padding: 0 12px;
@@ -7493,6 +7494,34 @@ styleElement.textContent = `
     gap: 10px;
     border-radius: 0;
     font: 400 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  }
+  .titlebar-settings-menu .titlebar-open-menu-item {
+    /*
+     * CDXC:TitlebarSettingsMenu 2026-06-19-00:35:
+     * Settings menu shortcuts must appear in a right-aligned column instead of being embedded in labels. Keep a stable icon/label/shortcut grid so rows with no assigned shortcut, such as Wake Pet and Join Discord, still align with shortcut-backed rows.
+     */
+    display: grid !important;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+  }
+  .titlebar-settings-menu-icon {
+    align-items: center;
+    display: inline-flex;
+    grid-column: 1;
+    justify-content: center;
+  }
+  .titlebar-settings-menu-label {
+    grid-column: 2;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .titlebar-settings-menu-shortcut {
+    color: rgba(255, 255, 255, 0.5);
+    grid-column: 3;
+    justify-self: end;
+    min-width: 1ch;
+    white-space: nowrap;
   }
   /**
    * CDXC:TitlebarActions 2026-05-19-16:05:

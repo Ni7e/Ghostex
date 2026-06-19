@@ -157,6 +157,7 @@ const FIRST_LAUNCH_INTRO_BENEFITS: readonly FirstLaunchBenefit[] = [
 const FIRST_LAUNCH_HOOK_SUPPORTED_AGENTS = DEFAULT_SIDEBAR_AGENTS.filter(
   (agent) => agent.agentId !== "t3",
 );
+const FIRST_LAUNCH_HOOK_SKIP_WARNING_AGENT_IDS = ["claude", "codex", "opencode", "pi"] as const;
 const FIRST_LAUNCH_PROMPT_AGENT_OPTIONS = DEFAULT_SIDEBAR_AGENTS.filter(
   (agent) =>
     agent.agentId !== "t3" && (!("hiddenByDefault" in agent) || agent.hiddenByDefault !== true),
@@ -997,11 +998,28 @@ function FirstLaunchPreferencesPage({
   settings: ghostexSettings;
 }) {
   const activePresetId = getSidebarSettingsPresetId(settings);
-  const selectedDefaultPromptAgentId = FIRST_LAUNCH_PROMPT_AGENT_OPTIONS.some(
-    (option) => option.value === settings.defaultPromptAgentId,
-  )
-    ? settings.defaultPromptAgentId
-    : DEFAULT_ghostex_SETTINGS.defaultPromptAgentId;
+  const normalizedDefaultPromptAgentId =
+    settings.defaultPromptAgentId.trim() || DEFAULT_ghostex_SETTINGS.defaultPromptAgentId;
+  const firstLaunchPromptAgentHasSavedDefault = FIRST_LAUNCH_PROMPT_AGENT_OPTIONS.some(
+    (option) => option.value === normalizedDefaultPromptAgentId,
+  );
+  const firstLaunchPromptAgentOptions = firstLaunchPromptAgentHasSavedDefault
+    ? FIRST_LAUNCH_PROMPT_AGENT_OPTIONS
+    : [
+        /*
+         * CDXC:GxserverAgentSettings 2026-06-19-08:58:
+         * First-launch preferences must display a gxserver-owned custom or
+         * currently unavailable Default Prompt Agent as unavailable instead of
+         * visually falling back to Codex. Other preference saves should preserve
+         * that canonical agent id until the user explicitly changes it.
+         */
+        {
+          label: `Unavailable (${normalizedDefaultPromptAgentId})`,
+          value: normalizedDefaultPromptAgentId,
+        },
+        ...FIRST_LAUNCH_PROMPT_AGENT_OPTIONS,
+      ];
+  const selectedDefaultPromptAgentId = normalizedDefaultPromptAgentId;
 
   const updateSetting = <Key extends keyof ghostexSettings>(
     key: Key,
@@ -1084,7 +1102,7 @@ function FirstLaunchPreferencesPage({
               onChange={(event) => updateSetting("defaultPromptAgentId", event.currentTarget.value)}
               value={selectedDefaultPromptAgentId}
             >
-              {FIRST_LAUNCH_PROMPT_AGENT_OPTIONS.map((option) => (
+              {firstLaunchPromptAgentOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -1829,10 +1847,16 @@ function areFirstLaunchAgentHooksReady(
     return false;
   }
   const statusByAgentId = new Map(agentHookStatus.agents.map((status) => [status.agentId, status]));
-  return FIRST_LAUNCH_HOOK_SUPPORTED_AGENTS.every((agent) => {
-    const status = statusByAgentId.get(agent.agentId)?.status;
-    return status === "installed" || status === "notRequired";
-  });
+  /*
+   * CDXC:FirstLaunchSetup 2026-06-19-08:42:
+   * The continue warning should only protect users who have no usable
+   * first-launch hook coverage. If Claude, Codex, OpenCode, or Pi already has a
+   * current Ghostex hook, continuing should not show the warning just because
+   * secondary providers are missing.
+   */
+  return FIRST_LAUNCH_HOOK_SKIP_WARNING_AGENT_IDS.some((agentId) =>
+    isFirstLaunchAgentHookReadyStatus(statusByAgentId.get(agentId)?.status),
+  );
 }
 
 function areFirstLaunchBundledSkillsInstalled(
@@ -1844,6 +1868,10 @@ function areFirstLaunchBundledSkillsInstalled(
     ghostexCliStatus.agentOrchestrationSkillInstalled === true &&
     ghostexCliStatus.generateTitleSkillInstalled === true
   );
+}
+
+function isFirstLaunchAgentHookReadyStatus(status: SidebarAgentHookStatus | undefined): boolean {
+  return status === "installed" || status === "notRequired";
 }
 
 function getFirstLaunchHookTone(

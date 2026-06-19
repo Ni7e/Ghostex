@@ -12,6 +12,23 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("settings modal source", () => {
+  test("keeps Show Advanced inside the Settings section sidebar", () => {
+    /*
+     * CDXC:SettingsNavigation 2026-06-19-08:40:
+     * The macOS Settings section list and Show Advanced filter should render
+     * as one sidebar surface, not as separate floating controls.
+     */
+    const settingsSidebar = sourceBetween(
+      settingsModalSource,
+      '<aside aria-label="Settings sections" className="settings-section-sidebar">',
+      "</aside>",
+    );
+    expect(settingsSidebar).toContain("settings-section-sidebar-list");
+    expect(settingsSidebar).toContain("settings-section-sidebar-footer");
+    expect(settingsSidebar).toContain("Show Advanced");
+    expect(settingsModalSource).not.toContain("settings-show-advanced-anchor");
+  });
+
   test("keeps hook and skill uninstall controls in a searchable advanced bottom section", () => {
     /*
      * CDXC:SettingsAdvanced 2026-06-18-02:54:
@@ -33,5 +50,24 @@ describe("settings modal source", () => {
     expect(settingsModalSource).toContain('title="Hooks & Skills"');
     expect(settingsModalSource).toContain('Uninstall Hooks');
     expect(settingsModalSource).toContain('Uninstall Skills');
+  });
+
+  test("shows unavailable gxserver-owned default prompt agents without selecting Codex", () => {
+    /*
+     * CDXC:GxserverAgentSettings 2026-06-19-08:58:
+     * Settings must preserve and display a gxserver-owned Default Prompt Agent
+     * even when the local launcher registry cannot currently provide a command.
+     * Showing an unavailable row is preferable to visually falling back to Codex.
+     */
+    const agentsTab = sourceBetween(
+      settingsModalSource,
+      "function AgentsSettingsTab",
+      "function AgentHookStatusRow",
+    );
+
+    expect(agentsTab).toContain("const promptAgentSelectOptions = promptAgentHasSavedDefault");
+    expect(agentsTab).toContain("Unavailable (${normalizedDefaultPromptAgentId})");
+    expect(agentsTab).toContain("const selectedDefaultPromptAgentId = normalizedDefaultPromptAgentId;");
+    expect(agentsTab).not.toContain("promptAgentOptions.find");
   });
 });

@@ -67,6 +67,38 @@ describe("first launch setup modal source", () => {
     expect(sidebarStylesSource).toContain("justify-content: flex-end;");
   });
 
+  test("skips the hook warning when a primary hook provider is ready", () => {
+    /*
+    CDXC:FirstLaunchSetup 2026-06-19-08:42:
+    The Hook step should not show the continue-warning overlay when Claude,
+    Codex, OpenCode, or Pi already has a current Ghostex hook. Missing secondary
+    providers should remain visible in the status list without blocking
+    Continue.
+    */
+    expect(firstLaunchSetupModalSource).toContain(
+      'const FIRST_LAUNCH_HOOK_SKIP_WARNING_AGENT_IDS = ["claude", "codex", "opencode", "pi"] as const;',
+    );
+    const hookReadiness = sourceBetween(
+      firstLaunchSetupModalSource,
+      "function areFirstLaunchAgentHooksReady",
+      "function areFirstLaunchBundledSkillsInstalled",
+    );
+
+    expect(hookReadiness).toContain("FIRST_LAUNCH_HOOK_SKIP_WARNING_AGENT_IDS.some");
+    expect(hookReadiness).toContain("isFirstLaunchAgentHookReadyStatus");
+    expect(hookReadiness).not.toContain("FIRST_LAUNCH_HOOK_SUPPORTED_AGENTS.every");
+
+    const warningStyles = sourceBetween(
+      sidebarStylesSource,
+      ".ghostex-settings-shadcn .first-launch-setup-warning-backdrop {",
+      ".ghostex-settings-shadcn .first-launch-setup-warning-actions {",
+    );
+    expect(warningStyles).toContain("var(--popover) 96%");
+    expect(warningStyles).toContain("var(--primary) 22%");
+    expect(warningStyles).not.toContain("#f59e0b");
+    expect(warningStyles).not.toContain("#fcd34d");
+  });
+
   test("shows Recommended as the leftmost default sidebar-style preset", () => {
     /*
     CDXC:FirstLaunchPreferences 2026-06-13-03:28:
@@ -127,5 +159,23 @@ describe("first launch setup modal source", () => {
       "https://github.com/maddada/Ghostex/releases/latest/download/ghostex-android.apk",
     );
     expect(androidDownloadUrlDefinition).not.toMatch(/releases\/download\/v\d/u);
+  });
+
+  test("preserves unavailable gxserver-owned default prompt agents on the preferences page", () => {
+    /*
+    CDXC:GxserverAgentSettings 2026-06-19-08:58:
+    First-launch preferences can save unrelated defaults, so the default-agent
+    select must display an unavailable saved gxserver id instead of visually
+    falling back to Codex and inviting accidental overwrite.
+    */
+    const preferencesPage = sourceBetween(
+      firstLaunchSetupModalSource,
+      "function FirstLaunchPreferencesPage",
+      "function FirstLaunchHooksPage",
+    );
+
+    expect(preferencesPage).toContain("const firstLaunchPromptAgentOptions = firstLaunchPromptAgentHasSavedDefault");
+    expect(preferencesPage).toContain("Unavailable (${normalizedDefaultPromptAgentId})");
+    expect(preferencesPage).toContain("const selectedDefaultPromptAgentId = normalizedDefaultPromptAgentId;");
   });
 });

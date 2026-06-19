@@ -402,6 +402,11 @@ describe("command palette source contracts", () => {
      * Browser Tab, Automations, Open Current Project in Finder, and visible
      * Open In targets should be command-palette rows too. Mobile, Discord,
      * Recent Projects, and section collapse controls are intentionally omitted.
+     *
+     * CDXC:Hotkeys 2026-06-19-00:35:
+     * Hotkeys is now supplied by the shared openHotkeys command so it can show
+     * Cmd+. as a real configurable shortcut instead of a duplicate no-shortcut
+     * app-modal entry.
      */
     expect(commandPaletteSource).toContain("const APP_MODAL_PALETTE_COMMANDS");
     expect(commandPaletteSource).toContain("Previous Sessions");
@@ -412,7 +417,8 @@ describe("command palette source contracts", () => {
     expect(commandPaletteSource).toContain("Configure Agents");
     expect(commandPaletteSource).toContain("Actions");
     expect(commandPaletteSource).toContain("Open Targets");
-    expect(commandPaletteSource).toContain("Hotkeys");
+    expect(commandPaletteSource).toContain('action.kind === "openHotkeys"');
+    expect(commandPaletteSource).not.toContain('commandId: "hotkeys"');
     expect(commandPaletteSource).toContain("Features");
     expect(commandPaletteSource).toContain("Tutorial Video");
     expect(commandPaletteSource).toContain('title: "Setup"');

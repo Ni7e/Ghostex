@@ -1334,10 +1334,16 @@ button,
  Continuing without first-launch hooks or bundled skills should show an in-modal
  warning overlay, and the primary install action belongs at the bottom right so
  users have a clear repair action before deliberately continuing.
+
+ CDXC:FirstLaunchSetup 2026-06-19-08:42:
+ Continue warnings should use the normal modal surface instead of brown warning
+ colors. Keep the alert visually clear with a subtle primary-tinted edge, icon
+ well, and shadow so it reads as a deliberate setup confirmation across dark and
+ light sidebar themes.
 */
 .ghostex-settings-shadcn .first-launch-setup-warning-backdrop {
   align-items: center;
-  background: rgb(0 0 0 / 52%);
+  background: rgb(0 0 0 / 58%);
   display: flex;
   inset: 0;
   justify-content: center;
@@ -1348,9 +1354,17 @@ button,
 
 .ghostex-settings-shadcn .first-launch-setup-warning {
   align-items: flex-start;
-  background: color-mix(in srgb, #f59e0b 11%, var(--card));
-  border: 1px solid color-mix(in srgb, #f59e0b 38%, var(--border));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--popover) 96%, var(--primary) 4%),
+      color-mix(in srgb, var(--card) 92%, var(--background) 8%)
+    );
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
   border-radius: 0;
+  box-shadow:
+    0 1rem 3rem rgb(0 0 0 / 32%),
+    inset 0 1px 0 color-mix(in srgb, var(--primary) 12%, transparent);
   display: grid;
   gap: 0.75rem;
   grid-template-columns: auto minmax(0, 1fr);
@@ -1361,9 +1375,10 @@ button,
 
 .ghostex-settings-shadcn .first-launch-setup-warning-icon {
   align-items: center;
-  background: color-mix(in srgb, #f59e0b 18%, var(--background));
+  background: color-mix(in srgb, var(--primary) 12%, var(--background));
+  border: 1px solid color-mix(in srgb, var(--primary) 26%, var(--border));
   border-radius: 0;
-  color: #fcd34d;
+  color: color-mix(in srgb, var(--primary) 82%, var(--foreground));
   display: inline-flex;
   height: 2rem;
   justify-content: center;
@@ -2003,17 +2018,21 @@ button,
 .ghostex-settings-shadcn .settings-main-tab-layout {
   /*
    * CDXC:SettingsNavigation 2026-06-16-09:20:
-   * The Settings and Hotkeys section rail should float in the left gutter instead of owning a grid column, so the 770px settings content column stays visually centered. Hide the rail once the modal is too narrow to fit the centered content plus the rail without overlap.
+   * Superseded by CDXC:SettingsNavigation 2026-06-19-08:40.
+   *
+   * CDXC:SettingsNavigation 2026-06-19-08:40:
+   * The macOS Settings section list and Show Advanced filter should read as one left sidebar instead of separate floating cards.
+   * Give the rail an owned layout column and pin the filter to the sidebar footer while the settings body centers inside the remaining content area.
    */
-  --settings-section-sidebar-width: 148px;
-  --settings-section-sidebar-left: 0.75rem;
-  display: block;
+  --settings-section-sidebar-width: 10.75rem;
+  display: grid;
+  grid-template-columns: var(--settings-section-sidebar-width) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
-  position: relative;
 }
 
 .ghostex-settings-shadcn .settings-main-scroll {
+  grid-column: 2;
   height: 100%;
   min-height: 0;
 }
@@ -2036,31 +2055,29 @@ button,
 }
 
 .ghostex-settings-shadcn .settings-section-sidebar {
-  align-content: start;
   background: color-mix(in srgb, var(--app-modal-background) 80%, var(--muted) 20%);
-  border: 1px solid var(--border);
-  border-radius: var(--settings-radius-section);
+  border-right: 1px solid var(--border);
   box-sizing: border-box;
-  display: grid;
-  gap: 0.25rem;
-  left: var(--settings-section-sidebar-left);
-  max-height: calc(100% - 1rem);
-  overflow: auto;
-  padding: 0.375rem;
-  position: absolute;
-  top: 0;
-  width: var(--settings-section-sidebar-width);
-  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.625rem 0.5rem;
 }
 
-.ghostex-settings-shadcn .settings-show-advanced-anchor {
-  align-items: center;
-  bottom: 1rem;
-  display: flex;
-  left: 1.25rem;
-  pointer-events: none;
-  position: absolute;
-  z-index: 2;
+.ghostex-settings-shadcn .settings-section-sidebar-list {
+  align-content: start;
+  display: grid;
+  gap: 0.25rem;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ghostex-settings-shadcn .settings-section-sidebar-footer {
+  border-top: 1px solid var(--border);
+  margin-top: auto;
+  padding-top: 0.625rem;
 }
 
 .ghostex-settings-shadcn .settings-show-advanced-toggle {
@@ -2068,13 +2085,13 @@ button,
    * CDXC:SettingsAdvanced 2026-06-16-01:35:
    * Show Advanced is a browsing filter for the first Settings page.
    *
-   * CDXC:SettingsAdvanced 2026-06-16-16:32:
-   * Anchor the toggle in the modal's bottom-left chrome and keep the control
-   * content-sized so it reads as a low-priority density filter.
+   * CDXC:SettingsNavigation 2026-06-19-08:40:
+   * Keep Show Advanced as a sidebar row instead of a bordered floating control
+   * so it belongs to the same navigation surface as the section list.
    */
   align-items: center;
-  background: color-mix(in srgb, var(--muted) 36%, transparent);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: 1px solid transparent;
   color: var(--foreground);
   cursor: pointer;
   display: flex;
@@ -2082,8 +2099,7 @@ button,
   justify-content: space-between;
   min-height: 2.25rem;
   padding: 0.375rem 0.625rem;
-  pointer-events: auto;
-  width: max-content;
+  width: 100%;
 }
 
 .ghostex-settings-shadcn .settings-show-advanced-toggle:hover {
@@ -2232,7 +2248,15 @@ button,
   }
 }
 
-@container settings-modal (max-width: 1088px) {
+@container settings-modal (max-width: 820px) {
+  .ghostex-settings-shadcn .settings-main-tab-layout {
+    display: block;
+  }
+
+  .ghostex-settings-shadcn .settings-main-scroll {
+    grid-column: auto;
+  }
+
   .ghostex-settings-shadcn .settings-section-sidebar {
     display: none;
   }

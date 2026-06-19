@@ -364,17 +364,31 @@ describe("chromium browser source", () => {
     expect(profilePickerSource).toContain("betaItem.isEnabled = false");
   });
 
-  test("defaults CEF browser color scheme to Light and applies menu changes", () => {
+  test("defaults CEF browser color scheme to Light and persists per project origin", () => {
     /*
      * CDXC:ChromiumBrowserPanes 2026-06-18-22:50:
      * Hidden browser address-bar color-scheme controls should behave as if Light
      * is selected by default. CEF must receive real Chromium color-scheme
      * emulation so pages observe the choice through prefers-color-scheme.
+     *
+     * CDXC:BrowserColorScheme 2026-06-19-08:34:
+     * User-selected System/Light/Dark values should persist per project and exact http(s) origin, including effective default ports. Missing origin entries still resolve to Light.
      */
     expect(cefBridgeHeaderSource).toContain("setPreferredColorScheme(_:)");
     expect(cefBridgeSource).toContain('#include "include/cef_values.h"');
     expect(cefBridgeSource).toContain('"Emulation.setEmulatedMedia"');
     expect(cefBridgeSource).toContain('"prefers-color-scheme"');
+    expect(hostProtocolSource).toContain("let browserColorSchemes: [String: String]?");
+    expect(hostProtocolSource).toContain("case browserColorSchemeSelected(projectId: String, origin: String, colorScheme: String)");
+    expect(sharedHostProtocolSource).toContain('type: "browserColorSchemeSelected";');
+    expect(nativeSidebarSource).toContain('type NativeBrowserColorScheme = "system" | "light" | "dark";');
+    expect(nativeSidebarSource).toContain("projectBrowserColorSchemes?: NativeProjectBrowserColorSchemes;");
+    expect(nativeSidebarSource).toContain("function browserColorSchemeOriginKey");
+    expect(nativeSidebarSource).toContain('protocol === "http:"');
+    expect(nativeSidebarSource).toContain('? "80"');
+    expect(nativeSidebarSource).toContain('return `${protocol}//${hostname}:${port}`;');
+    expect(nativeSidebarSource).toContain("function handleBrowserColorSchemeSelected");
+    expect(nativeSidebarSource).toContain('writeStoredProjects("browserColorSchemeSelected")');
 
     const themeModeSource = sourceBetween(
       terminalWorkspaceSource,
@@ -384,21 +398,29 @@ describe("chromium browser source", () => {
     expect(themeModeSource).toContain("var preferredColorSchemeOverride: String?");
     expect(themeModeSource).toContain('return "light"');
     expect(themeModeSource).toContain('return "dark"');
+    expect(themeModeSource).toContain("fileprivate static func browserColorSchemeOriginKey");
+    expect(themeModeSource).toContain('scheme == "http" || scheme == "https"');
+    expect(themeModeSource).toContain('let port = components.port ?? (scheme == "http" ? 80 : 443)');
     expect(terminalWorkspaceSource).toContain("private var browserThemeMode: BrowserPaneThemeMode = .light");
+    expect(terminalWorkspaceSource).toContain("private var browserColorSchemesByProjectId");
+    expect(terminalWorkspaceSource).toContain("private func rememberBrowserColorSchemes");
+    expect(terminalWorkspaceSource).toContain("private func setBrowserColorScheme");
+    expect(terminalWorkspaceSource).toContain("private func normalizedBrowserColorSchemeProjectId");
 
     const hostInitSource = sourceBetween(
       terminalWorkspaceSource,
       "init(\n    browserView: NSView",
       "  /*\n   CDXC:SourceCEFDragDrop",
     );
-    expect(hostInitSource).toContain("applyBrowserThemeMode(browserThemeMode)");
+    expect(hostInitSource).toContain("browserColorSchemes: [String: String] = [:]");
+    expect(hostInitSource).toContain("applyBrowserColorSchemeForNavigation(urlString: initialAddress");
 
     const replaceSource = sourceBetween(
       terminalWorkspaceSource,
       "func replaceHostedBrowserView(",
       "  func focusAddressField",
     );
-    expect(replaceSource).toContain("applyBrowserThemeMode(browserThemeMode)");
+    expect(replaceSource).toContain("applyBrowserColorSchemeForNavigation(");
 
     const applySource = sourceBetween(
       terminalWorkspaceSource,
@@ -406,6 +428,8 @@ describe("chromium browser source", () => {
       "  @objc private func showImportSettings",
     );
     expect(applySource).toContain("chromiumView?.setPreferredColorScheme(mode.preferredColorSchemeOverride)");
+    expect(applySource).toContain("persistsSelection");
+    expect(applySource).toContain("onBrowserColorSchemeSelected?(origin, mode.rawValue)");
     expect(applySource).not.toContain("leaves Chromium rendering alone");
   });
 

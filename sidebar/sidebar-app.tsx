@@ -2267,6 +2267,11 @@ export function SidebarApp({
       return;
     }
 
+    if (action.kind === "openHotkeys") {
+      openHotkeys();
+      return;
+    }
+
     if (action.kind === "moveSidebar") {
       moveSidebar();
       return;
@@ -3164,6 +3169,21 @@ export function SidebarApp({
     setIsSessionSearchOpen(false);
     setSessionSearchQuery("");
     openAppModal({ modal: "settings", type: "open" });
+  };
+
+  const openHotkeys = () => {
+    /*
+     * CDXC:Hotkeys 2026-06-19-00:35:
+     * Cmd+. is the advertised Hotkeys shortcut in the far-right titlebar Settings menu. Route it to the same full-window app-modal host as Settings and Command Palette, closing transient sidebar drawers first so the shortcut opens one focused Hotkeys surface.
+     */
+    setIsPinnedPromptsOpen(false);
+    setIsPreviousSessionsOpen(false);
+    setIsDaemonSessionsOpen(false);
+    setIsScratchPadOpen(false);
+    setIsSessionSearchSelectionVisible(false);
+    setIsSessionSearchOpen(false);
+    setSessionSearchQuery("");
+    openAppModal({ modal: "hotkeys", type: "open" });
   };
 
   const openCommandPalette = (initialQuery = ">") => {

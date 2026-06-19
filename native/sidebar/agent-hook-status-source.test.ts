@@ -18,17 +18,23 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("agent hook status source", () => {
-  test("checks requested hook providers one at a time and prioritizes Codex, Claude, and Pi", () => {
+  test("checks requested hook providers one at a time and prioritizes Codex, Claude, OpenCode, and Pi", () => {
     /*
      * CDXC:AgentHooks 2026-06-18-02:38:
      * First-launch can request the full supported hook set while native checks
-     * providers one at a time, prioritizing Codex, Claude, and Pi before the
-     * secondary agents and posting each partial result as soon as it arrives.
+     * providers one at a time, prioritizing Codex, Claude, OpenCode, and Pi
+     * before the secondary agents and posting each partial result as soon as it
+     * arrives.
+     *
+     * CDXC:AgentHooks 2026-06-19-08:42:
+     * OpenCode participates in first-launch hook-warning suppression, so native
+     * must request its status in the priority group instead of waiting for lower
+     * priority provider probes.
      */
     expect(contractSource).toContain("agentIds?: readonly string[];");
     expect(modalHostSource).toContain("vscode.postMessage({ agentIds, type: \"requestAgentHookStatus\" });");
     expect(modalHostSource).toContain("vscode.postMessage({ agentIds, type: \"installAgentHooks\" });");
-    expect(nativeSidebarSource).toContain('const nativeAgentHookPriorityStatusAgentIds = ["codex", "claude", "pi"] as const;');
+    expect(nativeSidebarSource).toContain('const nativeAgentHookPriorityStatusAgentIds = ["codex", "claude", "opencode", "pi"] as const;');
 
     const requestStatus = sourceBetween(
       nativeSidebarSource,

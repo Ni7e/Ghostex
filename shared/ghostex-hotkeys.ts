@@ -9,6 +9,7 @@ export type ghostexHotkeyActionId =
   | "openSessionSearchPalette"
   | "openBrowserPane"
   | "openSettings"
+  | "openHotkeys"
   | "moveSidebar"
   | "openCommandsPanel"
   | "popOutPane"
@@ -57,6 +58,7 @@ export type ghostexHotkeyAction =
   | { id: ghostexHotkeyActionId; kind: "openSessionSearchPalette" }
   | { id: ghostexHotkeyActionId; kind: "openCommandsPanel" }
   | { id: ghostexHotkeyActionId; kind: "openSettings" }
+  | { id: ghostexHotkeyActionId; kind: "openHotkeys" }
   | { id: ghostexHotkeyActionId; kind: "renameActiveSession" }
   | { id: ghostexHotkeyActionId; kind: "runActionSlot"; slotNumber: number }
   | { id: ghostexHotkeyActionId; kind: "setViewMode"; viewMode: TerminalViewMode }
@@ -143,6 +145,17 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: "Open app settings.",
     id: "openSettings",
     title: "Open Settings",
+  },
+  {
+    action: { id: "openHotkeys", kind: "openHotkeys" },
+    /**
+     * CDXC:Hotkeys 2026-06-19-00:35:
+     * The far-right titlebar Settings menu advertises Cmd+. beside Hotkeys. Make Hotkeys a real configurable app shortcut so the menu label, Settings editor, sidebar dispatch, and terminal-focused AppKit dispatch all describe the same behavior.
+     */
+    defaultKey: "cmd+.",
+    description: "Open app hotkeys.",
+    id: "openHotkeys",
+    title: "Hotkeys",
   },
   {
     action: { id: "toggleSidebarCollapsed", kind: "toggleSidebarCollapsed" },

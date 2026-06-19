@@ -6,6 +6,10 @@ const titlebarHostSource = readFileSync(
   new URL("../native/sidebar/titlebar-host.tsx", import.meta.url),
   "utf8",
 );
+const groupPanelsCssSource = readFileSync(
+  new URL("./styles/group-panels.css", import.meta.url),
+  "utf8",
+);
 
 function sourceBetween(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);
@@ -26,25 +30,25 @@ describe("titlebar settings menu source", () => {
     expect(titlebarHostSource).toContain('className="titlebar-open-group titlebar-settings-group"');
     expect(titlebarHostSource).toContain('showTitlebarDropdownPanel("settings", event.currentTarget)');
     expect(titlebarHostSource).toContain("<IconMenu2");
+    expect(titlebarHostSource).toContain(".titlebar-settings-menu-button");
+    expect(titlebarHostSource).toContain("width: 45px;");
+    expect(titlebarHostSource).toContain("padding-right: 15px;");
     expect(sidebarAppSource).not.toContain("function renderFloatingOverflowMenu(");
     expect(sidebarAppSource).not.toContain('aria-label="Open sidebar menu"');
   });
 
-  test("keeps the requested settings menu order and debug-only Running row", () => {
+  test("keeps the requested settings menu order with right-aligned shortcuts", () => {
     const settingsMenuSource = sourceBetween(
       titlebarHostSource,
       '{kind === "settings" ? (',
       '{kind === "openIn" ? (',
     );
     const expectedLabels = [
-      "<span>Settings</span>",
-      "<span>Commands [⌘⇧P]</span>",
-      "<span>Hotkeys</span>",
-      "<span>Wake Pet</span>",
-      "<span>Pinned Prompts</span>",
-      "<span>Scratch Pad</span>",
-      "<span>Running</span>",
-      "<span>Join Discord</span>",
+      'label="Settings"',
+      'label="Hotkeys"',
+      'label="Commands"',
+      'label="Wake Pet"',
+      'label="Join Discord"',
     ];
 
     for (let index = 1; index < expectedLabels.length; index += 1) {
@@ -52,8 +56,15 @@ describe("titlebar settings menu source", () => {
         settingsMenuSource.indexOf(expectedLabels[index]),
       );
     }
-    expect(settingsMenuSource).toContain("settingsShowRunning ?");
-    expect(titlebarHostSource).toContain('postTitlebarSidebarCommand({ type: "refreshDaemonSessions" })');
+    expect(settingsMenuSource).toContain("settingsMenuHotkeys.openSettings");
+    expect(settingsMenuSource).toContain("settingsMenuHotkeys.openHotkeys");
+    expect(settingsMenuSource).toContain("settingsMenuHotkeys.openCommandPalette");
+    expect(titlebarHostSource).toContain("titlebar-settings-menu-shortcut");
+    expect(titlebarHostSource).toContain("grid-template-columns: 18px minmax(0, 1fr) auto;");
+    expect(settingsMenuSource).not.toContain("Commands [");
+    expect(settingsMenuSource).not.toContain('label="Pinned Prompts"');
+    expect(settingsMenuSource).not.toContain('label="Scratch Pad"');
+    expect(settingsMenuSource).not.toContain('label="Running"');
     expect(settingsMenuSource).not.toContain("Setup Flow");
     expect(settingsMenuSource).not.toContain("Tutorial Video");
   });
@@ -67,6 +78,9 @@ describe("titlebar settings menu source", () => {
     expect(recentProjectsSource).toContain("reference-sidebar-commands-pane-action");
     expect(recentProjectsSource).toContain('aria-label="Show Commands Pane"');
     expect(recentProjectsSource).toContain("createFullWidthTerminalPane();");
+    expect(groupPanelsCssSource).toContain(".reference-sidebar-commands-pane-action");
+    expect(groupPanelsCssSource).toContain("pointer-events: auto;");
+    expect(groupPanelsCssSource).toContain("cannot fall through to the drawer toggle");
     expect(sidebarAppSource).not.toContain("function SidebarReferenceSettingsButton(");
   });
 });

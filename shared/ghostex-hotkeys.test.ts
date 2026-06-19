@@ -32,6 +32,7 @@ describe("normalizeghostexHotkeySettings", () => {
      */
     expect(DEFAULT_ghostex_HOTKEYS.openCommandsPanel).toBe("f12");
     expect(DEFAULT_ghostex_HOTKEYS.openSettings).toBe("cmd+,");
+    expect(DEFAULT_ghostex_HOTKEYS.openHotkeys).toBe("cmd+.");
     /**
      * CDXC:SidebarCollapse 2026-06-12-02:23:
      * Cmd+B is the complete sidebar collapse toggle. Moving the sidebar between
@@ -204,6 +205,7 @@ describe("normalizeghostexHotkeySettings", () => {
       moveSidebar: "",
       openBrowserPane: "cmd+n",
       openCommandPalette: "cmd+shift+p",
+      openHotkeys: "cmd+.",
       openSessionSearchPalette: "cmd+p",
       toggleSidebarCollapsed: "cmd+b",
     });

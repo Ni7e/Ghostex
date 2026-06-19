@@ -1114,6 +1114,15 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
   right: 9px;
 }
 
+.reference-sidebar-commands-pane-action {
+  /*
+   * CDXC:CommandsPanel 2026-06-19-00:22:
+   * The Recent Projects header is itself a full-width button. Keep the Commands Pane hover action on a higher stacking layer and pointer-active even while transparent so clicking the right-side icon area cannot fall through to the drawer toggle.
+   */
+  pointer-events: auto;
+  z-index: 2;
+}
+
 .reference-sidebar-nav-item:hover .reference-sidebar-hover-action,
 .reference-sidebar-nav-item:focus-within .reference-sidebar-hover-action {
   opacity: 1;

@@ -304,6 +304,7 @@ const HOTKEY_SETTINGS_SECTIONS: readonly HotkeySettingsSectionDefinition[] = [
       "openCommandPalette",
       "openSessionSearchPalette",
       "openSettings",
+      "openHotkeys",
       "toggleSidebarCollapsed",
       "moveSidebar",
     ],
@@ -583,7 +584,10 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
  * The first Settings page should default to everyday controls and hide precision tuning, support/debug toggles, context-menu utilities, and provider-specific terminal options until users enable Show Advanced. Search still exposes matching advanced controls so discoverability is not tied to browsing mode.
  *
  * CDXC:SettingsAdvanced 2026-06-16-01:53:
- * Show Advanced belongs to the right of the Settings modal header rather than the section rail, because it changes the density of the full General page.
+ * Superseded by CDXC:SettingsNavigation 2026-06-19-08:40.
+ *
+ * CDXC:SettingsNavigation 2026-06-19-08:40:
+ * Show Advanced changes the density of the General Settings page, but the macOS Settings UI should still present it inside the same left sidebar as the section navigation rather than as separate header or footer chrome.
  *
  * CDXC:SettingsAdvanced 2026-06-16-08:12:
  * Browser feedback, Storage, session-card chrome, Workspace tuning, and Terminal Behavior controls are advanced-only browsing rows because the default General page should stay focused on common setup and daily preferences.
@@ -2297,8 +2301,8 @@ export function SettingsModal({
           and section jumps operate on one main Settings page. */}
           <div className="settings-main-tab-layout">
             <aside aria-label="Settings sections" className="settings-section-sidebar">
-              {visibleMainSettingsSectionNavigation
-                .map((section) => (
+              <div className="settings-section-sidebar-list">
+                {visibleMainSettingsSectionNavigation.map((section) => (
                   <Button
                     className="settings-section-sidebar-button"
                     data-active={activeMainSettingsSectionId === section.id ? "true" : "false"}
@@ -2310,6 +2314,24 @@ export function SettingsModal({
                     {section.title}
                   </Button>
                 ))}
+              </div>
+              {/*
+               * CDXC:SettingsNavigation 2026-06-19-08:40:
+               * The macOS Settings section list and Show Advanced filter should live in one real sidebar, not as separate floating cards.
+               * Keep the filter inside the sidebar footer so the left rail owns both navigation and page-density controls.
+               */}
+              {!isFirstLaunchSetup ? (
+                <div className="settings-section-sidebar-footer">
+                  <label className="settings-show-advanced-toggle" htmlFor={showAdvancedSettingsId}>
+                    <span className="settings-show-advanced-copy">Show Advanced</span>
+                    <Switch
+                      checked={showAdvancedSettings}
+                      id={showAdvancedSettingsId}
+                      onCheckedChange={setShowAdvancedSettings}
+                    />
+                  </label>
+                </div>
+              ) : null}
             </aside>
           <ScrollArea className="settings-main-scroll h-full min-h-0">
           <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
@@ -3881,25 +3903,6 @@ export function SettingsModal({
           </TabsContent>
           ) : null}
           </Tabs>
-          {/*
-           * CDXC:SettingsAdvanced 2026-06-16-01:35:
-           * Show Advanced is a local browsing filter for the first Settings page, not a persisted app preference.
-           *
-           * CDXC:SettingsAdvanced 2026-06-16-16:32:
-           * The Show Advanced control should live in the Settings modal's bottom-left chrome instead of beside the Settings title. Show it only on the General settings page because it filters that page's advanced rows.
-           */}
-          {!isFirstLaunchSetup && activeTab === "settings" ? (
-            <div className="settings-show-advanced-anchor">
-              <label className="settings-show-advanced-toggle" htmlFor={showAdvancedSettingsId}>
-                <span className="settings-show-advanced-copy">Show Advanced</span>
-                <Switch
-                  checked={showAdvancedSettings}
-                  id={showAdvancedSettingsId}
-                  onCheckedChange={setShowAdvancedSettings}
-                />
-              </label>
-            </div>
-          ) : null}
         </TooltipProvider>
       </DialogContent>
     </Dialog>
@@ -5558,14 +5561,28 @@ function AgentsSettingsTab({
         .map((agent) => ({ label: agent.name.trim() || agent.agentId, value: agent.agentId })),
     [agents],
   );
-  const selectedDefaultPromptAgentId = promptAgentOptions.some(
-    (option) => option.value === defaultPromptAgentId,
-  )
-    ? defaultPromptAgentId
-    : promptAgentOptions.find((option) => option.value === DEFAULT_ghostex_SETTINGS.defaultPromptAgentId)
-        ?.value ??
-      promptAgentOptions[0]?.value ??
-      "";
+  const normalizedDefaultPromptAgentId =
+    defaultPromptAgentId.trim() || DEFAULT_ghostex_SETTINGS.defaultPromptAgentId;
+  const promptAgentHasSavedDefault = promptAgentOptions.some(
+    (option) => option.value === normalizedDefaultPromptAgentId,
+  );
+  const promptAgentSelectOptions = promptAgentHasSavedDefault
+    ? promptAgentOptions
+    : [
+        /*
+         * CDXC:GxserverAgentSettings 2026-06-19-08:58:
+         * Default Prompt Agent is gxserver-owned and may name a custom or hidden
+         * agent before the local launcher registry has a command for it. Show
+         * that saved id as unavailable instead of rendering Codex as selected,
+         * so Settings never silently rewrites or masks the canonical choice.
+         */
+        {
+          label: `Unavailable (${normalizedDefaultPromptAgentId})`,
+          value: normalizedDefaultPromptAgentId,
+        },
+        ...promptAgentOptions,
+      ];
+  const selectedDefaultPromptAgentId = normalizedDefaultPromptAgentId;
   const titleGenerationCommandPreview = getSessionTitleGenerationCommandPreview(
     sessionTitleGenerationAgent,
     {
@@ -5759,7 +5776,7 @@ function AgentsSettingsTab({
                 onResetToDefault={() =>
                   onDefaultPromptAgentIdChange(DEFAULT_ghostex_SETTINGS.defaultPromptAgentId)
                 }
-                options={promptAgentOptions}
+                options={promptAgentSelectOptions}
                 value={selectedDefaultPromptAgentId}
               />
             ) : (
@@ -6943,18 +6960,20 @@ function HotkeysSettingsTab({
   return (
     <div className="settings-main-tab-layout">
       <aside aria-label="Hotkey sections" className="settings-section-sidebar">
-        {visibleSections.map((section) => (
-          <Button
-            className="settings-section-sidebar-button"
-            data-active={activeHotkeySettingsSectionId === section.id ? "true" : "false"}
-            key={section.id}
-            onClick={() => sectionRefs[section.id].current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            type="button"
-            variant="ghost"
-          >
-            {section.title}
-          </Button>
-        ))}
+        <div className="settings-section-sidebar-list">
+          {visibleSections.map((section) => (
+            <Button
+              className="settings-section-sidebar-button"
+              data-active={activeHotkeySettingsSectionId === section.id ? "true" : "false"}
+              key={section.id}
+              onClick={() => sectionRefs[section.id].current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              type="button"
+              variant="ghost"
+            >
+              {section.title}
+            </Button>
+          ))}
+        </div>
       </aside>
       <ScrollArea
         className="settings-main-scroll h-full min-h-0"

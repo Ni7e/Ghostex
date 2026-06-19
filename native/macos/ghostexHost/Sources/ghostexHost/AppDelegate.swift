@@ -5292,6 +5292,11 @@ private final class NativeSettingsStore {
     "openCommandsPanel": "f12",
     "openBrowserPane": "cmd+n",
     "openSettings": "cmd+,",
+    /**
+     CDXC:Hotkeys 2026-06-19-00:35:
+     Cmd+. opens Hotkeys because the titlebar Settings menu shows that shortcut beside the Hotkeys row. Keep the AppKit default in sync with the shared hotkey model so terminal-focused dispatch and Settings agree.
+     */
+    "openHotkeys": "cmd+.",
     "popOutPane": "ctrl+shift+o",
     /**
      CDXC:CommandPalette 2026-05-17-01:34:
@@ -8210,6 +8215,13 @@ final class ghostexRootView: NSView {
           return item
         } ?? []
       ]
+    }
+    if let hotkeys = command.hotkeys {
+      /**
+       CDXC:TitlebarSettingsMenu 2026-06-19-00:35:
+       The isolated React titlebar Settings dropdown shows shortcuts in a right-aligned column. Forward the normalized hotkey map from layout sync so customized Settings, Hotkeys, and Commands bindings render accurately in both the main titlebar and dropdown child window.
+       */
+      payload["hotkeys"] = hotkeys
     }
     if let agentHookStatus = command.agentHookStatus {
       /**
