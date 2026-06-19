@@ -12,6 +12,7 @@ import {
   type RefObject,
   type UIEvent as ReactUIEvent,
 } from "react";
+import { flushSync } from "react-dom";
 import Fuse from "fuse.js";
 import ColorPicker from "react-best-gradient-color-picker";
 import { cn } from "@/lib/utils";
@@ -279,6 +280,51 @@ function SettingsTextarea({
       autoCorrect={autoCorrect}
       spellCheck={spellCheck}
       {...props}
+    />
+  );
+}
+
+function SettingsSelect({
+  disabled,
+  onOpenChange,
+  onValueChange,
+  ...props
+}: ComponentProps<typeof Select>) {
+  const [selectOpen, setSelectOpen] = useState(false);
+
+  useEffect(() => {
+    if (disabled && selectOpen) {
+      setSelectOpen(false);
+    }
+  }, [disabled, selectOpen]);
+
+  const closeSelect = () => {
+    flushSync(() => {
+      setSelectOpen(false);
+    });
+  };
+
+  /*
+   * CDXC:SettingsDropdowns 2026-06-19-19:22:
+   * Settings select changes save immediately through the native modal host.
+   * Close every Base UI popup before posting the setting update so portaled
+   * dropdowns, including Default Prompt Agent and the custom editor selects,
+   * cannot keep their modal focus trap alive while gxserver and native settings
+   * hydration re-render the dialog.
+   */
+  return (
+    <Select
+      {...props}
+      disabled={disabled}
+      onOpenChange={(nextOpen, eventDetails) => {
+        setSelectOpen(nextOpen);
+        onOpenChange?.(nextOpen, eventDetails);
+      }}
+      onValueChange={(nextValue) => {
+        closeSelect();
+        onValueChange?.(nextValue);
+      }}
+      open={selectOpen}
     />
   );
 }
@@ -728,6 +774,16 @@ function isEditableSettingsModalEventTarget(target: EventTarget | null): boolean
   return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
+function isEditableSettingsModalElement(element: Element | null): boolean {
+  if (!(element instanceof HTMLElement)) {
+    return false;
+  }
+  if (element.isContentEditable) {
+    return true;
+  }
+  return Boolean(element.closest("input, textarea, select, [contenteditable='true']"));
+}
+
 function getActiveSettingsModalScrollViewport(dialogElement: HTMLElement | null): HTMLElement | null {
   return (
     dialogElement
@@ -989,7 +1045,8 @@ export function SettingsModal({
       isFirstLaunchSetup ||
       !isSearchableSettingsModalTab(activeTab) ||
       event.key.length !== 1 ||
-      isEditableSettingsModalEventTarget(event.target)
+      isEditableSettingsModalEventTarget(event.target) ||
+      isEditableSettingsModalElement(event.currentTarget.ownerDocument.activeElement)
     ) {
       return;
     }
@@ -1088,6 +1145,13 @@ export function SettingsModal({
      * When a searchable Settings tab opens, ordinary typing should enter the
      * active tab's search box even if Radix focus starts on a tab, button, or
      * another non-text control. Text fields and recorders keep their own input.
+     *
+     * CDXC:SettingsSearch 2026-06-19-16:53:
+     * Settings search must not steal printable keys from a focused Settings
+     * text field during native settings round-trips. Check both the key event
+     * target and the document active element before forwarding a character to
+     * the search box because WebKit can dispatch through modal chrome while the
+     * editable field still owns focus.
      */
     const animationFrame = requestAnimationFrame(() => {
       const viewport = getActiveSettingsModalScrollViewport(dialogContentRef.current);
@@ -4308,7 +4372,7 @@ function RemoteMachineFields({
             className="settings-remote-machine-input"
             maxLength={120}
             onChange={(event) => onChange({ sshUser: event.currentTarget.value })}
-            placeholder="madda"
+            placeholder="machine username"
             value={draft.sshUser}
           />
         </Field>
@@ -5349,7 +5413,7 @@ function IntegrationsSettingsTab({
                   onCheckedChange={onAppShotsEnabledChange}
                 />
               </div>
-              <Select
+              <SettingsSelect
                 disabled={!appShotsEnabled}
                 onValueChange={(value) => onAppShotsHotkeyChange(value as AppShotsHotkey)}
                 value={appShotsHotkey}
@@ -5366,7 +5430,7 @@ function IntegrationsSettingsTab({
                     ))}
                   </SelectGroup>
                 </SettingsSelectContent>
-              </Select>
+              </SettingsSelect>
             </div>
           </IntegrationSettingsRow>
 
@@ -6160,7 +6224,11 @@ function AgentSettingsEditor({
             Agent type
           </FieldLabel>
         </FieldContent>
-        <Select items={AGENT_TYPE_SELECT_ITEMS} onValueChange={updateAgentType} value={icon}>
+        <SettingsSelect
+          items={AGENT_TYPE_SELECT_ITEMS}
+          onValueChange={updateAgentType}
+          value={icon}
+        >
           <SelectTrigger className="h-10 w-full px-3 text-sm" id={agentTypeId}>
             <SelectValue />
           </SelectTrigger>
@@ -6174,7 +6242,7 @@ function AgentSettingsEditor({
               ))}
             </SelectGroup>
           </SettingsSelectContent>
-        </Select>
+        </SettingsSelect>
       </Field>
       <Field className="gap-2.5">
         <FieldContent>
@@ -6216,7 +6284,7 @@ function AgentSettingsEditor({
               : "This agent does not expose a supported Accept All mode in Ghostex."}
           </FieldDescription>
         </FieldContent>
-        <Select
+        <SettingsSelect
           disabled={!acceptAllSupported}
           items={AGENT_ACCEPT_ALL_MODE_SELECT_ITEMS}
           onValueChange={(value) => setAcceptAllMode(value as AgentAcceptAllMode)}
@@ -6234,7 +6302,7 @@ function AgentSettingsEditor({
               ))}
             </SelectGroup>
           </SettingsSelectContent>
-        </Select>
+        </SettingsSelect>
       </Field>
       <div className="flex justify-end gap-3">
         <Button onClick={onCancel} type="button" variant="outline">
@@ -6610,7 +6678,7 @@ function ActionSettingsEditor({
               Type
             </FieldLabel>
           </FieldContent>
-          <Select
+          <SettingsSelect
             onValueChange={(value) => {
               const nextActionType = value === "browser" ? "browser" : "terminal";
               setActionType(nextActionType);
@@ -6629,7 +6697,7 @@ function ActionSettingsEditor({
                 <SelectItem value="browser">Browser</SelectItem>
               </SelectGroup>
             </SettingsSelectContent>
-          </Select>
+          </SettingsSelect>
         </Field>
       )}
       <Field className="gap-2.5" data-invalid={hasDuplicateTitle || undefined}>
@@ -7428,7 +7496,10 @@ function GtePromptEditingField({
       onResetToDefault={onResetToDefault}
     >
       <div className="flex flex-col items-start gap-3">
-        <Select onValueChange={(value) => onChange(value as PromptEditorBackend)} value={backend}>
+        <SettingsSelect
+          onValueChange={(value) => onChange(value as PromptEditorBackend)}
+          value={backend}
+        >
           <SelectTrigger className="h-10 w-full px-3 text-sm" id={id}>
             <SelectValue />
           </SelectTrigger>
@@ -7441,7 +7512,7 @@ function GtePromptEditingField({
               ))}
             </SelectGroup>
           </SettingsSelectContent>
-        </Select>
+        </SettingsSelect>
         <Button
           className="h-9 w-fit px-3 text-sm"
           onClick={onInstall}
@@ -7829,7 +7900,12 @@ function SelectField({
       label={label}
       onResetToDefault={onResetToDefault}
     >
-      <Select disabled={disabled} items={options} onValueChange={onChange} value={value}>
+      <SettingsSelect
+        disabled={disabled}
+        items={options}
+        onValueChange={onChange}
+        value={value}
+      >
         <SelectTrigger className="h-10 w-full px-3 text-sm" disabled={disabled} id={id}>
           <SelectValue />
         </SelectTrigger>
@@ -7842,7 +7918,7 @@ function SelectField({
             ))}
           </SelectGroup>
         </SettingsSelectContent>
-      </Select>
+      </SettingsSelect>
       {supportingContent}
     </SettingRow>
   );
@@ -7905,7 +7981,10 @@ function PetPickerField({
           <PetAvatar className="scale-[0.42]" petId={selectedPet.id} />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <Select onValueChange={(nextValue) => onChange(nextValue as PetId)} value={value}>
+          <SettingsSelect
+            onValueChange={(nextValue) => onChange(nextValue as PetId)}
+            value={value}
+          >
             <SelectTrigger className="h-10 w-full px-3 text-sm" id={id}>
               <SelectValue />
             </SelectTrigger>
@@ -7918,7 +7997,7 @@ function PetPickerField({
                 ))}
               </SelectGroup>
             </SettingsSelectContent>
-          </Select>
+          </SettingsSelect>
           <div className="truncate text-xs text-muted-foreground">{selectedPet.description}</div>
         </div>
       </div>
@@ -7965,7 +8044,7 @@ function SoundField({
       onResetToDefault={onResetToDefault}
     >
       <div className="grid grid-cols-[minmax(0,1fr)_2.5rem] items-center gap-2">
-        <Select
+        <SettingsSelect
           onValueChange={(nextValue) => onChange(nextValue as CompletionSoundSetting)}
           value={value}
         >
@@ -7981,7 +8060,7 @@ function SoundField({
               ))}
             </SelectGroup>
           </SettingsSelectContent>
-        </Select>
+        </SettingsSelect>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -8023,6 +8102,29 @@ function TextField({
   value: string;
 } & SettingModificationProps) {
   const id = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [inputValue, setInputValue] = useState(value);
+
+  useEffect(() => {
+    /*
+     * CDXC:SettingsTextFields 2026-06-19-16:53:
+     * Immediate-save Settings text fields must keep the user's focused edit
+     * buffer while native settings hydration echoes persisted values back into
+     * the modal host. Sync external values only when the field is not actively
+     * editing so Font Family and command fields do not repaint focus back to
+     * Settings search after the first typed character.
+     */
+    if (inputRef.current?.ownerDocument.activeElement === inputRef.current) {
+      return;
+    }
+    setInputValue(value);
+  }, [value]);
+
+  const updateInputValue = (nextValue: string) => {
+    setInputValue(nextValue);
+    onChange(nextValue);
+  };
+
   return (
     <SettingRow
       advanced={advanced}
@@ -8035,9 +8137,11 @@ function TextField({
       <SettingsInput
         id={id}
         className="h-10 px-3 text-sm"
-        onChange={(event) => onChange(event.currentTarget.value)}
+        onBlur={(event) => updateInputValue(event.currentTarget.value)}
+        onChange={(event) => updateInputValue(event.currentTarget.value)}
         placeholder={placeholder}
-        value={value}
+        ref={inputRef}
+        value={inputValue}
       />
     </SettingRow>
   );
@@ -8179,6 +8283,18 @@ function WebColorPickerField({
     const normalizedColor = previewColor(nextColor);
     onCommit?.(normalizedColor);
   };
+  const commitColorAfterClosingPicker = (nextColor: string) => {
+    /*
+     * CDXC:SidebarTitlebarColors 2026-06-19-19:51:
+     * The custom tint picker is a nested Base UI dialog inside Settings.
+     * Close the dialog before the final setting commit so native settings
+     * hydration cannot re-render while the picker still owns modal focus.
+     */
+    flushSync(() => {
+      setPickerOpen(false);
+    });
+    commitColor(nextColor);
+  };
 
   return (
     <SettingRow
@@ -8269,7 +8385,8 @@ function WebColorPickerField({
           open={pickerOpen}
           onOpenChange={(open) => {
             if (!open) {
-              commitColor(colorValue);
+              commitColorAfterClosingPicker(colorValue);
+              return;
             }
             setPickerOpen(open);
           }}
@@ -8300,8 +8417,7 @@ function WebColorPickerField({
             <DialogFooter>
               <Button
                 onClick={() => {
-                  commitColor(colorValue);
-                  setPickerOpen(false);
+                  commitColorAfterClosingPicker(colorValue);
                 }}
                 type="button"
               >

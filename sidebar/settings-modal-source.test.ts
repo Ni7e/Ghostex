@@ -47,6 +47,32 @@ describe("settings modal source", () => {
     expect(headerSearch).toContain("<SidebarSessionSearchField");
   });
 
+  test("keeps focused text fields from being redirected into settings search", () => {
+    /*
+     * CDXC:SettingsTextFields 2026-06-19-16:53:
+     * Font Family and other Settings text fields must keep printable typing in
+     * the focused input while immediate-save settings updates round-trip
+     * through the native modal host.
+     */
+    const keyCapture = sourceBetween(
+      settingsModalSource,
+      "const handleSettingsModalKeyDownCapture",
+      "const setActiveTab",
+    );
+    const textField = sourceBetween(
+      settingsModalSource,
+      "function TextField",
+      "function DisabledCommandPreviewField",
+    );
+
+    expect(keyCapture).toContain(
+      "isEditableSettingsModalElement(event.currentTarget.ownerDocument.activeElement)",
+    );
+    expect(textField).toContain("const inputRef = useRef<HTMLInputElement>(null);");
+    expect(textField).toContain("const [inputValue, setInputValue] = useState(value);");
+    expect(textField).toContain("value={inputValue}");
+  });
+
   test("keeps hook and skill uninstall controls in a searchable advanced bottom section", () => {
     /*
      * CDXC:SettingsAdvanced 2026-06-18-02:54:
@@ -117,6 +143,53 @@ describe("settings modal source", () => {
     expect(agentsTab).toContain("Unavailable (${normalizedDefaultPromptAgentId})");
     expect(agentsTab).toContain("const selectedDefaultPromptAgentId = normalizedDefaultPromptAgentId;");
     expect(agentsTab).not.toContain("promptAgentOptions.find");
+  });
+
+  test("routes settings select popups through the close-before-write wrapper", () => {
+    /*
+     * CDXC:SettingsDropdowns 2026-06-19-19:22:
+     * Changing Settings dropdowns in the macOS modal must close the popup
+     * before native and gxserver settings hydration can re-render the dialog,
+     * otherwise the portaled popup can keep input trapped.
+     */
+    const settingsSelect = sourceBetween(
+      settingsModalSource,
+      "function SettingsSelect",
+      "function SettingsSelectContent",
+    );
+    const selectField = sourceBetween(
+      settingsModalSource,
+      "function SelectField",
+      "function StaticNoteField",
+    );
+    const settingsModalWithoutSettingsSelect = settingsModalSource.replace(settingsSelect, "");
+
+    expect(settingsModalSource).toContain('import { flushSync } from "react-dom";');
+    expect(settingsSelect).toContain("const [selectOpen, setSelectOpen] = useState(false);");
+    expect(settingsSelect).toContain("flushSync(() => {");
+    expect(settingsSelect).toContain("onOpenChange={(nextOpen, eventDetails) => {");
+    expect(settingsSelect).toContain("open={selectOpen}");
+    expect(selectField).toContain("<SettingsSelect");
+    expect(settingsModalWithoutSettingsSelect).not.toMatch(/<Select(?:\s|>)/u);
+  });
+
+  test("closes the custom tint picker dialog before final setting commits", () => {
+    /*
+     * CDXC:SidebarTitlebarColors 2026-06-19-19:51:
+     * The custom Background Tint picker is a nested dialog, not a dropdown,
+     * but it still must close before final settings persistence can re-render
+     * the macOS Settings modal.
+     */
+    const colorPickerField = sourceBetween(
+      settingsModalSource,
+      "function WebColorPickerField",
+      "function normalizeColorInputValue",
+    );
+
+    expect(colorPickerField).toContain("const commitColorAfterClosingPicker");
+    expect(colorPickerField).toContain("setPickerOpen(false);");
+    expect(colorPickerField).toContain("commitColor(nextColor);");
+    expect(colorPickerField).toContain("commitColorAfterClosingPicker(colorValue);");
   });
 
   test("keeps project deletion out of the Projects settings page", () => {

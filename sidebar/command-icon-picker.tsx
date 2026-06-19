@@ -1,5 +1,6 @@
 import { IconChevronDown } from "@tabler/icons-react";
 import { useEffect, useId, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   Command,
   CommandEmpty,
@@ -145,8 +146,17 @@ export function CommandIconPicker({
                       data-checked={selectedIcon === option.icon}
                       key={option.icon}
                       onSelect={() => {
+                        /*
+                         * CDXC:SidebarActions 2026-06-19-19:52:
+                         * The action icon picker is a portaled Popover inside
+                         * Settings. Close it before handing the selected icon
+                         * to the parent editor so parent re-renders cannot leave
+                         * the picker popup owning focus.
+                         */
+                        flushSync(() => {
+                          setIsOpen(false);
+                        });
                         onIconChange(option.icon);
-                        setIsOpen(false);
                       }}
                       value={option.label}
                     >
