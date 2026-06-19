@@ -3,6 +3,7 @@ use serde_json::{json, Map, Value};
 
 use crate::{
     domain::{read_project_id, read_session_id, DomainRepository, DomainStateError},
+    ids::is_gxserver_session_id,
     presentation::project_session_title_projection,
     zmx::{dispatch_zmx_lifecycle_endpoint, ZmxEndpointError, ZmxServerContext},
 };
@@ -2090,6 +2091,7 @@ fn trusted_resume_title(session: &Value) -> Option<String> {
 fn is_rejected_resume_title(title: &str) -> bool {
     let lower = title.trim().to_ascii_lowercase();
     is_temporary_title(title)
+        || is_gxserver_session_id(title.trim())
         || is_status_word_title(&lower)
         || lower.starts_with("codex ")
         || lower.starts_with("claude ")
@@ -2487,6 +2489,24 @@ mod tests {
                 "codex --yolo fork \"12345678-1234-1234-1234-123456789abc\""
             ))
         );
+    }
+
+    #[test]
+    fn resume_plan_rejects_gxserver_session_id_titles() {
+        let project = json!({ "path": "/tmp/project", "customAgents": [], "launchSettings": {} });
+        let session = json!({
+            "agentId": "cursor",
+            "launchSettings": {},
+            "runtimeSettings": {
+                "agentCommand": "cursor-agent",
+                "titleSource": "user"
+            },
+            "title": "G3gnt",
+        });
+        let settings = normalize_agent_settings(None);
+        let resume = build_agent_resume_plan(&project, &session, &settings);
+        assert_eq!(resume.get("primaryCommand"), None);
+        assert_eq!(resume.get("startupTextDisposition"), Some(&json!("none")));
     }
 
     #[test]

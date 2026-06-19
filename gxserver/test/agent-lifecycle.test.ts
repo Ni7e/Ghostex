@@ -14,6 +14,9 @@ import {
   buildAgentResumeStartupText,
   createAgentForkSessionParams,
   getEffectiveAgentActivityState,
+  getAgentStartupTextForSession,
+  getQueuedAgentLaunchStartupTextForSession,
+  launchSettingsWithConsumedAgentLaunchStartupText,
 } from "../src/agents/lifecycle.js";
 import type { GxserverProjectDomainState, GxserverSessionDomainState } from "../protocol/index.js";
 
@@ -220,6 +223,38 @@ test("Cursor placeholder titles are not used for chat-store lookup", () => {
   assert.equal(buildAgentResumeCommand(project, session), undefined);
   assert.equal(buildAgentResumeFallbackCommand(project, session), undefined);
   assert.equal(buildAgentResumeStartupText(project, session), undefined);
+});
+
+test("fresh Cursor launch startup is queued separately from title-based resume", () => {
+  /*
+   * CDXC:GxserverAgentLifecycle 2026-06-19-15:55:
+   * Brand-new Cursor panes can have a Ghostex `G...` routing id as their stored title before the live agent reports metadata. First provider startup should consume the queued launch command, and resume planning must not treat that routing id as a Cursor chat title.
+   */
+  const project = projectFixture();
+  const session = sessionFixture({
+    agentId: "cursor",
+    launchSettings: {
+      agentLaunchPlan: {
+        agentCommand: "cursor-agent",
+        command: "cursor-agent --yolo",
+        startupText: " cursor-agent --yolo\r",
+        startupTextDisposition: "queueAfterTerminalReady",
+      },
+      runtimeRelevant: {
+        queueProviderStartupText: true,
+      },
+    },
+    runtimeSettings: {
+      agentCommand: "cursor-agent",
+    },
+    title: "G3gnt",
+  });
+
+  assert.equal(getQueuedAgentLaunchStartupTextForSession(session), " cursor-agent --yolo\r");
+  assert.equal(getAgentStartupTextForSession(project, session), undefined);
+  assert.deepEqual(launchSettingsWithConsumedAgentLaunchStartupText(session)?.runtimeRelevant, {
+    queueProviderStartupText: false,
+  });
 });
 
 test("resume and fallback command construction follows current sidebar rules", () => {

@@ -1721,15 +1721,33 @@ async function createGxserverAgentSession(payload = {}, flags = {}) {
   if (!agentId) {
     throw new Error("create-agent requires an agent id.");
   }
-  return callGxserverRpc(
+  /**
+   * CDXC:GxserverCliAgents 2026-06-19-15:55:
+   * `ghostex create-agent` is a spawn command for automation and agent orchestration, not just a row-creation helper. After creating the gxserver session, immediately ask gxserver to materialize the zmx provider so subsequent `send-message` targets a live agent process instead of a shell prompt.
+   */
+  const created = await callGxserverRpc(
     "/api/createAgentSession",
     compactObject({
       agentId,
       projectId,
-      title: flags.title,
+      title: flags.title ?? payload.title,
     }),
     flags,
   );
+  const session = created?.session;
+  if (!session?.projectId || !session?.sessionId) {
+    return created;
+  }
+  const provider = await callGxserverRpc(
+    "/api/startSessionProvider",
+    { projectId: session.projectId, sessionId: session.sessionId },
+    flags,
+  );
+  return {
+    ...created,
+    provider,
+    session: provider?.session ?? session,
+  };
 }
 
 async function ensureGxserverProjectForPath(projectPath, flags = {}) {
@@ -5661,7 +5679,7 @@ function usage() {
     formatHelpCommand("edit | e [--wait] [--goto] <file...>", "Open files in embedded Code"),
     formatHelpCommand("terminal | t [--cwd path] [--title title] [-- command...]", "Create a Quick terminal"),
     formatHelpCommand("create-session [title] [--input text] [--project-id id] [--group-id id]", "Create a terminal session"),
-    formatHelpCommand("create-agent <agentId> [--group-id id]", "Create a configured agent session"),
+    formatHelpCommand("create-agent <agentId> --project-id id [--group-id id]", "Create and start a configured agent session"),
     formatHelpCommand("run-agent <agentId>", "Run a configured agent button"),
     formatHelpCommand("run-command <commandId>", "Run a configured command button"),
     formatHelpCommand("click-button <agent|command> <id>", "Trigger a sidebar button"),

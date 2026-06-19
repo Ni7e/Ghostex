@@ -5,6 +5,7 @@ import {
   isTemporarySessionTitle,
 } from "./normalization.js";
 import type { GxserverSessionTitleSource } from "./types.js";
+import { isGxserverSessionId } from "../ids.js";
 
 const TERMINAL_TITLE_SESSION_SYNC_AGENT_IDS = new Set([
   "antigravity",
@@ -43,6 +44,9 @@ const AGENT_COMMAND_EXECUTABLE_NAMES = new Set([
 /*
 CDXC:GxserverSessionTitles 2026-06-01-20:59:
 Terminal titles can legitimately start with an agent name, such as "Codex zshrc additions". Reject only titles that still look like an agent launch command, so gxserver trusts settled zmx title observations without letting resume commands become durable sidebar titles.
+
+CDXC:GxserverSessionTitles 2026-06-19-15:55:
+Ghostex routing ids are provider-agnostic row identifiers, not agent conversation titles. Reject raw G-session ids from title-based resume lookup so a fresh Cursor/Codex/Claude pane never runs a provider resume command against `G3gnt`-style session ids.
 */
 const AGENT_COMMAND_SUBCOMMAND_NAMES = new Set([
   "auth",
@@ -122,6 +126,7 @@ export function isRejectedResumeTitle(title: string): boolean {
     normalizedTitle === "ð^ß^Ñ»" ||
     isTemporarySessionTitle(normalizedTitle) ||
     isGhostPlaceholderSessionTitle(normalizedTitle) ||
+    isGxserverSessionId(normalizedTitle) ||
     /[\u0000-\u001f\u007f]/u.test(normalizedTitle) ||
     (normalizedTitle.startsWith("ð") && normalizedTitle.endsWith("»")) ||
     isAgentCommandNoiseTitle(normalizedLowerTitle)

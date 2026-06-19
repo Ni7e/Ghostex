@@ -48,8 +48,10 @@ import {
   buildProjectAgentLaunchPlan,
   createAgentForkSessionParams,
   createAgentSessionParams,
-  getAgentLaunchStartupTextForSession,
+  getQueuedAgentLaunchStartupTextForSession,
   getAgentStartupTextForSession,
+  hasQueuedAgentLaunchStartupText,
+  launchSettingsWithConsumedAgentLaunchStartupText,
   getAgentActivityStaleProjectionDelayMs,
   updateSessionActivitySettings,
 } from "./agents/lifecycle.js";
@@ -4647,13 +4649,22 @@ async function createAttachSessionMetadata(
   CDXC:GxserverTerminalWake 2026-06-01-12:07:
   Sleeping-session wake should let gxserver rebuild the real agent resume command from shared session metadata. A macOS renderer can legitimately pass an empty string when its legacy local resume builder has no text; treat blank startupText as absent instead of suppressing the server-owned resume plan.
   */
+  const explicitStartupText = normalizeOptionalStartupText(params.startupText);
+  const queuedLaunchStartupText = explicitStartupText
+    ? undefined
+    : getQueuedAgentLaunchStartupTextForSession(probedSession);
   const startupText =
-    normalizeOptionalStartupText(params.startupText) ??
+    explicitStartupText ??
+    queuedLaunchStartupText ??
     getAgentStartupTextForSession(project, probedSession, agentSettings);
   const startupTextDisposition = decideStartupTextDisposition({
     providerState: probe.lifecycleState,
     startupText,
   });
+  const sessionForAttach =
+    !explicitStartupText && (queuedLaunchStartupText || probe.lifecycleState === "exists")
+      ? consumeQueuedAgentLaunchStartupText(repository, probedSession)
+      : probedSession;
 
   if (probe.lifecycleState === "missing" && !(cwd && (await (runtime.zmxLifecycle?.cwdExists ?? defaultCwdExists)(cwd)))) {
     await runtime.logger.log({
@@ -4676,7 +4687,7 @@ async function createAttachSessionMetadata(
         ...(cwd ? { cwd } : {}),
         reason: "missingCwd",
       },
-      session: probedSession,
+      session: sessionForAttach,
       ...(startupTextDisposition === "queueAfterTerminalReady" && startupText ? { startupText } : {}),
       startupTextDisposition,
       zmxName: zmxSessionName,
@@ -4692,18 +4703,33 @@ async function createAttachSessionMetadata(
       gxserverProtocolVersion: GXSERVER_PROTOCOL_VERSION,
       promptEditor: normalizePromptEditorAttachMode(params.promptEditor),
       sessionName: zmxSessionName,
-      title: probedSession.title,
+      title: sessionForAttach.title,
       zmxExecutablePath: zmx.executablePath,
     }),
     cwd,
     persistenceSessionCreated: probe.lifecycleState === "missing",
     provider: "zmx",
     providerState: probe,
-    session: probedSession,
+    session: sessionForAttach,
     ...(startupTextDisposition === "queueAfterTerminalReady" && startupText ? { startupText } : {}),
     startupTextDisposition,
     zmxName: zmxSessionName,
   };
+}
+
+function consumeQueuedAgentLaunchStartupText(
+  repository: GxserverDomainRepository,
+  session: GxserverSessionDomainState,
+): GxserverSessionDomainState {
+  const launchSettings = launchSettingsWithConsumedAgentLaunchStartupText(session);
+  if (!launchSettings) {
+    return session;
+  }
+  return repository.updateSession({
+    launchSettings,
+    projectId: session.projectId,
+    sessionId: session.sessionId,
+  });
 }
 
 function normalizeOptionalStartupText(value: unknown): string | undefined {
@@ -4816,9 +4842,13 @@ async function startSessionProvider(
     repository,
     lifecycle,
   );
+  const explicitStartupText = normalizeOptionalStartupText(params.startupText);
+  const queuedLaunchStartupText = explicitStartupText
+    ? undefined
+    : getQueuedAgentLaunchStartupTextForSession(probedSession);
   const startupText =
-    normalizeOptionalStartupText(params.startupText) ??
-    getAgentLaunchStartupTextForSession(probedSession) ??
+    explicitStartupText ??
+    queuedLaunchStartupText ??
     getAgentStartupTextForSession(project, probedSession, agentSettings);
   const startupTextDisposition = decideStartupTextDisposition({
     providerState: probe.lifecycleState,
@@ -4837,7 +4867,10 @@ async function startSessionProvider(
     return {
       provider: "zmx",
       providerState: probe,
-      session: probedSession,
+      session:
+        !explicitStartupText && hasQueuedAgentLaunchStartupText(probedSession)
+          ? consumeQueuedAgentLaunchStartupText(repository, probedSession)
+          : probedSession,
       started: false,
       startupTextDisposition,
       zmxName: zmxSessionName,
@@ -4887,7 +4920,12 @@ async function startSessionProvider(
     probedAt: new Date().toISOString(),
     zmxName: zmxSessionName,
   };
+  const consumedLaunchSettings =
+    !explicitStartupText && hasQueuedAgentLaunchStartupText(probedSession)
+      ? launchSettingsWithConsumedAgentLaunchStartupText(probedSession)
+      : undefined;
   const session = repository.updateSession({
+    ...(consumedLaunchSettings ? { launchSettings: consumedLaunchSettings } : {}),
     lifecycleState: "running",
     projectId: probedSession.projectId,
     providerState: providerStatePatch(probedSession, providerState),

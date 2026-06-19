@@ -2029,6 +2029,73 @@ test("zmx lifecycle APIs attach existing sessions without replay and create miss
   );
 });
 
+test("attach metadata consumes fresh agent launch startup before resume planning", async () => {
+  const calls: string[] = [];
+  await withApiServer(
+    "local",
+    async ({ baseUrl, paths, token }) => {
+      const project = (
+        await requestJson(baseUrl, "/api/createProject", {
+          body: { params: { name: "Ghostex", path: paths.rootDir }, protocolVersion: GXSERVER_PROTOCOL_VERSION },
+          method: "POST",
+          token,
+        })
+      ).body.result.project;
+      const session = (
+        await requestJson(baseUrl, "/api/createAgentSession", {
+          body: {
+            params: {
+              agentId: "cursor",
+              projectId: project.projectId,
+            },
+            protocolVersion: GXSERVER_PROTOCOL_VERSION,
+          },
+          method: "POST",
+          token,
+        })
+      ).body.result.session;
+
+      assert.equal(session.launchSettings.runtimeRelevant.queueProviderStartupText, true);
+
+      const firstAttach = await requestJson(baseUrl, "/api/attachSessionMetadata", {
+        body: {
+          params: { projectId: project.projectId, sessionId: session.sessionId },
+          protocolVersion: GXSERVER_PROTOCOL_VERSION,
+        },
+        method: "POST",
+        token,
+      });
+      assert.equal(firstAttach.status, 200);
+      assert.equal(firstAttach.body.result.attach.providerState.lifecycleState, "missing");
+      assert.equal(firstAttach.body.result.attach.startupText, " cursor-agent --yolo\r");
+      assert.doesNotMatch(firstAttach.body.result.attach.startupText, /Restoring session|--resume "G[0-9a-z]{4}"/u);
+      assert.equal(
+        firstAttach.body.result.attach.session.launchSettings.runtimeRelevant.queueProviderStartupText,
+        false,
+      );
+
+      /*
+      CDXC:GxserverAgentLifecycle 2026-06-19-15:55:
+      After the first attach preflight consumes a launch command, repeated attach attempts must not rebuild a Cursor title-lookup resume command from the Ghostex session id.
+      */
+      const secondAttach = await requestJson(baseUrl, "/api/attachSessionMetadata", {
+        body: {
+          params: { projectId: project.projectId, sessionId: session.sessionId },
+          protocolVersion: GXSERVER_PROTOCOL_VERSION,
+        },
+        method: "POST",
+        token,
+      });
+      assert.equal(secondAttach.status, 200);
+      assert.equal(secondAttach.body.result.attach.startupTextDisposition, "none");
+      assert.equal(secondAttach.body.result.attach.startupText, undefined);
+    },
+    {
+      zmxLifecycle: fakeZmxLifecycle(calls, () => 1),
+    },
+  );
+});
+
 test("createSession suppresses fresh terminal title attention and logs safe diagnostics", async () => {
   await withApiServer("local", async ({ baseUrl, paths, token }) => {
     await writeNativeSidebarSettings(paths.homeDir, { debuggingMode: true });

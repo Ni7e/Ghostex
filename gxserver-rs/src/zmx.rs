@@ -364,10 +364,25 @@ fn create_attach_session_metadata(
     let cwd = string_field(&existing_session, "cwd").or_else(|| string_field(&project, "path"));
     let (probe, probed_session, zmx, zmx_name) =
         probe_and_cache_session_provider(repository, &lifecycle)?;
-    let startup_text = normalize_optional_startup_text(params.get("startupText"))
+    let explicit_startup_text = normalize_optional_startup_text(params.get("startupText"));
+    let queued_launch_startup_text = if explicit_startup_text.is_none() {
+        get_queued_agent_launch_startup_text_for_session(&probed_session)
+    } else {
+        None
+    };
+    let startup_text = explicit_startup_text
+        .clone()
+        .or(queued_launch_startup_text.clone())
         .or_else(|| get_agent_startup_text_for_session(&project, &probed_session));
     let startup_text_disposition =
         decide_startup_text_disposition(&probe.lifecycle_state, startup_text.as_deref());
+    let session_for_attach = if explicit_startup_text.is_none()
+        && (queued_launch_startup_text.is_some() || probe.lifecycle_state == "exists")
+    {
+        consume_queued_agent_launch_startup_text(repository, &probed_session)?
+    } else {
+        probed_session.clone()
+    };
     if probe.lifecycle_state == "missing" && !cwd.as_deref().map(cwd_exists).unwrap_or(false) {
         let mut restore_blocked = Map::new();
         if let Some(cwd) = cwd.clone() {
@@ -378,7 +393,7 @@ fn create_attach_session_metadata(
         attach.insert("provider".to_string(), json!("zmx"));
         attach.insert("providerState".to_string(), probe_to_value(&probe));
         attach.insert("restoreBlocked".to_string(), Value::Object(restore_blocked));
-        attach.insert("session".to_string(), probed_session);
+        attach.insert("session".to_string(), session_for_attach);
         maybe_insert_startup_text(
             &mut attach,
             &startup_text_disposition,
@@ -401,7 +416,7 @@ fn create_attach_session_metadata(
         prompt_editor: (params.get("promptEditor").and_then(Value::as_str) == Some("monaco"))
             .then_some("monaco".to_string()),
         session_name: zmx_name.clone(),
-        title: string_field(&probed_session, "title"),
+        title: string_field(&session_for_attach, "title"),
         zmx_executable_path: zmx.executable_path,
     });
     let mut attach = Map::new();
@@ -415,7 +430,7 @@ fn create_attach_session_metadata(
     );
     attach.insert("provider".to_string(), json!("zmx"));
     attach.insert("providerState".to_string(), probe_to_value(&probe));
-    attach.insert("session".to_string(), probed_session);
+    attach.insert("session".to_string(), session_for_attach);
     maybe_insert_startup_text(
         &mut attach,
         &startup_text_disposition,
@@ -442,8 +457,15 @@ fn start_session_provider(
         })?;
     let (probe, probed_session, zmx, zmx_name) =
         probe_and_cache_session_provider(repository, &lifecycle)?;
-    let startup_text = normalize_optional_startup_text(params.get("startupText"))
-        .or_else(|| get_agent_launch_startup_text_for_session(&probed_session))
+    let explicit_startup_text = normalize_optional_startup_text(params.get("startupText"));
+    let queued_launch_startup_text = if explicit_startup_text.is_none() {
+        get_queued_agent_launch_startup_text_for_session(&probed_session)
+    } else {
+        None
+    };
+    let startup_text = explicit_startup_text
+        .clone()
+        .or(queued_launch_startup_text)
         .or_else(|| get_agent_startup_text_for_session(&project, &probed_session));
     let startup_text_disposition =
         decide_startup_text_disposition(&probe.lifecycle_state, startup_text.as_deref());
@@ -456,7 +478,11 @@ fn start_session_provider(
         return Ok(json!({
             "provider": "zmx",
             "providerState": probe_to_value(&probe),
-            "session": probed_session,
+            "session": if explicit_startup_text.is_none() && has_queued_agent_launch_startup_text(&probed_session) {
+                consume_queued_agent_launch_startup_text(repository, &probed_session)?
+            } else {
+                probed_session
+            },
             "started": false,
             "startupTextDisposition": startup_text_disposition,
             "zmxName": zmx_name,
@@ -505,6 +531,13 @@ fn start_session_provider(
         "providerState".to_string(),
         Value::Object(provider_state_patch(&probed_session, &provider_state)?),
     );
+    if explicit_startup_text.is_none() {
+        if let Some(launch_settings) =
+            launch_settings_with_consumed_agent_launch_startup_text(&probed_session)
+        {
+            update.insert("launchSettings".to_string(), Value::Object(launch_settings));
+        }
+    }
     let session = repository.update_session_for_lifecycle(&update)?;
     Ok(json!({
         "exitCode": result.exit_code,
@@ -1377,8 +1410,71 @@ fn get_agent_launch_startup_text_for_session(session: &Value) -> Option<String> 
         .filter(|value| !value.trim().is_empty())
 }
 
-fn get_agent_startup_text_for_session(_project: &Value, session: &Value) -> Option<String> {
+fn get_queued_agent_launch_startup_text_for_session(session: &Value) -> Option<String> {
+    if !has_queued_agent_launch_startup_text(session) {
+        return None;
+    }
     get_agent_launch_startup_text_for_session(session)
+}
+
+fn has_queued_agent_launch_startup_text(session: &Value) -> bool {
+    session
+        .get("launchSettings")
+        .and_then(Value::as_object)
+        .and_then(|settings| settings.get("runtimeRelevant"))
+        .and_then(Value::as_object)
+        .and_then(|runtime| runtime.get("queueProviderStartupText"))
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+fn launch_settings_with_consumed_agent_launch_startup_text(
+    session: &Value,
+) -> Option<Map<String, Value>> {
+    if !has_queued_agent_launch_startup_text(session) {
+        return None;
+    }
+    let mut launch_settings = session
+        .get("launchSettings")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut runtime_relevant = launch_settings
+        .get("runtimeRelevant")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    runtime_relevant.insert("queueProviderStartupText".to_string(), Value::Bool(false));
+    launch_settings.insert(
+        "runtimeRelevant".to_string(),
+        Value::Object(runtime_relevant),
+    );
+    Some(launch_settings)
+}
+
+fn consume_queued_agent_launch_startup_text(
+    repository: &DomainRepository<'_>,
+    session: &Value,
+) -> ZmxEndpointResult<Value> {
+    let Some(launch_settings) = launch_settings_with_consumed_agent_launch_startup_text(session)
+    else {
+        return Ok(session.clone());
+    };
+    let mut update = Map::new();
+    update.insert("projectId".to_string(), value_field(session, "projectId")?);
+    update.insert("sessionId".to_string(), value_field(session, "sessionId")?);
+    update.insert("launchSettings".to_string(), Value::Object(launch_settings));
+    repository
+        .update_session_for_lifecycle(&update)
+        .map_err(ZmxEndpointError::Domain)
+}
+
+fn get_agent_startup_text_for_session(_project: &Value, _session: &Value) -> Option<String> {
+    /*
+    CDXC:GxserverRustPort 2026-06-19-15:55:
+    Fresh agent provider launch is controlled by `runtimeRelevant.queueProviderStartupText`; generic zmx attach/start must not reuse a stale launch plan as a resume fallback after that queue bit is consumed.
+    */
+    None
 }
 
 fn read_interaction_text(
@@ -1574,6 +1670,33 @@ mod tests {
         let error = read_interaction_text(Some(&json!(oversized)), "sendSessionText")
             .expect_err("oversized text rejected");
         assert!(error.message.contains("zmx send limit"));
+    }
+
+    #[test]
+    fn queued_launch_startup_text_is_explicit_and_consumable() {
+        let session = json!({
+            "launchSettings": {
+                "agentLaunchPlan": {
+                    "startupText": " cursor-agent --yolo\r"
+                },
+                "runtimeRelevant": {
+                    "queueProviderStartupText": true
+                }
+            }
+        });
+        assert_eq!(
+            get_queued_agent_launch_startup_text_for_session(&session),
+            Some(" cursor-agent --yolo\r".to_string())
+        );
+        let consumed =
+            launch_settings_with_consumed_agent_launch_startup_text(&session).expect("consumed");
+        assert_eq!(
+            consumed
+                .get("runtimeRelevant")
+                .and_then(Value::as_object)
+                .and_then(|runtime| runtime.get("queueProviderStartupText")),
+            Some(&Value::Bool(false))
+        );
     }
 
     #[test]

@@ -1829,6 +1829,84 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
     }
   });
 
+  test("create-agent starts the gxserver provider after creating the session", async () => {
+    /**
+     * CDXC:GxserverCliAgents 2026-06-19-15:55:
+     * Agent orchestration uses `ghostex create-agent` as a spawn primitive. The CLI must create the durable gxserver row and immediately materialize its zmx provider so follow-up `send-message` calls target an agent process, not the post-failure shell prompt.
+     */
+    const requests = [];
+    const server = http.createServer(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) {
+        chunks.push(chunk);
+      }
+      const requestBody = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      requests.push({ body: requestBody, url: request.url });
+      const result =
+        request.url === "/api/createAgentSession"
+          ? {
+              session: {
+                projectId: "P1a",
+                sessionId: "G1a",
+                title: "G1a",
+              },
+            }
+          : request.url === "/api/startSessionProvider"
+            ? {
+                providerState: { lifecycleState: "exists", zmxName: "S1a-P1a-G1a" },
+                session: {
+                  projectId: "P1a",
+                  providerState: { lifecycleState: "exists", zmxName: "S1a-P1a-G1a" },
+                  sessionId: "G1a",
+                  title: "G1a",
+                },
+                started: true,
+              }
+            : {};
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        ok: true,
+        product: "gxserver",
+        protocolVersion: 1,
+        requestId: "create-agent-fixture",
+        result,
+      }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    try {
+      const result = await sendGxserverCliAction(
+        "createAgentSession",
+        { agentId: "cursor", projectId: "P1a" },
+        {
+          server: `http://127.0.0.1:${address.port}`,
+          timeoutMs: 1_000,
+          token: "test-token",
+        },
+      );
+
+      expect(result.provider).toMatchObject({ started: true });
+      expect(result.session).toMatchObject({
+        providerState: { lifecycleState: "exists" },
+        sessionId: "G1a",
+      });
+      expect(requests.map((request) => request.url)).toEqual([
+        "/api/createAgentSession",
+        "/api/startSessionProvider",
+      ]);
+      expect(requests[0].body.params).toMatchObject({
+        agentId: "cursor",
+        projectId: "P1a",
+      });
+      expect(requests[1].body.params).toEqual({
+        projectId: "P1a",
+        sessionId: "G1a",
+      });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   test("sleep-session false with a flagged selector calls gxserver wake", async () => {
     const requests = [];
     const server = http.createServer(async (request, response) => {

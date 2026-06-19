@@ -196,6 +196,9 @@ Copy Resume is a clipboard affordance, not the automated restore path. It must c
 
 CDXC:GxserverAgentLifecycle 2026-06-09-14:22:
 OpenCode TUI Accept All is config-driven, not flag-driven. Launch, resume, and copy commands must use OPENCODE_CONFIG_CONTENT with permission allow while keeping lookup commands on the plain base opencode command so session-list parsing is unaffected.
+
+CDXC:GxserverAgentLifecycle 2026-06-19-15:55:
+Fresh CLI-created agent sessions must consume the queued launch command for their first provider materialization. Do not treat the Ghostex G-session id or a user/display title as a provider resume title before an agent hook has captured a real restorable conversation identity.
 */
 export function buildAgentLaunchPlan(input: GxserverAgentLaunchInput): GxserverAgentLaunchPlan {
   const baseCommand = normalizeText(input.command) ?? resolveDefaultAgentCommand(input.agentId) ?? "";
@@ -363,12 +366,7 @@ export function getAgentStartupTextForSession(
   session: GxserverSessionDomainState,
   agentSettings?: GxserverAgentSettings,
 ): string | undefined {
-  const resumeStartupText = buildAgentResumeStartupText(project, session, agentSettings);
-  if (resumeStartupText?.trim()) {
-    return resumeStartupText;
-  }
-  const launchPlan = readAgentLaunchPlan(session.launchSettings);
-  return launchPlan?.startupText?.trim() ? launchPlan.startupText : undefined;
+  return buildAgentResumeStartupText(project, session, agentSettings);
 }
 
 export function getAgentLaunchStartupTextForSession(
@@ -376,6 +374,36 @@ export function getAgentLaunchStartupTextForSession(
 ): string | undefined {
   const launchPlan = readAgentLaunchPlan(session.launchSettings);
   return launchPlan?.startupText?.trim() ? launchPlan.startupText : undefined;
+}
+
+export function getQueuedAgentLaunchStartupTextForSession(
+  session: GxserverSessionDomainState,
+): string | undefined {
+  if (!hasQueuedAgentLaunchStartupText(session)) {
+    return undefined;
+  }
+  return getAgentLaunchStartupTextForSession(session);
+}
+
+export function hasQueuedAgentLaunchStartupText(session: GxserverSessionDomainState): boolean {
+  const runtimeRelevant = normalizeObject(session.launchSettings.runtimeRelevant);
+  return runtimeRelevant.queueProviderStartupText === true;
+}
+
+export function launchSettingsWithConsumedAgentLaunchStartupText(
+  session: GxserverSessionDomainState,
+): Record<string, unknown> | undefined {
+  if (!hasQueuedAgentLaunchStartupText(session)) {
+    return undefined;
+  }
+  const runtimeRelevant = normalizeObject(session.launchSettings.runtimeRelevant);
+  return {
+    ...session.launchSettings,
+    runtimeRelevant: {
+      ...runtimeRelevant,
+      queueProviderStartupText: false,
+    },
+  };
 }
 
 export function buildAgentResumeStartupText(
