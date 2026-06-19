@@ -2,6 +2,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 
 const settingsModalSource = readFileSync(new URL("./settings-modal.tsx", import.meta.url), "utf8");
+const settingsModalStylesSource = readFileSync(
+  new URL("./styles/modals.css", import.meta.url),
+  "utf8",
+);
 
 function sourceBetween(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);
@@ -29,11 +33,11 @@ describe("settings modal source", () => {
     expect(settingsModalSource).not.toContain("settings-show-advanced-anchor");
   });
 
-  test("keeps settings search in the sidebar-aware header row", () => {
+  test("keeps settings search in a header row outside the floating sidebar", () => {
     /*
-     * CDXC:SettingsNavigation 2026-06-19-10:36:
+     * CDXC:SettingsNavigation 2026-06-19-12:18:
      * Settings and Hotkeys search should center above the settings card column,
-     * not above the full modal width or the left sidebar.
+     * independent of the floating left sidebar.
      */
     const headerSearch = sourceBetween(
       settingsModalSource,
@@ -66,6 +70,36 @@ describe("settings modal source", () => {
     expect(settingsModalSource).toContain('Uninstall Skills');
   });
 
+  test("gates Keep Awake settings behind Show Beta features", () => {
+    /*
+     * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
+     * Keep Awake is beta-only in regular macOS Settings, but the Beta section
+     * must name the hidden Power settings and titlebar button so search can
+     * lead users to the opt-in gate.
+     */
+    const betaSearch = sourceBetween(
+      settingsModalSource,
+      'beta: getSettingsSectionSearch(settingsSearchQuery, "Beta", [',
+      'debugging: getSettingsSectionSearch(settingsSearchQuery, "Debugging", [',
+    );
+    const betaSection = sourceBetween(
+      settingsModalSource,
+      '<SettingsSection sectionRef={betaSectionRef} title="Beta">',
+      '{mainSectionVisible("debugging", settingsSearch.debugging) ? (',
+    );
+    const mainVisibility = sourceBetween(
+      settingsModalSource,
+      "const keepAwakeSettingsVisible =",
+      "const visibleMainSettingsSectionNavigation",
+    );
+
+    expect(betaSearch).toContain("Keep Awake");
+    expect(betaSection).toContain("Title bar and Power settings: Keep Awake");
+    expect(betaSection).toContain("Keep Awake title-bar button");
+    expect(mainVisibility).toContain('sectionId === "power" && !keepAwakeSettingsVisible');
+    expect(mainVisibility).toContain("first-launch lid-close preference");
+  });
+
   test("shows unavailable gxserver-owned default prompt agents without selecting Codex", () => {
     /*
      * CDXC:GxserverAgentSettings 2026-06-19-08:58:
@@ -83,5 +117,40 @@ describe("settings modal source", () => {
     expect(agentsTab).toContain("Unavailable (${normalizedDefaultPromptAgentId})");
     expect(agentsTab).toContain("const selectedDefaultPromptAgentId = normalizedDefaultPromptAgentId;");
     expect(agentsTab).not.toContain("promptAgentOptions.find");
+  });
+
+  test("keeps project deletion out of the Projects settings page", () => {
+    /*
+     * CDXC:ProjectSettings 2026-06-19-12:11:
+     * Projects settings edits selected-project metadata only. The standalone
+     * trash action should not be available from this page.
+     */
+    const projectsPanel = sourceBetween(
+      settingsModalSource,
+      "function ProjectsSettingsPanel",
+      "function OpenTargetsSettingsTab",
+    );
+
+    expect(projectsPanel).not.toContain('type: "removeProject"');
+    expect(projectsPanel).not.toContain("removeSelectedProject");
+    expect(projectsPanel).not.toContain("Remove project");
+    expect(projectsPanel).not.toContain("<IconTrash");
+  });
+
+  test("keeps the open project selector neutral", () => {
+    /*
+     * CDXC:ProjectSettings 2026-06-19-12:22:
+     * The Projects dropdown trigger should use neutral Settings colors when
+     * open, not the app accent color that appears blue in dark themes.
+     */
+    const openSelectorStyles = sourceBetween(
+      settingsModalStylesSource,
+      ".projects-settings-selector-trigger[data-popup-open]",
+      "}",
+    );
+
+    expect(openSelectorStyles).not.toContain("--app-button-background");
+    expect(openSelectorStyles).toContain("--app-card-active");
+    expect(openSelectorStyles).toContain("--app-border");
   });
 });

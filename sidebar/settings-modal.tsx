@@ -814,7 +814,6 @@ export type SettingsModalProps = {
   onClose: () => void;
   onOpenAccessibilityPreferences?: () => void;
   onOpenMacOSNotificationSettings?: () => void;
-  onOpenFirstLaunchSetup?: () => void;
   onOpenScreenRecordingPreferences?: () => void;
   onOpenGhostexFolder?: () => void;
   onGhosttySettingsAction?: (action: GhosttySettingsAction) => void;
@@ -862,7 +861,6 @@ export function SettingsModal({
   presentation = "default",
   onOpenAccessibilityPreferences,
   onOpenMacOSNotificationSettings,
-  onOpenFirstLaunchSetup,
   onOpenScreenRecordingPreferences,
   onOpenGhostexFolder,
   onGhosttySettingsAction,
@@ -1719,7 +1717,7 @@ export function SettingsModal({
       {
         key: "showBetaFeatures",
         subtitle:
-          "Show beta-only surfaces: OS Integration settings, Browser Profiles, and Browser color scheme.",
+          "Show beta-only surfaces: OS Integration settings, Browser Profiles, Browser color scheme, and Keep Awake.",
         title: "Show Beta features",
       },
     ]),
@@ -1848,6 +1846,7 @@ export function SettingsModal({
   );
   const visibleFirstLaunchMainSettings =
     firstLaunchSetupVisibleSettings ?? FIRST_LAUNCH_SETUP_VISIBLE_MAIN_SETTINGS;
+  const keepAwakeSettingsVisible = isFirstLaunchSetup || draft.showBetaFeatures;
   const mainSettingVisible = (
     sectionResult: SettingsSectionSearchResult,
     settingKey: string,
@@ -1864,6 +1863,15 @@ export function SettingsModal({
     sectionId: MainSettingsSectionId,
     sectionResult: SettingsSectionSearchResult,
   ) => {
+    /*
+     * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
+     * Keep Awake is beta-only in the regular macOS Settings UI. Hide the Power
+     * section until Show Beta features is enabled, while preserving the
+     * first-launch lid-close preference required by onboarding.
+     */
+    if (sectionId === "power" && !keepAwakeSettingsVisible) {
+      return false;
+    }
     if (isFirstLaunchSetup) {
       return MAIN_SETTINGS_SECTION_SETTING_KEYS[sectionId].some((settingKey) =>
         isFirstLaunchSetupMainSettingVisible(
@@ -2303,7 +2311,7 @@ export function SettingsModal({
           and section jumps operate on one main Settings page. */}
           <div className="settings-main-tab-layout">
             <aside aria-label="Settings sections" className="settings-section-sidebar">
-              <div className="settings-section-sidebar-list">
+              <div className="settings-section-sidebar-list vertical-scroll-fade-mask">
                 {visibleMainSettingsSectionNavigation.map((section) => (
                   <Button
                     className="settings-section-sidebar-button"
@@ -2501,8 +2509,8 @@ export function SettingsModal({
 
                   CDXC:SidebarTitlebarColors 2026-06-15-13:45:
                   Replace the freeform background color picker with a constrained
-                  contrast slider. The slider outputs grayscale backgrounds so
-                  sidebar row states remain predictable.
+                  contrast slider. The slider outputs calibrated dark
+                  backgrounds so sidebar row states remain predictable.
 
                   CDXC:SidebarTitlebarColors 2026-06-15-15:01:
                   Limit the contrast slider to 85-100 because lower values made
@@ -3622,12 +3630,19 @@ export function SettingsModal({
                      * CDXC:BetaFeatures 2026-06-16-13:08:
                      * The Beta section must keep a current visible inventory of
                      * every surface enabled by Show Beta features. Update this
-                     * list whenever a new beta-gated Settings tab or browser
-                     * address-bar control is added or removed.
+                     * list whenever a new beta-gated Settings tab, titlebar
+                     * button, or browser address-bar control is added or
+                     * removed.
+                     *
+                     * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
+                     * Keep Awake belongs in the Beta inventory because the
+                     * Power settings section, titlebar button, and titlebar
+                     * runtime automation stay hidden until Show Beta features
+                     * is enabled.
                      */}
                     <ToggleField
                       checked={draft.showBetaFeatures}
-                      description="Show beta-only settings and browser address-bar controls."
+                      description="Show beta-only settings, browser address-bar controls, and the Keep Awake title-bar button."
                       label="Show Beta features"
                       {...getSettingModificationProps("showBetaFeatures")}
                       onChange={(checked) => updateDraft("showBetaFeatures", checked)}
@@ -3638,6 +3653,7 @@ export function SettingsModal({
                         <li>OS Integration settings tab</li>
                         <li>Browser address bar: Profiles</li>
                         <li>Browser address bar: Color scheme</li>
+                        <li>Title bar and Power settings: Keep Awake</li>
                       </ul>
                     </div>
                   </>
@@ -3801,7 +3817,6 @@ export function SettingsModal({
               onInstallGenerateTitleSkill={onInstallGenerateTitleSkill}
               onInstallGhostexCli={onInstallGhostexCli}
               onOpenAccessibilityPreferences={onOpenAccessibilityPreferences}
-              onOpenFirstLaunchSetup={onOpenFirstLaunchSetup}
               onOpenScreenRecordingPreferences={onOpenScreenRecordingPreferences}
               onRequestAgentHookStatus={onRequestAgentHookStatus}
               onRequestGhostexCliStatus={onRequestGhostexCliStatus}
@@ -4467,20 +4482,6 @@ function ProjectsSettingsPanel({
     });
   };
 
-  const removeSelectedProject = () => {
-    if (!selectedProject) {
-      return;
-    }
-    const shouldRemove = window.confirm(`Remove ${selectedProject.name} from Ghostex?`);
-    if (!shouldRemove) {
-      return;
-    }
-    vscode?.postMessage({
-      projectId: selectedProject.projectId,
-      type: "removeProject",
-    });
-  };
-
   if (projects.length === 0) {
     return (
       <div className="settings-tab-scroll scroll-mask-y">
@@ -4507,6 +4508,11 @@ function ProjectsSettingsPanel({
          * button list. Keep one project selector at the top, open a searchable
          * dropdown of project paths on click, and bind the settings editor below
          * to the selected project.
+         *
+         * CDXC:ProjectSettings 2026-06-19-12:11:
+         * The Projects settings page edits selected-project metadata only.
+         * Do not expose project deletion from this page; removing the standalone
+         * trash row keeps destructive project management out of this settings flow.
          */}
         <div className="projects-settings-selector">
           <span className="projects-settings-selector-label" id={projectSelectorLabelId}>
@@ -4584,19 +4590,6 @@ function ProjectsSettingsPanel({
               </Command>
             </PopoverContent>
           </Popover>
-          {/*
-           * CDXC:ProjectSettings 2026-06-17-17:13:
-           * Users can manage projects from Settings after selecting them, including removing any listed project such as test/build entries that may not be convenient to delete from the visible sidebar.
-           */}
-          <Button
-            aria-label={selectedProject ? `Remove ${selectedProject.name}` : "Remove project"}
-            disabled={!selectedProject}
-            onClick={removeSelectedProject}
-            type="button"
-            variant="outline"
-          >
-            <IconTrash aria-hidden="true" />
-          </Button>
         </div>
         <Card className="settings-project-command-card">
           <CardContent className="flex flex-col gap-4 p-4">
@@ -5157,7 +5150,6 @@ function IntegrationsSettingsTab({
   onInstallGenerateTitleSkill,
   onInstallGhostexCli,
   onOpenAccessibilityPreferences,
-  onOpenFirstLaunchSetup,
   onOpenScreenRecordingPreferences,
   onRequestAgentHookStatus,
   onRequestGhostexCliStatus,
@@ -5178,7 +5170,6 @@ function IntegrationsSettingsTab({
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
   onOpenAccessibilityPreferences?: () => void;
-  onOpenFirstLaunchSetup?: () => void;
   onOpenScreenRecordingPreferences?: () => void;
   onRequestAgentHookStatus?: () => void;
   onRequestGhostexCliStatus?: () => void;
@@ -5421,23 +5412,11 @@ function IntegrationsSettingsTab({
               Screen Recording
             </Button>
           </IntegrationSettingsRow>
-
-          <IntegrationSettingsRow
-            description="Reopen the first-launch setup flow any time for the guided version of these integrations and app tips."
-            icon={IconInfoCircle}
-            status="Available"
-            tone="neutral"
-            title="Setup Flow"
-          >
-            <Button
-              disabled={!onOpenFirstLaunchSetup}
-              onClick={onOpenFirstLaunchSetup}
-              type="button"
-              variant="outline"
-            >
-              Open Setup Flow
-            </Button>
-          </IntegrationSettingsRow>
+          {/*
+            CDXC:SettingsIntegrations 2026-06-19-14:51:
+            macOS Settings > Integrations should not include a Setup Flow launcher row.
+            Keep setup access owned by first-launch and other explicit entry points instead of listing it as an integration setting.
+          */}
         </SettingsSection>
       </div>
     </ScrollArea>
@@ -6962,7 +6941,7 @@ function HotkeysSettingsTab({
   return (
     <div className="settings-main-tab-layout">
       <aside aria-label="Hotkey sections" className="settings-section-sidebar">
-        <div className="settings-section-sidebar-list">
+        <div className="settings-section-sidebar-list vertical-scroll-fade-mask">
           {visibleSections.map((section) => (
             <Button
               className="settings-section-sidebar-button"
@@ -8137,21 +8116,20 @@ function ColorField({
 const SIDEBAR_TITLEBAR_TINT_SWATCHES: ReadonlyArray<{ label: string; value: string }> = [
   { label: "White", value: DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR },
   { label: "Neutral Gray", value: "#808080" },
-  { label: "Blue", value: "#336699" },
-  { label: "Sky", value: "#2f6f8f" },
-  { label: "Cyan", value: "#287c7f" },
-  { label: "Teal", value: "#2f7d66" },
-  { label: "Violet", value: "#6c4f8f" },
-  { label: "Purple", value: "#5f4f96" },
-  { label: "Indigo", value: "#4f5f96" },
-  { label: "Green", value: "#3f7a5f" },
-  { label: "Olive", value: "#657a3f" },
-  { label: "Amber", value: "#8a6a2f" },
-  { label: "Orange", value: "#8a5330" },
-  { label: "Red", value: "#884444" },
-  { label: "Rose", value: "#8a4f5f" },
-  { label: "Pink", value: "#854f7a" },
+  { label: "Black", value: "#000000" },
   { label: "Steel", value: "#4f6672" },
+  { label: "Red", value: "#884444" },
+  { label: "Orange", value: "#8a5330" },
+  { label: "Amber", value: "#8a6a2f" },
+  { label: "Olive", value: "#657a3f" },
+  { label: "Green", value: "#3f7a5f" },
+  { label: "Teal", value: "#2f7d66" },
+  { label: "Cyan", value: "#287c7f" },
+  { label: "Blue", value: "#336699" },
+  { label: "Indigo", value: "#4f5f96" },
+  { label: "Violet", value: "#6c4f8f" },
+  { label: "Pink", value: "#854f7a" },
+  { label: "Rose", value: "#8a4f5f" },
 ];
 
 function WebColorPickerField({
@@ -8239,8 +8217,17 @@ function WebColorPickerField({
         react-best-gradient-color-picker control used in Sharptabs. Keep this
         setting solid-color only, and expose it as a simple Pick Color dialog
         rather than showing technical hue/saturation labels in the Settings row.
+
+        CDXC:SidebarTitlebarColors 2026-06-19-13:44:
+        Background Tint presets should scan as neutrals first and then a hue-wheel sequence. Keep only fifteen presets by removing near-duplicate Sky and Purple stops, and use compact row spacing so the custom picker and hex field remain on the same row.
+
+        CDXC:SidebarTitlebarColors 2026-06-19-14:20:
+        Add Black to the neutral preset group because white, gray, and black are all valid untinted chrome choices. Keep the input two character cells narrower than the first compact layout so the added swatch does not force the hex field onto a second row.
+
+        CDXC:SidebarTitlebarColors 2026-06-19-14:36:
+        The hex field should use exactly the remaining first-row width after the swatches and custom picker. Use a zero-basis flexible input instead of a fixed character width so it fills the right-side remainder without wrapping to a second line.
       */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1.5">
         {SIDEBAR_TITLEBAR_TINT_SWATCHES.map((swatch) => {
           const isSelected = colorValue === swatch.value;
           return (
@@ -8325,7 +8312,7 @@ function WebColorPickerField({
         </Dialog>
         <SettingsInput
           aria-label={`${label} hex color`}
-          className="h-8 w-[8.5rem] px-2 font-mono text-xs uppercase"
+          className="h-8 min-w-0 flex-1 px-2 font-mono text-xs uppercase"
           id={id}
           inputMode="text"
           onBlur={() => commitColor(colorText)}

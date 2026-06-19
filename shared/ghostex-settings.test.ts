@@ -16,7 +16,9 @@ import {
   MIN_SIDEBAR_DEFAULT_WIDTH_PX,
   applySidebarSettingsPreset,
   getDefaultEditorCommandForSettings,
+  getSidebarTitlebarBackgroundForDarkness,
   getSessionTitleGenerationCommandPreview,
+  getSidebarTitlebarGradientColors,
   getSidebarSettingsPresetId,
   normalizeghostexSettings,
   PROMPT_EDITOR_BACKEND_OPTIONS,
@@ -767,7 +769,7 @@ describe("normalizeghostexSettings", () => {
      *
      * CDXC:SidebarTitlebarColors 2026-06-15-13:45:
      * The background is no longer a freeform color picker. Settings exposes a
-     * contrast slider and stores a computed grayscale hex color for native
+     * contrast slider and stores a computed dark hex color for native
      * protocol compatibility.
      *
      * CDXC:SidebarTitlebarColors 2026-06-15-15:01:
@@ -780,7 +782,7 @@ describe("normalizeghostexSettings", () => {
      *
      * CDXC:SidebarTitlebarColors 2026-06-15-15:28:
      * Background tint is chosen with a web picker and then folded into the
-     * computed background hex as a subtle hue offset. Neutral #808080 must keep
+     * computed background hex as a calibrated dark tint. Neutral #808080 must keep
      * existing Dark Gray output unchanged.
      *
      * CDXC:SettingsTheming 2026-06-15-21:35:
@@ -788,21 +790,30 @@ describe("normalizeghostexSettings", () => {
      * compatibility field to true so visible Theming controls always apply.
      *
      * CDXC:SidebarTitlebarColors 2026-06-16-14:28:
-     * The custom chrome default is 93 contrast with white #FFFFFF tint. Missing
+     * The custom chrome default is 95 contrast with white #FFFFFF tint. Missing
      * settings must use that explicit slider default, while valid legacy saved
      * background colors still seed the slider during migration.
+     *
+     * CDXC:SidebarTitlebarColors 2026-06-19-14:20:
+     * Preset tint previews stay brighter than the applied chrome. The default
+     * applied backgrounds should be very dark, including #0d0005 for red and
+     * #0c0e11 for blue, while white and black remain neutral instead of
+     * receiving a blue cast.
      */
     expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarColorsEnabled).toBe(true);
     expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarForegroundColor).toBe("#d8d8d8");
     expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor).toBe("#ffffff");
-    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundDarknessPercent).toBe(93);
-    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundColor).toBe("#141414");
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundDarknessPercent).toBe(95);
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundColor).toBe("#0e0e0e");
+    expect(getSidebarTitlebarBackgroundForDarkness(95, "#884444")).toBe("#0d0005");
+    expect(getSidebarTitlebarBackgroundForDarkness(95, "#336699")).toBe("#0c0e11");
+    expect(getSidebarTitlebarBackgroundForDarkness(95, "#000000")).toBe("#000000");
     expect(normalizeghostexSettings({})).toMatchObject({
       customSidebarTitlebarColorsEnabled: true,
       customSidebarTitlebarForegroundColor: "#d8d8d8",
       customSidebarTitlebarBackgroundTintColor: "#ffffff",
-      customSidebarTitlebarBackgroundDarknessPercent: 93,
-      customSidebarTitlebarBackgroundColor: "#141414",
+      customSidebarTitlebarBackgroundDarknessPercent: 95,
+      customSidebarTitlebarBackgroundColor: "#0e0e0e",
     });
     expect(
       normalizeghostexSettings({
@@ -826,7 +837,7 @@ describe("normalizeghostexSettings", () => {
       customSidebarTitlebarForegroundColor: "#d8d8d8",
       customSidebarTitlebarBackgroundTintColor: "#336699",
       customSidebarTitlebarBackgroundDarknessPercent: 85,
-      customSidebarTitlebarBackgroundColor: "#242a30",
+      customSidebarTitlebarBackgroundColor: "#242a33",
     });
     expect(
       normalizeghostexSettings({
@@ -849,8 +860,45 @@ describe("normalizeghostexSettings", () => {
       }),
     ).toMatchObject({
       customSidebarTitlebarForegroundColor: "#d8d8d8",
-      customSidebarTitlebarBackgroundDarknessPercent: 93,
-      customSidebarTitlebarBackgroundColor: "#141414",
+      customSidebarTitlebarBackgroundDarknessPercent: 95,
+      customSidebarTitlebarBackgroundColor: "#0e0e0e",
+    });
+  });
+
+  test("derives fixed-strength sidebar and titlebar gradient stops from custom chrome color", () => {
+    /*
+     * CDXC:SidebarTitlebarColors 2026-06-19-12:33:
+     * Custom sidebar chrome should use a deterministic gradient with the same
+     * endpoint distance for neutral and tinted backgrounds. The titlebar starts
+     * from the sidebar top stop and moves to the sidebar bottom stop.
+     *
+     * CDXC:SidebarTitlebarColors 2026-06-19-14:20:
+     * White, black, and gray custom chrome must stay neutral. The old cool
+     * fallback direction should not add blue to same-channel backgrounds.
+     */
+    expect(getSidebarTitlebarGradientColors("#0e0e0e")).toEqual({
+      sidebarTop: "#0e0e0e",
+      sidebarBottom: "#0e0e0e",
+      titlebarLeft: "#0e0e0e",
+      titlebarRight: "#0e0e0e",
+    });
+    expect(getSidebarTitlebarGradientColors("#000000")).toEqual({
+      sidebarTop: "#000000",
+      sidebarBottom: "#000000",
+      titlebarLeft: "#000000",
+      titlebarRight: "#000000",
+    });
+    expect(getSidebarTitlebarGradientColors("#0c0e11")).toEqual({
+      sidebarTop: "#0a0e13",
+      sidebarBottom: "#030d1b",
+      titlebarLeft: "#0a0e13",
+      titlebarRight: "#030d1b",
+    });
+    expect(getSidebarTitlebarGradientColors("invalid")).toEqual({
+      sidebarTop: "#0e0e0e",
+      sidebarBottom: "#0e0e0e",
+      titlebarLeft: "#0e0e0e",
+      titlebarRight: "#0e0e0e",
     });
   });
 

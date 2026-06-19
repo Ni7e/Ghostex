@@ -90,10 +90,27 @@ export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_FOREGROUND_COLOR = "#d8d8d8";
 export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_DARK_FOREGROUND_COLOR = "#262626";
 export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR = "#0e0e0e";
 export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR = "#ffffff";
-export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 93;
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 95;
 export const MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 85;
 export const MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 100;
-const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_STRENGTH = 0.12;
+const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARK_TINTS: ReadonlyMap<string, string> = new Map([
+  ["#000000", "#000000"],
+  ["#ffffff", "#0e0e0e"],
+  ["#808080", "#0e0e0e"],
+  ["#4f6672", "#0c0e10"],
+  ["#884444", "#0d0005"],
+  ["#8a5330", "#100502"],
+  ["#8a6a2f", "#110a02"],
+  ["#657a3f", "#0c1005"],
+  ["#3f7a5f", "#031006"],
+  ["#2f7d66", "#03100c"],
+  ["#287c7f", "#031011"],
+  ["#336699", "#0c0e11"],
+  ["#4f5f96", "#080912"],
+  ["#6c4f8f", "#0a0611"],
+  ["#854f7a", "#100611"],
+  ["#8a4f5f", "#100409"],
+]);
 export const SESSION_TITLE_GENERATION_AGENT_OPTIONS: ReadonlyArray<{
   label: string;
   value: SessionTitleGenerationAgent;
@@ -145,6 +162,71 @@ function clampColorChannel(value: number): number {
   return Math.min(255, Math.max(0, Math.round(value)));
 }
 
+type SidebarTitlebarRgbColor = {
+  blue: number;
+  green: number;
+  red: number;
+};
+
+function parseSidebarTitlebarHexColor(color: string): SidebarTitlebarRgbColor {
+  const normalized = normalizeSidebarTitlebarHexColor(
+    color,
+    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR,
+  );
+  return {
+    red: Number.parseInt(normalized.slice(1, 3), 16),
+    green: Number.parseInt(normalized.slice(3, 5), 16),
+    blue: Number.parseInt(normalized.slice(5, 7), 16),
+  };
+}
+
+function formatSidebarTitlebarHexColor(color: SidebarTitlebarRgbColor): string {
+  return `#${[color.red, color.green, color.blue]
+    .map((channel) => clampColorChannel(channel).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function scaleSidebarTitlebarVector(color: SidebarTitlebarRgbColor, amount: number): SidebarTitlebarRgbColor {
+  return {
+    red: color.red * amount,
+    green: color.green * amount,
+    blue: color.blue * amount,
+  };
+}
+
+function addSidebarTitlebarColors(
+  base: SidebarTitlebarRgbColor,
+  offset: SidebarTitlebarRgbColor,
+): SidebarTitlebarRgbColor {
+  return {
+    red: base.red + offset.red,
+    green: base.green + offset.green,
+    blue: base.blue + offset.blue,
+  };
+}
+
+function normalizedSidebarTitlebarTintDirection(background: SidebarTitlebarRgbColor): SidebarTitlebarRgbColor {
+  const average = (background.red + background.green + background.blue) / 3;
+  const direction = {
+    red: background.red - average,
+    green: background.green - average,
+    blue: background.blue - average,
+  };
+  const magnitude = Math.max(
+    Math.abs(direction.red),
+    Math.abs(direction.green),
+    Math.abs(direction.blue),
+  );
+  if (magnitude < 0.5) {
+    return {
+      red: 0,
+      green: 0,
+      blue: 0,
+    };
+  }
+  return scaleSidebarTitlebarVector(direction, 1 / magnitude);
+}
+
 export function clampSidebarTitlebarBackgroundDarknessPercent(value: number): number {
   if (!Number.isFinite(value)) {
     return DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT;
@@ -167,6 +249,45 @@ function getSidebarTitlebarBackgroundDarknessForColor(backgroundColor: string): 
   return clampSidebarTitlebarBackgroundDarknessPercent((1 - luminance) * 100);
 }
 
+function isNeutralSidebarTitlebarColor(color: SidebarTitlebarRgbColor): boolean {
+  return Math.max(color.red, color.green, color.blue) - Math.min(color.red, color.green, color.blue) < 1;
+}
+
+function getSidebarTitlebarDefaultDarkTintBackground(tint: string): SidebarTitlebarRgbColor {
+  const calibratedTintBackground = CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARK_TINTS.get(tint);
+  if (calibratedTintBackground) {
+    return parseSidebarTitlebarHexColor(calibratedTintBackground);
+  }
+
+  const color = parseSidebarTitlebarHexColor(tint);
+  if (isNeutralSidebarTitlebarColor(color)) {
+    return parseSidebarTitlebarHexColor(DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR);
+  }
+
+  const direction = normalizedSidebarTitlebarTintDirection(color);
+  const base = parseSidebarTitlebarHexColor(DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR);
+  return addSidebarTitlebarColors(base, scaleSidebarTitlebarVector(direction, 4));
+}
+
+function scaleSidebarTitlebarDefaultDarkTintBackground(
+  background: SidebarTitlebarRgbColor,
+  darknessPercent: number,
+): SidebarTitlebarRgbColor {
+  if (darknessPercent === MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT) {
+    return { red: 0, green: 0, blue: 0 };
+  }
+  const defaultRange =
+    MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT -
+    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT;
+  const scale =
+    (MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT - darknessPercent) / defaultRange;
+  return {
+    red: background.red * scale,
+    green: background.green * scale,
+    blue: background.blue * scale,
+  };
+}
+
 export function getSidebarTitlebarBackgroundForDarkness(
   darknessPercent: number,
   tintColor = DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
@@ -174,9 +295,9 @@ export function getSidebarTitlebarBackgroundForDarkness(
   /**
    * CDXC:SidebarTitlebarColors 2026-06-15-13:45:
    * Replace the freeform custom background color picker with a contrast slider.
-   * The slider produces grayscale-only sidebar/titlebar backgrounds so custom
-   * chrome can vary in contrast without introducing arbitrary hues that break
-   * sidebar row contrast.
+   * The slider controls how strongly the calibrated dark tint background is
+   * applied so custom chrome can vary in contrast without turning into
+   * arbitrary bright sidebar colors.
    *
    * CDXC:SidebarTitlebarColors 2026-06-15-15:01:
    * Limit the contrast slider to 85-100 so custom chrome stays in the dark
@@ -188,30 +309,32 @@ export function getSidebarTitlebarBackgroundForDarkness(
    *
    * CDXC:SidebarTitlebarColors 2026-06-15-15:28:
    * Add a web-only tint picker without returning to arbitrary background
-   * colors. Apply a small hue offset around the contrast-selected gray so tint
-   * changes are subtle and neutral #808080 preserves the original gray.
+   * colors. Map tint choices to dark applied backgrounds so tint changes are
+   * subtle and neutral #808080 preserves the original gray.
    *
    * CDXC:SidebarTitlebarColors 2026-06-16-14:28:
-   * Default custom chrome should now use 93 contrast with white tint. White
-   * remains neutral in the hue-offset algorithm because all channels match,
-   * while saved non-neutral tints still introduce only a small hue offset.
+   * Default custom chrome should now use 95 contrast with white tint. White
+   * remains neutral in the calibrated tint table because all same-channel
+   * tints should keep the sidebar/titlebar background gray.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-19-14:20:
+   * Tint swatches stay visually legible in Settings, but applied custom chrome
+   * should default to calibrated very-dark backgrounds such as #0d0005 for red
+   * and #0c0e11 for blue. Scale those dark targets with the Contrast slider,
+   * and keep same-channel tints such as white, black, and gray neutral instead
+   * of adding a blue cast.
    */
   const darkness = clampSidebarTitlebarBackgroundDarknessPercent(darknessPercent);
-  const baseChannel =
-    darkness === 100 ? 0 : Math.min(255, Math.round(280 * ((100 - darkness) / 100)));
   const tint = normalizeSidebarTitlebarHexColor(
     tintColor,
     DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
   );
-  const tintRed = Number.parseInt(tint.slice(1, 3), 16);
-  const tintGreen = Number.parseInt(tint.slice(3, 5), 16);
-  const tintBlue = Number.parseInt(tint.slice(5, 7), 16);
-  const tintAverage = (tintRed + tintGreen + tintBlue) / 3;
-  const channels = [tintRed, tintGreen, tintBlue].map((channel) =>
-    clampColorChannel(
-      baseChannel + (channel - tintAverage) * CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_STRENGTH,
-    ),
+  const defaultDarkTintBackground = getSidebarTitlebarDefaultDarkTintBackground(tint);
+  const background = scaleSidebarTitlebarDefaultDarkTintBackground(
+    defaultDarkTintBackground,
+    darkness,
   );
+  const channels = [background.red, background.green, background.blue].map(clampColorChannel);
   return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
 }
 
@@ -234,6 +357,43 @@ export function getSidebarTitlebarForegroundForBackground(backgroundColor: strin
   return luminance > 0.54
     ? DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_DARK_FOREGROUND_COLOR
     : DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_FOREGROUND_COLOR;
+}
+
+export type SidebarTitlebarGradientColors = {
+  sidebarBottom: string;
+  sidebarTop: string;
+  titlebarLeft: string;
+  titlebarRight: string;
+};
+
+export function getSidebarTitlebarGradientColors(backgroundColor: string): SidebarTitlebarGradientColors {
+  /*
+   * CDXC:SidebarTitlebarColors 2026-06-19-12:33:
+   * Custom sidebar chrome should render as a fixed-strength gradient instead of
+   * a flat color. Derive the hue direction from the resolved tint-adjusted
+   * background, normalize it so every tint uses the same gradient degree, and
+   * keep neutral white/black/gray tints on a neutral gray gradient.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-19-13:26:
+   * The titlebar should share the sidebar's gradient stops: left side matches
+   * the sidebar top stop and right side matches the sidebar bottom stop so the
+   * chrome fades darker across the titlebar instead of brighter.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-19-14:20:
+   * Same-channel tint outputs must not receive the older blue fallback
+   * direction. White and black selections should leave the dark sidebar area
+   * neutral instead of shifting it toward blue.
+   */
+  const base = parseSidebarTitlebarHexColor(backgroundColor);
+  const tintDirection = normalizedSidebarTitlebarTintDirection(base);
+  const sidebarTop = addSidebarTitlebarColors(base, scaleSidebarTitlebarVector(tintDirection, 2));
+  const sidebarBottom = addSidebarTitlebarColors(base, scaleSidebarTitlebarVector(tintDirection, 10));
+  return {
+    sidebarTop: formatSidebarTitlebarHexColor(sidebarTop),
+    sidebarBottom: formatSidebarTitlebarHexColor(sidebarBottom),
+    titlebarLeft: formatSidebarTitlebarHexColor(sidebarTop),
+    titlebarRight: formatSidebarTitlebarHexColor(sidebarBottom),
+  };
 }
 
 /**
@@ -420,7 +580,7 @@ export type ghostexSettings = {
    *
    * CDXC:SidebarTitlebarColors 2026-06-15-13:45:
    * Users now tune the custom sidebar/titlebar background through a contrast
-   * slider. Keep the background color field as the computed grayscale protocol
+   * slider. Keep the background color field as the computed dark protocol
    * value, not as a user-editable setting.
    *
    * CDXC:SidebarTitlebarColors 2026-06-15-15:15:
@@ -789,9 +949,16 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   keepAwakePreventLidSleep: false,
   /**
    * CDXC:TitlebarKeepAwake 2026-05-27-07:32:
-   * The titlebar keep-awake affordance is optional chrome. Keep it visible by
-   * default, but persist a Power setting that can remove the titlebar control
-   * completely for users who do not use Mac sleep management from Ghostex.
+   * The titlebar keep-awake affordance is optional chrome. Keep the per-control
+   * hide preference off by default, but persist a Power setting that can remove
+   * the titlebar control completely for users who do not use Mac sleep
+   * management from Ghostex.
+   *
+   * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
+   * Keep Awake is now a beta-gated macOS feature. The Show Beta features gate
+   * must be enabled before the titlebar button or runtime automation is
+   * available; this preference only hides the button again inside that beta-on
+   * state.
    */
   hideKeepAwakeTitlebarControl: false,
   /**
@@ -898,8 +1065,8 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    *
    * CDXC:SidebarTitlebarColors 2026-06-15-13:45:
    * The custom background contrast slider defaults near Dark Gray and is
-   * restricted to dark grayscale values to avoid arbitrary color blends in
-   * sidebar rows.
+   * restricted to dark applied values to avoid arbitrary bright color blends
+   * in sidebar rows.
    *
    * CDXC:SidebarTitlebarColors 2026-06-15-15:01:
    * Clamp the slider to 85-100 per visual review; lighter values made the
@@ -911,11 +1078,11 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    *
    * CDXC:SidebarTitlebarColors 2026-06-15-15:28:
    * The tint picker originally defaulted to neutral #808080. The tint
-   * algorithm uses hue offset around the selected contrast gray, so neutral
-   * same-channel tints do not change Dark Gray chrome.
+   * algorithm now maps picker colors to very dark chrome backgrounds, so
+   * neutral same-channel tints do not change Dark Gray chrome.
    *
    * CDXC:SidebarTitlebarColors 2026-06-16-14:28:
-   * The custom chrome default is now 93 contrast with white #FFFFFF tint.
+   * The custom chrome default is now 95 contrast with white #FFFFFF tint.
    * Store the computed default background with those controls so Settings,
    * native startup, and protocol snapshots agree.
    *
@@ -1220,7 +1387,7 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
   );
   /**
    * CDXC:SidebarTitlebarColors 2026-06-16-14:28:
-   * Missing Settings should use the explicit 93 contrast default instead of
+   * Missing Settings should use the explicit 95 contrast default instead of
    * reverse-mapping the default background hex, because that reverse mapping
    * cannot exactly invert the slider's channel curve. Only valid legacy saved
    * background colors should continue to seed the slider during migration.
@@ -1582,6 +1749,10 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
      * CDXC:TitlebarKeepAwake 2026-05-27-07:32:
      * Normalize the hide preference independently from the caffeinate rules so
      * hiding titlebar chrome does not rewrite existing power automation settings.
+     *
+     * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
+     * Keep the persisted hide preference independent from the beta gate because
+     * the titlebar bridge computes effective visibility from both settings.
      */
     hideKeepAwakeTitlebarControl: readBoolean(
       source,

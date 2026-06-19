@@ -452,6 +452,19 @@ button,
  modal while keeping the border inside the exact native child-window frame.
 */
 .ghostex-settings-shadcn.settings-modal-dialog {
+  /*
+   * CDXC:SettingsNavigation 2026-06-19-11:15:
+   * Superseded by CDXC:SettingsNavigation 2026-06-19-12:18.
+   *
+   * CDXC:SettingsNavigation 2026-06-19-12:18:
+   * Settings and Hotkeys section navigation should float over the left side of
+   * the settings pages instead of reserving a layout column. Keep shared panel
+   * geometry on the modal root so the floating rail can sit consistently near
+   * the tabs row without shifting the centered search and card columns.
+   */
+  --settings-section-sidebar-left: 1rem;
+  --settings-section-sidebar-tabs-offset: 3.25rem;
+  --settings-section-sidebar-width: 12rem;
   container-name: settings-modal;
   container-type: inline-size;
   height: min(860px, calc(100vh - 1rem));
@@ -472,7 +485,8 @@ button,
 }
 
 .ghostex-settings-shadcn.settings-modal-dialog .ghostex-modal-heading-bar {
-  padding-right: 1.25rem;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .ghostex-settings-shadcn .settings-modal-title-row {
@@ -481,6 +495,7 @@ button,
   gap: 1rem;
   justify-content: flex-start;
   min-width: 0;
+  padding-inline: 1.25rem;
 }
 
 @media (max-width: 760px) {
@@ -2027,29 +2042,17 @@ button,
    * CDXC:SettingsNavigation 2026-06-19-10:30:
    * The Settings sidebar should start at the tab bar instead of below the search field, stay transparent over the modal surface, and be 20px wider than the first owned-column layout.
    *
-   * CDXC:SettingsNavigation 2026-06-19-10:36:
-   * The tabs row should span the full Settings modal width, while search aligns
-   * to the same centered content column as the settings cards. Draw the sidebar
-   * divider from the shared layout so it stays continuous through the header gap.
+   * CDXC:SettingsNavigation 2026-06-19-11:15:
+   * Superseded by CDXC:SettingsNavigation 2026-06-19-12:18.
+   *
+   * CDXC:SettingsNavigation 2026-06-19-12:18:
+   * The section rail is a floating overlay in General Settings and Hotkeys, so
+   * it must not reserve a column that pushes the main settings content right.
    */
-  --settings-section-sidebar-tabs-offset: 3.25rem;
-  --settings-section-sidebar-width: 12rem;
-  display: grid;
-  grid-template-columns: var(--settings-section-sidebar-width) minmax(0, 1fr);
+  display: block;
   height: 100%;
   min-height: 0;
   position: relative;
-}
-
-.ghostex-settings-shadcn .settings-main-tab-layout::before {
-  border-right: 1px solid var(--border);
-  bottom: 0;
-  content: "";
-  left: var(--settings-section-sidebar-width);
-  pointer-events: none;
-  position: absolute;
-  top: calc(var(--settings-section-sidebar-tabs-offset) * -1);
-  z-index: 0;
 }
 
 .ghostex-settings-shadcn .settings-main-tabs-content {
@@ -2063,7 +2066,6 @@ button,
 }
 
 .ghostex-settings-shadcn .settings-main-scroll {
-  grid-column: 2;
   height: 100%;
   min-height: 0;
 }
@@ -2086,21 +2088,33 @@ button,
 }
 
 .ghostex-settings-shadcn .settings-section-sidebar {
-  background: transparent;
+  background: color-mix(in srgb, var(--app-modal-background) 78%, var(--muted) 22%);
+  border: 1px solid var(--border);
+  border-radius: var(--settings-radius-section);
+  box-shadow: 0 0.75rem 1.75rem rgb(0 0 0 / 24%);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  left: var(--settings-section-sidebar-left);
   min-height: 0;
   overflow: hidden;
   padding: 0.625rem 0.5rem;
-  transform: translateY(calc(var(--settings-section-sidebar-tabs-offset) * -1));
-  height: calc(100% + var(--settings-section-sidebar-tabs-offset));
-  position: relative;
-  z-index: 1;
+  position: absolute;
+  top: calc(var(--settings-section-sidebar-tabs-offset) * -1);
+  bottom: 1rem;
+  width: var(--settings-section-sidebar-width);
+  z-index: 2;
 }
 
 .ghostex-settings-shadcn .settings-section-sidebar-list {
+  /*
+   * CDXC:ScrollFades 2026-06-19-14:16:
+   * Settings section navigation can scroll independently from the main page.
+   * Use the shared Codex-style mask so the rail matches command palettes,
+   * dropdowns, and sidebar lists.
+   */
+  --edge-fade-distance: 12px;
   align-content: start;
   display: grid;
   gap: 0.25rem;
@@ -2168,33 +2182,78 @@ button,
 }
 
 .ghostex-settings-shadcn .settings-modal-tabs-scroll {
+  /*
+   * CDXC:SettingsNavigation 2026-06-19-11:15:
+   * Tabs should fill the Settings modal, not the centered settings-card column.
+   *
+   * CDXC:SettingsNavigation 2026-06-19-12:22:
+   * The Settings tab rail should be darker than the prior muted strip while
+   * staying in the same neutral surface family as settings cards. Use a
+   * stronger selected-tab fill, border, and foreground contrast so the active
+   * Settings tab is immediately readable.
+   *
+   * CDXC:SettingsNavigation 2026-06-19-12:34:
+   * Keep the tabs rail inset 16px from the modal's left and right edges so the
+   * darker strip does not run flush into the Settings window frame.
+   */
+  margin-inline: 1rem;
   min-width: 0;
-  width: 100%;
+  width: calc(100% - 2rem);
 }
 
 .ghostex-settings-shadcn .settings-modal-tabs-scroll [data-slot="tabs-list"] {
+  background: color-mix(in srgb, var(--app-modal-background) 72%, var(--muted) 28%) !important;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   display: grid !important;
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
+  padding: 0.1875rem !important;
   width: 100% !important;
 }
 
 .ghostex-settings-shadcn .settings-modal-tabs-scroll [data-slot="tabs-trigger"] {
+  color: color-mix(in srgb, var(--muted-foreground) 84%, var(--foreground) 16%);
+  font-weight: 500;
   min-width: 0;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
   width: 100%;
 }
 
+.ghostex-settings-shadcn .settings-modal-tabs-scroll [data-slot="tabs-trigger"]:hover {
+  background: color-mix(in srgb, var(--app-modal-background) 60%, var(--muted) 40%) !important;
+  color: color-mix(in srgb, var(--foreground) 86%, var(--muted-foreground) 14%);
+}
+
+.ghostex-settings-shadcn .settings-modal-tabs-scroll [data-slot="tabs-trigger"][data-active] {
+  background: color-mix(in srgb, var(--app-modal-background) 42%, var(--muted) 58%) !important;
+  border-color: color-mix(in srgb, var(--foreground) 20%, var(--border) 80%) !important;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent),
+    0 1px 0 rgb(0 0 0 / 18%);
+  color: var(--foreground);
+  font-weight: 650;
+}
+
 .ghostex-settings-shadcn .settings-modal-search-row {
+  /*
+   * CDXC:SettingsNavigation 2026-06-19-11:15:
+   * Superseded by CDXC:SettingsNavigation 2026-06-19-12:18.
+   *
+   * CDXC:SettingsNavigation 2026-06-19-12:18:
+   * Settings and Hotkeys search should center over the same card column as the
+   * settings body, independent of the floating sidebar overlay.
+   */
   box-sizing: border-box;
-  display: grid;
-  grid-template-columns: var(--settings-section-sidebar-width) minmax(0, 1fr);
+  display: block;
   margin-top: 0.75rem;
   width: 100%;
 }
 
 .ghostex-settings-shadcn .settings-modal-search-toolbar {
   box-sizing: border-box;
-  grid-column: 2;
   margin-inline: auto;
   max-width: var(--settings-content-max-width, 770px);
   padding-inline: var(--settings-content-inline-padding, 1.25rem);
