@@ -1,9 +1,5 @@
 # Rules for Agents working in this Repository
 
-## Rules for running commands
-
-- Never run "bun run start" or any command that would restart the app unless I ask you to.
-
 ## Repository Search Routing
 
 This repository contains Ghostex app code plus large imported/vendored terminal code. Start searches in the smallest app-owned area that matches the task, and only expand after the first pass doesn't find what you need.
@@ -131,3 +127,8 @@ Before running any destructive command, including but not limited to `git restor
 4. Ask for explicit approval before executing the destructive command.
 
 If the user asks to revert only the agent's changes, use surgical reversal: inspect diffs, identify the exact hunks/files you changed, and revert only those. When uncertain, stop and ask. Never use broad restore/clean commands as a shortcut.
+
+
+## Rules for running commands
+
+- Never run "bun run start" or any command that would restart the app unless I ask you to.
