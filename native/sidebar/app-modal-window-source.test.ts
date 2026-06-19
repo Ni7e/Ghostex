@@ -137,7 +137,9 @@ describe("native app modal window source", () => {
     expect(appDelegateSource).toContain('case "floatingPromptEditorDraftUpdate":');
     expect(appDelegateSource).toContain("updateFloatingPromptEditorDraft(message: message)");
     expect(appDelegateSource).toContain("func saveActiveFloatingPromptEditorForAppLifecycleClose(reason: String)");
-    expect(appDelegateSource).toContain("writeFloatingPromptEditorStatusFile(active.statusFile, status: \"saved\")");
+    expect(appDelegateSource).toContain(
+      'writeFloatingPromptEditorStatusFile(active.statusFile, status: "saved", requestId: active.requestId)',
+    );
     expect(appDelegateSource).toContain(
       "saveActiveFloatingPromptEditorForAppLifecycleClose(\n      reason: \"mainWindowWillClose\")",
     );

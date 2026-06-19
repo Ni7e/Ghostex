@@ -167,7 +167,6 @@ function SettingsModalStory({
         }
         onInstallGhostexCli={() => setGhostexCliStatus({ ...ghostexCliStatus, installed: true })}
         onOpenAccessibilityPreferences={() => undefined}
-        onOpenFirstLaunchSetup={() => undefined}
         onOpenScreenRecordingPreferences={() => undefined}
         onRequestAgentHookStatus={() => undefined}
         onRequestGhostexCliStatus={() => undefined}
