@@ -7,13 +7,11 @@ import {
   IconArrowRight,
   IconArrowsDiagonal2,
   IconArrowsDiagonalMinimize,
-  IconBookmark,
   IconCaretRightFilled,
   IconChevronDown,
   IconChevronRight,
   IconCheck,
   IconClock,
-  IconCommand,
   IconCopy,
   IconDownload,
   IconEdit,
@@ -23,18 +21,12 @@ import {
   IconFolder,
   IconFolderOpen,
   IconGitBranch,
-  IconHelpCircle,
   IconHistory,
   IconHistoryToggle,
-  IconKeyboard,
   IconLayoutSidebar,
-  IconMenu2Filled,
-  IconPencil,
-  IconPlayerPlay,
   IconPlus,
   IconPlusFilled,
   IconRefresh,
-  IconRobotFace,
   IconSearch,
   IconSettings,
   IconTerminal2,
@@ -203,11 +195,6 @@ type SidebarGroupsById = SidebarStoreState[ "groupsById" ];
 type SidebarSessionsById = SidebarStoreState[ "sessionsById" ];
 type RemoteMachineRuntimeStatus = Extract<ExtensionToSidebarMessage, { type: "remoteMachineStatus"; }>;
 type RemoteMachineRuntimeStatuses = Record<string, RemoteMachineRuntimeStatus[ "state" ]>;
-type FloatingMenuPosition = {
-  right: number;
-  top: number;
-};
-
 type HeaderSortMenuPosition = {
   left: number;
   top: number;
@@ -548,7 +535,6 @@ const SIDEBAR_POINTER_DRAG_REORDER_THRESHOLD_PX = 8;
 const SIDEBAR_GXSERVER_UNAVAILABLE_GROUP_ID = "gxserver-unavailable";
 const SIDEBAR_GXSERVER_UNAVAILABLE_EMPTY_STATE_DELAY_MS = 20_000;
 const SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY = "ghostex-sidebar-ui-collapse-state";
-const GHOSTEX_DISCORD_URL = "https://discord.gg/df7b3G92CS";
 const MIN_SESSION_SEARCH_QUERY_LENGTH = 2;
 const COMPLETION_FLASH_DURATION_MS = 3_000;
 const DEBUG_BUILD_STAMP_STYLE: CSSProperties = {
@@ -717,7 +703,6 @@ export function SidebarApp({
   const [ isStartupInteractionBlocked, setIsStartupInteractionBlocked ] = useState(true);
   const [ autoEditingGroupId, setAutoEditingGroupId ] = useState<string>();
   const [ agentCreateRequestId, setAgentCreateRequestId ] = useState(0);
-  const [ isOverflowMenuOpen, setIsOverflowMenuOpen ] = useState(false);
   const [ isDaemonSessionsOpen, setIsDaemonSessionsOpen ] = useState(false);
   const [ isPinnedPromptsOpen, setIsPinnedPromptsOpen ] = useState(false);
   const [ isPreviousSessionsOpen, setIsPreviousSessionsOpen ] = useState(false);
@@ -764,8 +749,6 @@ export function SidebarApp({
   const [ pinnedSessionDropIndicator, setPinnedSessionDropIndicator ] =
     useState<SidebarSessionDropTarget>();
   const [ sessionDropIndicatorGroupId, setSessionDropIndicatorGroupId ] = useState<string>();
-  const [ overflowMenuAnchor, setOverflowMenuAnchor ] = useState<HTMLElement>();
-  const [ overflowMenuPosition, setOverflowMenuPosition ] = useState<FloatingMenuPosition>();
   const [ isSessionSearchSelectionVisible, setIsSessionSearchSelectionVisible ] = useState(false);
   const [ focusedSessionRevealRequestId, setFocusedSessionRevealRequestId ] = useState(0);
   const [ showGxserverUnavailableEmptyState, setShowGxserverUnavailableEmptyState ] =
@@ -774,7 +757,6 @@ export function SidebarApp({
     useState<SidebarSessionSearchSelection>();
   const pendingCreateGroupRef = useRef(false);
   const didResetStoreRef = useRef(false);
-  const overflowMenuRef = useRef<HTMLDivElement>(null);
   const sessionGroupsPanelRef = useRef<HTMLElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const recentProjectsSearchInputRef = useRef<HTMLInputElement>(null);
@@ -1870,102 +1852,6 @@ export function SidebarApp({
 
     sessionGroupsPanelRef.current.inert = isSidebarInteractionBlocked;
   }, [ isSidebarInteractionBlocked ]);
-
-  useEffect(() => {
-    if (!isOverflowMenuOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) {
-        return;
-      }
-
-      if (overflowMenuRef.current?.contains(target)) {
-        return;
-      }
-
-      if (target instanceof Element && target.closest('[data-sidebar-overflow-trigger="true"]')) {
-        return;
-      }
-
-      setIsOverflowMenuOpen(false);
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsOverflowMenuOpen(false);
-      }
-    };
-
-    const handleBlur = () => {
-      setIsOverflowMenuOpen(false);
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== "visible") {
-        setIsOverflowMenuOpen(false);
-      }
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("blur", handleBlur);
-
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("blur", handleBlur);
-    };
-  }, [ isOverflowMenuOpen ]);
-
-  useEffect(() => {
-    if (!isOverflowMenuOpen || !overflowMenuAnchor) {
-      setOverflowMenuPosition(undefined);
-      return;
-    }
-
-    const updateOverflowMenuPosition = () => {
-      if (!overflowMenuAnchor.isConnected) {
-        setIsOverflowMenuOpen(false);
-        setOverflowMenuAnchor(undefined);
-        return;
-      }
-
-      const triggerBounds = overflowMenuAnchor.getBoundingClientRect();
-      if (!triggerBounds) {
-        return;
-      }
-
-      /*
-       * CDXC:Sidebar-overflow-menu 2026-05-04-07:47
-       * The overflow menu's right edge must sit directly below the overflow
-       * trigger's right edge. Fixed right positioning avoids transform/width
-       * rounding drift and preserves the sidebar-width cap from CSS.
-       */
-      setOverflowMenuPosition({
-        right: Math.max(0, window.innerWidth - triggerBounds.right),
-        top: triggerBounds.bottom + 6,
-      });
-    };
-
-    updateOverflowMenuPosition();
-    window.addEventListener("resize", updateOverflowMenuPosition);
-    window.addEventListener("scroll", updateOverflowMenuPosition, true);
-
-    return () => {
-      window.removeEventListener("resize", updateOverflowMenuPosition);
-      window.removeEventListener("scroll", updateOverflowMenuPosition, true);
-    };
-  }, [ isOverflowMenuOpen, overflowMenuAnchor ]);
-
-  const toggleOverflowMenu = (trigger: HTMLElement) => {
-    setOverflowMenuAnchor(trigger);
-    setIsOverflowMenuOpen((previous) => !previous);
-  };
 
   const triggerReferenceSectionChildAnimation = (section: ReferenceSidebarSectionId) => {
     /**
@@ -3265,31 +3151,7 @@ export function SidebarApp({
     });
   }) satisfies DragDropEventHandlers[ "onDragEnd" ];
 
-  const openScratchPad = () => {
-    setIsOverflowMenuOpen(false);
-    setIsDaemonSessionsOpen(false);
-    setIsPinnedPromptsOpen(false);
-    setIsPreviousSessionsOpen(false);
-    setIsSessionSearchSelectionVisible(false);
-    setIsSessionSearchOpen(false);
-    setSessionSearchQuery("");
-    openAppModal({ modal: "scratchPad", type: "open" });
-  };
-
-  const openRunningSessions = () => {
-    setIsOverflowMenuOpen(false);
-    setIsPinnedPromptsOpen(false);
-    setIsPreviousSessionsOpen(false);
-    setIsScratchPadOpen(false);
-    setIsSessionSearchSelectionVisible(false);
-    setIsSessionSearchOpen(false);
-    setSessionSearchQuery("");
-    openAppModal({ modal: "daemonSessions", type: "open" });
-    vscode.postMessage({ type: "refreshDaemonSessions" });
-  };
-
   const openSidebarSettings = () => {
-    setIsOverflowMenuOpen(false);
     setIsPinnedPromptsOpen(false);
     if (!settings) {
       vscode.postMessage({ type: "openSettings" });
@@ -3302,18 +3164,6 @@ export function SidebarApp({
     setIsSessionSearchOpen(false);
     setSessionSearchQuery("");
     openAppModal({ modal: "settings", type: "open" });
-  };
-
-  const openHotkeys = () => {
-    setIsOverflowMenuOpen(false);
-    setIsPinnedPromptsOpen(false);
-    setIsPreviousSessionsOpen(false);
-    setIsDaemonSessionsOpen(false);
-    setIsScratchPadOpen(false);
-    setIsSessionSearchSelectionVisible(false);
-    setIsSessionSearchOpen(false);
-    setSessionSearchQuery("");
-    openAppModal({ modal: "hotkeys", type: "open" });
   };
 
   const openCommandPalette = (initialQuery = ">") => {
@@ -3334,8 +3184,7 @@ export function SidebarApp({
      * projects, collapsed projects, then previous sessions. Include the
      * sidebar collapse map with each open request so the native modal host does
      * not have to infer UI-only state from rendered DOM.
-     */
-    setIsOverflowMenuOpen(false);
+   */
     setIsPinnedPromptsOpen(false);
     setIsPreviousSessionsOpen(false);
     setIsDaemonSessionsOpen(false);
@@ -3385,11 +3234,6 @@ export function SidebarApp({
 
     if (isScratchPadOpen) {
       setIsScratchPadOpen(false);
-      return true;
-    }
-
-    if (isOverflowMenuOpen) {
-      setIsOverflowMenuOpen(false);
       return true;
     }
 
@@ -3511,7 +3355,6 @@ export function SidebarApp({
         isDaemonSessionsOpen ||
         isPreviousSessionsOpen ||
         isScratchPadOpen ||
-        isOverflowMenuOpen ||
         (isEditableSidebarKeyboardTarget(target) && !isSearchInputTarget)
       ) {
         return;
@@ -3573,7 +3416,6 @@ export function SidebarApp({
     closeTopmostSidebarOverlay,
     gitCommitDraft,
     isDaemonSessionsOpen,
-    isOverflowMenuOpen,
     isPreviousSessionsOpen,
     isScratchPadOpen,
     isSessionSearchOpen,
@@ -3622,7 +3464,6 @@ export function SidebarApp({
   };
 
   const setActiveSessionsSortMode = (sortMode: SidebarActiveSessionsSortMode) => {
-    setIsOverflowMenuOpen(false);
     vscode.postMessage({
       manualSessionIdsByGroup:
         sortMode === "manual" && activeSessionsSortMode !== "manual"
@@ -3657,13 +3498,11 @@ export function SidebarApp({
 
   const moveSidebar = () => {
     dismissAppModalForSidebarNavigation("SettingsDismissal:moveSidebar");
-    setIsOverflowMenuOpen(false);
     vscode.postMessage({ type: "moveSidebarToOtherSide" });
   };
 
   const toggleSidebarCollapsed = () => {
     dismissAppModalForSidebarNavigation("SettingsDismissal:toggleSidebar");
-    setIsOverflowMenuOpen(false);
     /**
      * CDXC:SidebarCollapse 2026-06-12-02:23:
      * Sidebar collapse is native chrome state. React requests the toggle, while
@@ -3672,83 +3511,20 @@ export function SidebarApp({
     vscode.postMessage({ type: "toggleSidebarCollapsed" });
   };
 
-  const openDiscoverGhostex = () => {
-    setIsOverflowMenuOpen(false);
-    /**
-     * CDXC:DiscoverGhostex 2026-06-16-00:26:
-     * The overflow help entry opens the replayable feature tour
-     * that is separate from first-launch setup. Keep hook repair inside Settings
-     * and onboarding while this menu item stays focused on discovery.
-     *
-     * CDXC:HighlightedFeatures 2026-06-16-08:17:
-     * The replayable feature-tour entry used the discoverGhostex modal id for
-     * first-run sequencing and native modal sizing.
-     *
-     * CDXC:GhostexTutorialVideo 2026-06-18-05:31:
-     * Keep the overflow Features entry available, but route it to the tutorial
-     * video modal so the old Highlighted Features modal remains unused.
-     */
-    openAppModal({ modal: "watchGhostexVideo", type: "open" });
-  };
-
-  const openGhostexTutorialVideo = () => {
-    setIsOverflowMenuOpen(false);
-    /**
-     * CDXC:GhostexTutorialVideo 2026-06-18-04:49:
-     * The sidebar help menu should expose the copied Highlighted Features shell
-     * as a separate Tutorial Video modal with the supplied Ghostty walkthrough.
-     */
-    openAppModal({ modal: "watchGhostexVideo", type: "open" });
-  };
-
-  const openFirstLaunchSetup = () => {
-    setIsOverflowMenuOpen(false);
-    /**
-     * CDXC:FirstLaunchSetup 2026-06-16-00:56:
-     * The overflow menu must expose the original first-launch setup flow as its
-     * own Setup Flow item immediately above Features, so users can
-     * reopen onboarding tasks without replacing the feature-tour entry.
-     */
-    openAppModal({ modal: "firstLaunchSetup", type: "open" });
-  };
-
-  const openDiscord = () => {
-    setIsOverflowMenuOpen(false);
-    /**
-     * CDXC:SidebarDiscord 2026-05-27-05:04:
-     * The top sidebar overflow menu should keep a bottom Discord entry so users
-     * can ask questions, report setup issues, or contribute without reopening
-     * onboarding.
-     */
-    vscode.postMessage({ type: "openExternalUrl", url: GHOSTEX_DISCORD_URL });
-  };
-
   const pickWorkspaceFolder = () => {
     dismissAppModalForSidebarNavigation("SettingsDismissal:pickWorkspaceFolder");
-    setIsOverflowMenuOpen(false);
     vscode.postMessage({ type: "pickWorkspaceFolder" });
-  };
-
-  const togglePetOverlay = () => {
-    setIsOverflowMenuOpen(false);
-    /**
-     * CDXC:PetOverlay 2026-05-17-02:03:
-     * Wake/Sleep Pet belongs in the sidebar overflow menu attached to the New
-     * Session row instead of the native titlebar. Reuse the settings-owned
-     * native toggle so the overlay, command palette, and Settings modal stay
-     * synchronized.
-     */
-    vscode.postMessage({ type: "togglePetOverlay" });
   };
 
   const createFullWidthTerminalPane = () => {
     dismissAppModalForSidebarNavigation("SettingsDismissal:commandsPane");
     /**
-     * CDXC:CommandsPanel 2026-05-13-17:02
-     * The Settings-row terminal shortcut keeps the legacy message name, but the
-     * native host now uses it as a Commands panel toggle.
+     * CDXC:CommandsPanel 2026-05-13-17:02:
+     * The legacy createFullWidthTerminalPane message is now the Commands panel toggle.
+     *
+     * CDXC:CommandsPanel 2026-06-18-23:28:
+     * The Commands panel shortcut lives on the Recent Projects header after Settings moved out of the sidebar footer. Keep the same native command so the host behavior does not fork by launcher.
      */
-    setIsOverflowMenuOpen(false);
     setIsPinnedPromptsOpen(false);
     setIsPreviousSessionsOpen(false);
     setIsDaemonSessionsOpen(false);
@@ -3817,7 +3593,6 @@ export function SidebarApp({
 
   const togglePinnedPrompts = () => {
     dismissAppModalForSidebarNavigation("SettingsDismissal:pinnedPrompts");
-    setIsOverflowMenuOpen(false);
     setIsDaemonSessionsOpen(false);
     setIsPreviousSessionsOpen(false);
     setIsScratchPadOpen(false);
@@ -3829,7 +3604,6 @@ export function SidebarApp({
 
   const openPreviousSessions = () => {
     dismissAppModalForSidebarNavigation("SettingsDismissal:previousSessions");
-    setIsOverflowMenuOpen(false);
     setIsPinnedPromptsOpen(false);
     setIsDaemonSessionsOpen(false);
     setIsScratchPadOpen(false);
@@ -3841,7 +3615,6 @@ export function SidebarApp({
 
   const searchPreviousSessionsByText = () => {
     dismissAppModalForSidebarNavigation("SettingsDismissal:previousSessionsTextSearch");
-    setIsOverflowMenuOpen(false);
     setIsPinnedPromptsOpen(false);
     setIsDaemonSessionsOpen(false);
     setIsScratchPadOpen(false);
@@ -3851,36 +3624,11 @@ export function SidebarApp({
     vscode.postMessage({ type: "searchPreviousSessionsByText" });
   };
 
-  const topControlOptions = {
-    commandPaletteMenuLabel: getCommandPaletteOverflowMenuLabel(
-      normalizeghostexHotkeySettings(settings?.hotkeys).openCommandPalette ?? "",
-    ),
-    isOverflowMenuOpen,
-    isPetOverlayEnabled: settings?.petOverlayEnabled === true,
-    isPinnedPromptsOpen,
-    isScratchPadOpen,
-    onMoveSidebar: moveSidebar,
-    onOpenCommandPalette: openCommandPalette,
-    onOpenDiscord: openDiscord,
-    onOpenFirstLaunchSetup: openFirstLaunchSetup,
-    onOpenHelp: openDiscoverGhostex,
-    onOpenHotkeys: openHotkeys,
-    onOpenTutorialVideo: openGhostexTutorialVideo,
-    onShowRunning: openRunningSessions,
-    onTogglePetOverlay: togglePetOverlay,
-    onTogglePinnedPrompts: togglePinnedPrompts,
-    onToggleMenu: toggleOverflowMenu,
-    onToggleScratchPad: openScratchPad,
-    overflowMenuPosition,
-    overflowMenuRef,
-  } satisfies RenderSidebarTopControlsOptions;
-
   return (
     <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
       <div className="sidebar-reference-layout" data-reference-sidebar="true">
         {showCommandHotkeyOverlay ? <SidebarHotkeyOverlay hotkeys={settings?.hotkeys} /> : null}
         <SidebarReferenceTopChrome
-          isOverflowMenuOpen={isOverflowMenuOpen}
           isSessionSearchOpen={isSessionSearchOpen}
           onCloseSearch={closeSessionSearch}
           onOpenAgentsHub={openReferenceAgentsHub}
@@ -3889,13 +3637,11 @@ export function SidebarApp({
           onOpenPreviousSessions={openPreviousSessions}
           onSearchPreviousSessionsByText={searchPreviousSessionsByText}
           onSearch={toggleSessionSearch}
-          onToggleMenu={toggleOverflowMenu}
           searchInputRef={searchInputRef}
           sessionSearchQuery={sessionSearchQuery}
           showBetaFeatures={settings?.showBetaFeatures === true}
           setSessionSearchQuery={setSessionSearchQuery}
         />
-        {renderFloatingOverflowMenu(topControlOptions)}
         <div
           className="stack"
           data-dimmed={String(isStartupInteractionBlocked)}
@@ -4280,46 +4026,65 @@ export function SidebarApp({
              * project and only create a blank terminal when no sessions were
              * preserved.
              */}
-              <button
-                aria-expanded={isRecentProjectsOpen}
-                className="recent-projects-drawer-toggle group-head"
-                data-collapsible="true"
-                onClick={() => {
-                  postSidebarCollapseStateLog("sectionToggle", {
-                    collapsed: !isRecentProjectsOpen,
-                    recentProjectCount: recentProjects.length,
-                    section: "recent-projects",
-                  });
-                  setRecentProjectContextMenuPosition(undefined);
-                  setIsRecentProjectsOpen((previous) => !previous);
-                }}
-                type="button"
-              >
-                <span className="group-title-wrap">
-                  <span className="group-title-row">
-                    <span
-                      aria-hidden="true"
-                      className="group-collapse-button section-titlebar-toggle"
-                      data-collapsed={String(!isRecentProjectsOpen)}
-                      data-has-idle-icon="true"
-                    >
-                      <span className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon">
-                        <IconHistory size={16} stroke={1.8} />
-                      </span>
-                      <IconCaretRightFilled
+              <div className="recent-projects-drawer-header reference-sidebar-nav-item">
+                <button
+                  aria-expanded={isRecentProjectsOpen}
+                  className="recent-projects-drawer-toggle group-head"
+                  data-collapsible="true"
+                  onClick={() => {
+                    postSidebarCollapseStateLog("sectionToggle", {
+                      collapsed: !isRecentProjectsOpen,
+                      recentProjectCount: recentProjects.length,
+                      section: "recent-projects",
+                    });
+                    setRecentProjectContextMenuPosition(undefined);
+                    setIsRecentProjectsOpen((previous) => !previous);
+                  }}
+                  type="button"
+                >
+                  <span className="group-title-wrap">
+                    <span className="group-title-row">
+                      <span
                         aria-hidden="true"
-                        className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
-                        size={16}
-                      />
-                    </span>
-                    <span className="group-title-handle">
-                      <span className="recent-projects-drawer-title group-title section-titlebar-label">
-                        Recent Projects
+                        className="group-collapse-button section-titlebar-toggle"
+                        data-collapsed={String(!isRecentProjectsOpen)}
+                        data-has-idle-icon="true"
+                      >
+                        <span className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon">
+                          <IconHistory size={16} stroke={1.8} />
+                        </span>
+                        <IconCaretRightFilled
+                          aria-hidden="true"
+                          className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
+                          size={16}
+                        />
+                      </span>
+                      <span className="group-title-handle">
+                        <span className="recent-projects-drawer-title group-title section-titlebar-label">
+                          Recent Projects
+                        </span>
                       </span>
                     </span>
                   </span>
-                </span>
-              </button>
+                </button>
+                {/*
+                  CDXC:CommandsPanel 2026-06-18-23:28:
+                  Move the Commands Pane launcher from the removed sidebar Settings footer onto the Recent Projects header as a sibling hover action so the header toggle keeps valid button semantics.
+                */}
+                <button
+                  aria-label="Show Commands Pane"
+                  className="reference-sidebar-hover-action reference-sidebar-hover-action-tooltip reference-sidebar-commands-pane-action"
+                  data-tooltip="Commands Pane"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    createFullWidthTerminalPane();
+                  }}
+                  type="button"
+                >
+                  <IconTerminal2 aria-hidden="true" size={15} stroke={1.9} />
+                </button>
+              </div>
               <div
                 aria-hidden={!isRecentProjectsOpen}
                 className="recent-projects-drawer-body"
@@ -4497,17 +4262,12 @@ export function SidebarApp({
             </AppTooltip>
           ) : null}
         </div>
-        <SidebarReferenceSettingsButton
-          onCreateFullWidthTerminalPane={createFullWidthTerminalPane}
-          onOpenSettings={openSidebarSettings}
-        />
       </div>
     </TooltipProvider>
   );
 }
 
 function SidebarReferenceTopChrome({
-  isOverflowMenuOpen,
   isSessionSearchOpen,
   onCloseSearch,
   onOpenAgentsHub,
@@ -4516,13 +4276,11 @@ function SidebarReferenceTopChrome({
   onOpenPreviousSessions,
   onSearchPreviousSessionsByText,
   onSearch,
-  onToggleMenu,
   searchInputRef,
   sessionSearchQuery,
   showBetaFeatures,
   setSessionSearchQuery,
 }: {
-  isOverflowMenuOpen: boolean;
   isSessionSearchOpen: boolean;
   onCloseSearch: () => void;
   onOpenAgentsHub: () => void;
@@ -4531,7 +4289,6 @@ function SidebarReferenceTopChrome({
   onOpenPreviousSessions: () => void;
   onSearchPreviousSessionsByText: () => void;
   onSearch: () => void;
-  onToggleMenu: (trigger: HTMLElement) => void;
   searchInputRef: RefObject<HTMLInputElement | null>;
   sessionSearchQuery: string;
   showBetaFeatures: boolean;
@@ -4542,16 +4299,6 @@ function SidebarReferenceTopChrome({
    * Combined mode should visually match the provided app sidebar: native-style
    * window dots, disabled back/forward chrome, and large primary rows such as
    * Agents Hub, Automations, Mobile, and Search.
-   *
-   * CDXC:SidebarReference 2026-05-08-14:48
-   * Reference sidebar exposes the overflow menu as a small right-side control.
-   * Keep it attached to a primary navigation row so global sidebar actions stay
-   * discoverable without adding a separate persistent row.
-   *
-   * CDXC:SidebarReference 2026-06-16-01:29:
-   * Remove the New Session primary row and move the More overflow control onto
-   * Agents Hub. The top nav should start with agent management while still
-   * keeping global overflow actions one hover target away.
    *
    * CDXC:TitlebarActions 2026-05-11-02:46
    * Actions moved out of the sidebar header into the native titlebar beside
@@ -4585,9 +4332,10 @@ function SidebarReferenceTopChrome({
    *
    * CDXC:AgentsHub 2026-06-16-19:35:
    * Agents Hub is beta-only, so the primary sidebar entry should appear only
-   * after Enable beta settings is enabled. Keep the row-level overflow menu on
-   * the first visible primary item so hiding Agents Hub does not hide global
-   * sidebar actions.
+   * after Enable beta settings is enabled.
+   *
+   * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
+   * Global Settings, Commands, Hotkeys, pet, prompt, scratch, Running, and Discord actions live in the far-right native titlebar menu. Keep the sidebar primary nav free of More/overflow controls.
    */
   return (
     <header className="reference-sidebar-top">
@@ -4601,18 +4349,16 @@ function SidebarReferenceTopChrome({
       </div>
       <nav aria-label="Sidebar primary navigation" className="reference-sidebar-primary-nav">
         {showBetaFeatures ? (
-          <SidebarReferenceAgentsHubNavItem
-            isOverflowMenuOpen={isOverflowMenuOpen}
-            onOpenAgentsHub={onOpenAgentsHub}
-            onToggleMenu={onToggleMenu}
+          <SidebarReferenceNavButton
+            icon={IconUsersGroup}
+            label="Agents Hub"
+            onClick={onOpenAgentsHub}
           />
         ) : (
-          <SidebarReferenceOverflowNavItem
+          <SidebarReferenceNavButton
             icon={IconClock}
-            isOverflowMenuOpen={isOverflowMenuOpen}
             label="Automations"
             onClick={onOpenAutomations}
-            onToggleMenu={onToggleMenu}
           />
         )}
         {showBetaFeatures ? (
@@ -4639,82 +4385,6 @@ function SidebarReferenceTopChrome({
         />
       </nav>
     </header>
-  );
-}
-
-function SidebarReferenceOverflowNavItem({
-  icon,
-  isOverflowMenuOpen,
-  label,
-  onClick,
-  onToggleMenu,
-}: {
-  icon: TablerIcon;
-  isOverflowMenuOpen: boolean;
-  label: string;
-  onClick: () => void;
-  onToggleMenu: (trigger: HTMLElement) => void;
-}) {
-  return (
-    <div className="reference-sidebar-nav-item">
-      <SidebarReferenceNavButton icon={icon} label={label} onClick={onClick} />
-      <SidebarReferenceOverflowAction
-        isOverflowMenuOpen={isOverflowMenuOpen}
-        onToggleMenu={onToggleMenu}
-      />
-    </div>
-  );
-}
-
-function SidebarReferenceAgentsHubNavItem({
-  isOverflowMenuOpen,
-  onOpenAgentsHub,
-  onToggleMenu,
-}: {
-  isOverflowMenuOpen: boolean;
-  onOpenAgentsHub: () => void;
-  onToggleMenu: (trigger: HTMLElement) => void;
-}) {
-  return (
-    <div className="reference-sidebar-nav-item">
-      <SidebarReferenceNavButton
-        icon={IconUsersGroup}
-        label="Agents Hub"
-        onClick={onOpenAgentsHub}
-      />
-      <SidebarReferenceOverflowAction
-        isOverflowMenuOpen={isOverflowMenuOpen}
-        onToggleMenu={onToggleMenu}
-      />
-    </div>
-  );
-}
-
-function SidebarReferenceOverflowAction({
-  isOverflowMenuOpen,
-  onToggleMenu,
-}: {
-  isOverflowMenuOpen: boolean;
-  onToggleMenu: (trigger: HTMLElement) => void;
-}) {
-  return (
-    <button
-      aria-controls="sidebar-overflow-menu"
-      aria-expanded={isOverflowMenuOpen}
-      aria-haspopup="menu"
-      aria-label="More"
-      className="reference-sidebar-hover-action reference-sidebar-hover-action-tooltip reference-sidebar-overflow-action"
-      data-sidebar-overflow-trigger="true"
-      data-tooltip="More"
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onToggleMenu(event.currentTarget);
-      }}
-      type="button"
-    >
-      <IconMenu2Filled aria-hidden="true" size={15} />
-    </button>
   );
 }
 
@@ -5442,112 +5112,6 @@ function RecentProjectRow({
   );
 }
 
-function SidebarReferenceSettingsButton({
-  onCreateFullWidthTerminalPane,
-  onOpenSettings,
-}: {
-  onCreateFullWidthTerminalPane: () => void;
-  onOpenSettings: () => void;
-}) {
-  return (
-    <div className="reference-sidebar-settings-row">
-      <div className="reference-sidebar-nav-item">
-        <SidebarReferenceNavButton icon={IconSettings} label="Settings" onClick={onOpenSettings} />
-        {/*
-          CDXC:CommandsPane 2026-05-15-19:41:
-          The sidebar footer terminal action is the Commands pane entry point
-          after removing the duplicate terminal icon from the native titlebar.
-          Its hover label should name that destination instead of describing the
-          underlying terminal-tab creation detail.
-
-          CDXC:Tooltips 2026-05-19-19:05:
-          This bottom-right hover icon cannot use portaled Radix tooltips because
-          the native sidebar webview mis-anchors them far from the trigger. Keep
-          the label local to the button and render it to the left of the icon.
-
-          CDXC:CommandsPane 2026-05-29-20:39:
-          The Commands pane footer action should use the shorter visual tooltip
-          "Commands Pane" and keep the full accessible label on the button.
-        */}
-        <button
-          aria-label="Show Commands Pane"
-          className="reference-sidebar-hover-action reference-sidebar-hover-action-tooltip reference-sidebar-settings-terminal-action"
-          data-tooltip="Commands Pane"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onCreateFullWidthTerminalPane();
-          }}
-          type="button"
-        >
-          <IconTerminal2 aria-hidden="true" size={15} stroke={1.9} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-type ToolbarIconButtonProps = {
-  ariaControls?: string;
-  ariaExpanded?: boolean;
-  ariaHasPopup?: "dialog" | "menu";
-  ariaLabel: string;
-  children: React.ReactNode;
-  className?: string;
-  dataDimmed?: string;
-  isDisabled?: boolean;
-  isDimmed?: boolean;
-  isSelected?: boolean;
-  onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
-  tabIndex?: number;
-  tooltip: string;
-  triggerDataName?: string;
-};
-
-function ToolbarIconButton({
-  ariaControls,
-  ariaExpanded,
-  ariaHasPopup,
-  ariaLabel,
-  children,
-  className,
-  dataDimmed,
-  isDisabled = false,
-  isDimmed = false,
-  isSelected = false,
-  onClick,
-  tabIndex,
-  tooltip,
-  triggerDataName,
-}: ToolbarIconButtonProps) {
-  return (
-    <AppTooltip content={tooltip}>
-      <button
-        aria-controls={ariaControls}
-        aria-disabled={isDisabled}
-        aria-expanded={ariaExpanded}
-        aria-haspopup={ariaHasPopup}
-        aria-label={ariaLabel}
-        className={className ? `toolbar-button ${className}` : "toolbar-button"}
-        data-disabled={String(isDisabled)}
-        data-dimmed={dataDimmed ?? String(isDimmed)}
-        data-sidebar-overflow-trigger={triggerDataName}
-        data-selected={String(isSelected)}
-        onClick={(event) => {
-          if (isDisabled) {
-            return;
-          }
-
-          onClick(event);
-        }}
-        tabIndex={tabIndex}
-        type="button"
-      >
-        {children}
-      </button>
-    </AppTooltip>
-  );
-}
 function createWorkspaceSessionIdsByGroup(
   workspaceGroupIds: readonly string[],
   sessionIdsByGroup: SessionIdsByGroup,
@@ -5890,334 +5454,6 @@ function findCreatedGroupId(
 ): string | undefined {
   const previousGroupIds = new Set(previousGroups);
   return nextGroups.find((groupId) => !previousGroupIds.has(groupId));
-}
-
-function OverflowIcon() {
-  return (
-    <svg aria-hidden="true" className="toolbar-icon" viewBox="0 0 16 16">
-      <circle cx="3.5" cy="8" fill="currentColor" r="1.1" />
-      <circle cx="8" cy="8" fill="currentColor" r="1.1" />
-      <circle cx="12.5" cy="8" fill="currentColor" r="1.1" />
-    </svg>
-  );
-}
-
-function getScratchPadMenuLabel(isScratchPadOpen: boolean): string {
-  return isScratchPadOpen ? "Hide Scratch Pad" : "Scratch Pad";
-}
-
-function getCommandPaletteOverflowMenuLabel(hotkey: string): string {
-  const hotkeyLabel = formatOverflowMenuTextHotkey(hotkey);
-  return hotkeyLabel ? `Commands [${hotkeyLabel}]` : "Commands";
-}
-
-function formatOverflowMenuTextHotkey(hotkey: string): string {
-  /*
-   * CDXC:SidebarHotkeys 2026-06-16-08:17:
-   * The overflow-menu command-palette shortcut should read like native compact
-   * shortcut text without literal plus characters, e.g. `⌘⇧P`.
-   */
-  const normalizedHotkey = normalizeHotkeyText(hotkey);
-  if (!normalizedHotkey) {
-    return "";
-  }
-  return normalizedHotkey
-    .split(" ")
-    .map((chord) =>
-      chord
-        .split("+")
-        .map(formatOverflowMenuTextHotkeyPart)
-        .join(""),
-    )
-    .join(" ");
-}
-
-function formatOverflowMenuTextHotkeyPart(part: string): string {
-  switch (part) {
-    case "cmd":
-      return "⌘";
-    case "ctrl":
-      return "⌃";
-    case "alt":
-      return "⌥";
-    case "shift":
-      return "⇧";
-    case "up":
-      return "UP";
-    case "right":
-      return "RIGHT";
-    case "down":
-      return "DOWN";
-    case "left":
-      return "LEFT";
-    default:
-      return part.toUpperCase();
-  }
-}
-
-type RenderSidebarTopControlsOptions = {
-  commandPaletteMenuLabel: string;
-  isOverflowMenuOpen: boolean;
-  isPetOverlayEnabled: boolean;
-  isPinnedPromptsOpen: boolean;
-  isScratchPadOpen: boolean;
-  onMoveSidebar: () => void;
-  onOpenCommandPalette: () => void;
-  onOpenDiscord: () => void;
-  onOpenFirstLaunchSetup: () => void;
-  onOpenHelp: () => void;
-  onOpenHotkeys: () => void;
-  onOpenTutorialVideo: () => void;
-  onShowRunning: () => void;
-  onTogglePetOverlay: () => void;
-  onTogglePinnedPrompts: () => void;
-  onToggleMenu: (trigger: HTMLElement) => void;
-  onToggleScratchPad: () => void;
-  overflowMenuPosition?: FloatingMenuPosition;
-  overflowMenuRef: RefObject<HTMLDivElement | null>;
-};
-
-function renderFloatingOverflowMenu({
-  commandPaletteMenuLabel,
-  isOverflowMenuOpen,
-  isPetOverlayEnabled,
-  isPinnedPromptsOpen,
-  isScratchPadOpen,
-  onMoveSidebar: _onMoveSidebar,
-  onOpenCommandPalette,
-  onOpenDiscord,
-  onOpenFirstLaunchSetup,
-  onOpenHelp,
-  onOpenHotkeys,
-  onOpenTutorialVideo,
-  onShowRunning,
-  onTogglePetOverlay,
-  onTogglePinnedPrompts,
-  onToggleMenu,
-  onToggleScratchPad,
-  overflowMenuPosition,
-  overflowMenuRef,
-}: RenderSidebarTopControlsOptions) {
-  return (
-    <>
-      {/*
-       * CDXC:Sidebar-controls 2026-04-25-09:50
-       * The overflow menu must stay available even when project/section headers
-       * are hidden, so its trigger floats at the top-right of the whole sidebar
-       * instead of being owned by a header titlebar.
-       */}
-      <ToolbarIconButton
-        ariaControls="sidebar-overflow-menu"
-        ariaExpanded={isOverflowMenuOpen}
-        ariaHasPopup="menu"
-        ariaLabel="Open sidebar menu"
-        className="floating-toolbar-button sidebar-floating-overflow-trigger"
-        isSelected={isOverflowMenuOpen}
-        onClick={(event) => onToggleMenu(event.currentTarget)}
-        tooltip="More"
-        triggerDataName="true"
-      >
-        <OverflowIcon />
-      </ToolbarIconButton>
-      {isOverflowMenuOpen && overflowMenuPosition
-        ? createPortal(
-          <div
-            aria-label="Sidebar actions"
-            className="session-context-menu sidebar-floating-menu"
-            data-empty-space-blocking="true"
-            id="sidebar-overflow-menu"
-            ref={overflowMenuRef}
-            role="menu"
-            style={{
-              right: overflowMenuPosition.right,
-              top: overflowMenuPosition.top,
-              zIndex: 250,
-            }}
-          >
-            <div className="session-context-menu-group">
-              {/*
-                 * CDXC:SidebarLayout 2026-05-13-08:11
-                 * Pinned prompts and scratch pad are permanent overflow-menu
-                 * actions so compact secondary tools stay reachable from one
-                 * consistent menu in the reference sidebar.
-                 *
-                 * CDXC:Sidebar-overflow-menu 2026-05-04-03:09
-                 * The overflow menu order must keep compact tools before
-                 * status/help actions.
-                 *
-                 * CDXC:Sidebar-overflow-menu 2026-05-09-15:18
-                 * The sidebar hamburger menu is intentionally compact: Search,
-                 * Previous Sessions, Last Activity Sort, and Settings stay out
-                 * of this menu because they are available from primary chrome or
-                 * dedicated settings surfaces.
-                 *
-                 * CDXC:Sidebar-overflow-menu 2026-05-15-10:18:
-                 * Completion Sound, Persistence, and Remote Access no longer
-                 * belong in the sidebar overflow menu. Keep this menu to
-                 * scratch tools, running state, hotkeys, and help so one
-                 * separator can divide tools from status/help actions.
-                 *
-                 * CDXC:PetOverlay 2026-05-17-02:03:
-                 * The Wake/Sleep Pet action moved from the native titlebar into
-                 * this New Session-adjacent overflow menu, keeping the titlebar
-                 * focused on workspace mode, resources, actions, and Open In.
-                 *
-                 * CDXC:CommandPalette 2026-06-13-10:42:
-                 * The sidebar overflow menu should make Commands the first
-                 * menu item and include the current command-palette hotkey in
-                 * text form so users can discover the app-wide command surface
-                 * and its configured shortcut from the sidebar's More control.
-                 */}
-              <button
-                className="session-context-menu-item"
-                onClick={onOpenCommandPalette}
-                role="menuitem"
-                type="button"
-              >
-                <IconCommand
-                  aria-hidden="true"
-                  className="session-context-menu-icon"
-                  size={14}
-                  stroke={1.8}
-                />
-                {commandPaletteMenuLabel}
-              </button>
-              <button
-                aria-checked={isPetOverlayEnabled}
-                className="session-context-menu-item"
-                onClick={onTogglePetOverlay}
-                role="menuitemcheckbox"
-                type="button"
-              >
-                <IconRobotFace
-                  aria-hidden="true"
-                  className="session-context-menu-icon"
-                  size={14}
-                  stroke={1.8}
-                />
-                {isPetOverlayEnabled ? "Sleep Pet" : "Wake Pet"}
-              </button>
-              <button
-                aria-checked={isPinnedPromptsOpen}
-                className="session-context-menu-item"
-                onClick={onTogglePinnedPrompts}
-                role="menuitemcheckbox"
-                type="button"
-              >
-                <IconBookmark
-                  aria-hidden="true"
-                  className="session-context-menu-icon"
-                  size={14}
-                  stroke={1.8}
-                />
-                Pinned Prompts
-              </button>
-              <button
-                className="session-context-menu-item"
-                onClick={onToggleScratchPad}
-                role="menuitem"
-                type="button"
-              >
-                <IconPencil
-                  aria-hidden="true"
-                  className="session-context-menu-icon"
-                  size={14}
-                  stroke={1.8}
-                />
-                {getScratchPadMenuLabel(isScratchPadOpen)}
-              </button>
-            </div>
-            <div className="session-context-menu-divider" role="separator" />
-            <div className="session-context-menu-group">
-              <button
-                className="session-context-menu-item"
-                onClick={onShowRunning}
-                role="menuitem"
-                type="button"
-              >
-                <IconHistory aria-hidden="true" className="session-context-menu-icon" size={14} />
-                Running
-              </button>
-              <button
-                className="session-context-menu-item"
-                onClick={onOpenHotkeys}
-                role="menuitem"
-                type="button"
-              >
-                <IconKeyboard
-                  aria-hidden="true"
-                  className="session-context-menu-icon"
-                  size={14}
-                  stroke={1.8}
-                />
-                Hotkeys
-              </button>
-              <button
-                className="session-context-menu-item"
-                onClick={onOpenFirstLaunchSetup}
-                role="menuitem"
-                type="button"
-              >
-                <IconHelpCircle
-                  aria-hidden="true"
-                  className="session-context-menu-icon"
-                  size={14}
-                  stroke={1.8}
-                />
-                Setup Flow
-              </button>
-              <button
-                className="session-context-menu-item"
-                onClick={onOpenHelp}
-                role="menuitem"
-                type="button"
-              >
-                <IconHelpCircle
-                  aria-hidden="true"
-                  className="session-context-menu-icon"
-                  size={14}
-                  stroke={1.8}
-                />
-                Features
-              </button>
-              <button
-                className="session-context-menu-item"
-                onClick={onOpenTutorialVideo}
-                role="menuitem"
-                type="button"
-              >
-                <IconPlayerPlay
-                  aria-hidden="true"
-                  className="session-context-menu-icon"
-                  size={14}
-                  stroke={1.8}
-                />
-                Tutorial Video
-              </button>
-            </div>
-            <div className="session-context-menu-divider" role="separator" />
-            <div className="session-context-menu-group">
-              <button
-                className="session-context-menu-item"
-                onClick={onOpenDiscord}
-                role="menuitem"
-                type="button"
-              >
-                <IconUsersGroup
-                  aria-hidden="true"
-                  className="session-context-menu-icon"
-                  size={14}
-                  stroke={1.8}
-                />
-                Join Discord
-              </button>
-            </div>
-          </div>,
-          document.body,
-        )
-        : null}
-    </>
-  );
 }
 
 function resolveSessionDropTargetFromPoint(

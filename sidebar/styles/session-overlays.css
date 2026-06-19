@@ -214,18 +214,6 @@
   background: color-mix(in srgb, #ff7b72 18%, transparent);
 }
 
-.session-context-menu.sidebar-floating-menu {
-  /*
-   * CDXC:Sidebar-overflow-menu 2026-05-04-04:30
-   * The sidebar overflow menu should be 40px narrower than the previous 230px
-   * width and must never render wider than the sidebar webview itself.
-   */
-  box-sizing: border-box;
-  max-width: calc(100vw - 8px);
-  min-width: 0;
-  width: min(190px, calc(100vw - 8px));
-}
-
 .tooltip-positioner {
   z-index: 1400;
 }

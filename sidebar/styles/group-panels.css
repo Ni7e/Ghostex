@@ -635,7 +635,7 @@
 /* CDXC:SidebarReference 2026-05-08-01:10: Combined mode must copy the
    provided app sidebar: a dark full-height rail, top window/navigation chrome,
    hidden legacy grids via display:none, section labels, and a persistent
-   bottom Settings row.
+   bottom Recent Projects drawer.
    CDXC:SidebarReference 2026-05-08-01:28: Reference sizing follows the
    measured sidebar button geometry: a 298px viewport gives 7px side margins
    and 284x34px primary rows with compact 12px icons.
@@ -952,7 +952,6 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 }
 
 .reference-sidebar-nav-button,
-.reference-sidebar-settings-button,
 .reference-sidebar-project-row {
   background: transparent;
   border: none;
@@ -1047,12 +1046,10 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
  * CDXC:SidebarReference 2026-05-15-15:36:
  * Primary sidebar labels must keep their descenders visible in the 34px rows.
  * Use an 18px text line box instead of clipping labels to 14px, which cuts off
- * Agents Hub, Automations, Mobile, Search, and Settings at the bottom.
+ * Agents Hub, Automations, Mobile, Search, and Recent Projects at the bottom.
  *
- * CDXC:SidebarReference 2026-06-16-01:29:
- * The More overflow trigger now lives as a right-side hover icon on Agents Hub,
- * so the shared hover-action padding rules must keep the Agents Hub title clear
- * of that secondary button after removing the New Session primary row.
+ * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
+ * The sidebar no longer owns a More overflow trigger. Shared hover-action padding now protects Search and the Recent Projects Commands Pane launcher while global actions live in the titlebar Settings menu.
  */
 .sidebar-reference-layout[data-reference-sidebar="true"] .reference-sidebar-primary-nav > * {
   min-width: 0;
@@ -1076,11 +1073,8 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
  * action is visible so hidden secondary controls do not shorten the primary
  * title unnecessarily.
  *
- * CDXC:WorkspacePanes 2026-05-11-02:51
- * Combined-sidebar Settings owns a matching secondary terminal action that
- * creates a full-width pane in the active project. Reserve row padding only
- * while the hover icon is visible so the Settings label uses the full row at
- * rest.
+ * CDXC:CommandsPanel 2026-06-18-23:28:
+ * Recent Projects owns the matching secondary Commands Pane action after the sidebar Settings footer was removed. Reserve row padding only while the hover icon is visible so the Recent Projects label uses the full row at rest.
  *
  * CDXC:SidebarReferenceBounds 2026-05-31-15:38:
  * Hover child buttons for More, Previous Sessions, and Commands Pane should sit
@@ -1226,13 +1220,10 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
   z-index: var(--ghostex-tooltip-z-index, 1400);
 }
 
-.reference-sidebar-settings-terminal-action.reference-sidebar-hover-action-tooltip::after {
+.reference-sidebar-commands-pane-action.reference-sidebar-hover-action-tooltip::after {
   /*
    * CDXC:CommandsPane 2026-05-30-07:33:
-   * The Commands pane footer button is the sidebar exception to below-positioned
-   * tooltips. Keep this compact label to the left of the icon so it does not
-   * cover footer controls while the rest of the sidebar keeps below-trigger
-   * labels.
+   * The Commands pane button is the sidebar exception to below-positioned tooltips. Keep this compact label to the left of the icon so it does not cover bottom drawer controls while the rest of the sidebar keeps below-trigger labels.
    */
   right: calc(100% + 8px);
   top: 50%;
@@ -1253,12 +1244,10 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 }
 
 @media (max-width: 169.98px) {
-  .reference-sidebar-settings-terminal-action.reference-sidebar-hover-action-tooltip::after {
+  .reference-sidebar-commands-pane-action.reference-sidebar-hover-action-tooltip::after {
     /*
      * CDXC:CommandsPane 2026-05-29-20:39:
-     * The Commands pane footer action sits at the narrow sidebar edge. Hide its
-     * visual tooltip below 170px instead of shortening it further so the footer
-     * controls stay unclipped while the button keeps its accessible label.
+     * The Commands pane action sits at the narrow sidebar edge. Hide its visual tooltip below 170px instead of shortening it further so the bottom controls stay unclipped while the button keeps its accessible label.
      */
     content: none;
     display: none;
@@ -1316,8 +1305,6 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
 .reference-sidebar-nav-button:focus-visible,
 .recent-projects-drawer-toggle.group-head:hover,
 .recent-projects-drawer-toggle.group-head:focus-visible,
-.reference-sidebar-settings-button:hover,
-.reference-sidebar-settings-button:focus-visible,
 .reference-sidebar-project-row:hover,
 .reference-sidebar-project-row:focus-visible,
 .reference-sidebar-section-action:hover,
@@ -1967,12 +1954,6 @@ manual mode visibly selected without adding text to the section row.
   white-space: nowrap;
 }
 
-.reference-sidebar-settings-row {
-  flex: none;
-  margin: 0 calc(-1 * var(--reference-sidebar-edge-bleed-right)) 0
-    calc(-1 * var(--reference-sidebar-footer-edge-bleed-left));
-}
-
 .sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-drawer {
   border-top: 0;
   box-shadow: inset 0 -1px transparent;
@@ -1998,25 +1979,29 @@ manual mode visibly selected without adding text to the section row.
   /*
    * CDXC:RecentProjects 2026-05-31-16:37:
    * Expanded Recent Projects needs a full-width bottom divider so its search
-   * and previous-project rows read as a distinct drawer above Settings.
+   * and previous-project rows read as a distinct bottom drawer.
    */
   box-shadow: inset 0 -1px color-mix(in srgb, var(--app-border) 64%, transparent);
   padding-bottom: 8px;
 }
 
 /*
- * CDXC:SidebarReference 2026-05-10-12:14
- * The closed Recent Projects and Settings buttons should sit 6px closer
- * together; the drawer body is hidden but its grid row gap otherwise still
- * adds visual space below the closed Recent Projects button.
+ * CDXC:SidebarReference 2026-05-10-12:14:
+ * The closed Recent Projects drawer should collapse its body row so the bottom drawer does not reserve extra vertical space while it is closed.
  *
  * CDXC:SidebarReference 2026-05-15-15:36:
- * Recent Projects uses the same visual row height as Settings, so its title
- * also needs an unclipped 18px text line box instead of a fixed 14px title row.
+ * Recent Projects uses the same visual row height as the removed Settings footer, so its title also needs an unclipped 18px text line box instead of a fixed 14px title row.
  */
 .sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-drawer[data-open="false"] {
   gap: 0;
   grid-template-rows: auto minmax(0, 0fr);
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-drawer-header {
+  justify-self: start;
+  margin-left: calc(5px - var(--reference-sidebar-footer-edge-bleed-left));
+  min-width: 0;
+  width: calc(100% + var(--reference-sidebar-edge-bleed-right));
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-drawer-toggle.group-head,
@@ -2033,24 +2018,26 @@ manual mode visibly selected without adding text to the section row.
 .sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-drawer-toggle.group-head {
   /*
    * CDXC:RecentProjects 2026-05-31-15:38:
-   * Recent Projects and Settings had a smaller left gap than main sidebar rows.
-   * Bleed the header by the footer edge amount and compensate its padding so
-   * its icon/text remain aligned with Settings while the button surface starts
-   * at the sidebar edge.
+   * Recent Projects had a smaller left gap than main sidebar rows. Bleed the
+   * header by the footer edge amount and compensate its padding so its icon/text
+   * stay aligned while the button surface starts at the sidebar edge.
    */
   justify-self: start;
-  margin-left: calc(5px - var(--reference-sidebar-footer-edge-bleed-left));
+  margin-left: 0;
   max-width: none;
   padding-left: calc(10px + var(--reference-sidebar-footer-edge-bleed-left));
   padding-right: calc(10px + var(--reference-sidebar-edge-bleed-right) - 5px);
-  width: calc(100% + var(--reference-sidebar-edge-bleed-right));
+  width: 100%;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
-  .reference-sidebar-settings-row
-  .reference-sidebar-nav-button {
-  padding-left: calc(10px + var(--reference-sidebar-footer-edge-bleed-left));
-  padding-right: calc(10px + var(--reference-sidebar-edge-bleed-right));
+  .recent-projects-drawer-header:has(.reference-sidebar-commands-pane-action):is(:hover, :focus-within)
+  .recent-projects-drawer-toggle.group-head {
+  /*
+   * CDXC:CommandsPanel 2026-06-18-23:28:
+   * The Recent Projects row hosts the Commands Pane hover action. Add temporary right padding only while the action is visible so the header text does not sit beneath the terminal icon.
+   */
+  padding-right: calc(47px + var(--reference-sidebar-edge-bleed-right) - 5px);
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-drawer-toggle.group-head {

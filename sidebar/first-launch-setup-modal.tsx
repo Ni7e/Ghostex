@@ -323,8 +323,8 @@ const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
       },
       {
         icon: IconHistory,
-        text: "Reopen this guide any time from the sidebar overflow menu.",
-        title: "Replay this guide",
+        text: "Review setup tasks later from Settings > Integrations.",
+        title: "Review setup",
       },
       {
         icon: IconCode,
@@ -465,14 +465,14 @@ const FIRST_LAUNCH_CONTINUE_WARNINGS: Record<
   browserControl: {
     actionLabel: "Continue without Ghostex Browser Use",
     description:
-      "Agents will not be able to inspect or operate Ghostex browser panes through Ghostex Browser Use until the skill is installed. You can install it later from Settings > Integrations or by launching this setup flow from the sidebar overflow menu.",
+      "Agents will not be able to inspect or operate Ghostex browser panes through Ghostex Browser Use until the skill is installed. You can install it later from Settings > Integrations.",
     installLabel: "Install Ghostex Browser Use",
     title: "Continue without Ghostex Browser Use?",
   },
   desktopCua: {
     actionLabel: "Continue without Ghostex Computer Use",
     description:
-      "Agents will not be able to control native macOS desktop apps until Ghostex Computer Use, Cua Driver, Accessibility, and Screen Recording are ready. You can finish this later from Settings > Integrations or by launching this setup flow from the sidebar overflow menu.",
+      "Agents will not be able to control native macOS desktop apps until Ghostex Computer Use, Cua Driver, Accessibility, and Screen Recording are ready. You can finish this later from Settings > Integrations.",
     installLabel: "Install Ghostex Computer Use",
     title: "Continue without Ghostex Computer Use?",
   },

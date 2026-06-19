@@ -69,16 +69,6 @@ async function findGroupControl(storyRoot: HTMLElement, groupId: string, selecto
   );
 }
 
-async function openSidebarMenuForStory(storyRoot: HTMLElement) {
-  await hoverSidebarChrome(storyRoot);
-  const menuButton = await findRequiredElement(
-    storyRoot,
-    '[data-sidebar-overflow-trigger="true"]',
-    "sidebar overflow menu trigger",
-  );
-  menuButton.click();
-}
-
 async function waitForSidebarScrollObservers(windowLike: Window | null) {
   for (let index = 0; index < 3; index += 1) {
     await new Promise((resolve) => {
@@ -137,15 +127,6 @@ export const ToolbarActions: Story = {
       ).toBeNull();
     });
 
-    await step("keep removed actions out of the sidebar menu", async () => {
-      await openSidebarMenuForStory(canvasElement.ownerDocument.body);
-      await body.findByRole("menuitem", { name: "Pinned Prompts" });
-      expect(body.queryByRole("menuitem", { name: "Search" })).toBeNull();
-      expect(body.queryByRole("menuitem", { name: "Previous Sessions" })).toBeNull();
-      expect(body.queryByRole("menuitem", { name: /Sort/ })).toBeNull();
-      expect(body.queryByRole("menuitem", { name: "Settings" })).toBeNull();
-    });
-
     await step("launch Search by Text from the Search row", async () => {
       resetSidebarStoryMessages();
       const searchRow = await findRequiredElement(
@@ -156,30 +137,6 @@ export const ToolbarActions: Story = {
       fireEvent.mouseEnter(searchRow);
       fireEvent.click(await body.findByRole("button", { name: "Search by Text" }));
       await expectMessage({ type: "searchPreviousSessionsByText" });
-    });
-
-    await step("open the scratch pad from the sidebar menu", async () => {
-      await openSidebarMenuForStory(canvasElement.ownerDocument.body);
-      const scratchPadItem = body.queryByRole("menuitem", { name: "Scratch Pad" });
-      if (scratchPadItem) {
-        await userEvent.click(scratchPadItem);
-        await body.findByRole("dialog", { name: "Scratch Pad" });
-        await userEvent.click(body.getByRole("button", { name: "Close scratch pad" }));
-        await waitFor(() => {
-          expect(body.queryByRole("dialog", { name: "Scratch Pad" })).toBeNull();
-        });
-      }
-    });
-
-    await step("collapse the sidebar menu from its trigger", async () => {
-      await openSidebarMenuForStory(canvasElement.ownerDocument.body);
-      const runningItem = await body.findByRole("menuitem", { name: "Running" }).catch(() => null);
-      if (runningItem) {
-        await userEvent.click(canvas.getByRole("button", { name: "Open sidebar menu" }));
-        await waitFor(() => {
-          expect(body.queryByRole("menuitem", { name: "Running" })).toBeNull();
-        });
-      }
     });
 
     await step("hide the top chrome after leaving the sidebar", async () => {

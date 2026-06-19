@@ -11,10 +11,6 @@ const appModalHostBridgeSource = readFileSync(
 );
 const modalHostSource = readFileSync(new URL("./modal-host.tsx", import.meta.url), "utf8");
 const nativeSidebarSource = readFileSync(new URL("./native-sidebar.tsx", import.meta.url), "utf8");
-const sidebarAppSource = readFileSync(
-  new URL("../../sidebar/sidebar-app.tsx", import.meta.url),
-  "utf8",
-);
 
 function sourceBetween(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);
@@ -63,14 +59,18 @@ describe("first-launch highlighted features sequence source", () => {
     );
     expect(modalHostOpenMessage).toContain("showFirstLaunchSetupOnClose?: boolean;");
 
-    const manualDiscoverLauncher = sourceBetween(
-      sidebarAppSource,
-      "const openDiscoverGhostex = () => {",
-      "const openFirstLaunchSetup = () => {",
+    const highlightedFeaturesCompatibilityLauncher = sourceBetween(
+      nativeSidebarSource,
+      'case "openHighlightedFeatures":',
+      'case "openGhostexTutorialVideo":',
     );
-    expect(manualDiscoverLauncher).toContain('openAppModal({ modal: "watchGhostexVideo", type: "open" });');
-    expect(manualDiscoverLauncher).not.toContain('openAppModal({ modal: "discoverGhostex", type: "open" });');
-    expect(manualDiscoverLauncher).not.toContain("showFirstLaunchSetupOnClose");
+    expect(highlightedFeaturesCompatibilityLauncher).toContain(
+      'openAppModal({ modal: "watchGhostexVideo", type: "open" });',
+    );
+    expect(highlightedFeaturesCompatibilityLauncher).not.toContain(
+      'openAppModal({ modal: "discoverGhostex", type: "open" });',
+    );
+    expect(highlightedFeaturesCompatibilityLauncher).not.toContain("showFirstLaunchSetupOnClose");
   });
 
   test("continues into setup from native Discover close paths", () => {

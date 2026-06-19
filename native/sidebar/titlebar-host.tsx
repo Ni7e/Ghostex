@@ -2,6 +2,7 @@ import {
   IconAlertTriangle,
   IconArrowsDiagonal2,
   IconArrowsDiagonalMinimize,
+  IconBookmark,
   IconBook2,
   IconBox,
   IconCheck,
@@ -25,10 +26,14 @@ import {
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconLoader2,
+  IconKeyboard,
+  IconMenu2,
   IconMoon,
+  IconPencil,
   IconPlayerPlay,
   IconRefresh,
   IconRocket,
+  IconRobotFace,
   IconSearch,
   IconSettings,
   IconStarFilled,
@@ -38,6 +43,7 @@ import {
   IconTool,
   IconUpload,
   IconUser,
+  IconUsersGroup,
   IconWorld,
   IconX,
 } from "@tabler/icons-react";
@@ -119,6 +125,7 @@ type TitlebarDropdownPanelKind =
   | "mode"
   | "openIn"
   | "resources"
+  | "settings"
   | "tips";
 type TitlebarDropdownPanelSize = {
   height: number;
@@ -150,6 +157,7 @@ type TitlebarOpenTargetsSettings = {
  */
 const GHOSTEX_CHANGELOG_URL = "https://github.com/maddada/ghostex/releases";
 const GHOSTEX_DOCS_URL = "https://ghostex.dev/docs";
+const GHOSTEX_DISCORD_URL = "https://discord.gg/df7b3G92CS";
 
 type TitlebarSidebarActionsSettings = {
   commands: SidebarCommandButton[];
@@ -334,6 +342,7 @@ type NativeTitlebarCommand =
   | { type: "openTasksPlaceholderFromTitlebar" }
   | { type: "refreshWorkspaceOpenTargetAvailabilityFromTitlebar" }
   | { type: "toggleCommandsPanelFromTitlebar" }
+  | { type: "togglePetOverlayFromTitlebar" }
   | { type: "toggleSidebarCollapsed" }
   | { type: "showUpdateDialogFromTitlebar" }
   | { type: "startGxserverFromTitlebar" }
@@ -346,6 +355,7 @@ type NativeTitlebarCommand =
   | { projectIds: string[]; sessionIds: string[]; type: "quitResourcesFromTitlebar" }
   | { commandId: string; type: "runSidebarCommandFromTitlebar" }
   | { action: SidebarGitAction; type: "runSidebarGitActionFromTitlebar" }
+  | { type: "openExternalUrl"; url: string }
   | {
       anchorRect: { height: number; width: number; x: number; y: number };
       kind: TitlebarDropdownPanelKind;
@@ -490,6 +500,7 @@ function readTitlebarDropdownPanelKind(): TitlebarDropdownPanelKind | undefined 
     rawKind === "mode" ||
     rawKind === "openIn" ||
     rawKind === "resources" ||
+    rawKind === "settings" ||
     rawKind === "tips"
   ) {
     return rawKind;
@@ -520,6 +531,7 @@ function createTitlebarDropdownPanelPreferredSize(
     gitItemCount: number;
     keepAwakeIsRunning: boolean;
     modeOptionCount: number;
+    settingsShowRunning: boolean;
     targetCount: number;
   },
 ): TitlebarDropdownPanelSize {
@@ -578,6 +590,10 @@ function createTitlebarDropdownPanelPreferredSize(
     case "openIn":
       return compactTitlebarDropdownPanelSize(
         titlebarMenuHeight(Math.max(0, counts.targetCount) + 1, { separatorCount: 1 }),
+      );
+    case "settings":
+      return compactTitlebarDropdownPanelSize(
+        titlebarMenuHeight(counts.settingsShowRunning ? 8 : 7, { separatorCount: 2 }),
       );
   }
 }
@@ -934,6 +950,7 @@ function postTitlebarSidebarCommand(
     | { type: "openWorkspaceWelcome" }
     | { type: "requestAgentHookStatus" }
     | { type: "requestGhostexCliStatus" }
+    | { type: "refreshDaemonSessions" }
     | { type: "refreshGitState" },
 ): void {
   /*
@@ -1816,6 +1833,7 @@ function App() {
         gitItemCount: 1,
         keepAwakeIsRunning: false,
         modeOptionCount: 4,
+        settingsShowRunning: false,
         targetCount: 0,
       }),
   );
@@ -2575,6 +2593,69 @@ function App() {
     closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarGitAction");
     postNative({ action, type: "runSidebarGitActionFromTitlebar" });
   };
+  const openTitlebarSettingsMenuSettings = () => {
+    /*
+     * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
+     * Settings moved from the sidebar footer into the far-right titlebar menu. Route the menu row through the existing app-modal host so Settings still opens as the native modal surface rather than a titlebar overlay.
+     */
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarSettingsMenu");
+    window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
+      modal: "settings",
+      type: "open",
+    });
+  };
+
+  const openTitlebarSettingsMenuCommands = () => {
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarCommandsMenu");
+    window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
+      initialQuery: ">",
+      modal: "commandPalette",
+      type: "open",
+    });
+  };
+
+  const openTitlebarSettingsMenuHotkeys = () => {
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarHotkeysMenu");
+    window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
+      modal: "hotkeys",
+      type: "open",
+    });
+  };
+
+  const wakePetFromTitlebarSettingsMenu = () => {
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarWakePetMenu");
+    postNative({ type: "togglePetOverlayFromTitlebar" });
+  };
+
+  const openTitlebarSettingsMenuPinnedPrompts = () => {
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarPinnedPromptsMenu");
+    window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
+      modal: "pinnedPrompts",
+      type: "open",
+    });
+  };
+
+  const openTitlebarSettingsMenuScratchPad = () => {
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarScratchPadMenu");
+    window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
+      modal: "scratchPad",
+      type: "open",
+    });
+  };
+
+  const openTitlebarSettingsMenuRunning = () => {
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarRunningMenu");
+    window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
+      modal: "daemonSessions",
+      type: "open",
+    });
+    postTitlebarSidebarCommand({ type: "refreshDaemonSessions" });
+  };
+
+  const openTitlebarSettingsMenuDiscord = () => {
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarDiscordMenu");
+    postNative({ type: "openExternalUrl", url: GHOSTEX_DISCORD_URL });
+  };
   const openGitMenuFromTitlebar = useCallback(
     (event: { currentTarget: HTMLElement }) => {
       postTitlebarSidebarCommand({ type: "refreshGitState" });
@@ -3179,11 +3260,13 @@ function App() {
         gitItemCount: gitMenuItems.length,
         keepAwakeIsRunning: Boolean(keepAwakeRuntime),
         modeOptionCount: titlebarModes.length,
+        settingsShowRunning: projectState.debuggingMode,
         targetCount: visibleTargets.length,
       }),
     [
       gitMenuItems.length,
       keepAwakeRuntime,
+      projectState.debuggingMode,
       titlebarModes.length,
       visibleActions.length,
       visibleTargets.length,
@@ -3310,6 +3393,13 @@ function App() {
           onOpenChangelog={openChangelogFromTips}
           onOpenDocs={openDocsFromTips}
           onOpenHighlightedFeatures={openHighlightedFeaturesFromTips}
+          onOpenSettingsMenuCommands={openTitlebarSettingsMenuCommands}
+          onOpenSettingsMenuDiscord={openTitlebarSettingsMenuDiscord}
+          onOpenSettingsMenuHotkeys={openTitlebarSettingsMenuHotkeys}
+          onOpenSettingsMenuPinnedPrompts={openTitlebarSettingsMenuPinnedPrompts}
+          onOpenSettingsMenuRunning={openTitlebarSettingsMenuRunning}
+          onOpenSettingsMenuScratchPad={openTitlebarSettingsMenuScratchPad}
+          onOpenSettingsMenuSettings={openTitlebarSettingsMenuSettings}
           onOpenNoticeSettings={handleNoticeAction}
           onOpenPowerSettings={openPowerSettings}
           onOpenTarget={openTarget}
@@ -3321,6 +3411,7 @@ function App() {
           onSleepInactiveSessions={sleepInactiveTerminalSessions}
           onStartKeepAwake={startKeepAwake}
           onStopKeepAwake={stopKeepAwake}
+          onWakePetFromSettingsMenu={wakePetFromTitlebarSettingsMenu}
           onToggleResourceCollapse={toggleResourceCollapse}
           orphanBundles={resourceViews.orphanBundles}
           resourceProcessSnapshotReady={resourceProcessSnapshotReady}
@@ -3328,6 +3419,7 @@ function App() {
           readTips={readTips}
           resourceGroupViews={resourceViews.groupViews}
           selectedActionCommandId={selectedActionCommandId}
+          settingsShowRunning={projectState.debuggingMode}
           sidebarTheme={projectState.sidebarTheme}
           sessionPersistenceProvider={
             projectState.sessionPersistenceProvider === "off"
@@ -3538,6 +3630,9 @@ function App() {
              * CDXC:ReactTitlebar 2026-06-18-05:16:
              * User-facing titlebar labels should use the shorter "Tips" copy
              * while the underlying tips menu behavior stays unchanged.
+             *
+             * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
+             * Settings is the rightmost dedicated menu button, so it opens its dropdown on normal click while the primary-action buttons keep their existing click/right-click split behavior.
              */}
             <ButtonGroup
               className="titlebar-open-group titlebar-tips-group"
@@ -3634,8 +3729,8 @@ function App() {
                 {/*
                  * CDXC:TitlebarResources 2026-05-17-02:03:
                  * The Resources button is the first right-side titlebar
-                 * control after moving the pet wake/sleep toggle into the
-                 * sidebar overflow menu.
+                 * control after moving the pet wake/sleep toggle out of
+                 * Resources.
                  *
                  * CDXC:TitlebarKeepAwake 2026-05-27-07:32:
                  * The keep-awake button now owns coffee/moon state icons, so
@@ -3751,6 +3846,35 @@ function App() {
                 </Button>
               </TitlebarAppTooltip>
             </ButtonGroup>
+            <ButtonGroup
+              className="titlebar-open-group titlebar-settings-group"
+              data-titlebar-dropdown-anchor
+            >
+              <TitlebarAppTooltip content="Settings">
+                <Button
+                  aria-expanded={nativeDropdownOpen === "settings"}
+                  aria-haspopup="menu"
+                  aria-label="Settings menu"
+                  className="titlebar-session-button titlebar-open-main-button titlebar-settings-menu-button"
+                  data-state={nativeDropdownOpen === "settings" ? "open" : undefined}
+                  onClick={(event) => {
+                    showTitlebarDropdownPanel("settings", event.currentTarget);
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    showTitlebarDropdownPanel("settings", event.currentTarget);
+                  }}
+                  type="button"
+                  variant="ghost"
+                >
+                  {/*
+                   * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
+                   * The far-right titlebar button replaces the sidebar Settings row and sidebar overflow trigger. Use a compact three-line menu glyph and open a native child-window dropdown on normal click so global app actions have one rightmost home.
+                   */}
+                  <IconMenu2 aria-hidden="true" size={16} stroke={1.9} />
+                </Button>
+              </TitlebarAppTooltip>
+            </ButtonGroup>
           </div>
         </div>
       </div>
@@ -3782,6 +3906,13 @@ function TitlebarDropdownPanelSurface({
   onOpenChangelog,
   onOpenDocs,
   onOpenHighlightedFeatures,
+  onOpenSettingsMenuCommands,
+  onOpenSettingsMenuDiscord,
+  onOpenSettingsMenuHotkeys,
+  onOpenSettingsMenuPinnedPrompts,
+  onOpenSettingsMenuRunning,
+  onOpenSettingsMenuScratchPad,
+  onOpenSettingsMenuSettings,
   onOpenNoticeSettings,
   onOpenPowerSettings,
   onOpenTarget,
@@ -3792,6 +3923,7 @@ function TitlebarDropdownPanelSurface({
   onSleepInactiveSessions,
   onStartKeepAwake,
   onStopKeepAwake,
+  onWakePetFromSettingsMenu,
   onViewGhostexGuide,
   onToggleResourceCollapse,
   orphanBundles,
@@ -3800,6 +3932,7 @@ function TitlebarDropdownPanelSurface({
   readTips,
   resourceGroupViews,
   selectedActionCommandId,
+  settingsShowRunning,
   sidebarTheme,
   sessionPersistenceProvider,
   visibleActions,
@@ -3829,6 +3962,13 @@ function TitlebarDropdownPanelSurface({
   onOpenChangelog: () => void;
   onOpenDocs: () => void;
   onOpenHighlightedFeatures: () => void;
+  onOpenSettingsMenuCommands: () => void;
+  onOpenSettingsMenuDiscord: () => void;
+  onOpenSettingsMenuHotkeys: () => void;
+  onOpenSettingsMenuPinnedPrompts: () => void;
+  onOpenSettingsMenuRunning: () => void;
+  onOpenSettingsMenuScratchPad: () => void;
+  onOpenSettingsMenuSettings: () => void;
   onOpenNoticeSettings: (notice: TitlebarNotice) => void;
   onOpenPowerSettings: () => void;
   onOpenTarget: (target: ResolvedOpenTarget | undefined) => void;
@@ -3842,6 +3982,7 @@ function TitlebarDropdownPanelSurface({
   onSleepInactiveSessions: () => void;
   onStartKeepAwake: (durationMinutes?: KeepAwakeDurationMinutes) => Promise<void>;
   onStopKeepAwake: () => Promise<void>;
+  onWakePetFromSettingsMenu: () => void;
   onViewGhostexGuide: () => void;
   onToggleResourceCollapse: (key: string) => void;
   orphanBundles: ResourceProcessBundle[];
@@ -3850,6 +3991,7 @@ function TitlebarDropdownPanelSurface({
   readTips: TitlebarTip[];
   resourceGroupViews: ResourceGroupView[];
   selectedActionCommandId: string | undefined;
+  settingsShowRunning: boolean;
   sidebarTheme: SidebarTheme;
   sessionPersistenceProvider: Exclude<SessionPersistenceProvider, "off"> | undefined;
   visibleActions: SidebarCommandButton[];
@@ -4146,6 +4288,50 @@ function TitlebarDropdownPanelSurface({
           >
             <IconSettings aria-hidden="true" size={16} />
             <span>Configure</span>
+          </TitlebarPanelMenuItem>
+        </div>
+      ) : null}
+      {kind === "settings" ? (
+        <div className="titlebar-open-menu titlebar-settings-menu min-w-[220px] rounded-none border-border/80 p-1 text-[13px] text-foreground shadow-2xl">
+          {/*
+           * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
+           * The far-right titlebar Settings menu replaces the sidebar footer Settings row and sidebar overflow menu. Keep the requested order exact, show Running only while Debugging UI is enabled, and use the same compact native child-window menu chrome as Actions.
+           */}
+          <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuSettings)}>
+            <IconSettings aria-hidden="true" size={16} />
+            <span>Settings</span>
+          </TitlebarPanelMenuItem>
+          <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuCommands)}>
+            <IconCommand aria-hidden="true" size={16} />
+            <span>Commands [⌘⇧P]</span>
+          </TitlebarPanelMenuItem>
+          <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuHotkeys)}>
+            <IconKeyboard aria-hidden="true" size={16} />
+            <span>Hotkeys</span>
+          </TitlebarPanelMenuItem>
+          <TitlebarPanelMenuSeparator />
+          <TitlebarPanelMenuItem onClick={() => closeAfter(onWakePetFromSettingsMenu)}>
+            <IconRobotFace aria-hidden="true" size={16} />
+            <span>Wake Pet</span>
+          </TitlebarPanelMenuItem>
+          <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuPinnedPrompts)}>
+            <IconBookmark aria-hidden="true" size={16} />
+            <span>Pinned Prompts</span>
+          </TitlebarPanelMenuItem>
+          <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuScratchPad)}>
+            <IconPencil aria-hidden="true" size={16} />
+            <span>Scratch Pad</span>
+          </TitlebarPanelMenuItem>
+          {settingsShowRunning ? (
+            <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuRunning)}>
+              <IconHistory aria-hidden="true" size={16} />
+              <span>Running</span>
+            </TitlebarPanelMenuItem>
+          ) : null}
+          <TitlebarPanelMenuSeparator />
+          <TitlebarPanelMenuItem onClick={() => closeAfter(onOpenSettingsMenuDiscord)}>
+            <IconUsersGroup aria-hidden="true" size={16} />
+            <span>Join Discord</span>
           </TitlebarPanelMenuItem>
         </div>
       ) : null}
@@ -6344,9 +6530,10 @@ const styles = {
     position: "absolute",
     /*
      * CDXC:ReactTitlebar 2026-05-30-12:00:
-     * Right-side titlebar controls should sit flush with the window edge. The
-     * Open split button is the rightmost control, so do not reserve trailing
-     * inset on the slot container.
+     * Right-side titlebar controls should sit flush with the window edge.
+     *
+     * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
+     * The Settings menu button is now the rightmost titlebar control, so do not reserve trailing inset on the slot container.
      */
     right: 0,
     top: TITLEBAR_RIGHT_CONTROLS_TOP,
