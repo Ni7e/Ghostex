@@ -2023,12 +2023,43 @@ button,
    * CDXC:SettingsNavigation 2026-06-19-08:40:
    * The macOS Settings section list and Show Advanced filter should read as one left sidebar instead of separate floating cards.
    * Give the rail an owned layout column and pin the filter to the sidebar footer while the settings body centers inside the remaining content area.
+   *
+   * CDXC:SettingsNavigation 2026-06-19-10:30:
+   * The Settings sidebar should start at the tab bar instead of below the search field, stay transparent over the modal surface, and be 20px wider than the first owned-column layout.
+   *
+   * CDXC:SettingsNavigation 2026-06-19-10:36:
+   * The tabs row should span the full Settings modal width, while search aligns
+   * to the same centered content column as the settings cards. Draw the sidebar
+   * divider from the shared layout so it stays continuous through the header gap.
    */
-  --settings-section-sidebar-width: 10.75rem;
+  --settings-section-sidebar-tabs-offset: 3.25rem;
+  --settings-section-sidebar-width: 12rem;
   display: grid;
   grid-template-columns: var(--settings-section-sidebar-width) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
+  position: relative;
+}
+
+.ghostex-settings-shadcn .settings-main-tab-layout::before {
+  border-right: 1px solid var(--border);
+  bottom: 0;
+  content: "";
+  left: var(--settings-section-sidebar-width);
+  pointer-events: none;
+  position: absolute;
+  top: calc(var(--settings-section-sidebar-tabs-offset) * -1);
+  z-index: 0;
+}
+
+.ghostex-settings-shadcn .settings-main-tabs-content {
+  /*
+   * CDXC:SettingsNavigation 2026-06-19-10:30:
+   * The sidebar intentionally extends upward to the tabs row while the body
+   * keeps scrolling inside ScrollArea. Let this tab content expose that
+   * sidebar extension instead of clipping it at the search-field baseline.
+   */
+  overflow: visible !important;
 }
 
 .ghostex-settings-shadcn .settings-main-scroll {
@@ -2055,8 +2086,7 @@ button,
 }
 
 .ghostex-settings-shadcn .settings-section-sidebar {
-  background: color-mix(in srgb, var(--app-modal-background) 80%, var(--muted) 20%);
-  border-right: 1px solid var(--border);
+  background: transparent;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -2064,6 +2094,10 @@ button,
   min-height: 0;
   overflow: hidden;
   padding: 0.625rem 0.5rem;
+  transform: translateY(calc(var(--settings-section-sidebar-tabs-offset) * -1));
+  height: calc(100% + var(--settings-section-sidebar-tabs-offset));
+  position: relative;
+  z-index: 1;
 }
 
 .ghostex-settings-shadcn .settings-section-sidebar-list {
@@ -2135,16 +2169,33 @@ button,
 
 .ghostex-settings-shadcn .settings-modal-tabs-scroll {
   min-width: 0;
+  width: 100%;
 }
 
 .ghostex-settings-shadcn .settings-modal-tabs-scroll [data-slot="tabs-list"] {
+  display: grid !important;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  width: 100% !important;
+}
+
+.ghostex-settings-shadcn .settings-modal-tabs-scroll [data-slot="tabs-trigger"] {
+  min-width: 0;
+  width: 100%;
+}
+
+.ghostex-settings-shadcn .settings-modal-search-row {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: var(--settings-section-sidebar-width) minmax(0, 1fr);
+  margin-top: 0.75rem;
   width: 100%;
 }
 
 .ghostex-settings-shadcn .settings-modal-search-toolbar {
   box-sizing: border-box;
+  grid-column: 2;
   margin-inline: auto;
-  margin-top: 0.75rem;
   max-width: var(--settings-content-max-width, 770px);
   padding-inline: var(--settings-content-inline-padding, 1.25rem);
   width: 100%;
@@ -2255,6 +2306,10 @@ button,
 
   .ghostex-settings-shadcn .settings-main-scroll {
     grid-column: auto;
+  }
+
+  .ghostex-settings-shadcn .settings-modal-search-row {
+    display: block;
   }
 
   .ghostex-settings-shadcn .settings-section-sidebar {

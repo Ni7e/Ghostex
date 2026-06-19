@@ -29,6 +29,20 @@ describe("settings modal source", () => {
     expect(settingsModalSource).not.toContain("settings-show-advanced-anchor");
   });
 
+  test("keeps settings search in the sidebar-aware header row", () => {
+    /*
+     * CDXC:SettingsNavigation 2026-06-19-10:36:
+     * Settings and Hotkeys search should center above the settings card column,
+     * not above the full modal width or the left sidebar.
+     */
+    const headerSearch = sourceBetween(
+      settingsModalSource,
+      '<div className="settings-modal-search-row">',
+      'toolbarClassName="settings-modal-search-toolbar"',
+    );
+    expect(headerSearch).toContain("<SidebarSessionSearchField");
+  });
+
   test("keeps hook and skill uninstall controls in a searchable advanced bottom section", () => {
     /*
      * CDXC:SettingsAdvanced 2026-06-18-02:54:

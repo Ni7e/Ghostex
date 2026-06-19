@@ -2252,38 +2252,40 @@ export function SettingsModal({
             </div>
             ) : null}
             {!isFirstLaunchSetup && (activeTab === "settings" || activeTab === "hotkeys") ? (
-              <SidebarSessionSearchField
-                ariaLabel={
-                  activeTab === "hotkeys"
-                    ? "Search hotkeys"
-                    : "Search settings"
-                }
-                autoCapitalize="none"
-                autoComplete="off"
-                autoCorrect="off"
-                clearLabel={
-                  activeTab === "hotkeys"
-                    ? "Clear hotkeys search"
-                    : "Clear settings search"
-                }
-                inputClassName="settings-modal-search-input"
-                inputRef={searchInputRef}
-                placeholder={activeTab === "hotkeys" ? "Search hotkeys" : "Search settings"}
-                query={activeTab === "hotkeys" ? hotkeysSearchQuery : settingsSearchQuery}
-                setQuery={(nextQuery) => {
-                  if (activeTab === "hotkeys") {
-                    setHotkeysSearchQuery(nextQuery);
-                    return;
+              <div className="settings-modal-search-row">
+                <SidebarSessionSearchField
+                  ariaLabel={
+                    activeTab === "hotkeys"
+                      ? "Search hotkeys"
+                      : "Search settings"
                   }
-                  setSettingsSearchQuery(nextQuery);
-                }}
-                spellCheck={false}
-                toolbarClassName="settings-modal-search-toolbar"
-              />
+                  autoCapitalize="none"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  clearLabel={
+                    activeTab === "hotkeys"
+                      ? "Clear hotkeys search"
+                      : "Clear settings search"
+                  }
+                  inputClassName="settings-modal-search-input"
+                  inputRef={searchInputRef}
+                  placeholder={activeTab === "hotkeys" ? "Search hotkeys" : "Search settings"}
+                  query={activeTab === "hotkeys" ? hotkeysSearchQuery : settingsSearchQuery}
+                  setQuery={(nextQuery) => {
+                    if (activeTab === "hotkeys") {
+                      setHotkeysSearchQuery(nextQuery);
+                      return;
+                    }
+                    setSettingsSearchQuery(nextQuery);
+                  }}
+                  spellCheck={false}
+                  toolbarClassName="settings-modal-search-toolbar"
+                />
+              </div>
             ) : null}
           </DialogHeader>
 
-          <TabsContent className="mt-0 min-h-0 flex-1 overflow-hidden" value="settings">
+          <TabsContent className="settings-main-tabs-content mt-0 min-h-0 flex-1 overflow-hidden" value="settings">
           {/* CDXC:Settings 2026-04-26-10:43: The settings dialog lives inside a
               narrow sidebar webview, so the Radix scroll area needs an explicit
               height instead of letting Dialog crop an auto-height viewport. */}
@@ -3880,7 +3882,7 @@ export function SettingsModal({
           </TabsContent>
           ) : null}
           {!isFirstLaunchSetup ? (
-          <TabsContent className="mt-0 min-h-0 flex-1 overflow-hidden" value="hotkeys">
+          <TabsContent className="settings-main-tabs-content mt-0 min-h-0 flex-1 overflow-hidden" value="hotkeys">
             <HotkeysSettingsTab
               expandCollapsedProjectsOnJump={draft.expandCollapsedProjectsOnJump}
               expandCollapsedProjectsOnJumpModification={getSettingModificationProps(
