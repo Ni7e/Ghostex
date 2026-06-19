@@ -1940,6 +1940,7 @@ function AppModalHost() {
   const [osIntegrationStatusLoading, setOSIntegrationStatusLoading] = useState(false);
   const [isPreviousSessionsInitialLoadReady, setIsPreviousSessionsInitialLoadReady] = useState(false);
   const settings = useSidebarStore((state) => state.hud.settings);
+  const revision = useSidebarStore((state) => state.revision);
   const agents = useSidebarStore((state) => state.hud.agents);
   const commands = useSidebarStore((state) => state.hud.commands);
   const projectSettingsProjects = useSidebarStore(
@@ -1964,7 +1965,15 @@ function AppModalHost() {
     renamePromptAgentId,
     settings?.defaultPromptAgentId,
   );
-  const isSettingsRenderable = isSettingsModalKind(activeModal) && settings !== undefined;
+  /*
+   * CDXC:GxserverAgentSettings 2026-06-19-08:58:
+   * The modal store starts with DEFAULT_ghostex_SETTINGS before the native
+   * hydrate arrives. Keep Settings and First Launch closed until revision > 0
+   * so their full-setting save messages cannot seed gxserver-owned Default
+   * Prompt Agent back to Codex from a pre-hydrate placeholder.
+   */
+  const hasNativeSettingsHydrated = revision > 0;
+  const isSettingsRenderable = isSettingsModalKind(activeModal) && hasNativeSettingsHydrated;
   const settingsInitialTab = settingsInitialTabOverride ?? getSettingsInitialTab(activeModal);
   const isBaseActiveModalRenderable = isModalRenderable({
     activeModal,
@@ -2592,7 +2601,10 @@ function AppModalHost() {
         agentHookStatusLoading={agentHookStatusLoading}
         ghostexCliStatus={ghostexCliStatus}
         ghostexCliStatusLoading={ghostexCliStatusLoading}
-        isOpen={activeModal === "firstLaunchSetup" || activeModal === "tipsAndTricks"}
+        isOpen={
+          hasNativeSettingsHydrated &&
+          (activeModal === "firstLaunchSetup" || activeModal === "tipsAndTricks")
+        }
         onChange={(nextSettings) => {
           vscode.postMessage({
             settings: nextSettings,

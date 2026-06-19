@@ -82,6 +82,8 @@ export type GxserverEndpointPath =
   | "/api/control/stopAll"
   | "/api/readAgentSettings"
   | "/api/updateAgentSettings"
+  | "/api/readAgentSkillStatus"
+  | "/api/installAgentSkills"
   | "/api/readAgentHookStatus"
   | "/api/installAgentHooks"
   | "/api/uninstallAgentHooks"
@@ -282,6 +284,7 @@ export interface GxserverRpcErrorResponse {
 
 export interface GxserverAgentSettings {
   agentAcceptAllEnabled: boolean;
+  defaultPromptAgentId: string;
 }
 
 export interface GxserverReadAgentSettingsResult {
@@ -291,6 +294,54 @@ export interface GxserverReadAgentSettingsResult {
 
 export interface GxserverUpdateAgentSettingsParams {
   agentAcceptAllEnabled?: boolean;
+  defaultPromptAgentId?: string;
+}
+
+export type GxserverAgentSkillSourceKind = "global" | "pluginCache" | "repository";
+
+export interface GxserverAgentSkillLocation {
+  directoryPath: string;
+  providers: readonly string[];
+  rootPath: string;
+  skillFilePath: string;
+  sourceKind: GxserverAgentSkillSourceKind;
+}
+
+export interface GxserverAgentSkillStatusRow {
+  installed: boolean;
+  locations: readonly GxserverAgentSkillLocation[];
+  skillName: string;
+}
+
+export interface GxserverReadAgentSkillStatusParams {
+  repositoryPaths?: readonly string[];
+  skillNames?: readonly string[];
+}
+
+export interface GxserverReadAgentSkillStatusResult {
+  generatedAt: string;
+  homeDir: string;
+  roots: readonly GxserverAgentSkillDiscoveryRoot[];
+  skills: readonly GxserverAgentSkillStatusRow[];
+  type: "agentSkillStatus";
+}
+
+export interface GxserverAgentSkillDiscoveryRoot {
+  path: string;
+  providers: readonly string[];
+  sourceKind: GxserverAgentSkillSourceKind;
+}
+
+export interface GxserverInstallAgentSkillsParams extends GxserverReadAgentSkillStatusParams {
+  agentIds?: readonly string[];
+  packageSource?: string;
+}
+
+export interface GxserverInstallAgentSkillsResult extends GxserverReadAgentSkillStatusResult {
+  installCommand: readonly string[];
+  packageSource: string;
+  stderr: string;
+  stdout: string;
 }
 
 export type GxserverAgentHookStatus = "cliMissing" | "installed" | "missing" | "updateRequired";

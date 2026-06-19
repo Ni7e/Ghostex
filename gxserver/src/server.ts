@@ -13,6 +13,7 @@ import {
   isRemoteEndpointAllowed,
   readProtocolVersion,
 } from "./api.js";
+import { installGxserverAgentSkills, readGxserverAgentSkillStatus } from "./agent-skills.js";
 import { installGxserverAgentHooks, normalizeGxserverProcessPath, readGxserverAgentHookStatus, uninstallGxserverAgentHooks } from "./agent-hooks.js";
 import {
   GXSERVER_CONTROL_PLANE_CAPABILITIES,
@@ -146,6 +147,7 @@ import type {
   GxserverIngestAgentHookEventParams,
   GxserverIngestAgentHookEventResult,
   GxserverInstallAgentHooksParams,
+  GxserverInstallAgentSkillsParams,
   GxserverListenerConfig,
   GxserverListenerKind,
   GxserverMinimalHealthResponse,
@@ -188,6 +190,7 @@ import type {
   GxserverTerminalTitleEventResult,
   GxserverUpdateAgentSettingsParams,
   GxserverReadAgentHookStatusParams,
+  GxserverReadAgentSkillStatusParams,
   GxserverUpdateProjectParams,
   GxserverUpdateAgentActivityParams,
   GxserverUpdateAgentActivityResult,
@@ -733,6 +736,12 @@ async function routeRequest(options: HandleRequestOptions, requestId: string): P
         throw caught;
       }
     }
+    return endpoint.path;
+  }
+
+  if (isAgentSkillEndpoint(endpoint.path)) {
+    const result = await handleAgentSkillEndpoint(runtime, endpoint.path, body, requestId);
+    sendJson(response, 200, result);
     return endpoint.path;
   }
 
@@ -5009,6 +5018,35 @@ function isDomainStateEndpoint(path: GxserverEndpointPath): boolean {
 
 function isAgentHookEndpoint(path: GxserverEndpointPath): boolean {
   return path === "/api/readAgentHookStatus" || path === "/api/installAgentHooks" || path === "/api/uninstallAgentHooks";
+}
+
+function isAgentSkillEndpoint(path: GxserverEndpointPath): boolean {
+  return path === "/api/readAgentSkillStatus" || path === "/api/installAgentSkills";
+}
+
+async function handleAgentSkillEndpoint(
+  runtime: GxserverApiRuntime,
+  path: GxserverEndpointPath,
+  body: unknown,
+  requestId: string,
+): Promise<GxserverRpcSuccessResponse> {
+  /*
+  CDXC:AgentSkills 2026-06-19-08:25:
+  Agent skill setup belongs to gxserver with hook setup, not renderer code.
+  Local authenticated APIs install through the external skills CLI and report
+  the same Claude/Codex/shared discovery roots used by the gxserver CLI.
+  */
+  const params = readRpcParams(body);
+  const result = path === "/api/installAgentSkills"
+    ? await installGxserverAgentSkills(runtime.paths, params as GxserverInstallAgentSkillsParams)
+    : await readGxserverAgentSkillStatus(runtime.paths, params as GxserverReadAgentSkillStatusParams);
+  return {
+    ok: true,
+    product: GXSERVER_PRODUCT,
+    protocolVersion: GXSERVER_PROTOCOL_VERSION,
+    requestId,
+    result: result as unknown as Record<string, unknown>,
+  };
 }
 
 async function handleAgentHookEndpoint(

@@ -945,6 +945,10 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "load agent settings";
     case "/api/updateAgentSettings":
       return "save agent settings";
+    case "/api/readAgentSkillStatus":
+      return "check agent skill status";
+    case "/api/installAgentSkills":
+      return "install agent skills";
     case "/api/readAgentHookStatus":
       return "check agent hook status";
     case "/api/installAgentHooks":

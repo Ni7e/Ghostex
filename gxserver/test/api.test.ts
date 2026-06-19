@@ -79,6 +79,7 @@ test("agent settings API owns inherited Accept All launch policy", async () => {
     assert.equal(initialSettings.status, 200);
     assert.equal(initialSettings.body.result.isPersisted, false);
     assert.equal(initialSettings.body.result.settings.agentAcceptAllEnabled, true);
+    assert.equal(initialSettings.body.result.settings.defaultPromptAgentId, "codex");
 
     const initialPlan = await requestJson(baseUrl, "/api/readAgentLaunchPlan", {
       body: {
@@ -92,7 +93,7 @@ test("agent settings API owns inherited Accept All launch policy", async () => {
 
     const updatedSettings = await requestJson(baseUrl, "/api/updateAgentSettings", {
       body: {
-        params: { agentAcceptAllEnabled: false },
+        params: { agentAcceptAllEnabled: false, defaultPromptAgentId: " claude " },
         protocolVersion: GXSERVER_PROTOCOL_VERSION,
       },
       method: "POST",
@@ -100,6 +101,7 @@ test("agent settings API owns inherited Accept All launch policy", async () => {
     });
     assert.equal(updatedSettings.status, 200);
     assert.equal(updatedSettings.body.result.settings.agentAcceptAllEnabled, false);
+    assert.equal(updatedSettings.body.result.settings.defaultPromptAgentId, "claude");
 
     const persistedSettings = await requestJson(baseUrl, "/api/readAgentSettings", {
       body: { params: {}, protocolVersion: GXSERVER_PROTOCOL_VERSION },
@@ -108,6 +110,7 @@ test("agent settings API owns inherited Accept All launch policy", async () => {
     });
     assert.equal(persistedSettings.body.result.isPersisted, true);
     assert.equal(persistedSettings.body.result.settings.agentAcceptAllEnabled, false);
+    assert.equal(persistedSettings.body.result.settings.defaultPromptAgentId, "claude");
 
     const updatedPlan = await requestJson(baseUrl, "/api/readAgentLaunchPlan", {
       body: {

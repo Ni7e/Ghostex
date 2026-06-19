@@ -22,6 +22,14 @@ export const GXSERVER_ENDPOINTS: readonly GxserverEndpointDescriptor[] = [
   descriptor("/api/readAgentSettings", "remoteAllowed", true, true, "http"),
   descriptor("/api/updateAgentSettings", "remoteAllowed", true, true, "http"),
   /*
+  CDXC:AgentSkills 2026-06-19-08:25:
+  Agent skill installation and filesystem discovery mutate or inspect user-local
+  agent folders. Keep those endpoints local-only while the installer delegates
+  to the external skills CLI so every client uses the same global skill layout.
+  */
+  descriptor("/api/readAgentSkillStatus", "fullLocal", true, true, "http"),
+  descriptor("/api/installAgentSkills", "fullLocal", true, true, "http"),
+  /*
   CDXC:AgentHooks 2026-06-03-20:28:
   Agent hook file probes and plugin writes inspect/mutate user-local dotfiles.
   Keep those setup endpoints local-only while shared agent policy remains

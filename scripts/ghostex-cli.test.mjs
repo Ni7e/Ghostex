@@ -1061,195 +1061,58 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
     }
   });
 
-  test("installs the Ghostex Browser Use skill for agents", async () => {
-    /**
-     * CDXC:BrowserAgentControl 2026-05-26-22:17:
-     * The first-launch CLI command installs the Ghostex Browser Use skill into
-     * the agent skill directory, so the CLI needs a deterministic copy command
-     * that works from the source checkout and the bundled app resource path.
-     *
-     * CDXC:BrowserAgentControl 2026-05-27-06:58:
-     * The installed skill id is `$ghostex-browser-use`; the legacy
-     * `$ghostex-browser-devtools-mcp` name caused duplicate Codex discovery
-     * when a shared installed skill and repo skill were both present.
+  test.each([
+    ["browser", "ghostex-browser-use"],
+    ["computer-use", "ghostex-computer-use"],
+    ["agent-orchestration", "ghostex-agent-orchestration"],
+    ["generate-title", "ghostex-generate-title"],
+    ["manage-beads", "ghostex-manage-beads"],
+  ])("delegates %s install-skill to gxserver agent-skills", async (namespace, skillName) => {
+    /*
+     * CDXC:AgentSkills 2026-06-19-08:25:
+     * Ghostex's public CLI should not copy skill folders itself. Route every
+     * bundled skill install through gxserver's external skills CLI wrapper while
+     * passing the local bundled skills package as the install source.
      */
-    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-browser-skill-"));
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-agent-skill-delegate-"));
+    const capturePath = path.join(tempDir, "capture.json");
+    const fakeGxserverCli = path.join(tempDir, "gxserver-cli.js");
     try {
-      const targetDir = path.join(tempDir, "ghostex-browser-use");
+      await writeFile(
+        fakeGxserverCli,
+        [
+          "#!/usr/bin/env node",
+          "import { writeFileSync } from 'node:fs';",
+          "const payload = { argv: process.argv.slice(2) };",
+          "writeFileSync(process.env.GHOSTEX_TEST_CAPTURE_PATH, JSON.stringify(payload));",
+          "console.log(JSON.stringify({ ok: true, received: payload.argv }));",
+        ].join("\n"),
+      );
+      await chmod(fakeGxserverCli, 0o755);
+
       const result = await execFileAsync(process.execPath, [
         path.resolve("scripts/ghostex-cli.mjs"),
-        "browser",
+        namespace,
         "install-skill",
-        "--target-dir",
-        targetDir,
         "--json",
-      ]);
-      const payload = JSON.parse(result.stdout);
-      const skillMarkdown = await readFile(path.join(targetDir, "SKILL.md"), "utf8");
-
-      expect(payload).toMatchObject({
-        command: "ghostex browser mcp",
-        ok: true,
-        skill: "ghostex-browser-use",
-        targetDir,
+      ], {
+        env: {
+          ...process.env,
+          GHOSTEX_GXSERVER_CLI: fakeGxserverCli,
+          GHOSTEX_TEST_CAPTURE_PATH: capturePath,
+        },
       });
-      expect(skillMarkdown).toContain("# ghostex-browser-use");
-      expect(skillMarkdown).toContain("ghostex_console_logs");
-    } finally {
-      await rm(tempDir, { force: true, recursive: true });
-    }
-  });
-
-  test("installs the Ghostex Computer Use skill for agents", async () => {
-    /**
-     * CDXC:ComputerAgentControl 2026-05-27-06:58:
-     * Desktop Control setup installs `$ghostex-computer-use` as a wrapper over
-     * `$cua-driver` so users can ask for Ghostex computer use without knowing
-     * the lower-level skill name.
-     */
-    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-computer-use-skill-"));
-    try {
-      const targetDir = path.join(tempDir, "ghostex-computer-use");
-      const result = await execFileAsync(process.execPath, [
-        path.resolve("scripts/ghostex-cli.mjs"),
-        "computer-use",
-        "install-skill",
-        "--target-dir",
-        targetDir,
-        "--json",
-      ]);
       const payload = JSON.parse(result.stdout);
-      const skillMarkdown = await readFile(path.join(targetDir, "SKILL.md"), "utf8");
+      const capture = JSON.parse(await readFile(capturePath, "utf8"));
+      const sourceIndex = capture.argv.indexOf("--source");
+      const sourcePath = capture.argv[sourceIndex + 1];
 
-      expect(payload).toMatchObject({
-        command: "cua-driver",
-        ok: true,
-        skill: "ghostex-computer-use",
-        targetDir,
-      });
-      expect(skillMarkdown).toContain("# ghostex-computer-use");
-      expect(skillMarkdown).toContain("$cua-driver");
-    } finally {
-      await rm(tempDir, { force: true, recursive: true });
-    }
-  });
-
-  test("installs the Ghostex Agent Orchestration skill for agents", async () => {
-    /**
-     * CDXC:AgentOrchestration 2026-05-27-07:15:
-     * Agents need `$ghostex-agent-orchestration` installed so they can discover
-     * Ghostex CLI commands for creating panes, messaging sessions, checking
-     * status, and reading last lines through `ghostex read-text`.
-     */
-    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-agent-orchestration-skill-"));
-    try {
-      const targetDir = path.join(tempDir, "ghostex-agent-orchestration");
-      const result = await execFileAsync(process.execPath, [
-        path.resolve("scripts/ghostex-cli.mjs"),
-        "agent-orchestration",
-        "install-skill",
-        "--target-dir",
-        targetDir,
-        "--json",
-      ]);
-      const payload = JSON.parse(result.stdout);
-      const skillMarkdown = await readFile(path.join(targetDir, "SKILL.md"), "utf8");
-
-      expect(payload).toMatchObject({
-        command: "ghostex --help",
-        ok: true,
-        skill: "ghostex-agent-orchestration",
-        targetDir,
-      });
-      expect(skillMarkdown).toContain("# ghostex-agent-orchestration");
-      expect(skillMarkdown).toContain("ghostex --help");
-      expect(skillMarkdown).toContain("ghostex read-text <selector> --lines 80 --json");
-    } finally {
-      await rm(tempDir, { force: true, recursive: true });
-    }
-  });
-
-  test("installs the Ghostex Generate Title skill for agents", async () => {
-    /**
-     * CDXC:GenerateTitleSkill 2026-05-27-07:28:
-     * `$ghostex-generate-title` replaces the personal title skill with a
-     * Ghostex workflow: title under 47 characters, then submit `/rename <title>`
-     * in the current session.
-     *
-     * CDXC:GenerateTitleSkill 2026-06-09-17:49:
-     * The installed skill must use `rename-command` so generated titles submit
-     * through the native Enter bridge used by Delayed Send.
-     *
-     * CDXC:GenerateTitleSkill 2026-06-12-04:10:
-     * zmx terminals may only expose GHOSTEX_GLOBAL_SESSION_REF or ZMX_SESSION.
-     * The installed skill must prefer exact self-session selectors before
-     * giving up, and must not guess by title or alias.
-     */
-    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-generate-title-skill-"));
-    try {
-      const targetDir = path.join(tempDir, "ghostex-generate-title");
-      const result = await execFileAsync(process.execPath, [
-        path.resolve("scripts/ghostex-cli.mjs"),
-        "generate-title",
-        "install-skill",
-        "--target-dir",
-        targetDir,
-        "--json",
-      ]);
-      const payload = JSON.parse(result.stdout);
-      const skillMarkdown = await readFile(path.join(targetDir, "SKILL.md"), "utf8");
-
-      expect(payload).toMatchObject({
-        ok: true,
-        skill: "ghostex-generate-title",
-        targetDir,
-      });
-      expect(payload.command).toContain("ghostex rename-command");
-      expect(payload.command).toContain("${GHOSTEX_GLOBAL_SESSION_REF:-${GHOSTEX_SESSION_ID:-${ZMX_SESSION:-}}}");
-      expect(skillMarkdown).toContain("# ghostex-generate-title");
-      expect(skillMarkdown).toContain("under 60 characters");
-      expect(skillMarkdown).toContain('ghostex_session_selector="${GHOSTEX_GLOBAL_SESSION_REF:-${GHOSTEX_SESSION_ID:-${ZMX_SESSION:-}}}"');
-      expect(skillMarkdown).toContain('ghostex rename-command --session-id "$ghostex_session_selector" --title "<generated title>"');
-      expect(skillMarkdown).toContain("not guess a session by title, alias, project, or recent activity");
-      expect(skillMarkdown).toContain("supported session input path");
-      expect(skillMarkdown).not.toContain("Do not press Enter");
-    } finally {
-      await rm(tempDir, { force: true, recursive: true });
-    }
-  });
-
-  test("installs the Ghostex Manage Beads skill for agents", async () => {
-    /**
-     * CDXC:ProjectBoardBeads 2026-06-04-03:32:
-     * Project-board work needs a bundled `$ghostex-manage-beads` skill so
-     * agents can discover the `bd` workflow and associate a review bead with
-     * the current Ghostex/Codex session without relying on transcript memory.
-     */
-    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-manage-beads-skill-"));
-    try {
-      const targetDir = path.join(tempDir, "ghostex-manage-beads");
-      const result = await execFileAsync(process.execPath, [
-        path.resolve("scripts/ghostex-cli.mjs"),
-        "manage-beads",
-        "install-skill",
-        "--target-dir",
-        targetDir,
-        "--json",
-      ]);
-      const payload = JSON.parse(result.stdout);
-      const skillMarkdown = await readFile(path.join(targetDir, "SKILL.md"), "utf8");
-      const skillMetadata = await readFile(path.join(targetDir, "agents", "openai.yaml"), "utf8");
-
-      expect(payload).toMatchObject({
-        command: "gx bd --help",
-        ok: true,
-        skill: "ghostex-manage-beads",
-        targetDir,
-      });
-      expect(skillMarkdown).toContain("# ghostex-manage-beads");
-      expect(skillMarkdown).toContain("Associate A Bead With The Current Session");
-      expect(skillMarkdown).toContain("codex-thread:$CODEX_THREAD_ID");
-      expect(skillMetadata).toContain("allow_implicit_invocation: true");
+      expect(payload.ok).toBe(true);
+      expect(capture.argv.slice(0, 3)).toEqual(["agent-skills", "install", skillName]);
+      expect(sourceIndex).toBeGreaterThan(0);
+      expect(sourcePath).toBe(path.resolve("skills"));
+      expect(await readFile(path.join(sourcePath, skillName, "SKILL.md"), "utf8")).toContain(`# ${skillName}`);
+      expect(capture.argv).toContain("--json");
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }

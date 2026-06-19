@@ -6,14 +6,20 @@ import type {
 } from "../../protocol/index.js";
 
 const AGENT_SETTINGS_METADATA_KEY = "agents.settings.v1";
+const DEFAULT_PROMPT_AGENT_ID = "codex";
+const MAX_DEFAULT_PROMPT_AGENT_ID_LENGTH = 120;
 
 export const DEFAULT_GXSERVER_AGENT_SETTINGS: GxserverAgentSettings = {
   agentAcceptAllEnabled: true,
+  defaultPromptAgentId: DEFAULT_PROMPT_AGENT_ID,
 };
 
 /*
 CDXC:GxserverAgentSettings 2026-06-02-22:23:
 Global agent launch policy is gxserver-owned daemon state, not macOS sidebar-local settings or per-project launchSettings. Store Accept All under metadata so macOS, CLI, TUI, mobile, and remote clients resolve inherited agent permissions through one shared source before gxserver builds launch, resume, wake, fork, and copy commands.
+
+CDXC:GxserverAgentSettings 2026-06-19-08:58:
+Default Prompt Agent now shares the same gxserver-owned metadata record as global Accept All. Preserve existing macOS selections by accepting plain built-in or custom agent ids without validating against a client-local agent registry; launch surfaces validate command availability at use time.
 */
 export class GxserverAgentSettingsRepository {
   readonly #db: Database.Database;
@@ -44,6 +50,9 @@ export class GxserverAgentSettingsRepository {
       ...(typeof params.agentAcceptAllEnabled === "boolean"
         ? { agentAcceptAllEnabled: params.agentAcceptAllEnabled }
         : {}),
+      ...(typeof params.defaultPromptAgentId === "string"
+        ? { defaultPromptAgentId: params.defaultPromptAgentId }
+        : {}),
     });
     const now = this.#now();
     this.#db
@@ -68,7 +77,19 @@ export function normalizeAgentSettings(value: unknown): GxserverAgentSettings {
       typeof record.agentAcceptAllEnabled === "boolean"
         ? record.agentAcceptAllEnabled
         : DEFAULT_GXSERVER_AGENT_SETTINGS.agentAcceptAllEnabled,
+    defaultPromptAgentId: normalizeDefaultPromptAgentId(
+      typeof record.defaultPromptAgentId === "string"
+        ? record.defaultPromptAgentId
+        : undefined,
+    ),
   };
+}
+
+function normalizeDefaultPromptAgentId(value: string | undefined): string {
+  return ((value ?? "").trim() || DEFAULT_GXSERVER_AGENT_SETTINGS.defaultPromptAgentId).slice(
+    0,
+    MAX_DEFAULT_PROMPT_AGENT_ID_LENGTH,
+  );
 }
 
 function parseJsonObject(value: string): unknown {

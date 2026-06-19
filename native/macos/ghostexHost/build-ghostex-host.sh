@@ -1228,7 +1228,7 @@ chmod 755 "$CLI_DIR/ghostex" "$CLI_DIR/gx"
 # the Ghostex Browser Use skill only after the user explicitly chooses that skill.
 # Bundle the skill beside the CLI so `ghostex browser install-skill` can copy the
 # exact version that matches the installed `ghostex browser mcp`
-# command into ~/agents/skills.
+# command into agent-specific global skill folders through the external skills CLI.
 # CDXC:BrowserAgentControl 2026-05-27-01:59: Browser control is now documented
 # through the `ghostex browser ...` namespace, so bundled CLI resources must
 # continue shipping the skill used by `ghostex browser install-skill`.
@@ -1238,10 +1238,10 @@ chmod 755 "$CLI_DIR/ghostex" "$CLI_DIR/gx"
 # `$ghostex-manage-beads` skills so first-launch, Settings, and CLI installers
 # can install Ghostex-named agent wrappers without relying on a source checkout,
 # raw zmx, or the lower-level `$cua-driver` skill name.
-# CDXC:AgentSkills 2026-05-28-10:38: Keep bundled Ghostex runtime skills under
-# scripts/skills instead of .agents/skills. Codex discovers .agents/skills
-# directly, so keeping installable source copies there duplicates the same skill
-# beside the user's shared ~/agents/skills install.
+# CDXC:AgentSkills 2026-06-19-09:13: Keep the publishable Ghostex runtime
+# skills at repo-root skills/ so GitHub installs can target the repository root
+# package shape. Continue bundling a copy beside the app CLI so installed builds
+# can install the matching local skill version without requiring a source checkout.
 # CDXC:AgentSkills 2026-05-28-13:12: Bundled Ghostex skill titles should match
 # their invocation slugs exactly, such as ghostex-browser-use, so the skill picker
 # does not show a separate marketing-style title from the actual `$skill-name`.
@@ -1253,7 +1253,7 @@ mkdir -p "$CLI_DIR/skills"
 copy_cli_skill() {
 	local skill_name="$1"
 	mkdir -p "$CLI_DIR/skills/$skill_name"
-	cp -R "$REPO_ROOT/scripts/skills/$skill_name/." "$CLI_DIR/skills/$skill_name/"
+	cp -R "$REPO_ROOT/skills/$skill_name/." "$CLI_DIR/skills/$skill_name/"
 }
 copy_cli_skill "ghostex-browser-use"
 copy_cli_skill "ghostex-computer-use"

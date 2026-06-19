@@ -66,7 +66,7 @@ describe("native sidebar gxserver client", () => {
             requestId: "agent-settings-request",
             result: {
               isPersisted: true,
-              settings: { agentAcceptAllEnabled: true },
+              settings: { agentAcceptAllEnabled: true, defaultPromptAgentId: "claude" },
             },
           });
         }
@@ -97,6 +97,10 @@ describe("native sidebar gxserver client", () => {
     });
     const snapshot = await client.fetchStartupSnapshot();
 
+    expect(snapshot.agentSettings).toEqual({
+      agentAcceptAllEnabled: true,
+      defaultPromptAgentId: "claude",
+    });
     expect(snapshot.projects).toEqual([]);
     expect(snapshot.presentation?.sessions).toEqual([]);
     expect(requests.map((request) => request.url)).toEqual([

@@ -62,14 +62,11 @@ const GXSERVER_STATE_DB_PATH = path.join(GXSERVER_ROOT, "state.db");
 const GXSERVER_CONNECTIONS_PATH = path.join(homedir(), ".ghostex", "clients", "connections.json");
 const SESSION_ALIAS_CACHE_PATH = path.join(CLI_DIR, "session-aliases.json");
 const SHARED_SETTINGS_PATH = path.join(GHOSTEX_HOME, "state", "native-sidebar-settings.json");
-const GHOSTEX_AGENT_SKILL_INSTALL_ROOT = path.join(homedir(), "agents", "skills");
 const GHOSTEX_BROWSER_SKILL_NAME = "ghostex-browser-use";
-const GHOSTEX_BROWSER_LEGACY_SKILL_NAMES = ["ghostex-browser-devtools-mcp"];
 const GHOSTEX_COMPUTER_USE_SKILL_NAME = "ghostex-computer-use";
 const GHOSTEX_AGENT_ORCHESTRATION_SKILL_NAME = "ghostex-agent-orchestration";
 const GHOSTEX_GENERATE_TITLE_SKILL_NAME = "ghostex-generate-title";
 const GHOSTEX_MANAGE_BEADS_SKILL_NAME = "ghostex-manage-beads";
-const GHOSTEX_GENERATE_TITLE_LEGACY_SKILL_NAMES = ["madda-generate-title"];
 const QUICK_TERMINALS_PROJECT_NAME = "Quick Terminals";
 const RESET_ANSI = "\x1b[0m";
 const PICKER_TITLE = "Attach to Ghostex Session";
@@ -414,7 +411,6 @@ async function installBrowserSkillCommand(args) {
     args,
     command: "ghostex browser mcp",
     envVars: ["GHOSTEX_BROWSER_USE_SKILL_SOURCE", "GHOSTEX_BROWSER_SKILL_SOURCE"],
-    legacySkillNames: GHOSTEX_BROWSER_LEGACY_SKILL_NAMES,
     skillName: GHOSTEX_BROWSER_SKILL_NAME,
   });
 }
@@ -537,7 +533,6 @@ async function installGenerateTitleSkillCommand(args) {
     args,
     command: "ghostex rename-command --session-id \"${GHOSTEX_GLOBAL_SESSION_REF:-${GHOSTEX_SESSION_ID:-${ZMX_SESSION:-}}}\" --title \"<title>\"",
     envVars: ["GHOSTEX_GENERATE_TITLE_SKILL_SOURCE"],
-    legacySkillNames: GHOSTEX_GENERATE_TITLE_LEGACY_SKILL_NAMES,
     skillName: GHOSTEX_GENERATE_TITLE_SKILL_NAME,
   });
 }
@@ -591,47 +586,38 @@ async function beadsCommand(args) {
   });
 }
 
-async function installGhostexAgentSkill({ args, command, envVars, legacySkillNames = [], skillName }) {
+async function installGhostexAgentSkill({ args, command, envVars, skillName }) {
   const { flags } = parseArgs(args);
-  const sourceDir = resolveGhostexAgentSkillSourceDir(skillName, envVars);
-  const defaultTargetDir = ghostexAgentSkillInstallDir(skillName);
-  const targetDir = path.resolve(stringFlag(flags.targetDir ?? flags.target) ?? defaultTargetDir);
-  const installsDefaultTarget = targetDir === defaultTargetDir;
-  /**
-   * CDXC:BrowserAgentControl 2026-05-26-22:17:
-   * First-launch CLI setup should install the agent skill, not only the
-   * `ghostex` executable. The CLI owns this copy step because Homebrew installs
-   * the bundled app resources and agents discover user skills under
-   * ~/agents/skills.
+  const packageSource = resolveGhostexAgentSkillPackageSource(skillName, envVars, flags);
+  const agentIds = multiValueFlag(args, "agent", "agents");
+  /*
+   * CDXC:AgentSkills 2026-06-19-08:25:
+   * Public Ghostex skill install commands should delegate to gxserver's
+   * external `skills` CLI wrapper instead of copying folders into one legacy
+   * shared path. Keep the bundled skill package source local so installed app
+   * builds install the skill version that matches their CLI commands.
    */
-  await mkdir(path.dirname(targetDir), { recursive: true });
-  await cp(sourceDir, targetDir, { force: true, recursive: true });
-
-  const removedLegacySkillDirs = [];
-  if (installsDefaultTarget) {
-    for (const legacySkillName of legacySkillNames) {
-      const legacyDir = ghostexAgentSkillInstallDir(legacySkillName);
-      await rm(legacyDir, { force: true, recursive: true });
-      removedLegacySkillDirs.push(legacyDir);
-    }
-  }
-
-  const result = {
-    command,
-    ok: true,
-    removedLegacySkillDirs,
-    skill: skillName,
-    sourceDir,
-    targetDir,
-  };
+  const gxserverArgs = [
+    "agent-skills",
+    "install",
+    skillName,
+    "--source",
+    packageSource,
+    ...(agentIds.length > 0 ? ["--agent", ...agentIds] : []),
+    ...(flags.json ? ["--json"] : []),
+  ];
   if (flags.json) {
-    printJson(result);
+    const launch = resolveGxserverCliLaunch();
+    const result = await execFileAsync(launch.command, [...launch.args, ...gxserverArgs], {
+      cwd: launch.cwd,
+      env: launch.env,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    process.stdout.write(result.stdout);
+    process.stderr.write(result.stderr);
     return;
   }
-  console.log(`Installed ${skillName} to ${targetDir}`);
-  if (removedLegacySkillDirs.length > 0) {
-    console.log(`Removed legacy skill installs: ${removedLegacySkillDirs.join(", ")}`);
-  }
+  await runGxserverCliCommand(gxserverArgs);
   console.log(`Configure agents to run: ${command}`);
 }
 
@@ -4147,10 +4133,6 @@ function findGhostexSourceRoot(startPath) {
   }
 }
 
-function ghostexAgentSkillInstallDir(skillName) {
-  return path.join(GHOSTEX_AGENT_SKILL_INSTALL_ROOT, skillName);
-}
-
 function resolveGhostexAgentSkillSourceDir(skillName, envVars = []) {
   const cliDir = path.dirname(fileURLToPath(import.meta.url));
   const explicitSources = envVars.map((envVar) => stringFlag(process.env[envVar]));
@@ -4158,6 +4140,7 @@ function resolveGhostexAgentSkillSourceDir(skillName, envVars = []) {
   const candidates = uniquePaths([
     ...explicitSources,
     path.join(cliDir, "skills", skillName),
+    sourceRoot && path.join(sourceRoot, "skills", skillName),
     sourceRoot && path.join(sourceRoot, "scripts", "skills", skillName),
     path.join(path.resolve(cliDir, ".."), ".agents", "skills", skillName),
     sourceRoot && path.join(sourceRoot, ".agents", "skills", skillName),
@@ -4170,6 +4153,40 @@ function resolveGhostexAgentSkillSourceDir(skillName, envVars = []) {
   throw new Error(
     `Could not find ${skillName}. Reinstall Ghostex or set ${envVars[0] ?? "GHOSTEX_SKILL_SOURCE"} to the skill directory.`,
   );
+}
+
+function resolveGhostexAgentSkillPackageSource(skillName, envVars = [], flags = {}) {
+  const cliDir = path.dirname(fileURLToPath(import.meta.url));
+  const explicitSource = stringFlag(flags.source ?? flags.packageSource ?? process.env.GHOSTEX_AGENT_SKILLS_SOURCE);
+  if (explicitSource && /^[a-z][a-z0-9+.-]*:/i.test(explicitSource)) {
+    return explicitSource;
+  }
+  const explicitSources = envVars.map((envVar) => stringFlag(process.env[envVar]));
+  const sourceRoot = findGhostexSourceRoot(process.cwd());
+  const candidates = uniquePaths([
+    explicitSource,
+    explicitSource && path.dirname(explicitSource),
+    ...explicitSources.map((candidate) => candidate && path.dirname(candidate)),
+    path.join(cliDir, "skills"),
+    sourceRoot && path.join(sourceRoot, "skills"),
+    sourceRoot && path.join(sourceRoot, "scripts"),
+    sourceRoot && path.join(sourceRoot, "scripts", "skills"),
+    path.join(path.resolve(cliDir, ".."), ".agents", "skills"),
+    sourceRoot && path.join(sourceRoot, ".agents", "skills"),
+  ]);
+  for (const candidate of candidates) {
+    if (fileExistsSync(path.join(candidate, skillName, "SKILL.md"))) {
+      return candidate;
+    }
+    if (fileExistsSync(path.join(candidate, "skills", skillName, "SKILL.md"))) {
+      return candidate;
+    }
+  }
+  if (explicitSource) {
+    return explicitSource;
+  }
+  const legacySourceDir = resolveGhostexAgentSkillSourceDir(skillName, envVars);
+  return path.dirname(legacySourceDir);
 }
 
 function uniquePaths(paths) {
@@ -5407,6 +5424,32 @@ function parseArgs(args) {
   return { flags, rest };
 }
 
+function multiValueFlag(args, ...names) {
+  const values = [];
+  const normalizedNames = new Set(names.map((name) => name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)));
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!arg.startsWith("--")) {
+      continue;
+    }
+    const body = arg.slice(2);
+    const equalsIndex = body.indexOf("=");
+    const name = equalsIndex >= 0 ? body.slice(0, equalsIndex) : body;
+    if (!normalizedNames.has(name)) {
+      continue;
+    }
+    if (equalsIndex >= 0) {
+      values.push(...body.slice(equalsIndex + 1).split(",").map((value) => value.trim()).filter(Boolean));
+      continue;
+    }
+    while (index + 1 < args.length && !args[index + 1].startsWith("--")) {
+      values.push(...String(args[index + 1]).split(",").map((value) => value.trim()).filter(Boolean));
+      index += 1;
+    }
+  }
+  return [...new Set(values)];
+}
+
 function filterLogLines(text, flags) {
   let lines = text.split(/\r?\n/).filter(Boolean);
   if (flags.since) {
@@ -5675,7 +5718,7 @@ function browserUsage() {
    */
   const setupCommands = [
     formatHelpCommand("browser mcp [--port n] [--target id|--page id]", "Run the stdio MCP server for CEF DevTools control"),
-    formatHelpCommand("browser install-skill [--json]", "Install the $ghostex-browser-use skill into ~/agents/skills"),
+    formatHelpCommand("browser install-skill [--json]", "Install the $ghostex-browser-use skill with the external skills CLI"),
     formatHelpCommand("browser open [url] [project/reuse flags]", "Open or reuse an embedded browser pane"),
     formatHelpCommand("browser open-pane [url] [project/reuse flags]", "Alias for browser open"),
   ].join("\n");

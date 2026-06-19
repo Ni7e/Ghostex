@@ -272,6 +272,12 @@ export type ghostexSettings = {
    * Automated prompt flows such as Git helper prompts, project board Start Work,
    * and worktree first prompts need one user-selected default agent instead of
    * hardcoding Codex in each launcher.
+   *
+   * CDXC:GxserverAgentSettings 2026-06-19-08:58:
+   * gxserver now owns the canonical Default Prompt Agent alongside global
+   * Accept All. Keep this field as the sidebar's synchronous render cache so
+   * Settings can draw immediately from startup snapshots and gxserver update
+   * responses without localStorage becoming a competing source of truth.
    */
   defaultPromptAgentId: string;
   /**
