@@ -26789,8 +26789,8 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       return
     }
     /*
-     CDXC:BrowserPageAppearance 2026-06-19-11:47:
-     Browser address bars no longer expose a System/Light/Dark control or persist per-origin choices. Browser panes always request light page appearance at the renderer boundary so sites do not inherit Ghostex's dark macOS chrome and misread `prefers-color-scheme` during startup.
+     CDXC:BrowserPageAppearance 2026-06-19-16:07:
+     Browser address bars no longer expose a System/Light/Dark control or persist per-origin choices. Browser panes always request light page appearance at the renderer boundary; CEF also owns a white page canvas for transparent sites, so public pages do not reveal the dark editor backing color.
      */
     webView?.appearance = NSAppearance(named: .aqua)
     chromiumView?.setForcesLightPageAppearance(true)

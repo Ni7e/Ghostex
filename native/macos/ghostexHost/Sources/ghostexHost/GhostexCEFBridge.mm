@@ -43,6 +43,18 @@ static NSString* const GhostexCEFBuiltInDefaultProfileIdentifier = @"52B43C05-4A
 static NSString* const GhostexCEFViewportDiagnosticConsolePrefix = @"__GHOSTEX_CEF_VIEWPORT_DIAGNOSTIC__";
 using GhostexCEFCompletionBlock = void (^)(void);
 
+static NSColor* GhostexCEFNativePageBackingColor(BOOL forcesLightPageAppearance) {
+  return forcesLightPageAppearance
+    ? [NSColor whiteColor]
+    : [NSColor colorWithCalibratedWhite:0.086 alpha:1];
+}
+
+static cef_color_t GhostexCEFBrowserPageBackingColor(BOOL forcesLightPageAppearance) {
+  return forcesLightPageAppearance
+    ? CefColorSetARGB(255, 255, 255, 255)
+    : CefColorSetARGB(255, 22, 22, 22);
+}
+
 struct GhostexCEFProfileFlushState {
   explicit GhostexCEFProfileFlushState(GhostexCEFCompletionBlock completionBlock)
       : completion([completionBlock copy]) {}
@@ -1120,6 +1132,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
 }
 - (void)ghostexCEFPinHostedViewToBoundsWithReason:(NSString*)reason;
 - (void)ghostexCEFDidCreateBrowser:(CefRefPtr<CefBrowser>)browser;
+- (void)ghostexCEFApplyNativePageBackingColor;
 - (void)ghostexCEFApplyPageAppearanceMediaIfPossible;
 @end
 
@@ -1134,7 +1147,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
     profileIdentifier_ = [profileIdentifier copy];
     currentURLString_ = [initialURL copy];
     self.wantsLayer = YES;
-    self.layer.backgroundColor = [NSColor colorWithCalibratedWhite:0.086 alpha:1].CGColor;
+    self.layer.backgroundColor = GhostexCEFNativePageBackingColor(NO).CGColor;
     self.layer.masksToBounds = YES;
   }
   return self;
@@ -1183,6 +1196,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
     return;
   }
   browser_ = browser;
+  [self ghostexCEFApplyNativePageBackingColor];
 
   CefWindowHandle handle = browser_->GetHost()->GetWindowHandle();
   cefView_ = (__bridge NSView*)handle;
@@ -1512,13 +1526,21 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   [self ghostexCEFApplyPageAppearanceMediaIfPossible];
 }
 
+- (void)ghostexCEFApplyNativePageBackingColor {
+  if (!self.layer) {
+    return;
+  }
+  self.layer.backgroundColor = GhostexCEFNativePageBackingColor(forcesLightPageAppearance_).CGColor;
+}
+
 - (void)ghostexCEFApplyPageAppearanceMediaIfPossible {
+  [self ghostexCEFApplyNativePageBackingColor];
   if (!browser_) {
     return;
   }
   /*
-  CDXC:BrowserPageAppearance 2026-06-19-11:47:
-  Browser panes no longer expose System/Light/Dark controls or per-origin persistence. Toolbar browser pages should always boot as light because CEF otherwise inherits macOS dark appearance before page scripts run, which made Excalidraw+ choose its dark landing-page CSS after app restart.
+  CDXC:BrowserPageAppearance 2026-06-19-16:07:
+  Browser panes no longer expose System/Light/Dark controls or per-origin persistence. Toolbar browser pages should always boot with light media and an opaque white default page canvas. Sites such as plus.excalidraw.com can leave the document and hero SVG transparent, so using the editor's dark CEF backing makes a light page render with wrong colors even when `prefers-color-scheme` is already light.
   */
   CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
   params->SetString("media", "");
@@ -1535,6 +1557,20 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
     pageAppearanceDevToolsMessageID_,
     CefString("Emulation.setEmulatedMedia"),
     params);
+  CefRefPtr<CefDictionaryValue> backgroundParams = CefDictionaryValue::Create();
+  if (forcesLightPageAppearance_) {
+    CefRefPtr<CefDictionaryValue> color = CefDictionaryValue::Create();
+    color->SetInt("r", 255);
+    color->SetInt("g", 255);
+    color->SetInt("b", 255);
+    color->SetDouble("a", 1);
+    backgroundParams->SetDictionary("color", color);
+  }
+  pageAppearanceDevToolsMessageID_ += 1;
+  browser_->GetHost()->ExecuteDevToolsMethod(
+    pageAppearanceDevToolsMessageID_,
+    CefString("Emulation.setDefaultBackgroundColorOverride"),
+    backgroundParams);
 }
 
 - (void)createBrowserIfNeeded {
@@ -1573,7 +1609,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   windowInfo.SetAsChild((__bridge void*)self, rect);
 
   CefBrowserSettings browserSettings;
-  browserSettings.background_color = CefColorSetARGB(255, 22, 22, 22);
+  browserSettings.background_color = GhostexCEFBrowserPageBackingColor(forcesLightPageAppearance_);
   if (self.trustedClipboardOrigin.length > 0) {
     /*
     CDXC:EditorClipboard 2026-05-14-10:08:
@@ -1599,8 +1635,8 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
     CDXC:GPUIPhase1 2026-06-14-13:24:
     GPUI integrates CEF through external_message_pump instead of CEF's blocking run loop. In that host, synchronous browser creation can fail even with a valid AppKit child frame, so use CEF's async CreateBrowser path and attach the returned native Chromium view from OnAfterCreated.
 
-    CDXC:BrowserPageAppearance 2026-06-19-11:47:
-    Toolbar browser panes that force light page appearance must create about:blank first, apply Chromium media emulation, and only then load the real URL. Loading the real URL directly lets early page scripts observe the inherited dark macOS preference before Ghostex can correct it.
+    CDXC:BrowserPageAppearance 2026-06-19-16:07:
+    Toolbar browser panes that force light page appearance must create about:blank first, apply Chromium media emulation plus the white default page canvas, and only then load the real URL. This keeps transparent public pages from flashing or settling on the dark editor backing while preserving direct startup for editor panes.
     */
     bool started = CefBrowserHost::CreateBrowser(
       windowInfo,
@@ -1627,8 +1663,8 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   CDXC:ChromiumBrowserPanes 2026-06-18-23:58:
   Non-toolbar CEF panes can still start on the requested page directly, avoiding a visible blank-render turn for editor surfaces.
 
-  CDXC:BrowserPageAppearance 2026-06-19-11:47:
-  Toolbar browser panes intentionally stage the first public navigation behind about:blank so the fixed light page appearance is in place before sites such as Excalidraw+ evaluate `prefers-color-scheme`.
+  CDXC:BrowserPageAppearance 2026-06-19-16:07:
+  Toolbar browser panes intentionally stage the first public navigation behind about:blank so the fixed light page appearance and white default page canvas are in place before sites such as Excalidraw+ paint transparent content.
   */
   browser_ = CefBrowserHost::CreateBrowserSync(
     windowInfo,
