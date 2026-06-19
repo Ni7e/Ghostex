@@ -387,7 +387,12 @@ export async function buildBeadsCommand(
     case "list":
       return { args: ["list", "--all", "--json"], cwd, executable: bd };
     case "listAllLabels":
-      return { args: ["label", "list-all", "--json"], cwd, executable: bd };
+      /*
+      CDXC:ProjectBoardLabels 2026-06-19-09:35:
+      Beads `label list-all` currently scans all issues and then fetches labels issue-by-issue.
+      Use the board list command and aggregate labels in gxserver so any remaining label-vocabulary caller shares the faster read path used by Kanban instead of blocking on the global label inventory command.
+      */
+      return { args: ["list", "--all", "--json"], cwd, executable: bd };
     case "removeLabel":
       return {
         args: ["label", "remove", normalizeIssueId(params.issueId), normalizeRequiredText(params.label, "label"), "--json"],
@@ -727,7 +732,7 @@ export async function runBeadsAction(
 ): Promise<GxserverTypedOperationResult | GxserverBeadsBoardResult> {
   const action = normalizeBeadsAction(params.action);
   const command = await buildBeadsCommand(params, context);
-  if (action === "board") {
+  if (action === "board" || action === "listAllLabels") {
     if (!command) {
       throw new GxserverTypedOperationError("badRequest", "No command was constructed for Beads board reads.");
     }
@@ -740,11 +745,20 @@ export async function runBeadsAction(
       return {
         action,
         command,
-        issues: [],
+        ...(action === "board" ? { issues: [] } : {}),
         ...result,
       };
     }
     const { issues, stdout } = parseBeadsBoardListOutput(result.stdout, resolveBeadsBoardLimits(context));
+    if (action === "listAllLabels") {
+      return {
+        action,
+        command,
+        exitCode: 0,
+        stderr: result.stderr,
+        stdout: JSON.stringify(deriveBeadsLabelCounts(issues)),
+      };
+    }
     return {
       action,
       command,
@@ -771,6 +785,23 @@ export async function runBeadsAction(
     throw new GxserverTypedOperationError("badRequest", `No command was constructed for Beads action ${action}.`);
   }
   return { action, command, ...(await runTypedCommand(command, commandOptions(context, { BD_JSON_ENVELOPE: "1" }))) };
+}
+
+function deriveBeadsLabelCounts(issues: readonly Record<string, unknown>[]): Array<{ count: number; label: string }> {
+  const counts = new Map<string, number>();
+  for (const issue of issues) {
+    const labels = Array.isArray(issue.labels) ? issue.labels : [];
+    for (const label of labels) {
+      const normalized = typeof label === "string" ? label.trim() : "";
+      if (!normalized) {
+        continue;
+      }
+      counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([label, count]) => ({ count, label }));
 }
 
 async function runTypedCommand(

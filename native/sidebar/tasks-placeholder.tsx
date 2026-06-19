@@ -204,7 +204,6 @@ const PROJECT_BOARD_IMAGE_RESPONSE_EVENT = "ghostex-project-board-image-response
 const PROJECT_BOARD_AUTO_REFRESH_INTERVAL_MS = 8_000;
 const PROJECT_BOARD_GENERATED_TITLE_DELAY_MS = 2_000;
 const PROJECT_BOARD_GENERATED_TITLE_IDLE_TIMEOUT_MS = 10_000;
-const PROJECT_BOARD_LABEL_REFRESH_INTERVAL_MS = 60_000;
 const PROJECT_BOARD_MAX_DEPENDENCY_OPTIONS = 600;
 const PROJECT_BOARD_MAX_VISIBLE_TICKETS_PER_COLUMN = 120;
 const PROJECT_BOARD_GENERATING_TITLE = "Generating title...";
@@ -240,7 +239,6 @@ const PROJECT_AUTOMATION_TRIAGE_RECENT_COMPLETED_LIMIT = 5;
 type BoardRefreshMode = "background" | "initial" | "manual" | "mutation";
 
 type BoardRefreshOptions = {
-  includeLabels?: boolean;
   mode?: BoardRefreshMode;
 };
 
@@ -596,13 +594,16 @@ function ProjectBoardApp() {
    * Keep status moves, generated titles, dependency/label mutations, and full Beads refreshes as background reconciliation so the page stays responsive while durable storage catches up.
    *
    * CDXC:ProjectBoardLocalFirst 2026-06-16-20:01:
-   * Generated titles and label vocabulary refreshes must not run as immediate follow-up work after local ticket insertion.
-   * Defer generated-title prompt-agent work to idle time, and refresh all labels only when the create flow introduced a label that is not already in the board's local label vocabulary.
+   * Generated titles must not run as immediate follow-up work after local ticket insertion.
+   * Defer generated-title prompt-agent work to idle time, and keep label vocabulary local-first instead of starting global label reads after create.
+   *
+   * CDXC:ProjectBoardLabels 2026-06-19-09:35:
+   * Kanban create, drag, initial render, manual refresh, and auto-refresh must not call Beads `label list-all`.
+   * The board derives label suggestions from the already-loaded issue rows and merges labels from successful local mutations so global label inventory cannot block scrolling or card movement.
    */
   const isRefreshingRef = useRef(false);
   const issuesSignatureRef = useRef("");
   const labelsSignatureRef = useRef("");
-  const lastLabelsRefreshAtRef = useRef(0);
   const newPromptRef = useRef<HTMLTextAreaElement>(null);
   const automationProjectsRef = useRef<ProjectAutomationsBridgeState["projects"]>([]);
   const [conversationAction, setConversationAction] = useState<ConversationActionState>();
@@ -888,7 +889,6 @@ function ProjectBoardApp() {
 
   const loadTickets = useCallback(async (options: BoardRefreshOptions = {}) => {
     const mode = options.mode ?? "manual";
-    const includeLabels = options.includeLabels ?? mode !== "background";
     if (isRefreshingRef.current) {
       if (mode === "background") {
         return;
@@ -914,17 +914,11 @@ function ProjectBoardApp() {
         setAllIssues(issues);
         setTickets(toBoardTickets(issues, displayKey));
       }
-      if (includeLabels) {
-        const labelsPayload = await runBeads({ action: "listAllLabels" });
-        const labels = normalizeBeadsPayload<string[]>(labelsPayload, [])
-          .filter((label) => typeof label === "string")
-          .sort();
-        const labelsSignature = labels.join("\u001f");
-        if (labelsSignature !== labelsSignatureRef.current) {
-          labelsSignatureRef.current = labelsSignature;
-          setKnownLabels(labels);
-        }
-        lastLabelsRefreshAtRef.current = Date.now();
+      const labels = deriveKnownLabelsFromIssues(issues);
+      const labelsSignature = labels.join("\u001f");
+      if (labelsSignature !== labelsSignatureRef.current) {
+        labelsSignatureRef.current = labelsSignature;
+        setKnownLabels(labels);
       }
       if (mode !== "background") {
         setLoadState("ready");
@@ -962,7 +956,7 @@ function ProjectBoardApp() {
     if (activeSurfaceTab !== "board") {
       return;
     }
-    void loadTickets({ includeLabels: true, mode: "initial" });
+    void loadTickets({ mode: "initial" });
   }, [activeSurfaceTab, loadTickets]);
 
   useEffect(() => {
@@ -1008,26 +1002,21 @@ function ProjectBoardApp() {
   }, [detail.description, imagePreviewDataUrls, newTicket.description]);
 
   useEffect(() => {
-    const refreshIfVisible = (includeLabels = false) => {
+    const refreshIfVisible = () => {
       if (document.visibilityState !== "visible") {
         return;
       }
       if (activeSurfaceTab === "board") {
-        void loadTickets({
-          includeLabels:
-            includeLabels ||
-            Date.now() - lastLabelsRefreshAtRef.current >= PROJECT_BOARD_LABEL_REFRESH_INTERVAL_MS,
-          mode: "background",
-        });
+        void loadTickets({ mode: "background" });
       }
       void loadConversationState();
       void loadAutomationState();
     };
     const intervalId = window.setInterval(
-      () => refreshIfVisible(false),
+      () => refreshIfVisible(),
       PROJECT_BOARD_AUTO_REFRESH_INTERVAL_MS,
     );
-    const handleVisible = () => refreshIfVisible(false);
+    const handleVisible = () => refreshIfVisible();
     document.addEventListener("visibilitychange", handleVisible);
     window.addEventListener("focus", handleVisible);
     return () => {
@@ -1144,7 +1133,7 @@ function ProjectBoardApp() {
         return;
       }
       pendingStatusMovesRef.current.delete(ticketId);
-      void loadTickets({ includeLabels: false, mode: "background" });
+      void loadTickets({ mode: "background" });
     } catch (error) {
       if (pendingStatusMovesRef.current.get(ticketId)?.token !== token) {
         return;
@@ -1241,7 +1230,8 @@ function ProjectBoardApp() {
       }
       setDeleteConfirmingTicketId("");
       setDetail(createEmptyDetailDraft());
-      await loadTickets({ includeLabels: true, mode: "mutation" });
+      setKnownLabels((current) => mergeKnownLabels(current, detail.labels));
+      await loadTickets({ mode: "mutation" });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not save the ticket.");
       setDetail((current) => ({ ...current, isSaving: false }));
@@ -1288,8 +1278,6 @@ function ProjectBoardApp() {
       const title = shouldGenerateTitle ? PROJECT_BOARD_GENERATING_TITLE : requestedTitle;
       const estimate = tshirtToEstimate(draft.tshirt);
       const issueIdsBeforeCreate = new Set(allIssues.map((issue) => issue.id));
-      const knownLabelSet = new Set(knownLabels);
-      const shouldRefreshLabelsAfterCreate = draft.labels.some((label) => !knownLabelSet.has(label));
       const createdPayload = await runBeads({
         action: "create",
         description: prompt,
@@ -1346,7 +1334,7 @@ function ProjectBoardApp() {
             title: generatedTitle,
           });
           setLocalTicketTitle(issueId, generatedTitle);
-          await loadTickets({ includeLabels: false, mode: "background" });
+          await loadTickets({ mode: "background" });
           logProjectBoardDebug("projectBoard.createTicket.titleGeneration.completed", {
             beadId: issueId,
             generatedTitleLength: generatedTitle.length,
@@ -1390,6 +1378,7 @@ function ProjectBoardApp() {
         title,
       };
       upsertLocalIssue(createdIssue);
+      setKnownLabels((current) => mergeKnownLabels(current, createdIssue?.labels ?? draft.labels));
 
       if (startAfterCreate) {
         const createdTicket = toCreatedBoardTicket(createdIssue, allIssues, displayKey);
@@ -1430,8 +1419,9 @@ function ProjectBoardApp() {
               issueId: createdIssueId,
               labels: draft.labels,
             });
+            setKnownLabels((current) => mergeKnownLabels(current, draft.labels));
           }
-          await loadTickets({ includeLabels: shouldRefreshLabelsAfterCreate, mode: "background" });
+          await loadTickets({ mode: "background" });
         } catch (error) {
           if (
             pendingCreateStatusToken !== undefined &&
@@ -1440,7 +1430,7 @@ function ProjectBoardApp() {
             pendingStatusMovesRef.current.delete(createdIssueId);
           }
           setErrorMessage(error instanceof Error ? error.message : "Could not finish creating the ticket.");
-          void loadTickets({ includeLabels: shouldRefreshLabelsAfterCreate, mode: "background" });
+          void loadTickets({ mode: "background" });
         }
       };
 
@@ -1490,7 +1480,7 @@ function ProjectBoardApp() {
       if (deletingFromDialog) {
         setDetail(createEmptyDetailDraft());
       }
-      await loadTickets({ includeLabels: true, mode: "mutation" });
+      await loadTickets({ mode: "mutation" });
     } catch (error) {
       setTickets((current) =>
         current.some((candidate) => candidate.id === ticket.id) ? current : [...current, ticket],
@@ -1559,7 +1549,7 @@ function ProjectBoardApp() {
             return;
           }
           pendingStatusMovesRef.current.delete(ticket.id);
-          void loadTickets({ includeLabels: false, mode: "background" });
+          void loadTickets({ mode: "background" });
         })
         .catch((error) => {
           if (pendingStatusMovesRef.current.get(ticket.id)?.token !== token) {
@@ -1567,7 +1557,7 @@ function ProjectBoardApp() {
           }
           pendingStatusMovesRef.current.delete(ticket.id);
           setErrorMessage(error instanceof Error ? error.message : "Could not move the ticket.");
-          void loadTickets({ includeLabels: false, mode: "background" });
+          void loadTickets({ mode: "background" });
         });
       setErrorMessage("");
       logProjectBoardDebug("projectBoard.createStart.startWork.completed", {
@@ -2054,7 +2044,7 @@ function ProjectBoardApp() {
             aria-label="Refresh project"
             disabled={loadState === "loading"}
             onClick={() => {
-              void loadTickets({ includeLabels: true, mode: "manual" });
+              void loadTickets({ mode: "manual" });
               void loadConversationState();
               void loadAutomationState();
             }}
@@ -4980,6 +4970,21 @@ function createIssuesSignature(issues: BeadsIssue[]): string {
     .join("\u001e");
 }
 
+function mergeKnownLabels(current: string[], labels: readonly string[] | undefined): string[] {
+  const next = new Set(current);
+  for (const label of labels ?? []) {
+    const normalized = typeof label === "string" ? label.trim() : "";
+    if (normalized) {
+      next.add(normalized);
+    }
+  }
+  return [...next].sort((left, right) => left.localeCompare(right));
+}
+
+function deriveKnownLabelsFromIssues(issues: BeadsIssue[]): string[] {
+  return mergeKnownLabels([], issues.flatMap((issue) => issue.labels ?? []));
+}
+
 function prioritizeDependencyTickets(tickets: BoardTicket[]): BoardTicket[] {
   const activeTickets = tickets.filter((ticket) => ticket.boardStatus !== "done");
   const doneTickets = tickets.filter((ticket) => ticket.boardStatus === "done");
@@ -5142,8 +5147,13 @@ styleElement.textContent = `
     --project-board-bg: var(--app-background, #191919);
     --project-board-panel: #171717;
     --project-board-panel-hover: #1d1d1d;
-    --project-board-card: #1a1a1a;
-    --project-board-card-hover: #202020;
+    /*
+     * CDXC:ProjectBoardCards 2026-06-19-09:14:
+     * Kanban card surfaces need a brighter resting background than their lane panels so cards stand out in the macOS Project board.
+     * Keep hover one step brighter than the resting card color so hover feedback remains visible after raising the base card tone.
+     */
+    --project-board-card: #242424;
+    --project-board-card-hover: #2b2b2b;
     --project-board-border: rgba(255, 255, 255, 0.1);
     --project-board-border-strong: rgba(255, 255, 255, 0.16);
     --project-board-control-height: 36px;
@@ -6026,7 +6036,12 @@ styleElement.textContent = `
     align-items: stretch;
     display: grid;
     flex: 1 1 auto;
-    gap: 12px;
+    /*
+     * CDXC:ProjectBoardLanes 2026-06-19-09:59:
+     * Kanban cards need more usable width, so swimlanes should sit directly beside each other instead of spending horizontal space on gutters.
+     * Keep the existing lane grid structure and let the lane border act as the visible separator.
+     */
+    gap: 0;
     grid-template-columns: repeat(6, minmax(218px, 1fr));
     min-height: 0;
     overflow-x: auto;
@@ -6043,6 +6058,15 @@ styleElement.textContent = `
     min-width: 218px;
     overflow: hidden;
     position: relative;
+  }
+
+  .project-board-lane + .project-board-lane {
+    /*
+     * CDXC:ProjectBoardLanes 2026-06-19-09:59:
+     * Adjacent zero-gap swimlanes must meet on one separator line, not two stacked borders.
+     * Remove the following lane's left border so the previous lane's right border owns the shared boundary.
+     */
+    border-left-width: 0;
   }
 
   .project-board-lane[data-drop-target="true"] {

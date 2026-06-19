@@ -616,6 +616,9 @@ test("Beads command construction uses resolved bd and preserves current board al
     const labelAdd = await buildBeadsCommand({ action: "addLabel", issueId: "gxserver-15", label: "frontend" }, context);
     assert.deepEqual(labelAdd?.args, ["label", "add", "gxserver-15", "frontend", "--json"]);
 
+    const listAllLabels = await buildBeadsCommand({ action: "listAllLabels" }, context);
+    assert.deepEqual(listAllLabels?.args, ["list", "--all", "--json"]);
+
     const configSet = await buildBeadsCommand({ action: "configSet", value: "backlog,test,review" }, context);
     assert.deepEqual(configSet?.args, ["config", "set", "status.custom", "backlog,test,review", "--json"]);
 
@@ -780,6 +783,42 @@ printf '%s\\n' '[{"id":"gxserver-1","title":"response body is too large"}]'
         return true;
       },
     );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Beads listAllLabels derives sorted counts from board list output", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "gxserver-beads-labels-"));
+  try {
+    const repo = path.join(root, "repo");
+    const appWebRoot = path.join(root, "app-web");
+    const gxserverRoot = path.join(appWebRoot, "gxserver");
+    const bd = path.join(appWebRoot, "bin", "bd");
+    await mkdir(repo);
+    await makeExecutable(
+      bd,
+      `#!/bin/sh
+printf '%s\\n' '{"data":[{"id":"gxserver-1","labels":["ui","mac"]},{"id":"gxserver-2","labels":["ui",""]},{"id":"gxserver-3","labels":["backend"]}]}'
+`,
+    );
+    const result = await runBeadsAction(
+      { action: "listAllLabels", projectPath: repo },
+      {
+        beadsBoardLimits: { fileLimitBytes: 1024, responseLimitBytes: 1024, rowLimit: 10 },
+        cwd: repo,
+        projects: [project("P3a91", repo)],
+        toolchain: { gxserverRoot, repoRoot: path.join(root, "source-root") },
+      },
+    );
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(result.command?.args, ["list", "--all", "--json"]);
+    assert.equal(result.stdout, JSON.stringify([
+      { count: 1, label: "backend" },
+      { count: 1, label: "mac" },
+      { count: 2, label: "ui" },
+    ]));
   } finally {
     await rm(root, { force: true, recursive: true });
   }

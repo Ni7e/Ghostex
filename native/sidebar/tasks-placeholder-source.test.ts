@@ -43,6 +43,30 @@ function collectFunctionalUpdaterCalls(source: string, setterCallStart: string):
 }
 
 describe("Project Board form event handling", () => {
+  test("keeps Kanban swimlanes adjacent with a single separator", () => {
+    /*
+     * CDXC:ProjectBoardLanes 2026-06-19-09:59:
+     * Kanban swimlanes should remove horizontal gutters to give cards more width while avoiding doubled borders where lanes touch.
+     */
+    const laneLayoutSource = sourceBetween(".project-board-lanes {", ".project-board-lane-header");
+
+    expect(laneLayoutSource).toContain("gap: 0;");
+    expect(laneLayoutSource).toContain(".project-board-lane + .project-board-lane");
+    expect(laneLayoutSource).toContain("border-left-width: 0;");
+  });
+
+  test("uses brighter Kanban bead card surfaces than lane panels", () => {
+    /*
+     * CDXC:ProjectBoardCards 2026-06-19-09:14:
+     * Kanban cards should stand out from the macOS Project board lanes before hover, so the card background token must stay visibly brighter than the lane panel token.
+     */
+    const variableSource = sourceBetween(":root {", "* { box-sizing: border-box; }");
+
+    expect(variableSource).toContain("--project-board-panel: #171717;");
+    expect(variableSource).toContain("--project-board-card: #242424;");
+    expect(variableSource).toContain("--project-board-card-hover: #2b2b2b;");
+  });
+
   test("prevents accidental text selection inside Kanban bead cards", () => {
     /*
      * CDXC:ProjectBoardCards 2026-06-13-13:55:
