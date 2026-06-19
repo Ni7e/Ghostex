@@ -47,6 +47,10 @@ describe("titlebar update download state source", () => {
     expect(titlebarHostSource).toContain('aria-disabled={projectState.updateDownloading ? true : undefined}');
     expect(titlebarHostSource).toContain('data-disabled={projectState.updateDownloading ? "true" : undefined}');
     expect(titlebarHostSource).toContain('data-downloading={projectState.updateDownloading ? "true" : undefined}');
+    expect(titlebarHostSource).toContain("titlebar-update-download-icon");
+    expect(titlebarHostSource).toMatch(
+      /\.titlebar-update-download-icon \{[\s\S]*transform: translateY\(2px\);/,
+    );
     expect(titlebarHostSource).toContain("titlebar-update-spinner");
     expect(titlebarHostSource).toContain("titlebar-update-download-spin");
     expect(titlebarHostSource).toContain('content={projectState.updateDownloading ? "Downloading..." : "Download update"}');

@@ -201,11 +201,13 @@ type TitlebarResourceSession = {
   isRunning: boolean;
   isSleeping?: boolean;
   lastInteractionAt?: string;
+  nativePaneState?: "mounted" | "mounting" | "unmounted";
+  providerSessionState?: "exists" | "missing" | "persistence-disabled" | "unknown";
   projectId?: string;
   sessionId: string;
   sessionKind?: "browser" | "terminal" | "t3";
   sessionPersistenceName?: string;
-  sessionPersistenceProvider?: string;
+  sessionPersistenceProvider?: SessionPersistenceProvider;
   terminalTitle?: string;
   title: string;
 };
@@ -1370,7 +1372,11 @@ function createSessionResourceBundle(
   const seedProcesses = processes.filter((process) =>
     matchTokens.some((token) => process.command.includes(token)),
   );
-  if (seedProcesses.length === 0 && session.sessionKind !== "browser") {
+  if (
+    seedProcesses.length === 0 &&
+    session.sessionKind !== "browser" &&
+    !hasRunningZmxProviderForTitlebarResourceSession(session)
+  ) {
     return undefined;
   }
   const tree = collectProcessTree(seedProcesses, childrenByParent);
@@ -1386,6 +1392,28 @@ function createSessionResourceBundle(
     session,
     type: "session",
   };
+}
+
+function hasRunningZmxProviderForTitlebarResourceSession(
+  session: Pick<
+    TitlebarResourceSession,
+    "providerSessionState" | "sessionKind" | "sessionPersistenceName" | "sessionPersistenceProvider"
+  >,
+): boolean {
+  /*
+   * CDXC:TitlebarResources 2026-06-19-19:21:
+   * Resources must list every zmx-backed terminal whose provider is running,
+   * even when the macOS pane is not loaded and the sampled process command
+   * does not expose the zmx session name. The sidebar labels that state as
+   * "Active, not loaded"; Resources should show the same live session row and
+   * attach CPU/RAM only when a sampled process tree can be matched.
+   */
+  return (
+    session.sessionKind === "terminal" &&
+    session.sessionPersistenceProvider === "zmx" &&
+    Boolean(session.sessionPersistenceName?.trim()) &&
+    session.providerSessionState === "exists"
+  );
 }
 
 function createProjectCodeServerBundle(
@@ -3572,7 +3600,12 @@ function App() {
                       stroke={1.8}
                     />
                   ) : (
-                    <IconDownload aria-hidden="true" size={15} stroke={1.8} />
+                    <IconDownload
+                      aria-hidden="true"
+                      className="titlebar-update-download-icon"
+                      size={15}
+                      stroke={1.8}
+                    />
                   )}
                 </Button>
               </TitlebarAppTooltip>
@@ -6856,6 +6889,15 @@ styleElement.textContent = `
   .titlebar-update-button[data-downloading="true"]:focus-visible {
     background: transparent;
     color: rgba(255,255,255,0.92);
+  }
+  .titlebar-update-download-icon {
+    /*
+     * CDXC:AutoUpdate 2026-06-19-20:09:
+     * Visual review moved only the available-update download glyph 2px lower.
+     * Keep the titlebar button full-height and move the SVG visually so the
+     * native titlebar hit target and neighboring layout stay unchanged.
+     */
+    transform: translateY(2px);
   }
   .titlebar-update-spinner {
     animation: titlebar-update-download-spin 1s linear infinite;

@@ -118,6 +118,26 @@ describe("native titlebar Resources source", () => {
     expect(rowActionSource).toContain("return [titlebarResourceSidebarSessionId(session)];");
   });
 
+  test("keeps provider-live zmx sessions visible without a matched process command", () => {
+    const bundleSource = sourceBetween(
+      titlebarHostSource,
+      "function createSessionResourceBundle",
+      "function createProjectCodeServerBundle",
+    );
+    const sessionTypeSource = sourceBetween(
+      titlebarHostSource,
+      "type TitlebarResourceSession =",
+      "type TitlebarTipIcon =",
+    );
+
+    expect(titlebarHostSource).toContain("CDXC:TitlebarResources 2026-06-19-19:21:");
+    expect(sessionTypeSource).toContain('providerSessionState?: "exists"');
+    expect(sessionTypeSource).toContain('nativePaneState?: "mounted"');
+    expect(bundleSource).toContain("!hasRunningZmxProviderForTitlebarResourceSession(session)");
+    expect(bundleSource).toContain('session.sessionPersistenceProvider === "zmx"');
+    expect(bundleSource).toContain('session.providerSessionState === "exists"');
+  });
+
   test("does not expose Close for app-critical browser helper bundles", () => {
     /*
      * CDXC:TitlebarResources 2026-06-15-13:45:
