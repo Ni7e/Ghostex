@@ -8,6 +8,39 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>4.21.1</title>
+            <pubDate>Fri, 19 Jun 2026 16:20:59 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.21.1</sparkle:fullReleaseNotesLink>
+            <sparkle:version>42101</sparkle:version>
+            <sparkle:shortVersionString>4.21.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 4.21.1
+
+- Major
+  - Fresh agent startup and CLI orchestration
+    - `ghostex create-agent` now creates and starts the gxserver provider in one step, so follow-up messages land in a live agent process instead of a shell prompt.
+    - Fresh agent panes consume the queued first-launch command once and no longer treat raw Ghostex `G...` session IDs as provider resume titles.
+    - The Rust gxserver and zmx path now follows the same queued-startup behavior as the TypeScript server.
+  - Focused session commands
+    - Sleep Focused Session, Wake Focused Session, Close Focused Session, and Close After Done are available from the command palette and Hotkeys settings.
+    - Option+Shift+S sleeps the focused terminal by default; wake, close, and timer actions are available to bind without taking over existing Cmd+W behavior.
+    - Native hotkeys and command-palette actions target the terminal that owns AppKit focus, including command-pane terminals.
+  - Browser page appearance
+    - Browser panes now force both light page media and a white default page canvas for public pages.
+    - Transparent pages that leave the document background unset no longer reveal the dark editor backing color.
+- Minor
+  - Git commit modal polish
+    - The branch header is quieter and the Select and Show All controls now live beneath the changed-file tree.
+    - Changed-file stats stay visible in the lower file footer without competing with the branch name.
+  - Reliability coverage
+    - Added coverage for queued agent startup consumption, command-palette focused actions, native hotkey dispatch, and Rust gxserver parity.
+
+[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.21.1)
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.21.1/ghostex-4.21.1-arm64.dmg" length="579718365" type="application/octet-stream" sparkle:edSignature="O/xrcdkT7JHeywLP2StzKv3VpNvlT+1jmZIBVYP481ia0bI3lixvsmJCvxeH1wv66skQKsuTABjxE3Sg+A1kDA=="/>
+        </item>
+        <item>
             <title>4.21.0</title>
             <pubDate>Fri, 19 Jun 2026 15:33:37 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.21.0</sparkle:fullReleaseNotesLink>
@@ -248,33 +281,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.14.0/ghostex-4.14.0-arm64.dmg" length="580293679" type="application/octet-stream" sparkle:edSignature="w7VQfuWEDL6MuaYIkr2EYtdEsAKUNqQWF6C3b6lUKlqsbJxuWHp7CxfoTuuN+mMKBvItXQbBxfDIQxKqL8M8BQ=="/>
         </item>
         <item>
-            <title>4.12.0</title>
-            <pubDate>Sun, 14 Jun 2026 02:18:54 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.12.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>41200</sparkle:version>
-            <sparkle:shortVersionString>4.12.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 4.12.0
-
-- Major
-  - Command palette search is now centered on sessions by default. Cmd+P opens session search, Cmd+Shift+P opens command mode with `>`, and results include current sessions, active projects, collapsed projects, and previous sessions ranked by recent activity.
-  - Native pane focus follows the surface that actually owns keyboard input. Focused borders track the AppKit first responder, directional focus uses rendered pane geometry, and command panels plus project-editor companion panes avoid stale retargeting.
-  - Sleeping panes behave like selected panes instead of empty gaps. Their tab chrome remains visible, placeholders show "Press Any Key to Wake", and normal key presses wake the sleeping terminal in place.
-  - Sidebar tag filters can be reordered, hidden, disabled, and reset from Settings. Hidden or disabled tags are removed from active filtering so old filter state does not keep sessions invisible.
-- Minor
-  - Sparkle's titlebar update button now fades only while an accepted update is actively downloading.
-  - App Shots is opt-in by default and marked as Beta in Settings.
-  - The TUI session switcher throttles held Up and Down arrow repeats while still responding immediately to the first key press.
-  - Long project session lists use a regular "Show N more" session row and restore scroll position more predictably when collapsed.
-  - Session card tooltips include clearer active, sleeping, and not-loaded state text plus colored metadata rows.
-  - Native modal and window polish tightens Add Worktree padding and close behavior, startup overlay layering, Exit Focus styling, command-panel resize hover feedback, toast entry animation, and browser profile routing.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.12.0)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.12.0/ghostex-4.12.0-arm64.dmg" length="562882666" type="application/octet-stream" sparkle:edSignature="LBOY0aTINOdqSR5nDKVqRb5/cEXqCeHId+BktJdVoCsSabt3m0ftLmC3eFTxH7utvEWyaDL/m4E87vjevllYDQ=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -286,6 +292,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: x3x3Gpu/y0R8XeLDE1SmvUa70xsWhRyKrdF26AWW3wFFjkERPglNeP+1WiWkkjlFlgbhMxCCeG9Gby6Ewde6AQ==
-length: 23086
+edSignature: mtetmgkzliVe2Fxu1GtB1QxFA0cpIEdIDHMC5ajhenEWXMCIXp92vrs++5jVA5+kAUSW+44KAqc0HuuL7H7HBg==
+length: 22995
 -->
