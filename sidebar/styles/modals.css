@@ -3523,8 +3523,13 @@ html:has(body.app-modal-host-native-window-body) {
    *
    * CDXC:DelayedSend 2026-06-17-17:01:
    * The native delayed-send child window has dedicated extra height. Fill that
-   * WebView with fixed padding so the title, duration fields, helper text, and
+   * WebView with fixed padding so the title, duration fields, and two-row
    * footer are visible without relying on body scrolling.
+   *
+   * CDXC:DelayedSend 2026-06-19-14:24:
+   * Active delayed-send cancellation must stay inside the compact modal by
+   * sharing the bottom cancel row. Keep the row full-width when Cancel is the
+   * only cancellation action.
    */
   max-width: min(460px, calc(100vw - 2rem));
 }
@@ -3558,6 +3563,27 @@ html:has(body.app-modal-host-native-window-body) {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.delayed-send-footer {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.delayed-send-cancel-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.delayed-send-cancel-row[data-has-active-timer="true"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.delayed-send-action-button {
+  min-width: 0;
+  width: 100%;
 }
 
 .session-rename-form {
@@ -3781,8 +3807,14 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .projects-settings-selector-trigger[data-popup-open] {
-  background: color-mix(in srgb, var(--app-button-background) 10%, var(--app-card-active) 90%);
-  border-color: color-mix(in srgb, var(--app-button-background) 38%, var(--app-border) 62%);
+  /*
+   * CDXC:ProjectSettings 2026-06-19-12:22:
+   * Opening the Projects dropdown should not tint the selector with the current
+   * app accent. Keep the active dropdown trigger neutral so it matches the
+   * Settings surface instead of reading blue in dark themes.
+   */
+  background: color-mix(in srgb, var(--app-card-active) 92%, var(--app-background) 8%);
+  border-color: color-mix(in srgb, var(--app-border) 74%, var(--app-foreground) 26%);
 }
 
 .projects-settings-selector-icon {

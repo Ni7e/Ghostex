@@ -32,7 +32,7 @@ export type CommandPaletteCurrentSessionItem = {
 };
 
 export type CommandPaletteSessionSection = {
-  heading: "Current Project" | "Active Projects" | "Collapsed Projects";
+  heading: "Current Project" | "Other Active Projects" | "Collapsed Projects";
   items: CommandPaletteCurrentSessionItem[];
   key: "currentProject" | "activeProjects" | "collapsedProjects";
 };
@@ -138,11 +138,21 @@ export function createCommandPaletteSessionSections(
 ): CommandPaletteSessionSection[] {
   /*
    * CDXC:CommandPalette 2026-06-13-22:48:
-   * Session search is project-oriented: the focused project is first, expanded
+   * Session search is project-oriented: the current project is first, expanded
    * projects follow, collapsed project rows follow after that, and previous
    * sessions stay last. Do not use the old flat current-session heading because
    * it hides whether a result belongs to the current, active, or collapsed
    * project area.
+   *
+   * CDXC:CommandPalette 2026-06-19-14:10:
+   * The Current Project section must mean the app's active project, not a
+   * session row with stale focus metadata. A visible `/` terminal can remain
+   * focused while the active project is Ghostex, so use active group state as
+   * the authoritative project context for Cmd+P grouping.
+   *
+   * CDXC:CommandPalette 2026-06-19-14:11:
+   * The second live-session bucket is Other Active Projects so users do not
+   * read Current Project as a separate concept above the app's active project.
    */
   const currentProjectItems: CommandPaletteCurrentSessionItem[] = [];
   const activeProjectItems: CommandPaletteCurrentSessionItem[] = [];
@@ -167,7 +177,7 @@ export function createCommandPaletteSessionSections(
       key: "currentProject",
     },
     {
-      heading: "Active Projects",
+      heading: "Other Active Projects",
       items: sortCommandPaletteCurrentSessionItemsByLastActive(activeProjectItems),
       key: "activeProjects",
     },
@@ -204,11 +214,7 @@ export function sortCommandPalettePreviousSessionsByLastActive(
 export function getCommandPaletteCurrentGroupId(
   items: readonly CommandPaletteCurrentSessionItem[],
 ): string | undefined {
-  return (
-    items.find((item) => item.session.isFocused)?.groupId ??
-    items.find((item) => item.groupIsActive)?.groupId ??
-    items[0]?.groupId
-  );
+  return items.find((item) => item.groupIsActive)?.groupId;
 }
 
 export function filterCommandPaletteItems<T>(

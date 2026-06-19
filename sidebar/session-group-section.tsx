@@ -716,7 +716,7 @@ export type SessionGroupSectionProps = {
   allowPinnedSessionReorder?: boolean;
   enableProjectSessionListToggle?: boolean;
   pinnedSessionDropIndicator?: SidebarSessionDropTarget;
-  sessionDropIndicatorGroupId?: string;
+  sessionDropIndicator?: SidebarSessionDropTarget;
   sessionDraggingDisabled?: boolean;
   projectHeaderActions?: "all" | "terminal-only";
   sessionTagListItems?: readonly SidebarSessionTagListItem[];
@@ -764,6 +764,48 @@ export function getGroupContextMenuItemCount({
   return 3 + Number(canFullReloadGroup);
 }
 
+export type SidebarSessionGapContextMenuCandidate<T> = {
+  bottom: number;
+  element: T;
+  top: number;
+};
+
+export function getSidebarSessionGapContextMenuTarget<T>({
+  clientY,
+  sessionRows,
+}: {
+  clientY: number;
+  sessionRows: readonly SidebarSessionGapContextMenuCandidate<T>[];
+}): T | undefined {
+  /*
+   * CDXC:SidebarContextMenu 2026-06-19-10:46:
+   * Project context menus are owned by the project header only. A right-click in
+   * the narrow visual gap between two sidebar session rows belongs to the
+   * session directly above the gap, preserving row-level actions without adding
+   * overlapping hit targets.
+   */
+  if (!Number.isFinite(clientY)) {
+    return undefined;
+  }
+
+  for (let index = 0; index < sessionRows.length - 1; index += 1) {
+    const currentRow = sessionRows[index];
+    const nextRow = sessionRows[index + 1];
+    if (
+      !Number.isFinite(currentRow.bottom) ||
+      !Number.isFinite(nextRow.top) ||
+      nextRow.top < currentRow.bottom
+    ) {
+      continue;
+    }
+    if (clientY >= currentRow.bottom && clientY <= nextRow.top) {
+      return currentRow.element;
+    }
+  }
+
+  return undefined;
+}
+
 function getControlMenuPosition(button: HTMLButtonElement | null): ContextMenuPosition | undefined {
   if (!button) {
     return undefined;
@@ -802,7 +844,7 @@ export function SessionGroupSection({
   enableProjectSessionListToggle = true,
   pinnedSessionDropIndicator,
   projectHeaderActions = "all",
-  sessionDropIndicatorGroupId,
+  sessionDropIndicator,
   sessionDraggingDisabled = false,
   sessionTagListItems,
   showHeaderActions = true,
@@ -843,6 +885,7 @@ export function SessionGroupSection({
   const controlMenuRef = useRef<HTMLDivElement>(null);
   const projectAgentButtonRef = useRef<HTMLButtonElement>(null);
   const groupSectionRef = useRef<HTMLElement | null>(null);
+  const sessionsShellRef = useRef<HTMLDivElement | null>(null);
   const debugInstanceIdRef = useRef(createSessionGroupDebugInstanceId());
 
   useEffect(() => {
@@ -989,6 +1032,71 @@ export function SessionGroupSection({
     projectSessionListRenderedSessionIdsKey,
     shouldClipProjectSessionList,
   ]);
+
+  useLayoutEffect(() => {
+    if (!projectContext) {
+      return;
+    }
+
+    const groupElement = groupSectionRef.current;
+    const sessionsShellElement = sessionsShellRef.current;
+    if (
+      !groupElement ||
+      !sessionsShellElement ||
+      !groupElement.closest('.sidebar-reference-layout[data-reference-sidebar="true"]')
+    ) {
+      return;
+    }
+
+    const headerElement = groupElement.querySelector<HTMLElement>(".group-head");
+    const scrollViewport = groupElement.closest<HTMLElement>(".session-groups-content");
+    if (!headerElement || !scrollViewport) {
+      return;
+    }
+
+    let animationFrameId = 0;
+
+    /**
+     * CDXC:SidebarTitlebarColors 2026-06-19-13:22:
+     * Transparent sticky project headers let their own session rows scroll
+     * behind the header. Clip the session shell by the measured overlap instead
+     * of restoring a painted header background, so the custom sidebar gradient
+     * remains visible while sticky headers still hide underlying rows.
+     */
+    const updateStickyHeaderClip = () => {
+      const headerRect = headerElement.getBoundingClientRect();
+      const shellRect = sessionsShellElement.getBoundingClientRect();
+      const clipTop = Math.max(0, Math.ceil(headerRect.bottom - shellRect.top));
+      sessionsShellElement.style.setProperty("--reference-project-session-clip-top", `${clipTop}px`);
+    };
+
+    const scheduleStickyHeaderClipUpdate = () => {
+      window.cancelAnimationFrame(animationFrameId);
+      animationFrameId = window.requestAnimationFrame(updateStickyHeaderClip);
+    };
+
+    updateStickyHeaderClip();
+    scrollViewport.addEventListener("scroll", scheduleStickyHeaderClipUpdate, { passive: true });
+    window.addEventListener("resize", scheduleStickyHeaderClipUpdate);
+
+    const observer = new ResizeObserver(scheduleStickyHeaderClipUpdate);
+    observer.observe(groupElement);
+    observer.observe(headerElement);
+    observer.observe(sessionsShellElement);
+
+    return () => {
+      scrollViewport.removeEventListener("scroll", scheduleStickyHeaderClipUpdate);
+      window.removeEventListener("resize", scheduleStickyHeaderClipUpdate);
+      observer.disconnect();
+      window.cancelAnimationFrame(animationFrameId);
+      sessionsShellElement.style.removeProperty("--reference-project-session-clip-top");
+    };
+  }, [
+    isCollapsed,
+    Boolean(projectContext),
+    projectSessionListRenderedSessionIdsKey,
+  ]);
+
   const postGroupDebugLog = useEffectEvent((event: string, details: Record<string, unknown>) => {
     if (!debuggingMode) {
       return;
@@ -1129,10 +1237,14 @@ export function SessionGroupSection({
         } as CSSProperties)
       : collapsibleStyle;
 
+  const sessionGroupDropPosition =
+    sessionDropIndicator?.kind === "group" && sessionDropIndicator.groupId === groupId
+      ? sessionDropIndicator.position
+      : undefined;
   const isGroupDropTarget =
     sortable.isDropTarget ||
     emptyGroupDropTarget.isDropTarget ||
-    (pinnedSessionDropIndicator === undefined && sessionDropIndicatorGroupId === groupId);
+    sessionGroupDropPosition !== undefined;
   /**
    * CDXC:ProjectReorder 2026-05-18-20:39:
    * Dragging a project in the reference sidebar must show a dim insertion line
@@ -1729,6 +1841,94 @@ export function SessionGroupSection({
     toggleCollapsedOrSelectEmptyProject();
   };
 
+  const handleGroupHeaderContextMenu = (event: ReactMouseEvent<HTMLElement>) => {
+    if (!projectContext && isNestedInteractiveContextMenuTarget(event)) {
+      /**
+       * CDXC:SidebarContextMenu 2026-05-15-17:53:
+       * Header buttons without their own context menu should not open the
+       * surrounding project/group context menu on right-click. Suppress nested
+       * interactive targets while preserving right-click menus on the row
+       * surface itself.
+       *
+       * CDXC:SidebarContextMenu 2026-05-16-13:39:
+       * Project headers own a custom project context menu across their whole
+       * header, including icon/title and action-button children. Do not apply
+       * the nested-control suppression to project groups.
+       *
+       * CDXC:SidebarContextMenu 2026-06-19-10:46:
+       * The project context menu must open from the project header only, not
+       * from the project body or the spacing between session rows.
+       */
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    if (isChatCollection || (!showHeaderActions && !projectContext)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenuPosition(
+      clampContextMenuPosition(
+        event.clientX,
+        event.clientY,
+        getGroupContextMenuItemCount({
+          canFullReloadGroup,
+          hasProjectContext: Boolean(projectContext),
+          isWorktreeProject: Boolean(projectContext?.worktree),
+        }),
+      ),
+    );
+  };
+
+  const handleGroupSessionsContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.target instanceof Element && event.target.closest(".session")) {
+      return;
+    }
+
+    const contextMenuTarget = getSidebarSessionGapContextMenuTarget({
+      clientY: event.clientY,
+      sessionRows: Array.from(
+        event.currentTarget.querySelectorAll<HTMLElement>(
+          '.session[data-sidebar-session-id][data-project-session-list-more-row="false"][data-project-session-list-overflow="false"]',
+        ),
+      ).map((element) => {
+        const bounds = element.getBoundingClientRect();
+        return {
+          bottom: bounds.bottom,
+          element,
+          top: bounds.top,
+        };
+      }),
+    });
+
+    if (!contextMenuTarget) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    contextMenuTarget.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        altKey: event.altKey,
+        bubbles: true,
+        button: event.button,
+        buttons: event.buttons,
+        cancelable: true,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        screenX: event.screenX,
+        screenY: event.screenY,
+        shiftKey: event.shiftKey,
+        view: window,
+      }),
+    );
+  };
+
   return (
     <>
       <section
@@ -1753,43 +1953,6 @@ export function SessionGroupSection({
 
           requestFocusGroup();
         }}
-        onContextMenu={(event: ReactMouseEvent<HTMLElement>) => {
-          if (!projectContext && isNestedInteractiveContextMenuTarget(event)) {
-            /**
-             * CDXC:SidebarContextMenu 2026-05-15-17:53:
-             * Header buttons without their own context menu should not open the
-             * surrounding project/group context menu on right-click. Suppress
-             * nested interactive targets while preserving right-click menus on
-             * the row surface itself.
-             *
-             * CDXC:SidebarContextMenu 2026-05-16-13:39:
-             * Project headers own a custom project context menu across their
-             * whole header, including icon/title and action-button children.
-             * Do not apply the nested-control suppression to project groups.
-             */
-            event.preventDefault();
-            event.stopPropagation();
-            return;
-          }
-
-          if (isChatCollection || (!showHeaderActions && !projectContext)) {
-            return;
-          }
-
-          event.preventDefault();
-          event.stopPropagation();
-          setContextMenuPosition(
-            clampContextMenuPosition(
-              event.clientX,
-              event.clientY,
-              getGroupContextMenuItemCount({
-                canFullReloadGroup,
-                hasProjectContext: Boolean(projectContext),
-                isWorktreeProject: Boolean(projectContext?.worktree),
-              }),
-            ),
-          );
-        }}
         ref={setGroupSectionElement}
         role={shouldScrubDisabledGroupDndAccessibility ? "group" : undefined}
       >
@@ -1797,6 +1960,7 @@ export function SessionGroupSection({
           className="group-head"
           data-collapsible="true"
           onClick={handleGroupHeaderClick}
+          onContextMenu={handleGroupHeaderContextMenu}
           onMouseEnter={refreshProjectDiffStats}
           ref={projectContext && !isChatCollection ? sortable.handleRef : undefined}
           style={groupHeaderStyle}
@@ -2225,13 +2389,16 @@ export function SessionGroupSection({
           className="group-sessions-shell sidebar-collapse-shell"
           data-collapsed={String(isCollapsed)}
           data-project-session-list-clipped={String(shouldClipProjectSessionList)}
+          ref={sessionsShellRef}
           style={sessionsShellStyle}
         >
           <div
             className="group-sessions sidebar-collapse-content"
+            data-drop-position={sessionGroupDropPosition}
             data-pinned-drop-gaps={String(shouldRenderPinnedSessionDropGaps)}
             data-drop-target={String(isSessionDropTargetVisible)}
             id={sessionsRegionId}
+            onContextMenu={handleGroupSessionsContextMenu}
             ref={contentRef}
           >
             {showSessionGroupConnector ? (
@@ -2259,6 +2426,18 @@ export function SessionGroupSection({
                     : visibleSessionIds.indexOf(sessionId);
                   const sessionIdsBelow =
                     visibleSessionIndex >= 0 ? visibleSessionIds.slice(visibleSessionIndex + 1) : [];
+                  const sessionDropPosition =
+                    sessionDropIndicator?.kind === "session" &&
+                    sessionDropIndicator.groupId === group.groupId &&
+                    sessionDropIndicator.sessionId === sessionId
+                      ? sessionDropIndicator.position
+                      : undefined;
+                  const pinnedSessionDropPosition =
+                    pinnedSessionDropIndicator?.kind === "session" &&
+                    pinnedSessionDropIndicator.groupId === group.groupId &&
+                    pinnedSessionDropIndicator.sessionId === sessionId
+                      ? pinnedSessionDropIndicator.position
+                      : undefined;
 
                   return (
                     <Fragment key={sessionId}>
@@ -2292,11 +2471,7 @@ export function SessionGroupSection({
                         forcedDropPosition={
                           allowPinnedSessionReorder || isProjectSessionListOverflowRow
                             ? undefined
-                            : pinnedSessionDropIndicator?.kind === "session" &&
-                                pinnedSessionDropIndicator.groupId === group.groupId &&
-                                pinnedSessionDropIndicator.sessionId === sessionId
-                              ? pinnedSessionDropIndicator.position
-                              : undefined
+                            : sessionDropPosition ?? pinnedSessionDropPosition
                         }
                         index={sessionIndex}
                         isProjectSessionListOverflowRow={isProjectSessionListOverflowRow}
@@ -2396,7 +2571,10 @@ export function SessionGroupSection({
             ) : (
               <div
                 className="group-empty-drop-target"
-                data-drop-position={emptyGroupDropTarget.isDropTarget ? "start" : undefined}
+                data-drop-position={
+                  sessionGroupDropPosition ??
+                  (emptyGroupDropTarget.isDropTarget ? "start" : undefined)
+                }
                 data-drop-target={String(isSessionDropTargetVisible)}
                 ref={emptyGroupDropTarget.ref}
               >

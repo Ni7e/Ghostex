@@ -33,6 +33,7 @@ import {
   IconTrash,
   IconUsersGroup,
   IconWorld,
+  IconX,
   type TablerIcon,
 } from "@tabler/icons-react";
 import {
@@ -156,6 +157,7 @@ import {
 import {
   DEFAULT_ghostex_SETTINGS,
   getSidebarTitlebarForegroundForBackground,
+  getSidebarTitlebarGradientColors,
   type RemoteMachineSettings,
 } from "../shared/ghostex-settings";
 import {
@@ -748,7 +750,7 @@ export function SidebarApp({
   const [ groupDragPreview, setGroupDragPreview ] = useState<SidebarGroupDragPreview>();
   const [ pinnedSessionDropIndicator, setPinnedSessionDropIndicator ] =
     useState<SidebarSessionDropTarget>();
-  const [ sessionDropIndicatorGroupId, setSessionDropIndicatorGroupId ] = useState<string>();
+  const [ sessionDropIndicator, setSessionDropIndicator ] = useState<SidebarSessionDropTarget>();
   const [ isSessionSearchSelectionVisible, setIsSessionSearchSelectionVisible ] = useState(false);
   const [ focusedSessionRevealRequestId, setFocusedSessionRevealRequestId ] = useState(0);
   const [ showGxserverUnavailableEmptyState, setShowGxserverUnavailableEmptyState ] =
@@ -1766,6 +1768,9 @@ export function SidebarApp({
     const customSidebarTitlebarForegroundColor = getSidebarTitlebarForegroundForBackground(
       effectiveSettings.customSidebarTitlebarBackgroundColor,
     );
+    const customSidebarTitlebarGradientColors = getSidebarTitlebarGradientColors(
+      effectiveSettings.customSidebarTitlebarBackgroundColor,
+    );
     if (normalizedThemeColor) {
       /**
        * CDXC:WorkspaceTheme 2026-05-05-02:58
@@ -1796,6 +1801,12 @@ export function SidebarApp({
        * CDXC:SidebarTitlebarColors 2026-06-15-13:22:
        * The foreground is derived from the selected background at apply time.
        * Do not preserve older stored foreground choices in the sidebar DOM.
+       *
+       * CDXC:SidebarTitlebarColors 2026-06-19-12:33:
+       * The sidebar custom chrome background is a fixed-strength vertical
+       * gradient derived from the selected tint-adjusted background. Publish
+       * explicit gradient stop variables while keeping the solid background
+       * token for row/card contrast calculations.
        */
       document.body.dataset.customSidebarTitlebarColors = "true";
       document.body.style.setProperty(
@@ -1806,10 +1817,20 @@ export function SidebarApp({
         "--custom-sidebar-titlebar-background-color",
         effectiveSettings.customSidebarTitlebarBackgroundColor,
       );
+      document.body.style.setProperty(
+        "--custom-sidebar-titlebar-gradient-top-color",
+        customSidebarTitlebarGradientColors.sidebarTop,
+      );
+      document.body.style.setProperty(
+        "--custom-sidebar-titlebar-gradient-bottom-color",
+        customSidebarTitlebarGradientColors.sidebarBottom,
+      );
     } else {
       delete document.body.dataset.customSidebarTitlebarColors;
       document.body.style.removeProperty("--custom-sidebar-titlebar-foreground-color");
       document.body.style.removeProperty("--custom-sidebar-titlebar-background-color");
+      document.body.style.removeProperty("--custom-sidebar-titlebar-gradient-top-color");
+      document.body.style.removeProperty("--custom-sidebar-titlebar-gradient-bottom-color");
     }
 
     return () => {
@@ -1820,6 +1841,8 @@ export function SidebarApp({
       document.body.style.removeProperty("--workspace-sidebar-theme-foreground");
       document.body.style.removeProperty("--custom-sidebar-titlebar-foreground-color");
       document.body.style.removeProperty("--custom-sidebar-titlebar-background-color");
+      document.body.style.removeProperty("--custom-sidebar-titlebar-gradient-top-color");
+      document.body.style.removeProperty("--custom-sidebar-titlebar-gradient-bottom-color");
     };
   }, [
     customThemeColor,
@@ -2395,6 +2418,7 @@ export function SidebarApp({
   const {
     hasOverflow: sessionGroupsHaveScrollableOverflow,
     showBottomGlow: showSessionGroupsBottomGlow,
+    showTopGlow: showSessionGroupsTopGlow,
   } = useScrollGlowState(sessionGroupsContentRef);
   const sidebarSessionSearchResults = useMemo(
     () =>
@@ -2642,7 +2666,7 @@ export function SidebarApp({
       const sourceData = getSidebarDropData(event.operation.source);
       if (sourceData?.kind === "group") {
         setPinnedSessionDropIndicator(undefined);
-        setSessionDropIndicatorGroupId(undefined);
+        setSessionDropIndicator(undefined);
         const resolvedGroupDropTarget = resolveGroupDropTargetFromPoint(
           getDragNativeEvent(event),
           groupIdsRef.current,
@@ -2658,22 +2682,15 @@ export function SidebarApp({
         return;
       }
 
-      if (isManualActiveSessionsSort) {
-        setGroupDropIndicator(undefined);
-        setPinnedSessionDropIndicator(undefined);
-        setSessionDropIndicatorGroupId(undefined);
-        return;
-      }
-
       setGroupDropIndicator(undefined);
       if (sourceData?.kind !== "session") {
         setPinnedSessionDropIndicator(undefined);
-        setSessionDropIndicatorGroupId(undefined);
+        setSessionDropIndicator(undefined);
         return;
       }
 
       if (sessionsById[ sourceData.sessionId ]?.isPinned === true) {
-        setSessionDropIndicatorGroupId(undefined);
+        setSessionDropIndicator(undefined);
         const resolvedPinnedSessionDropTarget = resolvePinnedSessionDropTargetFromPoint(
           getDragNativeEvent(event),
           sourceData,
@@ -2714,13 +2731,19 @@ export function SidebarApp({
         getSidebarDropData(event.operation.target),
         sourceData,
       );
-      const nextGroupId =
-        resolvedSessionDropTarget && resolvedSessionDropTarget.groupId !== sourceData.groupId
-          ? resolvedSessionDropTarget.groupId
-          : undefined;
 
-      setSessionDropIndicatorGroupId((previous) =>
-        previous === nextGroupId ? previous : nextGroupId,
+      /*
+       * CDXC:SidebarDragDrop 2026-06-19-11:12:
+       * Manual session sorting should always show an insertion line while the
+       * pointer is over another session row: above the row midpoint means
+       * before, below the midpoint means after. Store the resolved drop target
+       * directly instead of only highlighting a target project so the visual
+       * indicator does not disappear when dnd-kit reports the broader group.
+       */
+      setSessionDropIndicator((previous) =>
+        areSameSessionDropTarget(previous, resolvedSessionDropTarget ?? undefined)
+          ? previous
+          : resolvedSessionDropTarget ?? undefined,
       );
     },
   );
@@ -2779,7 +2802,7 @@ export function SidebarApp({
     pinnedSessionDropTargetLogKeyRef.current = undefined;
     setGroupDropIndicator(undefined);
     setPinnedSessionDropIndicator(undefined);
-    setSessionDropIndicatorGroupId(undefined);
+    setSessionDropIndicator(undefined);
     if (
       pointerDownSessionTarget &&
       sessionsById[ pointerDownSessionTarget.sessionId ]?.isPinned === true &&
@@ -2851,7 +2874,7 @@ export function SidebarApp({
     setGroupDropIndicator(undefined);
     setGroupDragPreview(undefined);
     setPinnedSessionDropIndicator(undefined);
-    setSessionDropIndicatorGroupId(undefined);
+    setSessionDropIndicator(undefined);
     const currentGroupIds = groupIdsRef.current;
     const currentSessionIdsByGroup = sessionIdsByGroupRef.current;
     const authoritativeGroupIds = workspaceGroupIds;
@@ -3675,20 +3698,26 @@ export function SidebarApp({
               {null}
             </div>
             {/*
-            CDXC:SidebarStickyHeaders 2026-05-20-09:55:
-            The reference sidebar scroll area should not draw the dark top
-            scroll glow now that project folder headers stick at the scroll
-            viewport top. The sticky project row provides top-edge context,
-            while the bottom glow remains useful for undiscovered content below.
+            CDXC:SidebarScroll 2026-06-19-13:28:
+            Match Codex Desktop's sidebar by applying the bottom edge fade to
+            the scroll container itself. Do not render a separate bottom shadow
+            overlay; custom gradient sidebar colors make painted overlays read
+            as gray.
+
+            CDXC:SidebarScroll 2026-06-19-13:55:
+            The Codex-style mask needs to apply at both scroll edges. Drive
+            top and bottom fade availability from measured scroll state so
+            transparent sticky project headers do not expose a painted shadow
+            or unfaded overlap at the viewport edges.
           */}
             <div
               className="session-groups-scroll-shell"
               data-scroll-glow-bottom={String(showSessionGroupsBottomGlow)}
-              data-scroll-glow-top="false"
+              data-scroll-glow-top={String(showSessionGroupsTopGlow)}
               data-scrollable-y={String(sessionGroupsHaveScrollableOverflow)}
             >
               <div
-                className="session-groups-content scroll-mask-y"
+                className="session-groups-content vertical-scroll-fade-mask"
                 data-scrollable-y={String(sessionGroupsHaveScrollableOverflow)}
                 ref={sessionGroupsContentRef}
               >
@@ -3770,7 +3799,7 @@ export function SidebarApp({
                                 : undefined
                             }
                             enableProjectSessionListToggle={!isSessionSearchFiltering}
-                            sessionDropIndicatorGroupId={sessionDropIndicatorGroupId}
+                            sessionDropIndicator={sessionDropIndicator}
                             sessionDraggingDisabled={!isManualActiveSessionsSort}
                             sessionTagListItems={sidebarSessionTagListItems}
                             showHeaderActions={true}
@@ -3893,7 +3922,7 @@ export function SidebarApp({
                                 : undefined
                             }
                             enableProjectSessionListToggle={!isSessionSearchFiltering}
-                            sessionDropIndicatorGroupId={sessionDropIndicatorGroupId}
+                            sessionDropIndicator={sessionDropIndicator}
                             sessionDraggingDisabled={!isManualActiveSessionsSort}
                             sessionTagListItems={sidebarSessionTagListItems}
                             showHeaderActions={true}
@@ -4027,10 +4056,6 @@ export function SidebarApp({
                   <div className="empty" data-empty-space-blocking="true"></div>
                 ) : null}
               </div>
-              <div
-                aria-hidden="true"
-                className="session-groups-scroll-glow session-groups-scroll-glow-bottom"
-              />
             </div>
           </section>
           {recentProjects.length > 0 ? (
@@ -4127,7 +4152,7 @@ export function SidebarApp({
                   shellClassName="recent-projects-search"
                 />
                 <div
-                  className="recent-projects-list"
+                  className="recent-projects-list vertical-scroll-fade-mask"
                   onPointerEnter={handleRecentProjectsListPointerMove}
                   onPointerLeave={handleRecentProjectsListPointerLeave}
                   onPointerMove={handleRecentProjectsListPointerMove}
@@ -4427,16 +4452,81 @@ function SidebarReferenceSearchNavItem({
   query: string;
   setQuery: (query: string) => void;
 }) {
+  const hasQuery = query.length > 0;
+  const clearQueryAndFocus = () => {
+    setQuery("");
+    inputRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(query.length, query.length);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [ inputRef, isOpen, query.length ]);
+
   return (
     <div className="reference-sidebar-search-slot" data-active={String(isOpen)}>
       {isOpen ? (
-        <div className="reference-sidebar-search-field">
-          <SidebarSessionSearchField
-            inputRef={inputRef}
-            onEmptyBlur={onCloseSearch}
-            query={query}
-            setQuery={setQuery}
-          />
+        <div className="reference-sidebar-nav-item" data-inline-search="true">
+          {/*
+           * CDXC:SidebarSearch 2026-06-19-13:52:
+           * The top Search row should not swap into a boxed search bar. When
+           * active, the nav label itself becomes a transparent input with the
+           * Search text as its placeholder so typing happens in-place.
+           */}
+          <div
+            className="reference-sidebar-nav-button reference-sidebar-inline-search-row"
+            onClick={() => {
+              inputRef.current?.focus();
+            }}
+          >
+            <IconSearch
+              aria-hidden="true"
+              className="reference-sidebar-nav-icon"
+              size={15}
+              stroke={1.9}
+            />
+            <input
+              aria-label="Search current and previous sessions"
+              className="reference-sidebar-inline-search-input"
+              onBlur={() => {
+                if (query.trim().length === 0) {
+                  onCloseSearch();
+                }
+              }}
+              onChange={(event) => {
+                setQuery(event.target.value);
+              }}
+              placeholder="Search"
+              ref={inputRef}
+              spellCheck={false}
+              type="text"
+              value={query}
+            />
+            {hasQuery ? (
+              <button
+                aria-label="Clear session search"
+                className="reference-sidebar-hover-action reference-sidebar-inline-search-clear"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  clearQueryAndFocus();
+                }}
+                type="button"
+              >
+                <IconX aria-hidden="true" size={15} stroke={1.9} />
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : (
         <div className="reference-sidebar-nav-item">
@@ -5483,11 +5573,17 @@ function resolveSessionDropTargetFromPoint(
   sourceData: Extract<ReturnType<typeof getSidebarDropData>, { kind: "session"; }> | undefined,
 ) {
   const point = getClientPoint(nativeEvent);
+  /*
+   * CDXC:SidebarDragDrop 2026-06-19-11:12:
+   * Prefer current pointer hit testing over dnd-kit's reported target so the
+   * insertion line follows the hovered row midpoint continuously, including
+   * the exact center of a session row.
+   */
   const candidates = [
-    getSidebarSessionDropTarget(targetData),
-    getSidebarSessionDropTargetFromDropData(targetData, point),
     point ? getSidebarSessionDropTargetAtPoint(document, point.x, point.y) : undefined,
     getSidebarSessionDropTargetFromEvent(nativeEvent),
+    getSidebarSessionDropTargetFromDropData(targetData, point),
+    getSidebarSessionDropTarget(targetData),
   ];
 
   for (const candidate of candidates) {
@@ -5558,9 +5654,13 @@ function resolvePinnedSessionDropTargetFromPoint(
    * pinned partition. Base the active slot on pinned row midpoints only, not on
    * whichever full-project or unpinned-row droppable dnd-kit reports while the
    * pointer crosses row gaps.
+   *
+   * CDXC:SidebarDragDrop 2026-06-19-11:12:
+   * The exact midpoint belongs to the lower half so a session row always shows
+   * an insertion line: center/down is after, center/up is before.
    */
   for (const target of targetSessionMetrics) {
-    if (point.y <= target.bounds.top + target.bounds.height / 2) {
+    if (point.y < target.bounds.top + target.bounds.height / 2) {
       return {
         groupId: sourceData.groupId,
         kind: "session",
@@ -5661,8 +5761,14 @@ function getSidebarSessionDropTargetFromDropData(
 
     const bounds = sessionElement.getBoundingClientRect();
     const relativeY = point?.y ?? bounds.top + bounds.height / 2;
+    /*
+     * CDXC:SidebarDragDrop 2026-06-19-11:12:
+     * Dnd-kit may report a broad target while the pointer is around a row
+     * midpoint. Resolve the explicit target with the same center/down-after
+     * rule as point-based row hit testing so the line stays visible.
+     */
     const position: "after" | "before" =
-      relativeY > bounds.top + bounds.height / 2 ? "after" : "before";
+      relativeY >= bounds.top + bounds.height / 2 ? "after" : "before";
     return {
       groupId: targetData.groupId,
       kind: "session",

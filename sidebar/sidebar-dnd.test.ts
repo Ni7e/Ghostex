@@ -245,6 +245,51 @@ describe("getSidebarSessionDropTargetAtPoint", () => {
       sessionId: "session-2",
     });
   });
+
+  test("should resolve row center and lower half after, and upper half before", () => {
+    /*
+     * CDXC:SidebarDragDrop 2026-06-19-11:12:
+     * Session drag/drop indicators split every hovered row by its midpoint so
+     * the line is always visible: upper half before, center/lower half after.
+     */
+    const groupElement = createMockElement({
+      dataset: { sidebarGroupId: "group-1" },
+    }) as HTMLElement;
+    const sessionElement = createMockElement({
+      closestMap: new Map([["[data-sidebar-group-id]", groupElement]]),
+      dataset: { sidebarSessionId: "session-2" },
+      getBoundingClientRect: () => ({ height: 40, top: 100 }),
+    }) as HTMLElement;
+    const targetSessionElement = createMockElement({
+      closestMap: new Map([
+        ["[data-dragging='true']", null],
+        ["[data-sidebar-session-id]", sessionElement],
+      ]),
+    });
+    const documentLike = {
+      elementFromPoint: () => targetSessionElement,
+      elementsFromPoint: () => [targetSessionElement],
+    };
+
+    expect(getSidebarSessionDropTargetAtPoint(documentLike, 50, 119)).toEqual({
+      groupId: "group-1",
+      kind: "session",
+      position: "before",
+      sessionId: "session-2",
+    });
+    expect(getSidebarSessionDropTargetAtPoint(documentLike, 50, 120)).toEqual({
+      groupId: "group-1",
+      kind: "session",
+      position: "after",
+      sessionId: "session-2",
+    });
+    expect(getSidebarSessionDropTargetAtPoint(documentLike, 50, 121)).toEqual({
+      groupId: "group-1",
+      kind: "session",
+      position: "after",
+      sessionId: "session-2",
+    });
+  });
 });
 
 function createMockElement({

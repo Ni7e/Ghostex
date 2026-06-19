@@ -1834,16 +1834,26 @@ body[data-custom-sidebar-titlebar-colors="true"]
   outline-color: transparent;
 }
 
-.sidebar-reference-layout[data-reference-sidebar="true"] .session:is(:hover, :focus-visible, [data-focused="true"], [data-search-selected="true"])::after {
-  opacity: 1;
-}
-
 .sidebar-reference-layout[data-reference-sidebar="true"] .session[data-visible="true"]::after {
   opacity: 0;
 }
 
+/*
+ * CDXC:SidebarTitlebarColors 2026-06-19-13:33:
+ * The current active session still needs a neutral row surface, but it must be
+ * translucent so the custom sidebar gradient remains visible underneath.
+ * Non-focused visible panes stay transparent until hover/search/focus-visible.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"] .session[data-focused="true"]::after {
+  opacity: 0.62;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"] .session:is(:hover, :focus-visible, [data-search-selected="true"])::after {
+  opacity: 1;
+}
+
 .sidebar-reference-layout[data-reference-sidebar="true"]
-  .session[data-visible="true"]:is(:hover, :focus-visible, [data-focused="true"], [data-search-selected="true"])::after {
+  .session[data-visible="true"]:is(:hover, :focus-visible, [data-search-selected="true"])::after {
   opacity: 1;
 }
 

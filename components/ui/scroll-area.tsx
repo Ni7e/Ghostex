@@ -14,9 +14,16 @@ function ScrollArea({
       className={cn("relative", className)}
       {...props}
     >
+      {/*
+       * CDXC:ScrollFades 2026-06-19-14:16:
+       * Shared ScrollArea viewports are used by Project Board details,
+       * Agents Hub, and modal bodies. Apply the Codex-style mask at the
+       * scrolling viewport so fixed outer chrome and custom scrollbars stay
+       * outside the fade.
+       */}
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="size-full rounded-none transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
+        className="vertical-scroll-fade-mask size-full rounded-none transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

@@ -219,6 +219,12 @@ function dispatchBackdropContextMenuToRetarget(
  * must dismiss the old menu and open the menu owned by the session under the
  * pointer. Retarget backdrop contextmenu events to the underlying element so
  * session rows keep priority over the surrounding project/group menu.
+ *
+ * CDXC:ScrollFades 2026-06-19-14:16:
+ * Viewport-clamped sidebar context menus can become internal scroll areas.
+ * Apply the shared Codex-style edge fade at this portal boundary so session,
+ * project, reference, and filter menus stay visually consistent when they
+ * overflow.
  */
 export function SidebarContextMenuPortal({
   children,
@@ -230,6 +236,9 @@ export function SidebarContextMenuPortal({
 }: SidebarContextMenuPortalProps) {
   const internalMenuRef = useRef<HTMLDivElement>(null);
   const activeMenuRef = menuRef ?? internalMenuRef;
+  const resolvedMenuClassName = menuClassName.includes("vertical-scroll-fade-mask")
+    ? menuClassName
+    : `${menuClassName} vertical-scroll-fade-mask`;
   const [viewportClampedMenuStyle, setViewportClampedMenuStyle] = useState<CSSProperties>();
 
   useEffect(() => {
@@ -308,7 +317,7 @@ export function SidebarContextMenuPortal({
         type="button"
       />
       <div
-        className={menuClassName}
+        className={resolvedMenuClassName}
         onClick={(event) => {
           event.stopPropagation();
         }}

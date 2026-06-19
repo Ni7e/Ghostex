@@ -256,9 +256,10 @@ describe("command palette modes", () => {
 
     /*
      * CDXC:CommandPalette 2026-06-13-23:06:
-     * Session search sections are ordered Current Project, Active Projects,
-     * Collapsed Projects, then Previous sessions in render. Each area sorts
-     * its rows by Last Active descending instead of inheriting workspace order.
+     * Session search sections are ordered Current Project, Other Active
+     * Projects, Collapsed Projects, then Previous sessions in render. Each
+     * area sorts its rows by Last Active descending instead of inheriting
+     * workspace order.
      */
     const sections = createCommandPaletteSessionSections(items, {
       collapsedGroupsById: { "group-collapsed": true },
@@ -266,7 +267,7 @@ describe("command palette modes", () => {
 
     expect(sections.map((section) => section.heading)).toEqual([
       "Current Project",
-      "Active Projects",
+      "Other Active Projects",
       "Collapsed Projects",
     ]);
     expect(
@@ -282,7 +283,61 @@ describe("command palette modes", () => {
         collapsedGroupsById: { "group-collapsed": true },
         currentGroupId: "group-current",
       }).map((section) => section.heading),
-    ).toEqual(["Active Projects"]);
+    ).toEqual(["Other Active Projects"]);
+  });
+
+  test("uses the active project as Current Project instead of stale focused sessions", () => {
+    const staleRootFocused = createSession({
+      alias: "Root Shell",
+      detail: "Terminal",
+      isFocused: true,
+      sessionId: "session-root",
+    });
+    const ghostexActive = createSession({
+      alias: "Ghostex Agent",
+      detail: "Terminal",
+      sessionId: "session-ghostex",
+    });
+    const items: CommandPaletteCurrentSessionItem[] = [
+      {
+        groupId: "group-root",
+        groupIsActive: false,
+        projectLabel: "/",
+        searchText: "Root Shell",
+        session: staleRootFocused,
+      },
+      {
+        groupId: "group-ghostex",
+        groupIsActive: true,
+        projectLabel: "Ghostex",
+        searchText: "Ghostex Agent",
+        session: ghostexActive,
+      },
+    ];
+
+    /*
+     * CDXC:CommandPalette 2026-06-19-14:10:
+     * Cmd+P Current Project must follow the active project state, not stale
+     * terminal focus metadata. When `/` still has a focused session but the
+     * Ghostex project is active, Ghostex owns Current Project and `/` moves to
+     * the other active project section.
+     */
+    const sections = createCommandPaletteSessionSections(items, {
+      collapsedGroupsById: {},
+    });
+
+    expect(sections.map((section) => section.heading)).toEqual([
+      "Current Project",
+      "Other Active Projects",
+    ]);
+    expect(
+      sections.map((section) => section.items.map((item) => item.projectLabel)),
+    ).toEqual([["Ghostex"], ["/"]]);
+    expect(
+      createCommandPaletteSessionSections([items[0]], {
+        collapsedGroupsById: {},
+      }).map((section) => section.heading),
+    ).toEqual(["Other Active Projects"]);
   });
 
   test("sorts previous session rows by last active descending before display limit", () => {
@@ -468,7 +523,7 @@ describe("command palette source contracts", () => {
     expect(commandPaletteSource).toContain("pendingModeSwitchSelectionRef");
     expect(commandPaletteSource).toContain('data-ghostex-command-palette-input="true"');
     expect(commandPaletteSearchSource).toContain('heading: "Current Project"');
-    expect(commandPaletteSearchSource).toContain('heading: "Active Projects"');
+    expect(commandPaletteSearchSource).toContain('heading: "Other Active Projects"');
     expect(commandPaletteSearchSource).toContain('heading: "Collapsed Projects"');
     expect(commandPaletteSearchSource).not.toContain("Current Sessions");
     expect(commandPaletteSource.match(/data-focused="false"/g)?.length ?? 0).toBeGreaterThanOrEqual(

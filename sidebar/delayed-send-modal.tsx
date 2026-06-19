@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
 const MAX_DELAY_MS = 2_147_483_647;
@@ -60,6 +60,11 @@ export type DelayedSendModalProps = {
  * The native child window can become key after React's first focus pass, so
  * retry minutes focus over the first few animation frames/timeouts. Pressing
  * Enter while editing the duration must schedule the timer immediately.
+ *
+ * CDXC:DelayedSend 2026-06-19-14:24:
+ * The duration controls should not include helper copy. When a timer is active,
+ * keep Cancel Timer inside the dialog by sharing the bottom cancel row; without
+ * an active timer, Cancel remains the only full-width action in that row.
  */
 export function DelayedSendModal({
   delayedSendDeadlineAt,
@@ -220,20 +225,34 @@ export function DelayedSendModal({
                 />
               </Field>
             </div>
-            <FieldDescription>Enter a delay between 1 minute and 24 days.</FieldDescription>
           </FieldGroup>
-          <DialogFooter>
-            {hasActiveTimer ? (
-              <Button onClick={onCancelTimer} type="button" variant="destructive">
-                Cancel Timer
-              </Button>
-            ) : null}
-            <Button onClick={onCancel} type="button" variant="outline">
-              Cancel
-            </Button>
-            <Button disabled={!isValidDelay} type="submit">
+          <DialogFooter className="delayed-send-footer">
+            <Button className="delayed-send-action-button" disabled={!isValidDelay} type="submit">
               Set Timer
             </Button>
+            <div
+              className="delayed-send-cancel-row"
+              data-has-active-timer={hasActiveTimer ? "true" : "false"}
+            >
+              {hasActiveTimer ? (
+                <Button
+                  className="delayed-send-action-button"
+                  onClick={onCancelTimer}
+                  type="button"
+                  variant="destructive"
+                >
+                  Cancel Timer
+                </Button>
+              ) : null}
+              <Button
+                className="delayed-send-action-button"
+                onClick={onCancel}
+                type="button"
+                variant="outline"
+              >
+                Cancel
+              </Button>
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>

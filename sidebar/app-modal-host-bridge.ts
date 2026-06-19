@@ -80,7 +80,13 @@ export type OpenAppModalMessage =
        * CDXC:CommandPalette 2026-06-13-22:48:
        * Session-search sections need the sidebar's current project collapse
        * state so rows from collapsed projects can move into the Collapsed
-       * Projects area while expanded project rows stay in Active Projects.
+       * Projects area while expanded non-current project rows stay in Other
+       * Active Projects.
+       *
+       * CDXC:CommandPalette 2026-06-19-14:11:
+       * Name the expanded non-current bucket Other Active Projects so the
+       * Current Project section reads as the active project, not as a separate
+       * category above it.
        */
       collapsedGroupsById?: Record<string, true>;
       initialQuery?: string;

@@ -367,10 +367,16 @@ function getSidebarSessionDropTargetFromElement(
     if (groupId && sessionId) {
       const bounds = sessionElement.getBoundingClientRect();
       const relativeY = clientY ?? bounds.top + bounds.height / 2;
+      /*
+       * CDXC:SidebarDragDrop 2026-06-19-11:12:
+       * Session insertion indicators should never disappear at row center.
+       * Treat the midpoint as the first pixel of the lower half so center/down
+       * shows an after-line and center/up shows a before-line.
+       */
       return {
         groupId,
         kind: "session",
-        position: relativeY > bounds.top + bounds.height / 2 ? "after" : "before",
+        position: relativeY >= bounds.top + bounds.height / 2 ? "after" : "before",
         sessionId,
       };
     }

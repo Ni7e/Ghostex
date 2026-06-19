@@ -396,69 +396,40 @@
   position: relative;
 }
 
-.session-groups-scroll-glow {
-  border-radius: 0;
-  height: calc(16px * var(--sidebar-density-scale));
-  left: calc(12px * var(--sidebar-density-scale));
-  opacity: 0;
-  pointer-events: none;
-  position: absolute;
-  right: calc(12px * var(--sidebar-density-scale));
-  transition: opacity 150ms ease;
-  z-index: 2;
-  -webkit-mask-image: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(0, 0, 0, 0.48) 10%,
-    #000000 22%,
-    #000000 78%,
-    rgba(0, 0, 0, 0.48) 90%,
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(0, 0, 0, 0.48) 10%,
-    #000000 22%,
-    #000000 78%,
-    rgba(0, 0, 0, 0.48) 90%,
-    transparent 100%
-  );
+.session-groups-content.vertical-scroll-fade-mask {
+  /*
+   * CDXC:SidebarScroll 2026-06-19-13:28:
+   * Use Codex Desktop's scroll-container mask for the session list edge fade.
+   * Keep the previous 16px fade distance, but remove the painted gradient and
+   * inset shadow overlay so the bottom edge adapts to custom sidebar colors.
+   *
+   * CDXC:SidebarScroll 2026-06-19-13:55:
+   * The top edge needs the same mask as the bottom edge. Scroll-linked masks
+   * are still the preferred Codex path, while the measured scroll state below
+   * provides explicit top/bottom fade values so both edges render in Ghostex's
+   * native webview.
+   */
+  --edge-fade-distance: calc(16px * var(--sidebar-density-scale));
 }
 
-.session-groups-scroll-glow-top {
-  top: 0;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--app-background) 94%, transparent) 0%,
-    color-mix(in srgb, var(--app-background) 64%, transparent) 62%,
-    transparent 100%
-  );
-  box-shadow: inset 0 10px 14px color-mix(in srgb, var(--app-background) 48%, transparent);
-  clip-path: inset(
-    0 0 0 0 round 0 0 calc(999px * var(--sidebar-density-scale))
-      calc(999px * var(--sidebar-density-scale))
-  );
+.session-groups-scroll-shell[data-scroll-glow-top="true"]
+  .session-groups-content.vertical-scroll-fade-mask {
+  --top-fade: var(--edge-fade-distance);
 }
 
-.session-groups-scroll-glow-bottom {
-  bottom: 0;
-  background: linear-gradient(
-    0deg,
-    color-mix(in srgb, var(--app-background) 94%, transparent) 0%,
-    color-mix(in srgb, var(--app-background) 64%, transparent) 62%,
-    transparent 100%
-  );
-  box-shadow: inset 0 -10px 14px color-mix(in srgb, var(--app-background) 48%, transparent);
-  clip-path: inset(
-    calc(0px * var(--sidebar-density-scale)) 0 0 0 round calc(999px * var(--sidebar-density-scale))
-      calc(999px * var(--sidebar-density-scale)) 0 0
-  );
+.session-groups-scroll-shell[data-scroll-glow-bottom="true"]
+  .session-groups-content.vertical-scroll-fade-mask {
+  --bottom-fade: var(--edge-fade-distance);
 }
 
-.session-groups-scroll-shell[data-scroll-glow-top="true"] .session-groups-scroll-glow-top,
-.session-groups-scroll-shell[data-scroll-glow-bottom="true"] .session-groups-scroll-glow-bottom {
-  opacity: 1;
+.session-groups-scroll-shell[data-scroll-glow-top="false"]
+  .session-groups-content.vertical-scroll-fade-mask {
+  --top-fade: 0px !important;
+}
+
+.session-groups-scroll-shell[data-scroll-glow-bottom="false"]
+  .session-groups-content.vertical-scroll-fade-mask {
+  --bottom-fade: 0px !important;
 }
 
 .session-search-toolbar {
@@ -690,6 +661,11 @@ body:has(.sidebar-reference-layout[data-reference-sidebar="true"]) .stack {
  * surfaces, sticky headers, search inputs, scroll fades, and context-menu
  * hover colors inherit the custom foreground/background without changing
  * modal, dropdown portal, or shadcn surface tokens.
+ *
+ * CDXC:SidebarTitlebarColors 2026-06-19-12:33:
+ * The visible custom sidebar backing should now be a fixed-strength vertical
+ * gradient. Keep app/theme tokens on the solid selected color because cards,
+ * hovers, and color-mix calculations need one stable contrast color.
  */
 body[data-custom-sidebar-titlebar-colors="true"]:has(
     .sidebar-reference-layout[data-reference-sidebar="true"]
@@ -712,7 +688,11 @@ body[data-custom-sidebar-titlebar-colors="true"]:has(
   .stack,
 body[data-custom-sidebar-titlebar-colors="true"]
   .sidebar-reference-layout[data-reference-sidebar="true"] {
-  background: var(--custom-sidebar-titlebar-background-color);
+  background: linear-gradient(
+    180deg,
+    var(--custom-sidebar-titlebar-gradient-top-color),
+    var(--custom-sidebar-titlebar-gradient-bottom-color)
+  );
 }
 
 body[data-custom-sidebar-titlebar-colors="true"]
@@ -925,7 +905,7 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
   > .reference-sidebar-nav-button,
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-sidebar-primary-nav
-  > .reference-sidebar-search-slot[data-active="false"] {
+  > .reference-sidebar-search-slot {
   margin-left: calc(-1 * var(--reference-sidebar-main-edge-bleed-left));
   margin-right: calc(-1 * var(--reference-sidebar-edge-bleed-right));
 }
@@ -937,18 +917,6 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 
 .reference-sidebar-search-slot {
   min-width: 0;
-}
-
-.reference-sidebar-search-slot[data-active="false"] .reference-sidebar-nav-button {
-  animation: reference-sidebar-search-button-enter 140ms ease-out both;
-}
-
-.reference-sidebar-search-field {
-  animation: reference-sidebar-search-field-enter 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  box-sizing: border-box;
-  margin-left: -1px;
-  min-width: 0;
-  width: calc(100% + 1px);
 }
 
 .reference-sidebar-nav-button,
@@ -986,7 +954,7 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
   > :is(
     .reference-sidebar-nav-item,
     .reference-sidebar-nav-button,
-    .reference-sidebar-search-slot[data-active="false"]
+    .reference-sidebar-search-slot
   )
   .reference-sidebar-nav-button,
 .sidebar-reference-layout[data-reference-sidebar="true"]
@@ -1138,6 +1106,72 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 .reference-sidebar-hover-action:disabled {
   color: color-mix(in srgb, var(--app-muted) 80%, transparent);
   cursor: default;
+}
+
+.reference-sidebar-inline-search-row {
+  /*
+   * CDXC:SidebarSearch 2026-06-19-13:52:
+   * Active top Search must keep the original nav-row geometry. Use a
+   * transparent input in the label slot instead of the boxed shared session
+   * search field so the placeholder is the Search text itself.
+   *
+   * CDXC:SidebarSearch 2026-06-19-13:59:
+   * The active Search placeholder should briefly read like the original label,
+   * then fade to low opacity so users can tell it is placeholder text. Closing
+   * empty search should restore the plain nav row immediately without the old
+   * button re-entry animation.
+   */
+  cursor: text;
+  position: relative;
+}
+
+.reference-sidebar-inline-search-input {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--app-foreground);
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  height: 20px;
+  letter-spacing: 0;
+  line-height: 18px;
+  min-width: 0;
+  outline: none;
+  padding: 0;
+}
+
+.reference-sidebar-inline-search-input::placeholder {
+  animation: reference-sidebar-inline-search-placeholder-fade 180ms ease-out 70ms both;
+  color: color-mix(in srgb, var(--app-foreground) 52%, transparent);
+}
+
+@keyframes reference-sidebar-inline-search-placeholder-fade {
+  from {
+    color: var(--app-foreground);
+  }
+
+  to {
+    color: color-mix(in srgb, var(--app-foreground) 52%, transparent);
+  }
+}
+
+.reference-sidebar-nav-item[data-inline-search="true"]:has(.reference-sidebar-inline-search-clear)
+  .reference-sidebar-inline-search-row {
+  padding-right: 47px;
+}
+
+.reference-sidebar-inline-search-clear {
+  opacity: 1;
+  pointer-events: auto;
+  right: 9px;
+}
+
+.reference-sidebar-inline-search-clear:hover,
+.reference-sidebar-inline-search-clear:focus-visible {
+  background: color-mix(in srgb, var(--app-foreground) 10%, transparent);
 }
 
 /*
@@ -1372,23 +1406,17 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
   padding: 0;
   /*
    * CDXC:SidebarSearch 2026-05-31-18:39:
-   * The active top Search sessions field needs 5px more right-edge gap. Shrink
-   * the toolbar width instead of changing parent padding so the search box's
-   * left edge and internal icon/text spacing stay fixed.
+   * Boxed session-search fields in reference layout need 5px more right-edge
+   * gap. Shrink the toolbar width instead of changing parent padding so the
+   * search box's left edge and internal icon/text spacing stay fixed.
+   *
+   * CDXC:SidebarSearch 2026-06-19-13:52:
+   * The top Search row no longer uses this boxed toolbar while active. Keep
+   * this sizing for other shared SidebarSessionSearchField surfaces, such as
+   * Recent Projects, that still intentionally render as boxes.
    */
   justify-self: start;
   width: calc(100% - 5px);
-}
-
-.sidebar-reference-layout[data-reference-sidebar="true"]
-  .reference-sidebar-search-field
-  > .session-search-toolbar {
-  /*
-   * CDXC:SidebarSearch 2026-06-09-18:46:
-   * The active sidebar Search field should be 12px narrower from both left and right edges while preserving the existing 5px right-edge trim from the reference layout.
-   */
-  margin-left: 12px;
-  width: calc(100% - 29px);
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .session-search-input-shell {
@@ -1428,30 +1456,6 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
 .sidebar-reference-layout[data-reference-sidebar="true"] .session-search-clear-button {
   color: color-mix(in srgb, var(--app-foreground) 62%, transparent);
   right: 5px;
-}
-
-@keyframes reference-sidebar-search-field-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-3px) scale(0.985);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes reference-sidebar-search-button-enter {
-  from {
-    opacity: 0;
-    transform: translateY(3px) scale(0.985);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .session-groups-content {
@@ -1502,16 +1506,12 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
   width: 0;
 }
 
-.sidebar-reference-layout[data-reference-sidebar="true"]
-  .session-groups-scroll-shell[data-scroll-glow-top="false"]
-  .session-groups-content {
+.session-groups-scroll-shell[data-scroll-glow-top="false"] .session-groups-content {
   --tw-scroll-mask-top: linear-gradient(#000000, #000000) !important;
   --tw-scroll-mask-top-size: 0px !important;
 }
 
-.sidebar-reference-layout[data-reference-sidebar="true"]
-  .session-groups-scroll-shell[data-scroll-glow-bottom="false"]
-  .session-groups-content {
+.session-groups-scroll-shell[data-scroll-glow-bottom="false"] .session-groups-content {
   --tw-scroll-mask-bottom: linear-gradient(#000000, #000000) !important;
   --tw-scroll-mask-bottom-size: 0px !important;
 }
@@ -1527,7 +1527,7 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
 .reference-sidebar-section-row {
   --reference-sidebar-section-actions-max-width: 132px;
   align-items: center;
-  background: var(--app-background);
+  background: transparent;
   box-sizing: border-box;
   display: flex;
   min-height: 22px;
@@ -1561,6 +1561,11 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
    * actions appear. Keep the action buttons in normal flex layout, but remove
    * their hidden-state width and let the title ellipsize once the visible
    * action cluster needs room.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-19-12:56:
+   * Section headers sit above the custom sidebar gradient and should not paint
+   * the solid contrast token at rest. Keep the row transparent so only hover
+   * controls add local chrome.
    */
 }
 
@@ -2225,8 +2230,18 @@ manual mode visibly selected without adding text to the section row.
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-list {
+  /*
+   * CDXC:ScrollFades 2026-06-19-14:16:
+   * Recent Projects is a real scroll surface when the parked project list is
+   * long. Use the shared Codex-style scroll-container fade instead of a hard
+   * clipped edge so it matches the main sidebar session list.
+   */
+  --edge-fade-distance: calc(14px * var(--sidebar-density-scale));
   gap: 0;
   max-height: min(230px, 36vh);
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .recent-projects-row.group-head {

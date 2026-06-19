@@ -215,7 +215,7 @@ export function GitActionRow({ git, vscode }: GitActionRowProps) {
       {isMenuOpen && menuPosition
         ? createPortal(
             <div
-              className="git-action-menu"
+              className="git-action-menu vertical-scroll-fade-mask"
               ref={menuRef}
               role="menu"
               style={{
@@ -305,7 +305,7 @@ export function GitActionRow({ git, vscode }: GitActionRowProps) {
           )
         : null}
       {git.files.length > 0 ? (
-        <div className="git-action-changed-files">
+        <div className="git-action-changed-files vertical-scroll-fade-mask">
           <div className="git-action-changed-files-header">
             <span>Changed Files</span>
             <span className="git-action-changed-files-count">{git.files.length}</span>

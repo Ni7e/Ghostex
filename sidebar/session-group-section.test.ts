@@ -6,6 +6,7 @@ import {
   getEmptyProjectNewSessionButtonLabel,
   getGroupContextMenuItemCount,
   getPinnedSessionDropGapKey,
+  getSidebarSessionGapContextMenuTarget,
   PINNED_SESSION_DROP_GAP_AFTER_LAST,
   shouldPreventGroupDragActivation,
   shouldTreatProjectAsEmptySessionGroup,
@@ -15,6 +16,10 @@ import {
 
 const sessionGroupSectionSource = readFileSync(
   new URL("./session-group-section.tsx", import.meta.url),
+  "utf8",
+);
+const sessionGroupStylesSource = readFileSync(
+  new URL("./styles/groups.css", import.meta.url),
   "utf8",
 );
 
@@ -342,6 +347,148 @@ describe("getGroupContextMenuItemCount", () => {
         isWorktreeProject: false,
       }),
     ).toBe(3);
+  });
+});
+
+describe("getSidebarSessionGapContextMenuTarget", () => {
+  const sessionRows = [
+    { bottom: 34, element: "session-1", top: 0 },
+    { bottom: 69, element: "session-2", top: 36 },
+    { bottom: 104, element: "session-3", top: 71 },
+  ] as const;
+
+  test("routes a session-to-session gap to the row above it", () => {
+    expect(
+      getSidebarSessionGapContextMenuTarget({
+        clientY: 35,
+        sessionRows,
+      }),
+    ).toBe("session-1");
+
+    expect(
+      getSidebarSessionGapContextMenuTarget({
+        clientY: 70,
+        sessionRows,
+      }),
+    ).toBe("session-2");
+  });
+
+  test("does not route row interiors or outer project body space", () => {
+    expect(
+      getSidebarSessionGapContextMenuTarget({
+        clientY: 20,
+        sessionRows,
+      }),
+    ).toBeUndefined();
+    expect(
+      getSidebarSessionGapContextMenuTarget({
+        clientY: -1,
+        sessionRows,
+      }),
+    ).toBeUndefined();
+    expect(
+      getSidebarSessionGapContextMenuTarget({
+        clientY: 110,
+        sessionRows,
+      }),
+    ).toBeUndefined();
+  });
+
+  test("keeps the project context menu attached to the header instead of the group body", () => {
+    /*
+     * CDXC:SidebarContextMenu 2026-06-19-10:46:
+     * Right-clicking project body gaps must not open the project context menu.
+     * The group body owns only session-gap retargeting, while the header owns
+     * the project menu.
+     */
+    const sectionStart = sessionGroupSectionSource.indexOf('<section\n        className="group"');
+    const groupHeadStart = sessionGroupSectionSource.indexOf(
+      'className="group-head"',
+      sectionStart,
+    );
+    const groupSessionsStart = sessionGroupSectionSource.indexOf(
+      'className="group-sessions sidebar-collapse-content"',
+      groupHeadStart,
+    );
+
+    expect(sectionStart).toBeGreaterThan(-1);
+    expect(groupHeadStart).toBeGreaterThan(sectionStart);
+    expect(groupSessionsStart).toBeGreaterThan(groupHeadStart);
+    expect(sessionGroupSectionSource.slice(sectionStart, groupHeadStart)).not.toContain(
+      "onContextMenu=",
+    );
+    expect(sessionGroupSectionSource.slice(groupHeadStart, groupSessionsStart)).toContain(
+      "onContextMenu={handleGroupHeaderContextMenu}",
+    );
+    expect(sessionGroupSectionSource.slice(groupSessionsStart, groupSessionsStart + 600)).toContain(
+      "onContextMenu={handleGroupSessionsContextMenu}",
+    );
+  });
+});
+
+describe("reference sidebar group spacing styles", () => {
+  test("uses row-owned padding instead of blank gaps between project headers and sessions", () => {
+    /*
+     * CDXC:ReferenceSidebar 2026-06-19-10:52:
+     * Sidebar project headers and session rows should not have empty visual
+     * gaps between buttons. Keep project-header breathing room inside the
+     * clickable row and leave session drag indicators row-owned.
+     */
+    const projectListStart = sessionGroupStylesSource.indexOf(
+      '.sidebar-reference-layout[data-reference-sidebar="true"] .reference-project-group-list {',
+    );
+    const projectHeaderStart = sessionGroupStylesSource.indexOf(
+      '.sidebar-reference-layout[data-reference-sidebar="true"] .group[data-project-group="true"] .group-head {',
+      projectListStart,
+    );
+    const projectHeaderSource = sessionGroupStylesSource.slice(
+      projectHeaderStart,
+      projectHeaderStart + 3200,
+    );
+    const groupSessionsStart = sessionGroupStylesSource.indexOf(
+      '.sidebar-reference-layout[data-reference-sidebar="true"] .group-sessions {',
+      projectHeaderStart,
+    );
+    const groupSessionsSource = sessionGroupStylesSource.slice(
+      groupSessionsStart,
+      groupSessionsStart + 500,
+    );
+
+    expect(projectListStart).toBeGreaterThan(-1);
+    expect(projectHeaderStart).toBeGreaterThan(projectListStart);
+    expect(groupSessionsStart).toBeGreaterThan(projectHeaderStart);
+    expect(sessionGroupStylesSource.slice(projectListStart, projectHeaderStart)).toContain(
+      "row-gap: 0;",
+    );
+    expect(projectHeaderSource).toContain("padding-bottom: 5.5px;");
+    expect(projectHeaderSource).toContain("padding-top: 5.5px;");
+    expect(groupSessionsSource).toContain("gap: 0;");
+    expect(groupSessionsSource).not.toContain("gap: 1px;");
+  });
+
+  test("keeps session drag feedback to insertion lines instead of project highlights", () => {
+    /*
+     * CDXC:SidebarDragDrop 2026-06-19-11:12:
+     * Dropping sessions onto projects should not tint the project body. The
+     * only visible destination cue should be the insertion line.
+     */
+    const emptyTargetStart = sessionGroupStylesSource.indexOf(
+      '.group-empty-drop-target[data-drop-target="true"] .group-empty-state {',
+    );
+    const emptyTargetSource = sessionGroupStylesSource.slice(
+      emptyTargetStart,
+      emptyTargetStart + 700,
+    );
+
+    expect(sessionGroupStylesSource).not.toContain(
+      '.group-sessions[data-drop-target="true"] {\n  background:',
+    );
+    expect(sessionGroupStylesSource).not.toContain(
+      '.group:has(.session[data-drop-target="true"]) .group-sessions',
+    );
+    expect(emptyTargetStart).toBeGreaterThan(-1);
+    expect(emptyTargetSource).toContain("background: transparent;");
+    expect(emptyTargetSource).toContain("box-shadow: none;");
   });
 });
 

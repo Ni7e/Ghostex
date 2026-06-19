@@ -143,7 +143,13 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        "no-scrollbar max-h-72 scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
+        /*
+         * CDXC:ScrollFades 2026-06-19-14:16:
+         * Command palettes and command-backed pickers should use the same
+         * Codex-style scroll-container fade as the macOS sidebar instead of
+         * bespoke gray shadows or unfaded clipped edges.
+         */
+        "vertical-scroll-fade-mask no-scrollbar max-h-72 scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
         className,
       )}
       {...props}

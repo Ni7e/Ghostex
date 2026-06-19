@@ -266,6 +266,21 @@
     0 0 0 1px color-mix(in srgb, var(--app-button-background) 10%, transparent);
 }
 
+/*
+ * CDXC:SidebarTitlebarColors 2026-06-19-12:56:
+ * Custom-gradient sidebars should not show solid active project/chat header
+ * fills while idle. Preserve hover/focus affordances, but let the gradient
+ * remain visible behind active headers when the pointer is not on them.
+ */
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-active="true"]:not(:has(.group-session-connector-button:hover)):not(
+    :has(.group-session-connector-button:focus-visible)
+  )
+  .group-head:not(:hover):not(:has(:focus-visible))::before {
+  background: transparent;
+  box-shadow: none;
+}
+
 /* CDXC:WorkspaceTheme 2026-05-05-02:58: Custom workspace theme colors tint
    Combined-mode project headers only. The synthetic Chats group keeps its
    normal chat styling because it has no project theme color. */
@@ -1225,35 +1240,27 @@
   opacity: 1;
 }
 
-.group-sessions[data-drop-target="true"] {
-  background: color-mix(in srgb, var(--app-button-background) 8%, transparent);
-  border-radius: 0;
-}
-
-.group:has(.session[data-drop-target="true"]) .group-sessions {
-  background: color-mix(in srgb, var(--app-button-background) 8%, transparent);
-  border-radius: 0;
-}
-
 .group-empty-drop-target {
   display: grid;
   position: relative;
 }
 
 .group-empty-drop-target[data-drop-target="true"] .group-empty-state {
-  background: color-mix(in srgb, var(--app-button-background) 12%, transparent);
-  border-color: color-mix(in srgb, var(--app-button-background) 76%, var(--app-border));
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--app-button-background) 18%, transparent),
-    0 12px 24px color-mix(in srgb, var(--app-button-background) 8%, transparent);
+  /*
+   * CDXC:SidebarDragDrop 2026-06-19-11:12:
+   * Session drag/drop should communicate the destination with insertion lines
+   * only. Do not color the project body or empty-state panel while a session is
+   * dragged over a project.
+   */
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .group:has(.session[data-drop-target="true"]) .group-empty-state {
-  background: color-mix(in srgb, var(--app-button-background) 12%, transparent);
-  border-color: color-mix(in srgb, var(--app-button-background) 76%, var(--app-border));
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--app-button-background) 18%, transparent),
-    0 12px 24px color-mix(in srgb, var(--app-button-background) 8%, transparent);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .group-empty-state {
@@ -1380,8 +1387,13 @@
    * CDXC:ReferenceSidebar 2026-05-08-09:13
    * Project rows in the reference sidebar need an 11px visual gap between
    * different projects while preserving the compact spacing inside each group.
+   *
+   * CDXC:ReferenceSidebar 2026-06-19-10:52:
+   * Project headers should not be separated by empty list gaps. Keep the same
+   * breathing room inside the clickable header rows instead so right-click,
+   * hover, and drag ownership remains row-local.
    */
-  row-gap: 11px;
+  row-gap: 0;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .group {
@@ -1445,14 +1457,26 @@
    * CDXC:ProjectHeaders 2026-05-31-18:24:
    * Project header contents need another 2px left inset without changing the
    * right inset or the full-width header bounds.
+   *
+   * CDXC:ProjectHeaders 2026-06-19-10:52:
+   * The project list no longer uses outside row gaps. Add vertical padding to
+   * each project header so adjacent headers keep their scan spacing without
+   * leaving blank context-menu space between buttons.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-19-12:56:
+   * Custom-gradient sidebars need sticky project headers to stay transparent
+   * at rest. Let the sidebar gradient show through the sticky row and rely on
+   * the existing ::before hover/focus surface for local interaction feedback.
    */
-  background: var(--app-background);
+  background: transparent;
   border-radius: 0;
   box-sizing: border-box;
   margin-left: calc(-1 * var(--reference-sidebar-scroll-row-bleed-left, 7px));
   margin-right: calc(-1 * var(--reference-sidebar-scroll-row-bleed-right, 0px));
+  padding-bottom: 5.5px;
   padding-left: calc(18px + var(--reference-sidebar-scroll-row-bleed-left, 7px));
   padding-right: calc(10px + var(--reference-sidebar-scroll-row-bleed-right, 0px));
+  padding-top: 5.5px;
   position: sticky;
   top: var(--reference-sidebar-project-sticky-top, 0px);
   z-index: 28;
@@ -1807,8 +1831,26 @@
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .group-sessions {
-  gap: 1px;
+  /*
+   * CDXC:SidebarSessions 2026-06-19-10:52:
+   * Reference-sidebar session rows should touch directly. Drag insertion lines
+   * are row-owned pseudo-elements, so the list does not need an empty gap for
+   * drag/drop visibility or hit testing.
+   */
+  gap: 0;
   overflow: visible;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"]
+  .group-sessions-shell {
+  /*
+   * CDXC:SidebarTitlebarColors 2026-06-19-13:22:
+   * Sticky project headers are transparent so the custom sidebar gradient can
+   * show through. Clip the project session shell by the measured sticky-header
+   * overlap instead of painting a header background over scrolling rows.
+   */
+  clip-path: inset(var(--reference-project-session-clip-top, 0px) 0 0 0);
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .group[data-session-connector="true"] .session-frame {

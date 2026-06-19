@@ -99,6 +99,263 @@
   }
 }
 
+/*
+ * CDXC:SidebarScroll 2026-06-19-13:28:
+ * Match Codex Desktop's sidebar scroll-edge implementation for the macOS sidebar:
+ * put the fade on the scroll container with scroll-linked CSS masks instead of
+ * painting a separate gray gradient or inset shadow overlay. This keeps the
+ * bottom edge color-independent across custom sidebar gradients and tints.
+ */
+@property --top-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --bottom-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --edge-fade-distance {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 1rem;
+}
+
+@property --left-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --right-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes edge-fade {
+  /*
+   * CDXC:ScrollFades 2026-06-19-14:41:
+   * Recent Projects has a short scroll range, so the top fade must reach full
+   * strength immediately after leaving scrollTop 0 instead of interpolating
+   * across the whole list. Keep both edges visible through the middle of the
+   * scroll range, then drop the bottom fade only at the end.
+   */
+  0% {
+    --top-fade: 0px;
+    --bottom-fade: var(--edge-fade-distance, 1rem);
+  }
+  0.1% {
+    --top-fade: var(--edge-fade-distance, 1rem);
+    --bottom-fade: var(--edge-fade-distance, 1rem);
+  }
+  99.9% {
+    --top-fade: var(--edge-fade-distance, 1rem);
+    --bottom-fade: var(--edge-fade-distance, 1rem);
+  }
+  to {
+    --top-fade: var(--edge-fade-distance, 1rem);
+    --bottom-fade: 0px;
+  }
+}
+
+@keyframes edge-fade-top {
+  0% {
+    --top-fade: var(--edge-fade-distance, 1rem);
+    --bottom-fade: var(--edge-fade-distance, 1rem);
+  }
+  1% {
+    --top-fade: var(--edge-fade-distance, 1rem);
+    --bottom-fade: var(--edge-fade-distance, 1rem);
+  }
+  99% {
+    --top-fade: var(--edge-fade-distance, 1rem);
+    --bottom-fade: 0px;
+  }
+  to {
+    --top-fade: var(--edge-fade-distance, 1rem);
+    --bottom-fade: 0px;
+  }
+}
+
+@keyframes edge-fade-bottom {
+  0% {
+    --top-fade: 0px;
+    --bottom-fade: var(--edge-fade-distance, 1rem);
+  }
+  1% {
+    --top-fade: 0px;
+    --bottom-fade: var(--edge-fade-distance, 1rem);
+  }
+  99% {
+    --top-fade: 0px;
+    --bottom-fade: 0px;
+  }
+  to {
+    --top-fade: 0px;
+    --bottom-fade: 0px;
+  }
+}
+
+@keyframes edge-fade-horizontal {
+  0% {
+    --left-fade: 0px;
+    --right-fade: var(--edge-fade-distance, 1rem);
+  }
+  0.1% {
+    --left-fade: var(--edge-fade-distance, 1rem);
+    --right-fade: var(--edge-fade-distance, 1rem);
+  }
+  99.9% {
+    --left-fade: var(--edge-fade-distance, 1rem);
+    --right-fade: var(--edge-fade-distance, 1rem);
+  }
+  to {
+    --left-fade: var(--edge-fade-distance, 1rem);
+    --right-fade: 0px;
+  }
+}
+
+.vertical-scroll-fade-mask,
+.vertical-scroll-fade-mask-top {
+  /*
+   * CDXC:SidebarScroll 2026-06-19-13:55:
+   * The sidebar must show the Codex-style blur mask at both scroll edges.
+   * Apply the mask outside the scroll-animation feature query so Ghostex still
+   * gets the top and bottom fade when the embedded browser skips scroll-linked
+   * animation support.
+   *
+   * CDXC:SidebarScroll 2026-06-19-13:55:
+   * Bun's native web CSS bundler drops Codex's mask shorthand gradients to
+   * `mask: none`. Use the alpha-equivalent black/transparent mask-image stops
+   * so the generated macOS Web assets preserve the top and bottom fade.
+   */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black var(--top-fade),
+    black calc(100% - var(--bottom-fade)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black var(--top-fade),
+    black calc(100% - var(--bottom-fade)),
+    transparent 100%
+  );
+}
+
+.vertical-scroll-fade-mask-bottom {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black 0,
+    black calc(100% - var(--bottom-fade)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    black 0,
+    black calc(100% - var(--bottom-fade)),
+    transparent 100%
+  );
+}
+
+/*
+ * CDXC:ScrollFades 2026-06-19-14:16:
+ * Apply the Codex-style scroll-linked fade anywhere the app opts into the
+ * reusable mask class. Use the same `scroll()` support query as Ghostex's
+ * existing scroll-mask utilities so command palettes, Kanban lanes, Recent
+ * Projects, dropdowns, and ScrollArea viewports all animate their edge fades
+ * in the native macOS web bundle.
+ */
+@supports (animation-timeline: scroll()) {
+  .horizontal-scroll-fade-mask {
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      black var(--left-fade),
+      black calc(100% - var(--right-fade)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      black var(--left-fade),
+      black calc(100% - var(--right-fade)),
+      transparent 100%
+    );
+    animation-name: edge-fade-horizontal;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+    animation-timeline: scroll(self x);
+  }
+
+  .vertical-scroll-fade-mask {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      black var(--top-fade),
+      black calc(100% - var(--bottom-fade)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      black var(--top-fade),
+      black calc(100% - var(--bottom-fade)),
+      transparent 100%
+    );
+    animation-name: edge-fade;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+    animation-timeline: scroll(self y);
+  }
+
+  .vertical-scroll-fade-mask-top {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      black var(--top-fade),
+      black calc(100% - var(--bottom-fade)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      black var(--top-fade),
+      black calc(100% - var(--bottom-fade)),
+      transparent 100%
+    );
+    animation-name: edge-fade-top;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+    animation-timeline: scroll(self y);
+  }
+
+  .vertical-scroll-fade-mask-bottom {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      black 0,
+      black calc(100% - var(--bottom-fade)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      black 0,
+      black calc(100% - var(--bottom-fade)),
+      transparent 100%
+    );
+    animation-name: edge-fade-bottom;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+    animation-timeline: scroll(self y);
+  }
+}
+
 @utility scroll-mask {
   --tw-scroll-mask-left-size: 1rem;
   --tw-scroll-mask-right-size: 1rem;

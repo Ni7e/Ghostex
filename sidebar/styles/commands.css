@@ -122,6 +122,7 @@
 }
 
 .git-action-menu {
+  --edge-fade-distance: calc(12px * var(--sidebar-density-scale));
   background: color-mix(in srgb, var(--app-card) 96%, black 4%);
   border: 1px solid color-mix(in srgb, var(--app-border) 94%, transparent);
   border-radius: 0;
@@ -231,6 +232,7 @@
 }
 
 .git-action-changed-files {
+  --edge-fade-distance: calc(12px * var(--sidebar-density-scale));
   background: color-mix(in srgb, var(--app-card-active) 78%, transparent);
   border: 1px solid color-mix(in srgb, var(--app-border) 78%, transparent);
   border-radius: 0;
@@ -438,6 +440,27 @@
 }
 
 .quick-action-menu {
+  /*
+   * CDXC:ScrollFades 2026-06-19-14:16:
+   * Custom sidebar action menus can overflow vertically outside the shadcn
+   * primitives. Give them the same scroll-container fade as command palettes
+   * and dropdowns so long menus do not end on a hard edge.
+   */
+  --edge-fade-distance: calc(12px * var(--sidebar-density-scale));
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black var(--top-fade),
+    black calc(100% - var(--bottom-fade)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black var(--top-fade),
+    black calc(100% - var(--bottom-fade)),
+    transparent 100%
+  );
   background: color-mix(in srgb, var(--app-card) 96%, black 4%);
   border: 1px solid color-mix(in srgb, var(--app-border) 94%, transparent);
   border-radius: 0;
@@ -451,6 +474,15 @@
   padding: calc(8px * var(--sidebar-density-scale));
   position: fixed;
   z-index: 44;
+}
+
+@supports (animation-timeline: scroll()) {
+  .quick-action-menu {
+    animation-name: edge-fade;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+    animation-timeline: scroll(self y);
+  }
 }
 
 .quick-action-menu-label {
