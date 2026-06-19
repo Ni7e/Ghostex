@@ -8,6 +8,50 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>4.21.0</title>
+            <pubDate>Fri, 19 Jun 2026 10:27:20 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.21.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>42100</sparkle:version>
+            <sparkle:shortVersionString>4.21.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 4.21.0
+
+- Major
+  - Agent setup and default agents
+    - Bundled Ghostex agent skills now install through gxserver's shared skill installer instead of copying into one legacy folder.
+    - Skill setup can detect Ghostex skills in global Codex, Claude, shared agent, plugin-cache, and repository skill locations.
+    - Default Prompt Agent is now gxserver-owned with global Accept All, so Settings, first launch, Git helpers, Project Board starts, and worktree prompts share one selection across clients.
+    - Custom, hidden, or temporarily unavailable default agents are shown as unavailable instead of silently falling back to Codex.
+  - Browser appearance and titlebar controls
+    - Browser System, Light, and Dark choices now persist per project and exact web origin, including default ports, for standalone Browser panes and Project Browser tabs.
+    - Restored browser panes receive the saved project appearance map before navigation, while missing origins still default to Light.
+    - The far-right titlebar Settings menu is cleaner, shows Settings, Hotkeys, and Commands shortcuts in a right-aligned column, and adds Cmd+. for opening Hotkeys.
+    - Native tab-bar overflow menus no longer duplicate per-session commands; right-clicking a tab still exposes scoped Rename, Delayed Send, Close After Done, Fork, Reload, and Pop Out actions.
+  - Project Board performance and readability
+    - Kanban label suggestions now come from already-loaded board issues and successful local mutations instead of blocking on global label inventory reads.
+    - Beads label counts are derived from the board list output when label inventory is requested, avoiding the slower per-issue label scan.
+    - Kanban cards are brighter than their lane panels, and swimlanes sit side by side with one shared separator so cards get more usable width.
+- Minor
+  - First-launch and Settings polish
+    - The hook warning now skips the confirmation overlay once Claude, Codex, OpenCode, or Pi already has current Ghostex hooks.
+    - OpenCode hook status is prioritized with the primary first-launch providers.
+    - First-launch warnings use the normal modal surface instead of brown warning colors.
+    - Show Advanced now lives inside the Settings section sidebar instead of floating separately from the navigation rail.
+  - Browser and sidebar fixes
+    - Native Browser panes now start on the requested initial URL instead of briefly opening blank. Thanks @cuttothechaseo.
+    - Sidebar section header actions no longer overlap their labels on tighter layouts. Thanks @cuttothechaseo.
+    - The Recent Projects Commands Pane hover action no longer falls through to the drawer toggle when clicked.
+  - Source pane and native chrome polish
+    - Changing Source-pane VS Code settings-link options waits briefly before restarting code-server, so rapid Settings edits apply once using the final choice.
+    - Only awake Source panes trigger that restart.
+    - The native pane action button now uses a compact layout icon and the titlebar Settings button has a slightly wider right-side hit area.
+
+[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.21.0)
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.21.0/ghostex-4.21.0-arm64.dmg" length="578082934" type="application/octet-stream" sparkle:edSignature="8XCHvBqiw1+o1jiBq4dSN1BzLlnKnLqkJameRIaueOI9CYtpydoN39lN6XUyIU7bWwcsgr/hRSfd8DRGThu5DA=="/>
+        </item>
+        <item>
             <title>4.20.0</title>
             <pubDate>Thu, 18 Jun 2026 06:25:37 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.20.0</sparkle:fullReleaseNotesLink>
@@ -220,34 +264,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.12.0/ghostex-4.12.0-arm64.dmg" length="562882666" type="application/octet-stream" sparkle:edSignature="LBOY0aTINOdqSR5nDKVqRb5/cEXqCeHId+BktJdVoCsSabt3m0ftLmC3eFTxH7utvEWyaDL/m4E87vjevllYDQ=="/>
         </item>
         <item>
-            <title>4.11.0</title>
-            <pubDate>Sat, 13 Jun 2026 17:05:12 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.11.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>41100</sparkle:version>
-            <sparkle:shortVersionString>4.11.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 4.11.0
-
-- Major
-  - Native workspace layout now keeps titlebar, sidebar, divider, pane, webview, and terminal regions in stricter non-overlapping frames, reducing click and focus misses.
-  - Sidebar dividers, native pane tabs, and titlebar chrome have more predictable hit targets because each surface owns its own input region.
-  - New terminals, forks, and restored panes wait for terminal-ready state before focus moves, so keyboard focus lands in the intended session.
-  - Pane tabs recover more reliably while gxserver presentation reconnects, including sleeping, waking, closing, and remote-backed rows.
-  - Previous Sessions and session search preserve provider, agent, and restore identity more accurately when ranking, restoring, or reattaching to older sessions.
-  - Stale local gxserver rows are pruned from the native sidebar so dead sessions do not compete with live provider state.
-- Minor
-  - Sidebar session cards, overflow menus, command palette input, and search surfaces received tighter interaction polish for dense daily use.
-  - Project Board and Tickets cards are denser, placeholders are clearer, and bulk actions and group labels are easier to scan.
-  - First-launch preferences and skill-install status rows are simpler, with status presented in the action area.
-  - Claude Code and Codex terminal keybindings line up with the current prompt-editor and terminal shortcut model.
-  - Android startup recovery handles empty-service startup more reliably.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.11.0)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.11.0/ghostex-4.11.0-arm64.dmg" length="571680076" type="application/octet-stream" sparkle:edSignature="UgodWTxNyTbw6lByvUoOKtJSU/P8PMoiepzbkVG+ctT7Tv5GJ8Bfb6DVcCvxzVoUvy1lNeSbwrUyd/deTedQAQ=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -259,6 +275,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: QRwajm5Sy+dpxWFTdXmAdGIfTVYmv63z7/DAoWCWtRFy82YVVRSlEnGpRncQDhICvPEAs/SAEXIPsdpuAIJqAA==
-length: 19929
+edSignature: kc/LBmQ/TuSjgy6m2wmMkKuqNgITdZlnEsDF3KhHDx6mYEIPgf+G7lzgUpniEtCQkbL9KIB1mo+E7/OJY2Y+AA==
+length: 21533
 -->
