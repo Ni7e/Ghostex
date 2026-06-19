@@ -24705,13 +24705,13 @@ private final class TerminalSessionTitleBarView: NSView {
      Narrow tabbed panes must keep native tabs clickable and draggable. Action
      buttons are AppKit subviews above the tab strip, so when the full horizontal
      cluster would leave less than a usable tab viewport, collapse non-close
-     actions into a single native hamburger menu. If even that menu would clip
+     actions into a single native pane-actions menu. If even that menu would clip
      a one-tab viewport below the tab's own minimum interactive width, hide the
      menu too; tab selection plus inline Close is the primary narrow-pane
      controls.
 
      CDXC:PaneTitleBarUX 2026-05-12-19:06
-     Pane action chrome should always use the hamburger menu, independent of pane
+     Pane action chrome should always use the compact pane-actions menu, independent of pane
      width. Keep the full action-strip layout branch intact for future reuse, but
      route current layouts through the compact menu so panes do not switch back
      to the expanded icon cluster on wider widths.
@@ -25354,13 +25354,7 @@ private final class TerminalSessionTitleBarView: NSView {
       button.resetTabBarIconChrome()
     }
     if button === actionMenuButton {
-      button.image = enabled
-        ? Self.workspaceTabBarActionImage(
-          systemSymbolName: "line.3.horizontal",
-          accessibilityDescription: "Pane Actions")
-        : NSImage(
-          systemSymbolName: "line.3.horizontal",
-          accessibilityDescription: "Pane Actions")
+      button.image = Self.workspaceTabBarActionMenuImage()
     }
   }
 
@@ -25670,7 +25664,7 @@ private final class TerminalSessionTitleBarView: NSView {
   private func showCollapsedActionMenu(from _: NSButton, source: String) {
     /**
      CDXC:PaneTitleBarUX 2026-05-15-17:54:
-     The collapsed pane hamburger menu must not include New Terminal. Terminal
+     The collapsed pane-actions menu must not include New Terminal. Terminal
      creation remains available from the tab-bar plus button, so the menu keeps
      the remaining pane/session actions.
 
@@ -25700,7 +25694,7 @@ private final class TerminalSessionTitleBarView: NSView {
          The always-collapsed pane action menu must retain the visual grouping
          from the former full button strip: create/open, split, session actions,
          and pop-out controls remain separated even though they now live inside
-         one hamburger dropdown.
+         one compact pane-actions dropdown.
          */
         menu.addItem(NSMenuItem.separator())
       }
@@ -25716,7 +25710,7 @@ private final class TerminalSessionTitleBarView: NSView {
     }
     /**
      CDXC:PaneTitleBarUX 2026-05-12-10:58
-     Collapsed hamburger clicks are owned by the visible native NSButton.
+     Collapsed pane-actions clicks are owned by the visible native NSButton.
      Anchor the menu in title-bar coordinates only for placement; the click
      itself reaches this path through normal AppKit target/action dispatch.
 
@@ -25862,14 +25856,16 @@ private final class TerminalSessionTitleBarView: NSView {
     actionMenuButton.action = #selector(performActionMenuButton(_:))
     /**
      CDXC:PaneTitleBarUX 2026-05-12-10:58
-     The collapsed hamburger is visible whenever layout reserves its frame and
+     The collapsed pane-actions button is visible whenever layout reserves its frame and
      uses AppKit's normal mouse-up button action. Do not synthesize this through
      title-bar mouse handling; the NSButton owns the click.
      */
     actionMenuButton.sendAction(on: [.leftMouseUp])
-    actionMenuButton.image = NSImage(
-      systemSymbolName: "line.3.horizontal",
-      accessibilityDescription: "Pane Actions")
+    /*
+     CDXC:PaneTabs 2026-06-18-23:28:
+     The rightmost native pane-tab action button should use the filled layout-board-split glyph instead of the previous hamburger icon, matching the requested Tabler-style pane layout icon while preserving the existing NSButton frame and native click ownership.
+     */
+    actionMenuButton.image = Self.workspaceTabBarActionMenuImage()
     actionMenuButton.isHidden = true
     actionMenuButton.alphaValue = 0
     addSubview(actionMenuButton)
@@ -25889,6 +25885,38 @@ private final class TerminalSessionTitleBarView: NSView {
       pointSize: workspaceTabBarActionIconPointSize,
       weight: .regular)
     return image.withSymbolConfiguration(configuration) ?? image
+  }
+
+  private static func workspaceTabBarActionMenuImage() -> NSImage {
+    let pointSize = workspaceTabBarActionIconPointSize
+    let image = NSImage(size: CGSize(width: pointSize, height: pointSize), flipped: false) { rect in
+      let scale = min(rect.width, rect.height) / 24
+      let originX = rect.midX - 12 * scale
+      let originY = rect.midY - 12 * scale
+      let cornerRadius = 1.1 * scale
+
+      func drawTile(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) {
+        let flippedY = 24 - y - height
+        NSBezierPath(
+          roundedRect: CGRect(
+            x: originX + x * scale,
+            y: originY + flippedY * scale,
+            width: width * scale,
+            height: height * scale),
+          xRadius: cornerRadius,
+          yRadius: cornerRadius).fill()
+      }
+
+      NSColor.black.setFill()
+      drawTile(x: 3, y: 3, width: 8, height: 8)
+      drawTile(x: 13, y: 3, width: 8, height: 5)
+      drawTile(x: 13, y: 10, width: 8, height: 4)
+      drawTile(x: 13, y: 16, width: 8, height: 5)
+      drawTile(x: 3, y: 13, width: 8, height: 8)
+      return true
+    }
+    image.isTemplate = true
+    return image
   }
 
   private func syncActionSeparators() {
@@ -26358,6 +26386,17 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
         return "moon"
       }
     }
+
+    var preferredColorSchemeOverride: String? {
+      switch self {
+      case .system:
+        return nil
+      case .light:
+        return "light"
+      case .dark:
+        return "dark"
+      }
+    }
   }
 
   private static let browserToolbarHeight: CGFloat = 40
@@ -26450,12 +26489,16 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     tooltip: "Browser Profile"
   )
   private let appearanceButton = WebPaneHostView.makeToolbarButton(
-    systemSymbolName: "circle.lefthalf.filled",
+    systemSymbolName: "sun.max",
     fallbackTitle: "A",
     tooltip: "Toggle Page Appearance"
   )
   private var navigationObservations: [NSKeyValueObservation] = []
-  private var browserThemeMode: BrowserPaneThemeMode = .system
+  /*
+   CDXC:BrowserPanes 2026-06-18-22:50:
+   CEF browser panes should present sites as if the hidden address-bar color-scheme menu is set to Light by default, not System. Apply the mode through the same menu path on creation and CEF replacement so `prefers-color-scheme` starts in light mode even when Show Beta features keeps the button hidden.
+   */
+  private var browserThemeMode: BrowserPaneThemeMode = .light
   private var isEditingAddress = false
 
   init(
@@ -26503,6 +26546,7 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     browserView.frame = bounds
     if showsBrowserToolbar {
       configureBrowserToolbar(initialAddress: initialAddress)
+      applyBrowserThemeMode(browserThemeMode)
       addSubview(toolbarView)
     }
     addSubview(browserView)
@@ -26623,6 +26667,9 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       }
       browserFindBar = findBar
       addSubview(findBar)
+    }
+    if showsBrowserToolbar {
+      applyBrowserThemeMode(browserThemeMode)
     }
     refreshHostedWebView(reason: reason)
     updateBrowserToolbarState()
@@ -27698,11 +27745,16 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       return
     }
     /**
-     CDXC:BrowserPanes 2026-05-02-17:32
-     The browser theme top-bar control mirrors the reference System/Light/Dark
-     menu. Apply the choice directly to the embedded WKWebView so compatible
-     pages update in place without replacing the browser pane or using overlay UI.
+     CDXC:BrowserPanes 2026-05-02-17:32:
+     The browser theme top-bar control mirrors the reference System/Light/Dark menu. Apply the choice directly to the embedded browser surface so compatible pages update in place without replacing the browser pane or using overlay UI.
+
+     CDXC:ChromiumBrowserPanes 2026-06-18-22:50:
+     CEF must use Chromium's page color-scheme emulation rather than a stored no-op. Selecting System clears the emulation, while Light and Dark update page `prefers-color-scheme` immediately.
      */
+    applyBrowserThemeMode(mode)
+  }
+
+  private func applyBrowserThemeMode(_ mode: BrowserPaneThemeMode) {
     browserThemeMode = mode
     if let webView {
       switch mode {
@@ -27713,15 +27765,8 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
       case .dark:
         webView.appearance = NSAppearance(named: .darkAqua)
       }
-    } else {
-      /**
-       CDXC:ChromiumBrowserPanes 2026-05-04-16:51
-       Chromium panes should not fake WebKit's per-view AppKit appearance hook.
-       CEF needs explicit page/runtime theme support to do this correctly, so
-       the toolbar stores the selected mode but leaves Chromium rendering alone
-       until a real Chromium theme implementation is added.
-       */
     }
+    chromiumView?.setPreferredColorScheme(mode.preferredColorSchemeOverride)
     appearanceButton.image = NSImage(systemSymbolName: mode.symbolName, accessibilityDescription: "Browser Theme")
   }
 

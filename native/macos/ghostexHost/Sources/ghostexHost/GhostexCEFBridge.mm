@@ -31,6 +31,7 @@
 #include "include/cef_load_handler.h"
 #include "include/cef_permission_handler.h"
 #include "include/cef_request_context.h"
+#include "include/cef_values.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
 
@@ -1074,6 +1075,14 @@ static bool GhostexCEFOriginsMatch(NSString* lhs, NSString* rhs) {
   return leftOrigin.length > 0 && [leftOrigin isEqualToString:rightOrigin];
 }
 
+static NSString* GhostexCEFNormalizedPreferredColorScheme(NSString* value) {
+  NSString* normalized = [[value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+  if ([normalized isEqualToString:@"light"] || [normalized isEqualToString:@"dark"]) {
+    return normalized;
+  }
+  return nil;
+}
+
 static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestContext> requestContext,
                                                           NSString* trustedOrigin) {
   NSString* normalizedOrigin = GhostexCEFNormalizedOrigin(trustedOrigin);
@@ -1102,6 +1111,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   NSView* cefView_;
   NSString* currentURLString_;
   NSString* pageTitle_;
+  NSString* preferredColorScheme_;
   BOOL canGoBack_;
   BOOL canGoForward_;
   BOOL isLoading_;
@@ -1110,6 +1120,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   NSUInteger layoutPass_;
   NSUInteger internalGeometryDiagnosticSequence_;
   NSUInteger viewportDiagnosticSequence_;
+  int preferredColorSchemeDevToolsMessageID_;
   NSTimeInterval lastInternalGeometryDiagnosticAt_;
   NSTimeInterval lastViewportDiagnosticAt_;
   NSRect lastInternalGeometryDiagnosticBounds_;
@@ -1117,6 +1128,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
 }
 - (void)ghostexCEFPinHostedViewToBoundsWithReason:(NSString*)reason;
 - (void)ghostexCEFDidCreateBrowser:(CefRefPtr<CefBrowser>)browser;
+- (void)ghostexCEFApplyPreferredColorSchemeIfPossible;
 @end
 
 @implementation GhostexCEFBrowserView
@@ -1185,6 +1197,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   cefView_.autoresizingMask = NSViewNotSizable;
   [self ghostexCEFPinHostedViewToBoundsWithReason:@"createBrowser"];
   [self setNeedsLayout:YES];
+  [self ghostexCEFApplyPreferredColorSchemeIfPossible];
 
   if (initialURL_.length > 0 && !didGiveInitialURLToBrowserCreate_) {
     [self loadURLString:initialURL_];
@@ -1499,6 +1512,40 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   return browser_ ? browser_->GetHost()->GetZoomLevel() : 0.0;
 }
 
+- (void)setPreferredColorScheme:(NSString*)colorScheme {
+  NSString* normalized = GhostexCEFNormalizedPreferredColorScheme(colorScheme);
+  BOOL isSame = (preferredColorScheme_ == nil && normalized == nil) || [preferredColorScheme_ isEqualToString:normalized];
+  preferredColorScheme_ = [normalized copy];
+  if (!isSame) {
+    [self ghostexCEFApplyPreferredColorSchemeIfPossible];
+  }
+}
+
+- (void)ghostexCEFApplyPreferredColorSchemeIfPossible {
+  if (!browser_) {
+    return;
+  }
+  /*
+  CDXC:ChromiumBrowserPanes 2026-06-18-22:50:
+  Chromium does not use AppKit's per-view appearance for page media queries. Browser color-scheme menu choices must become DevTools `Emulation.setEmulatedMedia` updates so sites observe System, Light, or Dark through `prefers-color-scheme` instead of the menu merely storing a value.
+  */
+  CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
+  params->SetString("media", "");
+  CefRefPtr<CefListValue> features = CefListValue::Create();
+  if (preferredColorScheme_.length > 0) {
+    CefRefPtr<CefDictionaryValue> feature = CefDictionaryValue::Create();
+    feature->SetString("name", "prefers-color-scheme");
+    feature->SetString("value", [preferredColorScheme_ UTF8String]);
+    features->SetDictionary(0, feature);
+  }
+  params->SetList("features", features);
+  preferredColorSchemeDevToolsMessageID_ += 1;
+  browser_->GetHost()->ExecuteDevToolsMethod(
+    preferredColorSchemeDevToolsMessageID_,
+    CefString("Emulation.setEmulatedMedia"),
+    params);
+}
+
 - (void)createBrowserIfNeeded {
   if (getenv("GHOSTEX_GPUI_TRACE")) {
     fprintf(stderr,
@@ -1608,6 +1655,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   cefView_.autoresizingMask = NSViewNotSizable;
   [self ghostexCEFPinHostedViewToBoundsWithReason:@"createBrowser"];
   [self setNeedsLayout:YES];
+  [self ghostexCEFApplyPreferredColorSchemeIfPossible];
 
   if (initialURL_.length > 0) {
     [self loadURLString:initialURL_];

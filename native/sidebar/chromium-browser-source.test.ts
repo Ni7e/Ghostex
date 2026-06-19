@@ -359,6 +359,51 @@ describe("chromium browser source", () => {
     expect(profilePickerSource).toContain("betaItem.isEnabled = false");
   });
 
+  test("defaults CEF browser color scheme to Light and applies menu changes", () => {
+    /*
+     * CDXC:ChromiumBrowserPanes 2026-06-18-22:50:
+     * Hidden browser address-bar color-scheme controls should behave as if Light
+     * is selected by default. CEF must receive real Chromium color-scheme
+     * emulation so pages observe the choice through prefers-color-scheme.
+     */
+    expect(cefBridgeHeaderSource).toContain("setPreferredColorScheme(_:)");
+    expect(cefBridgeSource).toContain('#include "include/cef_values.h"');
+    expect(cefBridgeSource).toContain('"Emulation.setEmulatedMedia"');
+    expect(cefBridgeSource).toContain('"prefers-color-scheme"');
+
+    const themeModeSource = sourceBetween(
+      terminalWorkspaceSource,
+      "private enum BrowserPaneThemeMode",
+      "private static let browserToolbarHeight",
+    );
+    expect(themeModeSource).toContain("var preferredColorSchemeOverride: String?");
+    expect(themeModeSource).toContain('return "light"');
+    expect(themeModeSource).toContain('return "dark"');
+    expect(terminalWorkspaceSource).toContain("private var browserThemeMode: BrowserPaneThemeMode = .light");
+
+    const hostInitSource = sourceBetween(
+      terminalWorkspaceSource,
+      "init(\n    browserView: NSView",
+      "  /*\n   CDXC:SourceCEFDragDrop",
+    );
+    expect(hostInitSource).toContain("applyBrowserThemeMode(browserThemeMode)");
+
+    const replaceSource = sourceBetween(
+      terminalWorkspaceSource,
+      "func replaceHostedBrowserView(",
+      "  func focusAddressField",
+    );
+    expect(replaceSource).toContain("applyBrowserThemeMode(browserThemeMode)");
+
+    const applySource = sourceBetween(
+      terminalWorkspaceSource,
+      "private func applyBrowserThemeMode",
+      "  @objc private func showImportSettings",
+    );
+    expect(applySource).toContain("chromiumView?.setPreferredColorScheme(mode.preferredColorSchemeOverride)");
+    expect(applySource).not.toContain("leaves Chromium rendering alone");
+  });
+
   test("disables browser feedback tool buttons on GitHub pages", () => {
     /*
      * CDXC:BrowserFeedbackTools 2026-06-15-01:52:

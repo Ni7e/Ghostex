@@ -70,6 +70,7 @@ int GhostexCEFRemoteDebuggingPort(void);
         findNext:(BOOL)findNext NS_SWIFT_NAME(findText(_:forward:findNext:));
 - (void)stopFindingWithClearSelection:(BOOL)clearSelection NS_SWIFT_NAME(stopFinding(clearSelection:));
 - (void)executeJavaScript:(NSString*)javaScript;
+- (void)setPreferredColorScheme:(nullable NSString*)colorScheme NS_SWIFT_NAME(setPreferredColorScheme(_:));
 - (void)emitToolbarActionDiagnosticsWithAction:(NSString*)action
                                          phase:(NSString*)phase NS_SWIFT_NAME(emitToolbarActionDiagnostics(action:phase:));
 - (void)pinHostedViewToBounds;
