@@ -29,6 +29,28 @@
 <!-- CDXC:Distribution 2026-06-19-06:40: Release notes for 4.20.1 must cover the user-facing titlebar Settings menu move, CEF browser color-scheme behavior, debounced Source settings restarts, and pane action icon polish while preserving the Major and Minor top-level bullet structure. -->
 <!-- CDXC:Distribution 2026-06-19-10:23: Release notes for 4.21.0 must include all user-facing work since v4.20.0, preserve the Major and Minor top-level bullet structure, and credit external human contributors by GitHub username while skipping maddada, claude, codex, and automation accounts. -->
 <!-- CDXC:Distribution 2026-06-19-15:28: The reissued 4.21.0 release notes must merge the later settings, sidebar, native prompt-editor, Source-pane, and Delayed Send changes into the original 4.21.0 notes before GitHub, Sparkle, Homebrew, and Android assets are overwritten from the latest main. -->
+<!-- CDXC:Distribution 2026-06-19-16:11: Release notes for 4.21.1 must cover fresh agent startup materialization, focused-session command actions, Git commit modal polish, and Chromium page-canvas appearance fixes while preserving Major and Minor top-level bullets. -->
+
+## 4.21.1 - 2026-06-19
+
+- Major
+  - Fresh agent startup and CLI orchestration
+    - `ghostex create-agent` now creates and starts the gxserver provider in one step, so follow-up messages land in a live agent process instead of a shell prompt.
+    - Fresh agent panes consume the queued first-launch command once and no longer treat raw Ghostex `G...` session IDs as provider resume titles.
+    - The Rust gxserver and zmx path now follows the same queued-startup behavior as the TypeScript server.
+  - Focused session commands
+    - Sleep Focused Session, Wake Focused Session, Close Focused Session, and Close After Done are available from the command palette and Hotkeys settings.
+    - Option+Shift+S sleeps the focused terminal by default; wake, close, and timer actions are available to bind without taking over existing Cmd+W behavior.
+    - Native hotkeys and command-palette actions target the terminal that owns AppKit focus, including command-pane terminals.
+  - Browser page appearance
+    - Browser panes now force both light page media and a white default page canvas for public pages.
+    - Transparent pages that leave the document background unset no longer reveal the dark editor backing color.
+- Minor
+  - Git commit modal polish
+    - The branch header is quieter and the Select and Show All controls now live beneath the changed-file tree.
+    - Changed-file stats stay visible in the lower file footer without competing with the branch name.
+  - Reliability coverage
+    - Added coverage for queued agent startup consumption, command-palette focused actions, native hotkey dispatch, and Rust gxserver parity.
 
 ## 4.21.0 - 2026-06-19
 
