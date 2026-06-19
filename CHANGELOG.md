@@ -27,6 +27,39 @@
 <!-- CDXC:Distribution 2026-06-17-09:48: Release 4.14.2 must ship from committed main with the latest supplied Highlighted Features PNGs included in the app bundle, not from hidden stash state or older packaged images. -->
 <!-- CDXC:Distribution 2026-06-18-06:14: Release notes for 4.20.0 must cover the user-facing setup, tutorial, command palette, hook recovery, session search, native pane, CLI, README, and sidebar polish shipped after 4.14.2 while keeping the required Major and Minor top-level bullet structure. -->
 <!-- CDXC:Distribution 2026-06-19-06:40: Release notes for 4.20.1 must cover the user-facing titlebar Settings menu move, CEF browser color-scheme behavior, debounced Source settings restarts, and pane action icon polish while preserving the Major and Minor top-level bullet structure. -->
+<!-- CDXC:Distribution 2026-06-19-10:23: Release notes for 4.21.0 must include all user-facing work since v4.20.0, preserve the Major and Minor top-level bullet structure, and credit external human contributors by GitHub username while skipping maddada, claude, codex, and automation accounts. -->
+
+## 4.21.0 - 2026-06-19
+
+- Major
+  - Agent setup and default agents
+    - Bundled Ghostex agent skills now install through gxserver's shared skill installer instead of copying into one legacy folder.
+    - Skill setup can detect Ghostex skills in global Codex, Claude, shared agent, plugin-cache, and repository skill locations.
+    - Default Prompt Agent is now gxserver-owned with global Accept All, so Settings, first launch, Git helpers, Project Board starts, and worktree prompts share one selection across clients.
+    - Custom, hidden, or temporarily unavailable default agents are shown as unavailable instead of silently falling back to Codex.
+  - Browser appearance and titlebar controls
+    - Browser System, Light, and Dark choices now persist per project and exact web origin, including default ports, for standalone Browser panes and Project Browser tabs.
+    - Restored browser panes receive the saved project appearance map before navigation, while missing origins still default to Light.
+    - The far-right titlebar Settings menu is cleaner, shows Settings, Hotkeys, and Commands shortcuts in a right-aligned column, and adds Cmd+. for opening Hotkeys.
+    - Native tab-bar overflow menus no longer duplicate per-session commands; right-clicking a tab still exposes scoped Rename, Delayed Send, Close After Done, Fork, Reload, and Pop Out actions.
+  - Project Board performance and readability
+    - Kanban label suggestions now come from already-loaded board issues and successful local mutations instead of blocking on global label inventory reads.
+    - Beads label counts are derived from the board list output when label inventory is requested, avoiding the slower per-issue label scan.
+    - Kanban cards are brighter than their lane panels, and swimlanes sit side by side with one shared separator so cards get more usable width.
+- Minor
+  - First-launch and Settings polish
+    - The hook warning now skips the confirmation overlay once Claude, Codex, OpenCode, or Pi already has current Ghostex hooks.
+    - OpenCode hook status is prioritized with the primary first-launch providers.
+    - First-launch warnings use the normal modal surface instead of brown warning colors.
+    - Show Advanced now lives inside the Settings section sidebar instead of floating separately from the navigation rail.
+  - Browser and sidebar fixes
+    - Native Browser panes now start on the requested initial URL instead of briefly opening blank. Thanks @cuttothechaseo.
+    - Sidebar section header actions no longer overlap their labels on tighter layouts. Thanks @cuttothechaseo.
+    - The Recent Projects Commands Pane hover action no longer falls through to the drawer toggle when clicked.
+  - Source pane and native chrome polish
+    - Changing Source-pane VS Code settings-link options waits briefly before restarting code-server, so rapid Settings edits apply once using the final choice.
+    - Only awake Source panes trigger that restart.
+    - The native pane action button now uses a compact layout icon and the titlebar Settings button has a slightly wider right-side hit area.
 
 ## 4.20.1 - 2026-06-19
 
