@@ -5,9 +5,12 @@
  *
  * CDXC:PromptAgents 2026-06-10-12:00:
  * Reduce the per-chunk line limit from fifteen to thirteen so staged agent prompts stay under Cursor Agent paste-collapse thresholds more reliably.
+ *
+ * CDXC:PromptAgents 2026-06-19-16:57:
+ * Git and project-board agent prompts must be staged in five-line writes because Cursor Agent can still collapse thirteen-line injections into a "[Pasted text #N +N lines]" chip before submit.
  */
 
-export const AGENT_PROMPT_MAX_LINES_PER_CHUNK = 13;
+export const AGENT_PROMPT_MAX_LINES_PER_CHUNK = 5;
 
 /**
  * Splits prompt text into chunks of at most `maxLinesPerChunk` lines so agent TUIs

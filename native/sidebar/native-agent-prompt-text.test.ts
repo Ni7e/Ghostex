@@ -14,7 +14,7 @@ describe("splitAgentPromptTextIntoLineChunks", () => {
     expect(splitAgentPromptTextIntoLineChunks(prompt)).toEqual([prompt]);
   });
 
-  test("splits prompts into thirteen-line chunks that reconstruct the original text", () => {
+  test("splits prompts into five-line chunks that reconstruct the original text", () => {
     const lineCount = AGENT_PROMPT_MAX_LINES_PER_CHUNK * 2 + 3;
     const prompt = Array.from({ length: lineCount }, (_, index) => `line-${index + 1}`).join("\n");
     const chunks = splitAgentPromptTextIntoLineChunks(prompt);

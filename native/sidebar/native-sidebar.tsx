@@ -20862,8 +20862,11 @@ async function stageNativeAgentPrompt(input: {
    * conflicts, and worktree first prompts all use the same ordered path.
    *
    * CDXC:PromptAgents 2026-05-31-07:35:
-   * Long bead prompts must be written in thirteen-line chunks so Cursor Agent does
-   * not collapse the staged text into a "[Pasted text #1 +N lines]" chip before submit.
+   * Long bead prompts must be chunked so Cursor Agent does not collapse the
+   * staged text into a "[Pasted text #1 +N lines]" chip before submit.
+   *
+   * CDXC:PromptAgents 2026-06-19-16:57:
+   * Git workflow prompts use this same terminal staging path, including Commit, Push & PR. Stage prompt text in five-line chunks rather than special-casing Git prompts so all agent prompt automation avoids paste-chip collapse.
    */
   await waitForNativeTerminalReady(input.session.sessionId);
   await delayNativeAgentPromptStep(AGENT_PROMPT_READY_DELAY_MS);
