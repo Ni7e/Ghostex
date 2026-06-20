@@ -57,9 +57,10 @@ Great for working with markdown, reviewing code, and checking PRs (Github Extens
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/986fbece-d0de-4739-8515-f3c2a7437b92" />
 
-### Supports all of the popular Agent CLIs and T3code GUI Panes
+### Supports all of the popular Agent CLIs
 
 Ghostex works with Claude Code, Codex CLI, OpenCode, Pi Agent, Gemini, Copilot, and other terminal-based agent CLIs.
+Also supports T3code GUI panes if you prefer those (feature is fully hibernated when not used)
 
 <img width="1200" alt="Ghostex T3code panes and supported terminal CLIs" src="https://github.com/user-attachments/assets/49862e2d-1edd-4647-8161-5afb25ed8341" />
 
