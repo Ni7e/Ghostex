@@ -64,22 +64,22 @@ Also supports T3code GUI panes if you prefer those (feature is fully hibernated 
 
 <img width="1200" alt="Ghostex T3code panes and supported terminal CLIs" src="https://github.com/user-attachments/assets/49862e2d-1edd-4647-8161-5afb25ed8341" />
 
-### Embedded Chromium Browser with Design mode
+### Embedded Chromium Browser
 
-Also Comes with Devtools, Agent Browser Control, Profiles, and MCP access.
+Comes with Annotations, Chrome Devtools MCP for Agents, Profiles.
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/ce9fbe6b-8c2b-41f1-88f6-67d8254846e5" />
 
 ### Kanban board based on beads!
 
-Dump your notes here then let an orchestrator agent hand them off to other agents
-(App supports cross agent orchestration too)
+Put all your thoughts here then let an orchestrator agent manage subagents to tackle them
+(Ghostex supports cross Agent CLI orchestration)
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/85543937-85f1-4171-b2d0-6ee7264beddd" />
 
-### Rich Prompt Editor with ctrl + g
+### Rich Prompt Editor with Ctrl+G
 
-Edit your agent prompts with full hotkeys support and even image previews! Includes Monaco-based and TUI-based editor modes.
+Edit your agent prompts with full hotkeys support and image previews! No more uneditable "[Pasted 50+ lines]" text!
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/b51ec92e-04cf-4d8f-933c-fc2a13638a1d" />
 
@@ -91,7 +91,7 @@ Fuzzy search in all your previous sessions accross agents by typing a few words 
 
 ### Extensible Architecture (client apps <-> gxserver daemon <-> zmx persistence)
 
-This architecture allows your to install just the gxserver daemon on any remote machine then control the agents on that machine from any client device (macOS/iOS/Android for now. Need help for Win/Linux)
+The client/server split allows your to install just the gxserver daemon on any remote machine then control the agents on that machine from any client device (macOS/iOS/Android for now. Need help for Win/Linux)
 
 <img width="3326" height="1514" alt="2026-06-12_Google Chrome_23-43-07@2x" src="https://github.com/user-attachments/assets/ecc84149-a9fc-4ec8-a387-af5ce35aa7be" />
 
