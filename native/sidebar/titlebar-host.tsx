@@ -6,8 +6,6 @@ import {
   IconBox,
   IconCheck,
   IconChevronDown,
-  IconChevronLeft,
-  IconChevronRight,
   IconChecklist,
   IconCode,
   IconCoffee,
@@ -22,8 +20,10 @@ import {
   IconGitPullRequest,
   IconHistory,
   IconInfoCircle,
+  IconLayoutSidebar,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
+  IconLayoutSidebarRight,
   IconLoader2,
   IconKeyboard,
   IconMenu2,
@@ -266,6 +266,7 @@ type TitlebarProjectState = {
   agentHookStatus?: SidebarAgentHookStatusMessage;
   ghostexCliStatus?: SidebarGhostexCliStatusMessage;
   debuggingMode: boolean;
+  showBetaFeatures: boolean;
   diffStats: SidebarProjectDiffStats;
   editorIsOpen: boolean;
   editorIsSleeping: boolean;
@@ -874,10 +875,10 @@ function setTitlebarNativePointerInside(isInside: boolean): void {
 
 function setTitlebarWindowFocused(isFocused: boolean): void {
   /*
-   * CDXC:SidebarCollapse 2026-06-13-10:57:
-   * The traffic-light-side sidebar collapse dot must dim to #313131 whenever
-   * the macOS window is not key. AppKit owns that state; React only stores the
-   * bridge boolean on the document for CSS.
+   * CDXC:ReactTitlebar 2026-06-20-17:10:
+   * AppKit owns the key-window state for titlebar chrome. React keeps the
+   * existing body dataset bridge so titlebar CSS can track active/inactive
+   * windows without adding new native hit-test or routing behavior.
    */
   window.__ghostex_PENDING_TITLEBAR_WINDOW_FOCUSED__ = isFocused;
   document.body.dataset.windowFocused = isFocused ? "true" : "false";
@@ -1882,8 +1883,15 @@ function App() {
   );
   const [keepAwakeAutoStartSuppressed, setKeepAwakeAutoStartSuppressed] = useState(false);
   const [resourceProcesses, setResourceProcesses] = useState<ResourceProcess[]>([]);
-  const sidebarCollapseChevronPointsRight =
-    projectState.sidebarSide === "right" ? !projectState.sidebarCollapsed : projectState.sidebarCollapsed;
+  /*
+   * CDXC:SidebarCollapse 2026-06-20-17:10:
+   * The macOS titlebar Toggle Sidebar control should be a plain Tabler sidebar
+   * glyph instead of the former blue traffic-light dot. Mirror the configured
+   * sidebar placement so left sidebars use IconLayoutSidebar and right sidebars
+   * use IconLayoutSidebarRight.
+   */
+  const SidebarCollapseIcon =
+    projectState.sidebarSide === "right" ? IconLayoutSidebarRight : IconLayoutSidebar;
   const keepAwakeFeatureEnabled = projectState.keepAwake.featureEnabled === true;
   /*
    * CDXC:TitlebarResources 2026-06-11-18:13:
@@ -3286,11 +3294,23 @@ function App() {
     projectState.editorIsOpen &&
     !projectState.editorIsSleeping;
   /*
+   * CDXC:TitlebarManage 2026-06-20-17:13:
+   * Manage is an experimental project workarea. Hide its titlebar entry unless
+   * both Settings Debugging Mode and Show Beta features are enabled, while
+   * keeping the existing project-context disabled reason for eligible users.
+   */
+  const showManageTitlebarMode =
+    projectState.debuggingMode && projectState.showBetaFeatures;
+  /*
    * CDXC:TitlebarModeTabs 2026-05-31-12:00:
    * macOS titlebar mode switcher labels use title case (Agents, Source, Browser, Kanban, Manage), not all-caps, so the segmented control reads like navigation chrome rather than shouting labels.
    *
    * CDXC:Manage 2026-06-20-04:36:
    * Manage is a project-scoped file browser workarea and should sit beside Kanban in the same titlebar segmented control instead of being hidden under a menu.
+   *
+   * CDXC:TitlebarManage 2026-06-20-17:13:
+   * Manage should be absent from the titlebar mode list unless the user has
+   * both Debugging Mode and Show Beta features enabled in Settings.
    */
   const titlebarModes = [
     {
@@ -3317,13 +3337,17 @@ function App() {
       onSelect: openTasksMode,
       value: "tasks" as const,
     },
-    {
-      disabled: manageModeDisabledReason !== undefined,
-      disabledReason: manageModeDisabledReason,
-      label: "Manage",
-      onSelect: openManageMode,
-      value: "manage" as const,
-    },
+    ...(showManageTitlebarMode
+      ? [
+          {
+            disabled: manageModeDisabledReason !== undefined,
+            disabledReason: manageModeDisabledReason,
+            label: "Manage",
+            onSelect: openManageMode,
+            value: "manage" as const,
+          },
+        ]
+      : []),
   ];
   const resolveTitlebarDropdownPanelSize = useCallback(
     (kind: TitlebarDropdownPanelKind) =>
@@ -3528,53 +3552,27 @@ function App() {
         variant="ghost"
       >
         {/*
-         * CDXC:SidebarCollapse 2026-06-12-10:57:
-         * Users need a traffic-light-sized titlebar button immediately
-         * before the project identity to collapse or expand the entire
-         * native sidebar. For the default left sidebar, the chevron points
-         * left while expanded and right while collapsed so it indicates the
-         * next action.
-         *
-         * CDXC:SidebarCollapse 2026-06-13-11:05:
-         * When the sidebar is on the right, invert the chevron direction from
-         * the left-sidebar default. The icon should point toward the actual
-         * collapse or expand motion for the current sidebar side.
+         * CDXC:SidebarCollapse 2026-06-20-17:10:
+         * Users asked for the titlebar Toggle Sidebar affordance to use the
+         * Tabler sidebar icon itself, without the blue circular button visual.
+         * Keep the existing 33px titlebar hit target but render only the
+         * side-aware glyph so the control reads as titlebar chrome.
          *
          * CDXC:SidebarCollapse 2026-06-12-11:10:
          * The update affordance belongs to the right of this collapse
          * button, with a 9px gap between the two compact titlebar buttons.
-         * Keep the collapse button one pixel lower than its first pass and
-         * use a 10px chevron so the glyph reads clearly inside the 14px dot.
-         *
-         * CDXC:SidebarCollapse 2026-06-12-21:03:
-         * The visible collapse affordance is tiny while the actual titlebar
-         * button frame is a stable 33x33px square that keeps the small dot easy
-         * to click without painting that larger area.
+         * Keep the stable frame so the native titlebar layout does not shift.
          *
          * CDXC:SidebarCollapse 2026-06-13-10:53:
-         * The hover tooltip for this button must contain only the assigned Toggle
-         * Sidebar hotkey so the tiny titlebar affordance stays terse.
-         *
-         * CDXC:SidebarCollapse 2026-06-13-01:00:
-         * Move only the visible dot 2px lower. The 33x33 button frame stays
-         * fixed so clicking and native strip ownership remain stable.
-         *
-         * CDXC:SidebarCollapse 2026-06-13-09:24:
-         * The visible dot should be 14x14px again so it matches the macOS
-         * traffic-light buttons while retaining the stable 33x33 button frame.
+         * The hover tooltip for this button should name Toggle Sidebar and show
+         * its assigned hotkey so the tiny titlebar affordance remains clear.
          *
          * CDXC:SidebarCollapse 2026-06-13-02:59:
          * Use the same AppTooltip wrapper as sidebar controls for the hotkey
          * label; keep the titlebar-specific wrapper responsible only for right
-         * placement beside the traffic-light-side button.
+         * placement beside the titlebar-side button.
         */}
-        <span className="titlebar-sidebar-collapse-button-visual">
-          {sidebarCollapseChevronPointsRight ? (
-            <IconChevronRight aria-hidden="true" size={10} stroke={2.4} />
-          ) : (
-            <IconChevronLeft aria-hidden="true" size={10} stroke={2.4} />
-          )}
-        </span>
+        <SidebarCollapseIcon aria-hidden="true" data-icon="inline-start" stroke={1.9} />
       </Button>
     </TitlebarAppTooltip>
   );
@@ -4592,6 +4590,7 @@ function mergeTitlebarProjectState(
     agentHookStatus: state.agentHookStatus ?? current.agentHookStatus,
     ghostexCliStatus: state.ghostexCliStatus ?? current.ghostexCliStatus,
     debuggingMode: state.debuggingMode ?? current.debuggingMode,
+    showBetaFeatures: state.showBetaFeatures ?? current.showBetaFeatures,
     diffStats: state.diffStats ?? current.diffStats,
     git: resolveTitlebarGitStateForMerge(current.git, state.git, projectIdentity),
     gxserverDaemon: state.gxserverDaemon ?? current.gxserverDaemon,
@@ -4802,8 +4801,8 @@ function formatToggleSidebarTooltipLabel(hotkey: string | undefined): string {
   }
   /*
    * CDXC:SidebarCollapse 2026-06-15-13:34:
-   * The traffic-light-side collapse control tooltip should name the command
-   * and show the assigned shortcut, matching native hover help language while
+   * The titlebar-side collapse control tooltip should name the command and
+   * show the assigned shortcut, matching native hover help language while
    * preserving the empty label when Toggle Sidebar has no hotkey.
    */
   return `Toggle Sidebar (${formatSidebarHotkeyLabel(hotkey)})`;
@@ -4822,6 +4821,7 @@ function createInitialProjectState(bootstrap: Record<string, unknown>): Titlebar
     ghostexCliStatus: undefined,
     browserTabs: [],
     debuggingMode: settings.debuggingMode,
+    showBetaFeatures: settings.showBetaFeatures,
     diffStats: createDefaultSidebarProjectDiffStats(false),
     editorIsOpen: false,
     editorIsSleeping: false,
@@ -6685,7 +6685,6 @@ styleElement.textContent = `
    */
   body[data-custom-sidebar-titlebar-colors="true"] :is(
     .titlebar-sidebar-collapse-button,
-    .titlebar-sidebar-collapse-button-visual,
     .titlebar-session-button,
     .titlebar-project-title,
     .titlebar-project-name,
@@ -6783,53 +6782,15 @@ styleElement.textContent = `
   }
   .titlebar-sidebar-collapse-button {
     /*
-     * CDXC:SidebarCollapse 2026-06-12-10:57:
-     * The sidebar collapse affordance belongs beside the macOS traffic lights,
-     * not in the sidebar content. Match the requested 14px gray traffic-light
-     * footprint and keep a compact gap before the next titlebar affordance.
-     *
-     * CDXC:SidebarCollapse 2026-06-12-11:10:
-     * Visual review moved the button 1px lower, increased the chevron to 10px,
-     * and made the next titlebar affordance sit 9px to the right of this button.
-     *
-     * CDXC:SidebarCollapse 2026-06-12-11:36:
-     * The first gray traffic-light styling disappeared on the dark titlebar
-     * because the shadcn ghost button reset background/color. Keep the 14px
-     * footprint but use light chrome and !important so collapse/expand stays visible.
-     *
-     * CDXC:SidebarCollapse 2026-06-12-20:09:
-     * The traffic-light-side collapse button was required to finish at 14x14px,
-     * but the gray fill must not have an outline around it.
-     *
-     * CDXC:SidebarCollapse 2026-06-12-21:03:
-     * The visible dot is intentionally smaller than its pointer hit target. Use
-     * a 33x33px hit square that includes invisible space around the dot.
-     *
-     * CDXC:SidebarCollapse 2026-06-13-10:53:
-     * Keep the 33x33px hit target inside the 35px titlebar vertically. Only
-     * offset the target left so the dot stays in its traffic-light-side
-     * visual slot while clicks still work across the expanded target.
+     * CDXC:SidebarCollapse 2026-06-20-17:10:
+     * The titlebar Toggle Sidebar button now paints only a side-aware Tabler
+     * layout-sidebar glyph, not the previous blue circular dot. Preserve the
+     * existing 33x33px titlebar hit target and compact offset so AppKit layout
+     * and click ownership stay unchanged while the visible chrome is simplified.
      *
      * CDXC:SidebarCollapse 2026-06-13-02:59:
      * The assigned hotkey renders through AppTooltip, matching sidebar controls
      * instead of a titlebar-only data-tooltip pseudo-element.
-     *
-     * CDXC:SidebarCollapse 2026-06-13-09:18:
-     * The visible collapse dot should be white with an almost-black chevron
-     * inside it, while the invisible 33px hit target and no-outline treatment
-     * stay unchanged.
-     *
-     * CDXC:SidebarCollapse 2026-06-13-09:22:
-     * Visual review changed the dot from white to #4699d9 and the chevron from
-     * almost black to white.
-     *
-     * CDXC:SidebarCollapse 2026-06-13-09:24:
-     * The visible dot should be 14x14px so it matches the other macOS traffic
-     * light buttons. Keep the 33px hit target, blue fill, and white chevron.
-     *
-     * CDXC:SidebarCollapse 2026-06-13-10:57:
-     * When AppKit says the window is not focused, keep the same visible 14px
-     * dot and 33px hit target but paint the dot #313131.
      */
     align-items: center;
     background: transparent !important;
@@ -6854,28 +6815,9 @@ styleElement.textContent = `
     color: #ffffff !important;
     outline: none;
   }
-  .titlebar-sidebar-collapse-button-visual {
-    align-items: center;
-    background: #4699d9;
-    border-radius: 999px;
-    display: inline-flex;
-    height: 14px;
-    justify-content: center;
-    transform: translateY(2px);
-    width: 14px;
-  }
-  .titlebar-sidebar-collapse-button:hover .titlebar-sidebar-collapse-button-visual,
-  .titlebar-sidebar-collapse-button:focus-visible .titlebar-sidebar-collapse-button-visual {
-    background: #5aa7e1;
-  }
-  body[data-window-focused="false"] .titlebar-sidebar-collapse-button-visual,
-  body[data-window-focused="false"] .titlebar-sidebar-collapse-button:hover .titlebar-sidebar-collapse-button-visual,
-  body[data-window-focused="false"] .titlebar-sidebar-collapse-button:focus-visible .titlebar-sidebar-collapse-button-visual {
-    background: #313131;
-  }
   .titlebar-sidebar-collapse-button svg {
-    height: 10px;
-    width: 10px;
+    height: 17px !important;
+    width: 17px !important;
   }
   .titlebar-update-button {
     /**

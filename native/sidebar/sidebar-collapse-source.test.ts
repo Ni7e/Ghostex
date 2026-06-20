@@ -62,23 +62,21 @@ describe("native sidebar collapse source", () => {
     expect(appDelegateSource).toContain("sidebarWorkareaBorder: .zero");
   });
 
-  test("titlebar exposes a traffic-light-sized sidebar collapse button", () => {
+  test("titlebar exposes a side-aware sidebar collapse button", () => {
     /*
      * CDXC:SidebarCollapse 2026-06-12-10:57:
-     * The React titlebar needs a 14px gray chevron button before the project
-     * name and must mirror native collapse state pushed from AppKit.
+     * The React titlebar needs a sidebar toggle before the project name and
+     * must mirror native collapse state pushed from AppKit.
      *
      * CDXC:TitlebarResources 2026-06-12-20:06:
      * The Resources dropdown also needs a visible expand/collapse button in
      * its right-side header action rail immediately before Sleep Inactive.
      *
-     * CDXC:SidebarCollapse 2026-06-12-20:09:
-     * The traffic-light-side collapse button previously kept a 14x14px footprint
-     * without drawing a border outline around the gray fill.
-     *
-     * CDXC:SidebarCollapse 2026-06-12-21:03:
-     * The traffic-light-side collapse button has a tiny visible dot inside a
-     * 33x33px square hit target with invisible space around the painted button.
+     * CDXC:SidebarCollapse 2026-06-20-17:10:
+     * The macOS titlebar Toggle Sidebar control renders a plain Tabler sidebar
+     * glyph instead of the previous blue circular button visual. The glyph must
+     * follow sidebar placement: IconLayoutSidebar for left and
+     * IconLayoutSidebarRight for right.
      *
      * CDXC:SidebarCollapse 2026-06-13-10:53:
      * Keep the expanded hit target inside the titlebar vertically and show a
@@ -89,35 +87,9 @@ describe("native sidebar collapse source", () => {
      * showing only the shortcut, so the native titlebar control names the
      * command and its current binding.
      *
-     * CDXC:SidebarCollapse 2026-06-13-01:00:
-     * Move only the visible dot 2px lower while keeping the expanded native hit
-     * region fixed.
-     *
      * CDXC:SidebarCollapse 2026-06-13-02:59:
      * The hotkey hover label uses the same AppTooltip wrapper as sidebar
      * buttons, with only titlebar-local placement around that shared component.
-     *
-     * CDXC:SidebarCollapse 2026-06-13-09:18:
-     * The visible collapse dot is white and the chevron icon inside it is
-     * almost black, without changing the expanded invisible hit target.
-     *
-     * CDXC:SidebarCollapse 2026-06-13-09:22:
-     * Visual review changed the dot to #4699d9 with a white chevron, keeping
-     * the same dimensions and invisible hit target.
-     *
-     * CDXC:SidebarCollapse 2026-06-13-09:24:
-     * The visible dot is 14x14px to match the macOS traffic-light buttons while
-     * the invisible 33x33px hit target stays unchanged.
-     *
-     * CDXC:SidebarCollapse 2026-06-13-10:57:
-     * The visible collapse dot should paint #313131 when the macOS window is
-     * not focused, while preserving the 14x14px visible size and 33x33px hit
-     * target.
-     *
-     * CDXC:SidebarCollapse 2026-06-13-11:05:
-     * The chevron direction should flip when the sidebar is placed on the right
-     * side, so the icon keeps pointing toward the current collapse or expand
-     * motion.
      *
      * CDXC:TitlebarResources 2026-06-12-23:33:
      * The Resources header button collapses and expands individual expandable
@@ -150,7 +122,12 @@ describe("native sidebar collapse source", () => {
     expect(titlebarHostSource).toContain('document.body.dataset.windowFocused = isFocused ? "true" : "false";');
     expect(titlebarHostSource).toContain('| { type: "toggleSidebarCollapsed" }');
     expect(titlebarHostSource).toContain('className="titlebar-sidebar-collapse-button"');
-    expect(titlebarHostSource).toContain('className="titlebar-sidebar-collapse-button-visual"');
+    expect(titlebarHostSource).toContain("const SidebarCollapseIcon =");
+    expect(titlebarHostSource).toContain(
+      'projectState.sidebarSide === "right" ? IconLayoutSidebarRight : IconLayoutSidebar',
+    );
+    expect(titlebarHostSource).toContain("<SidebarCollapseIcon");
+    expect(titlebarHostSource).toContain('data-icon="inline-start"');
     expect(titlebarHostSource).toContain('className="titlebar-resources-collapse-all-button"');
     expect(titlebarHostSource).toContain('onClick={() => postNative({ type: "toggleSidebarCollapsed" })}');
     expect(titlebarHostSource).toContain(
@@ -176,30 +153,24 @@ describe("native sidebar collapse source", () => {
     expect(titlebarHostSource).not.toContain("RESOURCE_ORPHANED_SECTION_KEY");
     expect(titlebarHostSource).not.toContain("createResourceAreaCollapseKeys");
     expect(titlebarHostSource).not.toContain("collapseKey={");
-    expect(titlebarHostSource).toContain("const sidebarCollapseChevronPointsRight =");
-    expect(titlebarHostSource).toContain(
-      'projectState.sidebarSide === "right" ? !projectState.sidebarCollapsed : projectState.sidebarCollapsed',
-    );
-    expect(titlebarHostSource).toContain("sidebarCollapseChevronPointsRight ? (");
-    expect(titlebarHostSource).toContain("<IconChevronRight");
-    expect(titlebarHostSource).toContain("<IconChevronLeft");
+    expect(titlebarHostSource).not.toContain("const sidebarCollapseChevronPointsRight =");
+    expect(titlebarHostSource).not.toContain("<IconChevronRight");
+    expect(titlebarHostSource).not.toContain("<IconChevronLeft");
     expect(titlebarHostSource).toContain("<IconChevronDown");
-    expect(titlebarHostSource).toContain("size={10}");
     expect(titlebarHostSource).toContain("size={13}");
     expect(titlebarHostSource).toContain("flex: 0 0 33px;");
     expect(titlebarHostSource).toContain("border: 0 !important;");
     expect(titlebarHostSource).toContain("flex: 0 0 24px;");
     expect(titlebarHostSource).toContain("height: 33px !important;");
-    expect(titlebarHostSource).toContain("height: 14px;");
-    expect(titlebarHostSource).toContain("background: #4699d9;");
-    expect(titlebarHostSource).toContain("background: #5aa7e1;");
-    expect(titlebarHostSource).toContain('body[data-window-focused="false"] .titlebar-sidebar-collapse-button-visual');
-    expect(titlebarHostSource).toContain("background: #313131;");
+    expect(titlebarHostSource).not.toContain('className="titlebar-sidebar-collapse-button-visual"');
+    expect(titlebarHostSource).not.toContain("background: #4699d9;");
+    expect(titlebarHostSource).not.toContain("background: #5aa7e1;");
+    expect(titlebarHostSource).not.toContain('body[data-window-focused="false"] .titlebar-sidebar-collapse-button-visual');
+    expect(titlebarHostSource).not.toContain("background: #313131;");
     expect(titlebarHostSource).toContain("color: #ffffff !important;");
     expect(titlebarHostSource).toContain("height: 24px;");
     expect(titlebarHostSource).toContain("margin: 0 0 0 -9px;");
     expect(titlebarHostSource).toContain("width: 33px !important;");
-    expect(titlebarHostSource).toContain("width: 14px;");
     expect(titlebarHostSource).toContain("import { AppTooltip, TooltipProvider } from");
     expect(titlebarHostSource).toContain("function TitlebarAppTooltip");
     expect(titlebarHostSource).toContain("setWindowFocused: setTitlebarWindowFocused");
@@ -213,9 +184,8 @@ describe("native sidebar collapse source", () => {
     expect(titlebarHostSource).not.toContain(
       '<TooltipContent side="bottom">{projectState.toggleSidebarHotkeyLabel}</TooltipContent>',
     );
-    expect(titlebarHostSource).toContain("height: 10px;");
-    expect(titlebarHostSource).toContain("width: 10px;");
-    expect(titlebarHostSource).toContain("transform: translateY(2px);");
+    expect(titlebarHostSource).toContain("height: 17px !important;");
+    expect(titlebarHostSource).toContain("width: 17px !important;");
     expect(titlebarHostSource).toContain("margin-left: 0;");
     expect(appDelegateSource).toContain('"sidebarCollapsed": isSidebarCollapsed');
     expect(appDelegateSource).toContain('"sidebarSide": sidebarSide.rawValue');

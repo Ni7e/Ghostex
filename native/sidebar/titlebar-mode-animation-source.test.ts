@@ -2,6 +2,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 
 const titlebarHostSource = readFileSync(new URL("./titlebar-host.tsx", import.meta.url), "utf8");
+const appDelegateSource = readFileSync(
+  new URL("../macos/ghostexHost/Sources/ghostexHost/AppDelegate.swift", import.meta.url),
+  "utf8",
+);
 
 function sourceBetween(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);
@@ -32,10 +36,11 @@ describe("titlebar mode active state source", () => {
   test("shows right-side disabled reasons for project-only mode tabs", () => {
     /*
      * CDXC:ModeSwitcher 2026-06-16-16:00:
-     * Disabled Browser, Kanban, and Manage tabs need a right-side AppTooltip explaining
-     * that Quick-session users must switch to a project before opening those
-     * project views. The buttons must stay hoverable, so do not use native
-     * disabled on the visible mode-switcher tabs.
+     * Disabled Browser and Kanban tabs, plus Manage when its debugging/beta
+     * gate shows it, need a right-side AppTooltip explaining that Quick-session
+     * users must switch to a project before opening those project views. The
+     * buttons must stay hoverable, so do not use native disabled on the visible
+     * mode-switcher tabs.
      */
     const visibleModeSwitcherSource = sourceBetween(
       titlebarHostSource,
@@ -50,5 +55,34 @@ describe("titlebar mode active state source", () => {
     expect(visibleModeSwitcherSource).toContain('side="right"');
     expect(visibleModeSwitcherSource).toContain("if (mode.disabled) {\n                return;\n              }");
     expect(visibleModeSwitcherSource).not.toContain("disabled={mode.disabled}");
+  });
+
+  test("hides Manage from the titlebar until debugging and beta features are enabled", () => {
+    /*
+     * CDXC:TitlebarManage 2026-06-20-17:13:
+     * Manage should not appear in the macOS titlebar mode switcher or compact
+     * mode dropdown unless Settings has both Debugging Mode and Show Beta
+     * features enabled. The native bridge must forward both flags so changes
+     * apply to the isolated titlebar webview without reloading the app.
+     */
+    const titlebarModesSource = sourceBetween(
+      titlebarHostSource,
+      "const showManageTitlebarMode =",
+      "const resolveTitlebarDropdownPanelSize = useCallback",
+    );
+
+    expect(titlebarHostSource).toContain("showBetaFeatures: boolean;");
+    expect(titlebarHostSource).toContain("showBetaFeatures: settings.showBetaFeatures");
+    expect(titlebarHostSource).toContain(
+      "showBetaFeatures: state.showBetaFeatures ?? current.showBetaFeatures",
+    );
+    expect(titlebarModesSource).toContain(
+      "projectState.debuggingMode && projectState.showBetaFeatures",
+    );
+    expect(titlebarModesSource).toContain("...(showManageTitlebarMode");
+    expect(titlebarModesSource).toContain('label: "Manage"');
+    expect(titlebarModesSource).toContain("value: \"manage\" as const");
+    expect(titlebarModesSource).toContain(": []),");
+    expect(appDelegateSource).toContain('payload["showBetaFeatures"] = showBetaFeatures');
   });
 });
