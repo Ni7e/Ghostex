@@ -573,9 +573,11 @@ resolve_beads_root() {
 		return 1
 	fi
 	# CDXC:ProjectBoardBeads 2026-06-08-10:46: Ghostex bundles upstream Beads without forking it. Prefer an explicit BEADS_ROOT for release automation, and keep the owner's local reference checkout as the default developer source for periodic pinned Beads updates.
+	# CDXC:ProjectBoardBeads 2026-06-20-05:46: Local starts must keep packaging the pinned upstream Beads CLI when the maintainer checkout already lives under ~/dev/custom/beads instead of requiring a duplicate ~/dev/_references/beads checkout or symlink.
 	for candidate in \
 		"$REPO_ROOT/beads" \
-		"$HOME/dev/_references/beads"; do
+		"$HOME/dev/_references/beads" \
+		"$HOME/dev/custom/beads"; do
 		if [[ -f "$candidate/go.mod" && -d "$candidate/cmd/bd" ]]; then
 			(cd "$candidate" && pwd)
 			return 0
@@ -1066,8 +1068,10 @@ if [[ -z "$BEADS_ROOT" ]]; then
 	cat >&2 <<EOF
 Beads source is required to package the embedded Project board CLI.
 
-Set BEADS_ROOT or GHOSTEX_BEADS_ROOT to a Beads checkout, or place it at:
+Set BEADS_ROOT or GHOSTEX_BEADS_ROOT to a Beads checkout, or place it at one of:
+  $REPO_ROOT/beads
   $HOME/dev/_references/beads
+  $HOME/dev/custom/beads
 EOF
 	exit 1
 fi
@@ -1597,6 +1601,7 @@ ${escapedTasksPlaceholderJs}
   </body>
 </html>
 `);
+// CDXC:ManageWebBuild 2026-06-20-16:03: Manage imports Excalidraw, and that bundle contains import.meta in worker and development-mode guards. Keep the inlined IIFE and boot-error capture, but execute the Manage wrapper as a module script so WebKit parses import.meta instead of failing before React mounts.
 writeFileSync(join(webDir, "manage.html"), `<!doctype html>
 <html>
   <head>
@@ -1611,8 +1616,8 @@ ${manageCss}
   </head>
   <body>
     <div id="root"></div>
-    <script>
-(() => {
+    <script type="module">
+(function () {
 try {
 ${escapedManageJs}
 } catch (error) {
@@ -1622,7 +1627,7 @@ ${escapedManageJs}
   };
   throw error;
 }
-})();
+}).call(window);
 //# sourceURL=manage.js
     </script>
   </body>

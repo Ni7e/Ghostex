@@ -531,8 +531,8 @@ type NativeHostCommand =
       newBrowserTabUrl?: string;
       projectId: string;
       /*
-       * CDXC:Manage 2026-06-20-04:36:
-       * Manage file browsing is scoped by native to the owning project-editor session, so the project root travels as a typed host command field instead of a WK page URL query string that native diagnostics could record.
+       * CDXC:Manage 2026-06-20-06:14:
+       * Manage file browsing and editing are scoped by native to the owning project-editor session, so the project root travels as a typed host command field instead of a WK page URL query string that native diagnostics could record.
        */
       projectPath?: string;
       projectTitle?: string;
@@ -11335,8 +11335,8 @@ function restoreProjectEditorSurfaceStates(
      * surfaces Browser mode; the default first tab remains GitHub/Ghostex only
      * when a project has no prior Browser tab list.
      *
-     * CDXC:Manage 2026-06-20-04:36:
-     * Manage restores through the same durable project-editor state as Project, so restarting the active project can recreate its bundled WKWebView file browser while inactive projects remain asleep.
+     * CDXC:Manage 2026-06-20-06:14:
+     * Manage restores through the same durable project-editor state as Project, so restarting the active project can recreate its bundled WKWebView file workarea while inactive projects remain asleep.
      */
     projectEditorSurfaceByProjectId.set(project.projectId, {
       activeBrowserTabId: restoredMode === "git" ? restoredActiveBrowserTabId : undefined,
@@ -39604,8 +39604,8 @@ function openProjectManageEditorSurface(project: NativeProject, manageUrl: strin
   }
 
   /*
-   * CDXC:Manage 2026-06-20-04:36:
-   * Manage follows Kanban's project-editor shell: keep the companion agent pane on the left, host a first-party WKWebView page on the right, and use a mode-scoped native editor id so file browsing survives switching to Source, Browser, or Kanban.
+   * CDXC:Manage 2026-06-20-06:14:
+   * Manage follows Kanban's project-editor shell: keep the companion agent pane on the left, host a first-party WKWebView page on the right, and use a mode-scoped native editor id so file editing survives switching to Source, Browser, or Kanban.
    */
   cancelProjectEditorSleepTimer(project.projectId);
   const isAwakeManagePane = hasAwakeProjectEditorMode(project.projectId, "manage");

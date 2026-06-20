@@ -325,6 +325,7 @@ private struct ProjectBoardImageBridgeResponse: Encodable {
 
 private struct ManageFilesBridgeRequest: Decodable {
   let action: String
+  let content: String?
   let path: String?
   let projectEditorId: String?
   let projectId: String?
@@ -5186,8 +5187,8 @@ final class TerminalWorkspaceView: NSView {
        The Project mode board is a first-party local React app and should use WKWebView, not the Chromium/CEF browser path used by Code and Git.
        WebKit gives the board a native message handler that forwards Beads requests to gxserver typed operations while preserving the project-editor companion layout.
 
-       CDXC:Manage 2026-06-20-04:36:
-       Manage uses the same bundled WKWebView project-editor path as Project while keeping its own read-only file bridge, because file browsing is local app UI and should not require the Chromium project-browser stack.
+       CDXC:Manage 2026-06-20-06:14:
+       Manage uses the same bundled WKWebView project-editor path as Project while keeping its own scoped file bridge, because project file browsing, editing, and drawing updates are local app UI and should not require the Chromium project-browser stack.
        */
       let configuration = WKWebViewConfiguration()
       configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
@@ -5222,8 +5223,8 @@ final class TerminalWorkspaceView: NSView {
         manageFilesBridge = nil
       } else {
         /*
-         CDXC:Manage 2026-06-20-04:36:
-         Manage is a local read-only file browser, not a Project Board. Give it a narrow WK bridge for list/read requests instead of exposing Beads or board mutation handlers to this page.
+         CDXC:Manage 2026-06-20-06:14:
+         Manage is a local project file workarea, not a Project Board. Give it a narrow WK bridge for list/read/save requests instead of exposing Beads or board mutation handlers to this page.
          */
         let nextManageFilesBridge = ManageFilesBridge { [weak self] request, webView in
           self?.handleManageFilesBridgeRequest(request, webView: webView)
@@ -10311,10 +10312,15 @@ final class TerminalWorkspaceView: NSView {
     }
   }
 
-  private static func runManageFilesBridgeRequest(
+  private nonisolated static func runManageFilesBridgeRequest(
     _ request: ManageFilesBridgeRequest,
     projectRootPath: String
   ) -> ManageFilesBridgeResponse {
+    /*
+     CDXC:Manage 2026-06-20-06:14:
+     Manage file listing, previews, and saves can walk/read/write project files, so the WK bridge runs them from a detached task.
+     Keep these helpers nonisolated because they do not touch AppKit/WKWebView state; response dispatch remains on the main actor.
+     */
     do {
       let rootURL = try manageProjectRootURL(projectRootPath)
       switch request.action {
@@ -10334,6 +10340,14 @@ final class TerminalWorkspaceView: NSView {
           file: try manageProjectFilePreview(rootURL: rootURL, path: request.path),
           requestId: request.requestId,
           rootName: rootURL.lastPathComponent)
+      case "save":
+        return ManageFilesBridgeResponse(
+          action: request.action,
+          entries: nil,
+          error: nil,
+          file: try manageSaveProjectFile(rootURL: rootURL, path: request.path, content: request.content),
+          requestId: request.requestId,
+          rootName: rootURL.lastPathComponent)
       default:
         throw ManageFilesBridgeError.invalidRequest("Unsupported Manage file action.")
       }
@@ -10348,12 +10362,14 @@ final class TerminalWorkspaceView: NSView {
     }
   }
 
-  private static let manageFileListMaxEntries = 1_200
-  private static let manageFileListMaxDepth = 8
-  private static let manageFilePreviewMaxBytes = 400_000
-  private static let manageIgnoredDirectoryNames: Set<String> = [
+  private nonisolated static let manageFileListMaxEntries = 1_200
+  private nonisolated static let manageFileListMaxDepth = 8
+  private nonisolated static let manageFilePreviewMaxBytes = 2_000_000
+  private nonisolated static let manageFileSaveMaxBytes = 2_000_000
+  private nonisolated static let manageIgnoredDirectoryNames: Set<String> = [
     ".cache",
     ".git",
+    ".ghostex",
     ".gradle",
     ".next",
     ".nuxt",
@@ -10377,7 +10393,7 @@ final class TerminalWorkspaceView: NSView {
     "zig-out",
   ]
 
-  private static func manageProjectRootURL(_ path: String) throws -> URL {
+  private nonisolated static func manageProjectRootURL(_ path: String) throws -> URL {
     let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedPath.isEmpty else {
       throw ManageFilesBridgeError.invalidRequest("No active project root is available.")
@@ -10393,7 +10409,7 @@ final class TerminalWorkspaceView: NSView {
       .resolvingSymlinksInPath()
   }
 
-  private static func manageNormalizedRelativePath(_ path: String?) throws -> String {
+  private nonisolated static func manageNormalizedRelativePath(_ path: String?) throws -> String {
     let trimmedPath = path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if trimmedPath.isEmpty {
       return ""
@@ -10412,7 +10428,7 @@ final class TerminalWorkspaceView: NSView {
     return components.joined(separator: "/")
   }
 
-  private static func manageURL(
+  private nonisolated static func manageURL(
     rootURL: URL,
     relativePath: String?
   ) throws -> (url: URL, relativePath: String) {
@@ -10428,16 +10444,19 @@ final class TerminalWorkspaceView: NSView {
     return (resolvedURL, normalizedRelativePath)
   }
 
-  private static func manageURLIsInsideProjectRoot(_ url: URL, rootURL: URL) -> Bool {
+  private nonisolated static func manageURLIsInsideProjectRoot(_ url: URL, rootURL: URL) -> Bool {
     let rootPath = rootURL.path
     let candidatePath = url.path
     return candidatePath == rootPath || candidatePath.hasPrefix("\(rootPath)/")
   }
 
-  private static func manageProjectFileEntries(rootURL: URL) throws -> [ManageFileEntry] {
+  private nonisolated static func manageProjectFileEntries(rootURL: URL) throws -> [ManageFileEntry] {
     /*
      CDXC:Manage 2026-06-20-04:36:
      The first Manage file sidebar should be useful on large code projects without indexing user content into logs. Recursively list project-relative metadata only, skip dependency/build/cache directories, and cap entries/depth so opening Manage cannot walk an unbounded tree.
+
+     CDXC:ManageFileListing 2026-06-20-06:52:
+     Direct children of each directory must be appended before recursive descendants so root-level files, including .excalidraw drawings, cannot be pushed past the entry cap by a large nested tree.
      */
     var entries: [ManageFileEntry] = []
     try manageAppendProjectFileEntries(
@@ -10449,7 +10468,7 @@ final class TerminalWorkspaceView: NSView {
     return entries
   }
 
-  private static func manageAppendProjectFileEntries(
+  private nonisolated static func manageAppendProjectFileEntries(
     entries: inout [ManageFileEntry],
     rootURL: URL,
     directoryURL: URL,
@@ -10481,6 +10500,7 @@ final class TerminalWorkspaceView: NSView {
       }
       return left.lastPathComponent.localizedStandardCompare(right.lastPathComponent) == .orderedAscending
     }
+    var directoriesToRecurse: [(url: URL, relativePath: String)] = []
     for child in sortedChildren {
       if entries.count >= manageFileListMaxEntries {
         return
@@ -10509,23 +10529,29 @@ final class TerminalWorkspaceView: NSView {
           path: relativePath,
           size: isDirectory ? nil : values?.fileSize.map(Int64.init)))
       if isDirectory && !isSymbolicLink && depth < manageFileListMaxDepth {
-        try manageAppendProjectFileEntries(
-          entries: &entries,
-          rootURL: rootURL,
-          directoryURL: child,
-          relativeDirectoryPath: relativePath,
-          depth: depth + 1)
+        directoriesToRecurse.append((url: child, relativePath: relativePath))
       }
+    }
+    for directory in directoriesToRecurse {
+      if entries.count >= manageFileListMaxEntries {
+        return
+      }
+      try manageAppendProjectFileEntries(
+        entries: &entries,
+        rootURL: rootURL,
+        directoryURL: directory.url,
+        relativeDirectoryPath: directory.relativePath,
+        depth: depth + 1)
     }
   }
 
-  private static func manageProjectFilePreview(
+  private nonisolated static func manageProjectFilePreview(
     rootURL: URL,
     path: String?
   ) throws -> ManageFilePreview {
     /*
-     CDXC:Manage 2026-06-20-04:36:
-     Manage previews should show readable source, markdown, and text files but must not dump arbitrary binary data or huge files into WKWebView. Return a clear unsupported state instead of partial unsafe output.
+     CDXC:Manage 2026-06-20-06:14:
+     Manage reads should show editable readable source, Markdown, drawing JSON, and text files but must not dump arbitrary binary data or huge files into WKWebView. Return a clear unsupported state instead of partial unsafe output.
      */
     let target = try manageURL(rootURL: rootURL, relativePath: path)
     guard !target.relativePath.isEmpty else {
@@ -10583,7 +10609,49 @@ final class TerminalWorkspaceView: NSView {
       size: size)
   }
 
-  private static func manageISOString(_ date: Date?) -> String? {
+  private nonisolated static func manageSaveProjectFile(
+    rootURL: URL,
+    path: String?,
+    content: String?
+  ) throws -> ManageFilePreview {
+    /*
+     CDXC:ManageEditing 2026-06-20-06:14:
+     Manage writes must use the same pathless WK bridge as reads: JavaScript sends project-relative paths and UTF-8 content only, while Swift resolves the active project root, rejects traversal and symlink escapes, bounds write size, and writes without logging names, paths, or content.
+     */
+    guard let content else {
+      throw ManageFilesBridgeError.invalidRequest("No file content was provided.")
+    }
+    let data = Data(content.utf8)
+    guard data.count <= manageFileSaveMaxBytes else {
+      throw ManageFilesBridgeError.invalidRequest("File is too large to save from Manage.")
+    }
+    let target = try manageURL(rootURL: rootURL, relativePath: path)
+    guard !target.relativePath.isEmpty else {
+      throw ManageFilesBridgeError.invalidRequest("Select a project file to save.")
+    }
+    let parentURL = target.url.deletingLastPathComponent()
+      .standardizedFileURL
+      .resolvingSymlinksInPath()
+    guard manageURLIsInsideProjectRoot(parentURL, rootURL: rootURL) else {
+      throw ManageFilesBridgeError.invalidRequest("Manage paths must stay inside the project.")
+    }
+    let keys: Set<URLResourceKey> = [
+      .isDirectoryKey,
+    ]
+    let values = try? target.url.resourceValues(forKeys: keys)
+    guard values?.isDirectory != true else {
+      throw ManageFilesBridgeError.invalidRequest("Select a file to save.")
+    }
+    /*
+     CDXC:ManageAnnotationPersistence 2026-06-20-06:35:
+     Manage annotations persist through a Ghostex-owned project sidecar. The save bridge has already normalized the relative path and verified the resolved parent remains inside the project root, so create that parent directory here without exposing a broader filesystem API to JavaScript.
+     */
+    try FileManager.default.createDirectory(at: parentURL, withIntermediateDirectories: true)
+    try data.write(to: target.url, options: [.atomic])
+    return try manageProjectFilePreview(rootURL: rootURL, path: target.relativePath)
+  }
+
+  private nonisolated static func manageISOString(_ date: Date?) -> String? {
     guard let date else {
       return nil
     }
