@@ -8285,6 +8285,15 @@ final class ghostexRootView: NSView {
     if let debuggingMode = command.debuggingMode {
       payload["debuggingMode"] = debuggingMode
     }
+    if let showBetaFeatures = command.showBetaFeatures {
+      /**
+       CDXC:TitlebarManage 2026-06-20-17:13:
+       The React titlebar hides the Manage mode unless both Debugging Mode and
+       Show Beta features are enabled. Forward the beta gate beside
+       Debugging Mode so Settings changes update the isolated titlebar webview.
+       */
+      payload["showBetaFeatures"] = showBetaFeatures
+    }
     if let status = command.activeProjectEditorStatus {
       payload["editorStatus"] = status
     }
@@ -14906,6 +14915,15 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
         "preferredFrameProvided": preferredContentFrame != nil,
         "requestId": message["requestId"] as? String ?? "",
       ])
+    logSettingsWindowEvent(
+      "nativeWindow.open.entry",
+      details: [
+        "controllerState": reusableHostDebugState(for: modal),
+        "isPrewarm": message["prewarm"] as? Bool == true,
+        "modal": modal,
+        "preferredFrameProvided": preferredContentFrame != nil,
+        "requestId": message["requestId"] as? String ?? "",
+      ])
     if canReuseHost(for: modal) {
       reuseHost(
         modal: modal,
@@ -14917,6 +14935,13 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     }
     close(sendReactClose: false)
     logPromptWindowEvent(
+      "nativeWindow.open.freshAfterClose",
+      details: [
+        "elapsedMs": max(0, Self.monotonicMilliseconds() - openEntryStartedAtMs),
+        "modal": modal,
+        "requestId": message["requestId"] as? String ?? "",
+      ])
+    logSettingsWindowEvent(
       "nativeWindow.open.freshAfterClose",
       details: [
         "elapsedMs": max(0, Self.monotonicMilliseconds() - openEntryStartedAtMs),
@@ -14941,6 +14966,14 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
         "modal": modal,
         "requestId": message["requestId"] as? String ?? "",
       ])
+    logSettingsWindowEvent(
+      "nativeWindow.open.start",
+      details: [
+        "elapsedMs": max(0, Self.monotonicMilliseconds() - openEntryStartedAtMs),
+        "isReusableHost": false,
+        "modal": modal,
+        "requestId": message["requestId"] as? String ?? "",
+      ])
 
     let frameStartedAtMs = Self.monotonicMilliseconds()
     let size = constrainedSize(
@@ -14953,6 +14986,13 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       parentWindow: parentWindow,
       modal: modal)
     logPromptWindowEvent(
+      "nativeWindow.open.contentFrameResolved",
+      details: [
+        "durationMs": max(0, Self.monotonicMilliseconds() - frameStartedAtMs),
+        "modal": modal,
+        "requestId": message["requestId"] as? String ?? "",
+      ])
+    logSettingsWindowEvent(
       "nativeWindow.open.contentFrameResolved",
       details: [
         "durationMs": max(0, Self.monotonicMilliseconds() - frameStartedAtMs),
@@ -15003,6 +15043,13 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
         "modal": modal,
         "requestId": message["requestId"] as? String ?? "",
       ])
+    logSettingsWindowEvent(
+      "nativeWindow.open.panelCreated",
+      details: [
+        "durationMs": max(0, Self.monotonicMilliseconds() - panelStartedAtMs),
+        "modal": modal,
+        "requestId": message["requestId"] as? String ?? "",
+      ])
 
     let webViewStartedAtMs = Self.monotonicMilliseconds()
     let webView = AppModalWindowWebView(
@@ -15026,6 +15073,13 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     webView.setValue(false, forKey: "drawsBackground")
     panel.contentView = webView
     logPromptWindowEvent(
+      "nativeWindow.open.webViewCreated",
+      details: [
+        "durationMs": max(0, Self.monotonicMilliseconds() - webViewStartedAtMs),
+        "modal": modal,
+        "requestId": message["requestId"] as? String ?? "",
+      ])
+    logSettingsWindowEvent(
       "nativeWindow.open.webViewCreated",
       details: [
         "durationMs": max(0, Self.monotonicMilliseconds() - webViewStartedAtMs),
@@ -15223,6 +15277,14 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
         "msSinceOpen": elapsedSinceOpenMs(),
         "pendingMessageCount": pendingMessages.count,
       ])
+    logSettingsWindowEvent(
+      "nativeWindow.hostReady",
+      details: [
+        "hasLatestSidebarState": latestSidebarState != nil,
+        "hasPendingOpenMessage": pendingOpenMessage != nil,
+        "msSinceOpen": elapsedSinceOpenMs(),
+        "pendingMessageCount": pendingMessages.count,
+      ])
     if let latestSidebarState {
       self.latestSidebarState = latestSidebarState
     }
@@ -15253,7 +15315,15 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     logPromptWindowEvent(
       "nativeWindow.present",
       details: [
+        "modal": modal ?? "",
         "msSinceOpen": elapsedSinceOpenMs(),
+      ])
+    logSettingsWindowEvent(
+      "nativeWindow.present",
+      details: [
+        "modal": modal ?? "",
+        "msSinceOpen": elapsedSinceOpenMs(),
+        "parentAttachedBeforePresent": panel.parent === parentWindow,
       ])
     panel.makeKeyAndOrderFront(nil)
     if modal == "commandPalette", let webView {
@@ -15271,6 +15341,16 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       "nativeWindow.present.completed",
       details: [
         "durationMs": max(0, Self.monotonicMilliseconds() - presentStartedAtMs),
+        "modal": modal ?? "",
+        "msSinceOpen": elapsedSinceOpenMs(),
+      ])
+    logSettingsWindowEvent(
+      "nativeWindow.present.completed",
+      details: [
+        "durationMs": max(0, Self.monotonicMilliseconds() - presentStartedAtMs),
+        "isKeyWindow": panel.isKeyWindow,
+        "isVisible": panel.isVisible,
+        "modal": modal ?? "",
         "msSinceOpen": elapsedSinceOpenMs(),
       ])
   }
@@ -15311,6 +15391,23 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return
     }
     guard isReady else {
+      let messageType = message["type"] as? String ?? ""
+      let messageModal = message["modal"] as? String ?? ""
+      if isSettingsWorkspaceAppModal(loadedModal)
+        || isSettingsWorkspaceAppModal(currentModal)
+        || isSettingsWorkspaceAppModal(messageModal)
+      {
+        logSettingsWindowEvent(
+          messageType == "sidebarState"
+            ? "nativeWindow.dispatch.latestSidebarStateBeforeReady"
+            : "nativeWindow.dispatch.queuedBeforeReady",
+          details: [
+            "messageModal": messageModal,
+            "messageType": messageType,
+            "msSinceOpen": elapsedSinceOpenMs(),
+            "pendingMessageCount": pendingMessages.count,
+          ])
+      }
       /*
        CDXC:AppModals 2026-06-11-23:07:
        The main-window modal WKWebView fallback is gone, so fast follow-up
@@ -15323,16 +15420,32 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       }
       return
     }
+    let messageType = message["type"] as? String ?? ""
+    let messageModal = message["modal"] as? String ?? ""
     let isPromptEditorMessage =
       loadedModal == "floatingPromptEditor"
-      && ((message["modal"] as? String) == "floatingPromptEditor"
-        || (message["type"] as? String)?.hasPrefix("floatingPromptEditor") == true)
+      && (messageModal == "floatingPromptEditor"
+        || messageType.hasPrefix("floatingPromptEditor"))
+    let isSettingsModalMessage =
+      isSettingsWorkspaceAppModal(loadedModal)
+      || isSettingsWorkspaceAppModal(currentModal)
+      || isSettingsWorkspaceAppModal(messageModal)
     if isPromptEditorMessage {
       logPromptWindowEvent(
         "nativeWindow.dispatch",
         details: [
-          "messageModal": message["modal"] as? String ?? "",
-          "messageType": message["type"] as? String ?? "",
+          "messageModal": messageModal,
+          "messageType": messageType,
+          "msSinceOpen": elapsedSinceOpenMs(),
+          "requestId": message["requestId"] as? String ?? "",
+        ])
+    }
+    if isSettingsModalMessage {
+      logSettingsWindowEvent(
+        "nativeWindow.dispatch",
+        details: [
+          "messageModal": messageModal,
+          "messageType": messageType,
           "msSinceOpen": elapsedSinceOpenMs(),
           "requestId": message["requestId"] as? String ?? "",
         ])
@@ -15362,6 +15475,17 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
             "durationMs": max(0, Self.monotonicMilliseconds() - dispatchStartedAtMs),
             "messageModal": message["modal"] as? String ?? "",
             "messageType": message["type"] as? String ?? "",
+            "requestId": message["requestId"] as? String ?? "",
+          ])
+      }
+      if isSettingsModalMessage {
+        self.logSettingsWindowEvent(
+          error == nil ? "nativeWindow.dispatch.completed" : "nativeWindow.dispatch.failed",
+          details: [
+            "durationMs": max(0, Self.monotonicMilliseconds() - dispatchStartedAtMs),
+            "hasError": error != nil,
+            "messageModal": messageModal,
+            "messageType": messageType,
             "requestId": message["requestId"] as? String ?? "",
           ])
       }
@@ -15597,6 +15721,14 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
           atPath: webAssets.appendingPathComponent("modal-host.html").path),
         "modal": loadedModal ?? "",
       ])
+    logSettingsWindowEvent(
+      "nativeWindow.webView.loadStart",
+      details: [
+        "assetExists": FileManager.default.fileExists(
+          atPath: webAssets.appendingPathComponent("modal-host.html").path),
+        "modal": loadedModal ?? "",
+        "msSinceOpen": elapsedSinceOpenMs(),
+      ])
     let builtModalHost = webAssets.appendingPathComponent("modal-host.html")
     guard FileManager.default.fileExists(atPath: builtModalHost.path) else {
       webView.loadHTMLString(
@@ -15632,6 +15764,12 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
         "msSinceLoadStart": elapsedSinceWebViewLoadMs(),
         "msSinceOpen": elapsedSinceOpenMs(),
       ])
+    logSettingsWindowEvent(
+      "nativeWindow.webView.didFinish",
+      details: [
+        "msSinceLoadStart": elapsedSinceWebViewLoadMs(),
+        "msSinceOpen": elapsedSinceOpenMs(),
+      ])
   }
 
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -15639,6 +15777,13 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       "nativeWindow.webView.failed",
       details: [
         "error": error.localizedDescription,
+      ])
+    logSettingsWindowEvent(
+      "nativeWindow.webView.failed",
+      details: [
+        "error": error.localizedDescription,
+        "msSinceLoadStart": elapsedSinceWebViewLoadMs(),
+        "msSinceOpen": elapsedSinceOpenMs(),
       ])
   }
 
@@ -15651,6 +15796,13 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       "nativeWindow.webView.provisionalFailed",
       details: [
         "error": error.localizedDescription,
+      ])
+    logSettingsWindowEvent(
+      "nativeWindow.webView.provisionalFailed",
+      details: [
+        "error": error.localizedDescription,
+        "msSinceLoadStart": elapsedSinceWebViewLoadMs(),
+        "msSinceOpen": elapsedSinceOpenMs(),
       ])
   }
 
@@ -15680,6 +15832,42 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     payload["loadedModal"] = loadedModal ?? ""
     payload["source"] = "nativeWindow"
     PromptEditorDebugLog.append(event: event, details: payload)
+  }
+
+  private func logSettingsWindowEvent(_ event: String, details: [String: Any] = [:]) {
+    /*
+     CDXC:SettingsModalDiagnostics 2026-06-20-05:38:
+     Settings blank-window reports need native child-window delivery milestones without persisting settings values, paths, project names, titles, URLs, command text, or user content.
+     Record only modal ids, message types, request ids, booleans, and timings while Debugging Mode gates app-modal diagnostics.
+
+     CDXC:SettingsModalDiagnostics 2026-06-20-06:03:
+     Blank Settings repros must distinguish native window creation, WKWebView load, host-ready dispatch, React presentation, and final AppKit visibility.
+     Keep these lifecycle breadcrumbs under the same Debugging Mode gate as other app-modal diagnostics.
+     */
+    guard isSettingsWorkspaceAppModal(loadedModal)
+      || isSettingsWorkspaceAppModal(currentModal)
+      || isSettingsWorkspaceAppModal(details["modal"] as? String)
+      || isSettingsWorkspaceAppModal(details["messageModal"] as? String)
+    else {
+      return
+    }
+    var payload = details
+    payload["currentModal"] = currentModal ?? ""
+    payload["loadedModal"] = loadedModal ?? ""
+    payload["source"] = "nativeWindow"
+    let detailsString: String
+    if JSONSerialization.isValidJSONObject(payload),
+      let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+      let json = String(data: data, encoding: .utf8)
+    {
+      detailsString = json
+    } else {
+      detailsString = "{\"serializationFailed\":true,\"source\":\"nativeWindow\"}"
+    }
+    AppDelegate.appendAgentDetectionDebugLog(
+      event: "nativeBridge.appModal.\(event)",
+      details: detailsString
+    )
   }
 
   private func defaultSize(for modal: String) -> CGSize {

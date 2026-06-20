@@ -546,6 +546,88 @@ describe("native app modal window source", () => {
     expect(modalHostSource).toContain("openRequestSequence={commandPaletteOpenRequestSequence}");
   });
 
+  test("keeps Settings modal diagnostics privacy-safe", () => {
+    /*
+    CDXC:SettingsModalDiagnostics 2026-06-20-05:38:
+    Settings blank-window diagnostics may persist to the shared support logs while Debugging Mode is enabled. They must prove bridge delivery and renderability with safe lifecycle fields instead of raw settings values, paths, URLs, project names, command text, search text, or secrets.
+
+    CDXC:SettingsModalDiagnostics 2026-06-20-06:03:
+    Diagnostics must cover native WebView load, host-ready dispatch, React open handling, React renderability, presented dispatch, and final AppKit visibility so blank Settings reports can be placed on one lifecycle timeline.
+    */
+    const settingsWindowLogger = sourceBetween(
+      appDelegateSource,
+      "private func logSettingsWindowEvent(",
+      "private func defaultSize(for modal: String)",
+    );
+    expect(settingsWindowLogger).toContain("AppDelegate.appendAgentDetectionDebugLog");
+    expect(appDelegateSource).toContain(
+      "guard isNativePersistentLogImportantDiagnostic(event) || NativeDebugLogging.isEnabled else",
+    );
+    expect(appDelegateSource).toContain('"nativeWindow.webView.loadStart"');
+    expect(appDelegateSource).toContain('"nativeWindow.webView.didFinish"');
+    expect(appDelegateSource).toContain('"nativeWindow.hostReady"');
+    expect(appDelegateSource).toContain('"nativeWindow.present.completed"');
+
+    const nativeSettingsDispatchLog = sourceBetween(
+      appDelegateSource,
+      "if isSettingsModalMessage {",
+      "guard JSONSerialization.isValidJSONObject(message)",
+    );
+    expect(nativeSettingsDispatchLog).toContain('"messageModal"');
+    expect(nativeSettingsDispatchLog).toContain('"messageType"');
+    expect(nativeSettingsDispatchLog).toContain('"requestId"');
+    expect(nativeSettingsDispatchLog).not.toContain('message["projectPath"]');
+    expect(nativeSettingsDispatchLog).not.toContain('message["projectName"]');
+    expect(nativeSettingsDispatchLog).not.toContain('message["initialSearchQuery"]');
+    expect(nativeSettingsDispatchLog).not.toContain('message["settings"]');
+    expect(nativeSettingsDispatchLog).not.toContain('message["password"]');
+
+    const reactSettingsOpenLog = sourceBetween(
+      modalHostSource,
+      'postSettingsModalDebugLog("modalHost.settings.open.received"',
+      "          }\n          if (message.modal === \"renameSession\")",
+    );
+    expect(reactSettingsOpenLog).toContain("hasInitialSearchQuery");
+    expect(reactSettingsOpenLog).toContain("hasInitialRemoteMachineId");
+    expect(reactSettingsOpenLog).toContain("initialSection");
+    expect(reactSettingsOpenLog).toContain("initialTab");
+    expect(reactSettingsOpenLog).not.toContain("initialSearchQuery:");
+    expect(reactSettingsOpenLog).not.toContain("initialRemoteMachineId:");
+    expect(reactSettingsOpenLog).not.toContain("projectName");
+    expect(reactSettingsOpenLog).not.toContain("projectPath");
+    expect(reactSettingsOpenLog).not.toContain("password");
+
+    const reactSettingsRenderStateLog = sourceBetween(
+      modalHostSource,
+      'postSettingsModalDebugLog("modalHost.settings.renderState"',
+      "  });\n  }, [",
+    );
+    expect(reactSettingsRenderStateLog).toContain("hasSettingsInitialSearchQuery");
+    expect(reactSettingsRenderStateLog).toContain("hasSettingsInitialRemoteMachineId");
+    expect(reactSettingsRenderStateLog).toContain("settingsInitialTab");
+    expect(reactSettingsRenderStateLog).not.toContain("settingsInitialSearchQuery:");
+    expect(reactSettingsRenderStateLog).not.toContain("settingsInitialRemoteMachineId:");
+    expect(reactSettingsRenderStateLog).not.toContain("settings:");
+    expect(reactSettingsRenderStateLog).not.toContain("projectName");
+    expect(reactSettingsRenderStateLog).not.toContain("projectPath");
+    expect(reactSettingsRenderStateLog).not.toContain("password");
+
+    const reactSettingsPresentedLog = sourceBetween(
+      modalHostSource,
+      'postSettingsModalDebugLog("modalHost.settings.presented.sent"',
+      "    }\n    postAppModalHostMessage(presentedMessage",
+    );
+    expect(reactSettingsPresentedLog).toContain("hasSettingsInitialSearchQuery");
+    expect(reactSettingsPresentedLog).toContain("hasSettingsInitialRemoteMachineId");
+    expect(reactSettingsPresentedLog).toContain("settingsInitialTab");
+    expect(reactSettingsPresentedLog).not.toContain("settingsInitialSearchQuery:");
+    expect(reactSettingsPresentedLog).not.toContain("settingsInitialRemoteMachineId:");
+    expect(reactSettingsPresentedLog).not.toContain("settings:");
+    expect(reactSettingsPresentedLog).not.toContain("projectName");
+    expect(reactSettingsPresentedLog).not.toContain("projectPath");
+    expect(reactSettingsPresentedLog).not.toContain("password");
+  });
+
   test("keeps Add Worktree fixed at 570x574 with exact native-window padding", () => {
     /*
     CDXC:WorktreeModal 2026-06-12-10:51:

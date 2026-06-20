@@ -435,6 +435,38 @@ function isAppModalDebugLoggingEnabled(): boolean {
   return useSidebarStore.getState().hud.debuggingMode;
 }
 
+function postSettingsModalDebugLog(
+  event: string,
+  details: Record<string, string | number | boolean | null | undefined>,
+) {
+  if (!isAppModalDebugLoggingEnabled()) {
+    return;
+  }
+  /*
+   * CDXC:SettingsModalDiagnostics 2026-06-20-05:38:
+   * Settings blank-window reports need React renderability milestones, but logs
+   * must never include settings values, search text, project names, paths, URLs,
+   * command text, or secrets. Emit only lifecycle booleans, revisions, timings,
+   * modal ids, and safe enum-like tab/section metadata.
+   *
+   * CDXC:SettingsModalDiagnostics 2026-06-20-06:03:
+   * Blank Settings repros need enough checkpoints to separate native WebView
+   * loading from React open handling, Settings hydration, renderability, and
+   * `presented` dispatch. Keep all checkpoints behind Debugging Mode.
+   */
+  postAppModalHostMessage(
+    {
+      details: JSON.stringify({
+        performanceNow: Math.round(performance.now()),
+        ...details,
+      }),
+      event,
+      type: "debugLog",
+    },
+    "AppModals:debug",
+  );
+}
+
 /**
  * CDXC:PromptEditor 2026-05-19-11:20:
  * Prompt-editor repro logs must land in ~/.ghostex/logs/native-prompt-editor-debug.log
@@ -1972,6 +2004,7 @@ function AppModalHost() {
   const [ghostexFolderStatsLoading, setGhostexFolderStatsLoading] = useState(false);
   const [osIntegrationStatusLoading, setOSIntegrationStatusLoading] = useState(false);
   const [isPreviousSessionsInitialLoadReady, setIsPreviousSessionsInitialLoadReady] = useState(false);
+  const previousSettingsRenderStateLogRef = useRef("");
   const settings = useSidebarStore((state) => state.hud.settings);
   const revision = useSidebarStore((state) => state.revision);
   const agents = useSidebarStore((state) => state.hud.agents);
@@ -2008,6 +2041,10 @@ function AppModalHost() {
   const hasNativeSettingsHydrated = revision > 0;
   const isSettingsRenderable = isSettingsModalKind(activeModal) && hasNativeSettingsHydrated;
   const settingsInitialTab = settingsInitialTabOverride ?? getSettingsInitialTab(activeModal);
+  const hasSettings = settings !== undefined;
+  const hasSettingsInitialSection = settingsInitialSection !== undefined;
+  const hasSettingsInitialRemoteMachineId = settingsInitialRemoteMachineId !== undefined;
+  const hasSettingsInitialSearchQuery = settingsInitialSearchQuery !== undefined;
   const isBaseActiveModalRenderable = isModalRenderable({
     activeModal,
     config,
@@ -2032,6 +2069,57 @@ function AppModalHost() {
   const isActiveModalRenderable =
     isBaseActiveModalRenderable &&
     (activeModal !== "previousSessions" || isPreviousSessionsInitialLoadReady);
+
+  useEffect(() => {
+    if (!isSettingsModalKind(activeModal)) {
+      previousSettingsRenderStateLogRef.current = "";
+      return;
+    }
+    const signature = JSON.stringify({
+      activeModal,
+      hasNativeSettingsHydrated,
+      hasSettings,
+      hasSettingsInitialRemoteMachineId,
+      hasSettingsInitialSearchQuery,
+      hasSettingsInitialSection,
+      isActiveModalRenderable,
+      isBaseActiveModalRenderable,
+      isSettingsRenderable,
+      nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
+      revision,
+      settingsInitialTab,
+    });
+    if (previousSettingsRenderStateLogRef.current === signature) {
+      return;
+    }
+    previousSettingsRenderStateLogRef.current = signature;
+    postSettingsModalDebugLog("modalHost.settings.renderState", {
+      activeModal,
+      hasNativeSettingsHydrated,
+      hasSettings,
+      hasSettingsInitialRemoteMachineId,
+      hasSettingsInitialSearchQuery,
+      hasSettingsInitialSection,
+      isActiveModalRenderable,
+      isBaseActiveModalRenderable,
+      isSettingsRenderable,
+      nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
+      revision,
+      settingsInitialTab,
+    });
+  }, [
+    activeModal,
+    hasNativeSettingsHydrated,
+    hasSettings,
+    hasSettingsInitialRemoteMachineId,
+    hasSettingsInitialSearchQuery,
+    hasSettingsInitialSection,
+    isActiveModalRenderable,
+    isBaseActiveModalRenderable,
+    isSettingsRenderable,
+    revision,
+    settingsInitialTab,
+  ]);
 
   useEffect(() => {
     if (activeModal !== "previousSessions") {
@@ -2101,8 +2189,38 @@ function AppModalHost() {
     if (activeModal === "floatingPromptEditor" && floatingPromptEditor) {
       presentedMessage.requestId = floatingPromptEditor.requestId;
     }
+    if (isSettingsModalKind(activeModal)) {
+      postSettingsModalDebugLog("modalHost.settings.presented.sent", {
+        activeModal,
+        hasNativeSettingsHydrated,
+        hasSettings,
+        hasSettingsInitialRemoteMachineId,
+        hasSettingsInitialSearchQuery,
+        hasSettingsInitialSection,
+        isActiveModalRenderable,
+        isBaseActiveModalRenderable,
+        isSettingsRenderable,
+        nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
+        revision,
+        settingsInitialTab,
+      });
+    }
     postAppModalHostMessage(presentedMessage, "AppModals:presented");
-  }, [activeModal, activeModalRequestId, floatingPromptEditor?.requestId, isActiveModalRenderable]);
+  }, [
+    activeModal,
+    activeModalRequestId,
+    floatingPromptEditor?.requestId,
+    hasNativeSettingsHydrated,
+    hasSettings,
+    hasSettingsInitialRemoteMachineId,
+    hasSettingsInitialSearchQuery,
+    hasSettingsInitialSection,
+    isActiveModalRenderable,
+    isBaseActiveModalRenderable,
+    isSettingsRenderable,
+    revision,
+    settingsInitialTab,
+  ]);
 
   useEffect(() => {
     if (activeModal !== "settings") {
@@ -2954,11 +3072,12 @@ function useModalStateFromNative() {
         }
 
         if (message.type === "open") {
+          const sidebarStateAtOpen = useSidebarStore.getState();
           if (isAppModalDebugLoggingEnabled()) {
             postAppModalHostMessage(
               {
                 details: JSON.stringify({
-                  hasSettings: useSidebarStore.getState().hud.settings !== undefined,
+                  hasSettings: sidebarStateAtOpen.hud.settings !== undefined,
                   modal: message.modal,
                   performanceNow: performance.now(),
                 }),
@@ -2967,6 +3086,22 @@ function useModalStateFromNative() {
               },
               "AppModals:debug",
             );
+          }
+          if (isSettingsModalKind(message.modal)) {
+            postSettingsModalDebugLog("modalHost.settings.open.received", {
+              activeModalBeforeOpen: activeModalRef.current ?? null,
+              hasInitialRemoteMachineId:
+                typeof message.initialRemoteMachineId === "string" &&
+                message.initialRemoteMachineId.trim().length > 0,
+              hasInitialSearchQuery: typeof message.initialSearchQuery === "string",
+              hasSettings: sidebarStateAtOpen.hud.settings !== undefined,
+              initialSection:
+                typeof message.initialSection === "string" ? message.initialSection : null,
+              initialTab: isSettingsModalTab(message.initialTab) ? message.initialTab : null,
+              modal: message.modal,
+              nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
+              revision: sidebarStateAtOpen.revision,
+            });
           }
           if (message.modal === "renameSession") {
             if (!message.sessionId) {
