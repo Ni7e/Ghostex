@@ -15,7 +15,7 @@ describe("titlebar mode active state source", () => {
   test("uses an instant active pill while preserving the commented Motion restore point", () => {
     /*
      * CDXC:ModeSwitcher 2026-06-15-20:07:
-     * Agents/Source/Browser/Kanban clicks should mark the clicked titlebar tab
+     * Agents/Source/Browser/Kanban/Manage clicks should mark the clicked titlebar tab
      * active immediately. Keep the old Motion spring commented in source so it
      * can be restored without re-discovering the previous tuning.
      */
@@ -32,7 +32,7 @@ describe("titlebar mode active state source", () => {
   test("shows right-side disabled reasons for project-only mode tabs", () => {
     /*
      * CDXC:ModeSwitcher 2026-06-16-16:00:
-     * Disabled Browser and Kanban tabs need a right-side AppTooltip explaining
+     * Disabled Browser, Kanban, and Manage tabs need a right-side AppTooltip explaining
      * that Quick-session users must switch to a project before opening those
      * project views. The buttons must stay hoverable, so do not use native
      * disabled on the visible mode-switcher tabs.

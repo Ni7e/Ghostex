@@ -52,7 +52,7 @@ describe("titlebar mode switch diagnostics source", () => {
   test("routes all mode-switch timing through the dedicated sanitized native log", () => {
     /*
      * CDXC:ModeSwitcherDiagnostics 2026-06-15-00:21:
-     * Agents/Source/Browser/Kanban lag repros need a dedicated support-bundle
+     * Agents/Source/Browser/Kanban/Manage lag repros need a dedicated support-bundle
      * log that is Debugging Mode gated and sanitized at the writer boundary.
      * Source coverage keeps the titlebar/sidebar bridge off the older
      * session-title log and prevents raw path, URL, title, command, or user-text
@@ -95,6 +95,7 @@ describe("titlebar mode switch diagnostics source", () => {
     expect(titlebarClickSource).toContain('targetMode: "code"');
     expect(titlebarClickSource).toContain('targetMode: "git"');
     expect(titlebarClickSource).toContain('targetMode: "tasks"');
+    expect(titlebarClickSource).toContain('targetMode: "manage"');
     expect(titlebarClickSource).toContain("titlebarModeSwitch.titlebarClickStart");
     expect(titlebarClickSource).toContain("titlebarModeSwitch.titlebarClickPostedNative");
     expect(titlebarClickSource).not.toContain("projectPath");
@@ -109,6 +110,7 @@ describe("titlebar mode switch diagnostics source", () => {
     expect(sidebarModeSource).toContain("titlebarModeSwitch.browserSeedRepoCheckStart");
     expect(sidebarModeSource).toContain("titlebarModeSwitch.browserSeedRemoteCheckDone");
     expect(sidebarModeSource).toContain("titlebarModeSwitch.tasksHandlerResolvedBoard");
+    expect(sidebarModeSource).toContain("titlebarModeSwitch.manageHandlerStart");
     const sidebarModeLogCalls = appendModeSwitcherLogCalls(sidebarModeSource);
     expect(sidebarModeLogCalls).not.toContain("projectPath:");
     expect(sidebarModeLogCalls).not.toContain("projectName:");

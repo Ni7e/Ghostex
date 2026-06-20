@@ -14,7 +14,7 @@ enum NativeModeSwitcherDebugLog {
 
   /*
    CDXC:ModeSwitcherDiagnostics 2026-06-15-00:21:
-   Agents, Source, Browser, and Kanban switching lag needs one dedicated support-bundle log so the titlebar click, sidebar route, native layout sync, and AppKit settle timings can be correlated without mixing them into session-title or terminal-focus diagnostics.
+   Agents, Source, Browser, Kanban, and Manage switching lag needs one dedicated support-bundle log so the titlebar click, sidebar route, native layout sync, and AppKit settle timings can be correlated without mixing them into session-title or terminal-focus diagnostics.
    Keep routine breadcrumbs behind Settings Debugging Mode, write under ~/.ghostex/logs, rotate at the shared 25 MB/three-file limit, and sanitize structured payloads at the writer boundary so project names, paths, URLs, titles, commands, and user text cannot reach disk.
    */
   static func append(event: String, details: [String: Any] = [:], force: Bool = false) {

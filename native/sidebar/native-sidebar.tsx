@@ -410,7 +410,7 @@ type NativeTerminalTitleBarAction =
   | "splitVertical"
   | "unpinCommandsPanel";
 type ProjectEditorLoadStatus = "idle" | "opening" | "running" | "error";
-type ProjectEditorSurfaceMode = "code" | "git" | "tasks";
+type ProjectEditorSurfaceMode = "code" | "git" | "tasks" | "manage";
 type TitlebarMode = "agents" | ProjectEditorSurfaceMode;
 type NativeProjectBrowserTabRestoreState = {
   id: string;
@@ -530,6 +530,11 @@ type NativeHostCommand =
        */
       newBrowserTabUrl?: string;
       projectId: string;
+      /*
+       * CDXC:Manage 2026-06-20-04:36:
+       * Manage file browsing is scoped by native to the owning project-editor session, so the project root travels as a typed host command field instead of a WK page URL query string that native diagnostics could record.
+       */
+      projectPath?: string;
       projectTitle?: string;
       showsBrowserToolbar?: boolean;
       showsProjectTabs?: boolean;
@@ -10840,7 +10845,10 @@ function normalizeStoredProjectEditorRestoreState(
     return undefined;
   }
   const mode =
-    source.mode === "code" || source.mode === "git" || source.mode === "tasks"
+    source.mode === "code" ||
+    source.mode === "git" ||
+    source.mode === "tasks" ||
+    source.mode === "manage"
       ? source.mode
       : undefined;
   const url = normalizeProjectBrowserUrl(source.url);
@@ -11319,16 +11327,16 @@ function restoreProjectEditorSurfaceStates(
         : normalizeProjectBrowserUrl(project.projectEditor.url);
     /**
      * CDXC:EditorPanes 2026-05-14-13:22:
-     * If embedded Code was open when ghostex quit, restart must bring that Code row
-     * back in the sidebar. Hydrate project-editor surface state from the durable
-     * project snapshot; the active project recreates its Code pane immediately,
-     * while background projects stay sleeping until the user focuses them.
+     * If an embedded project editor was open when ghostex quit, restart must bring that row back in the sidebar. Hydrate project-editor surface state from the durable project snapshot; the active project recreates its non-Browser pane immediately, while background projects stay sleeping until the user focuses them.
      *
      * CDXC:ProjectBrowserTabs 2026-06-13-00:12:
      * Browser-mode project tabs are restored as sleeping metadata on startup.
      * Do not create CEF browser views for remembered Browser tabs until the user
      * surfaces Browser mode; the default first tab remains GitHub/Ghostex only
      * when a project has no prior Browser tab list.
+     *
+     * CDXC:Manage 2026-06-20-04:36:
+     * Manage restores through the same durable project-editor state as Project, so restarting the active project can recreate its bundled WKWebView file browser while inactive projects remain asleep.
      */
     projectEditorSurfaceByProjectId.set(project.projectId, {
       activeBrowserTabId: restoredMode === "git" ? restoredActiveBrowserTabId : undefined,
@@ -17425,10 +17433,8 @@ function setProjectEditorCompanionPaneHidden(
     didChange = true;
     /**
      * CDXC:ProjectEditorCompanion 2026-05-16-14:42:
-     * Closing the agent side pane is a project preference shared by Code, Git,
-     * and Project mode surfaces. Persist it on the project record, not on the
-     * mode-specific projectEditor state, so switching modes and restarting the
-     * app keep the companion pane hidden until the titlebar restore button is used.
+     * Closing the agent side pane is a project preference shared by Code, Browser,
+     * Project, and Manage mode surfaces. Persist it on the project record, not on the mode-specific projectEditor state, so switching modes and restarting the app keep the companion pane hidden until the titlebar restore button is used.
      */
     return { ...project, projectEditorCompanionPaneHidden: hidden };
   });
@@ -24658,7 +24664,7 @@ function focusTerminal(sessionId: string): void {
    * the clicked session is already the focused sidebar session, so a locally
    * closed companion pane can be restored.
    * CDXC:ProjectEditorCompanion 2026-05-23-13:50:
-   * When the companion pane is hidden in Code, Git, or Project view, sidebar
+   * When the companion pane is hidden in Code, Browser, Project, or Manage view, sidebar
    * session clicks must return to the Agents workarea and focus the clicked
    * session tab instead of retargeting an invisible companion pane.
    * CDXC:ProjectEditorCompanion 2026-05-14-09:40:
@@ -24992,7 +24998,7 @@ function focusSidebarSessionMode(sessionId: string): void {
   const snapshot = activeGroup?.snapshot;
   /**
    * CDXC:SessionFocusMode 2026-05-23-14:35:
-   * Double-clicking a native pane tab while Focus mode is already active for that tab group must exit Focus and restore the prior Code/Git/Project surface instead of re-entering Focus.
+   * Double-clicking a native pane tab while Focus mode is already active for that tab group must exit Focus and restore the prior Code/Browser/Project/Manage surface instead of re-entering Focus.
    *
    * CDXC:SessionFocusMode 2026-05-28-09:41:
    * Focus mode is a split-pane zoom. When the zoom is already active, a second Focus request for the focused pane group is an automatic exit rather than another focus transition.
@@ -25176,10 +25182,10 @@ function runNativeHotkeyAction(
   }
 }
 
-function switchNativeWorkareaView(view: "agents" | "github" | "kanban" | "source"): void {
+function switchNativeWorkareaView(view: "agents" | "github" | "kanban" | "manage" | "source"): void {
   /**
    * CDXC:Hotkeys 2026-06-06-04:36:
-   * Option+1..4 must switch the active project workarea using the same route as the titlebar segmented control: Agents, Source, Browser, Kanban. Reuse those handlers so hotkeys preserve project-editor sleep, focus, and validation behavior.
+   * Option+1..5 must switch the active project workarea using the same route as the titlebar segmented control: Agents, Source, Browser, Kanban, Manage. Reuse those handlers so hotkeys preserve project-editor sleep, focus, and validation behavior.
    */
   switch (view) {
     case "agents":
@@ -25193,6 +25199,9 @@ function switchNativeWorkareaView(view: "agents" | "github" | "kanban" | "source
       return;
     case "kanban":
       openTasksPlaceholderFromTitlebar();
+      return;
+    case "manage":
+      openManageFromTitlebar();
       return;
   }
 }
@@ -25936,7 +25945,7 @@ function focusProjectEditorCompanionHotkeyDirection(
 
   /**
    * CDXC:PaneFocus 2026-05-29-05:25:
-   * In Code, Git, and Project modes, directional focus treats the companion agent pane as the left target and the project-editor workarea as the right target.
+   * In Code, Browser, Project, and Manage modes, directional focus treats the companion agent pane as the left target and the project-editor workarea as the right target.
    * Left/right should move keyboard focus between those two native regions without changing visibleSessionIds; up/down are consumed because the editor companion layout is horizontal only.
    */
   if (direction === "right") {
@@ -38347,6 +38356,18 @@ function createCodeServerProjectEditorUrl(
   return url.toString();
 }
 
+function createManageProjectEditorUrl(projectId: string): string {
+  const url = new URL("manage.html", window.location.href);
+  const nativeEditorId = createNativeProjectEditorId(projectId, "manage");
+  /*
+   * CDXC:Manage 2026-06-20-04:36:
+   * Manage URLs carry only stable project/editor ids. The native file bridge receives the project root through the create-pane command and resolves all filesystem work from the owning session, keeping workspace paths out of WebKit page URLs and mode-switch diagnostics.
+   */
+  url.searchParams.set("projectId", projectId);
+  url.searchParams.set("projectEditorId", nativeEditorId);
+  return url.toString();
+}
+
 function createNativeProjectEditorId(projectId: string, mode: ProjectEditorSurfaceMode): string {
   return `project-editor:${encodeURIComponent(projectId)}:${mode}`;
 }
@@ -38354,7 +38375,7 @@ function createNativeProjectEditorId(projectId: string, mode: ProjectEditorSurfa
 function parseNativeProjectEditorId(
   nativeEditorId: string,
 ): { mode: ProjectEditorSurfaceMode; projectId: string } | undefined {
-  const match = /^project-editor:(?<projectId>.+):(?<mode>code|git|tasks)$/u.exec(nativeEditorId);
+  const match = /^project-editor:(?<projectId>.+):(?<mode>code|git|tasks|manage)$/u.exec(nativeEditorId);
   if (!match?.groups) {
     return undefined;
   }
@@ -38398,6 +38419,9 @@ function projectEditorErrorMessageForMode(mode: ProjectEditorSurfaceMode): strin
   if (mode === "tasks") {
     return "Project did not finish loading within 10 seconds.";
   }
+  if (mode === "manage") {
+    return "Manage did not finish loading within 10 seconds.";
+  }
   return "VS Code did not finish loading within 10 seconds.";
 }
 
@@ -38407,6 +38431,9 @@ function projectEditorLoadFailureMessageForMode(mode: ProjectEditorSurfaceMode):
   }
   if (mode === "tasks") {
     return "Project failed to load.";
+  }
+  if (mode === "manage") {
+    return "Manage failed to load.";
   }
   return "VS Code failed to load.";
 }
@@ -38420,6 +38447,9 @@ function projectEditorSurfaceTitleForMode(
   }
   if (mode === "tasks") {
     return "Project";
+  }
+  if (mode === "manage") {
+    return "Manage";
   }
   return projectEditorTitle(project);
 }
@@ -38529,7 +38559,7 @@ function getProjectEditorAutoSleepTimeoutMs(mode: ProjectEditorSurfaceMode): num
   const enabled =
     mode === "git"
       ? settings.autoSleepGitEditorEnabled
-      : mode === "tasks"
+      : mode === "tasks" || mode === "manage"
         ? settings.autoSleepProjectEditorEnabled
         : settings.autoSleepCodeEditorEnabled;
   if (!enabled) {
@@ -38538,7 +38568,7 @@ function getProjectEditorAutoSleepTimeoutMs(mode: ProjectEditorSurfaceMode): num
   const idleMinutes =
     mode === "git"
       ? settings.autoSleepGitEditorIdleMinutes
-      : mode === "tasks"
+      : mode === "tasks" || mode === "manage"
         ? settings.autoSleepProjectEditorIdleMinutes
         : settings.autoSleepCodeEditorIdleMinutes;
   return idleMinutes * AUTO_SLEEP_MINUTE_MS;
@@ -38656,6 +38686,10 @@ function sleepProjectEditorSurface(projectId: string): void {
     });
     postNative({
       projectId: createNativeProjectEditorId(projectId, "tasks"),
+      type: "closeProjectEditorPane",
+    });
+    postNative({
+      projectId: createNativeProjectEditorId(projectId, "manage"),
       type: "closeProjectEditorPane",
     });
   }
@@ -38812,6 +38846,8 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
         : undefined
       : nextMode === "tasks"
         ? surfaceState?.url
+      : nextMode === "manage"
+        ? surfaceState?.url ?? createManageProjectEditorUrl(project.projectId)
       : (surfaceState?.mode === "code" ? surfaceState.url : undefined) ??
         createCodeServerProjectEditorUrl(project.path);
   const browserTabsForWake =
@@ -38824,7 +38860,8 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
   const activeBrowserTabIsPlaceholder = activeBrowserTabForWake?.isPlaceholder === true;
   if (
     (nextMode === "git" && !url && browserTabsForWake.length === 0) ||
-    (nextMode === "tasks" && !url)
+    (nextMode === "tasks" && !url) ||
+    (nextMode === "manage" && !url)
   ) {
     return;
   }
@@ -38909,6 +38946,7 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
     companionPaneHidden: project.projectEditorCompanionPaneHidden === true,
     mode: nextMode,
     projectId: nativeEditorId,
+    projectPath: nextMode === "manage" ? project.path : undefined,
     projectTitle: projectEditorTitle(project),
     showBetaFeatures: settings.showBetaFeatures,
     showsBrowserToolbar: nextMode === "git",
@@ -39303,9 +39341,9 @@ function openProjectGitEditorSurface(project: NativeProject, seedUrl: string, ne
    * workspace instead of the Code-style side-pane layout the mode switcher promises.
    *
    * CDXC:ModeSwitcher 2026-05-15-14:42:
-   * Code, Browser, and tasks-backed Project modes must keep separate native
-   * project-editor panes. Native receives mode-scoped editor IDs so switching
-   * modes changes the visible pane without reloading the other pages.
+   * Code, Browser, tasks-backed Project, and Manage modes must keep separate
+   * native project-editor panes. Native receives mode-scoped editor IDs so
+   * switching modes changes the visible pane without reloading the other pages.
    *
    * CDXC:ProjectBrowserTabs 2026-06-13-00:12:
    * Browser mode should restore the project's previous Browser tab list and
@@ -39450,7 +39488,7 @@ function openProjectTasksEditorSurface(project: NativeProject, tasksUrl: string)
    * CDXC:ModeSwitcher 2026-05-15-14:42:
    * The tasks-backed Project mode follows Browser mode's project-editor behavior:
    * keep the sessions companion pane on the left and preserve the Project
-   * surface across Code/Git/Project mode switches instead of creating a normal
+   * surface across Code/Browser/Project/Manage mode switches instead of creating a normal
    * browser session or reloading.
    *
    * CDXC:ProjectMode 2026-05-15-15:35:
@@ -39508,6 +39546,116 @@ function openProjectTasksEditorSurface(project: NativeProject, tasksUrl: string)
     nativeEditorId,
     projectId: project.projectId,
     targetMode: "tasks",
+  });
+}
+
+function openProjectManageEditorSurface(project: NativeProject, manageUrl: string): void {
+  const startedAtMs = performance.now();
+  const didFocusProject = activeProjectId !== project.projectId;
+  if (didFocusProject) {
+    focusProject(project.projectId);
+  }
+  const nativeEditorId = createNativeProjectEditorId(project.projectId, "manage");
+  const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
+  appendModeSwitcherDebugLog("titlebarModeSwitch.manageSurfaceStart", {
+    activeProjectChanged: didFocusProject,
+    hasManageUrl: Boolean(manageUrl),
+    nativeEditorId,
+    projectId: project.projectId,
+    surfaceIsOpen: surfaceState?.isOpen === true,
+    surfaceIsSleeping: surfaceState?.isSleeping === true,
+    surfaceMode: surfaceState?.mode ?? "none",
+    surfaceStatus: surfaceState?.status ?? "none",
+    targetMode: "manage",
+  });
+  if (
+    surfaceState?.mode === "manage" &&
+    surfaceState.url === manageUrl &&
+    surfaceState.isSleeping !== true &&
+    (surfaceState.status === "opening" || surfaceState.status === "running")
+  ) {
+    cancelProjectEditorSleepTimer(project.projectId);
+    if (surfaceState.status === "running") {
+      cancelProjectEditorOpenTimer(project.projectId);
+    }
+    projectEditorSurfaceByProjectId.set(project.projectId, {
+      ...surfaceState,
+      errorMessage: undefined,
+      isOpen: true,
+      isSleeping: false,
+      lastAccessedAt: new Date().toISOString(),
+    });
+    enforceProjectEditorAwakeSurfaceLimit("focus-existing-manage-editor", [project.projectId]);
+    appendModeSwitcherDebugLog("titlebarModeSwitch.manageSurfaceBeforeExistingFocusPost", {
+      elapsedMs: performance.now() - startedAtMs,
+      nativeEditorId: surfaceState.nativeEditorId,
+      projectId: project.projectId,
+      targetMode: "manage",
+    });
+    postNative({ projectId: surfaceState.nativeEditorId, type: "focusProjectEditorPane" });
+    publish();
+    appendModeSwitcherDebugLog("titlebarModeSwitch.manageSurfaceExistingDone", {
+      elapsedMs: performance.now() - startedAtMs,
+      nativeEditorId: surfaceState.nativeEditorId,
+      projectId: project.projectId,
+      targetMode: "manage",
+    });
+    return;
+  }
+
+  /*
+   * CDXC:Manage 2026-06-20-04:36:
+   * Manage follows Kanban's project-editor shell: keep the companion agent pane on the left, host a first-party WKWebView page on the right, and use a mode-scoped native editor id so file browsing survives switching to Source, Browser, or Kanban.
+   */
+  cancelProjectEditorSleepTimer(project.projectId);
+  const isAwakeManagePane = hasAwakeProjectEditorMode(project.projectId, "manage");
+  if (isAwakeManagePane) {
+    cancelProjectEditorOpenTimer(project.projectId);
+  } else {
+    scheduleProjectEditorOpenTimeout(project.projectId);
+  }
+  projectEditorSurfaceByProjectId.set(project.projectId, {
+    errorMessage: undefined,
+    isOpen: true,
+    isSleeping: false,
+    lastAccessedAt: new Date().toISOString(),
+    mode: "manage",
+    nativeEditorId,
+    status: isAwakeManagePane ? "running" : "opening",
+    title: "Manage",
+    url: manageUrl,
+  });
+  rememberAwakeProjectEditorMode(project.projectId, "manage");
+  enforceProjectEditorAwakeSurfaceLimit("open-manage-editor", [project.projectId]);
+  appendModeSwitcherDebugLog("titlebarModeSwitch.manageSurfaceBeforeCreatePanePost", {
+    elapsedMs: performance.now() - startedAtMs,
+    isAwakeTargetMode: isAwakeManagePane,
+    nativeEditorId,
+    projectId: project.projectId,
+    targetMode: "manage",
+  });
+  postNative({
+    browserFeedbackTool: settings.browserFeedbackTool,
+    companionPaneHidden: project.projectEditorCompanionPaneHidden === true,
+    mode: "manage",
+    projectId: nativeEditorId,
+    projectPath: project.path,
+    projectTitle: projectEditorTitle(project),
+    showBetaFeatures: settings.showBetaFeatures,
+    title: "Manage",
+    type: "createProjectEditorPane",
+    url: manageUrl,
+  });
+  postNative({ projectId: nativeEditorId, type: "focusProjectEditorPane" });
+  setProjectEditorPersistedOpen(project.projectId, true, "openManage");
+  stopCodeServerRuntimeIfEveryEditorSleeping();
+  void refreshProjectDiffStats(project.projectId);
+  publish();
+  appendModeSwitcherDebugLog("titlebarModeSwitch.manageSurfaceDone", {
+    elapsedMs: performance.now() - startedAtMs,
+    nativeEditorId,
+    projectId: project.projectId,
+    targetMode: "manage",
   });
 }
 
@@ -39690,6 +39838,33 @@ function openTasksPlaceholderFromTitlebar(): void {
     elapsedMs: performance.now() - startedAtMs,
     projectId: project.projectId,
     targetMode: "tasks",
+  });
+}
+
+function openManageFromTitlebar(): void {
+  const startedAtMs = performance.now();
+  const project = activeProject();
+  if (isQuickProject(project) || project.isRecentProject === true) {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.manageHandlerSkippedProject", {
+      elapsedMs: performance.now() - startedAtMs,
+      isQuick: isQuickProject(project),
+      isRecentProject: project.isRecentProject === true,
+      projectId: project.projectId,
+      targetMode: "manage",
+    });
+    return;
+  }
+  appendModeSwitcherDebugLog("titlebarModeSwitch.manageHandlerStart", {
+    activeProjectId,
+    projectId: project.projectId,
+    targetMode: "manage",
+  });
+  const url = createManageProjectEditorUrl(project.projectId);
+  openProjectManageEditorSurface(project, url);
+  appendModeSwitcherDebugLog("titlebarModeSwitch.manageHandlerDone", {
+    elapsedMs: performance.now() - startedAtMs,
+    projectId: project.projectId,
+    targetMode: "manage",
   });
 }
 
@@ -39922,6 +40097,10 @@ function closeProjectEditorForGroup(groupId: string): void {
     projectId: createNativeProjectEditorId(project.projectId, "tasks"),
     type: "closeProjectEditorPane",
   });
+  postNative({
+    projectId: createNativeProjectEditorId(project.projectId, "manage"),
+    type: "closeProjectEditorPane",
+  });
   stopCodeServerRuntimeIfEveryEditorSleeping();
   publish();
 }
@@ -39947,7 +40126,7 @@ function rememberProjectModeBeforeSessionFocus(projectId: string): void {
   }
   /**
    * CDXC:SessionFocusMode 2026-05-23-09:28:
-   * Focusing a session from Code, Git, or Project mode must temporarily show
+   * Focusing a session from Code, Browser, Project, or Manage mode must temporarily show
    * the Agents workarea so the focused pane can take over the full native
    * workspace. Remember the previous project surface mode so exiting focus
    * returns to the view the user came from instead of always staying on Agents.
@@ -39967,6 +40146,10 @@ function restoreProjectModeAfterSessionFocus(projectId: string): void {
   }
   if (previousMode === "git") {
     void openGitHubProjectFromTitlebar();
+    return;
+  }
+  if (previousMode === "manage") {
+    openManageFromTitlebar();
     return;
   }
   openTasksPlaceholderFromTitlebar();
@@ -40229,6 +40412,10 @@ function disposeProjectEditorSurface(projectId: string): void {
     });
     postNative({
       projectId: createNativeProjectEditorId(projectId, "tasks"),
+      type: "closeProjectEditorPane",
+    });
+    postNative({
+      projectId: createNativeProjectEditorId(projectId, "manage"),
       type: "closeProjectEditorPane",
     });
   }
@@ -45819,6 +46006,7 @@ window.__ghostex_NATIVE_SIDEBAR__ = {
   toggleProjectEditorCompanionFromTitlebar,
   sleepInactiveSessionsFromTitlebar,
   openTasksPlaceholderFromTitlebar,
+  openManageFromTitlebar,
   refreshWorkspaceOpenTargetAvailabilityFromTitlebar,
   rotateActivePaneLayoutClockwiseFromTitlebar,
   sleepPetOverlayFromPet,

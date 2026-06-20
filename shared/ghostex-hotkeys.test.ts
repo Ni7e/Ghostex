@@ -83,6 +83,7 @@ describe("normalizeghostexHotkeySettings", () => {
     expect(DEFAULT_ghostex_HOTKEYS.switchSourceView).toBe("alt+2");
     expect(DEFAULT_ghostex_HOTKEYS.switchGitHubView).toBe("alt+3");
     expect(DEFAULT_ghostex_HOTKEYS.switchKanbanView).toBe("alt+4");
+    expect(DEFAULT_ghostex_HOTKEYS.switchManageView).toBe("alt+5");
     /**
      * CDXC:ActionsHotkeys 2026-05-17-01:18:
      * Action launch hotkeys are positional so Settings can bind the first five
@@ -174,6 +175,9 @@ describe("normalizeghostexHotkeySettings", () => {
     );
     expect(getghostexHotkeyActionIdForKey(DEFAULT_ghostex_HOTKEYS, "alt+4")).toBe(
       "switchKanbanView",
+    );
+    expect(getghostexHotkeyActionIdForKey(DEFAULT_ghostex_HOTKEYS, "alt+5")).toBe(
+      "switchManageView",
     );
   });
 

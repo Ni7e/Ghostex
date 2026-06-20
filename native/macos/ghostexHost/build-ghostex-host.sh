@@ -1412,7 +1412,7 @@ NATIVE_WEB_DIGEST="$(fingerprint_inputs \
 	--path "$REPO_ROOT/src/assets" \
 	--path "$REPO_ROOT/package.json" \
 	--path "$REPO_ROOT/bun.lock")"
-if cache_matches "$NATIVE_WEB_CACHE_KEY" "$NATIVE_WEB_DIGEST" "$WEB_DIR/index.html" "$WEB_DIR/modal-host.html" "$WEB_DIR/titlebar-host.html" "$WEB_DIR/tasks-placeholder.html" "$WEB_DIR/pet-host.html" "$WEB_DIR/native-sidebar.js" "$WEB_DIR/native-sidebar.css"; then
+if cache_matches "$NATIVE_WEB_CACHE_KEY" "$NATIVE_WEB_DIGEST" "$WEB_DIR/index.html" "$WEB_DIR/modal-host.html" "$WEB_DIR/titlebar-host.html" "$WEB_DIR/tasks-placeholder.html" "$WEB_DIR/manage.html" "$WEB_DIR/pet-host.html" "$WEB_DIR/native-sidebar.js" "$WEB_DIR/native-sidebar.css"; then
 	echo "Native web bundles are current; skipping Bun bundle build."
 else
 # CDXC:NativeSidebarBuild 2026-04-27-09:32
@@ -1426,18 +1426,20 @@ else
 # CDXC:ModeSwitcher 2026-05-15-12:38: Bundle the tasks-backed Project mode as
 # a first-party React page so the titlebar switcher can open a placeholder
 # workarea surface without depending on remote assets or an external browser.
+# CDXC:Manage 2026-06-20-04:36: Bundle Manage as its own WKWebView project workarea entrypoint so native can host file browsing with the same project-editor shell as Kanban while keeping a separate mode-scoped pane id.
 # CDXC:ReactCompiler 2026-06-06-21:20: Build all native WKWebView React bundles
 # through the repository helper so React Compiler runs before Bun bundles and
 # the host still receives the same classic-script filenames it inlines below.
 # CDXC:LocalStartFast 2026-06-07-16:23: Cache native web bundle generation by source content so no-op starts do not rewrite identical WKWebView assets, which would invalidate the signed app resources and force a pointless re-sign.
 # CDXC:NativeWebBuild 2026-06-11-20:28: Host-specific CSS files are generated artifacts, and Bun may collapse shared CSS into native-sidebar.css for entries that import the same stylesheet. Remove stale per-host CSS before rebuilding so titlebar, modal, and pet HTML cannot inline an older #050505 modal surface after the source background changes to #0e0e0e.
-rm -f "$WEB_DIR/modal-host.css" "$WEB_DIR/titlebar-host.css" "$WEB_DIR/tasks-placeholder.css" "$WEB_DIR/pet-host.css"
+rm -f "$WEB_DIR/modal-host.css" "$WEB_DIR/titlebar-host.css" "$WEB_DIR/tasks-placeholder.css" "$WEB_DIR/manage.css" "$WEB_DIR/pet-host.css"
 bun "$REPO_ROOT/scripts/build-native-web-bundles.mjs" \
 	--outdir "$WEB_DIR" \
 	"$REPO_ROOT/native/sidebar/native-sidebar.tsx" \
 	"$REPO_ROOT/native/sidebar/modal-host.tsx" \
 	"$REPO_ROOT/native/sidebar/titlebar-host.tsx" \
 	"$REPO_ROOT/native/sidebar/tasks-placeholder.tsx" \
+	"$REPO_ROOT/native/sidebar/manage.tsx" \
 	"$REPO_ROOT/native/sidebar/pet-host.tsx"
 
 WEB_DIR="$WEB_DIR" "$GXSERVER_NODE_BIN" <<'JS'
@@ -1458,6 +1460,9 @@ const titlebarJs = readFileSync(join(webDir, "titlebar-host.js"), "utf8");
 const tasksPlaceholderCssPath = join(webDir, "tasks-placeholder.css");
 const tasksPlaceholderCss = existsSync(tasksPlaceholderCssPath) ? readFileSync(tasksPlaceholderCssPath, "utf8") : "";
 const tasksPlaceholderJs = readFileSync(join(webDir, "tasks-placeholder.js"), "utf8");
+const manageCssPath = join(webDir, "manage.css");
+const manageCss = existsSync(manageCssPath) ? readFileSync(manageCssPath, "utf8") : "";
+const manageJs = readFileSync(join(webDir, "manage.js"), "utf8");
 const petCssPath = join(webDir, "pet-host.css");
 const petCss = existsSync(petCssPath) ? readFileSync(petCssPath, "utf8") : css;
 const petJs = readFileSync(join(webDir, "pet-host.js"), "utf8");
@@ -1466,6 +1471,7 @@ const escapedJs = js.replace(/<\/script/gi, "<\\/script");
 const escapedModalJs = modalJs.replace(/<\/script/gi, "<\\/script");
 const escapedTitlebarJs = titlebarJs.replace(/<\/script/gi, "<\\/script");
 const escapedTasksPlaceholderJs = tasksPlaceholderJs.replace(/<\/script/gi, "<\\/script");
+const escapedManageJs = manageJs.replace(/<\/script/gi, "<\\/script");
 const escapedPetJs = petJs.replace(/<\/script/gi, "<\\/script");
 writeFileSync(join(webDir, "index.html"), `<!doctype html>
 <html>
@@ -1587,6 +1593,37 @@ ${escapedTasksPlaceholderJs}
 }
 })();
 //# sourceURL=tasks-placeholder.js
+    </script>
+  </body>
+</html>
+`);
+writeFileSync(join(webDir, "manage.html"), `<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <style>
+${manageCss}
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+(() => {
+try {
+${escapedManageJs}
+} catch (error) {
+  window.__ghostex_BOOT_ERROR__ = {
+    message: error && error.message ? String(error.message) : String(error),
+    stack: error && error.stack ? String(error.stack) : ""
+  };
+  throw error;
+}
+})();
+//# sourceURL=manage.js
     </script>
   </body>
 </html>

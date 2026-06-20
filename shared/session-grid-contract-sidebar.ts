@@ -1312,8 +1312,8 @@ export type SidebarToExtensionMessage =
        * CDXC:SessionFocusMode 2026-05-23-09:28:
        * Session-card and pane-tab Focus is a reversible zoom for the clicked
        * session's pane tab group. The native/sidebar controller owns this
-       * command because it must also switch from Code/Git/Project surfaces back
-       * to Agents while remembering the prior surface for unfocus.
+       * command because it must also switch from Code/Browser/Project/Manage
+       * surfaces back to Agents while remembering the prior surface for unfocus.
        */
       type: "focusSessionMode";
       sessionId: string;

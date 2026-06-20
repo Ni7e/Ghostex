@@ -87,6 +87,7 @@ enum HostCommand: Decodable {
   case openGitHubProjectFromTitlebar
   case toggleProjectEditorCompanionFromTitlebar
   case openTasksPlaceholderFromTitlebar
+  case openManageFromTitlebar
   case refreshWorkspaceOpenTargetAvailabilityFromTitlebar
   case rotateActivePaneLayoutClockwiseFromTitlebar
   case togglePetOverlayFromTitlebar
@@ -196,6 +197,7 @@ enum HostCommand: Decodable {
     case openGitHubProjectFromTitlebar
     case toggleProjectEditorCompanionFromTitlebar
     case openTasksPlaceholderFromTitlebar
+    case openManageFromTitlebar
     case refreshWorkspaceOpenTargetAvailabilityFromTitlebar
     case rotateActivePaneLayoutClockwiseFromTitlebar
     case togglePetOverlayFromTitlebar
@@ -392,6 +394,8 @@ enum HostCommand: Decodable {
       self = .toggleProjectEditorCompanionFromTitlebar
     case .openTasksPlaceholderFromTitlebar:
       self = .openTasksPlaceholderFromTitlebar
+    case .openManageFromTitlebar:
+      self = .openManageFromTitlebar
     case .refreshWorkspaceOpenTargetAvailabilityFromTitlebar:
       self = .refreshWorkspaceOpenTargetAvailabilityFromTitlebar
     case .rotateActivePaneLayoutClockwiseFromTitlebar:
@@ -586,6 +590,11 @@ struct CreateProjectEditorPane: Decodable {
    */
   let newBrowserTabUrl: String?
   let projectId: String
+  /*
+   CDXC:Manage 2026-06-20-04:36:
+   Manage file browsing is scoped by native to the owning project-editor session, so the project root travels as a typed host command field instead of a WK page URL query string that native diagnostics could record.
+  */
+  let projectPath: String?
   let projectTitle: String?
   let showBetaFeatures: Bool?
   let showsBrowserToolbar: Bool?
@@ -1652,10 +1661,10 @@ enum HostEvent: Encodable {
       try container.encode(sessionId, forKey: .sessionId)
     case .paneTabFocusRequested(let sessionId):
       /**
-       CDXC:SessionFocusMode 2026-05-23-09:28:
-       Native pane-tab double-clicks and tab context-menu Focus need a distinct
-       event from normal selection because the sidebar must enter reversible
-       focus mode and may switch the workarea from Code/Git/Project to Agents.
+      CDXC:SessionFocusMode 2026-05-23-09:28:
+      Native pane-tab double-clicks and tab context-menu Focus need a distinct
+      event from normal selection because the sidebar must enter reversible
+      focus mode and may switch the workarea from Code/Browser/Project/Manage to Agents.
        */
       try container.encode("paneTabFocusRequested", forKey: .type)
       try container.encode(sessionId, forKey: .sessionId)

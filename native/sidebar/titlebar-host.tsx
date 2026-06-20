@@ -120,7 +120,7 @@ import {
 } from "../../shared/sidebar-git";
 
 type ProjectEditorLoadStatus = "idle" | "opening" | "running" | "error";
-type TitlebarMode = "agents" | "code" | "git" | "tasks";
+type TitlebarMode = "agents" | "code" | "git" | "tasks" | "manage";
 type TitlebarDropdownPanelKind =
   | "actions"
   | "git"
@@ -241,7 +241,7 @@ type TitlebarBrowserTabResource = {
   browserId: number;
   id: string;
   isActive?: boolean;
-  kind: "browser" | "code" | "git" | "tasks" | string;
+  kind: "browser" | "code" | "git" | "tasks" | "manage" | string;
   projectId?: string;
   sessionId?: string;
   title: string;
@@ -348,6 +348,7 @@ type NativeTitlebarCommand =
   | { type: "openAgentsModeFromTitlebar" }
   | { type: "openGitHubProjectFromTitlebar" }
   | { type: "openTasksPlaceholderFromTitlebar" }
+  | { type: "openManageFromTitlebar" }
   | { type: "refreshWorkspaceOpenTargetAvailabilityFromTitlebar" }
   | { type: "toggleCommandsPanelFromTitlebar" }
   | { type: "togglePetOverlayFromTitlebar" }
@@ -1038,7 +1039,7 @@ function appendTitlebarModeSwitchDebugLog(
 ): void {
   /**
    * CDXC:ModeSwitcherDiagnostics 2026-06-15-00:21:
-   * Agents, Source, Browser, and Kanban titlebar clicks need the same first-hop
+   * Agents, Source, Browser, Kanban, and Manage titlebar clicks need the same first-hop
    * timing breadcrumbs. Send only enum-like mode state, booleans, safe ids,
    * and monotonic timestamps while Settings Debugging Mode is enabled; never
    * include project names, paths, URLs, titles, commands, or user text.
@@ -3204,6 +3205,9 @@ function App() {
   const kanbanModeDisabledReason = projectState.projectIsQuick
     ? "Switch to a project to access this view"
     : undefined;
+  const manageModeDisabledReason = projectState.projectIsQuick
+    ? "Switch to a project to access this view"
+    : undefined;
 
   const openGitMode = () => {
     if (browserModeDisabledReason) {
@@ -3241,6 +3245,24 @@ function App() {
     });
   };
 
+  const openManageMode = () => {
+    if (manageModeDisabledReason) {
+      return;
+    }
+    closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarManageMode");
+    appendTitlebarModeSwitchDebugLog(
+      projectState.debuggingMode,
+      "titlebarModeSwitch.titlebarClickStart",
+      titlebarModeSwitchLogDetails({ optimisticMode, projectState, targetMode: "manage" }),
+    );
+    setOptimisticMode("manage");
+    postNative({ type: "openManageFromTitlebar" });
+    appendTitlebarModeSwitchDebugLog(projectState.debuggingMode, "titlebarModeSwitch.titlebarClickPostedNative", {
+      projectId: projectState.projectId ?? "none",
+      targetMode: "manage",
+    });
+  };
+
   const toggleProjectEditorCompanion = () => {
     appendTitlebarModeSwitchDebugLog(projectState.debuggingMode, "titlebarModeSwitch.companionToggle.dispatch", {
       activeMode,
@@ -3265,7 +3287,10 @@ function App() {
     !projectState.editorIsSleeping;
   /*
    * CDXC:TitlebarModeTabs 2026-05-31-12:00:
-   * macOS titlebar mode switcher labels use title case (Agents, Source, Browser, Kanban), not all-caps, so the segmented control reads like navigation chrome rather than shouting labels.
+   * macOS titlebar mode switcher labels use title case (Agents, Source, Browser, Kanban, Manage), not all-caps, so the segmented control reads like navigation chrome rather than shouting labels.
+   *
+   * CDXC:Manage 2026-06-20-04:36:
+   * Manage is a project-scoped file browser workarea and should sit beside Kanban in the same titlebar segmented control instead of being hidden under a menu.
    */
   const titlebarModes = [
     {
@@ -3291,6 +3316,13 @@ function App() {
       label: "Kanban",
       onSelect: openTasksMode,
       value: "tasks" as const,
+    },
+    {
+      disabled: manageModeDisabledReason !== undefined,
+      disabledReason: manageModeDisabledReason,
+      label: "Manage",
+      onSelect: openManageMode,
+      value: "manage" as const,
     },
   ];
   const resolveTitlebarDropdownPanelSize = useCallback(
@@ -6046,16 +6078,16 @@ function normalizeTitlebarMode(candidate: unknown): TitlebarMode {
    * CDXC:ModeSwitcher 2026-05-15-18:20:
    * The top titlebar mode must mirror the workarea mode restored by the sidebar
    * at launch and after each mode transition. Treat the sidebar/native payload
-   * as authoritative so a restored Code, Git, or Project pane cannot leave the
-   * segmented control highlighted on Agents.
+   * as authoritative so a restored Code, Browser, Project, or Manage pane cannot
+   * leave the segmented control highlighted on Agents.
    *
    * CDXC:ModeSwitcher 2026-05-15-18:30:
    * User clicks still need optimistic local mode selection so the shared-layout
-   * pill animates immediately while slow Code/Git/Project surfaces load. Clear
+   * pill animates immediately while slow Code/Browser/Project/Manage surfaces load. Clear
    * that optimistic value when sidebar state arrives so startup restore and
    * failed transitions remain synchronized with the real visible workarea.
    */
-  return candidate === "code" || candidate === "git" || candidate === "tasks"
+  return candidate === "code" || candidate === "git" || candidate === "tasks" || candidate === "manage"
     ? candidate
     : "agents";
 }
@@ -6080,6 +6112,8 @@ function getTitlebarModeIcon(mode: TitlebarMode): ReactNode {
       return <IconWorld aria-hidden="true" size={14} stroke={1.8} />;
     case "tasks":
       return <IconChecklist aria-hidden="true" size={14} stroke={1.8} />;
+    case "manage":
+      return <IconFolderOpen aria-hidden="true" size={14} stroke={1.8} />;
     case "agents":
     default:
       /**
@@ -6103,7 +6137,7 @@ type TitlebarModeOption = {
 
 /*
 CDXC:ModeSwitcher 2026-06-15-20:07:
-Titlebar mode tabs should show the active segment immediately on click instead of animating the shared-layout pill between Agents, Source, Browser, and Kanban. Keep the previous Motion transition commented here so the animated behavior can be restored if the requirement changes.
+Titlebar mode tabs should show the active segment immediately on click instead of animating the shared-layout pill between Agents, Source, Browser, Kanban, and Manage. Keep the previous Motion transition commented here so the animated behavior can be restored if the requirement changes.
 
 Previous Motion wiring:
 * import { motion } from "motion/react";
@@ -6145,7 +6179,7 @@ function TitlebarModeDropdown({
     >
       {/*
        * CDXC:ModeSwitcher 2026-05-28-10:38:
-       * When app width is below 1050px, Agents/Code/Git/Project moves from
+       * When app width is below 1050px, Agents/Code/Browser/Project/Manage moves from
        * the centered segmented control into a keep-awake-style mode picker
        * beside the project title. Keep the current mode icon visible on the
        * main segment so narrow titlebar chrome still exposes the active action.
@@ -6220,7 +6254,7 @@ function TitlebarModeSwitcher({
 
         CDXC:ProjectEditorCompanion 2026-06-12-04:02:
         The toggle is anchor-positioned off the switcher's left edge so the
-        Agents/Source/Browser/Kanban group keeps its original centered titlebar
+        Agents/Source/Browser/Kanban/Manage group keeps its original centered titlebar
         geometry while staying normal DOM inside the titlebar WKWebView.
       */}
       {showCompanionToggle ? (
@@ -7034,7 +7068,7 @@ styleElement.textContent = `
       /*
        * CDXC:ModeSwitcher 2026-05-28-10:38:
        * App widths below 1050px do not have enough horizontal room for the
-       * centered Agents/Code/Git/Project switcher plus right-side titlebar
+       * centered Agents/Code/Browser/Project/Manage switcher plus right-side titlebar
        * actions. Replace it with the split picker beside the project name.
        */
       display: none;
@@ -7080,12 +7114,12 @@ styleElement.textContent = `
     /**
      * CDXC:ProjectEditorCompanion 2026-06-12-03:18:
      * The companion toggle is an icon-only mode-switcher segment. Use the same
-     * left-border separator model as Agents/Source/Browser/Kanban, with Agents'
+     * left-border separator model as Agents/Source/Browser/Kanban/Manage, with Agents'
      * own left border providing the boundary to its right.
      *
      * CDXC:ProjectEditorCompanion 2026-06-12-04:02:
      * Anchor this control to the left edge of the centered mode switcher without
-     * participating in flex layout, so the Agents/Source/Browser/Kanban button
+     * participating in flex layout, so the Agents/Source/Browser/Kanban/Manage button
      * group remains centered in the titlebar.
      *
      * CDXC:ProjectEditorCompanion 2026-06-12-04:23:

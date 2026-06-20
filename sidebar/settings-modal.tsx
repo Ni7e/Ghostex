@@ -3321,7 +3321,7 @@ export function SettingsModal({
 
             {mainSectionVisible("autoSleep", settingsSearch.autoSleep) ? (
             <SettingsSection sectionRef={autoSleepSectionRef} title="Auto Sleep">
-              {/* CDXC:AutoSleep 2026-05-28-08:32: Auto Sleep controls belong in one Settings section so VS Code, Git, Project, browser, and agent sessions can be tuned independently without hiding the relationship between the policies. */}
+              {/* CDXC:AutoSleep 2026-05-28-08:32: Auto Sleep controls belong in one Settings section so VS Code, Git, Project, Manage, browser, and agent sessions can be tuned independently without hiding the relationship between the policies. */}
               {mainSettingVisible(settingsSearch.autoSleep, "autoSleepCodeEditorEnabled") ? (
               <ToggleField
                 checked={draft.autoSleepCodeEditorEnabled}

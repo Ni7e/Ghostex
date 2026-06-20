@@ -31,7 +31,7 @@ function collectActivePaneOwnerSessionIdsFromNode(
       /*
        * CDXC:AutoSleep 2026-06-09-20:33:
        * Auto Sleep protects the selected owner of every persisted split pane,
-       * even when Focus Mode or Source/GitHub/Kanban hides the Agents workarea.
+       * even when Focus Mode or Source/Browser/Kanban/Manage hides the Agents workarea.
        * If a tab group's stored active id is stale, protect the first valid tab
        * member so pane ownership remains conservative instead of sleeping a
        * split's current conversation.

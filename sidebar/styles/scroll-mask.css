@@ -271,9 +271,15 @@
  * existing scroll-mask utilities so command palettes, Kanban lanes, Recent
  * Projects, dropdowns, and ScrollArea viewports all animate their edge fades
  * in the native macOS web bundle.
+ *
+ * CDXC:ProjectBoardDropdowns 2026-06-20-04:38:
+ * Kanban dropdowns must close immediately after a user selects an option.
+ * Base UI waits for popup animations before unmounting, so scroll-linked
+ * fade animations must not run on elements that also carry Base UI's
+ * data-open/data-closed lifecycle attributes.
  */
 @supports (animation-timeline: scroll()) {
-  .horizontal-scroll-fade-mask {
+  .horizontal-scroll-fade-mask:not([data-open]):not([data-closed]) {
     -webkit-mask-image: linear-gradient(
       to right,
       transparent 0,
@@ -294,7 +300,7 @@
     animation-timeline: scroll(self x);
   }
 
-  .vertical-scroll-fade-mask {
+  .vertical-scroll-fade-mask:not([data-open]):not([data-closed]) {
     -webkit-mask-image: linear-gradient(
       to bottom,
       transparent 0,
@@ -315,7 +321,7 @@
     animation-timeline: scroll(self y);
   }
 
-  .vertical-scroll-fade-mask-top {
+  .vertical-scroll-fade-mask-top:not([data-open]):not([data-closed]) {
     -webkit-mask-image: linear-gradient(
       to bottom,
       transparent 0,
@@ -336,7 +342,7 @@
     animation-timeline: scroll(self y);
   }
 
-  .vertical-scroll-fade-mask-bottom {
+  .vertical-scroll-fade-mask-bottom:not([data-open]):not([data-closed]) {
     -webkit-mask-image: linear-gradient(
       to bottom,
       black 0,

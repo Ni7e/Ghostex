@@ -247,7 +247,7 @@ export type NativeGhosttyHostCommand =
       }>;
       browserHistoryScopeId?: string;
       showBetaFeatures?: boolean;
-      mode?: "code" | "git" | "tasks";
+      mode?: "code" | "git" | "tasks" | "manage";
       companionPaneHidden?: boolean;
       /**
        * CDXC:ProjectBrowserTabs 2026-06-16-12:02:
@@ -255,6 +255,11 @@ export type NativeGhosttyHostCommand =
        */
       newBrowserTabUrl?: string;
       projectId: string;
+      /**
+       * CDXC:Manage 2026-06-20-04:36:
+       * Manage file browsing is scoped by native to the owning project-editor session, so the project root travels as a typed host command field instead of a WK page URL query string that native diagnostics could record.
+       */
+      projectPath?: string;
       projectTitle?: string;
       showsBrowserToolbar?: boolean;
       showsProjectTabs?: boolean;
@@ -307,7 +312,7 @@ export type NativeGhosttyHostCommand =
   | {
       activeProjectEditorId?: string;
       activeProjectDiffStats?: SidebarProjectDiffStats;
-      activeProjectMode?: "agents" | "code" | "git" | "tasks";
+      activeProjectMode?: "agents" | "code" | "git" | "tasks" | "manage";
       activeProjectEditorCompanionPaneHidden?: boolean;
       activeProjectEditorIsOpen?: boolean;
       activeProjectEditorIsSleeping?: boolean;
@@ -641,7 +646,7 @@ export type NativeGhosttyHostEvent =
        * CDXC:SessionFocusMode 2026-05-23-09:28:
        * Native tab Focus is separate from selection because it enters the
        * reversible session-focus mode and may temporarily switch the project
-       * workarea back to Agents before restoring Code/Git/Project on unfocus.
+       * workarea back to Agents before restoring Code/Browser/Project/Manage on unfocus.
        */
       sessionId: string;
       type: "paneTabFocusRequested";
@@ -692,9 +697,9 @@ export type NativeGhosttyHostEvent =
   | {
       /**
        * CDXC:ProjectEditorCompanion 2026-05-16-14:42:
-       * Closing the agent side pane is project state shared by Code, Git, and
-       * Project surfaces. Native reports the close so the sidebar can persist
-       * the hidden preference across mode switches and app restarts.
+       * Closing the agent side pane is project state shared by Code, Browser,
+       * Project, and Manage surfaces. Native reports the close so the sidebar
+       * can persist the hidden preference across mode switches and app restarts.
        */
       hidden: boolean;
       projectId: string;

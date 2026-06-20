@@ -194,6 +194,7 @@ private let nativeGhosttySessionIdentityEnvironmentKeys = [
 private let projectBeadsResponseEventName = "ghostex-project-beads-response"
 private let projectBoardResponseEventName = "ghostex-project-board-response"
 private let projectBoardImageResponseEventName = "ghostex-project-board-image-response"
+private let manageFilesResponseEventName = "ghostex-manage-files-response"
 private let projectBoardInternalPromptGenerationEnvironmentKeys = [
   "GHOSTEX_GLOBAL_SESSION_REF",
   "GHOSTEX_GXSERVER_AUTH_TOKEN_FILE",
@@ -322,7 +323,54 @@ private struct ProjectBoardImageBridgeResponse: Encodable {
   let requestId: String
 }
 
+private struct ManageFilesBridgeRequest: Decodable {
+  let action: String
+  let path: String?
+  let projectEditorId: String?
+  let projectId: String?
+  let requestId: String
+}
+
+private struct ManageFileEntry: Encodable {
+  let depth: Int
+  let kind: String
+  let modifiedAt: String?
+  let name: String
+  let path: String
+  let size: Int64?
+}
+
+private struct ManageFilePreview: Encodable {
+  let content: String?
+  let error: String?
+  let kind: String
+  let modifiedAt: String?
+  let name: String
+  let path: String
+  let size: Int64?
+}
+
+private struct ManageFilesBridgeResponse: Encodable {
+  let action: String
+  let entries: [ManageFileEntry]?
+  let error: String?
+  let file: ManageFilePreview?
+  let requestId: String
+  let rootName: String?
+}
+
 private enum ProjectBeadsBridgeError: Error, LocalizedError {
+  case invalidRequest(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .invalidRequest(let message):
+      return message
+    }
+  }
+}
+
+private enum ManageFilesBridgeError: Error, LocalizedError {
   case invalidRequest(String)
 
   var errorDescription: String? {
@@ -871,7 +919,7 @@ private func projectBoardNativeProcessPath(_ path: String?) -> String {
 private func projectEditorModeFromNativeEditorId(_ nativeEditorId: String) -> String? {
   guard nativeEditorId.hasPrefix("project-editor:"),
     let mode = nativeEditorId.split(separator: ":").last.map(String.init),
-    ["code", "git", "tasks"].contains(mode)
+    ["code", "git", "tasks", "manage"].contains(mode)
   else {
     return nil
   }
@@ -2301,6 +2349,7 @@ final class TerminalWorkspaceView: NSView {
     let mode: String
     var newBrowserTabUrl: String
     let projectId: String
+    var projectRootPath: String?
     let projectTitle: String
     let showsProjectTabs: Bool
     var tabs: [ProjectEditorBrowserTab]
@@ -4901,6 +4950,11 @@ final class TerminalWorkspaceView: NSView {
     let newBrowserTabUrl = projectEditorBrowserNewTabURL(command.newBrowserTabUrl, fallback: command.url)
     if let existingSession = projectEditorPaneSessions[command.projectId] {
       var nextSession = existingSession
+      if let projectPath = command.projectPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+        !projectPath.isEmpty
+      {
+        nextSession.projectRootPath = projectPath
+      }
       nextSession.newBrowserTabUrl = newBrowserTabUrl
       for hostView in projectEditorHostViews(nextSession) {
         hostView.setBrowserFeedbackTool(browserFeedbackTool)
@@ -4938,7 +4992,7 @@ final class TerminalWorkspaceView: NSView {
       return
     }
 
-    guard requestedMode == "tasks" || GhostexCEFIsRuntimeAvailable() else {
+    guard requestedMode == "tasks" || requestedMode == "manage" || GhostexCEFIsRuntimeAvailable() else {
       /**
        CDXC:EditorPanes 2026-05-06-14:21
        Project editors must embed code-server through Chromium without browser
@@ -4947,10 +5001,7 @@ final class TerminalWorkspaceView: NSView {
        behavior.
 
        CDXC:ProjectBoard 2026-05-23-03:16:
-       Project mode is the exception to the Chromium requirement because it is
-       now a first-party bundled board backed by WKWebView. Keep the CEF guard
-       scoped to Code and Git so Project can open even when Chromium is not
-       available.
+       Project and Manage modes are the exceptions to the Chromium requirement because they are first-party bundled WKWebView workareas. Keep the CEF guard scoped to Code and Git so local project pages can open even when Chromium is not available.
        */
       sendEvent(
         .terminalError(
@@ -5047,6 +5098,7 @@ final class TerminalWorkspaceView: NSView {
       mode: requestedMode,
       newBrowserTabUrl: newBrowserTabUrl,
       projectId: command.projectId,
+      projectRootPath: command.projectPath?.trimmingCharacters(in: .whitespacesAndNewlines),
       projectTitle: command.projectTitle ?? command.title,
       showsProjectTabs: command.showsProjectTabs ?? false,
       tabs: initialTabs,
@@ -5112,7 +5164,7 @@ final class TerminalWorkspaceView: NSView {
      layout, focus, and toolbar commands.
      */
     let projectEditorMode = projectEditorModeFromNativeEditorId(projectId)
-    let useWebKitProjectView = !isPlaceholder && projectEditorMode == "tasks"
+    let useWebKitProjectView = !isPlaceholder && (projectEditorMode == "tasks" || projectEditorMode == "manage")
     let usesDeferredCodeServerNavigation = !isPlaceholder && projectEditorMode == "code"
     let tabUrl = isPlaceholder
       ? url
@@ -5133,34 +5185,60 @@ final class TerminalWorkspaceView: NSView {
        CDXC:ProjectBoard 2026-06-02-13:31:
        The Project mode board is a first-party local React app and should use WKWebView, not the Chromium/CEF browser path used by Code and Git.
        WebKit gives the board a native message handler that forwards Beads requests to gxserver typed operations while preserving the project-editor companion layout.
+
+       CDXC:Manage 2026-06-20-04:36:
+       Manage uses the same bundled WKWebView project-editor path as Project while keeping its own read-only file bridge, because file browsing is local app UI and should not require the Chromium project-browser stack.
        */
       let configuration = WKWebViewConfiguration()
       configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
       configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
       configuration.websiteDataStore = .default()
-      let beadsBridge = ProjectBeadsBridge { [weak self] request, webView in
-        self?.handleProjectBeadsBridgeRequest(request, webView: webView)
-      }
-      let projectBoardBridge = ProjectBoardBridge { [weak self] request in
-        if request.action == "projectEditorFocusOwnerChanged" {
-          self?.handleProjectBoardFocusOwnerChanged(request)
-          return
+      let beadsBridge: ProjectBeadsBridge?
+      let projectBoardImageBridge: ProjectBoardImageBridge?
+      let manageFilesBridge: ManageFilesBridge?
+      if projectEditorMode == "tasks" {
+        let nextBeadsBridge = ProjectBeadsBridge { [weak self] request, webView in
+          self?.handleProjectBeadsBridgeRequest(request, webView: webView)
         }
-        self?.sendEvent(.projectBoardRequest(request))
+        let projectBoardBridge = ProjectBoardBridge { [weak self] request in
+          if request.action == "projectEditorFocusOwnerChanged" {
+            self?.handleProjectBoardFocusOwnerChanged(request)
+            return
+          }
+          self?.sendEvent(.projectBoardRequest(request))
+        }
+        let nextProjectBoardImageBridge = ProjectBoardImageBridge { [weak self] request, webView in
+          self?.handleProjectBoardImageBridgeRequest(request, webView: webView)
+        }
+        configuration.userContentController.add(nextBeadsBridge, name: ProjectBeadsBridge.messageHandlerName)
+        configuration.userContentController.add(
+          projectBoardBridge,
+          name: ProjectBoardBridge.messageHandlerName)
+        configuration.userContentController.add(
+          nextProjectBoardImageBridge,
+          name: ProjectBoardImageBridge.messageHandlerName)
+        beadsBridge = nextBeadsBridge
+        projectBoardImageBridge = nextProjectBoardImageBridge
+        manageFilesBridge = nil
+      } else {
+        /*
+         CDXC:Manage 2026-06-20-04:36:
+         Manage is a local read-only file browser, not a Project Board. Give it a narrow WK bridge for list/read requests instead of exposing Beads or board mutation handlers to this page.
+         */
+        let nextManageFilesBridge = ManageFilesBridge { [weak self] request, webView in
+          self?.handleManageFilesBridgeRequest(request, webView: webView)
+        }
+        configuration.userContentController.add(
+          nextManageFilesBridge,
+          name: ManageFilesBridge.messageHandlerName)
+        beadsBridge = nil
+        projectBoardImageBridge = nil
+        manageFilesBridge = nextManageFilesBridge
       }
-      let projectBoardImageBridge = ProjectBoardImageBridge { [weak self] request, webView in
-        self?.handleProjectBoardImageBridgeRequest(request, webView: webView)
-      }
-      configuration.userContentController.add(beadsBridge, name: ProjectBeadsBridge.messageHandlerName)
-      configuration.userContentController.add(
-        projectBoardBridge,
-        name: ProjectBoardBridge.messageHandlerName)
-      configuration.userContentController.add(
-        projectBoardImageBridge,
-        name: ProjectBoardImageBridge.messageHandlerName)
       let projectWebView = WKWebView(frame: .zero, configuration: configuration)
-      beadsBridge.webView = projectWebView
-      projectBoardImageBridge.webView = projectWebView
+      beadsBridge?.webView = projectWebView
+      projectBoardImageBridge?.webView = projectWebView
+      manageFilesBridge?.webView = projectWebView
       if #available(macOS 13.3, *) {
         projectWebView.isInspectable = true
       }
@@ -5357,10 +5435,10 @@ final class TerminalWorkspaceView: NSView {
      session mounted in the left companion pane unless the user already closed
      that companion for this editor visit.
      CDXC:ModeSwitcher 2026-05-15-14:42:
-     Code, Git, and tasks-backed Project modes use separate mode-scoped
+     Code, Browser, Project, and Manage modes use separate mode-scoped
      project-editor pane IDs for the same project. Focusing one pane must hide
-     every other project-editor host immediately so mode switches keep each CEF
-     tab alive without showing stale content from the previously active mode.
+     every other project-editor host immediately so mode switches keep each
+     hosted page alive without showing stale content from the previously active mode.
    */
     let didSwitchProjectEditor = activeProjectEditorId != projectId
     let currentCompanionLayout = projectEditorCompanionLayout(in: bounds)
@@ -5431,7 +5509,7 @@ final class TerminalWorkspaceView: NSView {
     if didSwitchProjectEditor {
       /*
        CDXC:ZmxPersistenceRefresh 2026-05-18-15:03:
-       Switching from Agents into Code, Git, or Project mode surfaces the current companion terminal without always taking the ordinary terminal-focus path.
+       Switching from Agents into Code, Browser, Project, or Manage mode surfaces the current companion terminal without always taking the ordinary terminal-focus path.
        Refresh the zmx terminal pane that is actually visible after the editor and companion frames are applied.
        */
       refreshZmxPersistenceTerminalsForSurfacedPanes(reason: "focusProjectEditorPane.modeSwitch")
@@ -5692,6 +5770,8 @@ final class TerminalWorkspaceView: NSView {
       return "Browser - \(visibleTitle)"
     case "tasks":
       return "Project - \(visibleTitle)"
+    case "manage":
+      return "Manage - \(visibleTitle)"
     default:
       return visibleTitle
     }
@@ -7450,7 +7530,7 @@ final class TerminalWorkspaceView: NSView {
     if previousActiveProjectEditorId != activeProjectEditorId {
       /*
        CDXC:ZmxPersistenceRefresh 2026-05-18-15:03:
-       Sidebar mode switches between Agents and Code/Git/Project can reveal a zmx terminal set through layout state rather than direct terminal focus.
+       Sidebar mode switches between Agents and Code/Browser/Project/Manage can reveal a zmx terminal set through layout state rather than direct terminal focus.
        Refresh every surfaced zmx terminal after the active project-editor id is applied so both directions repair persisted terminal text.
        */
       refreshZmxPersistenceTerminalsForSurfacedPanes(reason: "setActiveTerminalSet.projectEditorModeSwitch")
@@ -7482,7 +7562,7 @@ final class TerminalWorkspaceView: NSView {
     {
       /*
        CDXC:ZmxPersistenceRefresh 2026-05-18-15:44:
-       Companion-pane show/hide and retargeting changes the visible terminal frame inside Code/Git/Project mode without always being a pane-resize drag.
+       Companion-pane show/hide and retargeting changes the visible terminal frame inside Code/Browser/Project/Manage mode without always being a pane-resize drag.
        Use the surfaced-only scheduler so hidden Agents tabs do not receive zmx refresh requests.
        */
       scheduleZmxPersistenceTerminalRefreshAfterResize(reason: "setActiveTerminalSet.projectEditorCompanionChanged")
@@ -8551,7 +8631,7 @@ final class TerminalWorkspaceView: NSView {
      CDXC:ProjectEditorCompanion 2026-05-16-14:42:
      The agent side pane hidden flag is owned by the sidebar as project state
      and applies to every mode-scoped editor pane for that project. Native must
-     honor it during editor creation and layout sync so Code, Git, and Project
+     honor it during editor creation and layout sync so Code, Browser, Project, and Manage
      surfaces do not reopen the companion after the user closed it.
 
      CDXC:ProjectEditorCompanion 2026-05-27-08:42:
@@ -8735,7 +8815,7 @@ final class TerminalWorkspaceView: NSView {
     }
     /*
      CDXC:ProjectEditorCompanion 2026-05-23-13:50:
-     When the Code/Git/Project companion pane is hidden, sidebar session clicks must leave the project-editor workarea and focus the clicked session in Agents view. Fall through to the normal focusTerminal/focusWebPane path instead of retargeting an invisible companion pane.
+     When the Code/Browser/Project/Manage companion pane is hidden, sidebar session clicks must leave the project-editor workarea and focus the clicked session in Agents view. Fall through to the normal focusTerminal/focusWebPane path instead of retargeting an invisible companion pane.
      */
     if projectEditorCompanionPaneHidden {
       return false
@@ -8822,7 +8902,7 @@ final class TerminalWorkspaceView: NSView {
      Refresh zmx after the companion pane has been retargeted and focused so broken persisted terminal text is corrected without manual terminal input.
 
      CDXC:ZmxPersistenceRefresh 2026-06-04-21:39:
-     Sidebar session-button clicks inside Code/Git/Project companion mode need the same always-refresh behavior as normal Agents-mode sidebar clicks, because retargeting can be a no-op while the attached zmx client still needs a repaint.
+     Sidebar session-button clicks inside Code/Browser/Project/Manage companion mode need the same always-refresh behavior as normal Agents-mode sidebar clicks, because retargeting can be a no-op while the attached zmx client still needs a repaint.
      */
     if sessions[sessionId] != nil {
       if reason == "sidebarFocusCommand" {
@@ -8880,7 +8960,7 @@ final class TerminalWorkspaceView: NSView {
     }
     /*
      CDXC:ProjectEditorCompanion 2026-06-08-09:47:
-     Sidebar session switches inside Code/Git/Project mode change only the left
+     Sidebar session switches inside Code/Browser/Project/Manage mode change only the left
      companion owner. Re-running the full workspace layout also touches the
      adjacent CEF editor host, which can flash even when its frame is unchanged.
      If the editor host is already mounted at the expected frame, update only
@@ -10195,6 +10275,337 @@ final class TerminalWorkspaceView: NSView {
     webView.evaluateJavaScript(script, completionHandler: nil)
   }
 
+  private func handleManageFilesBridgeRequest(
+    _ request: ManageFilesBridgeRequest,
+    webView: WKWebView?
+  ) {
+    guard let webView,
+      let entry = projectEditorSessionEntry(for: webView),
+      entry.session.mode == "manage"
+    else {
+      return
+    }
+    let projectEditorId = request.projectEditorId?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let projectEditorId, !projectEditorId.isEmpty, projectEditorId != entry.projectId {
+      Self.dispatchManageFilesBridgeResponse(
+        ManageFilesBridgeResponse(
+          action: request.action,
+          entries: nil,
+          error: "Manage request was not sent by this project editor.",
+          file: nil,
+          requestId: request.requestId,
+          rootName: nil),
+        to: webView)
+      return
+    }
+    let rootPath = entry.session.projectRootPath ?? ""
+    let responseTarget = ProjectBeadsBridgeResponseTarget(webView: webView)
+    Task.detached(priority: .userInitiated) {
+      let response = Self.runManageFilesBridgeRequest(request, projectRootPath: rootPath)
+      await MainActor.run {
+        guard let webView = responseTarget.webView else {
+          return
+        }
+        Self.dispatchManageFilesBridgeResponse(response, to: webView)
+      }
+    }
+  }
+
+  private static func runManageFilesBridgeRequest(
+    _ request: ManageFilesBridgeRequest,
+    projectRootPath: String
+  ) -> ManageFilesBridgeResponse {
+    do {
+      let rootURL = try manageProjectRootURL(projectRootPath)
+      switch request.action {
+      case "list":
+        return ManageFilesBridgeResponse(
+          action: request.action,
+          entries: try manageProjectFileEntries(rootURL: rootURL),
+          error: nil,
+          file: nil,
+          requestId: request.requestId,
+          rootName: rootURL.lastPathComponent)
+      case "read":
+        return ManageFilesBridgeResponse(
+          action: request.action,
+          entries: nil,
+          error: nil,
+          file: try manageProjectFilePreview(rootURL: rootURL, path: request.path),
+          requestId: request.requestId,
+          rootName: rootURL.lastPathComponent)
+      default:
+        throw ManageFilesBridgeError.invalidRequest("Unsupported Manage file action.")
+      }
+    } catch {
+      return ManageFilesBridgeResponse(
+        action: request.action,
+        entries: nil,
+        error: error.localizedDescription,
+        file: nil,
+        requestId: request.requestId,
+        rootName: nil)
+    }
+  }
+
+  private static let manageFileListMaxEntries = 1_200
+  private static let manageFileListMaxDepth = 8
+  private static let manageFilePreviewMaxBytes = 400_000
+  private static let manageIgnoredDirectoryNames: Set<String> = [
+    ".cache",
+    ".git",
+    ".gradle",
+    ".next",
+    ".nuxt",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svelte-kit",
+    ".turbo",
+    ".tox",
+    ".venv",
+    ".vite",
+    "DerivedData",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "out",
+    "storybook-static",
+    "target",
+    "tmp",
+    "venv",
+    "zig-out",
+  ]
+
+  private static func manageProjectRootURL(_ path: String) throws -> URL {
+    let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedPath.isEmpty else {
+      throw ManageFilesBridgeError.invalidRequest("No active project root is available.")
+    }
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: trimmedPath, isDirectory: &isDirectory),
+      isDirectory.boolValue
+    else {
+      throw ManageFilesBridgeError.invalidRequest("The active project root is unavailable.")
+    }
+    return URL(fileURLWithPath: trimmedPath, isDirectory: true)
+      .standardizedFileURL
+      .resolvingSymlinksInPath()
+  }
+
+  private static func manageNormalizedRelativePath(_ path: String?) throws -> String {
+    let trimmedPath = path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if trimmedPath.isEmpty {
+      return ""
+    }
+    guard !trimmedPath.contains("\0"),
+      !trimmedPath.hasPrefix("/")
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Manage paths must be project-relative.")
+    }
+    let components = trimmedPath.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+    guard !components.contains("."),
+      !components.contains("..")
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Manage paths must stay inside the project.")
+    }
+    return components.joined(separator: "/")
+  }
+
+  private static func manageURL(
+    rootURL: URL,
+    relativePath: String?
+  ) throws -> (url: URL, relativePath: String) {
+    let normalizedRelativePath = try manageNormalizedRelativePath(relativePath)
+    let url =
+      normalizedRelativePath.isEmpty
+      ? rootURL
+      : rootURL.appendingPathComponent(normalizedRelativePath, isDirectory: false)
+    let resolvedURL = url.standardizedFileURL.resolvingSymlinksInPath()
+    guard manageURLIsInsideProjectRoot(resolvedURL, rootURL: rootURL) else {
+      throw ManageFilesBridgeError.invalidRequest("Manage paths must stay inside the project.")
+    }
+    return (resolvedURL, normalizedRelativePath)
+  }
+
+  private static func manageURLIsInsideProjectRoot(_ url: URL, rootURL: URL) -> Bool {
+    let rootPath = rootURL.path
+    let candidatePath = url.path
+    return candidatePath == rootPath || candidatePath.hasPrefix("\(rootPath)/")
+  }
+
+  private static func manageProjectFileEntries(rootURL: URL) throws -> [ManageFileEntry] {
+    /*
+     CDXC:Manage 2026-06-20-04:36:
+     The first Manage file sidebar should be useful on large code projects without indexing user content into logs. Recursively list project-relative metadata only, skip dependency/build/cache directories, and cap entries/depth so opening Manage cannot walk an unbounded tree.
+     */
+    var entries: [ManageFileEntry] = []
+    try manageAppendProjectFileEntries(
+      entries: &entries,
+      rootURL: rootURL,
+      directoryURL: rootURL,
+      relativeDirectoryPath: "",
+      depth: 0)
+    return entries
+  }
+
+  private static func manageAppendProjectFileEntries(
+    entries: inout [ManageFileEntry],
+    rootURL: URL,
+    directoryURL: URL,
+    relativeDirectoryPath: String,
+    depth: Int
+  ) throws {
+    guard entries.count < manageFileListMaxEntries,
+      depth <= manageFileListMaxDepth
+    else {
+      return
+    }
+    let keys: Set<URLResourceKey> = [
+      .contentModificationDateKey,
+      .fileSizeKey,
+      .isDirectoryKey,
+      .isSymbolicLinkKey,
+    ]
+    let children = try FileManager.default.contentsOfDirectory(
+      at: directoryURL,
+      includingPropertiesForKeys: Array(keys),
+      options: [.skipsPackageDescendants])
+    let sortedChildren = children.sorted { left, right in
+      let leftValues = try? left.resourceValues(forKeys: keys)
+      let rightValues = try? right.resourceValues(forKeys: keys)
+      let leftIsDirectory = leftValues?.isDirectory == true
+      let rightIsDirectory = rightValues?.isDirectory == true
+      if leftIsDirectory != rightIsDirectory {
+        return leftIsDirectory && !rightIsDirectory
+      }
+      return left.lastPathComponent.localizedStandardCompare(right.lastPathComponent) == .orderedAscending
+    }
+    for child in sortedChildren {
+      if entries.count >= manageFileListMaxEntries {
+        return
+      }
+      let name = child.lastPathComponent
+      if name == ".DS_Store" {
+        continue
+      }
+      let values = try? child.resourceValues(forKeys: keys)
+      let isDirectory = values?.isDirectory == true
+      let isSymbolicLink = values?.isSymbolicLink == true
+      if isDirectory && manageIgnoredDirectoryNames.contains(name) {
+        continue
+      }
+      let resolvedChild = child.standardizedFileURL.resolvingSymlinksInPath()
+      if !manageURLIsInsideProjectRoot(resolvedChild, rootURL: rootURL) {
+        continue
+      }
+      let relativePath = relativeDirectoryPath.isEmpty ? name : "\(relativeDirectoryPath)/\(name)"
+      entries.append(
+        ManageFileEntry(
+          depth: depth,
+          kind: isDirectory ? "directory" : "file",
+          modifiedAt: manageISOString(values?.contentModificationDate),
+          name: name,
+          path: relativePath,
+          size: isDirectory ? nil : values?.fileSize.map(Int64.init)))
+      if isDirectory && !isSymbolicLink && depth < manageFileListMaxDepth {
+        try manageAppendProjectFileEntries(
+          entries: &entries,
+          rootURL: rootURL,
+          directoryURL: child,
+          relativeDirectoryPath: relativePath,
+          depth: depth + 1)
+      }
+    }
+  }
+
+  private static func manageProjectFilePreview(
+    rootURL: URL,
+    path: String?
+  ) throws -> ManageFilePreview {
+    /*
+     CDXC:Manage 2026-06-20-04:36:
+     Manage previews should show readable source, markdown, and text files but must not dump arbitrary binary data or huge files into WKWebView. Return a clear unsupported state instead of partial unsafe output.
+     */
+    let target = try manageURL(rootURL: rootURL, relativePath: path)
+    guard !target.relativePath.isEmpty else {
+      throw ManageFilesBridgeError.invalidRequest("Select a project file to preview.")
+    }
+    let keys: Set<URLResourceKey> = [
+      .contentModificationDateKey,
+      .fileSizeKey,
+      .isDirectoryKey,
+    ]
+    let values = try target.url.resourceValues(forKeys: keys)
+    guard values.isDirectory != true else {
+      throw ManageFilesBridgeError.invalidRequest("Select a file to preview.")
+    }
+    let size = values.fileSize.map(Int64.init)
+    let name = target.url.lastPathComponent
+    if let size, size > Int64(manageFilePreviewMaxBytes) {
+      return ManageFilePreview(
+        content: nil,
+        error: "File is too large to preview.",
+        kind: "unsupported",
+        modifiedAt: manageISOString(values.contentModificationDate),
+        name: name,
+        path: target.relativePath,
+        size: size)
+    }
+    let data = try Data(contentsOf: target.url, options: [.mappedIfSafe])
+    if data.contains(0) {
+      return ManageFilePreview(
+        content: nil,
+        error: "Binary files are not previewed.",
+        kind: "unsupported",
+        modifiedAt: manageISOString(values.contentModificationDate),
+        name: name,
+        path: target.relativePath,
+        size: size)
+    }
+    guard let text = String(data: data, encoding: .utf8) else {
+      return ManageFilePreview(
+        content: nil,
+        error: "This file is not valid UTF-8 text.",
+        kind: "unsupported",
+        modifiedAt: manageISOString(values.contentModificationDate),
+        name: name,
+        path: target.relativePath,
+        size: size)
+    }
+    return ManageFilePreview(
+      content: text,
+      error: nil,
+      kind: "text",
+      modifiedAt: manageISOString(values.contentModificationDate),
+      name: name,
+      path: target.relativePath,
+      size: size)
+  }
+
+  private static func manageISOString(_ date: Date?) -> String? {
+    guard let date else {
+      return nil
+    }
+    return ISO8601DateFormatter().string(from: date)
+  }
+
+  private static func dispatchManageFilesBridgeResponse(
+    _ response: ManageFilesBridgeResponse,
+    to webView: WKWebView
+  ) {
+    guard let data = try? JSONEncoder().encode(response),
+      let json = String(data: data, encoding: .utf8)
+    else {
+      return
+    }
+    let script = """
+      window.dispatchEvent(new CustomEvent('\(manageFilesResponseEventName)', { detail: \(json) }));
+      undefined;
+      """
+    webView.evaluateJavaScript(script, completionHandler: nil)
+  }
+
   func dispatchProjectBoardBridgeResponse(_ response: ProjectBoardResponse) {
     let projectId = response.projectId ?? activeProjectEditorId
     let targetSession =
@@ -10216,7 +10627,7 @@ final class TerminalWorkspaceView: NSView {
   private static func modeSwitcherDebugURLKind(_ value: String?) -> String {
     /*
      CDXC:ModeSwitcherDiagnostics 2026-06-15-00:21:
-     Agents/Source/Browser/Kanban switch repros need native load-state breadcrumbs
+     Agents/Source/Browser/Kanban/Manage switch repros need native load-state breadcrumbs
      without raw URLs, titles, paths, or page content. Classify destinations by
      scheme only so support can distinguish CEF, WebKit, and code-server paths
      while the shared support-bundle log remains safe to zip.
@@ -14422,7 +14833,7 @@ final class TerminalWorkspaceView: NSView {
     session.hostView.frame = contentRect
     /*
      CDXC:ProjectEditorCompanion 2026-06-08-13:04:
-     Retargeting the Code/Git/Project companion pane to a newly opened T3 web pane must be frame-only while AppKit is already laying out the active editor surface. Refreshing the hosted WKWebView from this parent layout pass marks the host dirty again and can create the repeated Update Constraints loop seen when closing then opening a T3 Code agent.
+     Retargeting the Code/Browser/Project/Manage companion pane to a newly opened T3 web pane must be frame-only while AppKit is already laying out the active editor surface. Refreshing the hosted WKWebView from this parent layout pass marks the host dirty again and can create the repeated Update Constraints loop seen when closing then opening a T3 Code agent.
      */
     if mode == .normal {
       session.hostView.refreshHostedWebView(reason: "setWebPaneFrame")
@@ -18016,6 +18427,31 @@ private final class ProjectBoardImageBridge: NSObject, WKScriptMessageHandler {
       JSONSerialization.isValidJSONObject(dictionary),
       let data = try? JSONSerialization.data(withJSONObject: dictionary),
       let request = try? JSONDecoder().decode(ProjectBoardImageBridgeRequest.self, from: data)
+    else {
+      return
+    }
+    onRequest(request, webView)
+  }
+}
+
+private final class ManageFilesBridge: NSObject, WKScriptMessageHandler {
+  static let messageHandlerName = "ghostexManageFiles"
+
+  weak var webView: WKWebView?
+
+  private let onRequest: (ManageFilesBridgeRequest, WKWebView?) -> Void
+
+  init(onRequest: @escaping (ManageFilesBridgeRequest, WKWebView?) -> Void) {
+    self.onRequest = onRequest
+  }
+
+  func userContentController(
+    _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
+  ) {
+    guard let dictionary = message.body as? [String: Any],
+      JSONSerialization.isValidJSONObject(dictionary),
+      let data = try? JSONSerialization.data(withJSONObject: dictionary),
+      let request = try? JSONDecoder().decode(ManageFilesBridgeRequest.self, from: data)
     else {
       return
     }
@@ -24785,9 +25221,9 @@ private final class TerminalSessionTitleBarView: NSView {
         >= minimumContentWidthForCollapsedControls
     var separatorIndex = 0
     if usesProjectEditorCompanionChrome {
-      /*
-       CDXC:ProjectEditorCompanion 2026-05-16-11:46:
-       The side companion pane in Code, Git, and Project views needs a minimal
+     /*
+      CDXC:ProjectEditorCompanion 2026-05-16-11:46:
+       The side companion pane in Code, Browser, Project, and Manage views needs a minimal
        titlebar without generic session pane actions. Hide the normal action
        buttons and collapsed overflow menu in this embedded-editor surface.
        */
@@ -25548,7 +25984,7 @@ private final class TerminalSessionTitleBarView: NSView {
     }
     /**
      CDXC:ProjectEditorCompanion 2026-05-16-11:46:
-     Code, Git, and Project companion panes should not show the generic pane
+     Code, Browser, Project, and Manage companion panes should not show the generic pane
      overflow menu in their titlebar. Agents view panes still use the normal
      action menu because they do not enable companion controls.
 

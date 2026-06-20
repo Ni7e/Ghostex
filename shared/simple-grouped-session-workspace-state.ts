@@ -2420,9 +2420,9 @@ function wakeSessionsIntoFocusedPaneTabGroup(
     currentVisibleCount = clampSupportedVisibleCount(Math.max(1, nextVisibleSessionIds.length));
   }
 
-  /**
+   /**
    * CDXC:SessionSleep 2026-05-18-15:47:
-   * Any wake path can run while Code/Git owns the visible workarea. Reattach
+   * Any wake path can run while Code/Browser/Project/Manage owns the visible workarea. Reattach
    * restored sessions to the focused pane tab group before marking them active
    * so the later Agents-mode native layout sync does not append each awake but
    * paneLayout-missing session as a separate split pane.

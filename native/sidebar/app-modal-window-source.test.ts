@@ -439,6 +439,7 @@ describe("native app modal window source", () => {
     expect(titlebarHostSource).toContain("SettingsDismissal:titlebarSourceMode");
     expect(titlebarHostSource).toContain("SettingsDismissal:titlebarBrowserMode");
     expect(titlebarHostSource).toContain("SettingsDismissal:titlebarKanbanMode");
+    expect(titlebarHostSource).toContain("SettingsDismissal:titlebarManageMode");
 
     expect(nativeSidebarSource).toContain("SettingsDismissal:nativeHotkeyCreateSession");
     expect(nativeSidebarSource).toContain("SettingsDismissal:nativeHotkeyRename");

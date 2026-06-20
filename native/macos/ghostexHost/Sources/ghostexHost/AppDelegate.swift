@@ -3922,6 +3922,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       break
     case .openTasksPlaceholderFromTitlebar:
       break
+    case .openManageFromTitlebar:
+      break
     case .refreshWorkspaceOpenTargetAvailabilityFromTitlebar:
       break
     case .rotateActivePaneLayoutClockwiseFromTitlebar:
@@ -5457,13 +5459,14 @@ private final class NativeSettingsStore {
      CDXC:Hotkeys 2026-06-07-14:24:
      Terminal-focused AppKit dispatch must use the same default hotkey table as
      the shared sidebar model. Cmd+T creates a terminal tab, Cmd+N creates a
-     browser tab, and Option+1..4 switch Agents, Source, Browser, and Kanban
+     browser tab, and Option+1..5 switch Agents, Source, Browser, Kanban, and Manage
      without depending on the sidebar WebKit DOM receiving the keydown.
      */
     "switchAgentsView": "alt+1",
     "switchSourceView": "alt+2",
     "switchGitHubView": "alt+3",
     "switchKanbanView": "alt+4",
+    "switchManageView": "alt+5",
     "toggleSidebarCollapsed": "cmd+b",
   ]
   private static let legacyHotkeyActionIds: [String: String] = [
@@ -8255,7 +8258,7 @@ final class ghostexRootView: NSView {
      letting the titlebar infer state by running separate Git or code-server
      checks.
      CDXC:ModeSwitcher 2026-05-15-18:20:
-     The titlebar's selected Agents/Code/Git/Project segment must come from
+     The titlebar's selected Agents/Code/Browser/Project/Manage segment must come from
      the same sidebar layout sync that restores the visible workspace surface,
      so a launch directly into Code mode cannot leave Agents highlighted.
      */
@@ -8912,6 +8915,35 @@ final class ghostexRootView: NSView {
     }
   }
 
+  private func openManageFromTitlebar() {
+    /**
+     CDXC:Manage 2026-06-20-04:36:
+     The Manage titlebar tab is app chrome like Kanban. Forward it into the sidebar adapter so one React state owner validates the active project and opens the bundled WKWebView project-editor surface.
+     */
+    AppDelegate.appendModeSwitcherDebugLog(
+      event: "titlebarModeSwitch.swiftForwardStart",
+      details: AppDelegate.jsonObjectString([
+        "targetMode": "manage",
+        "timeInterval": "\(Date().timeIntervalSince1970)",
+      ]))
+    sidebarView.evaluateJavaScript(
+      """
+      window.__ghostex_NATIVE_SIDEBAR__?.openManageFromTitlebar?.();
+      undefined;
+      """
+    ) { _, error in
+      AppDelegate.appendModeSwitcherDebugLog(
+        event: "titlebarModeSwitch.swiftForwardCompleted",
+        details: AppDelegate.jsonObjectString([
+          "errorCode": error.map { ($0 as NSError).code } ?? 0,
+          "errorDomain": error.map { ($0 as NSError).domain } ?? "",
+          "hasError": error != nil,
+          "targetMode": "manage",
+          "timeInterval": "\(Date().timeIntervalSince1970)",
+        ]))
+    }
+  }
+
   private func runSidebarCommandFromTitlebar(_ command: RunSidebarCommandFromTitlebar) {
     /**
      CDXC:TitlebarActions 2026-05-11-02:46
@@ -9387,6 +9419,8 @@ final class ghostexRootView: NSView {
       toggleProjectEditorCompanionFromTitlebar()
     case .openTasksPlaceholderFromTitlebar:
       openTasksPlaceholderFromTitlebar()
+    case .openManageFromTitlebar:
+      openManageFromTitlebar()
     case .refreshWorkspaceOpenTargetAvailabilityFromTitlebar:
       refreshWorkspaceOpenTargetAvailabilityFromTitlebar()
     case .rotateActivePaneLayoutClockwiseFromTitlebar:

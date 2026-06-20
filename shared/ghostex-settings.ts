@@ -508,7 +508,7 @@ export type ghostexSettings = {
   /**
    * CDXC:AutoSleep 2026-05-28-08:06:
    * Auto Sleep is a settings-owned policy for retiring idle VS Code, Git,
-   * Project, browser, and agent sessions through their native sleep paths.
+   * Project, Manage, browser, and agent sessions through their native sleep paths.
    * Keep each surface independently configurable so users can preserve existing
    * editor behavior while opting agent terminals in separately.
    */

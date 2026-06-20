@@ -37,6 +37,7 @@ type GhostexNativeSidebarBridge = {
   toggleProjectEditorCompanionFromTitlebar: () => void;
   sleepInactiveSessionsFromTitlebar: (sessionIds: string[]) => void;
   openTasksPlaceholderFromTitlebar: () => void;
+  openManageFromTitlebar: () => void;
   refreshWorkspaceOpenTargetAvailabilityFromTitlebar: () => void;
   rotateActivePaneLayoutClockwiseFromTitlebar: () => void;
   sleepPetOverlayFromPet: () => void;

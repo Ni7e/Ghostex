@@ -1047,7 +1047,7 @@ export function SortableSessionCard({
      * Double-click and context-menu Focus should zoom the clicked session's
      * pane tab group rather than rename the session. Route through the
      * controller so it can switch to Agents mode and later restore the prior
-     * Code/Git/Project surface on unfocus.
+     * Code/Browser/Project/Manage surface on unfocus.
      */
     vscode.postMessage({
       sessionId: session.sessionId,
