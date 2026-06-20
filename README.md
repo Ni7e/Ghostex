@@ -148,7 +148,7 @@ Ghostex supports notifications, pets, menu bar indicators (running/done agents),
 
 ## Useful Extras
 
-- Continue over SSH, then attach with `ghostex` or `gx`.
+- Install gxserver daemon on remote. Connect over SSH in settings. Remote machines show in sidebar.
 - Create worktrees and merge them back easily.
 - Find previous threads by keyword and continue with context.
 - Sync session titles and status into the UI.
