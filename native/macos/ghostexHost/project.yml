@@ -13,20 +13,20 @@ settings:
     # maintainer's Apple signing identity. Developers can set signing locally
     # in Xcode or with an untracked config.
     CODE_SIGN_STYLE: Automatic
-    # CDXC:AutoUpdate 2026-06-19-20:40: Sparkle compares CFBundleVersion, not
+    # CDXC:AutoUpdate 2026-06-21-04:24: Sparkle compares CFBundleVersion, not
     # only CFBundleShortVersionString. Release builds use semver-derived numeric
     # build values so each public update is greater than earlier installs.
-    CURRENT_PROJECT_VERSION: 42103
+    CURRENT_PROJECT_VERSION: 42104
     GENERATE_INFOPLIST_FILE: YES
     LD_RUNPATH_SEARCH_PATHS:
       - "$(inherited)"
       - "@executable_path/../Frameworks"
     MACOSX_DEPLOYMENT_TARGET: "13.0"
-    # CDXC:Distribution 2026-06-19-20:40: GitHub and Sparkle release v4.21.3 must
+    # CDXC:Distribution 2026-06-21-04:24: GitHub and Sparkle release v4.21.4 must
     # publish a notarized Developer ID Ghostex app whose bundle metadata
     # matches the GitHub arm64 release asset, Sparkle appcast, and the
     # Apple Silicon Ghostex update feed.
-    MARKETING_VERSION: "4.21.3"
+    MARKETING_VERSION: "4.21.4"
     SDKROOT: macosx
     SWIFT_VERSION: "5.0"
     # CDXC:ChromiumBrowserPanes 2026-05-04-16:38: Swift needs both Ghostty's
