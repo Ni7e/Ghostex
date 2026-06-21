@@ -14337,7 +14337,8 @@ private final class NativeAppToastView: NSView {
   private static let iconTextGap: CGFloat = 14
   private static let minimumDescriptionHeight: CGFloat = 18
   private static let minimumHeight: CGFloat = 52
-  private static let titleHeight: CGFloat = 22
+  private static let minimumTitleHeight: CGFloat = 22
+  private static let titleFont = NSFont.systemFont(ofSize: 14, weight: .semibold)
   private static let verticalPadding: CGFloat = 13
 
   private let actionButton = NativeToastActionButton()
@@ -14360,10 +14361,12 @@ private final class NativeAppToastView: NSView {
     layer?.cornerRadius = 12
     layer?.masksToBounds = true
 
-    titleField.font = .systemFont(ofSize: 14, weight: .semibold)
-    titleField.lineBreakMode = .byTruncatingTail
+    titleField.font = Self.titleFont
+    titleField.lineBreakMode = .byWordWrapping
+    titleField.maximumNumberOfLines = 0
+    titleField.cell?.wraps = true
+    titleField.cell?.isScrollable = false
     titleField.textColor = NSColor(srgbRed: 244.0 / 255.0, green: 244.0 / 255.0, blue: 245.0 / 255.0, alpha: 1)
-    titleField.usesSingleLineMode = true
     descriptionField.font = Self.descriptionFont
     descriptionField.lineBreakMode = .byWordWrapping
     descriptionField.maximumNumberOfLines = 0
@@ -14429,6 +14432,7 @@ private final class NativeAppToastView: NSView {
       ? bounds.width - Self.horizontalPadding
       : actionFrame.minX - Self.actionGap
     let textWidth = max(40, textRight - leadingContentX)
+    let titleHeight = Self.measuredTitleHeight(request.title, width: textWidth)
     if hasDescription {
       let descriptionHeight = Self.measuredDescriptionHeight(
         request.description ?? "",
@@ -14437,18 +14441,18 @@ private final class NativeAppToastView: NSView {
         x: leadingContentX,
         y: Self.verticalPadding,
         width: textWidth,
-        height: Self.titleHeight)
+        height: titleHeight)
       descriptionField.frame = CGRect(
         x: leadingContentX,
-        y: Self.verticalPadding + Self.titleHeight + Self.descriptionTopGap,
+        y: Self.verticalPadding + titleHeight + Self.descriptionTopGap,
         width: textWidth,
         height: descriptionHeight)
     } else {
       titleField.frame = CGRect(
         x: leadingContentX,
-        y: floor((bounds.height - Self.titleHeight) / 2),
+        y: floor((bounds.height - titleHeight) / 2),
         width: textWidth,
-        height: Self.titleHeight)
+        height: titleHeight)
       descriptionField.frame = .zero
     }
   }
@@ -14460,14 +14464,20 @@ private final class NativeAppToastView: NSView {
      of a fixed 72px two-line frame. Git error messages can be longer than two
      lines, so measure the current title/action/spinner layout width and grow
      the panel height before AppKit lays out the toast stack.
+
+     CDXC:AppToasts 2026-06-21-13:59:
+     Daemon startup errors can arrive as title-only toasts. Measure and wrap the
+     title too so those messages expand vertically instead of truncating with an
+     ellipsis while the sidebar is unavailable.
      */
-    guard let description = request.description else {
-      return CGSize(width: width, height: Self.minimumHeight)
-    }
     let textWidth = Self.textWidth(for: request, width: width)
+    let titleHeight = Self.measuredTitleHeight(request.title, width: textWidth)
+    guard let description = request.description else {
+      let titleOnlyHeight = Self.verticalPadding * 2 + titleHeight
+      return CGSize(width: width, height: ceil(max(Self.minimumHeight, titleOnlyHeight)))
+    }
     let descriptionHeight = Self.measuredDescriptionHeight(description, width: textWidth)
-    let textHeight =
-      Self.verticalPadding * 2 + Self.titleHeight + Self.descriptionTopGap + descriptionHeight
+    let textHeight = Self.verticalPadding * 2 + titleHeight + Self.descriptionTopGap + descriptionHeight
     return CGSize(width: width, height: ceil(max(Self.minimumHeight, textHeight)))
   }
 
@@ -14479,9 +14489,30 @@ private final class NativeAppToastView: NSView {
     return max(40, width - Self.horizontalPadding - leadingContentX - trailingContentWidth)
   }
 
+  private static func measuredTitleHeight(_ text: String, width: CGFloat) -> CGFloat {
+    measuredTextHeight(
+      text,
+      font: Self.titleFont,
+      minimumHeight: Self.minimumTitleHeight,
+      width: width)
+  }
+
   private static func measuredDescriptionHeight(_ text: String, width: CGFloat) -> CGFloat {
+    measuredTextHeight(
+      text,
+      font: Self.descriptionFont,
+      minimumHeight: Self.minimumDescriptionHeight,
+      width: width)
+  }
+
+  private static func measuredTextHeight(
+    _ text: String,
+    font: NSFont,
+    minimumHeight: CGFloat,
+    width: CGFloat
+  ) -> CGFloat {
     guard !text.isEmpty else {
-      return Self.minimumDescriptionHeight
+      return minimumHeight
     }
     let paragraphStyle = NSMutableParagraphStyle()
     paragraphStyle.lineBreakMode = .byWordWrapping
@@ -14489,10 +14520,10 @@ private final class NativeAppToastView: NSView {
       with: CGSize(width: width, height: CGFloat.greatestFiniteMagnitude),
       options: [.usesLineFragmentOrigin, .usesFontLeading],
       attributes: [
-        .font: Self.descriptionFont,
+        .font: font,
         .paragraphStyle: paragraphStyle,
       ])
-    return max(Self.minimumDescriptionHeight, ceil(bounds.height))
+    return max(minimumHeight, ceil(bounds.height))
   }
 }
 

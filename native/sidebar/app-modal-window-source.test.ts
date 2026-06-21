@@ -179,24 +179,34 @@ describe("native app modal window source", () => {
     expect(nativeToastController).toContain("x: floor(screenAnchorFrame.midX - size.width / 2)");
   });
 
-  test("sizes native app toasts from wrapped description text", () => {
+  test("sizes native app toasts from wrapped title and description text", () => {
     /*
     CDXC:AppToasts 2026-06-16-18:41:
     Native app toasts should measure wrapped description text and grow the
     panel height instead of using a fixed two-line frame that can cut off Git
     error messages.
+
+    CDXC:AppToasts 2026-06-21-13:59:
+    Title-only daemon errors also need wrapped measurement so a long startup
+    message grows the panel instead of truncating in a fixed-height toast.
     */
     const nativeToastView = sourceBetween(
       appDelegateSource,
       "private final class NativeAppToastView",
       "private final class NativeToastActionButton",
     );
+    expect(nativeToastView).toContain("titleField.lineBreakMode = .byWordWrapping");
+    expect(nativeToastView).toContain("titleField.maximumNumberOfLines = 0");
+    expect(nativeToastView).toContain("titleField.cell?.wraps = true");
+    expect(nativeToastView).toContain("measuredTitleHeight(request.title, width: textWidth)");
     expect(nativeToastView).toContain("descriptionField.lineBreakMode = .byWordWrapping");
     expect(nativeToastView).toContain("descriptionField.maximumNumberOfLines = 0");
     expect(nativeToastView).toContain("descriptionField.cell?.wraps = true");
     expect(nativeToastView).toContain("measuredDescriptionHeight(description, width: textWidth)");
     expect(nativeToastView).toContain("boundingRect(");
     expect(nativeToastView).not.toContain("descriptionField.lineBreakMode = .byTruncatingTail");
+    expect(nativeToastView).not.toContain("titleField.lineBreakMode = .byTruncatingTail");
+    expect(nativeToastView).not.toContain("titleField.usesSingleLineMode = true");
     expect(nativeToastView).not.toContain("let baseHeight: CGFloat = hasDescription ? 72 : 52");
     expect(nativeToastView).not.toContain(
       "descriptionField.frame = CGRect(x: leadingContentX, y: 37, width: textWidth, height: bounds.height - 49)",
