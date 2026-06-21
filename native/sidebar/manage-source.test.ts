@@ -93,6 +93,16 @@ describe("Manage project workarea source", () => {
     expect(manageSource).not.toContain('aria-label="Refresh files"');
   });
 
+  test("omits the Manage editor header Save button", () => {
+    /*
+     * CDXC:ManageEditing 2026-06-21-18:00:
+     * The macOS Manage editor header should not expose a Save button. Keep the native save bridge available for shortcut-driven edit persistence, but do not render the old wide header action in the file panel.
+     */
+    expect(manageSource).not.toContain("manage-save-button");
+    expect(manageSource).not.toContain("IconDeviceFloppy");
+    expect(manageSource).not.toContain("onSave={() => void saveFile()}");
+  });
+
   test("saves edits through the native bridge with normalized in-project paths", () => {
     /*
      * CDXC:ManageEditing 2026-06-20-06:14:

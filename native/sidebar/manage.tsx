@@ -10,7 +10,6 @@ import {
   IconAlertTriangle,
   IconCheck,
   IconCopy,
-  IconDeviceFloppy,
   IconEdit,
   IconEye,
   IconFile,
@@ -186,6 +185,9 @@ const MANAGE_QUICK_LABELS: ManageQuickLabel[] = [
  *
  * CDXC:ManageDrawings 2026-06-20-06:14:
  * .excalidraw files should open as editable drawings instead of raw JSON. Use the upstream Excalidraw component for canvas behavior, serialize full scene JSON through the normal Manage save bridge, and keep invalid drawings editable as source text so users can repair them.
+ *
+ * CDXC:ManageEditing 2026-06-21-18:00:
+ * The macOS Manage editor header should not show an explicit Save button. Keep edited/saved status visible in metadata while retaining the existing bridge-backed save behavior through the keyboard shortcut and editor flows.
  *
  * CDXC:ManageSidebar 2026-06-20-17:15:
  * Manage's file-sidebar refresh control is an overflow menu with Refresh and Switch sidebar side actions. A separate adjacent icon hides the file sidebar, and the editor area provides a small restore affordance so hiding is reversible.
@@ -573,7 +575,6 @@ function ManageApp() {
           isDirty={isDirty}
           onAnnotationsChange={updateAnnotationsForSelectedFile}
           onDraftContentChange={setDraftContent}
-          onSave={() => void saveFile()}
           preview={preview}
           previewState={previewState}
           saveState={saveState}
@@ -724,7 +725,6 @@ function ManagePreview({
   isDirty,
   onAnnotationsChange,
   onDraftContentChange,
-  onSave,
   preview,
   previewState,
   saveState,
@@ -737,7 +737,6 @@ function ManagePreview({
   isDirty: boolean;
   onAnnotationsChange: (updater: (annotations: ManageAnnotation[]) => ManageAnnotation[]) => void;
   onDraftContentChange: (content: string) => void;
-  onSave: () => void;
   preview?: ManageFilePreview;
   previewState: "idle" | "loading" | "ready" | "error";
   saveState: "idle" | "saving" | "saved" | "error";
@@ -1032,16 +1031,6 @@ function ManagePreview({
             </button>
           </div>
         ) : null}
-        <button
-          className="manage-save-button"
-          data-state={saveState}
-          disabled={!canEdit || !isDirty || saveState === "saving"}
-          onClick={onSave}
-          type="button"
-        >
-          <IconDeviceFloppy aria-hidden="true" size={15} stroke={1.9} />
-          {saveState === "saving" ? "Saving" : saveState === "saved" ? "Saved" : "Save"}
-        </button>
       </header>
       <div className="manage-preview-path">{preview.path}</div>
       {preview.kind === "unsupported" ? (
@@ -2459,37 +2448,6 @@ styleElement.textContent = `
     color: var(--manage-text);
   }
 
-  .manage-save-button {
-    align-items: center;
-    background: rgba(125, 211, 252, 0.14);
-    border: 1px solid rgba(125, 211, 252, 0.34);
-    color: var(--manage-text);
-    display: inline-flex;
-    flex: 0 0 auto;
-    font-size: 12px;
-    font-weight: 750;
-    gap: 6px;
-    height: 30px;
-    padding: 0 10px;
-  }
-
-  .manage-save-button:hover,
-  .manage-save-button:focus-visible {
-    background: rgba(125, 211, 252, 0.2);
-    outline: none;
-  }
-
-  .manage-save-button:disabled {
-    background: rgba(255, 255, 255, 0.035);
-    border-color: var(--manage-border);
-    color: var(--manage-subtle);
-  }
-
-  .manage-save-button[data-state="error"] {
-    border-color: rgba(253, 164, 175, 0.4);
-    color: var(--manage-red);
-  }
-
   .manage-preview-path {
     border-bottom: 1px solid rgba(255, 255, 255, 0.055);
     color: var(--manage-subtle);
@@ -3057,13 +3015,8 @@ styleElement.textContent = `
     }
 
     .manage-preview-meta,
-    .manage-save-button,
     .manage-segmented {
       align-self: stretch;
-    }
-
-    .manage-save-button {
-      justify-content: center;
     }
 
     .manage-markdown-workspace,
