@@ -17,6 +17,7 @@ pub mod protocol;
 pub mod repository_clone;
 pub mod runtime;
 pub mod server;
+pub mod session_status;
 pub mod storage;
 pub mod toolchain;
 pub mod typed_operations;
