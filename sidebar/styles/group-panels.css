@@ -745,6 +745,7 @@ body[data-custom-sidebar-titlebar-colors="true"]
 .sidebar-reference-layout[data-reference-sidebar="true"] {
   --sidebar-density-scale: 1;
   --reference-sidebar-main-edge-bleed-left: 15px;
+  --reference-sidebar-primary-nav-edge-bleed-left: var(--reference-sidebar-main-edge-bleed-left);
   --reference-sidebar-scroll-edge-bleed-left: 8px;
   --reference-sidebar-scroll-row-bleed-left: 7px;
   --reference-sidebar-scroll-row-bleed-right: 0px;
@@ -814,6 +815,15 @@ body[data-custom-sidebar-titlebar-colors="true"]
    */
   margin-left: 1px;
   padding: 0 1px 7px 8px;
+}
+
+body.native-sidebar-body .sidebar-reference-layout[data-reference-sidebar="true"] {
+  /*
+   * CDXC:SidebarReferenceBounds 2026-06-21-17:56:
+   * The macOS native sidebar needs 4px more left inset, and the primary buttons for Agents Hub, Automations, Mobile, and Search must honor that inset instead of bleeding back to the viewport edge. Override only the native body contract so non-native reference layouts keep the shared 8px content inset.
+   */
+  --reference-sidebar-primary-nav-edge-bleed-left: 9px;
+  padding-left: 12px;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"],
@@ -906,7 +916,7 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-sidebar-primary-nav
   > .reference-sidebar-search-slot {
-  margin-left: calc(-1 * var(--reference-sidebar-main-edge-bleed-left));
+  margin-left: calc(-1 * var(--reference-sidebar-primary-nav-edge-bleed-left));
   margin-right: calc(-1 * var(--reference-sidebar-edge-bleed-right));
 }
 
@@ -960,7 +970,7 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-sidebar-primary-nav
   > .reference-sidebar-nav-button {
-  padding-left: calc(10px + var(--reference-sidebar-main-edge-bleed-left));
+  padding-left: calc(10px + var(--reference-sidebar-primary-nav-edge-bleed-left));
   padding-right: calc(10px + var(--reference-sidebar-edge-bleed-right));
 }
 
@@ -969,7 +979,7 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
   > .reference-sidebar-nav-button {
   max-width: none;
   width: calc(
-    100% + var(--reference-sidebar-main-edge-bleed-left) +
+    100% + var(--reference-sidebar-primary-nav-edge-bleed-left) +
       var(--reference-sidebar-edge-bleed-right)
   );
 }

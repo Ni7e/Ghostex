@@ -13,6 +13,41 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("reference sidebar section header layout source", () => {
+  test("applies native left inset to primary sidebar nav buttons", () => {
+    /*
+     * CDXC:SidebarReferenceBounds 2026-06-21-17:56:
+     * The macOS sidebar left inset must be 4px beyond the shared reference
+     * layout, and the top Agents Hub, Automations, Mobile, and Search buttons
+     * must use the native primary-nav bleed so their row surfaces move with the
+     * rest of the sidebar instead of staying flush to the viewport edge.
+     */
+    const nativeInsetRule = sourceBetween(
+      groupPanelsSource,
+      'body.native-sidebar-body .sidebar-reference-layout[data-reference-sidebar="true"] {',
+      '.sidebar-reference-layout[data-reference-sidebar="true"],',
+    );
+    expect(nativeInsetRule).toContain("--reference-sidebar-primary-nav-edge-bleed-left: 9px;");
+    expect(nativeInsetRule).toContain("padding-left: 12px;");
+
+    const primaryNavBleedRule = sourceBetween(
+      groupPanelsSource,
+      ".sidebar-reference-layout[data-reference-sidebar=\"true\"]\n  .reference-sidebar-primary-nav\n  > .reference-sidebar-nav-item,",
+      ".reference-sidebar-nav-item {",
+    );
+    expect(primaryNavBleedRule).toContain(
+      "margin-left: calc(-1 * var(--reference-sidebar-primary-nav-edge-bleed-left));",
+    );
+
+    const primaryNavButtonPaddingRule = sourceBetween(
+      groupPanelsSource,
+      ".sidebar-reference-layout[data-reference-sidebar=\"true\"]\n  .reference-sidebar-primary-nav\n  > :is(",
+      ".sidebar-reference-layout[data-reference-sidebar=\"true\"] .reference-sidebar-actions-button {",
+    );
+    expect(primaryNavButtonPaddingRule).toContain(
+      "padding-left: calc(10px + var(--reference-sidebar-primary-nav-edge-bleed-left));",
+    );
+  });
+
   test("collapses Quick and Projects labels when hover actions become visible", () => {
     /*
      * CDXC:SidebarHeaderActions 2026-06-17-23:21:
