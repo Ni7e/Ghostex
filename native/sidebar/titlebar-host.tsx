@@ -6788,6 +6788,15 @@ styleElement.textContent = `
      * existing 33x33px titlebar hit target and compact offset so AppKit layout
      * and click ownership stay unchanged while the visible chrome is simplified.
      *
+     * CDXC:SidebarCollapse 2026-06-20-17:58:
+     * Visual review moved only the visible sidebar glyph 2px lower. Keep the
+     * titlebar button frame unchanged so the native hit target and neighboring
+     * controls do not shift.
+     *
+     * CDXC:SidebarCollapse 2026-06-20-18:28:
+     * Visual review moved only the visible sidebar glyph 1px right while
+     * preserving the titlebar button placement and native hit target.
+     *
      * CDXC:SidebarCollapse 2026-06-13-02:59:
      * The assigned hotkey renders through AppTooltip, matching sidebar controls
      * instead of a titlebar-only data-tooltip pseudo-element.
@@ -6817,6 +6826,7 @@ styleElement.textContent = `
   }
   .titlebar-sidebar-collapse-button svg {
     height: 17px !important;
+    transform: translate(1px, 2px);
     width: 17px !important;
   }
   .titlebar-update-button {

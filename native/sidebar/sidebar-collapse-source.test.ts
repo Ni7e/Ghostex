@@ -78,6 +78,14 @@ describe("native sidebar collapse source", () => {
      * follow sidebar placement: IconLayoutSidebar for left and
      * IconLayoutSidebarRight for right.
      *
+     * CDXC:SidebarCollapse 2026-06-20-17:58:
+     * The visible sidebar glyph should sit 2px lower without moving the 33px
+     * titlebar button frame or changing native click ownership.
+     *
+     * CDXC:SidebarCollapse 2026-06-20-18:28:
+     * The visible sidebar glyph should also shift 1px right while preserving
+     * the button frame placement.
+     *
      * CDXC:SidebarCollapse 2026-06-13-10:53:
      * Keep the expanded hit target inside the titlebar vertically and show a
      * hover tooltip for the assigned Toggle Sidebar hotkey.
@@ -104,6 +112,10 @@ describe("native sidebar collapse source", () => {
      * The Resources modal collapses all expandable item rows on every open and
      * shows the expand action when all item targets are already collapsed.
      */
+    const sidebarCollapseIconStyle =
+      titlebarHostSource.match(/\.titlebar-sidebar-collapse-button svg \{[\s\S]*?\n  \}/)?.[0] ??
+      "";
+
     expect(titlebarHostSource).toContain("sidebarCollapsed: boolean;");
     expect(titlebarHostSource).toContain("sidebarSide: SidebarSide;");
     expect(titlebarHostSource).toContain("type SidebarSide");
@@ -184,8 +196,9 @@ describe("native sidebar collapse source", () => {
     expect(titlebarHostSource).not.toContain(
       '<TooltipContent side="bottom">{projectState.toggleSidebarHotkeyLabel}</TooltipContent>',
     );
-    expect(titlebarHostSource).toContain("height: 17px !important;");
-    expect(titlebarHostSource).toContain("width: 17px !important;");
+    expect(sidebarCollapseIconStyle).toContain("height: 17px !important;");
+    expect(sidebarCollapseIconStyle).toContain("transform: translate(1px, 2px);");
+    expect(sidebarCollapseIconStyle).toContain("width: 17px !important;");
     expect(titlebarHostSource).toContain("margin-left: 0;");
     expect(appDelegateSource).toContain('"sidebarCollapsed": isSidebarCollapsed');
     expect(appDelegateSource).toContain('"sidebarSide": sidebarSide.rawValue');

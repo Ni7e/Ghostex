@@ -63,6 +63,40 @@ describe("native pane tab sleeping placeholders", () => {
     );
   });
 
+  test("paints selected sleeping tabs with active tab chrome", () => {
+    /*
+     * CDXC:PaneTabs 2026-06-20-21:16:
+     * Clicking a sleeping native tab selects its placeholder before wake. The
+     * selected sleeping tab must use the same active fill and label treatment
+     * as an awake selected tab so tab selection remains visible.
+     */
+    const tabBackgroundSource = sourceSection(
+      "private func tabBackgroundColor() -> NSColor",
+      "private static func compositedWorkspaceTabColor",
+    );
+    const titleColorSource = sourceSection(
+      "private var titleColor: NSColor",
+      "private func drawTitle()",
+    );
+
+    expect(tabBackgroundSource).toContain("let isSelectedWorkspaceTab = isActiveTab");
+    expect(tabBackgroundSource).toContain(
+      "? (isSelectedWorkspaceTab ? CGFloat(0.13) : CGFloat(0.025))",
+    );
+    expect(tabBackgroundSource).toContain(
+      ": (isSelectedWorkspaceTab ? CGFloat(0.13) : CGFloat(0.06))",
+    );
+    expect(tabBackgroundSource).toContain("if isActiveTab {\n      overlayAlpha = 0.13\n    } else {");
+    expect(tabBackgroundSource).not.toContain("isActiveTab && !isSleepingTab");
+    expect(tabBackgroundSource).not.toContain("isSleepingTab ? CGFloat(0.075) : CGFloat(0.13)");
+
+    expect(titleColorSource).toContain("let usesSelectedTitleColor = chromeRole != .workspace || isActiveTab");
+    expect(titleColorSource).toContain("let sleepAlpha: CGFloat = isSleepingTab && !isActiveTab ? 0.48 : 1");
+    expect(titleColorSource).not.toContain(
+      "let isSurfacedWorkspaceTab = chromeRole != .workspace || (isActiveTab && !isSleepingTab)",
+    );
+  });
+
   test("centers the press-any-key wake affordance in sleeping placeholders", () => {
     /*
      * CDXC:SleepingPanePlaceholders 2026-06-13-21:26:

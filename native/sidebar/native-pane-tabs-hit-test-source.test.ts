@@ -107,9 +107,15 @@ describe("native pane tab titlebar hit testing", () => {
     expect(appDelegateSource).toContain(
       "without monitors, overlays, or root hit-test expansion",
     );
-    expect(appDelegateSource).toContain("sidebarWorkareaBorderX = dividerFrame.minX");
+    expect(appDelegateSource).not.toContain("sidebarWorkareaBorderX = dividerFrame.minX");
     expect(appDelegateSource).toContain(
-      "sidebarWorkareaBorderX = max(dividerFrame.maxX - separatorWidth, dividerFrame.minX)",
+      "let sidebarWorkareaBorderX = max(dividerFrame.maxX - separatorWidth, dividerFrame.minX)",
+    );
+    expect(appDelegateSource).toContain("private static let sidebarDividerLineColor = NSColor(");
+    expect(appDelegateSource).toContain("srgbRed: 33.0 / 255.0");
+    expect(appDelegateSource).toContain("divider.separatorColor = Self.sidebarDividerLineColor");
+    expect(appDelegateSource).toContain(
+      "The left-sidebar 1px line belongs on the workspace side of the five-point drag rail",
     );
     expect(appDelegateSource).not.toContain("final class SidebarModalBackdropView");
     expect(appDelegateSource).not.toContain("NonInteractiveChromeLineView");
@@ -345,7 +351,7 @@ describe("native pane tab titlebar hit testing", () => {
   test("keeps passive pane titlebar chrome out of the AppKit view tree", () => {
     /*
      * CDXC:NativePaneTabClicks 2026-06-13-13:21:
-     * The activity dot, collapsed trailing fill, bottom border, and action
+     * The activity indicator, collapsed trailing fill, bottom border, and action
      * separators are visual titlebar chrome. They must stay as CALayers so only
      * real AppKit controls participate in click dispatch.
      */
@@ -369,6 +375,36 @@ describe("native pane tab titlebar hit testing", () => {
     expect(titleBarSource).not.toContain("addSubview(commandCollapsedTrailingBackgroundView");
     expect(titleBarSource).not.toContain("addSubview(bottomBorderView");
     expect(titleBarSource).not.toContain("addSubview(separator)");
+  });
+
+  test("renders per-pane titlebar activity indicator as a lowered square", () => {
+    /*
+     * CDXC:ProjectEditorCompanion 2026-06-20-18:22:
+     * Companion pane title bars should place the status indicator 3px lower than
+     * centered geometry and draw it as a square mark instead of a circular dot.
+     */
+    const titleBarIndex = terminalWorkspaceSource.indexOf("private final class TerminalSessionTitleBarView");
+    const titleBarSource = terminalWorkspaceSource.slice(
+      titleBarIndex,
+      terminalWorkspaceSource.indexOf("private func isEmptyTitleBarDoubleClickPoint", titleBarIndex),
+    );
+    const layoutSource = sourceSection(
+      terminalWorkspaceSource,
+      "override func layout()",
+      "private func reserveDoubleClickNewTerminalTarget",
+      titleBarIndex,
+    );
+
+    expect(titleBarIndex).toBeGreaterThan(-1);
+    expect(titleBarSource).toContain("activityIndicatorLayer.cornerRadius = 4");
+    expect(layoutSource).toContain(
+      "let activityIndicatorVerticalOffset: CGFloat = usesProjectEditorCompanionChrome ? 3 : 0",
+    );
+    expect(layoutSource).toContain(
+      "activityIndicatorLayer.cornerRadius = usesProjectEditorCompanionChrome ? 0 : indicatorSize / 2",
+    );
+    expect(layoutSource).toContain("y: floor((bounds.height - indicatorSize) / 2) + activityIndicatorVerticalOffset");
+    expect(layoutSource).not.toContain("y: floor((bounds.height - indicatorSize) / 2),");
   });
 
   test("uses explicit scroll-offset tab geometry for local hover and close helpers", () => {
