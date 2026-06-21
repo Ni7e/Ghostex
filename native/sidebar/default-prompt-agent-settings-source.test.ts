@@ -54,10 +54,16 @@ describe("default prompt agent settings source", () => {
      * The modal store initializes with DEFAULT_ghostex_SETTINGS. Settings and
      * First Launch should not render as writable until a native hydrate replaces
      * that placeholder with the gxserver-backed settings snapshot.
+     *
+     * CDXC:SettingsModalStuckBlank 2026-06-21-04:18:
+     * Settings renderability now separates the Settings-family modal check from
+     * the hydrate check so native child windows can block `presented` until the
+     * actual Settings UI is renderable.
      */
     expect(modalHostSource).toContain("const revision = useSidebarStore((state) => state.revision);");
     expect(modalHostSource).toContain("const hasNativeSettingsHydrated = revision > 0;");
-    expect(modalHostSource).toContain("const isSettingsRenderable = isSettingsModalKind(activeModal) && hasNativeSettingsHydrated;");
+    expect(modalHostSource).toContain("const isSettingsModal = isSettingsModalKind(activeModal);");
+    expect(modalHostSource).toContain("const isSettingsRenderable = isSettingsModal && hasNativeSettingsHydrated;");
     expect(modalHostSource).toContain("hasNativeSettingsHydrated &&");
   });
 
