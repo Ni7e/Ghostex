@@ -81,6 +81,25 @@ describe("Project Board form event handling", () => {
     expect(overlayStyleSource).toContain("@keyframes project-board-loading-spin");
   });
 
+  test("keeps ticket dialog buttons aligned with adjacent dropdown controls", () => {
+    /*
+     * CDXC:ProjectBoardForms 2026-06-21-15:30:
+     * New-ticket and edit-ticket action rows should use one shared Project Board control height for buttons and adjacent dropdowns so the macOS Kanban dialogs do not mix default shadcn button height with taller select triggers.
+     */
+    const ticketDialogControlSource = sourceBetween(
+      ".project-ticket-footer-select,",
+      ".project-ticket-meta-grid {",
+    );
+
+    expect(ticketDialogControlSource).toContain(
+      '.project-ticket-conversation-controls [data-slot="select-trigger"]',
+    );
+    expect(ticketDialogControlSource).toContain('height: var(--project-board-control-height);');
+    expect(ticketDialogControlSource).toContain('.project-ticket-dialog-footer [data-slot="button"]');
+    expect(ticketDialogControlSource).toContain('.project-ticket-create-actions > [data-slot="button"]');
+    expect(ticketDialogControlSource).toContain('.project-ticket-conversation-controls > [data-slot="button"]');
+  });
+
   test("uses brighter Kanban bead card surfaces than lane panels", () => {
     /*
      * CDXC:ProjectBoardCards 2026-06-19-09:14:
@@ -173,6 +192,35 @@ describe("Project Board form event handling", () => {
     expect(tasksPlaceholderSource).toContain("function projectBoardPromptAgentKind");
     expect(tasksPlaceholderSource).toContain("function projectBoardTitleGenerationFailureDetails");
     expect(tasksPlaceholderSource).toContain("function projectBoardTitleGenerationErrorClass");
+  });
+
+  test("keeps generated Kanban titles background-only after deterministic draft creation", () => {
+    /*
+     * CDXC:ProjectBoardTitleGeneration 2026-06-21-16:56:
+     * Empty-title Kanban ticket creation should use a deterministic draft title immediately, schedule prompt-agent title generation as detached background work, and patch only that card when the generated title lands.
+     */
+    const draftTitleSource = sourceBetween(
+      "function createProjectBoardDraftTitle",
+      "function applyPendingBoardStatusMoves",
+    );
+    const createTicketSource = sourceBetween("const createTicket = async", "const deleteTicket = async");
+    const titleGenerationSource = sourceBetween(
+      "const generateCreatedTicketTitle = async",
+      "if (!createdIssue?.id)",
+    );
+
+    expect(tasksPlaceholderSource).not.toContain("PROJECT_BOARD_GENERATING_TITLE");
+    expect(draftTitleSource).toContain("PROJECT_BOARD_DRAFT_TITLE_MAX_LENGTH");
+    expect(draftTitleSource).toContain('return "New ticket";');
+    expect(createTicketSource).toContain(
+      "const title = shouldGenerateTitle ? createProjectBoardDraftTitle(prompt) : requestedTitle;",
+    );
+    expect(createTicketSource).toContain("void reconcileCreatedTicket();");
+    expect(createTicketSource).toContain("scheduleProjectBoardGeneratedTitle(() =>");
+    expect(createTicketSource).not.toContain("void reconcileCreatedTicket().then");
+    expect(titleGenerationSource).toContain("setLocalTicketTitle(issueId, generatedTitle);");
+    expect(titleGenerationSource).not.toContain('loadTickets({ mode: "background" })');
+    expect(titleGenerationSource).not.toContain("setErrorMessage(");
   });
 
   test("snapshots form values before functional state updaters", () => {

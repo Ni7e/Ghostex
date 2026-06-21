@@ -205,9 +205,9 @@ const PROJECT_BOARD_IMAGE_RESPONSE_EVENT = "ghostex-project-board-image-response
 const PROJECT_BOARD_AUTO_REFRESH_INTERVAL_MS = 8_000;
 const PROJECT_BOARD_GENERATED_TITLE_DELAY_MS = 2_000;
 const PROJECT_BOARD_GENERATED_TITLE_IDLE_TIMEOUT_MS = 10_000;
+const PROJECT_BOARD_DRAFT_TITLE_MAX_LENGTH = 39;
 const PROJECT_BOARD_MAX_DEPENDENCY_OPTIONS = 600;
 const PROJECT_BOARD_MAX_VISIBLE_TICKETS_PER_COLUMN = 120;
-const PROJECT_BOARD_GENERATING_TITLE = "Generating title...";
 const PROJECT_BOARD_START_LOCATION_SELECT_ITEMS: ReadonlyArray<{
   label: string;
   value: ProjectBoardStartLocation;
@@ -401,6 +401,40 @@ function createEmptyTicketFormDraft(): TicketFormDraft {
     status: "todo",
     title: "",
   };
+}
+
+/*
+ * CDXC:ProjectBoardTitleGeneration 2026-06-21-16:56:
+ * Empty-title Kanban tickets must appear with a useful deterministic draft title immediately, while prompt-agent title generation runs later as background polish.
+ * Keep the draft short enough for the board's title column so replacing it with the generated title does not require a full board reload.
+ */
+function createProjectBoardDraftTitle(prompt: string): string {
+  const normalizedPrompt = prompt
+    .replace(/```[\s\S]*?```/g, " ")
+    .split(/\n+/u)
+    .map((line) =>
+      line
+        .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+)/u, "")
+        .replace(/[`*_~>#]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim(),
+    )
+    .find(Boolean) ?? "";
+  const firstSentence = normalizedPrompt.match(/^[^.!?]{8,}[.!?](?=\s|$)/u)?.[0] ?? normalizedPrompt;
+  const title = firstSentence
+    .replace(/[.!?]+$/u, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!title) {
+    return "New ticket";
+  }
+  if (title.length <= PROJECT_BOARD_DRAFT_TITLE_MAX_LENGTH) {
+    return title;
+  }
+  const clipped = title.slice(0, PROJECT_BOARD_DRAFT_TITLE_MAX_LENGTH).replace(/\s+\S*$/u, "").trim();
+  return (clipped.length >= 12 ? clipped : title.slice(0, PROJECT_BOARD_DRAFT_TITLE_MAX_LENGTH))
+    .replace(/[.,;:!?-]+$/u, "")
+    .trim() || "New ticket";
 }
 
 function applyPendingBoardStatusMoves(
@@ -1286,7 +1320,7 @@ function ProjectBoardApp() {
       await ensureIssuePrefix(runBeads, issuePrefix);
       const requestedTitle = draft.title.trim();
       const shouldGenerateTitle = !requestedTitle;
-      const title = shouldGenerateTitle ? PROJECT_BOARD_GENERATING_TITLE : requestedTitle;
+      const title = shouldGenerateTitle ? createProjectBoardDraftTitle(prompt) : requestedTitle;
       const estimate = tshirtToEstimate(draft.tshirt);
       const issueIdsBeforeCreate = new Set(allIssues.map((issue) => issue.id));
       const createdPayload = await runBeads({
@@ -1373,8 +1407,12 @@ function ProjectBoardApp() {
             issueId,
             title: generatedTitle,
           });
+          /*
+           * CDXC:ProjectBoardTitleGeneration 2026-06-21-16:56:
+           * Generated title completion is background polish for one card.
+           * Patch the local ticket title after the durable Beads update and do not reload the full board, so a slow prompt-agent title cannot hitch Kanban scrolling, drag/drop, or follow-up ticket creation.
+           */
           setLocalTicketTitle(issueId, generatedTitle);
-          await loadTickets({ mode: "background" });
           logProjectBoardDebug("projectBoard.createTicket.titleGeneration.completed", {
             beadId: issueId,
             generatedTitleLength: generatedTitle.length,
@@ -1385,9 +1423,6 @@ function ProjectBoardApp() {
             ...titleGenerationDebugDetails,
             ...projectBoardTitleGenerationFailureDetails(error),
           });
-          if (!startAfterCreate) {
-            setErrorMessage(error instanceof Error ? error.message : "Could not generate the ticket title.");
-          }
         }
       };
 
@@ -1473,13 +1508,17 @@ function ProjectBoardApp() {
         }
       };
 
-      void reconcileCreatedTicket().then(() => {
-        if (shouldGenerateTitle) {
-          scheduleProjectBoardGeneratedTitle(() => {
-            void generateCreatedTicketTitle(createdIssueId);
-          });
-        }
-      });
+      /*
+       * CDXC:ProjectBoardTitleGeneration 2026-06-21-16:56:
+       * Ticket reconciliation owns dependency/status/label durability, while prompt-agent title generation owns only replacing the deterministic draft title.
+       * Start both as detached background work so title generation is not serialized behind board reconciliation and the create flow can return immediately.
+       */
+      void reconcileCreatedTicket();
+      if (shouldGenerateTitle) {
+        scheduleProjectBoardGeneratedTitle(() => {
+          void generateCreatedTicketTitle(createdIssueId);
+        });
+      }
       logProjectBoardDebug("projectBoard.createTicket.completed", {
         beadId: createdIssueId,
         startAfterCreate,
@@ -6690,7 +6729,8 @@ styleElement.textContent = `
     min-width: 0;
   }
 
-  .project-ticket-footer-select {
+  .project-ticket-footer-select,
+  .project-ticket-conversation-controls [data-slot="select-trigger"] {
     height: var(--project-board-control-height);
     min-width: 0;
     width: 100%;
@@ -6705,6 +6745,16 @@ styleElement.textContent = `
 
   .project-ticket-create-actions {
     justify-content: flex-end;
+  }
+
+  .project-ticket-dialog-footer [data-slot="button"],
+  .project-ticket-create-actions > [data-slot="button"],
+  .project-ticket-conversation-controls > [data-slot="button"] {
+    /*
+     * CDXC:ProjectBoardForms 2026-06-21-15:30:
+     * New-ticket and edit-ticket action buttons must match the adjacent Project Board dropdown height so macOS Kanban dialog control rows align instead of mixing shadcn's default button height with taller select triggers.
+     */
+    height: var(--project-board-control-height);
   }
 
   .project-ticket-meta-grid {
