@@ -1,3 +1,8 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
 
@@ -5,6 +10,10 @@ use crate::{
     domain::{read_project_id, read_session_id, DomainRepository, DomainStateError},
     ids::is_gxserver_session_id,
     presentation::project_session_title_projection,
+    session_status::{
+        compute_activity_update, is_stale_activity_event, normalize_agent_activity_value,
+        parse_iso_ms, ActivityUpdate,
+    },
     zmx::{dispatch_zmx_lifecycle_endpoint, ZmxEndpointError, ZmxServerContext},
 };
 
@@ -12,8 +21,6 @@ const AGENT_SETTINGS_METADATA_KEY: &str = "agents.settings.v1";
 const LEGACY_AGENT_SETTINGS_METADATA_KEY: &str = "gxserverAgentSettings";
 const DEFAULT_PROMPT_AGENT_ID: &str = "codex";
 const MAX_DEFAULT_PROMPT_AGENT_ID_LENGTH: usize = 120;
-const INITIAL_ACTIVITY_SUPPRESSION_MS: i64 = 12_000;
-const ESCAPE_ATTENTION_SUPPRESSION_MS: i64 = 5_000;
 
 #[derive(Debug)]
 pub enum AgentEndpointError {
@@ -56,6 +63,7 @@ Rust must treat legacy `gxserverAgentSettings` metadata as persisted when `agent
 pub fn dispatch_agent_endpoint(
     repository: &DomainRepository<'_>,
     db: &Connection,
+    home_dir: &Path,
     endpoint_path: &str,
     params: &Map<String, Value>,
     zmx_context: Option<&ZmxServerContext>,
@@ -110,7 +118,7 @@ pub fn dispatch_agent_endpoint(
         }
         "/api/requestSessionRename" => {
             let lifecycle = read_lifecycle(params)?;
-            let result = request_session_rename(repository, &lifecycle, params)?;
+            let result = request_session_rename(repository, &lifecycle, params, home_dir)?;
             AgentEndpointOutput {
                 presentation_session: Some((lifecycle.project_id, lifecycle.session_id)),
                 result,
@@ -697,6 +705,7 @@ fn request_session_rename(
     repository: &DomainRepository<'_>,
     lifecycle: &LifecycleParams,
     params: &Map<String, Value>,
+    home_dir: &Path,
 ) -> Result<Value, DomainStateError> {
     let session = require_session(repository, lifecycle)?;
     let requested_title = read_text(params, "title");
@@ -758,12 +767,27 @@ fn request_session_rename(
             Value::Object(runtime_settings),
         );
         let updated = repository.update_session(&update)?;
+        let pending_changed = updated.get("updatedAt") != session.get("updatedAt");
+        /*
+        CDXC:GxserverAgentTitles 2026-06-21-15:35:
+        Rust requestSessionRename must mirror TypeScript gxserver for Agent CLI renames: the renderer command can ask the CLI to rename, but the app sidebar title must be reconciled from Codex structured session metadata before the RPC returns so macOS receives the canonical session projection.
+        */
+        let reconciled =
+            reconcile_agent_metadata_title(repository, lifecycle, home_dir, "pending")?;
+        let _metadata_title_found = reconciled.metadata_title_found;
+        let reconciled_changed = reconciled.changed;
+        let reason = if reconciled_changed {
+            reconciled.reason
+        } else {
+            "agent-rename-request-pending-metadata".to_string()
+        };
+        let final_session = reconciled.session.unwrap_or(updated);
         return Ok(json!({
-            "changed": updated.get("updatedAt") != session.get("updatedAt"),
+            "changed": pending_changed || reconciled_changed,
             "pendingAgentMetadata": true,
-            "projection": project_session_title_projection(&updated),
-            "reason": "agent-rename-request-pending-metadata",
-            "session": updated,
+            "projection": project_session_title_projection(&final_session),
+            "reason": reason,
+            "session": final_session,
             "shouldSendAgentRenameCommand": true,
         }));
     }
@@ -787,6 +811,250 @@ fn request_session_rename(
         "session": updated,
         "shouldSendAgentRenameCommand": false,
     }))
+}
+
+struct AgentMetadataTitle {
+    provider: &'static str,
+    title: String,
+    updated_at: Option<String>,
+}
+
+struct AgentTitleReconcileResult {
+    changed: bool,
+    metadata_title_found: bool,
+    reason: String,
+    session: Option<Value>,
+}
+
+pub(crate) fn reconcile_agent_metadata_title_for_session(
+    repository: &DomainRepository<'_>,
+    project_id: &str,
+    session_id: &str,
+    home_dir: &Path,
+    pending_mismatch_status: &str,
+) -> Result<bool, DomainStateError> {
+    let lifecycle = LifecycleParams {
+        project_id: project_id.to_string(),
+        session_id: session_id.to_string(),
+    };
+    let result =
+        reconcile_agent_metadata_title(repository, &lifecycle, home_dir, pending_mismatch_status)?;
+    Ok(result.changed)
+}
+
+fn reconcile_agent_metadata_title(
+    repository: &DomainRepository<'_>,
+    lifecycle: &LifecycleParams,
+    home_dir: &Path,
+    pending_mismatch_status: &str,
+) -> Result<AgentTitleReconcileResult, DomainStateError> {
+    let Some(session) = repository.get_session(&lifecycle.project_id, &lifecycle.session_id)?
+    else {
+        return Ok(AgentTitleReconcileResult {
+            changed: false,
+            metadata_title_found: false,
+            reason: "session-missing".to_string(),
+            session: None,
+        });
+    };
+    let runtime_settings = object_field(&session, "runtimeSettings");
+    let identity = resolve_session_identity(&IdentityInput {
+        agent_id: read_text_value(&session, "agentId"),
+        agent_name: read_text_from_map(&runtime_settings, "agentName"),
+        agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
+        agent_session_path: read_text_from_map(&runtime_settings, "agentSessionPath"),
+        runtime_settings: runtime_settings.clone(),
+        startup_text: None,
+    });
+    if !is_agent_associated(&session, &identity) {
+        return Ok(AgentTitleReconcileResult {
+            changed: false,
+            metadata_title_found: false,
+            reason: "not-agent-associated".to_string(),
+            session: Some(session),
+        });
+    }
+    let Some(metadata_title) = read_agent_metadata_title(home_dir, &session) else {
+        return Ok(AgentTitleReconcileResult {
+            changed: false,
+            metadata_title_found: false,
+            reason: "metadata-title-missing".to_string(),
+            session: Some(session),
+        });
+    };
+
+    let pending_title = read_text_from_map(&runtime_settings, "pendingAgentTitleRequestTitle");
+    let pending_status = pending_title.as_deref().map(|pending_title| {
+        if titles_match(pending_title, &metadata_title.title) {
+            "confirmed"
+        } else {
+            pending_mismatch_status
+        }
+    });
+    let mut next_runtime_settings = runtime_settings.clone();
+    next_runtime_settings.insert("titleMetadataCheckedAt".to_string(), json!(now_iso()));
+    next_runtime_settings.insert(
+        "titleMetadataProvider".to_string(),
+        json!(metadata_title.provider),
+    );
+    next_runtime_settings.insert("titleMetadataSource".to_string(), json!("agent-metadata"));
+    next_runtime_settings.insert("titleSource".to_string(), json!("terminal-auto"));
+    if let Some(updated_at) = metadata_title.updated_at.as_deref() {
+        next_runtime_settings.insert("titleMetadataUpdatedAt".to_string(), json!(updated_at));
+    }
+    if let Some(status) = pending_status {
+        next_runtime_settings.insert("pendingAgentTitleRequestStatus".to_string(), json!(status));
+    }
+    let needs_update = session.get("title").and_then(Value::as_str)
+        != Some(metadata_title.title.as_str())
+        || runtime_settings.get("titleSource") != next_runtime_settings.get("titleSource")
+        || runtime_settings.get("titleMetadataSource")
+            != next_runtime_settings.get("titleMetadataSource")
+        || runtime_settings.get("titleMetadataProvider")
+            != next_runtime_settings.get("titleMetadataProvider")
+        || runtime_settings.get("titleMetadataUpdatedAt")
+            != next_runtime_settings.get("titleMetadataUpdatedAt")
+        || runtime_settings.get("pendingAgentTitleRequestStatus")
+            != next_runtime_settings.get("pendingAgentTitleRequestStatus");
+
+    if !needs_update {
+        return Ok(AgentTitleReconcileResult {
+            changed: false,
+            metadata_title_found: true,
+            reason: "metadata-title-already-current".to_string(),
+            session: Some(session),
+        });
+    }
+
+    let mut update = lifecycle_update(lifecycle);
+    update.insert(
+        "runtimeSettings".to_string(),
+        Value::Object(next_runtime_settings),
+    );
+    update.insert("title".to_string(), Value::String(metadata_title.title));
+    let updated = repository.update_session(&update)?;
+    Ok(AgentTitleReconcileResult {
+        changed: true,
+        metadata_title_found: true,
+        reason: "metadata-title-applied".to_string(),
+        session: Some(updated),
+    })
+}
+
+fn read_agent_metadata_title(home_dir: &Path, session: &Value) -> Option<AgentMetadataTitle> {
+    let runtime_settings = object_field(session, "runtimeSettings");
+    let identity = resolve_session_identity(&IdentityInput {
+        agent_id: read_text_value(session, "agentId"),
+        agent_name: read_text_from_map(&runtime_settings, "agentName"),
+        agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
+        agent_session_path: read_text_from_map(&runtime_settings, "agentSessionPath"),
+        runtime_settings,
+        startup_text: None,
+    });
+    if identity.agent_id.as_deref() != Some("codex") {
+        return None;
+    }
+    let agent_session_id = identity.agent_session_id.as_deref()?.trim();
+    if agent_session_id.is_empty() {
+        return None;
+    }
+    read_codex_session_index_title(
+        home_dir,
+        agent_session_id,
+        identity.agent_session_path.as_deref(),
+    )
+}
+
+fn read_codex_session_index_title(
+    home_dir: &Path,
+    agent_session_id: &str,
+    agent_session_path: Option<&str>,
+) -> Option<AgentMetadataTitle> {
+    for index_path in get_codex_session_index_candidate_paths(home_dir, agent_session_path) {
+        if let Some(title) = read_codex_session_index_title_from_path(&index_path, agent_session_id)
+        {
+            return Some(title);
+        }
+    }
+    None
+}
+
+fn read_codex_session_index_title_from_path(
+    index_path: &Path,
+    agent_session_id: &str,
+) -> Option<AgentMetadataTitle> {
+    let text = fs::read_to_string(index_path).ok()?;
+    for line in text.lines().rev() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(entry) = entry.as_object() else {
+            continue;
+        };
+        if entry.get("id").and_then(Value::as_str) != Some(agent_session_id) {
+            continue;
+        }
+        let title = normalize_metadata_title(
+            entry
+                .get("thread_name")
+                .or_else(|| entry.get("title"))
+                .or_else(|| entry.get("name")),
+        )?;
+        return Some(AgentMetadataTitle {
+            provider: "codex-session-index",
+            title,
+            updated_at: entry
+                .get("updated_at")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+        });
+    }
+    None
+}
+
+fn get_codex_session_index_candidate_paths(
+    home_dir: &Path,
+    agent_session_path: Option<&str>,
+) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(root) = get_codex_root_from_session_path(agent_session_path) {
+        roots.push(root);
+    }
+    let home_root = home_dir.join(".codex");
+    if !roots.iter().any(|root| root == &home_root) {
+        roots.push(home_root);
+    }
+    roots
+        .into_iter()
+        .map(|root| root.join("session_index.jsonl"))
+        .collect()
+}
+
+fn get_codex_root_from_session_path(agent_session_path: Option<&str>) -> Option<PathBuf> {
+    let normalized_path = agent_session_path?.trim().replace('\\', "/");
+    if normalized_path.is_empty() {
+        return None;
+    }
+    let sessions_marker_index = normalized_path.rfind("/sessions/")?;
+    (sessions_marker_index > 0).then(|| PathBuf::from(&normalized_path[..sessions_marker_index]))
+}
+
+fn normalize_metadata_title(value: Option<&Value>) -> Option<String> {
+    let title = get_visible_terminal_title(value?.as_str()?)?
+        .trim()
+        .to_string();
+    (!title.is_empty() && !is_rejected_resume_title(&title)).then_some(title)
+}
+
+fn titles_match(left: &str, right: &str) -> bool {
+    left.split_whitespace().collect::<Vec<_>>().join(" ")
+        == right.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn cancel_first_prompt_auto_title(
@@ -851,25 +1119,12 @@ fn ingest_session_state_event(
     lifecycle: &LifecycleParams,
     params: &Map<String, Value>,
 ) -> Result<Value, DomainStateError> {
-    let current = require_session(repository, lifecycle)?;
-    let incoming_identity = resolve_session_identity(&IdentityInput {
-        agent_id: None,
-        agent_name: read_text(params, "agentName"),
-        agent_session_id: read_text(params, "agentSessionId"),
-        agent_session_path: read_text(params, "agentSessionPath"),
-        runtime_settings: Map::new(),
-        startup_text: read_text(params, "startupText"),
-    });
-    if launch_agent_mismatch(&current, incoming_identity.agent_id.as_deref()) {
-        return Ok(json!({
-            "changed": false,
-            "projection": project_session_title_projection(&current),
-            "reason": "session-state-agent-mismatch",
-            "session": current,
-        }));
-    }
-    let (mut result, session) =
-        apply_session_state_update(repository, lifecycle, params, "passive")?;
+    let (mut result, session) = apply_session_state_update(
+        repository,
+        lifecycle,
+        params,
+        SessionIdentityUpdateSource::Passive,
+    )?;
     let claimed =
         claim_first_prompt_auto_title(repository, &session, read_text(params, "firstUserMessage"))?;
     if let Some(claimed_session) = claimed {
@@ -887,6 +1142,93 @@ fn ingest_session_state_event(
     Ok(Value::Object(result))
 }
 
+pub(crate) fn apply_live_process_session_identity(
+    repository: &DomainRepository<'_>,
+    project_id: &str,
+    session_id: &str,
+    agent_id: Option<String>,
+    agent_session_id: Option<String>,
+    agent_session_path: Option<String>,
+) -> Result<bool, DomainStateError> {
+    let lifecycle = LifecycleParams {
+        project_id: project_id.to_string(),
+        session_id: session_id.to_string(),
+    };
+    let mut params = Map::new();
+    insert_optional_string(&mut params, "agentName", agent_id);
+    insert_optional_string(&mut params, "agentSessionId", agent_session_id);
+    insert_optional_string(&mut params, "agentSessionPath", agent_session_path);
+    let (result, _) = apply_session_state_update(
+        repository,
+        &lifecycle,
+        &params,
+        SessionIdentityUpdateSource::LiveProcess,
+    )?;
+    Ok(result.get("changed").and_then(Value::as_bool) == Some(true))
+}
+
+pub(crate) fn apply_created_session_identity(
+    repository: &DomainRepository<'_>,
+    session: &Value,
+    params: &Map<String, Value>,
+) -> Result<Value, DomainStateError> {
+    let lifecycle = LifecycleParams {
+        project_id: read_text_value(session, "projectId")
+            .ok_or_else(|| DomainStateError::corrupt_state("Session missing projectId."))?,
+        session_id: read_text_value(session, "sessionId")
+            .ok_or_else(|| DomainStateError::corrupt_state("Session missing sessionId."))?,
+    };
+    let runtime_settings = params
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let launch_settings = params
+        .get("launchSettings")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut identity_params = Map::new();
+    insert_optional_string(
+        &mut identity_params,
+        "agentName",
+        read_text_value(session, "agentId").or_else(|| read_text(params, "agentId")),
+    );
+    insert_optional_string(
+        &mut identity_params,
+        "agentSessionId",
+        read_text_from_map(&runtime_settings, "agentSessionId"),
+    );
+    insert_optional_string(
+        &mut identity_params,
+        "agentSessionPath",
+        read_text_from_map(&runtime_settings, "agentSessionPath"),
+    );
+    insert_optional_string(
+        &mut identity_params,
+        "startupText",
+        read_text_from_map(&runtime_settings, "startupText")
+            .or_else(|| read_text_from_map(&launch_settings, "startupText")),
+    );
+    insert_optional_string(
+        &mut identity_params,
+        "titleSource",
+        read_text_from_map(&runtime_settings, "titleSource"),
+    );
+    insert_optional_string(
+        &mut identity_params,
+        "title",
+        read_text(params, "title").or_else(|| read_text_value(session, "title")),
+    );
+    let (_, updated) = apply_session_state_update(
+        repository,
+        &lifecycle,
+        &identity_params,
+        SessionIdentityUpdateSource::Lifecycle,
+    )?;
+    Ok(updated)
+}
+
 fn ingest_terminal_title_event(
     repository: &DomainRepository<'_>,
     lifecycle: &LifecycleParams,
@@ -899,38 +1241,22 @@ fn ingest_terminal_title_event(
         .as_deref()
         .and_then(get_terminal_title_detected_agent_name);
     let mut runtime_settings = object_field(&current, "runtimeSettings");
-    let agent_name = read_text(params, "agentName")
-        .or(title_detected_agent.clone())
-        .or_else(|| read_text_from_map(&runtime_settings, "agentName"))
-        .or_else(|| read_text_value(&current, "agentId"));
+    let agent_name = read_text(params, "agentName").or(title_detected_agent.clone());
     let captured_agent_session_id = raw_title
         .as_deref()
         .and_then(get_codex_session_id_from_title)
         .filter(|_| normalize_agent_id(agent_name.as_deref()).as_deref() == Some("codex"));
     /*
-    CDXC:GxserverRustPort 2026-06-16-00:49:
-    Codex zmx terminal titles can carry a UUID identity without a user-visible title. Treat a newly captured UUID as a real metadata change so Rust matches the TypeScript changed contract while still keeping the raw title out of logs and sidebar titles.
+    CDXC:GxserverSessionIdentity 2026-06-21-18:25:
+    Terminal-title agent/session-id observations must flow through the shared identity reducer, matching TypeScript gxserver. This keeps launch-agent mismatch protection and Codex thread conflict rules identical while still allowing zmx title streams to promote recognized CLI rows for every client.
     */
-    let previous_agent_session_id = read_text_from_map(&runtime_settings, "agentSessionId");
-    let captured_agent_session_changed = captured_agent_session_id
-        .as_deref()
-        .is_some_and(|next| previous_agent_session_id.as_deref() != Some(next));
-    if let Some(agent_session_id) = captured_agent_session_id.clone() {
-        runtime_settings.insert("agentSessionId".to_string(), json!(agent_session_id));
-    }
-    let mut changed = captured_agent_session_changed;
+    let mut changed = false;
     let mut reason = if captured_agent_session_id.is_some() {
         "captured-agent-session-id".to_string()
     } else {
         "terminal-title-not-visible".to_string()
     };
     let mut update = lifecycle_update(lifecycle);
-    if let Some(agent) = title_detected_agent.clone() {
-        update.insert("kind".to_string(), json!("agent"));
-        update.insert("agentId".to_string(), json!(agent.clone()));
-        runtime_settings.insert("agentName".to_string(), json!(agent));
-        changed = true;
-    }
     if let Some(title) = visible_title.clone() {
         if params
             .get("protectStoredTitleFromAutomation")
@@ -946,9 +1272,53 @@ fn ingest_terminal_title_event(
             reason = "already-synced".to_string();
         }
     }
-    let activity_update = compute_activity_update(&current, params, Some("title"));
-    let should_update_activity = should_persist_activity_update(&current, &activity_update);
+    let mut session = if changed {
+        update.insert(
+            "runtimeSettings".to_string(),
+            Value::Object(runtime_settings),
+        );
+        repository.update_session(&update)?
+    } else {
+        current
+    };
+    if captured_agent_session_id.is_some() || title_detected_agent.is_some() {
+        let mut identity_params = Map::new();
+        insert_optional_string(&mut identity_params, "agentName", agent_name);
+        insert_optional_string(
+            &mut identity_params,
+            "agentSessionId",
+            captured_agent_session_id.clone(),
+        );
+        let (identity_result, identity_session) = apply_session_state_update(
+            repository,
+            lifecycle,
+            &identity_params,
+            SessionIdentityUpdateSource::TerminalTitle,
+        )?;
+        if identity_result
+            .get("changed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            changed = true;
+            reason = identity_result
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("identity-updated")
+                .to_string();
+        } else if reason == "terminal-title-not-visible" {
+            reason = identity_result
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("already-synced")
+                .to_string();
+        }
+        session = identity_session;
+    }
+    let activity_update = compute_activity_update(&session, params, Some("title"));
+    let should_update_activity = should_persist_activity_update(&session, &activity_update);
     if should_update_activity {
+        let mut runtime_settings = object_field(&session, "runtimeSettings");
         runtime_settings.insert(
             "agentActivity".to_string(),
             activity_update.activity.clone(),
@@ -956,13 +1326,13 @@ fn ingest_terminal_title_event(
         if let Some(last_active_at) = activity_update.last_active_at.clone() {
             update.insert("lastActiveAt".to_string(), json!(last_active_at));
         }
-    }
-    if changed || captured_agent_session_id.is_some() || should_update_activity {
         update.insert(
             "runtimeSettings".to_string(),
             Value::Object(runtime_settings),
         );
-        let session = repository.update_session(&update)?;
+        session = repository.update_session(&update)?;
+    }
+    if changed || captured_agent_session_id.is_some() || should_update_activity {
         Ok(json!({
             "agentSessionId": captured_agent_session_id,
             "activity": activity_update.activity,
@@ -981,9 +1351,9 @@ fn ingest_terminal_title_event(
             "changed": false,
             "enteredAttention": activity_update.entered_attention,
             "previousActivity": activity_update.previous_activity,
-            "projection": project_session_title_projection(&current),
+            "projection": project_session_title_projection(&session),
             "reason": reason,
-            "session": current,
+            "session": session,
             "visibleTitle": visible_title,
         }))
     }
@@ -996,7 +1366,7 @@ fn update_agent_activity_endpoint(
 ) -> Result<Value, DomainStateError> {
     let current = require_session(repository, lifecycle)?;
     if launch_agent_mismatch(&current, read_text(params, "agentName").as_deref()) {
-        let previous = normalize_agent_activity_state(
+        let previous = normalize_agent_activity_value(
             object_field(&current, "runtimeSettings").get("agentActivity"),
             "idle",
         );
@@ -1041,7 +1411,7 @@ fn ingest_agent_hook_event(
         params.get("agentName"),
     );
     if launch_agent_mismatch(&current, read_text(params, "agentName").as_deref()) {
-        let previous = normalize_agent_activity_state(
+        let previous = normalize_agent_activity_value(
             object_field(&current, "runtimeSettings").get("agentActivity"),
             "idle",
         );
@@ -1055,8 +1425,12 @@ fn ingest_agent_hook_event(
             "session": current,
         }));
     }
-    let (metadata_result, mut session) =
-        apply_session_state_update(repository, lifecycle, params, "passive")?;
+    let (metadata_result, mut session) = apply_session_state_update(
+        repository,
+        lifecycle,
+        params,
+        SessionIdentityUpdateSource::Passive,
+    )?;
     let mut changed = metadata_result
         .get("changed")
         .and_then(Value::as_bool)
@@ -1130,47 +1504,89 @@ fn ingest_agent_hook_event(
     Ok(Value::Object(result))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SessionIdentityUpdateSource {
+    Lifecycle,
+    LiveProcess,
+    Passive,
+    TerminalTitle,
+}
+
+struct SessionIdentityConflict {
+    agent_id: String,
+    current_agent_session_id: Option<String>,
+    incoming_agent_session_id: String,
+    owner_project_id: Option<String>,
+    owner_session_id: Option<String>,
+    reason: &'static str,
+    source: SessionIdentityUpdateSource,
+}
+
 fn apply_session_state_update(
     repository: &DomainRepository<'_>,
     lifecycle: &LifecycleParams,
     params: &Map<String, Value>,
-    identity_update_source: &str,
+    identity_update_source: SessionIdentityUpdateSource,
 ) -> Result<(Map<String, Value>, Value), DomainStateError> {
     let session = require_session(repository, lifecycle)?;
     let project = require_project(repository, &lifecycle.project_id)?;
-    let identity = resolve_session_identity(&IdentityInput {
-        agent_id: read_text_value(&session, "agentId"),
+    let project_sessions = repository.list_sessions(Some(&lifecycle.project_id))?;
+    let observed_identity = resolve_session_identity(&IdentityInput {
+        agent_id: None,
         agent_name: read_text(params, "agentName"),
         agent_session_id: read_text(params, "agentSessionId"),
         agent_session_path: read_text(params, "agentSessionPath"),
-        runtime_settings: object_field(&session, "runtimeSettings"),
+        runtime_settings: Map::new(),
         startup_text: read_text(params, "startupText"),
     });
-    let mut runtime_settings = object_field(&session, "runtimeSettings");
-    let current_agent = normalize_agent_id(read_text_value(&session, "agentId").as_deref());
-    let next_agent = identity.agent_id.clone().or(current_agent.clone());
-    let agent_changed =
-        current_agent.is_some() && next_agent.is_some() && current_agent != next_agent;
-    if let Some(agent_id) = next_agent.clone() {
-        runtime_settings.insert("agentName".to_string(), json!(agent_id));
-        if identity_update_source == "live-process" {
-            runtime_settings.insert("launchAgentId".to_string(), json!(agent_id));
+    if identity_update_source != SessionIdentityUpdateSource::LiveProcess
+        && launch_agent_mismatch(&session, observed_identity.agent_id.as_deref())
+    {
+        let result = json!({
+            "changed": false,
+            "projection": project_session_title_projection(&session),
+            "reason": "launch-agent-mismatch",
+            "session": session.clone(),
+        });
+        return Ok((object_from_value(result), session));
+    }
+    let current_identity = resolve_stored_session_identity(&session);
+    let resolved_identity = merge_observed_session_identity(&observed_identity, &current_identity);
+    let (identity, identity_conflict) = resolve_allowed_session_identity(
+        &current_identity,
+        &session,
+        &observed_identity,
+        &resolved_identity,
+        &project_sessions,
+        identity_update_source,
+    );
+    if identity_conflict.is_some() && identity_update_source == SessionIdentityUpdateSource::Passive
+    {
+        let mut result = object_from_value(json!({
+            "changed": false,
+            "projection": project_session_title_projection(&session),
+            "reason": "passive-session-identity-conflict",
+            "session": session.clone(),
+        }));
+        if let Some(conflict) = identity_conflict {
+            result.insert(
+                "identityConflict".to_string(),
+                session_identity_conflict_value(&conflict),
+            );
         }
+        return Ok((result, session));
     }
-    if let Some(agent_session_id) = identity.agent_session_id.clone() {
-        runtime_settings.insert("agentSessionId".to_string(), json!(agent_session_id));
-    } else if agent_changed {
-        runtime_settings.remove("agentSessionId");
-    }
-    if let Some(agent_session_path) = identity.agent_session_path.clone() {
-        runtime_settings.insert("agentSessionPath".to_string(), json!(agent_session_path));
-    } else if agent_changed {
-        runtime_settings.remove("agentSessionPath");
-    }
-    if agent_changed {
-        runtime_settings.remove("agentId");
-        runtime_settings.remove("agentActivity");
-    }
+
+    let next_agent = identity
+        .agent_id
+        .clone()
+        .or_else(|| read_text_value(&session, "agentId"));
+    let mut runtime_settings = apply_session_identity_runtime_settings(
+        &current_identity,
+        &identity,
+        object_field(&session, "runtimeSettings"),
+        identity_update_source,
+    );
     insert_optional_from_params(
         &mut runtime_settings,
         params,
@@ -1189,19 +1605,32 @@ fn apply_session_state_update(
     let mut title =
         read_text_value(&session, "title").unwrap_or_else(|| "Terminal Session".to_string());
     let mut reason = "identity-updated".to_string();
-    if trusted_resume_title(&session).is_none() {
-        if let Some(candidate) = read_text(params, "title")
-            .and_then(|title| get_visible_terminal_title(&title))
-            .filter(|title| !is_rejected_resume_title(title))
-        {
-            title = candidate;
-            runtime_settings.insert(
-                "titleSource".to_string(),
-                json!(read_text(params, "titleSource").unwrap_or_else(|| "user".to_string())),
-            );
-            reason = "event-title".to_string();
-        } else if let Some(project_name) = read_text_value(&project, "name") {
-            let _ = project_name;
+    let mut current_with_identity = session.clone();
+    if let Some(object) = current_with_identity.as_object_mut() {
+        if let Some(agent_id) = next_agent.clone() {
+            object.insert("agentId".to_string(), json!(agent_id));
+        }
+        if should_promote_agent {
+            object.insert("kind".to_string(), json!("agent"));
+        }
+        object.insert(
+            "runtimeSettings".to_string(),
+            Value::Object(runtime_settings.clone()),
+        );
+    }
+
+    if trusted_resume_title(&current_with_identity).is_none() {
+        if let Some(candidate) = select_trusted_title_for_identity(
+            &project,
+            &project_sessions,
+            &current_with_identity,
+            params.get("title"),
+            params.get("titleSource"),
+            &identity,
+        ) {
+            title = candidate.title;
+            runtime_settings.insert("titleSource".to_string(), json!(candidate.title_source));
+            reason = candidate.reason;
         }
     } else {
         reason = "current-title-already-trusted".to_string();
@@ -1220,21 +1649,532 @@ fn apply_session_state_update(
     );
     update.insert("title".to_string(), json!(title));
     let needs_update = update.get("title") != session.get("title")
-        || update.get("kind") != session.get("kind")
         || next_agent != read_text_value(&session, "agentId")
-        || Value::Object(runtime_settings) != object_field_value(&session, "runtimeSettings");
+        || (should_promote_agent && session.get("kind").and_then(Value::as_str) != Some("agent"))
+        || runtime_settings.get("agentName")
+            != object_field(&session, "runtimeSettings").get("agentName")
+        || runtime_settings.get("agentId")
+            != object_field(&session, "runtimeSettings").get("agentId")
+        || runtime_settings.get("agentSessionId")
+            != object_field(&session, "runtimeSettings").get("agentSessionId")
+        || runtime_settings.get("agentSessionPath")
+            != object_field(&session, "runtimeSettings").get("agentSessionPath")
+        || runtime_settings.get("launchAgentId")
+            != object_field(&session, "runtimeSettings").get("launchAgentId")
+        || runtime_settings.get("firstPromptTitleGenerationAgent")
+            != object_field(&session, "runtimeSettings").get("firstPromptTitleGenerationAgent")
+        || runtime_settings.get("firstPromptTitleGenerationCommand")
+            != object_field(&session, "runtimeSettings").get("firstPromptTitleGenerationCommand")
+        || runtime_settings.get("firstUserMessage")
+            != object_field(&session, "runtimeSettings").get("firstUserMessage")
+        || runtime_settings.get("agentActivity")
+            != object_field(&session, "runtimeSettings").get("agentActivity")
+        || runtime_settings.get("titleSource")
+            != object_field(&session, "runtimeSettings").get("titleSource");
     let updated = if needs_update {
         repository.update_session(&update)?
     } else {
-        session
+        current_with_identity
     };
-    let result = json!({
+    let mut result = object_from_value(json!({
         "changed": needs_update,
         "projection": project_session_title_projection(&updated),
         "reason": if needs_update { reason } else { "unchanged".to_string() },
         "session": updated.clone(),
+    }));
+    if let Some(conflict) = identity_conflict {
+        result.insert(
+            "identityConflict".to_string(),
+            session_identity_conflict_value(&conflict),
+        );
+    }
+    Ok((result, updated))
+}
+
+fn resolve_allowed_session_identity(
+    current_identity: &ResolvedIdentity,
+    current_session: &Value,
+    observed_identity: &ResolvedIdentity,
+    resolved_identity: &ResolvedIdentity,
+    sessions: &[Value],
+    source: SessionIdentityUpdateSource,
+) -> (ResolvedIdentity, Option<SessionIdentityConflict>) {
+    let observed_agent_id = normalize_agent_id(observed_identity.agent_id.as_deref());
+    let current_agent_id = normalize_agent_id(current_identity.agent_id.as_deref());
+    let resolved_agent_id = normalize_agent_id(resolved_identity.agent_id.as_deref());
+    let incoming_agent_session_id = observed_identity
+        .agent_session_id
+        .as_deref()
+        .and_then(normalize_codex_session_id);
+    let current_codex_session_id = if current_agent_id.as_deref() == Some("codex") {
+        current_identity
+            .agent_session_id
+            .as_deref()
+            .and_then(normalize_codex_session_id)
+    } else {
+        None
+    };
+    let is_passive_codex_observation = source == SessionIdentityUpdateSource::Passive
+        && incoming_agent_session_id.is_some()
+        && (observed_agent_id.as_deref() == Some("codex")
+            || (observed_agent_id.is_none()
+                && current_agent_id.as_deref() == Some("codex")
+                && resolved_agent_id.as_deref() == Some("codex")));
+    if !is_passive_codex_observation {
+        return (resolved_identity.clone(), None);
+    }
+    let incoming_agent_session_id = incoming_agent_session_id.expect("checked above");
+    if let Some(current_codex_session_id) = current_codex_session_id {
+        if current_codex_session_id != incoming_agent_session_id {
+            let conflict = SessionIdentityConflict {
+                agent_id: "codex".to_string(),
+                current_agent_session_id: Some(current_codex_session_id),
+                incoming_agent_session_id,
+                owner_project_id: None,
+                owner_session_id: None,
+                reason: "passive-agent-session-id-replacement",
+                source,
+            };
+            return (
+                keep_current_session_identity(resolved_identity, current_identity),
+                Some(conflict),
+            );
+        }
+        return (resolved_identity.clone(), None);
+    }
+    if let Some(owner) =
+        find_active_codex_identity_owner(sessions, current_session, &incoming_agent_session_id)
+    {
+        let conflict = SessionIdentityConflict {
+            agent_id: "codex".to_string(),
+            current_agent_session_id: None,
+            incoming_agent_session_id,
+            owner_project_id: read_text_value(&owner, "projectId"),
+            owner_session_id: read_text_value(&owner, "sessionId"),
+            reason: "active-agent-session-id-owned",
+            source,
+        };
+        return (
+            keep_current_session_identity(resolved_identity, current_identity),
+            Some(conflict),
+        );
+    }
+    (resolved_identity.clone(), None)
+}
+
+fn keep_current_session_identity(
+    resolved_identity: &ResolvedIdentity,
+    current_identity: &ResolvedIdentity,
+) -> ResolvedIdentity {
+    ResolvedIdentity {
+        agent_id: resolved_identity.agent_id.clone(),
+        agent_session_id: current_identity.agent_session_id.clone(),
+        agent_session_path: current_identity.agent_session_path.clone(),
+    }
+}
+
+fn merge_observed_session_identity(
+    observed_identity: &ResolvedIdentity,
+    current_identity: &ResolvedIdentity,
+) -> ResolvedIdentity {
+    let observed_agent_id = normalize_agent_id(observed_identity.agent_id.as_deref());
+    let current_agent_id = normalize_agent_id(current_identity.agent_id.as_deref());
+    let agent_changed = observed_agent_id.is_some()
+        && current_agent_id.is_some()
+        && observed_agent_id != current_agent_id;
+    ResolvedIdentity {
+        agent_id: observed_agent_id.or(current_agent_id),
+        agent_session_id: observed_identity.agent_session_id.clone().or_else(|| {
+            (!agent_changed)
+                .then(|| current_identity.agent_session_id.clone())
+                .flatten()
+        }),
+        agent_session_path: observed_identity.agent_session_path.clone().or_else(|| {
+            (!agent_changed)
+                .then(|| current_identity.agent_session_path.clone())
+                .flatten()
+        }),
+    }
+}
+
+fn resolve_stored_session_identity(session: &Value) -> ResolvedIdentity {
+    let runtime_settings = object_field(session, "runtimeSettings");
+    let stored_identity = resolve_session_identity(&IdentityInput {
+        agent_id: read_text_value(session, "agentId"),
+        agent_name: read_text_from_map(&runtime_settings, "agentName"),
+        agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
+        agent_session_path: read_text_from_map(&runtime_settings, "agentSessionPath"),
+        runtime_settings: runtime_settings.clone(),
+        startup_text: None,
     });
-    Ok((object_from_value(result), updated))
+    let transcript_path_identity = resolve_session_identity(&IdentityInput {
+        agent_id: None,
+        agent_name: None,
+        agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
+        agent_session_path: read_text_from_map(&runtime_settings, "agentSessionPath"),
+        runtime_settings: Map::new(),
+        startup_text: None,
+    });
+    merge_observed_session_identity(&transcript_path_identity, &stored_identity)
+}
+
+fn apply_session_identity_runtime_settings(
+    current_identity: &ResolvedIdentity,
+    identity: &ResolvedIdentity,
+    mut runtime_settings: Map<String, Value>,
+    source: SessionIdentityUpdateSource,
+) -> Map<String, Value> {
+    let current_agent_id = normalize_agent_id(current_identity.agent_id.as_deref());
+    let next_agent_id = normalize_agent_id(identity.agent_id.as_deref());
+    let agent_changed =
+        current_agent_id.is_some() && next_agent_id.is_some() && current_agent_id != next_agent_id;
+    let activity_agent_id = read_agent_activity_agent_id(runtime_settings.get("agentActivity"));
+    let activity_owner_changed = next_agent_id.is_some()
+        && activity_agent_id.is_some()
+        && activity_agent_id != next_agent_id;
+    if let Some(agent_id) = identity.agent_id.clone() {
+        runtime_settings.insert("agentName".to_string(), json!(agent_id));
+    }
+    if source == SessionIdentityUpdateSource::LiveProcess {
+        if let Some(agent_id) = next_agent_id.clone() {
+            runtime_settings.insert("launchAgentId".to_string(), json!(agent_id));
+        }
+    }
+    if let Some(agent_session_id) = identity.agent_session_id.clone() {
+        runtime_settings.insert("agentSessionId".to_string(), json!(agent_session_id));
+    } else if agent_changed {
+        runtime_settings.remove("agentSessionId");
+    }
+    if let Some(agent_session_path) = identity.agent_session_path.clone() {
+        runtime_settings.insert("agentSessionPath".to_string(), json!(agent_session_path));
+    } else if agent_changed {
+        runtime_settings.remove("agentSessionPath");
+    }
+    if agent_changed {
+        runtime_settings.remove("agentId");
+    }
+    if agent_changed || activity_owner_changed {
+        runtime_settings.remove("agentActivity");
+    }
+    runtime_settings
+}
+
+fn read_agent_activity_agent_id(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_object)
+        .and_then(|activity| activity.get("agentName"))
+        .and_then(Value::as_str)
+        .and_then(|value| normalize_agent_id(Some(value)))
+}
+
+fn find_active_codex_identity_owner(
+    sessions: &[Value],
+    current_session: &Value,
+    incoming_agent_session_id: &str,
+) -> Option<Value> {
+    sessions.iter().find_map(|session| {
+        if read_text_value(session, "sessionId") == read_text_value(current_session, "sessionId")
+            && read_text_value(session, "projectId")
+                == read_text_value(current_session, "projectId")
+        {
+            return None;
+        }
+        if !is_active_identity_owner(session) {
+            return None;
+        }
+        let runtime_settings = object_field(session, "runtimeSettings");
+        let identity = resolve_session_identity(&IdentityInput {
+            agent_id: read_text_value(session, "agentId"),
+            agent_name: None,
+            agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
+            agent_session_path: read_text_from_map(&runtime_settings, "agentSessionPath"),
+            runtime_settings,
+            startup_text: None,
+        });
+        let is_match = normalize_agent_id(identity.agent_id.as_deref()).as_deref() == Some("codex")
+            && identity
+                .agent_session_id
+                .as_deref()
+                .and_then(normalize_codex_session_id)
+                .as_deref()
+                == Some(incoming_agent_session_id);
+        is_match.then(|| session.clone())
+    })
+}
+
+fn is_active_identity_owner(session: &Value) -> bool {
+    session.get("lifecycleState").and_then(Value::as_str) == Some("running")
+        || session.get("lifecycleState").and_then(Value::as_str) == Some("sleeping")
+        || (session.get("lifecycleState").and_then(Value::as_str) != Some("stopped")
+            && object_field(session, "providerState")
+                .get("lifecycleState")
+                .and_then(Value::as_str)
+                == Some("exists"))
+}
+
+fn session_identity_conflict_value(conflict: &SessionIdentityConflict) -> Value {
+    let mut output = Map::new();
+    output.insert("agentId".to_string(), json!(conflict.agent_id));
+    insert_optional_string(
+        &mut output,
+        "currentAgentSessionId",
+        conflict.current_agent_session_id.clone(),
+    );
+    output.insert(
+        "incomingAgentSessionId".to_string(),
+        json!(conflict.incoming_agent_session_id),
+    );
+    insert_optional_string(
+        &mut output,
+        "ownerProjectId",
+        conflict.owner_project_id.clone(),
+    );
+    insert_optional_string(
+        &mut output,
+        "ownerSessionId",
+        conflict.owner_session_id.clone(),
+    );
+    output.insert("reason".to_string(), json!(conflict.reason));
+    output.insert(
+        "source".to_string(),
+        json!(identity_update_source_name(conflict.source)),
+    );
+    Value::Object(output)
+}
+
+fn identity_update_source_name(source: SessionIdentityUpdateSource) -> &'static str {
+    match source {
+        SessionIdentityUpdateSource::Lifecycle => "lifecycle",
+        SessionIdentityUpdateSource::LiveProcess => "live-process",
+        SessionIdentityUpdateSource::Passive => "passive",
+        SessionIdentityUpdateSource::TerminalTitle => "terminal-title",
+    }
+}
+
+struct TrustedTitleCandidate {
+    reason: String,
+    title: String,
+    title_source: String,
+    updated_at: Option<String>,
+}
+
+fn select_trusted_title_for_identity(
+    project: &Value,
+    sessions: &[Value],
+    current_session: &Value,
+    event_title: Option<&Value>,
+    event_title_source: Option<&Value>,
+    identity: &ResolvedIdentity,
+) -> Option<TrustedTitleCandidate> {
+    if let Some(candidate) =
+        create_trusted_title_candidate(event_title, event_title_source, "event-title", None)
+    {
+        return Some(candidate);
+    }
+
+    let current_session_id = read_text_value(current_session, "sessionId");
+    let live_candidate = select_newest_candidate(
+        sessions
+            .iter()
+            .filter(|session| read_text_value(session, "sessionId") != current_session_id)
+            .filter_map(|session| {
+                let runtime_settings = object_field(session, "runtimeSettings");
+                let candidate_identity = ResolvedIdentity {
+                    agent_id: read_text_value(session, "agentId")
+                        .or_else(|| read_text_from_map(&runtime_settings, "agentName")),
+                    agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
+                    agent_session_path: read_text_from_map(&runtime_settings, "agentSessionPath"),
+                };
+                if !identities_match(identity, &candidate_identity) {
+                    return None;
+                }
+                let title = trusted_resume_title(session)?;
+                Some(TrustedTitleCandidate {
+                    reason: format!(
+                        "matching-live-session:{}",
+                        read_text_value(session, "sessionId").unwrap_or_default()
+                    ),
+                    title_source: normalize_title_source(
+                        object_field(session, "runtimeSettings")
+                            .get("titleSource")
+                            .and_then(Value::as_str),
+                        &title,
+                    ),
+                    updated_at: read_text_value(session, "lastActiveAt")
+                        .or_else(|| read_text_value(session, "updatedAt")),
+                    title,
+                })
+            })
+            .collect(),
+    );
+    if live_candidate.is_some() {
+        return live_candidate;
+    }
+
+    select_newest_candidate(
+        project
+            .get("previousSessionHistory")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| create_history_title_candidate(item, identity))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    )
+}
+
+fn create_history_title_candidate(
+    value: &Value,
+    identity: &ResolvedIdentity,
+) -> Option<TrustedTitleCandidate> {
+    let record = value.as_object()?;
+    let session_record = record.get("sessionRecord").and_then(Value::as_object);
+    let hidden_record = record
+        .get("hiddenRestoreMetadata")
+        .and_then(Value::as_object)
+        .and_then(|hidden| hidden.get("sessionRecord"))
+        .and_then(Value::as_object);
+    let candidate_identity = ResolvedIdentity {
+        agent_id: read_text_from_record(record, "agentId")
+            .or_else(|| read_text_from_record(record, "agentName"))
+            .or_else(|| session_record.and_then(|item| read_text_from_record(item, "agentName")))
+            .or_else(|| hidden_record.and_then(|item| read_text_from_record(item, "agentName")))
+            .and_then(|value| normalize_agent_id(Some(&value))),
+        agent_session_id: read_text_from_record(record, "agentSessionId")
+            .or_else(|| {
+                session_record.and_then(|item| read_text_from_record(item, "agentSessionId"))
+            })
+            .or_else(|| {
+                hidden_record.and_then(|item| read_text_from_record(item, "agentSessionId"))
+            }),
+        agent_session_path: read_text_from_record(record, "agentSessionPath")
+            .or_else(|| {
+                session_record.and_then(|item| read_text_from_record(item, "agentSessionPath"))
+            })
+            .or_else(|| {
+                hidden_record.and_then(|item| read_text_from_record(item, "agentSessionPath"))
+            }),
+    };
+    if !identities_match(identity, &candidate_identity) {
+        return None;
+    }
+
+    let updated_at = read_text_from_record(record, "lastInteractionAt")
+        .or_else(|| read_text_from_record(record, "closedAt"));
+    if let Some(session_record) = session_record {
+        if let Some(candidate) = create_trusted_title_candidate(
+            session_record.get("title"),
+            session_record.get("titleSource"),
+            "previous-session-record-title",
+            updated_at.clone(),
+        ) {
+            return Some(candidate);
+        }
+    }
+    create_trusted_title_candidate(
+        record.get("primaryTitle"),
+        Some(&json!(if record
+            .get("isPrimaryTitleTerminalTitle")
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            "terminal-auto"
+        } else {
+            "user"
+        })),
+        "previous-session-primary-title",
+        updated_at.clone(),
+    )
+    .or_else(|| {
+        create_trusted_title_candidate(
+            record.get("terminalTitle"),
+            Some(&json!("terminal-auto")),
+            "previous-session-terminal-title",
+            updated_at,
+        )
+    })
+}
+
+fn create_trusted_title_candidate(
+    title: Option<&Value>,
+    title_source: Option<&Value>,
+    reason: &str,
+    updated_at: Option<String>,
+) -> Option<TrustedTitleCandidate> {
+    let normalized_title = get_visible_terminal_title(title?.as_str()?)?
+        .trim()
+        .to_string();
+    if normalized_title.is_empty() || is_rejected_resume_title(&normalized_title) {
+        return None;
+    }
+    let normalized_source =
+        normalize_title_source(title_source.and_then(Value::as_str), &normalized_title);
+    if normalized_source == "placeholder" {
+        return None;
+    }
+    Some(TrustedTitleCandidate {
+        reason: reason.to_string(),
+        title: normalized_title,
+        title_source: normalized_source,
+        updated_at,
+    })
+}
+
+fn select_newest_candidate(
+    mut candidates: Vec<TrustedTitleCandidate>,
+) -> Option<TrustedTitleCandidate> {
+    candidates.sort_by(|left, right| {
+        timestamp_value(right.updated_at.as_deref())
+            .cmp(&timestamp_value(left.updated_at.as_deref()))
+    });
+    candidates.into_iter().next()
+}
+
+fn timestamp_value(value: Option<&str>) -> i64 {
+    value.and_then(parse_iso_ms).unwrap_or(0)
+}
+
+fn normalize_title_source(source: Option<&str>, title: &str) -> String {
+    match source {
+        Some("generated") => "generated".to_string(),
+        Some("terminal-auto") => "terminal-auto".to_string(),
+        Some("user") => "user".to_string(),
+        Some("placeholder") => "placeholder".to_string(),
+        _ if is_temporary_title(title) => "placeholder".to_string(),
+        _ => "user".to_string(),
+    }
+}
+
+fn read_text_from_record(record: &Map<String, Value>, key: &str) -> Option<String> {
+    record
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn identities_match(left: &ResolvedIdentity, right: &ResolvedIdentity) -> bool {
+    let left_agent = normalize_agent_id(left.agent_id.as_deref());
+    let right_agent = normalize_agent_id(right.agent_id.as_deref());
+    if left_agent.is_some() && right_agent.is_some() && left_agent != right_agent {
+        return false;
+    }
+    if left.agent_session_id.is_some()
+        && right.agent_session_id.is_some()
+        && left.agent_session_id == right.agent_session_id
+    {
+        return true;
+    }
+    left.agent_session_path.is_some()
+        && right.agent_session_path.is_some()
+        && left.agent_session_path == right.agent_session_path
+}
+
+fn normalize_codex_session_id(value: &str) -> Option<String> {
+    is_uuid(value.trim()).then(|| value.trim().to_ascii_lowercase())
 }
 
 fn claim_first_prompt_auto_title(
@@ -1287,200 +2227,9 @@ fn claim_first_prompt_auto_title(
     repository.update_session(&update).map(Some)
 }
 
-struct ActivityUpdate {
-    activity: Value,
-    entered_attention: bool,
-    last_active_at: Option<String>,
-    previous_activity: String,
-}
-
-fn compute_activity_update(
-    session: &Value,
-    params: &Map<String, Value>,
-    forced_event: Option<&str>,
-) -> ActivityUpdate {
-    let runtime_settings = object_field(session, "runtimeSettings");
-    let previous = normalize_agent_activity_state(runtime_settings.get("agentActivity"), "idle");
-    let previous_activity = previous
-        .get("activity")
-        .and_then(Value::as_str)
-        .unwrap_or("idle")
-        .to_string();
-    let now_ms_value = params
-        .get("nowMs")
-        .and_then(Value::as_i64)
-        .unwrap_or_else(now_ms);
-    let now_iso_value = iso_from_ms(now_ms_value);
-    let event = forced_event
-        .map(str::to_string)
-        .or_else(|| read_text(params, "event"));
-    let explicit_activity = params
-        .get("activity")
-        .and_then(Value::as_str)
-        .filter(|value| matches!(*value, "idle" | "working" | "attention"))
-        .map(str::to_string);
-    let agent_name = normalize_status_agent_name(
-        read_text(params, "agentName")
-            .or_else(|| read_text_value(session, "agentId"))
-            .or_else(|| {
-                read_text_from_map(
-                    &previous.as_object().cloned().unwrap_or_default(),
-                    "agentName",
-                )
-            })
-            .as_deref(),
-    );
-    let mut next = previous.as_object().cloned().unwrap_or_default();
-    match event.as_deref() {
-        Some("launch" | "resume" | "agentDetected" | "wake") => {
-            next = default_activity(agent_name.as_deref(), Some("idle"))
-                .as_object()
-                .cloned()
-                .unwrap_or_default();
-            next.insert(
-                "suppressedUntil".to_string(),
-                json!(iso_from_ms(now_ms_value + INITIAL_ACTIVITY_SUPPRESSION_MS)),
-            );
-        }
-        Some("acknowledge") => {
-            next.insert("activity".to_string(), json!("idle"));
-            next.insert("isAcknowledged".to_string(), Value::Bool(true));
-            next.insert("lastChangedAt".to_string(), json!(now_iso_value.clone()));
-        }
-        Some("escape") => {
-            if previous_activity == "attention" {
-                next.insert("activity".to_string(), json!("idle"));
-                next.remove("attentionEventId");
-                next.remove("workingSource");
-                next.remove("workingStartedAt");
-            }
-            next.insert("isAcknowledged".to_string(), Value::Bool(true));
-            next.insert(
-                "attentionSuppressedUntil".to_string(),
-                json!(iso_from_ms(now_ms_value + ESCAPE_ATTENTION_SUPPRESSION_MS)),
-            );
-            if previous_activity == "attention" {
-                next.insert("lastChangedAt".to_string(), json!(now_iso_value.clone()));
-            }
-        }
-        _ => {
-            let title_signal = if event.as_deref() == Some("title") {
-                classify_terminal_title_status(
-                    read_text(params, "title").as_deref(),
-                    agent_name.as_deref(),
-                )
-            } else {
-                None
-            };
-            let requested = explicit_activity
-                .or_else(|| match event.as_deref() {
-                    Some("bell" | "terminalError") => Some("attention".to_string()),
-                    Some("terminalExited") => Some("idle".to_string()),
-                    _ => None,
-                })
-                .or_else(|| title_signal.as_ref().map(|(_, state)| state.clone()))
-                .unwrap_or_else(|| previous_activity.clone());
-            next.insert("activity".to_string(), json!(requested.clone()));
-            insert_optional_string(&mut next, "agentName", agent_name);
-            next.insert("lastChangedAt".to_string(), json!(now_iso_value.clone()));
-            if requested == "working" {
-                next.insert("hasSeenWorking".to_string(), Value::Bool(true));
-                next.insert("isAcknowledged".to_string(), Value::Bool(false));
-                next.insert("workingStartedAt".to_string(), json!(now_iso_value.clone()));
-                next.insert(
-                    "workingSource".to_string(),
-                    json!(if event.as_deref() == Some("title") {
-                        "title"
-                    } else {
-                        "explicit"
-                    }),
-                );
-            } else if requested == "attention" {
-                next.insert(
-                    "attentionEventId".to_string(),
-                    json!(format!("attn_{}", now_ms_value)),
-                );
-                next.insert("hasSeenWorking".to_string(), Value::Bool(true));
-                next.insert("isAcknowledged".to_string(), Value::Bool(false));
-            } else {
-                next.remove("workingSource");
-                next.remove("workingStartedAt");
-            }
-            if let Some(title) = read_text(params, "title") {
-                let same_title =
-                    next.get("lastTitle").and_then(Value::as_str) == Some(title.as_str());
-                next.insert("lastTitle".to_string(), json!(title));
-                if !same_title {
-                    next.insert(
-                        "lastTitleChangeAt".to_string(),
-                        json!(now_iso_value.clone()),
-                    );
-                }
-            }
-        }
-    }
-    let activity = Value::Object(next);
-    let next_activity = activity
-        .get("activity")
-        .and_then(Value::as_str)
-        .unwrap_or("idle");
-    let last_active_at = if matches!(next_activity, "working" | "attention") {
-        activity
-            .get("lastChangedAt")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .or(Some(now_iso_value))
-    } else {
-        read_text_value(session, "lastActiveAt")
-    };
-    ActivityUpdate {
-        entered_attention: previous_activity != "attention" && next_activity == "attention",
-        activity,
-        last_active_at,
-        previous_activity,
-    }
-}
-
 fn should_persist_activity_update(session: &Value, update: &ActivityUpdate) -> bool {
     read_text_value(session, "lastActiveAt") != update.last_active_at
         || object_field(session, "runtimeSettings").get("agentActivity") != Some(&update.activity)
-}
-
-fn normalize_agent_activity_state(value: Option<&Value>, fallback: &str) -> Value {
-    let record = value
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    let activity = record
-        .get("activity")
-        .and_then(Value::as_str)
-        .filter(|value| matches!(*value, "idle" | "working" | "attention"))
-        .unwrap_or(fallback);
-    let mut output = Map::new();
-    output.insert("activity".to_string(), json!(activity));
-    for key in [
-        "agentName",
-        "attentionEventId",
-        "attentionSuppressedUntil",
-        "lastChangedAt",
-        "lastTitle",
-        "lastTitleChangeAt",
-        "suppressedUntil",
-        "workingSource",
-        "workingStartedAt",
-    ] {
-        insert_optional_string(
-            &mut output,
-            key,
-            record.get(key).and_then(Value::as_str).map(str::to_string),
-        );
-    }
-    for key in ["hasSeenWorking", "isAcknowledged"] {
-        if let Some(value) = record.get(key).and_then(Value::as_bool) {
-            output.insert(key.to_string(), Value::Bool(value));
-        }
-    }
-    Value::Object(output)
 }
 
 fn normalize_agent_hook_activity(
@@ -1547,18 +2296,6 @@ fn normalize_agent_hook_activity(
         .and_then(Value::as_str)
         .filter(|value| matches!(*value, "idle" | "working" | "attention"))
         .map(str::to_string)
-}
-
-fn is_stale_activity_event(session: &Value, incoming_now_ms: i64) -> bool {
-    let current_changed_at = object_field(session, "runtimeSettings")
-        .get("agentActivity")
-        .and_then(Value::as_object)
-        .and_then(|activity| activity.get("lastChangedAt"))
-        .and_then(Value::as_str)
-        .and_then(parse_iso_ms);
-    current_changed_at
-        .map(|current| incoming_now_ms < current)
-        .unwrap_or(false)
 }
 
 #[derive(Clone)]
@@ -2237,49 +2974,6 @@ fn get_terminal_title_detected_agent_name(title: &str) -> Option<String> {
     None
 }
 
-fn classify_terminal_title_status(
-    title: Option<&str>,
-    known_agent_name: Option<&str>,
-) -> Option<(String, String)> {
-    let title = title?;
-    let normalized = title
-        .trim()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let lower = normalized.to_ascii_lowercase();
-    let agent = normalize_status_agent_name(known_agent_name);
-    if lower.contains("action required") && agent.as_deref() == Some("codex") {
-        return Some(("codex".to_string(), "attention".to_string()));
-    }
-    if lower.contains("codex") || agent.as_deref() == Some("codex") {
-        let working = normalized.chars().any(|char| "⠸⠴⠼⠧⠦⠏⠋⠇⠙⠹".contains(char));
-        return Some((
-            "codex".to_string(),
-            if working { "working" } else { "idle" }.to_string(),
-        ));
-    }
-    if lower.contains("claude") || agent.as_deref() == Some("claude") {
-        let working = normalized.chars().any(|char| "⠐⠂·✶✻✽✸✹✺✷✴".contains(char));
-        return Some((
-            "claude".to_string(),
-            if working { "working" } else { "idle" }.to_string(),
-        ));
-    }
-    if lower.contains("cursor agent") || lower.contains("⏳ working") {
-        return Some((
-            "cursor".to_string(),
-            if lower.contains("⏳ working") {
-                "working"
-            } else {
-                "idle"
-            }
-            .to_string(),
-        ));
-    }
-    None
-}
-
 fn default_activity(agent_id: Option<&str>, override_activity: Option<&str>) -> Value {
     let timestamp = now_iso();
     let mut activity = Map::new();
@@ -2386,10 +3080,6 @@ fn object_field(value: &Value, key: &str) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
-fn object_field_value(value: &Value, key: &str) -> Value {
-    Value::Object(object_field(value, key))
-}
-
 fn object_from_value(value: Value) -> Map<String, Value> {
     value.as_object().cloned().unwrap_or_default()
 }
@@ -2449,18 +3139,6 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-fn iso_from_ms(ms: i64) -> String {
-    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
-        .unwrap_or_else(chrono::Utc::now)
-        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
-
-fn parse_iso_ms(value: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(value)
-        .ok()
-        .map(|value| value.timestamp_millis())
-}
-
 fn sql_error(error: rusqlite::Error) -> DomainStateError {
     DomainStateError {
         code: "internalError",
@@ -2494,6 +3172,305 @@ mod tests {
             ],
         )
         .expect("write metadata value");
+    }
+
+    fn create_codex_agent_session(
+        repository: &DomainRepository<'_>,
+        agent_session_id: &str,
+    ) -> (LifecycleParams, Value) {
+        let project = repository
+            .create_project(
+                json!({ "name": "Rename Test Project" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("create project");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id")
+            .to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "agentId": "codex",
+                    "kind": "agent",
+                    "projectId": project_id,
+                    "runtimeSettings": {
+                        "agentName": "codex",
+                        "agentSessionId": agent_session_id,
+                        "titleSource": "placeholder"
+                    },
+                    "title": "Codex Session"
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("create session");
+        let lifecycle = LifecycleParams {
+            project_id: session
+                .get("projectId")
+                .and_then(Value::as_str)
+                .expect("session project id")
+                .to_string(),
+            session_id: session
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .expect("session id")
+                .to_string(),
+        };
+        (lifecycle, session)
+    }
+
+    #[test]
+    fn request_session_rename_reconciles_codex_metadata_title() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let agent_session_id = "codex-thread-rename";
+        let (lifecycle, _session) = create_codex_agent_session(&repository, agent_session_id);
+        let codex_dir = temp.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).expect("create codex dir");
+        std::fs::write(
+            codex_dir.join("session_index.jsonl"),
+            format!(
+                "{{\"id\":\"{agent_session_id}\",\"thread_name\":\"Old title\"}}\n{{\"id\":\"{agent_session_id}\",\"thread_name\":\"Renamed Investigation\",\"updated_at\":\"2026-06-21T15:35:00.000Z\"}}\n"
+            ),
+        )
+        .expect("write session index");
+
+        let result = request_session_rename(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "codex",
+                "agentSessionId": agent_session_id,
+                "title": "Renamed Investigation",
+                "titleSource": "user"
+            })
+            .as_object()
+            .expect("rename params"),
+            temp.path(),
+        )
+        .expect("rename result");
+
+        assert_eq!(result.get("changed"), Some(&json!(true)));
+        assert_eq!(result.get("pendingAgentMetadata"), Some(&json!(true)));
+        assert_eq!(result.get("reason"), Some(&json!("metadata-title-applied")));
+        assert_eq!(
+            result.get("shouldSendAgentRenameCommand"),
+            Some(&json!(true))
+        );
+        let session = result.get("session").expect("result session");
+        assert_eq!(session.get("title"), Some(&json!("Renamed Investigation")));
+        let runtime_settings = session
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .expect("runtime settings");
+        assert_eq!(
+            runtime_settings.get("pendingAgentTitleRequestStatus"),
+            Some(&json!("confirmed"))
+        );
+        assert_eq!(
+            runtime_settings.get("titleMetadataProvider"),
+            Some(&json!("codex-session-index"))
+        );
+        assert_eq!(
+            runtime_settings.get("titleMetadataSource"),
+            Some(&json!("agent-metadata"))
+        );
+        assert_eq!(
+            runtime_settings.get("titleMetadataUpdatedAt"),
+            Some(&json!("2026-06-21T15:35:00.000Z"))
+        );
+        assert_eq!(
+            runtime_settings.get("titleSource"),
+            Some(&json!("terminal-auto"))
+        );
+        assert!(runtime_settings.get("titleMetadataCheckedAt").is_some());
+        let stored = repository
+            .get_session(&lifecycle.project_id, &lifecycle.session_id)
+            .expect("get stored session")
+            .expect("stored session");
+        assert_eq!(stored.get("title"), Some(&json!("Renamed Investigation")));
+    }
+
+    #[test]
+    fn request_session_rename_keeps_pending_when_codex_metadata_is_missing() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let agent_session_id = "codex-thread-missing";
+        let (lifecycle, _session) = create_codex_agent_session(&repository, agent_session_id);
+
+        let result = request_session_rename(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "codex",
+                "agentSessionId": agent_session_id,
+                "title": "Requested Missing Title",
+                "titleSource": "user"
+            })
+            .as_object()
+            .expect("rename params"),
+            temp.path(),
+        )
+        .expect("rename result");
+
+        assert_eq!(
+            result.get("reason"),
+            Some(&json!("agent-rename-request-pending-metadata"))
+        );
+        assert_eq!(
+            result.get("shouldSendAgentRenameCommand"),
+            Some(&json!(true))
+        );
+        let session = result.get("session").expect("result session");
+        assert_eq!(session.get("title"), Some(&json!("Codex Session")));
+        let runtime_settings = session
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .expect("runtime settings");
+        assert_eq!(
+            runtime_settings.get("pendingAgentTitleRequestStatus"),
+            Some(&json!("pending"))
+        );
+        assert_eq!(
+            runtime_settings.get("pendingAgentTitleRequestTitle"),
+            Some(&json!("Requested Missing Title"))
+        );
+        assert!(runtime_settings.get("titleMetadataSource").is_none());
+    }
+
+    #[test]
+    fn trailing_agent_metadata_reconcile_marks_request_mismatch() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let agent_session_id = "codex-thread-trailing";
+        let (lifecycle, _session) = create_codex_agent_session(&repository, agent_session_id);
+        let _pending = request_session_rename(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "codex",
+                "agentSessionId": agent_session_id,
+                "title": "Requested Title",
+                "titleSource": "user"
+            })
+            .as_object()
+            .expect("rename params"),
+            temp.path(),
+        )
+        .expect("pending rename");
+        let codex_dir = temp.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).expect("create codex dir");
+        std::fs::write(
+            codex_dir.join("session_index.jsonl"),
+            format!(
+                "{{\"id\":\"{agent_session_id}\",\"thread_name\":\"Accepted Different Title\"}}\n"
+            ),
+        )
+        .expect("write session index");
+
+        let changed = reconcile_agent_metadata_title_for_session(
+            &repository,
+            &lifecycle.project_id,
+            &lifecycle.session_id,
+            temp.path(),
+            "metadata-mismatch",
+        )
+        .expect("trailing reconcile");
+
+        assert!(changed);
+        let stored = repository
+            .get_session(&lifecycle.project_id, &lifecycle.session_id)
+            .expect("get stored session")
+            .expect("stored session");
+        assert_eq!(
+            stored.get("title"),
+            Some(&json!("Accepted Different Title"))
+        );
+        let runtime_settings = stored
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .expect("runtime settings");
+        assert_eq!(
+            runtime_settings.get("pendingAgentTitleRequestStatus"),
+            Some(&json!("metadata-mismatch"))
+        );
+    }
+
+    #[test]
+    fn live_process_identity_promotes_running_zmx_terminal_to_codex() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let project = repository
+            .create_project(
+                json!({ "name": "Ghostex" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("create project");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id")
+            .to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "kind": "terminal",
+                    "lifecycleState": "running",
+                    "projectId": project_id,
+                    "runtimeSettings": {
+                        "sessionPersistenceProvider": "zmx",
+                        "titleSource": "user"
+                    },
+                    "surface": "workspace",
+                    "title": "Sidebar scrolls after closing (set above)"
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("create session");
+        let session_id = session
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .expect("session id")
+            .to_string();
+
+        let changed = apply_live_process_session_identity(
+            &repository,
+            &project_id,
+            &session_id,
+            Some("codex".to_string()),
+            Some("019EB8D0-D27B-7F30-B6D7-7A04AB8FAE78".to_string()),
+            None,
+        )
+        .expect("apply live process identity");
+
+        assert!(changed);
+        let updated = repository
+            .get_session(&project_id, &session_id)
+            .expect("get updated session")
+            .expect("updated session");
+        assert_eq!(updated.get("kind"), Some(&json!("agent")));
+        assert_eq!(updated.get("agentId"), Some(&json!("codex")));
+        assert_eq!(
+            updated.get("title"),
+            Some(&json!("Sidebar scrolls after closing (set above)"))
+        );
+        let runtime_settings = updated
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .expect("runtime settings");
+        assert_eq!(runtime_settings.get("agentName"), Some(&json!("codex")));
+        assert_eq!(runtime_settings.get("launchAgentId"), Some(&json!("codex")));
+        assert_eq!(
+            runtime_settings.get("agentSessionId"),
+            Some(&json!("019EB8D0-D27B-7F30-B6D7-7A04AB8FAE78"))
+        );
     }
 
     #[test]
