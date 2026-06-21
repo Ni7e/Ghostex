@@ -1,4 +1,10 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use anyhow::{anyhow, Context, Result};
 use axum::{
@@ -17,13 +23,16 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Map, Value};
-use tokio::{net::TcpListener, sync::broadcast};
+use tokio::{net::TcpListener, process::Command, sync::broadcast};
 use uuid::Uuid;
 
 use crate::{
     agent_hooks::{install_agent_hooks, read_agent_hook_status, uninstall_agent_hooks},
     agent_skills::{install_agent_skills, read_agent_skill_status},
-    agents::{dispatch_agent_endpoint, AgentEndpointError},
+    agents::{
+        apply_created_session_identity, apply_live_process_session_identity,
+        dispatch_agent_endpoint, reconcile_agent_metadata_title_for_session, AgentEndpointError,
+    },
     auth::{
         ensure_gxserver_auth_token, is_authorized_headers, is_expected_gxserver_auth_token,
         read_gxserver_auth_token,
@@ -62,6 +71,7 @@ use crate::{
         create_source_build_identity, is_build_identity_reusable, remove_runtime_metadata,
         write_runtime_metadata,
     },
+    session_status::agent_activity_stale_projection_delay_ms,
     storage::{
         create_gxserver_migration_status, initialize_gxserver_storage, open_gxserver_database,
     },
@@ -73,7 +83,7 @@ use crate::{
     zmx::{
         dispatch_zmx_lifecycle_endpoint, dispatch_zmx_session_interaction_endpoint,
         merge_session_with_renderer_result, prepare_focus_session_renderer_command,
-        ZmxEndpointError, ZmxServerContext,
+        read_zmx_session_process_identities, ZmxEndpointError, ZmxServerContext,
     },
 };
 
@@ -99,6 +109,7 @@ struct AppState {
     paths: GxserverPaths,
     repository_clone_jobs: RepositoryCloneJobManager,
     shutdown_tx: broadcast::Sender<()>,
+    stale_activity_timers: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
     version: String,
 }
 
@@ -106,6 +117,12 @@ struct RoutedResponse {
     endpoint_path: Option<String>,
     response: Response<Body>,
 }
+
+const GXSERVER_AGENT_TITLE_METADATA_DEBOUNCE_MS: u64 = 3_000;
+const GXSERVER_BARE_RENAME_GENERATING_WINDOW_MS: u64 = 400;
+const GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH: usize = 250;
+const GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH: usize = 39;
+const GXSERVER_FIRST_PROMPT_TITLE_GENERATION_TIMEOUT_MS: u64 = 30_000;
 
 const RENDERER_COMMAND_ACTIONS: &[&str] = &[
     "assertSidebarCard",
@@ -195,6 +212,7 @@ pub async fn run_gxserver_foreground(
         paths: paths.clone(),
         repository_clone_jobs: RepositoryCloneJobManager::default(),
         shutdown_tx: shutdown_tx.clone(),
+        stale_activity_timers: Arc::new(Mutex::new(HashMap::new())),
         version,
     });
     let app = Router::new()
@@ -551,7 +569,8 @@ async fn route_http(
             request_id,
             &body_json,
             |repository, db, params, _| {
-                let session = repository.create_session(params, false)?;
+                let created_session = repository.create_session(params, false)?;
+                let session = apply_created_session_identity(repository, &created_session, params)?;
                 let project_id = value_text(&session, "projectId")?;
                 let session_id = value_text(&session, "sessionId")?;
                 schedule_presentation_session_delta(
@@ -570,7 +589,8 @@ async fn route_http(
             request_id,
             &body_json,
             |repository, db, params, _| {
-                let session = repository.create_session(params, true)?;
+                let created_session = repository.create_session(params, true)?;
+                let session = apply_created_session_identity(repository, &created_session, params)?;
                 let project_id = value_text(&session, "projectId")?;
                 let session_id = value_text(&session, "sessionId")?;
                 schedule_presentation_session_delta(
@@ -588,8 +608,15 @@ async fn route_http(
             endpoint.path,
             request_id,
             &body_json,
-            |repository, _, params, _| {
+            |repository, db, params, _| {
                 let project_id = read_optional_project_id(params)?;
+                sync_live_zmx_process_identities(
+                    &state,
+                    db,
+                    repository,
+                    project_id.as_deref(),
+                    "list-sessions",
+                )?;
                 repository
                     .list_sessions(project_id.as_deref())
                     .map(|sessions| json!({ "sessions": sessions }))
@@ -659,7 +686,14 @@ async fn route_http(
             endpoint.path,
             request_id,
             &body_json,
-            |_, db, _, server_id| {
+            |repository, db, _, server_id| {
+                sync_live_zmx_process_identities(
+                    &state,
+                    db,
+                    repository,
+                    None,
+                    "read-presentation-snapshot",
+                )?;
                 read_presentation_snapshot(db, server_id)
                     .map(|snapshot| json!({ "snapshot": snapshot }))
             },
@@ -911,17 +945,57 @@ async fn handle_agent_http(
             state.config.listeners.local.host, state.config.listeners.local.port
         ),
     };
-    match dispatch_agent_endpoint(&repository, &db, &endpoint_path, &params, Some(&context)) {
+    match dispatch_agent_endpoint(
+        &repository,
+        &db,
+        &state.paths.home_dir,
+        &endpoint_path,
+        &params,
+        Some(&context),
+    ) {
         Ok(output) => {
-            if let Some((project_id, session_id)) = output.presentation_session {
+            let presentation_session = output.presentation_session.clone();
+            let should_schedule_agent_title_metadata_check = endpoint_path
+                == "/api/requestSessionRename"
+                && output
+                    .result
+                    .get("pendingAgentMetadata")
+                    .and_then(Value::as_bool)
+                    == Some(true);
+            let should_schedule_first_prompt_auto_title =
+                output.result.get("reason").and_then(Value::as_str)
+                    == Some("first-prompt-auto-title-claimed");
+            if let Some((project_id, session_id)) = presentation_session.as_ref() {
                 if let Err(error) = schedule_presentation_session_delta(
                     state,
                     &db,
                     &repository,
-                    &project_id,
-                    &session_id,
+                    project_id,
+                    session_id,
                 ) {
                     return domain_error_response(endpoint_path, request_id, error);
+                }
+                if let Ok(Some(session)) = repository.get_session(project_id, session_id) {
+                    schedule_stale_activity_presentation_refresh(
+                        state,
+                        &session,
+                        "agent-activity-stale-activity",
+                    );
+                }
+            }
+            if should_schedule_agent_title_metadata_check {
+                if let Some((project_id, session_id)) = presentation_session {
+                    schedule_agent_title_metadata_check(state.clone(), project_id, session_id);
+                }
+            }
+            if should_schedule_first_prompt_auto_title {
+                if let Some(session) = output.result.get("session") {
+                    if let (Some(project_id), Some(session_id)) = (
+                        read_session_text(session, "projectId"),
+                        read_session_text(session, "sessionId"),
+                    ) {
+                        schedule_first_prompt_auto_title_job(state.clone(), project_id, session_id);
+                    }
                 }
             }
             routed_json(
@@ -932,6 +1006,699 @@ async fn handle_agent_http(
         }
         Err(error) => agent_error_response(endpoint_path, request_id, error),
     }
+}
+
+fn schedule_agent_title_metadata_check(state: AppState, project_id: String, session_id: String) {
+    /*
+    CDXC:GxserverAgentTitles 2026-06-21-15:35:
+    Agent CLI renames are accepted asynchronously after Ghostex submits `/rename`. Match TypeScript gxserver's three-second trailing metadata check so Rust promotes the Codex session-index title and broadcasts a presentation delta after the CLI writes the canonical thread name.
+    */
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(
+            GXSERVER_AGENT_TITLE_METADATA_DEBOUNCE_MS,
+        ))
+        .await;
+        let Ok(db) = open_gxserver_database(&state.paths) else {
+            return;
+        };
+        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+        let Ok(changed) = reconcile_agent_metadata_title_for_session(
+            &repository,
+            &project_id,
+            &session_id,
+            &state.paths.home_dir,
+            "metadata-mismatch",
+        ) else {
+            return;
+        };
+        if changed {
+            let _ = schedule_presentation_session_delta(
+                &state,
+                &db,
+                &repository,
+                &project_id,
+                &session_id,
+            );
+        }
+    });
+}
+
+fn schedule_first_prompt_auto_title_job(state: AppState, project_id: String, session_id: String) {
+    /*
+    CDXC:GxserverSessionTitle 2026-06-21-19:26:
+    Rust gxserver-rs must finish the same first-prompt auto-title flow as TypeScript gxserver after hooks claim a job: decide eligibility centrally, generate or stage the provider rename command, send only staged text to zmx, and persist applied/skipped/failed status so native clients can submit Enter from the presentation transition.
+    */
+    tokio::spawn(async move {
+        if let Err(()) =
+            run_first_prompt_auto_title_job(state.clone(), project_id.clone(), session_id.clone())
+                .await
+        {
+            mark_first_prompt_auto_title_failed(&state, &project_id, &session_id);
+        }
+    });
+}
+
+#[derive(Clone)]
+struct FirstPromptAutoTitleDecision {
+    normalized_prompt: Option<String>,
+    reason: String,
+    should_run: bool,
+    strategy: Option<&'static str>,
+}
+
+async fn run_first_prompt_auto_title_job(
+    state: AppState,
+    project_id: String,
+    session_id: String,
+) -> Result<(), ()> {
+    let (project_path, session, prompt, decision) = {
+        let db = open_gxserver_database(&state.paths).map_err(|_| ())?;
+        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+        let Some(session) = repository
+            .get_session(&project_id, &session_id)
+            .map_err(|_| ())?
+        else {
+            return Ok(());
+        };
+        let Some(project) = repository.get_project(&project_id).map_err(|_| ())? else {
+            return Ok(());
+        };
+        let prompt = read_runtime_text(&session, "firstUserMessage");
+        let decision = decide_first_prompt_auto_title(&session, prompt.as_deref(), true);
+        (
+            read_session_text(&project, "path")
+                .unwrap_or_else(|| state.paths.home_dir.to_string_lossy().to_string()),
+            session,
+            prompt,
+            decision,
+        )
+    };
+
+    if !decision.should_run || decision.normalized_prompt.is_none() || decision.strategy.is_none() {
+        mark_first_prompt_auto_title_skipped(&state, &project_id, &session_id, &decision.reason);
+        schedule_delta_for_ids(&state, &project_id, &session_id);
+        return Ok(());
+    }
+
+    if decision.strategy == Some("sendBareRenameCommand") {
+        tokio::time::sleep(Duration::from_millis(
+            GXSERVER_BARE_RENAME_GENERATING_WINDOW_MS,
+        ))
+        .await;
+    }
+
+    let title = if matches!(
+        decision.strategy,
+        Some("generateTitleAndRename" | "generateTitleAndName")
+    ) {
+        Some(
+            generate_first_prompt_session_title(
+                &state,
+                Some(&project_path),
+                decision.normalized_prompt.as_deref().ok_or(())?,
+                &session,
+            )
+            .await
+            .map_err(|_| ())?,
+        )
+    } else {
+        None
+    };
+
+    let db = open_gxserver_database(&state.paths).map_err(|_| ())?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let Some(latest_session) = repository
+        .get_session(&project_id, &session_id)
+        .map_err(|_| ())?
+    else {
+        return Ok(());
+    };
+    if read_runtime_text(&latest_session, "gxserverFirstPromptAutoTitleStatus").as_deref()
+        == Some("cancelled")
+    {
+        schedule_delta_for_ids(&state, &project_id, &session_id);
+        return Ok(());
+    }
+    if read_runtime_text(&latest_session, "gxserverFirstPromptAutoTitleStatus").as_deref()
+        != Some("running")
+        || normalize_first_prompt_title_prompt(
+            read_runtime_text(&latest_session, "firstUserMessage").as_deref(),
+        ) != decision.normalized_prompt
+    {
+        return Ok(());
+    }
+
+    let command_text = match decision.strategy {
+        Some("sendBareRenameCommand") => "/rename".to_string(),
+        Some("generateTitleAndName") => format!("/name {}", title.as_deref().ok_or(())?),
+        _ => format!("/rename {}", title.as_deref().ok_or(())?),
+    };
+    let mut send_params = Map::new();
+    send_params.insert("projectId".to_string(), json!(project_id.clone()));
+    send_params.insert("sessionId".to_string(), json!(session_id.clone()));
+    send_params.insert("text".to_string(), json!(command_text));
+    dispatch_zmx_session_interaction_endpoint(&repository, "/api/sendSessionText", &send_params)
+        .map_err(|_| ())?;
+
+    let mut runtime_settings = latest_session
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    runtime_settings.insert("autoTitleFromFirstPrompt".to_string(), Value::Bool(true));
+    runtime_settings.insert(
+        "gxserverFirstPromptAutoTitleAppliedAt".to_string(),
+        json!(now_iso()),
+    );
+    runtime_settings.insert(
+        "gxserverFirstPromptAutoTitleReason".to_string(),
+        json!(decision.reason),
+    );
+    runtime_settings.insert(
+        "gxserverFirstPromptAutoTitleShouldSubmitStagedCommand".to_string(),
+        Value::Bool(true),
+    );
+    runtime_settings.insert(
+        "gxserverFirstPromptAutoTitleStatus".to_string(),
+        json!("applied"),
+    );
+    if title.is_some() {
+        runtime_settings.insert("titleSource".to_string(), json!("generated"));
+    }
+    let mut update = Map::new();
+    update.insert("projectId".to_string(), json!(project_id.clone()));
+    update.insert("sessionId".to_string(), json!(session_id.clone()));
+    update.insert(
+        "runtimeSettings".to_string(),
+        Value::Object(runtime_settings),
+    );
+    if let Some(title) = title {
+        update.insert("title".to_string(), json!(title));
+    }
+    repository.update_session(&update).map_err(|_| ())?;
+    schedule_delta_for_ids(&state, &project_id, &session_id);
+    let _ = prompt;
+    Ok(())
+}
+
+fn mark_first_prompt_auto_title_skipped(
+    state: &AppState,
+    project_id: &str,
+    session_id: &str,
+    reason: &str,
+) {
+    update_first_prompt_auto_title_runtime(state, project_id, session_id, |runtime| {
+        runtime.insert(
+            "gxserverFirstPromptAutoTitleReason".to_string(),
+            json!(reason),
+        );
+        runtime.insert(
+            "gxserverFirstPromptAutoTitleStatus".to_string(),
+            json!("skipped"),
+        );
+    });
+}
+
+fn mark_first_prompt_auto_title_failed(state: &AppState, project_id: &str, session_id: &str) {
+    update_first_prompt_auto_title_runtime(state, project_id, session_id, |runtime| {
+        runtime.insert(
+            "gxserverFirstPromptAutoTitleFailedAt".to_string(),
+            json!(now_iso()),
+        );
+        runtime.insert(
+            "gxserverFirstPromptAutoTitleStatus".to_string(),
+            json!("failed"),
+        );
+    });
+    schedule_delta_for_ids(state, project_id, session_id);
+}
+
+fn update_first_prompt_auto_title_runtime<F>(
+    state: &AppState,
+    project_id: &str,
+    session_id: &str,
+    apply: F,
+) where
+    F: FnOnce(&mut Map<String, Value>),
+{
+    let Ok(db) = open_gxserver_database(&state.paths) else {
+        return;
+    };
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let Ok(Some(session)) = repository.get_session(project_id, session_id) else {
+        return;
+    };
+    let mut runtime_settings = session
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    apply(&mut runtime_settings);
+    let mut update = Map::new();
+    update.insert("projectId".to_string(), json!(project_id));
+    update.insert("sessionId".to_string(), json!(session_id));
+    update.insert(
+        "runtimeSettings".to_string(),
+        Value::Object(runtime_settings),
+    );
+    let _ = repository.update_session(&update);
+}
+
+fn schedule_delta_for_ids(state: &AppState, project_id: &str, session_id: &str) {
+    let Ok(db) = open_gxserver_database(&state.paths) else {
+        return;
+    };
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let _ = schedule_presentation_session_delta(state, &db, &repository, project_id, session_id);
+}
+
+fn decide_first_prompt_auto_title(
+    session: &Value,
+    prompt: Option<&str>,
+    allow_running: bool,
+) -> FirstPromptAutoTitleDecision {
+    let status = read_runtime_text(session, "gxserverFirstPromptAutoTitleStatus");
+    let normalized_prompt = normalize_first_prompt_title_prompt(prompt);
+    let cancelled_prompt = normalize_first_prompt_title_prompt(
+        read_runtime_text(session, "gxserverFirstPromptAutoTitleCancelledPrompt").as_deref(),
+    )
+    .or_else(|| {
+        normalize_first_prompt_title_prompt(
+            read_runtime_text(session, "firstUserMessage").as_deref(),
+        )
+    });
+    let is_cancelled_retry_prompt = status.as_deref() == Some("cancelled")
+        && normalized_prompt.is_some()
+        && normalized_prompt != cancelled_prompt;
+    if (status.as_deref() == Some("running") && !allow_running)
+        || matches!(status.as_deref(), Some("applied" | "failed" | "skipped"))
+        || (status.as_deref() == Some("cancelled") && !is_cancelled_retry_prompt)
+    {
+        return FirstPromptAutoTitleDecision {
+            normalized_prompt,
+            reason: format!("already-{}", status.unwrap_or_default()),
+            should_run: false,
+            strategy: None,
+        };
+    }
+    if session
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .and_then(|settings| settings.get("autoTitleFromFirstPrompt"))
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        return decision(normalized_prompt, "alreadyAutoNamed", false, None);
+    }
+    let agent_name = first_prompt_agent_name(session);
+    let strategy = first_prompt_auto_title_strategy(agent_name.as_deref());
+    if strategy.is_none() {
+        return decision(normalized_prompt, "unsupportedAgent", false, None);
+    }
+    let Some(prompt) = normalized_prompt.clone() else {
+        return decision(normalized_prompt, "emptyPrompt", false, strategy);
+    };
+    if is_first_prompt_meta_prompt(&prompt) {
+        return decision(Some(prompt), "metaPrompt", false, strategy);
+    }
+    if prompt.len() <= 50
+        && prompt
+            .split_whitespace()
+            .next()
+            .map(|token| token.starts_with('/') && token.len() > 1)
+            == Some(true)
+    {
+        return decision(Some(prompt), "slashCommand", false, strategy);
+    }
+    if !is_generic_agent_session_title(
+        agent_name.as_deref(),
+        read_session_text(session, "title").as_deref(),
+    ) {
+        return decision(Some(prompt), "nonGenericCurrentTitle", false, strategy);
+    }
+    decision(Some(prompt), "eligible", true, strategy)
+}
+
+fn decision(
+    normalized_prompt: Option<String>,
+    reason: &str,
+    should_run: bool,
+    strategy: Option<&'static str>,
+) -> FirstPromptAutoTitleDecision {
+    FirstPromptAutoTitleDecision {
+        normalized_prompt,
+        reason: reason.to_string(),
+        should_run,
+        strategy,
+    }
+}
+
+fn first_prompt_agent_name(session: &Value) -> Option<String> {
+    read_session_text(session, "agentId").or_else(|| read_runtime_text(session, "agentName"))
+}
+
+fn first_prompt_auto_title_strategy(agent_name: Option<&str>) -> Option<&'static str> {
+    match normalize_agent_name(agent_name).as_deref() {
+        Some("claude") => Some("sendBareRenameCommand"),
+        Some("codex") => Some("generateTitleAndRename"),
+        Some("pi") => Some("generateTitleAndName"),
+        _ => None,
+    }
+}
+
+fn normalize_agent_name(value: Option<&str>) -> Option<String> {
+    let normalized = value?.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" => None,
+        "openai codex" | "codex cli" => Some("codex".to_string()),
+        "claude code" => Some("claude".to_string()),
+        "π" => Some("pi".to_string()),
+        other => Some(other.to_string()),
+    }
+}
+
+fn is_generic_agent_session_title(agent_name: Option<&str>, title: Option<&str>) -> bool {
+    let normalized_title = title
+        .map(|value| {
+            value
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_ascii_lowercase()
+        })
+        .unwrap_or_default();
+    if normalized_title.is_empty() {
+        return true;
+    }
+    let normalized_agent = normalize_agent_name(agent_name);
+    let generic = [
+        "terminal",
+        "terminal session",
+        "agent",
+        "agent session",
+        "claude",
+        "claude code",
+        "claude session",
+        "codex",
+        "codex cli",
+        "codex session",
+        "openai codex",
+        "openai codex session",
+        "pi",
+        "π",
+        "pi session",
+    ];
+    generic.contains(&normalized_title.as_str())
+        || normalized_agent.as_deref() == Some(normalized_title.as_str())
+}
+
+fn normalize_first_prompt_title_prompt(prompt: Option<&str>) -> Option<String> {
+    let normalized = prompt?.split_whitespace().collect::<Vec<_>>().join(" ");
+    let normalized = normalized.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    let lower = normalized.to_ascii_lowercase();
+    let prefixes = [
+        "please ",
+        "kindly ",
+        "hey ",
+        "hi ",
+        "hello ",
+        "can you ",
+        "could you ",
+        "would you ",
+        "will you ",
+        "can we ",
+        "could we ",
+        "would we ",
+        "help me ",
+        "i need you to ",
+        "i need to ",
+        "i need ",
+    ];
+    let mut stripped = normalized;
+    for prefix in prefixes {
+        if lower.starts_with(prefix) {
+            stripped = &normalized[prefix.len()..];
+            break;
+        }
+    }
+    let cleaned = stripped
+        .trim()
+        .trim_end_matches(['.', '?', '!', ':', ';', ','])
+        .trim();
+    Some(
+        if cleaned.is_empty() {
+            normalized
+        } else {
+            cleaned
+        }
+        .to_string(),
+    )
+}
+
+fn is_first_prompt_meta_prompt(prompt: &str) -> bool {
+    prompt.starts_with("# AGENTS")
+        || prompt.contains("tool_use_id")
+        || [
+            "<command",
+            "<environment_context",
+            "<permissions instructions>",
+            "<user_instructions>",
+            "<INSTRUCTIONS>",
+            "<collaboration_mode>",
+            "<app-context>",
+            "<turn_aborted>",
+            "<ide_opened_file>",
+            "<local-",
+            "[Tool Result]",
+            "Caveat:",
+        ]
+        .iter()
+        .any(|prefix| prompt.starts_with(prefix))
+}
+
+async fn generate_first_prompt_session_title(
+    state: &AppState,
+    cwd: Option<&str>,
+    prompt: &str,
+    session: &Value,
+) -> Result<String, String> {
+    let source_text = prompt
+        .chars()
+        .take(GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH)
+        .collect::<String>();
+    let generation_prompt = build_first_prompt_title_generation_prompt(&source_text);
+    let delimiter = format!(
+        "ghostex_GXSERVER_SESSION_TITLE_{}",
+        chrono::Utc::now().timestamp_millis()
+    );
+    let agent = normalize_title_generation_agent(
+        read_runtime_text(session, "firstPromptTitleGenerationAgent").as_deref(),
+    );
+    let command = read_title_generation_command(session, &agent)?;
+    let shell_command =
+        build_title_generation_command(&agent, &command, &delimiter, &generation_prompt)?;
+    let mut child = Command::new("/bin/zsh");
+    child.arg("-lic").arg(shell_command);
+    child.current_dir(cwd.unwrap_or_else(|| state.paths.home_dir.to_str().unwrap_or(".")));
+    child.envs(internal_title_generation_environment(&state.paths.home_dir));
+    child.stdout(std::process::Stdio::piped());
+    child.stderr(std::process::Stdio::piped());
+    let output = tokio::time::timeout(
+        Duration::from_millis(GXSERVER_FIRST_PROMPT_TITLE_GENERATION_TIMEOUT_MS),
+        child.output(),
+    )
+    .await
+    .map_err(|_| "title generation timed out".to_string())?
+    .map_err(|error| format!("title generation failed: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "title generation exited {:?}",
+            output.status.code()
+        ));
+    }
+    parse_generated_session_title_text(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn normalize_title_generation_agent(value: Option<&str>) -> String {
+    match value {
+        Some("cursor" | "claude" | "grok" | "custom") => value.unwrap().to_string(),
+        _ => "codex".to_string(),
+    }
+}
+
+fn read_title_generation_command(session: &Value, agent: &str) -> Result<String, String> {
+    if let Some(command) = read_runtime_text(session, "firstPromptTitleGenerationCommand") {
+        return Ok(command);
+    }
+    match agent {
+        "codex" => Ok("codex".to_string()),
+        "cursor" => Ok("cursor-agent".to_string()),
+        "claude" => Ok("claude".to_string()),
+        "grok" => Ok("grok".to_string()),
+        "custom" => Err("Custom title generation command is not configured.".to_string()),
+        _ => Ok("codex".to_string()),
+    }
+}
+
+fn build_title_generation_command(
+    agent: &str,
+    command: &str,
+    delimiter: &str,
+    prompt: &str,
+) -> Result<String, String> {
+    Ok(match agent {
+        "codex" => create_here_doc_command(
+            &format!("{command} exec --ephemeral --skip-git-repo-check -m gpt-5.4-mini -c 'model_reasoning_effort=\"low\"'"),
+            delimiter,
+            prompt,
+        ),
+        "cursor" => format!(
+            "{command} --print --yolo --trust --output-format text {}",
+            quote_shell_arg(prompt)
+        ),
+        "claude" => create_here_doc_command(&format!("{command} -p --model haiku"), delimiter, prompt),
+        "grok" => format!(
+            "{command} -p --model grok-composer-2.5-fast --output-format plain --no-alt-screen --no-plan --no-subagents --disable-web-search --max-turns 1 {}",
+            quote_shell_arg(prompt)
+        ),
+        "custom" => create_here_doc_command(command, delimiter, prompt),
+        other => return Err(format!("Unsupported title generation agent: {other}")),
+    })
+}
+
+fn create_here_doc_command(command: &str, delimiter: &str, body: &str) -> String {
+    format!("{command} <<'{delimiter}'\n{body}\n{delimiter}")
+}
+
+fn build_first_prompt_title_generation_prompt(source_text: &str) -> String {
+    [
+        "Write a concise session title that summarizes the user's text.",
+        "Return plain text only.",
+        "Rules:",
+        "- keep it specific and scannable",
+        "- prefer 2 to 4 words when possible",
+        &format!(
+            "- must be fewer than {} characters",
+            GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH + 1
+        ),
+        "- do not abbreviate with ellipses",
+        "- do not use quotes, markdown, or commentary",
+        "- do not end with punctuation",
+        "- focus on the task, bug, feature, or topic",
+        "",
+        "User text:",
+        source_text,
+        "",
+        "Output handling:",
+        "- Produce only the final session title.",
+        "- Do not wrap the result in backticks.",
+        "- Print only the final result to stdout.",
+    ]
+    .join("\n")
+}
+
+fn parse_generated_session_title_text(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    let normalized = if trimmed.starts_with("```") && trimmed.ends_with("```") {
+        trimmed
+            .trim_start_matches('`')
+            .lines()
+            .skip(1)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end_matches('`')
+            .trim()
+            .to_string()
+    } else {
+        trimmed.to_string()
+    };
+    let Some(line) = normalized.lines().find(|line| !line.trim().is_empty()) else {
+        return Err("Title generation returned an empty session title.".to_string());
+    };
+    let sanitized = line
+        .trim()
+        .trim_matches(['"', '\'', '`'])
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_end_matches(['.', '…'])
+        .trim()
+        .to_string();
+    if sanitized.is_empty() {
+        return Err("Title generation returned an empty session title.".to_string());
+    }
+    Ok(clamp_generated_session_title_length(&sanitized))
+}
+
+fn clamp_generated_session_title_length(value: &str) -> String {
+    if value.chars().count() <= GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH {
+        return value.to_string();
+    }
+    let mut candidate = String::new();
+    for word in value.split_whitespace() {
+        let next = if candidate.is_empty() {
+            word.to_string()
+        } else {
+            format!("{candidate} {word}")
+        };
+        if next.chars().count() > GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH {
+            break;
+        }
+        candidate = next;
+    }
+    if candidate.is_empty() {
+        value
+            .chars()
+            .take(GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH)
+            .collect::<String>()
+            .trim()
+            .to_string()
+    } else {
+        candidate
+    }
+}
+
+fn internal_title_generation_environment(home_dir: &std::path::Path) -> Vec<(String, String)> {
+    let mut environment = std::env::vars().collect::<std::collections::HashMap<_, _>>();
+    for key in [
+        "ANSI_COLORS_DISABLED",
+        "NO_COLOR",
+        "NODE_DISABLE_COLORS",
+        "GHOSTEX_GLOBAL_SESSION_REF",
+        "GHOSTEX_GXSERVER_AUTH_TOKEN_FILE",
+        "GHOSTEX_GXSERVER_BASE_URL",
+        "GHOSTEX_GXSERVER_PROTOCOL_VERSION",
+        "GHOSTEX_SESSION_ID",
+        "GHOSTEX_SESSION_STATE_FILE",
+        "GHOSTEX_WORKSPACE_ID",
+        "GHOSTEX_WORKSPACE_ROOT",
+        "VSMUX_SESSION_ID",
+        "VSMUX_SESSION_STATE_FILE",
+        "VSMUX_WORKSPACE_ID",
+        "VSMUX_WORKSPACE_ROOT",
+        "ghostex_SESSION_STATE_FILE",
+        "ghostex_WORKSPACE_ID",
+        "ghostex_WORKSPACE_ROOT",
+    ] {
+        environment.remove(key);
+    }
+    environment.insert("HOME".to_string(), home_dir.to_string_lossy().to_string());
+    environment.insert(
+        "GHOSTEX_INTERNAL_PROMPT_GENERATION".to_string(),
+        "1".to_string(),
+    );
+    environment.insert(
+        "GHOSTEX_INTERNAL_TITLE_GENERATION".to_string(),
+        "1".to_string(),
+    );
+    environment.into_iter().collect()
+}
+
+fn quote_shell_arg(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn handle_agent_hook_http(
@@ -1359,6 +2126,7 @@ async fn handle_renderer_command_http(
             )
         }
     };
+    let payload = with_renderer_session_target(payload);
     let timeout_ms = match normalize_renderer_command_timeout_ms(params.get("timeoutMs")) {
         Ok(timeout_ms) => timeout_ms,
         Err(message) => {
@@ -1385,6 +2153,57 @@ async fn handle_renderer_command_http(
             rpc_error(error.code, error.message, Some(request_id)),
         ),
     }
+}
+
+fn with_renderer_session_target(mut payload: Map<String, Value>) -> Map<String, Value> {
+    if payload
+        .get("sessionTarget")
+        .and_then(Value::as_object)
+        .is_some()
+    {
+        return payload;
+    }
+    let Some(project_id) = payload
+        .get("projectId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+    else {
+        return payload;
+    };
+    let Some(session_id) = payload
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+    else {
+        return payload;
+    };
+    /*
+    CDXC:GxserverRendererCommands 2026-06-21-19:22:
+    gxserver renderer commands target durable project/session ids, but macOS may
+    render sessions with combined presentation ids. Add a structured target at
+    the daemon boundary so every CLI or API caller gets the same renderer lookup
+    contract without depending on sidebar id encoding.
+    */
+    let mut session_target = Map::new();
+    if let Some(global_ref) = payload
+        .get("globalRef")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        session_target.insert(
+            "globalRef".to_string(),
+            Value::String(global_ref.to_string()),
+        );
+    }
+    session_target.insert("projectId".to_string(), Value::String(project_id));
+    session_target.insert("sessionId".to_string(), Value::String(session_id));
+    payload.insert("sessionTarget".to_string(), Value::Object(session_target));
+    payload
 }
 
 fn normalize_renderer_command_timeout_ms(value: Option<&Value>) -> Result<u64, String> {
@@ -1436,6 +2255,166 @@ fn schedule_presentation_session_delta(
         "type": "presentationDelta",
     }));
     Ok(())
+}
+
+fn schedule_stale_activity_presentation_refresh(state: &AppState, session: &Value, _reason: &str) {
+    let Some(project_id) = read_session_text(session, "projectId") else {
+        return;
+    };
+    let Some(session_id) = read_session_text(session, "sessionId") else {
+        return;
+    };
+    let key = format!("{project_id}/{session_id}");
+    let delay_ms = session
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .and_then(|settings| settings.get("agentActivity"))
+        .and_then(|activity| agent_activity_stale_projection_delay_ms(Some(activity), now_ms()));
+    let Ok(mut timers) = state.stale_activity_timers.lock() else {
+        return;
+    };
+    if let Some(handle) = timers.remove(&key) {
+        handle.abort();
+    }
+    let Some(delay_ms) = delay_ms else {
+        return;
+    };
+    /*
+    CDXC:SessionStatus 2026-06-21-19:26:
+    Rust event streams must match TypeScript gxserver's stale title-derived working refresh. zmx may not emit another terminal-title event after a spinner freezes, so schedule one presentation delta at the projection boundary without rewriting durable activity state or re-scheduling from the timer callback.
+    */
+    let state = state.clone();
+    let timer_key = key.clone();
+    let handle = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(delay_ms.max(0) as u64 + 25)).await;
+        if let Ok(mut timers) = state.stale_activity_timers.lock() {
+            timers.remove(&timer_key);
+        }
+        let Ok(db) = open_gxserver_database(&state.paths) else {
+            return;
+        };
+        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+        let _ =
+            schedule_presentation_session_delta(&state, &db, &repository, &project_id, &session_id);
+    });
+    timers.insert(key, handle);
+}
+
+fn sync_live_zmx_process_identities(
+    state: &AppState,
+    db: &rusqlite::Connection,
+    repository: &DomainRepository<'_>,
+    project_id: Option<&str>,
+    _reason: &str,
+) -> std::result::Result<(), DomainStateError> {
+    let sessions = repository.list_sessions(project_id)?;
+    let candidates = sessions
+        .iter()
+        .filter(|session| should_sync_live_zmx_process_identity(session))
+        .filter_map(|session| {
+            Some((
+                read_session_text(session, "projectId")?,
+                read_session_text(session, "sessionId")?,
+                read_session_text(session, "zmxName")?,
+            ))
+        })
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    let session_names = candidates
+        .iter()
+        .map(|(_, _, zmx_name)| zmx_name.clone())
+        .collect::<Vec<_>>();
+    let Ok(identities) = read_zmx_session_process_identities(&session_names) else {
+        return Ok(());
+    };
+    for (candidate_project_id, candidate_session_id, _) in candidates {
+        let Some(current) = repository.get_session(&candidate_project_id, &candidate_session_id)?
+        else {
+            continue;
+        };
+        if !should_sync_live_zmx_process_identity(&current) {
+            continue;
+        }
+        let Some(zmx_name) = read_session_text(&current, "zmxName") else {
+            continue;
+        };
+        let Some(identity) = identities.get(&zmx_name) else {
+            continue;
+        };
+        if identity.agent_id.is_none() {
+            continue;
+        }
+        /*
+        CDXC:GxserverSessionIdentity 2026-06-21-18:25:
+        Rust must copy TypeScript gxserver's live zmx process repair before sidebar list/snapshot responses. A running zmx terminal whose foreground process is Codex/Claude/etc. must be promoted to the matching agent row in durable state so macOS shows the same session identity after the gxserver-rs cutover.
+        */
+        let changed = apply_live_process_session_identity(
+            repository,
+            &candidate_project_id,
+            &candidate_session_id,
+            identity.agent_id.clone(),
+            identity.agent_session_id.clone(),
+            identity.agent_session_path.clone(),
+        )?;
+        let reconciled = if changed {
+            reconcile_agent_metadata_title_for_session(
+                repository,
+                &candidate_project_id,
+                &candidate_session_id,
+                &state.paths.home_dir,
+                "pending",
+            )
+            .unwrap_or(false)
+        } else {
+            false
+        };
+        if changed || reconciled {
+            schedule_presentation_session_delta(
+                state,
+                db,
+                repository,
+                &candidate_project_id,
+                &candidate_session_id,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn should_sync_live_zmx_process_identity(session: &Value) -> bool {
+    session.get("lifecycleState").and_then(Value::as_str) == Some("running")
+        && session.get("surface").and_then(Value::as_str) != Some("commands")
+        && read_runtime_text(session, "sessionPersistenceProvider").as_deref() == Some("zmx")
+}
+
+fn read_runtime_text(session: &Value, key: &str) -> Option<String> {
+    session
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .and_then(|settings| settings.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn read_session_text(session: &Value, key: &str) -> Option<String> {
+    session
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn now_iso() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
 }
 
 fn broadcast_server_stopping(state: &AppState) {
@@ -1609,6 +2588,9 @@ fn send_presentation_snapshot_for_subscription(
     let Ok(db) = open_gxserver_database(&state.paths) else {
         return;
     };
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let _ =
+        sync_live_zmx_process_identities(state, &db, &repository, None, "presentation-subscribe");
     let Ok(snapshot) = read_presentation_snapshot(&db, &state.metadata.server_id) else {
         return;
     };
@@ -1887,6 +2869,72 @@ mod tests {
         assert!(RENDERER_COMMAND_ACTIONS.contains(&"renameCommand"));
     }
 
+    #[test]
+    fn renderer_command_payload_adds_structured_session_target() {
+        /*
+        CDXC:GxserverRendererCommands 2026-06-21-19:22:
+        Rust gxserver must normalize renderer-command payloads from any client so macOS receives a project-scoped session target and does not have to match raw G ids against combined sidebar presentation ids.
+        */
+        let payload = Map::from_iter([
+            ("globalRef".to_string(), json!("S90:P1a:G9a")),
+            ("projectId".to_string(), json!("P1a")),
+            ("sessionId".to_string(), json!("G9a")),
+            ("title".to_string(), json!("GPUI Sidebar Resize Parity")),
+        ]);
+
+        let normalized = with_renderer_session_target(payload);
+
+        assert_eq!(
+            normalized.get("sessionTarget"),
+            Some(&json!({
+                "globalRef": "S90:P1a:G9a",
+                "projectId": "P1a",
+                "sessionId": "G9a",
+            }))
+        );
+        assert_eq!(normalized.get("sessionId"), Some(&json!("G9a")));
+    }
+
+    #[test]
+    fn first_prompt_auto_title_decides_provider_strategy_and_filters_meta_prompts() {
+        let codex = json!({
+            "agentId": "codex",
+            "runtimeSettings": {},
+            "title": "Codex Session",
+        });
+        let decision =
+            decide_first_prompt_auto_title(&codex, Some("Please fix flaky tests."), false);
+        assert!(decision.should_run);
+        assert_eq!(
+            decision.normalized_prompt.as_deref(),
+            Some("fix flaky tests")
+        );
+        assert_eq!(decision.strategy, Some("generateTitleAndRename"));
+
+        let claude = json!({
+            "agentId": "claude",
+            "runtimeSettings": {},
+            "title": "Claude Code",
+        });
+        let decision = decide_first_prompt_auto_title(&claude, Some("Summarize the logs"), false);
+        assert!(decision.should_run);
+        assert_eq!(decision.strategy, Some("sendBareRenameCommand"));
+
+        let meta = decide_first_prompt_auto_title(&codex, Some("# AGENTS.md instructions"), false);
+        assert!(!meta.should_run);
+        assert_eq!(meta.reason, "metaPrompt");
+    }
+
+    #[test]
+    fn generated_first_prompt_titles_are_sanitized_and_clamped() {
+        let title = parse_generated_session_title_text(
+            "```text\n\"Investigate Sidebar Resize Regression With Extra Words\"\n```",
+        )
+        .expect("title");
+        assert_eq!(title, "Investigate Sidebar Resize Regression");
+        assert!(title.len() <= GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH);
+    }
+
     #[tokio::test]
     async fn query_logs_route_returns_filtered_logs_and_bad_request_errors() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -1992,6 +3040,7 @@ mod tests {
             paths,
             repository_clone_jobs: RepositoryCloneJobManager::default(),
             shutdown_tx,
+            stale_activity_timers: Arc::new(Mutex::new(HashMap::new())),
             version: "0.0.0-test".to_string(),
         })
     }
