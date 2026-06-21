@@ -134,6 +134,12 @@ describe("chromium browser source", () => {
      *
      * CDXC:ChromiumBrowserPanes 2026-06-18-23:58:
      * The production CreateBrowserSync path needs the same first-URL behavior as GPUI async creation. Starting on about:blank and then calling LoadURL adds a visible blank render turn when Cmd+N opens a new browser pane.
+     *
+     * CDXC:BrowserPageAppearance 2026-06-21-04:20:
+     * Toolbar browser panes that follow macOS system appearance intentionally
+     * stage their first public navigation behind about:blank so CEF can apply
+     * media emulation and the default page canvas before transparent pages
+     * paint.
      */
     const didCreateBrowserSource = sourceBetween(
       cefBridgeSource,
@@ -154,9 +160,14 @@ describe("chromium browser source", () => {
       'bool runsUnderGPUI = NSApp && [NSStringFromClass([NSApp class]) isEqualToString:@"GPUIApplication"];',
     );
     expect(createBrowserSource).toContain(
-      'NSString* creationURL = initialURL_.length > 0 ? initialURL_ : @"about:blank";',
+      "BOOL shouldStageInitialURL = usesSystemPageAppearance_ && initialURL_.length > 0;",
     );
-    expect(createBrowserSource).toContain("didGiveInitialURLToBrowserCreate_ = initialURL_.length > 0;");
+    expect(createBrowserSource).toContain(
+      'NSString* creationURL = shouldStageInitialURL ? @"about:blank" : (initialURL_.length > 0 ? initialURL_ : @"about:blank");',
+    );
+    expect(createBrowserSource).toContain(
+      "didGiveInitialURLToBrowserCreate_ = !shouldStageInitialURL && initialURL_.length > 0;",
+    );
     expect(createBrowserSource).toContain("CefBrowserHost::CreateBrowser(");
     expect(createBrowserSource).toContain("CefString([creationURL UTF8String])");
     expect(createBrowserSource).toContain("CefBrowserHost::CreateBrowserSync(");
@@ -364,7 +375,7 @@ describe("chromium browser source", () => {
     expect(profilePickerSource).toContain("betaItem.isEnabled = false");
   });
 
-  test("defaults CEF browser color scheme to Light and persists per project origin", () => {
+  test("applies CEF browser page appearance from macOS system appearance", () => {
     /*
      * CDXC:ChromiumBrowserPanes 2026-06-18-22:50:
      * Hidden browser address-bar color-scheme controls should behave as if Light
@@ -373,64 +384,44 @@ describe("chromium browser source", () => {
      *
      * CDXC:BrowserColorScheme 2026-06-19-08:34:
      * User-selected System/Light/Dark values should persist per project and exact http(s) origin, including effective default ports. Missing origin entries still resolve to Light.
+     *
+     * CDXC:BrowserPageAppearance 2026-06-21-04:20:
+     * The toolbar menu no longer exposes manual System/Light/Dark choices.
+     * Browser panes follow the current macOS appearance at the CEF/WKWebView
+     * boundary and CEF owns a matching default page canvas for transparent
+     * public pages.
      */
-    expect(cefBridgeHeaderSource).toContain("setPreferredColorScheme(_:)");
+    expect(cefBridgeHeaderSource).toContain("setUsesSystemPageAppearance(_:)");
+    expect(cefBridgeSource).toContain("GhostexCEFSystemPreferredColorSchemeValue");
     expect(cefBridgeSource).toContain('#include "include/cef_values.h"');
     expect(cefBridgeSource).toContain('"Emulation.setEmulatedMedia"');
+    expect(cefBridgeSource).toContain('"Emulation.setDefaultBackgroundColorOverride"');
     expect(cefBridgeSource).toContain('"prefers-color-scheme"');
-    expect(hostProtocolSource).toContain("let browserColorSchemes: [String: String]?");
-    expect(hostProtocolSource).toContain("case browserColorSchemeSelected(projectId: String, origin: String, colorScheme: String)");
-    expect(sharedHostProtocolSource).toContain('type: "browserColorSchemeSelected";');
-    expect(nativeSidebarSource).toContain('type NativeBrowserColorScheme = "system" | "light" | "dark";');
-    expect(nativeSidebarSource).toContain("projectBrowserColorSchemes?: NativeProjectBrowserColorSchemes;");
-    expect(nativeSidebarSource).toContain("function browserColorSchemeOriginKey");
-    expect(nativeSidebarSource).toContain('protocol === "http:"');
-    expect(nativeSidebarSource).toContain('? "80"');
-    expect(nativeSidebarSource).toContain('return `${protocol}//${hostname}:${port}`;');
-    expect(nativeSidebarSource).toContain("function handleBrowserColorSchemeSelected");
-    expect(nativeSidebarSource).toContain('writeStoredProjects("browserColorSchemeSelected")');
-
-    const themeModeSource = sourceBetween(
-      terminalWorkspaceSource,
-      "private enum BrowserPaneThemeMode",
-      "private static let browserToolbarHeight",
-    );
-    expect(themeModeSource).toContain("var preferredColorSchemeOverride: String?");
-    expect(themeModeSource).toContain('return "light"');
-    expect(themeModeSource).toContain('return "dark"');
-    expect(themeModeSource).toContain("fileprivate static func browserColorSchemeOriginKey");
-    expect(themeModeSource).toContain('scheme == "http" || scheme == "https"');
-    expect(themeModeSource).toContain('let port = components.port ?? (scheme == "http" ? 80 : 443)');
-    expect(terminalWorkspaceSource).toContain("private var browserThemeMode: BrowserPaneThemeMode = .light");
-    expect(terminalWorkspaceSource).toContain("private var browserColorSchemesByProjectId");
-    expect(terminalWorkspaceSource).toContain("private func rememberBrowserColorSchemes");
-    expect(terminalWorkspaceSource).toContain("private func setBrowserColorScheme");
-    expect(terminalWorkspaceSource).toContain("private func normalizedBrowserColorSchemeProjectId");
+    expect(cefBridgeSource).toContain("usesSystemPageAppearance_");
 
     const hostInitSource = sourceBetween(
       terminalWorkspaceSource,
       "init(\n    browserView: NSView",
       "  /*\n   CDXC:SourceCEFDragDrop",
     );
-    expect(hostInitSource).toContain("browserColorSchemes: [String: String] = [:]");
-    expect(hostInitSource).toContain("applyBrowserColorSchemeForNavigation(urlString: initialAddress");
+    expect(hostInitSource).toContain("applySystemBrowserPageAppearanceIfNeeded()");
 
     const replaceSource = sourceBetween(
       terminalWorkspaceSource,
       "func replaceHostedBrowserView(",
       "  func focusAddressField",
     );
-    expect(replaceSource).toContain("applyBrowserColorSchemeForNavigation(");
+    expect(replaceSource).toContain("applySystemBrowserPageAppearanceIfNeeded()");
 
     const applySource = sourceBetween(
       terminalWorkspaceSource,
-      "private func applyBrowserThemeMode",
-      "  @objc private func showImportSettings",
+      "private func applySystemBrowserPageAppearanceIfNeeded",
+      "  func refreshHostedWebView",
     );
-    expect(applySource).toContain("chromiumView?.setPreferredColorScheme(mode.preferredColorSchemeOverride)");
-    expect(applySource).toContain("persistsSelection");
-    expect(applySource).toContain("onBrowserColorSchemeSelected?(origin, mode.rawValue)");
-    expect(applySource).not.toContain("leaves Chromium rendering alone");
+    expect(applySource).toContain("guard showsBrowserToolbar else");
+    expect(applySource).toContain("webView?.appearance = nil");
+    expect(applySource).toContain("chromiumView?.setUsesSystemPageAppearance(true)");
+    expect(applySource).not.toContain("onBrowserColorSchemeSelected?");
   });
 
   test("disables browser feedback tool buttons on GitHub pages", () => {
@@ -534,7 +525,7 @@ describe("chromium browser source", () => {
     expect(toolbarSource).toContain("private let historyButton = WebPaneHostView.makeToolbarButton(");
     expect(toolbarSource).toContain('systemSymbolName: "clock.arrow.circlepath"');
     expect(toolbarSource).toContain(
-      "let rightButtons = [zoomButton, reactGrabButton, historyButton, profileButton, appearanceButton, devToolsButton]",
+      "let rightButtons = [zoomButton, reactGrabButton, historyButton, profileButton, devToolsButton].filter { !$0.isHidden }",
     );
     expect(toolbarSource).toContain("Array(browserHistoryItems.prefix(browserHistoryVisibleLimit))");
     expect(toolbarSource).toContain("NSMenuItem.separator()");
