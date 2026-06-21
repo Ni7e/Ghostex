@@ -473,8 +473,7 @@ type MainSettingsSectionId =
   | "power"
   | "sounds"
   | "storage"
-  | "beta"
-  | "hooksSkills";
+  | "beta";
 
 export type MainSettingsInitialSectionId = MainSettingsSectionId;
 
@@ -622,7 +621,6 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
    * become visible when that gate is enabled.
    */
   beta: ["showBetaFeatures"],
-  hooksSkills: ["uninstallAgentHooks", "uninstallBundledAgentSkills"],
 };
 
 /*
@@ -652,8 +650,6 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
  * CDXC:SettingsAdvanced 2026-06-16-18:19:
  * Hide last-active timestamps, completion sounds, macOS attention notification, action-completion sound, Sidebar Tags, and the sidebar interface-size slider are common preferences. Keep them visible without Show Advanced while leaving terminal, debugging, storage, and lower-frequency utility controls advanced.
  *
- * CDXC:SettingsAdvanced 2026-06-18-02:54:
- * Hook and bundled-skill uninstall actions are advanced recovery controls at the bottom of General Settings. Search should still find them by "uninstall hooks" and "uninstall skills" so users can remove setup artifacts without browsing every tab.
  */
 const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "browserFeedbackTool",
@@ -721,8 +717,6 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "debuggingMode",
   "showSessionCommandCopyActions",
   "showSessionDetailsCopyAction",
-  "uninstallAgentHooks",
-  "uninstallBundledAgentSkills",
 ]);
 
 type HotkeySettingsSectionId =
@@ -985,7 +979,6 @@ export function SettingsModal({
   const sessionCardsSectionRef = useRef<HTMLDivElement>(null);
   const debuggingSectionRef = useRef<HTMLDivElement>(null);
   const betaSectionRef = useRef<HTMLDivElement>(null);
-  const hooksSkillsSectionRef = useRef<HTMLDivElement>(null);
   const agentsOnboardingSectionRef = useRef<HTMLDivElement>(null);
   const sidebarSectionRef = useRef<HTMLDivElement>(null);
   const themingSectionRef = useRef<HTMLDivElement>(null);
@@ -1809,18 +1802,6 @@ export function SettingsModal({
         title: "Show Copy details option",
       },
     ]),
-    hooksSkills: getSettingsSectionSearch(settingsSearchQuery, "Hooks & Skills", [
-      {
-        key: "uninstallAgentHooks",
-        subtitle: "Remove Ghostex-owned hook entries from supported agent CLI configs.",
-        title: "Uninstall hooks",
-      },
-      {
-        key: "uninstallBundledAgentSkills",
-        subtitle: "Remove bundled Ghostex agent skills from ~/agents/skills.",
-        title: "Uninstall skills",
-      },
-    ]),
   };
   const mainSettingsSectionNavigation: Array<{
     id: MainSettingsSectionId;
@@ -1897,12 +1878,6 @@ export function SettingsModal({
       ref: debuggingSectionRef,
       searchResult: settingsSearch.debugging,
       title: "Debugging",
-    },
-    {
-      id: "hooksSkills",
-      ref: hooksSkillsSectionRef,
-      searchResult: settingsSearch.hooksSkills,
-      title: "Hooks & Skills",
     },
   ];
   const hasVisibleMainSettings = mainSettingsSectionNavigation.some((section) =>
@@ -1981,7 +1956,6 @@ export function SettingsModal({
       sidebar: sidebarSectionRef,
       sounds: soundsSectionRef,
       beta: betaSectionRef,
-      hooksSkills: hooksSkillsSectionRef,
       statusIndicators: statusIndicatorsSectionRef,
       storage: storageSectionRef,
       sidebarTags: sidebarTagsSectionRef,
@@ -3775,44 +3749,6 @@ export function SettingsModal({
               </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("hooksSkills", settingsSearch.hooksSkills) ? (
-              <SettingsSection
-                description="Remove Ghostex-owned setup artifacts. You can install hooks and bundled skills again from Integrations."
-                sectionRef={hooksSkillsSectionRef}
-                title="Hooks & Skills"
-              >
-                {mainSettingVisible(settingsSearch.hooksSkills, "uninstallAgentHooks") ||
-                mainSettingVisible(settingsSearch.hooksSkills, "uninstallBundledAgentSkills") ? (
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {mainSettingVisible(settingsSearch.hooksSkills, "uninstallAgentHooks") ? (
-                      <Button
-                        className="h-10 px-4 text-sm"
-                        disabled={agentHookStatusLoading || !onUninstallAgentHooks}
-                        onClick={onUninstallAgentHooks}
-                        type="button"
-                        variant="outline"
-                      >
-                        <IconTrash aria-hidden="true" data-icon="inline-start" />
-                        Uninstall Hooks
-                      </Button>
-                    ) : null}
-                    {mainSettingVisible(settingsSearch.hooksSkills, "uninstallBundledAgentSkills") ? (
-                      <Button
-                        className="h-10 px-4 text-sm"
-                        disabled={ghostexCliStatusLoading || !onUninstallBundledAgentSkills}
-                        onClick={onUninstallBundledAgentSkills}
-                        type="button"
-                        variant="outline"
-                      >
-                        <IconTrash aria-hidden="true" data-icon="inline-start" />
-                        Uninstall Skills
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </SettingsSection>
-            ) : null}
-
             {!isFirstLaunchSetup && !hasVisibleMainSettings ? (
               <div className="rounded-none border border-border bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
                 No settings match your search.
@@ -3880,6 +3816,8 @@ export function SettingsModal({
               onInstallCuaDriver={onInstallCuaDriver}
               onInstallGenerateTitleSkill={onInstallGenerateTitleSkill}
               onInstallGhostexCli={onInstallGhostexCli}
+              onUninstallAgentHooks={onUninstallAgentHooks}
+              onUninstallBundledAgentSkills={onUninstallBundledAgentSkills}
               onOpenAccessibilityPreferences={onOpenAccessibilityPreferences}
               onOpenScreenRecordingPreferences={onOpenScreenRecordingPreferences}
               onRequestAgentHookStatus={onRequestAgentHookStatus}
@@ -5197,6 +5135,44 @@ function getCuaPermissionStatus(
   return { status: "Permission Status Unknown", tone: "warning" };
 }
 
+function canInstallOrUpdateAgentHooks(
+  agentHookStatus: SidebarAgentHookStatusMessage | undefined,
+): boolean {
+  if (!agentHookStatus) {
+    return true;
+  }
+  if (agentHookStatus.errorMessage) {
+    return false;
+  }
+  return agentHookStatus.agents.some(
+    (status) =>
+      status.cliInstalled && (status.status === "missing" || status.status === "updateRequired"),
+  );
+}
+
+function hasRemovableAgentHooks(
+  agentHookStatus: SidebarAgentHookStatusMessage | undefined,
+): boolean {
+  if (!agentHookStatus || agentHookStatus.errorMessage) {
+    return false;
+  }
+  return agentHookStatus.agents.some(
+    (status) =>
+      status.hookInstalled || status.status === "installed" || status.status === "updateRequired",
+  );
+}
+
+function hasInstalledBundledAgentSkills(
+  ghostexCliStatus: SidebarGhostexCliStatusMessage | undefined,
+): boolean {
+  return (
+    ghostexCliStatus?.agentOrchestrationSkillInstalled === true ||
+    ghostexCliStatus?.browserSkillInstalled === true ||
+    ghostexCliStatus?.computerUseSkillInstalled === true ||
+    ghostexCliStatus?.generateTitleSkillInstalled === true
+  );
+}
+
 function IntegrationsSettingsTab({
   agentHookStatus,
   agentHookStatusLoading,
@@ -5213,6 +5189,8 @@ function IntegrationsSettingsTab({
   onInstallCuaDriver,
   onInstallGenerateTitleSkill,
   onInstallGhostexCli,
+  onUninstallAgentHooks,
+  onUninstallBundledAgentSkills,
   onOpenAccessibilityPreferences,
   onOpenScreenRecordingPreferences,
   onRequestAgentHookStatus,
@@ -5233,6 +5211,8 @@ function IntegrationsSettingsTab({
   onInstallCuaDriver?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
+  onUninstallAgentHooks?: () => void;
+  onUninstallBundledAgentSkills?: () => void;
   onOpenAccessibilityPreferences?: () => void;
   onOpenScreenRecordingPreferences?: () => void;
   onRequestAgentHookStatus?: () => void;
@@ -5244,6 +5224,17 @@ function IntegrationsSettingsTab({
     ).length ?? 0;
   const updateRequiredHookCount =
     agentHookStatus?.agents.filter((status) => status.status === "updateRequired").length ?? 0;
+  const agentHooksAvailableForInstall = canInstallOrUpdateAgentHooks(agentHookStatus);
+  const agentHooksInstallComplete = Boolean(
+    agentHookStatus && !agentHooksAvailableForInstall && installedHookCount > 0,
+  );
+  const agentHookInstallLabel = updateRequiredHookCount > 0
+    ? "Update Hooks"
+    : agentHooksInstallComplete
+      ? "Hooks Installed"
+      : "Install Hooks";
+  const agentHooksAvailableForUninstall = hasRemovableAgentHooks(agentHookStatus);
+  const bundledAgentSkillsAvailableForUninstall = hasInstalledBundledAgentSkills(ghostexCliStatus);
   const updateRequiredHookSummary =
     updateRequiredHookCount === 1 ? "1 needs update" : `${updateRequiredHookCount} need update`;
   const hookSummary = agentHookStatus
@@ -5370,13 +5361,17 @@ function IntegrationsSettingsTab({
             title="Agent Hooks"
           >
             <Button
-              disabled={agentHookStatusLoading || !onInstallAgentHooks}
+              disabled={agentHookStatusLoading || !agentHooksAvailableForInstall || !onInstallAgentHooks}
               onClick={onInstallAgentHooks}
               type="button"
               variant={installedHookCount > 0 ? "outline" : "default"}
             >
-              <IconDownload aria-hidden="true" data-icon="inline-start" />
-              {updateRequiredHookCount > 0 ? "Update Hooks" : "Install Hooks"}
+              {agentHooksInstallComplete ? (
+                <IconCircleCheckFilled aria-hidden="true" data-icon="inline-start" />
+              ) : (
+                <IconDownload aria-hidden="true" data-icon="inline-start" />
+              )}
+              {agentHookInstallLabel}
             </Button>
             <Button
               disabled={agentHookStatusLoading || !onRequestAgentHookStatus}
@@ -5481,6 +5476,38 @@ function IntegrationsSettingsTab({
             macOS Settings > Integrations should not include a Setup Flow launcher row.
             Keep setup access owned by first-launch and other explicit entry points instead of listing it as an integration setting.
           */}
+        </SettingsSection>
+        {/*
+          CDXC:IntegrationsSetup 2026-06-21-02:54:
+          Hooks & Skills removal is an integration recovery action, so keep it as the final card in Settings > Integrations rather than a General Settings advanced section.
+          Disable actions when status proves the corresponding Ghostex-owned artifacts are already absent, and disable Agent Hooks install/update once no installed CLI needs hook work, so users cannot click no-op setup buttons.
+        */}
+        <SettingsSection
+          description="Remove Ghostex-owned setup artifacts. You can install hooks and bundled skills again from the rows above."
+          title="Hooks & Skills"
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Button
+              className="h-10 px-4 text-sm"
+              disabled={agentHookStatusLoading || !agentHooksAvailableForUninstall || !onUninstallAgentHooks}
+              onClick={onUninstallAgentHooks}
+              type="button"
+              variant="outline"
+            >
+              <IconTrash aria-hidden="true" data-icon="inline-start" />
+              Uninstall Hooks
+            </Button>
+            <Button
+              className="h-10 px-4 text-sm"
+              disabled={ghostexCliStatusLoading || !bundledAgentSkillsAvailableForUninstall || !onUninstallBundledAgentSkills}
+              onClick={onUninstallBundledAgentSkills}
+              type="button"
+              variant="outline"
+            >
+              <IconTrash aria-hidden="true" data-icon="inline-start" />
+              Uninstall Skills
+            </Button>
+          </div>
         </SettingsSection>
       </div>
     </ScrollArea>

@@ -73,27 +73,42 @@ describe("settings modal source", () => {
     expect(textField).toContain("value={inputValue}");
   });
 
-  test("keeps hook and skill uninstall controls in a searchable advanced bottom section", () => {
+  test("keeps hook and skill uninstall controls at the bottom of integrations", () => {
     /*
-     * CDXC:SettingsAdvanced 2026-06-18-02:54:
-     * Hooks & Skills uninstall controls belong at the bottom of General
-     * Settings, hidden behind Show Advanced during browsing while remaining
-     * searchable by uninstall hooks and uninstall skills.
+     * CDXC:IntegrationsSetup 2026-06-21-02:54:
+     * Hooks & Skills uninstall controls belong at the bottom of Settings >
+     * Integrations, and their no-op states must be disabled when hooks or
+     * bundled skills are already absent.
      */
     const navigation = sourceBetween(
       settingsModalSource,
       "const mainSettingsSectionNavigation",
       "const hasVisibleMainSettings",
     );
-    expect(navigation).toMatch(/title: "Debugging"[\s\S]*title: "Hooks & Skills"/u);
-    expect(settingsModalSource).toContain('hooksSkills: ["uninstallAgentHooks", "uninstallBundledAgentSkills"]');
-    expect(settingsModalSource).toContain('title: "Uninstall hooks"');
-    expect(settingsModalSource).toContain('title: "Uninstall skills"');
-    expect(settingsModalSource).toContain('"uninstallAgentHooks"');
-    expect(settingsModalSource).toContain('"uninstallBundledAgentSkills"');
-    expect(settingsModalSource).toContain('title="Hooks & Skills"');
-    expect(settingsModalSource).toContain('Uninstall Hooks');
-    expect(settingsModalSource).toContain('Uninstall Skills');
+    const integrationsTab = sourceBetween(
+      settingsModalSource,
+      "function IntegrationsSettingsTab",
+      "function IntegrationSettingsRow",
+    );
+
+    expect(navigation).not.toContain('title: "Hooks & Skills"');
+    expect(settingsModalSource).not.toContain("hooksSkills");
+    const cuaPermissionsIndex = integrationsTab.indexOf('title="Cua Permissions"');
+    const hooksSkillsIndex = integrationsTab.indexOf('title="Hooks & Skills"');
+    expect(cuaPermissionsIndex).toBeGreaterThanOrEqual(0);
+    expect(hooksSkillsIndex).toBeGreaterThanOrEqual(0);
+    expect(cuaPermissionsIndex).toBeLessThan(hooksSkillsIndex);
+    expect(integrationsTab).toContain("agentHooksAvailableForUninstall");
+    expect(integrationsTab).toContain("bundledAgentSkillsAvailableForUninstall");
+    expect(integrationsTab).toContain(
+      "disabled={agentHookStatusLoading || !agentHooksAvailableForUninstall || !onUninstallAgentHooks}",
+    );
+    expect(integrationsTab).toContain(
+      "disabled={ghostexCliStatusLoading || !bundledAgentSkillsAvailableForUninstall || !onUninstallBundledAgentSkills}",
+    );
+    expect(integrationsTab).toContain('title="Hooks & Skills"');
+    expect(integrationsTab).toContain("Uninstall Hooks");
+    expect(integrationsTab).toContain("Uninstall Skills");
   });
 
   test("gates Keep Awake settings behind Show Beta features", () => {

@@ -447,19 +447,22 @@ const FIRST_LAUNCH_CONTINUE_WARNINGS: Record<
 > = {
   /*
    * CDXC:FirstLaunchSetup 2026-06-18-02:54:
-   * First-launch warnings should tell users that Settings can remove all Ghostex hooks or bundled skills later by searching Uninstall Hooks or Uninstall Skills with Show Advanced enabled.
+   * First-launch warnings should tell users that Settings can remove all Ghostex hooks or bundled skills later.
+   *
+   * CDXC:IntegrationsSetup 2026-06-21-02:54:
+   * Hook and bundled-skill uninstall controls moved to the bottom of Settings > Integrations, so skipped-setup warnings should point at that tab instead of the old General Settings advanced search path.
    */
   hooks: {
     actionLabel: "Continue without hooks",
     description:
-      "Ghostex will not notify you when agents enter In Progress or Needs Attention, and it will not automatically name agent sessions from the first message until hooks are installed. You can install them later from Settings > Integrations, or uninstall all Ghostex hooks from Settings by searching Uninstall Hooks with Show Advanced enabled.",
+      "Ghostex will not notify you when agents enter In Progress or Needs Attention, and it will not automatically name agent sessions from the first message until hooks are installed. You can install them later from Settings > Integrations, or uninstall all Ghostex hooks from the bottom of Settings > Integrations.",
     installLabel: "Install Hooks",
     title: "Continue without agent hooks?",
   },
   skills: {
     actionLabel: "Continue without skills",
     description:
-      "Agents will not discover Ghostex Browser Use, Ghostex Computer Use, Agent Orchestration, or Generate Title until the bundled skills are installed. You can install them later from Settings > Integrations, or uninstall all bundled Ghostex skills from Settings by searching Uninstall Skills with Show Advanced enabled.",
+      "Agents will not discover Ghostex Browser Use, Ghostex Computer Use, Agent Orchestration, or Generate Title until the bundled skills are installed. You can install them later from Settings > Integrations, or uninstall all bundled Ghostex skills from the bottom of Settings > Integrations.",
     installLabel: "Install Missing Skills",
     title: "Continue without bundled agent skills?",
   },

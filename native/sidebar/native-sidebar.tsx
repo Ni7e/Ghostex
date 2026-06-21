@@ -7249,7 +7249,10 @@ async function installNativeGenerateTitleSkill(showSuccessMessage = true): Promi
 async function uninstallNativeBundledAgentSkills(): Promise<void> {
   /**
    * CDXC:AgentSkills 2026-06-18-02:54:
-   * Advanced Settings exposes one Uninstall Skills action for the bundled Ghostex agent skills. Remove only the shared catalog skill directories from ~/agents/skills so user-authored skills are not affected.
+   * Settings exposes one Uninstall Skills action for the bundled Ghostex agent skills. Remove only the shared catalog skill directories from ~/agents/skills so user-authored skills are not affected.
+   *
+   * CDXC:IntegrationsSetup 2026-06-21-02:54:
+   * Settings now presents this action at the bottom of Integrations, but native still owns the same bounded removal so the UI move does not broaden what can be deleted.
    */
   const result = await runNativeNodeScript(
     String.raw`
@@ -19975,7 +19978,10 @@ async function uninstallNativeAgentHooksFromSettings(agentIds?: readonly string[
   try {
     /*
     CDXC:AgentHooks 2026-06-18-02:54:
-    Advanced Settings owns the explicit Uninstall Hooks action. Route it through gxserver so removing hooks uses the same provider-aware ownership rules as installing and status checks.
+    Settings owns the explicit Uninstall Hooks action. Route it through gxserver so removing hooks uses the same provider-aware ownership rules as installing and status checks.
+
+    CDXC:IntegrationsSetup 2026-06-21-02:54:
+    Settings now presents this recovery action at the bottom of Integrations while preserving gxserver-owned hook removal and status refresh behavior.
     */
     await gxserverClient.uninstallAgentHooks(agentIds);
     showAppToast("success", "Agent hooks uninstalled", "Ghostex-owned hook entries were removed.");

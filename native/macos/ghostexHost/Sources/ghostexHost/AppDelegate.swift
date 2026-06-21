@@ -1760,7 +1760,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       message, to: logURL, logsDirectory: logsDirectory, label: "sidebar collapse state debug")
   }
 
-  fileprivate static func appendProjectBoardDebugLog(event: String, details: String?) {
+  static func appendProjectBoardDebugLog(event: String, details: String?) {
     /**
      CDXC:ProjectBoardDiagnostics 2026-05-28-12:32:
      Project-page create/start diagnostics need their own app-storage log file
@@ -1768,6 +1768,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
      breadcrumbs can be inspected without mixing them into terminal-focus or
      session-title logs. These are regular diagnostics, so Settings Debugging
      Mode is the final gate before any file write.
+
+     CDXC:ProjectBoardDiagnostics 2026-06-21-03:56:
+     Kanban empty-title failures can happen inside the native prompt-agent
+     bridge after the webview has already created the ticket. Expose this writer
+     to TerminalWorkspaceView so the native bridge can record privacy-safe
+     process metadata in the same project-board support log without adding a
+     second diagnostic file.
      */
     guard NativeDebugLogging.isEnabled else {
       return
@@ -6098,9 +6105,8 @@ final class ghostexRootView: NSView {
   /**
    CDXC:NativeWindowChrome 2026-05-30-06:23:
    The main work area needs a #252525 separator below the React titlebar
-   without continuing above the sidebar. Use native non-interactive chrome lines
-   so the horizontal titlebar divider starts at the workspace frame while the
-   matching vertical divider tracks the sidebar/workarea boundary.
+   without continuing above the sidebar. Use native non-interactive chrome
+   layers so the horizontal titlebar divider starts at the workspace frame.
 
    CDXC:NativeWindowChrome 2026-05-30-06:51:
    The workarea separators should be 1px thick instead of the original 2px.
@@ -6114,6 +6120,15 @@ final class ghostexRootView: NSView {
     srgbRed: 37.0 / 255.0,
     green: 37.0 / 255.0,
     blue: 37.0 / 255.0,
+    alpha: 1.0)
+  /**
+   CDXC:NativeSidebarChrome 2026-06-20-19:11:
+   The left-sidebar 1px line belongs on the workspace side of the five-point drag rail, not on the sidebar WebView edge. Draw that divider line in #212121 as native rail chrome so the sidebar itself no longer contributes the visible boundary.
+   */
+  private static let sidebarDividerLineColor = NSColor(
+    srgbRed: 33.0 / 255.0,
+    green: 33.0 / 255.0,
+    blue: 33.0 / 255.0,
     alpha: 1.0)
   private static let defaultSidebarWidth: CGFloat = 235
   private static let sidebarResetWidth: CGFloat = 235
@@ -6464,7 +6479,7 @@ final class ghostexRootView: NSView {
      chrome so project/session controls always own their visible hit area.
     */
     addSubview(sidebarView)
-    divider.separatorColor = Self.workareaSeparatorColor
+    divider.separatorColor = Self.sidebarDividerLineColor
     addSubview(divider)
     /**
      CDXC:NativeSidebarChrome 2026-06-08-19:58:
@@ -10595,8 +10610,22 @@ final class ghostexRootView: NSView {
     guard modal != "commandPalette" else {
       return false
     }
-    guard appModalWindowController(for: modal)?.isActiveOrPendingModal(modal) == true else {
-      return false
+    if isSettingsWorkspaceAppModal(modal) {
+      /*
+       CDXC:SettingsModalStuckBlank 2026-06-20-23:02:
+       Settings repeat opens must only be ignored after React has confirmed the
+       actual Settings UI by sending `presented` and making the child window
+       visible. A pending native Settings host is not enough, because the stuck
+       blank repro is native believing Settings is open while React is not
+       showing Settings.
+       */
+      guard appModalWindowController(for: modal)?.isVisibleModal(modal) == true else {
+        return false
+      }
+    } else {
+      guard appModalWindowController(for: modal)?.isActiveOrPendingModal(modal) == true else {
+        return false
+      }
     }
     /*
      CDXC:AppModals 2026-06-15-10:27:
@@ -11661,9 +11690,9 @@ final class ghostexRootView: NSView {
     validateRootLayoutFrames(frames)
     /**
      CDXC:NativeSidebarChrome 2026-05-31-18:58:
-     The native #252525 sidebar/workarea divider must remain owned by AppKit.
-     Keep the divider above the sidebar WKWebView so web content cannot compete
-     with the native boundary.
+     The native sidebar/workarea divider must remain owned by AppKit. Keep the
+     divider above the sidebar WKWebView so web content cannot compete with the
+     native boundary.
 
      CDXC:NativeLayout 2026-06-13-09:02:
      The sidebar, divider, and workspace must be strict sibling regions. Do not
@@ -11680,6 +11709,11 @@ final class ghostexRootView: NSView {
      workspace split handles. Keep it as a strict sibling region and draw the
      one-point separator within that frame so AppKit normal traversal owns
      resizing without monitors, overlays, or root hit-test expansion.
+
+     CDXC:NativeSidebarChrome 2026-06-20-19:11:
+     When the sidebar is on the left, the #212121 visual line should sit at the
+     right edge of the drag rail beside the workspace instead of at the
+     sidebar's own right edge.
      */
     let shouldRefreshDividerCursorAfterLayout =
       isSidebarCollapsed && !divider.isHidden && divider.needsCursorRefreshBeforeHide()
@@ -11739,10 +11773,9 @@ final class ghostexRootView: NSView {
      toasts now use separate native child panels instead of this z-order path.
 
      CDXC:NativeSidebarChrome 2026-06-05-05:01:
-     The #252525 sidebar/workarea separator must remain visible on the
-     sidebar's right edge after both shrink and expand drags. The native resize
-     handle draws the separator inside the same AppKit view that owns the drag
-     gesture, resize cursor, and delayed hover affordance.
+     The native resize handle draws the sidebar/workarea separator inside the
+     same AppKit view that owns the drag gesture, resize cursor, and delayed
+     hover affordance.
 
      CDXC:NativeSidebarChrome 2026-06-08-19:58:
      Z-order-only cursor fixes were not reliable enough for the macOS sidebar
@@ -11889,8 +11922,13 @@ final class ghostexRootView: NSView {
 
      CDXC:NativeSidebarChrome 2026-06-19-14:38:
      Sidebar resize now follows the workspace split-pane rail width: reserve a
-     real five-point divider between sidebar and workspace siblings, then keep
-     the one-point visible separator pinned to the sidebar edge inside that rail.
+     real five-point divider between sidebar and workspace siblings, then draw
+     the one-point visible separator inside that rail.
+
+     CDXC:NativeSidebarChrome 2026-06-20-19:11:
+     For left-sidebar placement, move the visible #212121 line from the
+     sidebar edge to the divider rail's rightmost pixel so the rail separates
+     the sidebar from the workspace before the line is drawn.
      */
     let sidebarX: CGFloat
     let dividerX: CGFloat
@@ -11922,12 +11960,7 @@ final class ghostexRootView: NSView {
       height: contentHeight
     )
     let separatorWidth = Self.workareaSeparatorWidth
-    let sidebarWorkareaBorderX: CGFloat
-    if sidebarSide == .left {
-      sidebarWorkareaBorderX = dividerFrame.minX
-    } else {
-      sidebarWorkareaBorderX = max(dividerFrame.maxX - separatorWidth, dividerFrame.minX)
-    }
+    let sidebarWorkareaBorderX = max(dividerFrame.maxX - separatorWidth, dividerFrame.minX)
     let sidebarWorkareaBorderFrame = CGRect(
       x: sidebarWorkareaBorderX,
       y: workspaceFrame.minY,
@@ -15430,6 +15463,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       isSettingsWorkspaceAppModal(loadedModal)
       || isSettingsWorkspaceAppModal(currentModal)
       || isSettingsWorkspaceAppModal(messageModal)
+    let deliveryMessage = messageForDispatch(message)
     if isPromptEditorMessage {
       logPromptWindowEvent(
         "nativeWindow.dispatch",
@@ -15446,12 +15480,13 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
         details: [
           "messageModal": messageModal,
           "messageType": messageType,
+          "hasInlineSidebarStateMessage": deliveryMessage["latestSidebarStateMessage"] != nil,
           "msSinceOpen": elapsedSinceOpenMs(),
           "requestId": message["requestId"] as? String ?? "",
         ])
     }
-    guard JSONSerialization.isValidJSONObject(message),
-      let data = try? JSONSerialization.data(withJSONObject: message),
+    guard JSONSerialization.isValidJSONObject(deliveryMessage),
+      let data = try? JSONSerialization.data(withJSONObject: deliveryMessage),
       let json = String(data: data, encoding: .utf8)
     else {
       AppDelegate.appendAppModalErrorLog(
@@ -15497,6 +15532,29 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
         )
       }
     }
+  }
+
+  private func messageForDispatch(_ message: [String: Any]) -> [String: Any] {
+    guard (message["type"] as? String) == "open",
+      isSettingsWorkspaceAppModal(message["modal"] as? String),
+      let latestSidebarState
+    else {
+      return message
+    }
+    /*
+     CDXC:SettingsModalStuckBlank 2026-06-20-23:02:
+     Settings opens must carry the native window's latest sidebar hydrate in
+     the same JS event as the open request. React applies this inline snapshot
+     before setting activeModal, so Settings cannot present against the modal
+     host's revision-0 default store.
+     */
+    var deliveryMessage = message
+    if let sidebarStateMessage = latestSidebarState["message"] {
+      deliveryMessage["latestSidebarStateMessage"] = sidebarStateMessage
+    } else {
+      deliveryMessage["latestSidebarStateMessage"] = latestSidebarState
+    }
+    return deliveryMessage
   }
 
   func close(sendReactClose: Bool) {

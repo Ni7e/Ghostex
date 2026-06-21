@@ -122,6 +122,7 @@ type AppModalHostMessage =
       initialSection?: MainSettingsInitialSectionId;
       initialSearchQuery?: string;
       initialTab?: SettingsModalTab;
+      latestSidebarStateMessage?: unknown;
       initialText?: string;
       language?: string;
       modal: AppModalKind;
@@ -2005,6 +2006,9 @@ function AppModalHost() {
   const [osIntegrationStatusLoading, setOSIntegrationStatusLoading] = useState(false);
   const [isPreviousSessionsInitialLoadReady, setIsPreviousSessionsInitialLoadReady] = useState(false);
   const previousSettingsRenderStateLogRef = useRef("");
+  const latestSettingsPresentedLogDetailsRef = useRef<
+    Record<string, string | number | boolean | null | undefined>
+  >({});
   const settings = useSidebarStore((state) => state.hud.settings);
   const revision = useSidebarStore((state) => state.revision);
   const agents = useSidebarStore((state) => state.hud.agents);
@@ -2039,7 +2043,8 @@ function AppModalHost() {
    * Prompt Agent back to Codex from a pre-hydrate placeholder.
    */
   const hasNativeSettingsHydrated = revision > 0;
-  const isSettingsRenderable = isSettingsModalKind(activeModal) && hasNativeSettingsHydrated;
+  const isSettingsModal = isSettingsModalKind(activeModal);
+  const isSettingsRenderable = isSettingsModal && hasNativeSettingsHydrated;
   const settingsInitialTab = settingsInitialTabOverride ?? getSettingsInitialTab(activeModal);
   const hasSettings = settings !== undefined;
   const hasSettingsInitialSection = settingsInitialSection !== undefined;
@@ -2066,9 +2071,39 @@ function AppModalHost() {
   CDXC:PreviousSessions 2026-06-02-20:39:
   The native app-modal host is hidden until React posts `presented`. Previous Sessions must delay that presented signal until its first gxserver history query resolves, proves empty, or hits the two-second cap, otherwise the user sees the empty short modal before loaded rows expand it.
   */
+  /*
+   * CDXC:SettingsModalStuckBlank 2026-06-20-23:02:
+   * Settings must not send native `presented` from the generic modal-ready path
+   * while the actual Settings component is still closed on revision 0. Tie
+   * Settings-family presentation to the same hydrated renderability condition
+   * used by SettingsModal so native cannot believe Settings is open while
+   * React is showing no Settings UI.
+   */
   const isActiveModalRenderable =
     isBaseActiveModalRenderable &&
+    (!isSettingsModal || isSettingsRenderable) &&
     (activeModal !== "previousSessions" || isPreviousSessionsInitialLoadReady);
+  /*
+   * CDXC:SettingsModalDiagnostics 2026-06-20-20:24:
+   * Settings presented diagnostics must not add sidebar revision or hydration
+   * fields to the `presented` effect dependencies, because that would re-send
+   * native presented messages on ordinary sidebar updates. Keep the latest safe
+   * diagnostic payload in a ref while preserving the original present trigger.
+   */
+  latestSettingsPresentedLogDetailsRef.current = {
+    activeModal,
+    hasNativeSettingsHydrated,
+    hasSettings,
+    hasSettingsInitialRemoteMachineId,
+    hasSettingsInitialSearchQuery,
+    hasSettingsInitialSection,
+    isActiveModalRenderable,
+    isBaseActiveModalRenderable,
+    isSettingsRenderable,
+    nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
+    revision,
+    settingsInitialTab,
+  };
 
   useEffect(() => {
     if (!isSettingsModalKind(activeModal)) {
@@ -2190,37 +2225,13 @@ function AppModalHost() {
       presentedMessage.requestId = floatingPromptEditor.requestId;
     }
     if (isSettingsModalKind(activeModal)) {
-      postSettingsModalDebugLog("modalHost.settings.presented.sent", {
-        activeModal,
-        hasNativeSettingsHydrated,
-        hasSettings,
-        hasSettingsInitialRemoteMachineId,
-        hasSettingsInitialSearchQuery,
-        hasSettingsInitialSection,
-        isActiveModalRenderable,
-        isBaseActiveModalRenderable,
-        isSettingsRenderable,
-        nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
-        revision,
-        settingsInitialTab,
-      });
+      postSettingsModalDebugLog(
+        "modalHost.settings.presented.sent",
+        latestSettingsPresentedLogDetailsRef.current,
+      );
     }
     postAppModalHostMessage(presentedMessage, "AppModals:presented");
-  }, [
-    activeModal,
-    activeModalRequestId,
-    floatingPromptEditor?.requestId,
-    hasNativeSettingsHydrated,
-    hasSettings,
-    hasSettingsInitialRemoteMachineId,
-    hasSettingsInitialSearchQuery,
-    hasSettingsInitialSection,
-    isActiveModalRenderable,
-    isBaseActiveModalRenderable,
-    isSettingsRenderable,
-    revision,
-    settingsInitialTab,
-  ]);
+  }, [activeModal, activeModalRequestId, floatingPromptEditor?.requestId, isActiveModalRenderable]);
 
   useEffect(() => {
     if (activeModal !== "settings") {
@@ -3072,6 +3083,19 @@ function useModalStateFromNative() {
         }
 
         if (message.type === "open") {
+          if (
+            isSettingsModalKind(message.modal) &&
+            message.latestSidebarStateMessage !== undefined
+          ) {
+            /*
+             * CDXC:SettingsModalStuckBlank 2026-06-20-23:02:
+             * Settings opens must apply the native window's latest sidebar
+             * snapshot before setting activeModal. This keeps Debugging Mode,
+             * revision, and settings data in the modal host before React decides
+             * whether the Settings component can actually render.
+             */
+            applySidebarStateMessage(message.latestSidebarStateMessage);
+          }
           const sidebarStateAtOpen = useSidebarStore.getState();
           if (isAppModalDebugLoggingEnabled()) {
             postAppModalHostMessage(
@@ -3095,6 +3119,7 @@ function useModalStateFromNative() {
                 message.initialRemoteMachineId.trim().length > 0,
               hasInitialSearchQuery: typeof message.initialSearchQuery === "string",
               hasSettings: sidebarStateAtOpen.hud.settings !== undefined,
+              hasInlineSidebarStateMessage: message.latestSidebarStateMessage !== undefined,
               initialSection:
                 typeof message.initialSection === "string" ? message.initialSection : null,
               initialTab: isSettingsModalTab(message.initialTab) ? message.initialTab : null,

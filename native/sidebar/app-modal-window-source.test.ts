@@ -530,6 +530,8 @@ describe("native app modal window source", () => {
       "private func preferredNativeAppModalContentFrame",
     );
     expect(duplicateGuard).toContain('guard modal != "commandPalette"');
+    expect(duplicateGuard).toContain("isSettingsWorkspaceAppModal(modal)");
+    expect(duplicateGuard).toContain("isVisibleModal(modal) == true");
     expect(duplicateGuard).toContain("isActiveOrPendingModal(modal)");
     expect(duplicateGuard).toContain("nativeBridge.appModal.open.duplicateIgnored");
     expect(duplicateGuard).toContain("private func isVisibleCommandPaletteModeSwitch(modal: String) -> Bool");
@@ -571,22 +573,28 @@ describe("native app modal window source", () => {
     const nativeSettingsDispatchLog = sourceBetween(
       appDelegateSource,
       "if isSettingsModalMessage {",
-      "guard JSONSerialization.isValidJSONObject(message)",
+      "guard JSONSerialization.isValidJSONObject(deliveryMessage)",
     );
     expect(nativeSettingsDispatchLog).toContain('"messageModal"');
     expect(nativeSettingsDispatchLog).toContain('"messageType"');
+    expect(nativeSettingsDispatchLog).toContain('"hasInlineSidebarStateMessage"');
     expect(nativeSettingsDispatchLog).toContain('"requestId"');
     expect(nativeSettingsDispatchLog).not.toContain('message["projectPath"]');
     expect(nativeSettingsDispatchLog).not.toContain('message["projectName"]');
     expect(nativeSettingsDispatchLog).not.toContain('message["initialSearchQuery"]');
     expect(nativeSettingsDispatchLog).not.toContain('message["settings"]');
     expect(nativeSettingsDispatchLog).not.toContain('message["password"]');
+    expect(appDelegateSource).toContain("private func messageForDispatch(_ message: [String: Any])");
+    expect(appDelegateSource).toContain('deliveryMessage["latestSidebarStateMessage"] = sidebarStateMessage');
 
     const reactSettingsOpenLog = sourceBetween(
       modalHostSource,
       'postSettingsModalDebugLog("modalHost.settings.open.received"',
       "          }\n          if (message.modal === \"renameSession\")",
     );
+    expect(modalHostSource).toContain("applySidebarStateMessage(message.latestSidebarStateMessage)");
+    expect(modalHostSource).toContain("message.latestSidebarStateMessage !== undefined");
+    expect(reactSettingsOpenLog).toContain("hasInlineSidebarStateMessage");
     expect(reactSettingsOpenLog).toContain("hasInitialSearchQuery");
     expect(reactSettingsOpenLog).toContain("hasInitialRemoteMachineId");
     expect(reactSettingsOpenLog).toContain("initialSection");
@@ -612,20 +620,32 @@ describe("native app modal window source", () => {
     expect(reactSettingsRenderStateLog).not.toContain("projectPath");
     expect(reactSettingsRenderStateLog).not.toContain("password");
 
-    const reactSettingsPresentedLog = sourceBetween(
+    const reactSettingsPresentedPayload = sourceBetween(
       modalHostSource,
-      'postSettingsModalDebugLog("modalHost.settings.presented.sent"',
-      "    }\n    postAppModalHostMessage(presentedMessage",
+      "latestSettingsPresentedLogDetailsRef.current = {",
+      "  };\n\n  useEffect(() => {",
     );
-    expect(reactSettingsPresentedLog).toContain("hasSettingsInitialSearchQuery");
-    expect(reactSettingsPresentedLog).toContain("hasSettingsInitialRemoteMachineId");
-    expect(reactSettingsPresentedLog).toContain("settingsInitialTab");
-    expect(reactSettingsPresentedLog).not.toContain("settingsInitialSearchQuery:");
-    expect(reactSettingsPresentedLog).not.toContain("settingsInitialRemoteMachineId:");
-    expect(reactSettingsPresentedLog).not.toContain("settings:");
-    expect(reactSettingsPresentedLog).not.toContain("projectName");
-    expect(reactSettingsPresentedLog).not.toContain("projectPath");
-    expect(reactSettingsPresentedLog).not.toContain("password");
+    expect(reactSettingsPresentedPayload).toContain("hasSettingsInitialSearchQuery");
+    expect(reactSettingsPresentedPayload).toContain("hasSettingsInitialRemoteMachineId");
+    expect(reactSettingsPresentedPayload).toContain("settingsInitialTab");
+    expect(reactSettingsPresentedPayload).not.toContain("settingsInitialSearchQuery:");
+    expect(reactSettingsPresentedPayload).not.toContain("settingsInitialRemoteMachineId:");
+    expect(reactSettingsPresentedPayload).not.toContain("settings:");
+    expect(reactSettingsPresentedPayload).not.toContain("projectName");
+    expect(reactSettingsPresentedPayload).not.toContain("projectPath");
+    expect(reactSettingsPresentedPayload).not.toContain("password");
+
+    const reactPresentedEffect = sourceBetween(
+      modalHostSource,
+      "useLayoutEffect(() => {",
+      "  useEffect(() => {\n    if (activeModal !== \"settings\")",
+    );
+    expect(modalHostSource).toContain("(!isSettingsModal || isSettingsRenderable)");
+    expect(reactPresentedEffect).toContain("latestSettingsPresentedLogDetailsRef.current");
+    expect(reactPresentedEffect).toContain(
+      "[activeModal, activeModalRequestId, floatingPromptEditor?.requestId, isActiveModalRenderable]",
+    );
+    expect(reactPresentedEffect).not.toContain("revision,\n");
   });
 
   test("keeps Add Worktree fixed at 570x574 with exact native-window padding", () => {
