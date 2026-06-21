@@ -793,6 +793,7 @@ export function SidebarApp({
   const collapseStateHydrateLogCountRef = useRef(0);
   const lastCollapseStateHydrateShapeRef = useRef<string | undefined>(undefined);
   const focusedSessionScrollLogSequenceRef = useRef(0);
+  const previousFocusedSessionRevealRequestIdRef = useRef(focusedSessionRevealRequestId);
 
   if (!didResetStoreRef.current) {
     resetSidebarStore();
@@ -809,6 +810,9 @@ export function SidebarApp({
   }, []);
 
   const applyLocalFocus = useSidebarStore((state) => state.applyLocalFocus);
+  const consumeFocusedSessionScrollSuppression = useSidebarStore(
+    (state) => state.consumeFocusedSessionScrollSuppression,
+  );
   const applyCommandRunStateClearedMessage = useSidebarStore(
     (state) => state.applyCommandRunStateClearedMessage,
   );
@@ -1255,6 +1259,7 @@ export function SidebarApp({
 
   const focusSidebarSessionFromNavigation = (groupId: string, sessionId: string) => {
     dismissAppModalForSidebarNavigation("SettingsDismissal:focusSession");
+    useSidebarStore.getState().clearFocusedSessionScrollSuppression();
     applyLocalFocus(groupId, sessionId);
   };
 
@@ -2499,6 +2504,13 @@ export function SidebarApp({
   }, [ isSessionSearchSelectionVisible, selectedSessionSearchResult ]);
 
   useEffect(() => {
+    const isExplicitFocusedSessionRevealRequest =
+      focusedSessionRevealRequestId !== previousFocusedSessionRevealRequestIdRef.current;
+    previousFocusedSessionRevealRequestIdRef.current = focusedSessionRevealRequestId;
+    if (isExplicitFocusedSessionRevealRequest) {
+      useSidebarStore.getState().clearFocusedSessionScrollSuppression();
+    }
+
     if (!focusedSessionId || !sessionGroupsContentRef.current) {
       return;
     }
@@ -2506,6 +2518,9 @@ export function SidebarApp({
     /*
      * CDXC:SidebarWakeScrollDiagnostics 2026-06-16-02:20:
      * Wake-scroll repros need to prove whether the sidebar jumped because focus-following issued scrollIntoView or because the focused row moved in the displayed order. Log only session IDs, row indexes, sort mode, and geometry metrics while Debugging Mode is enabled.
+     *
+     * CDXC:SidebarSessionClose 2026-06-21-18:02:
+     * Closing the focused terminal session should retarget native focus without reveal-scrolling the sidebar. Consume the one-shot close marker before scrollIntoViewIfNeeded so the user's list position stays stable after close.
      */
     let afterAnimationFrameId: number | undefined;
     let afterSettledTimeoutId: number | undefined;
@@ -2518,6 +2533,18 @@ export function SidebarApp({
           sequence,
         });
         return;
+      }
+
+      if (!isExplicitFocusedSessionRevealRequest) {
+        const suppression = consumeFocusedSessionScrollSuppression();
+        if (suppression) {
+          postSidebarWakeScrollLog("focusedRowScrollSkipped", focusedSessionId, {
+            reason: "close-driven-focus-scroll-suppressed",
+            sequence,
+            suppressionReason: suppression.reason,
+          });
+          return;
+        }
       }
 
       const focusedSessionElement = document.querySelector<HTMLElement>(
@@ -2586,7 +2613,7 @@ export function SidebarApp({
         window.clearTimeout(afterSettledTimeoutId);
       }
     };
-  }, [ focusedSessionId, focusedSessionRevealRequestId ]);
+  }, [ consumeFocusedSessionScrollSuppression, focusedSessionId, focusedSessionRevealRequestId ]);
 
   const unlockCompletionSoundPlayback = useEffectEvent(() => {
     void prepareCompletionSoundPlayback((soundEvent, details) => {
@@ -3337,6 +3364,7 @@ export function SidebarApp({
     }
 
     dismissAppModalForSidebarNavigation("SettingsDismissal:sessionSearchActivate");
+    useSidebarStore.getState().clearFocusedSessionScrollSuppression();
     applyLocalFocus(selectedResult.groupId, selectedResult.sessionId);
     vscode.postMessage({
       sessionId: selectedResult.sessionId,

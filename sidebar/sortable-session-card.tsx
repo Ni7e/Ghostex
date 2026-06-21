@@ -315,6 +315,15 @@ function postSidebarSessionCloseInBackground(
   }, 0);
 }
 
+function suppressCloseDrivenFocusedSessionScroll(sessionIds: readonly string[]): void {
+  const store = useSidebarStore.getState();
+  if (!sessionIds.some((sessionId) => store.sessionsById[sessionId]?.isFocused === true)) {
+    return;
+  }
+
+  store.suppressNextFocusedSessionScroll("sessionClose");
+}
+
 function postSidebarSessionsCloseInBackground(
   vscode: WebviewApi,
   sessionIds: readonly string[],
@@ -995,6 +1004,7 @@ export function SortableSessionCard({
         */
         useSidebarStore.getState().setSessionSleepingLocally(session.sessionId, true);
       } else {
+        suppressCloseDrivenFocusedSessionScroll([session.sessionId]);
         useSidebarStore.getState().hideSessionLocally(session.sessionId);
       }
     });
@@ -1320,6 +1330,7 @@ export function SortableSessionCard({
 
     flushSync(() => {
       setContextMenuPosition(undefined);
+      suppressCloseDrivenFocusedSessionScroll(targetSessionIds);
       useSidebarStore.getState().hideSessionsLocally(targetSessionIds);
     });
     postSidebarSessionsCloseInBackground(vscode, targetSessionIds);

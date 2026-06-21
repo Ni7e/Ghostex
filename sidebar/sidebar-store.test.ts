@@ -102,6 +102,28 @@ describe("sidebar store", () => {
     expect(useSidebarStore.getState().commandRunStates.build).toBeUndefined();
   });
 
+  test("should consume focused-session scroll suppression once while it is active", () => {
+    useSidebarStore.getState().suppressNextFocusedSessionScroll("sessionClose", 1_000);
+
+    expect(useSidebarStore.getState().focusedSessionScrollSuppression).toEqual({
+      expiresAtMs: 6_000,
+      reason: "sessionClose",
+    });
+    expect(useSidebarStore.getState().consumeFocusedSessionScrollSuppression(5_999)).toEqual({
+      expiresAtMs: 6_000,
+      reason: "sessionClose",
+    });
+    expect(useSidebarStore.getState().focusedSessionScrollSuppression).toBeUndefined();
+    expect(useSidebarStore.getState().consumeFocusedSessionScrollSuppression(5_999)).toBeUndefined();
+  });
+
+  test("should clear expired focused-session scroll suppression without consuming it", () => {
+    useSidebarStore.getState().suppressNextFocusedSessionScroll("sessionClose", 1_000);
+
+    expect(useSidebarStore.getState().consumeFocusedSessionScrollSuppression(6_001)).toBeUndefined();
+    expect(useSidebarStore.getState().focusedSessionScrollSuppression).toBeUndefined();
+  });
+
   test("should preserve the synthetic chats group marker during hydration", () => {
     useSidebarStore.getState().applySidebarMessage(
       createHydrateMessage([

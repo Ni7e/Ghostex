@@ -32,6 +32,7 @@ export type SidebarGroupRecord = Omit<SidebarSessionGroup, "sessions">;
 type SidebarStoreDataState = {
   commandRunStates: Record<string, SidebarCommandRunFeedbackState>;
   daemonSessionsState: SidebarDaemonSessionsStateMessage | undefined;
+  focusedSessionScrollSuppression: SidebarFocusedSessionScrollSuppression | undefined;
   gitCommitDraft: SidebarPromptGitCommitMessage | undefined;
   gitFileDiffDraft: SidebarGitFileDiffDraft | undefined;
   groupOrder: string[];
@@ -51,6 +52,13 @@ type SidebarStoreDataState = {
   workspaceGroupIds: string[];
 };
 
+export type SidebarFocusedSessionScrollSuppressionReason = "sessionClose";
+
+export type SidebarFocusedSessionScrollSuppression = {
+  expiresAtMs: number;
+  reason: SidebarFocusedSessionScrollSuppressionReason;
+};
+
 type SidebarStoreActions = {
   applyCommandRunStateClearedMessage: (message: SidebarCommandRunStateClearedMessage) => void;
   applyCommandRunStateMessage: (message: SidebarCommandRunStateChangedMessage) => void;
@@ -64,18 +72,29 @@ type SidebarStoreActions = {
   applySessionPresentationMessage: (message: SidebarSessionPresentationChangedMessage) => void;
   applySidebarMessage: (message: SidebarHydrateMessage | SidebarSessionStateMessage) => void;
   clearCommandRunState: (commandId: string) => void;
+  clearFocusedSessionScrollSuppression: () => void;
+  consumeFocusedSessionScrollSuppression: (
+    nowMs?: number,
+  ) => SidebarFocusedSessionScrollSuppression | undefined;
   reset: () => void;
   setDaemonSessionsState: (message: SidebarDaemonSessionsStateMessage | undefined) => void;
+  suppressNextFocusedSessionScroll: (
+    reason: SidebarFocusedSessionScrollSuppressionReason,
+    nowMs?: number,
+  ) => void;
   setGitCommitDraft: (message: SidebarPromptGitCommitMessage | undefined) => void;
   setGitFileDiffDraft: (draft: SidebarGitFileDiffDraft | undefined) => void;
 };
 
 export type SidebarStoreState = SidebarStoreDataState & SidebarStoreActions;
 
+const FOCUSED_SESSION_SCROLL_SUPPRESSION_TTL_MS = 5_000;
+
 export function createInitialSidebarStoreDataState(): SidebarStoreDataState {
   return {
     commandRunStates: {},
     daemonSessionsState: undefined,
+    focusedSessionScrollSuppression: undefined,
     gitCommitDraft: undefined,
     gitFileDiffDraft: undefined,
     groupOrder: [],
@@ -127,7 +146,7 @@ export function createInitialSidebarStoreDataState(): SidebarStoreDataState {
   };
 }
 
-export const useSidebarStore = create<SidebarStoreState>((set) => ({
+export const useSidebarStore = create<SidebarStoreState>((set, get) => ({
   ...createInitialSidebarStoreDataState(),
   applyCommandRunStateClearedMessage: (message) => {
     set((state) => {
@@ -203,11 +222,39 @@ export const useSidebarStore = create<SidebarStoreState>((set) => ({
       };
     });
   },
+  clearFocusedSessionScrollSuppression: () => {
+    set((state) =>
+      state.focusedSessionScrollSuppression === undefined
+        ? state
+        : { focusedSessionScrollSuppression: undefined },
+    );
+  },
+  consumeFocusedSessionScrollSuppression: (nowMs = Date.now()) => {
+    const suppression = get().focusedSessionScrollSuppression;
+    if (!suppression) {
+      return undefined;
+    }
+
+    set({ focusedSessionScrollSuppression: undefined });
+    return suppression.expiresAtMs >= nowMs ? suppression : undefined;
+  },
   reset: () => {
     set(createInitialSidebarStoreDataState());
   },
   setDaemonSessionsState: (message) => {
     set({ daemonSessionsState: message });
+  },
+  suppressNextFocusedSessionScroll: (reason, nowMs = Date.now()) => {
+    /*
+     * CDXC:SidebarSessionClose 2026-06-21-18:02:
+     * Closing the focused terminal session can remove the clicked row before native publishes the replacement focus. Keep a short one-shot marker so close-driven focus retargeting does not scroll the session list away from the user's current position.
+     */
+    set({
+      focusedSessionScrollSuppression: {
+        expiresAtMs: nowMs + FOCUSED_SESSION_SCROLL_SUPPRESSION_TTL_MS,
+        reason,
+      },
+    });
   },
   setGitCommitDraft: (message) => {
     set({ gitCommitDraft: message, gitFileDiffDraft: undefined });
