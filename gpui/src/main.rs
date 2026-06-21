@@ -1,14 +1,20 @@
 mod cef;
 
-use std::{env, path::PathBuf, rc::Rc};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    rc::Rc,
+    time::Duration,
+};
 
 use anyhow::{Context as _, Result};
 use cef::CefBrowser;
 use gpui::{
-    App, AppContext as _, Bounds, ContentMask, Element, ElementId, Entity, FocusHandle, FontWeight,
-    GlobalElementId, Hitbox, Hsla, InteractiveElement as _, IntoElement, KeyBinding, LayoutId,
-    MouseButton, ParentElement as _, Pixels, Render, Size, StatefulInteractiveElement as _, Style,
-    Styled as _, Window, WindowBounds, WindowControlArea, WindowOptions, canvas, div,
+    Animation, AnimationExt as _, App, AppContext as _, Bounds, ContentMask, Element, ElementId,
+    Entity, FocusHandle, FontWeight, GlobalElementId, Hitbox, Hsla, InteractiveElement as _,
+    IntoElement, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement as _, Pixels, Render, Size, StatefulInteractiveElement as _, Style, Styled as _,
+    Window, WindowBounds, WindowControlArea, WindowOptions, canvas, div,
     prelude::FluentBuilder as _, px, rgb, size, svg,
 };
 use gpui_component::{
@@ -20,7 +26,16 @@ use gpui_component::{
 use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
 
 const DEFAULT_BROWSER_URL: &str = "https://www.google.com";
-const DEFAULT_SIDEBAR_WIDTH: f32 = 340.0;
+const DEFAULT_SIDEBAR_WIDTH: f32 = 235.0;
+const SIDEBAR_MIN_WIDTH: f32 = 150.0;
+const SIDEBAR_MAX_WIDTH: f32 = 520.0;
+const SIDEBAR_RESET_WIDTH: f32 = 235.0;
+const SIDEBAR_DIVIDER_WIDTH: f32 = 5.0;
+const SIDEBAR_DIVIDER_LINE_WIDTH: f32 = 1.0;
+const SIDEBAR_DIVIDER_HOVER_LINE_WIDTH: f32 = 3.0;
+const SIDEBAR_DIVIDER_HOVER_DELAY: Duration = Duration::from_millis(50);
+const SIDEBAR_DIVIDER_HOVER_FADE_DURATION: Duration = Duration::from_millis(180);
+const WORKSPACE_MIN_WIDTH: f32 = 240.0;
 const CEF_KEY_CONTEXT: &str = "GhostexGpuiCef";
 const TITLEBAR_HEIGHT: f32 = 35.0;
 const TITLEBAR_CONTROL_HEIGHT: f32 = TITLEBAR_HEIGHT - 1.0;
@@ -93,12 +108,23 @@ enum TitlebarMode {
     Kanban,
 }
 
+#[derive(Clone, Copy)]
+struct SidebarDragState {
+    start_x: f32,
+    start_width: f32,
+}
+
 pub struct GhostexGpuiApp {
     parent_ns_view: *mut std::ffi::c_void,
     project_name: String,
     sidebar_url: String,
     browser_url: String,
     active_mode: TitlebarMode,
+    sidebar_width: f32,
+    sidebar_drag: Option<SidebarDragState>,
+    sidebar_divider_hovering: bool,
+    sidebar_divider_hover_visible: bool,
+    sidebar_divider_hover_epoch: u64,
     sidebar: Option<Entity<CefSurface>>,
     browser: Option<Entity<CefSurface>>,
     address_input: Entity<InputState>,
@@ -110,6 +136,9 @@ impl GhostexGpuiApp {
         let project_name = project_name();
         let sidebar_url = sidebar_url().context("failed to resolve sidebar bundle URL")?;
         let browser_url = DEFAULT_BROWSER_URL.to_string();
+        let sidebar_width = read_sidebar_width_setting()
+            .unwrap_or(DEFAULT_SIDEBAR_WIDTH)
+            .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
 
         let address_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -124,6 +153,11 @@ impl GhostexGpuiApp {
                 sidebar_url,
                 browser_url,
                 active_mode: TitlebarMode::Agents,
+                sidebar_width,
+                sidebar_drag: None,
+                sidebar_divider_hovering: false,
+                sidebar_divider_hover_visible: false,
+                sidebar_divider_hover_epoch: 0,
                 sidebar: None,
                 browser: None,
                 address_input: address_input.clone(),
@@ -613,10 +647,166 @@ impl GhostexGpuiApp {
                 browser_toolbar_button_icon_color(),
             ))
     }
+
+    fn render_sidebar_resize_divider(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        div()
+            .id("ghostex-gpui-sidebar-resize-divider")
+            .relative()
+            .flex_shrink_0()
+            .w(px(SIDEBAR_DIVIDER_WIDTH))
+            .h_full()
+            .cursor_ew_resize()
+            .bg(sidebar_background_color())
+            .on_hover(cx.listener(|this, hovered, _, cx| {
+                this.handle_sidebar_divider_hover(*hovered, cx);
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    this.handle_sidebar_divider_mouse_down(event, window, cx);
+                }),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .right_0()
+                    .top_0()
+                    .h_full()
+                    .w(px(SIDEBAR_DIVIDER_LINE_WIDTH))
+                    .cursor_ew_resize()
+                    .bg(sidebar_divider_line_color()),
+            )
+            .when(self.sidebar_divider_hover_visible, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .right_0()
+                        .top_0()
+                        .h_full()
+                        .w(px(SIDEBAR_DIVIDER_HOVER_LINE_WIDTH))
+                        .cursor_ew_resize()
+                        .bg(sidebar_divider_hover_line_color())
+                        .with_animation(
+                            "ghostex-gpui-sidebar-resize-divider-hover-line",
+                            Animation::new(SIDEBAR_DIVIDER_HOVER_FADE_DURATION)
+                                .with_easing(gpui::ease_out_quint()),
+                            |line, delta| line.opacity(delta),
+                        ),
+                )
+            })
+    }
+
+    fn handle_sidebar_divider_hover(&mut self, hovered: bool, cx: &mut gpui::Context<Self>) {
+        self.sidebar_divider_hover_epoch = self.sidebar_divider_hover_epoch.wrapping_add(1);
+        self.sidebar_divider_hovering = hovered;
+
+        if !hovered {
+            self.sidebar_divider_hover_visible = false;
+            cx.notify();
+            return;
+        }
+
+        self.sidebar_divider_hover_visible = false;
+        let epoch = self.sidebar_divider_hover_epoch;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(SIDEBAR_DIVIDER_HOVER_DELAY)
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                if this.sidebar_divider_hover_epoch == epoch && this.sidebar_divider_hovering {
+                    this.sidebar_divider_hover_visible = true;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn handle_sidebar_divider_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        window.prevent_default();
+        cx.stop_propagation();
+
+        if event.click_count >= 2 {
+            self.reset_sidebar_width(window);
+            cx.notify();
+            return;
+        }
+
+        self.sidebar_drag = Some(SidebarDragState {
+            start_x: event.position.x.as_f32(),
+            start_width: self.sidebar_width,
+        });
+        self.sidebar_divider_hover_visible = true;
+        cx.notify();
+    }
+
+    fn handle_sidebar_drag_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(drag) = self.sidebar_drag else {
+            return;
+        };
+
+        if !event.dragging() {
+            self.finish_sidebar_drag(cx);
+            return;
+        }
+
+        window.prevent_default();
+        cx.stop_propagation();
+
+        let max_width = current_sidebar_max_width(window);
+        let delta = event.position.x.as_f32() - drag.start_x;
+        let next_width = clamp_sidebar_width(drag.start_width + delta, max_width);
+        if (next_width - self.sidebar_width).abs() >= 0.5 {
+            self.sidebar_width = next_width;
+            cx.notify();
+        }
+    }
+
+    fn handle_sidebar_drag_mouse_up(
+        &mut self,
+        _event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.sidebar_drag.is_some() {
+            window.prevent_default();
+            cx.stop_propagation();
+        }
+        self.finish_sidebar_drag(cx);
+    }
+
+    fn finish_sidebar_drag(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.sidebar_drag.take().is_none() {
+            return;
+        }
+        persist_sidebar_width_setting(self.sidebar_width);
+        cx.notify();
+    }
+
+    fn reset_sidebar_width(&mut self, window: &Window) {
+        let max_width = current_sidebar_max_width(window);
+        let reset_width = read_sidebar_default_width_setting().unwrap_or(SIDEBAR_RESET_WIDTH);
+        self.sidebar_width = clamp_sidebar_width(reset_width, max_width);
+        self.sidebar_drag = None;
+        self.sidebar_divider_hover_visible = false;
+        persist_sidebar_width_setting(self.sidebar_width);
+    }
 }
 
 impl Render for GhostexGpuiApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         if env::var_os("GHOSTEX_GPUI_TRACE").is_some() {
             eprintln!(
                 "[ghostex-gpui] app render sidebar={} browser={}",
@@ -627,10 +817,26 @@ impl Render for GhostexGpuiApp {
         /*
         CDXC:GPUIPhase1 2026-06-14-12:06:
         Phase 1 must prove the macOS sidebar React UI and a normal browser surface can run as CEF children inside a GPUI shell. Keep the CEF child views as exact GPUI layout siblings, with the address-bar chrome owned by GPUI above only the main browser area, so future Linux and Windows backends can replace the macOS FFI without changing the app layout contract.
+
+        CDXC:GPUISidebarChrome 2026-06-21-18:34:
+        The GPUI sidebar must match native macOS sidebar resizing: start from the persisted native sidebarWidth, reserve a real five-pixel divider rail between the sidebar and browser siblings, clamp drag/reset width to 150px..520px while preserving a 240px workspace minimum, and use the Settings-owned sidebarDefaultWidthPx only for double-click reset.
         */
+        self.sidebar_width =
+            clamp_sidebar_width(self.sidebar_width, current_sidebar_max_width(window));
+
         v_flex()
             .size_full()
             .bg(cx.theme().background)
+            .when(self.sidebar_drag.is_some(), |this| this.cursor_ew_resize())
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                this.handle_sidebar_drag_move(event, window, cx);
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseUpEvent, window, cx| {
+                    this.handle_sidebar_drag_mouse_up(event, window, cx);
+                }),
+            )
             .child(self.render_titlebar(cx))
             .child(
                 h_flex()
@@ -639,12 +845,11 @@ impl Render for GhostexGpuiApp {
                     .overflow_hidden()
                     .child(
                         div()
-                            .w(px(DEFAULT_SIDEBAR_WIDTH))
+                            .w(px(self.sidebar_width))
                             .h_full()
-                            .border_r_1()
-                            .border_color(cx.theme().border)
                             .when_some(self.sidebar.clone(), |this, sidebar| this.child(sidebar)),
                     )
+                    .child(self.render_sidebar_resize_divider(cx))
                     .child(
                         v_flex()
                             .flex_1()
@@ -978,6 +1183,18 @@ fn browser_toolbar_button_hover_color() -> Hsla {
     rgb(0xffffff).opacity(0.08).into()
 }
 
+fn sidebar_background_color() -> Hsla {
+    rgb(0x0e0e0e).into()
+}
+
+fn sidebar_divider_line_color() -> Hsla {
+    rgb(0x212121).into()
+}
+
+fn sidebar_divider_hover_line_color() -> Hsla {
+    rgb(0xffffff).into()
+}
+
 fn browser_security_icon_path(url: &str) -> &'static str {
     if url.trim_start().to_lowercase().starts_with("https://") {
         BROWSER_ICON_LOCK_FILLED
@@ -1133,4 +1350,95 @@ fn find_app_bundle_root(path: &std::path::Path) -> Option<PathBuf> {
 
 fn file_url(path: &std::path::Path) -> String {
     format!("file://{}", path.to_string_lossy())
+}
+
+fn current_sidebar_max_width(window: &Window) -> f32 {
+    let max_for_window =
+        window.bounds().size.width.as_f32() - SIDEBAR_DIVIDER_WIDTH - WORKSPACE_MIN_WIDTH;
+    SIDEBAR_MAX_WIDTH.min(max_for_window).max(SIDEBAR_MIN_WIDTH)
+}
+
+fn clamp_sidebar_width(width: f32, max_width: f32) -> f32 {
+    width.clamp(SIDEBAR_MIN_WIDTH, max_width)
+}
+
+fn read_sidebar_width_setting() -> Option<f32> {
+    read_json_number_field(&native_chrome_settings_path(), "sidebarWidth")
+}
+
+fn read_sidebar_default_width_setting() -> Option<f32> {
+    read_json_number_field(&shared_sidebar_settings_path(), "sidebarDefaultWidthPx")
+        .map(|width| width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
+}
+
+fn persist_sidebar_width_setting(width: f32) {
+    let path = native_chrome_settings_path();
+    let mut settings = read_json_object(&path).unwrap_or_default();
+    settings.insert(
+        "sidebarWidth".to_string(),
+        serde_json::Value::Number(
+            serde_json::Number::from_f64(width as f64)
+                .expect("clamped sidebar width should be finite"),
+        ),
+    );
+
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(data) = serde_json::to_vec_pretty(&serde_json::Value::Object(settings)) {
+        let _ = fs::write(path, data);
+    }
+}
+
+fn read_json_number_field(path: &Path, key: &str) -> Option<f32> {
+    let object = read_json_object(path)?;
+    json_value_to_f32(object.get(key)?)
+}
+
+fn read_json_object(path: &Path) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let text = fs::read_to_string(path).ok()?;
+    match serde_json::from_str::<serde_json::Value>(&text).ok()? {
+        serde_json::Value::Object(object) => Some(object),
+        _ => None,
+    }
+}
+
+fn json_value_to_f32(value: &serde_json::Value) -> Option<f32> {
+    let number = match value {
+        serde_json::Value::Number(number) => number.as_f64()?,
+        serde_json::Value::String(text) => text.parse::<f64>().ok()?,
+        _ => return None,
+    };
+    number.is_finite().then_some(number as f32)
+}
+
+fn native_chrome_settings_path() -> PathBuf {
+    if let Ok(override_path) = env::var("ghostex_SETTINGS_PATH") {
+        if !override_path.trim().is_empty() {
+            return PathBuf::from(override_path);
+        }
+    }
+
+    let Some(home) = env::var_os("HOME") else {
+        return PathBuf::from("settings.json");
+    };
+    let app_support = PathBuf::from(home).join("Library/Application Support");
+    let candidates = [
+        app_support.join("com.madda.ghostex.host/state/settings.json"),
+        app_support.join("dev.maddada.ghostex/dev/state/settings.json"),
+        app_support.join("com.ghostex.host/state/settings.json"),
+    ];
+    candidates
+        .iter()
+        .find(|path| path.exists())
+        .cloned()
+        .unwrap_or_else(|| candidates[0].clone())
+}
+
+fn shared_sidebar_settings_path() -> PathBuf {
+    let root = env::var_os("GHOSTEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".ghostex")))
+        .unwrap_or_else(|| PathBuf::from(".ghostex"));
+    root.join("state/native-sidebar-settings.json")
 }

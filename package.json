@@ -7,6 +7,7 @@
   "scripts": {
     "s": "bun run start",
     "start": "bun scripts/start-ghostex.mjs",
+    "gpui": "bun scripts/start-gpui.mjs",
     "electron": "bun scripts/start-electron.mjs",
     "build": "native/macos/ghostexHost/build-ghostex-host.sh",
     "android:verify-release": "scripts/ghostex-android-release-readiness.sh",
