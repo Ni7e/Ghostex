@@ -1910,14 +1910,19 @@ async function updateHomebrew(version, artifacts, options) {
    reads the freshly pushed tap cask. Disable install-from-API for style/info/fetch
    validation and treat unrelated brew update failures as non-blocking once the
    Ghostex cask validates directly.
+
+   CDXC:HomebrewRelease 2026-06-21-13:20:
+   GitHub issue #49 showed current Homebrew treats `depends_on macos: :ventura`
+   as the Ventura-or-newer floor and warns on the old comparison string, so the
+   release renderer should use normal style validation and keep the symbol form.
    */
   const localStyleValidationAvailable = await runOptionalHomebrewHostValidation(
-    `HOMEBREW_NO_INSTALL_FROM_API=1 brew style --fix --except-cops Homebrew/OSDependsOn ${shellQuote(config.caskPath)}`,
+    `HOMEBREW_NO_INSTALL_FROM_API=1 brew style --fix ${shellQuote(config.caskPath)}`,
     { cwd: tapDir },
   );
   if (localStyleValidationAvailable) {
     await runOptionalHomebrewHostValidation(
-      `HOMEBREW_NO_INSTALL_FROM_API=1 brew style --except-cops Homebrew/OSDependsOn ${shellQuote(config.caskPath)}`,
+      `HOMEBREW_NO_INSTALL_FROM_API=1 brew style ${shellQuote(config.caskPath)}`,
       { cwd: tapDir },
     );
   }
@@ -2039,12 +2044,11 @@ function renderGhostexCask({ version, sha256 }) {
   homepage "https://github.com/maddada/Ghostex"
 
   conflicts_with cask: "zmux"
-  # CDXC:MacRelease 2026-05-29-20:59: Keep the explicit >= form so older
-  # Homebrew clients treat macOS 13 Ventura as the minimum supported version,
-  # not the only supported version, while newer Homebrew still parses the same
-  # floor.
+  # CDXC:MacRelease 2026-06-21-13:20: GitHub issue #49 showed current
+  # Homebrew treats the symbol form as the Ventura-or-newer floor, so keep this
+  # syntax to avoid a warning on every brew invocation.
   depends_on arch: :arm64
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "ghostex.app"
 
@@ -2141,7 +2145,7 @@ function validateGhostexCask(cask, { version, sha256 }) {
     `sha256 "${sha256}"`,
     'url "https://github.com/maddada/Ghostex/releases/download/v#{version}/ghostex-#{version}-arm64.dmg"',
     "depends_on arch: :arm64",
-    'depends_on macos: ">= :ventura"',
+    "depends_on macos: :ventura",
     "preflight do",
     "postflight do",
     "uninstall_preflight do",

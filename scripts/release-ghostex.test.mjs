@@ -23,7 +23,7 @@ const liveCaskShape = `cask "ghostex" do
 
   conflicts_with cask: "zmux"
   depends_on arch: :arm64
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "ghostex.app"
 
@@ -71,7 +71,7 @@ describe("Ghostex release automation helpers", () => {
     expect(cask).toContain("postflight do");
     expect(cask).toContain("uninstall_preflight do");
     expect(cask).toContain("depends_on arch: :arm64");
-    expect(cask).toContain('depends_on macos: ">= :ventura"');
+    expect(cask).toContain("depends_on macos: :ventura");
     expect(cask).toContain('next if command_target.include?("ghostex.app/Contents/Resources/Web/cli/#{command}")');
     expect(cask).not.toMatch(/^\s*binary\s+"/m);
     expect(cask).not.toContain("x86_64");
