@@ -6,6 +6,7 @@ import {
   IconCopy,
   IconExternalLink,
   IconFolderOpen,
+  IconLoader2,
   IconLink,
   IconMessageCircle,
   IconPlayerPlay,
@@ -477,6 +478,7 @@ function ProjectBoardApp() {
   });
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [loadState, setLoadState] = useState<LoadState>("idle");
+  const [hasCompletedInitialBoardLoad, setHasCompletedInitialBoardLoad] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -600,6 +602,10 @@ function ProjectBoardApp() {
    * CDXC:ProjectBoardLabels 2026-06-19-09:35:
    * Kanban create, drag, initial render, manual refresh, and auto-refresh must not call Beads `label list-all`.
    * The board derives label suggestions from the already-loaded issue rows and merges labels from successful local mutations so global label inventory cannot block scrolling or card movement.
+   *
+   * CDXC:ProjectBoardLoading 2026-06-20-18:21:
+   * The first time the macOS Kanban board opens, the lane strip should stay mounted but covered by a spinner overlay until the initial Beads load finishes.
+   * Later refreshes should keep the already-loaded board visible and interactive instead of replaying the first-open loading mask.
    */
   const isRefreshingRef = useRef(false);
   const issuesSignatureRef = useRef("");
@@ -935,6 +941,9 @@ function ProjectBoardApp() {
       }
     } finally {
       isRefreshingRef.current = false;
+      if (mode === "initial") {
+        setHasCompletedInitialBoardLoad(true);
+      }
     }
   }, [displayKey, issuePrefix, runBeads]);
 
@@ -1040,6 +1049,8 @@ function ProjectBoardApp() {
       { backlog: [], done: [], in_progress: [], review: [], test: [], todo: [] },
     );
   }, [filteredTickets]);
+  const showInitialBoardLoadingOverlay =
+    activeSurfaceTab === "board" && loadState === "loading" && !hasCompletedInitialBoardLoad;
 
   const linksByBeadId = useMemo(() => {
     const result = new Map<string, ProjectBoardConversationLinkView[]>();
@@ -1308,23 +1319,52 @@ function ProjectBoardApp() {
         });
       }
       const generateCreatedTicketTitle = async (issueId: string) => {
+        /*
+         * CDXC:ProjectBoardDiagnostics 2026-06-21-03:56:
+         * Empty-title ticket creation is a two-step flow: Beads persists the
+         * ticket first, then the Project board asks the selected/default prompt
+         * agent to generate a display title. Log only built-in agent categories,
+         * counts, booleans, lengths, and classification enums so a repro can
+         * line up webview and native title-generation failures without
+         * persisting prompt text, command text, paths, custom agent ids, stdout,
+         * stderr, or raw error output.
+         */
+        const promptAgentId = selectedAgentId || conversationState.defaultAgentId || "";
+        const promptAgent = conversationState.agents.find((agent) => agent.agentId === promptAgentId);
+        const titleGenerationDebugDetails = {
+          agentCount: conversationState.agents.length,
+          beadId: issueId,
+          defaultAgentKind: projectBoardPromptAgentKind(conversationState.defaultAgentId || ""),
+          hasDefaultAgentId: Boolean(conversationState.defaultAgentId),
+          hasPromptAgent: Boolean(promptAgent),
+          hasPromptAgentCommand: Boolean(promptAgent?.command?.trim()),
+          hasSelectedAgentId: Boolean(selectedAgentId),
+          promptAgentCommandLength: promptAgent?.command?.length ?? 0,
+          promptLength: prompt.length,
+          resolvedAgentKind: projectBoardPromptAgentKind(promptAgentId),
+          selectedAgentKind: projectBoardPromptAgentKind(selectedAgentId || ""),
+          startAfterCreate,
+        };
         try {
-          const promptAgentId = selectedAgentId || conversationState.defaultAgentId;
-          const promptAgent = conversationState.agents.find((agent) => agent.agentId === promptAgentId);
           logProjectBoardDebug("projectBoard.createTicket.titleGeneration.started", {
-            beadId: issueId,
-            startAfterCreate,
+            ...titleGenerationDebugDetails,
           });
           const generated = normalizeBeadsPayload<{ title?: string }>(
             await runBeads({
               action: "generateTitle",
               agentCommand: promptAgent?.command,
               agentId: promptAgentId,
+              issueId,
               prompt,
             }),
             {},
           );
           const generatedTitle = generated.title?.trim();
+          logProjectBoardDebug("projectBoard.createTicket.titleGeneration.bridgeResponse", {
+            ...titleGenerationDebugDetails,
+            generatedTitleLength: generatedTitle?.length ?? 0,
+            hasGeneratedTitle: Boolean(generatedTitle),
+          });
           if (!generatedTitle) {
             throw new Error("Prompt-agent title generation returned an empty title.");
           }
@@ -1342,9 +1382,8 @@ function ProjectBoardApp() {
           });
         } catch (error) {
           logProjectBoardDebug("projectBoard.createTicket.titleGeneration.failed", {
-            beadId: issueId,
-            error: error instanceof Error ? error.message : String(error),
-            startAfterCreate,
+            ...titleGenerationDebugDetails,
+            ...projectBoardTitleGenerationFailureDetails(error),
           });
           if (!startAfterCreate) {
             setErrorMessage(error instanceof Error ? error.message : "Could not generate the ticket title.");
@@ -2235,37 +2274,54 @@ function ProjectBoardApp() {
       {activeSurfaceTab === "board" ? (
         <>
           {errorMessage ? <ProjectBoardNotice message={errorMessage} /> : null}
-          <DragDropProvider onDragEnd={handleDragEnd}>
-            {/*
-              CDXC:ScrollFades 2026-06-19-14:16:
-              Kanban uses a horizontal board scroller plus vertical lane
-              scrollers. Apply the shared Codex-style masks to the scroll
-              containers themselves so lane headers and custom scrollbars stay
-              crisp while overflowing cards fade at the edges.
-            */}
-            <section className="project-board-lanes horizontal-scroll-fade-mask" aria-label="Project issue board">
-              {BOARD_COLUMNS.map((column) => (
-                <BoardLane
-                  column={column}
-                  conversationAction={conversationAction}
-                  key={column.key}
-                  linksByBeadId={linksByBeadId}
-                  onAddTicket={openNewTicket}
-                  onJumpToConversation={jumpToConversation}
-                  onOpenContextMenu={(ticket, point) =>
-                    setTicketContextMenu({
-                      confirmingDelete: false,
-                      ticketId: ticket.id,
-                      x: point.x,
-                      y: point.y,
-                    })
-                  }
-                  onOpenTicket={openTicket}
-                  tickets={ticketsByColumn[column.key]}
+          <div className="project-board-board-region">
+            <DragDropProvider onDragEnd={handleDragEnd}>
+              {/*
+                CDXC:ScrollFades 2026-06-19-14:16:
+                Kanban uses a horizontal board scroller plus vertical lane
+                scrollers. Apply the shared Codex-style masks to the scroll
+                containers themselves so lane headers and custom scrollbars stay
+                crisp while overflowing cards fade at the edges.
+              */}
+              <section className="project-board-lanes horizontal-scroll-fade-mask" aria-label="Project issue board">
+                {BOARD_COLUMNS.map((column) => (
+                  <BoardLane
+                    column={column}
+                    conversationAction={conversationAction}
+                    key={column.key}
+                    linksByBeadId={linksByBeadId}
+                    onAddTicket={openNewTicket}
+                    onJumpToConversation={jumpToConversation}
+                    onOpenContextMenu={(ticket, point) =>
+                      setTicketContextMenu({
+                        confirmingDelete: false,
+                        ticketId: ticket.id,
+                        x: point.x,
+                        y: point.y,
+                      })
+                    }
+                    onOpenTicket={openTicket}
+                    tickets={ticketsByColumn[column.key]}
+                  />
+                ))}
+              </section>
+            </DragDropProvider>
+            {showInitialBoardLoadingOverlay ? (
+              <div
+                aria-label="Loading board"
+                aria-live="polite"
+                className="project-board-loading-overlay"
+                role="status"
+              >
+                <IconLoader2
+                  aria-hidden="true"
+                  className="project-board-loading-spinner"
+                  size={32}
+                  stroke={1.8}
                 />
-              ))}
-            </section>
-          </DragDropProvider>
+              </div>
+            ) : null}
+          </div>
           {ticketContextMenu && contextMenuTicket ? (
             <ProjectBoardTicketContextMenu
               confirmingDelete={ticketContextMenu.confirmingDelete}
@@ -4962,6 +5018,55 @@ function stringifyProjectBoardDebugDetails(details: Record<string, unknown> | un
   }
 }
 
+function projectBoardTitleGenerationFailureDetails(error: unknown): Record<string, unknown> {
+  const text = error instanceof Error ? error.message : String(error);
+  return {
+    errorClass: projectBoardTitleGenerationErrorClass(text),
+    errorLength: text.length,
+    isGenericPromptAgentFailure: text === "Prompt-agent title generation failed.",
+  };
+}
+
+function projectBoardPromptAgentKind(agentId: string): string {
+  switch (agentId.trim().toLowerCase()) {
+    case "codex":
+    case "claude":
+    case "cursor":
+    case "gemini":
+      return agentId.trim().toLowerCase();
+    case "":
+      return "none";
+    default:
+      return "custom";
+  }
+}
+
+function projectBoardTitleGenerationErrorClass(text: string): string {
+  const normalized = text.toLowerCase();
+  if (!normalized) {
+    return "empty";
+  }
+  if (normalized.includes("command not found")) {
+    return "commandNotFound";
+  }
+  if (normalized.includes("permission") || normalized.includes("operation not permitted")) {
+    return "permission";
+  }
+  if (normalized.includes("auth") || normalized.includes("login") || normalized.includes("api key")) {
+    return "auth";
+  }
+  if (normalized.includes("rate limit") || normalized.includes("429")) {
+    return "rateLimit";
+  }
+  if (normalized.includes("timed out") || normalized.includes("timeout")) {
+    return "timeout";
+  }
+  if (normalized === "prompt-agent title generation failed.") {
+    return "genericPromptAgentFailure";
+  }
+  return "reported";
+}
+
 function createIssuesSignature(issues: BeadsIssue[]): string {
   return issues
     .map((issue) =>
@@ -6044,6 +6149,35 @@ styleElement.textContent = `
 
   .project-board-ticket-button {
     min-width: 0;
+  }
+
+  .project-board-board-region {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    position: relative;
+  }
+
+  .project-board-loading-overlay {
+    align-items: center;
+    background: rgba(10, 10, 10, 0.48);
+    color: rgba(244, 244, 245, 0.9);
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    pointer-events: auto;
+    position: absolute;
+    z-index: 20;
+  }
+
+  .project-board-loading-spinner {
+    animation: project-board-loading-spin 850ms linear infinite;
+    filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.38));
+  }
+
+  @keyframes project-board-loading-spin {
+    to { transform: rotate(360deg); }
   }
 
   .project-board-lanes {

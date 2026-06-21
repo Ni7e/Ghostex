@@ -129,6 +129,53 @@ enum NativeLogPrivacyTests {
     assertTrue(!promptEditorTimingJson.contains("secret-token"), "prompt timing logs must not include secrets")
     assertTrue(!promptEditorTimingJson.contains("private?token"), "prompt timing logs must not include full URLs or query strings")
 
+    /*
+     CDXC:ProjectBoardDiagnostics 2026-06-21-03:56:
+     Kanban title-generation repro logs need prompt-agent ids, command-source
+     enums, process exit/output byte counts, and capability booleans, but must
+     never persist raw prompt text, command text, paths, URLs, stdout, stderr,
+     or secrets from the native bridge.
+     */
+    let projectBoardTitlePayload = NativeLogPrivacy.sanitizePayload([
+      "agentCommand": "codex --dangerously-use-private-flags",
+      "agentCommandLength": 37,
+      "agentId": "codex",
+      "agentKind": "codex",
+      "commandSource": "stored",
+      "errBytes": 0,
+      "event": "projectBoard.nativeTitleGeneration.completed",
+      "exitCode": 1,
+      "failureClass": "silent",
+      "hasCodexExecutable": true,
+      "issueId": "ghostex-3xh",
+      "outBytes": 0,
+      "projectPath": "/Users/person/dev/private-customer",
+      "prompt": "private ticket prompt",
+      "promptLength": 323,
+      "requestId": "request-123",
+      "stderr": "private stderr secret-token",
+      "stdout": "private stdout",
+      "token": "secret-token",
+      "url": "https://example.test/private?token=secret-token",
+    ])
+    let projectBoardTitleJson = serializePrivacyTestPayload(projectBoardTitlePayload)
+
+    assertTrue(projectBoardTitleJson.contains("projectBoard.nativeTitleGeneration.completed"), "project-board title event should remain visible")
+    assertTrue(projectBoardTitleJson.contains("\"agentId\":\"codex\""), "project-board title agent id should remain visible")
+    assertTrue(projectBoardTitleJson.contains("\"commandSource\":\"stored\""), "project-board title command-source enum should remain visible")
+    assertTrue(projectBoardTitleJson.contains("\"agentCommandLength\":37"), "project-board title command length should remain numeric")
+    assertTrue(projectBoardTitleJson.contains("\"promptLength\":323"), "project-board title prompt length should remain numeric")
+    assertTrue(projectBoardTitleJson.contains("\"outBytes\":0"), "project-board title stdout byte count should remain numeric")
+    assertTrue(projectBoardTitleJson.contains("\"errBytes\":0"), "project-board title stderr byte count should remain numeric")
+    assertTrue(projectBoardTitleJson.contains("ghostex-3xh"), "project-board title bead id should remain visible")
+    assertTrue(!projectBoardTitleJson.contains("codex --dangerously-use-private-flags"), "project-board title logs must not include command text")
+    assertTrue(!projectBoardTitleJson.contains("private ticket prompt"), "project-board title logs must not include prompt text")
+    assertTrue(!projectBoardTitleJson.contains("private stdout"), "project-board title logs must not include stdout text")
+    assertTrue(!projectBoardTitleJson.contains("private stderr"), "project-board title logs must not include stderr text")
+    assertTrue(!projectBoardTitleJson.contains("/Users/person"), "project-board title logs must not include paths")
+    assertTrue(!projectBoardTitleJson.contains("secret-token"), "project-board title logs must not include secrets")
+    assertTrue(!projectBoardTitleJson.contains("private?token"), "project-board title logs must not include full URLs or query strings")
+
     let hotkeyReproPayload = NativeLogPrivacy.sanitizePayload([
       "actionId": "focusNextSession",
       "commandText": "codex --ask private request",

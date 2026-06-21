@@ -423,10 +423,18 @@ enum NativeLogPrivacy {
   }
 
   private static func isSensitiveTextKey(_ key: String) -> Bool {
+    /*
+     CDXC:DiagnosticsPrivacy 2026-06-21-03:56:
+     Project-board title generation and prompt-editor diagnostics may carry
+     explicit prompt fields while logging only lengths and classifications.
+     Treat prompt keys as user text at the sanitizer boundary so future support
+     logs cannot persist raw ticket or agent prompts.
+     */
     key == "title" || key.hasSuffix("title") || key == "name" || key.hasSuffix("name")
       || key == "message" || key == "details" || key.hasSuffix("details") || key == "input"
-      || key == "text" || key.hasSuffix("text") || key == "content" || key.hasSuffix("content")
-      || key == "comment" || key == "description" || key == "label" || key == "command"
+      || key == "prompt" || key.hasSuffix("prompt") || key == "text" || key.hasSuffix("text")
+      || key == "content" || key.hasSuffix("content") || key == "comment" || key == "description"
+      || key == "label" || key == "command"
       || key.hasSuffix("command") || key == "stdout" || key == "stderr" || key == "body"
       || key.hasSuffix("body")
   }

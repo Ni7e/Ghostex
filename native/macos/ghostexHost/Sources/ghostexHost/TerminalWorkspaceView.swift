@@ -9817,7 +9817,8 @@ final class TerminalWorkspaceView: NSView {
          continue to route through the remote gxserver.
          */
         let cwd: URL
-        if request.remoteMachineId != nil {
+        let isRemoteTitleRequest = request.remoteMachineId != nil
+        if isRemoteTitleRequest {
           cwd = FileManager.default.homeDirectoryForCurrentUser
         } else {
           cwd = try projectBeadsWorkingDirectory(request.cwd)
@@ -9826,7 +9827,10 @@ final class TerminalWorkspaceView: NSView {
           cwd: cwd,
           prompt: try projectBeadsRequired(request.prompt, field: "prompt"),
           agentCommand: request.agentCommand,
-          agentId: request.agentId)
+          agentId: request.agentId,
+          cwdKind: isRemoteTitleRequest ? "home" : "project",
+          issueId: request.issueId,
+          requestId: request.requestId)
         let payload = try JSONSerialization.data(withJSONObject: ["title": title])
         return ProjectBeadsBridgeResponse(
           error: nil,
@@ -10032,11 +10036,21 @@ final class TerminalWorkspaceView: NSView {
     cwd: URL,
     prompt: String,
     agentCommand: String?,
-    agentId: String?
+    agentId: String?,
+    cwdKind: String,
+    issueId: String?,
+    requestId: String
   ) throws -> String {
     /**
      CDXC:ProjectBoard 2026-05-23-14:18:
      Ticket title autogeneration must reuse the same Codex summarization policy as native session first-prompt naming so empty ticket titles stay consistent across Ghostex surfaces.
+
+     CDXC:ProjectBoardDiagnostics 2026-06-21-03:56:
+     Empty-title ticket creation can fail after Beads has already persisted the
+     ticket, and the webview only sees the prompt-agent bridge error. Record
+     native process setup and output-shape metadata here, never prompt text,
+     command text, paths, environment values, custom agent ids, stdout, or
+     stderr content.
      */
     let sourceText = String(prompt.prefix(4_000))
     let generationPrompt = """
@@ -10059,6 +10073,10 @@ final class TerminalWorkspaceView: NSView {
     """
     let delimiter = "ghostex_SESSION_TITLE_\(Int(Date().timeIntervalSince1970))"
     let generationCommand = try projectBeadsPromptGenerationCommand(agentCommand: agentCommand, agentId: agentId)
+    let normalizedAgentId = projectBeadsNormalizedPromptAgentId(agentId)
+    let agentKind = projectBeadsTitleAgentKind(normalizedAgentId)
+    let loggedAgentId = agentKind == "custom" ? "custom" : normalizedAgentId
+    let hasAgentCommand = agentCommand?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     /*
      CDXC:PromptAgents 2026-05-29-10:53:
      Project-board generated titles must use the selected/default prompt agent
@@ -10074,23 +10092,77 @@ final class TerminalWorkspaceView: NSView {
     let stdoutCollector = projectBeadsPipeCollector(stdoutPipe)
     let stderrCollector = projectBeadsPipeCollector(stderrPipe)
     let process = Process()
+    let environment = projectBoardNativeProcessEnvironment()
+    let startedAt = Date()
+    var baseDebugDetails: [String: Any] = [
+      "agentId": loggedAgentId,
+      "agentKind": agentKind,
+      "commandSource": hasAgentCommand ? "stored" : "builtIn",
+      "cwdKind": cwdKind,
+      "hasAgentCommand": hasAgentCommand,
+      "hasCodexExecutable": projectBeadsEnvironmentHasExecutable("codex", environment: environment),
+      "hasExpectedExecutable": projectBeadsExpectedExecutableProbe(agentKind: agentKind, environment: environment),
+      "issueId": issueId ?? "",
+      "pathEntryCount": projectBeadsEnvironmentPathEntryCount(environment),
+      "promptLength": prompt.count,
+      "requestId": requestId,
+      "shellScriptLength": command.count,
+      "sourceTextLength": sourceText.count,
+    ]
+    if let agentCommand {
+      baseDebugDetails["agentCommandLength"] = agentCommand.count
+    }
+    func debugDetails(_ extra: [String: Any]) -> [String: Any] {
+      var details = baseDebugDetails
+      for (key, value) in extra {
+        details[key] = value
+      }
+      return details
+    }
+    appendProjectBoardTitleGenerationDebugLog(
+      "projectBoard.nativeTitleGeneration.prepared",
+      details: baseDebugDetails)
     process.executableURL = URL(fileURLWithPath: "/bin/zsh")
     process.arguments = ["-lc", command]
     process.currentDirectoryURL = cwd
-    process.environment = projectBoardNativeProcessEnvironment()
+    process.environment = environment
     process.standardOutput = stdoutPipe
     process.standardError = stderrPipe
     process.qualityOfService = .utility
-    try process.run()
+    do {
+      try process.run()
+    } catch {
+      appendProjectBoardTitleGenerationDebugLog(
+        "projectBoard.nativeTitleGeneration.launchFailed",
+        details: debugDetails([
+          "elapsedMs": projectBeadsElapsedMilliseconds(since: startedAt),
+          "failureClass": projectBeadsLaunchFailureClass(error),
+        ]))
+      throw error
+    }
     process.waitUntilExit()
+    let stdout = stdoutCollector().trimmingCharacters(in: .whitespacesAndNewlines)
+    let stderr = stderrCollector().trimmingCharacters(in: .whitespacesAndNewlines)
+    var completedDetails = debugDetails([
+      "elapsedMs": projectBeadsElapsedMilliseconds(since: startedAt),
+      "exitCode": process.terminationStatus,
+      "failureClass": projectBeadsTitleFailureClass(stdout: stdout, stderr: stderr),
+      "success": process.terminationStatus == 0,
+      "terminationReason": process.terminationReason.rawValue,
+    ])
+    completedDetails.merge(projectBeadsTitleOutputSummary(stdout: stdout, stderr: stderr)) { _, new in new }
+    appendProjectBoardTitleGenerationDebugLog(
+      "projectBoard.nativeTitleGeneration.completed",
+      details: completedDetails)
     if process.terminationStatus != 0 {
-      let stderr = stderrCollector().trimmingCharacters(in: .whitespacesAndNewlines)
       throw ProjectBeadsBridgeError.invalidRequest(
         stderr.isEmpty ? "Prompt-agent title generation failed." : stderr)
     }
-    let stdout = stdoutCollector().trimmingCharacters(in: .whitespacesAndNewlines)
     guard let line = stdout.split(whereSeparator: \.isNewline).map(String.init).first(where: { !$0.isEmpty })
     else {
+      appendProjectBoardTitleGenerationDebugLog(
+        "projectBoard.nativeTitleGeneration.emptyOutput",
+        details: debugDetails(projectBeadsTitleOutputSummary(stdout: stdout, stderr: stderr)))
       throw ProjectBeadsBridgeError.invalidRequest("Prompt-agent title generation returned an empty title.")
     }
     let sanitized =
@@ -10100,9 +10172,164 @@ final class TerminalWorkspaceView: NSView {
       .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
       .replacingOccurrences(of: #"[.…]+$"#, with: "", options: .regularExpression)
     guard !sanitized.isEmpty else {
+      appendProjectBoardTitleGenerationDebugLog(
+        "projectBoard.nativeTitleGeneration.emptySanitizedTitle",
+        details: debugDetails([
+          "candidateLength": line.count,
+        ]))
       throw ProjectBeadsBridgeError.invalidRequest("Prompt-agent title generation returned an empty title.")
     }
+    appendProjectBoardTitleGenerationDebugLog(
+      "projectBoard.nativeTitleGeneration.titleAccepted",
+      details: debugDetails([
+        "candidateLength": line.count,
+        "generatedTitleLength": min(sanitized.count, 39),
+        "truncatedToBoardLimit": sanitized.count > 39,
+      ]))
     return String(sanitized.prefix(39))
+  }
+
+  private static func appendProjectBoardTitleGenerationDebugLog(
+    _ event: String,
+    details: [String: Any]
+  ) {
+    guard NativeDebugLogging.isEnabled else {
+      return
+    }
+    let sanitizedPayload = NativeLogPrivacy.sanitizePayload(details)
+    let json =
+      (try? JSONSerialization.data(withJSONObject: sanitizedPayload, options: [.sortedKeys]))
+      .flatMap { String(data: $0, encoding: .utf8) }
+      ?? "{\"serializationFailed\":true}"
+    AppDelegate.appendProjectBoardDebugLog(event: event, details: json)
+  }
+
+  private static func projectBeadsNormalizedPromptAgentId(_ agentId: String?) -> String {
+    let normalized = agentId?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    return normalized.isEmpty ? "codex" : normalized
+  }
+
+  private static func projectBeadsTitleAgentKind(_ agentId: String) -> String {
+    switch agentId {
+    case "codex", "claude", "cursor", "gemini":
+      return agentId
+    default:
+      return "custom"
+    }
+  }
+
+  private static func projectBeadsExpectedExecutableProbe(
+    agentKind: String,
+    environment: [String: String]
+  ) -> String {
+    let executable: String?
+    switch agentKind {
+    case "codex":
+      executable = "codex"
+    case "claude":
+      executable = "claude"
+    case "cursor":
+      executable = "cursor-agent"
+    case "gemini":
+      executable = "gemini"
+    default:
+      executable = nil
+    }
+    guard let executable else {
+      return "notChecked"
+    }
+    return projectBeadsEnvironmentHasExecutable(executable, environment: environment) ? "present" : "absent"
+  }
+
+  private static func projectBeadsEnvironmentHasExecutable(
+    _ executable: String,
+    environment: [String: String]
+  ) -> Bool {
+    let entries = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+    for entry in entries {
+      let normalizedEntry = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !normalizedEntry.isEmpty else {
+        continue
+      }
+      let candidate = URL(fileURLWithPath: normalizedEntry, isDirectory: true)
+        .appendingPathComponent(executable)
+        .path
+      if FileManager.default.isExecutableFile(atPath: candidate) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private static func projectBeadsEnvironmentPathEntryCount(_ environment: [String: String]) -> Int {
+    (environment["PATH"] ?? "")
+      .split(separator: ":")
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+      .count
+  }
+
+  private static func projectBeadsElapsedMilliseconds(since startedAt: Date) -> Int {
+    max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
+  }
+
+  private static func projectBeadsLaunchFailureClass(_ error: Error) -> String {
+    let nsError = error as NSError
+    if nsError.domain == NSPOSIXErrorDomain {
+      return "posix"
+    }
+    if nsError.domain == NSCocoaErrorDomain {
+      return "cocoa"
+    }
+    return "other"
+  }
+
+  private static func projectBeadsTitleFailureClass(stdout: String, stderr: String) -> String {
+    let combined = "\(stdout)\n\(stderr)".lowercased()
+    if stdout.isEmpty && stderr.isEmpty {
+      return "silent"
+    }
+    if combined.contains("command not found") {
+      return "commandNotFound"
+    }
+    if combined.contains("usage: codex") || combined.contains("unknown option") || combined.contains("unexpected argument") {
+      return "usage"
+    }
+    if combined.contains("permission") || combined.contains("operation not permitted") {
+      return "permission"
+    }
+    if combined.contains("auth") || combined.contains("login") || combined.contains("api key") {
+      return "auth"
+    }
+    if combined.contains("rate limit") || combined.contains("429") {
+      return "rateLimit"
+    }
+    if combined.contains("timed out") || combined.contains("timeout") {
+      return "timeout"
+    }
+    return "reported"
+  }
+
+  private static func projectBeadsTitleOutputSummary(stdout: String, stderr: String) -> [String: Any] {
+    [
+      "errBytes": stderr.lengthOfBytes(using: .utf8),
+      "errHasCodexKeyword": stderr.localizedCaseInsensitiveContains("codex"),
+      "errLines": projectBeadsNonEmptyLineCount(stderr),
+      "outBytes": stdout.lengthOfBytes(using: .utf8),
+      "outHasCodexBanner": stdout.contains("OpenAI Codex"),
+      "outHasHookText": stdout.contains("hook:"),
+      "outHasReadingPrompt": stdout.contains("Reading prompt from stdin"),
+      "outHasSessionIdLabel": stdout.localizedCaseInsensitiveContains("session id:"),
+      "outHasUsageSummary": stdout.localizedCaseInsensitiveContains("tokens used"),
+      "outLines": projectBeadsNonEmptyLineCount(stdout),
+    ]
+  }
+
+  private static func projectBeadsNonEmptyLineCount(_ value: String) -> Int {
+    value.split(whereSeparator: \.isNewline)
+      .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+      .count
   }
 
   private static func projectBeadsPromptGenerationCommand(agentCommand: String?, agentId: String?) throws -> String {
@@ -22767,29 +22994,35 @@ private final class TerminalTitleBarTabButton: NSButton {
   private func tabBackgroundColor() -> NSColor {
     /*
      CDXC:PaneTabs 2026-05-17-01:50:
-     Workspace-area sleeping tabs should use the same subdued visual treatment
-     as other unsurfaced tab siblings so the pane's surfaced session is the
-     obvious tab. ZMX inactivity owns the moon marker separately from this
-     parked-tab visual treatment.
+     Inactive workspace-area sleeping tabs should use the same subdued visual
+     treatment as other unsurfaced tab siblings. ZMX inactivity owns the moon
+     marker separately from this parked-tab visual treatment.
+
+     CDXC:PaneTabs 2026-06-20-21:16:
+     Clicking a sleeping native tab selects the placeholder before wake, so the
+     selected sleeping tab must use the same active highlight as selected awake
+     tabs. Keep only inactive sleeping tabs visually subdued.
 
      CDXC:SidebarTitlebarColors 2026-06-16-18:24:
      Custom-tinted native workspace tabs need darker inactive tab fills than the
      preset tab chrome. Keep the active tab's contrast but reduce the inactive
      white overlay so non-focused tabs do not look like raised selected surfaces
      when the sidebar/titlebar contrast slider lightens the base background.
-     */
+    */
     if chromeRole == .workspace {
-      let isSurfacedWorkspaceTab = isActiveTab && !isSleepingTab
+      let isSelectedWorkspaceTab = isActiveTab
       let overlayAlpha =
         customSidebarTitlebarChrome.enabled
-        ? (isSurfacedWorkspaceTab ? CGFloat(0.13) : CGFloat(0.025))
-        : (isSurfacedWorkspaceTab ? CGFloat(0.13) : CGFloat(0.06))
+        ? (isSelectedWorkspaceTab ? CGFloat(0.13) : CGFloat(0.025))
+        : (isSelectedWorkspaceTab ? CGFloat(0.13) : CGFloat(0.06))
       return NSColor(calibratedWhite: 1, alpha: overlayAlpha)
     }
-    let overlayAlpha =
-      isActiveTab
-      ? (isSleepingTab ? CGFloat(0.075) : CGFloat(0.13))
-      : (isSleepingTab ? CGFloat(0.032) : CGFloat(0.06))
+    let overlayAlpha: CGFloat
+    if isActiveTab {
+      overlayAlpha = 0.13
+    } else {
+      overlayAlpha = isSleepingTab ? 0.032 : 0.06
+    }
     return Self.compositedWorkspaceTabColor(overlayAlpha: overlayAlpha)
   }
 
@@ -23458,10 +23691,16 @@ private final class TerminalTitleBarTabButton: NSButton {
   }
 
   private var titleColor: NSColor {
-    let isSurfacedWorkspaceTab = chromeRole != .workspace || (isActiveTab && !isSleepingTab)
-    let baseWhite: CGFloat = isSurfacedWorkspaceTab ? 0.96 : 0.78
-    let baseAlpha: CGFloat = isSurfacedWorkspaceTab ? 0.98 : 0.82
-    let sleepAlpha: CGFloat = isSleepingTab ? 0.48 : 1
+    /*
+     CDXC:PaneTabs 2026-06-20-21:16:
+     A selected sleeping native tab should read as selected in both fill and
+     label treatment. Dim sleeping labels only while the sleeping tab is an
+     inactive sibling.
+     */
+    let usesSelectedTitleColor = chromeRole != .workspace || isActiveTab
+    let baseWhite: CGFloat = usesSelectedTitleColor ? 0.96 : 0.78
+    let baseAlpha: CGFloat = usesSelectedTitleColor ? 0.98 : 0.82
+    let sleepAlpha: CGFloat = isSleepingTab && !isActiveTab ? 0.48 : 1
     let resolvedSleepAlpha: CGFloat = chromeRole == .workspace ? 1 : sleepAlpha
     if chromeRole == .workspace, customSidebarTitlebarChrome.enabled {
       return customSidebarTitlebarChrome.foreground.withAlphaComponent(baseAlpha * resolvedSleepAlpha)
@@ -24450,7 +24689,7 @@ private final class TerminalSessionTitleBarView: NSView {
 
     /*
      CDXC:NativePaneTabClicks 2026-06-13-13:21:
-     Passive pane-titlebar chrome must not be NSView siblings. Keep the activity dot, collapsed trailing fill, bottom border, and action separators as CALayers so normal AppKit child controls own clicks without decorative views entering dispatch.
+     Passive pane-titlebar chrome must not be NSView siblings. Keep the activity indicator, collapsed trailing fill, bottom border, and action separators as CALayers so normal AppKit child controls own clicks without decorative views entering dispatch.
      */
     configurePassiveTitlebarLayer(activityIndicatorLayer)
     activityIndicatorLayer.backgroundColor = NSColor.clear.cgColor
@@ -25508,7 +25747,13 @@ private final class TerminalSessionTitleBarView: NSView {
      CDXC:NativeTerminals 2026-04-28-03:37
      Per-terminal title bars must not show the blue focused-session dot. Keep
      focus state visible through the pane border while preserving a small
-     card-matched activity dot immediately after the title for done/working.
+     card-matched activity indicator immediately after the title for done/working.
+
+     CDXC:ProjectEditorCompanion 2026-06-20-18:22:
+     Companion pane title bars should place the status indicator 3px lower than
+     centered geometry and draw it as a square mark instead of a circular dot.
+     Scope this to companion chrome so ordinary terminal pane titlebars keep
+     their existing centered circular activity marker.
      */
     let faviconSize: CGFloat = 16
     let faviconGap: CGFloat = 6
@@ -25553,7 +25798,7 @@ private final class TerminalSessionTitleBarView: NSView {
     /**
      CDXC:NativeTerminals 2026-05-01-02:18
      AppKit truncating text fields need a frame as wide as the title's usable
-     area. Measuring the raw title is only for placing the activity dot; the
+     area. Measuring the raw title is only for placing the activity indicator; the
      label itself must span maxTitleWidth so native text drawing does not
      ellipsize against a stale or too-small intrinsic width.
      */
@@ -25570,9 +25815,11 @@ private final class TerminalSessionTitleBarView: NSView {
       height: 16
     )
     let visibleTitleWidth = min(measuredTitleWidth, maxTitleWidth)
+    let activityIndicatorVerticalOffset: CGFloat = usesProjectEditorCompanionChrome ? 3 : 0
+    activityIndicatorLayer.cornerRadius = usesProjectEditorCompanionChrome ? 0 : indicatorSize / 2
     activityIndicatorLayer.frame = CGRect(
       x: titleLabel.frame.minX + visibleTitleWidth + indicatorGap,
-      y: floor((bounds.height - indicatorSize) / 2),
+      y: floor((bounds.height - indicatorSize) / 2) + activityIndicatorVerticalOffset,
       width: indicatorSize,
       height: indicatorSize
     )

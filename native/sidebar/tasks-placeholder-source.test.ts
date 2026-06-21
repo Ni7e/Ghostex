@@ -55,6 +55,32 @@ describe("Project Board form event handling", () => {
     expect(laneLayoutSource).toContain("border-left-width: 0;");
   });
 
+  test("shows the first-open Kanban loading overlay until initial load finishes", () => {
+    /*
+     * CDXC:ProjectBoardLoading 2026-06-20-18:21:
+     * The first macOS Kanban open should cover the mounted lanes with a spinner until initial Beads loading finishes, while later refreshes should not replay that mask.
+     */
+    const projectBoardSource = sourceBetween("function ProjectBoardApp()", "function TicketMetaFields(");
+    const overlayStyleSource = sourceBetween(".project-board-board-region {", ".project-board-lanes {");
+
+    expect(projectBoardSource).toContain(
+      "const [hasCompletedInitialBoardLoad, setHasCompletedInitialBoardLoad] = useState(false);",
+    );
+    expect(projectBoardSource).toContain('if (mode === "initial") {');
+    expect(projectBoardSource).toContain("setHasCompletedInitialBoardLoad(true);");
+    expect(projectBoardSource).toContain(
+      'activeSurfaceTab === "board" && loadState === "loading" && !hasCompletedInitialBoardLoad',
+    );
+    expect(projectBoardSource).toContain('className="project-board-loading-overlay"');
+    expect(projectBoardSource).toContain('role="status"');
+    expect(projectBoardSource).toContain("IconLoader2");
+    expect(overlayStyleSource).toContain("position: relative;");
+    expect(overlayStyleSource).toContain(".project-board-loading-overlay");
+    expect(overlayStyleSource).toContain("position: absolute;");
+    expect(overlayStyleSource).toContain(".project-board-loading-spinner");
+    expect(overlayStyleSource).toContain("@keyframes project-board-loading-spin");
+  });
+
   test("uses brighter Kanban bead card surfaces than lane panels", () => {
     /*
      * CDXC:ProjectBoardCards 2026-06-19-09:14:
@@ -120,6 +146,33 @@ describe("Project Board form event handling", () => {
     expect(focusEffectSource).toContain('window.addEventListener("keydown", handleKeyDown, true)');
     expect(focusEffectSource).toContain('postFocusOwnerChanged("keydown", event.target)');
     expect(focusEffectSource).toContain('event !== "pointerdown" && !isProjectBoardEditableFocusTarget(target)');
+  });
+
+  test("logs Kanban title-generation diagnostics without raw prompt-agent output", () => {
+    /*
+     * CDXC:ProjectBoardDiagnostics 2026-06-21-03:56:
+     * Empty-title Kanban ticket diagnostics should join webview and native
+     * title-generation attempts by ids, counts, lengths, and failure classes,
+     * not by persisting prompt text, command text, stdout, stderr, or raw error
+     * output in the support bundle.
+     */
+    const titleGenerationSource = sourceBetween(
+      "const generateCreatedTicketTitle = async",
+      "if (!createdIssue?.id)",
+    );
+
+    expect(titleGenerationSource).toContain("titleGenerationDebugDetails");
+    expect(titleGenerationSource).toContain("defaultAgentKind");
+    expect(titleGenerationSource).toContain("promptLength: prompt.length");
+    expect(titleGenerationSource).toContain("promptAgentCommandLength");
+    expect(titleGenerationSource).toContain("resolvedAgentKind");
+    expect(titleGenerationSource).toContain("selectedAgentKind");
+    expect(titleGenerationSource).toContain("issueId,");
+    expect(titleGenerationSource).toContain("projectBoardTitleGenerationFailureDetails(error)");
+    expect(titleGenerationSource).not.toContain("error: error instanceof Error ? error.message : String(error)");
+    expect(tasksPlaceholderSource).toContain("function projectBoardPromptAgentKind");
+    expect(tasksPlaceholderSource).toContain("function projectBoardTitleGenerationFailureDetails");
+    expect(tasksPlaceholderSource).toContain("function projectBoardTitleGenerationErrorClass");
   });
 
   test("snapshots form values before functional state updaters", () => {
