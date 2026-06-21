@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet, VecDeque},
     io::{Read, Write},
     path::Path,
     process::{Command, Stdio},
@@ -23,7 +23,15 @@ const ZMX_LIFECYCLE_COMMAND_TIMEOUT_MS: u64 = 5_000;
 pub const GXSERVER_ZMX_COMMAND_STDOUT_LIMIT_BYTES: usize = 512 * 1024;
 pub const GXSERVER_ZMX_COMMAND_STDERR_LIMIT_BYTES: usize = 64 * 1024;
 pub const GXSERVER_ZMX_HISTORY_STDOUT_LIMIT_BYTES: usize = 256 * 1024;
+pub const GXSERVER_ZMX_PROCESS_SNAPSHOT_STDOUT_LIMIT_BYTES: usize = 1024 * 1024;
 pub const GXSERVER_ZMX_SEND_TEXT_LIMIT_BYTES: usize = 512 * 1024;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ZmxProcessIdentity {
+    pub agent_id: Option<String>,
+    pub agent_session_id: Option<String>,
+    pub agent_session_path: Option<String>,
+}
 
 #[derive(Clone)]
 pub struct ZmxServerContext {
@@ -673,6 +681,556 @@ fn kill_zmx_session(session_name: &str, zmx_executable_path: &str) -> ProviderKi
         stdout: result.stdout,
         zmx_name: session_name.to_string(),
     }
+}
+
+pub fn read_zmx_session_process_identities(
+    session_names: &[String],
+) -> ZmxEndpointResult<HashMap<String, ZmxProcessIdentity>> {
+    if session_names.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let zmx = require_zmx()?;
+    let result = run_zsh_script(
+        build_zmx_process_snapshot_command(&zmx.executable_path),
+        ZmxCommandOptions {
+            stdout_limit_bytes: Some(GXSERVER_ZMX_PROCESS_SNAPSHOT_STDOUT_LIMIT_BYTES),
+            ..ZmxCommandOptions::default()
+        },
+    )
+    .map_err(ZmxEndpointError::DependencyUnavailable)?;
+    if result.exit_code != 0 {
+        return Ok(HashMap::new());
+    }
+    let (ps_output, zmx_list_output) = parse_zmx_process_snapshot_sections(&result.stdout);
+    Ok(parse_zmx_session_process_identities(
+        &ps_output,
+        session_names,
+        &zmx_list_output,
+    ))
+}
+
+pub fn parse_zmx_session_process_identities(
+    ps_output: &str,
+    session_names: &[String],
+    zmx_list_output: &str,
+) -> HashMap<String, ZmxProcessIdentity> {
+    let root_pids_by_session_name = parse_zmx_root_pids(zmx_list_output, session_names);
+    let processes = parse_process_rows(ps_output);
+    let children_by_parent_pid = group_processes_by_parent_pid(&processes);
+    let mut identities = HashMap::new();
+    for session_name in session_names {
+        let Some(root_pid) = root_pids_by_session_name.get(session_name) else {
+            continue;
+        };
+        if let Some(identity) =
+            resolve_process_tree_agent_identity(*root_pid, &processes, &children_by_parent_pid)
+        {
+            if identity.agent_id.is_some() {
+                identities.insert(session_name.clone(), identity);
+            }
+        }
+    }
+    identities
+}
+
+fn build_zmx_process_snapshot_command(zmx_executable_path: &str) -> String {
+    /*
+    CDXC:GxserverSessionIdentity 2026-06-21-18:25:
+    Rust must copy TypeScript gxserver's live zmx process identity scan so sidebar rows are repaired from actual agent executables after cutover. Capture only bounded process metadata in memory, never persistent logs, and keep parsing centralized in gxserver-rs instead of client fallbacks.
+    */
+    format!(
+        r#"
+zmx_bin={}
+if [ ! -x "$zmx_bin" ]; then
+  printf '%s\n' 'session persistence is set to zmx, but Ghostex bundled zmx was not found.' >&2
+  exit 127
+fi
+unset ZMX_SESSION ZMX_SESSION_PREFIX
+printf '%s\n' '__GHOSTEX_ZMX_LIST__'
+"$zmx_bin" list
+printf '%s\n' '__GHOSTEX_PS__'
+ps -axo pid=,ppid=,command=
+"#,
+        shell_quote(zmx_executable_path)
+    )
+    .trim()
+    .to_string()
+}
+
+fn parse_zmx_process_snapshot_sections(stdout: &str) -> (String, String) {
+    let zmx_marker = "__GHOSTEX_ZMX_LIST__";
+    let ps_marker = "__GHOSTEX_PS__";
+    let Some(zmx_index) = stdout.find(zmx_marker) else {
+        return (String::new(), String::new());
+    };
+    let Some(ps_index) = stdout.find(ps_marker) else {
+        return (String::new(), String::new());
+    };
+    if ps_index <= zmx_index {
+        return (String::new(), String::new());
+    }
+    (
+        stdout[ps_index + ps_marker.len()..].trim().to_string(),
+        stdout[zmx_index + zmx_marker.len()..ps_index]
+            .trim()
+            .to_string(),
+    )
+}
+
+fn parse_zmx_root_pids(zmx_list_output: &str, session_names: &[String]) -> HashMap<String, i64> {
+    let wanted = session_names.iter().cloned().collect::<HashSet<_>>();
+    let mut root_pids = HashMap::new();
+    for line in zmx_list_output.lines() {
+        let Some(name) = parse_zmx_list_name(line) else {
+            continue;
+        };
+        if !wanted.contains(&name) {
+            continue;
+        }
+        if let Some(pid) = parse_zmx_list_pid(line) {
+            root_pids.insert(name, pid);
+        }
+    }
+    root_pids
+}
+
+fn parse_zmx_list_name(line: &str) -> Option<String> {
+    for part in line.split_whitespace() {
+        let Some(value) = part
+            .strip_prefix("name=")
+            .or_else(|| part.strip_prefix("→name="))
+        else {
+            continue;
+        };
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+fn parse_zmx_list_pid(line: &str) -> Option<i64> {
+    for part in line.split_whitespace() {
+        let Some(value) = part.strip_prefix("pid=") else {
+            continue;
+        };
+        let pid = value.parse::<i64>().ok()?;
+        if pid > 0 {
+            return Some(pid);
+        }
+    }
+    None
+}
+
+#[derive(Clone, Debug)]
+struct ProcessRow {
+    command: String,
+    pid: i64,
+    ppid: i64,
+}
+
+#[derive(Clone, Debug)]
+struct ProcessIdentityCandidate {
+    confidence: i64,
+    depth: i64,
+    identity: ZmxProcessIdentity,
+}
+
+#[derive(Clone, Debug)]
+struct ProcessIdentityObservation {
+    confidence: i64,
+    identity: ZmxProcessIdentity,
+}
+
+const GXSERVER_PROCESS_COMMAND_PREFIX_TOKEN_LIMIT: usize = 12;
+const GXSERVER_DIRECT_AGENT_PROCESS_CONFIDENCE: i64 = 300;
+const GXSERVER_WRAPPED_AGENT_PROCESS_CONFIDENCE: i64 = 275;
+const GXSERVER_AGENT_SESSION_ID_CONFIDENCE_BONUS: i64 = 25;
+
+fn parse_process_rows(ps_output: &str) -> Vec<ProcessRow> {
+    let mut rows = Vec::new();
+    for line in ps_output.lines() {
+        let mut parts = line.split_whitespace();
+        let Some(pid) = parts.next().and_then(|value| value.parse::<i64>().ok()) else {
+            continue;
+        };
+        let Some(ppid) = parts.next().and_then(|value| value.parse::<i64>().ok()) else {
+            continue;
+        };
+        rows.push(ProcessRow {
+            command: parts.collect::<Vec<_>>().join(" "),
+            pid,
+            ppid,
+        });
+    }
+    rows
+}
+
+fn group_processes_by_parent_pid(processes: &[ProcessRow]) -> HashMap<i64, Vec<ProcessRow>> {
+    let mut grouped = HashMap::<i64, Vec<ProcessRow>>::new();
+    for process_row in processes {
+        grouped
+            .entry(process_row.ppid)
+            .or_default()
+            .push(process_row.clone());
+    }
+    grouped
+}
+
+fn resolve_process_tree_agent_identity(
+    root_pid: i64,
+    processes: &[ProcessRow],
+    children_by_parent_pid: &HashMap<i64, Vec<ProcessRow>>,
+) -> Option<ZmxProcessIdentity> {
+    let rows_by_pid = processes
+        .iter()
+        .map(|process_row| (process_row.pid, process_row))
+        .collect::<HashMap<_, _>>();
+    let mut candidates = Vec::<ProcessIdentityCandidate>::new();
+    let mut queue = VecDeque::from([(0_i64, root_pid)]);
+    let mut seen = HashSet::<i64>::new();
+    while let Some((depth, pid)) = queue.pop_front() {
+        if !seen.insert(pid) {
+            continue;
+        }
+        if let Some(row) = rows_by_pid.get(&pid) {
+            if let Some(observation) = resolve_process_command_agent_identity(&row.command) {
+                if observation.identity.agent_id.is_some() {
+                    candidates.push(ProcessIdentityCandidate {
+                        confidence: observation.confidence,
+                        depth,
+                        identity: observation.identity,
+                    });
+                }
+            }
+        }
+        if let Some(children) = children_by_parent_pid.get(&pid) {
+            for child in children {
+                queue.push_back((depth + 1, child.pid));
+            }
+        }
+    }
+    candidates.sort_by(|left, right| {
+        let confidence =
+            score_process_identity_candidate(right).cmp(&score_process_identity_candidate(left));
+        if confidence != std::cmp::Ordering::Equal {
+            return confidence;
+        }
+        let id_score = right
+            .identity
+            .agent_session_id
+            .is_some()
+            .cmp(&left.identity.agent_session_id.is_some());
+        if id_score != std::cmp::Ordering::Equal {
+            return id_score;
+        }
+        right.depth.cmp(&left.depth)
+    });
+    candidates
+        .into_iter()
+        .next()
+        .map(|candidate| candidate.identity)
+}
+
+fn score_process_identity_candidate(candidate: &ProcessIdentityCandidate) -> i64 {
+    candidate.confidence
+        + if candidate.identity.agent_session_id.is_some() {
+            GXSERVER_AGENT_SESSION_ID_CONFIDENCE_BONUS
+        } else {
+            0
+        }
+}
+
+fn resolve_process_command_agent_identity(command: &str) -> Option<ProcessIdentityObservation> {
+    let tokens = split_process_command_prefix(command, GXSERVER_PROCESS_COMMAND_PREFIX_TOKEN_LIMIT);
+    if tokens.is_empty() || should_ignore_process_command_for_agent_identity(command, &tokens) {
+        return None;
+    }
+    resolve_agent_process_invocation(&tokens, 0, GXSERVER_DIRECT_AGENT_PROCESS_CONFIDENCE)
+        .or_else(|| resolve_wrapped_agent_process_invocation(&tokens))
+}
+
+fn should_ignore_process_command_for_agent_identity(command: &str, tokens: &[String]) -> bool {
+    let executable_name = normalize_process_executable_name(tokens.first().map(String::as_str));
+    if executable_name.as_deref().is_some_and(|name| {
+        matches!(
+            name,
+            "gte" | "node_repl" | "prompt-editor" | "skycomputeruseclient"
+        )
+    }) {
+        return true;
+    }
+    let lower_command = command.to_ascii_lowercase();
+    ["skycomputeruseclient", "/node_repl", " node_repl"]
+        .iter()
+        .any(|marker| lower_command.contains(marker))
+}
+
+fn resolve_wrapped_agent_process_invocation(
+    tokens: &[String],
+) -> Option<ProcessIdentityObservation> {
+    let executable_name = normalize_process_executable_name(tokens.first().map(String::as_str));
+    if executable_name.as_deref() == Some("env") {
+        if let Some(invocation_index) = find_env_wrapped_command_index(tokens) {
+            return resolve_agent_process_invocation(
+                tokens,
+                invocation_index,
+                GXSERVER_WRAPPED_AGENT_PROCESS_CONFIDENCE,
+            );
+        }
+    }
+    if !executable_name
+        .as_deref()
+        .is_some_and(|name| matches!(name, "bun" | "node"))
+    {
+        return None;
+    }
+    for index in 1..tokens.len().min(8) {
+        if let Some(observation) = resolve_agent_process_invocation(
+            tokens,
+            index,
+            GXSERVER_WRAPPED_AGENT_PROCESS_CONFIDENCE,
+        ) {
+            return Some(observation);
+        }
+    }
+    None
+}
+
+fn resolve_agent_process_invocation(
+    tokens: &[String],
+    executable_index: usize,
+    confidence: i64,
+) -> Option<ProcessIdentityObservation> {
+    let agent_id = infer_agent_id_from_process_executable(tokens, executable_index)?;
+    let agent_session_id = extract_agent_process_session_id(&agent_id, tokens, executable_index);
+    Some(ProcessIdentityObservation {
+        confidence,
+        identity: ZmxProcessIdentity {
+            agent_id: Some(agent_id),
+            agent_session_id,
+            agent_session_path: None,
+        },
+    })
+}
+
+fn infer_agent_id_from_process_executable(
+    tokens: &[String],
+    executable_index: usize,
+) -> Option<String> {
+    let executable_name =
+        normalize_process_executable_name(tokens.get(executable_index).map(String::as_str))?;
+    if executable_name == "acli"
+        && normalize_process_token(tokens.get(executable_index + 1).map(String::as_str)).as_deref()
+            == Some("rovodev")
+        && normalize_process_token(tokens.get(executable_index + 2).map(String::as_str)).as_deref()
+            == Some("run")
+    {
+        return Some("rovodev".to_string());
+    }
+    Some(
+        match executable_name.as_str() {
+            "agy" => "antigravity",
+            "amp" => "amp",
+            "claude" => "claude",
+            "codebuddy" => "codebuddy",
+            "codex" => "codex",
+            "copilot" => "copilot",
+            "cursor-agent" => "cursor",
+            "droid" => "droid",
+            "gemini" => "gemini",
+            "grok" => "grok",
+            "hermes" => "hermes-agent",
+            "kiro-cli" => "kiro",
+            "omp" => "omp",
+            "opencode" => "opencode",
+            "pi" => "pi",
+            "qodercli" => "qoder",
+            "rovodev" => "rovodev",
+            _ => return None,
+        }
+        .to_string(),
+    )
+}
+
+fn extract_agent_process_session_id(
+    agent_id: &str,
+    tokens: &[String],
+    executable_index: usize,
+) -> Option<String> {
+    let args = tokens.get(executable_index + 1..).unwrap_or(&[]);
+    if agent_id == "codex" {
+        for index in 0..args.len().saturating_sub(1) {
+            let token = normalize_process_token(args.get(index).map(String::as_str));
+            if matches!(token.as_deref(), Some("resume" | "fork")) {
+                return normalize_agent_process_session_id(
+                    agent_id,
+                    args.get(index + 1).map(String::as_str),
+                );
+            }
+        }
+        return None;
+    }
+    if matches!(agent_id, "claude" | "cursor") {
+        return read_agent_process_flag_value(agent_id, args, "--resume");
+    }
+    if agent_id == "opencode" {
+        return read_agent_process_flag_value(agent_id, args, "--session")
+            .or_else(|| read_agent_process_flag_value(agent_id, args, "-s"));
+    }
+    if matches!(agent_id, "pi" | "omp") {
+        return read_agent_process_flag_value(agent_id, args, "--session");
+    }
+    if agent_id == "kiro" {
+        return read_agent_process_flag_value(agent_id, args, "--resume-id");
+    }
+    None
+}
+
+fn read_agent_process_flag_value(agent_id: &str, args: &[String], flag: &str) -> Option<String> {
+    for index in 0..args.len() {
+        let arg = args.get(index)?;
+        if arg == flag {
+            return normalize_agent_process_session_id(
+                agent_id,
+                args.get(index + 1).map(String::as_str),
+            );
+        }
+        if let Some(value) = arg.strip_prefix(&format!("{flag}=")) {
+            return normalize_agent_process_session_id(agent_id, Some(value));
+        }
+    }
+    None
+}
+
+fn normalize_agent_process_session_id(agent_id: &str, value: Option<&str>) -> Option<String> {
+    let normalized = value?.trim().trim_end_matches([';', '&', '|']).to_string();
+    if normalized.is_empty() {
+        return None;
+    }
+    if agent_id == "codex" {
+        normalize_codex_session_id(&normalized).or(Some(normalized))
+    } else {
+        Some(normalized)
+    }
+}
+
+fn find_env_wrapped_command_index(tokens: &[String]) -> Option<usize> {
+    for index in 1..tokens.len() {
+        let token = tokens.get(index)?;
+        if token.starts_with('-') || is_environment_assignment(token) {
+            continue;
+        }
+        return Some(index);
+    }
+    None
+}
+
+fn split_process_command_prefix(command: &str, max_tokens: usize) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for char in command.chars() {
+        if escaped {
+            current.push(char);
+            escaped = false;
+            continue;
+        }
+        if char == '\\' {
+            escaped = true;
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            if char == active_quote {
+                quote = None;
+            } else {
+                current.push(char);
+            }
+            continue;
+        }
+        if matches!(char, '"' | '\'') {
+            quote = Some(char);
+            continue;
+        }
+        if char.is_whitespace() {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+                if tokens.len() >= max_tokens {
+                    return tokens;
+                }
+            }
+            continue;
+        }
+        current.push(char);
+    }
+    if !current.is_empty() && tokens.len() < max_tokens {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn normalize_process_executable_name(token: Option<&str>) -> Option<String> {
+    let normalized = normalize_process_token(token)?;
+    let basename = normalized
+        .rsplit('/')
+        .next()
+        .unwrap_or(normalized.as_str())
+        .to_string();
+    for extension in [".cjs", ".cmd", ".exe", ".js", ".mjs", ".ts"] {
+        if let Some(stripped) = basename.strip_suffix(extension) {
+            return (!stripped.is_empty()).then(|| stripped.to_string());
+        }
+    }
+    Some(basename)
+}
+
+fn normalize_process_token(token: Option<&str>) -> Option<String> {
+    let text = token?.trim().to_ascii_lowercase();
+    let text = text.trim_matches(['"', '\'', '`']).to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+fn is_environment_assignment(token: &str) -> bool {
+    let mut chars = token.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    let mut seen_equals = false;
+    for char in chars {
+        if char == '=' {
+            seen_equals = true;
+            break;
+        }
+        if !(char.is_ascii_alphanumeric() || char == '_') {
+            return false;
+        }
+    }
+    seen_equals
+}
+
+fn normalize_codex_session_id(value: &str) -> Option<String> {
+    is_uuid(value).then(|| value.to_ascii_lowercase())
+}
+
+fn is_uuid(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    for (index, byte) in bytes.iter().enumerate() {
+        if matches!(index, 8 | 13 | 18 | 23) {
+            if *byte != b'-' {
+                return false;
+            }
+        } else if !byte.is_ascii_hexdigit() {
+            return false;
+        }
+    }
+    true
 }
 
 fn run_zmx_interaction_command(
@@ -1658,6 +2216,58 @@ mod tests {
         assert_eq!(patch.get("lifecycleState"), Some(&json!("unknown")));
         assert_eq!(patch.get("zmxName"), Some(&json!("S7k-P100-G100")));
         assert_eq!(patch.get("killError"), Some(&json!("zmx kill failed")));
+    }
+
+    #[test]
+    fn zmx_process_identity_parser_prefers_live_codex_child() {
+        let session_name = "S90-P3lv0-G0p1k".to_string();
+        let identities = parse_zmx_session_process_identities(
+            r#"
+81395     1 /bundle/zmx run S90-P3lv0-G0p1k -d --initial-command /bin/zsh -lic gx f
+81396 81395 /bin/zsh -lic gx f
+81557 81396 node /Applications/Ghostex.app/Contents/Resources/CLI/ghostex-cli.mjs f
+81582 81557 /Applications/Ghostex.app/Contents/Resources/Web/bin/zehn --accept-all
+82148 81582 node /Users/madda/.local/bin/codex --yolo resume 019EB8D0-D27B-7F30-B6D7-7A04AB8FAE78
+82149 82148 /Users/madda/.local/lib/codex --yolo resume 019eb8d0-d27b-7f30-b6d7-7a04ab8fae78
+94784 93944 /Users/madda/.local/bin/claude --resume 303d77cf-4871-48da-871f-47782e834307
+"#
+            .trim(),
+            &[session_name.clone()],
+            &format!(
+                "  name={session_name}\tpid=81396\tclients=1\tcreated=1781219985\tstart_dir=/repo"
+            ),
+        );
+        let identity = identities.get(&session_name).expect("identity");
+        assert_eq!(identity.agent_id.as_deref(), Some("codex"));
+        assert_eq!(
+            identity.agent_session_id.as_deref(),
+            Some("019eb8d0-d27b-7f30-b6d7-7a04ab8fae78")
+        );
+        assert_eq!(identity.agent_session_path, None);
+    }
+
+    #[test]
+    fn zmx_process_identity_parser_ignores_helper_payload_agent_mentions() {
+        let session_name = "S90-P3lv0-G8cl2".to_string();
+        let identities = parse_zmx_session_process_identities(
+            r#"
+23572     1 -zsh
+23754 23572 node /Users/person/.local/share/mise/installs/node/24.14.1/bin/codex --yolo
+23755 23754 /Users/person/.local/share/mise/installs/node/24.14.1/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex --yolo
+34225 23755 /Users/person/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient turn-ended {"input-messages":["compare codex hotkeys with claude code"]}
+"#
+            .trim(),
+            &[session_name.clone()],
+            &format!("  name={session_name}\tpid=23572\tclients=1\tcreated=1781317239\tstart_dir=/repo"),
+        );
+        /*
+        CDXC:GxserverSessionIdentity 2026-06-21-18:25:
+        Rust process identity parsing must copy TypeScript's helper-process guard. Agent labels come from actual executable tokens, not serialized helper payloads that may mention other CLIs in user-owned text.
+        */
+        let identity = identities.get(&session_name).expect("identity");
+        assert_eq!(identity.agent_id.as_deref(), Some("codex"));
+        assert_eq!(identity.agent_session_id, None);
+        assert_eq!(identity.agent_session_path, None);
     }
 
     #[test]
