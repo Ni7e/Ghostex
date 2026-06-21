@@ -8,9 +8,11 @@
 <!-- CDXC:Distribution 2026-06-19-15:28: The reissued 4.21.0 public feature index must include the later settings chrome, inline sidebar search, drag/drop, Source-pane readiness, Delayed Send restore, scroll-fade, and privacy-safe prompt-editor diagnostics changes included in the overwritten 4.21.0 artifacts. -->
 <!-- CDXC:Distribution 2026-06-19-16:11: The 4.21.1 public feature index must summarize fresh gxserver agent provider startup, focused-session command actions, Git commit modal polish, and Chromium light page-canvas fixes. -->
 <!-- CDXC:Distribution 2026-06-19-20:37: The 4.21.3 public feature index and the two previous top entries should be shorter and easier to scan while preserving the user-facing release claims. -->
+<!-- CDXC:Distribution 2026-06-21-04:22: The 4.21.4 public feature index must summarize Manage, Settings reliability, Integrations recovery controls, Project Board first-load feedback, and native/browser polish in a short user-facing entry. -->
 
 ## All features:
 
+- 4.21.4 adds the beta-gated Manage workarea for files, previews, edits, review notes, and Excalidraw drawings; makes Settings native windows open more reliably; keeps hook and skill recovery in Integrations; adds Project Board first-load feedback and safer title-generation diagnostics; and polishes sidebar, tab, first-launch, and browser appearance behavior.
 - 4.21.3 improves Settings focus while changes save, makes Browser panes follow macOS light or dark appearance, shows running unloaded terminal sessions in Resources, restores menu bar status right-click actions, sends agent prompts in smaller chunks for Cursor, tidies titlebar icons, and brings the experimental Rust gxserver path closer to full app parity.
 - 4.21.1 starts `ghostex create-agent` sessions immediately, avoids accidental resumes from raw Ghostex session IDs, adds focused-session Sleep/Wake/Close/Close After Done commands, fixes transparent browser page backgrounds, and simplifies the Git commit review sidebar.
 - 4.21.0 simplifies agent setup, persists browser appearance per project and origin, cleans up titlebar and sidebar controls, improves Project Board label loading and card readability, waits for Source-pane readiness, restores Delayed Send timers after restart, and includes Browser initial-URL plus sidebar header fixes from @cuttothechaseo.

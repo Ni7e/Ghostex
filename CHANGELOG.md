@@ -31,6 +31,20 @@
 <!-- CDXC:Distribution 2026-06-19-15:28: The reissued 4.21.0 release notes must merge the later settings, sidebar, native prompt-editor, Source-pane, and Delayed Send changes into the original 4.21.0 notes before GitHub, Sparkle, Homebrew, and Android assets are overwritten from the latest main. -->
 <!-- CDXC:Distribution 2026-06-19-16:11: Release notes for 4.21.1 must cover fresh agent startup materialization, focused-session command actions, Git commit modal polish, and Chromium page-canvas appearance fixes while preserving Major and Minor top-level bullets. -->
 <!-- CDXC:Distribution 2026-06-19-20:37: Release notes for 4.21.3 and the previous two public sections must be shorter and simpler: use only Major and Minor top-level bullets with direct user-facing sub-bullets, while still covering Settings focus, Browser appearance, status-menu clicks, Resources, agent prompt chunking, and Rust gxserver parity. -->
+<!-- CDXC:Distribution 2026-06-21-04:22: Release notes for 4.21.4 must stay simple with only Major and Minor top-level bullets, short user-facing sub-bullets, and coverage for Manage, Settings reliability, Integrations recovery controls, Project Board feedback, and native/browser polish. -->
+
+## 4.21.4 - 2026-06-21
+
+- Major
+  - Manage adds a beta-gated project workarea for file browsing, previews, editing, review annotations, and Excalidraw drawings.
+  - Settings native windows open more reliably after hydration.
+  - Settings > Integrations keeps hook and skill install, update, and uninstall actions together.
+  - Project Board now shows a first-open loading overlay and records safer title-generation diagnostics.
+- Minor
+  - Sidebar toggle and native pane-tab chrome are cleaner and easier to read.
+  - Selected sleeping tabs keep the active-tab visual treatment before wake.
+  - Browser page appearance now follows the current system behavior more consistently.
+  - First-launch setup buttons are disabled when there is no setup action to run.
 
 ## 4.21.3 - 2026-06-19
 
