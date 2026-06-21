@@ -251,9 +251,26 @@ fn bundled_bd_tool_candidates() -> Vec<ToolCandidate> {
 }
 
 fn default_gxserver_root() -> PathBuf {
+    if let Ok(current_exe) = env::current_exe() {
+        if let Some(root) = gxserver_root_from_executable_path(&current_exe) {
+            return root;
+        }
+    }
     env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join("gxserver")
+}
+
+fn gxserver_root_from_executable_path(executable_path: &Path) -> Option<PathBuf> {
+    /*
+    CDXC:GxserverToolchain 2026-06-21-13:59:
+    The macOS app launches gxserver-rs from Web/gxserver/bin/gxserver while the process current directory is not the package root. Resolve bundled zmx/zehn/bd from the running executable's package root first so Rust starts with the same app resources the TypeScript daemon used.
+    */
+    let parent = executable_path.parent()?;
+    if parent.file_name().and_then(|name| name.to_str()) != Some("bin") {
+        return None;
+    }
+    parent.parent().map(Path::to_path_buf)
 }
 
 fn dedupe_candidates(candidates: Vec<ToolCandidate>) -> Vec<ToolCandidate> {
@@ -270,6 +287,31 @@ fn dedupe_candidates(candidates: Vec<ToolCandidate>) -> Vec<ToolCandidate> {
             seen.insert(key)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gxserver_root_from_packaged_executable_uses_package_parent() {
+        let root = gxserver_root_from_executable_path(Path::new(
+            "/Applications/Ghostex.app/Contents/Resources/Web/gxserver/bin/gxserver",
+        ))
+        .expect("packaged root");
+        assert_eq!(
+            root,
+            PathBuf::from("/Applications/Ghostex.app/Contents/Resources/Web/gxserver")
+        );
+    }
+
+    #[test]
+    fn gxserver_root_from_dev_target_executable_keeps_cwd_fallback() {
+        assert!(gxserver_root_from_executable_path(Path::new(
+            "/repo/gxserver-rs/target/release/gxserver"
+        ))
+        .is_none());
+    }
 }
 
 fn is_executable_file(path: &Path) -> bool {
