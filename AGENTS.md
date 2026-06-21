@@ -51,7 +51,7 @@ Logs may be requested from users for debugging, so persistent logs must be safe 
 7. When adding or changing persistent logging, add or update tests proving raw names, paths, URLs, command text, and secrets do not appear in written log output.
 
 ## CDX_LOG comments:
-   - Please whenever you're working on a codebase. I want you to add comments describing the date of the change (must be in this format yyyy-MM-dd-hh:mm) and describing the requirements or the change in requirements that made you implement certain functionality.
+   - Whenever you're working on a codebase. I want you to add comments describing the date of the change (must be in this format yyyy-MM-dd-hh:mm) and describing the requirements or the change in requirements that made you implement certain functionality.
    - I want you to write CDXC:Area-of-product in front of all your comments so they can be grepped.
    - Most of this should be written as jsdocs but you can add short comments around for the important variables and more complex parts of the codebase.
    - The idea is to encode the requiements of the system (especially software behavior, UX, and important technical decisions) into the code so it's clearer later why a certain piece of code was written.
@@ -72,7 +72,7 @@ Logs may be requested from users for debugging, so persistent logs must be safe 
    */
    ```
 
-## Please never generate fallbacks when the right solution is to actually correct the behavior itself to fix the issue. Fallbacks should be used in rare cases only because they add complexity and hide issues and introduce useless logic.
+## Never generate fallbacks when the right solution is to actually correct the behavior itself to fix the issue. Fallbacks should be used in rare cases only because they add complexity and hide issues and introduce useless logic.
 
 Example of adding bad fallback code:
 
