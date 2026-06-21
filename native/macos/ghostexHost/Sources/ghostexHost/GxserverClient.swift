@@ -162,11 +162,11 @@ final class GxserverClient {
    CDXC:GxserverBootstrap 2026-06-08-12:17:
    Legacy JavaScript gxserver selections must launch with code-server's bundled Node 22 runtime under app resources so users never need to install Node, fix PATH, or match the database-module ABI before the sidebar can start.
 
-   CDXC:GxserverRustPort 2026-06-14-21:09:
-   Phase 2 Rust testing used explicit opt-in through GHOSTEX_GXSERVER_CLI/BIN. Keep those hard-selection hooks for source/reference testing, skip Node validation for native gxserver binaries, and report fixed-port startup failures instead of silently switching daemons.
+   CDXC:GxserverRustPort 2026-06-21-13:45:
+   GHOSTEX_GXSERVER_CLI/BIN now mean explicit daemon selection rather than Rust opt-in. Keep those hard-selection hooks for source/reference testing, skip Node validation for native gxserver binaries, and report fixed-port startup failures instead of silently switching daemons.
 
-  CDXC:GxserverStartup 2026-06-16-03:08:
-   The current deployment release needs the TypeScript gxserver daemon by default. Prefer the packaged TypeScript CLI when it is present, while keeping explicit Rust selections and packaged Rust fallback testable without changing release behavior.
+   CDXC:GxserverStartup 2026-06-21-13:45:
+   The macOS app now cuts over to gxserver-rs for normal packaged starts. Prefer the bundled native gxserver binary so the sidebar reads the same SQLite-backed projects and presentation sessions through Rust, while explicit JavaScript CLI selections remain hard selections for source validation.
   */
   func startOrReuse(allowStart: Bool? = nil) async -> GxserverClientStatus {
     let shouldStart = allowStart ?? alwaysStartOnLaunch
@@ -202,7 +202,7 @@ final class GxserverClient {
           authToken: running.authToken,
           health: running.health,
           message:
-            "Rust gxserver was selected, but 127.0.0.1:58744 is already owned by a different gxserver. Stop the current control plane before starting the Rust opt-in.",
+            "Native gxserver was selected, but 127.0.0.1:58744 is already owned by a different gxserver. Stop the current control plane before starting the selected daemon.",
           ok: false,
           state: "portConflict"
         )
@@ -230,7 +230,7 @@ final class GxserverClient {
         authToken: readAuthToken(),
         health: nil,
         message:
-          "Bundled gxserver TypeScript CLI or gxserver binary is missing. Run `bun run build` for development, or reinstall Ghostex so Web/gxserver is present.",
+          "Bundled gxserver binary is missing. Run `bun run build` for development, or reinstall Ghostex so Web/gxserver is present.",
         ok: false,
         state: "missingGxserverCli"
       )
@@ -753,7 +753,7 @@ final class GxserverClient {
     if let explicit = explicitGxserverLaunchPath() {
       guard let url = resolveExplicitGxserverLaunchURL(explicit.path) else {
         return .failure(
-          message: "Selected gxserver path from \(explicit.key) does not exist: \(explicit.path). TypeScript gxserver was not started because this launch explicitly opted into another daemon.",
+          message: "Selected gxserver path from \(explicit.key) does not exist: \(explicit.path). The packaged gxserver was not started because this launch explicitly selected another daemon.",
           explicit: true
         )
       }
@@ -767,7 +767,7 @@ final class GxserverClient {
       }
       guard fileManager.isExecutableFile(atPath: url.path) else {
         return .failure(
-          message: "Selected gxserver binary from \(explicit.key) is not executable: \(url.path). TypeScript gxserver was not started because this launch explicitly opted into another daemon.",
+          message: "Selected gxserver binary from \(explicit.key) is not executable: \(url.path). The packaged gxserver was not started because this launch explicitly selected another daemon.",
           explicit: true
         )
       }
@@ -775,14 +775,14 @@ final class GxserverClient {
       guard versionResult.exitCode == 0 else {
         let detail = startupProbeMessage(stdout: versionResult.stdout, stderr: versionResult.stderr)
         return .failure(
-          message: "Selected Rust gxserver from \(explicit.key) did not report a version.\(detail) TypeScript gxserver was not started because this launch explicitly opted into Rust.",
+          message: "Selected native gxserver from \(explicit.key) did not report a version.\(detail) The packaged gxserver was not started because this launch explicitly selected another daemon.",
           explicit: true
         )
       }
       let version = versionResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
       guard !version.isEmpty else {
         return .failure(
-          message: "Selected Rust gxserver from \(explicit.key) returned an empty version. TypeScript gxserver was not started because this launch explicitly opted into Rust.",
+          message: "Selected native gxserver from \(explicit.key) returned an empty version. The packaged gxserver was not started because this launch explicitly selected another daemon.",
           explicit: true
         )
       }
@@ -796,7 +796,7 @@ final class GxserverClient {
 
     guard let defaultPlan = resolveDefaultGxserverLaunchPlan() else {
       return .failure(
-        message: "Bundled gxserver TypeScript CLI or gxserver binary is missing. Run `bun run build` for development, or reinstall Ghostex so Web/gxserver is present.",
+        message: "Bundled gxserver binary is missing. Run `bun run build` for development, or reinstall Ghostex so Web/gxserver is present.",
         explicit: false
       )
     }
@@ -841,6 +841,25 @@ final class GxserverClient {
   }
 
   private func resolveDefaultGxserverLaunchPlan() -> GxserverLaunchPlan? {
+    var binaryCandidates: [URL] = []
+    if let webBinary = Bundle.main.resourceURL?.appendingPathComponent("Web/gxserver/bin/gxserver") {
+      binaryCandidates.append(webBinary)
+    }
+    if let resourceBinary = Bundle.main.resourceURL?.appendingPathComponent("gxserver/bin/gxserver") {
+      binaryCandidates.append(resourceBinary)
+    }
+    binaryCandidates.append(contentsOf: gxserverDevelopmentRoots().map {
+      $0.appendingPathComponent("native/macos/ghostexHost/Web/gxserver/bin/gxserver")
+    })
+    if let binaryURL = binaryCandidates.first(where: { fileManager.isExecutableFile(atPath: $0.path) && isRustGxserverPackageExecutable($0) }) {
+      return GxserverLaunchPlan(
+        executableURL: binaryURL,
+        expectedBuildIdentity: expectedBundledBuildIdentity(for: binaryURL),
+        isExplicitSelection: false,
+        kind: .nativeExecutable
+      )
+    }
+
     var cliCandidates: [URL] = []
     if let webCli = Bundle.main.resourceURL?.appendingPathComponent("Web/gxserver/dist/src/cli.js") {
       cliCandidates.append(webCli)
@@ -862,26 +881,20 @@ final class GxserverClient {
         kind: .javascriptCli
       )
     }
+    return nil
+  }
 
-    var binaryCandidates: [URL] = []
-    if let webBinary = Bundle.main.resourceURL?.appendingPathComponent("Web/gxserver/bin/gxserver") {
-      binaryCandidates.append(webBinary)
-    }
-    if let resourceBinary = Bundle.main.resourceURL?.appendingPathComponent("gxserver/bin/gxserver") {
-      binaryCandidates.append(resourceBinary)
-    }
-    binaryCandidates.append(contentsOf: gxserverDevelopmentRoots().map {
-      $0.appendingPathComponent("native/macos/ghostexHost/Web/gxserver/bin/gxserver")
-    })
-    guard let binaryURL = binaryCandidates.first(where: { fileManager.isExecutableFile(atPath: $0.path) }) else {
-      return nil
-    }
-    return GxserverLaunchPlan(
-      executableURL: binaryURL,
-      expectedBuildIdentity: expectedBundledBuildIdentity(for: binaryURL),
-      isExplicitSelection: false,
-      kind: .nativeExecutable
-    )
+  private func isRustGxserverPackageExecutable(_ executableURL: URL) -> Bool {
+    /*
+     CDXC:GxserverStartup 2026-06-21-13:45:
+     Both Rust and TypeScript app packages contain bin/gxserver. Treat the default bin entry as a native daemon only when the package lacks the TypeScript dist/src/cli.js marker; explicit TypeScript validation packages must continue through the JavaScript CLI path so bundled Node/runtime checks still run.
+     */
+    let packageRoot = Self.gxserverPackageRoot(for: executableURL)
+    let typeScriptCliURL = packageRoot
+      .appendingPathComponent("dist", isDirectory: true)
+      .appendingPathComponent("src", isDirectory: true)
+      .appendingPathComponent("cli.js", isDirectory: false)
+    return !fileManager.fileExists(atPath: typeScriptCliURL.path)
   }
 
   private func gxserverDevelopmentRoots() -> [URL] {

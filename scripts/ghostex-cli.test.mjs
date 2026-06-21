@@ -313,7 +313,7 @@ printf 'forwarded:%s\\n' "$1"
   test("forwards gx server subcommands to an explicit gxserver binary path", async () => {
     /*
      * CDXC:GxserverRustPort 2026-06-14-21:09:
-     * Phase 2 Rust CLI opt-in uses GHOSTEX_GXSERVER_BIN as a hard selection. A relative gxserver-rs/target/debug/gxserver path must resolve from the caller's development root and must not fall back to the TypeScript CLI.
+     * Explicit CLI daemon selection uses GHOSTEX_GXSERVER_BIN as a hard selection. A relative gxserver-rs/target/debug/gxserver path must resolve from the caller's development root and must not fall back to a packaged daemon.
      */
     const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-gxserver-rust-bin-"));
     const markerPath = path.join(tempDir, "argv.txt");
@@ -350,12 +350,12 @@ printf 'rust-forwarded:%s\\n' "$1"
     }
   });
 
-  test("resolves bundled TypeScript gxserver from app resources before binary fallback", async () => {
+  test("resolves bundled Rust gxserver from app resources before TypeScript CLI fallback", async () => {
     /*
-     * CDXC:GxserverPackaging 2026-06-16-03:10:
-     * This deployment release makes packaged `gx server ...` default to Web/gxserver/dist/src/cli.js. Keep Web/gxserver/bin/gxserver as a fallback so Rust opt-in packages and older bundles still launch.
+     * CDXC:GxserverPackaging 2026-06-21-13:45:
+     * The app cutover makes packaged `gx server ...` default to Web/gxserver/bin/gxserver. Keep TypeScript CLI discovery after the Rust binary so explicit TypeScript packages remain testable without changing the normal daemon.
      */
-    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-gxserver-typescript-default-"));
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-gxserver-rust-default-"));
     try {
       const appRoot = path.join(tempDir, "typescript-app");
       const rustBinPath = path.join(appRoot, "gxserver", "bin", "gxserver");
@@ -367,8 +367,8 @@ printf 'rust-forwarded:%s\\n' "$1"
       await chmod(rustBinPath, 0o755);
 
       expect(resolveGxserverCliLaunchFromRoot(appRoot)).toMatchObject({
-        args: [referenceCliPath],
-        command: process.execPath,
+        args: [],
+        command: rustBinPath,
       });
 
       const referenceOnlyRoot = path.join(tempDir, "reference-only");
@@ -2053,7 +2053,98 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
         payload: {
           projectId: "P1a",
           sessionId: "G9a",
+          sessionTarget: {
+            projectId: "P1a",
+            sessionId: "G9a",
+          },
           title: "Ghostex Native IME Fix",
+        },
+      });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test("rename-command preserves project-scoped targets for renderer lookup", async () => {
+    const requests = [];
+    const globalRef = "S90:P1a:G9a";
+    const server = http.createServer(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) {
+        chunks.push(chunk);
+      }
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      requests.push({ body, url: request.url });
+      const result =
+        request.url === "/api/listProjects"
+          ? { projects: [{ name: "Project Alpha", path: "/tmp/project-alpha", projectId: "P1a" }] }
+          : request.url === "/api/listSessions"
+            ? {
+                sessions: [
+                  {
+                    globalRef,
+                    kind: "agent",
+                    lifecycleState: "running",
+                    projectId: "P1a",
+                    sessionId: "G9a",
+                    title: "Current Session",
+                    zmxName: "S90-P1a-G9a",
+                  },
+                ],
+              }
+            : request.url === "/api/readPresentationSnapshot"
+              ? { sessions: [] }
+              : { ok: true };
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        ok: true,
+        product: "gxserver",
+        protocolVersion: 1,
+        requestId: "global-rename-command-fixture",
+        result,
+      }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    try {
+      /*
+       * CDXC:GxserverRendererCommands 2026-06-21-19:22:
+       * Generated-title agents call `ghostex rename-command --session-id S:P:G`
+       * from inside the target pane. The CLI must resolve that global ref to
+       * raw gxserver ids while still sending a structured target that the
+       * renderer can match against combined sidebar presentation ids.
+       */
+      const result = await execFileAsync(process.execPath, [
+        path.resolve("scripts/ghostex-cli.mjs"),
+        "rename-command",
+        "--session-id",
+        globalRef,
+        "--title",
+        "GPUI Sidebar Resize Parity",
+        "--server",
+        `http://127.0.0.1:${address.port}`,
+        "--token",
+        "test-token",
+        "--json",
+      ]);
+
+      expect(JSON.parse(result.stdout)).toMatchObject({ ok: true });
+      expect(requests.map((entry) => entry.url)).toEqual([
+        "/api/listProjects",
+        "/api/listSessions",
+        "/api/readPresentationSnapshot",
+        "/api/dispatchRendererCommand",
+      ]);
+      expect(requests[3].body.params).toMatchObject({
+        action: "renameCommand",
+        payload: {
+          projectId: "P1a",
+          sessionId: "G9a",
+          sessionTarget: {
+            projectId: "P1a",
+            sessionId: "G9a",
+          },
+          title: "GPUI Sidebar Resize Parity",
         },
       });
     } finally {

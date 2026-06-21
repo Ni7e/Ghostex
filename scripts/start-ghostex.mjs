@@ -15,7 +15,7 @@ const installDir = process.env.INSTALL_DIR || "/Applications";
 const protocolVersion = 1;
 const gxserverBaseUrl = "http://127.0.0.1:58744";
 const startEnvironment = withoutColorDisablingEnvironment(process.env);
-const gxserverOptInLaunchEnvironmentKeys = ["GHOSTEX_GXSERVER_CLI", "GHOSTEX_GXSERVER_BIN"];
+const gxserverExplicitLaunchEnvironmentKeys = ["GHOSTEX_GXSERVER_CLI", "GHOSTEX_GXSERVER_BIN"];
 
 validateStartArguments(process.argv.slice(2), process.env.GHOSTEX_APP_VARIANT);
 /*
@@ -640,7 +640,7 @@ function prepareLaunchServicesEnvironment() {
   } else {
     clearLaunchServicesDevelopmentEnvironment();
   }
-  publishLaunchServicesGxserverOptInEnvironment();
+  publishLaunchServicesGxserverExplicitEnvironment();
 }
 
 function shouldPublishLaunchServicesDevelopmentEnvironment() {
@@ -659,12 +659,12 @@ function clearLaunchServicesDevelopmentEnvironment() {
   }
 }
 
-function publishLaunchServicesGxserverOptInEnvironment() {
+function publishLaunchServicesGxserverExplicitEnvironment() {
   /*
-  CDXC:GxserverRustPort 2026-06-14-21:09:
-  Phase 2 keeps TypeScript gxserver as the default, but an explicit local-start GHOSTEX_GXSERVER_CLI/BIN must reach the LaunchServices-started macOS app so developers can opt into gxserver-rs without stale launchd variables silently selecting Rust later.
+  CDXC:GxserverRustPort 2026-06-21-13:45:
+  The packaged local-start default is gxserver-rs, but explicit GHOSTEX_GXSERVER_CLI/BIN selections must still reach the LaunchServices-started macOS app for source validation. Clear stale launchd values when no explicit daemon is selected so the bundled Rust package remains the default.
   */
-  for (const key of gxserverOptInLaunchEnvironmentKeys) {
+  for (const key of gxserverExplicitLaunchEnvironmentKeys) {
     const value = process.env[key]?.trim();
     if (value) {
       run("launchctl", ["setenv", key, value], { stdio: "ignore" });

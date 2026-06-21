@@ -1610,8 +1610,41 @@ function dispatchGxserverRendererCommand(action, payload = {}, flags = {}) {
    * CLI commands that still need visible macOS workspace state route through
    * gxserver's renderer-command endpoint. Do not reconnect the old native CLI
    * bridge; gxserver owns the command contract and macOS is only the executor.
+   *
+   * CDXC:GxserverRendererCommands 2026-06-21-19:22:
+   * Renderer commands may target sessions by gxserver's raw project-scoped id,
+   * while the macOS sidebar can render combined project/session ids. Carry a
+   * structured `sessionTarget` whenever projectId/sessionId are present so the
+   * renderer can resolve the target without callers learning presentation ids.
    */
-  return callGxserverRpc("/api/dispatchRendererCommand", { action, payload }, flags);
+  return callGxserverRpc(
+    "/api/dispatchRendererCommand",
+    { action, payload: withRendererSessionTarget(payload) },
+    flags,
+  );
+}
+
+function withRendererSessionTarget(payload = {}) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+  if (payload.sessionTarget && typeof payload.sessionTarget === "object") {
+    return payload;
+  }
+  const projectId = String(payload.projectId ?? "").trim();
+  const sessionId = String(payload.sessionId ?? "").trim();
+  if (!projectId || !sessionId) {
+    return payload;
+  }
+  const globalRef = String(payload.globalRef ?? "").trim();
+  return {
+    ...payload,
+    sessionTarget: compactObject({
+      globalRef: globalRef || undefined,
+      projectId,
+      sessionId,
+    }),
+  };
 }
 
 async function sendGxserverSessionKey(payload = {}, flags = {}) {
@@ -4005,7 +4038,7 @@ function resolveGxserverCliLaunch() {
   }
 
   throw new Error(
-    "Bundled gxserver TypeScript CLI or gxserver binary is missing. Rebuild or reinstall Ghostex so Web/gxserver is present, or set GHOSTEX_GXSERVER_CLI/BIN for an explicit source/reference daemon.",
+    "Bundled gxserver binary is missing. Rebuild or reinstall Ghostex so Web/gxserver is present, or set GHOSTEX_GXSERVER_CLI/BIN for an explicit source/reference daemon.",
   );
 }
 
@@ -4014,14 +4047,14 @@ function resolveGxserverCliLaunchFromRoot(root) {
     return undefined;
   }
   /*
-   * CDXC:GxserverPackaging 2026-06-16-03:10:
-   * The current deployment release should route installed `gx server ...` commands to the TypeScript gxserver package by default. Prefer its JavaScript CLI when it exists, then keep the packaged binary launcher as a fallback for Rust opt-in packages and older bundles.
+   * CDXC:GxserverPackaging 2026-06-21-13:45:
+   * `gx server ...` must follow the macOS app cutover and prefer the packaged gxserver-rs binary. Keep JavaScript CLI discovery only after the native binary so explicit TypeScript package checks do not change the normal installed daemon.
    */
   for (const candidate of [
-    path.join(root, "gxserver", "dist", "src", "cli.js"),
-    path.join(root, "native", "macos", "ghostexHost", "Web", "gxserver", "dist", "src", "cli.js"),
     path.join(root, "gxserver", "bin", "gxserver"),
     path.join(root, "native", "macos", "ghostexHost", "Web", "gxserver", "bin", "gxserver"),
+    path.join(root, "gxserver", "dist", "src", "cli.js"),
+    path.join(root, "native", "macos", "ghostexHost", "Web", "gxserver", "dist", "src", "cli.js"),
   ]) {
     if (fileExistsSync(candidate)) {
       return resolveGxserverCliLaunchForPath(candidate);
@@ -4054,7 +4087,7 @@ function resolveGxserverCliPath(cliPath, options = {}) {
   }
   /*
    * CDXC:GxserverRustPort 2026-06-14-21:09:
-   * Phase 2 Rust opt-in uses the existing GHOSTEX_GXSERVER_CLI/BIN hooks. Resolve explicit relative paths against the current shell and source-root hints so developers can point `gx server ...` at gxserver-rs/target/debug/gxserver without changing the TypeScript default or falling back when the opt-in path is wrong.
+   * Explicit GHOSTEX_GXSERVER_CLI/BIN selections use the current shell and source-root hints so developers can point `gx server ...` at either gxserver-rs/target/debug/gxserver or a TypeScript CLI without falling back when the selected path is wrong.
    */
   const sourceRoot = findGhostexSourceRoot(process.cwd());
   const candidates = uniquePaths([

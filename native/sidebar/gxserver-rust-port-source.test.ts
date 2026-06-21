@@ -8,6 +8,9 @@ const gxserverClientSource = readFileSync(
 const buildGhostexHostSource = readFileSync(new URL("../macos/ghostexHost/build-ghostex-host.sh", import.meta.url), "utf8");
 const ghostexCliSource = readFileSync(new URL("../../scripts/ghostex-cli.mjs", import.meta.url), "utf8");
 const startGhostexSource = readFileSync(new URL("../../scripts/start-ghostex.mjs", import.meta.url), "utf8");
+const nativeSidebarGxserverClientSource = readFileSync(new URL("gxserver-client.ts", import.meta.url), "utf8");
+const gxserverRustServerSource = readFileSync(new URL("../../gxserver-rs/src/server.rs", import.meta.url), "utf8");
+const gxserverRustPathsSource = readFileSync(new URL("../../gxserver-rs/src/paths.rs", import.meta.url), "utf8");
 
 function sourceBetween(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);
@@ -18,10 +21,10 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("gxserver release packaging source contract", () => {
-  test("macOS gxserver startup defaults to bundled TypeScript while keeping explicit Rust hard selection", () => {
+  test("macOS gxserver startup defaults to bundled Rust while keeping explicit hard selection", () => {
     /*
-    CDXC:GxserverPackaging 2026-06-16-03:08:
-    This release temporarily makes the packaged TypeScript daemon the default macOS control plane. Explicit GHOSTEX_GXSERVER_CLI/BIN selections stay hard selections for Rust/source testing and still refuse to stop a different fixed-port owner.
+    CDXC:GxserverPackaging 2026-06-21-13:45:
+    The macOS app now defaults to the packaged gxserver-rs control plane. Explicit GHOSTEX_GXSERVER_CLI/BIN selections stay hard selections for source validation and still refuse to stop a different fixed-port owner.
     */
     expect(gxserverClientSource).toContain('"GHOSTEX_GXSERVER_CLI"');
     expect(gxserverClientSource).toContain('"GHOSTEX_GXSERVER_BIN"');
@@ -33,10 +36,21 @@ describe("gxserver release packaging source contract", () => {
     expect(gxserverClientSource).toContain('expectedBundledBuildIdentity(for: url) ?? "gxserver:\\(version):rust-source"');
     expect(gxserverClientSource).toContain("isExplicitSelection: true");
     expect(gxserverClientSource).toContain("isExplicitSelection: false");
-    expect(gxserverClientSource).toContain("Selected Rust gxserver");
-    expect(gxserverClientSource).toContain("TypeScript gxserver was not started because this launch explicitly opted into Rust");
-    expect(gxserverClientSource).toContain("Bundled gxserver TypeScript CLI or gxserver binary is missing");
+    expect(gxserverClientSource).toContain("Selected native gxserver");
+    expect(gxserverClientSource).toContain("The packaged gxserver was not started because this launch explicitly selected another daemon");
+    expect(gxserverClientSource).toContain("Bundled gxserver binary is missing");
     expect(gxserverClientSource).not.toContain("resolveDefaultGxserverCliURL");
+
+    const defaultResolverSource = sourceBetween(
+      gxserverClientSource,
+      "private func resolveDefaultGxserverLaunchPlan()",
+      "private func gxserverDevelopmentRoots()",
+    );
+    expect(defaultResolverSource.indexOf("Web/gxserver/bin/gxserver")).toBeLessThan(
+      defaultResolverSource.indexOf("Web/gxserver/dist/src/cli.js"),
+    );
+    expect(defaultResolverSource).toContain("isRustGxserverPackageExecutable($0)");
+    expect(gxserverClientSource).toContain("Both Rust and TypeScript app packages contain bin/gxserver");
 
     const startOrReuseSource = sourceBetween(
       gxserverClientSource,
@@ -58,27 +72,27 @@ describe("gxserver release packaging source contract", () => {
     expect(launchSource).toContain("--foreground");
   });
 
-  test("local starts publish and clear explicit gxserver opt-in environment", () => {
+  test("local starts publish and clear explicit gxserver selection environment", () => {
     /*
-    CDXC:GxserverRustPort 2026-06-14-21:09:
-    LaunchServices drops shell environment, so local app starts must forward only explicit gxserver opt-in keys and clear stale values when the packaged default should be used.
+    CDXC:GxserverRustPort 2026-06-21-13:45:
+    LaunchServices drops shell environment, so local app starts must forward only explicit gxserver selection keys and clear stale values when the packaged Rust default should be used.
     */
-    expect(startGhostexSource).toContain('const gxserverOptInLaunchEnvironmentKeys = ["GHOSTEX_GXSERVER_CLI", "GHOSTEX_GXSERVER_BIN"]');
-    expect(startGhostexSource).toContain("publishLaunchServicesGxserverOptInEnvironment()");
+    expect(startGhostexSource).toContain('const gxserverExplicitLaunchEnvironmentKeys = ["GHOSTEX_GXSERVER_CLI", "GHOSTEX_GXSERVER_BIN"]');
+    expect(startGhostexSource).toContain("publishLaunchServicesGxserverExplicitEnvironment()");
 
     const publisherSource = sourceBetween(
       startGhostexSource,
-      "function publishLaunchServicesGxserverOptInEnvironment()",
+      "function publishLaunchServicesGxserverExplicitEnvironment()",
       "function preflightInstalledGxserverBundle",
     );
     expect(publisherSource).toContain('run("launchctl", ["setenv", key, value]');
     expect(publisherSource).toContain('run("launchctl", ["unsetenv", key]');
   });
 
-  test("native macOS build packages TypeScript gxserver by default while keeping Rust opt-in", () => {
+  test("native macOS build packages Rust gxserver by default while keeping TypeScript validation mode", () => {
     /*
-    CDXC:GxserverPackaging 2026-06-16-03:06:
-    This release temporarily packages the TypeScript gxserver daemon by default, including Node runtime metadata and the database addon. Rust packaging remains available through GHOSTEX_GXSERVER_PACKAGE_MODE=rust.
+    CDXC:GxserverPackaging 2026-06-21-13:45:
+    Local and release macOS builds package gxserver-rs by default so the rebuilt app launches the Rust daemon. TypeScript packaging stays explicit through GHOSTEX_GXSERVER_PACKAGE_MODE=typescript for validation only.
     */
     const rustBuildSource = sourceBetween(
       buildGhostexHostSource,
@@ -95,7 +109,7 @@ describe("gxserver release packaging source contract", () => {
       "package_gxserver_if_needed()",
       "# CDXC:CodeServerRuntime",
     );
-    expect(buildGhostexHostSource).toContain('GHOSTEX_GXSERVER_PACKAGE_MODE="${GHOSTEX_GXSERVER_PACKAGE_MODE:-typescript}"');
+    expect(buildGhostexHostSource).toContain('GHOSTEX_GXSERVER_PACKAGE_MODE="${GHOSTEX_GXSERVER_PACKAGE_MODE:-rust}"');
     expect(packageSource).toContain('--value "mode=typescript"');
     expect(packageSource).toContain('--value "mode=rust"');
     expect(packageSource).toContain("rust_bin=\"$(build_gxserver_rust_if_needed)\"");
@@ -110,10 +124,10 @@ describe("gxserver release packaging source contract", () => {
     expect(packageSource).toContain("$target_dir/dist/protocol/index.d.ts");
   });
 
-  test("installed CLI defaults to packaged TypeScript gxserver and keeps binary fallback", () => {
+  test("installed CLI defaults to packaged Rust gxserver and keeps TypeScript validation fallback", () => {
     /*
-    CDXC:GxserverPackaging 2026-06-16-03:10:
-    The public `gx server` launcher should discover Web/gxserver/dist/src/cli.js from app resources by default while retaining Web/gxserver/bin/gxserver for Rust opt-in packages and older bundles.
+    CDXC:GxserverPackaging 2026-06-21-13:45:
+    The public `gx server` launcher should discover Web/gxserver/bin/gxserver from app resources before any TypeScript CLI so shell and macOS app starts use the same Rust daemon by default.
     */
     expect(ghostexCliSource).toContain("function resolveGxserverCliLaunchFromRoot(root)");
     expect(ghostexCliSource).toContain('path.join(root, "gxserver", "dist", "src", "cli.js")');
@@ -129,6 +143,29 @@ describe("gxserver release packaging source contract", () => {
       "function resolveGxserverCliLaunch()",
       "function resolveGxserverCliLaunchFromRoot(root)",
     );
-    expect(defaultResolverSource).toContain("Bundled gxserver TypeScript CLI or gxserver binary is missing");
+    const rootResolverSource = sourceBetween(
+      ghostexCliSource,
+      "function resolveGxserverCliLaunchFromRoot(root)",
+      "function resolveGxserverCliLaunchForPath",
+    );
+    expect(rootResolverSource.indexOf('path.join(root, "gxserver", "bin", "gxserver")')).toBeLessThan(
+      rootResolverSource.indexOf('path.join(root, "gxserver", "dist", "src", "cli.js")'),
+    );
+    expect(defaultResolverSource).toContain("Bundled gxserver binary is missing");
+  });
+
+  test("Rust cutover preserves the macOS sidebar sessions contract", () => {
+    /*
+    CDXC:GxserverSidebarSessions 2026-06-21-13:45:
+    Before cutting macOS over from TypeScript gxserver to gxserver-rs, the Rust daemon must read the same ~/.ghostex/gxserver/state.db project/session tables and expose the same listProjects plus readPresentationSnapshot startup surface that the sidebar uses to render visible sessions.
+    */
+    expect(gxserverRustPathsSource).toContain('home_dir.join(".ghostex").join("gxserver")');
+    expect(gxserverRustPathsSource).toContain('state_db_file: root_dir.join("state.db")');
+    expect(nativeSidebarGxserverClientSource).toContain('rpc<{ projects: GxserverProjectDomainState[] }>("/api/listProjects")');
+    expect(nativeSidebarGxserverClientSource).toContain('rpc<{ snapshot: GxserverPresentationSnapshot }>("/api/readPresentationSnapshot")');
+    expect(gxserverRustServerSource).toContain('"/api/listProjects" => handle_domain_http');
+    expect(gxserverRustServerSource).toContain('repository\n                    .list_projects()');
+    expect(gxserverRustServerSource).toContain('"/api/readPresentationSnapshot" => handle_domain_http');
+    expect(gxserverRustServerSource).toContain('read_presentation_snapshot(db, server_id)');
   });
 });

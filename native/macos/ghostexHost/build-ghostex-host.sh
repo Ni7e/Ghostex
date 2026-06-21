@@ -60,7 +60,7 @@ case "$GHOSTEX_MACOS_ARCH" in
 		;;
 esac
 BUILD_CACHE_DIR="${GHOSTEX_BUILD_CACHE_DIR:-$REPO_ROOT/build/$GHOSTEX_MACOS_ARCH/build-cache}"
-GHOSTEX_GXSERVER_PACKAGE_MODE="${GHOSTEX_GXSERVER_PACKAGE_MODE:-typescript}"
+GHOSTEX_GXSERVER_PACKAGE_MODE="${GHOSTEX_GXSERVER_PACKAGE_MODE:-rust}"
 case "$GHOSTEX_GXSERVER_PACKAGE_MODE" in
 	typescript | ts)
 		GHOSTEX_GXSERVER_PACKAGE_MODE="typescript"
@@ -936,9 +936,9 @@ package_gxserver_if_needed() {
 	#
 	# CDXC:ProjectBoardBeads 2026-06-08-10:46: Package the full upstream Beads CLI with gxserver so Project/Kanban opens without PATH setup. The app build stages exactly one `bd` binary for GHOSTEX_MACOS_ARCH, keeping arm and Intel app artifacts arch-specific instead of shipping a universal Beads binary.
 	#
-	# CDXC:GxserverRustPackaging 2026-06-16-10:35: Rust gxserver packaging preserves generated TypeScript protocol exports and is still available for cutover validation through GHOSTEX_GXSERVER_PACKAGE_MODE=rust.
+	# CDXC:GxserverRustPackaging 2026-06-16-10:35: Rust gxserver packaging preserves generated TypeScript protocol exports and is available as the app-packaged daemon through GHOSTEX_GXSERVER_PACKAGE_MODE=rust.
 	#
-	# CDXC:GxserverPackaging 2026-06-16-03:06: The current release needs to ship the TypeScript gxserver daemon while Rust remains available behind GHOSTEX_GXSERVER_PACKAGE_MODE=rust. Keep the mode explicit in the package fingerprint so release artifacts cannot reuse a stale Rust package when switching back to TypeScript.
+	# CDXC:GxserverPackaging 2026-06-21-13:45: The macOS app now cuts over to gxserver-rs as the packaged default. Keep the package mode in the fingerprint so local starts cannot reuse a stale TypeScript package when switching to Rust, while explicit GHOSTEX_GXSERVER_PACKAGE_MODE=typescript remains a source-validation path.
 	if [[ "$GHOSTEX_GXSERVER_PACKAGE_MODE" == "rust" ]]; then
 		rust_bin="$(build_gxserver_rust_if_needed)"
 		package_digest="$(fingerprint_inputs \
@@ -999,7 +999,7 @@ package_gxserver_if_needed() {
 	write_cache_stamp "gxserver-package-$GHOSTEX_MACOS_ARCH" "$package_digest"
 }
 
-# CDXC:CodeServerRuntime 2026-06-08-12:17: code-server owns the bundled Node runtime in the macOS app. Build code-server with Node 22 and stage that runtime inside Web/code-server/lib/node; TypeScript gxserver release packages reuse that runtime instead of shipping a duplicate Node.
+# CDXC:CodeServerRuntime 2026-06-08-12:17: code-server owns the bundled Node runtime in the macOS app. Build code-server with Node 22 and stage that runtime inside Web/code-server/lib/node; explicit TypeScript gxserver packages reuse that runtime instead of shipping a duplicate Node.
 CODE_SERVER_NODE_BIN="$(prepare_code_server_app_node_runtime)"
 CODE_SERVER_NODE_DIR="$(cd "$(dirname "$CODE_SERVER_NODE_BIN")" && pwd)"
 CODE_SERVER_NPM_BIN="$CODE_SERVER_NODE_DIR/npm"
