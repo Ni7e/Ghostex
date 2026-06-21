@@ -1959,8 +1959,10 @@ type NativeProjectBrowserRestoreState = {
 };
 
 type NativeCliSessionSelector = {
+  globalRef?: string;
   index?: number;
   project?: string;
+  projectId?: string;
   selectorTitle?: string;
   sessionId?: string;
   sessionNumber?: number;
@@ -16399,15 +16401,26 @@ function rememberedWorkspaceTerminal(project: NativeProject): string | undefined
   return session?.kind === "terminal" && session.surface !== "commands" ? sessionId : undefined;
 }
 
-function rememberedWorkspaceTerminalForCommandsPanel(project: NativeProject): string | undefined {
-  return rememberedWorkspaceTerminal(project);
-}
-
 function focusedWorkspaceSessionIdForProject(project: NativeProject): string | undefined {
   const activeGroup =
     project.workspace.groups.find((group) => group.groupId === project.workspace.activeGroupId) ??
     project.workspace.groups[0];
   return activeGroup?.snapshot.focusedSessionId;
+}
+
+function commandsPanelRestoreSessionId(project: NativeProject): string | undefined {
+  const sessionId = focusedWorkspaceSessionIdForProject(project);
+  if (sessionId) {
+    const session = findSessionRecordInProject(project, sessionId);
+    if (session && (session.kind !== "terminal" || session.surface !== "commands")) {
+      /*
+       * CDXC:CommandsPanel 2026-06-21-17:16:
+       * Hiding Commands from Agents should return focus to the active workspace pane, including Browser panes. Do not use terminal-only memory for this path because a browser-focused Agents layout can still have an older terminal remembered for explicit Agents navigation.
+       */
+      return sessionId;
+    }
+  }
+  return rememberedWorkspaceTerminal(project);
 }
 
 function agentsModeFocusSessionIdForProject(project: NativeProject): string | undefined {
@@ -21752,7 +21765,7 @@ function toggleFocusedCommandsPanelForActiveProject(): void {
 
 function hideCommandsPanelForActiveProject(): void {
   const project = activeProject();
-  const restoreSessionId = rememberedWorkspaceTerminalForCommandsPanel(project);
+  const restoreSessionId = commandsPanelRestoreSessionId(project);
   updateActiveProjectCommandsPanel((panel) => ({
     ...panel,
     isVisible: false,
@@ -29592,8 +29605,9 @@ function findSidebarSessionForCli(
 ): SidebarSessionItem | undefined {
   const sidebarMessage = buildSidebarMessage();
   const sessions = sidebarMessage.groups.flatMap((group) => group.sessions);
-  if (selector.sessionId) {
-    return sessions.find((session) => session.sessionId === selector.sessionId);
+  const selectedBySessionId = findSidebarSessionByCliTarget(sessions, selector);
+  if (selectedBySessionId) {
+    return selectedBySessionId;
   }
   if (typeof selector.sessionNumber === "number") {
     return sessions.find((session) => session.sessionNumber === selector.sessionNumber);
@@ -29628,6 +29642,56 @@ function findSidebarSessionForCli(
   return focusedSessionId
     ? sessions.find((session) => session.sessionId === focusedSessionId)
     : sessions[0];
+}
+
+function findSidebarSessionByCliTarget(
+  sessions: SidebarSessionItem[],
+  selector: NativeCliSessionSelector,
+): SidebarSessionItem | undefined {
+  const globalReference = parseCliGlobalSessionRef(selector.globalRef);
+  const projectId = selector.projectId?.trim() || globalReference?.projectId;
+  const sessionId = selector.sessionId?.trim() || globalReference?.sessionId;
+  if (!sessionId) {
+    return undefined;
+  }
+  /*
+  CDXC:CliSessionSelectors 2026-06-21-19:22:
+  gxserver renderer commands receive raw project-scoped session ids such as
+  P.../G..., while combined sidebar mode renders `combined-session:P...:G...`.
+  Resolve the structured target in the renderer so `ghostex rename-command` and
+  other renderer-only CLI actions do not need to know presentation id encoding.
+  */
+  if (projectId) {
+    const combinedSessionId = createCombinedProjectSessionId(projectId, sessionId);
+    return (
+      sessions.find((session) => session.sessionId === combinedSessionId) ??
+      sessions.find((session) => {
+        const reference = parseCombinedProjectSessionId(session.sessionId);
+        return reference?.projectId === projectId && reference.sessionId === sessionId;
+      }) ??
+      sessions.find((session) => {
+        if (session.sessionId !== sessionId) {
+          return false;
+        }
+        return findLocalTerminalSessionReferenceForSidebarSession(session.sessionId)
+          ?.project.projectId === projectId;
+      })
+    );
+  }
+  return sessions.find((session) => session.sessionId === sessionId);
+}
+
+function parseCliGlobalSessionRef(
+  globalRef: string | undefined,
+): { projectId: string; sessionId: string } | undefined {
+  const parts = globalRef?.trim().split(":");
+  if (parts?.length !== 3 || !parts[1] || !parts[2]) {
+    return undefined;
+  }
+  return {
+    projectId: parts[1],
+    sessionId: parts[2],
+  };
 }
 
 function listNativeCliSessions(): NativeCliSessionListItem[] {
@@ -29943,17 +30007,27 @@ function summarizeCliSessionRecord(session: SessionRecord | undefined) {
 }
 
 function requireCliSession(payload: Record<string, unknown>): SidebarSessionItem {
+  const sessionTarget = readCliSessionTarget(payload);
   const session = findSidebarSessionForCli({
+    globalRef: readUnknownRecordString(sessionTarget, "globalRef") ?? readUnknownRecordString(payload, "globalRef"),
     index: typeof payload.index === "number" ? payload.index : undefined,
     project: typeof payload.project === "string" ? payload.project : undefined,
+    projectId: readUnknownRecordString(sessionTarget, "projectId") ?? readUnknownRecordString(payload, "projectId"),
     selectorTitle: typeof payload.selectorTitle === "string" ? payload.selectorTitle : undefined,
-    sessionId: typeof payload.sessionId === "string" ? payload.sessionId : undefined,
+    sessionId: readUnknownRecordString(sessionTarget, "sessionId") ?? readUnknownRecordString(payload, "sessionId"),
     sessionNumber: typeof payload.sessionNumber === "number" ? payload.sessionNumber : undefined,
   });
   if (!session) {
     throw new Error("No matching session was found.");
   }
   return session;
+}
+
+function readCliSessionTarget(payload: Record<string, unknown>): Record<string, unknown> | undefined {
+  const target = payload.sessionTarget;
+  return target && typeof target === "object" && !Array.isArray(target)
+    ? target as Record<string, unknown>
+    : undefined;
 }
 
 function terminalTextForCliKey(key: unknown): string | undefined {

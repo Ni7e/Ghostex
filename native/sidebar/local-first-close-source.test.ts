@@ -133,4 +133,37 @@ describe("local-first sidebar close source", () => {
       "focusTerminal(createCombinedProjectSessionId(project.projectId, focusSessionId));",
     );
   });
+
+  test("keeps the focused browser pane when hiding commands from agents mode", () => {
+    /*
+     * CDXC:CommandsPanel 2026-06-21-17:16:
+     * Hiding the Commands panel from Agents mode must restore the active workspace
+     * pane, not the last remembered terminal. A focused Browser pane is a valid
+     * workspace focus target and should stay focused after Commands collapses.
+     */
+    const restoreTargetSource = sourceBetween(
+      nativeSidebarSource,
+      "function commandsPanelRestoreSessionId(project: NativeProject): string | undefined {",
+      "function agentsModeFocusSessionIdForProject(project: NativeProject): string | undefined {",
+    );
+    const hideCommandsPanelSource = sourceBetween(
+      nativeSidebarSource,
+      "function hideCommandsPanelForActiveProject(): void {",
+      "function toggleCommandsPanelForActiveProject(): void {",
+    );
+    const agentsModeSource = sourceBetween(
+      nativeSidebarSource,
+      "function openAgentsModeFromTitlebar(): void {",
+      "function toggleProjectEditorCompanionFromTitlebar(): void {",
+    );
+
+    expect(hideCommandsPanelSource).toContain("commandsPanelRestoreSessionId(project)");
+    expect(restoreTargetSource).toContain("const sessionId = focusedWorkspaceSessionIdForProject(project);");
+    expect(restoreTargetSource).toContain(
+      'if (session && (session.kind !== "terminal" || session.surface !== "commands"))',
+    );
+    expect(restoreTargetSource).toContain("return sessionId;");
+    expect(restoreTargetSource).toContain("return rememberedWorkspaceTerminal(project);");
+    expect(agentsModeSource).toContain("agentsModeFocusSessionIdForProject(project)");
+  });
 });
