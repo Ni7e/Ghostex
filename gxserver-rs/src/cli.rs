@@ -11,6 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::{Map, Value};
 
 use crate::{
+    agent_hooks::run_notify_hook,
     agent_skills::{install_agent_skills, read_agent_skill_status},
     auth::read_gxserver_auth_token,
     config::read_selected_local_api_port,
@@ -76,6 +77,9 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         }
         Some("agent-skills") => {
             run_agent_skills_command(args.iter().skip(1).cloned().collect()).await?;
+        }
+        Some("agent-hook-notify") => {
+            run_notify_hook(args.iter().skip(1).cloned().collect())?;
         }
         Some("--version") | Some("version") => {
             println!("{version}");
