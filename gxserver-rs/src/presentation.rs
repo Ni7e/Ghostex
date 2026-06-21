@@ -1,7 +1,10 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
 
-use crate::domain::{DomainRepository, DomainStateError};
+use crate::{
+    domain::{DomainRepository, DomainStateError},
+    session_status::effective_agent_activity_value,
+};
 
 /*
 CDXC:GxserverRustPort 2026-06-14-22:12:
@@ -239,7 +242,10 @@ fn project_presentation_session(
         read_runtime_text(session, "agentSessionPath"),
     );
     if activity == "attention" {
-        output.insert("attention".to_string(), attention_state(session));
+        output.insert(
+            "attention".to_string(),
+            attention_state(session, generated_at),
+        );
     }
     output.insert("createdAt".to_string(), value_field(session, "createdAt"));
     insert_optional_value(&mut output, "cwd", session.get("cwd").cloned());
@@ -743,12 +749,15 @@ fn presentation_actions(session: &Value, activity: &str) -> Value {
     })
 }
 
-fn presentation_activity(session: &Value, _generated_at: &str) -> String {
-    let activity = session
+fn presentation_activity(session: &Value, generated_at: &str) -> String {
+    let generated_at_ms = parse_iso_ms(generated_at).unwrap_or_else(now_ms);
+    let raw_activity = session
         .get("runtimeSettings")
         .and_then(Value::as_object)
-        .and_then(|settings| settings.get("agentActivity"))
-        .and_then(Value::as_object)
+        .and_then(|settings| settings.get("agentActivity"));
+    let effective = effective_agent_activity_value(raw_activity, "idle", generated_at_ms);
+    let activity = effective
+        .as_object()
         .and_then(|activity| activity.get("activity"))
         .and_then(Value::as_str);
     match activity {
@@ -757,12 +766,14 @@ fn presentation_activity(session: &Value, _generated_at: &str) -> String {
     }
 }
 
-fn attention_state(session: &Value) -> Value {
-    let activity = session
+fn attention_state(session: &Value, generated_at: &str) -> Value {
+    let generated_at_ms = parse_iso_ms(generated_at).unwrap_or_else(now_ms);
+    let raw_activity = session
         .get("runtimeSettings")
         .and_then(Value::as_object)
-        .and_then(|settings| settings.get("agentActivity"))
-        .and_then(Value::as_object)
+        .and_then(|settings| settings.get("agentActivity"));
+    let activity = effective_agent_activity_value(raw_activity, "idle", generated_at_ms)
+        .as_object()
         .cloned()
         .unwrap_or_default();
     let mut output = Map::new();
@@ -995,6 +1006,16 @@ fn merge_object(target: &mut Map<String, Value>, values: Map<String, Value>) {
 
 fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn parse_iso_ms(value: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|date| date.timestamp_millis())
 }
 
 #[cfg(test)]
