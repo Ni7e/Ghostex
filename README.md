@@ -34,7 +34,8 @@ You can also download the latest DMG from GitHub Releases.
 
 ### Android and iOS
 
-Use the mobile apps to connect live to your Ghostex agent CLI sessions. APKs are in Releases. Join discord for iOS app.
+Use the mobile apps to connect live to your Ghostex agent CLI sessions. 
+APKs are in Github Releases. Join discord for iOS app testflight.
 
 #### Click the button to get the app:
 
@@ -47,39 +48,45 @@ Use the mobile apps to connect live to your Ghostex agent CLI sessions. APKs are
 
 ## Gallery
 
-### Split your terminals and use keyboard hotkeys to jump between terminals in the Agents view
-
-<img width="1200" alt="image" src="https://github.com/user-attachments/assets/c92c5ec9-0021-42fb-9628-0cee62c48e86" />
-
 ### Embedded VS Code based editor
 
-Great for working with markdown, reviewing code, and checking PRs (Github Extension is great!). It also loads on demand for file edits, PR checks, and git workflows.
+Loads on demand for working with markdown, reviewing code, and checking PRs. <br/>
+Supports all extensions. Sleeps when not in use to same resources (configurable).
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/986fbece-d0de-4739-8515-f3c2a7437b92" />
 
+### Split your terminals and use keyboard hotkeys to jump between them in the Agents view
+
+Exact same hotkeys flow that you're used to from terminals like Ghostty & Cmux. Full configurable. <br />
+cmd + t for new terminal, cmd + d to split, cmd + option + arrows to switch around, etc.
+
+<img width="1200" alt="image" src="https://github.com/user-attachments/assets/c92c5ec9-0021-42fb-9628-0cee62c48e86" />
+
 ### Supports all of the popular Agent CLIs
 
-Ghostex works with Claude Code, Codex CLI, OpenCode, Pi Agent, Gemini, Copilot, and other terminal-based agent CLIs.
+Ghostex works with Claude Code, Codex CLI, OpenCode, Pi Agent, Gemini, Copilot, and other terminal-based agent CLIs. <br/>
 Also supports T3code GUI panes if you prefer those (feature is fully hibernated when not used)
 
 <img width="1200" alt="Ghostex T3code panes and supported terminal CLIs" src="https://github.com/user-attachments/assets/49862e2d-1edd-4647-8161-5afb25ed8341" />
 
 ### Embedded Chromium Browser
 
-Comes with Annotations, Chrome Devtools MCP for Agents, Profiles.
+Comes with Annotations, Chrome Devtools MCP for Agents, Profiles.<br />
+/ghostex-browser-use to let the agent control your browser tabs without approval prompt!
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/ce9fbe6b-8c2b-41f1-88f6-67d8254846e5" />
 
 ### Kanban board based on beads!
 
-Put all your thoughts here then let an orchestrator agent manage subagents to tackle them
-(Ghostex supports cross Agent CLI orchestration)
+Put all your thoughts here then let an orchestrator agent manage subagents to tackle them<br/>
+(Ghostex supports cross Agent CLI orchestration, your Claude Code can launch and steer Codex agents!)
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/85543937-85f1-4171-b2d0-6ee7264beddd" />
 
 ### Rich Prompt Editor with Ctrl+G
 
-Edit your agent prompts with full hotkeys support and image previews! No more uneditable "[Pasted 50+ lines]" text!
+Edit your agent prompts with full hotkeys support and image previews! <br />
+No more uneditable "[Pasted 50+ lines]" text! Press F1 for all commands.
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/b51ec92e-04cf-4d8f-933c-fc2a13638a1d" />
 
@@ -91,14 +98,17 @@ Fuzzy search in all your previous sessions accross agents by typing a few words 
 
 ### Extensible Architecture (client apps <-> gxserver daemon <-> zmx persistence)
 
-The client/server split allows your to install just the gxserver daemon on any remote machine then control the agents on that machine from any client device (macOS/iOS/Android for now. Need help for Win/Linux)
+The client/server split allows your to install just the gxserver daemon on any remote machine then control the agents on that machine from any client device<br/>
+(macOS/iOS/Android for now. Need help for Win/Linux)
 
 <img width="3326" height="1514" alt="2026-06-12_Google Chrome_23-43-07@2x" src="https://github.com/user-attachments/assets/ecc84149-a9fc-4ec8-a387-af5ce35aa7be" />
 
 ### Notifications and status
 
-Ghostex supports notifications, pets, menu bar indicators (running/done agents), and phone app notifications.
+Ghostex supports notification sounds, pets, menu bar indicators (running/done agents), and phone app notifications.<br/>
+See how many agents are running with just a glance at your menu bar. Click to jump to an agent!
 
+<img width="300" alt="2026-06-23_Ghostex_15-37-53@2x" src="https://github.com/user-attachments/assets/91885b03-efc4-40cd-84ad-b33523185322" />
 <img width="300" alt="Ghostex notification indicator" src="https://github.com/user-attachments/assets/ad0f7af5-b0e9-4b24-988c-cb6bf02c6c9f" />
 
 ## Highlights
@@ -120,6 +130,8 @@ Ghostex supports notifications, pets, menu bar indicators (running/done agents),
 | --- | --- | --- | --- |
 | Open source | Yes | - | Yes |
 | Ghostty terminal | Yes | - | Yes |
+| Chromium Browser | Yes | Yes | No |
+| Fully featured IDE| Yes | - | - |
 | Built-in Computer use | Yes | Yes | - |
 | Built-in Browser use | Yes | Yes | Yes |
 | Use any model | Yes | - | Yes |
@@ -127,7 +139,7 @@ Ghostex supports notifications, pets, menu bar indicators (running/done agents),
 | Rich Prompt Editor | Yes | N/A | - |
 | iOS & Android | Yes | Yes | - |
 | Pets | Yes | Yes | - |
-| Appshots | Soon™ | Yes | - |
+| Appshots | Yes | Yes | - |
 | Automations | Soon™ | Yes | - |
 
 ## Main Features
