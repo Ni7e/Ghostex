@@ -92,7 +92,8 @@ No more uneditable "[Pasted 50+ lines]" text! Press F1 for all commands.
 
 ### Previous Sessions Search
 
-Fuzzy search in all your previous sessions accross agents by typing a few words from your prompts then press enter to resume that session!
+Fuzzy search in all your previous sessions accross agents by typing a few words from your prompts<br/> 
+Press enter to resume that session! Lots of filters available. Start it from the sidebar or run `ghostex find / gx f` to start it 
 
 <img width="3456" height="2066" alt="image" src="https://github.com/user-attachments/assets/85bfd614-d352-4f30-8501-f2a47d001f88" />
 
