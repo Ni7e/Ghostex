@@ -72,7 +72,7 @@ Also supports T3code GUI panes if you prefer those (feature is fully hibernated 
 ### Embedded Chromium Browser
 
 Comes with Annotations, Chrome Devtools MCP for Agents, Profiles.<br />
-/ghostex-browser-use to let the agent control your browser tabs without approval prompt!
+/ghostex-browser-use to let the agent control your browser tabs without an approval prompt!
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/ce9fbe6b-8c2b-41f1-88f6-67d8254846e5" />
 
@@ -88,7 +88,7 @@ Put all your thoughts here then let an orchestrator agent manage subagents to ta
 Edit your agent prompts with full hotkeys support and image previews! <br />
 No more uneditable "[Pasted 50+ lines]" text! Press F1 for all commands.
 
-<img width="1200" alt="image" src="https://github.com/user-attachments/assets/b51ec92e-04cf-4d8f-933c-fc2a13638a1d" />
+<img width="2048" height="1221" alt="2026-06-23_CleanShot_15-47-56" src="https://github.com/user-attachments/assets/6f1db19e-20c2-456c-bb91-8dc3309b4c4b" />
 
 ### Previous Sessions Search
 
