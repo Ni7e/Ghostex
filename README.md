@@ -34,7 +34,7 @@ You can also download the latest DMG from GitHub Releases.
 
 ### Android and iOS
 
-Use the mobile apps to connect live to your Ghostex agent CLI sessions. 
+Use the mobile apps to connect live to your Ghostex agent CLI sessions. <br/>
 APKs are in Github Releases. Join discord for iOS app testflight.
 
 #### Click the button to get the app:
