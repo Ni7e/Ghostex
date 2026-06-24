@@ -1738,11 +1738,21 @@ async function createGxserverQuickTerminal(payload = {}, flags = {}) {
 
 async function createGxserverSession(payload = {}, flags = {}) {
   const projectId = normalizeRequiredProjectId(payload.projectId ?? flags.projectId, "create-session");
+  const input = String(payload.input ?? "").trim();
+  const launchSettings = compactObject({
+    startupCommand: payload.command,
+    startupText: input || undefined,
+  });
   const params = {
     cwd: payload.cwd,
     kind: "terminal",
-    launchSettings: payload.command ? { startupCommand: payload.command } : undefined,
+    /**
+     * CDXC:GxserverSessionTitle 2026-06-23-08:40:
+     * Mobile and CLI create-session callers may provide first-message input, but gxserver-rs must remain the owner of first-prompt auto-name generation. Pass the prompt through as runtime metadata and startup text instead of generating or staging title commands in the CLI.
+     */
+    launchSettings: Object.keys(launchSettings).length > 0 ? launchSettings : undefined,
     projectId,
+    runtimeSettings: input ? { firstUserMessage: input } : undefined,
     title: payload.title || "Terminal",
   };
   return callGxserverRpc("/api/createSession", compactObject(params), flags);
@@ -1998,6 +2008,12 @@ function toCliSession(session, project, index, presentationSession) {
   const providerSessionName = session.zmxName ?? session.providerState?.zmxName;
   const title = presentationSession?.title ?? session.title;
   /*
+   * CDXC:GxserverSessionInventory 2026-06-22-00:47:
+   * `ghostex sessions --json` is the manual/debug inventory for resume testing, so it must surface the same agent provider session id that gxserver presentation rows and durable runtime settings carry. Prefer presentation identity because it is already the UI contract, and fall back to listSessions runtime metadata when a snapshot row is unavailable.
+   */
+  const agentSessionId = stringFlag(presentationSession?.agentSessionId ?? session.runtimeSettings?.agentSessionId);
+  const agentSessionPath = stringFlag(presentationSession?.agentSessionPath ?? session.runtimeSettings?.agentSessionPath);
+  /*
    * CDXC:GxserverSessionTitles 2026-06-07-09:33:
    * CLI and mobile inventory should expose gxserver's rendered display title separately from the raw durable title, so clients can show the same unsynced/placeholder title chrome without leaking display glyphs into rename or restore payloads.
    */
@@ -2008,6 +2024,8 @@ function toCliSession(session, project, index, presentationSession) {
     agentId: session.agentId,
     agentIcon: presentationSession?.agentIcon ?? session.agentId,
     agentName: presentationSession?.agentName,
+    agentSessionId,
+    agentSessionPath,
     alias: index + 1,
     attention: presentationSession?.attention,
     createdAt: presentationSession?.createdAt ?? session.createdAt,
@@ -4049,9 +4067,13 @@ function resolveGxserverCliLaunchFromRoot(root) {
   /*
    * CDXC:GxserverPackaging 2026-06-21-13:45:
    * `gx server ...` must follow the macOS app cutover and prefer the packaged gxserver-rs binary. Keep JavaScript CLI discovery only after the native binary so explicit TypeScript package checks do not change the normal installed daemon.
+   *
+   * CDXC:RemoteMachines 2026-06-23-10:07:
+   * Remote Ubuntu packages are standalone gxserver roots rather than macOS Web roots. Let the bundled Ghostex CLI resolve root/bin/gxserver so ~/.ghostex/gxserver/package/CLI/ghostex-cli.mjs can still run `ghostex server ...` without a source checkout or PATH fallback.
    */
   for (const candidate of [
     path.join(root, "gxserver", "bin", "gxserver"),
+    path.join(root, "bin", "gxserver"),
     path.join(root, "native", "macos", "ghostexHost", "Web", "gxserver", "bin", "gxserver"),
     path.join(root, "gxserver", "dist", "src", "cli.js"),
     path.join(root, "native", "macos", "ghostexHost", "Web", "gxserver", "dist", "src", "cli.js"),

@@ -1043,6 +1043,8 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "detect the Git repository";
     case "/api/queryLogs":
       return "load support logs";
+    case "/api/updatePortlessState":
+      return "update Portless setup state";
     case "/api/updateAuth":
       return "update gxserver authentication";
     case "/api/updateListenerConfig":

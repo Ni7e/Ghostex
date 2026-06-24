@@ -2,8 +2,18 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 
 const settingsModalSource = readFileSync(new URL("./settings-modal.tsx", import.meta.url), "utf8");
+const agentsHubModalSource = readFileSync(new URL("./agents-hub-modal.tsx", import.meta.url), "utf8");
 const settingsModalStylesSource = readFileSync(
   new URL("./styles/modals.css", import.meta.url),
+  "utf8",
+);
+const sidebarStylesSource = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const sharedSidebarContractSource = readFileSync(
+  new URL("../shared/session-grid-contract-sidebar.ts", import.meta.url),
+  "utf8",
+);
+const nativeSidebarSource = readFileSync(
+  new URL("../native/sidebar/native-sidebar.tsx", import.meta.url),
   "utf8",
 );
 
@@ -16,6 +26,30 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("settings modal source", () => {
+  test("keeps Settings and Agents Hub tab rails visibly bordered", () => {
+    /*
+     * CDXC:AppModalTabs 2026-06-24-04:25:
+     * Settings and Agents Hub top-level tab rails share the app-modal tab style,
+     * and that style must keep a visible 1px #252525 outside border plus
+     * single-pixel internal dividers.
+     */
+    const tabRailStyles = sourceBetween(
+      sidebarStylesSource,
+      '.app-modal-tab-rail[data-slot="tabs-list"] {',
+      ".app-modal-tab-rail [data-slot=\"tabs-trigger\"]:hover",
+    );
+    expect(tabRailStyles).toContain("border: 1px solid #252525 !important;");
+    expect(tabRailStyles).toContain("border: 0 !important;");
+    expect(tabRailStyles).toContain(
+      ".app-modal-tab-rail [data-slot=\"tabs-trigger\"] + [data-slot=\"tabs-trigger\"]",
+    );
+    expect(tabRailStyles).toContain("border-left: 1px solid #252525 !important;");
+    expect(settingsModalSource).toContain('<TabsList className="app-modal-tab-rail">');
+    expect(agentsHubModalSource).toContain(
+      '<TabsList className="agents-hub-tabs-list app-modal-tab-rail">',
+    );
+  });
+
   test("keeps Show Advanced inside the Settings section sidebar", () => {
     /*
      * CDXC:SettingsNavigation 2026-06-19-08:40:
@@ -135,6 +169,8 @@ describe("settings modal source", () => {
     );
 
     expect(betaSearch).toContain("Keep Awake");
+    expect(settingsModalSource).toContain("keepAwakeWhileWorkingSessions");
+    expect(settingsModalSource).toContain("Keep awake for working sessions");
     expect(betaSection).toContain("Title bar and Power settings: Keep Awake");
     expect(betaSection).toContain("Keep Awake title-bar button");
     expect(mainVisibility).toContain('sectionId === "power" && !keepAwakeSettingsVisible');
@@ -158,6 +194,23 @@ describe("settings modal source", () => {
     expect(agentsTab).toContain("Unavailable (${normalizedDefaultPromptAgentId})");
     expect(agentsTab).toContain("const selectedDefaultPromptAgentId = normalizedDefaultPromptAgentId;");
     expect(agentsTab).not.toContain("promptAgentOptions.find");
+  });
+
+  test("labels intentionally omitted local T3 runtime as not bundled", () => {
+    /*
+     * CDXC:ContributorStart 2026-06-22-23:23:
+     * Contributor local builds can intentionally omit the optional t3code
+     * checkout. Settings should label that state as Not bundled instead of
+     * Missing so users understand only the T3 feature is unavailable.
+     */
+    const integrationsTab = sourceBetween(
+      settingsModalSource,
+      "function IntegrationsSettingsTab",
+      "function IntegrationSettingsRow",
+    );
+
+    expect(integrationsTab).toContain('ghostexCliStatus?.t3RuntimeSource === "unavailable"');
+    expect(integrationsTab).toContain('"Not bundled"');
   });
 
   test("routes settings select popups through the close-before-write wrapper", () => {
@@ -186,6 +239,36 @@ describe("settings modal source", () => {
     expect(settingsSelect).toContain("open={selectOpen}");
     expect(selectField).toContain("<SettingsSelect");
     expect(settingsModalWithoutSettingsSelect).not.toMatch(/<Select(?:\s|>)/u);
+  });
+
+  test("keeps dev-server controls in the Terminal settings flow", () => {
+    /*
+     * CDXC:TerminalDevServers 2026-06-23-19:22:
+     * Dev-server detection, one system-default/internal-browser launch choice, and ignored ports should live in a dedicated Terminal settings section rather than the generic Browser section or a per-browser checklist.
+     */
+    const sectionKeys = sourceBetween(
+      settingsModalSource,
+      "terminalDevServers: [",
+      "editor: [",
+    );
+    const settingsNavigation = sourceBetween(
+      settingsModalSource,
+      "const mainSettingsSectionNavigation",
+      "const hasVisibleMainSettings",
+    );
+    const devServersSection = sourceBetween(
+      settingsModalSource,
+      'title="Dev Servers"',
+      '{mainSectionVisible("editor", settingsSearch.editor) ? (',
+    );
+
+    expect(sectionKeys).toContain("terminalDevServerDetectionEnabled");
+    expect(sectionKeys).toContain("terminalDevServerOpenTarget");
+    expect(sectionKeys).toContain("terminalDevServerIgnoredPortRules");
+    expect(settingsNavigation).toContain('id: "terminalDevServers"');
+    expect(devServersSection).toContain("TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS");
+    expect(devServersSection).not.toContain("TerminalDevServerBrowserTargetsField");
+    expect(devServersSection).toContain("TerminalDevServerIgnoredPortsField");
   });
 
   test("closes the custom tint picker dialog before final setting commits", () => {
@@ -218,11 +301,139 @@ describe("settings modal source", () => {
       "function ProjectsSettingsPanel",
       "function OpenTargetsSettingsTab",
     );
+    const selectedProjectEditor = sourceBetween(
+      settingsModalSource,
+      '<Card className="settings-project-command-card">',
+      "type PortlessSettingsDomainSummary",
+    );
 
     expect(projectsPanel).not.toContain('type: "removeProject"');
     expect(projectsPanel).not.toContain("removeSelectedProject");
     expect(projectsPanel).not.toContain("Remove project");
-    expect(projectsPanel).not.toContain("<IconTrash");
+    expect(selectedProjectEditor).not.toContain("<IconTrash");
+  });
+
+  test("places Portless global settings above the Projects selector", () => {
+    /*
+     * CDXC:PortlessSettings 2026-06-23-03:47:
+     * Phase 14 puts app-wide Portless controls at the top of Settings ->
+     * Projects, before the project selector and selected-project fields.
+     */
+    const projectsPanel = sourceBetween(
+      settingsModalSource,
+      "function ProjectsSettingsPanel",
+      "function PortlessGlobalSettingsPanel",
+    );
+    const settingsModalProjectsTab = sourceBetween(
+      settingsModalSource,
+      '<TabsContent className="mt-0 min-h-0 flex-1 overflow-hidden" value="projects">',
+      "</TabsContent>",
+    );
+
+    expect(projectsPanel.indexOf("<PortlessGlobalSettingsPanel")).toBeGreaterThanOrEqual(0);
+    expect(projectsPanel.indexOf("<PortlessGlobalSettingsPanel")).toBeLessThan(
+      projectsPanel.indexOf('className="projects-settings-selector"'),
+    );
+    expect(settingsModalProjectsTab).toContain("portless={portless}");
+    expect(settingsModalStylesSource).toContain(".settings-projects-global-settings");
+  });
+
+  test("wires Portless defaults through normalized global settings", () => {
+    /*
+     * CDXC:PortlessSettings 2026-06-23-03:47:
+     * The Projects tab should use the global settings defaults from
+     * normalizeghostexSettings: Portless enabled and HTTPS protocol until the
+     * user changes those app-wide settings.
+     */
+    const settingsModalProjectsTab = sourceBetween(
+      settingsModalSource,
+      '<TabsContent className="mt-0 min-h-0 flex-1 overflow-hidden" value="projects">',
+      "</TabsContent>",
+    );
+    const globalPanel = sourceBetween(
+      settingsModalSource,
+      "function PortlessGlobalSettingsPanel",
+      "function PortlessSettingsAdminActionButton",
+    );
+
+    expect(settingsModalProjectsTab).toContain(
+      'onPortlessEnabledChange={(checked) => updateDraft("portlessEnabled", checked)}',
+    );
+    expect(settingsModalProjectsTab).toContain(
+      'onPortlessProtocolChange={(protocol) => updateDraft("portlessProtocol", protocol)}',
+    );
+    expect(globalPanel).toContain("checked={settings.portlessEnabled}");
+    expect(globalPanel).toContain("value={[settings.portlessProtocol]}");
+    expect(settingsModalSource).toContain('{ label: "HTTPS", value: "https" }');
+    expect(settingsModalSource).toContain('{ label: "HTTP", value: "http" }');
+  });
+
+  test("keeps Portless settings actions explicit and sanitized", () => {
+    /*
+     * CDXC:PortlessSettings 2026-06-23-03:47:
+     * Settings actions can install, reconfigure, retry, disable, or remove the
+     * Ghostex-managed proxy, but the sidebar command may carry only enum action,
+     * request id, and selected protocol metadata.
+     */
+    const projectsPanel = sourceBetween(
+      settingsModalSource,
+      "function ProjectsSettingsPanel",
+      "type SettingsAgentDragData",
+    );
+    const sharedSettingsCommand = sourceBetween(
+      sharedSidebarContractSource,
+      "Settings -> Projects exposes explicit Portless setup actions",
+      'type: "postponePortlessSetupPrompt"',
+    );
+    const nativeSettingsHandler = sourceBetween(
+      nativeSidebarSource,
+      "function runPortlessSettingsAdminAction",
+      "function setPortlessEnabledFromSetupPrompt",
+    );
+
+    expect(projectsPanel).toContain('type: "runPortlessSettingsAdminAction"');
+    expect(projectsPanel).toContain('action === "remove"');
+    expect(projectsPanel).toContain("protocol: settings.portlessProtocol");
+    expect(projectsPanel).toContain('onClick={() => onEnabledChange(false)}');
+    expect(projectsPanel).toContain('remove: "Remove background proxy"');
+    expect(sharedSettingsCommand).toContain("action: NativePortlessAdminInstallAction;");
+    expect(sharedSettingsCommand).toContain("protocol: NativePortlessProtocol;");
+    expect(sharedSettingsCommand).toContain('action: "remove";');
+    expect(nativeSettingsHandler).toContain("runTrackedPortlessAdminAction");
+    expect(nativeSettingsHandler).not.toContain("runProcess");
+    expect(nativeSettingsHandler).not.toContain("stdout");
+    expect(nativeSettingsHandler).not.toContain("stderr");
+  });
+
+  test("shows assigned Portless domains as read-only project and worktree summaries", () => {
+    /*
+     * CDXC:PortlessSettings 2026-06-23-03:47:
+     * Phase 14 displays generated project/worktree domains without slug edit,
+     * reset, or input controls. Worktree grouping needs only stable project ids.
+     */
+    const domainsSummary = sourceBetween(
+      settingsModalSource,
+      "function PortlessAssignedDomainsSummary",
+      "function getPortlessSettingsStatus",
+    );
+    const domainGrouping = sourceBetween(
+      settingsModalSource,
+      "function getProjectPortlessDomainSummaries",
+      "function getPortlessAssignedDomainsEmptyMessage",
+    );
+
+    expect(domainsSummary).toContain('aria-label="Assigned Portless domains"');
+    expect(domainsSummary).toContain("settings-portless-domain-hostname");
+    expect(domainsSummary).toContain("Generated project and worktree domains are read-only.");
+    expect(domainsSummary).not.toContain("SettingsInput");
+    expect(domainsSummary).not.toContain("SettingsTextarea");
+    expect(domainsSummary).not.toContain("slug");
+    expect(domainsSummary).not.toContain("reset");
+    expect(domainGrouping).toContain("assignedDomains");
+    expect(domainGrouping).toContain("liveRoutesByProjectAndHostname");
+    expect(domainGrouping).toContain("worktreeParentProjectId");
+    expect(sharedSidebarContractSource).toContain("worktreeParentProjectId?: string");
+    expect(nativeSidebarSource).toContain("worktreeParentProjectId: worktree.parentProjectId");
   });
 
   test("keeps the open project selector neutral", () => {

@@ -110,10 +110,15 @@
 }
 
 .agents-hub-tabs-list {
+  /*
+   * CDXC:AppModalTabs 2026-06-23-04:30:
+   * Agents Hub adopts the shared .app-modal-tab-rail titlebar look and its
+   * compact rail height; only the 4-up column layout stays Hub-specific. The
+   * earlier 2.75rem rail read as oversized beside the catalog/editor panes.
+   */
   flex: 0 0 auto;
   display: grid !important;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  height: 2.75rem !important;
   width: 100% !important;
 }
 

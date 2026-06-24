@@ -2338,6 +2338,7 @@ dependencies = [
  "anyhow",
  "cc",
  "cef",
+ "futures",
  "gpui",
  "gpui-component",
  "gpui_platform",

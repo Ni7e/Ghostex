@@ -4,6 +4,8 @@ use std::{
     net::TcpStream,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
+    process::{Command, Stdio},
+    thread,
     time::Duration,
 };
 
@@ -14,6 +16,7 @@ use crate::{
     constants::{GXSERVER_PROTOCOL_HEADER, GXSERVER_PROTOCOL_VERSION},
     domain::DomainStateError,
     paths::GxserverPaths,
+    platform::shell::{command_shell, command_shell_for_path, login_shell_candidates},
 };
 
 const NOTIFY_HOOK_MARKER: &str = "ghostex-gxserver-agent-notify-hook-marker";
@@ -23,6 +26,9 @@ const OPENCODE_PLUGIN_SPEC: &str = "./plugins/ghostex-session.js";
 const AMP_PLUGIN_MARKER: &str = "ghostex-amp-session-extension-marker";
 const PI_EXTENSION_MARKER: &str = "ghostex-pi-session-extension-marker";
 const OMP_EXTENSION_MARKER: &str = "ghostex-omp-session-extension-marker";
+const SHELL_PATH_SENTINEL: &str = "__GHOSTEX_GXSERVER_SHELL_PATH__";
+const GXSERVER_AGENT_HOOK_COLOR_DISABLING_ENVIRONMENT_KEYS: &[&str] =
+    &["ANSI_COLORS_DISABLED", "NO_COLOR", "NODE_DISABLE_COLORS"];
 
 struct HookDefinition {
     agent_id: &'static str,
@@ -1092,14 +1098,7 @@ fn provider_hook_paths(agent_id: &str, hook_paths: &HookPaths) -> Vec<PathBuf> {
             .join("amp")
             .join("plugins")
             .join("ghostex-session.ts")],
-        "pi" => vec![resolve_config_directory(
-            &hook_paths.home_dir,
-            "PI_CODING_AGENT_DIR",
-            ".pi/agent",
-            None,
-        )
-        .join("extensions")
-        .join("ghostex-session.ts")],
+        "pi" => pi_extension_paths(&hook_paths.home_dir),
         "omp" => vec![resolve_omp_agent_directory(&hook_paths.home_dir)
             .join("extensions")
             .join("ghostex-omp-session.ts")],
@@ -1184,24 +1183,21 @@ fn uninstall_plugin_file_hook(
     definition: &HookDefinition,
     config_paths: Vec<PathBuf>,
 ) -> Result<Vec<String>, DomainStateError> {
-    let Some(config_path) = config_paths.into_iter().next() else {
-        return Ok(Vec::new());
-    };
-    let text = read_file_text(&config_path);
-    if !text_contains_ghostex_owned_hook_command(&text)
-        && hook_marker(definition.agent_id)
-            .map(|marker| !text.contains(marker))
-            .unwrap_or(true)
-    {
-        return Ok(Vec::new());
-    }
-    remove_file_if_exists(&config_path).map(|removed| {
-        if removed {
-            vec![path_string(&config_path)]
-        } else {
-            Vec::new()
+    let mut removed_paths = Vec::new();
+    for config_path in config_paths {
+        let text = read_file_text(&config_path);
+        if !text_contains_ghostex_owned_hook_command(&text)
+            && hook_marker(definition.agent_id)
+                .map(|marker| !text.contains(marker))
+                .unwrap_or(true)
+        {
+            continue;
         }
-    })
+        if remove_file_if_exists(&config_path)? {
+            push_unique_path(&mut removed_paths, path_string(&config_path));
+        }
+    }
+    Ok(removed_paths)
 }
 
 fn uninstall_marked_yaml_hook(
@@ -1214,9 +1210,6 @@ fn uninstall_marked_yaml_hook(
     let begin_marker = format!("# ghostex hooks {} begin", definition.agent_id);
     let end_marker = format!("# ghostex hooks {} end", definition.agent_id);
     let current_text = read_file_text(&config_path);
-    if !current_text.lines().any(|line| line.trim() == begin_marker) {
-        return Ok(Vec::new());
-    }
     let normalized_text = current_text.replace("\r\n", "\n");
     let lines = normalized_text
         .split('\n')
@@ -1266,12 +1259,11 @@ fn uninstall_opencode_hook_paths(
         }
     }
     let plugin_text = read_file_text(plugin_path);
-    if plugin_text.contains(OPENCODE_PLUGIN_MARKER)
-        || text_contains_ghostex_owned_hook_command(&plugin_text)
+    if (plugin_text.contains(OPENCODE_PLUGIN_MARKER)
+        || text_contains_ghostex_owned_hook_command(&plugin_text))
+        && remove_file_if_exists(plugin_path)?
     {
-        if remove_file_if_exists(plugin_path)? {
-            push_unique_path(&mut removed_paths, path_string(plugin_path));
-        }
+        push_unique_path(&mut removed_paths, path_string(plugin_path));
     }
     Ok(removed_paths)
 }
@@ -1397,22 +1389,12 @@ fn without_marked_block(lines: &[String], begin_marker: &str, end_marker: &str) 
             index += 1;
             continue;
         }
-        /*
-        CDXC:AgentHooks 2026-06-19-18:43:
-        Marked YAML uninstall must be lossless when a Ghostex begin marker has no matching end marker. Preserve the whole file instead of assuming the rest of the user's YAML belongs to Ghostex.
-        */
-        let Some(end_index) =
-            lines
-                .iter()
-                .enumerate()
-                .skip(index + 1)
-                .find_map(|(candidate_index, line)| {
-                    (line.trim() == end_marker).then_some(candidate_index)
-                })
-        else {
-            return lines.to_vec();
-        };
-        index = end_index + 1;
+        while index < lines.len() && lines[index].trim() != end_marker {
+            index += 1;
+        }
+        if index < lines.len() {
+            index += 1;
+        }
     }
     while result.last().map(|line| line.trim().is_empty()) == Some(true) {
         result.pop();
@@ -1452,19 +1434,29 @@ fn inspect_agent_hook_installation(
             }
         }
         HookFormat::PluginFile => {
-            let text = config_paths
-                .first()
-                .map(|path| read_file_text(path))
-                .unwrap_or_default();
             let marker = hook_marker(definition.agent_id).unwrap_or_default();
-            let current = !marker.is_empty()
-                && text.contains(&current_plugin_marker(marker))
-                && text.contains(&path_string(&hook_paths.notify_hook_path));
+            let inspections = config_paths
+                .iter()
+                .map(|path| {
+                    let text = read_file_text(path);
+                    let current = !marker.is_empty()
+                        && text.contains(&current_plugin_marker(marker))
+                        && text.contains(&path_string(&hook_paths.notify_hook_path));
+                    HookInspection {
+                        current_hook_installed: current,
+                        ghostex_hook_present: current
+                            || (!marker.is_empty() && text.contains(marker))
+                            || text_contains_ghostex_owned_hook_command(&text),
+                    }
+                })
+                .collect::<Vec<_>>();
             HookInspection {
-                current_hook_installed: current,
-                ghostex_hook_present: current
-                    || (!marker.is_empty() && text.contains(marker))
-                    || text_contains_ghostex_owned_hook_command(&text),
+                current_hook_installed: inspections
+                    .iter()
+                    .any(|inspection| inspection.current_hook_installed),
+                ghostex_hook_present: inspections
+                    .iter()
+                    .any(|inspection| inspection.ghostex_hook_present),
             }
         }
         HookFormat::MarkedYaml => {
@@ -1998,6 +1990,10 @@ fn remove_macos_notify_hook_execution_attributes(path: &Path) {
 }
 
 fn is_notify_hook_current(path: &Path) -> bool {
+    /*
+    CDXC:AgentHooks 2026-06-22-08:23:
+    Area 27 parity requires Rust status/install/uninstall to treat the TypeScript gxserver v6 hook marker as the shared notify-hook currency contract. Do not require Rust-only helper text here; existing gxserver-owned v6 hooks should stay installed instead of forcing a needless updateRequired state.
+    */
     read_file_text(path).contains(&format!("{NOTIFY_HOOK_MARKER} v{NOTIFY_HOOK_VERSION}"))
 }
 
@@ -2887,11 +2883,11 @@ fn is_opencode_session_plugin_registration(value: &Value) -> bool {
         .as_str()
         .or_else(|| value.as_array().and_then(|items| items.first()?.as_str()))
         .unwrap_or_default();
-    /*
-    CDXC:AgentHooks 2026-06-19-18:43:
-    OpenCode uninstall may remove only Ghostex's generated plugin identifiers from opencode.json. User plugins that merely end in ghostex-session.js are not Ghostex-owned.
-    */
-    plugin == OPENCODE_PLUGIN_SPEC || plugin == "ghostex-session"
+    plugin == OPENCODE_PLUGIN_SPEC
+        || plugin == "ghostex-session"
+        || plugin == "./plugins/ghostex-session.js"
+        || plugin.ends_with("/plugins/ghostex-session.js")
+        || plugin.ends_with("/ghostex-session.js")
 }
 
 fn is_ghostex_owned_hook_command(value: &Value, command: &str) -> bool {
@@ -2912,7 +2908,6 @@ fn text_contains_ghostex_owned_hook_command(text: &str) -> bool {
         || normalized.contains(OMP_EXTENSION_MARKER)
         || normalized.contains(PI_EXTENSION_MARKER)
         || normalized.contains(OPENCODE_PLUGIN_MARKER)
-        || normalized.contains("ghostex-opencode-session-extension-marker")
         || normalized.contains("ghostex-session-plugin-marker")
         || normalized.contains("ghostex-session-extension-marker")
 }
@@ -3006,6 +3001,40 @@ fn resolve_omp_agent_directory(home_dir: &Path) -> PathBuf {
     config_dir.join("agent")
 }
 
+fn pi_extension_paths(home_dir: &Path) -> Vec<PathBuf> {
+    /*
+    CDXC:AgentHooks 2026-06-23-05:09:
+    Pi's active extension loader uses the Pi root extensions directory, while
+    older Ghostex installs and local customization experiments can leave hooks
+    under the agent directory. Treat the root extension file as canonical for
+    new installs, but keep inspecting the previous agent-scoped locations so
+    existing current hooks do not warn and stale hooks report updateRequired.
+    */
+    let agent_dir = resolve_config_directory(home_dir, "PI_CODING_AGENT_DIR", ".pi/agent", None);
+    let root_dir = agent_dir
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| home_dir.join(".pi"));
+    unique_path_bufs(vec![
+        root_dir.join("extensions").join("ghostex-session.ts"),
+        agent_dir.join("extensions").join("ghostex-session.ts"),
+        agent_dir
+            .join("extensions")
+            .join("ghostex-session")
+            .join("index.ts"),
+    ])
+}
+
+fn unique_path_bufs(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut output = Vec::new();
+    for path in paths {
+        if !output.contains(&path) {
+            output.push(path);
+        }
+    }
+    output
+}
+
 fn normalize_environment_path(value: Option<&str>, home_dir: &Path) -> Option<PathBuf> {
     let trimmed = value.map(str::trim).filter(|value| !value.is_empty())?;
     if trimmed == "~" {
@@ -3042,20 +3071,156 @@ fn list_profile_hook_paths(home_dir: &Path, profile_dir: &str, file_name: &str) 
 }
 
 fn command_exists(command: &str, home_dir: &Path) -> bool {
-    let path_env = std::env::var("PATH").unwrap_or_default();
-    let mut entries = path_env.split(':').map(PathBuf::from).collect::<Vec<_>>();
+    resolve_command_path(command, home_dir).is_some()
+}
+
+fn resolve_command_path(command: &str, home_dir: &Path) -> Option<String> {
+    /*
+    CDXC:AgentHooks 2026-06-23-07:52:
+    Hook status must discover the same agent CLIs on macOS and Ubuntu before reporting cliMissing. Merge login-shell PATH entries, GUI/default tool directories, and user PATH, then run the final command-v probe in the platform shell so startup files cannot overwrite the normalized PATH and Linux does not require zsh.
+    */
+    let path_value =
+        normalize_gxserver_process_path(std::env::var("PATH").ok().as_deref(), home_dir);
+    let shell = command_shell();
+    let mut command_process = Command::new(&shell.executable);
+    command_process.args(shell.script_args(&format!("command -v {}", shell_quote(command))));
+    apply_hook_command_environment(&mut command_process, home_dir);
+    command_process.env("PATH", path_value);
+    let stdout = run_command_stdout_with_timeout(command_process, Duration::from_millis(2_000))?;
+    stdout
+        .trim()
+        .split('\n')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn normalize_gxserver_process_path(current_path: Option<&str>, home_dir: &Path) -> String {
+    let mut entries = Vec::new();
+    entries.extend(discover_login_shell_path_entries(home_dir));
+    entries.extend(split_path(current_path));
     entries.extend([
-        home_dir.join(".opencode").join("bin"),
-        home_dir.join(".local").join("bin"),
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-        PathBuf::from("/usr/bin"),
-        PathBuf::from("/bin"),
+        path_string(&home_dir.join(".opencode").join("bin")),
+        path_string(
+            &home_dir
+                .join(".local")
+                .join("share")
+                .join("mise")
+                .join("shims"),
+        ),
+        path_string(&home_dir.join(".local").join("bin")),
+        path_string(&home_dir.join(".asdf").join("shims")),
+        "/opt/homebrew/bin".to_string(),
+        "/opt/homebrew/sbin".to_string(),
+        "/usr/local/bin".to_string(),
+        "/usr/local/sbin".to_string(),
+        "/usr/bin".to_string(),
+        "/bin".to_string(),
+        "/usr/sbin".to_string(),
+        "/sbin".to_string(),
     ]);
-    entries
-        .into_iter()
-        .map(|entry| entry.join(command))
-        .any(|candidate| candidate.is_file() && is_executable(&candidate))
+    unique_path_entries(entries).join(":")
+}
+
+fn discover_login_shell_path_entries(home_dir: &Path) -> Vec<String> {
+    for candidate in login_shell_candidates() {
+        let candidate_path = PathBuf::from(&candidate);
+        if !is_executable(&candidate_path) {
+            continue;
+        }
+        let entries = run_login_shell_path_probe(&candidate, home_dir);
+        if !entries.is_empty() {
+            return entries;
+        }
+    }
+    Vec::new()
+}
+
+fn run_login_shell_path_probe(shell_path: &str, home_dir: &Path) -> Vec<String> {
+    let shell = command_shell_for_path(shell_path);
+    let mut command = Command::new(&shell.executable);
+    command.args(
+        shell.interactive_script_args(&format!("printf '\\n{SHELL_PATH_SENTINEL}%s\\n' \"$PATH\"")),
+    );
+    apply_hook_command_environment(&mut command, home_dir);
+    let Some(stdout) = run_command_stdout_with_timeout(command, Duration::from_millis(2_000))
+    else {
+        return Vec::new();
+    };
+    stdout
+        .lines()
+        .rev()
+        .find_map(|line| line.strip_prefix(SHELL_PATH_SENTINEL))
+        .map(|path| split_path(Some(path)))
+        .unwrap_or_default()
+}
+
+fn apply_hook_command_environment(command: &mut Command, home_dir: &Path) {
+    command.env("HOME", home_dir);
+    for key in GXSERVER_AGENT_HOOK_COLOR_DISABLING_ENVIRONMENT_KEYS {
+        command.env_remove(key);
+    }
+}
+
+fn run_command_stdout_with_timeout(mut command: Command, timeout: Duration) -> Option<String> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = command.spawn().ok()?;
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return None;
+                }
+                let mut stdout = String::new();
+                if let Some(mut child_stdout) = child.stdout.take() {
+                    let _ = child_stdout.read_to_string(&mut stdout);
+                }
+                let _ = child.wait();
+                return Some(stdout);
+            }
+            Ok(None) => {
+                if started.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+}
+
+fn split_path(value: Option<&str>) -> Vec<String> {
+    value
+        .unwrap_or_default()
+        .split(':')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn unique_path_entries(entries: Vec<String>) -> Vec<String> {
+    let mut seen = Vec::new();
+    let mut output = Vec::new();
+    for entry in entries {
+        if entry.is_empty() || seen.contains(&entry) {
+            continue;
+        }
+        seen.push(entry.clone());
+        output.push(entry);
+    }
+    output
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -3230,6 +3395,117 @@ mod tests {
     }
 
     #[test]
+    fn hook_status_uses_pi_root_extension_before_legacy_agent_paths() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let hook_paths = HookPaths::new(paths.home_dir.clone());
+        write_test_executable(&temp.path().join(".local").join("bin").join("pi"));
+        install_notify_hook(&hook_paths).expect("notify hook");
+        let pi = HookDefinition {
+            agent_id: "pi",
+            cli_command: "pi",
+        };
+        let root_extension_path = temp
+            .path()
+            .join(".pi")
+            .join("extensions")
+            .join("ghostex-session.ts");
+        let legacy_agent_extension_path = temp
+            .path()
+            .join(".pi")
+            .join("agent")
+            .join("extensions")
+            .join("ghostex-session")
+            .join("index.ts");
+        write_test_file(
+            &root_extension_path,
+            &format!(
+                "// {PI_EXTENSION_MARKER} v3\nconst hook = \"{}\";\n",
+                path_string(&hook_paths.notify_hook_path)
+            ),
+        );
+        write_test_file(
+            &legacy_agent_extension_path,
+            &format!("// {PI_EXTENSION_MARKER} v2\n"),
+        );
+
+        let provider_paths = provider_hook_paths("pi", &hook_paths);
+        let inspection = inspect_agent_hook_installation(&pi, &hook_paths, &provider_paths);
+        assert!(inspection.current_hook_installed);
+        assert_eq!(
+            provider_paths.first().map(|path| path_string(path)),
+            Some(path_string(&root_extension_path))
+        );
+        assert!(provider_paths.contains(&legacy_agent_extension_path));
+
+        let status = read_agent_hook_status(
+            &paths,
+            json!({ "agentIds": ["pi"], "autoUpgradeInstalled": false })
+                .as_object()
+                .expect("params"),
+        )
+        .expect("status");
+        let row = status
+            .get("agents")
+            .and_then(Value::as_array)
+            .and_then(|agents| agents.first())
+            .expect("pi row");
+        assert_eq!(row.get("status"), Some(&json!("installed")));
+        assert_eq!(row.get("hookInstalled"), Some(&json!(true)));
+        assert!(row
+            .get("paths")
+            .and_then(Value::as_array)
+            .expect("paths")
+            .contains(&json!(path_string(&legacy_agent_extension_path))));
+    }
+
+    #[test]
+    fn hook_status_reports_legacy_pi_agent_extension_as_update_required() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let hook_paths = HookPaths::new(paths.home_dir.clone());
+        write_test_executable(&temp.path().join(".local").join("bin").join("pi"));
+        install_notify_hook(&hook_paths).expect("notify hook");
+        let legacy_agent_extension_path = temp
+            .path()
+            .join(".pi")
+            .join("agent")
+            .join("extensions")
+            .join("ghostex-session")
+            .join("index.ts");
+        write_test_file(
+            &legacy_agent_extension_path,
+            &format!("// {PI_EXTENSION_MARKER} v2\n"),
+        );
+
+        let status = read_agent_hook_status(
+            &paths,
+            json!({ "agentIds": ["pi"], "autoUpgradeInstalled": false })
+                .as_object()
+                .expect("params"),
+        )
+        .expect("status");
+        let row = status
+            .get("agents")
+            .and_then(Value::as_array)
+            .and_then(|agents| agents.first())
+            .expect("pi row");
+        assert_eq!(row.get("status"), Some(&json!("updateRequired")));
+        assert_eq!(row.get("hookInstalled"), Some(&json!(false)));
+    }
+
+    #[test]
+    fn notify_hook_current_uses_typescript_marker_contract() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let hook_path = temp.path().join("agent-shell-notify.sh");
+        write_test_file(
+            &hook_path,
+            &format!("#!/bin/zsh\n# {NOTIFY_HOOK_MARKER} v{NOTIFY_HOOK_VERSION}\n"),
+        );
+        assert!(is_notify_hook_current(&hook_path));
+    }
+
+    #[test]
     fn install_writes_notify_hook_without_payload_content() {
         let temp = tempfile::tempdir().expect("tempdir");
         let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
@@ -3338,7 +3614,7 @@ mod tests {
     }
 
     #[test]
-    fn uninstall_marked_yaml_preserves_file_when_end_marker_is_missing() {
+    fn uninstall_marked_yaml_matches_typescript_missing_end_marker_behavior() {
         let temp = tempfile::tempdir().expect("tempdir");
         let rovodev = HookDefinition {
             agent_id: "rovodev",
@@ -3350,10 +3626,10 @@ mod tests {
 
         let removed =
             uninstall_marked_yaml_hook(&rovodev, vec![yaml_path.clone()]).expect("yaml uninstall");
-        assert!(removed.is_empty());
+        assert_eq!(removed, vec![path_string(&yaml_path)]);
         assert_eq!(
             fs::read_to_string(&yaml_path).expect("yaml text"),
-            yaml_text
+            "user_before: true\n"
         );
     }
 
@@ -3575,13 +3851,25 @@ mod tests {
         .expect("opencode json");
         assert_eq!(
             opencode_config.get("plugin"),
-            Some(&json!([
-                "./plugins/other.js",
-                "/tmp/plugins/ghostex-session.js",
-                "/tmp/ghostex-session.js",
-                "not-ghostex"
-            ]))
+            Some(&json!(["./plugins/other.js", "not-ghostex"]))
         );
+    }
+
+    #[test]
+    fn command_exists_uses_typescript_default_tool_paths() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let command = format!("ghostex-test-cli-{}", std::process::id());
+        write_test_executable(
+            &temp
+                .path()
+                .join(".local")
+                .join("share")
+                .join("mise")
+                .join("shims")
+                .join(&command),
+        );
+
+        assert!(command_exists(&command, temp.path()));
     }
 
     fn write_test_file(path: &Path, text: &str) {

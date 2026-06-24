@@ -1,4 +1,9 @@
-use std::{collections::HashSet, env, fmt, path::Path};
+use std::{
+    collections::HashSet,
+    env, fmt, fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -98,7 +103,7 @@ impl<'a> DomainRepository<'a> {
     }
 
     pub fn update_project(&self, params: &Map<String, Value>) -> DomainResult<Value> {
-        let project_id = read_project_id(params)?;
+        let project_id = read_unvalidated_project_lookup_id(params);
         let current = self.get_project(&project_id)?.ok_or_else(|| {
             DomainStateError::not_found(format!("Project {project_id} does not exist."))
         })?;
@@ -175,16 +180,39 @@ impl<'a> DomainRepository<'a> {
 
     pub fn add_project_path(&self, params: &Map<String, Value>) -> DomainResult<Value> {
         let path = normalize_existing_directory_path(
-            params.get("path").or_else(|| params.get("projectPath")),
+            params
+                .get("path")
+                .filter(|value| !value.is_null())
+                .or_else(|| params.get("projectPath")),
             "path",
         )?;
-        if let Some(existing) = self.find_project_by_path(&path)? {
-            return Ok(existing);
-        }
         let mut create_params = params.clone();
         create_params.insert("path".to_string(), Value::String(path.clone()));
-        if !read_optional_text(create_params.get("name")).is_some() {
-            create_params.insert("name".to_string(), Value::String(path_basename(&path)));
+        let name =
+            read_optional_text(create_params.get("name")).unwrap_or_else(|| path_basename(&path));
+        create_params.insert("name".to_string(), Value::String(name.clone()));
+        let projects = self.list_projects()?;
+        /*
+        CDXC:WorktreeProjectRegistration 2026-06-22-00:35:
+        Rust gxserver must preserve the TypeScript Add Worktree/Add Project path-registration contract. When /api/addProjectPath receives a linked Git worktree path, detect the already registered main checkout and store worktree metadata under that canonical parent project ID; if the path was registered earlier without metadata, repair that existing row in place so the macOS sidebar groups it exactly like the old server.
+        */
+        let worktree = detect_registered_git_worktree_metadata(&projects, &path, &name);
+        if let Some(existing) = find_project_by_path_in(&projects, &path) {
+            if let Some(worktree) = worktree {
+                if !are_project_worktree_metadata_equal(existing.get("worktree"), &worktree) {
+                    let mut update_params = Map::new();
+                    update_params.insert(
+                        "projectId".to_string(),
+                        Value::String(read_string_field(&existing, "projectId")?),
+                    );
+                    update_params.insert("worktree".to_string(), Value::Object(worktree));
+                    return self.update_project(&update_params);
+                }
+            }
+            return Ok(existing);
+        }
+        if let Some(worktree) = worktree {
+            create_params.insert("worktree".to_string(), Value::Object(worktree));
         }
         self.create_project(&create_params)
     }
@@ -245,8 +273,8 @@ impl<'a> DomainRepository<'a> {
         params: &Map<String, Value>,
         allow_stopped_lifecycle_revive: bool,
     ) -> DomainResult<Value> {
-        let project_id = read_project_id(params)?;
-        let session_id = read_session_id(params)?;
+        let project_id = read_unvalidated_project_lookup_id(params);
+        let session_id = read_unvalidated_session_lookup_id(params);
         let current = self.get_session(&project_id, &session_id)?.ok_or_else(|| {
             DomainStateError::not_found(format!(
                 "Session {project_id}/{session_id} does not exist."
@@ -301,35 +329,53 @@ impl<'a> DomainRepository<'a> {
         }
         let session_ids = normalize_session_order_ids(params.get("sessionIds"))?;
         let updated_at = now_iso();
-        let mut sessions = Vec::new();
-        for (index, session_id) in session_ids.iter().enumerate() {
-            let current = self.get_session(&project_id, session_id)?.ok_or_else(|| {
-                DomainStateError::not_found(format!(
-                    "Session {project_id}/{session_id} does not exist."
-                ))
-            })?;
-            let mut update = Map::new();
-            update.insert("projectId".to_string(), Value::String(project_id.clone()));
-            update.insert("sessionId".to_string(), Value::String(session_id.clone()));
-            update.insert(
-                "sidebarOrder".to_string(),
-                Value::Number(serde_json::Number::from(((index + 1) * 1000) as i64)),
-            );
-            let session = merge_session_update(&self.server_id, current, &updated_at, &update)?;
-            self.db
-                .execute(
-                    "UPDATE sessions SET updatedAt = ?3, sidebarOrder = ?4 WHERE projectId = ?1 AND sessionId = ?2",
-                    params![
-                        project_id,
-                        session_id,
-                        updated_at,
-                        ((index + 1) * 1000) as i64
-                    ],
-                )
-                .map_err(sql_error)?;
-            sessions.push(session);
+        /*
+        CDXC:SidebarOrdering 2026-06-22-05:50:
+        updateSessionOrder is one manual sidebar-order write in TypeScript gxserver. If a later session ID is missing or SQLite rejects a row, earlier sidebarOrder and updatedAt writes must roll back instead of leaving a partially reordered sidebar.
+        */
+        self.db
+            .execute_batch("BEGIN IMMEDIATE TRANSACTION")
+            .map_err(sql_error)?;
+        let result = (|| -> DomainResult<Vec<Value>> {
+            let mut sessions = Vec::new();
+            for (index, session_id) in session_ids.iter().enumerate() {
+                let current = self.get_session(&project_id, session_id)?.ok_or_else(|| {
+                    DomainStateError::not_found(format!(
+                        "Session {project_id}/{session_id} does not exist."
+                    ))
+                })?;
+                let sidebar_order = ((index + 1) * 1000) as i64;
+                let mut update = Map::new();
+                update.insert("projectId".to_string(), Value::String(project_id.clone()));
+                update.insert("sessionId".to_string(), Value::String(session_id.clone()));
+                update.insert(
+                    "sidebarOrder".to_string(),
+                    Value::Number(serde_json::Number::from(sidebar_order)),
+                );
+                let session = merge_session_update(&self.server_id, current, &updated_at, &update)?;
+                self.db
+                    .execute(
+                        "UPDATE sessions SET updatedAt = ?3, sidebarOrder = ?4 WHERE projectId = ?1 AND sessionId = ?2",
+                        params![project_id, session_id, updated_at, sidebar_order],
+                    )
+                    .map_err(sql_error)?;
+                sessions.push(session);
+            }
+            Ok(sessions)
+        })();
+        match result {
+            Ok(sessions) => {
+                if let Err(error) = self.db.execute_batch("COMMIT") {
+                    let _ = self.db.execute_batch("ROLLBACK");
+                    return Err(sql_error(error));
+                }
+                Ok(sessions)
+            }
+            Err(error) => {
+                let _ = self.db.execute_batch("ROLLBACK");
+                Err(error)
+            }
         }
-        Ok(sessions)
     }
 
     pub fn list_sessions(&self, project_id: Option<&str>) -> DomainResult<Vec<Value>> {
@@ -380,8 +426,8 @@ impl<'a> DomainRepository<'a> {
     }
 
     pub fn remove_session(&self, params: &Map<String, Value>) -> DomainResult<Value> {
-        let project_id = read_project_id(params)?;
-        let session_id = read_session_id(params)?;
+        let project_id = read_unvalidated_project_lookup_id(params);
+        let session_id = read_unvalidated_session_lookup_id(params);
         let current = self.get_session(&project_id, &session_id)?.ok_or_else(|| {
             DomainStateError::not_found(format!(
                 "Session {project_id}/{session_id} does not exist."
@@ -408,15 +454,16 @@ impl<'a> DomainRepository<'a> {
     }
 
     fn find_project_by_path(&self, normalized_path: &str) -> DomainResult<Option<Value>> {
-        for project in self.list_projects()? {
-            if project.get("path").and_then(Value::as_str) == Some(normalized_path) {
-                return Ok(Some(project));
-            }
-        }
-        Ok(None)
+        Ok(find_project_by_path_in(
+            &self.list_projects()?,
+            normalized_path,
+        ))
     }
 
-    fn resolve_create_session_project(&self, params: &Map<String, Value>) -> DomainResult<Value> {
+    pub fn resolve_create_session_project(
+        &self,
+        params: &Map<String, Value>,
+    ) -> DomainResult<Value> {
         let project_id = params
             .get("projectId")
             .and_then(Value::as_str)
@@ -428,14 +475,15 @@ impl<'a> DomainRepository<'a> {
             }
         }
 
-        let project_path = params.get("projectPath").or_else(|| params.get("cwd"));
+        let project_path_param = params.get("projectPath").filter(|value| !value.is_null());
+        let project_path = project_path_param.or_else(|| params.get("cwd"));
         if let Some(path_value) = project_path
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
         {
             let normalized_path = normalize_existing_directory_path(
                 Some(&Value::String(path_value.to_string())),
-                if params.contains_key("projectPath") {
+                if project_path_param.is_some() {
                     "projectPath"
                 } else {
                     "cwd"
@@ -542,6 +590,188 @@ impl<'a> DomainRepository<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
+struct GitWorktreeEntry {
+    bare: bool,
+    branch: Option<String>,
+    path: String,
+}
+
+fn find_project_by_path_in(projects: &[Value], normalized_path: &str) -> Option<Value> {
+    projects
+        .iter()
+        .find(|project| project.get("path").and_then(Value::as_str) == Some(normalized_path))
+        .cloned()
+}
+
+fn detect_registered_git_worktree_metadata(
+    projects: &[Value],
+    project_path: &str,
+    project_name: &str,
+) -> Option<Map<String, Value>> {
+    if run_git(project_path, &["rev-parse", "--is-inside-work-tree"]) != "true" {
+        return None;
+    }
+
+    let worktree_root =
+        normalize_path_for_comparison(&run_git(project_path, &["rev-parse", "--show-toplevel"]));
+    if worktree_root.is_empty() {
+        return None;
+    }
+
+    let entries = parse_git_worktree_list_porcelain(&run_git(
+        project_path,
+        &["worktree", "list", "--porcelain"],
+    ));
+    let current_entry = entries
+        .iter()
+        .find(|entry| normalize_path_for_comparison(&entry.path) == worktree_root)?;
+    let main_entry = entries.iter().find(|entry| !entry.bare)?;
+    let main_path = normalize_path_for_comparison(&main_entry.path);
+    if main_path.is_empty() || worktree_root == main_path {
+        return None;
+    }
+
+    let parent_project = projects.iter().find(|project| {
+        let Some(project_path) = project.get("path").and_then(Value::as_str) else {
+            return false;
+        };
+        if project.get("worktree").is_some() {
+            return false;
+        }
+        normalize_path_for_comparison(project_path) == main_path
+    })?;
+    let parent_project_id = parent_project.get("projectId").and_then(Value::as_str)?;
+    let parent_project_name = parent_project.get("name").and_then(Value::as_str)?;
+    let parent_project_path = parent_project.get("path").and_then(Value::as_str)?;
+    let worktree_name = path_file_name(&worktree_root).unwrap_or_else(|| project_name.to_string());
+
+    let mut metadata = Map::new();
+    metadata.insert(
+        "branch".to_string(),
+        Value::String(normalize_git_worktree_branch(
+            current_entry.branch.as_deref(),
+        )),
+    );
+    metadata.insert("createdAt".to_string(), Value::String(now_iso()));
+    metadata.insert("name".to_string(), Value::String(worktree_name));
+    metadata.insert(
+        "parentProjectId".to_string(),
+        Value::String(parent_project_id.to_string()),
+    );
+    metadata.insert(
+        "parentProjectName".to_string(),
+        Value::String(parent_project_name.to_string()),
+    );
+    metadata.insert(
+        "parentProjectPath".to_string(),
+        Value::String(parent_project_path.to_string()),
+    );
+    Some(metadata)
+}
+
+fn are_project_worktree_metadata_equal(
+    current: Option<&Value>,
+    expected: &Map<String, Value>,
+) -> bool {
+    let Some(current) = current.and_then(Value::as_object) else {
+        return false;
+    };
+    [
+        "branch",
+        "name",
+        "parentProjectId",
+        "parentProjectName",
+        "parentProjectPath",
+    ]
+    .into_iter()
+    .all(|key| current.get(key) == expected.get(key))
+}
+
+fn parse_git_worktree_list_porcelain(stdout: &str) -> Vec<GitWorktreeEntry> {
+    let mut entries = Vec::new();
+    let mut current_entry: Option<GitWorktreeEntry> = None;
+
+    for line in stdout.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            if let Some(entry) = current_entry.take() {
+                if !entry.path.is_empty() {
+                    entries.push(entry);
+                }
+            }
+            current_entry = Some(GitWorktreeEntry {
+                bare: false,
+                branch: None,
+                path: path.trim().to_string(),
+            });
+            continue;
+        }
+
+        let Some(entry) = current_entry.as_mut() else {
+            continue;
+        };
+        if line == "bare" {
+            entry.bare = true;
+        } else if let Some(branch) = line.strip_prefix("branch ") {
+            entry.branch = Some(branch.trim().to_string());
+        }
+    }
+
+    if let Some(entry) = current_entry {
+        if !entry.path.is_empty() {
+            entries.push(entry);
+        }
+    }
+    entries
+}
+
+fn normalize_git_worktree_branch(branch: Option<&str>) -> String {
+    branch
+        .map(|branch| {
+            branch
+                .trim()
+                .strip_prefix("refs/heads/")
+                .unwrap_or(branch.trim())
+        })
+        .filter(|branch| !branch.is_empty())
+        .unwrap_or("detached")
+        .to_string()
+}
+
+fn run_git(cwd: &str, args: &[&str]) -> String {
+    let Ok(output) = Command::new("git").args(args).current_dir(cwd).output() else {
+        return String::new();
+    };
+    if !output.status.success() {
+        return String::new();
+    }
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn normalize_path_for_comparison(input: &str) -> String {
+    let trimmed = input.trim();
+    let without_trailing_slash = trimmed.trim_end_matches(&['/', '\\'][..]);
+    let candidate = if without_trailing_slash.is_empty() {
+        trimmed
+    } else {
+        without_trailing_slash
+    };
+    if candidate.is_empty() {
+        return String::new();
+    }
+    fs::canonicalize(candidate)
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|_| candidate.to_string())
+}
+
+fn path_file_name(path: &str) -> Option<String> {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 pub fn read_domain_rpc_params(body: &Value) -> DomainResult<Map<String, Value>> {
     let Some(object) = body.as_object() else {
         return Err(DomainStateError::bad_request(
@@ -560,7 +790,7 @@ pub fn read_domain_rpc_params(body: &Value) -> DomainResult<Map<String, Value>> 
 pub fn read_optional_project_id(params: &Map<String, Value>) -> DomainResult<Option<String>> {
     match params.get("projectId") {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::String(value)) if value.trim().is_empty() => Ok(None),
+        Some(Value::String(value)) if value.is_empty() => Ok(None),
         _ => read_project_id(params).map(Some),
     }
 }
@@ -573,13 +803,22 @@ pub fn read_project_id(params: &Map<String, Value>) -> DomainResult<String> {
     if !is_gxserver_project_id(value) {
         return Err(DomainStateError::bad_request(format!(
             "Invalid gxserver project ID: {}.",
-            params
-                .get("projectId")
-                .map(Value::to_string)
-                .unwrap_or_else(|| "undefined".to_string())
+            js_string(params.get("projectId"))
         )));
     }
     Ok(value.to_string())
+}
+
+/*
+CDXC:GxserverCrudParity 2026-06-22-05:39:
+TypeScript CRUD update/remove paths for projects and sessions call repository lookup methods before ID validators. Preserve that not-found behavior for stale or client-local IDs while keeping explicit readers strict for list filters, create-session project resolution, removeProject, and lifecycle APIs.
+*/
+fn read_unvalidated_project_lookup_id(params: &Map<String, Value>) -> String {
+    params
+        .get("projectId")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| js_string(params.get("projectId")))
 }
 
 pub fn read_session_id(params: &Map<String, Value>) -> DomainResult<String> {
@@ -590,13 +829,34 @@ pub fn read_session_id(params: &Map<String, Value>) -> DomainResult<String> {
     if !is_gxserver_session_id(value) {
         return Err(DomainStateError::bad_request(format!(
             "Invalid gxserver session ID: {}.",
-            params
-                .get("sessionId")
-                .map(Value::to_string)
-                .unwrap_or_else(|| "undefined".to_string())
+            js_string(params.get("sessionId"))
         )));
     }
     Ok(value.to_string())
+}
+
+fn read_unvalidated_session_lookup_id(params: &Map<String, Value>) -> String {
+    params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| js_string(params.get("sessionId")))
+}
+
+fn js_string(value: Option<&Value>) -> String {
+    match value {
+        None => "undefined".to_string(),
+        Some(Value::Null) => "null".to_string(),
+        Some(Value::String(value)) => value.clone(),
+        Some(Value::Bool(value)) => value.to_string(),
+        Some(Value::Number(value)) => value.to_string(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| js_string(Some(item)))
+            .collect::<Vec<_>>()
+            .join(","),
+        Some(Value::Object(_)) => "[object Object]".to_string(),
+    }
 }
 
 fn normalize_project_input(
@@ -776,7 +1036,7 @@ fn normalize_session_input(
     let zmx_name = create_zmx_session_name(server_id, project_id, session_id);
     let title = read_optional_text(input.get("title")).unwrap_or_else(|| session_id.to_string());
     let mut runtime_settings = normalize_object(input.get("runtimeSettings"));
-    if is_temporary_session_title(&title) && !runtime_settings.contains_key("titleSource") {
+    if is_temporary_session_title(&title) && !has_string_field(&runtime_settings, "titleSource") {
         runtime_settings.insert(
             "titleSource".to_string(),
             Value::String("placeholder".to_string()),
@@ -789,12 +1049,8 @@ fn normalize_session_input(
         );
     }
     let mut launch_settings = normalize_object(input.get("launchSettings"));
+    normalize_launch_settings_with_surface(&mut launch_settings, input.get("surface"));
     let surface = resolve_surface(input.get("surface"), &launch_settings, &runtime_settings);
-    if input.get("surface").and_then(Value::as_str).is_some()
-        || launch_settings.get("surface").is_some()
-    {
-        launch_settings.insert("surface".to_string(), Value::String(surface.clone()));
-    }
     let session_tag = normalize_optional_session_tag(input.get("sessionTag"))?;
     let mut provider_state = normalize_object(input.get("providerState"));
     provider_state.insert(
@@ -839,20 +1095,8 @@ fn normalize_session_input(
         "restoredFromHistoryId",
         read_optional_text(input.get("restoredFromHistoryId")),
     );
-    if let Some(restored) = input
-        .get("restoredFromSessionId")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    {
-        if !is_gxserver_session_id(restored) {
-            return Err(DomainStateError::bad_request(format!(
-                "Invalid restoredFromSessionId: {restored}."
-            )));
-        }
-        hidden.insert(
-            "restoredFromSessionId".to_string(),
-            Value::String(restored.to_string()),
-        );
+    if let Some(restored) = normalize_session_restore_id(input.get("restoredFromSessionId"))? {
+        hidden.insert("restoredFromSessionId".to_string(), Value::String(restored));
     }
     session.insert("hiddenMetadata".to_string(), Value::Object(hidden));
     session.insert(
@@ -966,12 +1210,7 @@ fn merge_session_update(
         );
     }
     if input.contains_key("restoredFromSessionId") {
-        if let Some(restored) = read_optional_text(input.get("restoredFromSessionId")) {
-            if !is_gxserver_session_id(&restored) {
-                return Err(DomainStateError::bad_request(format!(
-                    "Invalid restoredFromSessionId: {restored}."
-                )));
-            }
+        if let Some(restored) = normalize_session_restore_id(input.get("restoredFromSessionId"))? {
             hidden.insert("restoredFromSessionId".to_string(), Value::String(restored));
         } else {
             hidden.remove("restoredFromSessionId");
@@ -1006,7 +1245,7 @@ fn merge_session_update(
             .or_else(|| next.get("title").and_then(Value::as_str));
         let mut settings = normalize_object(input.get("runtimeSettings"));
         if title.map(is_temporary_session_title).unwrap_or(false)
-            && !settings.contains_key("titleSource")
+            && !has_string_field(&settings, "titleSource")
         {
             settings.insert(
                 "titleSource".to_string(),
@@ -1021,10 +1260,11 @@ fn merge_session_update(
             .unwrap_or_default()
     };
     if input.contains_key("launchSettings") || input.contains_key("surface") {
-        let surface = resolve_surface(input.get("surface"), &launch_settings, &runtime_settings);
-        if input.contains_key("surface") || launch_settings.contains_key("surface") {
-            launch_settings.insert("surface".to_string(), Value::String(surface.clone()));
-        }
+        let explicit_surface = input
+            .get("surface")
+            .filter(|_| input.contains_key("surface"));
+        normalize_launch_settings_with_surface(&mut launch_settings, explicit_surface);
+        let surface = resolve_surface(explicit_surface, &launch_settings, &runtime_settings);
         next.insert("surface".to_string(), Value::String(surface));
     } else {
         next.insert(
@@ -1547,11 +1787,16 @@ fn session_from_row(server_id: &str, row: SessionRow) -> DomainResult<Value> {
         &row_id,
     )?;
     let worktree = parse_object_map(&row.worktree_json, "worktreeJson", "session", &row_id)?;
-    let tag = row.session_tag.as_deref().and_then(|value| {
-        normalize_optional_session_tag(Some(&Value::String(value.to_string())))
-            .ok()
-            .flatten()
-    });
+    /*
+    CDXC:SessionTags 2026-06-22-05:58:
+    Stored sessionTag values are durable gxserver metadata, so Rust row hydration must reject the same invalid non-empty values as TypeScript instead of silently hiding corrupt or retired tags from clients.
+    Legacy rows that only have isFavorite still hydrate as the Favorite tag so old state.db files keep the expanded tag model after migration.
+    */
+    let tag = match row.session_tag.as_deref() {
+        Some(value) => normalize_optional_session_tag(Some(&Value::String(value.to_string())))?,
+        None if row.is_favorite == 1 => Some("favorite".to_string()),
+        None => None,
+    };
     let mut session = Map::new();
     insert_optional_string(&mut session, "agentId", row.agent_id);
     session.insert(
@@ -1894,6 +2139,22 @@ fn normalize_session_order_ids(value: Option<&Value>) -> DomainResult<Vec<String
     Ok(session_ids)
 }
 
+/*
+CDXC:GxserverIds 2026-06-22-05:29:
+Restored session references are user-provided gxserver session IDs. Match TypeScript by accepting only undefined, null, the exact empty string, or a valid G-id; whitespace and non-string values must be rejected instead of silently dropping the restore link.
+*/
+fn normalize_session_restore_id(value: Option<&Value>) -> DomainResult<Option<String>> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if value.is_empty() => Ok(None),
+        Some(Value::String(value)) if is_gxserver_session_id(value) => Ok(Some(value.clone())),
+        _ => Err(DomainStateError::bad_request(format!(
+            "Invalid restoredFromSessionId: {}.",
+            js_string(value)
+        ))),
+    }
+}
+
 fn normalize_optional_sidebar_order(value: Option<&Value>) -> Option<i64> {
     let number = value.and_then(Value::as_f64)?;
     if number.is_finite() && number >= 0.0 {
@@ -1927,10 +2188,16 @@ fn normalize_optional_session_tag(value: Option<&Value>) -> DomainResult<Option<
 }
 
 fn normalize_session_kind(value: Option<&Value>) -> String {
-    if value.and_then(Value::as_str) == Some("agent") {
-        "agent".to_string()
-    } else {
-        "terminal".to_string()
+    /*
+    CDXC:T3Code 2026-06-23-06:19:
+    Native T3 panes are no longer sidebar-only records. Preserve kind=t3 in
+    gxserver so presentation, restore, and lifecycle writes address the same
+    daemon session that stores the resolved T3 thread binding.
+    */
+    match value.and_then(Value::as_str) {
+        Some("agent") => "agent".to_string(),
+        Some("t3") => "t3".to_string(),
+        _ => "terminal".to_string(),
     }
 }
 
@@ -1947,6 +2214,17 @@ fn normalize_provider_lifecycle_state(value: Option<&Value>) -> String {
     match value.and_then(Value::as_str) {
         Some("exists" | "missing" | "unknown") => value.unwrap().as_str().unwrap().to_string(),
         _ => "unknown".to_string(),
+    }
+}
+
+fn normalize_launch_settings_with_surface(
+    launch_settings: &mut Map<String, Value>,
+    explicit_surface: Option<&Value>,
+) {
+    if let Some(surface) = normalize_session_surface(explicit_surface)
+        .or_else(|| normalize_session_surface(launch_settings.get("surface")))
+    {
+        launch_settings.insert("surface".to_string(), Value::String(surface));
     }
 }
 
@@ -1970,18 +2248,27 @@ fn resolve_surface(
     "workspace".to_string()
 }
 
+fn normalize_session_surface(value: Option<&Value>) -> Option<String> {
+    match value.and_then(Value::as_str) {
+        Some(surface @ ("commands" | "workspace")) => Some(surface.to_string()),
+        _ => None,
+    }
+}
+
 fn is_temporary_session_title(title: &str) -> bool {
-    matches!(
-        title.trim().to_ascii_lowercase().as_str(),
-        "terminal session"
-            | "search by text"
-            | "codex session"
-            | "codex cli session"
-            | "claude session"
-            | "claude code session"
-            | "cursor session"
-            | "cursor agent session"
-    ) || title.trim().starts_with("Session ")
+    /*
+    CDXC:GxserverDomainState 2026-06-22-05:22:
+    TypeScript domain normalization only auto-persists placeholder title provenance for Search by Text launches. Broader generic session labels are presentation and restore-filtering concerns, so the Rust repository must not store titleSource=placeholder for them at the durable row boundary.
+    */
+    title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .eq_ignore_ascii_case("search by text")
+}
+
+fn has_string_field(map: &Map<String, Value>, key: &str) -> bool {
+    matches!(map.get(key), Some(Value::String(_)))
 }
 
 fn insert_optional_string(map: &mut Map<String, Value>, key: &str, value: Option<String>) {
@@ -2186,12 +2473,20 @@ fn stringify_domain_json_field(field: &str, value: &Value) -> DomainResult<Strin
     let text = serde_json::to_string(value).map_err(|_| {
         DomainStateError::bad_request(format!("{field} must be JSON-serializable."))
     })?;
-    if text.len() > JSON_LIMIT_CHARS {
+    if domain_json_text_length(&text) > JSON_LIMIT_CHARS {
         return Err(DomainStateError::bad_request(format!(
             "{field} exceeds the gxserver domain-state JSON size limit of {JSON_LIMIT_CHARS} characters."
         )));
     }
     Ok(text)
+}
+
+fn domain_json_text_length(text: &str) -> usize {
+    /*
+    CDXC:GxserverDomainState 2026-06-22-05:22:
+    TypeScript enforces the domain JSON limit with JavaScript string length, which counts UTF-16 code units rather than UTF-8 bytes. Match that boundary so non-ASCII project/session metadata is not rejected earlier in Rust.
+    */
+    text.encode_utf16().count()
 }
 
 fn assert_domain_json_depth(field: &str, value: &Value, depth: usize) -> DomainResult<()> {
@@ -2216,26 +2511,38 @@ fn assert_domain_json_depth(field: &str, value: &Value, depth: usize) -> DomainR
     Ok(())
 }
 
+/*
+CDXC:GxserverProjectPaths 2026-06-22-06:07:
+Add Project and session cwd/projectPath resolution must match TypeScript's `normalizeExistingDirectoryPath`: accept absolute paths plus `~` shortcuts, reject non-string/blank/relative inputs with path-specific messages, and store the `path.resolve`-style normalized string so duplicate adds with `..`, `.`, or trailing separators return the existing project.
+JSON `null` follows the TypeScript nullish fallback contract (`path ?? projectPath`, `projectPath ?? cwd`); blank strings and non-strings stay selected and fail validation instead of falling through.
+*/
 fn normalize_existing_directory_path(value: Option<&Value>, field: &str) -> DomainResult<String> {
-    let path = normalize_required_text(value, field)?;
-    let expanded = expand_user_path(&path);
-    let normalized = Path::new(&expanded);
-    if !normalized.is_absolute() {
+    let Some(path) = value.and_then(Value::as_str).map(str::trim) else {
         return Err(DomainStateError::bad_request(format!(
-            "{field} must be an absolute path or start with ~/."
+            "{field} must be a non-empty path."
         )));
-    }
-    if !normalized.exists() {
-        return Err(DomainStateError::not_found(format!(
-            "{field} does not exist: {expanded}."
-        )));
-    }
-    if !normalized.is_dir() {
+    };
+    if path.is_empty() {
         return Err(DomainStateError::bad_request(format!(
-            "{field} is not a directory: {expanded}."
+            "{field} must be a non-empty path."
         )));
     }
-    Ok(expanded)
+    let expanded = expand_user_path(path);
+    if !Path::new(&expanded).is_absolute() {
+        return Err(DomainStateError::bad_request(format!(
+            "{field} must be an absolute path or start with ~/"
+        )));
+    }
+    let normalized = path_to_string(&resolve_path_syntax(PathBuf::from(expanded)));
+    let metadata = fs::metadata(&normalized).map_err(|_| {
+        DomainStateError::not_found(format!("{field} does not exist: {normalized}"))
+    })?;
+    if !metadata.is_dir() {
+        return Err(DomainStateError::bad_request(format!(
+            "{field} is not a directory: {normalized}"
+        )));
+    }
+    Ok(normalized)
 }
 
 fn expand_user_path(path: &str) -> String {
@@ -2248,6 +2555,30 @@ fn expand_user_path(path: &str) -> String {
         }
     }
     path.to_string()
+}
+
+fn resolve_path_syntax(path: PathBuf) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            std::path::Component::RootDir => normalized.push(component.as_os_str()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(part) => normalized.push(part),
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        path
+    } else {
+        normalized
+    }
+}
+
+fn path_to_string(path: &Path) -> String {
+    path.to_string_lossy().to_string()
 }
 
 fn path_basename(path: &str) -> String {
@@ -2307,6 +2638,7 @@ mod tests {
         paths::get_gxserver_paths,
         storage::{initialize_gxserver_storage, open_gxserver_database},
     };
+    use std::path::Path;
 
     fn open_test_database() -> (tempfile::TempDir, Connection) {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -2314,6 +2646,705 @@ mod tests {
         initialize_gxserver_storage(&paths).expect("storage init");
         let db = open_gxserver_database(&paths).expect("open db");
         (temp, db)
+    }
+
+    fn git_available() -> bool {
+        std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    fn run_git_for_test(cwd: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {:?} failed\nstdout: {}\nstderr: {}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn path_str(path: &Path) -> &str {
+        path.to_str().expect("test path is valid UTF-8")
+    }
+
+    fn value_str<'a>(value: &'a Value, key: &str) -> &'a str {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("{key} string missing"))
+    }
+
+    fn object_field<'a>(value: &'a Value, key: &str) -> &'a Map<String, Value> {
+        value
+            .get(key)
+            .and_then(Value::as_object)
+            .unwrap_or_else(|| panic!("{key} object missing"))
+    }
+
+    fn number_field(value: &Value, key: &str) -> f64 {
+        value
+            .get(key)
+            .and_then(Value::as_f64)
+            .unwrap_or_else(|| panic!("{key} number missing"))
+    }
+
+    #[test]
+    fn optional_project_id_rejects_whitespace_filter_ids() {
+        let mut params = Map::new();
+        assert_eq!(read_optional_project_id(&params).expect("missing id"), None);
+
+        params.insert("projectId".to_string(), json!(""));
+        assert_eq!(read_optional_project_id(&params).expect("empty id"), None);
+
+        params.insert("projectId".to_string(), json!("   "));
+        let error = read_optional_project_id(&params).expect_err("whitespace id rejected");
+        assert_eq!(error.code, "badRequest");
+        assert_eq!(error.message, "Invalid gxserver project ID:    .");
+
+        params.insert("projectId".to_string(), json!("P3a91"));
+        assert_eq!(
+            read_optional_project_id(&params).expect("valid id"),
+            Some("P3a91".to_string())
+        );
+    }
+
+    #[test]
+    fn restored_session_ids_reject_invalid_provided_values() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let project = repository
+            .create_project(
+                json!({ "name": "Restore IDs" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project created");
+        let project_id = value_str(&project, "projectId").to_string();
+
+        for restored in [json!("   "), json!(42), json!({ "sessionId": "G8v20" })] {
+            let error = repository
+                .create_session(
+                    json!({
+                        "projectId": project_id,
+                        "restoredFromSessionId": restored,
+                        "title": "Invalid restore",
+                    })
+                    .as_object()
+                    .expect("session params"),
+                    false,
+                )
+                .expect_err("invalid restore id rejected");
+            assert_eq!(error.code, "badRequest");
+            assert!(error.message.starts_with("Invalid restoredFromSessionId: "));
+        }
+
+        let source = repository
+            .create_session(
+                json!({
+                    "projectId": project_id,
+                    "title": "Source",
+                })
+                .as_object()
+                .expect("source params"),
+                false,
+            )
+            .expect("source session created");
+        let source_session_id = value_str(&source, "sessionId").to_string();
+        let restored = repository
+            .create_session(
+                json!({
+                    "projectId": project_id,
+                    "restoredFromSessionId": source_session_id,
+                    "title": "Restored",
+                })
+                .as_object()
+                .expect("restored params"),
+                false,
+            )
+            .expect("restored session created");
+        assert_eq!(
+            object_field(&restored, "hiddenMetadata")
+                .get("restoredFromSessionId")
+                .and_then(Value::as_str),
+            Some(source_session_id.as_str())
+        );
+
+        let restored_session_id = value_str(&restored, "sessionId").to_string();
+        let cleared = repository
+            .update_session(
+                json!({
+                    "projectId": project_id,
+                    "restoredFromSessionId": "",
+                    "sessionId": restored_session_id,
+                })
+                .as_object()
+                .expect("clear params"),
+            )
+            .expect("restore id cleared");
+        assert!(object_field(&cleared, "hiddenMetadata")
+            .get("restoredFromSessionId")
+            .is_none());
+
+        let error = repository
+            .update_session(
+                json!({
+                    "projectId": project_id,
+                    "restoredFromSessionId": "   ",
+                    "sessionId": restored_session_id,
+                })
+                .as_object()
+                .expect("invalid update params"),
+            )
+            .expect_err("invalid update restore id rejected");
+        assert_eq!(error.code, "badRequest");
+        assert_eq!(error.message, "Invalid restoredFromSessionId:    .");
+    }
+
+    #[test]
+    fn t3_session_kind_is_preserved() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let project = repository
+            .create_project(
+                json!({ "name": "T3 Project" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project created");
+        let project_id = value_str(&project, "projectId").to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "kind": "t3",
+                    "projectId": project_id,
+                    "runtimeSettings": {
+                        "provider": "t3code",
+                        "t3": { "threadId": "thread-1" }
+                    },
+                    "title": "T3 Code",
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("t3 session created");
+
+        assert_eq!(value_str(&session, "kind"), "t3");
+        assert_eq!(
+            object_field(&session, "runtimeSettings")
+                .get("provider")
+                .and_then(Value::as_str),
+            Some("t3code")
+        );
+    }
+
+    #[test]
+    fn session_tags_normalize_persist_and_clear_like_typescript() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let project = repository
+            .create_project(
+                json!({ "name": "Session Tags" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project created");
+        let project_id = value_str(&project, "projectId").to_string();
+        let supported_tags = [
+            "favorite",
+            "high-priority",
+            "research",
+            "todo",
+            "in-progress",
+            "testing",
+            "blocked",
+            "low-priority",
+            "on-hold",
+            "done",
+            "bug",
+            "feature",
+            "design",
+        ];
+
+        for tag in supported_tags {
+            let session = repository
+                .create_session(
+                    json!({
+                        "projectId": project_id.as_str(),
+                        "sessionTag": tag,
+                        "title": format!("Tagged {tag}"),
+                    })
+                    .as_object()
+                    .expect("tagged session params"),
+                    false,
+                )
+                .expect("tagged session created");
+            assert_eq!(session.get("sessionTag"), Some(&json!(tag)));
+            assert_eq!(
+                session.get("isFavorite").and_then(Value::as_bool),
+                Some(tag == "favorite")
+            );
+
+            let reloaded = repository
+                .get_session(&project_id, value_str(&session, "sessionId"))
+                .expect("tagged session reloaded")
+                .expect("tagged session exists");
+            assert_eq!(reloaded.get("sessionTag"), Some(&json!(tag)));
+        }
+
+        let legacy_favorite = repository
+            .create_session(
+                json!({
+                    "isFavorite": true,
+                    "projectId": project_id.as_str(),
+                    "title": "Legacy favorite",
+                })
+                .as_object()
+                .expect("legacy favorite params"),
+                false,
+            )
+            .expect("legacy favorite created");
+        assert_eq!(
+            legacy_favorite.get("isFavorite").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert!(legacy_favorite.get("sessionTag").is_none());
+
+        let legacy_favorite_id = value_str(&legacy_favorite, "sessionId").to_string();
+        let reloaded_legacy_favorite = repository
+            .get_session(&project_id, &legacy_favorite_id)
+            .expect("legacy favorite reloaded")
+            .expect("legacy favorite exists");
+        assert_eq!(
+            reloaded_legacy_favorite.get("sessionTag"),
+            Some(&json!("favorite"))
+        );
+        assert_eq!(
+            reloaded_legacy_favorite
+                .get("isFavorite")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+
+        let mutable = repository
+            .create_session(
+                json!({
+                    "projectId": project_id.as_str(),
+                    "title": "Mutable tag",
+                })
+                .as_object()
+                .expect("mutable session params"),
+                false,
+            )
+            .expect("mutable session created");
+        let mutable_id = value_str(&mutable, "sessionId").to_string();
+
+        let research = repository
+            .update_session(
+                json!({
+                    "projectId": project_id.as_str(),
+                    "sessionId": mutable_id.as_str(),
+                    "sessionTag": "research",
+                })
+                .as_object()
+                .expect("research tag params"),
+            )
+            .expect("research tag update");
+        assert_eq!(research.get("sessionTag"), Some(&json!("research")));
+        assert_eq!(
+            research.get("isFavorite").and_then(Value::as_bool),
+            Some(false)
+        );
+
+        let favorite = repository
+            .update_session(
+                json!({
+                    "isFavorite": true,
+                    "projectId": project_id.as_str(),
+                    "sessionId": mutable_id.as_str(),
+                })
+                .as_object()
+                .expect("favorite params"),
+            )
+            .expect("favorite update");
+        assert_eq!(favorite.get("sessionTag"), Some(&json!("favorite")));
+        assert_eq!(
+            favorite.get("isFavorite").and_then(Value::as_bool),
+            Some(true)
+        );
+
+        for cleared_value in [Value::Null, json!("")] {
+            let cleared = repository
+                .update_session(
+                    json!({
+                        "projectId": project_id.as_str(),
+                        "sessionId": mutable_id.as_str(),
+                        "sessionTag": cleared_value,
+                    })
+                    .as_object()
+                    .expect("clear tag params"),
+                )
+                .expect("tag cleared");
+            assert!(cleared.get("sessionTag").is_none());
+            assert_eq!(
+                cleared.get("isFavorite").and_then(Value::as_bool),
+                Some(false)
+            );
+        }
+
+        for invalid_tag in [json!("retired-type"), json!("   "), json!(42)] {
+            let error = repository
+                .create_session(
+                    json!({
+                        "projectId": project_id.as_str(),
+                        "sessionTag": invalid_tag,
+                        "title": "Invalid tag",
+                    })
+                    .as_object()
+                    .expect("invalid tag params"),
+                    false,
+                )
+                .expect_err("invalid tag rejected");
+            assert_eq!(error.code, "badRequest");
+            assert_eq!(error.message, "sessionTag must be a supported session tag.");
+        }
+    }
+
+    #[test]
+    fn persisted_invalid_session_tag_is_rejected_on_hydration() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let project = repository
+            .create_project(
+                json!({ "name": "Invalid Stored Tags" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project created");
+        let project_id = value_str(&project, "projectId").to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "projectId": project_id.as_str(),
+                    "title": "Stored invalid tag",
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("session created");
+        let session_id = value_str(&session, "sessionId").to_string();
+
+        db.execute_batch("PRAGMA ignore_check_constraints = ON;")
+            .expect("disable tag check");
+        db.execute(
+            "UPDATE sessions SET sessionTag = ?3 WHERE projectId = ?1 AND sessionId = ?2",
+            rusqlite::params![project_id.as_str(), session_id.as_str(), "retired-type"],
+        )
+        .expect("write invalid stored tag");
+        db.execute_batch("PRAGMA ignore_check_constraints = OFF;")
+            .expect("restore tag check");
+
+        let error = repository
+            .get_session(&project_id, &session_id)
+            .expect_err("invalid stored tag rejected");
+        assert_eq!(error.code, "badRequest");
+        assert_eq!(error.message, "sessionTag must be a supported session tag.");
+    }
+
+    #[test]
+    fn update_session_order_defaults_returns_touched_rows_and_list_remains_updated_at_ordered() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let project = repository
+            .create_project(
+                json!({ "name": "Sidebar Order" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project created");
+        let project_id = value_str(&project, "projectId").to_string();
+        let first = repository
+            .create_session(
+                json!({ "projectId": project_id.as_str(), "title": "First" })
+                    .as_object()
+                    .expect("first params"),
+                false,
+            )
+            .expect("first session");
+        let second = repository
+            .create_session(
+                json!({ "projectId": project_id.as_str(), "title": "Second" })
+                    .as_object()
+                    .expect("second params"),
+                false,
+            )
+            .expect("second session");
+        let third = repository
+            .create_session(
+                json!({ "projectId": project_id.as_str(), "title": "Third" })
+                    .as_object()
+                    .expect("third params"),
+                false,
+            )
+            .expect("third session");
+        let first_id = value_str(&first, "sessionId").to_string();
+        let second_id = value_str(&second, "sessionId").to_string();
+        let third_id = value_str(&third, "sessionId").to_string();
+
+        assert_eq!(number_field(&first, "sidebarOrder"), 0.0);
+        assert_eq!(number_field(&second, "sidebarOrder"), 0.0);
+
+        let ordered = repository
+            .update_session_order(
+                json!({
+                    "projectId": project_id.as_str(),
+                    "sessionIds": [second_id.as_str(), first_id.as_str()],
+                })
+                .as_object()
+                .expect("order params"),
+            )
+            .expect("order updated");
+        assert_eq!(ordered.len(), 2);
+        assert_eq!(
+            ordered
+                .iter()
+                .filter_map(|session| session.get("sessionId").and_then(Value::as_str))
+                .collect::<Vec<_>>(),
+            vec![second_id.as_str(), first_id.as_str()]
+        );
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|session| number_field(session, "sidebarOrder"))
+                .collect::<Vec<_>>(),
+            vec![1000.0, 2000.0]
+        );
+        let untouched = repository
+            .get_session(&project_id, &third_id)
+            .expect("get untouched")
+            .expect("untouched exists");
+        assert_eq!(number_field(&untouched, "sidebarOrder"), 0.0);
+
+        for (session_id, updated_at) in [
+            (second_id.as_str(), "2026-06-02T12:00:00.000Z"),
+            (first_id.as_str(), "2026-06-01T12:00:00.000Z"),
+            (third_id.as_str(), "2026-05-31T12:00:00.000Z"),
+        ] {
+            db.execute(
+                "UPDATE sessions SET updatedAt = ?3 WHERE projectId = ?1 AND sessionId = ?2",
+                rusqlite::params![project_id, session_id, updated_at],
+            )
+            .expect("updatedAt patched");
+        }
+        let listed = repository
+            .list_sessions(Some(&project_id))
+            .expect("sessions listed");
+        assert_eq!(
+            listed
+                .iter()
+                .filter_map(|session| session.get("sessionId").and_then(Value::as_str))
+                .collect::<Vec<_>>(),
+            vec![second_id.as_str(), first_id.as_str(), third_id.as_str()]
+        );
+    }
+
+    #[test]
+    fn update_session_order_rejects_invalid_duplicate_and_unknown_ids_without_partial_writes() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let project = repository
+            .create_project(
+                json!({ "name": "Sidebar Rollback" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project created");
+        let project_id = value_str(&project, "projectId").to_string();
+        let first = repository
+            .create_session(
+                json!({ "projectId": project_id.as_str(), "title": "First" })
+                    .as_object()
+                    .expect("first params"),
+                false,
+            )
+            .expect("first session");
+        let second = repository
+            .create_session(
+                json!({ "projectId": project_id.as_str(), "title": "Second" })
+                    .as_object()
+                    .expect("second params"),
+                false,
+            )
+            .expect("second session");
+        let first_id = value_str(&first, "sessionId").to_string();
+        let second_id = value_str(&second, "sessionId").to_string();
+        let original_updated_at = value_str(&first, "updatedAt").to_string();
+
+        let empty_error = repository
+            .update_session_order(
+                json!({ "projectId": project_id.as_str(), "sessionIds": [] })
+                    .as_object()
+                    .expect("empty params"),
+            )
+            .expect_err("empty order rejected");
+        assert_eq!(empty_error.code, "badRequest");
+        assert_eq!(
+            empty_error.message,
+            "sessionIds must contain at least one session ID."
+        );
+
+        let invalid_error = repository
+            .update_session_order(
+                json!({ "projectId": project_id.as_str(), "sessionIds": ["session-local"] })
+                    .as_object()
+                    .expect("invalid params"),
+            )
+            .expect_err("invalid order rejected");
+        assert_eq!(invalid_error.code, "badRequest");
+        assert_eq!(invalid_error.message, "Invalid sessionId: session-local.");
+
+        let duplicate_error = repository
+            .update_session_order(
+                json!({ "projectId": project_id.as_str(), "sessionIds": [first_id.as_str(), first_id.as_str()] })
+                    .as_object()
+                    .expect("duplicate params"),
+            )
+            .expect_err("duplicate order rejected");
+        assert_eq!(duplicate_error.code, "badRequest");
+        assert_eq!(
+            duplicate_error.message,
+            format!("Duplicate sessionId: {first_id}.")
+        );
+
+        let mut missing_id = "G9zzz".to_string();
+        if missing_id == first_id || missing_id == second_id {
+            missing_id = "G9zzy".to_string();
+        }
+        assert!(is_gxserver_session_id(&missing_id));
+        let missing_error = repository
+            .update_session_order(
+                json!({ "projectId": project_id.as_str(), "sessionIds": [first_id.as_str(), missing_id.as_str()] })
+                    .as_object()
+                    .expect("missing params"),
+            )
+            .expect_err("missing order rejected");
+        assert_eq!(missing_error.code, "notFound");
+        assert_eq!(
+            missing_error.message,
+            format!("Session {project_id}/{missing_id} does not exist.")
+        );
+        let first_after = repository
+            .get_session(&project_id, &first_id)
+            .expect("get first after rollback")
+            .expect("first exists after rollback");
+        assert_eq!(number_field(&first_after, "sidebarOrder"), 0.0);
+        assert_eq!(
+            first_after.get("updatedAt").and_then(Value::as_str),
+            Some(original_updated_at.as_str())
+        );
+    }
+
+    #[test]
+    fn update_and_remove_crud_paths_report_not_found_for_unvalidated_ids() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let project = repository
+            .create_project(
+                json!({ "name": "CRUD IDs" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project created");
+        let project_id = value_str(&project, "projectId").to_string();
+
+        let missing_project = repository
+            .update_project(
+                json!({ "projectId": "project-local" })
+                    .as_object()
+                    .expect("update project params"),
+            )
+            .expect_err("invalid project lookup is not found");
+        assert_eq!(missing_project.code, "notFound");
+        assert_eq!(
+            missing_project.message,
+            "Project project-local does not exist."
+        );
+
+        let missing_session = repository
+            .update_session(
+                json!({ "projectId": project_id, "sessionId": "session-local" })
+                    .as_object()
+                    .expect("update session params"),
+            )
+            .expect_err("invalid session lookup is not found");
+        assert_eq!(missing_session.code, "notFound");
+        assert!(missing_session
+            .message
+            .contains("/session-local does not exist."));
+
+        let missing_remove = repository
+            .remove_session(json!({}).as_object().expect("remove session params"))
+            .expect_err("missing session lookup is not found");
+        assert_eq!(missing_remove.code, "notFound");
+        assert_eq!(
+            missing_remove.message,
+            "Session undefined/undefined does not exist."
+        );
+    }
+
+    #[test]
+    fn records_project_and_session_id_allocations() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let project = repository
+            .create_project(
+                json!({ "name": "Allocated" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project created");
+        let project_id = value_str(&project, "projectId").to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "projectId": project_id,
+                    "title": "Allocated session",
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("session created");
+        let session_id = value_str(&session, "sessionId").to_string();
+
+        let project_allocation: Option<String> = db
+            .query_row(
+                "SELECT id FROM id_allocations WHERE kind = 'project' AND parentId = '' AND id = ?1",
+                [&project_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .expect("project allocation query");
+        assert_eq!(project_allocation, Some(project_id.clone()));
+
+        let session_allocation: Option<String> = db
+            .query_row(
+                "SELECT id FROM id_allocations WHERE kind = 'session' AND parentId = ?1 AND id = ?2",
+                rusqlite::params![project_id, session_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .expect("session allocation query");
+        assert_eq!(session_allocation, Some(session_id));
     }
 
     #[test]
@@ -2333,6 +3364,12 @@ mod tests {
             .expect_err("deep JSON rejected");
         assert_eq!(error.code, "badRequest");
         assert!(error.message.contains("depth limit"));
+    }
+
+    #[test]
+    fn domain_json_size_limit_counts_utf16_code_units_like_typescript() {
+        let value = json!({ "emoji": "👻".repeat(260_000) });
+        assert!(stringify_domain_json_field("runtimeSettings", &value).is_ok());
     }
 
     #[test]
@@ -2357,5 +3394,404 @@ mod tests {
             .expect_err("corrupt row rejected");
         assert_eq!(error.code, "corruptState");
         assert!(error.message.contains("runtimeSettingsJson"));
+    }
+
+    #[test]
+    fn title_runtime_settings_only_default_search_by_text_to_placeholder() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let project = repository
+            .create_project(
+                json!({ "name": "Title Defaults" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project created");
+        let project_id = value_str(&project, "projectId");
+
+        let terminal = repository
+            .create_session(
+                json!({
+                    "projectId": project_id,
+                    "title": "Terminal Session",
+                })
+                .as_object()
+                .expect("terminal session params"),
+                false,
+            )
+            .expect("terminal session created");
+        let terminal_runtime = object_field(&terminal, "runtimeSettings");
+        assert_eq!(terminal_runtime.get("titleSource"), None);
+
+        let search = repository
+            .create_session(
+                json!({
+                    "projectId": project_id,
+                    "runtimeSettings": { "titleSource": null },
+                    "title": "Search   by\nText",
+                })
+                .as_object()
+                .expect("search session params"),
+                false,
+            )
+            .expect("search session created");
+        let search_runtime = object_field(&search, "runtimeSettings");
+        assert_eq!(
+            search_runtime.get("titleSource"),
+            Some(&json!("placeholder"))
+        );
+    }
+
+    #[test]
+    fn invalid_surface_values_do_not_create_persisted_launch_surface_defaults() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let project = repository
+            .create_project(
+                json!({ "name": "Surface Defaults" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project created");
+        let project_id = value_str(&project, "projectId");
+
+        let explicit_invalid = repository
+            .create_session(
+                json!({
+                    "projectId": project_id,
+                    "surface": "invalid",
+                    "title": "Invalid Explicit Surface",
+                })
+                .as_object()
+                .expect("explicit invalid params"),
+                false,
+            )
+            .expect("explicit invalid session created");
+        assert_eq!(explicit_invalid.get("surface"), Some(&json!("workspace")));
+        assert_eq!(
+            object_field(&explicit_invalid, "launchSettings").get("surface"),
+            None
+        );
+
+        let launch_invalid = repository
+            .create_session(
+                json!({
+                    "launchSettings": { "surface": "invalid" },
+                    "projectId": project_id,
+                    "title": "Invalid Launch Surface",
+                })
+                .as_object()
+                .expect("launch invalid params"),
+                false,
+            )
+            .expect("launch invalid session created");
+        assert_eq!(launch_invalid.get("surface"), Some(&json!("workspace")));
+        assert_eq!(
+            object_field(&launch_invalid, "launchSettings").get("surface"),
+            Some(&json!("invalid"))
+        );
+
+        let updated = repository
+            .update_session(
+                json!({
+                    "launchSettings": { "surface": "invalid" },
+                    "projectId": project_id,
+                    "sessionId": value_str(&explicit_invalid, "sessionId"),
+                    "surface": "invalid",
+                })
+                .as_object()
+                .expect("update invalid params"),
+            )
+            .expect("invalid surface update");
+        assert_eq!(updated.get("surface"), Some(&json!("workspace")));
+        assert_eq!(
+            object_field(&updated, "launchSettings").get("surface"),
+            Some(&json!("invalid"))
+        );
+    }
+
+    #[test]
+    fn add_project_path_normalizes_nullish_fallback_and_deduplicates_path_syntax() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let parent = temp.path().join("paths");
+        let repo_path = parent.join("repo");
+        let fallback_path = parent.join("fallback");
+        std::fs::create_dir_all(&repo_path).expect("repo dir");
+        std::fs::create_dir_all(&fallback_path).expect("fallback dir");
+
+        let first_input = repo_path.join("..").join("repo").join(".");
+        let first = repository
+            .add_project_path(
+                json!({ "path": path_str(&first_input) })
+                    .as_object()
+                    .expect("first params"),
+            )
+            .expect("first add");
+        assert_eq!(value_str(&first, "path"), path_str(&repo_path));
+        assert_eq!(value_str(&first, "name"), "repo");
+
+        let trailing_input = format!("{}/", path_str(&repo_path));
+        let second = repository
+            .add_project_path(
+                json!({ "path": trailing_input })
+                    .as_object()
+                    .expect("second params"),
+            )
+            .expect("second add");
+        assert_eq!(
+            value_str(&second, "projectId"),
+            value_str(&first, "projectId")
+        );
+        assert_eq!(repository.list_projects().expect("projects").len(), 1);
+
+        let fallback = repository
+            .add_project_path(
+                json!({ "path": null, "projectPath": path_str(&fallback_path) })
+                    .as_object()
+                    .expect("fallback params"),
+            )
+            .expect("null path falls back to projectPath");
+        assert_eq!(value_str(&fallback, "path"), path_str(&fallback_path));
+
+        let empty_error = repository
+            .add_project_path(
+                json!({ "path": "", "projectPath": path_str(&repo_path) })
+                    .as_object()
+                    .expect("empty params"),
+            )
+            .expect_err("blank path does not fall back");
+        assert_eq!(empty_error.code, "badRequest");
+        assert_eq!(empty_error.message, "path must be a non-empty path.");
+    }
+
+    #[test]
+    fn add_project_path_rejects_invalid_path_inputs_with_typescript_messages() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let missing_input = temp
+            .path()
+            .join("missing-parent")
+            .join("..")
+            .join("missing");
+        let missing_normalized = temp.path().join("missing");
+        let file_path = temp.path().join("not-a-directory");
+        std::fs::write(&file_path, "file\n").expect("file");
+
+        let cases = vec![
+            (
+                json!({ "path": null }),
+                "badRequest",
+                "path must be a non-empty path.".to_string(),
+            ),
+            (
+                json!({ "path": 42 }),
+                "badRequest",
+                "path must be a non-empty path.".to_string(),
+            ),
+            (
+                json!({ "path": "   " }),
+                "badRequest",
+                "path must be a non-empty path.".to_string(),
+            ),
+            (
+                json!({ "path": "relative/repo" }),
+                "badRequest",
+                "path must be an absolute path or start with ~/".to_string(),
+            ),
+            (
+                json!({ "path": path_str(&missing_input) }),
+                "notFound",
+                format!("path does not exist: {}", path_str(&missing_normalized)),
+            ),
+            (
+                json!({ "path": path_str(&file_path) }),
+                "badRequest",
+                format!("path is not a directory: {}", path_str(&file_path)),
+            ),
+        ];
+
+        for (params, code, message) in cases {
+            let error = repository
+                .add_project_path(params.as_object().expect("params"))
+                .expect_err("invalid add path rejected");
+            assert_eq!(error.code, code);
+            assert_eq!(error.message, message);
+        }
+    }
+
+    #[test]
+    fn normalize_existing_directory_path_expands_home_shortcut() {
+        let Some(home) = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_dir())
+        else {
+            return;
+        };
+        let normalized = normalize_existing_directory_path(Some(&json!("~")), "path")
+            .expect("home shortcut normalized");
+        assert_eq!(normalized, path_to_string(&resolve_path_syntax(home)));
+    }
+
+    #[test]
+    fn create_session_project_resolution_uses_nullish_path_fallback() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let repo_path = temp.path().join("session-project");
+        std::fs::create_dir_all(&repo_path).expect("repo dir");
+        let project = repository
+            .add_project_path(
+                json!({ "path": path_str(&repo_path) })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project added");
+        let project_id = value_str(&project, "projectId").to_string();
+
+        let cwd_input = repo_path.join("..").join("session-project").join(".");
+        let session = repository
+            .create_session(
+                json!({
+                    "cwd": path_str(&cwd_input),
+                    "projectId": "project-local",
+                    "projectPath": null,
+                    "title": "Terminal",
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("session created");
+        assert_eq!(value_str(&session, "projectId"), project_id);
+        assert_eq!(value_str(&session, "cwd"), path_str(&cwd_input));
+
+        let empty_error = repository
+            .create_session(
+                json!({
+                    "cwd": path_str(&repo_path),
+                    "projectId": "project-local",
+                    "projectPath": "",
+                    "title": "Terminal",
+                })
+                .as_object()
+                .expect("empty session params"),
+                false,
+            )
+            .expect_err("blank projectPath does not fall back to cwd");
+        assert_eq!(empty_error.code, "badRequest");
+        assert_eq!(
+            empty_error.message,
+            "Invalid gxserver project ID: project-local."
+        );
+    }
+
+    #[test]
+    fn add_project_path_attaches_and_repairs_linked_worktree_metadata() {
+        if !git_available() {
+            return;
+        }
+
+        let (temp, db) = open_test_database();
+        let root = temp.path();
+        let repo_path = root.join("registered-main");
+        let worktree_path = root.join("registered-main-feature");
+        let orphan_worktree_path = root.join("registered-main-orphan");
+        std::fs::create_dir_all(&repo_path).expect("repo dir");
+        run_git_for_test(&repo_path, &["init"]);
+        run_git_for_test(
+            &repo_path,
+            &["config", "user.email", "ghostex@example.invalid"],
+        );
+        run_git_for_test(&repo_path, &["config", "user.name", "Ghostex Test"]);
+        std::fs::write(repo_path.join("README.md"), "main\n").expect("write readme");
+        run_git_for_test(&repo_path, &["add", "README.md"]);
+        run_git_for_test(&repo_path, &["commit", "-m", "Initial commit"]);
+        run_git_for_test(
+            &repo_path,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature/existing-worktree",
+                path_str(&worktree_path),
+            ],
+        );
+        run_git_for_test(
+            &repo_path,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature/orphan-worktree",
+                path_str(&orphan_worktree_path),
+            ],
+        );
+
+        let repository = DomainRepository::new(&db, "S7k");
+        let main_params = json!({ "name": "Registered Main", "path": path_str(&repo_path) });
+        let main_project = repository
+            .add_project_path(main_params.as_object().expect("main params"))
+            .expect("main project");
+        let main_project_id = value_str(&main_project, "projectId").to_string();
+
+        let worktree_params = json!({ "path": path_str(&worktree_path) });
+        let worktree_project = repository
+            .add_project_path(worktree_params.as_object().expect("worktree params"))
+            .expect("worktree project");
+        assert_eq!(
+            value_str(&worktree_project, "path"),
+            path_str(&worktree_path)
+        );
+        let metadata = object_field(&worktree_project, "worktree");
+        assert_eq!(
+            metadata.get("parentProjectId").and_then(Value::as_str),
+            Some(main_project_id.as_str())
+        );
+        assert_eq!(
+            metadata.get("parentProjectName").and_then(Value::as_str),
+            Some("Registered Main")
+        );
+        assert_eq!(
+            metadata.get("parentProjectPath").and_then(Value::as_str),
+            Some(path_str(&repo_path))
+        );
+        assert_eq!(
+            metadata.get("branch").and_then(Value::as_str),
+            Some("feature/existing-worktree")
+        );
+        assert!(metadata.get("createdAt").and_then(Value::as_str).is_some());
+
+        let second_add = repository
+            .add_project_path(worktree_params.as_object().expect("worktree params"))
+            .expect("second worktree add");
+        assert_eq!(
+            value_str(&second_add, "projectId"),
+            value_str(&worktree_project, "projectId")
+        );
+
+        let orphan_params =
+            json!({ "name": "Orphan Worktree", "path": path_str(&orphan_worktree_path) });
+        let orphan_project = repository
+            .create_project(orphan_params.as_object().expect("orphan params"))
+            .expect("orphan project");
+        assert!(orphan_project.get("worktree").is_none());
+        let repaired = repository
+            .add_project_path(orphan_params.as_object().expect("orphan params"))
+            .expect("repaired worktree project");
+        assert_eq!(
+            value_str(&repaired, "projectId"),
+            value_str(&orphan_project, "projectId")
+        );
+        let repaired_metadata = object_field(&repaired, "worktree");
+        assert_eq!(
+            repaired_metadata
+                .get("parentProjectId")
+                .and_then(Value::as_str),
+            Some(main_project_id.as_str())
+        );
+        assert_eq!(
+            repaired_metadata.get("branch").and_then(Value::as_str),
+            Some("feature/orphan-worktree")
+        );
     }
 }

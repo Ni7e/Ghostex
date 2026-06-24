@@ -16,6 +16,16 @@ import type { WorkspaceIdeTargetApp } from "./workspace-open-targets";
 import type { SidebarPinnedPrompt } from "./sidebar-pinned-prompts";
 import type { SidebarSessionTag } from "./session-tags";
 import type {
+  GxserverPortlessPresentation,
+  GxserverPortlessStatus,
+} from "./gxserver-protocol";
+import type {
+  NativePortlessAdminAction,
+  NativePortlessAdminInstallAction,
+  NativePortlessAdminResult,
+  NativePortlessProtocol,
+} from "./native-ghostty-host-protocol";
+import type {
   SessionLifecycleState,
   SessionGridSnapshot,
   SessionRecord,
@@ -135,6 +145,10 @@ export type SidebarGhostexCliStatusMessage = {
    * this app build, because T3 panes are a core visible feature and missing
    * packaged runtime state should be repairable before users hit a web-pane
    * network-style startup error.
+   *
+   * CDXC:ContributorStart 2026-06-22-23:23:
+   * `unavailable` means an optional local-build resource was intentionally not
+   * bundled, while `missing` means a strict or release-shaped build is broken.
    */
   browserSkillInstalled: boolean;
   browserSkillPath?: string;
@@ -423,6 +437,14 @@ export type SidebarProjectSettingsItem = {
   name: string;
   path: string;
   projectId: string;
+  /**
+   * CDXC:PortlessSettings 2026-06-23-03:47:
+   * Projects settings groups read-only Portless domain summaries by project
+   * and worktree family. Carry only the stable parent project id for worktree
+   * rows so the Settings UI does not need branch names, parent paths, command
+   * text, or slug-editing state.
+   */
+  worktreeParentProjectId?: string;
   worktreeCommand?: string;
 };
 
@@ -444,6 +466,31 @@ export type SidebarCommandSessionIndicator = {
   sessionId: string;
   status: "idle" | "running" | "error";
   title?: string;
+};
+
+export type SidebarPortlessNativeAdminUnavailableReason =
+  | "localMacOnly"
+  | "notRecommended"
+  | "setupNotGhostexOwned";
+
+export type SidebarPortlessNativeAdminActionAvailability = {
+  action: NativePortlessAdminAction;
+  available: boolean;
+  unavailableReason?: SidebarPortlessNativeAdminUnavailableReason;
+};
+
+export type SidebarPortlessState = {
+  /*
+  CDXC:PortlessProtocol 2026-06-23-00:25:
+  React receives Portless setup state, route previews, local-only native action availability, and sanitized native admin results through HUD metadata. This keeps future modal/settings/resources UI off Portless files and prevents remote gxserver state from advertising runnable privileged actions.
+  */
+  health: GxserverPortlessStatus;
+  nativeAdmin: {
+    actions: Record<NativePortlessAdminAction, SidebarPortlessNativeAdminActionAvailability>;
+    available: boolean;
+    lastResult?: NativePortlessAdminResult;
+  };
+  presentation?: GxserverPortlessPresentation;
 };
 
 export type SidebarHudState = {
@@ -473,6 +520,7 @@ export type SidebarHudState = {
   git: SidebarGitState;
   isFocusModeActive: boolean;
   pendingAgentIds: string[];
+  portless?: SidebarPortlessState;
   /**
    * CDXC:Worktrees 2026-05-18-23:07:
    * The Worktrees settings surface needs the same project id/name/path projection as native workspace storage, plus an optional per-project command override for creating worktrees.
@@ -828,7 +876,6 @@ export type SidebarToExtensionMessage =
       type:
         | "requestAgentHookStatus"
         | "installAgentHooks"
-        | "installAgentHooksFromTitlebarNotice"
         | "uninstallAgentHooks";
       agentIds?: readonly string[];
     }
@@ -873,6 +920,45 @@ export type SidebarToExtensionMessage =
   | {
       settings: ghostexSettings;
       type: "updateSettings";
+    }
+  | {
+      /*
+      CDXC:PortlessSetupModal 2026-06-23-13:42:
+      Portless setup prompts run in a separate app-modal child-window document,
+      and native logs modal sidebar commands as JSON. Keep this boundary
+      metadata-only: admin actions carry action/protocol/request id, Disable
+      carries one boolean, and dismissals carry only intent so full settings,
+      project data, paths, domains, URLs, and command text never cross here.
+      */
+      action: Extract<NativePortlessAdminInstallAction, "install" | "reconfigure">;
+      protocol: NativePortlessProtocol;
+      requestId: string;
+      type: "runPortlessSetupPromptAdminAction";
+    }
+  | {
+      /*
+      CDXC:PortlessSettings 2026-06-23-03:47:
+      Settings -> Projects exposes explicit Portless setup actions outside the
+      setup prompt. Keep this command metadata-only: install/reconfigure/retry
+      carry the selected HTTP/HTTPS mode, remove carries only intent, and
+      native still owns privileged execution and sanitized results.
+      */
+      action: NativePortlessAdminInstallAction;
+      protocol: NativePortlessProtocol;
+      requestId: string;
+      type: "runPortlessSettingsAdminAction";
+    }
+  | {
+      action: "remove";
+      requestId: string;
+      type: "runPortlessSettingsAdminAction";
+    }
+  | {
+      type: "postponePortlessSetupPrompt" | "cancelPortlessSetupPrompt";
+    }
+  | {
+      enabled: false;
+      type: "setPortlessEnabled";
     }
   | {
       /**

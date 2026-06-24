@@ -8,12 +8,24 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 WEB_DIR="$SCRIPT_DIR/Web"
 CLI_DIR="$SCRIPT_DIR/CLI"
 GHOSTTY_ROOT="${GHOSTTY_ROOT:-}"
+ZEHN_ROOT_EXPLICITLY_CONFIGURED=0
+[[ -n "${ZEHN_ROOT:-}" ]] && ZEHN_ROOT_EXPLICITLY_CONFIGURED=1
 ZMX_ROOT="${ZMX_ROOT:-$REPO_ROOT/zmx}"
 ZEHN_ROOT="${ZEHN_ROOT:-$REPO_ROOT/zehn}"
 GXSERVER_RS_ROOT="${GXSERVER_RS_ROOT:-$REPO_ROOT/gxserver-rs}"
+BEADS_ROOT_EXPLICITLY_CONFIGURED=0
+[[ -n "${BEADS_ROOT:-${GHOSTEX_BEADS_ROOT:-}}" ]] && BEADS_ROOT_EXPLICITLY_CONFIGURED=1
 BEADS_ROOT="${BEADS_ROOT:-${GHOSTEX_BEADS_ROOT:-}}"
+TUI_ROOT_EXPLICITLY_CONFIGURED=0
+[[ -n "${TUI_ROOT:-}" ]] && TUI_ROOT_EXPLICITLY_CONFIGURED=1
 TUI_ROOT="${TUI_ROOT:-$REPO_ROOT/tui}"
+TUI2_ROOT_EXPLICITLY_CONFIGURED=0
+[[ -n "${TUI2_ROOT:-}" ]] && TUI2_ROOT_EXPLICITLY_CONFIGURED=1
 TUI2_ROOT="${TUI2_ROOT:-$REPO_ROOT/tui2}"
+T3CODE_ROOT_EXPLICITLY_CONFIGURED=0
+[[ -n "${T3CODE_ROOT:-${VSMUX_T3CODE_REPO_ROOT:-${ghostex_T3CODE_REPO_ROOT:-}}}" ]] && T3CODE_ROOT_EXPLICITLY_CONFIGURED=1
+CODE_SERVER_ROOT_EXPLICITLY_CONFIGURED=0
+[[ -n "${CODE_SERVER_ROOT:-${GHOSTEX_CODE_SERVER_ROOT:-}}" ]] && CODE_SERVER_ROOT_EXPLICITLY_CONFIGURED=1
 CODE_SERVER_ROOT="${CODE_SERVER_ROOT:-${GHOSTEX_CODE_SERVER_ROOT:-$REPO_ROOT/code-server}}"
 CODE_SERVER_APP_NODE_VERSION="${CODE_SERVER_APP_NODE_VERSION:-}"
 if [[ -z "$CODE_SERVER_APP_NODE_VERSION" && -f "$CODE_SERVER_ROOT/.node-version" ]]; then
@@ -60,6 +72,9 @@ case "$GHOSTEX_MACOS_ARCH" in
 		;;
 esac
 BUILD_CACHE_DIR="${GHOSTEX_BUILD_CACHE_DIR:-$REPO_ROOT/build/$GHOSTEX_MACOS_ARCH/build-cache}"
+GHOSTEX_REMOTE_GXSERVER_LINUX_X64_DEFAULT_PACKAGE="$REPO_ROOT/build/remote-gxserver-linux/x64/package"
+GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_DEFAULT_PACKAGE="$REPO_ROOT/build/remote-gxserver-linux/arm64/package"
+# CDXC:RemoteMachines 2026-06-23-23:16: Remote Linux gxserver package staging is optional for normal Rust local starts, but the staging probe still runs in every gxserver package mode. Define the deterministic default package paths before the package-mode switch so `set -u` can safely skip absent Linux packages instead of treating the defaults as mode-specific required variables.
 GHOSTEX_GXSERVER_PACKAGE_MODE="${GHOSTEX_GXSERVER_PACKAGE_MODE:-rust}"
 case "$GHOSTEX_GXSERVER_PACKAGE_MODE" in
 	typescript | ts)
@@ -73,6 +88,44 @@ case "$GHOSTEX_GXSERVER_PACKAGE_MODE" in
 		exit 1
 		;;
 esac
+GHOSTEX_REMOTE_GXSERVER_LINUX_X64_PACKAGE="${GHOSTEX_REMOTE_GXSERVER_LINUX_X64_PACKAGE:-}"
+GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE="${GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE:-}"
+GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES="${GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES:-0}"
+case "$(printf '%s' "$GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES" | tr '[:upper:]' '[:lower:]')" in
+	1 | true | yes | on)
+		GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES=1
+		;;
+	*)
+		GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES=0
+		;;
+esac
+# CDXC:ContributorStart 2026-06-22-23:23: `bun run start` should stay stable for full maintainer checkouts while allowing contributor clones that omit optional submodules. Enable missing-optional-submodule skips only for local starts by default; release and direct strict builds must keep failing when Source, T3 Code, TUI, Zehn, or Beads resources are absent.
+GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES="${GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES:-${GHOSTEX_LOCAL_START:-0}}"
+case "$(printf '%s' "$GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES" | tr '[:upper:]' '[:lower:]')" in
+	1 | true | yes | on)
+		GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES=1
+		;;
+	*)
+		GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES=0
+		;;
+esac
+
+APP_CAPABILITY_SHARED_NODE_RUNTIME=false
+APP_CAPABILITY_SOURCE_EDITOR=false
+APP_CAPABILITY_T3_CODE=false
+APP_CAPABILITY_TUI=false
+APP_CAPABILITY_TUI2=false
+APP_CAPABILITY_ZEHN=false
+APP_CAPABILITY_BEADS=false
+APP_CAPABILITY_ZMX=true
+APP_OPTIONAL_RESOURCE_NOTES=()
+
+record_optional_resource_note() {
+	local feature="$1"
+	local reason="$2"
+	APP_OPTIONAL_RESOURCE_NOTES+=("$feature: $reason")
+	printf 'Skipping optional %s: %s\n' "$feature" "$reason" >&2
+}
 
 acquire_local_start_lock_if_needed() {
 	if [[ "${GHOSTEX_START_LOCK_HELD:-}" == "1" || "${GHOSTEX_BUILD_LOCK_HELD:-}" == "1" ]]; then
@@ -562,6 +615,85 @@ package_code_server_if_needed() {
 	write_cache_stamp "code-server-package-$GHOSTEX_MACOS_ARCH" "$package_digest"
 }
 
+stage_shared_code_server_node_runtime() {
+	local target_node="$WEB_DIR/code-server/lib/node"
+	# CDXC:ContributorStart 2026-06-22-23:23: Optional Source panes must not remove the shared app-owned Node runtime. Native sidebar helpers, Portless, and optional T3 runtime launchers still resolve Web/code-server/lib/node, so contributor builds without the code-server submodule stage only that executable and leave Source-specific files absent.
+	if [[ "$APP_CAPABILITY_SOURCE_EDITOR" != "true" ]]; then
+		rm -rf "$WEB_DIR/code-server"
+	fi
+	if [[ -x "$target_node" ]] && binary_supports_macos_arch "$target_node" "$GHOSTEX_MACOS_ARCH"; then
+		APP_CAPABILITY_SHARED_NODE_RUNTIME=true
+		return 0
+	fi
+	mkdir -p "$(dirname "$target_node")"
+	cp "$CODE_SERVER_NODE_BIN" "$target_node"
+	chmod 755 "$target_node"
+	APP_CAPABILITY_SHARED_NODE_RUNTIME=true
+}
+
+portless_staged_cli_smoke_check() {
+	local target_dir="$1"
+	env NO_COLOR=1 PATH="$CODE_SERVER_NODE_DIR:$PATH" "$CODE_SERVER_NODE_BIN" "$target_dir/dist/cli.js" --help >/dev/null
+}
+
+package_portless_if_needed() {
+	local source_dir="$REPO_ROOT/node_modules/portless"
+	local source_cli="$source_dir/dist/cli.js"
+	local target_dir="$WEB_DIR/portless"
+	local package_digest package_version node_identity source_file
+	local -a fingerprint_args
+
+	if [[ ! -d "$source_dir" ]]; then
+		echo "Portless package is missing at $source_dir." >&2
+		echo "Run bun install before packaging Ghostex so node_modules/portless contains the pinned portless@0.14.0 package." >&2
+		exit 1
+	fi
+	if [[ ! -f "$source_cli" ]]; then
+		echo "Portless CLI is missing: $source_cli" >&2
+		echo "Run bun install or rebuild the installed portless@0.14.0 package before packaging Ghostex; dist/cli.js is required." >&2
+		exit 1
+	fi
+
+	package_version="$("$CODE_SERVER_NODE_BIN" -e "const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(String(pkg.version || ''));" "$source_dir/package.json")"
+	if [[ "$package_version" != "0.14.0" ]]; then
+		echo "Ghostex packaging expected portless@0.14.0 in node_modules/portless, found version $package_version." >&2
+		echo "Run bun install with the root lockfile before packaging Ghostex." >&2
+		exit 1
+	fi
+
+	node_identity="$("$CODE_SERVER_NODE_BIN" -p 'process.version + ":" + process.versions.modules')"
+	fingerprint_args=(
+		--value "portless-package-v1"
+		--value "arch=$GHOSTEX_MACOS_ARCH"
+		--value "node=$node_identity"
+		--value "version=$package_version"
+		--path "$SCRIPT_DIR/build-ghostex-host.sh"
+		--path "$REPO_ROOT/package.json"
+		--path "$REPO_ROOT/bun.lock"
+	)
+	while IFS= read -r source_file; do
+		fingerprint_args+=(--path "$source_file")
+	done < <(find "$source_dir" -type f -print | LC_ALL=C sort)
+	package_digest="$(fingerprint_inputs "${fingerprint_args[@]}")"
+
+	# CDXC:PortlessPackaging 2026-06-22-22:26: Ghostex packages the published portless@0.14.0 CLI as Web/portless and runs it with the shared Web/code-server/lib/node runtime. Do not stage a second Node runtime; fail packaging if the installed package does not contain dist/cli.js.
+	if cache_matches "portless-package-$GHOSTEX_MACOS_ARCH" "$package_digest" "$target_dir/package.json" "$target_dir/dist/cli.js" &&
+		portless_staged_cli_smoke_check "$target_dir" >/dev/null 2>&1; then
+		echo "Portless package is current; skipping package rebuild."
+		return 0
+	fi
+
+	rm -rf "$target_dir"
+	mkdir -p "$target_dir"
+	rsync -a --delete "$source_dir/" "$target_dir/"
+	chmod 755 "$target_dir/dist/cli.js"
+	if ! portless_staged_cli_smoke_check "$target_dir"; then
+		echo "Staged Portless CLI failed to run with code-server Node: $CODE_SERVER_NODE_BIN" >&2
+		exit 1
+	fi
+	write_cache_stamp "portless-package-$GHOSTEX_MACOS_ARCH" "$package_digest"
+}
+
 resolve_beads_root() {
 	local configured="${BEADS_ROOT:-${GHOSTEX_BEADS_ROOT:-}}"
 	local candidate
@@ -598,6 +730,8 @@ package_t3code_server() {
 	# CDXC:LocalStartFast 2026-06-07-16:23: `bun run start` already treats T3 Code as a packaged runtime, so the build should not run the T3 monorepo build and production npm install on every app relaunch. Reuse the package when the T3 source tree, packager script, and selected Node/npm runtime are unchanged.
 	#
 	# CDXC:LocalStartReleaseParity 2026-06-09-09:07: Web/t3code-server is a shared staging directory reused by arm64 and x86_64 release/local-start passes. A per-arch cache stamp is valid only when the staged node-pty prebuild still matches GHOSTEX_MACOS_ARCH; otherwise rebuild so `bun run start` cannot copy Intel T3 native modules into an arm64 app.
+	#
+	# CDXC:T3CodePackaging 2026-06-22-22:15: The generated Web/t3code-server package must install against current upstream T3 versions even when the developer's npm user config pins `before` or disables install scripts. Use an isolated npm userconfig for this app-resource install so local/global npm policy cannot hide recently published upstream packages or skip native module setup.
 	node_identity="$("$node_bin" -p 'process.version + ":" + process.versions.modules')"
 	npm_version="$("$npm_bin" --version 2>/dev/null || true)"
 	expected_node_pty_prebuild="$target_dir/node_modules/node-pty/prebuilds/$(node_pty_prebuild_platform_dir)/pty.node"
@@ -624,7 +758,13 @@ package_t3code_server() {
 		--target "$target_dir"
 	(
 		cd "$target_dir"
-		env PATH="$(dirname "$node_bin"):$PATH" "$npm_bin" install --omit=dev --no-audit --no-fund
+		env \
+			-u npm_config_before \
+			-u NPM_CONFIG_BEFORE \
+			-u npm_config_ignore_scripts \
+			-u NPM_CONFIG_IGNORE_SCRIPTS \
+			PATH="$(dirname "$node_bin"):$PATH" \
+			"$npm_bin" --userconfig=/dev/null install --omit=dev --no-audit --no-fund
 		prune_node_pty_prebuilds "$target_dir"
 		remove_t3code_source_maps "$target_dir"
 		env PATH="$(dirname "$node_bin"):$PATH" "$node_bin" dist/bin.mjs --help >/dev/null
@@ -882,15 +1022,17 @@ EOF
 gxserver_rust_package_supports_macos_arch() {
 	local target_dir="$1"
 	local binary_path
-	if [[ ! -x "$target_dir/bin/bd" ]]; then
-		return 1
-	fi
 	for binary_path in \
 		"$target_dir/bin/gxserver" \
-		"$target_dir/bin/zmx" \
+		"$target_dir/bin/zmx"; do
+		if ! binary_supports_macos_arch "$binary_path" "$GHOSTEX_MACOS_ARCH"; then
+			return 1
+		fi
+	done
+	for binary_path in \
 		"$target_dir/bin/zehn" \
 		"$WEB_DIR/bin/bd"; do
-		if ! binary_supports_macos_arch "$binary_path" "$GHOSTEX_MACOS_ARCH"; then
+		if [[ -e "$binary_path" ]] && ! binary_supports_macos_arch "$binary_path" "$GHOSTEX_MACOS_ARCH"; then
 			return 1
 		fi
 	done
@@ -899,16 +1041,21 @@ gxserver_rust_package_supports_macos_arch() {
 
 gxserver_typescript_package_supports_macos_arch() {
 	local target_dir="$1"
-	local binary_path
-	if [[ ! -x "$target_dir/bin/gxserver" || ! -x "$target_dir/bin/bd" ]]; then
+	local binary_path optional_binary_path
+	if [[ ! -x "$target_dir/bin/gxserver" ]]; then
 		return 1
 	fi
 	for binary_path in \
 		"$target_dir/bin/zmx" \
-		"$target_dir/bin/zehn" \
-		"$WEB_DIR/bin/bd" \
 		"$target_dir/node_modules/better-sqlite3/build/Release/better_sqlite3.node"; do
 		if ! binary_supports_macos_arch "$binary_path" "$GHOSTEX_MACOS_ARCH"; then
+			return 1
+		fi
+	done
+	for optional_binary_path in \
+		"$target_dir/bin/zehn" \
+		"$WEB_DIR/bin/bd"; do
+		if [[ -e "$optional_binary_path" ]] && ! binary_supports_macos_arch "$optional_binary_path" "$GHOSTEX_MACOS_ARCH"; then
 			return 1
 		fi
 	done
@@ -924,10 +1071,275 @@ gxserver_package_supports_macos_arch() {
 	fi
 }
 
+gxserver_rust_package_version() {
+	local cargo_bin metadata package_version
+	cargo_bin="$(resolve_gxserver_rust_cargo)"
+	metadata="$("$cargo_bin" metadata --format-version 1 --no-deps --manifest-path "$GXSERVER_RS_ROOT/Cargo.toml")"
+	package_version="$(GXSERVER_METADATA_JSON="$metadata" "$GXSERVER_NODE_BIN" -e '
+	const metadata = JSON.parse(process.env.GXSERVER_METADATA_JSON ?? "{}");
+	const rootPackageId = metadata.root_package_id ?? metadata.resolve?.root;
+	const rootPackage =
+		metadata.packages.find((pkg) => pkg.id === rootPackageId) ??
+		metadata.packages.find((pkg) => pkg.name === "gxserver") ??
+		metadata.packages[0];
+	process.stdout.write(String(rootPackage?.version ?? ""));
+	')"
+	if [[ -z "$package_version" ]]; then
+		echo "Could not read gxserver-rs package version from $GXSERVER_RS_ROOT/Cargo.toml" >&2
+		exit 1
+	fi
+	printf '%s\n' "$package_version"
+}
+
+stage_gxserver_protocol_exports() {
+	local target_dir="$1"
+	local protocol_stage_dir="$BUILD_CACHE_DIR/gxserver-protocol"
+	local tsc_bin="$REPO_ROOT/node_modules/typescript/bin/tsc"
+	if [[ ! -f "$REPO_ROOT/shared/gxserver-protocol.ts" ]]; then
+		echo "shared gxserver protocol source is missing: $REPO_ROOT/shared/gxserver-protocol.ts" >&2
+		exit 1
+	fi
+	if [[ ! -f "$tsc_bin" ]]; then
+		echo "TypeScript compiler is missing at $tsc_bin. Run bun install before packaging gxserver." >&2
+		exit 1
+	fi
+	rm -rf "$protocol_stage_dir"
+	mkdir -p "$protocol_stage_dir/src" "$protocol_stage_dir/types" "$target_dir/dist/protocol"
+	cp "$REPO_ROOT/shared/gxserver-protocol.ts" "$protocol_stage_dir/src/index.ts"
+	bun build "$protocol_stage_dir/src/index.ts" --outfile "$target_dir/dist/protocol/index.js" --format esm --target node
+	"$GXSERVER_NODE_BIN" "$tsc_bin" \
+		--declaration \
+		--emitDeclarationOnly \
+		--isolatedModules \
+		--module ESNext \
+		--moduleResolution bundler \
+		--outDir "$protocol_stage_dir/types" \
+		--rootDir "$protocol_stage_dir/src" \
+		--skipLibCheck \
+		--strict \
+		--target ES2023 \
+		"$protocol_stage_dir/src/index.ts"
+	cp "$protocol_stage_dir/types/index.d.ts" "$target_dir/dist/protocol/index.d.ts"
+}
+
+write_gxserver_rust_package_manifest() {
+	local target_dir="$1"
+	local package_version="$2"
+	GXSERVER_PACKAGE_DIR="$target_dir" GXSERVER_PACKAGE_VERSION="$package_version" "$GXSERVER_NODE_BIN" <<'JS'
+const { writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+
+const targetDir = process.env.GXSERVER_PACKAGE_DIR;
+const version = process.env.GXSERVER_PACKAGE_VERSION;
+writeFileSync(
+	join(targetDir, "package.json"),
+	`${JSON.stringify({
+		name: "gxserver",
+		version,
+		private: true,
+		description: "Ghostex gxserver daemon and shared protocol package.",
+		type: "module",
+		bin: {
+			gxserver: "./bin/gxserver",
+		},
+		exports: {
+			"./protocol": {
+				types: "./dist/protocol/index.d.ts",
+				default: "./dist/protocol/index.js",
+			},
+		},
+	}, null, 2)}\n`,
+	"utf8",
+);
+JS
+}
+
+write_gxserver_rust_package_readme() {
+	local target_dir="$1"
+	cat >"$target_dir/README.md" <<'EOF'
+# gxserver server package
+
+gxserver is the Ghostex daemon used by the desktop app and server-only remote installs.
+
+## Runtime dependency
+
+This package uses the bundled native gxserver executable in `bin/gxserver` and does not require Node.js or better-sqlite3 at runtime.
+
+## Commands
+
+- `bin/gxserver`: run gxserver in the foreground.
+- `bin/gxserver start`: start gxserver in the background.
+- `bin/gxserver status --json`: check runtime state for health/status automation.
+- `bin/gxserver stop`: stop only the gxserver control plane; zmx sessions are not killed.
+- `bin/gxserver stop-all`: kill gxserver-tracked zmx sessions, then stop the control plane.
+
+The package includes Ghostex's pinned zmx, zehn, and upstream Beads `bd` artifacts in `bin/`. Project board operations require the bundled `bd`; shell-installed `bd` is intentionally ignored so Ghostex and agent workflows share one pinned Beads binary.
+EOF
+}
+
+write_gxserver_package_build_identity() {
+	local target_dir="$1"
+	local package_version="$2"
+	GXSERVER_PACKAGE_DIR="$target_dir" GXSERVER_PACKAGE_VERSION="$package_version" "$GXSERVER_NODE_BIN" <<'JS'
+const { createHash } = require("node:crypto");
+const { lstatSync, readFileSync, readdirSync, writeFileSync } = require("node:fs");
+const { join, relative, sep } = require("node:path");
+
+const targetDir = process.env.GXSERVER_PACKAGE_DIR;
+const version = process.env.GXSERVER_PACKAGE_VERSION;
+const hash = createHash("sha256");
+
+function walk(dir) {
+	for (const entry of readdirSync(dir, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+		const entryPath = join(dir, entry.name);
+		const packagePath = relative(targetDir, entryPath).split(sep).join("/");
+		if (packagePath === "build-identity.json") {
+			continue;
+		}
+		if (entry.isDirectory()) {
+			walk(entryPath);
+			continue;
+		}
+		const stat = lstatSync(entryPath);
+		if (!stat.isFile() && !stat.isSymbolicLink()) {
+			continue;
+		}
+		hash.update(packagePath);
+		hash.update("\0");
+		hash.update(readFileSync(entryPath));
+		hash.update("\0");
+	}
+}
+
+walk(targetDir);
+const fingerprint = `sha256:${hash.digest("hex")}`;
+writeFileSync(
+	join(targetDir, "build-identity.json"),
+	`${JSON.stringify({
+		buildIdentity: `gxserver:${version}:${fingerprint}`,
+		fingerprint,
+		packageVersion: version,
+	}, null, 2)}\n`,
+	"utf8",
+);
+JS
+}
+
+package_gxserver_rust_package() {
+	local package_dir="$1"
+	local rust_bin="$2"
+	local package_version="$3"
+	# CDXC:GxserverRustPackaging 2026-06-22-16:17: Local and release macOS builds no longer keep the deleted gxserver/ TypeScript source tree. Assemble the Rust daemon package directly from gxserver-rs, shared/gxserver-protocol.ts, and app-owned tool binaries so `bun run start` never cds into gxserver/ for the default packaged daemon.
+	# CDXC:ContributorStart 2026-06-22-23:23: zmx remains required, but Zehn and Beads are optional contributor resources. Copy optional tool binaries only when staged so gxserver health can report those capabilities unavailable instead of making the whole local app fail before launch.
+	rm -rf "$package_dir"
+	mkdir -p "$package_dir/bin"
+	cp "$rust_bin" "$package_dir/bin/gxserver"
+	cp "$WEB_DIR/bin/zmx" "$package_dir/bin/zmx"
+	if [[ -x "$WEB_DIR/bin/zehn" ]]; then
+		cp "$WEB_DIR/bin/zehn" "$package_dir/bin/zehn"
+	fi
+	chmod 755 "$package_dir/bin/gxserver" "$package_dir/bin/zmx"
+	if [[ -x "$package_dir/bin/zehn" ]]; then
+		chmod 755 "$package_dir/bin/zehn"
+	fi
+	if [[ -x "$WEB_DIR/bin/bd" ]]; then
+		write_gxserver_shared_bd_launcher "$package_dir/bin/bd"
+	fi
+	stage_gxserver_protocol_exports "$package_dir"
+	write_gxserver_rust_package_manifest "$package_dir" "$package_version"
+	write_gxserver_rust_package_readme "$package_dir"
+	write_gxserver_package_build_identity "$package_dir" "$package_version"
+}
+
+validate_remote_gxserver_linux_package() {
+	local package_dir="$1"
+	local package_label="$2"
+	local required_path file_output
+	for required_path in \
+		"bin/gxserver" \
+		"bin/zmx" \
+		"bin/zehn" \
+		"bin/bd" \
+		"code-server/lib/node" \
+		"portless/dist/cli.js"; do
+		if [[ ! -e "$package_dir/$required_path" ]]; then
+			echo "Remote gxserver $package_label package is missing required resource: $required_path" >&2
+			return 1
+		fi
+	done
+	if [[ ! -f "$package_dir/CLI/ghostex-cli.mjs" && ! -f "$package_dir/cli/ghostex-cli.mjs" ]]; then
+		echo "Remote gxserver $package_label package is missing Ghostex CLI entrypoint: CLI/ghostex-cli.mjs" >&2
+		return 1
+	fi
+	for required_path in \
+		"bin/gxserver" \
+		"bin/zmx" \
+		"bin/zehn" \
+		"bin/bd" \
+		"code-server/lib/node"; do
+		file_output="$(file "$package_dir/$required_path")"
+		if [[ "$file_output" == *"Mach-O"* ]]; then
+			echo "Remote gxserver $package_label package contains a macOS binary at $required_path; Linux packages must not ship Mach-O payloads." >&2
+			return 1
+		fi
+		if [[ "$file_output" != *"ELF"* ]]; then
+			echo "Remote gxserver $package_label package must contain a native Linux ELF payload at $required_path." >&2
+			return 1
+		fi
+		case "$package_label" in
+			LINUX_X64)
+				if [[ "$file_output" != *"x86-64"* && "$file_output" != *"x86_64"* ]]; then
+					echo "Remote gxserver $package_label package has the wrong Linux ELF architecture at $required_path: $file_output" >&2
+					return 1
+				fi
+				;;
+			LINUX_ARM64)
+				if [[ "$file_output" != *"aarch64"* && "$file_output" != *"AArch64"* ]]; then
+					echo "Remote gxserver $package_label package has the wrong Linux ELF architecture at $required_path: $file_output" >&2
+					return 1
+				fi
+				;;
+		esac
+	done
+}
+
+stage_remote_gxserver_linux_package_if_configured() {
+	local source_dir="$1"
+	local target_name="$2"
+	local package_label="$3"
+	local default_source_dir="$4"
+	local target_dir="$WEB_DIR/$target_name"
+	if [[ -z "$source_dir" && -d "$default_source_dir" ]]; then
+		source_dir="$default_source_dir"
+	fi
+	if [[ -z "$source_dir" ]]; then
+		if [[ "$GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES" == "1" ]]; then
+			echo "Missing $package_label remote gxserver package. Set GHOSTEX_REMOTE_GXSERVER_${package_label}_PACKAGE to a prebuilt Linux package directory." >&2
+			exit 1
+		fi
+		return 0
+	fi
+	if [[ ! -d "$source_dir" ]]; then
+		echo "Configured $package_label remote gxserver package is not a directory: $source_dir" >&2
+		exit 1
+	fi
+	validate_remote_gxserver_linux_package "$source_dir" "$package_label" || exit 1
+	# CDXC:RemoteMachines 2026-06-23-09:46: macOS app bundles may stage Linux remote gxserver packages only from explicit prebuilt directories. Validate required gxserver/zmx/zehn/bd/Node/Portless/CLI resources and require Linux ELF payloads before copying to Web/gxserver-linux-* so the installer never uploads the host Darwin package to Ubuntu.
+	#
+	# CDXC:RemoteMachines 2026-06-23-10:07: The Ubuntu package builder writes build/remote-gxserver-linux/<arch>/package by default. Auto-stage that deterministic output when it exists so release/local app packaging can include the already-built Linux package without requiring another env var or rebuilding it in the macOS app pass.
+	rm -rf "$target_dir"
+	mkdir -p "$target_dir"
+	rsync -a --delete "$source_dir"/ "$target_dir"/
+}
+
+stage_remote_gxserver_linux_packages_if_configured() {
+	stage_remote_gxserver_linux_package_if_configured "$GHOSTEX_REMOTE_GXSERVER_LINUX_X64_PACKAGE" "gxserver-linux-x64" "LINUX_X64" "$GHOSTEX_REMOTE_GXSERVER_LINUX_X64_DEFAULT_PACKAGE"
+	stage_remote_gxserver_linux_package_if_configured "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE" "gxserver-linux-arm64" "LINUX_ARM64" "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_DEFAULT_PACKAGE"
+}
+
 package_gxserver_if_needed() {
-	local package_dir="$REPO_ROOT/gxserver/dist/server-package"
 	local target_dir="$WEB_DIR/gxserver"
-	local package_digest rust_bin
+	local package_dir package_digest package_version rust_bin
 	# CDXC:GxserverPackaging 2026-05-30-15:49: The macOS app bundles the same gxserver server package used by standalone installs. The app only starts/reuses gxserver through packaged resources and does not own shutdown, so app resources must include the gxserver daemon plus pinned zmx/zehn/bd artifacts.
 	#
 	# CDXC:LocalStartFast 2026-06-07-16:23: gxserver packaging should skip work when gxserver runtime sources, package metadata, packager code, bundled zmx/zehn/bd binaries, and generated protocol inputs are unchanged.
@@ -939,18 +1351,20 @@ package_gxserver_if_needed() {
 	# CDXC:GxserverRustPackaging 2026-06-16-10:35: Rust gxserver packaging preserves generated TypeScript protocol exports and is available as the app-packaged daemon through GHOSTEX_GXSERVER_PACKAGE_MODE=rust.
 	#
 	# CDXC:GxserverPackaging 2026-06-21-13:45: The macOS app now cuts over to gxserver-rs as the packaged default. Keep the package mode in the fingerprint so local starts cannot reuse a stale TypeScript package when switching to Rust, while explicit GHOSTEX_GXSERVER_PACKAGE_MODE=typescript remains a source-validation path.
+	#
+	# CDXC:GxserverRustPackaging 2026-06-22-16:17: Rust is the only normal local-start package path now that gxserver/ is removed. Default packaging must consume gxserver-rs and shared/gxserver-protocol.ts directly; the TypeScript branch remains explicit validation only and may fail fast when that source tree is absent.
 	if [[ "$GHOSTEX_GXSERVER_PACKAGE_MODE" == "rust" ]]; then
+		package_dir="$BUILD_CACHE_DIR/gxserver-rs/server-package"
 		rust_bin="$(build_gxserver_rust_if_needed)"
+		package_version="$(gxserver_rust_package_version)"
 		package_digest="$(fingerprint_inputs \
-			--value "gxserver-package-v6" \
+			--value "gxserver-package-v7" \
 			--value "mode=rust" \
 			--value "arch=$GHOSTEX_MACOS_ARCH" \
+			--value "version=$package_version" \
 			--value "rust=$(path_identity "$rust_bin")" \
-			--path "$REPO_ROOT/gxserver/protocol" \
-			--path "$REPO_ROOT/gxserver/package.json" \
-			--path "$REPO_ROOT/gxserver/package-lock.json" \
-			--path "$REPO_ROOT/gxserver/tsconfig.json" \
-			--path "$REPO_ROOT/gxserver/scripts/package-gxserver.mjs" \
+			--path "$SCRIPT_DIR/build-ghostex-host.sh" \
+			--path "$REPO_ROOT/shared/gxserver-protocol.ts" \
 			--path "$GXSERVER_RS_ROOT/src" \
 			--path "$GXSERVER_RS_ROOT/Cargo.toml" \
 			--path "$GXSERVER_RS_ROOT/Cargo.lock" \
@@ -958,6 +1372,11 @@ package_gxserver_if_needed() {
 			--path "$WEB_DIR/bin/zehn" \
 			--path "$WEB_DIR/bin/bd")"
 	else
+		package_dir="$REPO_ROOT/gxserver/dist/server-package"
+		if [[ ! -d "$REPO_ROOT/gxserver" ]]; then
+			echo "TypeScript gxserver source is missing at $REPO_ROOT/gxserver. Unset GHOSTEX_GXSERVER_PACKAGE_MODE or set it to rust." >&2
+			exit 1
+		fi
 		package_digest="$(fingerprint_inputs \
 			--value "gxserver-package-v6" \
 			--value "mode=typescript" \
@@ -974,7 +1393,11 @@ package_gxserver_if_needed() {
 			--path "$WEB_DIR/bin/zehn" \
 			--path "$WEB_DIR/bin/bd")"
 	fi
-	if cache_matches "gxserver-package-$GHOSTEX_MACOS_ARCH" "$package_digest" "$package_dir/build-identity.json" "$target_dir/build-identity.json" "$target_dir/bin/gxserver" "$target_dir/dist/protocol/index.js" "$target_dir/dist/protocol/index.d.ts" &&
+	local cache_outputs=("$target_dir/build-identity.json" "$target_dir/bin/gxserver" "$target_dir/dist/protocol/index.js" "$target_dir/dist/protocol/index.d.ts")
+	if [[ "$GHOSTEX_GXSERVER_PACKAGE_MODE" == "typescript" ]]; then
+		cache_outputs=("$package_dir/build-identity.json" "${cache_outputs[@]}")
+	fi
+	if cache_matches "gxserver-package-$GHOSTEX_MACOS_ARCH" "$package_digest" "${cache_outputs[@]}" &&
 		{ [[ "$GHOSTEX_GXSERVER_PACKAGE_MODE" == "rust" ]] || [[ -f "$target_dir/native-runtime.json" && -f "$target_dir/dist/src/cli.js" ]]; } &&
 		gxserver_package_supports_macos_arch "$target_dir"; then
 		# CDXC:GxserverPackaging 2026-06-08-16:23: Web/gxserver is also shared across dual-architecture release passes. Do not accept a cache hit unless the staged gxserver, zmx, zehn, and bd binaries match the requested architecture, or Intel and arm64 DMGs can silently inherit the previous pass's native artifacts.
@@ -982,21 +1405,82 @@ package_gxserver_if_needed() {
 		return 0
 	fi
 
-	(
-		cd "$REPO_ROOT/gxserver"
-		env PATH="$GXSERVER_NODE_DIR:$PATH" "$GXSERVER_NPM_BIN" run build
-		if [[ "$GHOSTEX_GXSERVER_PACKAGE_MODE" == "rust" ]]; then
-			echo "Packaging Rust gxserver with $rust_bin"
-			env PATH="$GXSERVER_NODE_DIR:$PATH" "$GXSERVER_NODE_BIN" scripts/package-gxserver.mjs --rust-bin "$rust_bin" --zmx-bin "$WEB_DIR/bin/zmx" --zehn-bin "$WEB_DIR/bin/zehn" --bd-bin "$WEB_DIR/bin/bd"
-		else
+	if [[ "$GHOSTEX_GXSERVER_PACKAGE_MODE" == "rust" ]]; then
+		echo "Packaging Rust gxserver with $rust_bin"
+		package_gxserver_rust_package "$package_dir" "$rust_bin" "$package_version"
+	else
+		(
+			cd "$REPO_ROOT/gxserver"
+			env PATH="$GXSERVER_NODE_DIR:$PATH" "$GXSERVER_NPM_BIN" run build
 			echo "Packaging TypeScript gxserver with $GXSERVER_NODE_BIN ($GXSERVER_NODE_VERSION, NODE_MODULE_VERSION $GXSERVER_NODE_MODULE_VERSION)"
 			env PATH="$GXSERVER_NODE_DIR:$PATH" "$GXSERVER_NPM_BIN" run package:app -- --zmx-bin "$WEB_DIR/bin/zmx" --zehn-bin "$WEB_DIR/bin/zehn" --bd-bin "$WEB_DIR/bin/bd" --native-node "$GXSERVER_NODE_BIN" --native-npm "$GXSERVER_NPM_BIN"
-		fi
-	)
+		)
+	fi
 	rm -rf "$target_dir"
 	cp -R "$package_dir" "$target_dir"
-	write_gxserver_shared_bd_launcher "$target_dir/bin/bd"
+	if [[ -x "$WEB_DIR/bin/bd" ]]; then
+		write_gxserver_shared_bd_launcher "$target_dir/bin/bd"
+	else
+		rm -f "$target_dir/bin/bd"
+	fi
 	write_cache_stamp "gxserver-package-$GHOSTEX_MACOS_ARCH" "$package_digest"
+}
+
+write_build_capabilities_manifest() {
+	local notes_payload=""
+	local note
+	# CDXC:ContributorStart 2026-06-23-04:03: Local starts may have no skipped optional resources. macOS /bin/bash 3.2 treats an empty array expansion as unbound under `set -u`, so emit an empty notes payload without expanding the array when it has no entries.
+	if (( ${#APP_OPTIONAL_RESOURCE_NOTES[@]} > 0 )); then
+		for note in "${APP_OPTIONAL_RESOURCE_NOTES[@]}"; do
+			notes_payload+="$note"$'\n'
+		done
+	fi
+	GHOSTEX_CAP_SHARED_NODE_RUNTIME="$APP_CAPABILITY_SHARED_NODE_RUNTIME" \
+		GHOSTEX_CAP_SOURCE_EDITOR="$APP_CAPABILITY_SOURCE_EDITOR" \
+		GHOSTEX_CAP_T3_CODE="$APP_CAPABILITY_T3_CODE" \
+		GHOSTEX_CAP_TUI="$APP_CAPABILITY_TUI" \
+		GHOSTEX_CAP_TUI2="$APP_CAPABILITY_TUI2" \
+		GHOSTEX_CAP_ZEHN="$APP_CAPABILITY_ZEHN" \
+		GHOSTEX_CAP_BEADS="$APP_CAPABILITY_BEADS" \
+		GHOSTEX_CAP_ZMX="$APP_CAPABILITY_ZMX" \
+		GHOSTEX_CAP_ALLOW_MISSING_OPTIONAL="$GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES" \
+		GHOSTEX_CAP_NOTES="$notes_payload" \
+		GHOSTEX_CAPABILITIES_PATH="$WEB_DIR/ghostex-build-capabilities.json" \
+		"$GXSERVER_NODE_BIN" <<'JS'
+const { writeFileSync } = require("node:fs");
+
+const capabilityPath = process.env.GHOSTEX_CAPABILITIES_PATH;
+const notes = String(process.env.GHOSTEX_CAP_NOTES || "")
+  .split(/\n/)
+  .map((note) => note.trim())
+  .filter(Boolean);
+const bool = (name) => process.env[name] === "true" || process.env[name] === "1";
+
+/*
+CDXC:ContributorStart 2026-06-22-23:23:
+The app bundle needs a structured resource-capability manifest so local validation and Settings can distinguish intentionally omitted optional contributor modules from broken packaged resources. Keep the payload free of filesystem paths because persistent app diagnostics may include the same capability fields later.
+*/
+writeFileSync(
+  capabilityPath,
+  `${JSON.stringify({
+    generatedBy: "build-ghostex-host.sh",
+    optionalSubmodulesMayBeMissing: bool("GHOSTEX_CAP_ALLOW_MISSING_OPTIONAL"),
+    resources: {
+      beads: bool("GHOSTEX_CAP_BEADS"),
+      sharedNodeRuntime: bool("GHOSTEX_CAP_SHARED_NODE_RUNTIME"),
+      sourceEditor: bool("GHOSTEX_CAP_SOURCE_EDITOR"),
+      t3Code: bool("GHOSTEX_CAP_T3_CODE"),
+      tui: bool("GHOSTEX_CAP_TUI"),
+      tui2: bool("GHOSTEX_CAP_TUI2"),
+      zehn: bool("GHOSTEX_CAP_ZEHN"),
+      zmx: bool("GHOSTEX_CAP_ZMX"),
+    },
+    skippedOptionalResources: notes,
+    version: 1,
+  }, null, 2)}\n`,
+  "utf8",
+);
+JS
 }
 
 # CDXC:CodeServerRuntime 2026-06-08-12:17: code-server owns the bundled Node runtime in the macOS app. Build code-server with Node 22 and stage that runtime inside Web/code-server/lib/node; explicit TypeScript gxserver packages reuse that runtime instead of shipping a duplicate Node.
@@ -1009,13 +1493,16 @@ if [[ ! -x "$CODE_SERVER_NPM_BIN" ]]; then
 fi
 CODE_SERVER_ROOT="$(resolve_code_server_root || true)"
 if [[ -z "$CODE_SERVER_ROOT" ]]; then
-	cat >&2 <<EOF
+	if [[ "$CODE_SERVER_ROOT_EXPLICITLY_CONFIGURED" == "1" || "$GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES" == "0" ]]; then
+		cat >&2 <<EOF
 code-server source is required to package the embedded Source-tab runtime.
 
 Set CODE_SERVER_ROOT or GHOSTEX_CODE_SERVER_ROOT to a code-server checkout, or place it at:
   $REPO_ROOT/code-server
 EOF
-	exit 1
+		exit 1
+	fi
+	record_optional_resource_note "Source editor" "code-server checkout was not found"
 fi
 CODE_SERVER_NODE_VERSION="$("$CODE_SERVER_NODE_BIN" -p 'process.version')"
 CODE_SERVER_NODE_MAJOR="$("$CODE_SERVER_NODE_BIN" -p 'process.versions.node.split(".")[0]')"
@@ -1035,37 +1522,42 @@ if [[ "$GXSERVER_NODE_MAJOR" != "$CODE_SERVER_APP_NODE_MAJOR" ]]; then
 fi
 GXSERVER_NODE_MODULE_VERSION="$("$GXSERVER_NODE_BIN" -p 'process.versions.modules')"
 
-T3CODE_NODE_BIN="${T3CODE_NODE:-$(resolve_t3code_node || true)}"
-if [[ -z "$T3CODE_NODE_BIN" ]]; then
-	cat >&2 <<EOF
-Node.js 22.16+, 23.11+, or 24.10+ is required to package T3 Code for the macOS app.
-
-Install a compatible Node runtime from https://nodejs.org or set T3CODE_NODE explicitly.
-EOF
-	exit 1
-fi
-T3CODE_NODE_DIR="$(cd "$(dirname "$T3CODE_NODE_BIN")" && pwd)"
-T3CODE_NPM_BIN="${T3CODE_NPM:-$T3CODE_NODE_DIR/npm}"
-if [[ ! -x "$T3CODE_NPM_BIN" ]]; then
-	T3CODE_NPM_BIN="$(PATH="$T3CODE_NODE_DIR:$PATH" command -v npm || true)"
-fi
-if [[ -z "$T3CODE_NPM_BIN" || ! -x "$T3CODE_NPM_BIN" ]]; then
-	echo "npm is required beside the selected T3 Code Node runtime: $T3CODE_NODE_BIN" >&2
-	exit 1
-fi
 T3CODE_ROOT="$(resolve_t3code_root || true)"
 if [[ -z "$T3CODE_ROOT" ]]; then
-	cat >&2 <<EOF
+	if [[ "$T3CODE_ROOT_EXPLICITLY_CONFIGURED" == "1" || "$GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES" == "0" ]]; then
+		cat >&2 <<EOF
 T3 Code source is required to package the embedded runtime.
 
 Set T3CODE_ROOT or VSMUX_T3CODE_REPO_ROOT to a t3code checkout, or place it at:
   $REPO_ROOT/t3code
 EOF
-	exit 1
+		exit 1
+	fi
+	record_optional_resource_note "T3 Code" "t3code checkout was not found"
+else
+	T3CODE_NODE_BIN="${T3CODE_NODE:-$(resolve_t3code_node || true)}"
+	if [[ -z "$T3CODE_NODE_BIN" ]]; then
+		cat >&2 <<EOF
+Node.js 22.16+, 23.11+, or 24.10+ is required to package T3 Code for the macOS app.
+
+Install a compatible Node runtime from https://nodejs.org or set T3CODE_NODE explicitly.
+EOF
+		exit 1
+	fi
+	T3CODE_NODE_DIR="$(cd "$(dirname "$T3CODE_NODE_BIN")" && pwd)"
+	T3CODE_NPM_BIN="${T3CODE_NPM:-$T3CODE_NODE_DIR/npm}"
+	if [[ ! -x "$T3CODE_NPM_BIN" ]]; then
+		T3CODE_NPM_BIN="$(PATH="$T3CODE_NODE_DIR:$PATH" command -v npm || true)"
+	fi
+	if [[ -z "$T3CODE_NPM_BIN" || ! -x "$T3CODE_NPM_BIN" ]]; then
+		echo "npm is required beside the selected T3 Code Node runtime: $T3CODE_NODE_BIN" >&2
+		exit 1
+	fi
 fi
 BEADS_ROOT="$(resolve_beads_root || true)"
 if [[ -z "$BEADS_ROOT" ]]; then
-	cat >&2 <<EOF
+	if [[ "$BEADS_ROOT_EXPLICITLY_CONFIGURED" == "1" || "$GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES" == "0" ]]; then
+		cat >&2 <<EOF
 Beads source is required to package the embedded Project board CLI.
 
 Set BEADS_ROOT or GHOSTEX_BEADS_ROOT to a Beads checkout, or place it at one of:
@@ -1073,7 +1565,9 @@ Set BEADS_ROOT or GHOSTEX_BEADS_ROOT to a Beads checkout, or place it at one of:
   $HOME/dev/_references/beads
   $HOME/dev/custom/beads
 EOF
-	exit 1
+		exit 1
+	fi
+	record_optional_resource_note "Beads Project board CLI" "Beads checkout was not found"
 fi
 
 # CDXC:NativeBuild 2026-05-29-11:24: `bun run start` builds zmx and its Ghostty Zig dependency, which require Zig 0.15.2. A global Homebrew `zig` upgrade to 0.16 breaks the build API, so the local native build must choose the compatible Zig binary deliberately instead of inheriting the first PATH entry.
@@ -1288,26 +1782,7 @@ rm -rf "$WEB_DIR/bin"
 mkdir -p "$WEB_DIR/bin"
 cp "$ZMX_ROOT/zig-out/bin/zmx" "$WEB_DIR/bin/zmx"
 chmod 755 "$WEB_DIR/bin/zmx"
-# CDXC:GhostexTui 2026-06-07-12:13: The public installed `gx` command must open the TUI from any working directory, so the macOS app bundle ships the arch-specific Ghostex TUI beside pinned zmx/zehn/bd tools under Web/bin instead of relying on a source checkout or PATH fallback.
-if [[ ! -f "$TUI_ROOT/Cargo.toml" ]]; then
-	cat >&2 <<EOF
-Ghostex TUI source is missing:
-  $TUI_ROOT
-
-Initialize or provide the TUI source before building the app bundle.
-EOF
-	exit 1
-fi
-# CDXC:GhostexTui2 2026-06-16-22:52: The experimental upstream-Herdr sidebar TUI is launched by `gx 2`/`ghostex 2` and must be packaged as Web/bin/ghostex-tui2 so the installed CLI works from any directory while the default `gx` TUI remains unchanged.
-if [[ ! -f "$TUI2_ROOT/Cargo.toml" ]]; then
-	cat >&2 <<EOF
-Ghostex TUI2 source is missing:
-  $TUI2_ROOT
-
-Initialize or provide the TUI2 source before building the app bundle.
-EOF
-	exit 1
-fi
+# CDXC:ContributorStart 2026-06-22-23:23: Optional contributor submodules should be packaged when present and strict, but absent optional checkouts should only disable their feature in local starts. Keep zmx above as the hard terminal/persistence dependency; gate TUI, Zehn, Beads, Source, and T3 independently so one missing feature cannot remove the rest of the app shell.
 case "$GHOSTEX_MACOS_ARCH" in
 	arm64)
 		TUI_CARGO_TARGET="aarch64-apple-darwin"
@@ -1320,51 +1795,76 @@ TUI_CARGO_BIN="${CARGO:-}"
 if [[ -z "$TUI_CARGO_BIN" ]]; then
 	TUI_CARGO_BIN="$(command -v cargo || true)"
 fi
-if [[ -z "$TUI_CARGO_BIN" ]]; then
-	cat >&2 <<EOF
+if [[ -f "$TUI_ROOT/Cargo.toml" ]]; then
+	if [[ -z "$TUI_CARGO_BIN" ]]; then
+		cat >&2 <<EOF
 Cargo is required to build bundled ghostex-tui.
 
 Install Rust, then rerun this script:
   rustup toolchain install stable
 EOF
-	exit 1
-fi
-build_tui_if_needed
-cp "$TUI_ROOT/target/$TUI_CARGO_TARGET/release/ghostex-tui" "$WEB_DIR/bin/ghostex-tui"
-chmod 755 "$WEB_DIR/bin/ghostex-tui"
-build_tui2_if_needed
-cp "$TUI2_ROOT/target/$TUI_CARGO_TARGET/release/ghostex-tui2" "$WEB_DIR/bin/ghostex-tui2"
-chmod 755 "$WEB_DIR/bin/ghostex-tui2"
-# CDXC:AgentHistorySearch 2026-05-29-12:27: Ghostex bundles the pinned zehn submodule as Web/bin/zehn so `gx find` and `gx f` run the reviewed prompt-history search tool even when the user's PATH contains no zehn or a different zehn build. `gx s` is intentionally left as the existing sessions alias, and `gx search` is not a public alias.
-if [[ ! -f "$ZEHN_ROOT/build.zig" ]]; then
+		exit 1
+	fi
+	build_tui_if_needed
+	cp "$TUI_ROOT/target/$TUI_CARGO_TARGET/release/ghostex-tui" "$WEB_DIR/bin/ghostex-tui"
+	chmod 755 "$WEB_DIR/bin/ghostex-tui"
+	APP_CAPABILITY_TUI=true
+elif [[ "$TUI_ROOT_EXPLICITLY_CONFIGURED" == "1" || "$GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES" == "0" ]]; then
 	cat >&2 <<EOF
-zehn source is missing:
-  $ZEHN_ROOT
+Ghostex TUI source is missing:
+  $TUI_ROOT
 
-Initialize submodules before building:
-  git submodule update --init zehn
+Initialize or provide the TUI source before building the app bundle.
 EOF
 	exit 1
+else
+	record_optional_resource_note "Ghostex TUI" "tui checkout was not found"
 fi
-ZEHN_ZIG_BIN="${ZEHN_ZIG:-}"
-if [[ -z "$ZEHN_ZIG_BIN" ]]; then
-	ZEHN_ZIG_BIN="$(command -v zig || true)"
-fi
-if [[ -z "$ZEHN_ZIG_BIN" ]]; then
+if [[ -f "$TUI2_ROOT/Cargo.toml" ]]; then
+	if [[ -z "$TUI_CARGO_BIN" ]]; then
+		cat >&2 <<EOF
+Cargo is required to build bundled ghostex-tui2.
+
+Install Rust, then rerun this script:
+  rustup toolchain install stable
+EOF
+		exit 1
+	fi
+	build_tui2_if_needed
+	cp "$TUI2_ROOT/target/$TUI_CARGO_TARGET/release/ghostex-tui2" "$WEB_DIR/bin/ghostex-tui2"
+	chmod 755 "$WEB_DIR/bin/ghostex-tui2"
+	APP_CAPABILITY_TUI2=true
+elif [[ "$TUI2_ROOT_EXPLICITLY_CONFIGURED" == "1" || "$GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES" == "0" ]]; then
 	cat >&2 <<EOF
+Ghostex TUI2 source is missing:
+  $TUI2_ROOT
+
+Initialize or provide the TUI2 source before building the app bundle.
+EOF
+	exit 1
+else
+	record_optional_resource_note "Ghostex TUI2" "tui2 checkout was not found"
+fi
+if [[ -f "$ZEHN_ROOT/build.zig" ]]; then
+	ZEHN_ZIG_BIN="${ZEHN_ZIG:-}"
+	if [[ -z "$ZEHN_ZIG_BIN" ]]; then
+		ZEHN_ZIG_BIN="$(command -v zig || true)"
+	fi
+	if [[ -z "$ZEHN_ZIG_BIN" ]]; then
+		cat >&2 <<EOF
 Zig 0.16 or newer is required to build bundled zehn.
 
 Install it, then rerun this script:
   brew install zig
 EOF
-	exit 1
-fi
-ZEHN_ZIG_VERSION="$("$ZEHN_ZIG_BIN" version 2>/dev/null || true)"
-case "$ZEHN_ZIG_VERSION" in
-	0.16.* | 0.17.* | 0.18.* | 0.19.* | 0.20.*)
-		;;
-	*)
-		cat >&2 <<EOF
+		exit 1
+	fi
+	ZEHN_ZIG_VERSION="$("$ZEHN_ZIG_BIN" version 2>/dev/null || true)"
+	case "$ZEHN_ZIG_VERSION" in
+		0.16.* | 0.17.* | 0.18.* | 0.19.* | 0.20.*)
+			;;
+		*)
+			cat >&2 <<EOF
 Zig 0.16 or newer is required to build bundled zehn.
 
 Selected Zig:
@@ -1373,26 +1873,54 @@ Selected Zig:
 
 Set ZEHN_ZIG explicitly if your compatible Zig binary is not first on PATH.
 EOF
-		exit 1
-		;;
-esac
-case "$GHOSTEX_MACOS_ARCH" in
-	arm64)
-		ZEHN_TARGET="aarch64-macos.15.0"
-		;;
-	x86_64)
-		ZEHN_TARGET="x86_64-macos.13.0"
-		;;
-esac
-build_zehn_if_needed
-cp "$ZEHN_ROOT/zig-out/bin/zehn" "$WEB_DIR/bin/zehn"
-chmod 755 "$WEB_DIR/bin/zehn"
-build_beads_if_needed
-cp "$REPO_ROOT/build/$GHOSTEX_MACOS_ARCH/beads/bd" "$WEB_DIR/bin/bd"
-chmod 755 "$WEB_DIR/bin/bd"
-package_code_server_if_needed
+			exit 1
+			;;
+	esac
+	case "$GHOSTEX_MACOS_ARCH" in
+		arm64)
+			ZEHN_TARGET="aarch64-macos.15.0"
+			;;
+		x86_64)
+			ZEHN_TARGET="x86_64-macos.13.0"
+			;;
+	esac
+	build_zehn_if_needed
+	cp "$ZEHN_ROOT/zig-out/bin/zehn" "$WEB_DIR/bin/zehn"
+	chmod 755 "$WEB_DIR/bin/zehn"
+	APP_CAPABILITY_ZEHN=true
+elif [[ "$ZEHN_ROOT_EXPLICITLY_CONFIGURED" == "1" || "$GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES" == "0" ]]; then
+	cat >&2 <<EOF
+zehn source is missing:
+  $ZEHN_ROOT
+
+Initialize submodules before building:
+  git submodule update --init zehn
+EOF
+	exit 1
+else
+	record_optional_resource_note "Zehn search CLI" "zehn checkout was not found"
+fi
+if [[ -n "$BEADS_ROOT" ]]; then
+	build_beads_if_needed
+	cp "$REPO_ROOT/build/$GHOSTEX_MACOS_ARCH/beads/bd" "$WEB_DIR/bin/bd"
+	chmod 755 "$WEB_DIR/bin/bd"
+	APP_CAPABILITY_BEADS=true
+fi
+if [[ -n "$CODE_SERVER_ROOT" ]]; then
+	package_code_server_if_needed
+	APP_CAPABILITY_SOURCE_EDITOR=true
+fi
+stage_shared_code_server_node_runtime
+package_portless_if_needed
 package_gxserver_if_needed
-package_t3code_server "$T3CODE_ROOT" "$T3CODE_NODE_BIN" "$T3CODE_NPM_BIN"
+stage_remote_gxserver_linux_packages_if_configured
+if [[ -n "$T3CODE_ROOT" ]]; then
+	package_t3code_server "$T3CODE_ROOT" "$T3CODE_NODE_BIN" "$T3CODE_NPM_BIN"
+	APP_CAPABILITY_T3_CODE=true
+else
+	rm -rf "$WEB_DIR/t3code-server"
+fi
+write_build_capabilities_manifest
 mkdir -p "$CLI_DIR/node_modules"
 rsync -a --delete "$REPO_ROOT/node_modules/ws/" "$CLI_DIR/node_modules/ws/"
 mkdir -p "$WEB_DIR/monaco/vs"

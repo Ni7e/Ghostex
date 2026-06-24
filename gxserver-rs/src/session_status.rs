@@ -144,15 +144,14 @@ pub fn agent_activity_stale_projection_delay_ms(
     let state = normalize_agent_activity_state(value, "idle");
     if state.activity != "working"
         || state.working_source.as_deref() == Some("explicit")
-        || state.last_title_change_at.is_none()
         || !requires_observed_title_transitions(state.agent_name.as_deref())
     {
         return None;
     }
-    let last_title_change_ms = state
-        .last_title_change_at
-        .as_deref()
-        .and_then(parse_iso_ms)?;
+    let Some(last_title_change_ms) = state.last_title_change_at.as_deref().and_then(parse_iso_ms)
+    else {
+        return Some(0);
+    };
     let title_delay_ms = 0.max(
         last_title_change_ms + get_title_activity_window_ms(state.agent_name.as_deref())
             - now_ms_value,
@@ -253,28 +252,25 @@ fn apply_agent_activity_transition(input: ActivityInput) -> ActivityState {
         return next;
     }
 
-    if input.event.as_deref() == Some("title")
-        && title_signal.is_some()
-        && previous.agent_name.is_some()
-        && previous.agent_name
-            != title_signal
-                .as_ref()
-                .map(|signal| signal.agent_name.clone())
-        && previous.activity == "idle"
-        && previous.has_seen_working != Some(true)
-    {
-        let signal = title_signal.expect("checked");
-        return ActivityState {
-            activity: "idle".to_string(),
-            agent_name: Some(signal.agent_name),
-            has_seen_working: Some(false),
-            is_acknowledged: Some(true),
-            last_changed_at: Some(input.now_iso.clone()),
-            last_title: title_transition.last_title,
-            last_title_change_at: title_transition.last_title_change_at,
-            suppressed_until: Some(iso_from_ms(input.now_ms + INITIAL_ACTIVITY_SUPPRESSION_MS)),
-            ..ActivityState::default()
-        };
+    if let Some(signal) = title_signal.as_ref() {
+        if input.event.as_deref() == Some("title")
+            && previous.agent_name.is_some()
+            && previous.agent_name.as_deref() != Some(signal.agent_name.as_str())
+            && previous.activity == "idle"
+            && previous.has_seen_working != Some(true)
+        {
+            return ActivityState {
+                activity: "idle".to_string(),
+                agent_name: Some(signal.agent_name.clone()),
+                has_seen_working: Some(false),
+                is_acknowledged: Some(true),
+                last_changed_at: Some(input.now_iso.clone()),
+                last_title: title_transition.last_title,
+                last_title_change_at: title_transition.last_title_change_at,
+                suppressed_until: Some(iso_from_ms(input.now_ms + INITIAL_ACTIVITY_SUPPRESSION_MS)),
+                ..ActivityState::default()
+            };
+        }
     }
 
     if !has_explicit_activity
@@ -458,7 +454,7 @@ fn is_trusted_spinner_stop_title(
     title_signal: Option<&TitleStatusSignal>,
 ) -> bool {
     let Some(title) = (input.event.as_deref() == Some("title"))
-        .then(|| input.title.as_deref())
+        .then_some(input.title.as_deref())
         .flatten()
         .and_then(normalize_text_str)
     else {
@@ -677,7 +673,6 @@ fn effective_agent_activity_state(state: ActivityState, now_ms_value: i64) -> Ac
 fn is_stored_title_derived_working_stale(state: &ActivityState, now_ms_value: i64) -> bool {
     state.activity == "working"
         && state.working_source.as_deref() != Some("explicit")
-        && state.last_title_change_at.is_some()
         && is_title_derived_working_stale(
             state.agent_name.as_deref(),
             state.last_title_change_at.as_deref(),
@@ -904,12 +899,12 @@ fn create_title_activity_signature(
         _ => {}
     }
     let mut signature = chars.into_iter().collect::<String>();
-    if signal.map(|signal| signal.agent_name.as_str()) == Some("codex")
-        || signal.map(|signal| signal.agent_name.as_str()) == Some("pi")
+    if matches!(
+        signal.map(|signal| signal.agent_name.as_str()),
+        Some("codex" | "pi")
+    ) && is_codex_action_required_title(&signature)
     {
-        if is_codex_action_required_title(&signature) {
-            signature = "Action Required".to_string();
-        }
+        signature = "Action Required".to_string();
     }
     if signal.map(|signal| signal.agent_name.as_str()) == Some("cursor") {
         signature = replace_cursor_working_suffix(&signature);
@@ -1454,6 +1449,32 @@ mod tests {
         assert_eq!(effective.get("activity"), Some(&json!("idle")));
         assert_eq!(effective.get("workingSource"), None);
         assert_eq!(activity.get("activity"), Some(&json!("working")));
+
+        let malformed_title_working = json!({
+            "activity": "working",
+            "agentName": "codex",
+            "hasSeenWorking": true,
+            "isAcknowledged": true,
+            "lastChangedAt": "2026-06-07T06:47:30.000Z",
+            "workingSource": "title",
+            "workingStartedAt": "2026-06-07T06:47:30.000Z"
+        });
+        assert_eq!(
+            agent_activity_stale_projection_delay_ms(
+                Some(&malformed_title_working),
+                1780814853000_i64
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            effective_agent_activity_value(
+                Some(&malformed_title_working),
+                "idle",
+                1780814853000_i64
+            )
+            .get("activity"),
+            Some(&json!("idle"))
+        );
     }
 
     #[test]

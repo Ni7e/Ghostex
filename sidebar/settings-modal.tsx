@@ -122,6 +122,7 @@ import {
   type SidebarGhostexCliStatusMessage,
   type SidebarGhostexFolderStatsMessage,
   type SidebarOSIntegrationStatusMessage,
+  type SidebarPortlessState,
   type SidebarProjectSettingsItem,
   type SidebarTheme,
   type SidebarThemeVariant,
@@ -149,6 +150,7 @@ import {
   SESSION_TITLE_GENERATION_AGENT_OPTIONS,
   SIDEBAR_SETTINGS_PRESETS,
   SIDEBAR_SIDE_OPTIONS,
+  TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS,
   applySidebarSettingsPreset,
   getSessionTitleGenerationCommandPreview,
   getSidebarSettingsPresetId,
@@ -156,6 +158,8 @@ import {
   MAX_SIDEBAR_DEFAULT_WIDTH_PX,
   MIN_COMMANDS_PANEL_DEFAULT_HEIGHT_PX,
   MIN_SIDEBAR_DEFAULT_WIDTH_PX,
+  normalizeTerminalDevServerIgnoredPortRuleInput,
+  normalizeTerminalDevServerIgnoredPortRules,
   normalizeghostexSettings,
   normalizeRemoteMachineSettings,
   type BrowserFeedbackTool,
@@ -166,12 +170,14 @@ import {
   type GhosttyCopyOnSelect,
   type GhosttyScrollbar,
   type KeepAwakeDurationMinutes,
+  type PortlessProtocol,
   type RemoteMachineSettings,
   type SessionPersistenceProvider,
   type SessionStatusIndicatorSize,
   type SessionTitleGenerationAgent,
   type SidebarSettingsPresetId,
   type SidebarSide,
+  type TerminalDevServerOpenTarget,
   type TerminalCursorStyle,
   type ghostexSettings,
 } from "../shared/ghostex-settings";
@@ -224,6 +230,10 @@ import {
   normalizeSidebarSessionTagListItems,
   type SidebarSessionTagListItem,
 } from "../shared/session-tags";
+import type {
+  NativePortlessAdminAction,
+  NativePortlessAdminInstallAction,
+} from "../shared/native-ghostty-host-protocol";
 import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "./agent-logos";
 import { EditorBrandIcon, getEditorBrandIconId } from "./brand-icons";
 import { BundledAgentSkillsPanel } from "./bundled-agent-skills-panel";
@@ -467,6 +477,7 @@ type MainSettingsSectionId =
   | "terminal"
   | "terminalBehavior"
   | "terminalScrolling"
+  | "terminalDevServers"
   | "browser"
   | "editor"
   | "autoSleep"
@@ -574,6 +585,15 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "terminalMouseScrollMultiplierDiscrete",
     "terminalScrollToBottomWhenTyping",
   ],
+  /*
+   * CDXC:TerminalDevServers 2026-06-23-19:22:
+   * Dev-server discovery preferences belong under Terminal settings because they govern terminal-output detection and launch choices, while remaining separate from Ghostty config-backed terminal emulator controls. Keep the launch control to system default versus internal browser instead of presenting per-browser checkboxes.
+   */
+  terminalDevServers: [
+    "terminalDevServerDetectionEnabled",
+    "terminalDevServerOpenTarget",
+    "terminalDevServerIgnoredPortRules",
+  ],
   editor: [
     "defaultEditorCommand",
     "customDefaultEditorCommand",
@@ -602,6 +622,7 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "keepAwakePreventLidSleep",
     "keepAwakeActivateOnLaunch",
     "keepAwakeActivateOnExternalDisplay",
+    "keepAwakeWhileWorkingSessions",
     "keepAwakeDeactivateBelowBatteryThreshold",
     "keepAwakeBatteryThresholdPercent",
     "keepAwakeDeactivateOnLowPowerMode",
@@ -707,6 +728,7 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "keepAwakePreventLidSleep",
   "keepAwakeActivateOnLaunch",
   "keepAwakeActivateOnExternalDisplay",
+  "keepAwakeWhileWorkingSessions",
   "keepAwakeDeactivateBelowBatteryThreshold",
   "keepAwakeBatteryThresholdPercent",
   "keepAwakeDeactivateOnLowPowerMode",
@@ -895,6 +917,7 @@ export type SettingsModalProps = {
   ghostexFolderStatsLoading?: boolean;
   osIntegrationStatus?: SidebarOSIntegrationStatusMessage;
   osIntegrationStatusLoading?: boolean;
+  portless?: SidebarPortlessState;
 };
 
 export function SettingsModal({
@@ -942,6 +965,7 @@ export function SettingsModal({
   ghostexFolderStatsLoading = false,
   osIntegrationStatus,
   osIntegrationStatusLoading = false,
+  portless,
 }: SettingsModalProps) {
   const isFirstLaunchSetup = presentation === "firstLaunchSetup";
   const normalizedInitialSettings = normalizeghostexSettings(settings);
@@ -974,6 +998,7 @@ export function SettingsModal({
   const ghosttyBehaviorSectionRef = useRef<HTMLDivElement>(null);
   const ghosttyScrollingSectionRef = useRef<HTMLDivElement>(null);
   const ghosttyTerminalSectionRef = useRef<HTMLDivElement>(null);
+  const terminalDevServersSectionRef = useRef<HTMLDivElement>(null);
   const powerSectionRef = useRef<HTMLDivElement>(null);
   const statusIndicatorsSectionRef = useRef<HTMLDivElement>(null);
   const sessionCardsSectionRef = useRef<HTMLDivElement>(null);
@@ -1363,6 +1388,11 @@ export function SettingsModal({
         title: "Activate on external display",
       },
       {
+        key: "keepAwakeWhileWorkingSessions",
+        subtitle: "Keep the Mac awake while sessions are working and for 20 minutes after.",
+        title: "Keep awake for working sessions",
+      },
+      {
         key: "keepAwakeDeactivateBelowBatteryThreshold",
         subtitle: "Stop preventing sleep when battery capacity drops below the threshold.",
         title: "Deactivate below battery threshold",
@@ -1743,6 +1773,28 @@ export function SettingsModal({
         title: "Scroll to bottom when typing",
       },
     ]),
+    terminalDevServers: getSettingsSectionSearch(settingsSearchQuery, "Dev Servers", [
+      {
+        key: "terminalDevServerDetectionEnabled",
+        subtitle: "Detect localhost dev server URLs from terminal output.",
+        title: "Detect running servers in terminals",
+      },
+      {
+        key: "terminalDevServerOpenTarget",
+        options: TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS,
+        subtitle: "Open detected server URLs in the system default browser or internal browser.",
+        title: "Open detected servers in",
+      },
+      {
+        key: "terminalDevServerIgnoredPortRules",
+        options: [
+          { label: "9229", value: "9229" },
+          { label: "24678-24680", value: "24678-24680" },
+        ],
+        subtitle: "Hide detected servers on specific ports or inclusive port ranges.",
+        title: "Ignored ports",
+      },
+    ]),
     workspace: getSettingsSectionSearch(settingsSearchQuery, "Workspace", [
       {
         key: "workspaceActivePaneBorderColor",
@@ -1846,6 +1898,12 @@ export function SettingsModal({
       ref: ghosttyScrollingSectionRef,
       searchResult: settingsSearch.terminalScrolling,
       title: "Terminal Scrolling",
+    },
+    {
+      id: "terminalDevServers",
+      ref: terminalDevServersSectionRef,
+      searchResult: settingsSearch.terminalDevServers,
+      title: "Dev Servers",
     },
     { id: "editor", ref: editorSectionRef, searchResult: settingsSearch.editor, title: "Editor" },
     {
@@ -1963,6 +2021,7 @@ export function SettingsModal({
 	      terminal: ghosttyTerminalSectionRef,
 	      terminalBehavior: ghosttyBehaviorSectionRef,
 	      terminalScrolling: ghosttyScrollingSectionRef,
+	      terminalDevServers: terminalDevServersSectionRef,
 	      theming: themingSectionRef,
 	      workspace: workspaceSectionRef,
 	      agents: agentsOnboardingSectionRef,
@@ -2282,7 +2341,7 @@ export function SettingsModal({
              */}
             {!isFirstLaunchSetup ? (
             <div className="settings-modal-tabs-scroll mt-3">
-              <TabsList>
+              <TabsList className="app-modal-tab-rail">
                 <TabsTrigger value="settings">General</TabsTrigger>
                 <TabsTrigger value="integrations">Integrations</TabsTrigger>
                 <TabsTrigger value="remote">Remote</TabsTrigger>
@@ -2811,12 +2870,20 @@ export function SettingsModal({
                   pass. */}
               {mainSettingVisible(settingsSearch.terminal, "ghosttySettingsActions") ? (
                 <>
-                  <div className="rounded-none border border-destructive/45 bg-destructive/10 px-4 py-3 text-sm leading-6 text-foreground">
-                    Whatever you set here also applies to your external Ghostty terminal
-                    because this Ghostty terminal uses the same settings file. ghostex reloads
-                    its embedded Ghostty terminal about 3 seconds after you stop changing
-                    these controls; external Ghostty windows may still need Cmd+Shift+, to
-                    reload.
+                  {/* CDXC:TerminalSettings 2026-06-23-05:48:
+                      The shared-config notice is informational, not a warning, so
+                      it uses the neutral Info box pattern (muted border/background
+                      plus an info icon) instead of any colored alert tint, matching
+                      the IconInfoCircle info boxes used elsewhere in Settings. */}
+                  <div className="flex items-start gap-3 rounded-none border border-border bg-muted/20 px-4 py-3 text-sm leading-6 text-muted-foreground">
+                    <IconInfoCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-foreground" />
+                    <p className="m-0">
+                      Whatever you set here also applies to your external Ghostty terminal
+                      because this Ghostty terminal uses the same settings file. ghostex reloads
+                      its embedded Ghostty terminal about 3 seconds after you stop changing
+                      these controls; external Ghostty windows may still need Cmd+Shift+, to
+                      reload.
+                    </p>
                   </div>
                   <GhosttySettingsActions
                     onApplyRecommended={applyRecommendedGhosttySettings}
@@ -3225,6 +3292,63 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
+            {mainSectionVisible("terminalDevServers", settingsSearch.terminalDevServers) ? (
+              <SettingsSection
+                description="Choose how Ghostex discovers running dev servers, where detected server URLs open, and which ports stay hidden."
+                sectionRef={terminalDevServersSectionRef}
+                title="Dev Servers"
+              >
+                {/*
+                 * CDXC:TerminalDevServers 2026-06-23-19:22:
+                 * Dev-server settings are terminal-adjacent app behavior. Keep detection, one launch destination, and ignored port rules together so users can tune server discovery without editing terminal emulator config or managing individual browser targets.
+                 */}
+                {mainSettingVisible(
+                  settingsSearch.terminalDevServers,
+                  "terminalDevServerDetectionEnabled",
+                ) ? (
+                  <ToggleField
+                    checked={draft.terminalDevServerDetectionEnabled}
+                    description="Detect localhost dev server URLs from terminal output."
+                    label="Detect running servers in terminals"
+                    {...getSettingModificationProps("terminalDevServerDetectionEnabled")}
+                    onChange={(checked) =>
+                      updateDraft("terminalDevServerDetectionEnabled", checked)
+                    }
+                  />
+                ) : null}
+                {mainSettingVisible(
+                  settingsSearch.terminalDevServers,
+                  "terminalDevServerOpenTarget",
+                ) ? (
+                  <SelectField
+                    description="Open detected server URLs in the system default browser or internal browser."
+                    label="Open detected servers in"
+                    {...getSettingModificationProps("terminalDevServerOpenTarget")}
+                    onChange={(value) =>
+                      updateDraft(
+                        "terminalDevServerOpenTarget",
+                        value as TerminalDevServerOpenTarget,
+                      )
+                    }
+                    options={TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS}
+                    value={draft.terminalDevServerOpenTarget}
+                  />
+                ) : null}
+                {mainSettingVisible(
+                  settingsSearch.terminalDevServers,
+                  "terminalDevServerIgnoredPortRules",
+                ) ? (
+                  <TerminalDevServerIgnoredPortsField
+                    ignoredPortRules={draft.terminalDevServerIgnoredPortRules}
+                    {...getSettingModificationProps("terminalDevServerIgnoredPortRules")}
+                    onChange={(ignoredPortRules) =>
+                      updateDraft("terminalDevServerIgnoredPortRules", ignoredPortRules)
+                    }
+                  />
+                ) : null}
+              </SettingsSection>
+            ) : null}
+
             {mainSectionVisible("editor", settingsSearch.editor) ? (
             <SettingsSection sectionRef={editorSectionRef} title="Editor">
               {mainSettingVisible(settingsSearch.editor, "defaultEditorCommand") ? (
@@ -3508,6 +3632,15 @@ export function SettingsModal({
                 onChange={(checked) => updateDraft("keepAwakeActivateOnExternalDisplay", checked)}
               />
               ) : null}
+              {mainSettingVisible(settingsSearch.power, "keepAwakeWhileWorkingSessions") ? (
+              <ToggleField
+                checked={draft.keepAwakeWhileWorkingSessions}
+                description="Keep the Mac awake while any session is Working and for 20 minutes after, so you have time to reply."
+                label="Keep awake for working sessions"
+                {...getSettingModificationProps("keepAwakeWhileWorkingSessions")}
+                onChange={(checked) => updateDraft("keepAwakeWhileWorkingSessions", checked)}
+              />
+              ) : null}
               {mainSettingVisible(settingsSearch.power, "keepAwakeDeactivateBelowBatteryThreshold") ? (
               <ToggleField
                 checked={draft.keepAwakeDeactivateBelowBatteryThreshold}
@@ -3690,7 +3823,6 @@ export function SettingsModal({
                       <ul className="grid gap-1.5">
                         <li>OS Integration settings tab</li>
                         <li>Browser address bar: Profiles</li>
-                        <li>Browser address bar: Color scheme</li>
                         <li>Title bar and Power settings: Keep Awake</li>
                       </ul>
                     </div>
@@ -3843,7 +3975,14 @@ export function SettingsModal({
           ) : null}
           {!isFirstLaunchSetup ? (
           <TabsContent className="mt-0 min-h-0 flex-1 overflow-hidden" value="projects">
-            <ProjectsSettingsPanel projects={projects} vscode={vscode} />
+            <ProjectsSettingsPanel
+              onPortlessEnabledChange={(checked) => updateDraft("portlessEnabled", checked)}
+              onPortlessProtocolChange={(protocol) => updateDraft("portlessProtocol", protocol)}
+              portless={portless}
+              projects={projects}
+              settings={draft}
+              vscode={vscode}
+            />
           </TabsContent>
           ) : null}
           {!isFirstLaunchSetup ? (
@@ -4251,6 +4390,30 @@ function RemoteSettingsTab({
                     onPasswordSave={() => saveRemoteMachinePassword(machine)}
                     passwordSaveDisabled={!vscode}
                   />
+                  {/*
+                   * CDXC:RemoteMachines 2026-06-23-08:30:
+                   * Remote Settings needs a direct gxserver install action for
+                   * first-run Ubuntu SSH machines. Reuse the reconnect flow so
+                   * native opens the approval modal only after SSH proves
+                   * gxserver is missing, and otherwise connects the existing
+                   * remote daemon without reinstalling it.
+                   */}
+                  <div className="settings-management-actions settings-remote-machine-install-actions">
+                    <Button
+                      disabled={!vscode || !machine.sshHost.trim()}
+                      onClick={() => {
+                        vscode?.postMessage({
+                          remoteMachineId: machine.id,
+                          type: "reconnectRemoteMachine",
+                        });
+                      }}
+                      type="button"
+                      variant="secondary"
+                    >
+                      <IconDownload aria-hidden="true" />
+                      Install / Connect gxserver
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))
@@ -4399,10 +4562,18 @@ function formatRemoteMachineSshTarget(machine: RemoteMachineSettings): string {
 }
 
 function ProjectsSettingsPanel({
+  onPortlessEnabledChange,
+  onPortlessProtocolChange,
+  portless,
   projects,
+  settings,
   vscode,
 }: {
+  onPortlessEnabledChange: (checked: boolean) => void;
+  onPortlessProtocolChange: (protocol: PortlessProtocol) => void;
+  portless?: SidebarPortlessState;
   projects: SidebarProjectSettingsItem[];
+  settings: ghostexSettings;
   vscode?: WebviewApi;
 }) {
   const projectSelectorLabelId = useId();
@@ -4451,6 +4622,24 @@ function ProjectsSettingsPanel({
     setProjectSelectorQuery("");
   };
 
+  const runPortlessSettingsAdminAction = (action: NativePortlessAdminAction) => {
+    const requestId = createPortlessSettingsAdminRequestId(action);
+    if (action === "remove") {
+      vscode?.postMessage({
+        action,
+        requestId,
+        type: "runPortlessSettingsAdminAction",
+      });
+      return;
+    }
+    vscode?.postMessage({
+      action,
+      protocol: settings.portlessProtocol,
+      requestId,
+      type: "runPortlessSettingsAdminAction",
+    });
+  };
+
   const saveCommand = () => {
     if (!selectedProject) {
       return;
@@ -4484,26 +4673,36 @@ function ProjectsSettingsPanel({
     });
   };
 
-  if (projects.length === 0) {
-    return (
-      <div className="settings-tab-scroll scroll-mask-y">
+  return (
+    <div className="settings-tab-scroll scroll-mask-y">
+      {/*
+       * CDXC:PortlessSettings 2026-06-23-03:47:
+       * Projects settings starts with global Portless controls because the
+       * background proxy and HTTP/HTTPS mode are app-wide settings. Keep
+       * generated project and worktree domains read-only here; slug editing and
+       * reset actions belong to a later phase.
+       *
+       * CDXC:Worktrees 2026-05-18-23:07:
+       * Main projects can store a setup command that runs inside every new worktree before the selected agent receives the first prompt. Keep worktree projects out of this list because they inherit from their parent project.
+       */}
+      <div className="projects-settings-layout">
+        <PortlessGlobalSettingsPanel
+          domainSummaries={getProjectPortlessDomainSummaries(projects, selectedProject, portless)}
+          onAdminAction={runPortlessSettingsAdminAction}
+          onEnabledChange={onPortlessEnabledChange}
+          onProtocolChange={onPortlessProtocolChange}
+          portless={portless}
+          settings={settings}
+        />
+        {projects.length === 0 ? (
         <Empty>
           <EmptyHeader>
             <EmptyTitle>No projects</EmptyTitle>
             <EmptyDescription>Main projects will appear here.</EmptyDescription>
           </EmptyHeader>
         </Empty>
-      </div>
-    );
-  }
-
-  return (
-    <div className="settings-tab-scroll scroll-mask-y">
-      {/*
-       * CDXC:Worktrees 2026-05-18-23:07:
-       * Main projects can store a setup command that runs inside every new worktree before the selected agent receives the first prompt. Keep worktree projects out of this list because they inherit from their parent project.
-       */}
-      <div className="projects-settings-layout">
+        ) : (
+        <>
         {/*
          * CDXC:ProjectSettings 2026-06-14-17:29:
          * The Projects settings tab should not render every project as a visible
@@ -4679,9 +4878,391 @@ function ProjectsSettingsPanel({
             </div>
           </CardContent>
         </Card>
+        </>
+        )}
       </div>
     </div>
   );
+}
+
+type PortlessSettingsDomainSummary = {
+  domains: readonly {
+    hostname: string;
+    liveRoutes: readonly {
+      kind: "primary" | "additional";
+      port: number;
+    }[];
+  }[];
+  kind: "project" | "worktree";
+  projectId: string;
+  title: string;
+};
+
+const PORTLESS_PROTOCOL_OPTIONS: readonly { label: string; value: PortlessProtocol }[] = [
+  { label: "HTTPS", value: "https" },
+  { label: "HTTP", value: "http" },
+];
+
+const PORTLESS_SETTINGS_RECOMMENDED_ADMIN_ACTIONS: readonly NativePortlessAdminInstallAction[] = [
+  "install",
+  "reconfigure",
+  "retry",
+];
+
+const PORTLESS_SETTINGS_ADMIN_ACTION_LABELS: Record<NativePortlessAdminAction, string> = {
+  install: "Install",
+  reconfigure: "Reconfigure",
+  remove: "Remove background proxy",
+  retry: "Retry",
+};
+
+function PortlessGlobalSettingsPanel({
+  domainSummaries,
+  onAdminAction,
+  onEnabledChange,
+  onProtocolChange,
+  portless,
+  settings,
+}: {
+  domainSummaries: readonly PortlessSettingsDomainSummary[];
+  onAdminAction: (action: NativePortlessAdminAction) => void;
+  onEnabledChange: (checked: boolean) => void;
+  onProtocolChange: (protocol: PortlessProtocol) => void;
+  portless?: SidebarPortlessState;
+  settings: ghostexSettings;
+}) {
+  const portlessToggleId = useId();
+  const portlessProtocolLabelId = useId();
+  const status = getPortlessSettingsStatus(portless, settings);
+  const recommendedAction = getPortlessRecommendedSettingsAdminAction(portless);
+  const showRemoveAction = portless?.health.setupOwnership === "ghostex";
+  const removeAvailability = portless?.nativeAdmin.actions.remove;
+
+  return (
+    <section className="settings-modal-section settings-projects-global-settings">
+      <div className="settings-projects-global-header">
+        <div className="settings-management-header-text">
+          <h3 className="settings-management-heading">Global Settings</h3>
+          <p className="settings-management-description">
+            Portless controls apply to all projects and worktrees.
+          </p>
+        </div>
+        <span className="settings-portless-status-badge" data-status={status.tone}>
+          {status.label}
+        </span>
+      </div>
+      <div className="settings-projects-global-body">
+        <div className="settings-portless-control-row">
+          <div className="settings-management-main">
+            <label className="settings-management-title" htmlFor={portlessToggleId}>
+              Portless
+            </label>
+            <span className="settings-management-detail">
+              Create stable local domains for running project and worktree dev servers.
+            </span>
+          </div>
+          <Switch
+            checked={settings.portlessEnabled}
+            id={portlessToggleId}
+            onCheckedChange={onEnabledChange}
+          />
+        </div>
+        <div className="settings-portless-control-row">
+          <div className="settings-management-main">
+            <span className="settings-management-title" id={portlessProtocolLabelId}>
+              Protocol
+            </span>
+            <span className="settings-management-detail">
+              Choose the standard local web port the background proxy should use.
+            </span>
+          </div>
+          <ToggleGroup
+            aria-labelledby={portlessProtocolLabelId}
+            className="settings-portless-protocol-toggle"
+            onValueChange={(value) => {
+              const [protocol] = value as PortlessProtocol[];
+              if (protocol) {
+                onProtocolChange(protocol);
+              }
+            }}
+            value={[settings.portlessProtocol]}
+            variant="outline"
+          >
+            {PORTLESS_PROTOCOL_OPTIONS.map((option) => (
+              <ToggleGroupItem key={option.value} value={option.value}>
+                {option.label}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </div>
+        <div className="settings-portless-status-row">
+          <IconInfoCircle aria-hidden="true" />
+          <div className="settings-management-main">
+            <span className="settings-management-title">Setup status</span>
+            <span className="settings-management-detail">{status.detail}</span>
+          </div>
+        </div>
+        <div className="settings-portless-actions" aria-label="Portless actions">
+          {recommendedAction ? (
+            <PortlessSettingsAdminActionButton
+              action={recommendedAction}
+              availability={portless?.nativeAdmin.actions[recommendedAction]}
+              onAdminAction={onAdminAction}
+            />
+          ) : null}
+          {settings.portlessEnabled ? (
+            <Button onClick={() => onEnabledChange(false)} type="button" variant="outline">
+              <IconCircleX aria-hidden="true" />
+              Disable
+            </Button>
+          ) : null}
+          {showRemoveAction ? (
+            <PortlessSettingsAdminActionButton
+              action="remove"
+              availability={removeAvailability}
+              onAdminAction={onAdminAction}
+            />
+          ) : null}
+        </div>
+        <PortlessAssignedDomainsSummary
+          domainSummaries={domainSummaries}
+          routePreviewStatus={portless?.presentation?.routePreviewStatus}
+          settings={settings}
+        />
+      </div>
+    </section>
+  );
+}
+
+function PortlessSettingsAdminActionButton({
+  action,
+  availability,
+  onAdminAction,
+}: {
+  action: NativePortlessAdminAction;
+  availability?: SidebarPortlessState["nativeAdmin"]["actions"][NativePortlessAdminAction];
+  onAdminAction: (action: NativePortlessAdminAction) => void;
+}) {
+  const Icon =
+    action === "install"
+      ? IconDownload
+      : action === "retry"
+        ? IconRefresh
+        : action === "remove"
+          ? IconTrash
+          : IconTools;
+  const disabled = availability?.available !== true;
+  return (
+    <Button
+      disabled={disabled}
+      onClick={() => onAdminAction(action)}
+      type="button"
+      variant={action === "remove" ? "outline" : "default"}
+    >
+      <Icon aria-hidden="true" />
+      {PORTLESS_SETTINGS_ADMIN_ACTION_LABELS[action]}
+    </Button>
+  );
+}
+
+function PortlessAssignedDomainsSummary({
+  domainSummaries,
+  routePreviewStatus,
+  settings,
+}: {
+  domainSummaries: readonly PortlessSettingsDomainSummary[];
+  routePreviewStatus?: NonNullable<SidebarPortlessState["presentation"]>["routePreviewStatus"];
+  settings: ghostexSettings;
+}) {
+  const emptyMessage = getPortlessAssignedDomainsEmptyMessage(routePreviewStatus, settings);
+  return (
+    <div className="settings-portless-domains">
+      <div className="settings-management-main">
+        <span className="settings-management-title">Assigned domains</span>
+        <span className="settings-management-detail">
+          Generated project and worktree domains are read-only.
+        </span>
+      </div>
+      {domainSummaries.length > 0 ? (
+        <ul aria-label="Assigned Portless domains" className="settings-portless-domain-list">
+          {domainSummaries.map((summary) => (
+            <li className="settings-portless-domain-group" key={summary.projectId}>
+              <div className="settings-portless-domain-group-header">
+                <span className="settings-portless-domain-group-title">{summary.title}</span>
+                <span className="settings-portless-domain-group-kind">
+                  {summary.kind === "worktree" ? "Worktree" : "Project"}
+                </span>
+              </div>
+              <div className="settings-portless-domain-hosts">
+                {summary.domains.map((domain) => (
+                  <div className="settings-portless-domain-host" key={domain.hostname}>
+                    <code className="settings-portless-domain-hostname">{domain.hostname}</code>
+                    <span className="settings-portless-domain-meta">
+                      {domain.liveRoutes.length > 0
+                        ? domain.liveRoutes
+                            .map((route) => `${route.kind === "primary" ? "Primary" : "Additional"} - port ${route.port}`)
+                            .join(", ")
+                        : "Assigned"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="settings-portless-domain-empty">{emptyMessage}</div>
+      )}
+    </div>
+  );
+}
+
+function getPortlessSettingsStatus(
+  portless: SidebarPortlessState | undefined,
+  settings: ghostexSettings,
+): { detail: string; label: string; tone: "active" | "disabled" | "failed" | "needsSetup" | "unknown" } {
+  if (!settings.portlessEnabled) {
+    return {
+      detail: "Portless is off in Ghostex settings.",
+      label: "Disabled",
+      tone: "disabled",
+    };
+  }
+  const health = portless?.health;
+  if (!health) {
+    return {
+      detail: "Gxserver has not reported Portless setup metadata yet.",
+      label: "Unknown",
+      tone: "unknown",
+    };
+  }
+  if (health.setupStatus === "active" && health.setupOwnership === "ghostex") {
+    return {
+      detail: `Ghostex is managing the ${health.protocol.toUpperCase()} background proxy.`,
+      label: "Active",
+      tone: "active",
+    };
+  }
+  if (health.setupStatus === "failed") {
+    return {
+      detail: "Ghostex could not verify the managed background proxy.",
+      label: "Failed",
+      tone: "failed",
+    };
+  }
+  if (health.setupStatus === "needed" && health.setupOwnership === "standalone") {
+    return {
+      detail: "A Portless service is installed, but Ghostex is not managing it.",
+      label: "Reconfigure",
+      tone: "needsSetup",
+    };
+  }
+  if (health.setupStatus === "needed") {
+    return {
+      detail: "Install the Ghostex-managed background proxy to assign domains.",
+      label: "Setup needed",
+      tone: "needsSetup",
+    };
+  }
+  if (health.setupStatus === "disabled") {
+    return {
+      detail: "Portless setup is disabled in the reported runtime state.",
+      label: "Disabled",
+      tone: "disabled",
+    };
+  }
+  return {
+    detail: "Portless setup state is not available yet.",
+    label: "Unknown",
+    tone: "unknown",
+  };
+}
+
+function getPortlessRecommendedSettingsAdminAction(
+  portless: SidebarPortlessState | undefined,
+): NativePortlessAdminInstallAction | undefined {
+  return PORTLESS_SETTINGS_RECOMMENDED_ADMIN_ACTIONS.find((action) => {
+    const nativeAvailability = portless?.nativeAdmin.actions[action];
+    const healthRecommendation = portless?.health.actions[action];
+    return nativeAvailability?.available === true || healthRecommendation?.recommended === true;
+  });
+}
+
+function getProjectPortlessDomainSummaries(
+  projects: readonly SidebarProjectSettingsItem[],
+  selectedProject: SidebarProjectSettingsItem | undefined,
+  portless: SidebarPortlessState | undefined,
+): readonly PortlessSettingsDomainSummary[] {
+  const assignedDomains = portless?.presentation?.assignedDomains ?? [];
+  if (!selectedProject || assignedDomains.length === 0) {
+    return [];
+  }
+  const projectsById = new Map(projects.map((project) => [project.projectId, project]));
+  const includedProjectIds = new Set<string>([selectedProject.projectId]);
+  if (!selectedProject.worktreeParentProjectId) {
+    for (const project of projects) {
+      if (project.worktreeParentProjectId === selectedProject.projectId) {
+        includedProjectIds.add(project.projectId);
+      }
+    }
+  }
+  const liveRoutesByProjectAndHostname = new Map<
+    string,
+    PortlessSettingsDomainSummary["domains"][number]["liveRoutes"]
+  >();
+  for (const preview of portless?.presentation?.routePreviews ?? []) {
+    const key = `${preview.projectId}\0${preview.hostname}`;
+    liveRoutesByProjectAndHostname.set(key, [
+      ...(liveRoutesByProjectAndHostname.get(key) ?? []),
+      {
+        kind: preview.kind,
+        port: preview.port,
+      },
+    ]);
+  }
+  const domainsByProjectId = new Map<string, PortlessSettingsDomainSummary["domains"][number][]>();
+  for (const domain of assignedDomains) {
+    if (!includedProjectIds.has(domain.projectId)) {
+      continue;
+    }
+    const domains = domainsByProjectId.get(domain.projectId) ?? [];
+    if (!domains.some((existingDomain) => existingDomain.hostname === domain.hostname)) {
+      domains.push({
+        hostname: domain.hostname,
+        liveRoutes:
+          liveRoutesByProjectAndHostname.get(`${domain.projectId}\0${domain.hostname}`) ?? [],
+      });
+    }
+    domainsByProjectId.set(domain.projectId, domains);
+  }
+  return [...domainsByProjectId.entries()].map(([projectId, domains]) => {
+    const project = projectsById.get(projectId);
+    return {
+      domains,
+      kind: project?.worktreeParentProjectId ? "worktree" : "project",
+      projectId,
+      title: project?.name ?? "Project",
+    };
+  });
+}
+
+function getPortlessAssignedDomainsEmptyMessage(
+  routePreviewStatus:
+    | NonNullable<SidebarPortlessState["presentation"]>["routePreviewStatus"]
+    | undefined,
+  settings: ghostexSettings,
+): string {
+  if (!settings.portlessEnabled || routePreviewStatus === "disabled") {
+    return "No domains are assigned while Portless is disabled.";
+  }
+  if (routePreviewStatus === "unavailable" || !routePreviewStatus) {
+    return "No assigned domain metadata is available yet.";
+  }
+  return "No assigned domains are available for the selected project yet.";
+}
+
+function createPortlessSettingsAdminRequestId(action: NativePortlessAdminAction): string {
+  return `portless-settings-${action}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 type SettingsAgentDragData = {
@@ -5258,6 +5839,8 @@ function IntegrationsSettingsTab({
         ? ghostexCliStatus?.t3RuntimeSource === "development"
           ? "Development"
           : "Bundled"
+        : ghostexCliStatus?.t3RuntimeSource === "unavailable"
+          ? "Not bundled"
         : "Missing";
   const t3RuntimeDescription =
     ghostexCliStatus?.t3RuntimeDetail ??
@@ -5322,6 +5905,9 @@ function IntegrationsSettingsTab({
           {/*
            * CDXC:T3CodePackaging 2026-06-06-05:50:
            * T3 Code panes are a core advertised Ghostex feature, so Settings -> Integrations must show whether the app build actually contains the managed T3 runtime instead of leaving users to discover a missing Web/t3code-server package through a pane startup failure.
+           *
+           * CDXC:ContributorStart 2026-06-22-23:23:
+           * Contributor local builds can intentionally omit the optional t3code submodule. Show that state as Not bundled instead of Missing so the warning points to a disabled feature, not a broken app shell.
            */}
           <IntegrationSettingsRow
             description={t3RuntimeDescription}
@@ -7649,6 +8235,111 @@ function shouldShowSetting(
     return result.sectionMatches || result.visibleSettingKeys.has(settingKey);
   }
   return showAdvancedSettings || !isAdvancedMainSetting(settingKey);
+}
+
+function TerminalDevServerIgnoredPortsField({
+  advanced,
+  ignoredPortRules,
+  isModified,
+  onChange,
+  onResetToDefault,
+}: {
+  advanced?: boolean;
+  ignoredPortRules: readonly string[];
+  onChange: (ignoredPortRules: readonly string[]) => void;
+} & SettingModificationProps) {
+  const id = useId();
+  const [inputValue, setInputValue] = useState("");
+  const [error, setError] = useState("");
+  const addIgnoredPortRule = () => {
+    const canonicalRule = normalizeTerminalDevServerIgnoredPortRuleInput(inputValue);
+    if (!canonicalRule) {
+      setError("Enter a port (e.g. 9229) or a range (e.g. 24678-24680).");
+      return;
+    }
+    setError("");
+    setInputValue("");
+    onChange(normalizeTerminalDevServerIgnoredPortRules([...ignoredPortRules, canonicalRule]));
+  };
+  const removeIgnoredPortRule = (rule: string) => {
+    onChange(
+      normalizeTerminalDevServerIgnoredPortRules(
+        ignoredPortRules.filter((ignoredPortRule) => ignoredPortRule !== rule),
+      ),
+    );
+  };
+
+  return (
+    <SettingRow
+      advanced={advanced}
+      description="Servers on these ports are hidden from the server menu. Enter a port or an inclusive range."
+      htmlFor={id}
+      isModified={isModified}
+      label="Ignored ports"
+      onResetToDefault={onResetToDefault}
+    >
+      <div className="grid gap-3" id={id}>
+        <div className="grid gap-2">
+          {ignoredPortRules.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No ignored ports.</div>
+          ) : (
+            ignoredPortRules.map((rule) => (
+              <div
+                className="flex min-h-9 items-center justify-between gap-3 rounded-none border border-border/70 bg-card/40 px-3 py-2"
+                key={rule}
+              >
+                <span className="min-w-0 truncate font-mono text-sm">{rule}</span>
+                <Button
+                  aria-label={`Remove ignored port ${rule}`}
+                  onClick={() => removeIgnoredPortRule(rule)}
+                  size="icon-xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <IconTrash aria-hidden="true" size={14} />
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <SettingsInput
+            aria-invalid={Boolean(error)}
+            aria-label="Ignored port or range"
+            className="h-10 min-w-0 flex-1 px-3 text-sm"
+            onChange={(event) => {
+              setInputValue(event.currentTarget.value);
+              if (error) {
+                setError("");
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                addIgnoredPortRule();
+              }
+            }}
+            placeholder="e.g. 9229 or 24678-24680"
+            value={inputValue}
+          />
+          <Button
+            disabled={!inputValue.trim()}
+            onClick={addIgnoredPortRule}
+            type="button"
+            variant="outline"
+          >
+            <IconPlus aria-hidden="true" data-icon="inline-start" />
+            Add
+          </Button>
+        </div>
+        {error ? (
+          <div className="text-sm text-destructive" role="alert">
+            {error}
+          </div>
+        ) : null}
+      </div>
+    </SettingRow>
+  );
 }
 
 function SettingsSection({

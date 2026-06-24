@@ -228,6 +228,27 @@ describe("ghostex CLI Android remote-session contract", () => {
     });
   });
 
+  test("parses create-session first input for gxserver runtime metadata", () => {
+    /**
+     * CDXC:GxserverSessionTitle 2026-06-23-08:40:
+     * Mobile create-session callers may provide first-message input; the CLI parser must preserve it so gxserver-rs can own first-prompt auto-name claiming and generation.
+     */
+    const { flags, rest } = parseArgs([
+      "Terminal",
+      "--input",
+      "Summarize this project",
+      "--project-id",
+      "project-1",
+      "--json",
+    ]);
+
+    expect(parseCreateSession(rest, flags)).toMatchObject({
+      input: "Summarize this project",
+      projectId: "project-1",
+      title: "Terminal",
+    });
+  });
+
   test("keeps positional rename-session form for human CLI usage", () => {
     const { flags, rest } = parseArgs(["session-1", "Ship", "Android"]);
 
@@ -388,6 +409,22 @@ printf 'rust-forwarded:%s\\n' "$1"
       expect(resolveGxserverCliLaunchFromRoot(binaryOnlyRoot)).toMatchObject({
         args: [],
         command: binaryOnlyPath,
+      });
+
+      /*
+       * CDXC:RemoteMachines 2026-06-23-10:07:
+       * Ubuntu remote installs expose the CLI under package/CLI and gxserver
+       * under package/bin. Keep that standalone package shape resolvable so
+       * `ghostex server start` works after the app uploads the package.
+       */
+      const standalonePackageRoot = path.join(tempDir, "standalone-package");
+      const standalonePackageBin = path.join(standalonePackageRoot, "bin", "gxserver");
+      await mkdir(path.dirname(standalonePackageBin), { recursive: true });
+      await writeFile(standalonePackageBin, "#!/bin/sh\n");
+      await chmod(standalonePackageBin, 0o755);
+      expect(resolveGxserverCliLaunchFromRoot(standalonePackageRoot)).toMatchObject({
+        args: [],
+        command: standalonePackageBin,
       });
     } finally {
       await rm(tempDir, { force: true, recursive: true });
@@ -1646,6 +1683,7 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
                 activity: "idle",
                 agentIcon: "codex",
                 agentName: "codex",
+                agentSessionId: "presentation-codex-session",
                 groupId: "P1a:active",
                 isFavorite: true,
                 isPinned: false,
@@ -1688,6 +1726,9 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
               providerState: { lifecycleState: "missing", zmxName: "S1a-P1a-G2a" },
               sessionId: "G2a",
               title: "Sleeping",
+              runtimeSettings: {
+                agentSessionId: "runtime-codex-session",
+              },
               updatedAt: "2026-05-31T04:01:00.000Z",
               zmxName: "S1a-P1a-G2a",
             },
@@ -1745,6 +1786,7 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
         activity: "idle",
         agentIcon: "codex",
         agentName: "codex",
+        agentSessionId: "presentation-codex-session",
         groupId: "P1a:active",
         isFavorite: true,
         primaryTitle: "Sleeping",
@@ -1901,6 +1943,76 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
       expect(requests[1].body.params).toEqual({
         projectId: "P1a",
         sessionId: "G1a",
+      });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test("create-session sends first input to gxserver runtime settings", async () => {
+    /**
+     * CDXC:GxserverSessionTitle 2026-06-23-08:40:
+     * The CLI must pass first-message input through to gxserver-rs as runtime metadata and startup text, leaving title generation and staged rename ownership in gxserver.
+     */
+    const requests = [];
+    const server = http.createServer(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) {
+        chunks.push(chunk);
+      }
+      requests.push({
+        body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+        url: request.url,
+      });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        ok: true,
+        product: "gxserver",
+        protocolVersion: 1,
+        requestId: "create-session-input-fixture",
+        result: {
+          session: {
+            projectId: "P1a",
+            sessionId: "G1a",
+            title: "Terminal",
+          },
+        },
+      }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    try {
+      await sendGxserverCliAction(
+        "createSession",
+        {
+          input: "Summarize this project",
+          projectId: "P1a",
+          title: "Terminal",
+        },
+        {
+          server: `http://127.0.0.1:${address.port}`,
+          timeoutMs: 1_000,
+          token: "test-token",
+        },
+      );
+
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        url: "/api/createSession",
+        body: {
+          params: {
+            kind: "terminal",
+            launchSettings: {
+              startupText: "Summarize this project",
+            },
+            projectId: "P1a",
+            runtimeSettings: {
+              firstUserMessage: "Summarize this project",
+            },
+            title: "Terminal",
+          },
+          protocolVersion: 1,
+        },
       });
     } finally {
       await new Promise((resolve) => server.close(resolve));

@@ -48,10 +48,30 @@ describe("native titlebar keep-awake source", () => {
       '<TitlebarAppTooltip content="Keep awake">',
       '<ButtonGroup\n              className="titlebar-open-group"\n              data-titlebar-dropdown-anchor\n            >',
     );
+    const runtimeSyncStateSource = sourceBetween(
+      titlebarHostSource,
+      "const syncKeepAwakeRuntimeState = useCallback",
+      "const closeTitlebarDropdownPanel = useCallback",
+    );
     const runtimeSyncEffectSource = sourceBetween(
       titlebarHostSource,
-      "const syncKeepAwakeRuntime = (syncState: KeepAwakeRuntimeSyncState | undefined) =>",
+      "useEffect(() => {\n    const handleStorage",
       "useEffect(() => {\n    /*\n     * CDXC:TitlebarKeepAwake 2026-06-19-13:13:",
+    );
+    const titlebarBridgeSource = sourceBetween(
+      titlebarHostSource,
+      "window.__ghostex_TITLEBAR__ = {",
+      "if (isRecord(window.__ghostex_PENDING_TITLEBAR_PROJECT_STATE__))",
+    );
+    const titlebarBlankMouseDownSource = sourceBetween(
+      titlebarHostSource,
+      "const requestTitlebarBlankMouseDown = useCallback",
+      "useEffect(() => {\n    if (initialTitlebarDropdownPanelKind)",
+    );
+    const keepAwakeDropdownSource = sourceBetween(
+      titlebarHostSource,
+      '{kind === "keepAwake" ? (',
+      '{kind === "resources" ? (',
     );
     const externalDisplayEffectSource = sourceBetween(
       titlebarHostSource,
@@ -61,18 +81,34 @@ describe("native titlebar keep-awake source", () => {
 
     expect(titlebarHostSource).toContain("const KEEP_AWAKE_RUNTIME_SYNC_STORAGE_KEY");
     expect(titlebarHostSource).toContain("const KEEP_AWAKE_RUNTIME_CHANGED_EVENT");
+    expect(titlebarHostSource).toContain("const KEEP_AWAKE_WORKING_SESSION_GRACE_MS = 20 * 60_000");
     expect(titlebarHostSource).toContain("const [keepAwakeAutoStartSuppressed, setKeepAwakeAutoStartSuppressed]");
     expect(titlebarHostSource).toContain("function publishKeepAwakeRuntimeSync");
     expect(titlebarHostSource).toContain("function readKeepAwakeRuntimeSyncState");
+    expect(titlebarHostSource).toContain("function syncKeepAwakeRuntimeToMainTitlebar");
+    expect(titlebarHostSource).toContain('type: "syncTitlebarKeepAwakeRuntime"');
 
     expect(stopKeepAwakeSource).toContain("options: { suppressAutoStart?: boolean } = {}");
     expect(stopKeepAwakeSource).toContain("setKeepAwakeAutoStartSuppressed(true)");
-    expect(stopKeepAwakeSource).toContain("publishKeepAwakeRuntimeSync({");
+    expect(stopKeepAwakeSource).toContain("publishKeepAwakeRuntimeSync(syncState)");
+    expect(stopKeepAwakeSource).toContain("runtime: null");
     expect(stopKeepAwakeSource).toContain("suppressAutoStart: options.suppressAutoStart !== false");
+    expect(stopKeepAwakeSource).toContain("syncKeepAwakeRuntimeToMainTitlebar(syncState)");
 
     expect(startKeepAwakeSource).toContain("await stopKeepAwake({ suppressAutoStart: false })");
     expect(startKeepAwakeSource).toContain("setKeepAwakeAutoStartSuppressed(false)");
-    expect(startKeepAwakeSource).toContain("publishKeepAwakeRuntimeSync({ suppressAutoStart: false })");
+    expect(startKeepAwakeSource).toContain('source: options.source ?? "manual"');
+    expect(startKeepAwakeSource).toContain("const syncState = { runtime: nextRuntime, suppressAutoStart: false }");
+    expect(startKeepAwakeSource).toContain("publishKeepAwakeRuntimeSync(syncState)");
+    expect(startKeepAwakeSource).toContain("syncKeepAwakeRuntimeToMainTitlebar(syncState)");
+    expect(titlebarHostSource).toContain('void startKeepAwake(0, { source: "automatic" })');
+    expect(titlebarHostSource).toContain('keepAwakeRuntime?.source === "automatic"');
+    expect(titlebarHostSource).toContain("projectState.keepAwake.delayedSendSessionCount > 0");
+    expect(titlebarHostSource).toContain("projectState.keepAwake.workingSessionCount > 0");
+    expect(titlebarBridgeSource).toContain("syncKeepAwakeRuntime: syncKeepAwakeRuntimeState");
+    expect(keepAwakeDropdownSource).toContain("onClick={() => closeAfter(() => onStartKeepAwake(option.value))}");
+    expect(keepAwakeDropdownSource).toContain("onClick={() => closeAfter(onStopKeepAwake)}");
+    expect(keepAwakeDropdownSource).not.toContain("void onStartKeepAwake(option.value)");
 
     /*
      * CDXC:TitlebarKeepAwake 2026-06-15-23:25:
@@ -121,8 +157,20 @@ describe("native titlebar keep-awake source", () => {
     expect(runtimeSyncEffectSource).toContain(
       "if (event.key === KEEP_AWAKE_RUNTIME_STORAGE_KEY && event.newValue === null)",
     );
-    expect(runtimeSyncEffectSource).toContain("setKeepAwakeRuntime(storedRuntime)");
-    expect(runtimeSyncEffectSource).toContain("setKeepAwakeAutoStartSuppressed(true)");
+    expect(runtimeSyncEffectSource).toContain("syncKeepAwakeRuntimeState(");
+    expect(runtimeSyncStateSource).toContain('Object.prototype.hasOwnProperty.call(syncState, "runtime")');
+    expect(runtimeSyncStateSource).toContain("setKeepAwakeRuntime(syncState.runtime ?? undefined)");
+    expect(runtimeSyncStateSource).toContain("setKeepAwakeAutoStartSuppressed(syncState.suppressAutoStart === true)");
+    expect(runtimeSyncStateSource).toContain("setKeepAwakeRuntime(storedRuntime)");
+    expect(runtimeSyncStateSource).toContain("setKeepAwakeAutoStartSuppressed(true)");
+    expect(titlebarBlankMouseDownSource).toContain("if (nativeDropdownOpen)");
+    expect(titlebarBlankMouseDownSource).toContain("closeTitlebarDropdownPanel()");
+    expect(titlebarBlankMouseDownSource).toContain('postNative({ type: "titlebarBlankMouseDown" })');
+    expect(hostProtocolSource).toContain("case syncTitlebarKeepAwakeRuntime(SyncTitlebarKeepAwakeRuntime)");
+    expect(hostProtocolSource).toContain("struct SyncTitlebarKeepAwakeRuntime: Decodable");
+    expect(hostProtocolSource).toContain("let runtime: TitlebarKeepAwakeRuntime?");
+    expect(appDelegateSource).toContain("func syncTitlebarKeepAwakeRuntime(_ command: SyncTitlebarKeepAwakeRuntime)");
+    expect(appDelegateSource).toContain("window.__ghostex_TITLEBAR__?.syncKeepAwakeRuntime");
 
     expect(externalDisplayEffectSource).toContain("!keepAwakeRuntime");
     expect(externalDisplayEffectSource).toContain("!keepAwakeAutoStartSuppressed");
@@ -139,9 +187,19 @@ describe("native titlebar keep-awake source", () => {
     expect(nativeSidebarSource).toContain(
       "hideTitlebarControl: !settings.showBetaFeatures || settings.hideKeepAwakeTitlebarControl",
     );
+    expect(nativeSidebarSource).toContain("createTitlebarKeepAwakeSessionState(titlebarResourceGroups)");
+    expect(nativeSidebarSource).toContain("delayedSendSessionCount: keepAwakeSessionState.delayedSendSessionCount");
+    expect(nativeSidebarSource).toContain("whileWorkingSessions: settings.keepAwakeWhileWorkingSessions");
+    expect(nativeSidebarSource).toContain("workingSessionCount: keepAwakeSessionState.workingSessionCount");
+    expect(hostProtocolSource).toContain("let delayedSendSessionCount: Int?");
     expect(hostProtocolSource).toContain("let featureEnabled: Bool?");
     expect(hostProtocolSource).toContain("let hideTitlebarControl: Bool?");
+    expect(hostProtocolSource).toContain("let whileWorkingSessions: Bool?");
+    expect(hostProtocolSource).toContain("let workingSessionCount: Int?");
+    expect(appDelegateSource).toContain('"delayedSendSessionCount": keepAwake.delayedSendSessionCount ?? 0');
     expect(appDelegateSource).toContain('"featureEnabled": keepAwake.featureEnabled ?? false');
     expect(appDelegateSource).toContain('"hideTitlebarControl": keepAwake.hideTitlebarControl ?? true');
+    expect(appDelegateSource).toContain('"whileWorkingSessions": keepAwake.whileWorkingSessions ?? false');
+    expect(appDelegateSource).toContain('"workingSessionCount": keepAwake.workingSessionCount ?? 0');
   });
 });

@@ -11,7 +11,7 @@ export type WatchGhostexVideoModalProps = {
 };
 
 const WATCH_GHOSTEX_VIDEO_TITLE =
-  "Please watch this video to understand how to use Ghostty! (1.5x recommended)";
+  "Ghostex Features Walkthrough";
 const WATCH_GHOSTEX_VIDEO_SOURCE_URL =
   "https://www.loom.com/share/84a08f60871a4c57a589c057335ac25b";
 const WATCH_GHOSTEX_VIDEO_EMBED_URL =

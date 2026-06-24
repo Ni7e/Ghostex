@@ -93,6 +93,9 @@ describe("gxserver release packaging source contract", () => {
     /*
     CDXC:GxserverPackaging 2026-06-21-13:45:
     Local and release macOS builds package gxserver-rs by default so the rebuilt app launches the Rust daemon. TypeScript packaging stays explicit through GHOSTEX_GXSERVER_PACKAGE_MODE=typescript for validation only.
+
+    CDXC:GxserverRustPackaging 2026-06-22-16:17:
+    The default Rust package path must not call the removed gxserver/ TypeScript packager. Build the app package directly from gxserver-rs, shared/gxserver-protocol.ts, and the app-owned tool binaries while leaving the old TypeScript path explicit-only.
     */
     const rustBuildSource = sourceBetween(
       buildGhostexHostSource,
@@ -113,10 +116,15 @@ describe("gxserver release packaging source contract", () => {
     expect(packageSource).toContain('--value "mode=typescript"');
     expect(packageSource).toContain('--value "mode=rust"');
     expect(packageSource).toContain("rust_bin=\"$(build_gxserver_rust_if_needed)\"");
-    expect(packageSource).toContain("--rust-bin \"$rust_bin\"");
+    expect(packageSource).toContain("package_dir=\"$BUILD_CACHE_DIR/gxserver-rs/server-package\"");
+    expect(packageSource).toContain("--path \"$REPO_ROOT/shared/gxserver-protocol.ts\"");
+    expect(packageSource).toContain("package_gxserver_rust_package \"$package_dir\" \"$rust_bin\" \"$package_version\"");
     expect(packageSource).toContain("run package:app --");
     expect(packageSource).toContain("--native-node \"$GXSERVER_NODE_BIN\"");
     expect(packageSource).toContain("--native-npm \"$GXSERVER_NPM_BIN\"");
+    expect(buildGhostexHostSource).toContain("stage_gxserver_protocol_exports()");
+    expect(buildGhostexHostSource).toContain("cp \"$REPO_ROOT/shared/gxserver-protocol.ts\" \"$protocol_stage_dir/src/index.ts\"");
+    expect(buildGhostexHostSource).toContain("write_gxserver_package_build_identity");
     expect(packageSource).toContain("native-runtime.json");
     expect(buildGhostexHostSource).toContain("better-sqlite3/build/Release/better_sqlite3.node");
     expect(packageSource).toContain("$target_dir/bin/gxserver");

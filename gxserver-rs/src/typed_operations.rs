@@ -14,13 +14,14 @@ use tokio::{
     time::{timeout, Instant},
 };
 
-use crate::toolchain::require_bundled_bd;
+use crate::{platform::shell::command_shell, toolchain::require_bundled_bd};
 
 const TYPED_OPERATION_TIMEOUT_MS: u64 = 120_000;
 const TYPED_OPERATION_STDOUT_LIMIT_BYTES: usize = 4 * 1024 * 1024;
 const TYPED_OPERATION_STDERR_LIMIT_BYTES: usize = 4 * 1024 * 1024;
 const BEADS_BOARD_RESPONSE_LIMIT_BYTES: usize = TYPED_OPERATION_STDOUT_LIMIT_BYTES;
 const BEADS_BOARD_ROW_LIMIT: usize = 5_000;
+const BEADS_GIT_HOOK_NAMES: [&str; 3] = ["pre-commit", "post-merge", "post-checkout"];
 const COMMIT_MESSAGE_LIMIT_BYTES: usize = 64 * 1024;
 const SETUP_COMMAND_LIMIT_BYTES: usize = 16 * 1024;
 const FILE_PATH_LIMIT: usize = 500;
@@ -28,36 +29,56 @@ const FILE_PATH_LIMIT: usize = 500;
 #[derive(Debug, Clone)]
 pub struct TypedOperationError {
     pub code: &'static str,
+    pub details: Option<Value>,
     pub message: String,
+    pub scope_rejection: bool,
 }
 
 impl TypedOperationError {
     fn bad_request(message: impl Into<String>) -> Self {
         Self {
             code: "badRequest",
+            details: None,
             message: message.into(),
+            scope_rejection: false,
         }
     }
 
     fn dependency_unavailable(message: impl Into<String>) -> Self {
         Self {
             code: "dependencyUnavailable",
+            details: None,
             message: message.into(),
+            scope_rejection: false,
         }
     }
 
     fn forbidden(message: impl Into<String>) -> Self {
         Self {
             code: "forbidden",
+            details: None,
             message: message.into(),
+            scope_rejection: false,
         }
     }
 
     fn not_found(message: impl Into<String>) -> Self {
         Self {
             code: "notFound",
+            details: None,
             message: message.into(),
+            scope_rejection: false,
         }
+    }
+
+    fn with_details(mut self, details: Value) -> Self {
+        self.details = Some(details);
+        self
+    }
+
+    fn with_scope_rejection(mut self) -> Self {
+        self.scope_rejection = true;
+        self
     }
 }
 
@@ -81,6 +102,7 @@ pub struct TypedOperationContext {
 struct ProcessCommand {
     args: Vec<String>,
     cwd: String,
+    env: Vec<(String, String)>,
     executable: String,
     result_command: Option<CommandSummary>,
     stdin: Option<String>,
@@ -99,6 +121,12 @@ struct CommandOutput {
     exit_code: i32,
     stderr: String,
     stdout: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BeadsBoardLimits {
+    response_limit_bytes: usize,
+    row_limit: usize,
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize)]
@@ -153,6 +181,10 @@ pub fn typed_operation_log_level(action: &str, exit_code: i32, has_error: bool) 
     }
 }
 
+/*
+CDXC:GxserverCommandRedaction 2026-06-22-09:38:
+Typed operation persistent logs must expose enum and shape facts only: action, command presence, argument count, executable, expected-nonzero state, exit code, and structured operation error. Do not copy argv, cwd, stdout, stderr, branch names, paths, Beads text fields, or setup command text into log details; the RPC result remains TypeScript-compatible for the caller.
+*/
 pub fn typed_operation_log_details(result: &Value) -> Value {
     let action = result
         .get("action")
@@ -188,11 +220,13 @@ fn resolve_project_operation_context(
     let project_id = read_project_id_value(&project)?;
     let project_path = project.get("path").and_then(Value::as_str).ok_or_else(|| {
         TypedOperationError::bad_request(format!("Project {project_id} has no filesystem path."))
+            .with_scope_rejection()
     })?;
     let cwd = normalize_existing_directory_path_value(
         Some(&Value::String(project_path.to_string())),
         "project.path",
-    )?;
+    )
+    .map_err(TypedOperationError::with_scope_rejection)?;
     let beads_cwd = if endpoint_path == "/api/runBeadsAction"
         && params.get("projectBoardScope").and_then(Value::as_bool) == Some(true)
     {
@@ -227,8 +261,7 @@ fn resolve_scoped_project(
     if let Some(project_id) = scope
         .get("projectId")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.trim().is_empty())
     {
         let project = projects
             .iter()
@@ -238,10 +271,12 @@ fn resolve_scoped_project(
             .cloned()
             .ok_or_else(|| {
                 TypedOperationError::not_found(format!("Project {project_id} does not exist."))
+                    .with_scope_rejection()
             })?;
         if scope.contains_key("projectPath") {
             let scoped_path =
-                normalize_existing_directory_path_value(scope.get("projectPath"), "projectPath")?;
+                normalize_existing_directory_path_value(scope.get("projectPath"), "projectPath")
+                    .map_err(TypedOperationError::with_scope_rejection)?;
             let project_path = project
                 .get("path")
                 .and_then(Value::as_str)
@@ -251,18 +286,21 @@ fn resolve_scoped_project(
                         "project.path",
                     )
                 })
-                .transpose()?;
+                .transpose()
+                .map_err(TypedOperationError::with_scope_rejection)?;
             if project_path.as_deref() != Some(scoped_path.as_str()) {
                 return Err(TypedOperationError::forbidden(
                     "projectPath does not match the requested projectId.",
-                ));
+                )
+                .with_scope_rejection());
             }
         }
         return Ok(project);
     }
 
     let scoped_path =
-        normalize_existing_directory_path_value(scope.get("projectPath"), "projectPath")?;
+        normalize_existing_directory_path_value(scope.get("projectPath"), "projectPath")
+            .map_err(TypedOperationError::with_scope_rejection)?;
     projects
         .iter()
         .find(|candidate| {
@@ -284,6 +322,7 @@ fn resolve_scoped_project(
             TypedOperationError::forbidden(
                 "projectPath must be a registered gxserver project path.",
             )
+            .with_scope_rejection()
         })
 }
 
@@ -364,21 +403,14 @@ async fn run_project_setup_command(
     params: &Map<String, Value>,
     context: &TypedOperationContext,
 ) -> Result<Value, TypedOperationError> {
-    let action = params
-        .get("action")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            TypedOperationError::bad_request("Unsupported project setup action: undefined")
-        })?;
-    if action != "worktreeSetupCommand" {
+    let action = params.get("action").and_then(Value::as_str);
+    if action != Some("worktreeSetupCommand") {
         return Err(TypedOperationError::bad_request(format!(
             "Unsupported project setup action: {}",
-            params
-                .get("action")
-                .map(value_to_string)
-                .unwrap_or_else(|| "undefined".to_string())
+            setup_action_value_to_string(params.get("action"))
         )));
     }
+    let action = action.expect("validated setup action");
     let setup_project = resolve_project_setup_command_project(params, context)?;
     let command_text = normalize_project_setup_command(
         setup_project
@@ -394,14 +426,19 @@ async fn run_project_setup_command(
             "stdout": "",
         }));
     }
+    let shell = command_shell();
     let command = ProcessCommand {
-        args: vec!["-lc".to_string(), command_text],
+        args: vec![shell.command_flag(false).to_string(), command_text],
         cwd: context.cwd.clone(),
-        executable: "/bin/zsh".to_string(),
+        env: Vec::new(),
+        executable: shell.executable.clone(),
         result_command: Some(CommandSummary {
-            args: vec!["-lc".to_string(), "<worktree setup command>".to_string()],
+            args: vec![
+                shell.command_flag(false).to_string(),
+                "<worktree setup command>".to_string(),
+            ],
             cwd: context.cwd.clone(),
-            executable: "/bin/zsh".to_string(),
+            executable: shell.executable.clone(),
         }),
         stdin: None,
     };
@@ -425,9 +462,23 @@ async fn run_beads_action(
             "stdout": if exists { "true" } else { "false" },
         }));
     }
-    let command = build_beads_command(&action, params, context)?;
+    /*
+    CDXC:ProjectBoard 2026-06-22-01:09:
+    gxserver-rs must match the TypeScript Beads execution contract: every subprocess-backed Project Board action runs with BD_JSON_ENVELOPE=1, failed board reads still return an empty `issues` array for UI consumers, and board parsing uses the same bounded JSON response rules.
+    */
+    let command = build_beads_command(&action, params, context)?.with_env("BD_JSON_ENVELOPE", "1");
     let output = run_process_command(&command, context).await?;
-    if matches!(action.as_str(), "board" | "listAllLabels") && output.exit_code == 0 {
+    if matches!(action.as_str(), "board" | "listAllLabels") {
+        if output.exit_code != 0 {
+            let mut result = typed_result(&action, &command, output);
+            if action == "board" {
+                result
+                    .as_object_mut()
+                    .expect("typed result object")
+                    .insert("issues".to_string(), Value::Array(Vec::new()));
+            }
+            return Ok(result);
+        }
         let (issues, stdout) = parse_beads_board_output(&output.stdout)?;
         if action == "listAllLabels" {
             let labels_stdout = serde_json::to_string(&derive_beads_label_counts(&issues))
@@ -939,10 +990,7 @@ fn build_beads_command_with_executable(
                 "update".to_string(),
                 normalize_issue_id(params.get("issueId"))?,
                 "--description".to_string(),
-                params
-                    .get("description")
-                    .map(value_to_string)
-                    .unwrap_or_default(),
+                nullish_value_to_string(params.get("description"), ""),
                 "--json".to_string(),
             ],
             &cwd,
@@ -1002,6 +1050,10 @@ fn build_beads_command_with_executable(
 async fn ensure_beads_git_hooks(
     context: &TypedOperationContext,
 ) -> Result<Value, TypedOperationError> {
+    /*
+    CDXC:WorktreeBeads 2026-06-22-01:09:
+    The Rust port must install the same Ghostex-managed Beads hooks as the TypeScript server. Generated hooks live under the common Git directory, call the bundled bd by absolute path, pin BEADS_DIR to `bd where --json`, and are written before core.hooksPath is pointed at them.
+    */
     if !Path::new(&context.cwd).join(".beads").is_dir() {
         return Ok(json!({
             "action": "ensureBeadsHooks",
@@ -1011,8 +1063,15 @@ async fn ensure_beads_git_hooks(
         }));
     }
     let bd = require_bundled_bd().map_err(TypedOperationError::dependency_unavailable)?;
+    ensure_beads_git_hooks_with_executable(context, &bd.executable_path).await
+}
+
+async fn ensure_beads_git_hooks_with_executable(
+    context: &TypedOperationContext,
+    bd_executable_path: &str,
+) -> Result<Value, TypedOperationError> {
     let where_command =
-        ProcessCommand::new(&bd.executable_path, vec!["where", "--json"], &context.cwd);
+        ProcessCommand::new(bd_executable_path, vec!["where", "--json"], &context.cwd);
     let where_result = run_process_command(&where_command, context).await?;
     if where_result.exit_code != 0 {
         return Ok(json!({
@@ -1022,6 +1081,7 @@ async fn ensure_beads_git_hooks(
             "stdout": "skipped: no Beads workspace",
         }));
     }
+    let beads_path = normalize_beads_where_directory(&where_result.stdout)?;
     let common_git_dir = run_process_command(
         &ProcessCommand::new("git", vec!["rev-parse", "--git-common-dir"], &context.cwd),
         context,
@@ -1034,12 +1094,22 @@ async fn ensure_beads_git_hooks(
                 .or_else("Could not resolve Git common directory."),
         ));
     }
-    let hooks_path = Path::new(&context.cwd)
-        .join(common_git_dir.stdout.trim())
-        .join("ghostex-hooks");
+    let hooks_path =
+        resolve_path_against(&context.cwd, common_git_dir.stdout.trim()).join("ghostex-hooks");
     fs::create_dir_all(&hooks_path).map_err(|error| {
         TypedOperationError::bad_request(format!("Could not create Beads hooks directory: {error}"))
     })?;
+    for hook_name in BEADS_GIT_HOOK_NAMES {
+        let hook_path = hooks_path.join(hook_name);
+        fs::write(
+            &hook_path,
+            build_ghostex_beads_git_hook_script(hook_name, bd_executable_path, &beads_path),
+        )
+        .map_err(|error| {
+            TypedOperationError::bad_request(format!("Could not write Beads Git hook: {error}"))
+        })?;
+        chmod_executable_if_supported(&hook_path)?;
+    }
     let config_output = run_process_command(
         &ProcessCommand::new(
             "git",
@@ -1073,6 +1143,102 @@ async fn ensure_beads_git_hooks(
     }))
 }
 
+fn normalize_beads_where_directory(stdout: &str) -> Result<String, TypedOperationError> {
+    let parsed: Value = serde_json::from_str(stdout.trim())
+        .map_err(|_| TypedOperationError::bad_request("Beads where output was not valid JSON."))?;
+    let beads_path = parsed.get("path").and_then(Value::as_str).unwrap_or("");
+    if !Path::new(beads_path).is_absolute() {
+        return Err(TypedOperationError::bad_request(
+            "Beads where output did not include an absolute storage path.",
+        ));
+    }
+    let metadata = fs::metadata(beads_path)
+        .map_err(|_| TypedOperationError::bad_request("Beads storage path is not a directory."))?;
+    if !metadata.is_dir() {
+        return Err(TypedOperationError::bad_request(
+            "Beads storage path is not a directory.",
+        ));
+    }
+    Ok(beads_path.to_string())
+}
+
+fn build_ghostex_beads_git_hook_script(hook_name: &str, bd: &str, beads_path: &str) -> String {
+    format!(
+        "#!/usr/bin/env sh\n\
+# Ghostex-managed Beads hook. This local file is generated under the common Git directory.\n\
+BD_BIN={}\n\
+BEADS_DIR_VALUE={}\n\
+HOOK_NAME={}\n\
+if [ ! -x \"$BD_BIN\" ]; then\n\
+  echo \"Warning: Ghostex bundled bd is missing; skipping Beads hook\" >&2\n\
+  exit 0\n\
+fi\n\
+export BEADS_DIR=\"$BEADS_DIR_VALUE\"\n\
+export BD_GIT_HOOK=1\n\
+export PATH=\"$(dirname \"$BD_BIN\"):$PATH\"\n\
+run_bd_hook() {{\n\
+  _bd_timeout=${{BEADS_HOOK_TIMEOUT:-300}}\n\
+  _bd_used_perl=0\n\
+  if command -v timeout >/dev/null 2>&1; then\n\
+    timeout \"$_bd_timeout\" \"$BD_BIN\" hooks run \"$HOOK_NAME\" \"$@\"\n\
+    _bd_exit=$?\n\
+  elif command -v gtimeout >/dev/null 2>&1; then\n\
+    gtimeout \"$_bd_timeout\" \"$BD_BIN\" hooks run \"$HOOK_NAME\" \"$@\"\n\
+    _bd_exit=$?\n\
+  elif command -v perl >/dev/null 2>&1; then\n\
+    _bd_used_perl=1\n\
+    perl -e 'alarm shift; exec @ARGV' \"$_bd_timeout\" \"$BD_BIN\" hooks run \"$HOOK_NAME\" \"$@\"\n\
+    _bd_exit=$?\n\
+  else\n\
+    echo >&2 \"beads: hook '$HOOK_NAME' running without timeout; install coreutils or perl to enable BEADS_HOOK_TIMEOUT\"\n\
+    \"$BD_BIN\" hooks run \"$HOOK_NAME\" \"$@\"\n\
+    _bd_exit=$?\n\
+  fi\n\
+  if [ $_bd_exit -eq 124 ] || {{ [ $_bd_used_perl -eq 1 ] && [ $_bd_exit -eq 142 ]; }}; then\n\
+    echo >&2 \"beads: hook '$HOOK_NAME' timed out after ${{_bd_timeout}}s; continuing without beads\"\n\
+    _bd_exit=0\n\
+  fi\n\
+  if [ $_bd_exit -eq 3 ]; then\n\
+    echo >&2 \"beads: database not initialized; skipping hook '$HOOK_NAME'\"\n\
+    _bd_exit=0\n\
+  fi\n\
+  return $_bd_exit\n\
+}}\n\
+run_bd_hook \"$@\"\n\
+exit $?\n",
+        shell_single_quote(bd),
+        shell_single_quote(beads_path),
+        shell_single_quote(hook_name),
+    )
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn resolve_path_against(cwd: &str, path_text: &str) -> PathBuf {
+    let path = Path::new(path_text.trim());
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        Path::new(cwd).join(path)
+    };
+    resolved.components().collect()
+}
+
+#[cfg(unix)]
+fn chmod_executable_if_supported(path: &Path) -> Result<(), TypedOperationError> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).map_err(|error| {
+        TypedOperationError::bad_request(format!("Could not chmod Beads Git hook: {error}"))
+    })
+}
+
+#[cfg(not(unix))]
+fn chmod_executable_if_supported(_path: &Path) -> Result<(), TypedOperationError> {
+    Ok(())
+}
+
 impl ProcessCommand {
     fn new<S, A, C>(executable: S, args: Vec<A>, cwd: C) -> Self
     where
@@ -1083,6 +1249,7 @@ impl ProcessCommand {
         Self {
             args: args.into_iter().map(Into::into).collect(),
             cwd: cwd.into(),
+            env: Vec::new(),
             executable: executable.into(),
             result_command: None,
             stdin: None,
@@ -1100,6 +1267,11 @@ impl ProcessCommand {
 
     fn with_result_command(mut self, result_command: Option<CommandSummary>) -> Self {
         self.result_command = result_command;
+        self
+    }
+
+    fn with_env(mut self, key: &str, value: &str) -> Self {
+        self.env.push((key.to_string(), value.to_string()));
         self
     }
 
@@ -1141,7 +1313,10 @@ async fn run_process_command(
     process
         .args(&command.args)
         .current_dir(&command.cwd)
-        .envs(typed_operation_environment(context.env_path.as_deref()))
+        .envs(typed_operation_environment(
+            context.env_path.as_deref(),
+            &command.env,
+        ))
         .kill_on_drop(true)
         .stdin(if command.stdin.is_some() {
             std::process::Stdio::piped()
@@ -1245,19 +1420,31 @@ async fn run_process_command(
     })
 }
 
-fn typed_operation_environment(env_path: Option<&str>) -> Vec<(String, String)> {
+fn typed_operation_environment(
+    env_path: Option<&str>,
+    extra_env: &[(String, String)],
+) -> Vec<(String, String)> {
     let mut environment: Vec<(String, String)> = env::vars().collect();
-    environment.retain(|(key, _)| {
-        !matches!(
-            key.as_str(),
-            "ANSI_COLORS_DISABLED" | "NO_COLOR" | "NODE_DISABLE_COLORS"
-        )
-    });
+    environment.retain(|(key, _)| !is_typed_operation_color_env_key(key));
     if let Some(path) = env_path {
         environment.retain(|(key, _)| key != "PATH");
         environment.push(("PATH".to_string(), path.to_string()));
     }
+    for (key, value) in extra_env {
+        if is_typed_operation_color_env_key(key) {
+            continue;
+        }
+        environment.retain(|(existing_key, _)| existing_key != key);
+        environment.push((key.clone(), value.clone()));
+    }
     environment
+}
+
+fn is_typed_operation_color_env_key(key: &str) -> bool {
+    matches!(
+        key,
+        "ANSI_COLORS_DISABLED" | "NO_COLOR" | "NODE_DISABLE_COLORS"
+    )
 }
 
 fn typed_result(action: &str, command: &ProcessCommand, output: CommandOutput) -> Value {
@@ -1362,10 +1549,34 @@ fn home_dir() -> PathBuf {
 }
 
 fn normalize_path_string(path: PathBuf) -> String {
-    path.components()
-        .collect::<PathBuf>()
-        .to_string_lossy()
-        .to_string()
+    /*
+    CDXC:GxserverProjectPaths 2026-06-22-09:35:
+    Typed-operation projectPath, worktreePath, setupCommandProjectPath, and Beads directory checks must match TypeScript `path.resolve` syntax normalization. Collapse `.` and `..` without canonicalizing symlinks so registered-root equality and containment stay lexical while selected paths still get filesystem validation at the operation boundary.
+    */
+    let path = if path.is_absolute() {
+        path
+    } else {
+        env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            std::path::Component::RootDir => normalized.push(component.as_os_str()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(segment) => normalized.push(segment),
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        ".".to_string()
+    } else {
+        normalized.to_string_lossy().to_string()
+    }
 }
 
 fn is_path_inside(parent_path: &str, candidate_path: &str) -> bool {
@@ -1658,8 +1869,7 @@ fn resolve_project_setup_command_project(
     if let Some(project_id) = params
         .get("setupCommandProjectId")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.trim().is_empty())
     {
         return context
             .projects
@@ -1675,60 +1885,103 @@ fn resolve_project_setup_command_project(
     if let Some(path) = params
         .get("setupCommandProjectPath")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.trim().is_empty())
     {
-        let setup_path = normalize_existing_directory_path_value(
-            Some(&Value::String(path.to_string())),
-            "setupCommandProjectPath",
-        )?;
-        return context
-            .projects
-            .iter()
-            .find(|candidate| {
-                candidate
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .and_then(|path| {
-                        normalize_existing_directory_path_value(
-                            Some(&Value::String(path.to_string())),
-                            "project.path",
-                        )
-                        .ok()
-                    })
-                    .as_deref()
-                    == Some(setup_path.as_str())
-            })
-            .cloned()
-            .ok_or_else(|| {
-                TypedOperationError::forbidden(
-                    "setupCommandProjectPath must be a registered gxserver project path.",
-                )
-            });
+        let setup_path =
+            normalize_project_setup_existing_directory_path(path, "setupCommandProjectPath")?;
+        for candidate in &context.projects {
+            if let Some(candidate_path) = candidate.get("path").and_then(Value::as_str) {
+                if normalize_project_setup_existing_directory_path(candidate_path, "project.path")?
+                    == setup_path
+                {
+                    return Ok(candidate.clone());
+                }
+            }
+        }
+        return Err(TypedOperationError::forbidden(
+            "setupCommandProjectPath must be a registered gxserver project path.",
+        ));
     }
-    context
-        .projects
-        .iter()
-        .find(|candidate| {
-            candidate
-                .get("path")
-                .and_then(Value::as_str)
-                .and_then(|path| {
-                    normalize_existing_directory_path_value(
-                        Some(&Value::String(path.to_string())),
-                        "project.path",
-                    )
-                    .ok()
-                })
-                .as_deref()
-                == Some(context.cwd.as_str())
-        })
-        .cloned()
-        .ok_or_else(|| {
-            TypedOperationError::forbidden(
-                "Project setup command target must be a registered gxserver project.",
-            )
-        })
+    resolve_project_setup_command_for_context_cwd(context)
+}
+
+fn resolve_project_setup_command_for_context_cwd(
+    context: &TypedOperationContext,
+) -> Result<Value, TypedOperationError> {
+    let context_cwd =
+        normalize_project_setup_existing_directory_path(&context.cwd, "project.path")?;
+    for candidate in &context.projects {
+        if let Some(candidate_path) = candidate.get("path").and_then(Value::as_str) {
+            if normalize_project_setup_existing_directory_path(candidate_path, "project.path")?
+                == context_cwd
+            {
+                return Ok(candidate.clone());
+            }
+        }
+    }
+    Err(TypedOperationError::forbidden(
+        "Project setup command target must be a registered gxserver project.",
+    ))
+}
+
+fn normalize_project_setup_existing_directory_path(
+    input: &str,
+    field: &str,
+) -> Result<String, TypedOperationError> {
+    let path = normalize_project_setup_absolute_path(input, field)?;
+    let metadata = fs::metadata(&path)
+        .map_err(|_| TypedOperationError::not_found(format!("{field} does not exist: {path}")))?;
+    if !metadata.is_dir() {
+        return Err(TypedOperationError::bad_request(format!(
+            "{field} is not a directory."
+        )));
+    }
+    Ok(path)
+}
+
+fn normalize_project_setup_absolute_path(
+    input: &str,
+    field: &str,
+) -> Result<String, TypedOperationError> {
+    let text = input.trim();
+    if text.is_empty() {
+        return Err(TypedOperationError::bad_request(format!(
+            "{field} must be a non-empty absolute path or ~/ path."
+        )));
+    }
+    let expanded = expand_user_path(text);
+    if !expanded.is_absolute() {
+        return Err(TypedOperationError::bad_request(format!(
+            "{field} must be absolute or start with ~/."
+        )));
+    }
+    Ok(normalize_path_string(expanded))
+}
+
+fn setup_action_value_to_string(input: Option<&Value>) -> String {
+    match input {
+        None => "undefined".to_string(),
+        Some(value) => json_value_to_javascript_string(value),
+    }
+}
+
+fn json_value_to_javascript_string(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => value.clone(),
+        Value::Array(values) => values
+            .iter()
+            .map(|value| match value {
+                Value::Null => String::new(),
+                Value::Array(_) => json_value_to_javascript_string(value),
+                _ => json_value_to_javascript_string(value),
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        Value::Object(_) => "[object Object]".to_string(),
+    }
 }
 
 fn normalize_git_action(input: Option<&Value>) -> Result<String, TypedOperationError> {
@@ -1887,16 +2140,9 @@ fn build_beads_create_args(
         "--title".to_string(),
         normalize_required_text(params.get("title"), "title")?,
         "--description".to_string(),
-        params
-            .get("description")
-            .map(value_to_string)
-            .unwrap_or_default(),
+        nullish_value_to_string(params.get("description"), ""),
         "--priority".to_string(),
-        params
-            .get("priority")
-            .map(|_| normalize_required_text(params.get("priority"), "priority"))
-            .transpose()?
-            .unwrap_or_else(|| "2".to_string()),
+        normalize_nullish_required_text(params.get("priority"), "priority", "2")?,
         "--type".to_string(),
         "task".to_string(),
     ];
@@ -1906,17 +2152,20 @@ fn build_beads_create_args(
             normalize_beads_estimate(params.get("estimate"))?,
         ]);
     }
-    if let Some(labels) = params
-        .get("labels")
-        .and_then(Value::as_array)
-        .filter(|labels| !labels.is_empty())
-    {
-        let labels = labels
-            .iter()
-            .map(|label| normalize_required_text(Some(label), "label"))
-            .collect::<Result<Vec<_>, _>>()?
-            .join(",");
-        args.extend(["--labels".to_string(), labels]);
+    if let Some(labels_value) = params.get("labels") {
+        if !labels_value.is_null() {
+            let labels = labels_value.as_array().ok_or_else(|| {
+                TypedOperationError::bad_request("labels must be an array of non-empty strings.")
+            })?;
+            if !labels.is_empty() {
+                let labels = labels
+                    .iter()
+                    .map(|label| normalize_required_text(Some(label), "label"))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .join(",");
+                args.extend(["--labels".to_string(), labels]);
+            }
+        }
     }
     if let Some(depends_on) = params
         .get("dependsOnId")
@@ -1938,7 +2187,15 @@ fn build_beads_create_args(
 }
 
 fn build_beads_set_label_args(input: Option<&Value>) -> Result<Vec<String>, TypedOperationError> {
-    let labels = input.and_then(Value::as_array).cloned().unwrap_or_default();
+    let labels = match input {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(labels)) => labels.clone(),
+        Some(_) => {
+            return Err(TypedOperationError::bad_request(
+                "labels must be an array of non-empty strings.",
+            ))
+        }
+    };
     let mut args = Vec::new();
     for label in labels {
         args.extend([
@@ -1957,6 +2214,20 @@ fn resolve_beads_cwd(context: &TypedOperationContext) -> String {
 }
 
 fn parse_beads_board_output(stdout: &str) -> Result<(Vec<Value>, String), TypedOperationError> {
+    parse_beads_board_output_with_limits(stdout, default_beads_board_limits())
+}
+
+fn default_beads_board_limits() -> BeadsBoardLimits {
+    BeadsBoardLimits {
+        response_limit_bytes: BEADS_BOARD_RESPONSE_LIMIT_BYTES,
+        row_limit: BEADS_BOARD_ROW_LIMIT,
+    }
+}
+
+fn parse_beads_board_output_with_limits(
+    stdout: &str,
+    limits: BeadsBoardLimits,
+) -> Result<(Vec<Value>, String), TypedOperationError> {
     let parsed: Value = serde_json::from_str(if stdout.trim().is_empty() {
         "[]"
     } else {
@@ -1980,18 +2251,29 @@ fn parse_beads_board_output(stdout: &str) -> Result<(Vec<Value>, String), TypedO
             continue;
         }
         row_count += 1;
-        if row_count > BEADS_BOARD_ROW_LIMIT {
+        if row_count > limits.row_limit {
             return Err(TypedOperationError::bad_request(format!(
-                "Beads board state exceeds the {BEADS_BOARD_ROW_LIMIT}-row limit; refusing to return oversized board data."
-            )));
+                "Beads board state exceeds the {}-row limit; refusing to return oversized board data.",
+                limits.row_limit
+            ))
+            .with_details(json!({
+                "rowCount": row_count,
+                "rowLimit": limits.row_limit,
+            })));
         }
         let text = serde_json::to_string(&item).unwrap_or_else(|_| "{}".to_string());
         let next_response_bytes =
             response_bytes + text.len() + if serialized.is_empty() { 0 } else { 1 };
-        if next_response_bytes > BEADS_BOARD_RESPONSE_LIMIT_BYTES {
+        if next_response_bytes > limits.response_limit_bytes {
             return Err(TypedOperationError::bad_request(format!(
-                "Beads board response exceeds the {BEADS_BOARD_RESPONSE_LIMIT_BYTES}-byte serialized JSON limit; refusing to return oversized board data."
-            )));
+                "Beads board response exceeds the {}-byte serialized JSON limit; refusing to return oversized board data.",
+                limits.response_limit_bytes
+            ))
+            .with_details(json!({
+                "capturedBytes": response_bytes,
+                "responseLimitBytes": limits.response_limit_bytes,
+                "rowCount": row_count,
+            })));
         }
         response_bytes = next_response_bytes;
         issues.push(item);
@@ -2191,6 +2473,24 @@ fn value_to_string(value: &Value) -> String {
     }
 }
 
+fn nullish_value_to_string(input: Option<&Value>, default_value: &str) -> String {
+    match input {
+        None | Some(Value::Null) => default_value.to_string(),
+        Some(value) => value_to_string(value),
+    }
+}
+
+fn normalize_nullish_required_text(
+    input: Option<&Value>,
+    field: &str,
+    default_value: &str,
+) -> Result<String, TypedOperationError> {
+    match input {
+        None | Some(Value::Null) => Ok(default_value.to_string()),
+        Some(value) => normalize_required_text(Some(value), field),
+    }
+}
+
 fn display_unknown_value(value: Option<&Value>) -> String {
     value
         .map(value_to_string)
@@ -2218,6 +2518,259 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn project_setup_action_errors_use_javascript_string_conversion() {
+        let dir = tempdir().unwrap();
+        let ctx = context(dir.path());
+        let cases = [
+            (
+                None,
+                "Unsupported project setup action: undefined".to_string(),
+            ),
+            (
+                Some(Value::Null),
+                "Unsupported project setup action: null".to_string(),
+            ),
+            (
+                Some(json!(false)),
+                "Unsupported project setup action: false".to_string(),
+            ),
+            (
+                Some(json!({"action": "worktreeSetupCommand"})),
+                "Unsupported project setup action: [object Object]".to_string(),
+            ),
+            (
+                Some(json!(["worktreeSetupCommand", null, {"x": 1}])),
+                "Unsupported project setup action: worktreeSetupCommand,,[object Object]"
+                    .to_string(),
+            ),
+        ];
+
+        for (action, expected_message) in cases {
+            let mut params = Map::new();
+            if let Some(action) = action {
+                params.insert("action".to_string(), action);
+            }
+            let error = run_project_setup_command(&params, &ctx).await.unwrap_err();
+            assert_eq!(error.code, "badRequest");
+            assert_eq!(error.message, expected_message);
+        }
+    }
+
+    #[tokio::test]
+    async fn project_setup_source_project_id_lookup_does_not_trim() {
+        let dir = tempdir().unwrap();
+        let ctx = context(dir.path());
+        let mut params = Map::new();
+        params.insert("action".to_string(), json!("worktreeSetupCommand"));
+        params.insert("setupCommandProjectId".to_string(), json!(" P-test "));
+
+        let error = run_project_setup_command(&params, &ctx).await.unwrap_err();
+
+        assert_eq!(error.code, "notFound");
+        assert_eq!(error.message, "Project  P-test  does not exist.");
+    }
+
+    #[tokio::test]
+    async fn project_setup_blank_source_project_id_still_allows_source_project_path() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("source");
+        let target = dir.path().join("target");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&target).unwrap();
+        let source_project = json!({
+            "projectId": "P-source",
+            "path": source.to_string_lossy(),
+            "gitConfig": {
+                "worktreeCommand": "printf source-selected"
+            },
+            "projectBoardConfig": {},
+        });
+        let target_project = json!({
+            "projectId": "P-target",
+            "path": target.to_string_lossy(),
+            "gitConfig": {},
+            "projectBoardConfig": {},
+        });
+        let ctx = TypedOperationContext {
+            beads_cwd: None,
+            cwd: target.to_string_lossy().to_string(),
+            env_path: None,
+            projects: vec![source_project, target_project],
+        };
+        let mut params = Map::new();
+        params.insert("action".to_string(), json!("worktreeSetupCommand"));
+        params.insert("setupCommandProjectId".to_string(), json!("   "));
+        params.insert(
+            "setupCommandProjectPath".to_string(),
+            json!(source.to_string_lossy()),
+        );
+
+        let result = run_project_setup_command(&params, &ctx).await.unwrap();
+
+        assert_eq!(result.get("exitCode").and_then(Value::as_i64), Some(0));
+        assert_eq!(
+            result.get("stdout").and_then(Value::as_str),
+            Some("source-selected")
+        );
+        assert_eq!(
+            result
+                .get("command")
+                .and_then(|command| command.get("args"))
+                .cloned(),
+            Some(json!(["-lc", "<worktree setup command>"]))
+        );
+    }
+
+    #[tokio::test]
+    async fn project_setup_endpoint_scope_project_id_lookup_does_not_trim() {
+        let dir = tempdir().unwrap();
+        let project = json!({
+            "projectId": "P-test",
+            "path": dir.path().to_string_lossy(),
+            "gitConfig": {},
+            "projectBoardConfig": {},
+        });
+        let mut params = Map::new();
+        params.insert("action".to_string(), json!("worktreeSetupCommand"));
+        params.insert("projectId".to_string(), json!(" P-test "));
+
+        let error = dispatch_typed_operation_endpoint(
+            "/api/runProjectSetupCommand",
+            &params,
+            vec![project],
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.code, "notFound");
+        assert_eq!(error.message, "Project  P-test  does not exist.");
+        assert!(error.scope_rejection);
+    }
+
+    #[tokio::test]
+    async fn typed_operation_scope_matches_path_resolve_for_project_path_lookup() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        fs::create_dir(&repo).unwrap();
+        let project = json!({
+            "projectId": "P-test",
+            "path": repo.to_string_lossy(),
+            "gitConfig": {},
+            "projectBoardConfig": {},
+        });
+        let unresolved_intermediate_path = dir
+            .path()
+            .join("missing-intermediate")
+            .join("..")
+            .join("repo");
+        let mut params = Map::new();
+        params.insert("action".to_string(), json!("worktreeSetupCommand"));
+        params.insert(
+            "projectPath".to_string(),
+            json!(unresolved_intermediate_path.to_string_lossy()),
+        );
+
+        let result = dispatch_typed_operation_endpoint(
+            "/api/runProjectSetupCommand",
+            &params,
+            vec![project],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result.get("action").and_then(Value::as_str),
+            Some("worktreeSetupCommand")
+        );
+        assert_eq!(result.get("exitCode").and_then(Value::as_i64), Some(0));
+    }
+
+    #[tokio::test]
+    async fn project_setup_command_path_reports_file_without_echoing_path() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("not-a-directory");
+        fs::write(&file_path, "x").unwrap();
+        let ctx = context(dir.path());
+        let mut params = Map::new();
+        params.insert("action".to_string(), json!("worktreeSetupCommand"));
+        params.insert(
+            "setupCommandProjectPath".to_string(),
+            json!(file_path.to_string_lossy()),
+        );
+
+        let error = run_project_setup_command(&params, &ctx).await.unwrap_err();
+
+        assert_eq!(error.code, "badRequest");
+        assert_eq!(error.message, "setupCommandProjectPath is not a directory.");
+    }
+
+    #[tokio::test]
+    async fn project_setup_default_lookup_normalizes_context_cwd() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        fs::create_dir(&repo).unwrap();
+        let project = json!({
+            "projectId": "P-test",
+            "path": repo.to_string_lossy(),
+            "gitConfig": {},
+            "projectBoardConfig": {},
+        });
+        let ctx = TypedOperationContext {
+            beads_cwd: None,
+            cwd: repo.join(".").to_string_lossy().to_string(),
+            env_path: None,
+            projects: vec![project],
+        };
+        let mut params = Map::new();
+        params.insert("action".to_string(), json!("worktreeSetupCommand"));
+
+        let result = run_project_setup_command(&params, &ctx).await.unwrap();
+
+        assert_eq!(
+            result.get("action").and_then(Value::as_str),
+            Some("worktreeSetupCommand")
+        );
+        assert_eq!(result.get("command"), None);
+        assert_eq!(result.get("exitCode").and_then(Value::as_i64), Some(0));
+    }
+
+    #[tokio::test]
+    async fn project_setup_default_lookup_validates_candidate_project_paths() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let stale = dir.path().join("stale");
+        fs::create_dir(&repo).unwrap();
+        let stale_project = json!({
+            "projectId": "P-stale",
+            "path": stale.to_string_lossy(),
+            "gitConfig": {},
+            "projectBoardConfig": {},
+        });
+        let project = json!({
+            "projectId": "P-test",
+            "path": repo.to_string_lossy(),
+            "gitConfig": {},
+            "projectBoardConfig": {},
+        });
+        let ctx = TypedOperationContext {
+            beads_cwd: None,
+            cwd: repo.to_string_lossy().to_string(),
+            env_path: None,
+            projects: vec![stale_project, project],
+        };
+        let mut params = Map::new();
+        params.insert("action".to_string(), json!("worktreeSetupCommand"));
+
+        let error = run_project_setup_command(&params, &ctx).await.unwrap_err();
+
+        assert_eq!(error.code, "notFound");
+        assert_eq!(
+            error.message,
+            format!("project.path does not exist: {}", stale.to_string_lossy())
+        );
+    }
+
     #[test]
     fn git_commit_redacts_stdin_command_metadata() {
         let dir = tempdir().unwrap();
@@ -2231,6 +2784,34 @@ mod tests {
             vec!["commit", "--no-verify", "-F", "<stdin>"]
         );
         assert!(command.stdin.unwrap().contains("secret subject"));
+    }
+
+    #[test]
+    fn typed_operation_log_details_omit_command_args_and_output() {
+        let result = json!({
+            "action": "commit",
+            "command": {
+                "args": ["commit", "-F", "<stdin>"],
+                "cwd": "/Users/person/dev/private-project",
+                "executable": "git",
+            },
+            "exitCode": 1,
+            "stderr": "private stderr containing command text",
+            "stdout": "private stdout containing command text",
+        });
+
+        let details = typed_operation_log_details(&result);
+
+        assert_eq!(details.get("action"), Some(&json!("commit")));
+        assert_eq!(details.get("argumentCount"), Some(&json!(3)));
+        assert_eq!(details.get("commandBuilt"), Some(&json!(true)));
+        assert_eq!(details.get("executable"), Some(&json!("git")));
+        assert_eq!(details.get("exitCode"), Some(&json!(1)));
+        assert_eq!(details.get("operationError"), Some(&Value::Null));
+        assert!(!details.to_string().contains("private-project"));
+        assert!(!details.to_string().contains("<stdin>"));
+        assert!(!details.to_string().contains("private stdout"));
+        assert!(!details.to_string().contains("private stderr"));
     }
 
     #[test]
@@ -2344,6 +2925,302 @@ mod tests {
     }
 
     #[test]
+    fn beads_board_rejects_explicit_row_and_response_limits() {
+        let row_error = parse_beads_board_output_with_limits(
+            r#"[{"id":"A"},{"id":"B"},{"id":"C"}]"#,
+            BeadsBoardLimits {
+                response_limit_bytes: 1024,
+                row_limit: 2,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(row_error.code, "badRequest");
+        assert!(row_error.message.contains("2-row limit"));
+        assert_eq!(
+            row_error
+                .details
+                .as_ref()
+                .and_then(|details| details.get("rowLimit")),
+            Some(&json!(2))
+        );
+
+        let response_error = parse_beads_board_output_with_limits(
+            r#"[{"id":"A","title":"response body is too large"}]"#,
+            BeadsBoardLimits {
+                response_limit_bytes: 16,
+                row_limit: 10,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(response_error.code, "badRequest");
+        assert!(response_error
+            .message
+            .contains("16-byte serialized JSON limit"));
+        assert_eq!(
+            response_error
+                .details
+                .as_ref()
+                .and_then(|details| details.get("responseLimitBytes")),
+            Some(&json!(16))
+        );
+    }
+
+    #[test]
+    fn beads_hook_script_matches_typescript_contract() {
+        let script = build_ghostex_beads_git_hook_script(
+            "pre-commit",
+            "/tmp/Ghostex Resources/bin/bd",
+            "/tmp/project/.beads",
+        );
+        assert!(script.contains("BD_BIN='/tmp/Ghostex Resources/bin/bd'"));
+        assert!(script.contains("BEADS_DIR_VALUE='/tmp/project/.beads'"));
+        assert!(script.contains("HOOK_NAME='pre-commit'"));
+        assert!(script.contains("export BEADS_DIR=\"$BEADS_DIR_VALUE\""));
+        assert!(script.contains("export BD_GIT_HOOK=1"));
+        assert!(script.contains("hooks run \"$HOOK_NAME\""));
+        assert!(!script.contains("bd sync"));
+        assert!(!script.contains("issues.jsonl"));
+
+        let quoted = shell_single_quote("/tmp/it's/bd");
+        assert_eq!(quoted, "'/tmp/it'\\''s/bd'");
+    }
+
+    #[tokio::test]
+    async fn ensure_beads_hooks_installs_scripts_in_common_git_directory() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let app_bin = dir.path().join("app-web").join("bin");
+        let bd = app_bin.join("bd");
+        let beads_dir = repo.join(".beads");
+        let hook_log = dir.path().join("hook.log");
+        fs::create_dir_all(&repo).unwrap();
+        fs::create_dir_all(&beads_dir).unwrap();
+        fs::create_dir_all(&app_bin).unwrap();
+        run_git(["init"], &repo);
+        fs::write(
+            &bd,
+            format!(
+                "#!/bin/sh\n\
+if [ \"$1\" = \"where\" ]; then\n\
+  printf '%s\\n' '{{\"path\":\"{}\"}}'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"hooks\" ] && [ \"$2\" = \"run\" ]; then\n\
+  printf '%s\\n' \"$BEADS_DIR|$BD_GIT_HOOK|$3\" >> {}\n\
+  exit 0\n\
+fi\n\
+exit 0\n",
+                beads_dir.to_string_lossy(),
+                shell_single_quote(&hook_log.to_string_lossy()),
+            ),
+        )
+        .unwrap();
+        chmod_executable_if_supported(&bd).unwrap();
+
+        let ctx = context(&repo);
+        let result = ensure_beads_git_hooks_with_executable(&ctx, &bd.to_string_lossy())
+            .await
+            .unwrap();
+        assert_eq!(result.get("exitCode").and_then(Value::as_i64), Some(0));
+        assert_eq!(
+            result.get("stdout").and_then(Value::as_str),
+            Some("installed")
+        );
+
+        let hooks_path = repo.join(".git").join("ghostex-hooks");
+        assert_eq!(
+            run_git_output(["config", "--get", "core.hooksPath"], &repo).trim(),
+            hooks_path.to_string_lossy()
+        );
+        let pre_commit = fs::read_to_string(hooks_path.join("pre-commit")).unwrap();
+        assert!(pre_commit.contains("BD_BIN="));
+        assert!(pre_commit.contains("BEADS_DIR_VALUE="));
+        assert!(pre_commit.contains("HOOK_NAME='pre-commit'"));
+        assert!(pre_commit.contains("hooks run \"$HOOK_NAME\""));
+        assert!(!pre_commit.contains("issues.jsonl"));
+
+        let hook_output = StdCommand::new(hooks_path.join("pre-commit"))
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(
+            hook_output.status.success(),
+            "hook failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&hook_output.stdout),
+            String::from_utf8_lossy(&hook_output.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(&hook_log).unwrap().trim(),
+            format!("{}|1|pre-commit", beads_dir.to_string_lossy())
+        );
+    }
+
+    #[test]
+    fn beads_where_output_requires_absolute_directory() {
+        let dir = tempdir().unwrap();
+        let beads_dir = dir.path().join(".beads");
+        fs::create_dir(&beads_dir).unwrap();
+        let stdout = format!(r#"{{"path":"{}"}}"#, beads_dir.to_string_lossy());
+        assert_eq!(
+            normalize_beads_where_directory(&stdout).unwrap(),
+            beads_dir.to_string_lossy()
+        );
+
+        let relative = normalize_beads_where_directory(r#"{"path":".beads"}"#).unwrap_err();
+        assert_eq!(relative.code, "badRequest");
+        assert!(relative.message.contains("absolute storage path"));
+
+        let file_path = dir.path().join("not-a-dir");
+        fs::write(&file_path, "x").unwrap();
+        let file_stdout = format!(r#"{{"path":"{}"}}"#, file_path.to_string_lossy());
+        let file_error = normalize_beads_where_directory(&file_stdout).unwrap_err();
+        assert_eq!(file_error.code, "badRequest");
+        assert!(file_error.message.contains("not a directory"));
+    }
+
+    #[test]
+    fn beads_commands_match_typescript_nullish_argument_behavior() {
+        let dir = tempdir().unwrap();
+        let ctx = context(dir.path());
+
+        let mut create_params = Map::new();
+        create_params.insert("title".to_string(), json!("Create from board"));
+        create_params.insert("description".to_string(), Value::Null);
+        create_params.insert("priority".to_string(), Value::Null);
+        let create =
+            build_beads_command_with_executable("create", &create_params, &ctx, "/tmp/bd").unwrap();
+        assert_eq!(
+            create.args,
+            vec![
+                "create",
+                "--title",
+                "Create from board",
+                "--description",
+                "",
+                "--priority",
+                "2",
+                "--type",
+                "task",
+                "--json",
+            ]
+        );
+
+        let mut update_description_params = Map::new();
+        update_description_params.insert("issueId".to_string(), json!("gxserver-15"));
+        update_description_params.insert("description".to_string(), Value::Null);
+        let update_description = build_beads_command_with_executable(
+            "updateDescription",
+            &update_description_params,
+            &ctx,
+            "/tmp/bd",
+        )
+        .unwrap();
+        assert_eq!(
+            update_description.args,
+            vec!["update", "gxserver-15", "--description", "", "--json"]
+        );
+
+        let mut update_params = Map::new();
+        update_params.insert("issueId".to_string(), json!("gxserver-15"));
+        update_params.insert("description".to_string(), Value::Null);
+        let update =
+            build_beads_command_with_executable("update", &update_params, &ctx, "/tmp/bd").unwrap();
+        assert_eq!(
+            update.args,
+            vec!["update", "gxserver-15", "--description", "null", "--json"]
+        );
+    }
+
+    #[test]
+    fn beads_board_scope_controls_command_cwd_only_for_board_calls() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let board_dir = dir.path().join("board");
+        fs::create_dir(&repo).unwrap();
+        fs::create_dir(&board_dir).unwrap();
+        let project = json!({
+            "projectId": "P-test",
+            "path": repo.to_string_lossy(),
+            "gitConfig": {},
+            "projectBoardConfig": {
+                "beadsDirectory": board_dir.to_string_lossy()
+            },
+        });
+
+        let mut board_params = Map::new();
+        board_params.insert("action".to_string(), json!("list"));
+        board_params.insert("projectBoardScope".to_string(), json!(true));
+        board_params.insert("projectId".to_string(), json!("P-test"));
+        let board_context = resolve_project_operation_context(
+            "/api/runBeadsAction",
+            &board_params,
+            vec![project.clone()],
+        )
+        .unwrap();
+        let board_command =
+            build_beads_command_with_executable("list", &board_params, &board_context, "/tmp/bd")
+                .unwrap();
+        assert_eq!(board_command.cwd, board_dir.to_string_lossy());
+
+        let mut probe_params = Map::new();
+        probe_params.insert("action".to_string(), json!("storageExists"));
+        probe_params.insert("projectId".to_string(), json!("P-test"));
+        let probe_context = resolve_project_operation_context(
+            "/api/runBeadsAction",
+            &probe_params,
+            vec![project.clone()],
+        )
+        .unwrap();
+        assert_eq!(probe_context.beads_cwd, None);
+
+        let worktree_context = resolve_project_operation_context(
+            "/api/runWorktreeAction",
+            &board_params,
+            vec![project],
+        )
+        .unwrap();
+        assert_eq!(worktree_context.beads_cwd, None);
+    }
+
+    #[test]
+    fn beads_label_arguments_reject_non_arrays() {
+        let dir = tempdir().unwrap();
+        let ctx = context(dir.path());
+
+        let mut create_params = Map::new();
+        create_params.insert("title".to_string(), json!("Create from board"));
+        create_params.insert("labels".to_string(), json!("ui"));
+        let create_error =
+            build_beads_command_with_executable("create", &create_params, &ctx, "/tmp/bd")
+                .unwrap_err();
+        assert_eq!(create_error.code, "badRequest");
+        assert!(create_error.message.contains("labels must be an array"));
+
+        let mut set_params = Map::new();
+        set_params.insert("issueId".to_string(), json!("gxserver-15"));
+        set_params.insert("labels".to_string(), json!("ui"));
+        let set_error =
+            build_beads_command_with_executable("setLabels", &set_params, &ctx, "/tmp/bd")
+                .unwrap_err();
+        assert_eq!(set_error.code, "badRequest");
+        assert!(set_error.message.contains("labels must be an array"));
+    }
+
+    #[test]
+    fn typed_operation_environment_applies_beads_json_envelope() {
+        let env = typed_operation_environment(
+            Some("/tmp/bin"),
+            &[
+                ("BD_JSON_ENVELOPE".to_string(), "1".to_string()),
+                ("NO_COLOR".to_string(), "1".to_string()),
+            ],
+        );
+        assert!(env.contains(&("PATH".to_string(), "/tmp/bin".to_string())));
+        assert!(env.contains(&("BD_JSON_ENVELOPE".to_string(), "1".to_string())));
+        assert!(!env.iter().any(|(key, _)| key == "NO_COLOR"));
+    }
+
+    #[test]
     fn beads_list_all_labels_plans_board_list_command() {
         let dir = tempdir().unwrap();
         let ctx = context(dir.path());
@@ -2380,6 +3257,35 @@ mod tests {
         I: IntoIterator<Item = S>,
         S: AsRef<std::ffi::OsStr>,
     {
+        let output = run_git_raw(args, cwd);
+        assert!(
+            output.status.success(),
+            "git failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn run_git_output<I, S>(args: I, cwd: &Path) -> String
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+    {
+        let output = run_git_raw(args, cwd);
+        assert!(
+            output.status.success(),
+            "git failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).to_string()
+    }
+
+    fn run_git_raw<I, S>(args: I, cwd: &Path) -> std::process::Output
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+    {
         let args = args
             .into_iter()
             .map(|arg| arg.as_ref().to_os_string())
@@ -2389,12 +3295,14 @@ mod tests {
             .current_dir(cwd)
             .output()
             .unwrap();
-        assert!(
-            output.status.success(),
-            "git {:?} failed\nstdout:\n{}\nstderr:\n{}",
-            args,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        if !output.status.success() {
+            eprintln!(
+                "git {:?} failed\nstdout:\n{}\nstderr:\n{}",
+                args,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        output
     }
 }

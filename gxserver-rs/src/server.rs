@@ -1,7 +1,9 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
+    fs,
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
+    process::Command as StdCommand,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -10,8 +12,8 @@ use anyhow::{anyhow, Context, Result};
 use axum::{
     body::{to_bytes, Body},
     extract::{
-        ws::{Message, WebSocket},
-        State, WebSocketUpgrade,
+        ws::{rejection::WebSocketUpgradeRejection, Message, WebSocket, WebSocketUpgrade},
+        State,
     },
     http::{
         header::{self, HeaderName, HeaderValue},
@@ -23,7 +25,13 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Map, Value};
-use tokio::{net::TcpListener, process::Command, sync::broadcast};
+use sha2::{Digest, Sha256};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    net::TcpListener,
+    process::Command,
+    sync::broadcast,
+};
 use uuid::Uuid;
 
 use crate::{
@@ -31,7 +39,9 @@ use crate::{
     agent_skills::{install_agent_skills, read_agent_skill_status},
     agents::{
         apply_created_session_identity, apply_live_process_session_identity,
-        dispatch_agent_endpoint, reconcile_agent_metadata_title_for_session, AgentEndpointError,
+        create_agent_session_params_for_project, dispatch_agent_endpoint,
+        get_visible_terminal_title, normalize_agent_hook_activity, read_agent_settings,
+        reconcile_agent_metadata_title_for_session, AgentEndpointError,
     },
     auth::{
         ensure_gxserver_auth_token, is_authorized_headers, is_expected_gxserver_auth_token,
@@ -49,10 +59,20 @@ use crate::{
     events::{EventClientSender, GxserverEventHub},
     http_client,
     identity::ensure_gxserver_identity,
+    ids::{is_gxserver_project_id, is_gxserver_session_id},
     logging::{
-        log_level_from_status, query_gxserver_logs, GxserverLogInput, GxserverLogger, LogQueryError,
+        log_level_from_status, query_gxserver_logs, GxserverLogInput, GxserverLogger, LogLevel,
+        LogQueryError,
     },
     paths::{get_gxserver_paths, GxserverPaths},
+    platform::shell::command_shell,
+    portless::{
+        apply_portless_state_update, log_portless_background_sync_failure,
+        log_portless_background_sync_outcome, log_portless_state_update_failure,
+        log_portless_state_update_success, read_portless_presentation_payload,
+        read_portless_status_payload, read_portless_status_payload_for_paths,
+        run_portless_background_sync_once, PortlessLogErrorCode, PortlessStateUpdate,
+    },
     presentation::{
         build_presentation_project_delta, build_presentation_session_delta,
         increment_presentation_revision, list_previous_sessions, read_presentation_snapshot,
@@ -75,7 +95,7 @@ use crate::{
     storage::{
         create_gxserver_migration_status, initialize_gxserver_storage, open_gxserver_database,
     },
-    toolchain::get_gxserver_tool_statuses,
+    toolchain::{get_gxserver_tool_statuses, require_bundled_zmx},
     typed_operations::{
         dispatch_typed_operation_endpoint, typed_operation_log_details, typed_operation_log_level,
         TypedOperationError,
@@ -97,6 +117,13 @@ pub struct GxserverForegroundResult {
     pub reused: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExistingGxserverState {
+    Reusable,
+    Running,
+    Stopped,
+}
+
 #[derive(Clone)]
 struct AppState {
     auth_token: String,
@@ -111,6 +138,7 @@ struct AppState {
     shutdown_tx: broadcast::Sender<()>,
     stale_activity_timers: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
     version: String,
+    zmx_title_observers: Arc<Mutex<HashMap<String, ZmxTitleObserverTask>>>,
 }
 
 struct RoutedResponse {
@@ -118,11 +146,17 @@ struct RoutedResponse {
     response: Response<Body>,
 }
 
+struct ZmxTitleObserverTask {
+    handle: tokio::task::JoinHandle<()>,
+    zmx_name: String,
+}
+
 const GXSERVER_AGENT_TITLE_METADATA_DEBOUNCE_MS: u64 = 3_000;
 const GXSERVER_BARE_RENAME_GENERATING_WINDOW_MS: u64 = 400;
 const GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH: usize = 250;
 const GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH: usize = 39;
 const GXSERVER_FIRST_PROMPT_TITLE_GENERATION_TIMEOUT_MS: u64 = 30_000;
+const GXSERVER_SESSION_STATE_SIDECAR_MAX_BYTES: u64 = 1024 * 1024;
 
 const RENDERER_COMMAND_ACTIONS: &[&str] = &[
     "assertSidebarCard",
@@ -156,10 +190,14 @@ const RENDERER_COMMAND_ACTIONS: &[&str] = &[
     "toggleSidebarCollapsed",
     "waitFor",
 ];
+const PORTLESS_BACKGROUND_SYNC_INTERVAL: Duration = Duration::from_secs(10);
 
 /*
 CDXC:GxserverRustPort 2026-06-14-20:37:
 Phase 1 must be a real foreground daemon, not a mock harness. Startup creates TypeScript-compatible auth, config, identity, SQLite, runtime metadata, logs directory, local HTTP listener, health/control endpoints, and the minimal event stream needed by Phase 0 compatibility.
+
+CDXC:GxserverLifecycle 2026-06-22-04:53:
+Foreground Rust startup must own the selected loopback port like TypeScript: reuse the same build, stop and replace a same-protocol build mismatch, and surface protocol mismatches before binding so selected-port failures are explicit instead of falling through to generic EADDRINUSE.
 */
 pub async fn run_gxserver_foreground(
     options: GxserverForegroundOptions,
@@ -170,13 +208,38 @@ pub async fn run_gxserver_foreground(
         .unwrap_or_else(|| create_source_build_identity(&version));
     let paths = get_gxserver_paths(options.home_dir);
 
-    if let Some(existing_auth) = read_gxserver_auth_token(&paths)? {
-        if let Ok(Some(existing)) =
-            http_client::fetch_server_health(Some(&existing_auth.token), 800)
-        {
-            if is_build_identity_reusable(Some(&existing.build_identity), Some(&build_identity)) {
+    let existing_auth = read_gxserver_auth_token(&paths)?;
+    if let Some(existing) = http_client::fetch_server_health(
+        existing_auth.as_ref().map(|auth| auth.token.as_str()),
+        800,
+    )? {
+        match classify_existing_gxserver(Some(&existing), &build_identity) {
+            ExistingGxserverState::Reusable => {
                 return Ok(GxserverForegroundResult { reused: true });
             }
+            ExistingGxserverState::Running => {
+                let _ = http_client::request_server_stop(
+                    existing_auth.as_ref().map(|auth| auth.token.as_str()),
+                    2_000,
+                )?;
+                match wait_for_mismatched_gxserver_to_stop(
+                    existing_auth.as_ref().map(|auth| auth.token.as_str()),
+                    &build_identity,
+                )
+                .await?
+                {
+                    ExistingGxserverState::Reusable => {
+                        return Ok(GxserverForegroundResult { reused: true });
+                    }
+                    ExistingGxserverState::Stopped => {}
+                    ExistingGxserverState::Running => {
+                        return Err(anyhow!(
+                            "gxserver build identity changed, but the old control plane did not stop. Stop gxserver and launch Ghostex again so the current migration code can run."
+                        ));
+                    }
+                }
+            }
+            ExistingGxserverState::Stopped => {}
         }
     }
 
@@ -214,6 +277,7 @@ pub async fn run_gxserver_foreground(
         shutdown_tx: shutdown_tx.clone(),
         stale_activity_timers: Arc::new(Mutex::new(HashMap::new())),
         version,
+        zmx_title_observers: Arc::new(Mutex::new(HashMap::new())),
     });
     let app = Router::new()
         .route("/api/events", any(handle_events))
@@ -247,6 +311,8 @@ pub async fn run_gxserver_foreground(
         "serverId": metadata.server_id.clone(),
         "type": "serverStarted",
     }));
+    sync_zmx_title_observers_for_all_sessions(&state, "server-start");
+    let portless_background_sync_task = spawn_portless_background_sync_task(&state);
 
     let mut shutdown_rx = shutdown_tx.subscribe();
     let shutdown_for_signal = shutdown_tx.clone();
@@ -257,15 +323,109 @@ pub async fn run_gxserver_foreground(
         let _ = shutdown_for_signal.send(());
     });
 
-    axum::serve(listener, app)
+    let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             let _ = shutdown_rx.recv().await;
         })
-        .await
-        .with_context(|| "run gxserver HTTP listener")?;
+        .await;
+    portless_background_sync_task.abort();
+    serve_result.with_context(|| "run gxserver HTTP listener")?;
 
     remove_runtime_metadata(&paths)?;
+    stop_all_zmx_title_observers(&state);
     Ok(GxserverForegroundResult { reused: false })
+}
+
+fn spawn_portless_background_sync_task(state: &Arc<AppState>) -> tokio::task::JoinHandle<()> {
+    /*
+    CDXC:PortlessBackgroundSync 2026-06-22-23:40:
+    Phase 9 route sync must run inside gxserver-rs without depending on Resources/sidebar polling, while staying lightweight for startup and shutdown. Run each sync pass off the async worker, retry on a conservative interval, and listen to gxserver's existing shutdown broadcast instead of adding a separate lifecycle channel.
+    */
+    let paths = state.paths.clone();
+    let logger = state.logger.clone();
+    let mut shutdown_rx = state.shutdown_tx.subscribe();
+    tokio::spawn(async move {
+        loop {
+            let sync_paths = paths.clone();
+            let sync_logger = logger.clone();
+            let sync_result = tokio::task::spawn_blocking(move || {
+                let started_at = Instant::now();
+                match run_portless_background_sync_once(&sync_paths) {
+                    Ok(outcome) => {
+                        log_portless_background_sync_outcome(
+                            &sync_logger,
+                            &outcome,
+                            started_at.elapsed().as_millis(),
+                        );
+                    }
+                    Err(_) => {
+                        log_portless_background_sync_failure(
+                            &sync_logger,
+                            PortlessLogErrorCode::BackgroundSyncFailed,
+                            started_at.elapsed().as_millis(),
+                        );
+                    }
+                }
+            })
+            .await;
+            if sync_result.is_err() {
+                log_portless_background_sync_failure(
+                    &logger,
+                    PortlessLogErrorCode::BackgroundSyncTaskJoinFailed,
+                    0,
+                );
+            }
+
+            tokio::select! {
+                _ = shutdown_rx.recv() => break,
+                _ = tokio::time::sleep(PORTLESS_BACKGROUND_SYNC_INTERVAL) => {}
+            }
+        }
+    })
+}
+
+async fn wait_for_mismatched_gxserver_to_stop(
+    token: Option<&str>,
+    expected_build_identity: &str,
+) -> Result<ExistingGxserverState> {
+    let deadline = Instant::now() + Duration::from_millis(5_000);
+    while Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let state = probe_existing_gxserver_state(token, expected_build_identity)?;
+        if state != ExistingGxserverState::Running {
+            return Ok(state);
+        }
+    }
+    probe_existing_gxserver_state(token, expected_build_identity)
+}
+
+fn probe_existing_gxserver_state(
+    token: Option<&str>,
+    expected_build_identity: &str,
+) -> Result<ExistingGxserverState> {
+    let health = http_client::fetch_server_health(token, 500)?;
+    Ok(classify_existing_gxserver(
+        health.as_ref(),
+        expected_build_identity,
+    ))
+}
+
+fn classify_existing_gxserver(
+    health: Option<&ServerHealthResponse>,
+    expected_build_identity: &str,
+) -> ExistingGxserverState {
+    match health {
+        Some(health)
+            if is_build_identity_reusable(
+                Some(&health.build_identity),
+                Some(expected_build_identity),
+            ) =>
+        {
+            ExistingGxserverState::Reusable
+        }
+        Some(_) => ExistingGxserverState::Running,
+        None => ExistingGxserverState::Stopped,
+    }
 }
 
 async fn handle_http(State(state): State<Arc<AppState>>, request: Request<Body>) -> Response<Body> {
@@ -313,28 +473,24 @@ async fn route_http(
     let (parts, body) = request.into_parts();
     let path = parts.uri.path().to_string();
     let method = parts.method.clone();
+    let endpoint = endpoint_for(&path);
 
-    if method == Method::GET && path == "/api/health" {
-        return routed_json(
-            Some("/api/health".to_string()),
-            StatusCode::OK,
-            MinimalHealthResponse::new(&state.version),
-        );
-    }
-
-    let Some(endpoint) = endpoint_for(&path) else {
-        return routed_json(
-            None,
-            StatusCode::NOT_FOUND,
-            rpc_error(
-                "notFound",
-                format!("No gxserver endpoint for {} {}.", method.as_str(), path),
-                Some(request_id),
-            ),
-        );
-    };
-
+    /*
+    CDXC:GxserverProtocol 2026-06-22-04:10:
+    Rust routing must preserve TypeScript's protocol gate order: CORS/OPTIONS is answered before minimal health, auth, method, body, and protocol checks. Unknown or WebSocket-only OPTIONS requests therefore return the HTTP-endpoint 404 envelope instead of the generic endpoint lookup message.
+    */
     if method == Method::OPTIONS {
+        let Some(endpoint) = endpoint else {
+            return routed_json(
+                None,
+                StatusCode::NOT_FOUND,
+                rpc_error(
+                    "notFound",
+                    format!("{path} is not a gxserver HTTP endpoint."),
+                    Some(request_id),
+                ),
+            );
+        };
         if endpoint.transport != Transport::Http {
             return routed_json(
                 Some(endpoint.path),
@@ -366,13 +522,33 @@ async fn route_http(
         };
     }
 
-    if endpoint.transport != Transport::Http {
+    if method == Method::GET && path == "/api/health" {
         return routed_json(
-            Some(endpoint.path),
+            Some("/api/health".to_string()),
+            StatusCode::OK,
+            MinimalHealthResponse::new(&state.version),
+        );
+    }
+
+    let Some(endpoint) = endpoint else {
+        return routed_json(
+            None,
             StatusCode::NOT_FOUND,
             rpc_error(
                 "notFound",
-                format!("No gxserver endpoint for {}.", path),
+                format!("No gxserver endpoint for {} {}.", method.as_str(), path),
+                Some(request_id),
+            ),
+        );
+    };
+
+    if endpoint.transport != Transport::Http {
+        return routed_json(
+            None,
+            StatusCode::NOT_FOUND,
+            rpc_error(
+                "notFound",
+                format!("No gxserver endpoint for {} {}.", method.as_str(), path),
                 Some(request_id),
             ),
         );
@@ -427,14 +603,18 @@ async fn route_http(
                         ),
                         Some(request_id),
                     ),
-                )
+                );
             }
             Err(ReadBodyError::InvalidJson) => {
                 return routed_json(
                     Some(endpoint.path),
                     StatusCode::BAD_REQUEST,
-                    rpc_error("badRequest", "Request body must be valid JSON.", Some(request_id)),
-                )
+                    rpc_error(
+                        "badRequest",
+                        "Request body must be valid JSON.",
+                        Some(request_id),
+                    ),
+                );
             }
         }
     } else {
@@ -525,7 +705,29 @@ async fn route_http(
             endpoint.path,
             request_id,
             &body_json,
-            |repository, _, params, _| repository.read_project_status(params),
+            |repository, db, params, _| {
+                let project_id = read_project_id(params)?;
+                let project = repository.get_project(&project_id)?.ok_or_else(|| {
+                    DomainStateError::not_found(format!("Project {project_id} does not exist."))
+                })?;
+                /*
+                CDXC:ProjectStatusParity 2026-06-22-06:21:
+                readProjectStatus is a polling project-status read, but TypeScript gxserver repairs live zmx process identity before returning the project/session graph and schedules agent metadata title checks for eligible sessions. Keep those side effects here instead of treating the endpoint as a plain repository read so Rust clients receive the same status projection.
+                */
+                sync_live_zmx_process_identities(
+                    &state,
+                    db,
+                    repository,
+                    Some(project_id.as_str()),
+                    "read-project-status",
+                )?;
+                let sessions = repository.list_sessions(Some(project_id.as_str()))?;
+                schedule_agent_title_metadata_checks_for_sessions(&state, &sessions);
+                Ok(json!({
+                    "project": project,
+                    "sessions": sessions,
+                }))
+            },
         ),
         "/api/addProjectPath" => handle_domain_http(
             &state,
@@ -563,6 +765,9 @@ async fn route_http(
                 Ok(json!({ "project": project }))
             },
         ),
+        "/api/deleteWorktreeProject" => {
+            handle_delete_worktree_project_http(&state, endpoint.path, request_id, &body_json).await
+        }
         "/api/createSession" => handle_domain_http(
             &state,
             endpoint.path,
@@ -589,8 +794,11 @@ async fn route_http(
             request_id,
             &body_json,
             |repository, db, params, _| {
-                let created_session = repository.create_session(params, true)?;
-                let session = apply_created_session_identity(repository, &created_session, params)?;
+                let project = repository.resolve_create_session_project(params)?;
+                let create_params = create_agent_session_params_for_project(db, &project, params)?;
+                let created_session = repository.create_session(&create_params, false)?;
+                let session =
+                    apply_created_session_identity(repository, &created_session, &create_params)?;
                 let project_id = value_text(&session, "projectId")?;
                 let session_id = value_text(&session, "sessionId")?;
                 schedule_presentation_session_delta(
@@ -610,6 +818,13 @@ async fn route_http(
             &body_json,
             |repository, db, params, _| {
                 let project_id = read_optional_project_id(params)?;
+                sync_session_state_sidecars(
+                    &state,
+                    db,
+                    repository,
+                    project_id.as_deref(),
+                    "list-sessions",
+                )?;
                 sync_live_zmx_process_identities(
                     &state,
                     db,
@@ -687,6 +902,13 @@ async fn route_http(
             request_id,
             &body_json,
             |repository, db, _, server_id| {
+                sync_session_state_sidecars(
+                    &state,
+                    db,
+                    repository,
+                    None,
+                    "read-presentation-snapshot",
+                )?;
                 sync_live_zmx_process_identities(
                     &state,
                     db,
@@ -758,11 +980,20 @@ async fn route_http(
             handle_typed_operation_http(&state, endpoint.path, request_id, &body_json).await
         }
         "/api/queryLogs" => handle_query_logs_http(&state, endpoint.path, request_id, &body_json),
+        "/api/updatePortlessState" => {
+            handle_portless_state_http(&state, endpoint.path, request_id, &body_json)
+        }
         "/api/previewRepositoryClone"
         | "/api/startRepositoryClone"
         | "/api/readRepositoryCloneJob"
         | "/api/cancelRepositoryCloneJob" => {
             handle_repository_clone_http(&state, endpoint.path, request_id, &body_json).await
+        }
+        "/api/browseProjectDirectories" => {
+            handle_browse_project_directories_http(&state, endpoint.path, request_id, &body_json)
+        }
+        "/api/resolveGitRootForPath" => {
+            handle_resolve_git_root_for_path_http(&state, endpoint.path, request_id, &body_json)
         }
         "/api/control/stop" => {
             broadcast_server_stopping(&state);
@@ -844,6 +1075,95 @@ fn handle_query_logs_http(
     }
 }
 
+fn handle_portless_state_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    /*
+    CDXC:PortlessFailureUX 2026-06-23-04:28:
+    Native-sidebar reports only enum-like Portless settings/admin outcomes to
+    gxserver-rs. The daemon persists setup recovery state, clears route files
+    for Disable/remove, and returns refreshed metadata without paths, command
+    text, process output, environment values, URLs, tokens, or file contents.
+    */
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let update = match serde_json::from_value::<PortlessStateUpdate>(Value::Object(params.clone()))
+    {
+        Ok(update) => update,
+        Err(error) => {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError::bad_request(format!(
+                    "Invalid Portless state update payload: {error}"
+                )),
+            );
+        }
+    };
+    let started_at = Instant::now();
+    let db = match open_gxserver_database(&state.paths) {
+        Ok(db) => db,
+        Err(error) => {
+            log_portless_state_update_failure(
+                &state.logger,
+                &update,
+                PortlessLogErrorCode::StateUpdateDatabaseUnavailable,
+                started_at.elapsed().as_millis(),
+            );
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "internalError",
+                    message: format!("SQLite gxserver state error: {error}"),
+                },
+            );
+        }
+    };
+    match apply_portless_state_update(&state.paths, &db, update.clone()) {
+        Ok(record) => {
+            log_portless_state_update_success(
+                &state.logger,
+                &update,
+                &record,
+                started_at.elapsed().as_millis(),
+            );
+            routed_json(
+                Some(endpoint_path),
+                StatusCode::OK,
+                rpc_success(
+                    request_id,
+                    json!({
+                        "presentation": read_portless_presentation_payload(&db),
+                        "status": read_portless_status_payload(&db),
+                    }),
+                ),
+            )
+        }
+        Err(error) => {
+            log_portless_state_update_failure(
+                &state.logger,
+                &update,
+                PortlessLogErrorCode::StateUpdateFailed,
+                started_at.elapsed().as_millis(),
+            );
+            domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "internalError",
+                    message: format!("Portless state update failed: {error}"),
+                },
+            )
+        }
+    }
+}
+
 /*
 CDXC:GxserverRustPort 2026-06-14-22:38:
 Phase 3 Rust domain endpoints must share the TypeScript RPC envelope, durable SQLite database, and error-status mapping. Keep routing synchronous and explicit here so unsupported lifecycle/provider endpoints still return milestone notImplemented instead of silently mutating partial state.
@@ -877,7 +1197,7 @@ where
                     code: "internalError",
                     message: format!("SQLite gxserver state error: {error}"),
                 },
-            )
+            );
         }
     };
     let server_id = state.metadata.server_id.as_str();
@@ -934,7 +1254,7 @@ async fn handle_agent_http(
                     code: "internalError",
                     message: format!("SQLite gxserver state error: {error}"),
                 },
-            )
+            );
         }
     };
     let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
@@ -955,16 +1275,25 @@ async fn handle_agent_http(
     ) {
         Ok(output) => {
             let presentation_session = output.presentation_session.clone();
-            let should_schedule_agent_title_metadata_check = endpoint_path
-                == "/api/requestSessionRename"
-                && output
-                    .result
-                    .get("pendingAgentMetadata")
-                    .and_then(Value::as_bool)
-                    == Some(true);
+            let mut result = output.result;
+            log_agent_hook_passive_identity_conflict(state, &endpoint_path, &params, &result);
+            strip_agent_hook_internal_result_fields(&endpoint_path, &mut result);
+            let should_queue_agent_title_metadata_check =
+                should_schedule_agent_title_metadata_check(&endpoint_path, &result);
             let should_schedule_first_prompt_auto_title =
-                output.result.get("reason").and_then(Value::as_str)
+                result.get("reason").and_then(Value::as_str)
                     == Some("first-prompt-auto-title-claimed");
+            if endpoint_path == "/api/updateAgentActivity" {
+                if let Some((project_id, session_id)) = presentation_session.as_ref() {
+                    let _ = reconcile_agent_metadata_title_for_session(
+                        &repository,
+                        project_id,
+                        session_id,
+                        &state.paths.home_dir,
+                        "pending",
+                    );
+                }
+            }
             if let Some((project_id, session_id)) = presentation_session.as_ref() {
                 if let Err(error) = schedule_presentation_session_delta(
                     state,
@@ -979,17 +1308,29 @@ async fn handle_agent_http(
                     schedule_stale_activity_presentation_refresh(
                         state,
                         &session,
-                        "agent-activity-stale-activity",
+                        stale_activity_refresh_reason(&endpoint_path),
                     );
                 }
             }
-            if should_schedule_agent_title_metadata_check {
+            if presentation_session.is_none()
+                && endpoint_path == "/api/ingestTerminalTitleEvent"
+                && result_activity(&result) == Some("working")
+            {
+                if let Some(session) = result.get("session") {
+                    schedule_stale_activity_presentation_refresh(
+                        state,
+                        session,
+                        "terminal-title-stale-activity",
+                    );
+                }
+            }
+            if should_queue_agent_title_metadata_check {
                 if let Some((project_id, session_id)) = presentation_session {
                     schedule_agent_title_metadata_check(state.clone(), project_id, session_id);
                 }
             }
             if should_schedule_first_prompt_auto_title {
-                if let Some(session) = output.result.get("session") {
+                if let Some(session) = result.get("session") {
                     if let (Some(project_id), Some(session_id)) = (
                         read_session_text(session, "projectId"),
                         read_session_text(session, "sessionId"),
@@ -1001,7 +1342,7 @@ async fn handle_agent_http(
             routed_json(
                 Some(endpoint_path),
                 StatusCode::OK,
-                rpc_success(request_id, output.result),
+                rpc_success(request_id, result),
             )
         }
         Err(error) => agent_error_response(endpoint_path, request_id, error),
@@ -1041,6 +1382,90 @@ fn schedule_agent_title_metadata_check(state: AppState, project_id: String, sess
             );
         }
     });
+}
+
+fn schedule_agent_title_metadata_checks_for_sessions(state: &AppState, sessions: &[Value]) {
+    for session in sessions {
+        if !should_check_agent_metadata_title_for_project_status(session) {
+            continue;
+        }
+        let Some(project_id) = read_session_text(session, "projectId") else {
+            continue;
+        };
+        let Some(session_id) = read_session_text(session, "sessionId") else {
+            continue;
+        };
+        schedule_agent_title_metadata_check(state.clone(), project_id, session_id);
+    }
+}
+
+fn should_check_agent_metadata_title_for_project_status(session: &Value) -> bool {
+    if !is_agent_associated_session_for_project_status(session) {
+        return false;
+    }
+    if read_runtime_text(session, "pendingAgentTitleRequestStatus").as_deref() == Some("pending") {
+        return true;
+    }
+    read_runtime_text(session, "titleMetadataSource").as_deref() != Some("agent-metadata")
+        && trusted_resume_title_for_project_status(session).is_none()
+}
+
+fn is_agent_associated_session_for_project_status(session: &Value) -> bool {
+    read_session_text(session, "kind").as_deref() == Some("agent")
+        || read_session_text(session, "agentId").is_some()
+        || read_runtime_text(session, "agentName").is_some()
+        || read_runtime_text(session, "agentId").is_some()
+        || read_runtime_text(session, "agentSessionId").is_some()
+        || read_runtime_text(session, "agentSessionPath").is_some()
+}
+
+fn trusted_resume_title_for_project_status(session: &Value) -> Option<String> {
+    let title = read_session_text(session, "title")?;
+    let title_source = normalize_project_status_title_source(
+        read_runtime_text(session, "titleSource")
+            .or_else(|| read_runtime_text(session, "restoreTitleSource"))
+            .as_deref(),
+        &title,
+    );
+    if title_source == "placeholder" {
+        return None;
+    }
+    let visible = get_visible_terminal_title(&title)?;
+    (!is_rejected_project_status_resume_title(&visible)).then_some(visible)
+}
+
+fn normalize_project_status_title_source(value: Option<&str>, title: &str) -> &'static str {
+    match value {
+        Some("browser-auto") => "browser-auto",
+        Some("generated") => "generated",
+        Some("placeholder") => "placeholder",
+        Some("terminal-auto") => "terminal-auto",
+        Some("user") => "user",
+        _ if is_temporary_project_status_title(title) => "placeholder",
+        _ => "user",
+    }
+}
+
+fn is_rejected_project_status_resume_title(title: &str) -> bool {
+    let normalized = title.trim();
+    let lower = normalized.to_ascii_lowercase();
+    normalized == "ð^ß^Ñ»"
+        || is_temporary_project_status_title(normalized)
+        || normalized.starts_with('ð') && normalized.ends_with('»')
+        || is_gxserver_session_id(normalized)
+        || normalized.chars().any(char::is_control)
+        || lower.starts_with("codex ")
+        || lower.starts_with("claude ")
+        || lower.starts_with("cursor-agent ")
+        || lower.starts_with("opencode ")
+}
+
+fn is_temporary_project_status_title(title: &str) -> bool {
+    title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .eq_ignore_ascii_case("search by text")
 }
 
 fn schedule_first_prompt_auto_title_job(state: AppState, project_id: String, session_id: String) {
@@ -1278,6 +1703,7 @@ fn decide_first_prompt_auto_title(
     allow_running: bool,
 ) -> FirstPromptAutoTitleDecision {
     let status = read_runtime_text(session, "gxserverFirstPromptAutoTitleStatus");
+    let raw_prompt = prompt;
     let normalized_prompt = normalize_first_prompt_title_prompt(prompt);
     let cancelled_prompt = normalize_first_prompt_title_prompt(
         read_runtime_text(session, "gxserverFirstPromptAutoTitleCancelledPrompt").as_deref(),
@@ -1321,13 +1747,7 @@ fn decide_first_prompt_auto_title(
     if is_first_prompt_meta_prompt(&prompt) {
         return decision(Some(prompt), "metaPrompt", false, strategy);
     }
-    if prompt.len() <= 50
-        && prompt
-            .split_whitespace()
-            .next()
-            .map(|token| token.starts_with('/') && token.len() > 1)
-            == Some(true)
-    {
+    if is_first_prompt_slash_command(raw_prompt, &prompt) {
         return decision(Some(prompt), "slashCommand", false, strategy);
     }
     if !is_generic_agent_session_title(
@@ -1418,32 +1838,7 @@ fn normalize_first_prompt_title_prompt(prompt: Option<&str>) -> Option<String> {
     if normalized.is_empty() {
         return None;
     }
-    let lower = normalized.to_ascii_lowercase();
-    let prefixes = [
-        "please ",
-        "kindly ",
-        "hey ",
-        "hi ",
-        "hello ",
-        "can you ",
-        "could you ",
-        "would you ",
-        "will you ",
-        "can we ",
-        "could we ",
-        "would we ",
-        "help me ",
-        "i need you to ",
-        "i need to ",
-        "i need ",
-    ];
-    let mut stripped = normalized;
-    for prefix in prefixes {
-        if lower.starts_with(prefix) {
-            stripped = &normalized[prefix.len()..];
-            break;
-        }
-    }
+    let stripped = strip_first_prompt_title_prefixes(normalized);
     let cleaned = stripped
         .trim()
         .trim_end_matches(['.', '?', '!', ':', ';', ','])
@@ -1456,6 +1851,92 @@ fn normalize_first_prompt_title_prompt(prompt: Option<&str>) -> Option<String> {
         }
         .to_string(),
     )
+}
+
+/*
+CDXC:GxserverSessionTitle 2026-06-22-08:12:
+First-prompt title eligibility must be decided before Rust claims a background job, using the same prompt-normalization and slash-command rules as TypeScript gxserver. Repeated polite prefixes are stripped only for title generation, while slash-command suppression scans the original prompt by line so short command prompts never enter the title job.
+*/
+fn strip_first_prompt_title_prefixes(value: &str) -> &str {
+    let mut stripped = value;
+    loop {
+        let lower = stripped.to_lowercase();
+        let prefix = [
+            "please ",
+            "kindly ",
+            "hey ",
+            "hi ",
+            "hello ",
+            "can you ",
+            "could you ",
+            "would you ",
+            "will you ",
+            "can we ",
+            "could we ",
+            "would we ",
+            "help me ",
+            "i need you to ",
+            "i need to ",
+            "i need ",
+            "how do i ",
+            "how does ",
+            "is there any way to ",
+            "is there way to ",
+        ]
+        .into_iter()
+        .find(|prefix| lower.starts_with(prefix));
+        let Some(prefix) = prefix else {
+            return stripped;
+        };
+        stripped = &stripped[prefix.len()..];
+    }
+}
+
+fn is_first_prompt_slash_command(raw_prompt: Option<&str>, normalized_prompt: &str) -> bool {
+    if js_string_length(normalized_prompt) > 50 {
+        return false;
+    }
+    let Some(raw_prompt) = raw_prompt else {
+        return false;
+    };
+    raw_prompt
+        .split('\n')
+        .any(is_first_prompt_slash_command_line)
+}
+
+fn is_first_prompt_slash_command_line(line: &str) -> bool {
+    let trimmed = line.trim_start_matches([' ', '\t']);
+    let Some(rest) = trimmed.strip_prefix('/') else {
+        return false;
+    };
+    let mut chars = rest.char_indices();
+    let Some((_, first)) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() {
+        return false;
+    }
+    let mut consumed_bytes = first.len_utf8();
+    for (index, ch) in chars {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            consumed_bytes = index + ch.len_utf8();
+            continue;
+        }
+        consumed_bytes = index;
+        break;
+    }
+    let suffix = &rest[consumed_bytes..];
+    suffix
+        .chars()
+        .next()
+        .map(|ch| {
+            ch.is_whitespace()
+                || matches!(
+                    ch,
+                    ')' | '.' | ',' | ':' | ';' | '!' | '?' | '\'' | '"' | '`'
+                )
+        })
+        .unwrap_or(true)
 }
 
 fn is_first_prompt_meta_prompt(prompt: &str) -> bool {
@@ -1485,10 +1966,7 @@ async fn generate_first_prompt_session_title(
     prompt: &str,
     session: &Value,
 ) -> Result<String, String> {
-    let source_text = prompt
-        .chars()
-        .take(GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH)
-        .collect::<String>();
+    let source_text = js_string_slice_prefix(prompt, GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH);
     let generation_prompt = build_first_prompt_title_generation_prompt(&source_text);
     let delimiter = format!(
         "ghostex_GXSERVER_SESSION_TITLE_{}",
@@ -1500,8 +1978,9 @@ async fn generate_first_prompt_session_title(
     let command = read_title_generation_command(session, &agent)?;
     let shell_command =
         build_title_generation_command(&agent, &command, &delimiter, &generation_prompt)?;
-    let mut child = Command::new("/bin/zsh");
-    child.arg("-lic").arg(shell_command);
+    let shell = command_shell();
+    let mut child = Command::new(&shell.executable);
+    child.args(shell.interactive_script_args(&shell_command));
     child.current_dir(cwd.unwrap_or_else(|| state.paths.home_dir.to_str().unwrap_or(".")));
     child.envs(internal_title_generation_environment(&state.paths.home_dir));
     child.stdout(std::process::Stdio::piped());
@@ -1551,7 +2030,9 @@ fn build_title_generation_command(
 ) -> Result<String, String> {
     Ok(match agent {
         "codex" => create_here_doc_command(
-            &format!("{command} exec --ephemeral --skip-git-repo-check -m gpt-5.4-mini -c 'model_reasoning_effort=\"low\"'"),
+            &format!(
+                "{command} exec --ephemeral --skip-git-repo-check -m gpt-5.4-mini -c 'model_reasoning_effort=\"low\"'"
+            ),
             delimiter,
             prompt,
         ),
@@ -1559,7 +2040,9 @@ fn build_title_generation_command(
             "{command} --print --yolo --trust --output-format text {}",
             quote_shell_arg(prompt)
         ),
-        "claude" => create_here_doc_command(&format!("{command} -p --model haiku"), delimiter, prompt),
+        "claude" => {
+            create_here_doc_command(&format!("{command} -p --model haiku"), delimiter, prompt)
+        }
         "grok" => format!(
             "{command} -p --model grok-composer-2.5-fast --output-format plain --no-alt-screen --no-plan --no-subagents --disable-web-search --max-turns 1 {}",
             quote_shell_arg(prompt)
@@ -1634,7 +2117,7 @@ fn parse_generated_session_title_text(value: &str) -> Result<String, String> {
 }
 
 fn clamp_generated_session_title_length(value: &str) -> String {
-    if value.chars().count() <= GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH {
+    if js_string_length(value) <= GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH {
         return value.to_string();
     }
     let mut candidate = String::new();
@@ -1644,21 +2127,46 @@ fn clamp_generated_session_title_length(value: &str) -> String {
         } else {
             format!("{candidate} {word}")
         };
-        if next.chars().count() > GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH {
+        if js_string_length(&next) > GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH {
             break;
         }
         candidate = next;
     }
     if candidate.is_empty() {
-        value
-            .chars()
-            .take(GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH)
-            .collect::<String>()
+        js_string_slice_prefix(value, GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH)
             .trim()
             .to_string()
     } else {
         candidate
     }
+}
+
+/*
+CDXC:GxserverSessionTitle 2026-06-22-07:21:
+TypeScript title caps use JavaScript string length and slice semantics, so Rust must count UTF-16 code units rather than Unicode scalar values for first-prompt source text and generated session titles. Rust strings cannot store lone surrogate halves; when a JS slice would expose one, use the replacement character that Node writes at the UTF-8 boundary.
+*/
+fn js_string_length(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+fn js_string_slice_prefix(text: &str, max_code_units: usize) -> String {
+    let mut output = String::new();
+    let mut code_units = 0usize;
+    for ch in text.chars() {
+        let width = ch.len_utf16();
+        if code_units + width > max_code_units {
+            if code_units < max_code_units {
+                output.push(char::REPLACEMENT_CHARACTER);
+            }
+            break;
+        }
+        output.push(ch);
+        code_units += width;
+        if code_units == max_code_units {
+            break;
+        }
+    }
+    output
 }
 
 fn internal_title_generation_environment(home_dir: &std::path::Path) -> Vec<(String, String)> {
@@ -1709,11 +2217,20 @@ fn handle_agent_hook_http(
 ) -> RoutedResponse {
     let params = match read_domain_rpc_params(body) {
         Ok(params) => params,
-        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+        Err(error) => {
+            return routed_json(
+                Some(endpoint_path),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                rpc_error("internalError", error.message, Some(request_id)),
+            )
+        }
     };
     /*
     CDXC:AgentHooks 2026-06-19-14:15:
     Hook uninstall is routed with read/install through the local authenticated RPC envelope. The handler returns the TypeScript-compatible status payload plus removedPaths without writing provider paths, hook commands, or hook file contents to persistent logs.
+
+    CDXC:AgentHooks 2026-06-22-08:23:
+    Area 27 status-code parity keeps malformed hook RPC params on TypeScript gxserver's generic internalError path. File/config hook operation failures still use the shared domain-error mapping after params have been accepted.
     */
     let result = match endpoint_path.as_str() {
         "/api/installAgentHooks" => install_agent_hooks(&state.paths, &params),
@@ -1801,7 +2318,7 @@ async fn handle_typed_operation_http(
                         code: "internalError",
                         message: format!("SQLite gxserver state error: {error}"),
                     },
-                )
+                );
             }
         };
         let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
@@ -1840,8 +2357,62 @@ async fn handle_typed_operation_http(
                 rpc_success(request_id, result),
             )
         }
-        Err(error) => typed_operation_error_response(endpoint_path, request_id, error),
+        Err(error) => {
+            if error.scope_rejection {
+                /*
+                CDXC:ProjectBoardRouting 2026-06-22-10:22:
+                Project Board and typed-operation scope misses are support-relevant but private. Match TypeScript by logging only endpoint/action/error identity and presence booleans, never raw project paths, command text, URLs, or user-owned board content.
+                */
+                let _ = state.logger.log(GxserverLogInput {
+                    level: LogLevel::Warn,
+                    event: "typedOperation.scopeRejected".to_string(),
+                    server_id: Some(state.metadata.server_id.clone()),
+                    request_id: Some(request_id.clone()),
+                    client: None,
+                    duration_ms: None,
+                    error: None,
+                    details: Some(typed_operation_scope_rejection_details(
+                        &endpoint_path,
+                        &params,
+                        &error,
+                    )),
+                });
+            }
+            typed_operation_error_response(endpoint_path, request_id, error)
+        }
     }
+}
+
+fn typed_operation_scope_rejection_details(
+    endpoint_path: &str,
+    params: &Map<String, Value>,
+    error: &TypedOperationError,
+) -> Value {
+    let mut details = Map::new();
+    if let Some(action) = params.get("action").and_then(Value::as_str) {
+        details.insert("action".to_string(), json!(action));
+    }
+    details.insert(
+        "endpoint".to_string(),
+        json!(endpoint_path.trim_start_matches("/api/")),
+    );
+    details.insert("errorCode".to_string(), json!(error.code));
+    details.insert("errorType".to_string(), json!("GxserverProjectPathError"));
+    details.insert(
+        "hasProjectId".to_string(),
+        json!(params
+            .get("projectId")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())),
+    );
+    details.insert(
+        "hasProjectPath".to_string(),
+        json!(params
+            .get("projectPath")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())),
+    );
+    Value::Object(details)
 }
 
 fn typed_operation_error_response(
@@ -1861,6 +2432,521 @@ fn typed_operation_error_response(
         status,
         rpc_error(error.code, error.message, Some(request_id)),
     )
+}
+
+#[derive(Clone)]
+struct DeleteWorktreeProjectParams {
+    delete_local_branch: bool,
+    delete_remote_branch: bool,
+    project_id: String,
+    remote_name: String,
+}
+
+#[derive(Clone)]
+struct NormalizedWorktreeMetadata {
+    branch: Option<String>,
+    parent_project_id: String,
+    parent_project_path: Option<String>,
+}
+
+struct DeleteWorktreeProjectPlan {
+    params: DeleteWorktreeProjectParams,
+    parent_path: String,
+    projects: Vec<Value>,
+    worktree_branch: Option<String>,
+    worktree_path: String,
+}
+
+enum DeleteWorktreeProjectError {
+    Domain(DomainStateError),
+    ProjectPath(ProjectPathHttpError),
+    Typed(TypedOperationError),
+}
+
+impl From<DomainStateError> for DeleteWorktreeProjectError {
+    fn from(error: DomainStateError) -> Self {
+        Self::Domain(error)
+    }
+}
+
+impl From<ProjectPathHttpError> for DeleteWorktreeProjectError {
+    fn from(error: ProjectPathHttpError) -> Self {
+        Self::ProjectPath(error)
+    }
+}
+
+impl From<TypedOperationError> for DeleteWorktreeProjectError {
+    fn from(error: TypedOperationError) -> Self {
+        Self::Typed(error)
+    }
+}
+
+/*
+CDXC:WorktreeDelete 2026-06-22-08:47:
+Rust gxserver must own the same shared Delete Worktree workflow as TypeScript: validate the selected worktree project, remove the Git checkout from the registered parent, delete the durable project row before optional branch cleanup, return cleanup failures as warnings, and publish the presentation delta after the canonical row is gone.
+*/
+async fn handle_delete_worktree_project_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let result = match prepare_delete_worktree_project_plan(state, &params) {
+        Ok(plan) => delete_worktree_project_from_plan(state, plan).await,
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(result) => routed_json(
+            Some(endpoint_path),
+            StatusCode::OK,
+            rpc_success(request_id, result),
+        ),
+        Err(error) => delete_worktree_project_error_response(endpoint_path, request_id, error),
+    }
+}
+
+fn prepare_delete_worktree_project_plan(
+    state: &AppState,
+    params: &Map<String, Value>,
+) -> std::result::Result<DeleteWorktreeProjectPlan, DeleteWorktreeProjectError> {
+    let params = normalize_delete_worktree_project_params(params)?;
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let projects = repository.list_projects()?;
+    let worktree_project = repository.get_project(&params.project_id)?.ok_or_else(|| {
+        DomainStateError::not_found(format!("Project {} does not exist.", params.project_id))
+    })?;
+    let worktree_project_path = worktree_project
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| DomainStateError::bad_request("Worktree project has no filesystem path."))?;
+    let worktree = normalize_worktree_metadata(worktree_project.get("worktree"))
+        .ok_or_else(|| DomainStateError::bad_request("Project is not a worktree."))?;
+    let parent_project = resolve_worktree_parent_project(&projects, &worktree)?;
+    let parent_project_path = parent_project
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| {
+            DomainStateError::not_found(format!(
+                "Parent project {} does not exist.",
+                worktree.parent_project_id
+            ))
+        })?;
+    let worktree_path_value = Value::String(worktree_project_path.to_string());
+    let parent_path_value = Value::String(parent_project_path.to_string());
+    let worktree_path = normalize_existing_directory_path(
+        Some(&worktree_path_value),
+        "project.path",
+        &state.paths.home_dir,
+    )?;
+    let parent_path = normalize_existing_directory_path(
+        Some(&parent_path_value),
+        "parentProject.path",
+        &state.paths.home_dir,
+    )?;
+    Ok(DeleteWorktreeProjectPlan {
+        params,
+        parent_path,
+        projects,
+        worktree_branch: worktree.branch,
+        worktree_path,
+    })
+}
+
+async fn delete_worktree_project_from_plan(
+    state: &AppState,
+    plan: DeleteWorktreeProjectPlan,
+) -> std::result::Result<Value, DeleteWorktreeProjectError> {
+    let branch_name = if plan.params.delete_local_branch || plan.params.delete_remote_branch {
+        resolve_current_worktree_branch_name(&plan).await?
+    } else {
+        None
+    };
+    let checkout_removal = remove_worktree_checkout(&plan).await?;
+    let project = remove_worktree_project_row(state, &plan.params.project_id)?;
+    let mut warnings = delete_selected_worktree_branches(&plan, branch_name).await?;
+    let prune =
+        run_delete_worktree_action(&plan.projects, "prune", &plan.parent_path, Map::new()).await?;
+    if exit_code(&prune) != 0 {
+        warnings.push(json!({
+            "kind": "pruneFailed",
+            "message": operation_failure_message(&prune, "git worktree prune failed."),
+        }));
+    }
+    schedule_deleted_worktree_project_delta(state, &plan.params.project_id)?;
+    Ok(json!({
+        "checkoutRemoval": checkout_removal,
+        "project": project,
+        "warnings": warnings,
+    }))
+}
+
+fn normalize_delete_worktree_project_params(
+    params: &Map<String, Value>,
+) -> std::result::Result<DeleteWorktreeProjectParams, DomainStateError> {
+    let project_id = read_project_id(params)?;
+    let remote_name = params
+        .get("remoteName")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("origin")
+        .to_string();
+    if !is_allowed_git_remote_name(&remote_name) {
+        return Err(DomainStateError::bad_request(
+            "remoteName is not an allowed Git remote name.",
+        ));
+    }
+    Ok(DeleteWorktreeProjectParams {
+        delete_local_branch: params.get("deleteLocalBranch").and_then(Value::as_bool) == Some(true),
+        delete_remote_branch: params.get("deleteRemoteBranch").and_then(Value::as_bool)
+            == Some(true),
+        project_id,
+        remote_name,
+    })
+}
+
+fn normalize_worktree_metadata(candidate: Option<&Value>) -> Option<NormalizedWorktreeMetadata> {
+    let worktree = candidate.and_then(Value::as_object)?;
+    let parent_project_id = worktree.get("parentProjectId").and_then(Value::as_str)?;
+    if !is_gxserver_project_id(parent_project_id) {
+        return None;
+    }
+    Some(NormalizedWorktreeMetadata {
+        branch: worktree
+            .get("branch")
+            .and_then(Value::as_str)
+            .and_then(normalize_branch_name),
+        parent_project_id: parent_project_id.to_string(),
+        parent_project_path: worktree
+            .get("parentProjectPath")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .map(str::to_string),
+    })
+}
+
+fn resolve_worktree_parent_project(
+    projects: &[Value],
+    worktree: &NormalizedWorktreeMetadata,
+) -> std::result::Result<Value, DomainStateError> {
+    let parent_project = projects
+        .iter()
+        .find(|project| {
+            project.get("projectId").and_then(Value::as_str)
+                == Some(worktree.parent_project_id.as_str())
+        })
+        .cloned()
+        .ok_or_else(|| {
+            DomainStateError::not_found(format!(
+                "Parent project {} does not exist.",
+                worktree.parent_project_id
+            ))
+        })?;
+    let parent_path = parent_project
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| {
+            DomainStateError::not_found(format!(
+                "Parent project {} does not exist.",
+                worktree.parent_project_id
+            ))
+        })?;
+    if let Some(expected_path) = worktree
+        .parent_project_path
+        .as_deref()
+        .filter(|path| !path.is_empty())
+    {
+        let expected = path_to_string(&resolve_path_syntax(PathBuf::from(expected_path)));
+        let actual = path_to_string(&resolve_path_syntax(PathBuf::from(parent_path)));
+        if expected != actual {
+            return Err(DomainStateError::bad_request(
+                "Worktree parent project path does not match the registered parent project.",
+            ));
+        }
+    }
+    Ok(parent_project)
+}
+
+async fn resolve_current_worktree_branch_name(
+    plan: &DeleteWorktreeProjectPlan,
+) -> std::result::Result<Option<String>, DeleteWorktreeProjectError> {
+    let branch =
+        run_delete_git_action(&plan.projects, "branch", &plan.worktree_path, Map::new()).await?;
+    if exit_code(&branch) == 0 {
+        if let Some(branch_name) = branch
+            .get("stdout")
+            .and_then(Value::as_str)
+            .and_then(normalize_branch_name)
+        {
+            return Ok(Some(branch_name));
+        }
+    }
+    Ok(plan.worktree_branch.clone())
+}
+
+async fn remove_worktree_checkout(
+    plan: &DeleteWorktreeProjectPlan,
+) -> std::result::Result<Value, DeleteWorktreeProjectError> {
+    let status = run_delete_git_action(
+        &plan.projects,
+        "statusPorcelain",
+        &plan.worktree_path,
+        Map::new(),
+    )
+    .await?;
+    if exit_code(&status) != 0 {
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&status, "Could not read worktree status."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+    let force_initial_remove = has_porcelain_status_changes(
+        status
+            .get("stdout")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
+    let mut extra = Map::new();
+    extra.insert(
+        "worktreePath".to_string(),
+        Value::String(plan.worktree_path.clone()),
+    );
+    if force_initial_remove {
+        extra.insert("force".to_string(), Value::Bool(true));
+    }
+    let mut remove =
+        run_delete_worktree_action(&plan.projects, "remove", &plan.parent_path, extra).await?;
+    let mut retried_for_submodules = false;
+    if exit_code(&remove) != 0 && !force_initial_remove && is_submodule_removal_refusal(&remove) {
+        retried_for_submodules = true;
+        let mut retry_extra = Map::new();
+        retry_extra.insert(
+            "worktreePath".to_string(),
+            Value::String(plan.worktree_path.clone()),
+        );
+        retry_extra.insert("force".to_string(), Value::Bool(true));
+        remove =
+            run_delete_worktree_action(&plan.projects, "remove", &plan.parent_path, retry_extra)
+                .await?;
+    }
+    if exit_code(&remove) != 0 {
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&remove, "git worktree remove failed."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+    Ok(json!({
+        "forced": force_initial_remove || retried_for_submodules,
+        "retriedForSubmodules": retried_for_submodules,
+    }))
+}
+
+async fn delete_selected_worktree_branches(
+    plan: &DeleteWorktreeProjectPlan,
+    branch_name: Option<String>,
+) -> std::result::Result<Vec<Value>, DeleteWorktreeProjectError> {
+    let mut warnings = Vec::new();
+    if plan.params.delete_local_branch {
+        if let Some(branch) = branch_name.as_deref() {
+            let mut extra = Map::new();
+            extra.insert("branch".to_string(), Value::String(branch.to_string()));
+            let local_delete = run_delete_git_action(
+                &plan.projects,
+                "deleteLocalBranch",
+                &plan.parent_path,
+                extra,
+            )
+            .await?;
+            if exit_code(&local_delete) != 0 {
+                warnings.push(json!({
+                    "kind": "localBranchDeleteFailed",
+                    "message": operation_failure_message(&local_delete, "git branch -d failed."),
+                }));
+            }
+        } else {
+            warnings.push(json!({
+                "kind": "localBranchNotResolved",
+                "message": "No local branch could be resolved.",
+            }));
+        }
+    }
+    if plan.params.delete_remote_branch {
+        if let Some(branch) = branch_name.as_deref() {
+            let mut extra = Map::new();
+            extra.insert("branch".to_string(), Value::String(branch.to_string()));
+            extra.insert(
+                "remoteName".to_string(),
+                Value::String(plan.params.remote_name.clone()),
+            );
+            let remote_delete = run_delete_git_action(
+                &plan.projects,
+                "deleteRemoteBranch",
+                &plan.parent_path,
+                extra,
+            )
+            .await?;
+            if exit_code(&remote_delete) != 0 {
+                warnings.push(json!({
+                    "kind": "remoteBranchDeleteFailed",
+                    "message": operation_failure_message(&remote_delete, "git push origin --delete failed."),
+                }));
+            }
+        } else {
+            warnings.push(json!({
+                "kind": "remoteBranchNotResolved",
+                "message": "No branch name could be resolved.",
+            }));
+        }
+    }
+    Ok(warnings)
+}
+
+async fn run_delete_git_action(
+    projects: &[Value],
+    action: &str,
+    project_path: &str,
+    mut extra_params: Map<String, Value>,
+) -> std::result::Result<Value, DeleteWorktreeProjectError> {
+    extra_params.insert("action".to_string(), Value::String(action.to_string()));
+    extra_params.insert(
+        "projectPath".to_string(),
+        Value::String(project_path.to_string()),
+    );
+    dispatch_typed_operation_endpoint("/api/runGitAction", &extra_params, projects.to_vec())
+        .await
+        .map_err(Into::into)
+}
+
+async fn run_delete_worktree_action(
+    projects: &[Value],
+    action: &str,
+    project_path: &str,
+    mut extra_params: Map<String, Value>,
+) -> std::result::Result<Value, DeleteWorktreeProjectError> {
+    extra_params.insert("action".to_string(), Value::String(action.to_string()));
+    extra_params.insert(
+        "projectPath".to_string(),
+        Value::String(project_path.to_string()),
+    );
+    dispatch_typed_operation_endpoint("/api/runWorktreeAction", &extra_params, projects.to_vec())
+        .await
+        .map_err(Into::into)
+}
+
+fn remove_worktree_project_row(
+    state: &AppState,
+    project_id: &str,
+) -> std::result::Result<Value, DeleteWorktreeProjectError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    repository.remove_project(project_id).map_err(Into::into)
+}
+
+fn schedule_deleted_worktree_project_delta(
+    state: &AppState,
+    project_id: &str,
+) -> std::result::Result<(), DeleteWorktreeProjectError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    schedule_presentation_project_delta(state, &db, &repository, project_id, "projectUpdated")
+        .map_err(Into::into)
+}
+
+fn delete_worktree_project_error_response(
+    endpoint_path: String,
+    request_id: String,
+    error: DeleteWorktreeProjectError,
+) -> RoutedResponse {
+    match error {
+        DeleteWorktreeProjectError::Domain(error) => {
+            domain_error_response(endpoint_path, request_id, error)
+        }
+        DeleteWorktreeProjectError::ProjectPath(error) => {
+            project_path_error_response(endpoint_path, request_id, error)
+        }
+        DeleteWorktreeProjectError::Typed(error) => {
+            typed_operation_error_response(endpoint_path, request_id, error)
+        }
+    }
+}
+
+fn is_allowed_git_remote_name(value: &str) -> bool {
+    value.chars().enumerate().all(|(index, ch)| {
+        (index == 0 && ch.is_ascii_alphanumeric())
+            || (index > 0 && (ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-')))
+    })
+}
+
+fn normalize_branch_name(branch: &str) -> Option<String> {
+    let value = branch.trim();
+    if value.is_empty() || value == "HEAD" || value == "detached" {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn has_porcelain_status_changes(stdout: &str) -> bool {
+    stdout.lines().any(|line| {
+        let trimmed = line.trim();
+        !trimmed.is_empty() && !trimmed.starts_with("##")
+    })
+}
+
+fn is_submodule_removal_refusal(result: &Value) -> bool {
+    let text = format!(
+        "{}\n{}",
+        result
+            .get("stderr")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        result
+            .get("stdout")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    );
+    text.to_lowercase()
+        .contains("working trees containing submodules cannot be moved or removed")
+}
+
+fn operation_failure_message(result: &Value, fallback: &str) -> String {
+    result
+        .get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .or_else(|| result.get("stderr").and_then(Value::as_str).map(str::trim))
+        .filter(|value| !value.is_empty())
+        .or_else(|| result.get("stdout").and_then(Value::as_str).map(str::trim))
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn exit_code(result: &Value) -> i64 {
+    result.get("exitCode").and_then(Value::as_i64).unwrap_or(1)
 }
 
 async fn handle_repository_clone_http(
@@ -1914,6 +3000,416 @@ fn repository_clone_error_response(
     )
 }
 
+#[derive(Debug)]
+struct ProjectPathHttpError {
+    code: &'static str,
+    message: String,
+}
+
+impl ProjectPathHttpError {
+    fn bad_request(message: impl Into<String>) -> Self {
+        Self {
+            code: "badRequest",
+            message: message.into(),
+        }
+    }
+
+    fn not_found(message: impl Into<String>) -> Self {
+        Self {
+            code: "notFound",
+            message: message.into(),
+        }
+    }
+}
+
+/*
+CDXC:GxserverHttpApi 2026-06-22-04:19:
+The Rust HTTP dispatcher must implement the same generic filesystem API surface
+as TypeScript gxserver before domain-specific worktree deletion parity lands.
+Remote project picking may browse directory names through `/api/browseProjectDirectories`,
+and local open-path routing may probe a Git root through `/api/resolveGitRootForPath`;
+the broader filesystem/admin endpoints remain cataloged but unimplemented.
+*/
+fn handle_browse_project_directories_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_project_directory_browse_params(body) {
+        Ok(params) => params,
+        Err(error) => return project_path_error_response(endpoint_path, request_id, error),
+    };
+    match browse_project_directories(&params, &state.paths.home_dir) {
+        Ok(result) => routed_json(
+            Some(endpoint_path),
+            StatusCode::OK,
+            rpc_success(request_id, result),
+        ),
+        Err(error) => project_path_error_response(endpoint_path, request_id, error),
+    }
+}
+
+fn handle_resolve_git_root_for_path_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => {
+            return routed_json(
+                Some(endpoint_path),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                rpc_error("internalError", error.message, Some(request_id)),
+            );
+        }
+    };
+    match resolve_git_root_for_existing_directory(params.get("path"), &state.paths.home_dir) {
+        Ok(git_root) => {
+            let mut result = Map::new();
+            if let Some(git_root) = git_root {
+                result.insert("gitRoot".to_string(), Value::String(git_root));
+            }
+            routed_json(
+                Some(endpoint_path),
+                StatusCode::OK,
+                rpc_success(request_id, Value::Object(result)),
+            )
+        }
+        Err(error) => project_path_error_response(endpoint_path, request_id, error),
+    }
+}
+
+fn project_path_error_response(
+    endpoint_path: String,
+    request_id: String,
+    error: ProjectPathHttpError,
+) -> RoutedResponse {
+    let status = match error.code {
+        "forbidden" => StatusCode::FORBIDDEN,
+        "notFound" => StatusCode::NOT_FOUND,
+        _ => StatusCode::BAD_REQUEST,
+    };
+    routed_json(
+        Some(endpoint_path),
+        status,
+        rpc_error(error.code, error.message, Some(request_id)),
+    )
+}
+
+fn read_project_directory_browse_params(
+    body: &Value,
+) -> std::result::Result<Map<String, Value>, ProjectPathHttpError> {
+    let Some(object) = body.as_object() else {
+        return Err(ProjectPathHttpError::bad_request(
+            "RPC request body must be an object.",
+        ));
+    };
+    let Some(params) = object.get("params").and_then(Value::as_object) else {
+        return Err(ProjectPathHttpError::bad_request(
+            "RPC params must be an object.",
+        ));
+    };
+    Ok(params.clone())
+}
+
+fn browse_project_directories(
+    params: &Map<String, Value>,
+    home_dir: &Path,
+) -> std::result::Result<Value, ProjectPathHttpError> {
+    let partial_path = normalize_browse_path_input(params.get("partialPath"), "partialPath")?;
+    let limit = normalize_browse_limit(params.get("limit"))?;
+    let cwd = params.get("cwd").and_then(Value::as_str);
+    let resolved_input_path = resolve_browse_target(cwd, &partial_path, home_dir)?;
+    let ends_with_separator =
+        partial_path == "~" || partial_path.ends_with('/') || partial_path.ends_with('\\');
+    let parent_path = if ends_with_separator {
+        resolved_input_path.clone()
+    } else {
+        resolved_input_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| resolved_input_path.clone())
+    };
+    let prefix = if ends_with_separator {
+        String::new()
+    } else {
+        resolved_input_path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default()
+    };
+    let dirents = fs::read_dir(&parent_path).map_err(|_| {
+        ProjectPathHttpError::not_found(format!(
+            "Unable to browse directory: {}",
+            path_to_string(&parent_path)
+        ))
+    })?;
+    let show_hidden = ends_with_separator || prefix.starts_with('.');
+    let lower_prefix = prefix.to_lowercase();
+    let mut entries = Vec::new();
+    for dirent in dirents.flatten() {
+        let Ok(file_type) = dirent.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let name = dirent.file_name().to_string_lossy().to_string();
+        if !name.to_lowercase().starts_with(&lower_prefix) {
+            continue;
+        }
+        if !show_hidden && name.starts_with('.') {
+            continue;
+        }
+        entries.push(json!({
+            "fullPath": path_to_string(&parent_path.join(&name)),
+            "name": name,
+        }));
+    }
+    entries.sort_by(|left, right| {
+        left.get("name")
+            .and_then(Value::as_str)
+            .cmp(&right.get("name").and_then(Value::as_str))
+    });
+    entries.truncate(limit);
+    Ok(json!({
+        "entries": entries,
+        "parentPath": path_to_string(&parent_path),
+    }))
+}
+
+fn resolve_git_root_for_existing_directory(
+    input: Option<&Value>,
+    home_dir: &Path,
+) -> std::result::Result<Option<String>, ProjectPathHttpError> {
+    let cwd = normalize_existing_directory_path(input, "path", home_dir)?;
+    let output = match StdCommand::new("git")
+        .args(["-C", cwd.as_str(), "rev-parse", "--show-toplevel"])
+        .output()
+    {
+        Ok(output) => output,
+        Err(_) => return Ok(None),
+    };
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if root.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(match fs::canonicalize(&root) {
+        Ok(path) => path_to_string(&path),
+        Err(_) => {
+            let trimmed = root.trim_end_matches('/').to_string();
+            if trimmed.is_empty() {
+                root
+            } else {
+                trimmed
+            }
+        }
+    }))
+}
+
+fn resolve_browse_target(
+    cwd: Option<&str>,
+    partial_path: &str,
+    home_dir: &Path,
+) -> std::result::Result<PathBuf, ProjectPathHttpError> {
+    if cfg!(not(windows)) && is_windows_absolute_path(partial_path) {
+        return Err(ProjectPathHttpError::bad_request(
+            "Windows-style paths are only supported on Windows.",
+        ));
+    }
+    if !is_explicit_relative_path(partial_path) {
+        return Ok(resolve_path_syntax(PathBuf::from(
+            expand_home_path_for_browse(partial_path, home_dir),
+        )));
+    }
+    let Some(cwd) = cwd else {
+        return Err(ProjectPathHttpError::bad_request(
+            "Relative filesystem browse paths require cwd.",
+        ));
+    };
+    let cwd = normalize_absolute_path(Some(&Value::String(cwd.to_string())), "cwd", home_dir)?;
+    Ok(resolve_path_syntax(PathBuf::from(cwd).join(partial_path)))
+}
+
+fn normalize_browse_path_input(
+    input: Option<&Value>,
+    field: &str,
+) -> std::result::Result<String, ProjectPathHttpError> {
+    let Some(value) = input.and_then(Value::as_str) else {
+        return Err(ProjectPathHttpError::bad_request(format!(
+            "{field} must be a non-empty path."
+        )));
+    };
+    if value.is_empty() {
+        return Err(ProjectPathHttpError::bad_request(format!(
+            "{field} must be a non-empty path."
+        )));
+    }
+    if value.contains('\0') {
+        return Err(ProjectPathHttpError::bad_request(format!(
+            "{field} must not contain null bytes."
+        )));
+    }
+    if value.chars().count() > 1024 {
+        return Err(ProjectPathHttpError::bad_request(format!(
+            "{field} exceeds 1024 characters."
+        )));
+    }
+    Ok(value.to_string())
+}
+
+fn normalize_browse_limit(
+    input: Option<&Value>,
+) -> std::result::Result<usize, ProjectPathHttpError> {
+    let Some(value) = input else {
+        return Ok(200);
+    };
+    let Some(limit) = json_number_to_positive_integer(value) else {
+        return Err(ProjectPathHttpError::bad_request(
+            "limit must be a positive integer.",
+        ));
+    };
+    Ok(limit.min(500))
+}
+
+fn json_number_to_positive_integer(value: &Value) -> Option<usize> {
+    match value {
+        Value::Number(number) => {
+            if let Some(value) = number.as_u64() {
+                return usize::try_from(value).ok().filter(|value| *value >= 1);
+            }
+            if let Some(value) = number.as_i64() {
+                return usize::try_from(value).ok().filter(|value| *value >= 1);
+            }
+            let value = number.as_f64()?;
+            if value.is_finite() && value >= 1.0 && value.fract() == 0.0 {
+                Some(value.min(usize::MAX as f64) as usize)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn normalize_existing_directory_path(
+    input: Option<&Value>,
+    field: &str,
+    home_dir: &Path,
+) -> std::result::Result<String, ProjectPathHttpError> {
+    let normalized = normalize_absolute_path(input, field, home_dir)?;
+    let metadata = fs::metadata(&normalized).map_err(|_| {
+        ProjectPathHttpError::not_found(format!("{field} does not exist: {normalized}"))
+    })?;
+    if !metadata.is_dir() {
+        return Err(ProjectPathHttpError::bad_request(format!(
+            "{field} is not a directory: {normalized}"
+        )));
+    }
+    Ok(normalized)
+}
+
+fn normalize_absolute_path(
+    input: Option<&Value>,
+    field: &str,
+    home_dir: &Path,
+) -> std::result::Result<String, ProjectPathHttpError> {
+    let Some(value) = input.and_then(Value::as_str).map(str::trim) else {
+        return Err(ProjectPathHttpError::bad_request(format!(
+            "{field} must be a non-empty path."
+        )));
+    };
+    if value.is_empty() {
+        return Err(ProjectPathHttpError::bad_request(format!(
+            "{field} must be a non-empty path."
+        )));
+    }
+    let expanded = expand_user_path(value, home_dir);
+    if !Path::new(&expanded).is_absolute() {
+        return Err(ProjectPathHttpError::bad_request(format!(
+            "{field} must be an absolute path or start with ~/"
+        )));
+    }
+    Ok(path_to_string(&resolve_path_syntax(PathBuf::from(
+        expanded,
+    ))))
+}
+
+fn resolve_path_syntax(path: PathBuf) -> PathBuf {
+    let path = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            std::path::Component::RootDir => normalized.push(component.as_os_str()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(part) => normalized.push(part),
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        normalized
+    }
+}
+
+fn expand_home_path_for_browse(input: &str, home_dir: &Path) -> String {
+    if input == "~" {
+        return path_to_string(home_dir);
+    }
+    if input.starts_with("~/") || input.starts_with("~\\") {
+        return path_to_string(&home_dir.join(&input[2..]));
+    }
+    input.to_string()
+}
+
+fn expand_user_path(input: &str, home_dir: &Path) -> String {
+    if input == "~" {
+        return path_to_string(home_dir);
+    }
+    if let Some(rest) = input.strip_prefix("~/") {
+        return path_to_string(&home_dir.join(rest));
+    }
+    input.to_string()
+}
+
+fn is_explicit_relative_path(value: &str) -> bool {
+    value == "."
+        || value == ".."
+        || value.starts_with("./")
+        || value.starts_with("../")
+        || value.starts_with(".\\")
+        || value.starts_with("..\\")
+}
+
+fn is_windows_absolute_path(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    value.starts_with("\\\\")
+        || (bytes.len() >= 2
+            && bytes[1] == b':'
+            && bytes[0].is_ascii_alphabetic()
+            && (bytes.len() == 2 || bytes[2] == b'/' || bytes[2] == b'\\'))
+}
+
+fn path_to_string(path: &Path) -> String {
+    path.to_string_lossy().to_string()
+}
+
 /*
 CDXC:GxserverRustPort 2026-06-15-18:06:
 Phase 5 lifecycle and session-I/O endpoints run through the same authenticated RPC envelope as the TypeScript daemon while zmx process work stays behind explicit endpoint handlers. Presentation deltas are still scheduled from durable state after lifecycle mutations so clients never infer sidebar state from subprocess output.
@@ -1938,7 +3434,7 @@ async fn handle_zmx_lifecycle_http(
                     code: "internalError",
                     message: format!("SQLite gxserver state error: {error}"),
                 },
-            )
+            );
         }
     };
     let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
@@ -1949,7 +3445,17 @@ async fn handle_zmx_lifecycle_http(
             state.config.listeners.local.host, state.config.listeners.local.port
         ),
     };
-    match dispatch_zmx_lifecycle_endpoint(&repository, &endpoint_path, &params, &context) {
+    let agent_settings = match read_agent_settings(&db) {
+        Ok(settings) => settings,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    match dispatch_zmx_lifecycle_endpoint(
+        &repository,
+        &endpoint_path,
+        &params,
+        &context,
+        &agent_settings,
+    ) {
         Ok(output) => {
             if let Some((project_id, session_id)) = output.presentation_session {
                 if let Err(error) = schedule_presentation_session_delta(
@@ -2012,7 +3518,7 @@ async fn handle_zmx_session_interaction_http(
                             code: "internalError",
                             message: format!("SQLite gxserver state error: {error}"),
                         },
-                    )
+                    );
                 }
             };
             let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
@@ -2052,7 +3558,7 @@ async fn handle_zmx_session_interaction_http(
                     code: "internalError",
                     message: format!("SQLite gxserver state error: {error}"),
                 },
-            )
+            );
         }
     };
     let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
@@ -2108,7 +3614,7 @@ async fn handle_renderer_command_http(
                     ),
                     Some(request_id),
                 ),
-            )
+            );
         }
     };
     let payload = match params.get("payload") {
@@ -2123,7 +3629,7 @@ async fn handle_renderer_command_http(
                     "Renderer command payload must be an object.",
                     Some(request_id),
                 ),
-            )
+            );
         }
     };
     let payload = with_renderer_session_target(payload);
@@ -2134,7 +3640,7 @@ async fn handle_renderer_command_http(
                 Some(endpoint_path),
                 StatusCode::BAD_REQUEST,
                 rpc_error("badRequest", message, Some(request_id)),
-            )
+            );
         }
     };
     match state
@@ -2254,6 +3760,12 @@ fn schedule_presentation_session_delta(
         "serverId": state.metadata.server_id.clone(),
         "type": "presentationDelta",
     }));
+    match repository.get_session(project_id, session_id) {
+        Ok(Some(session)) => {
+            sync_zmx_title_observer_for_session(state, &session, "presentation-session-delta")
+        }
+        _ => stop_zmx_title_observer(state, project_id, session_id, "session-removed"),
+    }
     Ok(())
 }
 
@@ -2298,6 +3810,243 @@ fn schedule_stale_activity_presentation_refresh(state: &AppState, session: &Valu
             schedule_presentation_session_delta(&state, &db, &repository, &project_id, &session_id);
     });
     timers.insert(key, handle);
+}
+
+fn sync_zmx_title_observers_for_all_sessions(state: &AppState, reason: &str) {
+    let Ok(db) = open_gxserver_database(&state.paths) else {
+        return;
+    };
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let Ok(sessions) = repository.list_sessions(None) else {
+        return;
+    };
+    let mut desired_keys = HashSet::new();
+    for session in sessions {
+        if let (Some(project_id), Some(session_id)) = (
+            read_session_text(&session, "projectId"),
+            read_session_text(&session, "sessionId"),
+        ) {
+            if is_zmx_title_observable_session(&session) {
+                desired_keys.insert(session_observer_key(&project_id, &session_id));
+            }
+        }
+        sync_zmx_title_observer_for_session(state, &session, reason);
+    }
+    let existing_keys = state
+        .zmx_title_observers
+        .lock()
+        .map(|observers| observers.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    for key in existing_keys {
+        if !desired_keys.contains(&key) {
+            stop_zmx_title_observer_by_key(state, &key, "session-no-longer-observable");
+        }
+    }
+}
+
+fn sync_zmx_title_observer_for_session(state: &AppState, session: &Value, reason: &str) {
+    let Some(project_id) = read_session_text(session, "projectId") else {
+        return;
+    };
+    let Some(session_id) = read_session_text(session, "sessionId") else {
+        return;
+    };
+    if !is_zmx_title_observable_session(session) {
+        stop_zmx_title_observer(state, &project_id, &session_id, reason);
+        return;
+    }
+    let Some(zmx_name) = read_session_text(session, "zmxName") else {
+        return;
+    };
+    let key = session_observer_key(&project_id, &session_id);
+    let Ok(mut observers) = state.zmx_title_observers.lock() else {
+        return;
+    };
+    if let Some(existing) = observers.get(&key) {
+        if existing.zmx_name == zmx_name && !existing.handle.is_finished() {
+            return;
+        }
+    }
+    if let Some(existing) = observers.remove(&key) {
+        existing.handle.abort();
+    }
+    /*
+    CDXC:ZmxTitleObservations 2026-06-21-22:23:
+    Rust gxserver must own the same zmx title-observation loop as TypeScript gxserver. Native deliberately avoids forwarding every zmx title frame, so without `zmx watch-title` the Rust daemon can keep Codex sessions stuck in working after hooks miss Stop or title-derived spinner state needs to expire.
+    */
+    let state = state.clone();
+    let handle = tokio::spawn(run_zmx_title_observer(
+        state,
+        project_id,
+        session_id,
+        zmx_name.clone(),
+    ));
+    observers.insert(key, ZmxTitleObserverTask { handle, zmx_name });
+}
+
+fn stop_zmx_title_observer(state: &AppState, project_id: &str, session_id: &str, reason: &str) {
+    stop_zmx_title_observer_by_key(state, &session_observer_key(project_id, session_id), reason);
+}
+
+fn stop_zmx_title_observer_by_key(state: &AppState, key: &str, _reason: &str) {
+    if let Ok(mut observers) = state.zmx_title_observers.lock() {
+        if let Some(existing) = observers.remove(key) {
+            existing.handle.abort();
+        }
+    }
+}
+
+fn stop_all_zmx_title_observers(state: &AppState) {
+    if let Ok(mut observers) = state.zmx_title_observers.lock() {
+        for (_, existing) in observers.drain() {
+            existing.handle.abort();
+        }
+    }
+}
+
+async fn run_zmx_title_observer(
+    state: AppState,
+    project_id: String,
+    session_id: String,
+    zmx_name: String,
+) {
+    let mut failure_count = 0usize;
+    loop {
+        let zmx = match require_bundled_zmx() {
+            Ok(zmx) => zmx,
+            Err(_) => {
+                failure_count += 1;
+                if !delay_zmx_title_observer_retry(failure_count).await {
+                    return;
+                }
+                continue;
+            }
+        };
+        let mut child = match Command::new(&zmx.executable_path)
+            .args(["watch-title", zmx_name.as_str()])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(_) => {
+                failure_count += 1;
+                if !delay_zmx_title_observer_retry(failure_count).await {
+                    return;
+                }
+                continue;
+            }
+        };
+        failure_count = 0;
+        let Some(stdout) = child.stdout.take() else {
+            return;
+        };
+        let mut lines = BufReader::new(stdout).lines();
+        loop {
+            match lines.next_line().await {
+                Ok(Some(line)) => {
+                    if let Some(title) = parse_zmx_title_line(&line) {
+                        ingest_zmx_title_observation(&state, &project_id, &session_id, &title);
+                    }
+                }
+                Ok(None) => break,
+                Err(_) => break,
+            }
+        }
+        let _ = child.wait().await;
+        failure_count += 1;
+        if !delay_zmx_title_observer_retry(failure_count).await {
+            return;
+        }
+    }
+}
+
+async fn delay_zmx_title_observer_retry(failure_count: usize) -> bool {
+    const DELAYS_MS: [u64; 5] = [250, 500, 1_000, 2_000, 5_000];
+    if failure_count > DELAYS_MS.len() {
+        return false;
+    }
+    tokio::time::sleep(Duration::from_millis(
+        DELAYS_MS[failure_count.saturating_sub(1)],
+    ))
+    .await;
+    true
+}
+
+fn ingest_zmx_title_observation(state: &AppState, project_id: &str, session_id: &str, title: &str) {
+    let Ok(db) = open_gxserver_database(&state.paths) else {
+        return;
+    };
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let mut params = Map::new();
+    params.insert("projectId".to_string(), json!(project_id));
+    params.insert("rawTitle".to_string(), json!(title));
+    params.insert("sessionId".to_string(), json!(session_id));
+    params.insert("sessionPersistenceProvider".to_string(), json!("zmx"));
+    let Ok(output) = dispatch_agent_endpoint(
+        &repository,
+        &db,
+        &state.paths.home_dir,
+        "/api/ingestTerminalTitleEvent",
+        &params,
+        None,
+    ) else {
+        return;
+    };
+    if let Some((project_id, session_id)) = output.presentation_session {
+        let _ =
+            schedule_presentation_session_delta(state, &db, &repository, &project_id, &session_id);
+        if let Ok(Some(session)) = repository.get_session(&project_id, &session_id) {
+            schedule_stale_activity_presentation_refresh(
+                state,
+                &session,
+                "terminal-title-stale-activity",
+            );
+        }
+    }
+}
+
+fn is_zmx_title_observable_session(session: &Value) -> bool {
+    let kind = read_session_text(session, "kind");
+    let lifecycle = read_session_text(session, "lifecycleState");
+    let provider_state = session
+        .get("providerState")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let provider_lifecycle = provider_state
+        .get("lifecycleState")
+        .and_then(Value::as_str)
+        .map(str::trim);
+    let provider_text = provider_state
+        .get("provider")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| read_runtime_text(session, "sessionPersistenceProvider"));
+    matches!(kind.as_deref(), Some("terminal" | "agent"))
+        && lifecycle.as_deref() == Some("running")
+        && provider_lifecycle == Some("exists")
+        && matches!(provider_text.as_deref(), None | Some("zmx"))
+        && read_session_text(session, "zmxName").is_some()
+}
+
+fn parse_zmx_title_line(line: &str) -> Option<String> {
+    serde_json::from_str::<Value>(line).ok().and_then(|value| {
+        value
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn session_observer_key(project_id: &str, session_id: &str) -> String {
+    format!("{project_id}/{session_id}")
 }
 
 fn sync_live_zmx_process_identities(
@@ -2383,6 +4132,287 @@ fn sync_live_zmx_process_identities(
     Ok(())
 }
 
+/*
+CDXC:MobileSessionStatus 2026-06-22-00:47:
+Rust gxserver must read the same hook sidecar files as TypeScript before list, snapshot, and subscription projections. Hooks can write provider session id and working/idle state even when an HTTP hook POST is missed, so presentation state must ingest those sidecars at the daemon boundary instead of leaving Codex rows idle or unresumable.
+*/
+fn sync_session_state_sidecars(
+    state: &AppState,
+    db: &rusqlite::Connection,
+    repository: &DomainRepository<'_>,
+    project_id: Option<&str>,
+    _reason: &str,
+) -> std::result::Result<(), DomainStateError> {
+    for session in repository.list_sessions(project_id)? {
+        if !should_sync_session_state_sidecar(&session) {
+            continue;
+        }
+        let Some(session_project_id) = read_session_text(&session, "projectId") else {
+            continue;
+        };
+        let Some(session_id) = read_session_text(&session, "sessionId") else {
+            continue;
+        };
+        let Some(sidecar) =
+            read_session_state_sidecar(&state.paths, &session_project_id, &session_id)
+        else {
+            continue;
+        };
+        if !has_session_state_sidecar_payload(&sidecar) {
+            continue;
+        }
+        let changed = apply_session_state_sidecar(
+            state,
+            db,
+            repository,
+            &session_project_id,
+            &session_id,
+            &sidecar,
+        )?;
+        if changed {
+            schedule_presentation_session_delta(
+                state,
+                db,
+                repository,
+                &session_project_id,
+                &session_id,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn should_sync_session_state_sidecar(session: &Value) -> bool {
+    session.get("lifecycleState").and_then(Value::as_str) == Some("running")
+        && session.get("surface").and_then(Value::as_str) != Some("commands")
+}
+
+#[derive(Default)]
+struct SessionStateSidecar {
+    agent_name: Option<String>,
+    agent_session_id: Option<String>,
+    agent_session_path: Option<String>,
+    first_user_message: Option<String>,
+    last_activity_at: Option<String>,
+    pending_first_prompt_auto_rename_prompt: Option<String>,
+    status: Option<String>,
+    status_updated_at: Option<String>,
+    title: Option<String>,
+}
+
+fn read_session_state_sidecar(
+    paths: &GxserverPaths,
+    project_id: &str,
+    session_id: &str,
+) -> Option<SessionStateSidecar> {
+    let path = build_session_state_sidecar_path(paths, project_id, session_id);
+    let metadata = fs::metadata(&path).ok()?;
+    if !metadata.is_file() || metadata.len() > GXSERVER_SESSION_STATE_SIDECAR_MAX_BYTES {
+        return None;
+    }
+    let raw = fs::read_to_string(path).ok()?;
+    parse_session_state_sidecar(&raw)
+}
+
+fn build_session_state_sidecar_path(
+    paths: &GxserverPaths,
+    project_id: &str,
+    session_id: &str,
+) -> PathBuf {
+    paths
+        .root_dir
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("session-state")
+        .join(sanitize_session_state_sidecar_path_part(project_id))
+        .join(format!(
+            "{}.env",
+            sanitize_session_state_sidecar_path_part(session_id)
+        ))
+}
+
+fn sanitize_session_state_sidecar_path_part(value: &str) -> String {
+    let mut output = String::new();
+    let mut last_was_dash = false;
+    for ch in value.chars() {
+        let keep = ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-');
+        if keep {
+            output.push(ch);
+            last_was_dash = false;
+        } else if !last_was_dash {
+            output.push('-');
+            last_was_dash = true;
+        }
+    }
+    let trimmed = output.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "session".to_string()
+    } else {
+        trimmed
+    }
+}
+
+fn parse_session_state_sidecar(raw: &str) -> Option<SessionStateSidecar> {
+    let mut sidecar = SessionStateSidecar::default();
+    for line in raw.lines() {
+        let Some((key, raw_value)) = line.split_once('=') else {
+            continue;
+        };
+        let value = if matches!(key, "firstUserMessageBase64" | "agentSessionPath") {
+            raw_value.trim().to_string()
+        } else {
+            raw_value.split_whitespace().collect::<Vec<_>>().join(" ")
+        };
+        if value.is_empty() {
+            continue;
+        }
+        match key {
+            "agent" => sidecar.agent_name = Some(value),
+            "agentSessionId" => sidecar.agent_session_id = Some(value),
+            "agentSessionPath" => sidecar.agent_session_path = Some(value),
+            "firstUserMessageBase64" => {
+                sidecar.first_user_message = decode_session_state_sidecar_base64(&value);
+            }
+            "lastActivityAt" => sidecar.last_activity_at = normalize_sidecar_iso_timestamp(&value),
+            "pendingFirstPromptAutoRenamePrompt" => {
+                sidecar.pending_first_prompt_auto_rename_prompt = Some(value);
+            }
+            "status" if matches!(value.as_str(), "attention" | "idle" | "working") => {
+                sidecar.status = Some(value);
+            }
+            "statusUpdatedAt" => {
+                sidecar.status_updated_at = normalize_sidecar_iso_timestamp(&value);
+            }
+            "title" => sidecar.title = get_visible_terminal_title(&value),
+            _ => {}
+        }
+    }
+    if sidecar.first_user_message.is_none() {
+        sidecar.first_user_message = sidecar.pending_first_prompt_auto_rename_prompt.clone();
+    }
+    Some(sidecar)
+}
+
+fn has_session_state_sidecar_payload(sidecar: &SessionStateSidecar) -> bool {
+    sidecar.agent_name.is_some()
+        || sidecar.agent_session_id.is_some()
+        || sidecar.agent_session_path.is_some()
+        || sidecar.first_user_message.is_some()
+        || sidecar.status.is_some()
+        || sidecar.title.is_some()
+}
+
+fn decode_session_state_sidecar_base64(value: &str) -> Option<String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let decoded = STANDARD.decode(value).ok()?;
+    String::from_utf8(decoded)
+        .ok()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+}
+
+fn normalize_sidecar_iso_timestamp(value: &str) -> Option<String> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|timestamp| {
+            timestamp
+                .with_timezone(&chrono::Utc)
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        })
+}
+
+fn apply_session_state_sidecar(
+    state: &AppState,
+    db: &rusqlite::Connection,
+    repository: &DomainRepository<'_>,
+    project_id: &str,
+    session_id: &str,
+    sidecar: &SessionStateSidecar,
+) -> std::result::Result<bool, DomainStateError> {
+    let mut params = Map::new();
+    params.insert("projectId".to_string(), json!(project_id));
+    params.insert("sessionId".to_string(), json!(session_id));
+    insert_optional_json_string(&mut params, "agentName", sidecar.agent_name.as_deref());
+    insert_optional_json_string(
+        &mut params,
+        "agentSessionId",
+        sidecar.agent_session_id.as_deref(),
+    );
+    insert_optional_json_string(
+        &mut params,
+        "agentSessionPath",
+        sidecar.agent_session_path.as_deref(),
+    );
+    insert_optional_json_string(
+        &mut params,
+        "firstUserMessage",
+        sidecar.first_user_message.as_deref(),
+    );
+    insert_optional_json_string(&mut params, "status", sidecar.status.as_deref());
+    insert_optional_json_string(
+        &mut params,
+        "statusUpdatedAt",
+        sidecar
+            .status_updated_at
+            .as_deref()
+            .or(sidecar.last_activity_at.as_deref()),
+    );
+    insert_optional_json_string(&mut params, "title", sidecar.title.as_deref());
+    params.insert(
+        "eventName".to_string(),
+        Value::String("legacy-session-state".to_string()),
+    );
+    let output = dispatch_agent_endpoint(
+        repository,
+        db,
+        &state.paths.home_dir,
+        "/api/ingestAgentHookEvent",
+        &params,
+        None,
+    )
+    .map_err(|error| match error {
+        AgentEndpointError::Domain(error) => error,
+        AgentEndpointError::DependencyUnavailable(message) => DomainStateError {
+            code: "dependencyUnavailable",
+            message,
+        },
+    })?;
+    let changed = output
+        .result
+        .get("changed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if changed {
+        if let Some(claimed) = output
+            .result
+            .get("reason")
+            .and_then(Value::as_str)
+            .filter(|reason| *reason == "first-prompt-auto-title-claimed")
+        {
+            let _ = claimed;
+            schedule_first_prompt_auto_title_job(
+                state.clone(),
+                project_id.to_string(),
+                session_id.to_string(),
+            );
+        }
+        if let Ok(Some(session)) = repository.get_session(project_id, session_id) {
+            schedule_stale_activity_presentation_refresh(
+                state,
+                &session,
+                "session-state-sidecar-stale-activity",
+            );
+        }
+    }
+    Ok(changed)
+}
+
+fn insert_optional_json_string(map: &mut Map<String, Value>, key: &str, value: Option<&str>) {
+    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+        map.insert(key.to_string(), Value::String(value.to_string()));
+    }
+}
+
 fn should_sync_live_zmx_process_identity(session: &Value) -> bool {
     session.get("lifecycleState").and_then(Value::as_str) == Some("running")
         && session.get("surface").and_then(Value::as_str) != Some("commands")
@@ -2407,6 +4437,157 @@ fn read_session_text(session: &Value, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn result_activity(result: &Value) -> Option<&str> {
+    result
+        .get("activity")
+        .and_then(Value::as_object)
+        .and_then(|activity| activity.get("activity"))
+        .and_then(Value::as_str)
+}
+
+fn log_agent_hook_passive_identity_conflict(
+    state: &AppState,
+    endpoint_path: &str,
+    params: &Map<String, Value>,
+    result: &Value,
+) {
+    if endpoint_path != "/api/ingestAgentHookEvent"
+        || result.get("reason").and_then(Value::as_str) != Some("passive-session-identity-conflict")
+    {
+        return;
+    }
+    let Some(conflict) = result.get("identityConflict").and_then(Value::as_object) else {
+        return;
+    };
+    if conflict.get("source").and_then(Value::as_str) != Some("passive") {
+        return;
+    }
+    let agent_id = conflict.get("agentId").and_then(Value::as_str);
+    let current_agent_session_id = conflict
+        .get("currentAgentSessionId")
+        .and_then(Value::as_str);
+    let incoming_agent_session_id = conflict
+        .get("incomingAgentSessionId")
+        .and_then(Value::as_str);
+    let reason = conflict.get("reason").and_then(Value::as_str);
+    let source = conflict.get("source").and_then(Value::as_str);
+    /*
+    CDXC:AgentHooks 2026-06-22-08:31:
+    Passive hook identity conflicts need the same support-bundle evidence as TypeScript without exposing thread ids, paths, titles, prompts, or hook payloads. Hash private agent-session ids at the writer boundary and log only enum fields, stable gxserver ids, and payload-shape booleans.
+    */
+    let _ = state.logger.log(GxserverLogInput {
+        level: LogLevel::Debug,
+        event: "sessionIdentity.updateBlocked".to_string(),
+        server_id: Some(state.metadata.server_id.clone()),
+        request_id: None,
+        client: None,
+        duration_ms: None,
+        error: None,
+        details: Some(json!({
+            "agentId": agent_id,
+            "currentAgentSessionIdHash": hash_log_identity(current_agent_session_id),
+            "currentAgentSessionIdPresent": current_agent_session_id.is_some(),
+            "incomingAgentSessionIdHash": hash_log_identity(incoming_agent_session_id),
+            "incomingAgentSessionIdPresent": incoming_agent_session_id.is_some(),
+            "ownerProjectId": conflict.get("ownerProjectId").cloned(),
+            "ownerSessionId": conflict.get("ownerSessionId").cloned(),
+            "projectId": params.get("projectId").and_then(Value::as_str),
+            "reason": reason,
+            "sessionId": params.get("sessionId").and_then(Value::as_str),
+            "source": source,
+        })),
+    });
+    let hook_activity = normalize_agent_hook_activity(
+        params.get("status"),
+        params
+            .get("eventName")
+            .or_else(|| params.get("rawEventName")),
+        params.get("agentName"),
+    );
+    let _ = state.logger.log(GxserverLogInput {
+        level: LogLevel::Warn,
+        event: "sessionIdentity.passiveEventRejected".to_string(),
+        server_id: Some(state.metadata.server_id.clone()),
+        request_id: None,
+        client: None,
+        duration_ms: None,
+        error: None,
+        details: Some(json!({
+            "activity": hook_activity,
+            "agentId": agent_id,
+            "currentAgentSessionIdHash": hash_log_identity(current_agent_session_id),
+            "currentAgentSessionIdPresent": current_agent_session_id.is_some(),
+            "hasAgentSessionId": params.get("agentSessionId").is_some(),
+            "hasAgentSessionPath": params.get("agentSessionPath").is_some(),
+            "hasExplicitStatus": params.get("status").is_some(),
+            "hasFirstUserMessage": params.get("firstUserMessage").is_some(),
+            "hasHookEventName": params.get("eventName").is_some() || params.get("rawEventName").is_some(),
+            "hasTitle": params.get("title").is_some(),
+            "identitySource": source,
+            "incomingAgentSessionIdHash": hash_log_identity(incoming_agent_session_id),
+            "incomingAgentSessionIdPresent": incoming_agent_session_id.is_some(),
+            "ownerProjectId": conflict.get("ownerProjectId").cloned(),
+            "ownerSessionId": conflict.get("ownerSessionId").cloned(),
+            "projectId": params.get("projectId").and_then(Value::as_str),
+            "reason": reason,
+            "sessionId": params.get("sessionId").and_then(Value::as_str),
+            "source": "agent-hook-event",
+        })),
+    });
+}
+
+fn strip_agent_hook_internal_result_fields(endpoint_path: &str, result: &mut Value) {
+    if endpoint_path != "/api/ingestAgentHookEvent" {
+        return;
+    }
+    if let Some(object) = result.as_object_mut() {
+        object.remove("identityConflict");
+    }
+}
+
+fn hash_log_identity(value: Option<&str>) -> Option<String> {
+    let value = value?;
+    let digest = Sha256::digest(value.as_bytes());
+    Some(
+        digest
+            .iter()
+            .take(8)
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+    )
+}
+
+fn should_schedule_agent_title_metadata_check(endpoint_path: &str, result: &Value) -> bool {
+    match endpoint_path {
+        "/api/requestSessionRename" => {
+            result.get("pendingAgentMetadata").and_then(Value::as_bool) == Some(true)
+        }
+        "/api/ingestSessionStateEvent" => {
+            result.get("reason").and_then(Value::as_str)
+                != Some("passive-session-identity-conflict")
+                && result.get("reason").and_then(Value::as_str)
+                    != Some("session-state-agent-mismatch")
+        }
+        "/api/ingestTerminalTitleEvent" => {
+            result.get("changed").and_then(Value::as_bool) == Some(true)
+        }
+        "/api/ingestAgentHookEvent" => !matches!(
+            result.get("reason").and_then(Value::as_str),
+            Some("agent-hook-agent-mismatch" | "passive-session-identity-conflict")
+        ),
+        "/api/updateAgentActivity" => true,
+        _ => false,
+    }
+}
+
+fn stale_activity_refresh_reason(endpoint_path: &str) -> &'static str {
+    match endpoint_path {
+        "/api/ingestAgentHookEvent" => "agent-hook-stale-activity",
+        "/api/ingestTerminalTitleEvent" => "terminal-title-stale-activity",
+        _ => "agent-activity-stale-activity",
+    }
 }
 
 fn now_iso() -> String {
@@ -2437,14 +4618,35 @@ fn value_text(value: &Value, key: &str) -> std::result::Result<String, DomainSta
 
 async fn handle_events(
     State(state): State<Arc<AppState>>,
-    ws: WebSocketUpgrade,
+    ws: std::result::Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
     headers: HeaderMap,
+    method: Method,
     uri: Uri,
 ) -> Response<Body> {
     let request_id = request_id(&headers);
+    let Ok(ws) = ws else {
+        let message = if method == Method::OPTIONS {
+            format!("{} is not a gxserver HTTP endpoint.", uri.path())
+        } else {
+            format!(
+                "No gxserver endpoint for {} {}.",
+                method.as_str(),
+                uri.path()
+            )
+        };
+        let mut response = json_response(
+            StatusCode::NOT_FOUND,
+            rpc_error("notFound", message, Some(request_id)),
+        );
+        apply_cors_headers(&headers, &mut response, &state.config);
+        return response;
+    };
     /*
     CDXC:GxserverPresentationEvents 2026-06-14-20:37:
     Browser WebSocket clients cannot set Authorization headers, so Rust keeps the TypeScript authToken query option and protocolVersion query/header gate for /api/events.
+
+    CDXC:GxserverProtocol 2026-06-22-04:10:
+    Plain HTTP requests to the WebSocket-only event path must keep the TypeScript JSON `notFound` envelope. Do not expose Axum WebSocket extractor rejection bodies because clients rely on gxserver's product/protocol/requestId error shape.
     */
     let query_token = query_value(&uri, "authToken");
     let authorized = is_authorized_headers(&headers, &state.auth_token)
@@ -2551,7 +4753,9 @@ async fn handle_event_client_message(
             true
         }
         Some("subscribePresentation") => {
-            if parsed.get("rendererCommands").and_then(Value::as_bool) == Some(true) {
+            if parsed.get("rendererCommands").and_then(Value::as_bool) == Some(true)
+                && renderer_client_id.is_none()
+            {
                 let client_id = format!("renderer-client-{}", Uuid::new_v4());
                 *renderer_client_id = Some(
                     state
@@ -2589,6 +4793,7 @@ fn send_presentation_snapshot_for_subscription(
         return;
     };
     let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let _ = sync_session_state_sidecars(state, &db, &repository, None, "presentation-subscribe");
     let _ =
         sync_live_zmx_process_identities(state, &db, &repository, None, "presentation-subscribe");
     let Ok(snapshot) = read_presentation_snapshot(&db, &state.metadata.server_id) else {
@@ -2637,6 +4842,7 @@ fn create_authenticated_health(state: &AppState) -> ServerHealthResponse {
         listeners: state.config.listeners.clone(),
         migration: state.migration.clone(),
         pid: state.metadata.pid,
+        portless: read_portless_status_payload_for_paths(&state.paths),
         port: state.metadata.port,
         server_id: state.metadata.server_id.clone(),
         started_at: state.metadata.started_at.clone(),
@@ -2692,14 +4898,20 @@ fn read_protocol_version(headers: &HeaderMap, uri: &Uri, body: Option<&Value>) -
     if let Some(value) = body.and_then(|body| body.get("protocolVersion")) {
         return Some(value.clone());
     }
-    query_value(uri, "protocolVersion").map(|value| parse_protocol_version(&value))
+    query_value(uri, "protocolVersion")
+        .filter(|value| !value.is_empty())
+        .map(|value| parse_protocol_version(&value))
 }
 
 fn parse_protocol_version(value: &str) -> Value {
-    value
-        .parse::<u64>()
-        .map(Value::from)
-        .unwrap_or_else(|_| Value::String(value.to_string()))
+    if value.chars().all(|ch| ch.is_ascii_digit()) {
+        value
+            .parse::<u64>()
+            .map(Value::from)
+            .unwrap_or_else(|_| Value::String(value.to_string()))
+    } else {
+        Value::String(value.to_string())
+    }
 }
 
 fn is_expected_protocol_version(value: Option<&Value>) -> bool {
@@ -2718,8 +4930,7 @@ fn request_id(headers: &HeaderMap) -> String {
     headers
         .get("x-request-id")
         .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| Uuid::new_v4().to_string())
 }
@@ -2870,6 +5081,117 @@ mod tests {
     }
 
     #[test]
+    fn typed_operation_scope_rejection_details_match_private_typescript_shape() {
+        let mut params = Map::new();
+        params.insert("action".to_string(), json!("board"));
+        params.insert("projectId".to_string(), json!("P3a91"));
+        params.insert(
+            "projectPath".to_string(),
+            json!("/Users/person/dev/private-project"),
+        );
+        let details = typed_operation_scope_rejection_details(
+            "/api/runBeadsAction",
+            &params,
+            &TypedOperationError {
+                code: "notFound",
+                details: None,
+                message: "projectPath does not exist".to_string(),
+                scope_rejection: true,
+            },
+        );
+
+        assert_eq!(details.get("action"), Some(&json!("board")));
+        assert_eq!(details.get("endpoint"), Some(&json!("runBeadsAction")));
+        assert_eq!(details.get("errorCode"), Some(&json!("notFound")));
+        assert_eq!(
+            details.get("errorType"),
+            Some(&json!("GxserverProjectPathError"))
+        );
+        assert_eq!(details.get("hasProjectId"), Some(&json!(true)));
+        assert_eq!(details.get("hasProjectPath"), Some(&json!(true)));
+        assert!(!details.to_string().contains("private-project"));
+    }
+
+    #[test]
+    fn foreground_classifies_selected_port_ownership_like_typescript() {
+        let current = test_health("gxserver:0.1.0:current");
+        let previous = test_health("gxserver:0.1.0:previous");
+
+        assert_eq!(
+            classify_existing_gxserver(Some(&current), "gxserver:0.1.0:current"),
+            ExistingGxserverState::Reusable
+        );
+        assert_eq!(
+            classify_existing_gxserver(Some(&previous), "gxserver:0.1.0:current"),
+            ExistingGxserverState::Running
+        );
+        assert_eq!(
+            classify_existing_gxserver(None, "gxserver:0.1.0:current"),
+            ExistingGxserverState::Stopped
+        );
+    }
+
+    #[test]
+    fn project_status_agent_title_polling_predicate_matches_typescript() {
+        let pending = json!({
+            "kind": "agent",
+            "projectId": "P1abc",
+            "runtimeSettings": {
+                "pendingAgentTitleRequestStatus": "pending"
+            },
+            "sessionId": "G1abc",
+            "title": "Trusted user title"
+        });
+        assert!(should_check_agent_metadata_title_for_project_status(
+            &pending
+        ));
+
+        let trusted = json!({
+            "kind": "agent",
+            "projectId": "P1abc",
+            "runtimeSettings": {},
+            "sessionId": "G1abc",
+            "title": "Investigate renderer state"
+        });
+        assert!(!should_check_agent_metadata_title_for_project_status(
+            &trusted
+        ));
+
+        let placeholder = json!({
+            "kind": "agent",
+            "projectId": "P1abc",
+            "runtimeSettings": { "titleSource": "placeholder" },
+            "sessionId": "G1abc",
+            "title": "Codex Session"
+        });
+        assert!(should_check_agent_metadata_title_for_project_status(
+            &placeholder
+        ));
+
+        let reconciled = json!({
+            "kind": "agent",
+            "projectId": "P1abc",
+            "runtimeSettings": { "titleMetadataSource": "agent-metadata" },
+            "sessionId": "G1abc",
+            "title": "Codex Session"
+        });
+        assert!(!should_check_agent_metadata_title_for_project_status(
+            &reconciled
+        ));
+
+        let terminal = json!({
+            "kind": "terminal",
+            "projectId": "P1abc",
+            "runtimeSettings": {},
+            "sessionId": "G1abc",
+            "title": "Codex Session"
+        });
+        assert!(!should_check_agent_metadata_title_for_project_status(
+            &terminal
+        ));
+    }
+
+    #[test]
     fn renderer_command_payload_adds_structured_session_target() {
         /*
         CDXC:GxserverRendererCommands 2026-06-21-19:22:
@@ -2902,8 +5224,11 @@ mod tests {
             "runtimeSettings": {},
             "title": "Codex Session",
         });
-        let decision =
-            decide_first_prompt_auto_title(&codex, Some("Please fix flaky tests."), false);
+        let decision = decide_first_prompt_auto_title(
+            &codex,
+            Some("Please can you help me fix flaky tests."),
+            false,
+        );
         assert!(decision.should_run);
         assert_eq!(
             decision.normalized_prompt.as_deref(),
@@ -2923,6 +5248,14 @@ mod tests {
         let meta = decide_first_prompt_auto_title(&codex, Some("# AGENTS.md instructions"), false);
         assert!(!meta.should_run);
         assert_eq!(meta.reason, "metaPrompt");
+
+        let slash = decide_first_prompt_auto_title(
+            &codex,
+            Some("notes before command\n  /status please"),
+            false,
+        );
+        assert!(!slash.should_run);
+        assert_eq!(slash.reason, "slashCommand");
     }
 
     #[test]
@@ -2932,7 +5265,364 @@ mod tests {
         )
         .expect("title");
         assert_eq!(title, "Investigate Sidebar Resize Regression");
-        assert!(title.len() <= GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH);
+        assert!(js_string_length(&title) <= GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH);
+    }
+
+    #[test]
+    fn first_prompt_title_caps_use_javascript_utf16_length() {
+        let rocket = "\u{1F680}";
+        let exact = js_string_slice_prefix(
+            &rocket.repeat(126),
+            GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH,
+        );
+        assert_eq!(exact, rocket.repeat(125));
+        assert_eq!(
+            js_string_length(&exact),
+            GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH
+        );
+
+        let split = js_string_slice_prefix(
+            &format!(
+                "{}{}",
+                "a".repeat(GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH - 1),
+                rocket
+            ),
+            GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH,
+        );
+        assert_eq!(
+            split,
+            format!(
+                "{}{}",
+                "a".repeat(GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH - 1),
+                char::REPLACEMENT_CHARACTER
+            )
+        );
+        assert_eq!(
+            js_string_length(&split),
+            GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH
+        );
+    }
+
+    #[test]
+    fn generated_title_clamp_counts_non_bmp_as_javascript_utf16() {
+        let rocket = "\u{1F680}";
+        let title = parse_generated_session_title_text(&rocket.repeat(20)).expect("title");
+        assert_eq!(
+            title,
+            format!("{}{}", rocket.repeat(19), char::REPLACEMENT_CHARACTER)
+        );
+        assert_eq!(
+            js_string_length(&title),
+            GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH
+        );
+    }
+
+    #[tokio::test]
+    async fn read_project_status_route_returns_project_sessions_and_missing_errors() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
+        let token = state.auth_token.clone();
+
+        let created_project = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/createProject",
+                &token,
+                json!({
+                    "params": {
+                        "name": "Status Project",
+                        "runtimeSettings": { "defaultPromptAgentId": "codex" }
+                    }
+                }),
+            ),
+            "request-create-project".to_string(),
+        )
+        .await;
+        assert_eq!(created_project.response.status(), StatusCode::OK);
+        let body = response_json(created_project.response).await;
+        let project_id = body["result"]["project"]["projectId"]
+            .as_str()
+            .expect("project id")
+            .to_string();
+
+        let created_session = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/createSession",
+                &token,
+                json!({
+                    "params": {
+                        "projectId": project_id.clone(),
+                        "title": "Status Session"
+                    }
+                }),
+            ),
+            "request-create-session".to_string(),
+        )
+        .await;
+        assert_eq!(created_session.response.status(), StatusCode::OK);
+        let body = response_json(created_session.response).await;
+        let session_id = body["result"]["session"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+
+        let status = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/readProjectStatus",
+                &token,
+                json!({ "params": { "projectId": project_id } }),
+            ),
+            "request-read-project-status".to_string(),
+        )
+        .await;
+        assert_eq!(status.response.status(), StatusCode::OK);
+        let body = response_json(status.response).await;
+        assert_eq!(body["result"]["project"]["projectId"], json!(project_id));
+        assert_eq!(
+            body["result"]["project"]["runtimeSettings"]["defaultPromptAgentId"],
+            json!("codex")
+        );
+        assert_eq!(body["result"]["sessions"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            body["result"]["sessions"][0]["sessionId"],
+            json!(session_id)
+        );
+
+        let missing = route_http(
+            state,
+            rpc_request(
+                "/api/readProjectStatus",
+                &token,
+                json!({ "params": { "projectId": "P9zzz" } }),
+            ),
+            "request-read-missing-project-status".to_string(),
+        )
+        .await;
+        assert_eq!(missing.response.status(), StatusCode::NOT_FOUND);
+        let body = response_json(missing.response).await;
+        assert_eq!(body["error"], json!("notFound"));
+        assert_eq!(body["message"], json!("Project P9zzz does not exist."));
+    }
+
+    #[tokio::test]
+    async fn protocol_contract_gate_edges_match_typescript() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
+        let token = state.auth_token.clone();
+
+        let unknown_options = route_http(
+            state.clone(),
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/api/missing")
+                .body(Body::empty())
+                .expect("request"),
+            "request-options".to_string(),
+        )
+        .await;
+        assert_eq!(unknown_options.response.status(), StatusCode::NOT_FOUND);
+        let body = response_json(unknown_options.response).await;
+        assert_eq!(body["error"], json!("notFound"));
+        assert_eq!(
+            body["message"],
+            json!("/api/missing is not a gxserver HTTP endpoint.")
+        );
+
+        let http_events = route_http(
+            state.clone(),
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/events")
+                .body(Body::empty())
+                .expect("request"),
+            "request-events".to_string(),
+        )
+        .await;
+        assert_eq!(http_events.response.status(), StatusCode::NOT_FOUND);
+        let body = response_json(http_events.response).await;
+        assert_eq!(body["error"], json!("notFound"));
+        assert_eq!(
+            body["message"],
+            json!("No gxserver endpoint for GET /api/events.")
+        );
+
+        let header_wins = route_http(
+            state,
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/listSessions")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(GXSERVER_PROTOCOL_HEADER, "999")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "params": {}, "protocolVersion": GXSERVER_PROTOCOL_VERSION })
+                        .to_string(),
+                ))
+                .expect("request"),
+            "request-protocol".to_string(),
+        )
+        .await;
+        assert_eq!(header_wins.response.status(), StatusCode::UPGRADE_REQUIRED);
+        let body = response_json(header_wins.response).await;
+        assert_eq!(body["error"], json!("protocolMismatch"));
+        assert_eq!(
+            body["message"],
+            json!(
+                "gxserver protocol mismatch. Expected protocol 1, got 999. Update Ghostex and gxserver so their protocol versions match."
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn protocol_query_parsing_matches_typescript_edges() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
+        let token = state.auth_token.clone();
+
+        let empty_query = route_http(
+            state.clone(),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/listSessions?protocolVersion=")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "params": {} }).to_string()))
+                .expect("request"),
+            "request-empty-query".to_string(),
+        )
+        .await;
+        assert_eq!(empty_query.response.status(), StatusCode::UPGRADE_REQUIRED);
+        let body = response_json(empty_query.response).await;
+        assert_eq!(
+            body["message"],
+            json!(
+                "gxserver protocol mismatch. Expected protocol 1, got undefined. Update Ghostex and gxserver so their protocol versions match."
+            )
+        );
+
+        let plus_query = route_http(
+            state,
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/listSessions?protocolVersion=%2B1")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "params": {} }).to_string()))
+                .expect("request"),
+            "request-plus-query".to_string(),
+        )
+        .await;
+        assert_eq!(plus_query.response.status(), StatusCode::UPGRADE_REQUIRED);
+        let body = response_json(plus_query.response).await;
+        assert_eq!(
+            body["message"],
+            json!(
+                "gxserver protocol mismatch. Expected protocol 1, got +1. Update Ghostex and gxserver so their protocol versions match."
+            )
+        );
+    }
+
+    #[test]
+    fn request_id_preserves_non_empty_header_value() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-request-id", HeaderValue::from_static(" request-1 "));
+        assert_eq!(request_id(&headers), " request-1 ");
+    }
+
+    #[test]
+    fn session_state_sidecar_parser_matches_legacy_env_fields() {
+        let raw = [
+            "agent=codex",
+            "agentSessionId=019eebdb-ba5a-7282-ac09-b926a9c09863",
+            "agentSessionPath=/Users/example/.codex/sessions/2026/06/21/thread.jsonl",
+            "firstUserMessageBase64=UGxlYXNlIGZpeCB0aGUgc2lkZWJhcg==",
+            "lastActivityAt=2026-06-21T20:25:05.171Z",
+            "status=working",
+            "statusUpdatedAt=2026-06-21T20:25:06.000Z",
+            "title=  GPUI Sidebar Resize Parity  ",
+        ]
+        .join("\n");
+        let sidecar = parse_session_state_sidecar(&raw).expect("sidecar");
+
+        assert_eq!(sidecar.agent_name.as_deref(), Some("codex"));
+        assert_eq!(
+            sidecar.agent_session_id.as_deref(),
+            Some("019eebdb-ba5a-7282-ac09-b926a9c09863")
+        );
+        assert_eq!(
+            sidecar.first_user_message.as_deref(),
+            Some("Please fix the sidebar")
+        );
+        assert_eq!(sidecar.status.as_deref(), Some("working"));
+        assert_eq!(
+            sidecar.status_updated_at.as_deref(),
+            Some("2026-06-21T20:25:06.000Z")
+        );
+        assert_eq!(sidecar.title.as_deref(), Some("GPUI Sidebar Resize Parity"));
+        assert!(has_session_state_sidecar_payload(&sidecar));
+        assert_eq!(
+            sanitize_session_state_sidecar_path_part("P3lv0/../../G01q0"),
+            "P3lv0-..-..-G01q0"
+        );
+    }
+
+    #[test]
+    fn session_state_sidecar_reader_uses_typescript_one_mib_cap() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let sidecar_path = build_session_state_sidecar_path(&paths, "P3lv0", "G01q0");
+        fs::create_dir_all(sidecar_path.parent().expect("sidecar parent")).expect("sidecar dir");
+
+        fs::write(
+            &sidecar_path,
+            format!("agent=codex\npadding={}", "x".repeat(70 * 1024)),
+        )
+        .expect("write sidecar under cap");
+        let sidecar = read_session_state_sidecar(&paths, "P3lv0", "G01q0").expect("sidecar");
+        assert_eq!(sidecar.agent_name.as_deref(), Some("codex"));
+
+        fs::write(
+            &sidecar_path,
+            format!(
+                "agent=codex\npadding={}",
+                "x".repeat(GXSERVER_SESSION_STATE_SIDECAR_MAX_BYTES as usize + 1)
+            ),
+        )
+        .expect("write sidecar over cap");
+        assert!(read_session_state_sidecar(&paths, "P3lv0", "G01q0").is_none());
+    }
+
+    #[test]
+    fn zmx_title_observer_parses_lines_and_filters_observable_sessions() {
+        assert_eq!(
+            parse_zmx_title_line(r#"{"title":"  Codex Session  "}"#).as_deref(),
+            Some("Codex Session")
+        );
+        assert!(parse_zmx_title_line(r#"{"title":"   "}"#).is_none());
+        assert!(parse_zmx_title_line("not-json").is_none());
+
+        let observable = json!({
+            "kind": "terminal",
+            "lifecycleState": "running",
+            "providerState": { "lifecycleState": "exists", "provider": "zmx" },
+            "projectId": "P1",
+            "runtimeSettings": {},
+            "sessionId": "G1",
+            "zmxName": "S1-P1-G1"
+        });
+        assert!(is_zmx_title_observable_session(&observable));
+
+        let missing_provider = json!({
+            "kind": "terminal",
+            "lifecycleState": "running",
+            "providerState": { "lifecycleState": "missing", "provider": "zmx" },
+            "projectId": "P1",
+            "sessionId": "G1",
+            "zmxName": "S1-P1-G1"
+        });
+        assert!(!is_zmx_title_observable_session(&missing_provider));
     }
 
     #[tokio::test]
@@ -3016,6 +5706,558 @@ mod tests {
         assert_eq!(body["error"], json!("badRequest"));
     }
 
+    #[tokio::test]
+    async fn agent_hook_route_matches_typescript_bad_params_status() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
+        let token = state.auth_token.clone();
+
+        let response = route_http(
+            state,
+            rpc_request(
+                "/api/readAgentHookStatus",
+                &token,
+                json!({
+                    "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+                    "params": []
+                }),
+            ),
+            "request-hook-bad-params".to_string(),
+        )
+        .await;
+
+        assert_eq!(
+            response.response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        let body = response_json(response.response).await;
+        assert_eq!(body["error"], json!("internalError"));
+        assert_eq!(body["message"], json!("RPC params must be an object."));
+    }
+
+    #[tokio::test]
+    async fn agent_hook_conflict_response_strips_private_log_metadata() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let log_file = paths.log_file.clone();
+        let state = test_app_state(paths);
+        let token = state.auth_token.clone();
+        let current_codex_session_id = "019e7af5-c610-7f62-a129-db7bb510b48d";
+        let incoming_codex_session_id = "019e7c39-7ba7-7ac3-b79c-02757e299516";
+
+        let created_project = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/createProject",
+                &token,
+                json!({ "params": { "name": "Hook Conflict" } }),
+            ),
+            "request-create-hook-conflict-project".to_string(),
+        )
+        .await;
+        assert_eq!(created_project.response.status(), StatusCode::OK);
+        let body = response_json(created_project.response).await;
+        let project_id = body["result"]["project"]["projectId"]
+            .as_str()
+            .expect("project id")
+            .to_string();
+
+        let created_session = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/createSession",
+                &token,
+                json!({
+                    "params": {
+                        "agentId": "codex",
+                        "kind": "agent",
+                        "projectId": project_id.clone(),
+                        "runtimeSettings": {
+                            "agentActivity": { "activity": "idle", "isAcknowledged": true },
+                            "agentName": "codex",
+                            "agentSessionId": current_codex_session_id,
+                            "titleSource": "terminal-auto"
+                        },
+                        "title": "Target Codex Thread"
+                    }
+                }),
+            ),
+            "request-create-hook-conflict-session".to_string(),
+        )
+        .await;
+        assert_eq!(created_session.response.status(), StatusCode::OK);
+        let body = response_json(created_session.response).await;
+        let session_id = body["result"]["session"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+
+        let ingested = route_http(
+            state,
+            rpc_request(
+                "/api/ingestAgentHookEvent",
+                &token,
+                json!({
+                    "params": {
+                        "agentName": "codex",
+                        "agentSessionId": incoming_codex_session_id,
+                        "eventName": "Stop",
+                        "firstUserMessage": "private prompt text",
+                        "projectId": project_id,
+                        "rawEventName": "Stop",
+                        "sessionId": session_id.clone(),
+                        "status": "attention",
+                        "statusUpdatedAt": "2026-06-09T18:08:19.857Z",
+                        "title": "Wrong Codex Thread"
+                    }
+                }),
+            ),
+            "request-ingest-hook-conflict".to_string(),
+        )
+        .await;
+
+        assert_eq!(ingested.response.status(), StatusCode::OK);
+        let body = response_json(ingested.response).await;
+        assert_eq!(
+            body["result"]["reason"],
+            json!("passive-session-identity-conflict")
+        );
+        assert!(body["result"].get("identityConflict").is_none());
+        assert_eq!(body["result"]["activity"]["activity"], json!("idle"));
+        let logs = fs::read_to_string(log_file).expect("read hook conflict log");
+        assert!(logs.contains("sessionIdentity.passiveEventRejected"));
+        assert!(!logs.contains(current_codex_session_id));
+        assert!(!logs.contains(incoming_codex_session_id));
+        assert!(!logs.contains("private prompt text"));
+        assert!(!logs.contains("Wrong Codex Thread"));
+        assert!(!logs.contains("Target Codex Thread"));
+    }
+
+    #[tokio::test]
+    async fn browse_project_directories_route_filters_directory_entries() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let parent = paths.root_dir.join("picker-parent");
+        fs::create_dir_all(parent.join("alpha")).expect("alpha");
+        fs::create_dir_all(parent.join("alpine")).expect("alpine");
+        fs::create_dir_all(parent.join("beta")).expect("beta");
+        fs::create_dir_all(parent.join(".hidden")).expect("hidden");
+        fs::write(parent.join("alphabet.txt"), "not a directory\n").expect("file");
+        let parent_path = path_to_string(&parent);
+
+        let filtered = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/browseProjectDirectories",
+                &token,
+                json!({
+                    "params": {
+                        "limit": 5,
+                        "partialPath": format!("{parent_path}/al")
+                    }
+                }),
+            ),
+            "request-browse-filtered".to_string(),
+        )
+        .await;
+        assert_eq!(filtered.response.status(), StatusCode::OK);
+        let body = response_json(filtered.response).await;
+        assert_eq!(body["result"]["parentPath"], json!(parent_path));
+        let names = body["result"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["alpha", "alpine"]);
+
+        let hidden = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/browseProjectDirectories",
+                &token,
+                json!({
+                    "params": {
+                        "partialPath": format!("{parent_path}/.h")
+                    }
+                }),
+            ),
+            "request-browse-hidden".to_string(),
+        )
+        .await;
+        assert_eq!(hidden.response.status(), StatusCode::OK);
+        let body = response_json(hidden.response).await;
+        let names = body["result"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec![".hidden"]);
+
+        let relative = route_http(
+            state,
+            rpc_request(
+                "/api/browseProjectDirectories",
+                &token,
+                json!({
+                    "params": {
+                        "cwd": parent_path,
+                        "partialPath": "./a"
+                    }
+                }),
+            ),
+            "request-browse-relative".to_string(),
+        )
+        .await;
+        assert_eq!(relative.response.status(), StatusCode::OK);
+        let body = response_json(relative.response).await;
+        let names = body["result"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["alpha", "alpine"]);
+    }
+
+    #[tokio::test]
+    async fn resolve_git_root_route_does_not_register_projects() {
+        let git_available = StdCommand::new("git")
+            .arg("--version")
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        if !git_available {
+            return;
+        }
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let repo = paths.root_dir.join("open-path-repo");
+        let nested = repo.join("src").join("feature");
+        let outside = paths.root_dir.join("outside-repo");
+        fs::create_dir_all(&nested).expect("nested");
+        fs::create_dir_all(&outside).expect("outside");
+        assert!(StdCommand::new("git")
+            .arg("init")
+            .current_dir(&repo)
+            .status()
+            .expect("git init")
+            .success());
+
+        let resolved = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/resolveGitRootForPath",
+                &token,
+                json!({
+                    "params": {
+                        "path": path_to_string(&nested)
+                    }
+                }),
+            ),
+            "request-resolve-git-root".to_string(),
+        )
+        .await;
+        assert_eq!(resolved.response.status(), StatusCode::OK);
+        let body = response_json(resolved.response).await;
+        assert_eq!(
+            body["result"]["gitRoot"],
+            json!(path_to_string(
+                &fs::canonicalize(&repo).expect("canonical repo")
+            ))
+        );
+
+        let projects = route_http(
+            state.clone(),
+            rpc_request("/api/listProjects", &token, json!({ "params": {} })),
+            "request-list-projects".to_string(),
+        )
+        .await;
+        let body = response_json(projects.response).await;
+        assert_eq!(body["result"]["projects"], json!([]));
+
+        let outside = route_http(
+            state,
+            rpc_request(
+                "/api/resolveGitRootForPath",
+                &token,
+                json!({
+                    "params": {
+                        "path": path_to_string(&outside)
+                    }
+                }),
+            ),
+            "request-resolve-outside".to_string(),
+        )
+        .await;
+        assert_eq!(outside.response.status(), StatusCode::OK);
+        let body = response_json(outside.response).await;
+        assert_eq!(body["result"], json!({}));
+    }
+
+    #[tokio::test]
+    async fn delete_worktree_project_route_removes_clean_checkout_and_local_branch() {
+        if !git_available() {
+            return;
+        }
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let parent = paths.root_dir.join("delete-worktree-parent");
+        let worktree = paths.root_dir.join("delete-worktree-parent-feature");
+        create_git_repository_for_server_test(&parent);
+        run_git_for_server_test(&parent, &["branch", "feature-clean"]);
+        run_git_for_server_test(
+            &parent,
+            &[
+                "worktree",
+                "add",
+                path_to_string(&worktree).as_str(),
+                "feature-clean",
+            ],
+        );
+
+        let parent_project = add_project_path_for_server_test(
+            state.clone(),
+            &token,
+            &parent,
+            Some("Delete Worktree Parent"),
+        )
+        .await;
+        let worktree_project =
+            add_project_path_for_server_test(state.clone(), &token, &worktree, None).await;
+        assert_eq!(
+            worktree_project["worktree"]["parentProjectId"],
+            parent_project["projectId"]
+        );
+
+        let response = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/deleteWorktreeProject",
+                &token,
+                json!({
+                    "params": {
+                        "deleteLocalBranch": true,
+                        "projectId": worktree_project["projectId"]
+                    }
+                }),
+            ),
+            "request-delete-clean-worktree".to_string(),
+        )
+        .await;
+        assert_eq!(response.response.status(), StatusCode::OK);
+        let body = response_json(response.response).await;
+        assert_eq!(
+            body["result"]["checkoutRemoval"],
+            json!({ "forced": false, "retriedForSubmodules": false })
+        );
+        assert_eq!(body["result"]["warnings"], json!([]));
+        assert_eq!(
+            body["result"]["project"]["projectId"],
+            worktree_project["projectId"]
+        );
+        assert!(!worktree.exists());
+        assert_eq!(
+            run_git_status_for_server_test(&parent, &["rev-parse", "--verify", "feature-clean"])
+                .status
+                .code(),
+            Some(128)
+        );
+
+        let projects = route_http(
+            state,
+            rpc_request("/api/listProjects", &token, json!({ "params": {} })),
+            "request-list-after-delete-clean".to_string(),
+        )
+        .await;
+        let body = response_json(projects.response).await;
+        assert!(!body["result"]["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|project| project["projectId"] == worktree_project["projectId"]));
+    }
+
+    #[tokio::test]
+    async fn delete_worktree_project_route_force_removes_dirty_checkout_and_warns_for_remote() {
+        if !git_available() {
+            return;
+        }
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let remote = paths.root_dir.join("delete-worktree-origin.git");
+        let parent = paths.root_dir.join("delete-worktree-remote-parent");
+        let worktree = paths.root_dir.join("delete-worktree-remote-parent-feature");
+        run_git_for_server_test(
+            &paths.root_dir,
+            &["init", "--bare", path_to_string(&remote).as_str()],
+        );
+        create_git_repository_for_server_test(&parent);
+        run_git_for_server_test(
+            &parent,
+            &["remote", "add", "origin", path_to_string(&remote).as_str()],
+        );
+        run_git_for_server_test(&parent, &["push", "-u", "origin", "HEAD:main"]);
+        run_git_for_server_test(&parent, &["branch", "feature-remote"]);
+        run_git_for_server_test(
+            &parent,
+            &[
+                "worktree",
+                "add",
+                path_to_string(&worktree).as_str(),
+                "feature-remote",
+            ],
+        );
+        fs::write(worktree.join("dirty.txt"), "not committed\n").expect("dirty file");
+
+        add_project_path_for_server_test(
+            state.clone(),
+            &token,
+            &parent,
+            Some("Delete Worktree Remote Parent"),
+        )
+        .await;
+        let worktree_project =
+            add_project_path_for_server_test(state.clone(), &token, &worktree, None).await;
+
+        let response = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/deleteWorktreeProject",
+                &token,
+                json!({
+                    "params": {
+                        "deleteRemoteBranch": true,
+                        "projectId": worktree_project["projectId"]
+                    }
+                }),
+            ),
+            "request-delete-dirty-worktree".to_string(),
+        )
+        .await;
+        assert_eq!(response.response.status(), StatusCode::OK);
+        let body = response_json(response.response).await;
+        assert_eq!(
+            body["result"]["checkoutRemoval"],
+            json!({ "forced": true, "retriedForSubmodules": false })
+        );
+        assert!(body["result"]["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning["kind"] == "remoteBranchDeleteFailed"));
+        assert!(!worktree.exists());
+
+        let projects = route_http(
+            state,
+            rpc_request("/api/listProjects", &token, json!({ "params": {} })),
+            "request-list-after-delete-dirty".to_string(),
+        )
+        .await;
+        let body = response_json(projects.response).await;
+        assert!(!body["result"]["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|project| project["projectId"] == worktree_project["projectId"]));
+    }
+
+    #[tokio::test]
+    async fn delete_worktree_project_route_retries_clean_initialized_submodule_with_force() {
+        if !git_available() {
+            return;
+        }
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let submodule = paths.root_dir.join("delete-worktree-submodule-source");
+        let parent = paths.root_dir.join("delete-worktree-submodule-parent");
+        let worktree = paths
+            .root_dir
+            .join("delete-worktree-submodule-parent-feature");
+        create_git_repository_for_server_test(&submodule);
+        create_git_repository_for_server_test(&parent);
+        run_git_for_server_test(
+            &parent,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                path_to_string(&submodule).as_str(),
+                "deps/submodule",
+            ],
+        );
+        run_git_for_server_test(&parent, &["commit", "-m", "add submodule"]);
+        run_git_for_server_test(&parent, &["branch", "feature-submodule"]);
+        run_git_for_server_test(
+            &parent,
+            &[
+                "worktree",
+                "add",
+                path_to_string(&worktree).as_str(),
+                "feature-submodule",
+            ],
+        );
+        run_git_for_server_test(
+            &worktree,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "update",
+                "--init",
+                "--recursive",
+            ],
+        );
+
+        add_project_path_for_server_test(
+            state.clone(),
+            &token,
+            &parent,
+            Some("Delete Worktree Submodule Parent"),
+        )
+        .await;
+        let worktree_project =
+            add_project_path_for_server_test(state.clone(), &token, &worktree, None).await;
+
+        let response = route_http(
+            state,
+            rpc_request(
+                "/api/deleteWorktreeProject",
+                &token,
+                json!({
+                    "params": {
+                        "projectId": worktree_project["projectId"]
+                    }
+                }),
+            ),
+            "request-delete-submodule-worktree".to_string(),
+        )
+        .await;
+        assert_eq!(response.response.status(), StatusCode::OK);
+        let body = response_json(response.response).await;
+        assert_eq!(
+            body["result"]["checkoutRemoval"],
+            json!({ "forced": true, "retriedForSubmodules": true })
+        );
+        assert!(!worktree.exists());
+    }
+
     fn test_app_state(paths: GxserverPaths) -> Arc<AppState> {
         let storage = initialize_gxserver_storage(&paths).expect("storage");
         let config = create_default_gxserver_config().expect("config");
@@ -3042,7 +6284,102 @@ mod tests {
             shutdown_tx,
             stale_activity_timers: Arc::new(Mutex::new(HashMap::new())),
             version: "0.0.0-test".to_string(),
+            zmx_title_observers: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    async fn add_project_path_for_server_test(
+        state: Arc<AppState>,
+        token: &str,
+        project_path: &Path,
+        name: Option<&str>,
+    ) -> Value {
+        let mut params = Map::new();
+        params.insert(
+            "path".to_string(),
+            Value::String(path_to_string(project_path)),
+        );
+        if let Some(name) = name {
+            params.insert("name".to_string(), Value::String(name.to_string()));
+        }
+        let response = route_http(
+            state,
+            rpc_request(
+                "/api/addProjectPath",
+                token,
+                json!({ "params": Value::Object(params) }),
+            ),
+            "request-add-project-path".to_string(),
+        )
+        .await;
+        assert_eq!(response.response.status(), StatusCode::OK);
+        response_json(response.response).await["result"]["project"].clone()
+    }
+
+    fn git_available() -> bool {
+        StdCommand::new("git")
+            .arg("--version")
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
+    fn create_git_repository_for_server_test(repository_path: &Path) {
+        fs::create_dir_all(repository_path).expect("repo dir");
+        run_git_for_server_test(repository_path, &["init"]);
+        run_git_for_server_test(
+            repository_path,
+            &["config", "user.email", "ghostex-tests@example.invalid"],
+        );
+        run_git_for_server_test(repository_path, &["config", "user.name", "Ghostex Tests"]);
+        fs::write(repository_path.join("README.md"), "initial\n").expect("readme");
+        run_git_for_server_test(repository_path, &["add", "README.md"]);
+        run_git_for_server_test(repository_path, &["commit", "-m", "initial"]);
+    }
+
+    fn run_git_for_server_test(cwd: &Path, args: &[&str]) -> String {
+        let output = run_git_status_for_server_test(cwd, args);
+        assert!(
+            output.status.success(),
+            "git {:?} failed\nstdout:\n{}\nstderr:\n{}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).to_string()
+    }
+
+    fn run_git_status_for_server_test(cwd: &Path, args: &[&str]) -> std::process::Output {
+        StdCommand::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .expect("git command")
+    }
+
+    fn test_health(build_identity: &str) -> ServerHealthResponse {
+        let config = create_default_gxserver_config().expect("config");
+        ServerHealthResponse {
+            ok: true,
+            product: GXSERVER_PRODUCT.to_string(),
+            protocol_version: GXSERVER_PROTOCOL_VERSION,
+            version: "0.1.0".to_string(),
+            build_identity: build_identity.to_string(),
+            capabilities: vec![],
+            listeners: config.listeners.clone(),
+            migration: MigrationStatus {
+                applied_migrations: vec![],
+                current_version: 0,
+                state_db_file: String::new(),
+                state_imports: None,
+            },
+            pid: 123,
+            portless: crate::portless::unavailable_portless_status_payload(),
+            port: config.listeners.local.port,
+            server_id: "S7k".to_string(),
+            started_at: "2026-05-30T10:00:00.000Z".to_string(),
+            tools: vec![],
+        }
     }
 
     fn rpc_request(path: &str, token: &str, body: Value) -> Request<Body> {

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { once } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -23,7 +23,9 @@ const DEV_PORT_ENV = "GHOSTEX_GXSERVER_DEV_PORT";
 const JSON_BODY_LIMIT_BYTES = 1024 * 1024;
 const GXSERVER_ZMX_HISTORY_STDOUT_LIMIT_BYTES = 256 * 1024;
 const GXSERVER_ZMX_SEND_TEXT_LIMIT_BYTES = 512 * 1024;
-const CURRENT_MIGRATION_VERSION = 9;
+const COMPAT_USER = "gxserver-compat";
+const COMPAT_SAFE_SYSTEM_PATHS = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+const CURRENT_MIGRATION_VERSION = 11;
 const EXPECTED_MIGRATIONS = [
   "0001_foundation",
   "0002_domain_state",
@@ -34,6 +36,8 @@ const EXPECTED_MIGRATIONS = [
   "0007_expand_session_tags_in_progress_and_type",
   "0008_remove_retired_session_type_tags",
   "0009_remove_legacy_zmux_chat_projects",
+  "0010_portless_persistence_model",
+  "0011_t3_session_kind",
 ];
 const EXPECTED_CAPABILITIES = [
   "health",
@@ -63,7 +67,6 @@ async function main(runOptions) {
   }
 
   const target = resolveTarget(runOptions);
-  const version = await readTargetVersion(target, runOptions.timeoutMs);
   if (!(await isTcpPortAvailable(runOptions.port))) {
     if (runOptions.skipIfPortBusy) {
       console.log(`SKIP gxserver-rs compat ${runOptions.suite}: ${LOCAL_HOST}:${runOptions.port} is already in use.`);
@@ -74,12 +77,11 @@ async function main(runOptions) {
 
   const homeDir = await mkdtemp(path.join(tmpdir(), "gxserver-rs-phase0-home-"));
   const paths = getGxserverPaths(homeDir);
-  if (runOptions.suite === "phase7") {
-    await preparePhase7ToolStubs(homeDir, runOptions);
-  }
   const childOutput = { stderr: "", stdout: "" };
   let child;
   let stoppedByControlEndpoint = false;
+  let targetEnv;
+  let version;
 
   const observations = {
     schemaVersion: 1,
@@ -88,9 +90,14 @@ async function main(runOptions) {
   };
 
   try {
+    await prepareCompatSandbox(homeDir, runOptions);
+    targetEnv = createTargetEnv(homeDir, runOptions);
+    assertCompatTargetEnv(targetEnv, homeDir);
+    version = await readTargetVersion(target, runOptions.timeoutMs, targetEnv);
+
     child = spawn(target.command, target.foregroundArgs, {
       cwd: target.cwd,
-      env: createTargetEnv(homeDir, runOptions),
+      env: targetEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
     collectChildOutput(child, childOutput);
@@ -215,7 +222,7 @@ async function main(runOptions) {
     assert.equal(eventStreamReady.body.serverId, authenticatedHealth.body.serverId);
     recordObservation(observations, "eventStreamReady", normalizeValue(eventStreamReady, homeDir));
 
-    const cliStatus = await runTargetCommand(target, target.statusArgs, homeDir, runOptions.timeoutMs);
+    const cliStatus = await runTargetCommand(target, target.statusArgs, targetEnv, runOptions.timeoutMs);
     assert.equal(cliStatus.exitCode, 0, cliStatus.stderr);
     const statusBody = JSON.parse(cliStatus.stdout);
     assert.equal(statusBody.ok, true);
@@ -240,7 +247,7 @@ async function main(runOptions) {
       await runPhase6AgentChecks({ homeDir, observations, paths, token });
     }
     if (runOptions.suite === "phase7") {
-      await runPhase7TypedOperationChecks({ homeDir, observations, paths, token });
+      await runPhase7TypedOperationChecks({ homeDir, observations, paths, runOptions, token });
     }
 
     const controlStop = await requestJson("/api/control/stop", {
@@ -265,7 +272,7 @@ async function main(runOptions) {
     await waitForProcessExit(child, runOptions.timeoutMs, childOutput);
     await assertRuntimeMetadataRemoved(paths);
 
-    const stoppedStatus = await runTargetCommand(target, target.statusArgs, homeDir, runOptions.timeoutMs);
+    const stoppedStatus = await runTargetCommand(target, target.statusArgs, targetEnv, runOptions.timeoutMs);
     assert.equal(stoppedStatus.exitCode, 0, stoppedStatus.stderr);
     const stoppedStatusBody = JSON.parse(stoppedStatus.stdout);
     assert.equal(stoppedStatusBody.ok, true);
@@ -276,6 +283,7 @@ async function main(runOptions) {
       stdoutJson: stoppedStatusBody,
     }, homeDir));
 
+    await assertCompatSandboxContained(homeDir, runOptions);
     await updateOrCompareFixture(runOptions, observations);
     console.log(`gxserver-rs compat ${runOptions.suite} passed for ${target.name}.`);
   } finally {
@@ -283,7 +291,10 @@ async function main(runOptions) {
       if (!stoppedByControlEndpoint) {
         child.kill("SIGTERM");
       }
-      await waitForProcessExit(child, 2_000, childOutput).catch(() => child.kill("SIGKILL"));
+      await waitForProcessExit(child, 2_000, childOutput).catch(async () => {
+        child.kill("SIGKILL");
+        await waitForProcessExit(child, 2_000, childOutput).catch(() => undefined);
+      });
     }
     if (runOptions.keepHome) {
       console.log(`Kept isolated HOME at ${homeDir}`);
@@ -816,6 +827,61 @@ async function runPhase4EventChecks({ homeDir, observations, token }) {
       response: rendererResponse,
     }, homeDir));
 
+    /*
+    CDXC:GxserverPresentationEvents 2026-06-22-04:30:
+    Renderer command subscriptions are ordered like TypeScript's WebSocket set. A later renderer-capable subscription must not steal commands from the first open renderer client, otherwise native command ownership can flip when secondary clients subscribe.
+    */
+    const secondRendererSocket = await openEventSocket(token);
+    try {
+      const secondRendererSnapshotPromise = nextWebSocketEvent(secondRendererSocket, "presentationSnapshot");
+      secondRendererSocket.send(JSON.stringify({
+        clientId: "phase4-renderer-later",
+        rendererCommands: true,
+        type: "subscribePresentation",
+      }));
+      await secondRendererSnapshotPromise;
+
+      const firstRendererCommandPromise = observeWebSocketEvent(socket, "rendererCommand", 500);
+      const laterRendererCommandPromise = observeWebSocketEvent(secondRendererSocket, "rendererCommand", 500);
+      const orderedRendererResponsePromise = requestJson("/api/dispatchRendererCommand", {
+        body: {
+          params: {
+            action: "toggleSidebarCollapsed",
+            payload: { source: "phase4-ordered-renderer" },
+            timeoutMs: 3000,
+          },
+          protocolVersion: PROTOCOL_VERSION,
+        },
+        method: "POST",
+        token,
+      });
+      const firstRendererCommand = await firstRendererCommandPromise;
+      if (firstRendererCommand.event) {
+        socket.send(JSON.stringify({
+          commandId: firstRendererCommand.event.command.commandId,
+          ok: true,
+          result: { ok: true, ordered: true },
+          type: "rendererCommandResult",
+        }));
+      }
+      const laterRendererCommand = await laterRendererCommandPromise;
+      if (!firstRendererCommand.event && laterRendererCommand.event) {
+        secondRendererSocket.send(JSON.stringify({
+          commandId: laterRendererCommand.event.command.commandId,
+          ok: true,
+          result: { ok: true, ordered: true },
+          type: "rendererCommandResult",
+        }));
+      }
+      const orderedRendererResponse = await orderedRendererResponsePromise;
+      assert.ok(firstRendererCommand.event, firstRendererCommand.error?.message ?? "First renderer subscriber did not receive the command.");
+      assert.ok(!laterRendererCommand.event, "Later renderer subscriber unexpectedly received the command before the first subscriber.");
+      assert.equal(orderedRendererResponse.status, 200);
+      assert.deepEqual(orderedRendererResponse.body.result, { ok: true, ordered: true });
+    } finally {
+      secondRendererSocket.close();
+    }
+
     const projectAddedPromise = nextWebSocketEvent(socket, "presentationDelta");
     const createProject = await requestJson("/api/createProject", {
       body: {
@@ -986,7 +1052,7 @@ async function runPhase5ZmxChecks({ homeDir, observations, token }) {
     assert.equal(attach.status, 200);
     assertSuccessEnvelope(attach.body);
     assert.equal(attach.body.result.attach.provider, "zmx");
-    assert.match(attach.body.result.attach.attachCommand, /^\/bin\/zsh -lc /u);
+    assert.match(attach.body.result.attach.attachCommand, new RegExp(`^${escapeRegExp(resolveCompatShell())} -l?c `, "u"));
     assert.match(attach.body.result.attach.attachCommand, /--prompt-editor=monaco/u);
     recordObservation(observations, "phase5AttachMetadata", normalizeValue({
       attachCommand: attach.body.result.attach.attachCommand,
@@ -1724,29 +1790,116 @@ async function runPhase6AgentChecks({ homeDir, observations, paths, token }) {
 /*
 CDXC:GxserverRustPort 2026-06-16-00:49:
 Phase 7 compatibility exercises typed Git/GitHub/worktree/Beads operations and repository clone jobs through public RPCs on the explicit dev port. Use isolated repositories and stubbed clone/GitHub tools so the suite never reaches the network, never shells against arbitrary user paths, and can compare TypeScript and Rust without touching the packaged daemon on 58744.
+
+CDXC:GxserverCompatContainment 2026-06-22-09:47:
+Compat fixture generation must be safe to run on developer machines. Build the target process environment from an explicit allowlist, keep HOME/TMP/XDG/Git config under the temp home, and make command shims fail closed so old TypeScript fixtures and new Rust comparisons cannot inherit real tokens, proxy settings, SSH sockets, user profile paths, or network-capable Git/GitHub/agent commands.
+
+CDXC:GxserverCompatLogs 2026-06-22-10:01:
+Area 36 privacy applies to persistent compat artifacts too. Tool invocation JSONL should keep only metadata booleans and counts, never raw argv, cwd, clone destinations, paths, URLs, command text, environment values, or secrets.
 */
-async function preparePhase7ToolStubs(homeDir, runOptions) {
-  const stubDir = path.join(homeDir, "phase7-tool-stubs");
-  await mkdir(stubDir, { recursive: true });
+async function prepareCompatSandbox(homeDir, runOptions) {
+  const sandboxPaths = getCompatSandboxPaths(homeDir);
+  await mkdir(sandboxPaths.tmpDir, { recursive: true });
+  await mkdir(sandboxPaths.xdgCacheHome, { recursive: true });
+  await mkdir(sandboxPaths.xdgConfigHome, { recursive: true });
+  await mkdir(sandboxPaths.xdgDataHome, { recursive: true });
+  await mkdir(sandboxPaths.gitTemplateDir, { recursive: true });
+  await mkdir(sandboxPaths.toolStubDir, { recursive: true });
+  await writeFile(sandboxPaths.gitConfigFile, "", { mode: 0o600 });
+  await prepareCompatToolStubs(homeDir, runOptions, sandboxPaths);
+  runOptions.sandboxPaths = sandboxPaths;
+}
+
+async function prepareCompatToolStubs(homeDir, runOptions, sandboxPaths) {
   const realGit = process.env.GXSERVER_COMPAT_REAL_GIT || "/usr/bin/git";
-  await writeFile(path.join(stubDir, "git"), `#!/usr/bin/env node
+  if (!path.isAbsolute(realGit)) {
+    throw new Error("GXSERVER_COMPAT_REAL_GIT must be an absolute path when set.");
+  }
+  const nodeShebang = `#!${process.execPath}`;
+  await writeFile(path.join(sandboxPaths.toolStubDir, "git"), `${nodeShebang}
 const cp = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const homeDir = fs.realpathSync.native(${JSON.stringify(homeDir)});
+const invocationLog = ${JSON.stringify(sandboxPaths.invocationLogFile)};
+const realGit = process.env.GXSERVER_COMPAT_REAL_GIT || ${JSON.stringify(realGit)};
 const args = process.argv.slice(2);
+function isInside(parent, candidate) {
+  const relative = path.relative(parent, candidate);
+  return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+function fail(message) {
+  process.stderr.write(message + "\\n");
+  process.exit(2);
+}
+function record(extra = {}) {
+  fs.appendFileSync(invocationLog, JSON.stringify({
+    argCount: args.length,
+    cwdInsideHome: isInside(homeDir, process.cwd()),
+    hasNetworkLookingArg: args.some((arg) => /^(?:https?|ssh):\\/\\//i.test(String(arg)) || /^git@[^:]+:/i.test(String(arg))),
+    tool: "git",
+    ...extra,
+  }) + "\\n");
+}
+const cwd = fs.realpathSync.native(process.cwd());
+if (!isInside(homeDir, cwd)) {
+  fail("compat git cwd escaped temp HOME");
+}
+if (args.some((arg, index) => index > 0 && /^(?:https?|ssh):\\/\\//i.test(arg))) {
+  if (args[0] !== "clone") {
+    fail("compat git blocked network-looking argument outside clone");
+  }
+}
 if (args[0] === "clone") {
   const destination = args[args.length - 1];
-  const absolute = path.resolve(process.cwd(), destination);
+  const absolute = path.resolve(cwd, destination);
+  if (!isInside(homeDir, absolute) || absolute === homeDir) {
+    fail("compat git clone destination escaped temp HOME");
+  }
+  record({ destinationInsideHome: isInside(homeDir, absolute), intercepted: true });
   fs.mkdirSync(absolute, { recursive: true });
   fs.writeFileSync(path.join(absolute, "README.md"), "compat clone\\n");
   process.stdout.write("compat clone ok\\n");
   process.exit(0);
 }
-const result = cp.spawnSync(process.env.GXSERVER_COMPAT_REAL_GIT || ${JSON.stringify(realGit)}, args, { stdio: "inherit" });
+const allowed = new Set([
+  "--version",
+  "commit\\u0000--no-verify\\u0000-F\\u0000-",
+  "status\\u0000--short\\u0000--branch",
+  "worktree\\u0000list\\u0000--porcelain",
+]);
+const joined = args.join("\\u0000");
+if (!allowed.has(joined)) {
+  fail("compat git blocked unsupported args: " + args.join(" "));
+}
+record({ delegated: true });
+const result = cp.spawnSync(realGit, args, {
+  env: process.env,
+  stdio: ["inherit", "inherit", "inherit"],
+});
 process.exit(result.status ?? 1);
 `, { mode: 0o755 });
-  await writeFile(path.join(stubDir, "gh"), `#!/usr/bin/env node
+  await writeFile(path.join(sandboxPaths.toolStubDir, "gh"), `${nodeShebang}
+const fs = require("node:fs");
+const path = require("node:path");
+const homeDir = fs.realpathSync.native(${JSON.stringify(homeDir)});
+const invocationLog = ${JSON.stringify(sandboxPaths.invocationLogFile)};
 const args = process.argv.slice(2);
+function isInside(parent, candidate) {
+  const relative = path.relative(parent, path.resolve(candidate));
+  return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+const cwd = fs.realpathSync.native(process.cwd());
+if (!isInside(homeDir, cwd)) {
+  process.stderr.write("compat gh cwd escaped temp HOME\\n");
+  process.exit(2);
+}
+fs.appendFileSync(invocationLog, JSON.stringify({
+  argCount: args.length,
+  cwdInsideHome: isInside(homeDir, cwd),
+  hasNetworkLookingArg: args.some((arg) => /^(?:https?|ssh):\\/\\//i.test(String(arg)) || /^git@[^:]+:/i.test(String(arg))),
+  tool: "gh",
+}) + "\\n");
 if (args.join(" ") === "--version") {
   process.stdout.write("gh version 2.0.0 (compat)\\n");
   process.exit(0);
@@ -1762,20 +1915,39 @@ if (args.join(" ") === "pr create --fill") {
 process.stderr.write("unsupported gh args: " + args.join(" ") + "\\n");
 process.exit(2);
 `, { mode: 0o755 });
-  runOptions.toolStubDir = stubDir;
+  for (const agentCommand of ["claude", "codex", "cursor-agent", "grok"]) {
+    await writeFile(path.join(sandboxPaths.toolStubDir, agentCommand), `${nodeShebang}
+const fs = require("node:fs");
+const path = require("node:path");
+const homeDir = fs.realpathSync.native(${JSON.stringify(homeDir)});
+const invocationLog = ${JSON.stringify(sandboxPaths.invocationLogFile)};
+const args = process.argv.slice(2);
+function isInside(parent, candidate) {
+  const relative = path.relative(parent, path.resolve(candidate));
+  return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+fs.appendFileSync(invocationLog, JSON.stringify({
+  argCount: args.length,
+  cwdInsideHome: isInside(homeDir, process.cwd()),
+  tool: ${JSON.stringify(agentCommand)},
+}) + "\\n");
+process.stdout.write("Compat Generated Title\\n");
+`, { mode: 0o755 });
+  }
+  runOptions.toolStubDir = sandboxPaths.toolStubDir;
   runOptions.realGit = realGit;
 }
 
-async function runPhase7TypedOperationChecks({ homeDir, observations, paths, token }) {
+async function runPhase7TypedOperationChecks({ homeDir, observations, paths, runOptions, token }) {
   const workspaceDir = path.join(homeDir, "workspace");
   const projectDir = path.join(workspaceDir, "phase7-project");
   const cloneParentDir = path.join(workspaceDir, "clone-parent");
   await mkdir(projectDir, { recursive: true });
   await mkdir(cloneParentDir, { recursive: true });
   await writeFile(path.join(projectDir, "file.txt"), "one\ntwo\n");
-  await runGit(["init"], projectDir);
-  await runGit(["config", "user.email", "compat@example.invalid"], projectDir);
-  await runGit(["config", "user.name", "Compat"], projectDir);
+  await runGit(["init"], projectDir, homeDir, runOptions);
+  await runGit(["config", "user.email", "compat@example.invalid"], projectDir, homeDir, runOptions);
+  await runGit(["config", "user.name", "Compat"], projectDir, homeDir, runOptions);
 
   const createProject = await requestJson("/api/createProject", {
     body: {
@@ -2014,9 +2186,10 @@ async function runPhase7TypedOperationChecks({ homeDir, observations, paths, tok
   });
 }
 
-async function runGit(args, cwd) {
+async function runGit(args, cwd, homeDir, runOptions) {
   const result = await runCommand(process.env.GXSERVER_COMPAT_REAL_GIT || "/usr/bin/git", args, {
     cwd,
+    env: createGitSetupEnv(homeDir, runOptions),
     timeoutMs: 20_000,
   });
   assert.equal(result.exitCode, 0, result.stderr);
@@ -2162,18 +2335,18 @@ function resolveTarget(runOptions) {
   throw new Error(`Unsupported target: ${runOptions.target}`);
 }
 
-async function readTargetVersion(target, timeoutMs) {
-  const result = await runCommand(target.command, target.versionArgs, { cwd: target.cwd, timeoutMs });
+async function readTargetVersion(target, timeoutMs, env) {
+  const result = await runCommand(target.command, target.versionArgs, { cwd: target.cwd, env, timeoutMs });
   assert.equal(result.exitCode, 0, result.stderr);
   const version = result.stdout.trim();
   assert.match(version, /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/u);
   return version;
 }
 
-async function runTargetCommand(target, args, homeDir, timeoutMs) {
+async function runTargetCommand(target, args, env, timeoutMs) {
   return await runCommand(target.command, args, {
     cwd: target.cwd,
-    env: createTargetEnv(homeDir, options),
+    env,
     timeoutMs,
   });
 }
@@ -2183,14 +2356,64 @@ function createTargetEnv(homeDir, runOptions) {
   CDXC:GxserverRustPort 2026-06-14-21:58:
   Compatibility runs may target an explicitly selected loopback port while the packaged daemon owns 58744. Pass the port through a dev-scoped environment variable only when --port is explicit so product defaults remain unchanged and startup never silently falls back to another daemon.
   */
+  const sandboxPaths = runOptions.sandboxPaths ?? getCompatSandboxPaths(homeDir);
+  const pathEntries = [
+    ...(runOptions.toolStubDir ? [runOptions.toolStubDir] : []),
+    ...COMPAT_SAFE_SYSTEM_PATHS,
+  ];
   return {
-    ...process.env,
     ...(runOptions.port !== DEFAULT_LOCAL_PORT ? { [DEV_PORT_ENV]: String(runOptions.port) } : {}),
     ...(runOptions.realGit ? { GXSERVER_COMPAT_REAL_GIT: runOptions.realGit } : {}),
+    GCM_INTERACTIVE: "never",
+    GIT_ASKPASS: "/bin/false",
+    GIT_CONFIG_GLOBAL: sandboxPaths.gitConfigFile,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TEMPLATE_DIR: sandboxPaths.gitTemplateDir,
+    GIT_TERMINAL_PROMPT: "0",
     GHOSTEX_SOURCE_ROOT: repoRoot,
     HOME: homeDir,
-    ...(runOptions.toolStubDir ? { PATH: `${runOptions.toolStubDir}${path.delimiter}${process.env.PATH ?? ""}` } : {}),
+    LANG: "C.UTF-8",
+    LC_ALL: "C.UTF-8",
+    LOGNAME: COMPAT_USER,
+    NO_PROXY: `${LOCAL_HOST},localhost`,
+    PATH: pathEntries.join(path.delimiter),
+    SHELL: resolveCompatShell(),
+    SSH_ASKPASS: "/bin/false",
+    TMPDIR: sandboxPaths.tmpDir,
+    USER: COMPAT_USER,
+    XDG_CACHE_HOME: sandboxPaths.xdgCacheHome,
+    XDG_CONFIG_HOME: sandboxPaths.xdgConfigHome,
+    XDG_DATA_HOME: sandboxPaths.xdgDataHome,
   };
+}
+
+function createGitSetupEnv(homeDir, runOptions) {
+  const targetEnv = createTargetEnv(homeDir, runOptions);
+  return {
+    ...targetEnv,
+    PATH: COMPAT_SAFE_SYSTEM_PATHS.join(path.delimiter),
+  };
+}
+
+function resolveCompatShell() {
+  /*
+  CDXC:GxserverUbuntu 2026-06-23-07:52:
+  The compat harness must exercise the same gxserver-rs code on macOS and Ubuntu. Keep zsh when present for mac parity, but use bash/sh on Linux sandboxes so tests do not fail before gxserver can prove platform-neutral behavior.
+  */
+  const candidates = (process.platform === "darwin"
+    ? ["/bin/zsh", process.env.SHELL, "/usr/bin/zsh", "/bin/bash", "/usr/bin/bash"]
+    : [process.env.SHELL, "/bin/bash", "/usr/bin/bash", "/bin/zsh", "/usr/bin/zsh"]
+  ).concat(["/bin/sh", "/usr/bin/sh"]).filter(Boolean);
+  for (const candidate of candidates) {
+    if (["bash", "sh", "zsh"].includes(path.basename(candidate)) && existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return "/bin/sh";
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 async function runCommand(command, args, { cwd, env = process.env, timeoutMs }) {
@@ -2262,6 +2485,94 @@ function getGxserverPaths(homeDir) {
   };
 }
 
+function getCompatSandboxPaths(homeDir) {
+  const compatDir = path.join(homeDir, "compat-sandbox");
+  return {
+    gitConfigFile: path.join(compatDir, "gitconfig"),
+    gitTemplateDir: path.join(compatDir, "git-template"),
+    invocationLogFile: path.join(compatDir, "tool-invocations.jsonl"),
+    tmpDir: path.join(compatDir, "tmp"),
+    toolStubDir: path.join(compatDir, "bin"),
+    xdgCacheHome: path.join(compatDir, "xdg-cache"),
+    xdgConfigHome: path.join(compatDir, "xdg-config"),
+    xdgDataHome: path.join(compatDir, "xdg-data"),
+  };
+}
+
+function assertCompatTargetEnv(env, homeDir) {
+  assert.equal(env.HOME, homeDir);
+  assert.equal(env.TMPDIR, path.join(homeDir, "compat-sandbox", "tmp"));
+  assert.equal(env.GIT_TERMINAL_PROMPT, "0");
+  assert.equal(env.GIT_CONFIG_NOSYSTEM, "1");
+  assert.equal(env.GHOSTEX_SOURCE_ROOT, repoRoot);
+  for (const forbiddenKey of [
+    "ANTHROPIC_API_KEY",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NETRC",
+    "OPENAI_API_KEY",
+    "SSH_AUTH_SOCK",
+  ]) {
+    assert.equal(Object.hasOwn(env, forbiddenKey), false, `compat target env leaked ${forbiddenKey}`);
+  }
+  const realHome = process.env.HOME;
+  if (realHome && realHome !== homeDir) {
+    for (const [key, value] of Object.entries(env)) {
+      if (key === "GHOSTEX_SOURCE_ROOT") {
+        continue;
+      }
+      assert.equal(String(value).includes(realHome), false, `compat target env ${key} leaked real HOME`);
+    }
+  }
+}
+
+async function assertCompatSandboxContained(homeDir, runOptions) {
+  const sandboxPaths = runOptions.sandboxPaths ?? getCompatSandboxPaths(homeDir);
+  let text = "";
+  try {
+    text = await readFile(sandboxPaths.invocationLogFile, "utf8");
+  } catch {
+    return;
+  }
+  for (const line of text.split("\n")) {
+    if (!line.trim()) {
+      continue;
+    }
+    const invocation = JSON.parse(line);
+    assert.equal(Object.hasOwn(invocation, "args"), false, "compat invocation log persisted raw args");
+    assert.equal(Object.hasOwn(invocation, "cwd"), false, "compat invocation log persisted cwd");
+    assert.equal(Object.hasOwn(invocation, "destination"), false, "compat invocation log persisted destination");
+    assert.equal(invocation.cwdInsideHome, true, `compat ${invocation.tool} cwd escaped temp HOME`);
+    if (Object.hasOwn(invocation, "destinationInsideHome")) {
+      assert.equal(invocation.destinationInsideHome, true, "compat git clone destination escaped temp HOME");
+    }
+    if (invocation.tool === "git" && invocation.delegated === true) {
+      assert.equal(invocation.hasNetworkLookingArg, false, "compat delegated git command included a network-looking argument");
+    }
+  }
+}
+
+function isPathInside(parentPath, candidatePath) {
+  const relative = path.relative(resolveExistingPath(parentPath), resolveExistingPath(candidatePath));
+  return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function resolveExistingPath(inputPath) {
+  try {
+    return realpathSync.native(inputPath);
+  } catch {
+    return path.resolve(inputPath);
+  }
+}
+
+function hasNetworkLookingArg(args) {
+  return Array.isArray(args) && args.some((arg) => /^(?:https?|ssh):\/\//iu.test(String(arg)) || /^git@[^:]+:/iu.test(String(arg)));
+}
+
 async function waitForFileText(filePath, timeoutMs, child, output) {
   return await waitFor(async () => {
     assertChildStillUseful(child, output);
@@ -2330,7 +2641,7 @@ async function requestJson(pathname, requestOptions) {
   if (requestOptions.body !== undefined) {
     headers["content-type"] = "application/json";
   }
-  const response = await fetch(`http://${LOCAL_HOST}:${options.port}${pathname}`, {
+  const response = await fetch(compatHttpUrl(pathname), {
     body: requestOptions.body === undefined ? undefined : JSON.stringify(requestOptions.body),
     headers,
     method: requestOptions.method,
@@ -2341,6 +2652,26 @@ async function requestJson(pathname, requestOptions) {
     headers: Object.fromEntries(response.headers.entries()),
     status: response.status,
   };
+}
+
+function compatHttpUrl(pathname) {
+  assert.equal(typeof pathname, "string");
+  assert.equal(pathname.startsWith("/"), true, "compat HTTP requests must use local absolute paths");
+  assert.equal(pathname.startsWith("//"), false, "compat HTTP requests must not use protocol-relative URLs");
+  const url = new URL(pathname, `http://${LOCAL_HOST}:${options.port}`);
+  assert.equal(url.protocol, "http:");
+  assert.equal(url.hostname, LOCAL_HOST);
+  assert.equal(url.port, String(options.port));
+  return url;
+}
+
+function compatWebSocketUrl(pathname, query) {
+  const url = compatHttpUrl(pathname);
+  url.protocol = "ws:";
+  for (const [key, value] of Object.entries(query)) {
+    url.searchParams.set(key, String(value));
+  }
+  return url;
 }
 
 function assertErrorEnvelope(body, error) {
@@ -2423,7 +2754,10 @@ async function readEventStreamReady(token) {
   if (typeof WebSocket === "undefined") {
     throw new Error("Global WebSocket is unavailable. Use Node 22 or newer.");
   }
-  const url = `ws://${LOCAL_HOST}:${options.port}/api/events?authToken=${encodeURIComponent(token)}&protocolVersion=${PROTOCOL_VERSION}`;
+  const url = compatWebSocketUrl("/api/events", {
+    authToken: token,
+    protocolVersion: PROTOCOL_VERSION,
+  });
   const socket = new WebSocket(url);
   try {
     const text = await new Promise((resolve, reject) => {
@@ -2454,7 +2788,10 @@ async function openEventSocket(token) {
   if (typeof WebSocket === "undefined") {
     throw new Error("Global WebSocket is unavailable. Use Node 22 or newer.");
   }
-  const url = `ws://${LOCAL_HOST}:${options.port}/api/events?authToken=${encodeURIComponent(token)}&protocolVersion=${PROTOCOL_VERSION}`;
+  const url = compatWebSocketUrl("/api/events", {
+    authToken: token,
+    protocolVersion: PROTOCOL_VERSION,
+  });
   const socket = new WebSocket(url);
   await new Promise((resolve, reject) => {
     socket.addEventListener("open", resolve, { once: true });
@@ -2496,6 +2833,14 @@ async function nextWebSocketEvent(socket, type, timeoutMs = 5_000) {
       reject(new Error("gxserver event WebSocket failed."));
     }, { once: true });
   });
+}
+
+async function observeWebSocketEvent(socket, type, timeoutMs) {
+  try {
+    return { event: await nextWebSocketEvent(socket, type, timeoutMs) };
+  } catch (error) {
+    return { error };
+  }
 }
 
 async function webSocketDataToText(data) {

@@ -3,6 +3,10 @@ export const NATIVE_GHOSTTY_HOST_PROTOCOL_VERSION = 1;
 import type { SidebarProjectDiffStats } from "./project-diff-stats";
 import type { SidebarCommandButton } from "./sidebar-commands";
 import type {
+  GxserverPortlessPresentation,
+  GxserverPortlessStatus,
+} from "./gxserver-protocol";
+import type {
   CustomWorkspaceOpenTarget,
   WorkspaceOpenTargetAvailability,
 } from "./workspace-open-targets";
@@ -95,6 +99,29 @@ export type TitlebarResourceSession = {
   sessionPersistenceProvider?: "tmux" | "zmx" | "zellij";
   terminalTitle?: string;
   title: string;
+};
+
+export type NativePortlessProtocol = "https" | "http";
+export type NativePortlessAdminInstallAction = "install" | "reconfigure" | "retry";
+export type NativePortlessAdminAction = NativePortlessAdminInstallAction | "remove";
+
+export type NativeTitlebarPortlessState = {
+  /*
+  CDXC:PortlessResources 2026-06-23-15:18:
+  The native titlebar Resources panel receives the existing sanitized Portless HUD metadata so it can decorate owned dev-server rows without reading Portless files or adding names, paths, commands, stdout/stderr, env, tokens, or full URL payloads.
+  */
+  health: GxserverPortlessStatus;
+  nativeAdmin: {
+    actions: Record<
+      NativePortlessAdminAction,
+      {
+        available: boolean;
+        unavailableReason?: "localMacOnly" | "notRecommended" | "setupNotGhostexOwned";
+      }
+    >;
+    available: boolean;
+  };
+  presentation?: GxserverPortlessPresentation;
 };
 
 export type NativeGhosttyHostCommand =
@@ -453,6 +480,7 @@ export type NativeGhosttyHostCommand =
       sidebarActions?: {
         commands: SidebarCommandButton[];
       };
+      titlebarPortless?: NativeTitlebarPortlessState;
       titlebarResourceGroups?: TitlebarResourceGroup[];
       type: "setActiveTerminalSet";
       workspaceOpenTargets?: {
@@ -486,6 +514,26 @@ export type NativeGhosttyHostCommand =
       sessionId: string;
       title: string;
       type: "showSessionAttentionNotification";
+    }
+  | {
+      /**
+       * CDXC:PortlessIntegration 2026-06-23-00:15:
+       * Portless service install, reconfigure, retry, and removal are explicit
+       * native admin actions. The command carries only the requested action,
+       * request id, and HTTP/HTTPS mode so React cannot pass arbitrary
+       * executables, env, stdout, stderr, paths, hostnames, URLs, or command
+       * text across the privileged boundary.
+       */
+      action: NativePortlessAdminInstallAction;
+      protocol: NativePortlessProtocol;
+      requestId: string;
+      type: "portlessAdminAction";
+    }
+  | {
+      action: "remove";
+      protocol?: NativePortlessProtocol;
+      requestId: string;
+      type: "portlessAdminAction";
     };
 
 export type NativeGhosttyHostEvent =
@@ -767,6 +815,23 @@ export type NativeGhosttyHostEvent =
       type: "t3RuntimeStartFailed";
     }
   | {
+      /**
+       * CDXC:PortlessIntegration 2026-06-23-00:15:
+       * Native Portless admin results are structured and sanitized. React gets
+       * only stable result fields, never raw process streams, resource paths,
+       * state paths, command text, hostnames, URLs, or environment values from
+       * the privileged service script.
+       */
+      action: NativePortlessAdminAction;
+      errorCode?: string;
+      exitCode?: number;
+      ok: boolean;
+      protocol?: NativePortlessProtocol;
+      requestId: string;
+      status: string;
+      type: "portlessAdminResult";
+    }
+  | {
       projectId: string;
       serverOrigin: string;
       sessionId: string;
@@ -778,3 +843,16 @@ export type NativeGhosttyHostEvent =
       protocolVersion: typeof NATIVE_GHOSTTY_HOST_PROTOCOL_VERSION;
       type: "hostReady";
     };
+
+/*
+CDXC:PortlessProtocol 2026-06-23-00:25:
+Native-sidebar should consume the shared sanitized Portless admin command/result contracts instead of carrying a second copy. These aliases keep Phase 11 privileged action fields aligned while Phase 12 passes the latest result through React metadata without stdout, stderr, paths, URLs, command text, or env values.
+*/
+export type NativePortlessAdminCommand = Extract<
+  NativeGhosttyHostCommand,
+  { type: "portlessAdminAction" }
+>;
+export type NativePortlessAdminResult = Extract<
+  NativeGhosttyHostEvent,
+  { type: "portlessAdminResult" }
+>;

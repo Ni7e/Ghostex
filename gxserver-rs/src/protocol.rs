@@ -5,6 +5,7 @@ use crate::constants::{
     GXSERVER_LOCAL_API_HOST, GXSERVER_LOCAL_API_PORT, GXSERVER_PRODUCT, GXSERVER_PROTOCOL_VERSION,
     GXSERVER_REMOTE_API_HOST, GXSERVER_REMOTE_API_PORT,
 };
+use crate::portless::PortlessStatusPayload;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ApiPermission {
@@ -108,13 +109,23 @@ pub struct MigrationStateImports {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LegacyMacosStateImportStatus {
-    pub completed_at: String,
+    /*
+    CDXC:GxserverStorage 2026-06-22-05:10:
+    Migration status is a storage wire contract, not only an internal Rust shape. Keep legacy import detail fields optional so `notRun`, skipped, completed, and TypeScript-created state.db metadata can serialize with the same field presence as the TypeScript daemon.
+    */
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
     pub id: String,
-    pub logs_imported: LegacyMacosLogsImportStatus,
-    pub projects_imported: usize,
-    pub sessions_imported: usize,
-    pub skipped_reason: String,
-    pub source_files_read: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logs_imported: Option<LegacyMacosLogsImportStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub projects_imported: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sessions_imported: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skipped_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_files_read: Option<Vec<String>>,
     pub status: String,
 }
 
@@ -170,6 +181,7 @@ pub struct ServerHealthResponse {
     pub listeners: ListenersConfig,
     pub migration: MigrationStatus,
     pub pid: u32,
+    pub portless: PortlessStatusPayload,
     pub port: u16,
     pub server_id: String,
     pub started_at: String,
@@ -259,10 +271,7 @@ pub fn protocol_mismatch_error(
     request_id: Option<String>,
 ) -> RpcErrorResponse {
     let actual = actual_protocol_version
-        .map(|value| match value {
-            Value::String(text) => text,
-            other => other.to_string(),
-        })
+        .map(js_string_for_protocol_version)
         .unwrap_or_else(|| "undefined".to_string());
     rpc_error(
         "protocolMismatch",
@@ -271,6 +280,34 @@ pub fn protocol_mismatch_error(
         ),
         request_id,
     )
+}
+
+/*
+CDXC:GxserverProtocol 2026-06-22-04:10:
+Protocol-mismatch messages are part of the client contract. TypeScript reports `String(actualProtocolVersion)`, so Rust must preserve JavaScript-like stringification for non-scalar JSON values instead of leaking serde JSON syntax into update guidance.
+*/
+fn js_string_for_protocol_version(value: Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(value) => {
+            if value {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }
+        }
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => value,
+        Value::Array(values) => values
+            .into_iter()
+            .map(|value| match value {
+                Value::Null => String::new(),
+                other => js_string_for_protocol_version(other),
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        Value::Object(_) => "[object Object]".to_string(),
+    }
 }
 
 /*
@@ -373,6 +410,7 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/uninstallAgentHooks"
         | "/api/readAgentSkillStatus"
         | "/api/installAgentSkills"
+        | "/api/updatePortlessState"
         | "/api/queryLogs" => full_local(path),
         "/api/resolveGitRootForPath"
         | "/api/updateAuth"
@@ -403,4 +441,22 @@ fn descriptor(
 pub fn is_remote_endpoint_allowed(listener_kind: ListenerKind, permission: ApiPermission) -> bool {
     matches!(listener_kind, ListenerKind::Local)
         || matches!(permission, ApiPermission::RemoteAllowed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn protocol_mismatch_message_uses_typescript_stringification() {
+        let object = protocol_mismatch_error(Some(json!({ "version": 2 })), Some("r1".to_string()));
+        assert!(object.message.contains("got [object Object]."));
+
+        let array = protocol_mismatch_error(Some(json!([1, null, "x"])), Some("r2".to_string()));
+        assert!(array.message.contains("got 1,,x."));
+
+        let missing = protocol_mismatch_error(None, Some("r3".to_string()));
+        assert!(missing.message.contains("got undefined."));
+    }
 }

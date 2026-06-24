@@ -78,7 +78,9 @@ import {
 import type {
   SidebarAgentHookStatusMessage,
   SidebarGhostexCliStatusMessage,
+  SidebarPortlessState,
 } from "../../shared/session-grid-contract-sidebar";
+import type { NativePortlessAdminInstallAction } from "../../shared/native-ghostty-host-protocol";
 import { resolveSidebarTheme, type SidebarTheme } from "../../shared/session-grid-contract";
 import {
   getSidebarTitlebarGradientColors,
@@ -88,6 +90,7 @@ import {
   type KeepAwakeDurationMinutes,
   type SidebarSide,
   type SessionPersistenceProvider,
+  type TerminalDevServerOpenTarget,
 } from "../../shared/ghostex-settings";
 import {
   normalizeghostexHotkeySettings,
@@ -162,6 +165,7 @@ const GHOSTEX_CHANGELOG_URL = "https://github.com/maddada/ghostex/releases";
 const GHOSTEX_DOCS_URL = "https://ghostex.dev/docs";
 const GHOSTEX_DISCORD_URL = "https://discord.gg/df7b3G92CS";
 const TITLEBAR_GRADIENT_BLEND_START_PERCENT = 40;
+const CODE_SERVER_RESOURCE_PORT = 3775;
 
 type TitlebarSidebarActionsSettings = {
   commands: SidebarCommandButton[];
@@ -176,9 +180,12 @@ type TitlebarKeepAwakeSettings = {
   deactivateOnLowPowerMode: boolean;
   deactivateOnUserSwitch: boolean;
   defaultDurationMinutes: KeepAwakeDurationMinutes;
+  delayedSendSessionCount: number;
   featureEnabled: boolean;
   hideTitlebarControl: boolean;
   preventLidSleep: boolean;
+  whileWorkingSessions: boolean;
+  workingSessionCount: number;
 };
 
 type TitlebarResourceGroup = {
@@ -229,7 +236,7 @@ type TitlebarTip = {
 };
 
 type TitlebarNotice = {
-  action?: "installAgentHooks" | "openSettings";
+  action?: "openSettings";
   body: string;
   icon: TitlebarTipIcon;
   id: string;
@@ -263,8 +270,10 @@ type TitlebarGxserverDaemonStatus = {
 type TitlebarProjectState = {
   activeMode: TitlebarMode;
   browserTabs: TitlebarBrowserTabResource[];
+  codeEditorProjectIds: string[];
   agentHookStatus?: SidebarAgentHookStatusMessage;
   ghostexCliStatus?: SidebarGhostexCliStatusMessage;
+  portless?: SidebarPortlessState;
   debuggingMode: boolean;
   showBetaFeatures: boolean;
   diffStats: SidebarProjectDiffStats;
@@ -292,6 +301,7 @@ type TitlebarProjectState = {
   hotkeys: ghostexHotkeySettings;
   showProjectEditorDiffFileCount: boolean;
   sessionPersistenceProvider: SessionPersistenceProvider;
+  terminalDevServerOpenTarget: TerminalDevServerOpenTarget;
   toggleSidebarHotkeyLabel: string;
   workspaceOpenTargets: TitlebarOpenTargetsSettings;
   isFocusModeActive?: boolean;
@@ -307,6 +317,24 @@ type ResourceProcess = {
   rssMb: number;
 };
 
+type ResourceListeningServer = {
+  commandName: string;
+  cwd?: string;
+  host: string;
+  pid: number;
+  port: number;
+  url: string;
+};
+
+type ResourcePortlessServerPresentation = {
+  hostname: string;
+  isSetupActive: boolean;
+  protocol: SidebarPortlessState["health"]["protocol"];
+  setupAction?: NativePortlessAdminInstallAction;
+  setupActionLabel: string;
+  setupStatusLabel: string;
+};
+
 type ResourceProcessBundle = {
   childProcesses: ResourceProcess[];
   cpu: number;
@@ -314,10 +342,13 @@ type ResourceProcessBundle = {
   label: string;
   memoryMb: number;
   pids: number[];
+  portless?: ResourcePortlessServerPresentation;
+  projectEditorIds?: string[];
   process?: ResourceProcess;
   browserTab?: TitlebarBrowserTabResource;
+  server?: ResourceListeningServer;
   session?: TitlebarResourceSession;
-  type: "browser" | "code" | "orphan" | "session";
+  type: "browser" | "code" | "orphan" | "server" | "session";
 };
 
 type ResourceGroupView = {
@@ -343,6 +374,11 @@ type NativeTitlebarCommand =
       requestId: string;
       type: "setKeepAwakeLidSleepPrevention";
     }
+  | {
+      runtime?: KeepAwakeRuntimeState | null;
+      suppressAutoStart: boolean;
+      type: "syncTitlebarKeepAwakeRuntime";
+    }
   | { type: "openActiveProjectEditorFromTitlebar" }
   | { type: "toggleProjectEditorCompanionFromTitlebar" }
   | { type: "exitFocusModeFromTitlebar" }
@@ -359,7 +395,6 @@ type NativeTitlebarCommand =
   | { type: "stopGxserverFromTitlebar" }
   | { type: "restartGxserverFromTitlebar" }
   | { enabled: boolean; type: "setGxserverAlwaysStartFromTitlebar" }
-  | { type: "installAgentHooksFromTitlebarNotice" }
   | { sessionId: string; type: "focusResourceSessionFromTitlebar" }
   | { sessionIds: string[]; type: "sleepInactiveSessionsFromTitlebar" }
   | { projectIds: string[]; sessionIds: string[]; type: "quitResourcesFromTitlebar" }
@@ -424,6 +459,7 @@ declare global {
       setNativeDropdownOpen: (kind: TitlebarDropdownPanelKind | undefined) => void;
       setNativePointerInside: (isInside: boolean) => void;
       setWindowFocused: (isFocused: boolean) => void;
+      syncKeepAwakeRuntime: (syncState: KeepAwakeRuntimeSyncState) => void;
     };
   }
 }
@@ -437,6 +473,7 @@ const KEEP_AWAKE_LID_SLEEP_STORAGE_KEY = "ghostex.titlebar.lidSleepPrevention";
 const TITLEBAR_GIT_STATE_CACHE_STORAGE_PREFIX = "ghostex.titlebar.gitState.";
 const TITLEBAR_TIPS_READ_STORAGE_KEY = "ghostex.titlebar.tips.readIds";
 const KEEP_AWAKE_POWER_CHECK_INTERVAL_MS = 30_000;
+const KEEP_AWAKE_WORKING_SESSION_GRACE_MS = 20 * 60_000;
 const KEEP_AWAKE_ADMIN_PROCESS_TIMEOUT_MS = 120_000;
 /**
  * CDXC:NativeWindowChrome 2026-05-25-07:16:
@@ -800,14 +837,14 @@ function createTitlebarMissingAgentHooksNotice(
    * auto session naming, session status, and sleep/resume reliability.
    */
   const formattedAgents = formatTitlebarNoticeNameList(agentNames);
-  const plural = agentNames.length > 1;
   const hasOutdatedHooks = outdatedAgents.size > 0;
   const hasMissingHooks = missingAgents.size > 0;
   const action = hasOutdatedHooks && hasMissingHooks ? "setup" : hasOutdatedHooks ? "update" : "install";
+  const actionLabel = action === "setup" ? "install or update" : action;
   const actionVerb = action === "setup" ? "set up" : action === "update" ? "updated" : "installed";
   return {
-    action: "installAgentHooks",
-    body: `Please install the hooks by clicking this notification. Automatic session renaming, In Progress/Needs Attention status, and sleeping or resuming agent sessions will not work correctly until hooks are ${action === "setup" ? "installed or updated" : actionVerb}.`,
+    action: "openSettings",
+    body: `Open Settings > Integrations to ${actionLabel} agent hooks for ${formattedAgents}. Automatic session renaming, In Progress/Needs Attention status, and sleeping or resuming agent sessions will not work correctly until hooks are ${action === "setup" ? "installed or updated" : actionVerb}.`,
     icon: "warning",
     id: `agent-hooks-${action}-${[...outdatedAgents.keys(), ...missingAgents.keys()].sort().join("-")}`,
     settingsTarget: "agentHooks",
@@ -838,10 +875,12 @@ type KeepAwakeRuntimeState = {
   durationMinutes: KeepAwakeDurationMinutes;
   fireAtMs?: number;
   pid: number;
+  source: "automatic" | "manual";
   startedAtMs: number;
 };
 
 type KeepAwakeRuntimeSyncState = {
+  runtime?: KeepAwakeRuntimeState | null;
   suppressAutoStart: boolean;
 };
 
@@ -959,7 +998,13 @@ function postTitlebarSidebarCommand(
     | { type: "requestAgentHookStatus" }
     | { type: "requestGhostexCliStatus" }
     | { type: "refreshDaemonSessions" }
-    | { type: "refreshGitState" },
+    | { type: "refreshGitState" }
+    | {
+        action: NativePortlessAdminInstallAction;
+        protocol: SidebarPortlessState["health"]["protocol"];
+        requestId: string;
+        type: "runPortlessSettingsAdminAction";
+      },
 ): void {
   /*
   CDXC:AgentHooks 2026-06-07-11:05:
@@ -1125,6 +1170,18 @@ function runNativeKeepAwakeLidSleepPrevention(
   });
 }
 
+function syncKeepAwakeRuntimeToMainTitlebar(syncState: KeepAwakeRuntimeSyncState): void {
+  /*
+   * CDXC:TitlebarKeepAwake 2026-06-23-19:36:
+   * Keep Awake menu actions run inside a native child WKWebView. Relay the committed runtime state back to the main titlebar explicitly so the titlebar icon changes immediately instead of depending on cross-webview localStorage events.
+   */
+  postNative({
+    runtime: syncState.runtime,
+    suppressAutoStart: syncState.suppressAutoStart,
+    type: "syncTitlebarKeepAwakeRuntime",
+  });
+}
+
 function parseResourceProcessTable(stdout: string): ResourceProcess[] {
   return stdout
     .split("\n")
@@ -1151,6 +1208,132 @@ function parseResourceProcessTable(stdout: string): ResourceProcess[] {
     .filter((process): process is ResourceProcess => process !== undefined);
 }
 
+function parseResourceListeningServerTable(stdout: string): ResourceListeningServer[] {
+  const servers: ResourceListeningServer[] = [];
+  let currentPid: number | undefined;
+  let currentCommandName = "";
+
+  for (const rawLine of stdout.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    const field = line[0];
+    const value = line.slice(1);
+    if (field === "p") {
+      const pid = Number(value);
+      currentPid = Number.isFinite(pid) && pid > 0 ? pid : undefined;
+      currentCommandName = "";
+      continue;
+    }
+    if (field === "c") {
+      currentCommandName = value.trim();
+      continue;
+    }
+    if (field !== "n" || currentPid === undefined) {
+      continue;
+    }
+    const endpoint = parseResourceListeningEndpoint(value);
+    if (!endpoint) {
+      continue;
+    }
+    servers.push({
+      commandName: currentCommandName || "server",
+      host: endpoint.host,
+      pid: currentPid,
+      port: endpoint.port,
+      url: endpoint.url,
+    });
+  }
+
+  return uniqueResourceListeningServers(servers);
+}
+
+function parseResourceListeningEndpoint(endpoint: string): { host: string; port: number; url: string } | undefined {
+  const trimmed = endpoint.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  let rawHost = "";
+  let rawPort = "";
+  if (trimmed.startsWith("[")) {
+    const hostEnd = trimmed.indexOf("]:");
+    if (hostEnd < 0) {
+      return undefined;
+    }
+    rawHost = trimmed.slice(1, hostEnd);
+    rawPort = trimmed.slice(hostEnd + 2);
+  } else {
+    const separatorIndex = trimmed.lastIndexOf(":");
+    if (separatorIndex < 0) {
+      return undefined;
+    }
+    rawHost = trimmed.slice(0, separatorIndex);
+    rawPort = trimmed.slice(separatorIndex + 1);
+  }
+
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    return undefined;
+  }
+  const host = resourceServerDisplayHost(rawHost);
+  const formattedHost = host.includes(":") ? `[${host}]` : host;
+  return {
+    host,
+    port,
+    url: `http://${formattedHost}:${port}`,
+  };
+}
+
+function parseResourceListeningServerCwdTable(stdout: string): Map<number, string> {
+  const cwdByPid = new Map<number, string>();
+  let currentPid: number | undefined;
+
+  for (const rawLine of stdout.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    const field = line[0];
+    const value = line.slice(1);
+    if (field === "p") {
+      const pid = Number(value);
+      currentPid = Number.isFinite(pid) && pid > 0 ? pid : undefined;
+      continue;
+    }
+    if (field === "n" && currentPid !== undefined && value.trim()) {
+      cwdByPid.set(currentPid, value.trim());
+    }
+  }
+
+  return cwdByPid;
+}
+
+function uniqueResourceListeningServers(servers: ResourceListeningServer[]): ResourceListeningServer[] {
+  const seen = new Set<string>();
+  return servers.filter((server) => {
+    const key = `${server.pid}:${server.port}:${server.host}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function resourceServerDisplayHost(host: string): string {
+  const normalized = host.trim().replace(/^\[|\]$/gu, "");
+  return !normalized ||
+    normalized === "*" ||
+    normalized === "0.0.0.0" ||
+    normalized === "::" ||
+    normalized === "::1" ||
+    normalized === "127.0.0.1"
+    ? "localhost"
+    : normalized;
+}
+
 async function readResourceProcesses(): Promise<ResourceProcess[]> {
   const result = await runNativeProcess("/bin/ps", [
     "-axo",
@@ -1159,14 +1342,65 @@ async function readResourceProcesses(): Promise<ResourceProcess[]> {
   return result.exitCode === 0 ? parseResourceProcessTable(result.stdout) : [];
 }
 
+async function readResourceListeningServers(): Promise<ResourceListeningServer[]> {
+  /*
+   * CDXC:TitlebarResources 2026-06-22-00:30:
+   * Resources needs a top Dev Servers section sourced from real TCP listeners,
+   * not terminal text heuristics. Read lsof's structured fields while the panel
+   * is open, then use cwd only for internal ownership matching without rendering
+   * or logging user paths.
+   */
+  try {
+    const listenerResult = await runNativeProcess(
+      "/usr/sbin/lsof",
+      ["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn"],
+      { timeoutMs: 10_000 },
+    );
+    if (listenerResult.exitCode !== 0) {
+      return [];
+    }
+
+    const servers = parseResourceListeningServerTable(listenerResult.stdout);
+    const pids = Array.from(new Set(servers.map((server) => server.pid)));
+    if (pids.length === 0) {
+      return servers;
+    }
+
+    const cwdResult = await runNativeProcess(
+      "/usr/sbin/lsof",
+      ["-nP", "-a", "-d", "cwd", "-F", "pn", "-p", pids.join(",")],
+      { timeoutMs: 10_000 },
+    );
+    if (cwdResult.exitCode !== 0) {
+      return servers;
+    }
+
+    const cwdByPid = parseResourceListeningServerCwdTable(cwdResult.stdout);
+    return servers.map((server) => {
+      const cwd = cwdByPid.get(server.pid);
+      return cwd ? { ...server, cwd } : server;
+    });
+  } catch {
+    return [];
+  }
+}
+
 /**
  * CDXC:TitlebarResources 2026-05-23-10:46:
  * Resource-manager Quit is a process-manager action, so it must terminate the
  * exact processes shown in the dropdown while the sidebar separately preserves
  * terminal cards as sleeping sessions. Recheck the command before SIGKILL so a
  * delayed hard kill cannot target an unrelated process that reused the PID.
+ *
+ * CDXC:TitlebarResources 2026-06-22-00:30:
+ * Dev Servers Stop should behave like a terminal Ctrl-C against the listener
+ * process tree before escalating. Use SIGINT for server bundles and keep SIGTERM
+ * for the existing close/sleep resource cleanup paths.
  */
-async function terminateResourceProcesses(processes: ResourceProcess[]): Promise<void> {
+async function terminateResourceProcesses(
+  processes: ResourceProcess[],
+  options: { gracefulSignal?: "INT" | "TERM" } = {},
+): Promise<void> {
   const targets = new Map(
     processes
       .filter((process) => Number.isFinite(process.pid) && process.pid > 1)
@@ -1176,7 +1410,8 @@ async function terminateResourceProcesses(processes: ResourceProcess[]): Promise
     return;
   }
 
-  await runNativeProcess("/bin/kill", ["-TERM", ...Array.from(targets.keys()).map(String)]);
+  const gracefulSignal = options.gracefulSignal ?? "TERM";
+  await runNativeProcess("/bin/kill", [`-${gracefulSignal}`, ...Array.from(targets.keys()).map(String)]);
   window.setTimeout(() => {
     void (async () => {
       const liveProcesses = await readResourceProcesses();
@@ -1196,7 +1431,14 @@ function createResourceGroupViews(
   browserTabs: TitlebarBrowserTabResource[],
   resourceGroups: TitlebarResourceGroup[],
   processes: ResourceProcess[],
-): { browserBundles: ResourceProcessBundle[]; groupViews: ResourceGroupView[]; orphanBundles: ResourceProcessBundle[] } {
+  servers: ResourceListeningServer[],
+  codeEditorProjectIds: string[],
+): {
+  browserBundles: ResourceProcessBundle[];
+  codeIdeBundles: ResourceProcessBundle[];
+  groupViews: ResourceGroupView[];
+  orphanBundles: ResourceProcessBundle[];
+} {
   const claimedPids = new Set<number>();
   const childrenByParent = createProcessChildrenMap(processes);
   const groupedBrowserTabIds = new Set<string>();
@@ -1211,15 +1453,21 @@ function createResourceGroupViews(
     const bundles = group.sessions
       .map((session) => createSessionResourceBundle(session, processes, childrenByParent, claimedPids))
       .filter((bundle): bundle is ResourceProcessBundle => bundle !== undefined);
-    const codeBundle = createProjectCodeServerBundle(group, processes, childrenByParent, claimedPids);
     const browserBundles = createBrowserBundles(groupBrowserTabs, processes, claimedPids, {
       includeRuntimeBundles: false,
     });
     return {
-      bundles: [...bundles, ...(codeBundle ? [codeBundle] : []), ...browserBundles],
+      bundles: [...bundles, ...browserBundles],
       group,
     };
   });
+  const codeIdeBundles = createCodeIdeResourceBundles(
+    servers,
+    processes,
+    childrenByParent,
+    claimedPids,
+    codeEditorProjectIds,
+  );
   claimAppRuntimeProcesses(processes, childrenByParent, claimedPids);
   const browserBundles = createBrowserBundles(
     browserTabs.filter((tab) => !groupedBrowserTabIds.has(tab.id)),
@@ -1227,11 +1475,191 @@ function createResourceGroupViews(
     claimedPids,
   );
   const orphanBundles = createOrphanBundles(processes, childrenByParent, claimedPids);
-  return { browserBundles, groupViews, orphanBundles };
+  return { browserBundles, codeIdeBundles, groupViews, orphanBundles };
+}
+
+function createResourceServerBundles(
+  servers: ResourceListeningServer[],
+  resourceViews: ReturnType<typeof createResourceGroupViews>,
+  processes: ResourceProcess[],
+  portless: SidebarPortlessState | undefined,
+): ResourceProcessBundle[] {
+  /*
+   * CDXC:TitlebarResources 2026-06-22-00:30:
+   * The Dev Servers section belongs above project sessions but must still be
+   * owned by a visible terminal resource. Attribute listeners by process-tree
+   * membership first, then by listener cwd inside the project path when a
+   * provider-backed session is visible without a sampled zmx root.
+   *
+   * CDXC:PortlessResources 2026-06-23-15:18:
+   * Resources may show Portless domains only on Ghostex-owned live server rows.
+   * Join routePreviews to the existing listener-backed server bundles by
+   * project id, session id, and port so assigned domains never become extra
+   * rows and Stop continues to target only the live server process tree.
+   */
+  const portlessPreviewsByOwnerAndPort = createPortlessRoutePreviewMap(portless);
+  const processByPid = new Map(processes.map((process) => [process.pid, process]));
+  const childrenByParent = createProcessChildrenMap(processes);
+  const terminalOwners = resourceViews.groupViews.flatMap((view) =>
+    view.bundles
+      .filter((bundle) => bundle.type === "session" && bundle.session?.sessionKind === "terminal")
+      .map((bundle) => ({ bundle, view })),
+  );
+  const ownerByPid = new Map<number, { bundle: ResourceProcessBundle; view: ResourceGroupView }>();
+  for (const owner of terminalOwners) {
+    owner.bundle.pids.forEach((pid) => ownerByPid.set(pid, owner));
+  }
+
+  return servers
+    .map((server): ResourceProcessBundle | undefined => {
+      const owner =
+        ownerByPid.get(server.pid) ??
+        terminalOwners.find(({ view }) =>
+          Boolean(
+            server.cwd &&
+              view.group.projectPath &&
+              isResourcePathInsideOrEqualTo(server.cwd, view.group.projectPath),
+          ),
+        );
+      if (!owner) {
+        return undefined;
+      }
+
+      const process = processByPid.get(server.pid);
+      const tree = process ? collectProcessTree([process], childrenByParent) : [];
+      const pids = tree.length > 0 ? tree.map((treeProcess) => treeProcess.pid) : [server.pid];
+      const portlessPreview = owner.bundle.session
+        ? portlessPreviewsByOwnerAndPort.get(
+            createPortlessRoutePreviewKeyForSession(owner.bundle.session, server.port),
+          )
+        : undefined;
+      return {
+        childProcesses: process ? tree.filter((treeProcess) => treeProcess.pid !== process.pid) : [],
+        cpu: sumProcessCpu(tree),
+        key: `server:${server.pid}:${server.port}`,
+        label: resourceServerLabel(server),
+        memoryMb: sumProcessMemory(tree),
+        pids,
+        ...(portlessPreview ? { portless: portlessPreview } : {}),
+        process,
+        server,
+        session: owner.bundle.session,
+        type: "server",
+      };
+    })
+    .filter((bundle): bundle is ResourceProcessBundle => bundle !== undefined)
+    .sort((left, right) => {
+      const leftPort = left.server?.port ?? 0;
+      const rightPort = right.server?.port ?? 0;
+      return leftPort === rightPort ? left.label.localeCompare(right.label) : leftPort - rightPort;
+    });
+}
+
+function createPortlessRoutePreviewMap(
+  portless: SidebarPortlessState | undefined,
+): Map<string, ResourcePortlessServerPresentation> {
+  const previewsByOwnerAndPort = new Map<string, ResourcePortlessServerPresentation>();
+  const routePreviews = portless?.presentation?.routePreviews ?? [];
+  if (!portless || routePreviews.length === 0 || portless.presentation?.routePreviewStatus !== "current") {
+    return previewsByOwnerAndPort;
+  }
+  for (const preview of routePreviews) {
+    const key = createPortlessRoutePreviewKey(preview.projectId, preview.sessionId, preview.port);
+    if (previewsByOwnerAndPort.has(key)) {
+      continue;
+    }
+    previewsByOwnerAndPort.set(key, {
+      hostname: preview.hostname,
+      isSetupActive: isPortlessResourceSetupActive(portless),
+      protocol: preview.protocol,
+      setupAction: getTitlebarPortlessResourcesSetupAction(portless),
+      setupActionLabel: getTitlebarPortlessResourcesSetupActionLabel(portless),
+      setupStatusLabel: getTitlebarPortlessResourcesSetupStatusLabel(portless),
+    });
+  }
+  return previewsByOwnerAndPort;
+}
+
+function createPortlessRoutePreviewKey(projectId: string, sessionId: string, port: number): string {
+  return `${projectId}:${sessionId}:${port}`;
+}
+
+function createPortlessRoutePreviewKeyForSession(
+  session: Pick<TitlebarResourceSession, "projectId" | "sessionId">,
+  port: number,
+): string {
+  const combinedSession = parseCombinedProjectSessionId(session.sessionId);
+  return createPortlessRoutePreviewKey(
+    session.projectId ?? combinedSession?.projectId ?? "",
+    combinedSession?.sessionId ?? session.sessionId,
+    port,
+  );
+}
+
+function isPortlessResourceSetupActive(portless: SidebarPortlessState): boolean {
+  const health = portless.health;
+  return (
+    health.enabled === true &&
+    health.setupOwnership === "ghostex" &&
+    health.setupStatus === "active"
+  );
+}
+
+function getTitlebarPortlessResourcesSetupAction(
+  portless: SidebarPortlessState,
+): NativePortlessAdminInstallAction | undefined {
+  const actions: readonly NativePortlessAdminInstallAction[] = ["install", "reconfigure", "retry"];
+  return actions.find((action) => portless.nativeAdmin.actions[action]?.available === true);
+}
+
+function getTitlebarPortlessResourcesSetupActionLabel(portless: SidebarPortlessState): string {
+  const action = getTitlebarPortlessResourcesSetupAction(portless);
+  if (action === "retry") {
+    return "Retry";
+  }
+  if (action === "install" || action === "reconfigure") {
+    return "Set up";
+  }
+  return "Status";
+}
+
+function getTitlebarPortlessResourcesSetupStatusLabel(portless: SidebarPortlessState): string {
+  const health = portless.health;
+  if (!health.enabled || health.setupStatus === "disabled") {
+    return "Portless disabled";
+  }
+  if (health.setupStatus === "failed") {
+    return "Portless setup failed";
+  }
+  if (health.setupOwnership === "standalone") {
+    return "Portless needs reconfigure";
+  }
+  if (health.setupStatus === "needed" || health.setupOwnership === "missing") {
+    return "Portless setup needed";
+  }
+  return "Portless status";
+}
+
+function resourceServerLabel(server: Pick<ResourceListeningServer, "host" | "port">): string {
+  return `${server.host}:${server.port}`;
+}
+
+function isResourcePathInsideOrEqualTo(childPath: string, parentPath: string): boolean {
+  const child = normalizeResourceOwnershipPath(childPath);
+  const parent = normalizeResourceOwnershipPath(parentPath);
+  if (!child || !parent) {
+    return false;
+  }
+  return child === parent || child.startsWith(`${parent}/`);
+}
+
+function normalizeResourceOwnershipPath(path: string): string {
+  return path.trim().replace(/\/+$/gu, "");
 }
 
 const EMPTY_RESOURCE_GROUP_VIEWS: ReturnType<typeof createResourceGroupViews> = {
   browserBundles: [],
+  codeIdeBundles: [],
   groupViews: [],
   orphanBundles: [],
 };
@@ -1245,7 +1673,7 @@ function createResourceItemCollapseTarget(bundle: ResourceProcessBundle): Resour
   if (bundle.childProcesses.length === 0) {
     return undefined;
   }
-  const collapsedByDefault = bundle.type === "session" || bundle.type === "browser";
+  const collapsedByDefault = bundle.type === "session" || bundle.type === "browser" || bundle.type === "server";
   return {
     collapsedWhenKeyPresent: !collapsedByDefault,
     key: collapsedByDefault ? `expanded:${bundle.key}` : bundle.key,
@@ -1266,6 +1694,7 @@ function isResourceItemCollapsed(target: ResourceItemCollapseTarget, collapsedKe
 
 function createResourceViewItemCollapseTargets(
   resourceViews: ReturnType<typeof createResourceGroupViews>,
+  serverBundles: ResourceProcessBundle[] = [],
 ): ResourceItemCollapseTarget[] {
   /*
    * CDXC:TitlebarResources 2026-06-11-18:30:
@@ -1284,9 +1713,11 @@ function createResourceViewItemCollapseTargets(
    * can share the same state transition.
    */
   return createResourceItemCollapseTargets([
+    ...serverBundles,
     ...resourceViews.groupViews
       .filter((view) => view.bundles.length > 0)
       .flatMap((view) => view.bundles),
+    ...resourceViews.codeIdeBundles,
     ...resourceViews.browserBundles,
     ...resourceViews.orphanBundles,
   ]);
@@ -1418,36 +1849,48 @@ function hasRunningZmxProviderForTitlebarResourceSession(
   );
 }
 
-function createProjectCodeServerBundle(
-  group: TitlebarResourceGroup,
+function createCodeIdeResourceBundles(
+  servers: ResourceListeningServer[],
   processes: ResourceProcess[],
   childrenByParent: Map<number, ResourceProcess[]>,
   claimedPids: Set<number>,
-): ResourceProcessBundle | undefined {
-  if (!group.projectPath) {
-    return undefined;
-  }
-  const seedProcesses = processes.filter(
-    (process) =>
-      !claimedPids.has(process.pid) &&
-      process.command.includes("code-server") &&
-      process.command.includes(group.projectPath),
+  codeEditorProjectIds: string[],
+): ResourceProcessBundle[] {
+  /*
+   * CDXC:TitlebarResources 2026-06-22-13:50:
+   * Embedded Code is one shared code-server runtime, not a project child process.
+   * Identify it from Ghostex's fixed localhost editor listener and render it in a Code IDE section so a root "/" project cannot claim it through path substring matching.
+   */
+  const server = servers.find(
+    (candidate) =>
+      candidate.port === CODE_SERVER_RESOURCE_PORT && candidate.host === "localhost",
   );
-  if (seedProcesses.length === 0) {
-    return undefined;
+  if (!server) {
+    return [];
   }
-  const tree = collectProcessTree(seedProcesses, childrenByParent);
+  const processByPid = new Map(processes.map((process) => [process.pid, process]));
+  const seedProcess = processByPid.get(server.pid);
+  const tree = seedProcess
+    ? collectProcessTree([seedProcess], childrenByParent).filter((process) => !claimedPids.has(process.pid))
+    : [];
   tree.forEach((process) => claimedPids.add(process.pid));
-  return {
-    childProcesses: tree.filter((process) => !seedProcesses.some((seed) => seed.pid === process.pid)),
-    cpu: sumProcessCpu(tree),
-    key: `code:${group.groupId}`,
-    label: "Code",
-    memoryMb: sumProcessMemory(tree),
-    pids: tree.map((process) => process.pid),
-    process: seedProcesses[0],
-    type: "code",
-  };
+  claimedPids.add(server.pid);
+  const pids = tree.length > 0 ? tree.map((process) => process.pid) : [server.pid];
+  return [
+    {
+      childProcesses: seedProcess
+        ? tree.filter((process) => process.pid !== seedProcess.pid)
+        : [],
+      cpu: sumProcessCpu(tree),
+      key: "code:ide",
+      label: "Code",
+      memoryMb: sumProcessMemory(tree),
+      pids,
+      process: seedProcess,
+      projectEditorIds: Array.from(new Set(codeEditorProjectIds)),
+      type: "code",
+    },
+  ];
 }
 
 function claimAppRuntimeProcesses(
@@ -1798,6 +2241,9 @@ function isResourceBundleActionable(bundle: ResourceProcessBundle): boolean {
 }
 
 function resourceBundleSidebarSessionIds(bundle: ResourceProcessBundle): string[] {
+  if (bundle.type === "server") {
+    return [];
+  }
   const session = bundle.session;
   if (session) {
     return [titlebarResourceSidebarSessionId(session)];
@@ -1813,7 +2259,18 @@ function resourceBundleSidebarSessionIds(bundle: ResourceProcessBundle): string[
   ];
 }
 
+function resourceBundleFocusSessionId(bundle: ResourceProcessBundle): string | undefined {
+  const session = bundle.session;
+  if (session) {
+    return titlebarResourceSidebarSessionId(session);
+  }
+  return resourceBundleSidebarSessionIds(bundle)[0];
+}
+
 function resourceBundleProjectEditorIds(bundle: ResourceProcessBundle): string[] {
+  if (bundle.projectEditorIds) {
+    return bundle.projectEditorIds;
+  }
   if (bundle.type === "code") {
     const match = /^code:(?<groupId>.+)$/u.exec(bundle.key);
     const projectId = match?.groups?.groupId ? parseCombinedProjectGroupId(match.groups.groupId) : undefined;
@@ -1882,6 +2339,9 @@ function App() {
     () => readStoredKeepAwakeRuntime(),
   );
   const [keepAwakeAutoStartSuppressed, setKeepAwakeAutoStartSuppressed] = useState(false);
+  const [keepAwakeWorkingSessionGraceUntilMs, setKeepAwakeWorkingSessionGraceUntilMs] =
+    useState<number | undefined>();
+  const previousKeepAwakeWorkingSessionCountRef = useRef(projectState.keepAwake.workingSessionCount);
   const [resourceProcesses, setResourceProcesses] = useState<ResourceProcess[]>([]);
   /*
    * CDXC:SidebarCollapse 2026-06-20-17:10:
@@ -1893,6 +2353,7 @@ function App() {
   const SidebarCollapseIcon =
     projectState.sidebarSide === "right" ? IconLayoutSidebarRight : IconLayoutSidebar;
   const keepAwakeFeatureEnabled = projectState.keepAwake.featureEnabled === true;
+  const [resourceServers, setResourceServers] = useState<ResourceListeningServer[]>([]);
   /*
    * CDXC:TitlebarResources 2026-06-11-18:13:
    * The native Resources child panel should not render zero-memory or missing-session rows while the first `ps` snapshot is still loading.
@@ -1919,9 +2380,29 @@ function App() {
   const resourceViews = useMemo(
     () =>
       resourcesPanelActive
-        ? createResourceGroupViews(projectState.browserTabs, projectState.resourceGroups, resourceProcesses)
+        ? createResourceGroupViews(
+            projectState.browserTabs,
+            projectState.resourceGroups,
+            resourceProcesses,
+            resourceServers,
+            projectState.codeEditorProjectIds,
+          )
         : EMPTY_RESOURCE_GROUP_VIEWS,
-    [projectState.browserTabs, projectState.resourceGroups, resourceProcesses, resourcesPanelActive],
+    [
+      projectState.browserTabs,
+      projectState.codeEditorProjectIds,
+      projectState.resourceGroups,
+      resourceProcesses,
+      resourceServers,
+      resourcesPanelActive,
+    ],
+  );
+  const resourceServerBundles = useMemo(
+    () =>
+      resourcesPanelActive
+        ? createResourceServerBundles(resourceServers, resourceViews, resourceProcesses, projectState.portless)
+        : [],
+    [projectState.portless, resourceProcesses, resourceServers, resourceViews, resourcesPanelActive],
   );
   const inactiveTerminalSleepSessionIds = useMemo(
     () => createInactiveTerminalSleepSessionIds(projectState.resourceGroups),
@@ -2012,6 +2493,30 @@ function App() {
      */
     postTitlebarSidebarCommand({ type: "openBrowserPane", url: GHOSTEX_CHANGELOG_URL });
   }, []);
+  const syncKeepAwakeRuntimeState = useCallback(
+    (syncState: KeepAwakeRuntimeSyncState | undefined) => {
+      if (syncState && Object.prototype.hasOwnProperty.call(syncState, "runtime")) {
+        /*
+         * CDXC:TitlebarKeepAwake 2026-06-23-19:36:
+         * Native child dropdowns send the committed Keep Awake runtime directly into the main titlebar bridge. Treat an explicit null runtime as a committed stop so stale localStorage in another WKWebView cannot keep the titlebar icon active.
+         */
+        setKeepAwakeRuntime(syncState.runtime ?? undefined);
+        setKeepAwakeAutoStartSuppressed(syncState.suppressAutoStart === true);
+        return;
+      }
+      if (syncState?.suppressAutoStart === true) {
+        setKeepAwakeRuntime(undefined);
+        setKeepAwakeAutoStartSuppressed(true);
+        return;
+      }
+      const storedRuntime = readStoredKeepAwakeRuntime();
+      setKeepAwakeRuntime(storedRuntime);
+      if (syncState?.suppressAutoStart === false || storedRuntime) {
+        setKeepAwakeAutoStartSuppressed(false);
+      }
+    },
+    [],
+  );
   const closeTitlebarDropdownPanel = useCallback(() => {
     postNative({ type: "closeTitlebarDropdownPanel" });
     setNativeDropdownOpen(undefined);
@@ -2095,10 +2600,19 @@ function App() {
       ) {
         return;
       }
+      if (nativeDropdownOpen) {
+        /*
+         * CDXC:ReactTitlebar 2026-06-23-19:36:
+         * Clicking blank titlebar chrome while a native child dropdown is open should dismiss that dropdown instead of starting a window drag. Keep this in the titlebar DOM mouse handler so AppKit does not need broad click rerouting or overlapping hit-test regions.
+         */
+        event.preventDefault();
+        closeTitlebarDropdownPanel();
+        return;
+      }
       event.preventDefault();
       postNative({ type: "titlebarBlankMouseDown" });
     },
-    [isDropdownPanel],
+    [closeTitlebarDropdownPanel, isDropdownPanel, nativeDropdownOpen],
   );
 
   useEffect(() => {
@@ -2252,6 +2766,7 @@ function App() {
     activeAction?.commandId,
     keepAwakeRuntime?.pid,
     resourceProcesses.length,
+    resourceServers.length,
     projectState.projectEditorCompanionPaneHidden,
     projectState.gxserverDaemon.state,
     projectState.projectIconDataUrl,
@@ -2362,6 +2877,7 @@ function App() {
       setNativePointerInside: setTitlebarNativePointerInside,
       setWindowFocused: setTitlebarWindowFocused,
       setNativeDropdownOpen,
+      syncKeepAwakeRuntime: syncKeepAwakeRuntimeState,
       setLastActionCommandId: (commandId) => {
         /*
          * CDXC:TitlebarActions 2026-06-16-18:31:
@@ -2413,7 +2929,7 @@ function App() {
       delete window.__ghostex_TITLEBAR__;
       delete document.body.dataset.windowFocused;
     };
-  }, [closeTitlebarDropdownPanel]);
+  }, [closeTitlebarDropdownPanel, syncKeepAwakeRuntimeState]);
 
   useEffect(() => {
     setSelectedActionCommandId(readLastActionCommandId(projectState));
@@ -2447,9 +2963,13 @@ function App() {
     }
     resourceRefreshInFlightRef.current = true;
     try {
-      const processes = await readResourceProcesses();
+      const [processes, servers] = await Promise.all([
+        readResourceProcesses(),
+        readResourceListeningServers(),
+      ]);
       if (generation === resourceRefreshGenerationRef.current) {
         setResourceProcesses(processes);
+        setResourceServers(servers);
         setResourceProcessSnapshotReady(true);
       }
     } catch (error) {
@@ -2493,6 +3013,7 @@ function App() {
       resourceRefreshGenerationRef.current += 1;
       setResourceProcessSnapshotReady(false);
       setResourceProcesses((current) => current.length === 0 ? current : []);
+      setResourceServers((current) => current.length === 0 ? current : []);
     };
   }, [refreshResources, resourcesPanelActive]);
 
@@ -2517,7 +3038,7 @@ function App() {
     if (resourcesOpenCollapseSeededRef.current) {
       return;
     }
-    const resourceItemCollapseTargets = createResourceViewItemCollapseTargets(resourceViews);
+    const resourceItemCollapseTargets = createResourceViewItemCollapseTargets(resourceViews, resourceServerBundles);
     if (resourceItemCollapseTargets.length === 0) {
       return;
     }
@@ -2534,7 +3055,7 @@ function App() {
     setCollapsedResourceKeys((current) =>
       applyResourceItemCollapsedState(current, resourceItemCollapseTargets, true),
     );
-  }, [ resourceViews, resourcesPanelActive ]);
+  }, [ resourceServerBundles, resourceViews, resourcesPanelActive ]);
 
   const openTarget = (target: ResolvedOpenTarget | undefined) => {
     if (!target || !projectState.projectPath) {
@@ -2734,6 +3255,11 @@ function App() {
      * mechanism. It also terminates the PIDs currently shown in the dropdown so
      * row Quit, group Quit, and Sleep All actually release RAM while the
      * sidebar keeps durable terminal sessions.
+     *
+     * CDXC:TitlebarResources 2026-06-22-00:30:
+     * Server Stop rows should interrupt only listener-backed server process trees.
+     * They intentionally skip sidebar session/project close commands so the
+     * terminal that launched the server remains available after the port stops.
      */
     setQuittingResourceKeys((current) => {
       const next = new Set(current);
@@ -2761,7 +3287,8 @@ function App() {
     );
     const resourceRefreshGeneration = resourceRefreshGenerationRef.current;
     if (processes.length > 0) {
-      void terminateResourceProcesses(processes).finally(() => {
+      const gracefulSignal = uniqueBundles.every((bundle) => bundle.type === "server") ? "INT" : "TERM";
+      void terminateResourceProcesses(processes, { gracefulSignal }).finally(() => {
         window.setTimeout(() => {
           void refreshResources(resourceRefreshGeneration);
         }, 1_800);
@@ -2806,9 +3333,12 @@ function App() {
     if (options.suppressAutoStart !== false) {
       setKeepAwakeAutoStartSuppressed(true);
     }
-    publishKeepAwakeRuntimeSync({
+    const syncState = {
+      runtime: null,
       suppressAutoStart: options.suppressAutoStart !== false,
-    });
+    };
+    publishKeepAwakeRuntimeSync(syncState);
+    syncKeepAwakeRuntimeToMainTitlebar(syncState);
     if (!runtime) {
       return;
     }
@@ -2820,7 +3350,10 @@ function App() {
   }, [keepAwakeRuntime]);
 
   const startKeepAwake = useCallback(
-    async (durationMinutes: KeepAwakeDurationMinutes = projectState.keepAwake.defaultDurationMinutes) => {
+    async (
+      durationMinutes: KeepAwakeDurationMinutes = projectState.keepAwake.defaultDurationMinutes,
+      options: { source?: KeepAwakeRuntimeState["source"] } = {},
+    ) => {
       if (!keepAwakeFeatureEnabled) {
         setKeepAwakeAutoStartSuppressed(true);
         return;
@@ -2849,11 +3382,14 @@ function App() {
         durationMinutes,
         fireAtMs: durationMinutes > 0 ? Date.now() + durationMinutes * 60_000 : undefined,
         pid,
+        source: options.source ?? "manual",
         startedAtMs: Date.now(),
       };
       setKeepAwakeRuntime(nextRuntime);
       localStorage.setItem(KEEP_AWAKE_RUNTIME_STORAGE_KEY, JSON.stringify(nextRuntime));
-      publishKeepAwakeRuntimeSync({ suppressAutoStart: false });
+      const syncState = { runtime: nextRuntime, suppressAutoStart: false };
+      publishKeepAwakeRuntimeSync(syncState);
+      syncKeepAwakeRuntimeToMainTitlebar(syncState);
     },
     [
       keepAwakeFeatureEnabled,
@@ -2894,14 +3430,19 @@ function App() {
     });
   };
 
-  const installAgentHooksFromTipsNotice = () => {
+  const openAgentHooksSettings = () => {
     /**
-     * CDXC:AgentHooks 2026-06-18-03:22:
-     * The missing-hook Tips warning should be an install action, not only a
-     * Settings deep-link. Native owns the install and toast lifecycle so the
-     * titlebar remains a thin UI surface.
+     * CDXC:AgentHooks 2026-06-23-05:09:
+     * The missing-hook Tips warning should deep-link to Settings > Integrations
+     * and search for Agent Hooks instead of installing directly from titlebar
+     * chrome, so users land on the provider-specific status and install control.
      */
-    postNative({ type: "installAgentHooksFromTitlebarNotice" });
+    window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
+      initialSearchQuery: "Agent Hooks",
+      initialTab: "integrations",
+      modal: "settings",
+      type: "open",
+    });
   };
 
   const openDebuggingModeSettings = () => {
@@ -2929,13 +3470,9 @@ function App() {
   };
 
   const handleNoticeAction = (notice: TitlebarNotice) => {
-    if (notice.action === "installAgentHooks") {
-      installAgentHooksFromTipsNotice();
-      return;
-    }
     const target = notice.settingsTarget;
     if (target === "agentHooks") {
-      installAgentHooksFromTipsNotice();
+      openAgentHooksSettings();
       return;
     }
     if (target === "debuggingMode") {
@@ -2950,18 +3487,6 @@ function App() {
   };
 
   useEffect(() => {
-    const syncKeepAwakeRuntime = (syncState: KeepAwakeRuntimeSyncState | undefined) => {
-      if (syncState?.suppressAutoStart === true) {
-        setKeepAwakeRuntime(undefined);
-        setKeepAwakeAutoStartSuppressed(true);
-        return;
-      }
-      const storedRuntime = readStoredKeepAwakeRuntime();
-      setKeepAwakeRuntime(storedRuntime);
-      if (syncState?.suppressAutoStart === false || storedRuntime) {
-        setKeepAwakeAutoStartSuppressed(false);
-      }
-    };
     const handleStorage = (event: StorageEvent) => {
       if (
         event.key !== KEEP_AWAKE_RUNTIME_STORAGE_KEY &&
@@ -2972,14 +3497,14 @@ function App() {
       if (event.key === KEEP_AWAKE_RUNTIME_STORAGE_KEY && event.newValue === null) {
         return;
       }
-      syncKeepAwakeRuntime(
+      syncKeepAwakeRuntimeState(
         event.key === KEEP_AWAKE_RUNTIME_SYNC_STORAGE_KEY
           ? readKeepAwakeRuntimeSyncState(event.newValue)
           : undefined,
       );
     };
     const handleLocalSync = (event: Event) => {
-      syncKeepAwakeRuntime(
+      syncKeepAwakeRuntimeState(
         event instanceof CustomEvent ? event.detail as KeepAwakeRuntimeSyncState : undefined,
       );
     };
@@ -2993,7 +3518,7 @@ function App() {
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener(KEEP_AWAKE_RUNTIME_CHANGED_EVENT, handleLocalSync);
     };
-  }, []);
+  }, [syncKeepAwakeRuntimeState]);
 
   useEffect(() => {
     /*
@@ -3024,6 +3549,88 @@ function App() {
     keepAwakeRuntime,
     projectState.keepAwake.activateOnLaunch,
     startKeepAwake,
+  ]);
+
+  useEffect(() => {
+    /*
+     * CDXC:TitlebarKeepAwake 2026-06-23-08:20:
+     * Working-session keep-awake is optional, but once enabled it should cover the active Working period plus 20 minutes afterward so users have time to reply before the Mac can sleep.
+     */
+    const previousWorkingSessionCount = previousKeepAwakeWorkingSessionCountRef.current;
+    previousKeepAwakeWorkingSessionCountRef.current = projectState.keepAwake.workingSessionCount;
+    if (!projectState.keepAwake.whileWorkingSessions) {
+      setKeepAwakeWorkingSessionGraceUntilMs(undefined);
+      return;
+    }
+    if (
+      projectState.keepAwake.workingSessionCount === 0 &&
+      previousWorkingSessionCount > 0
+    ) {
+      setKeepAwakeWorkingSessionGraceUntilMs(Date.now() + KEEP_AWAKE_WORKING_SESSION_GRACE_MS);
+    }
+  }, [
+    projectState.keepAwake.whileWorkingSessions,
+    projectState.keepAwake.workingSessionCount,
+  ]);
+
+  useEffect(() => {
+    if (
+      !projectState.keepAwake.whileWorkingSessions ||
+      projectState.keepAwake.workingSessionCount > 0 ||
+      keepAwakeWorkingSessionGraceUntilMs === undefined
+    ) {
+      return;
+    }
+    const remainingMs = keepAwakeWorkingSessionGraceUntilMs - Date.now();
+    if (remainingMs <= 0) {
+      setKeepAwakeWorkingSessionGraceUntilMs(undefined);
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setKeepAwakeWorkingSessionGraceUntilMs(undefined);
+    }, remainingMs);
+    return () => window.clearTimeout(timeout);
+  }, [
+    keepAwakeWorkingSessionGraceUntilMs,
+    projectState.keepAwake.whileWorkingSessions,
+    projectState.keepAwake.workingSessionCount,
+  ]);
+
+  useEffect(() => {
+    /*
+     * CDXC:TitlebarKeepAwake 2026-06-23-08:20:
+     * If no manual keep-awake period is running, active Delayed Send timers should still prevent laptop sleep so the scheduled Enter can fire. Manual Keep Awake, especially Until turned off, takes precedence because automatic holds only start when no runtime exists and only stop runtimes they started.
+     */
+    if (!keepAwakeFeatureEnabled) {
+      return;
+    }
+    const delayedSendHoldActive = projectState.keepAwake.delayedSendSessionCount > 0;
+    const workingSessionHoldActive =
+      projectState.keepAwake.whileWorkingSessions &&
+      (projectState.keepAwake.workingSessionCount > 0 ||
+        (keepAwakeWorkingSessionGraceUntilMs !== undefined &&
+          keepAwakeWorkingSessionGraceUntilMs > Date.now()));
+    const shouldRunAutomaticKeepAwake =
+      !keepAwakeAutoStartSuppressed && (delayedSendHoldActive || workingSessionHoldActive);
+    if (!shouldRunAutomaticKeepAwake) {
+      if (keepAwakeRuntime?.source === "automatic") {
+        void stopKeepAwake({ suppressAutoStart: false });
+      }
+      return;
+    }
+    if (!keepAwakeRuntime) {
+      void startKeepAwake(0, { source: "automatic" });
+    }
+  }, [
+    keepAwakeAutoStartSuppressed,
+    keepAwakeFeatureEnabled,
+    keepAwakeRuntime,
+    keepAwakeWorkingSessionGraceUntilMs,
+    projectState.keepAwake.delayedSendSessionCount,
+    projectState.keepAwake.whileWorkingSessions,
+    projectState.keepAwake.workingSessionCount,
+    startKeepAwake,
+    stopKeepAwake,
   ]);
 
   useEffect(() => {
@@ -3480,6 +4087,7 @@ function App() {
           activeMode={activeMode}
           activeTarget={activeTarget}
           browserBundles={resourceViews.browserBundles}
+          codeIdeBundles={resourceViews.codeIdeBundles}
           collapsedResourceKeys={collapsedResourceKeys}
           daemon={projectState.gxserverDaemon}
           git={projectState.git}
@@ -3520,9 +4128,11 @@ function App() {
           quittingResourceKeys={quittingResourceKeys}
           readTips={readTips}
           resourceGroupViews={resourceViews.groupViews}
+          serverBundles={resourceServerBundles}
           selectedActionCommandId={selectedActionCommandId}
           hotkeys={projectState.hotkeys}
           sidebarTheme={projectState.sidebarTheme}
+          serverOpenTarget={projectState.terminalDevServerOpenTarget}
           sessionPersistenceProvider={
             projectState.sessionPersistenceProvider === "off"
               ? undefined
@@ -3633,7 +4243,7 @@ function App() {
                     <IconDownload
                       aria-hidden="true"
                       className="titlebar-update-download-icon"
-                      size={15}
+                      size={14}
                       stroke={1.8}
                     />
                   )}
@@ -3968,6 +4578,7 @@ function TitlebarDropdownPanelSurface({
   activeMode,
   activeTarget,
   browserBundles,
+  codeIdeBundles,
   collapsedResourceKeys,
   daemon,
   git,
@@ -4009,9 +4620,11 @@ function TitlebarDropdownPanelSurface({
   quittingResourceKeys,
   readTips,
   resourceGroupViews,
+  serverBundles,
   selectedActionCommandId,
   hotkeys,
   sidebarTheme,
+  serverOpenTarget,
   sessionPersistenceProvider,
   visibleActions,
   visibleTargets,
@@ -4021,6 +4634,7 @@ function TitlebarDropdownPanelSurface({
   activeMode: TitlebarMode;
   activeTarget: ResolvedOpenTarget | undefined;
   browserBundles: ResourceProcessBundle[];
+  codeIdeBundles: ResourceProcessBundle[];
   collapsedResourceKeys: Set<string>;
   daemon: TitlebarGxserverDaemonStatus;
   git: SidebarGitState;
@@ -4065,9 +4679,11 @@ function TitlebarDropdownPanelSurface({
   quittingResourceKeys: Set<string>;
   readTips: TitlebarTip[];
   resourceGroupViews: ResourceGroupView[];
+  serverBundles: ResourceProcessBundle[];
   selectedActionCommandId: string | undefined;
   hotkeys: ghostexHotkeySettings;
   sidebarTheme: SidebarTheme;
+  serverOpenTarget: TerminalDevServerOpenTarget;
   sessionPersistenceProvider: Exclude<SessionPersistenceProvider, "off"> | undefined;
   visibleActions: SidebarCommandButton[];
   visibleTargets: ResolvedOpenTarget[];
@@ -4084,9 +4700,13 @@ function TitlebarDropdownPanelSurface({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  const closeAfter = (action: () => void) => {
-    action();
-    onClose();
+  const closeAfter = (action: () => void | Promise<void>) => {
+    void Promise.resolve()
+      .then(action)
+      .catch((error) => {
+        console.warn("Titlebar dropdown action failed", error);
+      })
+      .finally(onClose);
   };
   const isPanelDarkTheme = getTitlebarThemeVariant(sidebarTheme) === "dark";
   const gitBranchLabel = titlebarGitBranchLabel(git.branch);
@@ -4138,15 +4758,15 @@ function TitlebarDropdownPanelSurface({
 
             CDXC:TitlebarKeepAwake 2026-06-15-02:57:
             The Don't keep awake action should use IconSquareMinus so the row reads as disabling the keep-awake state instead of a moon or sleep-mode action.
+
+            CDXC:TitlebarKeepAwake 2026-06-23-19:36:
+            Keep Awake start/stop actions are async because they launch or kill caffeinate through the native process bridge. Keep this child dropdown alive until the action commits its runtime sync so the main titlebar icon updates immediately after a menu click.
           */}
           <div className="titlebar-menu-section-label">Keep awake period</div>
           {KEEP_AWAKE_DURATION_OPTIONS.map((option) => (
             <TitlebarPanelMenuItem
               key={option.value}
-              onClick={() => {
-                void onStartKeepAwake(option.value);
-                onClose();
-              }}
+              onClick={() => closeAfter(() => onStartKeepAwake(option.value))}
             >
               <IconCoffee aria-hidden="true" size={14} stroke={1.8} />
               <span className="min-w-0 flex-1 truncate">{getTitlebarKeepAwakeMenuLabel(option.label)}</span>
@@ -4157,10 +4777,7 @@ function TitlebarDropdownPanelSurface({
           ))}
           {keepAwakeIsRunning ? (
             <TitlebarPanelMenuItem
-              onClick={() => {
-                void onStopKeepAwake();
-                onClose();
-              }}
+              onClick={() => closeAfter(onStopKeepAwake)}
             >
               <IconSquareMinus aria-hidden="true" size={14} stroke={1.8} />
               <span>Don't keep awake</span>
@@ -4177,6 +4794,7 @@ function TitlebarDropdownPanelSurface({
         <div className="titlebar-open-menu titlebar-resources-menu rounded-none border-border/80 p-0 text-[13px] text-foreground shadow-2xl">
           <TitlebarResourcesMenu
             browserBundles={browserBundles}
+            codeIdeBundles={codeIdeBundles}
             collapsedKeys={collapsedResourceKeys}
             daemon={daemon}
             groupViews={resourceGroupViews}
@@ -4196,6 +4814,8 @@ function TitlebarDropdownPanelSurface({
             onToggle={onToggleResourceCollapse}
             orphanBundles={orphanBundles}
             quittingKeys={quittingResourceKeys}
+            serverBundles={serverBundles}
+            serverOpenTarget={serverOpenTarget}
             sessionPersistenceProvider={sessionPersistenceProvider}
           />
         </div>
@@ -4589,6 +5209,7 @@ function mergeTitlebarProjectState(
         : normalizeTitlebarMode(state.activeMode),
     agentHookStatus: state.agentHookStatus ?? current.agentHookStatus,
     ghostexCliStatus: state.ghostexCliStatus ?? current.ghostexCliStatus,
+    portless: state.portless ?? current.portless,
     debuggingMode: state.debuggingMode ?? current.debuggingMode,
     showBetaFeatures: state.showBetaFeatures ?? current.showBetaFeatures,
     diffStats: state.diffStats ?? current.diffStats,
@@ -4597,6 +5218,7 @@ function mergeTitlebarProjectState(
     hotkeys: normalizeghostexHotkeySettings(state.hotkeys ?? current.hotkeys),
     keepAwake: state.keepAwake ?? current.keepAwake,
     browserTabs: state.browserTabs ?? current.browserTabs,
+    codeEditorProjectIds: state.codeEditorProjectIds ?? current.codeEditorProjectIds,
     projectEditorCompanionPaneHidden:
       state.projectEditorCompanionPaneHidden ?? current.projectEditorCompanionPaneHidden,
     projectIsQuick: state.projectIsQuick ?? current.projectIsQuick,
@@ -4819,7 +5441,9 @@ function createInitialProjectState(bootstrap: Record<string, unknown>): Titlebar
     activeMode: resolveInitialTitlebarMode(bootstrap),
     agentHookStatus: undefined,
     ghostexCliStatus: undefined,
+    portless: undefined,
     browserTabs: [],
+    codeEditorProjectIds: [],
     debuggingMode: settings.debuggingMode,
     showBetaFeatures: settings.showBetaFeatures,
     diffStats: createDefaultSidebarProjectDiffStats(false),
@@ -4855,6 +5479,7 @@ function createInitialProjectState(bootstrap: Record<string, unknown>): Titlebar
     },
     showProjectEditorDiffFileCount: settings.showProjectEditorDiffFileCount,
     sessionPersistenceProvider: settings.sessionPersistenceProvider,
+    terminalDevServerOpenTarget: settings.terminalDevServerOpenTarget,
     toggleSidebarHotkeyLabel: formatToggleSidebarTooltipLabel(
       settings.hotkeys.toggleSidebarCollapsed,
     ),
@@ -4917,38 +5542,46 @@ function createTitlebarKeepAwakeSettings(
     deactivateOnLowPowerMode: settings.keepAwakeDeactivateOnLowPowerMode,
     deactivateOnUserSwitch: settings.keepAwakeDeactivateOnUserSwitch,
     defaultDurationMinutes: settings.keepAwakeDefaultDurationMinutes,
+    delayedSendSessionCount: 0,
     featureEnabled,
     hideTitlebarControl: !featureEnabled || settings.hideKeepAwakeTitlebarControl,
     preventLidSleep: settings.keepAwakePreventLidSleep,
+    whileWorkingSessions: settings.keepAwakeWhileWorkingSessions,
+    workingSessionCount: 0,
   };
 }
 
 function readStoredKeepAwakeRuntime(): KeepAwakeRuntimeState | undefined {
   try {
     const parsed = JSON.parse(localStorage.getItem(KEEP_AWAKE_RUNTIME_STORAGE_KEY) || "null");
-    if (!isRecord(parsed)) {
-      return undefined;
-    }
-    const pid = typeof parsed.pid === "number" ? parsed.pid : Number.NaN;
-    const durationMinutes = typeof parsed.durationMinutes === "number"
-      ? parsed.durationMinutes
-      : Number.NaN;
-    if (
-      !Number.isFinite(pid) ||
-      pid <= 0 ||
-      !KEEP_AWAKE_DURATION_OPTIONS.some((option) => option.value === durationMinutes)
-    ) {
-      return undefined;
-    }
-    return {
-      durationMinutes: durationMinutes as KeepAwakeDurationMinutes,
-      fireAtMs: typeof parsed.fireAtMs === "number" ? parsed.fireAtMs : undefined,
-      pid,
-      startedAtMs: typeof parsed.startedAtMs === "number" ? parsed.startedAtMs : Date.now(),
-    };
+    return parseKeepAwakeRuntimeState(parsed);
   } catch {
     return undefined;
   }
+}
+
+function parseKeepAwakeRuntimeState(value: unknown): KeepAwakeRuntimeState | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const pid = typeof value.pid === "number" ? value.pid : Number.NaN;
+  const durationMinutes = typeof value.durationMinutes === "number"
+    ? value.durationMinutes
+    : Number.NaN;
+  if (
+    !Number.isFinite(pid) ||
+    pid <= 0 ||
+    !KEEP_AWAKE_DURATION_OPTIONS.some((option) => option.value === durationMinutes)
+  ) {
+    return undefined;
+  }
+  return {
+    durationMinutes: durationMinutes as KeepAwakeDurationMinutes,
+    fireAtMs: typeof value.fireAtMs === "number" ? value.fireAtMs : undefined,
+    pid,
+    source: value.source === "automatic" ? "automatic" : "manual",
+    startedAtMs: typeof value.startedAtMs === "number" ? value.startedAtMs : Date.now(),
+  };
 }
 
 function readKeepAwakeRuntimeSyncState(raw: string | null): KeepAwakeRuntimeSyncState | undefined {
@@ -4957,7 +5590,10 @@ function readKeepAwakeRuntimeSyncState(raw: string | null): KeepAwakeRuntimeSync
     if (!isRecord(parsed)) {
       return undefined;
     }
+    const hasRuntime = Object.prototype.hasOwnProperty.call(parsed, "runtime");
+    const runtime = parseKeepAwakeRuntimeState(parsed.runtime);
     return {
+      ...(hasRuntime ? { runtime: runtime ?? null } : {}),
       suppressAutoStart: parsed.suppressAutoStart === true,
     };
   } catch {
@@ -4967,12 +5603,14 @@ function readKeepAwakeRuntimeSyncState(raw: string | null): KeepAwakeRuntimeSync
 
 function publishKeepAwakeRuntimeSync(state: KeepAwakeRuntimeSyncState): void {
   const payload = {
+    runtime: state.runtime,
     suppressAutoStart: state.suppressAutoStart,
     updatedAtMs: Date.now(),
   };
   localStorage.setItem(KEEP_AWAKE_RUNTIME_SYNC_STORAGE_KEY, JSON.stringify(payload));
   window.dispatchEvent(new CustomEvent<KeepAwakeRuntimeSyncState>(KEEP_AWAKE_RUNTIME_CHANGED_EVENT, {
     detail: {
+      runtime: state.runtime,
       suppressAutoStart: state.suppressAutoStart,
     },
   }));
@@ -5315,6 +5953,7 @@ function getTitlebarTipIcon(icon: TitlebarTipIcon): ReactNode {
 
 function TitlebarResourcesMenu({
   browserBundles,
+  codeIdeBundles,
   collapsedKeys,
   daemon,
   groupViews,
@@ -5331,9 +5970,12 @@ function TitlebarResourcesMenu({
   onToggle,
   orphanBundles,
   quittingKeys,
+  serverBundles,
+  serverOpenTarget,
   sessionPersistenceProvider,
 }: {
   browserBundles: ResourceProcessBundle[];
+  codeIdeBundles: ResourceProcessBundle[];
   collapsedKeys: Set<string>;
   daemon: TitlebarGxserverDaemonStatus;
   groupViews: ResourceGroupView[];
@@ -5344,27 +5986,37 @@ function TitlebarResourcesMenu({
   onGxserverStart: () => void;
   onGxserverStop: () => void;
   onQuit: (bundles: ResourceProcessBundle[]) => void;
-    onSetResourceItemsCollapsed: (
-      targets: readonly ResourceItemCollapseTarget[],
-      collapsed: boolean,
-    ) => void;
+  onSetResourceItemsCollapsed: (
+    targets: readonly ResourceItemCollapseTarget[],
+    collapsed: boolean,
+  ) => void;
   processSnapshotReady: boolean;
   onSleepInactiveSessions: () => void;
   onToggle: (key: string) => void;
   orphanBundles: ResourceProcessBundle[];
   quittingKeys: Set<string>;
+  serverBundles: ResourceProcessBundle[];
+  serverOpenTarget: TerminalDevServerOpenTarget;
   sessionPersistenceProvider?: Exclude<SessionPersistenceProvider, "off">;
 }) {
   const visibleGroupViews = processSnapshotReady
     ? groupViews.filter((view) => view.bundles.length > 0)
     : [];
-  const allBundles = processSnapshotReady
+  const metricBundles = processSnapshotReady
     ? [
         ...visibleGroupViews.flatMap((view) => view.bundles),
+        ...codeIdeBundles,
         ...browserBundles,
         ...orphanBundles,
       ]
     : [];
+  /*
+   * CDXC:TitlebarResources 2026-06-22-00:30:
+   * Dev-server rows intentionally duplicate process ownership for discovery,
+   * so modal-wide CPU/RAM totals keep using the original resource bundles while
+   * row and section metrics still show each listener's current process usage.
+   */
+  const allBundles = processSnapshotReady ? [...serverBundles, ...metricBundles] : [];
   /**
    * CDXC:TitlebarResources 2026-05-23-10:52:
    * Header actions should be two matching resource controls: one for sleeping
@@ -5422,8 +6074,8 @@ function TitlebarResourcesMenu({
    * child-panel buttons appear visible while still rejecting clicks.
    */
   const resourceTooltipStyle = { maxWidth: 220 };
-  const liveCpuLabel = processSnapshotReady ? formatWholePercent(sumBundleCpu(allBundles)) : "--";
-  const liveMemoryLabel = processSnapshotReady ? formatWholeMemory(sumBundleMemory(allBundles)) : "--";
+  const liveCpuLabel = processSnapshotReady ? formatWholePercent(sumBundleCpu(metricBundles)) : "--";
+  const liveMemoryLabel = processSnapshotReady ? formatWholeMemory(sumBundleMemory(metricBundles)) : "--";
   const resourceItemCollapseTargets = createResourceItemCollapseTargets(allBundles);
   const allResourceItemsCollapsed =
     resourceItemCollapseTargets.length > 0 &&
@@ -5577,6 +6229,22 @@ function TitlebarResourcesMenu({
         />
         {processSnapshotReady ? (
           <>
+            {/*
+             * CDXC:TitlebarResources 2026-06-22-00:30:
+             * Running dev servers should be the first Resources body section,
+             * above project session resource groups, so localhost ports are
+             * discoverable before users scan terminal/session rows.
+             */}
+            <TitlebarResourceSection
+              collapsedKeys={collapsedKeys}
+              onQuit={onQuit}
+              onFocusSession={onFocusSession}
+              onToggle={onToggle}
+              quittingKeys={quittingKeys}
+              serverOpenTarget={serverOpenTarget}
+              title="Dev Servers"
+              bundles={serverBundles}
+            />
             {visibleGroupViews.length > 0 ? (
               visibleGroupViews.map((view) => (
                 <TitlebarResourceSection
@@ -5593,6 +6261,19 @@ function TitlebarResourcesMenu({
             ) : (
               <div className="titlebar-resources-empty">No grouped sessions matched running processes.</div>
             )}
+            {/*
+             * CDXC:TitlebarResources 2026-06-22-13:50:
+             * The shared embedded Code runtime belongs after project-owned session groups and before Browser Tabs, where users expect app-wide IDE infrastructure rather than a specific project process.
+             */}
+            <TitlebarResourceSection
+              collapsedKeys={collapsedKeys}
+              onQuit={onQuit}
+              onFocusSession={onFocusSession}
+              onToggle={onToggle}
+              quittingKeys={quittingKeys}
+              title="Code IDE"
+              bundles={codeIdeBundles}
+            />
             <TitlebarResourceSection
               collapsedKeys={collapsedKeys}
               onQuit={onQuit}
@@ -5717,6 +6398,7 @@ function TitlebarResourceSection({
   onFocusSession,
   onToggle,
   quittingKeys,
+  serverOpenTarget,
   title,
 }: {
   bundles: ResourceProcessBundle[];
@@ -5725,6 +6407,7 @@ function TitlebarResourceSection({
   onFocusSession: (sessionId: string) => void;
   onToggle: (key: string) => void;
   quittingKeys: Set<string>;
+  serverOpenTarget?: TerminalDevServerOpenTarget;
   title: string;
 }) {
   if (bundles.length === 0) {
@@ -5737,14 +6420,21 @@ function TitlebarResourceSection({
   const hasTerminalSession = actionableBundles.some(
     (bundle) => bundle.type === "session" && bundle.session?.sessionKind === "terminal",
   );
+  const hasServer = actionableBundles.some((bundle) => bundle.type === "server");
   const sectionActionBundles = hasTerminalSession
     ? actionableBundles.filter((bundle) => bundle.type === "session" && bundle.session?.sessionKind === "terminal")
     : actionableBundles;
-  const sectionActionLabel = hasTerminalSession ? "Sleep Project" : "Quit";
-  const sectionActionTooltipTitle = hasTerminalSession ? "Sleep project" : "Quit this group";
+  const sectionActionLabel = hasTerminalSession ? "Sleep Project" : hasServer ? "Stop Servers" : "Quit";
+  const sectionActionTooltipTitle = hasTerminalSession
+    ? "Sleep project"
+    : hasServer
+      ? "Stop servers"
+      : "Quit this group";
   const sectionActionTooltipBody = hasTerminalSession
     ? "Sleeps this project's terminal sessions and keeps them restorable in the sidebar."
-    : "Stops user-owned live processes and closes related surfaces.";
+    : hasServer
+      ? "Stops the listener-backed server processes without sleeping the owning terminal sessions."
+      : "Stops user-owned live processes and closes related surfaces.";
   /**
    * CDXC:TitlebarResources 2026-05-25-14:21:
    * Resource action tooltips share the compact width cap used by header and
@@ -5772,6 +6462,11 @@ function TitlebarResourceSection({
    * Close. Keep shared browser helper bundles visible for diagnostics, but do
    * not let a bulk action close infrastructure that embedded browser panes need
    * to keep working.
+   *
+   * CDXC:TitlebarResources 2026-06-22-00:30:
+   * Dev Servers rows use Stop language because the action targets only the
+   * listener process tree. Do not route those rows through session sleep or
+   * project close semantics.
    */
   const resourceTooltipStyle = { maxWidth: 220 };
   return (
@@ -5805,7 +6500,7 @@ function TitlebarResourceSection({
           >
             <button
               className="titlebar-resource-section-quit-button"
-              data-action={hasTerminalSession ? "sleep" : "quit"}
+              data-action={hasTerminalSession ? "sleep" : hasServer ? "stop" : "quit"}
               onClick={() => onQuit(sectionActionBundles)}
               type="button"
             >
@@ -5824,6 +6519,7 @@ function TitlebarResourceSection({
             onFocusSession={onFocusSession}
             onQuit={onQuit}
             onToggle={onToggle}
+            serverOpenTarget={serverOpenTarget}
           />
         ))}
       </div>
@@ -5838,6 +6534,7 @@ function TitlebarResourceBundle({
   onQuit,
   onFocusSession,
   onToggle,
+  serverOpenTarget,
 }: {
   bundle: ResourceProcessBundle;
   collapsedKeys: Set<string>;
@@ -5845,6 +6542,7 @@ function TitlebarResourceBundle({
   onQuit: (bundles: ResourceProcessBundle[]) => void;
   onFocusSession: (sessionId: string) => void;
   onToggle: (key: string) => void;
+  serverOpenTarget?: TerminalDevServerOpenTarget;
 }) {
   const hasChildren = bundle.childProcesses.length > 0;
   /**
@@ -5873,9 +6571,19 @@ function TitlebarResourceBundle({
    */
   const preservesSidebarSession =
     bundle.type === "session" && bundle.session?.sessionKind === "terminal";
-  const focusSessionId = bundle.type === "session" ? resourceBundleSidebarSessionIds(bundle)[0] : undefined;
+  const isServer = bundle.type === "server";
+  const serverPortless = bundle.portless;
+  const mainLabel = getResourceBundleMainLabel(bundle);
+  const mainUrl = getResourceBundleMainUrl(bundle);
+  const showPortlessSetupAction =
+    isServer && serverPortless !== undefined && !serverPortless.isSetupActive;
+  const focusSessionId = resourceBundleFocusSessionId(bundle);
   const isActionable = isResourceBundleActionable(bundle);
-  const actionLabel = preservesSidebarSession ? `Sleep ${bundle.label}` : `Close ${bundle.label}`;
+  const actionLabel = preservesSidebarSession
+    ? `Sleep ${bundle.label}`
+    : isServer
+      ? `Stop server ${bundle.label}`
+      : `Close ${bundle.label}`;
   /**
    * CDXC:TitlebarResources 2026-05-28-10:39:
    * Session resource rows expose Focus beside Sleep/Close. Focus uses the same
@@ -5893,6 +6601,10 @@ function TitlebarResourceBundle({
    * bundles instead of disabling the button or letting the click reach process
    * termination. Users should only be able to close resource rows that map to a
    * restorable terminal session or an owned browser/code/orphan surface.
+   *
+   * CDXC:TitlebarResources 2026-06-22-00:30:
+   * Dev-server Focus may jump to the owning terminal, but Stop must only signal
+   * the listener process tree and must not sleep the terminal session.
    */
   return (
     <div className="titlebar-resource-bundle" data-quitting={String(isQuitting)}>
@@ -5922,13 +6634,48 @@ function TitlebarResourceBundle({
           )}
           <span className="titlebar-resource-avatar">{getResourceBundleAvatar(bundle)}</span>
           <span className="titlebar-resource-text">
-            <span className="titlebar-resource-name">{bundle.label}</span>
+            {mainUrl ? (
+              <a
+                className="titlebar-resource-name titlebar-resource-main-link"
+                href={mainUrl}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  openResourceBundleMainUrl(bundle, mainUrl, serverOpenTarget);
+                }}
+              >
+                {mainLabel}
+              </a>
+            ) : (
+              <span className="titlebar-resource-name">{mainLabel}</span>
+            )}
             <span className="titlebar-resource-meta">
-              {isQuitting
-                ? preservesSidebarSession
-                  ? "Sleeping..."
-                  : "Quitting..."
-                : getResourceBundleMeta(bundle)}
+              {isQuitting ? (
+                preservesSidebarSession ? (
+                  "Sleeping..."
+                ) : isServer ? (
+                  "Stopping..."
+                ) : (
+                  "Quitting..."
+                )
+              ) : (
+                <>
+                  <span className="titlebar-resource-meta-text">{getResourceBundleMeta(bundle)}</span>
+                  {showPortlessSetupAction && serverPortless ? (
+                    <button
+                      className="titlebar-resource-portless-action"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        runPortlessResourcesSetupAction(serverPortless);
+                      }}
+                      type="button"
+                    >
+                      {serverPortless.setupActionLabel}
+                    </button>
+                  ) : null}
+                </>
+              )}
             </span>
           </span>
         </div>
@@ -5960,7 +6707,7 @@ function TitlebarResourceBundle({
           <button
             aria-label={actionLabel}
             className="titlebar-resource-kill-button"
-            data-action={preservesSidebarSession ? "sleep" : "quit"}
+            data-action={preservesSidebarSession ? "sleep" : isServer ? "stop" : "quit"}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -5970,6 +6717,8 @@ function TitlebarResourceBundle({
           >
             {preservesSidebarSession ? (
               <IconMoon aria-hidden="true" size={13} stroke={1.9} />
+            ) : isServer ? (
+              <IconSquareMinus aria-hidden="true" size={13} stroke={1.9} />
             ) : (
               <IconX aria-hidden="true" size={13} stroke={2} />
             )}
@@ -6037,6 +6786,9 @@ function getResourceBundleAvatar(bundle: ResourceProcessBundle): ReactNode {
   if (bundle.type === "browser") {
     return <IconWorld aria-hidden="true" size={15} stroke={1.9} />;
   }
+  if (bundle.type === "server") {
+    return <IconWorld aria-hidden="true" size={15} stroke={1.9} />;
+  }
   if (bundle.session?.sessionKind === "terminal") {
     return <IconTerminal2 aria-hidden="true" size={15} stroke={1.9} />;
   }
@@ -6047,7 +6799,53 @@ function isSidebarAgentIcon(candidate: unknown): candidate is SidebarAgentIcon {
   return typeof candidate === "string" && Object.prototype.hasOwnProperty.call(AGENT_LOGOS, candidate);
 }
 
+function getResourceBundleMainLabel(bundle: ResourceProcessBundle): string {
+  if (bundle.server && bundle.portless?.isSetupActive) {
+    return bundle.portless.hostname;
+  }
+  if (bundle.server && bundle.portless) {
+    return resourceServerLocalhostLabel(bundle.server);
+  }
+  return bundle.label;
+}
+
+function getResourceBundleMainUrl(bundle: ResourceProcessBundle): string | undefined {
+  if (!bundle.server) {
+    return undefined;
+  }
+  if (bundle.portless?.isSetupActive) {
+    return resourcePortlessUrl(bundle.portless);
+  }
+  return resourceServerLocalhostUrl(bundle.server);
+}
+
+function openResourceBundleMainUrl(
+  bundle: ResourceProcessBundle,
+  url: string,
+  serverOpenTarget: TerminalDevServerOpenTarget | undefined,
+): void {
+  /*
+   * CDXC:TerminalDevServers 2026-06-23-19:22:
+   * Resources dev-server links should open either in the user's system default browser or the internal browser. Do not expose a per-browser target list here; only server bundles should read this setting so future resource links keep their existing route.
+   */
+  if (bundle.type === "server" && serverOpenTarget === "system-default-browser") {
+    postNative({ type: "openExternalUrl", url });
+    return;
+  }
+  postTitlebarSidebarCommand({ type: "openBrowserPane", url });
+}
+
 function getResourceBundleMeta(bundle: ResourceProcessBundle): string {
+  if (bundle.server) {
+    const pid = bundle.process?.pid ?? bundle.server.pid;
+    if (bundle.portless) {
+      const processMeta = `${bundle.server.commandName} pid ${pid}`;
+      return bundle.portless.isSetupActive
+        ? `${resourceServerLocalhostLabel(bundle.server)} - ${processMeta}`
+        : `${bundle.portless.setupStatusLabel} - ${processMeta}`;
+    }
+    return `${bundle.server.commandName} pid ${pid}`;
+  }
   if (bundle.session) {
     const provider = bundle.session.sessionPersistenceProvider
       ? `${bundle.session.sessionPersistenceProvider} terminal`
@@ -6071,6 +6869,44 @@ function getResourceBundleMeta(bundle: ResourceProcessBundle): string {
     return `pid ${bundle.process.pid}`;
   }
   return bundle.type;
+}
+
+function resourceServerLocalhostLabel(server: Pick<ResourceListeningServer, "port">): string {
+  return `localhost:${server.port}`;
+}
+
+function resourceServerLocalhostUrl(server: Pick<ResourceListeningServer, "port">): string {
+  return `http://${resourceServerLocalhostLabel(server)}`;
+}
+
+function resourcePortlessUrl(portless: Pick<ResourcePortlessServerPresentation, "hostname" | "protocol">): string {
+  return `${portless.protocol}://${portless.hostname}`;
+}
+
+function runPortlessResourcesSetupAction(portless: ResourcePortlessServerPresentation): void {
+  if (!portless.setupAction) {
+    openPortlessResourcesSettings();
+    return;
+  }
+  postTitlebarSidebarCommand({
+    action: portless.setupAction,
+    protocol: portless.protocol,
+    requestId: createPortlessResourcesAdminRequestId(portless.setupAction),
+    type: "runPortlessSettingsAdminAction",
+  });
+}
+
+function openPortlessResourcesSettings(): void {
+  window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
+    initialSearchQuery: "Portless",
+    initialTab: "projects",
+    modal: "settings",
+    type: "open",
+  });
+}
+
+function createPortlessResourcesAdminRequestId(action: NativePortlessAdminInstallAction): string {
+  return `portless-resources-${action}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 function normalizeTitlebarMode(candidate: unknown): TitlebarMode {
@@ -6797,6 +7633,23 @@ styleElement.textContent = `
      * Visual review moved only the visible sidebar glyph 1px right while
      * preserving the titlebar button placement and native hit target.
      *
+     * CDXC:SidebarCollapse 2026-06-22-22:46:
+     * Visual review shifted the Toggle Sidebar glyph up by 1px from the prior
+     * offset while keeping the button frame and hit target unchanged.
+     *
+     * CDXC:SidebarCollapse 2026-06-22-23:26:
+     * Follow-up visual tuning moved the Toggle Sidebar glyph 0.5px back down,
+     * so the final icon translation is 1px right and 1.5px down.
+     *
+     * CDXC:SidebarCollapse 2026-06-23-03:35:
+     * The Toggle Sidebar and available-update download glyphs should both render
+     * as 14x14 icons while keeping the current visual translation.
+     *
+     * CDXC:SidebarCollapse 2026-06-23-04:35:
+     * The Tabler Toggle Sidebar glyph has internal viewBox padding, so a 14px
+     * SVG box measured as an 11px visible mark. Use an 18px SVG box for this
+     * glyph so the visible icon reads as the requested 14x14 size.
+     *
      * CDXC:SidebarCollapse 2026-06-13-02:59:
      * The assigned hotkey renders through AppTooltip, matching sidebar controls
      * instead of a titlebar-only data-tooltip pseudo-element.
@@ -6825,9 +7678,9 @@ styleElement.textContent = `
     outline: none;
   }
   .titlebar-sidebar-collapse-button svg {
-    height: 17px !important;
-    transform: translate(1px, 2px);
-    width: 17px !important;
+    height: 18px !important;
+    transform: translate(1px, 1.5px);
+    width: 18px !important;
   }
   .titlebar-update-button {
     /**
@@ -6882,8 +7735,18 @@ styleElement.textContent = `
      * Visual review moved only the available-update download glyph 2px lower.
      * Keep the titlebar button full-height and move the SVG visually so the
      * native titlebar hit target and neighboring layout stay unchanged.
+     *
+     * CDXC:AutoUpdate 2026-06-22-23:26:
+     * The available-update download glyph should match the Toggle Sidebar
+     * titlebar glyph's exact size and 1px/1.5px visual placement.
+     *
+     * CDXC:AutoUpdate 2026-06-23-03:35:
+     * The matching titlebar glyph size is now 14x14 for both available-update
+     * download and Toggle Sidebar icons.
      */
-    transform: translateY(2px);
+    height: 14px !important;
+    transform: translate(1px, 1.5px);
+    width: 14px !important;
   }
   .titlebar-update-spinner {
     animation: titlebar-update-download-spin 1s linear infinite;
@@ -7041,10 +7904,29 @@ styleElement.textContent = `
     -webkit-appearance: none;
     align-items: center;
     background: transparent;
+    /*
+     * CDXC:ModeSwitcher 2026-06-23-04:45:
+     * Each mode tab carries a full 4-direction #252525 outline (the shared
+     * --titlebar-button-border-color token) so the titlebar, Settings, and
+     * Agents Hub tab bars all read as boxed tabs. box-sizing: border-box keeps
+     * the bordered tab inside the 34px control height so the new top/bottom
+     * lines never overflow the 35px titlebar reservation. Top/bottom/left live
+     * on every tab and the last child adds the right edge, keeping internal
+     * separators a single 1px line instead of doubling between neighbors.
+     */
     border: 0;
+    border-top: 1px solid var(--titlebar-button-border-color);
+    border-bottom: 1px solid var(--titlebar-button-border-color);
     border-left: 1px solid var(--titlebar-button-border-color);
     border-radius: var(--titlebar-mode-tab-radius);
-    color: rgba(255,255,255,0.68);
+    box-sizing: border-box;
+    /*
+     * CDXC:ModeSwitcher 2026-06-23-04:45:
+     * Inactive mode tabs read as slightly dimmed white; hover and active both
+     * go full white. Hover only brightens the label (no background fill) so the
+     * highlight box stays exclusive to the active tab.
+     */
+    color: rgba(255,255,255,0.75);
     cursor: default;
     display: inline-flex;
     font: 400 13.55px/${TITLEBAR_CONTROL_HEIGHT}px var(--titlebar-font-family);
@@ -7102,7 +7984,7 @@ styleElement.textContent = `
   }
   .titlebar-mode-tab:hover,
   .titlebar-mode-tab:focus-visible {
-    color: rgba(255,255,255,0.92);
+    color: #ffffff;
     outline: none;
   }
   .titlebar-mode-tab:disabled,
@@ -7114,7 +7996,7 @@ styleElement.textContent = `
     opacity: 0.72;
   }
   .titlebar-mode-tab[data-active="true"] {
-    color: rgba(255,255,255,0.98);
+    color: #ffffff;
   }
   .titlebar-mode-tab:disabled[data-active="true"],
   .titlebar-mode-tab[data-disabled="true"][data-active="true"] {
@@ -8061,7 +8943,8 @@ styleElement.textContent = `
     transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
     white-space: nowrap;
   }
-  .titlebar-resource-section-quit-button[data-action="sleep"] {
+  .titlebar-resource-section-quit-button[data-action="sleep"],
+  .titlebar-resource-section-quit-button[data-action="stop"] {
     background: rgba(255,255,255,0.08);
     border-color: rgba(255,255,255,0.13);
   }
@@ -8081,7 +8964,8 @@ styleElement.textContent = `
     opacity: 1;
     pointer-events: auto;
   }
-  .titlebar-resource-section-quit-button[data-action="sleep"]:hover {
+  .titlebar-resource-section-quit-button[data-action="sleep"]:hover,
+  .titlebar-resource-section-quit-button[data-action="stop"]:hover {
     background: rgba(255,255,255,0.14);
     color: rgba(255,255,255,0.92);
   }
@@ -8445,13 +9329,48 @@ styleElement.textContent = `
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .titlebar-resource-meta,
+  .titlebar-resource-main-link {
+    text-decoration: none;
+  }
+  .titlebar-resource-main-link:hover {
+    color: rgba(157, 215, 246, 0.98);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .titlebar-resource-meta {
+    align-items: center;
+    color: rgba(255,255,255,0.58);
+    display: flex;
+    font: 400 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .titlebar-resource-meta-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .titlebar-resource-child-name {
     color: rgba(255,255,255,0.58);
     font: 400 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .titlebar-resource-portless-action {
+    background: rgba(157, 215, 246, 0.12);
+    border: 1px solid rgba(157, 215, 246, 0.26);
+    border-radius: 4px;
+    color: rgba(201, 232, 248, 0.94);
+    flex: 0 0 auto;
+    font: 500 11px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    height: 19px;
+    padding: 0 6px;
+  }
+  .titlebar-resource-portless-action:hover {
+    background: rgba(157, 215, 246, 0.18);
   }
   .titlebar-resource-metrics,
   .titlebar-resource-child-metrics {
@@ -8539,13 +9458,16 @@ styleElement.textContent = `
     grid-row: 1;
     justify-self: center;
   }
-  .titlebar-resource-kill-button[data-action="sleep"] {
+  .titlebar-resource-kill-button[data-action="sleep"],
+  .titlebar-resource-kill-button[data-action="stop"] {
     background: rgba(255,255,255,0.14);
     border-color: rgba(255,255,255,0.16);
     color: rgba(255,255,255,0.9);
   }
   .titlebar-resource-kill-button[data-action="sleep"]:hover,
   .titlebar-resource-kill-button[data-action="sleep"]:focus-visible,
+  .titlebar-resource-kill-button[data-action="stop"]:hover,
+  .titlebar-resource-kill-button[data-action="stop"]:focus-visible,
   .titlebar-resource-kill-button[data-action="quit"]:hover,
   .titlebar-resource-kill-button[data-action="quit"]:focus-visible {
     background: rgba(255,255,255,0.2);

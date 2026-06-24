@@ -51,12 +51,14 @@ enum HostCommand: Decodable {
   case playSound(PlaySound)
   case runProcess(RunProcess)
   case cancelRunProcess(CancelRunProcess)
+  case portlessAdminAction(PortlessAdminActionCommand)
   case gxserverRequest(GxserverRequest)
   case remoteGxserverConnect(RemoteGxserverConnect)
   case remoteGxserverRequest(RemoteGxserverRequest)
   case remoteGxserverSubscribePresentation(RemoteGxserverPresentationSubscribe)
   case remoteSshPasswordSave(RemoteSshPasswordSave)
   case setKeepAwakeLidSleepPrevention(SetKeepAwakeLidSleepPrevention)
+  case syncTitlebarKeepAwakeRuntime(SyncTitlebarKeepAwakeRuntime)
   case syncGhosttyTerminalSettings(SyncGhosttyTerminalSettings)
   case applyGhosttyConfigSettings(ApplyGhosttyConfigSettings)
   case openGhosttyConfigFile
@@ -161,12 +163,14 @@ enum HostCommand: Decodable {
     case playSound
     case runProcess
     case cancelRunProcess
+    case portlessAdminAction
     case gxserverRequest
     case remoteGxserverConnect
     case remoteGxserverRequest
     case remoteGxserverSubscribePresentation
     case remoteSshPasswordSave
     case setKeepAwakeLidSleepPrevention
+    case syncTitlebarKeepAwakeRuntime
     case syncGhosttyTerminalSettings
     case applyGhosttyConfigSettings
     case openGhosttyConfigFile
@@ -322,6 +326,8 @@ enum HostCommand: Decodable {
       self = .runProcess(try RunProcess(from: decoder))
     case .cancelRunProcess:
       self = .cancelRunProcess(try CancelRunProcess(from: decoder))
+    case .portlessAdminAction:
+      self = .portlessAdminAction(try PortlessAdminActionCommand(from: decoder))
     case .gxserverRequest:
       self = .gxserverRequest(try GxserverRequest(from: decoder))
     case .remoteGxserverConnect:
@@ -334,6 +340,8 @@ enum HostCommand: Decodable {
       self = .remoteSshPasswordSave(try RemoteSshPasswordSave(from: decoder))
     case .setKeepAwakeLidSleepPrevention:
       self = .setKeepAwakeLidSleepPrevention(try SetKeepAwakeLidSleepPrevention(from: decoder))
+    case .syncTitlebarKeepAwakeRuntime:
+      self = .syncTitlebarKeepAwakeRuntime(try SyncTitlebarKeepAwakeRuntime(from: decoder))
     case .syncGhosttyTerminalSettings:
       self = .syncGhosttyTerminalSettings(try SyncGhosttyTerminalSettings(from: decoder))
     case .applyGhosttyConfigSettings:
@@ -781,6 +789,9 @@ struct SetActiveTerminalSet: Decodable {
   let agentHookStatus: TitlebarAgentHookStatus?
   let ghostexCliStatus: TitlebarGhostexCliStatus?
   let sessionPersistenceProvider: String?
+  let terminalDevServerOpenTarget: String?
+  let titlebarCodeEditorProjectIds: [String]?
+  let titlebarPortless: TitlebarPortlessState?
   let titlebarResourceGroups: [TitlebarResourceGroup]?
   let workspaceOpenTargets: TitlebarWorkspaceOpenTargets?
 }
@@ -846,6 +857,67 @@ struct TitlebarGhostexCliStatus: Decodable {
   let type: String
 }
 
+struct TitlebarPortlessState: Decodable {
+  let health: TitlebarPortlessHealth
+  let nativeAdmin: TitlebarPortlessNativeAdmin
+  let presentation: TitlebarPortlessPresentation?
+}
+
+struct TitlebarPortlessHealth: Decodable {
+  let enabled: Bool
+  let portlessProtocol: String
+  let runtimeStatus: String
+  let setupOwnership: String
+  let setupStatus: String
+  let sourceStatus: String
+  let updatedAt: String?
+
+  enum CodingKeys: String, CodingKey {
+    case enabled
+    case portlessProtocol = "protocol"
+    case runtimeStatus
+    case setupOwnership
+    case setupStatus
+    case sourceStatus
+    case updatedAt
+  }
+}
+
+struct TitlebarPortlessNativeAdmin: Decodable {
+  let actions: [String: TitlebarPortlessNativeAdminAction]
+  let available: Bool
+}
+
+struct TitlebarPortlessNativeAdminAction: Decodable {
+  let action: String?
+  let available: Bool
+  let unavailableReason: String?
+}
+
+struct TitlebarPortlessPresentation: Decodable {
+  let liveListenerCount: Int
+  let routePreviewStatus: String
+  let routePreviews: [TitlebarPortlessRoutePreview]
+}
+
+struct TitlebarPortlessRoutePreview: Decodable {
+  let hostname: String
+  let kind: String
+  let port: Int
+  let projectId: String
+  let portlessProtocol: String
+  let sessionId: String
+
+  enum CodingKeys: String, CodingKey {
+    case hostname
+    case kind
+    case port
+    case projectId
+    case portlessProtocol = "protocol"
+    case sessionId
+  }
+}
+
 struct TitlebarKeepAwakeSettings: Decodable {
   let activateOnExternalDisplay: Bool
   let activateOnLaunch: Bool
@@ -855,6 +927,7 @@ struct TitlebarKeepAwakeSettings: Decodable {
   let deactivateOnLowPowerMode: Bool
   let deactivateOnUserSwitch: Bool
   let defaultDurationMinutes: Int
+  let delayedSendSessionCount: Int?
   /**
    CDXC:TitlebarKeepAwake 2026-06-19-13:13:
    Keep Awake is beta-gated in the macOS titlebar. Decode the beta availability
@@ -864,6 +937,8 @@ struct TitlebarKeepAwakeSettings: Decodable {
   let featureEnabled: Bool?
   let hideTitlebarControl: Bool?
   let preventLidSleep: Bool
+  let whileWorkingSessions: Bool?
+  let workingSessionCount: Int?
 }
 
 struct TitlebarGxserverDaemon: Decodable {
@@ -982,7 +1057,24 @@ struct SetSessionStatusIndicators: Decodable {
   let availableCount: Int
   let hideFloatingIndicators: Bool
   let hideMenuBarIndicators: Bool
+  let projects: [SessionStatusIndicatorProject]?
   let size: NativeSessionStatusIndicatorSize
+}
+
+struct SessionStatusIndicatorProject: Decodable {
+  let projectId: String
+  let sessions: [SessionStatusIndicatorSession]
+  let title: String
+}
+
+struct SessionStatusIndicatorSession: Decodable {
+  let agentIconColor: String?
+  let agentIconDataUrl: String?
+  let lastActiveAt: String?
+  let sidebarOrder: Int
+  let sessionId: String
+  let status: NativeSessionStatusIndicatorStatus
+  let title: String
 }
 
 struct SetPetOverlayState: Codable {
@@ -1153,6 +1245,34 @@ struct CancelRunProcess: Decodable {
   let requestId: String
 }
 
+enum PortlessAdminActionKind: String, Codable {
+  case install
+  case reconfigure
+  case retry
+  case remove
+}
+
+enum PortlessAdminProtocol: String, Codable {
+  case https
+  case http
+}
+
+struct PortlessAdminActionCommand: Decodable {
+  /*
+   CDXC:PortlessIntegration 2026-06-23-00:15:
+   Portless service installation, protocol reconfigure, retry, and removal are explicit native admin actions. Decode them as a typed command instead of routing through runProcess so React cannot pass arbitrary executables, env, stdout, or stderr across the privileged boundary.
+   */
+  let action: PortlessAdminActionKind
+  let requestId: String
+  let serviceProtocol: PortlessAdminProtocol?
+
+  private enum CodingKeys: String, CodingKey {
+    case action
+    case requestId
+    case serviceProtocol = "protocol"
+  }
+}
+
 struct GxserverRequest: Decodable {
   let method: String
   let paramsJson: String?
@@ -1196,6 +1316,23 @@ struct SetKeepAwakeLidSleepPrevention: Decodable {
   let enabled: Bool
   let installIfNeeded: Bool?
   let requestId: String
+}
+
+struct SyncTitlebarKeepAwakeRuntime: Decodable {
+  /*
+   CDXC:TitlebarKeepAwake 2026-06-23-19:36:
+   Keep Awake menu actions may execute inside a native child titlebar WKWebView. Decode the committed runtime state here so Swift can relay it into the main titlebar WKWebView and keep the titlebar icon in sync immediately after a dropdown click.
+   */
+  let runtime: TitlebarKeepAwakeRuntime?
+  let suppressAutoStart: Bool
+}
+
+struct TitlebarKeepAwakeRuntime: Decodable {
+  let durationMinutes: Int
+  let fireAtMs: Double?
+  let pid: Int
+  let source: String?
+  let startedAtMs: Double
 }
 
 struct SyncGhosttyTerminalSettings: Decodable {
@@ -1472,6 +1609,8 @@ enum HostEvent: Encodable {
   case projectBoardRequest(ProjectBoardBridgeRequest)
   case osIntegrationStatus(payloadJson: String)
   case sessionStatusIndicatorClicked(status: NativeSessionStatusIndicatorStatus)
+  case sessionStatusIndicatorProjectClicked(projectId: String)
+  case sessionStatusIndicatorSessionClicked(projectId: String, sessionId: String)
   case petOverlayActivityClicked(projectId: String, sessionId: String)
   case sessionAttentionNotificationClicked(sessionId: String)
   case t3RuntimeStartFailed(sessionId: String?, message: String)
@@ -1479,6 +1618,14 @@ enum HostEvent: Encodable {
     sessionId: String, projectId: String, threadId: String, serverOrigin: String, workspaceRoot: String)
   case t3ThreadChanged(sessionId: String, threadId: String, title: String?)
   case processResult(requestId: String, exitCode: Int32, stdout: String, stderr: String)
+  case portlessAdminResult(
+    requestId: String,
+    action: PortlessAdminActionKind,
+    portlessProtocol: PortlessAdminProtocol?,
+    ok: Bool,
+    exitCode: Int32?,
+    status: String,
+    errorCode: String?)
   case gxserverResponse(
     requestId: String, path: String, ok: Bool, statusCode: Int?, bodyJson: String?, error: String?)
   case remoteGxserverStatus(remoteMachineId: String, payloadJson: String)
@@ -1549,6 +1696,8 @@ enum HostEvent: Encodable {
     case statusCode
     case startLocation
     case ticketTitle
+    case errorCode
+    case portlessProtocol = "protocol"
     case position
     case sourceSessionId
     case targetSessionId
@@ -1863,9 +2012,19 @@ enum HostEvent: Encodable {
       /**
        CDXC:SessionStatusIndicators 2026-06-02-15:27:
        Floating AppKit status circles report only the clicked aggregate status back to the sidebar adapter. The adapter chooses the current-window focus target from gxserver presentation plus local-only panes instead of letting AppKit own shared session inventory.
+
+       CDXC:MenuBarStatusIndicator 2026-06-22-13:52:
+       The menu bar status indicator now opens a running-agents modal on primary click. Its project and session row clicks use dedicated host events below so the sidebar can reuse normal project/session focus paths while right click remains a no-op.
       */
       try container.encode("sessionStatusIndicatorClicked", forKey: .type)
       try container.encode(status, forKey: .status)
+    case .sessionStatusIndicatorProjectClicked(let projectId):
+      try container.encode("sessionStatusIndicatorProjectClicked", forKey: .type)
+      try container.encode(projectId, forKey: .projectId)
+    case .sessionStatusIndicatorSessionClicked(let projectId, let sessionId):
+      try container.encode("sessionStatusIndicatorSessionClicked", forKey: .type)
+      try container.encode(projectId, forKey: .projectId)
+      try container.encode(sessionId, forKey: .sessionId)
     case .petOverlayActivityClicked(let projectId, let sessionId):
       /**
        CDXC:PetOverlay 2026-05-14-10:23:
@@ -1912,6 +2071,19 @@ enum HostEvent: Encodable {
       try container.encode(exitCode, forKey: .exitCode)
       try container.encode(stdout, forKey: .stdout)
       try container.encode(stderr, forKey: .stderr)
+    case .portlessAdminResult(let requestId, let action, let portlessProtocol, let ok, let exitCode, let status, let errorCode):
+      /*
+       CDXC:PortlessIntegration 2026-06-23-00:15:
+       The admin bridge reports only stable result fields back to React. Do not encode stdout, stderr, command text, resource paths, state paths, hostnames, URLs, or env values from the privileged Portless service script.
+       */
+      try container.encode("portlessAdminResult", forKey: .type)
+      try container.encode(requestId, forKey: .requestId)
+      try container.encode(action, forKey: .action)
+      try container.encodeIfPresent(portlessProtocol, forKey: .portlessProtocol)
+      try container.encode(ok, forKey: .ok)
+      try container.encodeIfPresent(exitCode, forKey: .exitCode)
+      try container.encode(status, forKey: .status)
+      try container.encodeIfPresent(errorCode, forKey: .errorCode)
     case .gxserverResponse(let requestId, let path, let ok, let statusCode, let bodyJson, let error):
       try container.encode("gxserverResponse", forKey: .type)
       try container.encode(requestId, forKey: .requestId)

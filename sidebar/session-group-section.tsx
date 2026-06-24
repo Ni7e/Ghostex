@@ -3010,48 +3010,50 @@ export function SessionGroupSection({
               )}
         </SidebarContextMenuPortal>
       ) : null}
-      {projectContext && openControlMenu === "project-agent"
-        ? createPortal(
-            <div
-              className="group-control-menu session-context-menu group-agent-menu"
-              onClick={(event) => event.stopPropagation()}
-              ref={controlMenuRef}
-              role="menu"
-              style={getPortalMenuStyle(projectAgentButtonRef.current, GROUP_AGENT_MENU_WIDTH_PX)}
+      {projectContext && openControlMenu === "project-agent" ? (
+        <SidebarContextMenuPortal
+          menuClassName="session-context-menu group-agent-menu"
+          menuRef={controlMenuRef}
+          menuStyle={getPortalMenuStyle(projectAgentButtonRef.current, GROUP_AGENT_MENU_WIDTH_PX)}
+          onDismiss={() => setOpenControlMenu(undefined)}
+          vscode={vscode}
+        >
+          {/*
+           * CDXC:ProjectAgents 2026-06-22-13:11:
+           * Project-header agent menus can open near the bottom of the native sidebar.
+           * Use the measured sidebar menu portal so long agent lists clamp to the visible webview and scroll instead of overflowing past the sidebar edge.
+           */}
+          {agents.map((agent) => (
+            <button
+              aria-pressed={primaryProjectAgent?.agentId === agent.agentId}
+              className="session-context-menu-item group-control-menu-item group-agent-menu-item"
+              data-selected={String(primaryProjectAgent?.agentId === agent.agentId)}
+              key={agent.agentId}
+              onClick={() => requestRunProjectAgent(agent)}
+              role="menuitem"
+              type="button"
             >
-              {agents.map((agent) => (
-                <button
-                  aria-pressed={primaryProjectAgent?.agentId === agent.agentId}
-                  className="session-context-menu-item group-control-menu-item group-agent-menu-item"
-                  data-selected={String(primaryProjectAgent?.agentId === agent.agentId)}
-                  key={agent.agentId}
-                  onClick={() => requestRunProjectAgent(agent)}
-                  role="menuitem"
-                  type="button"
-                >
-                  <ProjectAgentLauncherIcon agent={agent} colorMode="brand" />
-                  <span className="group-agent-menu-label">{agent.name}</span>
-                  {primaryProjectAgent?.agentId === agent.agentId ? (
-                    <IconCheck aria-hidden="true" className="session-context-menu-icon" size={14} />
-                  ) : null}
-                </button>
-              ))}
-              {agents.length > 0 ? (
-                <div className="session-context-menu-divider" role="separator" />
+              <ProjectAgentLauncherIcon agent={agent} colorMode="brand" />
+              <span className="group-agent-menu-label">{agent.name}</span>
+              {primaryProjectAgent?.agentId === agent.agentId ? (
+                <IconCheck aria-hidden="true" className="session-context-menu-icon" size={14} />
               ) : null}
-              <button
-                className="session-context-menu-item group-control-menu-item group-agent-menu-item"
-                onClick={openConfigureAgentsModal}
-                role="menuitem"
-                type="button"
-              >
-                <IconSettings aria-hidden="true" className="session-context-menu-icon" size={14} />
-                <span className="group-agent-menu-label">Configure</span>
-              </button>
-            </div>,
-            document.body,
-          )
-        : null}
+            </button>
+          ))}
+          {agents.length > 0 ? (
+            <div className="session-context-menu-divider" role="separator" />
+          ) : null}
+          <button
+            className="session-context-menu-item group-control-menu-item group-agent-menu-item"
+            onClick={openConfigureAgentsModal}
+            role="menuitem"
+            type="button"
+          >
+            <IconSettings aria-hidden="true" className="session-context-menu-icon" size={14} />
+            <span className="group-agent-menu-label">Configure</span>
+          </button>
+        </SidebarContextMenuPortal>
+      ) : null}
       {/**
        * CDXC:SessionClose 2026-05-11-00:45
        * Group close confirmation copy must use Close so bulk session removal

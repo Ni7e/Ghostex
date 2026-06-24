@@ -20,6 +20,9 @@ pub struct GxserverAuthState {
 /*
 CDXC:GxserverAuth 2026-06-14-20:37:
 Rust Phase 1 keeps the TypeScript auth contract exactly: a 32-byte base64url token lives at ~/.ghostex/gxserver/auth/token, the directory is 0700, the token file is 0600, and comparisons are constant-time.
+
+CDXC:GxserverAuth 2026-06-22-04:10:
+Authorization parsing must mirror Node's `authorization.split(" ")` behavior in TypeScript gxserver: use the first space-delimited token after `Bearer`, ignore later segments, and treat an empty second segment as missing auth.
 */
 pub fn ensure_gxserver_auth_token(paths: &GxserverPaths) -> Result<GxserverAuthState> {
     fs::create_dir_all(&paths.auth_dir).with_context(|| "create gxserver auth directory")?;
@@ -67,7 +70,7 @@ pub fn is_authorized_headers(headers: &HeaderMap, expected_token: &str) -> bool 
 }
 
 pub fn is_expected_gxserver_auth_token(provided_token: &str, expected_token: &str) -> bool {
-    provided_token.as_bytes().len() == expected_token.as_bytes().len()
+    provided_token.len() == expected_token.len()
         && provided_token
             .as_bytes()
             .ct_eq(expected_token.as_bytes())
@@ -76,7 +79,7 @@ pub fn is_expected_gxserver_auth_token(provided_token: &str, expected_token: &st
 
 fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    let mut parts = value.splitn(2, ' ');
+    let mut parts = value.split(' ');
     let scheme = parts.next()?;
     let token = parts.next()?;
     if scheme.eq_ignore_ascii_case("bearer") && !token.is_empty() {
@@ -125,5 +128,91 @@ fn write_new_file_with_mode(path: &Path, bytes: &[u8], mode: u32) -> Result<()> 
         fs::write(path, bytes)?;
         let _ = mode;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::paths::get_gxserver_paths;
+
+    #[test]
+    fn authorization_bearer_parsing_matches_typescript_split() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            "Bearer expected extra".parse().unwrap(),
+        );
+        assert!(is_authorized_headers(&headers, "expected"));
+
+        headers.insert(header::AUTHORIZATION, "Bearer  expected".parse().unwrap());
+        assert!(!is_authorized_headers(&headers, "expected"));
+
+        headers.insert(header::AUTHORIZATION, "Bearer expected".parse().unwrap());
+        assert!(is_authorized_headers(&headers, "expected"));
+    }
+
+    #[test]
+    fn auth_token_is_generated_once_at_gxserver_auth_path() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+
+        let first = ensure_gxserver_auth_token(&paths).expect("first token");
+        let second = ensure_gxserver_auth_token(&paths).expect("second token");
+        let read = read_gxserver_auth_token(&paths)
+            .expect("read token")
+            .expect("token");
+
+        assert_eq!(
+            paths.auth_token_file,
+            temp.path()
+                .join(".ghostex")
+                .join("gxserver")
+                .join("auth")
+                .join("token")
+        );
+        assert_eq!(second.token, first.token);
+        assert_eq!(read.token, first.token);
+        assert!(is_valid_auth_token(&first.token));
+        assert!(!first.token.contains('='));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn auth_token_permissions_are_strict() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+
+        ensure_gxserver_auth_token(&paths).expect("token");
+        assert_eq!(
+            fs::metadata(&paths.auth_token_file)
+                .expect("token metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            TOKEN_FILE_MODE
+        );
+        assert_eq!(
+            fs::metadata(&paths.auth_dir)
+                .expect("auth dir metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            AUTH_DIR_MODE
+        );
+
+        fs::set_permissions(&paths.auth_token_file, fs::Permissions::from_mode(0o644))
+            .expect("loosen token");
+        ensure_gxserver_auth_token(&paths).expect("token reused");
+        assert_eq!(
+            fs::metadata(&paths.auth_token_file)
+                .expect("token metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            TOKEN_FILE_MODE
+        );
     }
 }

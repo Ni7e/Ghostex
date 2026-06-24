@@ -9,6 +9,7 @@ use serde_json::{json, Map, Value};
 use crate::{
     domain::{read_project_id, read_session_id, DomainRepository, DomainStateError},
     ids::is_gxserver_session_id,
+    platform::resources,
     presentation::project_session_title_projection,
     session_status::{
         compute_activity_update, is_stale_activity_event, normalize_agent_activity_value,
@@ -18,9 +19,10 @@ use crate::{
 };
 
 const AGENT_SETTINGS_METADATA_KEY: &str = "agents.settings.v1";
-const LEGACY_AGENT_SETTINGS_METADATA_KEY: &str = "gxserverAgentSettings";
 const DEFAULT_PROMPT_AGENT_ID: &str = "codex";
 const MAX_DEFAULT_PROMPT_AGENT_ID_LENGTH: usize = 120;
+const GROK_PERMISSION_MODE_FLAG: &str = "--permission-mode";
+const GROK_BYPASS_PERMISSIONS_VALUE: &str = "bypassPermissions";
 
 #[derive(Debug)]
 pub enum AgentEndpointError {
@@ -57,8 +59,8 @@ Phase 6 moves agent policy, launch/resume planning, passive title/status ingesti
 CDXC:GxserverAgentSettings 2026-06-19-13:59:
 Agent settings parity uses the TypeScript metadata key `agents.settings.v1` and stores Default Prompt Agent beside global Accept All. Normalize the prompt-agent id at the daemon boundary by trimming whitespace, falling back to `codex`, and capping it to 120 chars without validating against a client-local agent registry.
 
-CDXC:GxserverAgentSettings 2026-06-19-18:44:
-Rust must treat legacy `gxserverAgentSettings` metadata as persisted when `agents.settings.v1` is absent so upgrades do not overwrite user choices during startup seeding. Updates migrate by reading that legacy value and writing only the current key while leaving the legacy row untouched.
+CDXC:GxserverAgentSettings 2026-06-22-07:33:
+Agent settings persistence must match TypeScript gxserver exactly: read and write only `agents.settings.v1`. Legacy or sidebar-local keys are not daemon settings and must not make `/api/readAgentSettings` report persisted values.
 */
 pub fn dispatch_agent_endpoint(
     repository: &DomainRepository<'_>,
@@ -134,7 +136,7 @@ pub fn dispatch_agent_endpoint(
         }
         "/api/ingestSessionStateEvent" => {
             let lifecycle = read_lifecycle(params)?;
-            let result = ingest_session_state_event(repository, &lifecycle, params)?;
+            let result = ingest_session_state_event(repository, &lifecycle, params, home_dir)?;
             AgentEndpointOutput {
                 presentation_session: Some((lifecycle.project_id, lifecycle.session_id)),
                 result,
@@ -142,10 +144,13 @@ pub fn dispatch_agent_endpoint(
         }
         "/api/ingestTerminalTitleEvent" => {
             let lifecycle = read_lifecycle(params)?;
-            let result = ingest_terminal_title_event(repository, &lifecycle, params)?;
+            let output =
+                ingest_terminal_title_event_with_home(repository, &lifecycle, params, home_dir)?;
             AgentEndpointOutput {
-                presentation_session: Some((lifecycle.project_id, lifecycle.session_id)),
-                result,
+                presentation_session: output
+                    .schedule_presentation_delta
+                    .then_some((lifecycle.project_id, lifecycle.session_id)),
+                result: output.result,
             }
         }
         "/api/updateAgentActivity" => {
@@ -158,9 +163,14 @@ pub fn dispatch_agent_endpoint(
         }
         "/api/ingestAgentHookEvent" => {
             let lifecycle = read_lifecycle(params)?;
-            let result = ingest_agent_hook_event(repository, &lifecycle, params)?;
+            let result = ingest_agent_hook_event(repository, &lifecycle, params, home_dir)?;
+            let rejected = matches!(
+                result.get("reason").and_then(Value::as_str),
+                Some("agent-hook-agent-mismatch" | "passive-session-identity-conflict")
+            );
             AgentEndpointOutput {
-                presentation_session: Some((lifecycle.project_id, lifecycle.session_id)),
+                presentation_session: (!rejected)
+                    .then_some((lifecycle.project_id, lifecycle.session_id)),
                 result,
             }
         }
@@ -184,10 +194,7 @@ fn read_agent_settings_with_metadata(db: &Connection) -> Result<Value, DomainSta
 }
 
 fn read_agent_settings_metadata_value(db: &Connection) -> Result<Option<String>, DomainStateError> {
-    if let Some(value) = read_metadata_value(db, AGENT_SETTINGS_METADATA_KEY)? {
-        return Ok(Some(value));
-    }
-    read_metadata_value(db, LEGACY_AGENT_SETTINGS_METADATA_KEY)
+    read_metadata_value(db, AGENT_SETTINGS_METADATA_KEY)
 }
 
 fn read_metadata_value(db: &Connection, key: &str) -> Result<Option<String>, DomainStateError> {
@@ -198,7 +205,7 @@ fn read_metadata_value(db: &Connection, key: &str) -> Result<Option<String>, Dom
     .map_err(sql_error)
 }
 
-fn read_agent_settings(db: &Connection) -> Result<Map<String, Value>, DomainStateError> {
+pub(crate) fn read_agent_settings(db: &Connection) -> Result<Map<String, Value>, DomainStateError> {
     let value = read_agent_settings_with_metadata(db)?;
     Ok(object_field(&value, "settings"))
 }
@@ -292,6 +299,130 @@ fn build_project_agent_launch_plan(
     })
 }
 
+/*
+CDXC:GxserverCrudParity 2026-06-22-05:39:
+`createAgentSession` is a CRUD endpoint, but its durable row is shaped by the same project agent config and persisted agent settings as TypeScript gxserver. Build the launch plan before repository insertion so listSessions/readProjectStatus return the same launchSettings and runtimeSettings immediately after creation.
+*/
+pub(crate) fn create_agent_session_params_for_project(
+    db: &Connection,
+    project: &Value,
+    params: &Map<String, Value>,
+) -> Result<Map<String, Value>, DomainStateError> {
+    let settings = read_agent_settings(db)?;
+    let project_id = project
+        .get("projectId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| DomainStateError::corrupt_state("Project missing projectId."))?;
+    let agent_id =
+        read_text(params, "agentId").unwrap_or_else(|| DEFAULT_PROMPT_AGENT_ID.to_string());
+    let mut launch_settings = params
+        .get("launchSettings")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut runtime_settings = params
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let agent_config = resolve_project_agent_config(project, &agent_id, Some(&launch_settings));
+    let launch_plan = build_agent_launch_plan(AgentLaunchInput {
+        accept_all_mode: read_text_from_map(&agent_config, "acceptAllMode")
+            .or_else(|| read_text_from_map(&launch_settings, "acceptAllMode")),
+        agent_id: agent_id.clone(),
+        agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
+        command: read_text_from_map(&agent_config, "command")
+            .or_else(|| read_text_from_map(&launch_settings, "agentCommand")),
+        delayed_send_deadline_at: read_text_from_map(&launch_settings, "delayedSendDeadlineAt"),
+        first_user_message: read_text_from_map(&runtime_settings, "firstUserMessage"),
+        global_accept_all_enabled: settings
+            .get("agentAcceptAllEnabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        icon: read_text_from_map(&agent_config, "icon")
+            .or_else(|| read_text_from_map(&launch_settings, "icon")),
+    });
+    let launch_plan_object = launch_plan.as_object().cloned().unwrap_or_default();
+    let has_launch_startup_text = launch_plan_object
+        .get("startupText")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    let agent_activity = if runtime_settings.get("agentActivity").is_some() {
+        normalize_agent_activity_value(runtime_settings.get("agentActivity"), "idle")
+    } else {
+        default_activity(
+            Some(&agent_id),
+            has_launch_startup_text.then_some("working"),
+        )
+    };
+    runtime_settings.insert("agentActivity".to_string(), agent_activity);
+    runtime_settings.insert(
+        "agentCommand".to_string(),
+        Value::String(
+            launch_plan_object
+                .get("agentCommand")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        ),
+    );
+    runtime_settings.insert("launchAgentId".to_string(), Value::String(agent_id.clone()));
+    if let Some(first_user_message) = launch_plan_object
+        .get("firstUserMessage")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    {
+        runtime_settings.insert(
+            "firstUserMessage".to_string(),
+            Value::String(first_user_message.to_string()),
+        );
+    }
+
+    let mut runtime_relevant = Map::new();
+    if let Some(deadline_at) = launch_plan_object
+        .get("delayedSend")
+        .and_then(Value::as_object)
+        .and_then(|delayed| delayed.get("deadlineAt"))
+        .and_then(Value::as_str)
+    {
+        runtime_relevant.insert(
+            "delayedSendDeadlineAt".to_string(),
+            Value::String(deadline_at.to_string()),
+        );
+    }
+    runtime_relevant.insert(
+        "queueProviderStartupText".to_string(),
+        Value::Bool(
+            launch_plan_object
+                .get("startupTextDisposition")
+                .and_then(Value::as_str)
+                == Some("queueAfterTerminalReady"),
+        ),
+    );
+    launch_settings.insert("agentLaunchPlan".to_string(), launch_plan);
+    launch_settings.insert(
+        "runtimeRelevant".to_string(),
+        Value::Object(runtime_relevant),
+    );
+
+    let mut normalized = params.clone();
+    normalized.insert("agentId".to_string(), Value::String(agent_id));
+    normalized.insert("kind".to_string(), Value::String("agent".to_string()));
+    normalized.insert("launchSettings".to_string(), Value::Object(launch_settings));
+    normalized.insert(
+        "projectId".to_string(),
+        Value::String(project_id.to_string()),
+    );
+    normalized
+        .entry("lifecycleState".to_string())
+        .or_insert_with(|| Value::String("running".to_string()));
+    normalized.insert(
+        "runtimeSettings".to_string(),
+        Value::Object(runtime_settings),
+    );
+    Ok(normalized)
+}
+
 struct AgentLaunchInput {
     accept_all_mode: Option<String>,
     agent_id: String,
@@ -319,10 +450,11 @@ fn build_agent_launch_plan(input: AgentLaunchInput) -> Value {
         input
             .agent_session_id
             .filter(|value| !value.trim().is_empty())
-            .map(|session_id| {
+            .and_then(|session_id| get_cursor_chat_session_id(Some(&session_id)))
+            .map(|chat_id| {
                 format!(
                     "{launch_command} --resume {}",
-                    quote_shell_double_arg(&session_id)
+                    quote_shell_double_arg(&chat_id)
                 )
             })
             .unwrap_or(launch_command)
@@ -330,9 +462,7 @@ fn build_agent_launch_plan(input: AgentLaunchInput) -> Value {
         launch_command
     };
     let mut plan = Map::new();
-    if !base_command.is_empty() {
-        plan.insert("agentCommand".to_string(), Value::String(base_command));
-    }
+    plan.insert("agentCommand".to_string(), Value::String(base_command));
     plan.insert("command".to_string(), Value::String(command.clone()));
     if let Some(deadline) = input.delayed_send_deadline_at {
         plan.insert(
@@ -367,6 +497,98 @@ fn build_agent_resume_plan(
     session: &Value,
     settings: &Map<String, Value>,
 ) -> Value {
+    let input = to_agent_resume_input(project, session, settings);
+    let primary_command =
+        build_agent_resume_command(&input, ResumeCommandOptions { display: false });
+    let display_command = primary_command
+        .as_ref()
+        .and_then(|_| build_agent_resume_command(&input, ResumeCommandOptions { display: true }))
+        .or_else(|| primary_command.clone());
+    let fallback_command = build_agent_resume_fallback_command(&input);
+    let copy_command = build_agent_resume_copy_command(&input);
+    let mut plan = Map::new();
+    insert_optional_string(&mut plan, "agentId", input.agent_id.clone());
+    insert_optional_string(&mut plan, "baseCommand", input.agent_lookup_command.clone());
+    insert_optional_string(&mut plan, "copyCommand", copy_command);
+    insert_optional_string(&mut plan, "displayCommand", display_command.clone());
+    insert_optional_string(&mut plan, "fallbackCommand", fallback_command.clone());
+    insert_optional_string(
+        &mut plan,
+        "lookupCommand",
+        input.agent_lookup_command.clone(),
+    );
+    insert_optional_string(&mut plan, "primaryCommand", primary_command.clone());
+    insert_optional_string(&mut plan, "runtimeCommand", input.agent_command.clone());
+    if let Some(command) = primary_command {
+        /*
+        CDXC:GxserverZmxLifecycle 2026-06-22-06:58:
+        Provider startup must feed zmx the same restored-session startup script shape as TypeScript gxserver. Wrap daemon-owned resume commands before they reach attach metadata or `startSessionProvider` so wake/start paths print restore context and keep the command in the initial provider startup text instead of changing zmx lifecycle decisions.
+
+        CDXC:AgentResume 2026-06-22-07:47:
+        Resume planning must keep TypeScript's separate primary/display/copy/fallback command roles. Exact Codex restores validate the stored id first, then the startup wrapper can try a trusted-title fallback without making Copy Resume include lookup shell code.
+        */
+        let startup_text = wrap_restored_terminal_resume_command(
+            &command,
+            display_command.as_deref().unwrap_or(&command),
+            fallback_command.as_deref(),
+        );
+        plan.insert(
+            "startupText".to_string(),
+            Value::String(as_atuin_ignored_shell_input(&startup_text)),
+        );
+        plan.insert(
+            "startupTextDisposition".to_string(),
+            Value::String("queueAfterTerminalReady".to_string()),
+        );
+    } else {
+        plan.insert(
+            "startupTextDisposition".to_string(),
+            Value::String("none".to_string()),
+        );
+    }
+    Value::Object(plan)
+}
+
+pub(crate) fn get_agent_startup_text_for_session(
+    project: &Value,
+    session: &Value,
+    settings: &Map<String, Value>,
+) -> Option<String> {
+    /*
+    CDXC:GxserverSessionIO 2026-06-22-06:53:
+    zmx attach metadata must preserve TypeScript's startup-text precedence: explicit renderer text, then queued fresh-launch text, then the daemon-owned agent resume plan shaped by current agent settings. This keeps missing-provider reattach/wake metadata from dropping restorable agent commands after the Rust cutover.
+    */
+    build_agent_resume_plan(project, session, settings)
+        .get("startupText")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .filter(|value| !value.trim().is_empty())
+}
+
+#[derive(Clone)]
+struct AgentResumeInput {
+    agent_command: Option<String>,
+    agent_id: Option<String>,
+    agent_lookup_command: Option<String>,
+    agent_session_id: Option<String>,
+    agent_session_path: Option<String>,
+    first_user_message: Option<String>,
+    project_path: Option<String>,
+    stored_command_candidates: Vec<String>,
+    title: Option<String>,
+    title_source: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+struct ResumeCommandOptions {
+    display: bool,
+}
+
+fn to_agent_resume_input(
+    project: &Value,
+    session: &Value,
+    settings: &Map<String, Value>,
+) -> AgentResumeInput {
     let agent_id = read_text_value(session, "agentId");
     let runtime_settings = object_field(session, "runtimeSettings");
     let launch_settings = object_field(session, "launchSettings");
@@ -383,97 +605,1242 @@ fn build_agent_resume_plan(
                 .and_then(default_agent_command)
                 .map(str::to_string)
         });
-    let runtime_command = agent_id.as_deref().and_then(|agent_id| {
-        base_command.as_ref().map(|command| {
-            resolve_agent_launch_command(
-                agent_id,
-                command,
-                read_text_from_map(&agent_config, "acceptAllMode")
-                    .or_else(|| read_text_from_map(&launch_settings, "acceptAllMode"))
-                    .as_deref(),
-                settings
-                    .get("agentAcceptAllEnabled")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(true),
-                read_text_from_map(&agent_config, "icon")
-                    .or_else(|| read_text_from_map(&launch_settings, "icon"))
-                    .as_deref(),
-            )
+    let runtime_command = agent_id
+        .as_ref()
+        .and_then(|agent_id| {
+            base_command.as_ref().map(|command| {
+                resolve_agent_launch_command(
+                    agent_id,
+                    command,
+                    read_text_from_map(&agent_config, "acceptAllMode")
+                        .or_else(|| read_text_from_map(&launch_settings, "acceptAllMode"))
+                        .as_deref(),
+                    settings
+                        .get("agentAcceptAllEnabled")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(true),
+                    read_text_from_map(&agent_config, "icon")
+                        .or_else(|| read_text_from_map(&launch_settings, "icon"))
+                        .as_deref(),
+                )
+            })
         })
-    });
-    let primary_command = match (agent_id.as_deref(), runtime_command.as_deref()) {
-        (Some(agent_id), Some(command)) => build_agent_resume_command(
-            agent_id,
-            command,
-            read_text_from_map(&runtime_settings, "agentSessionId")
-                .or_else(|| read_text_from_map(&runtime_settings, "agentSessionPath")),
-            trusted_resume_title(session),
-        ),
-        _ => None,
-    };
-    let copy_command = match (agent_id.as_deref(), runtime_command.as_deref()) {
-        (Some(agent_id), Some(command)) => build_agent_resume_command(
-            agent_id,
-            command,
-            read_text_from_map(&runtime_settings, "agentSessionId")
-                .or_else(|| read_text_from_map(&runtime_settings, "agentSessionPath")),
-            None,
-        ),
-        _ => None,
-    };
-    let mut plan = Map::new();
-    insert_optional_string(&mut plan, "agentId", agent_id);
-    insert_optional_string(&mut plan, "baseCommand", base_command.clone());
-    insert_optional_string(&mut plan, "copyCommand", copy_command);
-    insert_optional_string(&mut plan, "displayCommand", primary_command.clone());
-    insert_optional_string(&mut plan, "lookupCommand", base_command);
-    insert_optional_string(&mut plan, "primaryCommand", primary_command.clone());
-    insert_optional_string(&mut plan, "runtimeCommand", runtime_command);
-    if let Some(command) = primary_command {
-        plan.insert(
-            "startupText".to_string(),
-            Value::String(as_atuin_ignored_shell_input(&command)),
-        );
-        plan.insert(
-            "startupTextDisposition".to_string(),
-            Value::String("queueAfterTerminalReady".to_string()),
-        );
-    } else {
-        plan.insert(
-            "startupTextDisposition".to_string(),
-            Value::String("none".to_string()),
-        );
+        .or_else(|| base_command.clone());
+    AgentResumeInput {
+        agent_command: runtime_command,
+        agent_id,
+        agent_lookup_command: base_command,
+        agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
+        agent_session_path: read_text_from_map(&runtime_settings, "agentSessionPath"),
+        first_user_message: read_text_from_map(&runtime_settings, "firstUserMessage")
+            .or_else(|| read_text_from_map(&launch_settings, "firstUserMessage")),
+        project_path: read_text_value(session, "cwd").or_else(|| read_text_value(project, "path")),
+        stored_command_candidates: collect_stored_agent_resume_command_candidates(session),
+        title: read_text_value(session, "title"),
+        title_source: read_text_from_map(&runtime_settings, "titleSource")
+            .or_else(|| read_text_from_map(&runtime_settings, "restoreTitleSource"))
+            .or_else(|| Some("user".to_string())),
     }
-    Value::Object(plan)
 }
 
 fn build_agent_resume_command(
-    agent_id: &str,
-    command: &str,
-    exact_reference: Option<String>,
-    title_reference: Option<String>,
+    input: &AgentResumeInput,
+    options: ResumeCommandOptions,
 ) -> Option<String> {
-    let reference = exact_reference.or(title_reference)?;
-    let quoted = quote_shell_double_arg(&reference);
+    let agent_id = restorable_agent_id(input.agent_id.as_deref())?;
+    let agent_command = input.agent_command.as_deref()?;
+    let agent_lookup_command = input
+        .agent_lookup_command
+        .as_deref()
+        .unwrap_or(agent_command);
+    let resume_title = if agent_id == "pi" {
+        None
+    } else {
+        trusted_resume_title_for_input(input)
+    };
+    let exact_reference = get_exact_agent_session_reference(agent_id, input);
+    let codex_exact_reference = (agent_id == "codex")
+        .then(|| get_codex_session_reference(input))
+        .flatten();
+    let codex_reference = if agent_id == "codex" {
+        codex_exact_reference
+            .clone()
+            .or_else(|| resume_title.clone())
+    } else {
+        None
+    };
+    let claude_exact_reference = (agent_id == "claude")
+        .then(|| get_claude_session_reference(input))
+        .flatten();
+    let cursor_reference = (agent_id == "cursor")
+        .then(|| get_cursor_session_reference(input))
+        .flatten();
+    let opencode_reference = (agent_id == "opencode")
+        .then(|| get_opencode_session_reference(input))
+        .flatten();
+    let pi_reference = (agent_id == "pi")
+        .then(|| get_pi_session_reference(input))
+        .flatten();
+
     match agent_id {
-        "amp" => Some(format!("{command} threads continue {quoted}")),
-        "antigravity" => Some(format!("{command} --conversation {quoted}")),
-        "claude" => Some(format!("{command} --resume {quoted}")),
-        "codex" => Some(format!("{command} resume {quoted}")),
-        "cursor" => Some(format!("{command} --resume {quoted}")),
-        "grok" => Some(format!("{command} -r {quoted}")),
-        "kiro" => Some(format!("{command} --resume-id {quoted}")),
-        "omp" | "opencode" | "pi" => Some(format!("{command} --session {quoted}")),
-        "rovodev" => Some(if command.contains("rovodev") {
-            format!("{command} --restore {quoted}")
-        } else {
-            format!("{command} rovodev run --restore {quoted}")
+        "amp" => exact_reference.map(|reference| {
+            format!(
+                "{agent_command} threads continue {}",
+                quote_shell_double_arg(&reference)
+            )
         }),
-        "codebuddy" | "copilot" | "droid" | "gemini" | "hermes-agent" | "qoder" => {
-            Some(format!("{command} --resume {quoted}"))
+        "antigravity" => exact_reference.map(|reference| {
+            format!(
+                "{agent_command} --conversation {}",
+                quote_shell_double_arg(&reference)
+            )
+        }),
+        "codebuddy" | "copilot" | "droid" | "gemini" | "hermes-agent" | "qoder" => exact_reference
+            .map(|reference| {
+                format!(
+                    "{agent_command} --resume {}",
+                    quote_shell_double_arg(&reference)
+                )
+            }),
+        "grok" => exact_reference
+            .map(|reference| format!("{agent_command} -r {}", quote_shell_double_arg(&reference))),
+        "kiro" => exact_reference.map(|reference| {
+            format!(
+                "{agent_command} --resume-id {}",
+                quote_shell_double_arg(&reference)
+            )
+        }),
+        "omp" => exact_reference.map(|reference| {
+            format!(
+                "{agent_command} --session {}",
+                quote_shell_double_arg(&reference)
+            )
+        }),
+        "codex" => {
+            let reference = codex_reference?;
+            if options.display {
+                return Some(if let Some(exact) = codex_exact_reference {
+                    format!("{agent_command} resume {}", quote_shell_double_arg(&exact))
+                } else {
+                    format!(
+                        "{agent_command} resume {}  # lookup Codex session id by title",
+                        quote_shell_double_arg(&reference)
+                    )
+                });
+            }
+            if let Some(exact) = codex_exact_reference {
+                Some(build_codex_validated_resume_command(agent_command, &exact))
+            } else {
+                Some(build_codex_resume_lookup_command(agent_command, &reference))
+            }
+        }
+        "claude" => {
+            if let Some(exact) = claude_exact_reference {
+                return Some(format!(
+                    "{agent_command} --resume {}",
+                    quote_shell_double_arg(&exact)
+                ));
+            }
+            let resume_title = resume_title?;
+            if options.display {
+                Some(format!(
+                    "{agent_command} --resume {}  # lookup Claude session id by title",
+                    quote_shell_double_arg(&resume_title)
+                ))
+            } else {
+                Some(build_claude_resume_lookup_command(
+                    agent_command,
+                    input,
+                    &resume_title,
+                ))
+            }
+        }
+        "cursor" => {
+            if let Some(reference) = cursor_reference {
+                return Some(format!(
+                    "{agent_command} --resume {}",
+                    quote_shell_double_arg(&reference)
+                ));
+            }
+            let resume_title = resume_title?;
+            let project_path = input.project_path.as_deref()?;
+            if options.display {
+                Some(format!(
+                    "{agent_command} --resume {}  # lookup chat id in Cursor chat store",
+                    quote_shell_double_arg(&resume_title)
+                ))
+            } else {
+                Some(build_cursor_resume_lookup_command(
+                    agent_command,
+                    project_path,
+                    &resume_title,
+                ))
+            }
+        }
+        "opencode" => {
+            if let Some(reference) = opencode_reference {
+                return Some(format!(
+                    "{agent_command} --session {}",
+                    quote_shell_double_arg(&reference)
+                ));
+            }
+            let resume_title = resume_title?;
+            if options.display {
+                Some(format!(
+                    "{agent_command} -s {}  # lookup session id in OpenCode session list",
+                    quote_shell_double_arg(&resume_title)
+                ))
+            } else {
+                Some(build_opencode_resume_command(
+                    agent_command,
+                    &resume_title,
+                    agent_lookup_command,
+                ))
+            }
+        }
+        "pi" => pi_reference.map(|reference| {
+            format!(
+                "{agent_command} --session {}",
+                quote_shell_double_arg(&reference)
+            )
+        }),
+        "rovodev" => {
+            exact_reference.map(|reference| build_rovodev_resume_command(agent_command, &reference))
         }
         _ => None,
     }
+}
+
+fn build_agent_resume_copy_command(input: &AgentResumeInput) -> Option<String> {
+    let agent_id = restorable_agent_id(input.agent_id.as_deref())?;
+    let agent_command = input.agent_command.as_deref()?;
+    let exact_reference = get_exact_agent_session_reference(agent_id, input);
+    match agent_id {
+        "amp" => exact_reference.map(|reference| {
+            format!(
+                "{agent_command} threads continue {}",
+                quote_shell_double_arg(&reference)
+            )
+        }),
+        "antigravity" => exact_reference.map(|reference| {
+            format!(
+                "{agent_command} --conversation {}",
+                quote_shell_double_arg(&reference)
+            )
+        }),
+        "codebuddy" | "copilot" | "droid" | "gemini" | "hermes-agent" | "qoder" => exact_reference
+            .map(|reference| {
+                format!(
+                    "{agent_command} --resume {}",
+                    quote_shell_double_arg(&reference)
+                )
+            }),
+        "grok" => exact_reference
+            .map(|reference| format!("{agent_command} -r {}", quote_shell_double_arg(&reference))),
+        "kiro" => exact_reference.map(|reference| {
+            format!(
+                "{agent_command} --resume-id {}",
+                quote_shell_double_arg(&reference)
+            )
+        }),
+        "omp" => exact_reference.map(|reference| {
+            format!(
+                "{agent_command} --session {}",
+                quote_shell_double_arg(&reference)
+            )
+        }),
+        "codex" => get_codex_session_reference(input).map(|reference| {
+            format!(
+                "{agent_command} resume {}",
+                quote_shell_double_arg(&reference)
+            )
+        }),
+        "claude" => get_claude_session_reference(input).map(|reference| {
+            format!(
+                "{agent_command} --resume {}",
+                quote_shell_double_arg(&reference)
+            )
+        }),
+        "cursor" => get_cursor_session_reference(input).map(|reference| {
+            format!(
+                "{agent_command} --resume {}",
+                quote_shell_double_arg(&reference)
+            )
+        }),
+        "opencode" => get_opencode_session_reference(input).map(|reference| {
+            format!(
+                "{agent_command} --session {}",
+                quote_shell_double_arg(&reference)
+            )
+        }),
+        "pi" => get_pi_session_reference(input).map(|reference| {
+            format!(
+                "{agent_command} --session {}",
+                quote_shell_double_arg(&reference)
+            )
+        }),
+        "rovodev" => {
+            exact_reference.map(|reference| build_rovodev_resume_command(agent_command, &reference))
+        }
+        _ => None,
+    }
+}
+
+fn build_agent_resume_fallback_command(input: &AgentResumeInput) -> Option<String> {
+    let agent_id = restorable_agent_id(input.agent_id.as_deref())?;
+    let agent_command = input.agent_command.as_deref()?;
+    let agent_lookup_command = input
+        .agent_lookup_command
+        .as_deref()
+        .unwrap_or(agent_command);
+    let resume_title = trusted_resume_title_for_input(input)?;
+    match agent_id {
+        "codex" => {
+            let exact = get_codex_session_reference(input)?;
+            (exact != resume_title)
+                .then(|| build_codex_resume_lookup_command(agent_command, &resume_title))
+        }
+        "claude" => {
+            let _exact = get_claude_session_reference(input)?;
+            Some(build_claude_resume_lookup_command(
+                agent_command,
+                input,
+                &resume_title,
+            ))
+        }
+        "opencode" => {
+            let exact = get_opencode_session_reference(input)?;
+            (exact != resume_title).then(|| {
+                build_opencode_resume_command(agent_command, &resume_title, agent_lookup_command)
+            })
+        }
+        "cursor" => {
+            let _exact = get_cursor_session_reference(input)?;
+            let project_path = input.project_path.as_deref()?;
+            Some(build_cursor_resume_lookup_command(
+                agent_command,
+                project_path,
+                &resume_title,
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn restorable_agent_id(value: Option<&str>) -> Option<&str> {
+    let value = value?.trim();
+    match value {
+        "amp" | "antigravity" | "claude" | "codebuddy" | "codex" | "copilot" | "cursor"
+        | "droid" | "gemini" | "grok" | "hermes-agent" | "kiro" | "omp" | "opencode" | "pi"
+        | "qoder" | "rovodev" => Some(value),
+        _ => None,
+    }
+}
+
+fn get_exact_agent_session_reference(agent_id: &str, input: &AgentResumeInput) -> Option<String> {
+    match agent_id {
+        "codex" => get_codex_session_reference(input),
+        "cursor" => get_cursor_session_reference(input),
+        "pi" => get_pi_session_reference(input),
+        _ => input.agent_session_id.clone(),
+    }
+}
+
+fn get_codex_session_reference(input: &AgentResumeInput) -> Option<String> {
+    let session_id = input.agent_session_id.as_deref()?.trim();
+    if session_id.is_empty() {
+        return None;
+    }
+    get_uuid_from_text(session_id).or_else(|| Some(session_id.to_string()))
+}
+
+fn get_claude_session_reference(input: &AgentResumeInput) -> Option<String> {
+    input
+        .agent_session_id
+        .clone()
+        .or_else(|| get_claude_session_id(input.agent_session_path.as_deref()))
+        .or_else(|| get_claude_session_id_from_stored_commands(&input.stored_command_candidates))
+}
+
+fn get_opencode_session_reference(input: &AgentResumeInput) -> Option<String> {
+    input.agent_session_id.clone()
+}
+
+fn get_pi_session_reference(input: &AgentResumeInput) -> Option<String> {
+    input
+        .agent_session_path
+        .clone()
+        .or_else(|| input.agent_session_id.clone())
+}
+
+fn get_cursor_session_reference(input: &AgentResumeInput) -> Option<String> {
+    get_cursor_chat_session_id(input.agent_session_id.as_deref())
+        .or_else(|| get_cursor_chat_session_id(input.agent_session_path.as_deref()))
+        .or_else(|| {
+            get_cursor_chat_session_id_from_stored_commands(&input.stored_command_candidates)
+        })
+}
+
+fn get_cursor_chat_session_id(value: Option<&str>) -> Option<String> {
+    let normalized = value?.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    if is_uuid(normalized) {
+        return Some(normalized.to_ascii_lowercase());
+    }
+    let normalized_path = normalized.replace('\\', "/");
+    let marker = "/agent-transcripts/";
+    let index = normalized_path.to_ascii_lowercase().find(marker)?;
+    let tail = &normalized_path[index + marker.len()..];
+    let segment = tail.split('/').next()?.trim();
+    is_uuid(segment).then(|| segment.to_ascii_lowercase())
+}
+
+fn get_cursor_chat_session_id_from_stored_commands(candidates: &[String]) -> Option<String> {
+    candidates
+        .iter()
+        .filter_map(|candidate| get_resume_flag_value_from_stored_command(candidate, "--resume"))
+        .find_map(|value| get_cursor_chat_session_id(Some(&value)))
+}
+
+fn get_claude_session_id_from_stored_commands(candidates: &[String]) -> Option<String> {
+    candidates
+        .iter()
+        .filter_map(|candidate| get_resume_flag_value_from_stored_command(candidate, "--resume"))
+        .find_map(|value| get_claude_session_id(Some(&value)))
+}
+
+fn get_claude_session_id(value: Option<&str>) -> Option<String> {
+    let normalized = value?.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    if let Some(uuid) = get_uuid_from_text(normalized) {
+        return Some(uuid);
+    }
+    let cleaned = normalized.trim_end_matches(".jsonl");
+    if is_claude_ses_id(cleaned) {
+        return Some(cleaned.to_string());
+    }
+    let normalized_path = normalized.replace('\\', "/");
+    normalized_path
+        .split('/')
+        .filter_map(|part| {
+            let candidate = part.trim_end_matches(".jsonl");
+            is_claude_ses_id(candidate).then(|| candidate.to_string())
+        })
+        .next_back()
+}
+
+fn is_claude_ses_id(value: &str) -> bool {
+    value.strip_prefix("ses_").is_some_and(|rest| {
+        !rest.is_empty() && rest.chars().all(|char| char.is_ascii_alphanumeric())
+    })
+}
+
+fn get_resume_flag_value_from_stored_command(command: &str, flag: &str) -> Option<String> {
+    let bytes = command.as_bytes();
+    let flag_bytes = flag.as_bytes();
+    let mut index = 0;
+    while index + flag_bytes.len() <= bytes.len() {
+        if &bytes[index..index + flag_bytes.len()] != flag_bytes {
+            index += 1;
+            continue;
+        }
+        if index > 0 && !bytes[index - 1].is_ascii_whitespace() {
+            index += 1;
+            continue;
+        }
+        let mut cursor = index + flag_bytes.len();
+        if bytes.get(cursor) == Some(&b'=') {
+            cursor += 1;
+        } else if bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+                cursor += 1;
+            }
+        } else {
+            index += 1;
+            continue;
+        }
+        if cursor >= bytes.len() {
+            return None;
+        }
+        let quote = match bytes[cursor] {
+            b'\'' | b'"' => {
+                cursor += 1;
+                Some(bytes[cursor - 1])
+            }
+            _ => None,
+        };
+        let start = cursor;
+        while cursor < bytes.len() {
+            let byte = bytes[cursor];
+            if quote == Some(byte)
+                || (quote.is_none()
+                    && (byte.is_ascii_whitespace() || matches!(byte, b';' | b'&' | b'|')))
+            {
+                break;
+            }
+            cursor += 1;
+        }
+        let value = command[start..cursor].trim();
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+        index = cursor.saturating_add(1);
+    }
+    None
+}
+
+fn collect_stored_agent_resume_command_candidates(session: &Value) -> Vec<String> {
+    let runtime_settings = object_field(session, "runtimeSettings");
+    let launch_settings = object_field(session, "launchSettings");
+    let launch_plan = launch_settings
+        .get("agentLaunchPlan")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let resume_plan = launch_settings
+        .get("agentResumePlan")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let values = [
+        read_text_from_map(&runtime_settings, "agentResumeCommand"),
+        read_text_from_map(&runtime_settings, "resumeCommand"),
+        read_text_from_map(&runtime_settings, "resumeFallbackCommand"),
+        read_text_from_map(&runtime_settings, "copyCommand"),
+        read_text_from_map(&runtime_settings, "startupText"),
+        read_text_from_map(&launch_settings, "agentResumeCommand"),
+        read_text_from_map(&launch_settings, "resumeCommand"),
+        read_text_from_map(&launch_settings, "resumeFallbackCommand"),
+        read_text_from_map(&launch_settings, "copyCommand"),
+        read_text_from_map(&launch_settings, "startupText"),
+        read_text_from_map(&launch_plan, "command"),
+        read_text_from_map(&launch_plan, "startupText"),
+        read_text_from_map(&resume_plan, "primaryCommand"),
+        read_text_from_map(&resume_plan, "copyCommand"),
+        read_text_from_map(&resume_plan, "displayCommand"),
+        read_text_from_map(&resume_plan, "startupText"),
+    ];
+    let mut output = Vec::new();
+    for value in values.into_iter().flatten() {
+        if !output.iter().any(|candidate| candidate == &value) {
+            output.push(value);
+        }
+    }
+    output
+}
+
+fn trusted_resume_title_for_input(input: &AgentResumeInput) -> Option<String> {
+    let title = input.title.as_deref()?;
+    let title_source = normalize_title_source(input.title_source.as_deref(), title);
+    if title_source == "placeholder" {
+        return None;
+    }
+    let visible = get_visible_terminal_title(title)?.trim().to_string();
+    (!visible.is_empty() && !is_rejected_resume_title(&visible)).then_some(visible)
+}
+
+fn build_rovodev_resume_command(agent_command: &str, session_reference: &str) -> String {
+    let quoted = quote_shell_double_arg(session_reference);
+    if agent_command
+        .split_whitespace()
+        .any(|token| token == "rovodev")
+    {
+        format!("{agent_command} --restore {quoted}")
+    } else {
+        format!("{agent_command} rovodev run --restore {quoted}")
+    }
+}
+
+fn build_claude_resume_lookup_command(
+    agent_command: &str,
+    input: &AgentResumeInput,
+    resume_title: &str,
+) -> String {
+    let args = [
+        quote_shell_arg(input.project_path.as_deref().unwrap_or_default()),
+        quote_shell_arg(resume_title),
+        quote_shell_arg(input.first_user_message.as_deref().unwrap_or_default()),
+    ]
+    .join(" ");
+    let resume_invocation = format!("{agent_command} --resume \"$CLAUDE_RESUME_SESSION_ID\"");
+    [
+        "CLAUDE_RESUME_SESSION_ID=\"$(".to_string(),
+        format!(
+            "{} -- {args}",
+            build_node_eval_command(get_claude_session_id_lookup_script())
+        ),
+        ")\"".to_string(),
+        "&&".to_string(),
+        "test -n \"$CLAUDE_RESUME_SESSION_ID\"".to_string(),
+        "&&".to_string(),
+        resume_invocation,
+        "||".to_string(),
+        format!(
+            "{{ printf '%s\\n' {}; false; }}",
+            quote_shell_arg(&format!(
+                "Unable to find restorable Claude session id for \"{resume_title}\"."
+            ))
+        ),
+    ]
+    .join(" ")
+}
+
+fn build_cursor_resume_lookup_command(
+    agent_command: &str,
+    project_path: &str,
+    resume_title: &str,
+) -> String {
+    [
+        "CURSOR_CHAT_ID=\"$(".to_string(),
+        format!(
+            "{} -- {} {}",
+            build_node_eval_command(get_cursor_chat_session_lookup_script()),
+            quote_shell_arg(project_path),
+            quote_shell_arg(resume_title)
+        ),
+        ")\"".to_string(),
+        "&&".to_string(),
+        "test -n \"$CURSOR_CHAT_ID\"".to_string(),
+        "&&".to_string(),
+        format!("{agent_command} --resume \"$CURSOR_CHAT_ID\""),
+        "||".to_string(),
+        format!(
+            "printf '%s\\n' {}",
+            quote_shell_arg(&format!(
+                "Unable to find Cursor chat id for \"{resume_title}\"."
+            ))
+        ),
+    ]
+    .join(" ")
+}
+
+fn build_opencode_resume_command(
+    agent_command: &str,
+    resume_title: &str,
+    lookup_agent_command: &str,
+) -> String {
+    format!(
+        "{agent_command} -s \"$({lookup_agent_command} session list --format json | {} -- {})\"",
+        build_node_eval_command(get_opencode_session_lookup_script()),
+        quote_shell_arg(resume_title)
+    )
+}
+
+fn build_codex_validated_resume_command(agent_command: &str, session_reference: &str) -> String {
+    [
+        "CODEX_RESUME_SESSION_ID=\"$(".to_string(),
+        format!(
+            "{} -- --exact {}",
+            build_node_eval_command(get_codex_session_id_lookup_script()),
+            quote_shell_arg(session_reference)
+        ),
+        ")\"".to_string(),
+        "&&".to_string(),
+        "test -n \"$CODEX_RESUME_SESSION_ID\"".to_string(),
+        "&&".to_string(),
+        format!("{agent_command} resume \"$CODEX_RESUME_SESSION_ID\""),
+        "||".to_string(),
+        format!(
+            "{{ printf '%s\\n' {}; false; }}",
+            quote_shell_arg(&format!(
+                "Unable to restore Codex session \"{session_reference}\"."
+            ))
+        ),
+    ]
+    .join(" ")
+}
+
+fn build_codex_resume_lookup_command(agent_command: &str, resume_title: &str) -> String {
+    [
+        "CODEX_RESUME_SESSION_ID=\"$(".to_string(),
+        format!(
+            "{} -- --title {}",
+            build_node_eval_command(get_codex_session_id_lookup_script()),
+            quote_shell_arg(resume_title)
+        ),
+        ")\"".to_string(),
+        "&&".to_string(),
+        "test -n \"$CODEX_RESUME_SESSION_ID\"".to_string(),
+        "&&".to_string(),
+        format!("{agent_command} resume \"$CODEX_RESUME_SESSION_ID\""),
+        "||".to_string(),
+        format!(
+            "{{ printf '%s\\n' {}; false; }}",
+            quote_shell_arg(&format!(
+                "Unable to find restorable Codex session id for \"{resume_title}\"."
+            ))
+        ),
+    ]
+    .join(" ")
+}
+
+fn build_node_eval_command(script: &'static str) -> String {
+    /*
+    CDXC:AgentResume 2026-06-22-07:47:
+    Rust resume lookup wrappers still need Node for provider transcript/index parsing, matching the TypeScript daemon's `process.execPath` contract. Resolve Ghostex's bundled `Web/code-server/lib/node` from the native package layout before falling back to an explicit environment override or PATH `node`.
+    */
+    format!(
+        "{} --no-warnings -e {}",
+        quote_shell_arg(&resolve_node_exec_path()),
+        quote_shell_arg(script)
+    )
+}
+
+fn resolve_node_exec_path() -> String {
+    let mut candidates = Vec::new();
+    if let Some(value) = std::env::var("GHOSTEX_CODE_SERVER_NODE_PATH")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        candidates.push(PathBuf::from(value));
+    }
+    candidates.extend(resources::code_server_node_candidates());
+    for candidate in candidates {
+        if candidate.is_file() {
+            return candidate.to_string_lossy().to_string();
+        }
+    }
+    std::env::var("NODE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "node".to_string())
+}
+
+fn get_uuid_from_text(value: &str) -> Option<String> {
+    let text = value.as_bytes();
+    for start in 0..text.len().saturating_sub(35) {
+        let end = start + 36;
+        let candidate = &value[start..end];
+        if is_uuid(candidate) {
+            return Some(candidate.to_ascii_lowercase());
+        }
+    }
+    None
+}
+
+fn get_claude_session_id_lookup_script() -> &'static str {
+    r###"const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
+const [projectPathArg = "", titleArg = "", firstPromptArg = ""] = process.argv.slice(1);
+const projectPath = projectPathArg.trim();
+const title = normalize(titleArg);
+const firstPrompt = normalize(firstPromptArg);
+if (!title && !firstPrompt) {
+  process.exit(1);
+}
+
+const home = os.homedir();
+const roots = [path.join(home, ".claude", "projects")];
+const profilesRoot = path.join(home, ".claude-profiles");
+try {
+  for (const entry of fs.readdirSync(profilesRoot, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      roots.push(path.join(profilesRoot, entry.name, "projects"));
+    }
+  }
+} catch {}
+
+function normalize(value) {
+  return String(value || "").split(/\s+/u).filter(Boolean).join(" ");
+}
+
+function textFromMessage(message) {
+  if (typeof message === "string") {
+    return message;
+  }
+  if (!message || typeof message !== "object") {
+    return "";
+  }
+  const content = message.content;
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    const parts = [];
+    for (const item of content) {
+      if (typeof item === "string") {
+        parts.push(item);
+      } else if (item && typeof item === "object" && typeof item.text === "string") {
+        parts.push(item.text);
+      }
+    }
+    return parts.join("\n");
+  }
+  return "";
+}
+
+function expandHome(value) {
+  if (value === "~") {
+    return home;
+  }
+  return value.startsWith("~/") ? path.join(home, value.slice(2)) : value;
+}
+
+function normalizedPath(value) {
+  return path.resolve(expandHome(value));
+}
+
+function pathContains(parent, child) {
+  const relative = path.relative(parent, child);
+  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function isProjectMatch(cwd) {
+  if (!projectPath) {
+    return true;
+  }
+  const cwdText = String(cwd || "").trim();
+  if (!cwdText) {
+    return false;
+  }
+  try {
+    const project = normalizedPath(projectPath);
+    const candidate = normalizedPath(cwdText);
+    return candidate === project || pathContains(project, candidate) || pathContains(candidate, project);
+  } catch {
+    return cwdText === projectPath || cwdText.startsWith(projectPath.replace(/\/+$/u, "") + "/") || projectPath.startsWith(cwdText.replace(/\/+$/u, "") + "/");
+  }
+}
+
+function scanTranscript(filePath) {
+  let sessionId = path.basename(filePath).replace(/\.jsonl$/u, "");
+  const cwdValues = [];
+  const names = [];
+  const summaries = [];
+  let firstUser = "";
+  let latest = "";
+  let lines;
+  try {
+    lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/u);
+  } catch {
+    return undefined;
+  }
+  for (let index = 0; index < lines.length && index <= 2000; index += 1) {
+    const line = lines[index];
+    if (!line) {
+      continue;
+    }
+    let item;
+    try {
+      item = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    if (typeof item.sessionId === "string" && item.sessionId.trim()) {
+      sessionId = item.sessionId.trim();
+    }
+    if (typeof item.cwd === "string") {
+      cwdValues.push(item.cwd);
+    }
+    if (typeof item.projectPath === "string") {
+      cwdValues.push(item.projectPath);
+    }
+    if (typeof item.timestamp === "string" && item.timestamp > latest) {
+      latest = item.timestamp;
+    }
+    const itemType = String(item.type || "");
+    if (itemType === "custom-title" && typeof item.customTitle === "string") {
+      names.push(item.customTitle);
+    }
+    if (itemType === "agent-name" && typeof item.agentName === "string") {
+      names.push(item.agentName);
+    }
+    if (typeof item.slug === "string") {
+      names.push(item.slug);
+    }
+    if (typeof item.summary === "string") {
+      summaries.push(item.summary);
+    }
+    if (itemType === "user" && !firstUser) {
+      firstUser = textFromMessage(item.message);
+    }
+  }
+  const projectScore = cwdValues.some(isProjectMatch) ? 2 : 0;
+  if (projectPath && projectScore === 0) {
+    return undefined;
+  }
+  const normalizedNames = names.concat(summaries).map(normalize).filter(Boolean);
+  const normalizedFirstUser = normalize(firstUser);
+  let score = projectScore;
+  if (title) {
+    if (normalizedNames.some((value) => value === title)) {
+      score += 8;
+    } else if (normalizedNames.some((value) => value.includes(title) || title.includes(value))) {
+      score += 4;
+    }
+  }
+  if (firstPrompt && normalizedFirstUser) {
+    if (normalizedFirstUser === firstPrompt) {
+      score += 10;
+    } else if (firstPrompt.includes(normalizedFirstUser) || normalizedFirstUser.includes(firstPrompt)) {
+      score += 5;
+    }
+  }
+  return score > 0 ? { latest, score, sessionId } : undefined;
+}
+
+const matches = [];
+for (const root of roots) {
+  let projectDirs;
+  try {
+    projectDirs = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    continue;
+  }
+  for (const projectDir of projectDirs) {
+    if (!projectDir.isDirectory() || projectDir.name === "subagents") {
+      continue;
+    }
+    const projectDirPath = path.join(root, projectDir.name);
+    let files;
+    try {
+      files = fs.readdirSync(projectDirPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!file.isFile() || !file.name.endsWith(".jsonl")) {
+        continue;
+      }
+      const result = scanTranscript(path.join(projectDirPath, file.name));
+      if (result) {
+        matches.push(result);
+      }
+    }
+  }
+}
+
+if (!matches.length) {
+  process.exit(1);
+}
+
+matches.sort((left, right) => left.score - right.score || left.latest.localeCompare(right.latest));
+process.stdout.write(matches[matches.length - 1].sessionId);
+"###
+}
+
+fn get_codex_session_id_lookup_script() -> &'static str {
+    r###"const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
+const [mode = "", query = ""] = process.argv.slice(1).map((value) => String(value || "").trim());
+if (!["--exact", "--title"].includes(mode) || !query) {
+  process.exit(1);
+}
+
+const home = os.homedir();
+const candidateHomes = [];
+if (process.env.CODEX_HOME) {
+  candidateHomes.push(expandHome(process.env.CODEX_HOME));
+}
+candidateHomes.push(
+  path.join(home, ".codex-profiles", "personal"),
+  path.join(home, ".codex-profiles", "work"),
+  path.join(home, ".codex"),
+);
+
+const seen = new Set();
+const codexHomes = [];
+for (const candidate of candidateHomes) {
+  let normalized = candidate;
+  try {
+    if (fs.existsSync(candidate)) {
+      normalized = fs.realpathSync(candidate);
+    }
+  } catch {}
+  if (seen.has(normalized)) {
+    continue;
+  }
+  seen.add(normalized);
+  codexHomes.push(normalized);
+}
+
+const sessionIdPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/iu;
+const internalTitlePromptMarkers = [
+  "Write a concise session title that summarizes the user's text.",
+  "Output handling:",
+  "Print only the final result to stdout.",
+];
+
+function expandHome(value) {
+  const text = String(value || "");
+  if (text === "~") {
+    return home;
+  }
+  return text.startsWith("~/") ? path.join(home, text.slice(2)) : text;
+}
+
+function resolveTranscriptPath(codexHome, value) {
+  const expanded = expandHome(String(value || "").trim());
+  return path.isAbsolute(expanded) ? expanded : path.join(codexHome, expanded);
+}
+
+function* walkFiles(root, sessionId) {
+  const stack = [root];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+      } else if (entry.isFile() && entry.name.includes(sessionId) && entry.name.endsWith(".jsonl")) {
+        yield entryPath;
+      }
+    }
+  }
+}
+
+function transcriptPathsForSession(codexHome, sessionId, item = {}) {
+  const paths = [];
+  const seenPaths = new Set();
+  for (const key of ["path", "session_path", "sessionPath", "transcript_path", "transcriptPath"]) {
+    const value = typeof item[key] === "string" ? item[key].trim() : "";
+    if (!value) {
+      continue;
+    }
+    const transcriptPath = resolveTranscriptPath(codexHome, value);
+    if (!seenPaths.has(transcriptPath)) {
+      seenPaths.add(transcriptPath);
+      paths.push(transcriptPath);
+    }
+  }
+  const sessionsDir = path.join(codexHome, "sessions");
+  for (const transcriptPath of walkFiles(sessionsDir, sessionId)) {
+    if (!seenPaths.has(transcriptPath)) {
+      seenPaths.add(transcriptPath);
+      paths.push(transcriptPath);
+    }
+  }
+  return paths;
+}
+
+function transcriptIsInternalCodexExec(transcriptPath) {
+  let lines;
+  try {
+    lines = fs.readFileSync(transcriptPath, "utf8").split(/\r?\n/u);
+  } catch {
+    return false;
+  }
+  for (let index = 0; index < lines.length && index <= 80; index += 1) {
+    const line = lines[index] || "";
+    if (internalTitlePromptMarkers.every((marker) => line.includes(marker))) {
+      return true;
+    }
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const payload = entry && typeof entry === "object" ? entry.payload : undefined;
+    if (!payload || typeof payload !== "object") {
+      continue;
+    }
+    if (String(payload.originator || "").trim() === "codex_exec") {
+      return true;
+    }
+    if (String(payload.source || "").trim() === "exec") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isInternalCodexSession(codexHome, sessionId, item = {}) {
+  if (String(item.originator || "").trim() === "codex_exec") {
+    return true;
+  }
+  if (String(item.source || "").trim() === "exec") {
+    return true;
+  }
+  return transcriptPathsForSession(codexHome, sessionId, item).some(transcriptIsInternalCodexExec);
+}
+
+function exactReferenceIsInternal(sessionId) {
+  return codexHomes.some((codexHome) => isInternalCodexSession(codexHome, sessionId));
+}
+
+if (mode === "--exact") {
+  const exactMatch = query.match(sessionIdPattern);
+  if (!exactMatch) {
+    process.stdout.write(query);
+    process.exit(0);
+  }
+  const sessionId = exactMatch[0].toLowerCase();
+  if (exactReferenceIsInternal(sessionId)) {
+    process.exit(1);
+  }
+  process.stdout.write(sessionId);
+  process.exit(0);
+}
+
+const matches = [];
+for (const codexHome of codexHomes) {
+  const indexPath = path.join(codexHome, "session_index.jsonl");
+  let lines;
+  try {
+    lines = fs.readFileSync(indexPath, "utf8").split(/\r?\n/u);
+  } catch {
+    continue;
+  }
+  for (const line of lines) {
+    if (!line) {
+      continue;
+    }
+    let item;
+    try {
+      item = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (String(item.thread_name || "").trim() !== query) {
+      continue;
+    }
+    const sessionId = String(item.id || "").trim();
+    if (!sessionId || isInternalCodexSession(codexHome, sessionId, item)) {
+      continue;
+    }
+    matches.push({ sessionId, updatedAt: String(item.updated_at || "") });
+  }
+}
+
+if (!matches.length) {
+  process.exit(1);
+}
+
+matches.sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+process.stdout.write(matches[matches.length - 1].sessionId);
+"###
+}
+
+fn get_cursor_chat_session_lookup_script() -> &'static str {
+    r###"const crypto = require("node:crypto");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { DatabaseSync } = require("node:sqlite");
+
+const [projectPath = "", title = ""] = process.argv.slice(1).map((value) => String(value || "").trim());
+if (!projectPath || !title) {
+  process.exit(1);
+}
+
+const projectHash = crypto.createHash("md5").update(projectPath).digest("hex");
+const chatsDir = path.join(os.homedir(), ".cursor", "chats", projectHash);
+let chatDirs;
+try {
+  chatDirs = fs.readdirSync(chatsDir, { withFileTypes: true });
+} catch {
+  process.exit(1);
+}
+
+function parseMetaValue(raw) {
+  const value = String(raw || "").trim();
+  if (value.startsWith("{")) {
+    return JSON.parse(value);
+  }
+  return JSON.parse(Buffer.from(value, "hex").toString("utf8"));
+}
+
+const matches = [];
+for (const chatDir of chatDirs) {
+  if (!chatDir.isDirectory()) {
+    continue;
+  }
+  const dbPath = path.join(chatsDir, chatDir.name, "store.db");
+  if (!fs.existsSync(dbPath)) {
+    continue;
+  }
+  let db;
+  let rows;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    rows = db.prepare("select value from meta").all();
+  } catch {
+    rows = [];
+  } finally {
+    try {
+      db?.close();
+    } catch {}
+  }
+  for (const row of rows) {
+    let meta;
+    try {
+      meta = parseMetaValue(row.value);
+    } catch {
+      continue;
+    }
+    if (String(meta.name || "").trim() !== title) {
+      continue;
+    }
+    const chatId = String(meta.agentId || chatDir.name).trim();
+    if (!chatId) {
+      continue;
+    }
+    const createdAt = Number(meta.createdAt || 0);
+    matches.push({ chatId, createdAt: Number.isFinite(createdAt) ? createdAt : 0 });
+  }
+}
+
+if (!matches.length) {
+  process.exit(1);
+}
+
+matches.sort((left, right) => left.createdAt - right.createdAt);
+process.stdout.write(matches[matches.length - 1].chatId);
+"###
+}
+
+fn get_opencode_session_lookup_script() -> &'static str {
+    r###"const title = String(process.argv[1] || "").trim();
+if (!title) {
+  process.exit(1);
+}
+
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  input += chunk;
+});
+process.stdin.on("end", () => {
+  for (const line of input.split(/\r?\n/u)) {
+    if (!line.trim()) {
+      continue;
+    }
+    let item;
+    try {
+      item = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const name = String(item.title || item.name || "").trim();
+    const sessionId = String(item.id || "").trim();
+    if (name === title && sessionId) {
+      process.stdout.write(sessionId);
+      process.exit(0);
+    }
+  }
+  process.exit(1);
+});
+"###
 }
 
 fn fork_session(
@@ -523,6 +1890,7 @@ fn fork_session(
             .as_object()
             .ok_or_else(|| DomainStateError::corrupt_state("Fork provider params missing."))?,
         context,
+        &settings,
     )?;
     let session = provider
         .result
@@ -1118,26 +2486,59 @@ fn ingest_session_state_event(
     repository: &DomainRepository<'_>,
     lifecycle: &LifecycleParams,
     params: &Map<String, Value>,
+    home_dir: &Path,
 ) -> Result<Value, DomainStateError> {
+    let current = require_session(repository, lifecycle)?;
+    let observed_identity = resolve_session_identity(&IdentityInput {
+        agent_id: None,
+        agent_name: read_text(params, "agentName"),
+        agent_session_id: read_text(params, "agentSessionId"),
+        agent_session_path: read_text(params, "agentSessionPath"),
+        runtime_settings: Map::new(),
+        startup_text: read_text(params, "startupText"),
+    });
+    if launch_agent_mismatch(&current, observed_identity.agent_id.as_deref()) {
+        return Ok(json!({
+            "changed": false,
+            "projection": project_session_title_projection(&current),
+            "reason": "session-state-agent-mismatch",
+            "session": current,
+        }));
+    }
     let (mut result, session) = apply_session_state_update(
         repository,
         lifecycle,
         params,
         SessionIdentityUpdateSource::Passive,
     )?;
-    let claimed =
-        claim_first_prompt_auto_title(repository, &session, read_text(params, "firstUserMessage"))?;
-    if let Some(claimed_session) = claimed {
+    if result.get("reason").and_then(Value::as_str) == Some("passive-session-identity-conflict") {
+        return Ok(Value::Object(result));
+    }
+    let reconciled = reconcile_agent_metadata_title(repository, lifecycle, home_dir, "pending")?;
+    let mut session = reconciled.session.unwrap_or(session);
+    if reconciled.changed {
         result.insert("changed".to_string(), Value::Bool(true));
         result.insert(
             "projection".to_string(),
-            project_session_title_projection(&claimed_session),
+            project_session_title_projection(&session),
+        );
+        result.insert("reason".to_string(), Value::String(reconciled.reason));
+        result.insert("session".to_string(), session.clone());
+    }
+    let claimed =
+        claim_first_prompt_auto_title(repository, &session, read_text(params, "firstUserMessage"))?;
+    if let Some(claimed_session) = claimed {
+        session = claimed_session;
+        result.insert("changed".to_string(), Value::Bool(true));
+        result.insert(
+            "projection".to_string(),
+            project_session_title_projection(&session),
         );
         result.insert(
             "reason".to_string(),
             Value::String("first-prompt-auto-title-claimed".to_string()),
         );
-        result.insert("session".to_string(), claimed_session);
+        result.insert("session".to_string(), session);
     }
     Ok(Value::Object(result))
 }
@@ -1229,11 +2630,26 @@ pub(crate) fn apply_created_session_identity(
     Ok(updated)
 }
 
+struct TerminalTitleIngestOutput {
+    result: Value,
+    schedule_presentation_delta: bool,
+}
+
+#[cfg(test)]
 fn ingest_terminal_title_event(
     repository: &DomainRepository<'_>,
     lifecycle: &LifecycleParams,
     params: &Map<String, Value>,
-) -> Result<Value, DomainStateError> {
+) -> Result<TerminalTitleIngestOutput, DomainStateError> {
+    ingest_terminal_title_event_with_home(repository, lifecycle, params, Path::new(""))
+}
+
+fn ingest_terminal_title_event_with_home(
+    repository: &DomainRepository<'_>,
+    lifecycle: &LifecycleParams,
+    params: &Map<String, Value>,
+    home_dir: &Path,
+) -> Result<TerminalTitleIngestOutput, DomainStateError> {
     let current = require_session(repository, lifecycle)?;
     let raw_title = read_text(params, "rawTitle");
     let visible_title = raw_title.as_deref().and_then(get_visible_terminal_title);
@@ -1241,38 +2657,69 @@ fn ingest_terminal_title_event(
         .as_deref()
         .and_then(get_terminal_title_detected_agent_name);
     let mut runtime_settings = object_field(&current, "runtimeSettings");
-    let agent_name = read_text(params, "agentName").or(title_detected_agent.clone());
+    let decision_agent_name = read_text(params, "agentName")
+        .or_else(|| read_text_from_map(&runtime_settings, "agentName"))
+        .or_else(|| read_text_value(&current, "agentId"));
+    let promotion_agent_name = read_text(params, "agentName").or(title_detected_agent.clone());
     let captured_agent_session_id = raw_title
         .as_deref()
         .and_then(get_codex_session_id_from_title)
-        .filter(|_| normalize_agent_id(agent_name.as_deref()).as_deref() == Some("codex"));
+        .filter(|_| normalize_agent_id(decision_agent_name.as_deref()).as_deref() == Some("codex"))
+        .filter(|session_id| {
+            read_text_from_map(&runtime_settings, "agentSessionId").as_deref()
+                != Some(session_id.as_str())
+        });
     /*
     CDXC:GxserverSessionIdentity 2026-06-21-18:25:
     Terminal-title agent/session-id observations must flow through the shared identity reducer, matching TypeScript gxserver. This keeps launch-agent mismatch protection and Codex thread conflict rules identical while still allowing zmx title streams to promote recognized CLI rows for every client.
+
+    CDXC:GxserverSessionIdentity 2026-06-22-07:42:
+    TypeScript returns the terminal-title reducer's decision reason for `/api/ingestTerminalTitleEvent`; the follow-up identity reducer only mutates the session and changed flag unless metadata reconciliation later wins. Preserve reasons such as `captured-agent-session-id` even when identity promotion reports `current-title-already-trusted`.
+
+    CDXC:GxserverSessionTitles 2026-06-22-07:59:
+    Match TypeScript terminal-title ingestion gates exactly: session kind, visible-title normalization, ellipsized rejection, protected trusted titles, zmx/agent-title trust, and previous title-source reasons all belong in gxserver-rs before status or identity promotion runs.
     */
-    let mut changed = false;
-    let mut reason = if captured_agent_session_id.is_some() {
-        "captured-agent-session-id".to_string()
-    } else {
-        "terminal-title-not-visible".to_string()
-    };
+    if let Some(agent_session_id) = captured_agent_session_id.clone() {
+        runtime_settings.insert("agentSessionId".to_string(), json!(agent_session_id));
+    }
+    let mut decision_changed = captured_agent_session_id.is_some();
+    let mut reason = terminal_title_skip_reason(
+        &current,
+        params,
+        visible_title.as_deref(),
+        &runtime_settings,
+        captured_agent_session_id.as_deref(),
+    );
     let mut update = lifecycle_update(lifecycle);
-    if let Some(title) = visible_title.clone() {
-        if params
-            .get("protectStoredTitleFromAutomation")
-            .and_then(Value::as_bool)
-            != Some(true)
-            && current.get("title").and_then(Value::as_str) != Some(title.as_str())
-        {
-            update.insert("title".to_string(), json!(title));
-            runtime_settings.insert("titleSource".to_string(), json!("terminal-auto"));
-            changed = true;
-            reason = "zmx-terminal-title-from-user".to_string();
-        } else if reason == "terminal-title-not-visible" {
-            reason = "already-synced".to_string();
+    if reason.is_none() {
+        if let Some(title) = visible_title.clone() {
+            let previous_title_source = session_title_source(&current, &runtime_settings);
+            let sync_reason = terminal_title_sync_reason(
+                &current,
+                title.as_str(),
+                decision_agent_name.as_deref(),
+                read_text(params, "previousTerminalTitle").as_deref(),
+                read_text(params, "sessionPersistenceProvider").as_deref(),
+            );
+            if let Some(sync_reason) = sync_reason {
+                reason = Some(format!("{sync_reason}-from-{previous_title_source}"));
+                runtime_settings.insert("titleSource".to_string(), json!("terminal-auto"));
+                decision_changed = true;
+            } else {
+                reason = Some("terminal-title-not-trusted".to_string());
+            }
         }
     }
-    let mut session = if changed {
+    if reason.as_deref().is_some_and(|value| {
+        value.starts_with("valid-agent-terminal-title-from-")
+            || value.starts_with("zmx-terminal-title-from-")
+    }) {
+        if let Some(title) = visible_title.clone() {
+            update.insert("title".to_string(), json!(title));
+        }
+    }
+    let should_update_title_decision = decision_changed;
+    let mut session = if should_update_title_decision {
         update.insert(
             "runtimeSettings".to_string(),
             Value::Object(runtime_settings),
@@ -1281,9 +2728,11 @@ fn ingest_terminal_title_event(
     } else {
         current
     };
+    let mut changed = decision_changed;
+    let decision_changed_for_metadata = changed;
     if captured_agent_session_id.is_some() || title_detected_agent.is_some() {
         let mut identity_params = Map::new();
-        insert_optional_string(&mut identity_params, "agentName", agent_name);
+        insert_optional_string(&mut identity_params, "agentName", promotion_agent_name);
         insert_optional_string(
             &mut identity_params,
             "agentSessionId",
@@ -1301,21 +2750,24 @@ fn ingest_terminal_title_event(
             .unwrap_or(false)
         {
             changed = true;
-            reason = identity_result
-                .get("reason")
-                .and_then(Value::as_str)
-                .unwrap_or("identity-updated")
-                .to_string();
-        } else if reason == "terminal-title-not-visible" {
-            reason = identity_result
-                .get("reason")
-                .and_then(Value::as_str)
-                .unwrap_or("already-synced")
-                .to_string();
         }
         session = identity_session;
     }
-    let activity_update = compute_activity_update(&session, params, Some("title"));
+    let mut activity_params = params.clone();
+    if let Some(raw_title) = raw_title.clone() {
+        activity_params.insert("title".to_string(), json!(raw_title));
+    }
+    insert_optional_string(
+        &mut activity_params,
+        "agentName",
+        read_text(params, "agentName").or(title_detected_agent.clone()),
+    );
+    insert_optional_string(
+        &mut activity_params,
+        "settledTitle",
+        read_agent_metadata_settled_title(&session),
+    );
+    let activity_update = compute_activity_update(&session, &activity_params, Some("title"));
     let should_update_activity = should_persist_activity_update(&session, &activity_update);
     if should_update_activity {
         let mut runtime_settings = object_field(&session, "runtimeSettings");
@@ -1332,31 +2784,210 @@ fn ingest_terminal_title_event(
         );
         session = repository.update_session(&update)?;
     }
-    if changed || captured_agent_session_id.is_some() || should_update_activity {
-        Ok(json!({
-            "agentSessionId": captured_agent_session_id,
-            "activity": activity_update.activity,
-            "changed": changed,
-            "enteredAttention": activity_update.entered_attention,
-            "previousActivity": activity_update.previous_activity,
-            "projection": project_session_title_projection(&session),
-            "reason": reason,
-            "session": session,
-            "visibleTitle": visible_title,
-        }))
+    let should_check_metadata = decision_changed_for_metadata || changed;
+    let reconciled = if should_check_metadata {
+        Some(reconcile_agent_metadata_title(
+            repository, lifecycle, home_dir, "pending",
+        )?)
     } else {
-        Ok(json!({
-            "agentSessionId": captured_agent_session_id,
-            "activity": activity_update.activity,
-            "changed": false,
-            "enteredAttention": activity_update.entered_attention,
-            "previousActivity": activity_update.previous_activity,
-            "projection": project_session_title_projection(&session),
-            "reason": reason,
-            "session": session,
-            "visibleTitle": visible_title,
-        }))
+        None
+    };
+    let reconciled_changed = reconciled.as_ref().is_some_and(|result| result.changed);
+    let reconciled_reason = reconciled.as_ref().map(|result| result.reason.clone());
+    if let Some(reconciled_session) = reconciled.and_then(|result| result.session) {
+        session = reconciled_session;
     }
+    let response_reason = if reconciled_changed {
+        reconciled_reason.unwrap_or_else(|| "metadata-title-applied".to_string())
+    } else {
+        reason.unwrap_or_else(|| "terminal-title-not-visible".to_string())
+    };
+    let response_changed = changed || reconciled_changed;
+    let result = json!({
+        "agentSessionId": captured_agent_session_id,
+        "activity": activity_update.activity,
+        "changed": response_changed,
+        "enteredAttention": activity_update.entered_attention,
+        "previousActivity": activity_update.previous_activity,
+        "projection": project_session_title_projection(&session),
+        "reason": response_reason,
+        "session": session,
+        "visibleTitle": visible_title,
+    });
+    let result_activity = result
+        .get("activity")
+        .and_then(Value::as_object)
+        .and_then(|activity| activity.get("activity"))
+        .and_then(Value::as_str)
+        .unwrap_or("idle");
+    let schedule_presentation_delta =
+        response_changed || activity_update.previous_activity != result_activity;
+    Ok(TerminalTitleIngestOutput {
+        result,
+        schedule_presentation_delta,
+    })
+}
+
+fn terminal_title_skip_reason(
+    session: &Value,
+    params: &Map<String, Value>,
+    visible_title: Option<&str>,
+    runtime_settings: &Map<String, Value>,
+    captured_agent_session_id: Option<&str>,
+) -> Option<String> {
+    if !matches!(
+        session.get("kind").and_then(Value::as_str),
+        Some("terminal" | "agent")
+    ) {
+        return Some("invalid-session-kind".to_string());
+    }
+    let Some(visible_title) = visible_title else {
+        return Some(
+            if captured_agent_session_id.is_some() {
+                "captured-agent-session-id"
+            } else {
+                "terminal-title-not-visible"
+            }
+            .to_string(),
+        );
+    };
+    if is_ellipsized_terminal_window_title(visible_title) {
+        return Some("terminal-title-already-ellipsized".to_string());
+    }
+    if params
+        .get("protectStoredTitleFromAutomation")
+        .and_then(Value::as_bool)
+        == Some(true)
+        && trusted_resume_title_with_runtime(session, runtime_settings).is_some()
+    {
+        return Some("protected-stored-title".to_string());
+    }
+    if session
+        .get("title")
+        .and_then(Value::as_str)
+        .is_some_and(|title| title.trim() == visible_title)
+    {
+        return Some(
+            if captured_agent_session_id.is_some() {
+                "captured-agent-session-id"
+            } else {
+                "already-synced"
+            }
+            .to_string(),
+        );
+    }
+    None
+}
+
+fn terminal_title_sync_reason(
+    session: &Value,
+    visible_title: &str,
+    agent_name: Option<&str>,
+    previous_terminal_title: Option<&str>,
+    session_persistence_provider: Option<&str>,
+) -> Option<&'static str> {
+    if is_valid_agent_terminal_title(visible_title, agent_name) {
+        return Some("valid-agent-terminal-title");
+    }
+    let provider = session_persistence_provider.unwrap_or("zmx");
+    if provider != "off" && !is_rejected_resume_title(visible_title) {
+        return Some("zmx-terminal-title");
+    }
+    let previous_visible = previous_terminal_title.and_then(get_visible_terminal_title);
+    if previous_visible.as_deref().is_some_and(|previous| {
+        session
+            .get("title")
+            .and_then(Value::as_str)
+            .is_some_and(|title| title.trim() == previous)
+    }) {
+        return None;
+    }
+    None
+}
+
+fn session_title_source(session: &Value, runtime_settings: &Map<String, Value>) -> String {
+    normalize_title_source(
+        read_text_from_map(runtime_settings, "titleSource")
+            .or_else(|| read_text_from_map(runtime_settings, "restoreTitleSource"))
+            .as_deref(),
+        session
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    )
+}
+
+fn trusted_resume_title_with_runtime(
+    session: &Value,
+    runtime_settings: &Map<String, Value>,
+) -> Option<String> {
+    let title = read_text_value(session, "title")?;
+    if session_title_source(session, runtime_settings) == "placeholder"
+        || is_temporary_title(&title)
+    {
+        return None;
+    }
+    let visible = get_visible_terminal_title(&title)?;
+    (!is_rejected_resume_title(&visible)).then_some(visible)
+}
+
+fn read_agent_metadata_settled_title(session: &Value) -> Option<String> {
+    let runtime_settings = object_field(session, "runtimeSettings");
+    if read_text_from_map(&runtime_settings, "titleMetadataSource").as_deref()
+        != Some("agent-metadata")
+    {
+        return None;
+    }
+    let title = read_text_value(session, "title")?;
+    get_visible_terminal_title(&title).map(|value| value.trim().to_string())
+}
+
+fn is_ellipsized_terminal_window_title(title: &str) -> bool {
+    let trimmed = title.trim();
+    trimmed.ends_with('\u{2026}') || trimmed.ends_with("...")
+}
+
+fn is_valid_agent_terminal_title(title: &str, agent_name: Option<&str>) -> bool {
+    supports_terminal_title_session_sync(agent_name)
+        && title.trim().chars().count() > 1
+        && title.chars().any(|ch| ch.is_alphanumeric())
+        && get_visible_terminal_title(title).is_some()
+        && !is_rejected_resume_title(title)
+}
+
+fn supports_terminal_title_session_sync(agent_name: Option<&str>) -> bool {
+    let Some(normalized) = agent_name.map(|value| value.trim().to_ascii_lowercase()) else {
+        return false;
+    };
+    matches!(
+        normalized.as_str(),
+        "antigravity"
+            | "claude"
+            | "codex"
+            | "copilot"
+            | "cursor"
+            | "gemini"
+            | "hermes-agent"
+            | "opencode"
+            | "pi"
+            | "qoder"
+            | "rovodev"
+            | "claude code"
+            | "codex cli"
+            | "agy"
+            | "antigravity cli"
+            | "cursor agent"
+            | "cursor cli"
+            | "cursor-agent"
+            | "github copilot"
+            | "hermes"
+            | "hermes agent"
+            | "open code"
+            | "qodercli"
+            | "rovo"
+            | "rovo dev"
+            | "\u{03c0}"
+    )
 }
 
 fn update_agent_activity_endpoint(
@@ -1401,6 +3032,7 @@ fn ingest_agent_hook_event(
     repository: &DomainRepository<'_>,
     lifecycle: &LifecycleParams,
     params: &Map<String, Value>,
+    home_dir: &Path,
 ) -> Result<Value, DomainStateError> {
     let current = require_session(repository, lifecycle)?;
     let hook_activity = normalize_agent_hook_activity(
@@ -1410,7 +3042,15 @@ fn ingest_agent_hook_event(
             .or_else(|| params.get("rawEventName")),
         params.get("agentName"),
     );
-    if launch_agent_mismatch(&current, read_text(params, "agentName").as_deref()) {
+    let observed_identity = resolve_session_identity(&IdentityInput {
+        agent_id: None,
+        agent_name: read_text(params, "agentName"),
+        agent_session_id: read_text(params, "agentSessionId"),
+        agent_session_path: read_text(params, "agentSessionPath"),
+        runtime_settings: Map::new(),
+        startup_text: None,
+    });
+    if launch_agent_mismatch(&current, observed_identity.agent_id.as_deref()) {
         let previous = normalize_agent_activity_value(
             object_field(&current, "runtimeSettings").get("agentActivity"),
             "idle",
@@ -1440,7 +3080,31 @@ fn ingest_agent_hook_event(
         .and_then(Value::as_str)
         .unwrap_or("unchanged")
         .to_string();
+    if reason == "passive-session-identity-conflict" {
+        let previous = normalize_agent_activity_value(
+            object_field(&current, "runtimeSettings").get("agentActivity"),
+            "idle",
+        );
+        let mut result = object_from_value(json!({
+            "activity": previous,
+            "changed": false,
+            "enteredAttention": false,
+            "previousActivity": previous.get("activity").and_then(Value::as_str).unwrap_or("idle"),
+            "projection": project_session_title_projection(&current),
+            "reason": "passive-session-identity-conflict",
+            "session": current,
+        }));
+        if let Some(conflict) = metadata_result.get("identityConflict").cloned() {
+            result.insert("identityConflict".to_string(), conflict);
+        }
+        return Ok(Value::Object(result));
+    }
     let mut activity_update: Option<ActivityUpdate> = None;
+    let mut activity_reason = if hook_activity.is_some() {
+        "activity-unchanged".to_string()
+    } else {
+        "metadata-only".to_string()
+    };
     if let Some(activity) = hook_activity {
         let now_ms = params
             .get("statusUpdatedAt")
@@ -1455,30 +3119,56 @@ fn ingest_agent_hook_event(
         );
         let update = compute_activity_update(&session, &activity_params, None);
         if !is_stale_activity_event(&session, now_ms) {
-            let mut runtime_settings = object_field(&session, "runtimeSettings");
-            runtime_settings.insert("agentActivity".to_string(), update.activity.clone());
-            let mut session_update = lifecycle_update(lifecycle);
-            session_update.insert(
-                "runtimeSettings".to_string(),
-                Value::Object(runtime_settings),
-            );
-            if let Some(last_active_at) = update.last_active_at.clone() {
-                session_update.insert("lastActiveAt".to_string(), json!(last_active_at));
+            let activity_changed = should_persist_activity_update(&session, &update);
+            if activity_changed {
+                let mut runtime_settings = object_field(&session, "runtimeSettings");
+                runtime_settings.insert("agentActivity".to_string(), update.activity.clone());
+                let mut session_update = lifecycle_update(lifecycle);
+                session_update.insert(
+                    "runtimeSettings".to_string(),
+                    Value::Object(runtime_settings),
+                );
+                if let Some(last_active_at) = update.last_active_at.clone() {
+                    session_update.insert("lastActiveAt".to_string(), json!(last_active_at));
+                }
+                session = repository.update_session(&session_update)?;
+                changed = true;
             }
-            session = repository.update_session(&session_update)?;
-            changed = true;
-            reason = "activity-updated".to_string();
+            activity_reason = if activity_changed {
+                "activity-updated".to_string()
+            } else {
+                "activity-unchanged".to_string()
+            };
             activity_update = Some(update);
         } else {
-            reason = "stale-activity-event".to_string();
+            activity_reason = "stale-activity-event".to_string();
         }
     }
+    /*
+    CDXC:AgentHooks 2026-06-22-08:31:
+    Hook ingestion must mirror TypeScript's accepted-event reduction order: passive identity metadata, explicit activity, forced metadata-title reconciliation, then first-prompt auto-title claiming. Rejected passive conflicts stop before status, title, prompt, or presentation side effects can mutate the wrong session.
+    */
+    let reconciled = reconcile_agent_metadata_title(repository, lifecycle, home_dir, "pending")?;
+    if let Some(reconciled_session) = reconciled.session {
+        session = reconciled_session;
+    }
+    if reconciled.changed {
+        changed = true;
+    }
+    let mut auto_title_claimed = false;
     if let Some(claimed_session) =
         claim_first_prompt_auto_title(repository, &session, read_text(params, "firstUserMessage"))?
     {
         session = claimed_session;
         changed = true;
+        auto_title_claimed = true;
+    }
+    if reconciled.changed {
+        reason = reconciled.reason;
+    } else if auto_title_claimed {
         reason = "first-prompt-auto-title-claimed".to_string();
+    } else if activity_reason != "metadata-only" {
+        reason = activity_reason;
     }
     let mut result = Map::new();
     if let Some(update) = activity_update {
@@ -1587,7 +3277,7 @@ fn apply_session_state_update(
         object_field(&session, "runtimeSettings"),
         identity_update_source,
     );
-    insert_optional_from_params(
+    insert_truthy_from_params(
         &mut runtime_settings,
         params,
         "firstPromptTitleGenerationAgent",
@@ -1597,7 +3287,7 @@ fn apply_session_state_update(
         params,
         "firstPromptTitleGenerationCommand",
     );
-    insert_optional_from_params(&mut runtime_settings, params, "firstUserMessage");
+    insert_truthy_from_params(&mut runtime_settings, params, "firstUserMessage");
 
     let should_promote_agent = next_agent.is_some()
         || identity.agent_session_id.is_some()
@@ -2138,6 +3828,7 @@ fn timestamp_value(value: Option<&str>) -> i64 {
 
 fn normalize_title_source(source: Option<&str>, title: &str) -> String {
     match source {
+        Some("browser-auto") => "browser-auto".to_string(),
         Some("generated") => "generated".to_string(),
         Some("terminal-auto") => "terminal-auto".to_string(),
         Some("user") => "user".to_string(),
@@ -2182,25 +3873,14 @@ fn claim_first_prompt_auto_title(
     session: &Value,
     prompt: Option<String>,
 ) -> Result<Option<Value>, DomainStateError> {
-    let Some(prompt) = prompt.filter(|value| !value.trim().is_empty()) else {
+    let decision = decide_first_prompt_auto_title_claim(session, prompt.as_deref(), false);
+    if !decision.should_run {
+        return Ok(None);
+    };
+    let Some(prompt) = prompt else {
         return Ok(None);
     };
     let mut runtime_settings = object_field(session, "runtimeSettings");
-    let status = read_text_from_map(&runtime_settings, "gxserverFirstPromptAutoTitleStatus");
-    if matches!(
-        status.as_deref(),
-        Some("running" | "applied" | "failed" | "skipped" | "cancelled")
-    ) {
-        return Ok(None);
-    }
-    if !is_generic_agent_session_title(
-        read_text_from_map(&runtime_settings, "agentName")
-            .or_else(|| read_text_value(session, "agentId"))
-            .as_deref(),
-        read_text_value(session, "title").as_deref(),
-    ) {
-        return Ok(None);
-    }
     runtime_settings.remove("gxserverFirstPromptAutoTitleCancelledAt");
     runtime_settings.remove("gxserverFirstPromptAutoTitleCancelledPrompt");
     runtime_settings.remove("gxserverFirstPromptAutoTitleReason");
@@ -2227,12 +3907,326 @@ fn claim_first_prompt_auto_title(
     repository.update_session(&update).map(Some)
 }
 
-fn should_persist_activity_update(session: &Value, update: &ActivityUpdate) -> bool {
-    read_text_value(session, "lastActiveAt") != update.last_active_at
-        || object_field(session, "runtimeSettings").get("agentActivity") != Some(&update.activity)
+#[derive(Debug, PartialEq, Eq)]
+struct FirstPromptAutoTitleClaimDecision {
+    normalized_prompt: Option<String>,
+    reason: String,
+    should_run: bool,
+    strategy: Option<&'static str>,
 }
 
-fn normalize_agent_hook_activity(
+/*
+CDXC:GxserverSessionTitle 2026-06-22-08:12:
+Rust must match TypeScript gxserver's first-prompt claim boundary, not only the later background job. Claim only supported providers with generic titles and real user prompts, skip meta and slash-command prompts without setting `running`, and allow a cancelled prompt to retry only when the later prompt normalizes differently.
+*/
+fn decide_first_prompt_auto_title_claim(
+    session: &Value,
+    prompt: Option<&str>,
+    allow_running: bool,
+) -> FirstPromptAutoTitleClaimDecision {
+    let runtime_settings = object_field(session, "runtimeSettings");
+    let status = read_text_from_map(&runtime_settings, "gxserverFirstPromptAutoTitleStatus");
+    let normalized_prompt = normalize_first_prompt_title_claim_prompt(prompt);
+    let cancelled_prompt = normalize_first_prompt_title_claim_prompt(
+        read_text_from_map(
+            &runtime_settings,
+            "gxserverFirstPromptAutoTitleCancelledPrompt",
+        )
+        .as_deref(),
+    )
+    .or_else(|| {
+        normalize_first_prompt_title_claim_prompt(
+            read_text_from_map(&runtime_settings, "firstUserMessage").as_deref(),
+        )
+    });
+    let is_cancelled_retry_prompt = status.as_deref() == Some("cancelled")
+        && normalized_prompt.is_some()
+        && normalized_prompt != cancelled_prompt;
+    if (status.as_deref() == Some("running") && !allow_running)
+        || matches!(status.as_deref(), Some("applied" | "failed" | "skipped"))
+        || (status.as_deref() == Some("cancelled") && !is_cancelled_retry_prompt)
+    {
+        return first_prompt_claim_decision(
+            normalized_prompt,
+            &format!("already-{}", status.unwrap_or_default()),
+            false,
+            None,
+        );
+    }
+    if runtime_settings
+        .get("autoTitleFromFirstPrompt")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        return first_prompt_claim_decision(normalized_prompt, "alreadyAutoNamed", false, None);
+    }
+    let agent_name = first_prompt_claim_agent_name(session, &runtime_settings);
+    let strategy = first_prompt_claim_strategy(agent_name.as_deref());
+    if strategy.is_none() {
+        return first_prompt_claim_decision(normalized_prompt, "unsupportedAgent", false, None);
+    }
+    let Some(normalized) = normalized_prompt.clone() else {
+        return first_prompt_claim_decision(normalized_prompt, "emptyPrompt", false, strategy);
+    };
+    if is_first_prompt_claim_meta_prompt(&normalized) {
+        return first_prompt_claim_decision(Some(normalized), "metaPrompt", false, strategy);
+    }
+    if is_first_prompt_claim_slash_command(prompt, &normalized) {
+        return first_prompt_claim_decision(Some(normalized), "slashCommand", false, strategy);
+    }
+    if !is_first_prompt_claim_generic_title(
+        agent_name.as_deref(),
+        read_text_value(session, "title").as_deref(),
+    ) {
+        return first_prompt_claim_decision(
+            Some(normalized),
+            "nonGenericCurrentTitle",
+            false,
+            strategy,
+        );
+    }
+    first_prompt_claim_decision(Some(normalized), "eligible", true, strategy)
+}
+
+fn first_prompt_claim_decision(
+    normalized_prompt: Option<String>,
+    reason: &str,
+    should_run: bool,
+    strategy: Option<&'static str>,
+) -> FirstPromptAutoTitleClaimDecision {
+    FirstPromptAutoTitleClaimDecision {
+        normalized_prompt,
+        reason: reason.to_string(),
+        should_run,
+        strategy,
+    }
+}
+
+fn first_prompt_claim_agent_name(
+    session: &Value,
+    runtime_settings: &Map<String, Value>,
+) -> Option<String> {
+    read_text_value(session, "agentId")
+        .or_else(|| read_text_from_map(runtime_settings, "agentName"))
+}
+
+fn first_prompt_claim_strategy(agent_name: Option<&str>) -> Option<&'static str> {
+    match normalize_first_prompt_claim_agent_name(agent_name).as_deref() {
+        Some("claude") => Some("sendBareRenameCommand"),
+        Some("codex") => Some("generateTitleAndRename"),
+        Some("pi") => Some("generateTitleAndName"),
+        _ => None,
+    }
+}
+
+fn normalize_first_prompt_claim_agent_name(value: Option<&str>) -> Option<String> {
+    let normalized = value?.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" => None,
+        "openai codex" | "codex cli" => Some("codex".to_string()),
+        "claude code" => Some("claude".to_string()),
+        "π" => Some("pi".to_string()),
+        other => Some(other.to_string()),
+    }
+}
+
+fn is_first_prompt_claim_generic_title(agent_name: Option<&str>, title: Option<&str>) -> bool {
+    let normalized_title = title
+        .map(|value| {
+            value
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_ascii_lowercase()
+        })
+        .unwrap_or_default();
+    if normalized_title.is_empty() {
+        return true;
+    }
+    let normalized_agent = normalize_first_prompt_claim_agent_name(agent_name);
+    let generic = [
+        "terminal",
+        "terminal session",
+        "agent",
+        "agent session",
+        "claude",
+        "claude code",
+        "claude session",
+        "codex",
+        "codex cli",
+        "codex session",
+        "openai codex",
+        "openai codex session",
+        "pi",
+        "\u{03c0}",
+        "pi session",
+    ];
+    generic.contains(&normalized_title.as_str())
+        || normalized_agent.as_deref() == Some(normalized_title.as_str())
+}
+
+fn normalize_first_prompt_title_claim_prompt(prompt: Option<&str>) -> Option<String> {
+    let normalized = prompt?.split_whitespace().collect::<Vec<_>>().join(" ");
+    let normalized = normalized.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    let stripped = strip_first_prompt_title_claim_prefixes(normalized);
+    let cleaned = stripped
+        .trim()
+        .trim_end_matches(['.', '?', '!', ':', ';', ','])
+        .trim();
+    Some(
+        if cleaned.is_empty() {
+            normalized
+        } else {
+            cleaned
+        }
+        .to_string(),
+    )
+}
+
+fn strip_first_prompt_title_claim_prefixes(value: &str) -> &str {
+    let mut stripped = value;
+    loop {
+        let lower = stripped.to_lowercase();
+        let prefix = [
+            "please ",
+            "kindly ",
+            "hey ",
+            "hi ",
+            "hello ",
+            "can you ",
+            "could you ",
+            "would you ",
+            "will you ",
+            "can we ",
+            "could we ",
+            "would we ",
+            "help me ",
+            "i need you to ",
+            "i need to ",
+            "i need ",
+            "how do i ",
+            "how does ",
+            "is there any way to ",
+            "is there way to ",
+        ]
+        .into_iter()
+        .find(|prefix| lower.starts_with(prefix));
+        let Some(prefix) = prefix else {
+            return stripped;
+        };
+        stripped = &stripped[prefix.len()..];
+    }
+}
+
+fn is_first_prompt_claim_meta_prompt(prompt: &str) -> bool {
+    prompt.starts_with("# AGENTS")
+        || prompt.contains("tool_use_id")
+        || [
+            "<command",
+            "<environment_context",
+            "<permissions instructions>",
+            "<user_instructions>",
+            "<INSTRUCTIONS>",
+            "<collaboration_mode>",
+            "<app-context>",
+            "<turn_aborted>",
+            "<ide_opened_file>",
+            "<local-",
+            "[Tool Result]",
+            "Caveat:",
+        ]
+        .iter()
+        .any(|prefix| prompt.starts_with(prefix))
+}
+
+fn is_first_prompt_claim_slash_command(raw_prompt: Option<&str>, normalized_prompt: &str) -> bool {
+    if normalized_prompt.encode_utf16().count() > 50 {
+        return false;
+    }
+    let Some(raw_prompt) = raw_prompt else {
+        return false;
+    };
+    raw_prompt
+        .split('\n')
+        .any(is_first_prompt_claim_slash_command_line)
+}
+
+fn is_first_prompt_claim_slash_command_line(line: &str) -> bool {
+    let trimmed = line.trim_start_matches([' ', '\t']);
+    let Some(rest) = trimmed.strip_prefix('/') else {
+        return false;
+    };
+    let mut chars = rest.char_indices();
+    let Some((_, first)) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() {
+        return false;
+    }
+    let mut consumed_bytes = first.len_utf8();
+    for (index, ch) in chars {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            consumed_bytes = index + ch.len_utf8();
+            continue;
+        }
+        consumed_bytes = index;
+        break;
+    }
+    let suffix = &rest[consumed_bytes..];
+    suffix
+        .chars()
+        .next()
+        .map(|ch| {
+            ch.is_whitespace()
+                || matches!(
+                    ch,
+                    ')' | '.' | ',' | ':' | ';' | '!' | '?' | '\'' | '"' | '`'
+                )
+        })
+        .unwrap_or(true)
+}
+
+fn should_persist_activity_update(session: &Value, update: &ActivityUpdate) -> bool {
+    read_text_value(session, "lastActiveAt") != update.last_active_at
+        || persistable_agent_activity_snapshot(
+            object_field(session, "runtimeSettings").get("agentActivity"),
+        ) != persistable_agent_activity_snapshot(Some(&update.activity))
+}
+
+fn persistable_agent_activity_snapshot(value: Option<&Value>) -> Value {
+    let Some(activity) = value.and_then(Value::as_object) else {
+        return json!({});
+    };
+    let mut snapshot = Map::new();
+    for key in [
+        "activity",
+        "agentName",
+        "attentionEventId",
+        "attentionSuppressedUntil",
+        "hasSeenWorking",
+        "isAcknowledged",
+        "lastTitle",
+        "lastTitleChangeAt",
+        "suppressedUntil",
+        "workingSource",
+        "workingStartedAt",
+    ] {
+        if let Some(value) = activity.get(key) {
+            snapshot.insert(key.to_string(), value.clone());
+        }
+    }
+    if activity.get("activity").and_then(Value::as_str) != Some("idle") {
+        if let Some(value) = activity.get("lastChangedAt") {
+            snapshot.insert("lastChangedAt".to_string(), value.clone());
+        }
+    }
+    Value::Object(snapshot)
+}
+
+pub(crate) fn normalize_agent_hook_activity(
     status: Option<&Value>,
     event_name: Option<&Value>,
     agent_name: Option<&Value>,
@@ -2243,9 +4237,13 @@ fn normalize_agent_hook_activity(
         .unwrap_or_default()
         .trim()
         .to_string();
-    let lower = event.to_ascii_lowercase().replace(['_', '-', '.'], "");
+    let lower = event.to_ascii_lowercase();
+    /*
+    CDXC:AgentHookStatus 2026-06-22-08:31:
+    Server-side hook ingestion must use TypeScript gxserver's provider event semantics before trusting sidecar status. This keeps direct RPC events, legacy sidecars, and installed helper payloads from turning settled Stop/agent-response boundaries into false attention states.
+    */
     if normalized_agent.as_deref() == Some("claude") {
-        if matches!(lower.as_str(), "stop" | "idle" | "sessionend") {
+        if matches!(lower.as_str(), "stop" | "idle") {
             return Some("idle".to_string());
         }
         if matches!(
@@ -2254,48 +4252,154 @@ fn normalize_agent_hook_activity(
         ) {
             return Some("attention".to_string());
         }
-        if matches!(lower.as_str(), "userpromptsubmit" | "pretooluse") {
+        if matches!(
+            lower.as_str(),
+            "userpromptsubmit" | "prompt-submit" | "pretooluse" | "pre-tool-use"
+        ) {
+            return Some("working".to_string());
+        }
+        if matches!(lower.as_str(), "sessionend" | "session-end") {
+            return Some("idle".to_string());
+        }
+    }
+    if matches!(
+        normalized_agent.as_deref(),
+        Some("copilot" | "codebuddy" | "droid" | "qoder")
+    ) {
+        if matches!(
+            lower.as_str(),
+            "stop" | "notification" | "sessionend" | "session-end"
+        ) {
+            return Some("idle".to_string());
+        }
+        if matches!(lower.as_str(), "pretooluse" | "pre-tool-use") {
+            return Some("working".to_string());
+        }
+    }
+    if normalized_agent.as_deref() == Some("antigravity") {
+        if matches!(
+            lower.as_str(),
+            "stop" | "turn-completion" | "sessionend" | "session-end"
+        ) {
+            return Some("idle".to_string());
+        }
+        if matches!(
+            lower.as_str(),
+            "preinvocation" | "pretooluse" | "posttooluse"
+        ) {
             return Some("working".to_string());
         }
     }
     if matches!(
         lower.as_str(),
         "stop"
-            | "agentresponse"
+            | "agent-response"
             | "afteragent"
             | "afteragentresponse"
-            | "agentend"
-            | "oncomplete"
-            | "onerror"
-            | "turncompletion"
-            | "sessionend"
+            | "agent.end"
+            | "agent_end"
+            | "on_complete"
+            | "on_error"
+            | "post_llm_call"
+            | "turn-completion"
     ) {
         return Some("idle".to_string());
     }
     if matches!(
         lower.as_str(),
-        "pretooluse"
+        "on_tool_permission"
+            | "post_approval_response"
+            | "pretooluse"
             | "posttooluse"
-            | "pretoolcall"
+            | "pre_tool_call"
             | "beforeagent"
             | "preinvocation"
             | "userpromptsubmit"
-            | "agentstart"
+            | "agent.start"
+            | "agent_start"
             | "beforeshellexecution"
             | "beforesubmitprompt"
     ) {
         return Some("working".to_string());
     }
-    if matches!(
-        lower.as_str(),
-        "notification" | "permissionrequest" | "messageupdated" | "permissionupdated"
+    if let Some(status) = status
+        .and_then(Value::as_str)
+        .filter(|value| matches!(*value, "idle" | "working" | "attention"))
+    {
+        return Some(status.to_string());
+    }
+    if event.is_empty() {
+        return None;
+    }
+    if agent_hook_event_matches(
+        &event,
+        &lower,
+        &[
+            "BeforeAgent",
+            "PreInvocation",
+            "PreToolUse",
+            "UserPromptSubmit",
+            "agent.start",
+            "agent_start",
+            "agentSpawn",
+            "beforeShellExecution",
+            "beforeSubmitPrompt",
+            "on_session_reset",
+            "on_session_start",
+            "on_tool_permission",
+            "post_approval_response",
+            "postToolUse",
+            "pre_llm_call",
+            "pre_tool_call",
+            "preToolUse",
+            "userPromptSubmit",
+        ],
+    ) {
+        return Some("working".to_string());
+    }
+    if agent_hook_event_matches(
+        &event,
+        &lower,
+        &[
+            "Notification",
+            "PermissionRequest",
+            "message.updated",
+            "permission.updated",
+            "pre_approval_request",
+            "session.updated",
+        ],
     ) {
         return Some("attention".to_string());
     }
-    status
-        .and_then(Value::as_str)
-        .filter(|value| matches!(*value, "idle" | "working" | "attention"))
-        .map(str::to_string)
+    if agent_hook_event_matches(
+        &event,
+        &lower,
+        &[
+            "AfterAgent",
+            "SessionEnd",
+            "Stop",
+            "afterAgentResponse",
+            "agent.end",
+            "agent_end",
+            "on_complete",
+            "on_error",
+            "on_session_end",
+            "on_session_finalize",
+            "release",
+            "session.end",
+            "session_shutdown",
+            "turn-completion",
+        ],
+    ) {
+        return Some("idle".to_string());
+    }
+    None
+}
+
+fn agent_hook_event_matches(event: &str, lower_event: &str, candidates: &[&str]) -> bool {
+    candidates
+        .iter()
+        .any(|candidate| event == *candidate || lower_event == *candidate)
 }
 
 #[derive(Clone)]
@@ -2455,32 +4559,47 @@ fn infer_agent_id_from_path(path: Option<&str>) -> Option<String> {
     None
 }
 
+/*
+CDXC:GxserverSessionIdentity 2026-06-24-04:49:
+Passive hook and sidecar events must not let stale Droid metadata replace a row gxserver already owns as Pi or another agent.
+Treat stored agentId/runtime agentName as an identity lock when older rows do not yet have launchAgentId, while still allowing unowned terminal rows to be promoted by first matching observations.
+*/
+fn locked_session_agent_id(session: &Value) -> Option<String> {
+    let runtime_settings = object_field(session, "runtimeSettings");
+    let launch_settings = object_field(session, "launchSettings");
+    normalize_agent_id(
+        runtime_settings
+            .get("launchAgentId")
+            .and_then(Value::as_str),
+    )
+    .or_else(|| normalize_agent_id(read_text_value(session, "agentId").as_deref()))
+    .or_else(|| normalize_agent_id(runtime_settings.get("agentName").and_then(Value::as_str)))
+    .or_else(|| {
+        launch_settings
+            .get("agentLaunchPlan")
+            .and_then(Value::as_object)
+            .and_then(|plan| {
+                plan.get("agentCommand")
+                    .and_then(Value::as_str)
+                    .or_else(|| plan.get("command").and_then(Value::as_str))
+            })
+            .and_then(infer_agent_id_from_command)
+    })
+    .or_else(|| {
+        launch_settings
+            .get("startupText")
+            .and_then(Value::as_str)
+            .and_then(infer_agent_id_from_command)
+    })
+}
+
 fn launch_agent_mismatch(session: &Value, incoming_agent_id: Option<&str>) -> bool {
     let Some(incoming) = normalize_agent_id(incoming_agent_id) else {
         return false;
     };
-    let locked = object_field(session, "runtimeSettings")
-        .get("launchAgentId")
-        .and_then(Value::as_str)
-        .and_then(|value| normalize_agent_id(Some(value)))
-        .or_else(|| {
-            object_field(session, "launchSettings")
-                .get("agentLaunchPlan")
-                .and_then(Value::as_object)
-                .and_then(|plan| {
-                    plan.get("agentCommand")
-                        .and_then(Value::as_str)
-                        .or_else(|| plan.get("command").and_then(Value::as_str))
-                })
-                .and_then(infer_agent_id_from_command)
-        })
-        .or_else(|| {
-            object_field(session, "launchSettings")
-                .get("startupText")
-                .and_then(Value::as_str)
-                .and_then(infer_agent_id_from_command)
-        });
-    locked.map(|locked| locked != incoming).unwrap_or(false)
+    locked_session_agent_id(session)
+        .map(|locked| locked != incoming)
+        .unwrap_or(false)
 }
 
 fn infer_agent_id_from_command(command: &str) -> Option<String> {
@@ -2536,12 +4655,7 @@ fn resolve_project_agent_config(
             agents.iter().find(|candidate| {
                 candidate
                     .as_object()
-                    .and_then(|agent| {
-                        agent
-                            .get("agentId")
-                            .or_else(|| agent.get("id"))
-                            .and_then(Value::as_str)
-                    })
+                    .and_then(|agent| agent.get("agentId").and_then(Value::as_str))
                     .map(|id| id.trim().eq_ignore_ascii_case(&normalized_agent_id))
                     .unwrap_or(false)
             })
@@ -2588,7 +4702,10 @@ fn apply_accept_all_spec(
     if trimmed.is_empty() {
         return String::new();
     }
-    let spec = accept_all_spec(agent_id).or_else(|| icon.and_then(accept_all_spec));
+    let spec = accept_all_spec(agent_id).or_else(|| {
+        icon.and_then(default_agent_icon_to_id)
+            .and_then(accept_all_spec)
+    });
     let Some(spec) = spec else {
         return trimmed.to_string();
     };
@@ -2649,12 +4766,16 @@ fn accept_all_spec(agent_id: &str) -> Option<AcceptAllSpec> {
             aliases: vec!["--yolo".to_string()],
             canonical: "--yolo",
         },
-        "copilot" | "cursor" | "gemini" => AcceptAllSpec::Flag {
-            aliases: vec![
-                "--allow-all".to_string(),
-                "--yolo".to_string(),
-                "-y".to_string(),
-            ],
+        "copilot" => AcceptAllSpec::Flag {
+            aliases: vec!["--allow-all".to_string(), "--yolo".to_string()],
+            canonical: "--yolo",
+        },
+        "cursor" => AcceptAllSpec::Flag {
+            aliases: vec!["--force".to_string(), "--yolo".to_string()],
+            canonical: "--yolo",
+        },
+        "gemini" => AcceptAllSpec::Flag {
+            aliases: vec!["-y".to_string(), "--yolo".to_string()],
             canonical: "--yolo",
         },
         "grok" => AcceptAllSpec::Flag {
@@ -2682,33 +4803,89 @@ fn strip_accept_all_markers(command: &str, assignments: &[String], aliases: &[St
 }
 
 fn strip_accept_all_flags(command: &str, aliases: &[String]) -> String {
-    command
-        .split_whitespace()
-        .filter(|token| !is_accept_all_flag_token(token, aliases))
-        .collect::<Vec<_>>()
-        .join(" ")
+    let tokens = command.split_whitespace().collect::<Vec<_>>();
+    let mut output = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = tokens[index];
+        if is_accept_all_flag_token(token, aliases) {
+            index += 1;
+            continue;
+        }
+        if token == GROK_PERMISSION_MODE_FLAG {
+            if let Some(value_token) = tokens.get(index + 1) {
+                if is_grok_bypass_value_or_assignment_token(value_token) {
+                    index += 2;
+                    continue;
+                }
+            }
+        }
+        if is_grok_permission_mode_equals_token(token) {
+            index += 1;
+            continue;
+        }
+        output.push(token);
+        index += 1;
+    }
+    output.join(" ")
 }
 
 fn strip_duplicate_accept_all_flags(command: &str, aliases: &[String]) -> String {
     let mut seen = false;
     let mut output = Vec::new();
-    for token in command.split_whitespace() {
+    let tokens = command.split_whitespace().collect::<Vec<_>>();
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = tokens[index];
         if is_accept_all_flag_token(token, aliases) {
             if !seen {
                 output.push(token);
                 seen = true;
             }
+            index += 1;
+            continue;
+        }
+        if token == GROK_PERMISSION_MODE_FLAG
+            && tokens.get(index + 1) == Some(&GROK_BYPASS_PERMISSIONS_VALUE)
+        {
+            if !seen {
+                output.push(token);
+                output.push(tokens[index + 1]);
+                seen = true;
+            }
+            index += 2;
+            continue;
+        }
+        if is_grok_permission_mode_equals_token(token) {
+            if !seen {
+                output.push(token);
+                seen = true;
+            }
+            index += 1;
             continue;
         }
         output.push(token);
+        index += 1;
     }
     output.join(" ")
 }
 
 fn command_includes_accept_all_flag(command: &str, aliases: &[String]) -> bool {
-    command
-        .split_whitespace()
-        .any(|token| is_accept_all_flag_token(token, aliases))
+    let tokens = command.split_whitespace().collect::<Vec<_>>();
+    for (index, token) in tokens.iter().enumerate() {
+        if is_accept_all_flag_token(token, aliases) {
+            return true;
+        }
+        if *token == GROK_PERMISSION_MODE_FLAG
+            && tokens.get(index + 1) == Some(&GROK_BYPASS_PERMISSIONS_VALUE)
+        {
+            return true;
+        }
+        if is_grok_permission_mode_equals_token(token) {
+            return true;
+        }
+    }
+    false
 }
 
 fn is_accept_all_flag_token(token: &str, aliases: &[String]) -> bool {
@@ -2718,6 +4895,44 @@ fn is_accept_all_flag_token(token: &str, aliases: &[String]) -> bool {
                 .strip_prefix(alias)
                 .is_some_and(|rest| rest.starts_with('='))
     })
+}
+
+fn is_grok_permission_mode_equals_token(token: &str) -> bool {
+    token
+        .strip_prefix(GROK_PERMISSION_MODE_FLAG)
+        .and_then(|rest| rest.strip_prefix('='))
+        .is_some_and(|value| value == GROK_BYPASS_PERMISSIONS_VALUE)
+}
+
+fn is_grok_bypass_value_or_assignment_token(token: &str) -> bool {
+    token == GROK_BYPASS_PERMISSIONS_VALUE
+        || token
+            .strip_prefix(GROK_BYPASS_PERMISSIONS_VALUE)
+            .is_some_and(|rest| rest.starts_with('='))
+}
+
+fn default_agent_icon_to_id(icon: &str) -> Option<&'static str> {
+    match icon {
+        "amp-cli" => Some("amp"),
+        "antigravity-cli" => Some("antigravity"),
+        "claude" => Some("claude"),
+        "codebuddy" => Some("codebuddy"),
+        "codex" => Some("codex"),
+        "copilot" => Some("copilot"),
+        "cursor-cli" => Some("cursor"),
+        "factory-droid" => Some("droid"),
+        "gemini" => Some("gemini"),
+        "grok-build" => Some("grok"),
+        "hermes-agent" => Some("hermes-agent"),
+        "kiro" => Some("kiro"),
+        "omp" => Some("omp"),
+        "opencode" => Some("opencode"),
+        "pi" => Some("pi"),
+        "qoder" => Some("qoder"),
+        "rovo-dev" => Some("rovodev"),
+        "t3" => Some("t3"),
+        _ => None,
+    }
 }
 
 fn default_agent_command(agent_id: &str) -> Option<&'static str> {
@@ -2744,17 +4959,13 @@ fn default_agent_command(agent_id: &str) -> Option<&'static str> {
     }
 }
 
-fn get_visible_terminal_title(title: &str) -> Option<String> {
+pub(crate) fn get_visible_terminal_title(title: &str) -> Option<String> {
     let normalized = normalize_terminal_title(title)?;
-    let lower = normalized.to_ascii_lowercase();
-    if lower.starts_with('/')
-        || lower.starts_with("~/")
-        || lower == "terminal session"
-        || lower == "search by text"
-        || is_uuid(&normalized)
-        || is_generic_agent_title(&lower)
-        || is_status_word_title(&lower)
-        || normalized.starts_with("Session ")
+    if is_path_like_terminal_title(&normalized)
+        || is_ignored_placeholder_session_title(&normalized)
+        || is_generic_agent_title(&normalized)
+        || is_status_word_title(&normalized)
+        || is_windows_default_powershell_title(&normalized)
     {
         return None;
     }
@@ -2762,78 +4973,21 @@ fn get_visible_terminal_title(title: &str) -> Option<String> {
 }
 
 fn normalize_terminal_title(title: &str) -> Option<String> {
-    let mut value = title.trim().to_string();
-    while let Some(first) = value.chars().next() {
-        if first.is_whitespace()
-            || matches!(
-                first,
-                '⠸' | '⠴'
-                    | '⠼'
-                    | '⠧'
-                    | '⠦'
-                    | '⠏'
-                    | '⠋'
-                    | '⠇'
-                    | '⠙'
-                    | '⠹'
-                    | '·'
-                    | '•'
-                    | '⋅'
-                    | '◦'
-                    | '✳'
-                    | '*'
-                    | '∗'
-                    | '✶'
-                    | '✻'
-                    | '✽'
-                    | '✸'
-                    | '✹'
-                    | '✺'
-                    | '✷'
-                    | '✴'
-                    | '✦'
-                    | '◇'
-                    | '🤖'
-                    | '🔔'
-            )
-        {
-            value = value[first.len_utf8()..].trim_start().to_string();
-        } else {
-            break;
-        }
+    let value = title.trim();
+    if value.is_empty() {
+        return None;
     }
-    if value.to_ascii_uppercase().starts_with("OC |") {
-        value = value[4..].trim().to_string();
+    let value = strip_oc_prefixes(value.trim_start_matches(is_leading_title_marker).trim());
+    if let Some(cursor) = normalize_cursor_terminal_title(&value) {
+        return cursor;
     }
-    if value.ends_with("✅ Ready") {
-        value = value
-            .trim_end_matches("✅ Ready")
-            .trim_end_matches('-')
-            .trim()
-            .to_string();
+    if let Some(antigravity) = normalize_antigravity_terminal_title(&value) {
+        return antigravity;
     }
-    if value.contains("⏳ Working") {
-        value = value
-            .split("⏳ Working")
-            .next()
-            .unwrap_or_default()
-            .trim_end_matches('-')
-            .trim()
-            .to_string();
+    if let Some(pi) = normalize_pi_terminal_title(&value) {
+        return Some(pi);
     }
-    if value.starts_with("π") {
-        let parts = value
-            .split(" - ")
-            .map(str::trim)
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>();
-        if parts.len() >= 3 {
-            value = parts[1..parts.len() - 1].join(" - ");
-        } else {
-            value = "π".to_string();
-        }
-    }
-    (!value.trim().is_empty()).then_some(value.trim().to_string())
+    (!value.trim().is_empty()).then(|| value.trim().to_string())
 }
 
 fn get_codex_session_id_from_title(title: &str) -> Option<String> {
@@ -2861,8 +5015,12 @@ fn is_uuid(value: &str) -> bool {
 fn trusted_resume_title(session: &Value) -> Option<String> {
     let runtime_settings = object_field(session, "runtimeSettings");
     let title = read_text_value(session, "title")?;
-    if read_text_from_map(&runtime_settings, "titleSource").as_deref() == Some("placeholder")
-        || is_temporary_title(&title)
+    if normalize_title_source(
+        read_text_from_map(&runtime_settings, "titleSource")
+            .or_else(|| read_text_from_map(&runtime_settings, "restoreTitleSource"))
+            .as_deref(),
+        &title,
+    ) == "placeholder"
     {
         return None;
     }
@@ -2871,33 +5029,79 @@ fn trusted_resume_title(session: &Value) -> Option<String> {
 }
 
 fn is_rejected_resume_title(title: &str) -> bool {
-    let lower = title.trim().to_ascii_lowercase();
-    is_temporary_title(title)
+    let normalized = title.trim();
+    let lower = normalized.to_ascii_lowercase();
+    normalized == "\u{00f0}^\u{00df}^\u{00d1}\u{00bb}"
+        || is_temporary_title(normalized)
+        || is_ghost_placeholder_session_title(normalized)
         || is_gxserver_session_id(title.trim())
-        || is_status_word_title(&lower)
-        || lower.starts_with("codex ")
-        || lower.starts_with("claude ")
-        || lower.starts_with("cursor-agent ")
-        || lower.starts_with("opencode ")
+        || normalized
+            .chars()
+            .any(|ch| (ch as u32) <= 0x1f || (ch as u32) == 0x7f)
+        || (normalized.starts_with('\u{00f0}') && normalized.ends_with('\u{00bb}'))
+        || is_agent_command_noise_title(&lower)
 }
 
 fn is_temporary_title(title: &str) -> bool {
-    matches!(
-        title.trim().to_ascii_lowercase().as_str(),
-        "terminal session"
-            | "search by text"
-            | "codex session"
-            | "codex cli session"
-            | "claude session"
-            | "claude code session"
-            | "cursor session"
-            | "cursor agent session"
-    ) || title.trim().starts_with("Session ")
+    normalize_spaces(title).eq_ignore_ascii_case("search by text")
 }
 
-fn is_generic_agent_title(lower: &str) -> bool {
+fn is_ignored_placeholder_session_title(title: &str) -> bool {
+    let normalized = normalize_spaces(title);
+    let lower = normalized.to_ascii_lowercase();
+    is_session_number_title(&normalized)
+        || get_codex_session_id_from_title(&normalized).is_some()
+        || is_ghost_placeholder_session_title(&normalized)
+        || is_status_word_title(&normalized)
+        || is_ignored_placeholder_session_title_text(&lower)
+        || is_path_like_terminal_title(&normalized)
+}
+
+fn is_ignored_placeholder_session_title_text(lower: &str) -> bool {
     matches!(
         lower,
+        "terminal session"
+            | "amp cli session"
+            | "amp session"
+            | "antigravity cli session"
+            | "antigravity session"
+            | "claude code session"
+            | "claude session"
+            | "code buddy session"
+            | "codebuddy session"
+            | "codex cli session"
+            | "codex session"
+            | "copilot session"
+            | "cursor agent session"
+            | "cursor cli session"
+            | "cursor session"
+            | "droid session"
+            | "factory droid session"
+            | "gemini session"
+            | "grok build session"
+            | "grok session"
+            | "hermes agent session"
+            | "hermes session"
+            | "kiro cli session"
+            | "kiro session"
+            | "omp session"
+            | "open code session"
+            | "openai codex session"
+            | "opencode session"
+            | "pi session"
+            | "qoder session"
+            | "qodercli session"
+            | "rovo dev session"
+            | "rovo session"
+            | "rovodev session"
+            | "t3 code session"
+    )
+}
+
+fn is_generic_agent_title(title: &str) -> bool {
+    let lower = normalize_spaces(title).to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
         "amp"
             | "amp cli"
             | "agy"
@@ -2921,57 +5125,360 @@ fn is_generic_agent_title(lower: &str) -> bool {
             | "omp"
             | "openai codex"
             | "pi"
-            | "π"
+            | "\u{03c0}"
             | "ghostex"
     )
 }
 
-fn is_status_word_title(lower: &str) -> bool {
+fn is_status_word_title(title: &str) -> bool {
+    let core = title
+        .trim_matches(is_agent_status_boundary_char)
+        .to_ascii_lowercase();
     matches!(
-        lower.trim(),
+        core.as_str(),
         "done" | "error" | "idle" | "thinking" | "working"
     )
 }
 
-fn is_generic_agent_session_title(agent_name: Option<&str>, title: Option<&str>) -> bool {
-    let title = title.unwrap_or_default().trim().to_ascii_lowercase();
-    if is_temporary_title(&title) {
-        return true;
+fn normalize_spaces(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn is_leading_title_marker(ch: char) -> bool {
+    ch.is_whitespace()
+        || ('\u{2800}'..='\u{28ff}').contains(&ch)
+        || matches!(
+            ch,
+            '\u{00b7}'
+                | '\u{2022}'
+                | '\u{22c5}'
+                | '\u{25e6}'
+                | '\u{2733}'
+                | '*'
+                | '\u{2217}'
+                | '\u{2736}'
+                | '\u{273b}'
+                | '\u{273d}'
+                | '\u{2738}'
+                | '\u{2739}'
+                | '\u{273a}'
+                | '\u{2737}'
+                | '\u{2734}'
+                | '\u{2726}'
+                | '\u{25c7}'
+                | '\u{1f916}'
+                | '\u{1f514}'
+        )
+}
+
+fn strip_oc_prefixes(title: &str) -> String {
+    let mut rest = title;
+    loop {
+        let lower = rest.to_ascii_lowercase();
+        if !lower.starts_with("oc") {
+            break;
+        }
+        let after_oc = &rest[2..];
+        let after_spaces = after_oc.trim_start();
+        let Some(after_pipe) = after_spaces.strip_prefix('|') else {
+            break;
+        };
+        rest = after_pipe.trim_start();
     }
-    let Some(agent_name) = normalize_agent_id(agent_name) else {
+    rest.to_string()
+}
+
+fn normalize_cursor_terminal_title(title: &str) -> Option<Option<String>> {
+    let normalized = normalize_spaces(title);
+    if is_cursor_placeholder_title(&normalized) {
+        return Some(None);
+    }
+    if normalized.ends_with("\u{2705} Ready") {
+        let stripped = strip_cursor_status_suffix(&normalized, "\u{2705} Ready");
+        return Some(cursor_status_title(stripped));
+    }
+    let working_marker = "\u{23f3} Working ";
+    if let Some(index) = normalized.rfind(working_marker) {
+        let trailing = &normalized[index + working_marker.len()..];
+        if !trailing.is_empty() && trailing.chars().all(|ch| ch == '.' || ch == '\u{00b7}') {
+            let stripped = strip_cursor_working_suffix(&normalized, index);
+            return Some(cursor_status_title(stripped));
+        }
+    }
+    None
+}
+
+fn cursor_status_title(stripped: String) -> Option<String> {
+    if stripped.is_empty() || is_cursor_placeholder_title(&stripped) {
+        None
+    } else {
+        Some(stripped)
+    }
+}
+
+fn strip_cursor_status_suffix(title: &str, suffix: &str) -> String {
+    let Some(prefix) = title.strip_suffix(suffix) else {
+        return title.trim().to_string();
+    };
+    prefix
+        .trim_end()
+        .strip_suffix('-')
+        .map(str::trim)
+        .unwrap_or(title)
+        .trim()
+        .to_string()
+}
+
+fn strip_cursor_working_suffix(title: &str, status_index: usize) -> String {
+    let prefix = &title[..status_index];
+    prefix
+        .trim_end()
+        .strip_suffix('-')
+        .map(str::trim)
+        .unwrap_or(title)
+        .trim()
+        .to_string()
+}
+
+fn is_cursor_placeholder_title(title: &str) -> bool {
+    let lower = normalize_spaces(title).to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "cursor" | "cursor agent" | "cursor cli" | "cursor-agent" | "cursor agent - \u{2705} ready"
+    )
+}
+
+fn normalize_antigravity_terminal_title(title: &str) -> Option<Option<String>> {
+    let normalized = normalize_spaces(title);
+    let lower = normalized.to_ascii_lowercase();
+    if lower == "agy" {
+        return Some(Some("agy".to_string()));
+    }
+    if let Some(rest) = normalized.strip_prefix('\u{1f514}') {
+        if rest.trim().eq_ignore_ascii_case("agy") {
+            return Some(Some("agy".to_string()));
+        }
+    }
+    None
+}
+
+fn normalize_pi_terminal_title(title: &str) -> Option<String> {
+    let rest = title
+        .trim()
+        .strip_prefix('\u{03c0}')?
+        .trim_start()
+        .strip_prefix('-')?
+        .trim();
+    if rest.is_empty() {
+        return None;
+    }
+    let parts = rest
+        .split(" - ")
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() < 2 {
+        Some("\u{03c0}".to_string())
+    } else {
+        Some(parts[..parts.len() - 1].join(" - "))
+    }
+}
+
+fn is_ghost_placeholder_session_title(title: &str) -> bool {
+    matches!(
+        normalize_spaces(title).as_str(),
+        "\u{1f47b}" | "\u{1f47b} Terminal Session"
+    )
+}
+
+fn is_session_number_title(title: &str) -> bool {
+    let lower = normalize_spaces(title).to_ascii_lowercase();
+    let Some(rest) = lower.strip_prefix("session ") else {
         return false;
     };
-    title == format!("{agent_name} session")
-        || title == format!("{} cli session", agent_name)
-        || title == "terminal session"
+    !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_digit())
+}
+
+fn is_path_like_terminal_title(title: &str) -> bool {
+    let trimmed = title.trim();
+    trimmed.starts_with('~')
+        || trimmed.starts_with('/')
+        || trimmed.starts_with("\u{2026}/")
+        || trimmed.starts_with("\u{2026}\\")
+        || trimmed.starts_with(".../")
+        || trimmed.starts_with("...\\")
+}
+
+fn is_agent_status_boundary_char(ch: char) -> bool {
+    ch.is_whitespace()
+        || matches!(
+            ch,
+            '.' | ':' | '[' | ']' | '(' | ')' | '{' | '}' | '!' | '|' | '/' | '\\' | '_' | '-'
+        )
+}
+
+fn is_windows_default_powershell_title(title: &str) -> bool {
+    let lower = title.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    if bytes.len() < 2 || !bytes[0].is_ascii_lowercase() {
+        return false;
+    }
+    let rest = &lower[1..];
+    let prefix = ":\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe";
+    let Some(suffix) = rest.strip_prefix(prefix) else {
+        return false;
+    };
+    suffix.is_empty() || (suffix.starts_with(char::is_whitespace) && suffix.trim() == ".")
+}
+
+fn is_agent_command_noise_title(title: &str) -> bool {
+    let Some(executable_name) = command_executable_name(title) else {
+        return false;
+    };
+    if !is_agent_command_executable_name(&executable_name) {
+        return false;
+    }
+    if title == executable_name {
+        return true;
+    }
+    let rest = title[executable_name.len()..].trim();
+    if rest.is_empty() || rest.starts_with('-') {
+        return true;
+    }
+    let first_arg = rest.split_whitespace().next().unwrap_or_default();
+    is_agent_command_subcommand_name(first_arg)
+}
+
+fn command_executable_name(command: &str) -> Option<String> {
+    let first = command.split_whitespace().next()?.trim();
+    let first = first.trim_matches(|ch| ch == '\'' || ch == '"');
+    (!first.is_empty()).then(|| first.to_ascii_lowercase())
+}
+
+fn is_agent_command_executable_name(value: &str) -> bool {
+    matches!(
+        value,
+        "acli"
+            | "agy"
+            | "amp"
+            | "claude"
+            | "codebuddy"
+            | "codex"
+            | "copilot"
+            | "cursor-agent"
+            | "droid"
+            | "gemini"
+            | "grok"
+            | "hermes"
+            | "kiro-cli"
+            | "omp"
+            | "opencode"
+            | "pi"
+            | "qodercli"
+    )
+}
+
+fn is_agent_command_subcommand_name(value: &str) -> bool {
+    matches!(
+        value,
+        "auth"
+            | "completion"
+            | "debug"
+            | "exec"
+            | "help"
+            | "login"
+            | "logout"
+            | "mcp"
+            | "resume"
+            | "run"
+            | "sandbox"
+            | "session"
+            | "sessions"
+    )
 }
 
 fn get_terminal_title_detected_agent_name(title: &str) -> Option<String> {
-    let normalized = title
+    let normalized = normalize_spaces(title);
+    [
+        "antigravity",
+        "claude",
+        "codex",
+        "copilot",
+        "cursor",
+        "gemini",
+        "pi",
+    ]
+    .into_iter()
+    .find(|agent| is_explicit_agent_program_terminal_title(&normalized, agent))
+    .map(str::to_string)
+}
+
+fn is_explicit_agent_program_terminal_title(title: &str, agent_name: &str) -> bool {
+    match agent_name {
+        "antigravity" => {
+            let lower = normalize_spaces(title).to_ascii_lowercase();
+            lower == "agy" || lower == "\u{1f514} agy"
+        }
+        "claude" => strip_one_leading_title_marker(title).eq_ignore_ascii_case("Claude Code"),
+        "codex" => matches!(
+            strip_braille_dot_prefix(title)
+                .to_ascii_lowercase()
+                .as_str(),
+            "codex" | "codex cli"
+        ),
+        "copilot" => matches!(
+            strip_specific_prefix_markers(title, &['\u{1f916}', '\u{1f514}'])
+                .to_ascii_lowercase()
+                .as_str(),
+            "copilot" | "copilot cli" | "github copilot" | "github copilot cli"
+        ),
+        "cursor" => matches!(
+            normalize_spaces(title).to_ascii_lowercase().as_str(),
+            "cursor agent" | "cursor agent - \u{2705} ready"
+        ),
+        "gemini" => matches!(
+            strip_specific_prefix_markers(title, &['\u{2726}', '\u{25c7}'])
+                .to_ascii_lowercase()
+                .as_str(),
+            "gemini" | "gemini cli"
+        ),
+        "pi" => {
+            let stripped = title.trim_start_matches(is_leading_title_marker).trim();
+            stripped.starts_with("\u{03c0} -") || stripped.starts_with("\u{03c0}-")
+        }
+        _ => false,
+    }
+}
+
+fn strip_one_leading_title_marker(title: &str) -> String {
+    let trimmed = title.trim();
+    let mut chars = trimmed.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    if is_leading_title_marker(first) {
+        chars.as_str().trim().to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn strip_braille_dot_prefix(title: &str) -> String {
+    title
+        .trim_start_matches(|ch| {
+            ('\u{2800}'..='\u{28ff}').contains(&ch)
+                || matches!(ch, '\u{00b7}' | '\u{2022}' | '\u{22c5}' | '\u{25e6}')
+                || ch.is_whitespace()
+        })
         .trim()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let lower = normalized.to_ascii_lowercase();
-    if lower == "claude code" {
-        return Some("claude".to_string());
-    }
-    if lower == "codex" || lower == "codex cli" {
-        return Some("codex".to_string());
-    }
-    if lower == "cursor agent" || lower == "cursor agent - ✅ ready" {
-        return Some("cursor".to_string());
-    }
-    if lower == "agy" || lower == "🔔 agy" {
-        return Some("antigravity".to_string());
-    }
-    if lower == "gemini" || lower == "gemini cli" {
-        return Some("gemini".to_string());
-    }
-    if lower.starts_with("π") {
-        return Some("pi".to_string());
-    }
-    None
+        .to_string()
+}
+
+fn strip_specific_prefix_markers(title: &str, markers: &[char]) -> String {
+    title
+        .trim_start_matches(|ch: char| ch.is_whitespace() || markers.contains(&ch))
+        .trim()
+        .to_string()
 }
 
 fn default_activity(agent_id: Option<&str>, override_activity: Option<&str>) -> Value {
@@ -3100,6 +5607,26 @@ fn insert_optional_from_params(
     }
 }
 
+fn insert_truthy_from_params(
+    target: &mut Map<String, Value>,
+    params: &Map<String, Value>,
+    key: &str,
+) {
+    if let Some(value) = params.get(key).cloned().filter(js_truthy_value) {
+        target.insert(key.to_string(), value);
+    }
+}
+
+fn js_truthy_value(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(value) => *value,
+        Value::Number(value) => value.as_f64() != Some(0.0),
+        Value::String(value) => !value.is_empty(),
+        Value::Array(_) | Value::Object(_) => true,
+    }
+}
+
 fn read_session_target(session: &Value) -> Option<(String, String)> {
     Some((
         read_text_value(session, "projectId")?,
@@ -3116,6 +5643,45 @@ fn quote_shell_double_arg(value: &str) -> String {
             .replace('$', "\\$")
             .replace('`', "\\`")
     )
+}
+
+fn quote_shell_arg(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn wrap_restored_terminal_resume_command(
+    command: &str,
+    display_command: &str,
+    fallback_command: Option<&str>,
+) -> String {
+    let mut lines = vec![
+        format!("printf '%s\\n' {}", quote_shell_arg("Restoring session...")),
+        format!("printf '> %s\\n\\n' {}", quote_shell_arg(display_command)),
+        "__ghostex_restore_resume_status=0".to_string(),
+        "__ghostex_restore_resume_primary() {".to_string(),
+        command.to_string(),
+        "}".to_string(),
+        "__ghostex_restore_resume_primary || __ghostex_restore_resume_status=$?".to_string(),
+        "unset -f __ghostex_restore_resume_primary".to_string(),
+    ];
+    if let Some(fallback_command) = fallback_command.filter(|fallback| *fallback != command) {
+        lines.extend([
+            "if [ \"$__ghostex_restore_resume_status\" -ne 0 ]; then".to_string(),
+            format!(
+                "  printf '%s\\n' {}",
+                quote_shell_arg("Exact resume failed; trying saved fallback resume command.")
+            ),
+            "  __ghostex_restore_resume_status=0".to_string(),
+            "  __ghostex_restore_resume_fallback() {".to_string(),
+            fallback_command.to_string(),
+            "  }".to_string(),
+            "  __ghostex_restore_resume_fallback || __ghostex_restore_resume_status=$?".to_string(),
+            "  unset -f __ghostex_restore_resume_fallback".to_string(),
+            "fi".to_string(),
+        ]);
+    }
+    lines.push("unset __ghostex_restore_resume_status".to_string());
+    lines.join("\n")
 }
 
 fn as_atuin_ignored_shell_input(command: &str) -> String {
@@ -3221,6 +5787,974 @@ mod tests {
                 .to_string(),
         };
         (lifecycle, session)
+    }
+
+    fn create_pi_agent_session_without_launch_lock(
+        repository: &DomainRepository<'_>,
+    ) -> (LifecycleParams, Value) {
+        let project = repository
+            .create_project(
+                json!({ "name": "Pi Lock Project" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("create project");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id")
+            .to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "agentId": "pi",
+                    "kind": "agent",
+                    "projectId": project_id,
+                    "runtimeSettings": {
+                        "agentName": "pi",
+                        "titleSource": "terminal-auto"
+                    },
+                    "title": "Pi Investigation"
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("create session");
+        let lifecycle = LifecycleParams {
+            project_id: session
+                .get("projectId")
+                .and_then(Value::as_str)
+                .expect("session project id")
+                .to_string(),
+            session_id: session
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .expect("session id")
+                .to_string(),
+        };
+        (lifecycle, session)
+    }
+
+    #[test]
+    fn first_prompt_claim_decision_matches_provider_strategy_and_prompt_normalization() {
+        let codex = json!({
+            "agentId": "codex",
+            "runtimeSettings": {},
+            "title": "Terminal",
+        });
+        let decision = decide_first_prompt_auto_title_claim(
+            &codex,
+            Some("Please can you help me fix the sidebar."),
+            false,
+        );
+        assert!(decision.should_run);
+        assert_eq!(decision.reason, "eligible");
+        assert_eq!(
+            decision.normalized_prompt.as_deref(),
+            Some("fix the sidebar")
+        );
+        assert_eq!(decision.strategy, Some("generateTitleAndRename"));
+
+        let claude = json!({
+            "agentId": "claude",
+            "runtimeSettings": {},
+            "title": "Claude Code",
+        });
+        let decision = decide_first_prompt_auto_title_claim(
+            &claude,
+            Some("Summarize the session logs"),
+            false,
+        );
+        assert!(decision.should_run);
+        assert_eq!(decision.strategy, Some("sendBareRenameCommand"));
+
+        let pi = json!({
+            "agentId": "pi",
+            "runtimeSettings": {},
+            "title": "\u{03c0}",
+        });
+        let decision = decide_first_prompt_auto_title_claim(
+            &pi,
+            Some("How does resource syncing work?"),
+            false,
+        );
+        assert!(decision.should_run);
+        assert_eq!(
+            decision.normalized_prompt.as_deref(),
+            Some("resource syncing work")
+        );
+        assert_eq!(decision.strategy, Some("generateTitleAndName"));
+    }
+
+    #[test]
+    fn first_prompt_claim_decision_skips_non_claimable_prompts_without_running_state() {
+        let codex = json!({
+            "agentId": "codex",
+            "runtimeSettings": {},
+            "title": "Agent",
+        });
+        let meta = decide_first_prompt_auto_title_claim(
+            &codex,
+            Some("# AGENTS.md instructions for this repository"),
+            false,
+        );
+        assert!(!meta.should_run);
+        assert_eq!(meta.reason, "metaPrompt");
+
+        let slash = decide_first_prompt_auto_title_claim(
+            &codex,
+            Some("notes before command\n  /status please"),
+            false,
+        );
+        assert!(!slash.should_run);
+        assert_eq!(slash.reason, "slashCommand");
+
+        let unsupported = json!({
+            "agentId": "cursor",
+            "runtimeSettings": {},
+            "title": "Terminal",
+        });
+        let unsupported =
+            decide_first_prompt_auto_title_claim(&unsupported, Some("Summarize this"), false);
+        assert!(!unsupported.should_run);
+        assert_eq!(unsupported.reason, "unsupportedAgent");
+
+        let named = json!({
+            "agentId": "codex",
+            "runtimeSettings": { "autoTitleFromFirstPrompt": true },
+            "title": "Codex",
+        });
+        let named = decide_first_prompt_auto_title_claim(&named, Some("Summarize this"), false);
+        assert!(!named.should_run);
+        assert_eq!(named.reason, "alreadyAutoNamed");
+    }
+
+    #[test]
+    fn first_prompt_claim_retries_cancelled_job_only_for_later_prompt() {
+        let first_prompt = "Please cancel this generated title before rename";
+        let session = json!({
+            "agentId": "codex",
+            "runtimeSettings": {
+                "firstUserMessage": first_prompt,
+                "gxserverFirstPromptAutoTitleCancelledAt": "2026-06-22T04:00:00.000Z",
+                "gxserverFirstPromptAutoTitleCancelledPrompt": first_prompt,
+                "gxserverFirstPromptAutoTitleReason": "escape",
+                "gxserverFirstPromptAutoTitleStatus": "cancelled"
+            },
+            "title": "Terminal",
+        });
+
+        let same = decide_first_prompt_auto_title_claim(&session, Some(first_prompt), false);
+        assert!(!same.should_run);
+        assert_eq!(same.reason, "already-cancelled");
+
+        let later = decide_first_prompt_auto_title_claim(
+            &session,
+            Some("Now explain the auto sleep defaults"),
+            false,
+        );
+        assert!(later.should_run);
+        assert_eq!(later.reason, "eligible");
+        assert_eq!(
+            later.normalized_prompt.as_deref(),
+            Some("Now explain the auto sleep defaults")
+        );
+    }
+
+    #[test]
+    fn first_prompt_claim_clears_cancelled_metadata_for_later_prompt() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let (lifecycle, session) =
+            create_codex_agent_session(&repository, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        let first_prompt = "Please cancel this generated title before rename";
+        let mut runtime_settings = object_field(&session, "runtimeSettings");
+        runtime_settings.insert("firstUserMessage".to_string(), json!(first_prompt));
+        runtime_settings.insert(
+            "gxserverFirstPromptAutoTitleCancelledAt".to_string(),
+            json!("2026-06-22T04:00:00.000Z"),
+        );
+        runtime_settings.insert(
+            "gxserverFirstPromptAutoTitleCancelledPrompt".to_string(),
+            json!(first_prompt),
+        );
+        runtime_settings.insert(
+            "gxserverFirstPromptAutoTitleReason".to_string(),
+            json!("escape"),
+        );
+        runtime_settings.insert(
+            "gxserverFirstPromptAutoTitleStatus".to_string(),
+            json!("cancelled"),
+        );
+        let mut update = lifecycle_update(&lifecycle);
+        update.insert(
+            "runtimeSettings".to_string(),
+            Value::Object(runtime_settings),
+        );
+        let cancelled = repository.update_session(&update).expect("cancelled row");
+
+        let same =
+            claim_first_prompt_auto_title(&repository, &cancelled, Some(first_prompt.to_string()))
+                .expect("same prompt claim");
+        assert!(same.is_none());
+
+        let latest = repository
+            .get_session(&lifecycle.project_id, &lifecycle.session_id)
+            .expect("read latest")
+            .expect("latest session");
+        let claimed = claim_first_prompt_auto_title(
+            &repository,
+            &latest,
+            Some("Now explain the auto sleep defaults".to_string()),
+        )
+        .expect("later prompt claim")
+        .expect("claimed session");
+        let runtime = object_field(&claimed, "runtimeSettings");
+        assert_eq!(
+            runtime
+                .get("gxserverFirstPromptAutoTitleStatus")
+                .and_then(Value::as_str),
+            Some("running")
+        );
+        assert_eq!(
+            runtime.get("firstUserMessage").and_then(Value::as_str),
+            Some("Now explain the auto sleep defaults")
+        );
+        assert!(runtime
+            .get("gxserverFirstPromptAutoTitleCancelledAt")
+            .is_none());
+        assert!(runtime
+            .get("gxserverFirstPromptAutoTitleCancelledPrompt")
+            .is_none());
+        assert!(runtime.get("gxserverFirstPromptAutoTitleReason").is_none());
+    }
+
+    #[test]
+    fn terminal_title_capture_preserves_decision_reason_when_identity_title_is_trusted() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let project = repository
+            .create_project(
+                json!({ "name": "Terminal Title Capture" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("create project");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id")
+            .to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "agentId": "codex",
+                    "kind": "agent",
+                    "projectId": project_id,
+                    "runtimeSettings": {
+                        "agentName": "codex",
+                        "agentSessionId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                        "titleSource": "user"
+                    },
+                    "title": "Phase 6 Ingested Title"
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("create session");
+        let lifecycle = LifecycleParams {
+            project_id: session
+                .get("projectId")
+                .and_then(Value::as_str)
+                .expect("session project id")
+                .to_string(),
+            session_id: session
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .expect("session id")
+                .to_string(),
+        };
+        let captured_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+
+        let result = ingest_terminal_title_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "codex",
+                "rawTitle": captured_id,
+                "sessionPersistenceProvider": "zmx"
+            })
+            .as_object()
+            .expect("terminal title params"),
+        )
+        .expect("terminal title result");
+        let result = result.result;
+
+        assert_eq!(result.get("changed"), Some(&json!(true)));
+        assert_eq!(
+            result.get("reason"),
+            Some(&json!("captured-agent-session-id"))
+        );
+        assert_eq!(result.get("agentSessionId"), Some(&json!(captured_id)));
+        let session = result.get("session").expect("result session");
+        assert_eq!(session.get("title"), Some(&json!("Phase 6 Ingested Title")));
+        assert_eq!(
+            session
+                .get("runtimeSettings")
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("agentSessionId")),
+            Some(&json!(captured_id))
+        );
+    }
+
+    #[test]
+    fn terminal_title_applies_zmx_title_with_previous_source_reason_without_agent_promotion() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let project = repository
+            .create_project(
+                json!({ "name": "Terminal Title Canonical" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("create project");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id")
+            .to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "kind": "terminal",
+                    "projectId": project_id,
+                    "runtimeSettings": { "titleSource": "placeholder" },
+                    "title": "Search by Text"
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("create session");
+        let lifecycle = LifecycleParams {
+            project_id,
+            session_id: session
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .expect("session id")
+                .to_string(),
+        };
+
+        let output = ingest_terminal_title_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "rawTitle": "Find previous Codex work",
+                "sessionPersistenceProvider": "zmx"
+            })
+            .as_object()
+            .expect("terminal title params"),
+        )
+        .expect("terminal title result");
+        let result = output.result;
+
+        assert!(output.schedule_presentation_delta);
+        assert_eq!(result.get("changed"), Some(&json!(true)));
+        assert_eq!(
+            result.get("reason"),
+            Some(&json!("zmx-terminal-title-from-placeholder"))
+        );
+        let session = result.get("session").expect("result session");
+        assert_eq!(session.get("kind"), Some(&json!("terminal")));
+        assert_eq!(session.get("agentId"), None);
+        assert_eq!(
+            session.get("title"),
+            Some(&json!("Find previous Codex work"))
+        );
+        assert_eq!(
+            session
+                .get("runtimeSettings")
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("agentName")),
+            None
+        );
+    }
+
+    #[test]
+    fn terminal_title_rejects_untrusted_provider_off_title() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let project = repository
+            .create_project(
+                json!({ "name": "Terminal Title Trust" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("create project");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id")
+            .to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "kind": "terminal",
+                    "projectId": project_id,
+                    "runtimeSettings": { "titleSource": "user" },
+                    "title": "Terminal Session"
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("create session");
+        let lifecycle = LifecycleParams {
+            project_id,
+            session_id: session
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .expect("session id")
+                .to_string(),
+        };
+
+        let output = ingest_terminal_title_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "rawTitle": "Untrusted local shell title",
+                "sessionPersistenceProvider": "off"
+            })
+            .as_object()
+            .expect("terminal title params"),
+        )
+        .expect("terminal title result");
+        let result = output.result;
+
+        assert!(!output.schedule_presentation_delta);
+        assert_eq!(result.get("changed"), Some(&json!(false)));
+        assert_eq!(
+            result.get("reason"),
+            Some(&json!("terminal-title-not-trusted"))
+        );
+        assert_eq!(
+            result
+                .get("session")
+                .and_then(|session| session.get("title")),
+            Some(&json!("Terminal Session"))
+        );
+    }
+
+    #[test]
+    fn terminal_title_status_bookkeeping_does_not_schedule_presentation_delta() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let project = repository
+            .create_project(
+                json!({ "name": "Terminal Title Status" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("create project");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id")
+            .to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "kind": "terminal",
+                    "projectId": project_id,
+                    "runtimeSettings": { "titleSource": "terminal-auto" },
+                    "title": "Search by Text"
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("create session");
+        let lifecycle = LifecycleParams {
+            project_id,
+            session_id: session
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .expect("session id")
+                .to_string(),
+        };
+
+        let output = ingest_terminal_title_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "rawTitle": "Search by Text",
+                "sessionPersistenceProvider": "zmx"
+            })
+            .as_object()
+            .expect("terminal title params"),
+        )
+        .expect("terminal title result");
+        let result = output.result;
+
+        assert!(!output.schedule_presentation_delta);
+        assert_eq!(result.get("changed"), Some(&json!(false)));
+        assert_eq!(
+            result
+                .get("activity")
+                .and_then(|activity| activity.get("activity")),
+            Some(&json!("idle"))
+        );
+        assert_eq!(
+            result
+                .get("session")
+                .and_then(|session| session.get("runtimeSettings"))
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("agentActivity"))
+                .and_then(|activity| activity.get("lastTitle")),
+            Some(&json!("Search by Text"))
+        );
+    }
+
+    #[test]
+    fn session_state_event_reconciles_codex_metadata_title() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let agent_session_id = "codex-state-thread";
+        let (lifecycle, _session) = create_codex_agent_session(&repository, agent_session_id);
+        let codex_dir = temp.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).expect("create codex dir");
+        std::fs::write(
+            codex_dir.join("session_index.jsonl"),
+            format!("{{\"id\":\"{agent_session_id}\",\"thread_name\":\"State Metadata Title\"}}\n"),
+        )
+        .expect("write session index");
+
+        let result = ingest_session_state_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "codex",
+                "agentSessionId": agent_session_id
+            })
+            .as_object()
+            .expect("state params"),
+            temp.path(),
+        )
+        .expect("state result");
+
+        assert_eq!(result.get("changed"), Some(&json!(true)));
+        assert_eq!(result.get("reason"), Some(&json!("metadata-title-applied")));
+        let session = result.get("session").expect("result session");
+        assert_eq!(session.get("title"), Some(&json!("State Metadata Title")));
+        assert_eq!(
+            session
+                .get("runtimeSettings")
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("titleMetadataSource")),
+            Some(&json!("agent-metadata"))
+        );
+    }
+
+    #[test]
+    fn agent_hook_rejects_cross_agent_metadata_for_stored_pi_session_without_launch_lock() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let (lifecycle, before) = create_pi_agent_session_without_launch_lock(&repository);
+        assert_eq!(
+            before
+                .get("runtimeSettings")
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("launchAgentId")),
+            None
+        );
+
+        let result = ingest_agent_hook_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "droid",
+                "agentSessionId": "d7f1ca76-435b-4102-acdb-e3e786cd72a9",
+                "agentSessionPath": "/tmp/.factory/sessions/thread.jsonl",
+                "eventName": "Stop",
+                "firstUserMessage": "private prompt text",
+                "projectId": lifecycle.project_id.clone(),
+                "rawEventName": "Stop",
+                "sessionId": lifecycle.session_id.clone(),
+                "status": "attention",
+                "statusUpdatedAt": "2026-06-24T00:08:05.000Z",
+                "title": "Wrong Droid Thread"
+            })
+            .as_object()
+            .expect("hook params"),
+            temp.path(),
+        )
+        .expect("hook result");
+
+        assert_eq!(result.get("changed"), Some(&json!(false)));
+        assert_eq!(
+            result.get("reason"),
+            Some(&json!("agent-hook-agent-mismatch"))
+        );
+        let response_session = result.get("session").expect("response session");
+        assert_eq!(response_session.get("agentId"), Some(&json!("pi")));
+        let runtime_settings = response_session
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .expect("runtime settings");
+        assert_eq!(runtime_settings.get("agentName"), Some(&json!("pi")));
+        assert_eq!(runtime_settings.get("agentSessionId"), None);
+        assert_eq!(runtime_settings.get("firstUserMessage"), None);
+        let stored = repository
+            .get_session(&lifecycle.project_id, &lifecycle.session_id)
+            .expect("read stored")
+            .expect("stored session");
+        assert_eq!(stored.get("updatedAt"), before.get("updatedAt"));
+        assert_eq!(stored.get("title"), before.get("title"));
+        assert_eq!(stored.get("agentId"), Some(&json!("pi")));
+        let stored_runtime_settings = stored
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .expect("stored runtime settings");
+        assert_eq!(stored_runtime_settings.get("agentName"), Some(&json!("pi")));
+        assert_eq!(stored_runtime_settings.get("agentSessionId"), None);
+        assert_eq!(stored_runtime_settings.get("firstUserMessage"), None);
+    }
+
+    #[test]
+    fn session_state_rejects_cross_agent_metadata_for_stored_pi_session_without_launch_lock() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let (lifecycle, before) = create_pi_agent_session_without_launch_lock(&repository);
+        assert_eq!(
+            before
+                .get("runtimeSettings")
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("launchAgentId")),
+            None
+        );
+
+        let result = ingest_session_state_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "factory droid",
+                "agentSessionId": "d7f1ca76-435b-4102-acdb-e3e786cd72a9",
+                "agentSessionPath": "/tmp/.factory/sessions/thread.jsonl",
+                "projectId": lifecycle.project_id.clone(),
+                "sessionId": lifecycle.session_id.clone(),
+                "startupText": "droid",
+                "status": "working",
+                "title": "Wrong Droid Thread"
+            })
+            .as_object()
+            .expect("state params"),
+            temp.path(),
+        )
+        .expect("state result");
+
+        assert_eq!(result.get("changed"), Some(&json!(false)));
+        assert_eq!(
+            result.get("reason"),
+            Some(&json!("session-state-agent-mismatch"))
+        );
+        let response_session = result.get("session").expect("response session");
+        assert_eq!(response_session.get("agentId"), Some(&json!("pi")));
+        let runtime_settings = response_session
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .expect("runtime settings");
+        assert_eq!(runtime_settings.get("agentName"), Some(&json!("pi")));
+        assert_eq!(runtime_settings.get("agentSessionId"), None);
+        let stored = repository
+            .get_session(&lifecycle.project_id, &lifecycle.session_id)
+            .expect("read stored")
+            .expect("stored session");
+        assert_eq!(stored.get("updatedAt"), before.get("updatedAt"));
+        assert_eq!(stored.get("title"), before.get("title"));
+        assert_eq!(stored.get("agentId"), Some(&json!("pi")));
+        let stored_runtime_settings = stored
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .expect("stored runtime settings");
+        assert_eq!(stored_runtime_settings.get("agentName"), Some(&json!("pi")));
+        assert_eq!(stored_runtime_settings.get("agentSessionId"), None);
+    }
+
+    #[test]
+    fn agent_hook_rejects_passive_identity_conflict_before_activity_prompt_and_title() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let current_codex_session_id = "019e7af5-c610-7f62-a129-db7bb510b48d";
+        let incoming_codex_session_id = "019e7c39-7ba7-7ac3-b79c-02757e299516";
+        let (lifecycle, session) =
+            create_codex_agent_session(&repository, current_codex_session_id);
+        let mut runtime_settings = object_field(&session, "runtimeSettings");
+        runtime_settings.insert(
+            "agentActivity".to_string(),
+            json!({ "activity": "idle", "isAcknowledged": true }),
+        );
+        runtime_settings.insert("titleSource".to_string(), json!("terminal-auto"));
+        let mut update = lifecycle_update(&lifecycle);
+        update.insert(
+            "runtimeSettings".to_string(),
+            Value::Object(runtime_settings),
+        );
+        update.insert("title".to_string(), json!("Target Codex Thread"));
+        repository
+            .update_session(&update)
+            .expect("prepare target session");
+
+        let result = ingest_agent_hook_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "codex",
+                "agentSessionId": incoming_codex_session_id,
+                "eventName": "Stop",
+                "firstUserMessage": "private prompt text",
+                "projectId": lifecycle.project_id.clone(),
+                "rawEventName": "Stop",
+                "sessionId": lifecycle.session_id.clone(),
+                "status": "attention",
+                "statusUpdatedAt": "2026-06-09T18:08:19.857Z",
+                "title": "Wrong Codex Thread"
+            })
+            .as_object()
+            .expect("hook params"),
+            temp.path(),
+        )
+        .expect("hook result");
+
+        assert_eq!(result.get("changed"), Some(&json!(false)));
+        assert_eq!(
+            result.get("reason"),
+            Some(&json!("passive-session-identity-conflict"))
+        );
+        assert_eq!(
+            result
+                .get("activity")
+                .and_then(|activity| activity.get("activity")),
+            Some(&json!("idle"))
+        );
+        assert!(result.get("identityConflict").is_some());
+        let response_session = result.get("session").expect("response session");
+        assert_eq!(
+            response_session.get("title"),
+            Some(&json!("Target Codex Thread"))
+        );
+        assert_eq!(
+            response_session
+                .get("runtimeSettings")
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("agentSessionId")),
+            Some(&json!(current_codex_session_id))
+        );
+        assert_eq!(
+            response_session
+                .get("runtimeSettings")
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("firstUserMessage")),
+            None
+        );
+    }
+
+    #[test]
+    fn agent_hook_unchanged_activity_reports_unchanged_without_rewriting_state() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let agent_session_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+        let (lifecycle, session) = create_codex_agent_session(&repository, agent_session_id);
+        let activity_at = "2026-06-09T18:08:19.857Z";
+        let mut runtime_settings = object_field(&session, "runtimeSettings");
+        runtime_settings.insert("titleSource".to_string(), json!("terminal-auto"));
+        runtime_settings.insert(
+            "agentActivity".to_string(),
+            json!({
+                "activity": "working",
+                "agentName": "codex",
+                "hasSeenWorking": true,
+                "isAcknowledged": false,
+                "lastChangedAt": activity_at,
+                "workingSource": "explicit",
+                "workingStartedAt": activity_at
+            }),
+        );
+        let mut update = lifecycle_update(&lifecycle);
+        update.insert("lastActiveAt".to_string(), json!(activity_at));
+        update.insert(
+            "runtimeSettings".to_string(),
+            Value::Object(runtime_settings),
+        );
+        let before = repository
+            .update_session(&update)
+            .expect("prepare working session");
+
+        let result = ingest_agent_hook_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "codex",
+                "agentSessionId": agent_session_id,
+                "eventName": "PreToolUse",
+                "projectId": lifecycle.project_id.clone(),
+                "rawEventName": "PreToolUse",
+                "sessionId": lifecycle.session_id.clone(),
+                "status": "working",
+                "statusUpdatedAt": activity_at
+            })
+            .as_object()
+            .expect("hook params"),
+            temp.path(),
+        )
+        .expect("hook result");
+
+        assert_eq!(result.get("changed"), Some(&json!(false)));
+        assert_eq!(result.get("reason"), Some(&json!("activity-unchanged")));
+        assert_eq!(
+            result
+                .get("activity")
+                .and_then(|activity| activity.get("activity")),
+            Some(&json!("working"))
+        );
+        assert_eq!(result.get("previousActivity"), Some(&json!("working")));
+        let after = repository
+            .get_session(&lifecycle.project_id, &lifecycle.session_id)
+            .expect("read after")
+            .expect("after session");
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn agent_hook_reconciles_metadata_title_before_first_prompt_reason() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let agent_session_id = "codex-hook-thread";
+        let (lifecycle, _session) = create_codex_agent_session(&repository, agent_session_id);
+        let codex_dir = temp.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).expect("create codex dir");
+        std::fs::write(
+            codex_dir.join("session_index.jsonl"),
+            format!("{{\"id\":\"{agent_session_id}\",\"thread_name\":\"Hook Metadata Title\"}}\n"),
+        )
+        .expect("write session index");
+
+        let result = ingest_agent_hook_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "codex",
+                "agentSessionId": agent_session_id,
+                "eventName": "UserPromptSubmit",
+                "firstUserMessage": "Please summarize this repository",
+                "projectId": lifecycle.project_id.clone(),
+                "sessionId": lifecycle.session_id.clone(),
+                "status": "working",
+                "statusUpdatedAt": "2026-06-09T18:08:19.857Z"
+            })
+            .as_object()
+            .expect("hook params"),
+            temp.path(),
+        )
+        .expect("hook result");
+
+        assert_eq!(result.get("changed"), Some(&json!(true)));
+        assert_eq!(result.get("reason"), Some(&json!("metadata-title-applied")));
+        let session = result.get("session").expect("result session");
+        assert_eq!(session.get("title"), Some(&json!("Hook Metadata Title")));
+        assert_eq!(
+            session
+                .get("runtimeSettings")
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("firstUserMessage")),
+            Some(&json!("Please summarize this repository"))
+        );
+    }
+
+    #[test]
+    fn terminal_title_capture_reconciles_codex_metadata_title() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let project = repository
+            .create_project(
+                json!({ "name": "Terminal Title Metadata" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("create project");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id")
+            .to_string();
+        let agent_session_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+        let session = repository
+            .create_session(
+                json!({
+                    "agentId": "codex",
+                    "kind": "agent",
+                    "projectId": project_id,
+                    "runtimeSettings": {
+                        "agentName": "codex",
+                        "titleSource": "placeholder"
+                    },
+                    "title": "Codex Session"
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("create session");
+        let lifecycle = LifecycleParams {
+            project_id,
+            session_id: session
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .expect("session id")
+                .to_string(),
+        };
+        let codex_dir = temp.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).expect("create codex dir");
+        std::fs::write(
+            codex_dir.join("session_index.jsonl"),
+            format!(
+                "{{\"id\":\"{agent_session_id}\",\"thread_name\":\"Captured Metadata Title\"}}\n"
+            ),
+        )
+        .expect("write session index");
+
+        let output = ingest_terminal_title_event_with_home(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "codex",
+                "rawTitle": agent_session_id,
+                "sessionPersistenceProvider": "zmx"
+            })
+            .as_object()
+            .expect("terminal title params"),
+            temp.path(),
+        )
+        .expect("terminal title result");
+        let result = output.result;
+
+        assert!(output.schedule_presentation_delta);
+        assert_eq!(result.get("changed"), Some(&json!(true)));
+        assert_eq!(result.get("reason"), Some(&json!("metadata-title-applied")));
+        assert_eq!(result.get("agentSessionId"), Some(&json!(agent_session_id)));
+        let session = result.get("session").expect("result session");
+        assert_eq!(
+            session.get("title"),
+            Some(&json!("Captured Metadata Title"))
+        );
+        assert_eq!(
+            session
+                .get("runtimeSettings")
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("agentSessionId")),
+            Some(&json!(agent_session_id))
+        );
     }
 
     #[test]
@@ -3525,46 +7059,14 @@ mod tests {
     }
 
     #[test]
-    fn agent_settings_read_legacy_metadata_key_when_current_missing() {
+    fn agent_settings_ignore_legacy_metadata_key() {
         let (_temp, db) = open_test_database();
-        write_metadata_value(
-            &db,
-            LEGACY_AGENT_SETTINGS_METADATA_KEY,
-            json!({ "agentAcceptAllEnabled": false, "defaultPromptAgentId": " claude " }),
-        );
+        let legacy_value =
+            json!({ "agentAcceptAllEnabled": false, "defaultPromptAgentId": "claude" });
+        write_metadata_value(&db, "gxserverAgentSettings", legacy_value.clone());
 
-        let settings = read_agent_settings_with_metadata(&db).expect("legacy settings");
-        assert_eq!(settings.get("isPersisted"), Some(&json!(true)));
-        assert_eq!(
-            settings
-                .get("settings")
-                .and_then(|settings| settings.get("agentAcceptAllEnabled")),
-            Some(&json!(false))
-        );
-        assert_eq!(
-            settings
-                .get("settings")
-                .and_then(|settings| settings.get("defaultPromptAgentId")),
-            Some(&json!("claude"))
-        );
-    }
-
-    #[test]
-    fn agent_settings_prefer_current_metadata_key_over_legacy() {
-        let (_temp, db) = open_test_database();
-        write_metadata_value(
-            &db,
-            LEGACY_AGENT_SETTINGS_METADATA_KEY,
-            json!({ "agentAcceptAllEnabled": false, "defaultPromptAgentId": "claude" }),
-        );
-        write_metadata_value(
-            &db,
-            AGENT_SETTINGS_METADATA_KEY,
-            json!({ "agentAcceptAllEnabled": true, "defaultPromptAgentId": "codex" }),
-        );
-
-        let settings = read_agent_settings_with_metadata(&db).expect("current settings");
-        assert_eq!(settings.get("isPersisted"), Some(&json!(true)));
+        let settings = read_agent_settings_with_metadata(&db).expect("legacy ignored");
+        assert_eq!(settings.get("isPersisted"), Some(&json!(false)));
         assert_eq!(
             settings
                 .get("settings")
@@ -3577,28 +7079,16 @@ mod tests {
                 .and_then(|settings| settings.get("defaultPromptAgentId")),
             Some(&json!("codex"))
         );
-    }
-
-    #[test]
-    fn agent_settings_update_migrates_legacy_values_to_current_key_without_deleting_legacy() {
-        let (_temp, db) = open_test_database();
-        let legacy_value =
-            json!({ "agentAcceptAllEnabled": false, "defaultPromptAgentId": "claude" });
-        write_metadata_value(
-            &db,
-            LEGACY_AGENT_SETTINGS_METADATA_KEY,
-            legacy_value.clone(),
-        );
 
         let updated = update_agent_settings(
             &db,
-            json!({ "defaultPromptAgentId": " codex " })
+            json!({ "defaultPromptAgentId": " claude " })
                 .as_object()
                 .expect("params"),
         )
-        .expect("update settings from legacy");
-        assert_eq!(updated.get("agentAcceptAllEnabled"), Some(&json!(false)));
-        assert_eq!(updated.get("defaultPromptAgentId"), Some(&json!("codex")));
+        .expect("update settings with legacy row present");
+        assert_eq!(updated.get("agentAcceptAllEnabled"), Some(&json!(true)));
+        assert_eq!(updated.get("defaultPromptAgentId"), Some(&json!("claude")));
 
         let current: String = db
             .query_row(
@@ -3612,22 +7102,22 @@ mod tests {
             current_value
                 .get("agentAcceptAllEnabled")
                 .and_then(Value::as_bool),
-            Some(false)
+            Some(true)
         );
         assert_eq!(
             current_value
                 .get("defaultPromptAgentId")
                 .and_then(Value::as_str),
-            Some("codex")
+            Some("claude")
         );
 
         let legacy: String = db
             .query_row(
-                "SELECT value FROM metadata WHERE key = ?1",
-                [LEGACY_AGENT_SETTINGS_METADATA_KEY],
+                "SELECT value FROM metadata WHERE key = 'gxserverAgentSettings'",
+                [],
                 |row| row.get(0),
             )
-            .expect("legacy metadata");
+            .expect("legacy metadata remains unrelated");
         assert_eq!(parse_json_object(&legacy), legacy_value);
     }
 
@@ -3659,6 +7149,120 @@ mod tests {
     }
 
     #[test]
+    fn create_agent_session_params_use_project_agent_config_and_settings() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        update_agent_settings(
+            &db,
+            json!({ "agentAcceptAllEnabled": false })
+                .as_object()
+                .expect("settings params"),
+        )
+        .expect("agent settings");
+        let project = repository
+            .create_project(
+                json!({
+                    "customAgents": [{
+                        "acceptAllMode": "enabled",
+                        "agentId": "claude",
+                        "command": "claude",
+                        "icon": "claude"
+                    }],
+                    "name": "Agent CRUD"
+                })
+                .as_object()
+                .expect("project params"),
+            )
+            .expect("project created");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id");
+        let params = json!({
+            "agentId": "claude",
+            "launchSettings": {
+                "agentCommand": "ignored-local-command",
+                "delayedSendDeadlineAt": "2026-06-22T05:40:00.000Z"
+            },
+            "projectId": project_id,
+            "runtimeSettings": {
+                "firstUserMessage": "Summarize this repository."
+            },
+            "title": "Claude Agent"
+        });
+        let create_params = create_agent_session_params_for_project(
+            &db,
+            &project,
+            params.as_object().expect("create params"),
+        )
+        .expect("normalized create params");
+
+        let launch_settings = create_params
+            .get("launchSettings")
+            .and_then(Value::as_object)
+            .expect("launch settings");
+        let launch_plan = launch_settings
+            .get("agentLaunchPlan")
+            .and_then(Value::as_object)
+            .expect("launch plan");
+        assert_eq!(launch_plan.get("agentCommand"), Some(&json!("claude")));
+        assert_eq!(
+            launch_plan.get("command"),
+            Some(&json!("claude --dangerously-skip-permissions"))
+        );
+        assert_eq!(
+            launch_plan.get("firstUserMessage"),
+            Some(&json!("Summarize this repository."))
+        );
+        assert_eq!(
+            launch_plan
+                .get("delayedSend")
+                .and_then(|value| value.get("deadlineAt")),
+            Some(&json!("2026-06-22T05:40:00.000Z"))
+        );
+        assert_eq!(
+            launch_settings
+                .get("runtimeRelevant")
+                .and_then(|value| value.get("queueProviderStartupText")),
+            Some(&json!(true))
+        );
+        let runtime_settings = create_params
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .expect("runtime settings");
+        assert_eq!(runtime_settings.get("agentCommand"), Some(&json!("claude")));
+        assert_eq!(
+            runtime_settings.get("launchAgentId"),
+            Some(&json!("claude"))
+        );
+        assert_eq!(
+            runtime_settings
+                .get("agentActivity")
+                .and_then(|value| value.get("activity")),
+            Some(&json!("working"))
+        );
+        assert_eq!(
+            runtime_settings
+                .get("agentActivity")
+                .and_then(|value| value.get("agentName")),
+            Some(&json!("claude"))
+        );
+
+        let session = repository
+            .create_session(&create_params, false)
+            .expect("agent session created");
+        assert_eq!(session.get("kind"), Some(&json!("agent")));
+        assert_eq!(session.get("agentId"), Some(&json!("claude")));
+        assert_eq!(
+            session
+                .get("launchSettings")
+                .and_then(|value| value.get("agentLaunchPlan"))
+                .and_then(|value| value.get("command")),
+            Some(&json!("claude --dangerously-skip-permissions"))
+        );
+    }
+
+    #[test]
     fn launch_plan_applies_agent_settings_accept_all() {
         let (_temp, db) = open_test_database();
         let project = json!({
@@ -3681,6 +7285,121 @@ mod tests {
     }
 
     #[test]
+    fn launch_plan_keeps_typescript_custom_agent_lookup_and_empty_shape() {
+        let settings = normalize_agent_settings(None);
+        let project_with_id_only_agent = json!({
+            "customAgents": [{ "id": "codex", "command": "codex --profile ignored" }],
+            "launchSettings": {},
+        });
+        let plan =
+            build_project_agent_launch_plan(&project_with_id_only_agent, "codex", None, &settings);
+        assert_eq!(plan.get("agentCommand"), Some(&json!("codex")));
+        assert_eq!(plan.get("command"), Some(&json!("codex --yolo")));
+
+        let unknown_plan = build_project_agent_launch_plan(
+            &json!({ "customAgents": [], "launchSettings": {} }),
+            "custom-local",
+            None,
+            &settings,
+        );
+        assert_eq!(unknown_plan.get("agentCommand"), Some(&json!("")));
+        assert_eq!(unknown_plan.get("command"), Some(&json!("")));
+        assert_eq!(unknown_plan.get("startupText"), Some(&json!("")));
+        assert_eq!(
+            unknown_plan.get("startupTextDisposition"),
+            Some(&json!("none"))
+        );
+    }
+
+    #[test]
+    fn accept_all_specs_match_typescript_aliases_and_icon_mapping() {
+        assert_eq!(
+            resolve_agent_launch_command("cursor", "cursor-agent --allow-all", None, true, None),
+            "cursor-agent --allow-all --yolo"
+        );
+        assert_eq!(
+            resolve_agent_launch_command(
+                "cursor",
+                "cursor-agent --force --yolo",
+                Some("disabled"),
+                true,
+                None,
+            ),
+            "cursor-agent"
+        );
+        assert_eq!(
+            resolve_agent_launch_command("gemini", "gemini --allow-all", None, true, None),
+            "gemini --allow-all --yolo"
+        );
+        assert_eq!(
+            resolve_agent_launch_command("copilot", "copilot -y", None, true, None),
+            "copilot -y --yolo"
+        );
+        assert_eq!(
+            resolve_agent_launch_command(
+                "custom-cursor",
+                "cursor-agent",
+                None,
+                true,
+                Some("cursor-cli")
+            ),
+            "cursor-agent --yolo"
+        );
+        assert_eq!(
+            resolve_agent_launch_command(
+                "grok",
+                "grok --permission-mode bypassPermissions --always-approve",
+                None,
+                true,
+                None,
+            ),
+            "grok --permission-mode bypassPermissions"
+        );
+        assert_eq!(
+            resolve_agent_launch_command(
+                "grok",
+                "grok --permission-mode=bypassPermissions --always-approve",
+                Some("disabled"),
+                true,
+                None,
+            ),
+            "grok"
+        );
+    }
+
+    #[test]
+    fn cursor_launch_appends_only_normalized_resume_chat_ids() {
+        let valid = build_agent_launch_plan(AgentLaunchInput {
+            accept_all_mode: None,
+            agent_id: "cursor".to_string(),
+            agent_session_id: Some("8B16E7E6-3CE1-4D0B-9F35-78261B7F0767".to_string()),
+            command: Some("cursor-agent".to_string()),
+            delayed_send_deadline_at: None,
+            first_user_message: None,
+            global_accept_all_enabled: true,
+            icon: None,
+        });
+        assert_eq!(
+            valid.get("command"),
+            Some(&json!(
+                "cursor-agent --yolo --resume \"8b16e7e6-3ce1-4d0b-9f35-78261b7f0767\""
+            ))
+        );
+
+        let invalid = build_agent_launch_plan(AgentLaunchInput {
+            accept_all_mode: None,
+            agent_id: "cursor".to_string(),
+            agent_session_id: Some("not-a-chat-id".to_string()),
+            command: Some("cursor-agent".to_string()),
+            delayed_send_deadline_at: None,
+            first_user_message: None,
+            global_accept_all_enabled: true,
+            icon: None,
+        });
+        assert_eq!(invalid.get("command"), Some(&json!("cursor-agent --yolo")));
+    }
+
+    #[test]
     fn resume_and_fork_plans_shape_agent_commands() {
         let project = json!({ "path": "/tmp/project", "customAgents": [], "launchSettings": {} });
         let session = json!({
@@ -3695,11 +7414,40 @@ mod tests {
         });
         let settings = normalize_agent_settings(None);
         let resume = build_agent_resume_plan(&project, &session, &settings);
+        let primary_command = resume
+            .get("primaryCommand")
+            .and_then(Value::as_str)
+            .expect("primary command");
+        assert!(primary_command.contains("CODEX_RESUME_SESSION_ID"));
+        assert!(primary_command.contains("--exact"));
+        assert!(primary_command.contains("codex --yolo resume \"$CODEX_RESUME_SESSION_ID\""));
         assert_eq!(
-            resume.get("primaryCommand"),
+            resume.get("displayCommand"),
             Some(&json!(
                 "codex --yolo resume \"12345678-1234-1234-1234-123456789abc\""
             ))
+        );
+        assert_eq!(
+            resume.get("copyCommand"),
+            Some(&json!(
+                "codex --yolo resume \"12345678-1234-1234-1234-123456789abc\""
+            ))
+        );
+        assert!(resume
+            .get("fallbackCommand")
+            .and_then(Value::as_str)
+            .is_some_and(|command| command.contains("--title")));
+        let startup_text = resume
+            .get("startupText")
+            .and_then(Value::as_str)
+            .expect("startup text");
+        assert!(startup_text.starts_with(' '));
+        assert!(startup_text.contains("Restoring session..."));
+        assert!(startup_text
+            .contains("__ghostex_restore_resume_primary || __ghostex_restore_resume_status=$?"));
+        assert!(startup_text.contains("Exact resume failed; trying saved fallback resume command."));
+        assert!(
+            startup_text.contains("codex --yolo resume \"12345678-1234-1234-1234-123456789abc\"")
         );
         let fork = build_agent_fork_plan(&project, &session, &settings);
         assert_eq!(
@@ -3708,6 +7456,142 @@ mod tests {
                 "codex --yolo fork \"12345678-1234-1234-1234-123456789abc\""
             ))
         );
+    }
+
+    #[test]
+    fn resume_plan_extracts_provider_exact_identity_hints() {
+        let project = json!({ "path": "/repo/ghostex", "customAgents": [], "launchSettings": {} });
+        let settings = {
+            let mut settings = normalize_agent_settings(None);
+            settings.insert("agentAcceptAllEnabled".to_string(), Value::Bool(false));
+            settings
+        };
+        let claude = json!({
+            "agentId": "claude",
+            "launchSettings": {},
+            "runtimeSettings": {
+                "agentCommand": "claude",
+                "agentSessionPath": "/Users/example/.claude/projects/-repo-ghostex/9970b270-b39f-4d63-a764-fa8d88083995.jsonl",
+                "titleSource": "user"
+            },
+            "title": "Readable Claude title",
+        });
+        let claude_plan = build_agent_resume_plan(&project, &claude, &settings);
+        assert_eq!(
+            claude_plan.get("primaryCommand"),
+            Some(&json!(
+                "claude --resume \"9970b270-b39f-4d63-a764-fa8d88083995\""
+            ))
+        );
+        assert_eq!(
+            claude_plan.get("displayCommand"),
+            claude_plan.get("primaryCommand")
+        );
+        assert_eq!(
+            claude_plan.get("copyCommand"),
+            claude_plan.get("primaryCommand")
+        );
+        assert!(claude_plan
+            .get("fallbackCommand")
+            .and_then(Value::as_str)
+            .is_some_and(|command| command.contains("CLAUDE_RESUME_SESSION_ID")));
+
+        let cursor = json!({
+            "agentId": "cursor",
+            "launchSettings": {},
+            "runtimeSettings": {
+                "agentCommand": "cursor-agent",
+                "resumeCommand": "cd '/repo/ghostex' && cursor-agent --resume \"E10971DA-CBD7-459A-9AC3-B9B0313199A3\"",
+                "titleSource": "user"
+            },
+            "title": "∗ Cursor CLI Session",
+        });
+        let cursor_plan = build_agent_resume_plan(&project, &cursor, &settings);
+        assert_eq!(
+            cursor_plan.get("primaryCommand"),
+            Some(&json!(
+                "cursor-agent --resume \"e10971da-cbd7-459a-9ac3-b9b0313199a3\""
+            ))
+        );
+        assert!(cursor_plan.get("fallbackCommand").is_none());
+
+        let pi = json!({
+            "agentId": "pi",
+            "launchSettings": {},
+            "runtimeSettings": {
+                "agentCommand": "pi",
+                "agentSessionId": "pi-id",
+                "agentSessionPath": "/tmp/pi/session/path",
+                "titleSource": "user"
+            },
+            "title": "Pi thread",
+        });
+        let pi_plan = build_agent_resume_plan(&project, &pi, &settings);
+        assert_eq!(
+            pi_plan.get("primaryCommand"),
+            Some(&json!("pi --session \"/tmp/pi/session/path\""))
+        );
+    }
+
+    #[test]
+    fn opencode_resume_keeps_lookup_command_separate_from_runtime_accept_all() {
+        let project = json!({ "path": "/repo/ghostex", "customAgents": [], "launchSettings": {} });
+        let settings = normalize_agent_settings(None);
+        let titled = json!({
+            "agentId": "opencode",
+            "launchSettings": {},
+            "runtimeSettings": {
+                "agentCommand": "opencode",
+                "titleSource": "user"
+            },
+            "title": "Readable thread title",
+        });
+        let plan = build_agent_resume_plan(&project, &titled, &settings);
+        assert_eq!(
+            plan.get("runtimeCommand"),
+            Some(&json!(
+                "OPENCODE_CONFIG_CONTENT='{\"permission\":\"allow\"}' opencode"
+            ))
+        );
+        assert_eq!(plan.get("lookupCommand"), Some(&json!("opencode")));
+        let primary = plan
+            .get("primaryCommand")
+            .and_then(Value::as_str)
+            .expect("primary command");
+        assert!(
+            primary.contains("OPENCODE_CONFIG_CONTENT='{\"permission\":\"allow\"}' opencode -s")
+        );
+        assert!(primary.contains("opencode session list --format json"));
+        assert!(!primary.contains(
+            "OPENCODE_CONFIG_CONTENT='{\"permission\":\"allow\"}' opencode session list"
+        ));
+        assert!(plan.get("copyCommand").is_none());
+    }
+
+    #[test]
+    fn attach_startup_text_uses_agent_resume_plan_and_settings() {
+        let project = json!({ "path": "/tmp/project", "customAgents": [], "launchSettings": {} });
+        let session = json!({
+            "agentId": "codex",
+            "launchSettings": {},
+            "runtimeSettings": {
+                "agentCommand": "codex",
+                "agentSessionId": "12345678-1234-1234-1234-123456789abc"
+            },
+            "title": "Restorable Codex",
+        });
+        let mut settings = normalize_agent_settings(None);
+        settings.insert("agentAcceptAllEnabled".to_string(), Value::Bool(false));
+
+        let startup_text = get_agent_startup_text_for_session(&project, &session, &settings)
+            .expect("startup text");
+        assert!(startup_text.starts_with(' '));
+        assert!(startup_text.ends_with('\r'));
+        assert!(startup_text.contains("Restoring session..."));
+        assert!(startup_text.contains(
+            "printf '> %s\\n\\n' 'codex resume \"12345678-1234-1234-1234-123456789abc\"'"
+        ));
+        assert!(startup_text.contains("codex resume \"12345678-1234-1234-1234-123456789abc\""));
     }
 
     #[test]
@@ -3772,6 +7656,34 @@ mod tests {
         );
         assert_eq!(
             normalize_agent_hook_activity(None, Some(&json!("Stop")), Some(&json!("Claude Code"))),
+            Some("idle".to_string())
+        );
+        assert_eq!(
+            normalize_agent_hook_activity(
+                Some(&json!("attention")),
+                Some(&json!("Notification")),
+                Some(&json!("GitHub Copilot"))
+            ),
+            Some("idle".to_string())
+        );
+        assert_eq!(
+            normalize_agent_hook_activity(None, Some(&json!("pre_approval_request")), None),
+            Some("attention".to_string())
+        );
+        assert_eq!(
+            normalize_agent_hook_activity(None, Some(&json!("session.updated")), None),
+            Some("attention".to_string())
+        );
+        assert_eq!(
+            normalize_agent_hook_activity(None, Some(&json!("on_session_start")), None),
+            Some("working".to_string())
+        );
+        assert_eq!(
+            normalize_agent_hook_activity(None, Some(&json!("on_session_finalize")), None),
+            Some("idle".to_string())
+        );
+        assert_eq!(
+            normalize_agent_hook_activity(None, Some(&json!("session_shutdown")), None),
             Some("idle".to_string())
         );
     }

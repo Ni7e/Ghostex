@@ -9,11 +9,13 @@ import {
   createSidebarStoryMessage,
   createSidebarStoryWorkspace,
   reduceSidebarStoryWorkspace,
+  type SidebarStoryWorkspace,
 } from "./sidebar-story-workspace";
 import type { WebviewApi } from "./webview-api";
 
 export type SidebarStoryHarnessProps = {
   message: SidebarHydrateMessage;
+  onWorkspaceChange?: (workspace: SidebarStoryWorkspace) => void;
 };
 
 const sidebarStoryMessages: SidebarToExtensionMessage[] = [];
@@ -27,7 +29,7 @@ export function resetSidebarStoryMessages() {
   sidebarStoryMessages.length = 0;
 }
 
-export function SidebarStoryHarness({ message }: SidebarStoryHarnessProps) {
+export function SidebarStoryHarness({ message, onWorkspaceChange }: SidebarStoryHarnessProps) {
   const [workspace, setWorkspace] = useState(() => createSidebarStoryWorkspace(message));
   const workspaceRef = useRef(workspace);
   const vscode = useRef<WebviewApi>({
@@ -52,8 +54,13 @@ export function SidebarStoryHarness({ message }: SidebarStoryHarnessProps) {
   }).current;
 
   useEffect(() => {
+    /*
+     * CDXC:GPUIProjectSidebarBridge 2026-06-22-20:02:
+     * Storybook owns the current explicit sidebar workspace state. Let embeds observe that state directly so GPUI can post active-project changes without deriving project identity from fixture names, sidebar labels alone, paths, or logs.
+     */
     workspaceRef.current = workspace;
-  }, [workspace]);
+    onWorkspaceChange?.(workspace);
+  }, [onWorkspaceChange, workspace]);
 
   useEffect(() => {
     startTransition(() => {

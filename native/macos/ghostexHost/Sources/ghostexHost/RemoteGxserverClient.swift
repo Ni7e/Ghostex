@@ -15,6 +15,27 @@ private struct RemoteProcessResult {
   let stdout: String
 }
 
+private struct RemoteGxserverInstallTarget {
+  let arch: String
+  let distribution: String?
+  let os: String
+
+  var normalizedArch: String {
+    normalizeRemoteInstallArch(arch)
+  }
+
+  var normalizedOS: String {
+    normalizeRemoteInstallOS(os)
+  }
+
+  var displayLabel: String {
+    let osLabel = distribution?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+      ? distribution!.trimmingCharacters(in: .whitespacesAndNewlines)
+      : normalizedOS
+    return "\(osLabel)/\(normalizedArch)"
+  }
+}
+
 private struct RemoteSshAskpassScript {
   let directory: URL
   let script: URL
@@ -211,7 +232,30 @@ final class RemoteGxserverClient {
     )
     if tokenResult.exitCode == 127 {
       if command.installApproved == true {
-        let installResult = installBundledGxserverAndReadToken(target: target)
+        /*
+         CDXC:RemoteMachines 2026-06-23-09:46:
+         First-time Remote install must distinguish the Mac app's local gxserver package from a remote Ubuntu target. Probe uname before upload and select only a matching bundled package so Ghostex never copies a Darwin binary to Linux.
+         */
+        let installTargetResult = probeRemoteInstallTarget(target: target)
+        guard installTargetResult.exitCode == 0,
+          let installTarget = extractRemoteInstallTarget(from: installTargetResult.stdout)
+        else {
+          return statusEvent(
+            command,
+            state: "installFailed",
+            ok: false,
+            message: "Could not identify the remote operating system and CPU before installing gxserver."
+          )
+        }
+        guard let packageURL = bundledGxserverPackageURL(for: installTarget) else {
+          return statusEvent(
+            command,
+            state: "unsupportedRemotePlatform",
+            ok: false,
+            message: unsupportedRemotePackageMessage(for: installTarget)
+          )
+        }
+        let installResult = installBundledGxserverAndReadToken(target: target, packageURL: packageURL)
         if installResult.exitCode != 0 {
           return statusEvent(
             command,
@@ -288,28 +332,26 @@ final class RemoteGxserverClient {
   private func remoteTokenReadCommand() -> String {
     """
     GHOSTEX_REMOTE_TOKEN_FILE="$HOME/.ghostex/gxserver/auth/token"; \
-    GXSERVER_BIN="$(command -v gxserver 2>/dev/null || true)"; \
-    GHOSTEX_BIN="$(command -v ghostex 2>/dev/null || true)"; \
-    if [ -z "$GXSERVER_BIN" ] && [ -x "$HOME/.ghostex/gxserver/package/bin/gxserver" ]; then GXSERVER_BIN="$HOME/.ghostex/gxserver/package/bin/gxserver"; fi; \
-    if [ -n "$GXSERVER_BIN" ]; then \
-      "$GXSERVER_BIN" start --json >/dev/null 2>&1 || "$GXSERVER_BIN" start >/dev/null 2>&1 || true; \
-    elif [ -n "$GHOSTEX_BIN" ]; then \
-      "$GHOSTEX_BIN" server start --json >/dev/null 2>&1 || "$GHOSTEX_BIN" server start >/dev/null 2>&1 || true; \
+    GXSERVER_BIN="$HOME/.ghostex/gxserver/package/bin/gxserver"; \
+    if [ ! -x "$GXSERVER_BIN" ] && [ -x "$HOME/.local/bin/gxserver" ]; then GXSERVER_BIN="$HOME/.local/bin/gxserver"; fi; \
+    GHOSTEX_BIN="$HOME/.ghostex/gxserver/package/bin/ghostex"; \
+    if [ ! -x "$GHOSTEX_BIN" ] && [ -x "$HOME/.local/bin/ghostex" ]; then GHOSTEX_BIN="$HOME/.local/bin/ghostex"; fi; \
+    GHOSTEX_REMOTE_START_FAILED=0; \
+    if [ -x "$GXSERVER_BIN" ]; then \
+      "$GXSERVER_BIN" start --json >/dev/null 2>&1 || "$GXSERVER_BIN" start >/dev/null 2>&1 || GHOSTEX_REMOTE_START_FAILED=1; \
+    elif [ -x "$GHOSTEX_BIN" ]; then \
+      "$GHOSTEX_BIN" server start --json >/dev/null 2>&1 || "$GHOSTEX_BIN" server start >/dev/null 2>&1 || GHOSTEX_REMOTE_START_FAILED=1; \
     else \
       exit 127; \
     fi; \
-    test -r "$GHOSTEX_REMOTE_TOKEN_FILE" || exit 126; \
+    if [ ! -r "$GHOSTEX_REMOTE_TOKEN_FILE" ]; then if [ "$GHOSTEX_REMOTE_START_FAILED" = "1" ]; then exit 127; fi; exit 126; fi; \
     printf '__GHOSTEX_REMOTE_TOKEN_START__\\n'; \
     cat "$GHOSTEX_REMOTE_TOKEN_FILE"; \
     printf '\\n__GHOSTEX_REMOTE_TOKEN_END__\\n'
     """
   }
 
-  private func installBundledGxserverAndReadToken(target: RemoteSshTarget) -> RemoteProcessResult {
-    guard let packageURL = bundledGxserverPackageURL() else {
-      return RemoteProcessResult(exitCode: 126, stderr: "Bundled gxserver package is unavailable.", stdout: "")
-    }
-
+  private func installBundledGxserverAndReadToken(target: RemoteSshTarget, packageURL: URL) -> RemoteProcessResult {
     let tempDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("ghostex-remote-gxserver-\(UUID().uuidString)", isDirectory: true)
     let archiveURL = tempDirectory.appendingPathComponent("gxserver.tar.gz")
@@ -332,6 +374,12 @@ final class RemoteGxserverClient {
      Remote startup now runs through the user's zsh login+interactive
      environment so app-installed gxserver and public `ghostex server` installs
      can both find user-managed Node runtimes such as mise.
+
+     CDXC:RemoteMachines 2026-06-23-09:46:
+     Ubuntu remote install must be self-contained and deterministic: unpack a
+     target-matched package into a release directory, atomically retarget the
+     stable package symlink, expose gxserver/zmx/zehn/bd/ghostex/gx from
+     ~/.local/bin, and avoid PATH probing or broad package-directory deletion.
      */
     let tarResult = runProcess(
       executable: "/usr/bin/tar",
@@ -361,27 +409,218 @@ final class RemoteGxserverClient {
       return RemoteProcessResult(exitCode: uploadResult.exitCode, stderr: "Could not upload gxserver package over SSH.", stdout: "")
     }
 
+    let releaseId = "release-\(UUID().uuidString)"
     let installCommand = """
-    set -eu; \
-    rm -rf "$HOME/.ghostex/gxserver/package.tmp"; \
-    mkdir -p "$HOME/.ghostex/gxserver/package.tmp" "$HOME/.local/bin"; \
-    tar -xzf "$HOME/.ghostex/gxserver/gxserver-upload.tar.gz" -C "$HOME/.ghostex/gxserver/package.tmp"; \
-    rm -rf "$HOME/.ghostex/gxserver/package"; \
-    mv "$HOME/.ghostex/gxserver/package.tmp" "$HOME/.ghostex/gxserver/package"; \
-    chmod +x "$HOME/.ghostex/gxserver/package/bin/gxserver" "$HOME/.ghostex/gxserver/package/bin/zmx" "$HOME/.ghostex/gxserver/package/bin/zehn" 2>/dev/null || true; \
-    ln -sf "$HOME/.ghostex/gxserver/package/bin/gxserver" "$HOME/.local/bin/gxserver" 2>/dev/null || true; \
+    set -eu
+    install_root="$HOME/.ghostex/gxserver"
+    upload_path="$install_root/gxserver-upload.tar.gz"
+    release_dir="$install_root/releases/\(releaseId)"
+    package_link="$install_root/package"
+    mkdir -p "$install_root/releases" "$release_dir" "$HOME/.local/bin"
+    tar -xzf "$upload_path" -C "$release_dir"
+    if [ -e "$package_link" ] && [ ! -L "$package_link" ]; then
+      mv "$package_link" "$install_root/package.backup.\(releaseId)"
+    fi
+    ln -sfn "$release_dir" "$package_link"
+    for tool in gxserver zmx zehn bd; do
+      if [ -f "$package_link/bin/$tool" ]; then
+        chmod 755 "$package_link/bin/$tool" 2>/dev/null || true
+        ln -sfn "$package_link/bin/$tool" "$HOME/.local/bin/$tool" 2>/dev/null || true
+      fi
+    done
+    if [ -f "$package_link/code-server/lib/node" ]; then
+      chmod 755 "$package_link/code-server/lib/node" 2>/dev/null || true
+    fi
+    if [ -f "$package_link/portless/dist/cli.js" ]; then
+      chmod 755 "$package_link/portless/dist/cli.js" 2>/dev/null || true
+    fi
+    ghostex_cli_source=""
+    if [ -f "$package_link/CLI/ghostex-cli.mjs" ]; then
+      ghostex_cli_source="$package_link/CLI/ghostex-cli.mjs"
+    elif [ -f "$package_link/cli/ghostex-cli.mjs" ]; then
+      ghostex_cli_source="$package_link/cli/ghostex-cli.mjs"
+    fi
+    ghostex_cli_wrapper_written=0
+    if [ -n "$ghostex_cli_source" ] && [ -x "$package_link/code-server/lib/node" ]; then
+      cat > "$package_link/bin/ghostex" <<'__GHOSTEX_REMOTE_CLI__'
+    #!/bin/sh
+    set -eu
+    HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+    if [ -f "$HERE/../CLI/ghostex-cli.mjs" ]; then
+      exec "$HERE/../code-server/lib/node" "$HERE/../CLI/ghostex-cli.mjs" "$@"
+    fi
+    exec "$HERE/../code-server/lib/node" "$HERE/../cli/ghostex-cli.mjs" "$@"
+    __GHOSTEX_REMOTE_CLI__
+      ghostex_cli_wrapper_written=1
+    fi
+    if [ -x "$package_link/bin/ghostex" ]; then
+      chmod 755 "$package_link/bin/ghostex" 2>/dev/null || true
+      ln -sfn "$package_link/bin/ghostex" "$HOME/.local/bin/ghostex" 2>/dev/null || true
+      if [ "$ghostex_cli_wrapper_written" = "1" ] || [ ! -x "$package_link/bin/gx" ]; then
+        ln -sfn "$package_link/bin/ghostex" "$package_link/bin/gx" 2>/dev/null || true
+      fi
+    fi
+    if [ -x "$package_link/bin/gx" ]; then
+      chmod 755 "$package_link/bin/gx" 2>/dev/null || true
+      ln -sfn "$package_link/bin/gx" "$HOME/.local/bin/gx" 2>/dev/null || true
+    fi
+    rm -f "$upload_path"
     \(remoteTokenReadCommand())
     """
     return runSsh(target: target, remoteCommand: installCommand, timeoutSeconds: 45)
   }
 
-  private func bundledGxserverPackageURL() -> URL? {
-    let resourceURL = Bundle.main.resourceURL
-    let packageURL = resourceURL?.appendingPathComponent("Web/gxserver", isDirectory: true)
-    if let packageURL, FileManager.default.fileExists(atPath: packageURL.appendingPathComponent("bin/gxserver").path) {
-      return packageURL
+  private func probeRemoteInstallTarget(target: RemoteSshTarget) -> RemoteProcessResult {
+    runSsh(
+      target: target,
+      remoteCommand: remoteInstallTargetProbeCommand(),
+      timeoutSeconds: 12
+    )
+  }
+
+  private func remoteInstallTargetProbeCommand() -> String {
+    """
+    GHOSTEX_REMOTE_OS="$(uname -s 2>/dev/null || true)"; \
+    GHOSTEX_REMOTE_ARCH="$(uname -m 2>/dev/null || true)"; \
+    GHOSTEX_REMOTE_DIST=""; \
+    if [ -r /etc/os-release ]; then \
+      GHOSTEX_REMOTE_DIST="$(sed -n 's/^ID=//p' /etc/os-release 2>/dev/null | head -n 1 | tr -d '"' || true)"; \
+    fi; \
+    printf '__GHOSTEX_REMOTE_PLATFORM_START__\\n'; \
+    printf '%s\\n' "$GHOSTEX_REMOTE_OS"; \
+    printf '%s\\n' "$GHOSTEX_REMOTE_ARCH"; \
+    printf '%s\\n' "$GHOSTEX_REMOTE_DIST"; \
+    printf '__GHOSTEX_REMOTE_PLATFORM_END__\\n'
+    """
+  }
+
+  private func extractRemoteInstallTarget(from stdout: String) -> RemoteGxserverInstallTarget? {
+    let payload: String
+    if
+      let start = stdout.range(of: "__GHOSTEX_REMOTE_PLATFORM_START__"),
+      let end = stdout.range(of: "__GHOSTEX_REMOTE_PLATFORM_END__", range: start.upperBound..<stdout.endIndex)
+    {
+      payload = String(stdout[start.upperBound..<end.lowerBound])
+    } else {
+      payload = stdout
+    }
+
+    let lines = payload
+      .split(whereSeparator: \.isNewline)
+      .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+    guard lines.count >= 2, !lines[0].isEmpty, !lines[1].isEmpty else {
+      return nil
+    }
+    return RemoteGxserverInstallTarget(
+      arch: lines[1],
+      distribution: lines.count >= 3 && !lines[2].isEmpty ? lines[2] : nil,
+      os: lines[0]
+    )
+  }
+
+  private func bundledGxserverPackageURL(for target: RemoteGxserverInstallTarget) -> URL? {
+    for resourceName in bundledGxserverPackageResourceNames(for: target) {
+      guard let packageURL = bundledResourceDirectory(named: resourceName) else {
+        continue
+      }
+      if bundledGxserverPackageIsCompatible(packageURL, for: target) {
+        return packageURL
+      }
     }
     return nil
+  }
+
+  private func bundledGxserverPackageIsCompatible(_ packageURL: URL, for target: RemoteGxserverInstallTarget) -> Bool {
+    let requiredPaths = ["bin/gxserver", "bin/zmx", "bin/zehn", "bin/bd"]
+    guard requiredPaths.allSatisfy({ FileManager.default.fileExists(atPath: packageURL.appendingPathComponent($0).path) }) else {
+      return false
+    }
+    guard target.normalizedOS == "linux" else {
+      return true
+    }
+
+    /*
+     CDXC:RemoteMachines 2026-06-23-09:46:
+     Ubuntu packages must include the Linux server tools, bundled Node runtime,
+     Portless CLI, and Ghostex CLI entrypoint before native will upload them.
+     Require native ELF payloads and reject Mach-O binaries so a macOS app
+     package or host-only shell wrapper cannot pass as a Linux remote package
+     just because the file names match. Match ELF machine architecture too so
+     x64 and arm64 remote packages cannot be staged under the wrong resource
+     name and fail only after upload.
+     */
+    let linuxRequiredPaths = [
+      "code-server/lib/node",
+      "portless/dist/cli.js",
+    ]
+    guard linuxRequiredPaths.allSatisfy({ FileManager.default.fileExists(atPath: packageURL.appendingPathComponent($0).path) }) else {
+      return false
+    }
+    let hasGhostexCli = ["CLI/ghostex-cli.mjs", "cli/ghostex-cli.mjs"].contains { relativePath in
+      FileManager.default.fileExists(atPath: packageURL.appendingPathComponent(relativePath).path)
+    }
+    guard hasGhostexCli else {
+      return false
+    }
+    let nativePayloadPaths = [
+      "bin/gxserver",
+      "bin/zmx",
+      "bin/zehn",
+      "bin/bd",
+      "code-server/lib/node",
+    ]
+    guard !nativePayloadPaths.contains(where: { relativePath in
+      isMachOBinary(packageURL.appendingPathComponent(relativePath))
+    }) else {
+      return false
+    }
+    return nativePayloadPaths.allSatisfy { relativePath in
+      isELFBinary(packageURL.appendingPathComponent(relativePath), arch: target.normalizedArch)
+    }
+  }
+
+  private func bundledGxserverPackageResourceNames(for target: RemoteGxserverInstallTarget) -> [String] {
+    let os = target.normalizedOS
+    let arch = target.normalizedArch
+    if os == "linux" && arch == "x64" {
+      return ["Web/gxserver-linux-x64", "Web/gxserver-linux-amd64"]
+    }
+    if os == "linux" && arch == "arm64" {
+      return ["Web/gxserver-linux-arm64", "Web/gxserver-linux-aarch64"]
+    }
+    if os == "darwin" && arch == "arm64" {
+      return bundledHostGxserverPackageArch() == "arm64"
+        ? ["Web/gxserver-darwin-arm64", "Web/gxserver"]
+        : ["Web/gxserver-darwin-arm64"]
+    }
+    if os == "darwin" && arch == "x64" {
+      return bundledHostGxserverPackageArch() == "x64"
+        ? ["Web/gxserver-darwin-x64", "Web/gxserver"]
+        : ["Web/gxserver-darwin-x64"]
+    }
+    return []
+  }
+
+  private func bundledResourceDirectory(named resourceName: String) -> URL? {
+    var resourceURL = Bundle.main.resourceURL
+    for component in resourceName.split(separator: "/") {
+      resourceURL = resourceURL?.appendingPathComponent(String(component), isDirectory: true)
+    }
+    return resourceURL
+  }
+
+  private func bundledHostGxserverPackageArch() -> String {
+    #if arch(arm64)
+      return "arm64"
+    #elseif arch(x86_64)
+      return "x64"
+    #else
+      return "unknown"
+    #endif
+  }
+
+  private func unsupportedRemotePackageMessage(for target: RemoteGxserverInstallTarget) -> String {
+    "This Ghostex app bundle does not include a gxserver package for \(target.displayLabel). Install a Ghostex build that includes a matching remote gxserver package, then retry."
   }
 
   private func openTunnel(command: RemoteGxserverConnect, target: RemoteSshTarget, token: String) throws -> RemoteGxserverConnection {
@@ -985,6 +1224,88 @@ final class RemoteGxserverClient {
       return "SSH connection to the remote machine timed out."
     }
     return defaultMessage
+  }
+}
+
+private func normalizeRemoteInstallOS(_ value: String) -> String {
+  let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  if normalized.contains("darwin") {
+    return "darwin"
+  }
+  if normalized.contains("linux") {
+    return "linux"
+  }
+  return normalized.isEmpty ? "unknown" : normalized
+}
+
+private func normalizeRemoteInstallArch(_ value: String) -> String {
+  switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+  case "amd64", "x86_64":
+    return "x64"
+  case "aarch64", "arm64":
+    return "arm64"
+  default:
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return normalized.isEmpty ? "unknown" : normalized
+  }
+}
+
+private func isMachOBinary(_ url: URL) -> Bool {
+  guard
+    let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
+    data.count >= 4
+  else {
+    return false
+  }
+  let prefix = Array(data.prefix(4))
+  return prefix == [0xfe, 0xed, 0xfa, 0xce] ||
+    prefix == [0xce, 0xfa, 0xed, 0xfe] ||
+    prefix == [0xfe, 0xed, 0xfa, 0xcf] ||
+    prefix == [0xcf, 0xfa, 0xed, 0xfe] ||
+    prefix == [0xca, 0xfe, 0xba, 0xbe] ||
+    prefix == [0xbe, 0xba, 0xfe, 0xca]
+}
+
+private func isELFBinary(_ url: URL, arch: String? = nil) -> Bool {
+  guard
+    let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
+    data.count >= 4
+  else {
+    return false
+  }
+  guard Array(data.prefix(4)) == [0x7f, 0x45, 0x4c, 0x46] else {
+    return false
+  }
+  guard let arch else {
+    return true
+  }
+  return elfMachine(data) == expectedELFMachine(for: arch)
+}
+
+private func expectedELFMachine(for arch: String) -> UInt16? {
+  switch normalizeRemoteInstallArch(arch) {
+  case "x64":
+    return 0x3e
+  case "arm64":
+    return 0xb7
+  default:
+    return nil
+  }
+}
+
+private func elfMachine(_ data: Data) -> UInt16? {
+  guard data.count >= 20 else {
+    return nil
+  }
+  let machineRange = 18..<20
+  let machineBytes = [UInt8](data[machineRange])
+  switch data[5] {
+  case 1:
+    return UInt16(machineBytes[0]) | (UInt16(machineBytes[1]) << 8)
+  case 2:
+    return (UInt16(machineBytes[0]) << 8) | UInt16(machineBytes[1])
+  default:
+    return nil
   }
 }
 

@@ -15,8 +15,8 @@ function sourceBetween(source: string, start: string, end: string): string {
 describe("reference sidebar section header layout source", () => {
   test("applies native left inset to primary sidebar nav buttons", () => {
     /*
-     * CDXC:SidebarReferenceBounds 2026-06-21-17:56:
-     * The macOS sidebar left inset must be 4px beyond the shared reference
+     * CDXC:SidebarReferenceBounds 2026-06-22-01:11:
+     * The macOS sidebar left inset must be 5px beyond the shared reference
      * layout, and the top Agents Hub, Automations, Mobile, and Search buttons
      * must use the native primary-nav bleed so their row surfaces move with the
      * rest of the sidebar instead of staying flush to the viewport edge.
@@ -27,7 +27,7 @@ describe("reference sidebar section header layout source", () => {
       '.sidebar-reference-layout[data-reference-sidebar="true"],',
     );
     expect(nativeInsetRule).toContain("--reference-sidebar-primary-nav-edge-bleed-left: 9px;");
-    expect(nativeInsetRule).toContain("padding-left: 12px;");
+    expect(nativeInsetRule).toContain("padding-left: 13px;");
 
     const primaryNavBleedRule = sourceBetween(
       groupPanelsSource,

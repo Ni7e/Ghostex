@@ -1,4 +1,8 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+    time::Duration,
+};
 
 use serde_json::{json, Map, Value};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
@@ -17,7 +21,7 @@ pub struct GxserverEventHub {
 struct EventHubInner {
     broadcast_tx: broadcast::Sender<Value>,
     pending_renderer_commands: Mutex<HashMap<String, oneshot::Sender<Value>>>,
-    renderer_client: Mutex<Option<RendererClient>>,
+    renderer_clients: Mutex<VecDeque<RendererClient>>,
     server_id: String,
 }
 
@@ -36,6 +40,9 @@ pub struct RendererCommandError {
 /*
 CDXC:GxserverPresentationEvents 2026-06-15-09:55:
 Phase 4 Rust WebSockets must move beyond eventStreamReady and own the same server event hub contract as TypeScript: broadcast lifecycle/API/presentation events, let clients subscribe for fresh snapshots, and route renderer-only commands through the authenticated event stream without changing the default product port.
+
+CDXC:GxserverPresentationEvents 2026-06-22-04:30:
+TypeScript keeps renderer-capable WebSocket clients in insertion order and dispatches renderer commands to the first open subscriber. Rust must retain multiple subscribers instead of replacing the earlier renderer so native command ownership stays stable across secondary clients and reconnect races.
 */
 impl GxserverEventHub {
     pub fn new(server_id: impl Into<String>) -> Self {
@@ -44,7 +51,7 @@ impl GxserverEventHub {
             inner: Arc::new(EventHubInner {
                 broadcast_tx,
                 pending_renderer_commands: Mutex::new(HashMap::new()),
-                renderer_client: Mutex::new(None),
+                renderer_clients: Mutex::new(VecDeque::new()),
                 server_id: server_id.into(),
             }),
         }
@@ -68,22 +75,35 @@ impl GxserverEventHub {
         sender: EventClientSender,
     ) -> String {
         let client_id = client_id.into();
-        *self.inner.renderer_client.lock().await = Some(RendererClient {
-            client_id: client_id.clone(),
-            sender,
-        });
+        self.inner
+            .renderer_clients
+            .lock()
+            .await
+            .push_back(RendererClient {
+                client_id: client_id.clone(),
+                sender,
+            });
         client_id
     }
 
     pub async fn unregister_renderer_client(&self, client_id: &str) {
-        let mut renderer = self.inner.renderer_client.lock().await;
-        if renderer
-            .as_ref()
-            .map(|client| client.client_id.as_str() == client_id)
+        self.inner
+            .renderer_clients
+            .lock()
+            .await
+            .retain(|client| client.client_id != client_id);
+    }
+
+    async fn open_renderer_client(&self) -> Option<RendererClient> {
+        let mut clients = self.inner.renderer_clients.lock().await;
+        while clients
+            .front()
+            .map(|client| client.sender.is_closed())
             .unwrap_or(false)
         {
-            *renderer = None;
+            clients.pop_front();
         }
+        clients.front().cloned()
     }
 
     pub async fn handle_renderer_command_result(&self, message: &Map<String, Value>) {
@@ -105,7 +125,7 @@ impl GxserverEventHub {
                 "error": message
                     .get("error")
                     .and_then(Value::as_str)
-                    .unwrap_or("macOS renderer command failed."),
+                    .unwrap_or("renderer command failed."),
                 "ok": false,
             })
         } else {
@@ -125,7 +145,7 @@ impl GxserverEventHub {
         payload: Map<String, Value>,
         timeout_ms: u64,
     ) -> Result<Value, RendererCommandError> {
-        let Some(renderer) = self.inner.renderer_client.lock().await.clone() else {
+        let Some(renderer) = self.open_renderer_client().await else {
             return Err(RendererCommandError::dependency_unavailable());
         };
         let command_id = format!("renderer-{}", Uuid::new_v4());
@@ -180,24 +200,136 @@ impl GxserverEventHub {
 }
 
 impl RendererCommandError {
+    /*
+    CDXC:GxserverUbuntu 2026-06-23-07:52:
+    Renderer-only RPC behavior must stay protocol-identical on macOS and Ubuntu. Report the same no-renderer dependency failure without naming macOS so Linux clients do not receive platform-specific error copy.
+    */
     fn dependency_unavailable() -> Self {
         Self {
             code: "dependencyUnavailable",
-            message: "No macOS renderer is connected to gxserver for renderer-only commands."
-                .to_string(),
+            message: "No renderer is connected to gxserver for renderer-only commands.".to_string(),
         }
     }
 
     fn timeout(action: &str, timeout_ms: u64) -> Self {
         Self {
             code: "dependencyUnavailable",
-            message: format!(
-                "Timed out waiting {timeout_ms}ms for macOS renderer command {action}."
-            ),
+            message: format!("Timed out waiting {timeout_ms}ms for renderer command {action}."),
         }
     }
 }
 
 fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use tokio::time::{timeout, Duration};
+
+    #[tokio::test]
+    async fn renderer_commands_use_first_open_renderer_client() {
+        let hub = GxserverEventHub::new("S1a");
+        let (first_tx, mut first_rx) = hub.client_channel();
+        let (second_tx, mut second_rx) = hub.client_channel();
+        hub.register_renderer_client("renderer-first", first_tx)
+            .await;
+        hub.register_renderer_client("renderer-second", second_tx)
+            .await;
+
+        let dispatch = tokio::spawn({
+            let hub = hub.clone();
+            async move {
+                hub.dispatch_renderer_command(
+                    "toggleSidebarCollapsed".to_string(),
+                    Map::new(),
+                    1_000,
+                )
+                .await
+            }
+        });
+
+        let event = timeout(Duration::from_millis(250), first_rx.recv())
+            .await
+            .expect("first renderer received command")
+            .expect("first renderer event");
+        assert_eq!(event["type"], json!("rendererCommand"));
+        assert_eq!(event["command"]["action"], json!("toggleSidebarCollapsed"));
+        assert!(matches!(
+            second_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+
+        let command_id = event["command"]["commandId"]
+            .as_str()
+            .expect("command id")
+            .to_string();
+        hub.handle_renderer_command_result(&Map::from_iter([
+            ("commandId".to_string(), json!(command_id)),
+            ("ok".to_string(), json!(true)),
+            (
+                "result".to_string(),
+                json!({ "handledBy": "first", "ok": true }),
+            ),
+            ("type".to_string(), json!("rendererCommandResult")),
+        ]))
+        .await;
+
+        let result = timeout(Duration::from_millis(250), dispatch)
+            .await
+            .expect("renderer command completed")
+            .expect("renderer command task")
+            .expect("renderer command result");
+        assert_eq!(result, json!({ "handledBy": "first", "ok": true }));
+    }
+
+    #[tokio::test]
+    async fn renderer_commands_skip_closed_first_renderer_client() {
+        let hub = GxserverEventHub::new("S1a");
+        let (closed_tx, closed_rx) = hub.client_channel();
+        hub.register_renderer_client("renderer-closed", closed_tx)
+            .await;
+        drop(closed_rx);
+
+        let (open_tx, mut open_rx) = hub.client_channel();
+        hub.register_renderer_client("renderer-open", open_tx).await;
+
+        let dispatch = tokio::spawn({
+            let hub = hub.clone();
+            async move {
+                hub.dispatch_renderer_command(
+                    "toggleSidebarCollapsed".to_string(),
+                    Map::new(),
+                    1_000,
+                )
+                .await
+            }
+        });
+
+        let event = timeout(Duration::from_millis(250), open_rx.recv())
+            .await
+            .expect("open renderer received command")
+            .expect("open renderer event");
+        assert_eq!(event["type"], json!("rendererCommand"));
+        let command_id = event["command"]["commandId"]
+            .as_str()
+            .expect("command id")
+            .to_string();
+        hub.handle_renderer_command_result(&Map::from_iter([
+            ("commandId".to_string(), json!(command_id)),
+            ("ok".to_string(), json!(true)),
+            ("result".to_string(), json!({ "ok": true })),
+            ("type".to_string(), json!("rendererCommandResult")),
+        ]))
+        .await;
+
+        let result = timeout(Duration::from_millis(250), dispatch)
+            .await
+            .expect("renderer command completed")
+            .expect("renderer command task")
+            .expect("renderer command result");
+        assert_eq!(result, json!({ "ok": true }));
+    }
 }

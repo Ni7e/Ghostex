@@ -103,6 +103,11 @@ describe("native titlebar Tips & Tricks source", () => {
      * installed agent CLIs are missing or using stale hooks, even before a live
      * agent session exists, and the copy must name session naming, status, and
      * sleep/resume reliability.
+     *
+     * CDXC:AgentHooks 2026-06-23-05:09:
+     * Clicking the missing-hook notice should open Settings > Integrations with
+     * Agent Hooks searched so the user sees provider status and the install
+     * control instead of starting installation from titlebar chrome.
      */
     const noticeSource = sourceBetween(
       titlebarHostSource,
@@ -113,14 +118,16 @@ describe("native titlebar Tips & Tricks source", () => {
     expect(noticeSource).toContain("getDefaultSidebarAgentById(status.agentId)");
     expect(noticeSource).toContain("!status.cliInstalled");
     expect(noticeSource).toContain("Warning: Agent hooks aren't installed for agent CLIs");
-    expect(noticeSource).toContain("Please install the hooks by clicking this notification.");
+    expect(noticeSource).toContain("Open Settings > Integrations");
     expect(noticeSource).toContain("Automatic session renaming");
     expect(noticeSource).toContain("In Progress/Needs Attention status");
     expect(noticeSource).toContain("sleeping or resuming agent sessions will not work correctly");
-    expect(noticeSource).toContain('action: "installAgentHooks"');
+    expect(noticeSource).toContain('action: "openSettings"');
     expect(noticeSource).toContain('settingsTarget: "agentHooks"');
-    expect(titlebarHostSource).toContain('postNative({ type: "installAgentHooksFromTitlebarNotice" });');
+    expect(titlebarHostSource).toContain('initialSearchQuery: "Agent Hooks"');
+    expect(titlebarHostSource).toContain('initialTab: "integrations"');
     expect(titlebarHostSource).toContain('title="Notices"');
-    expect(titlebarHostSource).toContain("installAgentHooksFromTipsNotice");
+    expect(titlebarHostSource).toContain("openAgentHooksSettings");
+    expect(titlebarHostSource).not.toContain("installAgentHooksFromTitlebarNotice");
   });
 });

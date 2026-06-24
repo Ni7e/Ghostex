@@ -407,4 +407,37 @@ describe("native sidebar hotkey source", () => {
       'throw new Error("Command panel split placement target was validated but not found.")',
     );
   });
+
+  test("keeps native Cmd+W from closing project editor surfaces", () => {
+    /*
+     * CDXC:PaneClose 2026-06-22-03:14:
+     * Source/Browser/Kanban/Manage views are right-side project work surfaces, not
+     * close targets for Cmd+W. Native should route the shortcut to a focused
+     * command terminal first, then to the visible companion terminal, and never
+     * call closeProjectEditorPane from the focused-close command.
+     */
+    const closeFocusedSource = sourceBetween(
+      nativeTerminalWorkspaceSource,
+      "func closeFocusedSession(reason: String) -> Bool",
+      "@discardableResult\n  private func closeFocusedProjectEditorCompanionSession",
+    );
+    expect(closeFocusedSource).toContain("closeFocusedCommandsPanel(reason: reason)");
+    expect(closeFocusedSource).toContain("closeFocusedProjectEditorCompanionSession(reason: reason)");
+    expect(closeFocusedSource).not.toContain("closeProjectEditorPane(projectId: activeProjectEditorId)");
+
+    const companionCloseSource = sourceBetween(
+      nativeTerminalWorkspaceSource,
+      "private func closeFocusedProjectEditorCompanionSession(reason: String) -> Bool",
+      "@discardableResult\n  private func closeFocusedCommandsPanel",
+    );
+    expect(companionCloseSource).toContain("projectEditorCompanionSessionId");
+    expect(companionCloseSource).toContain("projectEditorCompanionRenderedSessionId == sessionId");
+    expect(companionCloseSource).toContain("sessions[sessionId] != nil");
+    expect(companionCloseSource).toContain(
+      "sendEvent(.paneTabCloseRequested(sessionId: sessionId, scope: .close))",
+    );
+    expect(companionCloseSource).not.toContain("closeProjectEditorPane");
+    expect(nativeTerminalWorkspaceSource).toContain("Cmd+W must never close those project");
+    expect(nativeTerminalWorkspaceSource).toContain("editor panes. In those modes");
+  });
 });

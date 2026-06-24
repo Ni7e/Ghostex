@@ -12,6 +12,8 @@ const ignoredDirectoryNames = new Set([
   ".git",
   ".next",
   ".turbo",
+  ".vite-plus",
+  ".repos",
   "coverage",
   "dist",
   "dist-electron",
@@ -37,6 +39,13 @@ const ignoredDirectoryNames = new Set([
  * `bun s` must be the normal app start path, not the dev app variant. Keep
  * variant-specific launching on explicit dev commands so the short command
  * preserves its existing release-like behavior.
+ *
+ * CDXC:T3CodeUpstreamReset 2026-06-22-21:08:
+ * Upstream T3 Code now declares `pnpm` plus Vite+ instead of the old Bun/Turbo
+ * build shape. Build the submodule with its declared package manager so local
+ * starts resolve Vite+ from the T3 checkout's own dependency install, while
+ * keeping upstream `.repos` reference material and `.vite-plus` output out of
+ * Ghostex's rebuild fingerprint.
  */
 async function main() {
   const t3Root = resolveT3CodeRoot();
@@ -55,7 +64,8 @@ async function main() {
 
   const reason = missingBuildOutput ? "missing build output" : "source changes detected";
   console.log(`[t3code] Running build (${reason})...`);
-  const result = spawnSync("bun", ["run", "build"], {
+  const buildCommand = await resolveBuildCommand(t3Root);
+  const result = spawnSync(buildCommand.command, buildCommand.args, {
     cwd: t3Root,
     env: process.env,
     stdio: "inherit",
@@ -80,6 +90,15 @@ function resolveT3CodeRoot() {
     return override;
   }
   return join(repoRoot, "t3code");
+}
+
+async function resolveBuildCommand(t3Root) {
+  const packageJson = JSON.parse(await readFile(join(t3Root, "package.json"), "utf8"));
+  const packageManager = typeof packageJson.packageManager === "string" ? packageJson.packageManager : "";
+  if (packageManager.startsWith("pnpm@")) {
+    return { command: "pnpm", args: ["run", "build"] };
+  }
+  return { command: "bun", args: ["run", "build"] };
 }
 
 async function readPreviousState() {

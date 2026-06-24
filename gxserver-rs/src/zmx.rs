@@ -14,8 +14,11 @@ use std::{
 use serde_json::{json, Map, Value};
 
 use crate::{
+    agents::get_agent_startup_text_for_session,
     constants::GXSERVER_PROTOCOL_VERSION,
     domain::{read_project_id, read_session_id, DomainRepository, DomainStateError},
+    platform::shell::command_shell,
+    session_status::compute_activity_update,
     toolchain::{require_bundled_zmx, GxserverResolvedTool},
 };
 
@@ -107,6 +110,7 @@ pub fn dispatch_zmx_lifecycle_endpoint(
     endpoint_path: &str,
     params: &Map<String, Value>,
     context: &ZmxServerContext,
+    agent_settings: &Map<String, Value>,
 ) -> ZmxEndpointResult<ZmxEndpointOutput> {
     let result = match endpoint_path {
         "/api/probeSessionProvider" => {
@@ -119,7 +123,8 @@ pub fn dispatch_zmx_lifecycle_endpoint(
             })
         }
         "/api/attachSessionMetadata" | "/api/wakeSession" => {
-            let mut attach = create_attach_session_metadata(repository, params, context)?;
+            let mut attach =
+                create_attach_session_metadata(repository, params, context, agent_settings)?;
             let restore_blocked = attach.get("restoreBlocked").is_some();
             if endpoint_path == "/api/wakeSession" && !restore_blocked {
                 let attach_session = attach
@@ -141,7 +146,9 @@ pub fn dispatch_zmx_lifecycle_endpoint(
                 );
                 update.insert("lifecycleState".to_string(), json!("running"));
                 update.insert("providerState".to_string(), provider_state);
-                let session = repository.update_session_for_lifecycle(&update)?;
+                let lifecycle_session = repository.update_session_for_lifecycle(&update)?;
+                let session =
+                    apply_wake_session_activity_suppression(repository, &lifecycle_session)?;
                 attach
                     .as_object_mut()
                     .expect("attach object")
@@ -157,7 +164,9 @@ pub fn dispatch_zmx_lifecycle_endpoint(
                 json!({ "attach": attach })
             }
         }
-        "/api/startSessionProvider" => start_session_provider(repository, params, context)?,
+        "/api/startSessionProvider" => {
+            start_session_provider(repository, params, context, agent_settings)?
+        }
         "/api/transitionSession" => {
             let lifecycle = read_lifecycle_params(params)?;
             let action = match params.get("action").and_then(Value::as_str) {
@@ -166,10 +175,7 @@ pub fn dispatch_zmx_lifecycle_endpoint(
                 _ => {
                     return Err(DomainStateError::bad_request(format!(
                         "Invalid session transition action: {}.",
-                        params
-                            .get("action")
-                            .map(Value::to_string)
-                            .unwrap_or_else(|| "undefined".to_string())
+                        js_string(params.get("action"))
                     ))
                     .into())
                 }
@@ -235,10 +241,7 @@ pub fn dispatch_zmx_session_interaction_endpoint(
                 },
             )?;
             let mut output = Map::new();
-            output.insert(
-                "capturedBytes".to_string(),
-                json!(result.stdout.as_bytes().len()),
-            );
+            output.insert("capturedBytes".to_string(), json!(result.stdout.len()));
             output.insert(
                 "limitBytes".to_string(),
                 json!(GXSERVER_ZMX_HISTORY_STDOUT_LIMIT_BYTES),
@@ -351,16 +354,25 @@ fn send_result(
         "exitCode": exit_code,
         "provider": "zmx",
         "session": session,
-        "textBytes": text.as_bytes().len(),
-        "textLength": text.chars().count(),
+        "textBytes": text.len(),
+        "textLength": js_string_length(text),
         "zmxName": zmx_name,
     })
+}
+
+/*
+CDXC:GxserverSessionIO 2026-06-22-07:09:
+sendSessionText, sendSessionMessage, and sendSessionEnter report `textLength` through the TypeScript API contract. Count UTF-16 code units like JavaScript `string.length` while keeping send limits and `textBytes` byte-based.
+*/
+fn js_string_length(text: &str) -> usize {
+    text.encode_utf16().count()
 }
 
 fn create_attach_session_metadata(
     repository: &DomainRepository<'_>,
     params: &Map<String, Value>,
     context: &ZmxServerContext,
+    agent_settings: &Map<String, Value>,
 ) -> ZmxEndpointResult<Value> {
     let lifecycle = read_lifecycle_params(params)?;
     let project = repository
@@ -381,7 +393,7 @@ fn create_attach_session_metadata(
     let startup_text = explicit_startup_text
         .clone()
         .or(queued_launch_startup_text.clone())
-        .or_else(|| get_agent_startup_text_for_session(&project, &probed_session));
+        .or_else(|| get_agent_startup_text_for_session(&project, &probed_session, agent_settings));
     let startup_text_disposition =
         decide_startup_text_disposition(&probe.lifecycle_state, startup_text.as_deref());
     let session_for_attach = if explicit_startup_text.is_none()
@@ -456,6 +468,7 @@ fn start_session_provider(
     repository: &DomainRepository<'_>,
     params: &Map<String, Value>,
     context: &ZmxServerContext,
+    agent_settings: &Map<String, Value>,
 ) -> ZmxEndpointResult<Value> {
     let lifecycle = read_lifecycle_params(params)?;
     let project = repository
@@ -474,7 +487,7 @@ fn start_session_provider(
     let startup_text = explicit_startup_text
         .clone()
         .or(queued_launch_startup_text)
-        .or_else(|| get_agent_startup_text_for_session(&project, &probed_session));
+        .or_else(|| get_agent_startup_text_for_session(&project, &probed_session, agent_settings));
     let startup_text_disposition =
         decide_startup_text_disposition(&probe.lifecycle_state, startup_text.as_deref());
     let should_start_with_startup_text =
@@ -613,6 +626,52 @@ fn kill_and_cache_session_provider(
     update.insert("providerState".to_string(), Value::Object(provider_state));
     let updated = repository.update_session_for_lifecycle(&update)?;
     Ok((kill, updated))
+}
+
+fn apply_wake_session_activity_suppression(
+    repository: &DomainRepository<'_>,
+    session: &Value,
+) -> Result<Value, DomainStateError> {
+    /*
+    CDXC:GxserverZmxLifecycle 2026-06-22-07:16:
+    Waking a session must clear stale working/attention state before title observation can replay an old zmx title. Keep Rust wake aligned with TypeScript by forcing the shared `wake` activity transition inside the lifecycle endpoint result rather than waiting for a later renderer or title event.
+    */
+    let params = Map::new();
+    let update = compute_activity_update(session, &params, Some("wake"));
+    if !should_persist_activity_update(session, &update.activity, update.last_active_at.as_deref())
+    {
+        return Ok(session.clone());
+    }
+    let mut runtime_settings = session
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    runtime_settings.insert("agentActivity".to_string(), update.activity);
+    let mut session_update = Map::new();
+    session_update.insert("projectId".to_string(), value_field(session, "projectId")?);
+    session_update.insert("sessionId".to_string(), value_field(session, "sessionId")?);
+    session_update.insert(
+        "runtimeSettings".to_string(),
+        Value::Object(runtime_settings),
+    );
+    if let Some(last_active_at) = update.last_active_at {
+        session_update.insert("lastActiveAt".to_string(), json!(last_active_at));
+    }
+    repository.update_session(&session_update)
+}
+
+fn should_persist_activity_update(
+    session: &Value,
+    activity: &Value,
+    last_active_at: Option<&str>,
+) -> bool {
+    string_field(session, "lastActiveAt").as_deref() != last_active_at
+        || session
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .and_then(|settings| settings.get("agentActivity"))
+            != Some(activity)
 }
 
 fn probe_zmx_session(session_name: &str, zmx_executable_path: &str) -> ProviderProbe {
@@ -1264,9 +1323,9 @@ fn run_zsh_script_blocking(
     script: &str,
     options: ZmxCommandOptions,
 ) -> Result<ZmxCommandResult, String> {
-    let mut child = Command::new("/bin/zsh")
-        .arg("-lc")
-        .arg(script)
+    let shell = command_shell();
+    let mut child = Command::new(&shell.executable)
+        .args(shell.script_args(script))
         .envs(build_gxserver_zmx_child_environment())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1435,6 +1494,7 @@ struct ZmxShellProviderCommandInput {
 }
 
 fn build_zmx_attach_command(input: ZmxAttachCommandInput) -> String {
+    let shell = command_shell();
     let prompt_editor_attach_args = if input.prompt_editor.as_deref() == Some("monaco") {
         "--prompt-editor=monaco"
     } else {
@@ -1475,12 +1535,12 @@ if [ -n "$zmx_gxserver_protocol_version" ]; then
 fi
 if "$zmx_bin" list --short 2>/dev/null | grep -F -x -- "$zmx_session" >/dev/null 2>&1; then
   if [ -n "$zmx_title_notice_command" ]; then
-    /bin/zsh -lc "$zmx_title_notice_command"
+    {} {} "$zmx_title_notice_command"
   fi
   exec "$zmx_bin" attach $zmx_prompt_editor_attach_args "$zmx_session"
 fi
 if [ -n "$zmx_persistence_notice_command" ]; then
-  /bin/zsh -lc "$zmx_persistence_notice_command"
+  {} {} "$zmx_persistence_notice_command"
 fi
 cd "$zmx_cwd" || exit
 exec "$zmx_bin" attach $zmx_prompt_editor_attach_args "$zmx_session"
@@ -1501,10 +1561,14 @@ exec "$zmx_bin" attach $zmx_prompt_editor_attach_args "$zmx_session"
         shell_quote(&input.zmx_executable_path),
         shell_quote(prompt_editor_attach_args),
         zmx_session_identity_reset_shell_command(),
+        &shell.executable,
+        shell.command_flag(false),
+        &shell.executable,
+        shell.command_flag(false),
     )
     .trim()
     .to_string();
-    format!("/bin/zsh -lc {}", shell_quote(&script))
+    shell.command_string(&script, false)
 }
 
 fn build_zmx_kill_command(session_name: &str, zmx_executable_path: &str) -> String {
@@ -1567,10 +1631,12 @@ exec "$zmx_bin" send "$zmx_session"
 fn build_zmx_run_command(input: ZmxRunCommandInput) -> String {
     let startup_command =
         with_atuin_ignored_shell_history_prefix(input.startup_text.trim_end_matches(['\r', '\n']));
+    let shell = command_shell();
     let provider_shell_command = format!(
-        "{}\n{}\nexec /bin/zsh -li",
+        "{}\n{}\n{}",
         zmx_provider_prompt_editor_setup_shell_command(),
-        startup_command
+        startup_command,
+        shell.interactive_exec_command()
     );
     format_zmx_provider_run_script(
         &input.session_name,
@@ -1587,9 +1653,11 @@ fn build_zmx_run_command(input: ZmxRunCommandInput) -> String {
 }
 
 fn build_zmx_shell_provider_command(input: ZmxShellProviderCommandInput) -> String {
+    let shell = command_shell();
     let provider_shell_command = format!(
-        "{}\nexec /bin/zsh -li",
-        zmx_provider_prompt_editor_setup_shell_command()
+        "{}\n{}",
+        zmx_provider_prompt_editor_setup_shell_command(),
+        shell.interactive_exec_command()
     );
     format_zmx_provider_run_script(
         &input.session_name,
@@ -1618,6 +1686,7 @@ fn format_zmx_provider_run_script(
     command_variable: &str,
     zmx_executable_path: &str,
 ) -> String {
+    let shell = command_shell();
     let startup_text_assignment = startup_text
         .map(|text| format!("zmx_startup_text={}\n", shell_quote(text)))
         .unwrap_or_default();
@@ -1659,7 +1728,7 @@ if [ -n "$zmx_gxserver_protocol_version" ]; then
   export GHOSTEX_GXSERVER_PROTOCOL_VERSION="$zmx_gxserver_protocol_version"
 fi
 cd "$zmx_cwd" || exit
-exec "$zmx_bin" run "$zmx_session" -d --initial-command /bin/zsh -lic "{}"
+exec "$zmx_bin" run "$zmx_session" -d --initial-command {} {} "{}"
 "#,
         shell_quote(session_name),
         shell_quote(cwd),
@@ -1677,6 +1746,8 @@ exec "$zmx_bin" run "$zmx_session" -d --initial-command /bin/zsh -lic "{}"
         shell_quote(zmx_executable_path),
         startup_text_guard,
         zmx_session_identity_reset_shell_command(),
+        &shell.executable,
+        shell.command_flag(true),
         command_arg,
     )
     .trim()
@@ -1712,9 +1783,9 @@ fn zmx_provider_prompt_editor_setup_shell_command() -> &'static str {
     r#"
 ghostex_prompt_editor_home="${GHOSTEX_HOME:-$HOME/.ghostex}"
 ghostex_prompt_editor_wrapper="$ghostex_prompt_editor_home/state/prompt-editor"
-mkdir -p "${ghostex_prompt_editor_wrapper:h}" 2>/dev/null || true
+mkdir -p "$(dirname "$ghostex_prompt_editor_wrapper")" 2>/dev/null || true
 cat > "$ghostex_prompt_editor_wrapper" <<'__GHOSTEX_PROMPT_EDITOR_WRAPPER__'
-#!/bin/zsh
+#!/bin/sh
 if [ -n "${GHOSTEX_ZMX_BIN:-}" ] && [ -x "${GHOSTEX_ZMX_BIN:-}" ]; then
   export GHOSTEX_ZMX_BIN
 fi
@@ -1778,6 +1849,20 @@ fn read_lifecycle_params(params: &Map<String, Value>) -> Result<LifecycleParams,
     })
 }
 
+fn js_string(value: Option<&Value>) -> String {
+    match value {
+        None => "undefined".to_string(),
+        Some(Value::String(value)) => value.clone(),
+        Some(Value::Array(values)) => values
+            .iter()
+            .map(|value| js_string(Some(value)))
+            .collect::<Vec<_>>()
+            .join(","),
+        Some(Value::Object(_)) => "[object Object]".to_string(),
+        Some(value) => value.to_string(),
+    }
+}
+
 fn require_session(
     repository: &DomainRepository<'_>,
     lifecycle: &LifecycleParams,
@@ -1797,6 +1882,10 @@ fn require_zmx() -> ZmxEndpointResult<GxserverResolvedTool> {
 }
 
 fn provider_zmx_session_name(session: &Value) -> Result<String, DomainStateError> {
+    /*
+    CDXC:GxserverUnsupportedSessionParity 2026-06-22-07:30:
+    TypeScript gxserver does not have an unsupported-session branch for zmx lifecycle or session-I/O endpoints. Route every persisted session through the canonical top-level zmxName, ignoring providerState.provider, providerState.zmxName, and runtimeSettings.sessionPersistenceProvider so provider-off, missing-provider, and migrated rows keep the same error/order behavior.
+    */
     string_field(session, "zmxName").ok_or_else(|| {
         DomainStateError::corrupt_state("zmxName missing from session domain state.")
     })
@@ -2027,14 +2116,6 @@ fn consume_queued_agent_launch_startup_text(
         .map_err(ZmxEndpointError::Domain)
 }
 
-fn get_agent_startup_text_for_session(_project: &Value, _session: &Value) -> Option<String> {
-    /*
-    CDXC:GxserverRustPort 2026-06-19-15:55:
-    Fresh agent provider launch is controlled by `runtimeRelevant.queueProviderStartupText`; generic zmx attach/start must not reuse a stale launch plan as a resume fallback after that queue bit is consumed.
-    */
-    None
-}
-
 fn read_interaction_text(
     value: Option<&Value>,
     command_name: &str,
@@ -2173,6 +2254,18 @@ fn session_identity_environment_keys() -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        paths::get_gxserver_paths,
+        storage::{initialize_gxserver_storage, open_gxserver_database},
+    };
+
+    fn open_test_database() -> (tempfile::TempDir, rusqlite::Connection) {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        initialize_gxserver_storage(&paths).expect("storage init");
+        let db = open_gxserver_database(&paths).expect("open db");
+        (temp, db)
+    }
 
     #[test]
     fn zmx_run_command_uses_initial_command_and_ghostex_identity() {
@@ -2219,6 +2312,139 @@ mod tests {
     }
 
     #[test]
+    fn provider_metadata_does_not_create_unsupported_session_route() {
+        for (session, expected_zmx_name, expected_provider) in [
+            (
+                json!({
+                    "providerState": {
+                        "lifecycleState": "exists",
+                        "provider": "off",
+                        "zmxName": "legacy-provider-name"
+                    },
+                    "runtimeSettings": { "sessionPersistenceProvider": "off" },
+                    "zmxName": "S7k-P100-G100"
+                }),
+                "S7k-P100-G100",
+                Some("off"),
+            ),
+            (
+                json!({
+                    "providerState": {
+                        "lifecycleState": "missing",
+                        "provider": "tmux",
+                        "zmxName": "legacy-tmux-name"
+                    },
+                    "runtimeSettings": { "sessionPersistenceProvider": "tmux" },
+                    "zmxName": "S7k-P100-G101"
+                }),
+                "S7k-P100-G101",
+                Some("tmux"),
+            ),
+            (
+                json!({
+                    "runtimeSettings": {},
+                    "zmxName": "S7k-P100-G102"
+                }),
+                "S7k-P100-G102",
+                None,
+            ),
+        ] {
+            assert_eq!(
+                provider_zmx_session_name(&session).expect("zmx name"),
+                expected_zmx_name
+            );
+            let probe = ProviderProbe {
+                error: None,
+                lifecycle_state: "exists".to_string(),
+                probed_at: "2026-06-22T07:30:00.000Z".to_string(),
+                zmx_name: provider_zmx_session_name(&session).expect("zmx name"),
+            };
+            let patch = provider_state_patch(&session, &probe).expect("provider patch");
+            assert_eq!(patch.get("zmxName"), Some(&json!(probe.zmx_name)));
+            assert_eq!(patch.get("lifecycleState"), Some(&json!("exists")));
+            assert_eq!(
+                patch.get("provider").and_then(Value::as_str),
+                expected_provider
+            );
+        }
+    }
+
+    #[test]
+    fn wake_activity_suppression_resets_stale_working_state() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let project = repository
+            .create_project(
+                json!({ "name": "Wake Activity" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id")
+            .to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "agentId": "codex",
+                    "kind": "agent",
+                    "lifecycleState": "running",
+                    "projectId": project_id,
+                    "providerState": { "lifecycleState": "missing", "provider": "zmx" },
+                    "runtimeSettings": {
+                        "agentActivity": {
+                            "activity": "working",
+                            "agentName": "codex",
+                            "hasSeenWorking": true,
+                            "isAcknowledged": false,
+                            "lastChangedAt": "2026-06-10T06:50:00.000Z",
+                            "workingStartedAt": "2026-06-10T06:50:00.000Z"
+                        },
+                        "titleSource": "user"
+                    },
+                    "title": "Sleeping private session"
+                })
+                .as_object()
+                .expect("session params"),
+                true,
+            )
+            .expect("session");
+        let before_wake_ms = chrono::Utc::now().timestamp_millis();
+
+        let updated =
+            apply_wake_session_activity_suppression(&repository, &session).expect("suppression");
+        let activity = updated
+            .get("runtimeSettings")
+            .and_then(Value::as_object)
+            .and_then(|settings| settings.get("agentActivity"))
+            .and_then(Value::as_object)
+            .expect("agent activity");
+
+        assert_eq!(activity.get("activity"), Some(&json!("idle")));
+        assert_eq!(activity.get("hasSeenWorking"), Some(&json!(false)));
+        assert_eq!(activity.get("isAcknowledged"), Some(&json!(true)));
+        let suppressed_until = activity
+            .get("suppressedUntil")
+            .and_then(Value::as_str)
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .expect("suppressedUntil")
+            .timestamp_millis();
+        assert!(suppressed_until - before_wake_ms > 10_000);
+    }
+
+    #[test]
+    fn transition_action_errors_use_javascript_stringification() {
+        assert_eq!(js_string(Some(&json!("pause"))), "pause");
+        assert_eq!(
+            js_string(Some(&json!({ "action": "pause" }))),
+            "[object Object]"
+        );
+        assert_eq!(js_string(None), "undefined");
+    }
+
+    #[test]
     fn zmx_process_identity_parser_prefers_live_codex_child() {
         let session_name = "S90-P3lv0-G0p1k".to_string();
         let identities = parse_zmx_session_process_identities(
@@ -2232,7 +2458,7 @@ mod tests {
 94784 93944 /Users/madda/.local/bin/claude --resume 303d77cf-4871-48da-871f-47782e834307
 "#
             .trim(),
-            &[session_name.clone()],
+            std::slice::from_ref(&session_name),
             &format!(
                 "  name={session_name}\tpid=81396\tclients=1\tcreated=1781219985\tstart_dir=/repo"
             ),
@@ -2257,7 +2483,7 @@ mod tests {
 34225 23755 /Users/person/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient turn-ended {"input-messages":["compare codex hotkeys with claude code"]}
 "#
             .trim(),
-            &[session_name.clone()],
+            std::slice::from_ref(&session_name),
             &format!("  name={session_name}\tpid=23572\tclients=1\tcreated=1781317239\tstart_dir=/repo"),
         );
         /*
@@ -2276,10 +2502,29 @@ mod tests {
         let error = read_interaction_text(Some(&json!("")), "sendSessionText")
             .expect_err("empty text rejected");
         assert_eq!(error.code, "badRequest");
+        let rocket = "\u{1F680}";
+        assert!(read_interaction_text(
+            Some(&json!(rocket.repeat(GXSERVER_ZMX_SEND_TEXT_LIMIT_BYTES / 4))),
+            "sendSessionText",
+        )
+        .is_ok());
         let oversized = "x".repeat(GXSERVER_ZMX_SEND_TEXT_LIMIT_BYTES + 1);
         let error = read_interaction_text(Some(&json!(oversized)), "sendSessionText")
             .expect_err("oversized text rejected");
         assert!(error.message.contains("zmx send limit"));
+    }
+
+    #[test]
+    fn send_result_text_length_matches_javascript_string_length() {
+        let result = send_result(
+            0,
+            json!({ "projectId": "P7abc", "sessionId": "G8def" }),
+            "go \u{1F680}",
+            false,
+            "S7k-P7abc-G8def".to_string(),
+        );
+        assert_eq!(result["textBytes"], json!(7));
+        assert_eq!(result["textLength"], json!(5));
     }
 
     #[test]

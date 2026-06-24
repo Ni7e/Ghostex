@@ -65,7 +65,6 @@ describe("agent hook status source", () => {
      */
     expect(contractSource).toContain('"requestAgentHookStatus"');
     expect(contractSource).toContain('"installAgentHooks"');
-    expect(contractSource).toContain('"installAgentHooksFromTitlebarNotice"');
     expect(contractSource).toContain('"uninstallAgentHooks"');
     expect(contractSource).toContain('"uninstallBundledAgentSkills"');
     expect(modalHostSource).toContain('vscode.postMessage({ type: "uninstallAgentHooks" });');
@@ -77,18 +76,15 @@ describe("agent hook status source", () => {
     expect(gxserverClientSource).toContain('"/api/uninstallAgentHooks"');
   });
 
-  test("installs hooks from the titlebar warning with progress and restart toasts", () => {
+  test("does not keep a titlebar direct-install hook command", () => {
     /*
-     * CDXC:AgentHooks 2026-06-18-03:22:
-     * Clicking the titlebar Tips hook warning should install hooks directly,
-     * replace the loading toast with completion feedback, and tell users to
-     * restart running agent CLI sessions.
+     * CDXC:AgentHooks 2026-06-23-05:09:
+     * The titlebar Tips hook warning deep-links to Settings instead of invoking
+     * installation directly, so the shared native command contract should keep
+     * hook writes behind Settings and first-launch setup only.
      */
-    expect(nativeSidebarSource).toContain("async function installNativeAgentHooksFromTitlebarNotice");
-    expect(nativeSidebarSource).toContain('showAppToast("info", "Installing agent hooks"');
-    expect(nativeSidebarSource).toContain("await gxserverClient.installAgentHooks();");
-    expect(nativeSidebarSource).toContain('showAppToast(\n      "success",\n      "Agent hooks installed"');
-    expect(nativeSidebarSource).toContain("Please restart all your agent CLI sessions");
-    expect(nativeSidebarSource).toContain('case "installAgentHooksFromTitlebarNotice"');
+    expect(contractSource).not.toContain('"installAgentHooksFromTitlebarNotice"');
+    expect(nativeSidebarSource).not.toContain("installNativeAgentHooksFromTitlebarNotice");
+    expect(nativeSidebarSource).not.toContain('case "installAgentHooksFromTitlebarNotice"');
   });
 });

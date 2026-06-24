@@ -20,6 +20,8 @@ import {
   getSessionTitleGenerationCommandPreview,
   getSidebarTitlebarGradientColors,
   getSidebarSettingsPresetId,
+  normalizeTerminalDevServerIgnoredPortRuleInput,
+  normalizeTerminalDevServerIgnoredPortRules,
   normalizeghostexSettings,
   PROMPT_EDITOR_BACKEND_OPTIONS,
   SESSION_PERSISTENCE_PROVIDER_OPTIONS,
@@ -28,6 +30,7 @@ import {
   SIDEBAR_SETTINGS_PRESETS,
   SIDEBAR_SIDE_OPTIONS,
   SIDEBAR_THEME_SETTING_OPTIONS,
+  TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS,
 } from "./ghostex-settings";
 import { DEFAULT_PET_ID } from "./pets";
 import {
@@ -84,6 +87,123 @@ describe("normalizeghostexSettings", () => {
       { label: "React Grab", value: "react-grab" },
       { label: "Agentation", value: "agentation" },
     ]);
+  });
+
+  test("normalizes terminal dev-server discovery settings", () => {
+    /*
+     * CDXC:TerminalDevServers 2026-06-23-19:22:
+     * Terminal dev-server preferences should persist as app settings with detection enabled by default, one launch target for either the user's system browser or the internal browser, and ignored ports stored as canonical port or range strings.
+     */
+    expect(DEFAULT_ghostex_SETTINGS.terminalDevServerDetectionEnabled).toBe(true);
+    expect(DEFAULT_ghostex_SETTINGS.terminalDevServerOpenTarget).toBe(
+      "system-default-browser",
+    );
+    expect(TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS).toEqual([
+      { label: "System Default Browser", value: "system-default-browser" },
+      { label: "Internal Browser", value: "internal-browser" },
+    ]);
+    expect(normalizeghostexSettings({})).toMatchObject({
+      terminalDevServerDetectionEnabled: true,
+      terminalDevServerOpenTarget: "system-default-browser",
+      terminalDevServerIgnoredPortRules: [],
+    });
+    expect(
+      normalizeghostexSettings({
+        terminalDevServerDetectionEnabled: false,
+        terminalDevServerOpenTarget: "internal-browser",
+        terminalDevServerIgnoredPortRules: [
+          "3000-3005",
+          "3004-3008",
+          "abc",
+          "9229",
+          "9230",
+        ],
+      }),
+    ).toMatchObject({
+      terminalDevServerDetectionEnabled: false,
+      terminalDevServerOpenTarget: "internal-browser",
+      terminalDevServerIgnoredPortRules: ["3000-3008", "9229-9230"],
+    });
+    expect(
+      normalizeghostexSettings({
+        terminalDevServerDefaultBrowserId: "edge",
+        terminalDevServerEnabledBrowserIds: ["firefox"],
+      }),
+    ).toMatchObject({
+      terminalDevServerOpenTarget: "system-default-browser",
+    });
+    expect(normalizeTerminalDevServerIgnoredPortRuleInput(" 24678 - 24680 ")).toBe(
+      "24678-24680",
+    );
+    expect(normalizeTerminalDevServerIgnoredPortRuleInput("0")).toBeUndefined();
+    expect(normalizeTerminalDevServerIgnoredPortRuleInput("70000")).toBeUndefined();
+    expect(normalizeTerminalDevServerIgnoredPortRuleInput("5000-4000")).toBeUndefined();
+    expect(normalizeTerminalDevServerIgnoredPortRules(["3000", "3001", "3002-3003"])).toEqual([
+      "3000-3003",
+    ]);
+  });
+
+  test("normalizes global Portless settings", () => {
+    /*
+     * CDXC:PortlessSettings 2026-06-22-22:35:
+     * Portless settings are global and default to enabled HTTPS for new and legacy settings. Per-project Portless toggle-shaped keys must not become part of the normalized settings contract.
+     */
+    expect(DEFAULT_ghostex_SETTINGS.portlessEnabled).toBe(true);
+    expect(DEFAULT_ghostex_SETTINGS.portlessProtocol).toBe("https");
+    expect(normalizeghostexSettings({})).toMatchObject({
+      portlessEnabled: true,
+      portlessProtocol: "https",
+    });
+
+    const legacySettings = { ...DEFAULT_ghostex_SETTINGS } as Record<string, unknown>;
+    delete legacySettings.portlessEnabled;
+    delete legacySettings.portlessProtocol;
+    expect(normalizeghostexSettings(legacySettings)).toMatchObject({
+      portlessEnabled: true,
+      portlessProtocol: "https",
+    });
+
+    expect(
+      normalizeghostexSettings({
+        portlessEnabled: "false",
+        portlessProtocol: "HTTPS",
+      }),
+    ).toMatchObject({
+      portlessEnabled: true,
+      portlessProtocol: "https",
+    });
+    expect(
+      normalizeghostexSettings({
+        portlessEnabled: true,
+        portlessProtocol: "https",
+      }),
+    ).toMatchObject({
+      portlessEnabled: true,
+      portlessProtocol: "https",
+    });
+    expect(
+      normalizeghostexSettings({
+        portlessEnabled: false,
+        portlessProtocol: "http",
+      }),
+    ).toMatchObject({
+      portlessEnabled: false,
+      portlessProtocol: "http",
+    });
+
+    const normalizedProjectLikeSettings = normalizeghostexSettings({
+      portlessEnabledByProject: { projectId: false },
+      projectPortlessEnabled: false,
+    });
+    expect(normalizedProjectLikeSettings).toMatchObject({
+      portlessEnabled: true,
+      portlessProtocol: "https",
+    });
+    expect(
+      Object.keys(normalizedProjectLikeSettings).filter(
+        (key) => key.toLowerCase().includes("portless") && key.toLowerCase().includes("project"),
+      ),
+    ).toEqual([]);
   });
 
   test("normalizes App Shots settings", () => {
@@ -360,6 +480,11 @@ describe("normalizeghostexSettings", () => {
      * Sidebar presets intentionally omit the macOS floating badge toggle. This
      * preset test should cover preset-owned sidebar chrome and menu bar
      * indicator state without coupling the floating desktop surface.
+     *
+     * CDXC:SidebarSettingsPresets 2026-06-23-08:20:
+     * All preset buttons should leave session-card close buttons enabled on
+     * hover so switching sidebar density or detail mode does not hide the
+     * primary per-session close affordance.
      */
     expect(DEFAULT_ghostex_SETTINGS).toMatchObject(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended);
     expect(normalizeghostexSettings({})).toMatchObject(
@@ -378,6 +503,9 @@ describe("normalizeghostexSettings", () => {
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideLastActiveTimeOnSessionCards).toBe(
       true,
     );
+    expect(
+      SIDEBAR_SETTINGS_PRESETS.every((preset) => preset.settings.showCloseButtonOnSessionCards),
+    ).toBe(true);
     expect("hideFloatingSessionStatusIndicators" in SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended)
       .toBe(false);
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideMenuBarSessionStatusIndicators).toBe(
@@ -432,10 +560,9 @@ describe("normalizeghostexSettings", () => {
     });
     expect(getSidebarSettingsPresetId(floatingIndicatorsEnabled)).toBe("recommended");
     for (const preset of SIDEBAR_SETTINGS_PRESETS) {
-      expect(
-        applySidebarSettingsPreset(floatingIndicatorsEnabled, preset.id)
-          .hideFloatingSessionStatusIndicators,
-      ).toBe(false);
+      const appliedPreset = applySidebarSettingsPreset(floatingIndicatorsEnabled, preset.id);
+      expect(appliedPreset.hideFloatingSessionStatusIndicators).toBe(false);
+      expect(appliedPreset.showCloseButtonOnSessionCards).toBe(true);
     }
     const floatingIndicatorsHidden = normalizeghostexSettings({
       hideFloatingSessionStatusIndicators: true,
@@ -518,6 +645,7 @@ describe("normalizeghostexSettings", () => {
     expect(DEFAULT_ghostex_SETTINGS.keepAwakeDefaultDurationMinutes).toBe(0);
     expect(DEFAULT_ghostex_SETTINGS.hideKeepAwakeTitlebarControl).toBe(false);
     expect(DEFAULT_ghostex_SETTINGS.keepAwakePreventLidSleep).toBe(false);
+    expect(DEFAULT_ghostex_SETTINGS.keepAwakeWhileWorkingSessions).toBe(false);
     expect(KEEP_AWAKE_DURATION_OPTIONS).toEqual([
       { label: "Until turned off", value: 0 },
       { label: "2 hours", value: 120 },
@@ -530,6 +658,7 @@ describe("normalizeghostexSettings", () => {
         keepAwakeBatteryThresholdPercent: 4,
         keepAwakeDefaultDurationMinutes: 120,
         keepAwakePreventLidSleep: true,
+        keepAwakeWhileWorkingSessions: true,
       }),
     ).toMatchObject({
       hideKeepAwakeTitlebarControl: false,
@@ -537,6 +666,7 @@ describe("normalizeghostexSettings", () => {
       keepAwakeBatteryThresholdPercent: 10,
       keepAwakeDefaultDurationMinutes: 120,
       keepAwakePreventLidSleep: true,
+      keepAwakeWhileWorkingSessions: true,
     });
     expect(normalizeghostexSettings({ hideKeepAwakeTitlebarControl: true })).toMatchObject({
       hideKeepAwakeTitlebarControl: true,

@@ -6730,10 +6730,17 @@ styleElement.textContent = `
   }
 
   .project-ticket-footer-select,
+  .project-ticket-meta-grid [data-slot="select-trigger"],
   .project-ticket-conversation-controls [data-slot="select-trigger"] {
     height: var(--project-board-control-height);
     min-width: 0;
     width: 100%;
+  }
+
+  .project-ticket-title-input,
+  .project-ticket-label-editor input {
+    height: var(--project-board-control-height);
+    min-height: var(--project-board-control-height);
   }
 
   .project-ticket-create-actions {
@@ -6749,10 +6756,14 @@ styleElement.textContent = `
 
   .project-ticket-dialog-footer [data-slot="button"],
   .project-ticket-create-actions > [data-slot="button"],
+  .project-ticket-label-editor > [data-slot="button"],
   .project-ticket-conversation-controls > [data-slot="button"] {
     /*
      * CDXC:ProjectBoardForms 2026-06-21-15:30:
      * New-ticket and edit-ticket action buttons must match the adjacent Project Board dropdown height so macOS Kanban dialog control rows align instead of mixing shadcn's default button height with taller select triggers.
+     *
+     * CDXC:ProjectBoardForms 2026-06-22-02:17:
+     * Top-of-dialog Kanban modal dropdowns, label add controls, and ticket title text fields must use the same Project Board control height as the footer buttons so the create/edit dialogs do not show mismatched control rows.
      */
     height: var(--project-board-control-height);
   }
@@ -6795,9 +6806,7 @@ styleElement.textContent = `
     CDXC:ProjectBoardTickets 2026-06-15-21:00:
     Ticket title editing is a single-line text field. Keep the create/edit title control at one input row so it does not inherit prompt textarea height or wrap its value like long-form content.
     */
-    height: 34px;
     line-height: 18px;
-    min-height: 34px !important;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -6833,7 +6842,7 @@ styleElement.textContent = `
   }
 
   .project-ticket-label-editor input {
-    height: 28px;
+    flex: 1 1 auto;
   }
 
   .project-ticket-image-strip {

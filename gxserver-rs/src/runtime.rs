@@ -5,6 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::{
     config::read_selected_local_api_port,
@@ -88,37 +89,98 @@ pub fn is_build_identity_reusable(running: Option<&str>, expected: Option<&str>)
 /*
 CDXC:GxserverRuntimeIdentity 2026-06-14-20:37:
 Rust Phase 1 writes the same runtime metadata shape as TypeScript so status checks and compatibility fixtures can distinguish healthy, stale, and unreachable fixed-port daemons without probing arbitrary process state.
+
+CDXC:GxserverRuntimeIdentity 2026-06-22-04:38:
+Runtime metadata is an advisory status file. Match TypeScript by treating JSON with missing or wrongly typed metadata fields as absent stale metadata, while still surfacing unreadable files and malformed JSON as real errors.
+Create new runtime metadata files with 0600 at the writer boundary so status files stay private without adding shutdown-time cleanup fallbacks.
 */
 pub fn write_runtime_metadata(paths: &GxserverPaths, metadata: &RuntimeMetadata) -> Result<()> {
     fs::create_dir_all(&paths.runtime_dir).with_context(|| "create gxserver runtime directory")?;
-    fs::write(
+    write_runtime_metadata_file(
         &paths.runtime_metadata_file,
-        format!("{}\n", serde_json::to_string_pretty(metadata)?),
+        format!("{}\n", serde_json::to_string_pretty(metadata)?).as_bytes(),
     )
     .with_context(|| "write gxserver runtime metadata")?;
-    set_file_mode_0600(&paths.runtime_metadata_file)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn write_runtime_metadata_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(bytes)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn write_runtime_metadata_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    fs::write(path, bytes)?;
     Ok(())
 }
 
 pub fn read_runtime_metadata(paths: &GxserverPaths) -> Result<Option<RuntimeMetadata>> {
     match fs::read_to_string(&paths.runtime_metadata_file) {
         Ok(text) => {
-            let parsed: RuntimeMetadata =
+            let parsed: Value =
                 serde_json::from_str(&text).with_context(|| "parse gxserver runtime metadata")?;
-            if parsed.port == read_selected_local_api_port()?
-                && parsed.protocol_version == GXSERVER_PROTOCOL_VERSION
-                && !parsed.server_id.is_empty()
-                && !parsed.started_at.is_empty()
-                && !parsed.version.is_empty()
-            {
-                Ok(Some(parsed))
-            } else {
-                Ok(None)
-            }
+            Ok(read_valid_runtime_metadata(
+                parsed,
+                read_selected_local_api_port()?,
+            ))
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error).with_context(|| "read gxserver runtime metadata"),
     }
+}
+
+fn read_valid_runtime_metadata(value: Value, selected_port: u16) -> Option<RuntimeMetadata> {
+    let object = value.as_object()?;
+    let build_identity = object.get("buildIdentity")?.as_str()?.to_string();
+    let pid = object
+        .get("pid")?
+        .as_u64()
+        .and_then(|pid| u32::try_from(pid).ok())?;
+    let port = json_u16(object.get("port")?)?;
+    if port != selected_port {
+        return None;
+    }
+    let protocol_version = object.get("protocolVersion")?.as_u64()?;
+    if protocol_version != GXSERVER_PROTOCOL_VERSION {
+        return None;
+    }
+    let server_id = object.get("serverId")?.as_str()?.to_string();
+    let started_at = object.get("startedAt")?.as_str()?.to_string();
+    let version = object.get("version")?.as_str()?.to_string();
+    Some(RuntimeMetadata {
+        build_identity,
+        pid,
+        port,
+        protocol_version,
+        server_id,
+        started_at,
+        version,
+    })
+}
+
+fn json_u16(value: &Value) -> Option<u16> {
+    value
+        .as_u64()
+        .and_then(|port| u16::try_from(port).ok())
+        .or_else(|| {
+            let number = value.as_f64()?;
+            if number.fract() == 0.0 && (1.0..=u16::MAX as f64).contains(&number) {
+                Some(number as u16)
+            } else {
+                None
+            }
+        })
 }
 
 pub fn remove_runtime_metadata(paths: &GxserverPaths) -> Result<()> {
@@ -178,18 +240,6 @@ pub fn is_process_running(pid: u32) -> bool {
     }
 }
 
-#[cfg(unix)]
-fn set_file_mode_0600(path: &std::path::Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_file_mode_0600(_path: &std::path::Path) -> Result<()> {
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,5 +297,66 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Invalid gxserver build identity"));
+    }
+
+    #[test]
+    fn runtime_metadata_ignores_json_with_invalid_shape() {
+        let invalid = serde_json::json!({
+            "pid": 123,
+            "port": crate::constants::GXSERVER_LOCAL_API_PORT,
+            "protocolVersion": crate::constants::GXSERVER_PROTOCOL_VERSION,
+            "serverId": "S7k",
+            "startedAt": "2026-05-30T10:04:00.000Z",
+            "version": "0.1.0"
+        });
+
+        assert!(
+            read_valid_runtime_metadata(invalid, crate::constants::GXSERVER_LOCAL_API_PORT)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn runtime_metadata_round_trips_fixed_file_shape() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = crate::paths::get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let metadata = RuntimeMetadata {
+            build_identity: "gxserver:0.1.0:rust-source".to_string(),
+            pid: 123,
+            port: crate::constants::GXSERVER_LOCAL_API_PORT,
+            protocol_version: crate::constants::GXSERVER_PROTOCOL_VERSION,
+            server_id: "S7k".to_string(),
+            started_at: "2026-05-30T10:04:00.000Z".to_string(),
+            version: "0.1.0".to_string(),
+        };
+
+        write_runtime_metadata(&paths, &metadata).expect("write metadata");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&paths.runtime_metadata_file)
+                    .expect("runtime metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+
+        let read = read_runtime_metadata(&paths)
+            .expect("read metadata")
+            .expect("metadata");
+        assert_eq!(read.build_identity, metadata.build_identity);
+        assert_eq!(read.pid, metadata.pid);
+        assert_eq!(read.port, metadata.port);
+        assert_eq!(read.protocol_version, metadata.protocol_version);
+        assert_eq!(read.server_id, metadata.server_id);
+        assert_eq!(read.started_at, metadata.started_at);
+        assert_eq!(read.version, metadata.version);
+        remove_runtime_metadata(&paths).expect("remove metadata");
+        assert!(read_runtime_metadata(&paths)
+            .expect("read removed metadata")
+            .is_none());
     }
 }

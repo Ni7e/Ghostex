@@ -973,7 +973,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
   private var pendingGhosttyConfigReloadTimer: Timer?
   private var isFlushingCEFBeforeTerminate = false
   private var didFlushCEFBeforeTerminate = false
-  private var isQuittingGhostexFullyFromMenuBar = false
   private var workspaceActivationObserver: NSObjectProtocol?
   private var trafficLightLayoutObservers: [NSObjectProtocol] = []
   private weak var trafficLightLayoutObservedWindow: NSWindow?
@@ -2686,6 +2685,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       onClick: { [weak self] status in
         self?.handleSessionStatusIndicatorClick(status)
       },
+      onProjectClick: { [weak self] projectId in
+        self?.handleSessionStatusIndicatorProjectClick(projectId)
+      },
+      onSessionClick: { [weak self] projectId, sessionId in
+        self?.handleSessionStatusIndicatorSessionClick(projectId: projectId, sessionId: sessionId)
+      },
       onMenuAction: { [weak self] action in
         self?.handleSessionStatusIndicatorMenuAction(action)
       })
@@ -2849,6 +2854,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
      settings do not fork #95d7f6 attention or orange working navigation behavior.
      */
     let event = HostEvent.sessionStatusIndicatorClicked(status: status)
+    window?.makeKeyAndOrderFront(nil)
+    bridge?.send(event)
+    (window?.contentView as? ghostexRootView)?.postHostEvent(event)
+  }
+
+  @MainActor
+  private func handleSessionStatusIndicatorProjectClick(_ projectId: String) {
+    /*
+     CDXC:MenuBarStatusIndicator 2026-06-22-13:52:
+     Running-agents modal project rows should raise Ghostex and ask the sidebar
+     to switch projects through its normal focusProject path. Native sends only
+     the stable project id so AppKit does not own project/session state.
+     */
+    let event = HostEvent.sessionStatusIndicatorProjectClicked(projectId: projectId)
+    recordNativeActivationRequest(reason: "menuBarStatusIndicator.projectClick")
+    NSApp.unhide(nil)
+    if window?.isMiniaturized == true {
+      window?.deminiaturize(nil)
+    }
+    NSApp.activate(ignoringOtherApps: true)
+    window?.makeKeyAndOrderFront(nil)
+    bridge?.send(event)
+    (window?.contentView as? ghostexRootView)?.postHostEvent(event)
+  }
+
+  @MainActor
+  private func handleSessionStatusIndicatorSessionClick(projectId: String, sessionId: String) {
+    /*
+     CDXC:MenuBarStatusIndicator 2026-06-22-13:52:
+     Running-agents modal session rows should behave like sidebar session-card
+     clicks. Forward the owning project id and sidebar session id so the sidebar
+     can switch projects, wake/attach panes, and focus the selected agent.
+     */
+    let event = HostEvent.sessionStatusIndicatorSessionClicked(
+      projectId: projectId,
+      sessionId: sessionId)
+    recordNativeActivationRequest(reason: "menuBarStatusIndicator.sessionClick")
+    NSApp.unhide(nil)
+    if window?.isMiniaturized == true {
+      window?.deminiaturize(nil)
+    }
+    NSApp.activate(ignoringOtherApps: true)
     window?.makeKeyAndOrderFront(nil)
     bridge?.send(event)
     (window?.contentView as? ghostexRootView)?.postHostEvent(event)
@@ -3412,42 +3459,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
   @MainActor
   private func handleSessionStatusIndicatorMenuAction(_ action: SessionStatusIndicatorMenuAction) {
     switch action {
-    case .openApp:
-      openGhostexFromMenuBarIndicator()
     case .restartApp:
       restartGhostexAppFromMenuBarIndicator()
     case .quitApp:
       NSApp.terminate(nil)
-    case .quitFully:
-      quitGhostexFullyFromMenuBarIndicator()
     }
-  }
-
-  @MainActor
-  private func openGhostexFromMenuBarIndicator() {
-    /*
-     CDXC:MenuBarStatusIndicator 2026-06-15-11:34:
-     The right-click status menu needs a plain Open Ghostex action above app
-     lifecycle commands. It should only raise/unhide the app; left-click status
-     routing remains responsible for selecting done or running sessions.
-     */
-    recordNativeActivationRequest(reason: "menuBarStatusIndicator.openGhostex")
-    NSApp.unhide(nil)
-    if window?.isMiniaturized == true {
-      window?.deminiaturize(nil)
-    }
-    NSApp.activate(ignoringOtherApps: true)
-    window?.makeKeyAndOrderFront(nil)
-    window?.orderFrontRegardless()
   }
 
   @MainActor
   private func restartGhostexAppFromMenuBarIndicator() {
     /*
-     CDXC:MenuBarStatusIndicator 2026-06-15-03:16:
-     The number-only menu bar indicator exposes app lifecycle commands. Restart
-     should relaunch the current Ghostex bundle without stopping gxserver or zmx
-     sessions, preserving the normal restart-safe backend behavior.
+     CDXC:MenuBarStatusIndicator 2026-06-22-13:52:
+     The running-agents modal footer exposes Restart Ghostex below a separator.
+     Restart should relaunch the current Ghostex bundle without stopping
+     gxserver or zmx sessions, preserving the normal restart-safe backend
+     behavior.
      */
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.createsNewApplicationInstance = true
@@ -3459,37 +3485,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
           Self.appendNativeHostLifecycleLog(
             "menuBar.restartApp launchError domain=\(nsError.domain) code=\(nsError.code)")
         }
-        NSApp.terminate(nil)
-      }
-    }
-  }
-
-  @MainActor
-  private func quitGhostexFullyFromMenuBarIndicator() {
-    /*
-     CDXC:MenuBarStatusIndicator 2026-06-15-03:16:
-     Quit Ghostex Fully should return as much RAM as possible. Terminate native
-     terminal children and app-managed runtimes first, then use gxserver
-     stop-all to kill tracked zmx sessions and the control plane before the
-     macOS app exits.
-     */
-    guard !isQuittingGhostexFullyFromMenuBar else {
-      return
-    }
-    isQuittingGhostexFullyFromMenuBar = true
-    publishGxserverBootstrapStatus(
-      gxserverClient.startingStatus(message: "Stopping gxserver and zmx sessions..."))
-    workspaceView?.terminateAllSessionProcessesForFullQuit()
-    stopT3CodeRuntime(logPrefix: "menuBar.quitFully")
-    stopCodeServerRuntime(logPrefix: "menuBar.quitFully")
-    (window?.contentView as? ghostexRootView)?.stopManagedRuntimesForFullQuit()
-    Task { [weak self] in
-      guard let self else { return }
-      let status = await self.gxserverClient.stopAllControlPlane()
-      await MainActor.run {
-        Self.appendNativeHostLifecycleLog(
-          "menuBar.quitFully state=\(status.state) ok=\(status.ok)")
-        self.publishGxserverBootstrapStatus(status)
         NSApp.terminate(nil)
       }
     }
@@ -3802,6 +3797,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       }
     case .cancelRunProcess(let command):
       NativeProcessRegistry.shared.cancel(requestId: command.requestId)
+    case .portlessAdminAction(let command):
+      /*
+       CDXC:PortlessIntegration 2026-06-23-00:15:
+       Portless service install/reconfigure/retry/remove actions use the dedicated native admin bridge, not runProcess, so the privileged path can enforce bundled runtime, clean env, fixed localhost ports, and sanitized result fields.
+       */
+      PortlessAdminClient.shared.run(command) { [weak self] event in
+        self?.bridge?.send(event)
+      }
     case .gxserverRequest(let command):
       Task { [weak self] in
         let event = await GxserverClient.request(command)
@@ -3915,6 +3918,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       (window?.contentView as? ghostexRootView)?.showTitlebarDropdownPanel(command)
     case .closeTitlebarDropdownPanel:
       (window?.contentView as? ghostexRootView)?.closeTitlebarDropdownPanel()
+    case .syncTitlebarKeepAwakeRuntime(let command):
+      (window?.contentView as? ghostexRootView)?.syncTitlebarKeepAwakeRuntime(command)
     case .resizeTitlebarDropdownPanel(let command):
       (window?.contentView as? ghostexRootView)?.resizeTitlebarDropdownPanel(command)
     case .titlebarDropdownPanelReady(let command):
@@ -8426,9 +8431,12 @@ final class ghostexRootView: NSView {
         "deactivateOnLowPowerMode": keepAwake.deactivateOnLowPowerMode,
         "deactivateOnUserSwitch": keepAwake.deactivateOnUserSwitch,
         "defaultDurationMinutes": keepAwake.defaultDurationMinutes,
+        "delayedSendSessionCount": keepAwake.delayedSendSessionCount ?? 0,
         "featureEnabled": keepAwake.featureEnabled ?? false,
         "hideTitlebarControl": keepAwake.hideTitlebarControl ?? true,
         "preventLidSleep": keepAwake.preventLidSleep,
+        "whileWorkingSessions": keepAwake.whileWorkingSessions ?? false,
+        "workingSessionCount": keepAwake.workingSessionCount ?? 0,
       ]
     }
     if let daemon = command.gxserverDaemon {
@@ -8541,6 +8549,68 @@ final class ghostexRootView: NSView {
         "type": ghostexCliStatus.type,
       ] as [String: Any]
     }
+    if let codeEditorProjectIds = command.titlebarCodeEditorProjectIds {
+      /**
+       CDXC:TitlebarResources 2026-06-22-13:50:
+       Forward only awake embedded-Code project ids into the isolated titlebar payload. The Resources modal uses these ids to close shared Code IDE surfaces while keeping project names, paths, and Code URLs out of the cross-webview state.
+       */
+      payload["codeEditorProjectIds"] = codeEditorProjectIds
+    }
+    if let portless = command.titlebarPortless {
+      /**
+       CDXC:PortlessResources 2026-06-23-15:18:
+       Forward only sanitized Portless status, native action availability, and
+       live route previews to the isolated titlebar. Resources uses this to
+       decorate existing owned dev-server rows; do not add paths, command text,
+       process output, environment values, tokens, or Portless file contents.
+       */
+      var nativeAdminActions: [String: Any] = [:]
+      for (actionName, action) in portless.nativeAdmin.actions {
+        var actionPayload: [String: Any] = [
+          "action": action.action ?? actionName,
+          "available": action.available,
+        ]
+        if let unavailableReason = action.unavailableReason {
+          actionPayload["unavailableReason"] = unavailableReason
+        }
+        nativeAdminActions[actionName] = actionPayload
+      }
+      var healthPayload: [String: Any] = [
+        "enabled": portless.health.enabled,
+        "protocol": portless.health.portlessProtocol,
+        "runtimeStatus": portless.health.runtimeStatus,
+        "setupOwnership": portless.health.setupOwnership,
+        "setupStatus": portless.health.setupStatus,
+        "sourceStatus": portless.health.sourceStatus,
+      ]
+      if let updatedAt = portless.health.updatedAt {
+        healthPayload["updatedAt"] = updatedAt
+      }
+      var portlessPayload: [String: Any] = [
+        "health": healthPayload,
+        "nativeAdmin": [
+          "actions": nativeAdminActions,
+          "available": portless.nativeAdmin.available,
+        ],
+      ]
+      if let presentation = portless.presentation {
+        portlessPayload["presentation"] = [
+          "liveListenerCount": presentation.liveListenerCount,
+          "routePreviewStatus": presentation.routePreviewStatus,
+          "routePreviews": presentation.routePreviews.map { preview in
+            [
+              "hostname": preview.hostname,
+              "kind": preview.kind,
+              "port": preview.port,
+              "projectId": preview.projectId,
+              "protocol": preview.portlessProtocol,
+              "sessionId": preview.sessionId,
+            ] as [String: Any]
+          },
+        ] as [String: Any]
+      }
+      payload["portless"] = portlessPayload
+    }
     if let resourceGroups = command.titlebarResourceGroups {
       /**
        CDXC:TitlebarResources 2026-06-02-15:27:
@@ -8595,6 +8665,15 @@ final class ghostexRootView: NSView {
     }
     if let sessionPersistenceProvider = command.sessionPersistenceProvider {
       payload["sessionPersistenceProvider"] = sessionPersistenceProvider
+    }
+    if let terminalDevServerOpenTarget = command.terminalDevServerOpenTarget {
+      /**
+       CDXC:TerminalDevServers 2026-06-23-19:22:
+       Settings reduces dev-server opening to either the system default browser
+       or the internal browser. Forward only that enum-like value to the
+       isolated titlebar so Resources rows do not need per-browser metadata.
+       */
+      payload["terminalDevServerOpenTarget"] = terminalDevServerOpenTarget
     }
     /**
      CDXC:TitlebarResources 2026-05-17-01:25:
@@ -8696,6 +8775,40 @@ final class ghostexRootView: NSView {
 
   func closeTitlebarDropdownPanel() {
     titlebarDropdownPanelController?.close()
+  }
+
+  func syncTitlebarKeepAwakeRuntime(_ command: SyncTitlebarKeepAwakeRuntime) {
+    /*
+     CDXC:TitlebarKeepAwake 2026-06-23-19:36:
+     Keep Awake dropdown actions can finish inside a native child WKWebView. Relay the committed runtime state into the main titlebar WKWebView so the strip icon updates immediately after menu selection, including explicit null runtime stops that clear stale child-webview state.
+     */
+    var payload: [String: Any] = [
+      "suppressAutoStart": command.suppressAutoStart,
+    ]
+    if let runtime = command.runtime {
+      var runtimePayload: [String: Any] = [
+        "durationMinutes": runtime.durationMinutes,
+        "pid": runtime.pid,
+        "source": runtime.source ?? "manual",
+        "startedAtMs": runtime.startedAtMs,
+      ]
+      if let fireAtMs = runtime.fireAtMs {
+        runtimePayload["fireAtMs"] = fireAtMs
+      }
+      payload["runtime"] = runtimePayload
+    } else {
+      payload["runtime"] = NSNull()
+    }
+    guard let data = try? JSONSerialization.data(withJSONObject: payload),
+      let json = String(data: data, encoding: .utf8)
+    else {
+      return
+    }
+    titlebarChromeWebView.evaluateJavaScript(
+      """
+      window.__ghostex_TITLEBAR__?.syncKeepAwakeRuntime(\(json));
+      undefined;
+      """)
   }
 
   func resizeTitlebarDropdownPanel(_ command: ResizeTitlebarDropdownPanel) {
@@ -9306,6 +9419,10 @@ final class ghostexRootView: NSView {
       runProcess(command)
     case .cancelRunProcess(let command):
       NativeProcessRegistry.shared.cancel(requestId: command.requestId)
+    case .portlessAdminAction(let command):
+      PortlessAdminClient.shared.run(command) { [weak self] event in
+        self?.postHostEvent(event)
+      }
     case .gxserverRequest(let command):
       Task { [weak self] in
         let event = await GxserverClient.request(command)
@@ -9427,6 +9544,8 @@ final class ghostexRootView: NSView {
       showTitlebarDropdownPanel(command)
     case .closeTitlebarDropdownPanel:
       closeTitlebarDropdownPanel()
+    case .syncTitlebarKeepAwakeRuntime(let command):
+      syncTitlebarKeepAwakeRuntime(command)
     case .resizeTitlebarDropdownPanel(let command):
       resizeTitlebarDropdownPanel(command)
     case .titlebarDropdownPanelReady(let command):
@@ -10201,18 +10320,6 @@ final class ghostexRootView: NSView {
     stopCodeServerRuntime(logPrefix: "nativeSidebar.applicationWillTerminate")
   }
 
-  func stopManagedRuntimesForFullQuit() {
-    /*
-     CDXC:MenuBarStatusIndicator 2026-06-15-03:16:
-     Quit Ghostex Fully should stop native-sidebar-owned shared runtimes before
-     AppKit termination. Route through the existing T3 Code and code-server
-     helpers so tracked process handles, pending launches, and stale listener
-     cleanup stay in one implementation.
-     */
-    stopT3CodeRuntime(logPrefix: "nativeSidebar.menuBar.quitFully")
-    stopCodeServerRuntime(logPrefix: "nativeSidebar.menuBar.quitFully")
-  }
-
   private func activateAppWindow() {
     NSApp.activate(ignoringOtherApps: true)
     window?.makeKeyAndOrderFront(nil)
@@ -10610,7 +10717,7 @@ final class ghostexRootView: NSView {
     guard modal != "commandPalette" else {
       return false
     }
-    if isSettingsWorkspaceAppModal(modal) {
+    if isSettingsAppModal(modal) {
       /*
        CDXC:SettingsModalStuckBlank 2026-06-20-23:02:
        Settings repeat opens must only be ignored after React has confirmed the
@@ -10651,64 +10758,18 @@ final class ghostexRootView: NSView {
     parentWindow: NSWindow,
     preferredContentFrame: CGRect?
   ) -> CGRect? {
-    if let preferredContentFrame {
-      return preferredContentFrame
-    }
-    guard isSettingsWorkspaceAppModal(modal) else {
-      return nil
-    }
     /*
-     CDXC:AppModals 2026-06-15-10:12:
-     Settings should cover the whole app workspace while leaving the sidebar,
-     divider, and titlebar as separate native siblings. Use the same computed
-     workspace frame that lays out terminal/browser panes, then convert that
-     content rect to screen coordinates for the AppKit child window.
-
-     CDXC:SettingsLayout 2026-06-19-13:37:
-     Titlebar Configure entries for Quick Actions and Open in App route to the
-     unified Settings dialog with modal ids such as configureActions and
-     openTargets. Treat every Settings-family id as a workspace-owned Settings
-     surface so those entry points do not inherit the compact centered modal
-     frame.
+     CDXC:SettingsWindow 2026-06-24-05:39:
+     Settings opens as a separate draggable, resizable native modal instead of a
+     workspace-sized child panel. Only callers that explicitly pass a content
+     frame, such as the prompt editor, should bypass the centered modal placement.
      */
-    let workspaceFrame = rootLayoutFrames().workspace
-    return parentWindow.convertToScreen(convert(workspaceFrame, to: nil))
-  }
-
-  fileprivate func updateSettingsModalWorkspaceFrameIfNeeded() {
-    guard let modal = nativeAppModalWindowController?.currentModalKind,
-      isSettingsWorkspaceAppModal(modal)
-    else {
-      return
-    }
-    /*
-     CDXC:SettingsLayout 2026-06-15-14:07:
-     Settings covers the current workspace frame exactly and must follow
-     workspace geometry changes while it stays open. Recompute the native child
-     window frame when the main window, sidebar collapse state, or sidebar side
-     changes instead of closing Settings or leaving the old frame onscreen.
-
-     CDXC:SettingsLayout 2026-06-19-13:37:
-     Reframe the active Settings-family modal by its actual modal id so Actions,
-     Open Targets, Agents, and Hotkeys entry points continue to fill the
-     available workspace after main-window/sidebar geometry changes.
-     */
-    guard let window,
-      let contentScreenFrame = preferredNativeAppModalContentFrame(
-        for: modal,
-        parentWindow: window,
-        preferredContentFrame: nil)
-    else {
-      return
-    }
-    nativeAppModalWindowController?.updateContentFrame(
-      modal: modal,
-      parentWindow: window,
-      preferredContentFrame: contentScreenFrame)
+    _ = modal
+    _ = parentWindow
+    return preferredContentFrame
   }
 
   fileprivate func updateAppModalChildWindowFramesIfNeeded() {
-    updateSettingsModalWorkspaceFrameIfNeeded()
     updateOnboardingAppModalBackdropFrameIfNeeded()
   }
 
@@ -14834,12 +14895,12 @@ private final class AppModalWindowWebView: WKWebView {
   }
 }
 
-private func isSettingsWorkspaceAppModal(_ modal: String?) -> Bool {
+private func isSettingsAppModal(_ modal: String?) -> Bool {
   /*
-   CDXC:SettingsLayout 2026-06-19-13:37:
-   These modal ids all render the unified Settings dialog in the native modal
-   host. Keep the native frame decision shared so direct Settings opens and
-   titlebar Configure opens fill the same workspace area.
+   CDXC:SettingsWindow 2026-06-24-05:39:
+   These modal ids all render the unified Settings dialog in a separate native
+   modal window. Keep this helper for routing, diagnostics, and inline settings
+   hydration without tying Settings to the app workspace frame.
    */
   switch modal {
   case "settings", "configureAgents", "configureActions", "openTargets", "hotkeys":
@@ -14852,6 +14913,13 @@ private func isSettingsWorkspaceAppModal(_ modal: String?) -> Bool {
 private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavigationDelegate {
   private static let screenMargin: CGFloat = 24
   private static let minimumSize = CGSize(width: 520, height: 360)
+  /*
+   CDXC:SettingsWindow 2026-06-24-05:39:
+   Settings must open as a normal resizable native modal with a 1000x750 content
+   size that is also its minimum, while user resize is capped at 1800x1200.
+   */
+  private static let settingsWindowSize = CGSize(width: 1000, height: 750)
+  private static let settingsWindowMaximumSize = CGSize(width: 1800, height: 1200)
   private static let floatingPromptEditorMinimumSize = CGSize(width: 180, height: 260)
   private static let floatingPromptEditorResizeMargin: CGFloat = 8
   private static let floatingPromptEditorResizeHandleSize: CGFloat = 24
@@ -15086,6 +15154,9 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     panel.isReleasedWhenClosed = false
     panel.level = parentWindow.level
     panel.contentMinSize = minimumContentSize(for: modal)
+    if let maximumContentSize = maximumContentSize(for: modal) {
+      panel.contentMaxSize = maximumContentSize
+    }
     if modal == "floatingPromptEditor" {
       panel.promptEditorMinimumContentSize = Self.floatingPromptEditorMinimumSize
       panel.promptEditorResizeMargin = Self.floatingPromptEditorResizeMargin
@@ -15185,12 +15256,11 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return
     }
     /*
-     CDXC:SettingsLayout 2026-06-15-14:07:
-     Exact-frame app modals such as Settings must be able to follow workspace
-     geometry changes without remounting React. Reuse the same constrained
-     content-frame calculation as initial open so sidebar collapse, sidebar
-     side changes, and main-window resize keep the child window aligned to the
-     current workspace sibling frame.
+     CDXC:SettingsWindow 2026-06-24-05:39:
+     Live frame updates are for app-modal surfaces with explicit native content
+     frames. Settings is user-positioned and resizable, so it must not be sent
+     through this workspace-following path after sidebar or main-window layout
+     changes.
      */
     let size = constrainedSize(
       preferredContentFrame?.size ?? defaultSize(for: modal),
@@ -15204,6 +15274,9 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     panel.setFrame(panel.frameRect(forContentRect: contentFrame), display: true)
     panel.level = parentWindow.level
     panel.contentMinSize = minimumContentSize(for: modal)
+    if let maximumContentSize = maximumContentSize(for: modal) {
+      panel.contentMaxSize = maximumContentSize
+    }
     if shouldLockContentSize(modal: modal) {
       panel.contentMinSize = size
       panel.contentMaxSize = size
@@ -15290,6 +15363,9 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       panel.setFrame(panel.frameRect(forContentRect: contentFrame), display: false)
       panel.level = parentWindow.level
       panel.contentMinSize = minimumContentSize(for: modal)
+      if let maximumContentSize = maximumContentSize(for: modal) {
+        panel.contentMaxSize = maximumContentSize
+      }
       if shouldLockContentSize(modal: modal) {
         panel.contentMinSize = size
         panel.contentMaxSize = size
@@ -15457,9 +15533,9 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     guard isReady else {
       let messageType = message["type"] as? String ?? ""
       let messageModal = message["modal"] as? String ?? ""
-      if isSettingsWorkspaceAppModal(loadedModal)
-        || isSettingsWorkspaceAppModal(currentModal)
-        || isSettingsWorkspaceAppModal(messageModal)
+      if isSettingsAppModal(loadedModal)
+        || isSettingsAppModal(currentModal)
+        || isSettingsAppModal(messageModal)
       {
         logSettingsWindowEvent(
           messageType == "sidebarState"
@@ -15491,9 +15567,9 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       && (messageModal == "floatingPromptEditor"
         || messageType.hasPrefix("floatingPromptEditor"))
     let isSettingsModalMessage =
-      isSettingsWorkspaceAppModal(loadedModal)
-      || isSettingsWorkspaceAppModal(currentModal)
-      || isSettingsWorkspaceAppModal(messageModal)
+      isSettingsAppModal(loadedModal)
+      || isSettingsAppModal(currentModal)
+      || isSettingsAppModal(messageModal)
     let deliveryMessage = messageForDispatch(message)
     if isPromptEditorMessage {
       logPromptWindowEvent(
@@ -15567,7 +15643,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
 
   private func messageForDispatch(_ message: [String: Any]) -> [String: Any] {
     guard (message["type"] as? String) == "open",
-      isSettingsWorkspaceAppModal(message["modal"] as? String),
+      isSettingsAppModal(message["modal"] as? String),
       let latestSidebarState
     else {
       return message
@@ -15933,10 +16009,10 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
      Blank Settings repros must distinguish native window creation, WKWebView load, host-ready dispatch, React presentation, and final AppKit visibility.
      Keep these lifecycle breadcrumbs under the same Debugging Mode gate as other app-modal diagnostics.
      */
-    guard isSettingsWorkspaceAppModal(loadedModal)
-      || isSettingsWorkspaceAppModal(currentModal)
-      || isSettingsWorkspaceAppModal(details["modal"] as? String)
-      || isSettingsWorkspaceAppModal(details["messageModal"] as? String)
+    guard isSettingsAppModal(loadedModal)
+      || isSettingsAppModal(currentModal)
+      || isSettingsAppModal(details["modal"] as? String)
+      || isSettingsAppModal(details["messageModal"] as? String)
     else {
       return
     }
@@ -15964,7 +16040,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     case "floatingPromptEditor":
       return CGSize(width: 400, height: 320)
     case "settings", "configureAgents", "configureActions", "openTargets", "hotkeys":
-      return CGSize(width: 1120, height: 780)
+      return Self.settingsWindowSize
     case "agentsHub":
       return CGSize(width: 1120, height: 760)
     case "firstLaunchSetup", "tipsAndTricks":
@@ -16065,8 +16141,12 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     }
     let visibleFrame = parentWindow.screen?.visibleFrame ?? parentWindow.frame
     let minimumSize = minimumContentSize(for: modal)
-    let maxWidth = max(minimumSize.width, visibleFrame.width - Self.screenMargin * 2)
-    let maxHeight = max(minimumSize.height, visibleFrame.height - Self.screenMargin * 2)
+    var maxWidth = max(minimumSize.width, visibleFrame.width - Self.screenMargin * 2)
+    var maxHeight = max(minimumSize.height, visibleFrame.height - Self.screenMargin * 2)
+    if let maximumSize = maximumContentSize(for: modal) {
+      maxWidth = max(minimumSize.width, min(maxWidth, maximumSize.width))
+      maxHeight = max(minimumSize.height, min(maxHeight, maximumSize.height))
+    }
     return CGSize(
       width: min(max(size.width, minimumSize.width), maxWidth),
       height: min(max(size.height, minimumSize.height), maxHeight)
@@ -16162,7 +16242,14 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   }
 
   private func shouldUseExactContentFrame(modal: String?) -> Bool {
-    isSettingsWorkspaceAppModal(modal)
+    /*
+     CDXC:SettingsWindow 2026-06-24-05:39:
+     Settings no longer opts into exact workspace framing. Keep exact-frame
+     placement disabled so native window sizing, min/max constraints, and
+     centered placement own Settings presentation.
+     */
+    _ = modal
+    return false
   }
 
   private func shouldLockContentSize(modal: String) -> Bool {
@@ -16178,30 +16265,40 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return Self.floatingPromptEditorMinimumSize
     case "settings", "configureAgents", "configureActions", "openTargets", "hotkeys":
       /*
-       CDXC:AppModals 2026-06-15-10:12:
-       Settings inherits the exact workspace content frame from the root view.
-       Do not let the generic modal minimum expand a narrow workspace over the
-       sidebar or titlebar when the main window is small.
-
-       CDXC:SettingsLayout 2026-06-19-13:37:
-       Settings-family routes share the same minimum because configureActions,
+       CDXC:SettingsWindow 2026-06-24-05:39:
+       Settings-family routes share the 1000x750 minimum because configureActions,
        openTargets, configureAgents, and hotkeys are initial-tab requests for
        the full Settings surface, not compact management dialogs.
        */
-      return CGSize(width: 1, height: 1)
+      return Self.settingsWindowSize
     default:
       return Self.minimumSize
     }
+  }
+
+  private func maximumContentSize(for modal: String?) -> CGSize? {
+    if isSettingsAppModal(modal) {
+      return Self.settingsWindowMaximumSize
+    }
+    return nil
   }
 
   private func appModalStyleMask(for modal: String) -> NSWindow.StyleMask {
     if modal == "floatingPromptEditor" {
       return .borderless
     }
+    if isSettingsAppModal(modal) {
+      return [.titled, .closable, .resizable]
+    }
     return .borderless
   }
 
   private func configurePanelChrome(_ panel: NSPanel, modal: String) {
+    if isSettingsAppModal(modal) {
+      panel.hasShadow = true
+      panel.isMovableByWindowBackground = false
+      return
+    }
     guard modal == "floatingPromptEditor" else {
       return
     }

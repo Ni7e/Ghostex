@@ -85,6 +85,9 @@ Rust logger startup must match TypeScript support-bundle retention: schedule a o
 
 CDXC:GxserverLogs 2026-06-19-18:44:
 Retention rewrites the retained JSONL file, so append, rotation, and prune must share a per-log-file writer lock. Do not replace this with stale temp-and-rename pruning unless concurrent appends are blocked or merged before the rewrite commits.
+
+CDXC:GxserverLogs 2026-06-22-09:57:
+Area 36 privacy review requires persistent gxserver-rs logs to stay metadata-only even when future call sites accidentally pass prompts, environment maps, or uppercase-scheme URLs through structured details. Keep those redactions at the JSONL writer boundary so hook, clone, typed-operation, and lifecycle diagnostics cannot persist user content.
 */
 impl GxserverLogger {
     pub fn new(paths: GxserverPaths) -> Self {
@@ -331,7 +334,7 @@ fn sanitize_log_value(key: &str, value: Value) -> Value {
         Value::Null | Value::Bool(_) | Value::Number(_) => value,
         Value::String(text) => sanitize_string_field(&key, &text),
         Value::Array(items) => {
-            if is_sensitive_collection_key(&key) {
+            if is_environment_key(&key) || is_sensitive_collection_key(&key) {
                 json!({ "count": items.len(), "redacted": true })
             } else {
                 Value::Array(
@@ -343,7 +346,7 @@ fn sanitize_log_value(key: &str, value: Value) -> Value {
             }
         }
         Value::Object(object) => {
-            if is_sensitive_collection_key(&key) {
+            if is_environment_key(&key) || is_sensitive_collection_key(&key) {
                 json!({ "redacted": true })
             } else {
                 Value::Object(
@@ -363,6 +366,9 @@ fn sanitize_log_value(key: &str, value: Value) -> Value {
 fn sanitize_string_field(key: &str, value: &str) -> Value {
     if is_secret_key(key) {
         return json!("[redacted:secret]");
+    }
+    if is_environment_key(key) {
+        return json!("[redacted]");
     }
     if is_identifier_key(key) && is_safe_identifier(value) {
         return json!(value);
@@ -426,7 +432,7 @@ fn redact_json_string_fields(value: &str) -> String {
 }
 
 fn redact_urls(value: &str) -> String {
-    redact_matching_segments(value, &["http://", "https://"], "[redacted:url]")
+    redact_matching_segments(value, &["http://", "https://"], "[redacted:url]", true)
 }
 
 fn redact_paths(value: &str) -> String {
@@ -441,18 +447,23 @@ fn redact_paths(value: &str) -> String {
             "/var/folders/",
         ],
         "[redacted:path]",
+        false,
     )
 }
 
-fn redact_matching_segments(value: &str, prefixes: &[&str], replacement: &str) -> String {
+fn redact_matching_segments(
+    value: &str,
+    prefixes: &[&str],
+    replacement: &str,
+    case_insensitive: bool,
+) -> String {
     let mut output = String::with_capacity(value.len());
     let mut cursor = 0;
     while cursor < value.len() {
         let next = prefixes
             .iter()
             .filter_map(|prefix| {
-                value[cursor..]
-                    .find(prefix)
+                find_prefix(&value[cursor..], prefix, case_insensitive)
                     .map(|index| (cursor + index, *prefix))
             })
             .min_by_key(|(index, _)| *index);
@@ -465,6 +476,14 @@ fn redact_matching_segments(value: &str, prefixes: &[&str], replacement: &str) -
         cursor = segment_end(value, start + prefix.len());
     }
     output
+}
+
+fn find_prefix(value: &str, prefix: &str, case_insensitive: bool) -> Option<usize> {
+    if case_insensitive {
+        value.to_ascii_lowercase().find(prefix)
+    } else {
+        value.find(prefix)
+    }
 }
 
 fn segment_end(value: &str, start: usize) -> usize {
@@ -566,7 +585,7 @@ fn read_debugging_mode_settings_file(paths: &GxserverPaths) -> bool {
 fn write_gxserver_log_line(paths: &GxserverPaths, line: &str) -> Result<()> {
     let write_lock = log_file_write_lock(&paths.log_file);
     let _write_guard = write_lock.lock().expect("gxserver log writer poisoned");
-    rotate_log_if_needed(&paths.log_file, line.as_bytes().len() as u64 + 1)?;
+    rotate_log_if_needed(&paths.log_file, line.len() as u64 + 1)?;
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -1182,6 +1201,10 @@ fn is_sensitive_text_key(key: &str) -> bool {
         || key == "comment"
         || key == "description"
         || key == "label"
+        || key == "prompt"
+        || key.ends_with("prompt")
+        || key == "prompts"
+        || key.ends_with("prompts")
         || key == "preview"
         || key.ends_with("preview")
         || key == "command"
@@ -1196,8 +1219,26 @@ fn is_sensitive_collection_key(key: &str) -> bool {
     key == "args" || key.ends_with("args") || key == "arguments" || key.ends_with("arguments")
 }
 
+fn is_environment_key(key: &str) -> bool {
+    key == "env"
+        || key == "envvars"
+        || key == "envvariables"
+        || key == "environment"
+        || key == "environmentvariables"
+        || key.ends_with("env")
+        || key.ends_with("envvars")
+        || key.ends_with("envvariables")
+        || key.ends_with("environment")
+        || key.ends_with("environmentvariables")
+}
+
 fn looks_like_url(value: &str) -> bool {
-    value.starts_with("http://") || value.starts_with("https://")
+    value
+        .get(..7)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+        || value
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
 }
 
 fn looks_like_path(value: &str) -> bool {
@@ -1259,6 +1300,139 @@ mod tests {
         assert!(!text.contains("raw command output"));
         assert!(!text.contains("raw error output"));
         assert!(text.contains("P1abc"));
+    }
+
+    #[test]
+    fn persistent_log_boundary_redacts_prompts_env_urls_titles_commands_and_output() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let logger = GxserverLogger::new(paths.clone());
+        logger
+            .log(GxserverLogInput {
+                level: LogLevel::Warn,
+                event: "privacy.boundary".to_string(),
+                server_id: Some("S7k".to_string()),
+                request_id: Some("request-privacy".to_string()),
+                client: None,
+                duration_ms: None,
+                error: Some(
+                    "failed while running /Users/person/dev/private-project with HTTPS://Example.test/private?token=SECRET"
+                        .to_string(),
+                ),
+                details: Some(json!({
+                    "args": ["commit", "-m", "private command subject"],
+                    "authToken": "SECRET",
+                    "commandText": "git commit -m 'private command subject'",
+                    "env": {
+                        "CUSTOMER_NAME": "Acme Private",
+                        "GHOSTEX_TOKEN": "SECRET"
+                    },
+                    "environment": "PATH=/Users/person/dev/private-project TOKEN=SECRET",
+                    "projectName": "Private Project",
+                    "prompt": "Summarize private customer incident",
+                    "prompts": ["private prompt one", "private prompt two"],
+                    "rawUrl": "HTTPS://Example.test/private?token=SECRET",
+                    "sessionName": "Customer Debug Session",
+                    "stderr": "private stderr output",
+                    "stdout": "private stdout output",
+                    "terminalTitle": "Private Terminal Title",
+                    "url": "HTTPS://Example.test/private?token=SECRET",
+                    "workspaceRoot": "/Users/person/dev/private-project"
+                })),
+            })
+            .expect("log");
+
+        let text = fs::read_to_string(paths.log_file).expect("read log");
+        for forbidden in [
+            "/Users/person",
+            "Acme Private",
+            "Customer Debug Session",
+            "Example.test/private",
+            "HTTPS://",
+            "Private Project",
+            "Private Terminal Title",
+            "Summarize private customer incident",
+            "git commit",
+            "private command subject",
+            "private prompt one",
+            "private stderr output",
+            "private stdout output",
+            "SECRET",
+            "TOKEN=SECRET",
+            "private-project",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "persistent log leaked {forbidden}: {text}"
+            );
+        }
+        assert!(text.contains("[redacted]"));
+        assert!(text.contains("[redacted:path]"));
+        assert!(text.contains("[redacted:url]"));
+        assert!(text.contains("[redacted:secret]"));
+    }
+
+    #[test]
+    fn routine_logs_are_gated_by_debugging_mode() {
+        let disabled_temp = tempfile::tempdir().expect("disabled tempdir");
+        let disabled_paths = get_gxserver_paths(Some(disabled_temp.path().to_path_buf()));
+        let disabled_logger = test_logger(disabled_paths.clone());
+        disabled_logger
+            .log(GxserverLogInput {
+                level: LogLevel::Info,
+                event: "routine.info".to_string(),
+                server_id: None,
+                request_id: None,
+                client: None,
+                duration_ms: None,
+                error: None,
+                details: None,
+            })
+            .expect("info log");
+        disabled_logger
+            .log(GxserverLogInput {
+                level: LogLevel::Debug,
+                event: "routine.debug".to_string(),
+                server_id: None,
+                request_id: None,
+                client: None,
+                duration_ms: None,
+                error: None,
+                details: None,
+            })
+            .expect("debug log");
+        assert!(!disabled_paths.log_file.exists());
+
+        let enabled_temp = tempfile::tempdir().expect("enabled tempdir");
+        let enabled_paths = get_gxserver_paths(Some(enabled_temp.path().to_path_buf()));
+        let enabled_logger = test_logger_with_debugging_mode(enabled_paths.clone(), true);
+        enabled_logger
+            .log(GxserverLogInput {
+                level: LogLevel::Info,
+                event: "routine.info".to_string(),
+                server_id: None,
+                request_id: None,
+                client: None,
+                duration_ms: None,
+                error: None,
+                details: None,
+            })
+            .expect("info log enabled");
+        enabled_logger
+            .log(GxserverLogInput {
+                level: LogLevel::Debug,
+                event: "routine.debug".to_string(),
+                server_id: None,
+                request_id: None,
+                client: None,
+                duration_ms: None,
+                error: None,
+                details: None,
+            })
+            .expect("debug log enabled");
+        let text = fs::read_to_string(enabled_paths.log_file).expect("read enabled logs");
+        assert!(text.contains("\"routine.info\""));
+        assert!(text.contains("\"routine.debug\""));
     }
 
     #[test]
@@ -1341,7 +1515,7 @@ mod tests {
                     .expect("timestamp")
                     .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
             }));
-            byte_length += line.as_bytes().len() as u64 + 1;
+            byte_length += line.len() as u64 + 1;
             lines.push(line);
             line_count += 1;
         }
@@ -1553,11 +1727,18 @@ mod tests {
     }
 
     fn test_logger(paths: GxserverPaths) -> GxserverLogger {
+        test_logger_with_debugging_mode(paths, false)
+    }
+
+    fn test_logger_with_debugging_mode(
+        paths: GxserverPaths,
+        debugging_mode: bool,
+    ) -> GxserverLogger {
         GxserverLogger {
             paths,
             debugging_mode_cache: Mutex::new(DebuggingModeCache {
                 checked_at: Instant::now(),
-                enabled: false,
+                enabled: debugging_mode,
             }),
         }
     }

@@ -5,12 +5,28 @@ const appDelegateSource = readFileSync(
   new URL("../macos/ghostexHost/Sources/ghostexHost/AppDelegate.swift", import.meta.url),
   "utf8",
 );
+const remoteGxserverClientSource = readFileSync(
+  new URL("../macos/ghostexHost/Sources/ghostexHost/RemoteGxserverClient.swift", import.meta.url),
+  "utf8",
+);
+const buildGhostexHostSource = readFileSync(
+  new URL("../macos/ghostexHost/build-ghostex-host.sh", import.meta.url),
+  "utf8",
+);
+const remoteGxserverLinuxPackageScriptSource = readFileSync(
+  new URL("../../gxserver-rs/package-remote-linux.mjs", import.meta.url),
+  "utf8",
+);
 const modalStylesSource = readFileSync(
   new URL("../../sidebar/styles/modals.css", import.meta.url),
   "utf8",
 );
 const delayedSendModalSource = readFileSync(
   new URL("../../sidebar/delayed-send-modal.tsx", import.meta.url),
+  "utf8",
+);
+const remoteGxserverInstallModalSource = readFileSync(
+  new URL("../../sidebar/remote-gxserver-install-modal.tsx", import.meta.url),
   "utf8",
 );
 const sidebarStylesSource = readFileSync(
@@ -250,26 +266,24 @@ describe("native app modal window source", () => {
     expect(modalTitle).toContain('return "Tutorial Video"');
   });
 
-  test("opens Settings-family modals over the exact macOS workspace area", () => {
+  test("opens Settings-family modals as separate resizable native windows", () => {
     /*
-    CDXC:AppModals 2026-06-15-10:12:
-    Settings must cover the whole workspace area while leaving the sidebar,
-    divider, and titlebar owned by their existing native sibling frames.
-
-    CDXC:SettingsLayout 2026-06-19-13:37:
-    Configure from Quick Actions and Open in App opens the unified Settings
-    dialog on the Actions/Open Targets tabs, so those modal ids must use the
-    same workspace-sized native child window as direct Settings.
+    CDXC:SettingsWindow 2026-06-24-05:39:
+    Settings and Settings-family entry points must open in a separate titled,
+    draggable, resizable native modal instead of covering the app workspace.
+    The content area starts and bottoms out at 1000x750 and is capped at
+    1800x1200.
     */
     const preferredFrame = sourceBetween(
       appDelegateSource,
       "private func preferredNativeAppModalContentFrame(",
-      "private func closeNativeAppModalWindow",
+      "fileprivate func updateAppModalChildWindowFramesIfNeeded()",
     );
-    expect(preferredFrame).toContain("guard isSettingsWorkspaceAppModal(modal)");
-    expect(preferredFrame).toContain("let workspaceFrame = rootLayoutFrames().workspace");
-    expect(preferredFrame).toContain("parentWindow.convertToScreen(convert(workspaceFrame, to: nil))");
-    expect(appDelegateSource).toContain("private func isSettingsWorkspaceAppModal(_ modal: String?) -> Bool");
+    expect(preferredFrame).toContain("CDXC:SettingsWindow 2026-06-24-05:39:");
+    expect(preferredFrame).toContain("return preferredContentFrame");
+    expect(preferredFrame).not.toContain("rootLayoutFrames().workspace");
+    expect(preferredFrame).not.toContain("parentWindow.convertToScreen(convert(workspaceFrame, to: nil))");
+    expect(appDelegateSource).toContain("private func isSettingsAppModal(_ modal: String?) -> Bool");
     expect(appDelegateSource).toContain(
       'case "settings", "configureAgents", "configureActions", "openTargets", "hotkeys":',
     );
@@ -282,35 +296,49 @@ describe("native app modal window source", () => {
     expect(openNativeModal).toContain("let resolvedPreferredContentFrame = preferredNativeAppModalContentFrame(");
     expect(openNativeModal).toContain("preferredContentFrame: resolvedPreferredContentFrame");
 
+    const defaultSize = sourceBetween(
+      appDelegateSource,
+      "private func defaultSize(for modal: String) -> CGSize",
+      "private func constrainedSize(_ size: CGSize, parentWindow: NSWindow) -> CGSize",
+    );
+    expect(defaultSize).toContain('case "settings", "configureAgents", "configureActions", "openTargets", "hotkeys":');
+    expect(defaultSize).toContain("return Self.settingsWindowSize");
+
     const appModalWindowController = sourceBetween(
       appDelegateSource,
       "private final class AppModalWindowController",
       "private final class TitlebarDropdownPanelController",
     );
     expect(appModalWindowController).toContain(
-      "panel.hasShadow = !shouldUseExactContentFrame(modal: modal)",
+      "private static let settingsWindowSize = CGSize(width: 1000, height: 750)",
     );
-    expect(appModalWindowController).toContain("if shouldUseExactContentFrame(modal: modal)");
-    expect(appModalWindowController).toContain("private func shouldUseExactContentFrame(modal: String?) -> Bool");
-    expect(appModalWindowController).toContain("isSettingsWorkspaceAppModal(modal)");
+    expect(appModalWindowController).toContain(
+      "private static let settingsWindowMaximumSize = CGSize(width: 1800, height: 1200)",
+    );
+    expect(appModalWindowController).toContain("panel.contentMaxSize = maximumContentSize");
+    expect(appModalWindowController).toContain("private func maximumContentSize(for modal: String?) -> CGSize?");
+    expect(appModalWindowController).toContain("return Self.settingsWindowMaximumSize");
+    expect(appModalWindowController).toContain("return [.titled, .closable, .resizable]");
     expect(appModalWindowController).toContain(
       'case "settings", "configureAgents", "configureActions", "openTargets", "hotkeys":',
     );
-    expect(appModalWindowController).toContain("return CGSize(width: 1, height: 1)");
+    expect(appModalWindowController).toContain("return Self.settingsWindowSize");
+    expect(appModalWindowController).not.toContain("return CGSize(width: 1, height: 1)");
+    expect(appModalWindowController).not.toContain("isSettingsWorkspaceAppModal");
 
     const settingsStyles = sourceBetween(
       sidebarStylesSource,
       ".app-modal-host-native-window-body .ghostex-settings-shadcn.settings-modal-dialog {",
       ".ghostex-settings-shadcn.settings-modal-dialog .ghostex-modal-heading-bar",
     );
-    expect(settingsStyles).toContain("border-bottom: 1px solid #252525 !important;");
-    expect(settingsStyles).toContain("border-right: 1px solid #252525 !important;");
-    expect(settingsStyles).toContain("border-top: 1px solid #252525 !important;");
     expect(settingsStyles).toContain("box-sizing: border-box;");
     expect(settingsStyles).toContain("height: 100vh;");
     expect(settingsStyles).toContain("max-height: 100vh;");
     expect(settingsStyles).toContain("max-width: 100vw;");
     expect(settingsStyles).toContain("width: 100vw;");
+    expect(settingsStyles).not.toContain("border-bottom:");
+    expect(settingsStyles).not.toContain("border-right:");
+    expect(settingsStyles).not.toContain("border-top:");
   });
 
   test("loads the tutorial video modal host with an HTTPS base URL", () => {
@@ -368,21 +396,13 @@ describe("native app modal window source", () => {
     expect(dropdownController).not.toContain(".nonactivatingPanel");
   });
 
-  test("reframes Settings when workspace geometry changes", () => {
+  test("keeps resizable Settings windows user-positioned while refreshing child-window overlays", () => {
     /*
-    CDXC:SettingsLayout 2026-06-15-14:07:
-    Settings is a full-workspace native child window. Main-window resize,
-    sidebar collapse, and sidebar side changes should reframe Settings to the
-    current workspace instead of closing it or keeping the old frame.
-
-    CDXC:AppModals 2026-06-16-19:50:
-    Resize/layout refreshes now go through the shared child-window frame helper
-    so Settings and the onboarding AppKit backdrop stay aligned together.
-
-    CDXC:SettingsLayout 2026-06-19-13:37:
-    Initial-tab Settings routes such as configureActions and openTargets need
-    the same reframe behavior as direct Settings after any workspace geometry
-    change.
+    CDXC:SettingsWindow 2026-06-24-05:39:
+    Settings is a user-draggable and user-resizable native modal. Main-window
+    resize, sidebar collapse, and sidebar side changes must not reframe Settings
+    back onto the workspace; only overlay surfaces that intentionally track app
+    layout, such as onboarding backdrops, should refresh here.
     */
     const resizeStart = sourceBetween(
       appDelegateSource,
@@ -392,18 +412,15 @@ describe("native app modal window source", () => {
     expect(resizeStart).toContain("resizedWindow === mainWindow");
     expect(resizeStart).toContain("updateAppModalChildWindowFramesIfNeeded()");
 
-    const updateSettingsFrame = sourceBetween(
+    const updateChildWindows = sourceBetween(
       appDelegateSource,
-      "fileprivate func updateSettingsModalWorkspaceFrameIfNeeded()",
+      "fileprivate func updateAppModalChildWindowFramesIfNeeded()",
       "private func shouldShowOnboardingAppModalBackdrop",
     );
-    expect(updateSettingsFrame).toContain("let modal = nativeAppModalWindowController?.currentModalKind");
-    expect(updateSettingsFrame).toContain("isSettingsWorkspaceAppModal(modal)");
-    expect(updateSettingsFrame).toContain("preferredNativeAppModalContentFrame(");
-    expect(updateSettingsFrame).toContain("for: modal");
-    expect(updateSettingsFrame).toContain("nativeAppModalWindowController?.updateContentFrame(");
-    expect(updateSettingsFrame).toContain("modal: modal");
-    expect(updateSettingsFrame).not.toContain("closeNativeAppModalWindow(");
+    expect(updateChildWindows).toContain("updateOnboardingAppModalBackdropFrameIfNeeded()");
+    expect(updateChildWindows).not.toContain("updateSettingsModalWorkspaceFrameIfNeeded");
+    expect(updateChildWindows).not.toContain("preferredNativeAppModalContentFrame(");
+    expect(updateChildWindows).not.toContain("nativeAppModalWindowController?.updateContentFrame(");
 
     const rootChrome = sourceBetween(
       appDelegateSource,
@@ -540,7 +557,7 @@ describe("native app modal window source", () => {
       "private func preferredNativeAppModalContentFrame",
     );
     expect(duplicateGuard).toContain('guard modal != "commandPalette"');
-    expect(duplicateGuard).toContain("isSettingsWorkspaceAppModal(modal)");
+    expect(duplicateGuard).toContain("isSettingsAppModal(modal)");
     expect(duplicateGuard).toContain("isVisibleModal(modal) == true");
     expect(duplicateGuard).toContain("isActiveOrPendingModal(modal)");
     expect(duplicateGuard).toContain("nativeBridge.appModal.open.duplicateIgnored");
@@ -656,6 +673,91 @@ describe("native app modal window source", () => {
       "[activeModal, activeModalRequestId, floatingPromptEditor?.requestId, isActiveModalRenderable]",
     );
     expect(reactPresentedEffect).not.toContain("revision,\n");
+  });
+
+  test("keeps remote gxserver install approval state renderable", () => {
+    /*
+    CDXC:RemoteMachines 2026-06-23-08:30:
+    When an SSH-reachable Ubuntu or macOS remote is missing gxserver, the
+    Remote Settings flow must open the approval modal with its Install
+    gxserver button instead of clearing modal state after the warning toast.
+    */
+    const installOpenBranch = sourceBetween(
+      modalHostSource,
+      '} else if (message.modal === "remoteGxserverInstall") {',
+      '} else if (message.modal === "remoteProjectPicker") {',
+    );
+    const remoteSettingsTab = sourceBetween(
+      settingsModalSource,
+      "function RemoteSettingsTab({",
+      "function RemoteMachineFields({",
+    );
+    expect(remoteSettingsTab).toContain("Install / Connect gxserver");
+    expect(remoteSettingsTab).toContain('type: "reconnectRemoteMachine"');
+    expect(installOpenBranch).toContain("setRemoteGxserverInstall({");
+    expect(installOpenBranch).not.toContain("setRemoteGxserverInstall(undefined);");
+    expect(modalHostSource).toContain("<RemoteGxserverInstallModal");
+    expect(modalHostSource).toContain('type: "reconnectRemoteMachine"');
+  });
+
+  test("probes remote gxserver install target before choosing the package", () => {
+    /*
+    CDXC:RemoteMachines 2026-06-23-09:46:
+    First-time Ubuntu install must not upload the local macOS gxserver bundle.
+    Native probes the remote OS/CPU and selects a matching package resource,
+    while React has a distinct unsupported-package message when no match exists.
+    */
+    const approvedInstallBranch = sourceBetween(
+      remoteGxserverClientSource,
+      "if command.installApproved == true {",
+      "if installResult.exitCode != 0 {",
+    );
+    expect(approvedInstallBranch).toContain("probeRemoteInstallTarget");
+    expect(approvedInstallBranch).toContain("bundledGxserverPackageURL(for: installTarget)");
+    expect(approvedInstallBranch).toContain('state: "unsupportedRemotePlatform"');
+    expect(remoteGxserverClientSource).toContain("uname -s");
+    expect(remoteGxserverClientSource).toContain("uname -m");
+    expect(remoteGxserverClientSource).toContain("Web/gxserver-linux-x64");
+    expect(remoteGxserverClientSource).toContain("Web/gxserver-linux-arm64");
+    expect(remoteGxserverClientSource).toContain("Web/gxserver-darwin-arm64");
+    expect(remoteGxserverClientSource).toContain("bundledGxserverPackageIsCompatible");
+    expect(remoteGxserverClientSource).toContain("isMachOBinary");
+    expect(remoteGxserverClientSource).toContain("isELFBinary");
+    expect(remoteGxserverClientSource).toContain("expectedELFMachine");
+    expect(remoteGxserverClientSource).toContain("code-server/lib/node");
+    expect(remoteGxserverClientSource).toContain("portless/dist/cli.js");
+    expect(remoteGxserverClientSource).toContain("CLI/ghostex-cli.mjs");
+    expect(remoteGxserverClientSource).toContain("$HOME/.local/bin/ghostex");
+    expect(remoteGxserverClientSource).toContain("$HOME/.local/bin/gx");
+    expect(remoteGxserverClientSource).toContain("package.backup.");
+    expect(remoteGxserverClientSource).toContain("releases/\\(releaseId)");
+    expect(remoteGxserverClientSource).not.toContain("rm -rf");
+    expect(remoteGxserverClientSource).not.toContain("command -v gxserver");
+    expect(remoteGxserverInstallModalSource).toContain("compatible bundled remote package");
+    expect(remoteGxserverInstallModalSource).toContain("<code>zmx</code>");
+    expect(remoteGxserverInstallModalSource).toContain("<code>ghostex</code>");
+    expect(buildGhostexHostSource).toContain("GHOSTEX_REMOTE_GXSERVER_LINUX_X64_PACKAGE");
+    expect(buildGhostexHostSource).toContain("GHOSTEX_REMOTE_GXSERVER_LINUX_X64_DEFAULT_PACKAGE");
+    expect(buildGhostexHostSource).toContain("build/remote-gxserver-linux/x64/package");
+    expect(buildGhostexHostSource).toContain("stage_remote_gxserver_linux_packages_if_configured");
+    expect(buildGhostexHostSource).toContain("validate_remote_gxserver_linux_package");
+    expect(buildGhostexHostSource).toContain("gxserver-linux-x64");
+    expect(buildGhostexHostSource).toContain("Linux packages must not ship Mach-O payloads");
+    expect(buildGhostexHostSource).toContain("native Linux ELF payload");
+    expect(buildGhostexHostSource).toContain("wrong Linux ELF architecture");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("Usage: node gxserver-rs/package-remote-linux.mjs");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("build/remote-gxserver-linux");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("bin/gxserver");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("bin/zmx");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("bin/zehn");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("bin/bd");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("code-server/lib/node");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("portless/dist/cli.js");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("CLI/ghostex-cli.mjs");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("Linux remote package expected an ELF binary");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("Linux remote package expected ${config.arch} ELF architecture");
+    expect(nativeSidebarSource).toContain('case "unsupportedRemotePlatform":');
+    expect(nativeSidebarSource).toContain("No compatible gxserver package");
   });
 
   test("keeps Add Worktree fixed at 570x574 with exact native-window padding", () => {

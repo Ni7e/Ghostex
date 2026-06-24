@@ -9,6 +9,11 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import type {
+  NativePortlessAdminAction,
+  NativePortlessAdminResult,
+  NativePortlessProtocol,
+} from "../shared/native-ghostty-host-protocol";
 import type { WebviewApi } from "./webview-api";
 
 const CONTEXT_MENU_VIEWPORT_MARGIN_PX = 12;
@@ -47,6 +52,10 @@ type GhostexNativeSidebarBridge = {
   runSidebarGitActionFromTitlebar: (
     action: "commit" | "push" | "pr" | "syncMain" | "multiRelease" | "release",
   ) => void;
+  runPortlessAdminAction: (
+    action: NativePortlessAdminAction,
+    options?: { protocol?: NativePortlessProtocol; requestId?: string; timeoutMs?: number },
+  ) => Promise<NativePortlessAdminResult>;
 };
 
 const activeDismissHandlers = new Set<() => void>();

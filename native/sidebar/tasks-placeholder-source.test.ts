@@ -81,22 +81,30 @@ describe("Project Board form event handling", () => {
     expect(overlayStyleSource).toContain("@keyframes project-board-loading-spin");
   });
 
-  test("keeps ticket dialog buttons aligned with adjacent dropdown controls", () => {
+  test("keeps ticket dialog controls aligned with footer buttons", () => {
     /*
      * CDXC:ProjectBoardForms 2026-06-21-15:30:
      * New-ticket and edit-ticket action rows should use one shared Project Board control height for buttons and adjacent dropdowns so the macOS Kanban dialogs do not mix default shadcn button height with taller select triggers.
+     *
+     * CDXC:ProjectBoardForms 2026-06-22-02:17:
+     * Kanban modal controls above the prompt editor should match footer button height too, including top metadata dropdowns, the label add row, and the ticket title text field.
      */
     const ticketDialogControlSource = sourceBetween(
       ".project-ticket-footer-select,",
       ".project-ticket-meta-grid {",
     );
 
+    expect(ticketDialogControlSource).toContain('.project-ticket-meta-grid [data-slot="select-trigger"]');
     expect(ticketDialogControlSource).toContain(
       '.project-ticket-conversation-controls [data-slot="select-trigger"]',
     );
+    expect(ticketDialogControlSource).toContain(".project-ticket-title-input");
+    expect(ticketDialogControlSource).toContain(".project-ticket-label-editor input");
     expect(ticketDialogControlSource).toContain('height: var(--project-board-control-height);');
+    expect(ticketDialogControlSource).toContain('min-height: var(--project-board-control-height);');
     expect(ticketDialogControlSource).toContain('.project-ticket-dialog-footer [data-slot="button"]');
     expect(ticketDialogControlSource).toContain('.project-ticket-create-actions > [data-slot="button"]');
+    expect(ticketDialogControlSource).toContain('.project-ticket-label-editor > [data-slot="button"]');
     expect(ticketDialogControlSource).toContain('.project-ticket-conversation-controls > [data-slot="button"]');
   });
 

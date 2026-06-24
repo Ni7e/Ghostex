@@ -33,6 +33,13 @@ export function RemoteGxserverInstallModal({
        * Missing remote gxserver installation must be a user-approved React
        * modal. The app explains why gxserver is required before native uploads
        * the bundled package over SSH and starts it on the selected machine.
+       *
+       * CDXC:RemoteMachines 2026-06-23-09:46:
+       * The approved install path must use a package that matches the remote
+       * machine's OS and CPU. The package owns gxserver plus the pinned zmx,
+       * zehn, bd, Ghostex CLI, and Node resources needed for first-run Ubuntu
+       * attach, so copy must not imply that only the local macOS daemon is
+       * uploaded.
        */}
       <DialogContent className="remote-gxserver-install-modal" showCloseButton={false}>
         <DialogHeader>
@@ -43,7 +50,7 @@ export function RemoteGxserverInstallModal({
             Ghostex can connect to {machineName}, but gxserver is not installed there. Ghostex needs gxserver on that machine to browse folders, add projects, clone repositories, and manage sessions remotely.
           </p>
           <p>
-            If you continue, Ghostex will copy its bundled gxserver package over SSH into <code>~/.ghostex/gxserver/package</code>, create or update a <code>~/.local/bin/gxserver</code> link when possible, start gxserver, then connect through an SSH tunnel.
+            If you continue, Ghostex will copy its compatible bundled remote package over SSH into <code>~/.ghostex/gxserver</code>, expose <code>gxserver</code>, <code>zmx</code>, <code>zehn</code>, <code>bd</code>, <code>ghostex</code>, and <code>gx</code> from <code>~/.local/bin</code> when possible, start gxserver, then connect through an SSH tunnel.
           </p>
         </div>
         <div className="remote-gxserver-install-modal-actions">

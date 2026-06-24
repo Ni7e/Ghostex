@@ -11,6 +11,10 @@ import { DelayedSendModal } from "../../sidebar/delayed-send-modal";
 import { DiscoverGhostexModal } from "../../sidebar/discover-ghostex-modal";
 import { FirstUserMessageModal } from "../../sidebar/first-user-message-modal";
 import { PinnedPromptsModal } from "../../sidebar/pinned-prompts-modal";
+import {
+  PortlessSetupModal,
+  type PortlessSetupModalMode,
+} from "../../sidebar/portless-setup-modal";
 import { PreviousSessionsModal } from "../../sidebar/previous-sessions-modal";
 import { RemoteGxserverInstallModal } from "../../sidebar/remote-gxserver-install-modal";
 import { RemoteProjectPickerModal } from "../../sidebar/remote-project-picker/remote-project-picker-modal";
@@ -74,6 +78,7 @@ type AppModalKind =
   | "deleteWorktree"
   | "openTargets"
   | "pinnedPrompts"
+  | "portlessSetup"
   | "floatingPromptEditor"
   | "previousSessions"
   | "firstUserMessage"
@@ -126,8 +131,10 @@ type AppModalHostMessage =
       initialText?: string;
       language?: string;
       modal: AppModalKind;
+      mode?: PortlessSetupModalMode;
       nativeOpenStartedAtMs?: number;
       prewarm?: boolean;
+      protocol?: "https" | "http";
       requestId?: string;
       sessionId?: string;
       showFirstLaunchSetupOnClose?: boolean;
@@ -316,6 +323,11 @@ type WorktreeModalState = {
   projectPath?: string;
   remoteMachineId?: string;
   remoteMachineName?: string;
+};
+
+type PortlessSetupModalState = {
+  mode: PortlessSetupModalMode;
+  protocol: "https" | "http";
 };
 
 const APP_MODAL_CONTEXT_MENU_EDITABLE_SELECTOR =
@@ -1995,6 +2007,7 @@ function AppModalHost() {
     ghostexCliStatus,
     ghostexFolderStats,
     osIntegrationStatus,
+    portlessSetup,
     settingsInitialSection,
     settingsInitialRemoteMachineId,
     settingsInitialSearchQuery,
@@ -2016,6 +2029,7 @@ function AppModalHost() {
   const projectSettingsProjects = useSidebarStore(
     (state) => state.hud.projectSettingsProjects ?? [],
   );
+  const portless = useSidebarStore((state) => state.hud.portless);
   const customThemeColor = useSidebarStore((state) => state.hud.customThemeColor);
   const theme = useSidebarStore((state) => state.hud.theme);
   const [gitCommitPromptAgentId, setGitCommitPromptAgentId] = useState(() =>
@@ -2066,6 +2080,7 @@ function AppModalHost() {
     t3BrowserAccess,
     t3ThreadId,
     worktree,
+    portlessSetup,
   });
   /*
   CDXC:PreviousSessions 2026-06-02-20:39:
@@ -2610,6 +2625,35 @@ function AppModalHost() {
         }}
         projectName={worktree?.projectName}
       />
+      <PortlessSetupModal
+        isOpen={activeModal === "portlessSetup" && portlessSetup !== undefined}
+        mode={portlessSetup?.mode ?? "firstSetup"}
+        onAdminAction={(action, protocol, requestId) => {
+          vscode.postMessage({
+            action,
+            protocol,
+            requestId,
+            type: "runPortlessSetupPromptAdminAction",
+          } satisfies SidebarToExtensionMessage);
+          closeModal();
+        }}
+        onCancel={() => {
+          vscode.postMessage({ type: "cancelPortlessSetupPrompt" } satisfies SidebarToExtensionMessage);
+          closeModal();
+        }}
+        onDisable={() => {
+          vscode.postMessage({
+            enabled: false,
+            type: "setPortlessEnabled",
+          } satisfies SidebarToExtensionMessage);
+          closeModal();
+        }}
+        onPostpone={() => {
+          vscode.postMessage({ type: "postponePortlessSetupPrompt" } satisfies SidebarToExtensionMessage);
+          closeModal();
+        }}
+        protocol={portlessSetup?.protocol ?? "https"}
+      />
       <ScratchPadModal
         isOpen={activeModal === "scratchPad"}
         onClose={closeModal}
@@ -2738,6 +2782,7 @@ function AppModalHost() {
           vscode.postMessage({ type: "testAgentTaskCompletion" });
         }}
         onClose={closeModal}
+        portless={portless}
         projects={projectSettingsProjects}
         settings={settings}
         vscode={vscode}
@@ -3005,6 +3050,7 @@ function useModalStateFromNative() {
   const [t3BrowserAccess, setT3BrowserAccess] = useState<T3BrowserAccessMessage>();
   const [t3ThreadId, setT3ThreadId] = useState<T3ThreadIdModalState>();
   const [worktree, setWorktree] = useState<WorktreeModalState>();
+  const [portlessSetup, setPortlessSetup] = useState<PortlessSetupModalState>();
   const [agentHookStatus, setAgentHookStatus] = useState<AgentHookStatusMessage>();
   const [commandPaletteCollapsedGroupsById, setCommandPaletteCollapsedGroupsById] = useState<
     Record<string, true>
@@ -3040,6 +3086,7 @@ function useModalStateFromNative() {
     setT3BrowserAccess(undefined);
     setT3ThreadId(undefined);
     setWorktree(undefined);
+    setPortlessSetup(undefined);
     setGhostexFolderStats(undefined);
     setOSIntegrationStatus(undefined);
     setAgentsHubCatalog(undefined);
@@ -3145,6 +3192,7 @@ function useModalStateFromNative() {
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
             setWorktree(undefined);
+            setPortlessSetup(undefined);
             setWorktreeDelete(undefined);
           } else if (message.modal === "firstUserMessage") {
             if (typeof message.message !== "string" || !message.message.trim()) {
@@ -3163,6 +3211,7 @@ function useModalStateFromNative() {
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
             setWorktree(undefined);
+            setPortlessSetup(undefined);
             setWorktreeDelete(undefined);
           } else if (message.modal === "remoteGxserverInstall") {
             if (
@@ -3173,6 +3222,13 @@ function useModalStateFromNative() {
             ) {
               throw new Error("Remote gxserver install request is missing machine details.");
             }
+            /*
+             * CDXC:RemoteMachines 2026-06-23-08:30:
+             * SSH-reachable Ubuntu and macOS machines that are missing gxserver
+             * must keep install approval state populated so Remote Settings
+             * shows the Install gxserver button instead of only the warning
+             * toast that explains the missing daemon.
+             */
             setRemoteGxserverInstall({
               remoteMachineId: message.remoteMachineId,
               remoteMachineName: message.remoteMachineName,
@@ -3181,12 +3237,12 @@ function useModalStateFromNative() {
             setDelayedSend(undefined);
             setFirstUserMessage(undefined);
             setFloatingPromptEditor(undefined);
-            setRemoteGxserverInstall(undefined);
             setRemoteProjectPicker(undefined);
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
             setWorktree(undefined);
+            setPortlessSetup(undefined);
             setWorktreeDelete(undefined);
           } else if (message.modal === "remoteProjectPicker") {
             if (
@@ -3219,6 +3275,7 @@ function useModalStateFromNative() {
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
             setWorktree(undefined);
+            setPortlessSetup(undefined);
             setWorktreeDelete(undefined);
           } else if (message.modal === "floatingPromptEditor") {
             const openMessageReceivedAt = performance.now();
@@ -3295,6 +3352,7 @@ function useModalStateFromNative() {
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
             setWorktree(undefined);
+            setPortlessSetup(undefined);
             setWorktreeDelete(undefined);
           } else if (message.modal === "delayedSend") {
             if (!message.sessionId) {
@@ -3321,6 +3379,7 @@ function useModalStateFromNative() {
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
             setWorktree(undefined);
+            setPortlessSetup(undefined);
             setWorktreeDelete(undefined);
           } else if (message.modal === "t3BrowserAccess") {
             if (!message.access) {
@@ -3342,6 +3401,7 @@ function useModalStateFromNative() {
             setRenameSession(undefined);
             setT3ThreadId(undefined);
             setWorktree(undefined);
+            setPortlessSetup(undefined);
             setWorktreeDelete(undefined);
           } else if (message.modal === "t3ThreadId") {
             if (!message.sessionId || typeof message.threadId !== "string") {
@@ -3360,6 +3420,7 @@ function useModalStateFromNative() {
             setRenameSession(undefined);
             setT3BrowserAccess(undefined);
             setWorktree(undefined);
+            setPortlessSetup(undefined);
             setWorktreeDelete(undefined);
           } else if (message.modal === "worktree") {
             setWorktree({
@@ -3379,6 +3440,30 @@ function useModalStateFromNative() {
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
             setGitCommit(undefined);
+            setPortlessSetup(undefined);
+            setWorktreeDelete(undefined);
+          } else if (message.modal === "portlessSetup") {
+            if (
+              message.mode !== "firstSetup" &&
+              message.mode !== "standaloneReconfigure"
+            ) {
+              throw new Error("Portless setup modal request is missing setup mode.");
+            }
+            if (message.protocol !== "https" && message.protocol !== "http") {
+              throw new Error("Portless setup modal request is missing protocol.");
+            }
+            setPortlessSetup({ mode: message.mode, protocol: message.protocol });
+            setConfig({});
+            setDelayedSend(undefined);
+            setFirstUserMessage(undefined);
+            setFloatingPromptEditor(undefined);
+            setRemoteGxserverInstall(undefined);
+            setRemoteProjectPicker(undefined);
+            setRenameSession(undefined);
+            setT3BrowserAccess(undefined);
+            setT3ThreadId(undefined);
+            setWorktree(undefined);
+            setGitCommit(undefined);
             setWorktreeDelete(undefined);
           } else if (message.modal === "deleteWorktree") {
             if (!message.worktreeDeleteDraft) {
@@ -3395,6 +3480,7 @@ function useModalStateFromNative() {
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
             setWorktree(undefined);
+            setPortlessSetup(undefined);
             setGitCommit(undefined);
           } else if (message.modal === "gitCommit") {
             if (!message.gitCommitDraft) {
@@ -3411,6 +3497,7 @@ function useModalStateFromNative() {
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
             setWorktree(undefined);
+            setPortlessSetup(undefined);
             setWorktreeDelete(undefined);
           } else if (message.modal === "gitFileDiff") {
             if (!message.gitFileDiff) {
@@ -3432,6 +3519,7 @@ function useModalStateFromNative() {
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
             setWorktree(undefined);
+            setPortlessSetup(undefined);
             setWorktreeDelete(undefined);
           } else {
             setConfig({});
@@ -3444,6 +3532,7 @@ function useModalStateFromNative() {
             setT3BrowserAccess(undefined);
             setT3ThreadId(undefined);
             setWorktree(undefined);
+            setPortlessSetup(undefined);
             setWorktreeDelete(undefined);
           }
           if (message.modal === "settings") {
@@ -3748,6 +3837,7 @@ function useModalStateFromNative() {
     t3BrowserAccess,
     t3ThreadId,
     worktree,
+    portlessSetup,
     agentHookStatus,
     ghostexCliStatus,
     ghostexFolderStats,
@@ -3851,6 +3941,7 @@ function isModalRenderable({
   t3BrowserAccess,
   t3ThreadId,
   worktree,
+  portlessSetup,
 }: {
   activeModal: AppModalKind | undefined;
   config: ConfigModalState;
@@ -3867,6 +3958,7 @@ function isModalRenderable({
   t3BrowserAccess: T3BrowserAccessMessage | undefined;
   t3ThreadId: T3ThreadIdModalState | undefined;
   worktree: WorktreeModalState | undefined;
+  portlessSetup: PortlessSetupModalState | undefined;
 }): boolean {
   switch (activeModal) {
     case undefined:
@@ -3908,6 +4000,8 @@ function isModalRenderable({
       return t3ThreadId !== undefined;
     case "worktree":
       return worktree !== undefined;
+    case "portlessSetup":
+      return portlessSetup !== undefined;
     case "daemonSessions":
     case "pinnedPrompts":
     case "previousSessions":

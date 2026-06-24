@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::platform::resources;
 use crate::protocol::ToolCapabilityStatus;
 
 #[derive(Clone, Copy)]
@@ -27,6 +28,12 @@ struct ToolCandidate {
     source: ToolSource,
 }
 
+enum CandidateInspection {
+    Available,
+    Missing,
+    NotExecutable,
+}
+
 #[derive(Clone, Debug)]
 pub struct GxserverResolvedTool {
     pub executable_path: String,
@@ -37,6 +44,9 @@ pub struct GxserverResolvedTool {
 /*
 CDXC:GxserverToolchain 2026-06-14-20:37:
 Managed terminal/search/project-board tools must resolve only from Ghostex-pinned development or bundled resources. Rust Phase 1 reports the same health status surface without falling back to arbitrary PATH binaries.
+
+CDXC:GxserverUbuntu 2026-06-23-07:52:
+The same gxserver-rs binary must resolve zmx, zehn, and bd from package-relative resources on macOS and Ubuntu. Add Linux-compatible bundle roots without adding user PATH fallbacks so tool behavior remains pinned to Ghostex-owned artifacts.
 */
 pub fn get_gxserver_tool_statuses() -> Vec<ToolCapabilityStatus> {
     vec![
@@ -80,13 +90,9 @@ fn require_bundled_tool(tool: &str) -> Result<GxserverResolvedTool, String> {
 
 fn resolve_bundled_tool_status(tool: &str) -> ToolCapabilityStatus {
     let candidates = bundled_tool_candidates(tool);
-    let inspected = candidates.iter().find_map(|candidate| {
-        if is_executable_file(&candidate.executable_path) {
-            Some(candidate)
-        } else {
-            None
-        }
-    });
+    let inspected = candidates
+        .iter()
+        .find(|candidate| is_executable_file(&candidate.executable_path));
     if let Some(candidate) = inspected {
         return ToolCapabilityStatus {
             availability: "available".to_string(),
@@ -129,10 +135,13 @@ fn resolve_bundled_tool_status(tool: &str) -> ToolCapabilityStatus {
 }
 
 fn get_bd_tool_status() -> ToolCapabilityStatus {
-    let candidates = bundled_bd_tool_candidates();
+    get_bd_tool_status_for_candidates(&bundled_bd_tool_candidates())
+}
+
+fn get_bd_tool_status_for_candidates(candidates: &[ToolCandidate]) -> ToolCapabilityStatus {
     if let Some(candidate) = candidates
         .iter()
-        .find(|candidate| is_executable_file(&candidate.executable_path))
+        .find(|candidate| matches!(inspect_candidate(candidate), CandidateInspection::Available))
     {
         return ToolCapabilityStatus {
             availability: "available".to_string(),
@@ -140,23 +149,44 @@ fn get_bd_tool_status() -> ToolCapabilityStatus {
             capability: "beadsProjectBoard".to_string(),
             executable_path: Some(candidate.executable_path.to_string_lossy().to_string()),
             guidance: None,
-            message: "bd resolved from appResource. gxserver will use Ghostex's bundled Beads CLI."
-                .to_string(),
+            message: format!(
+                "bd resolved from {}. gxserver will use Ghostex's bundled Beads CLI.",
+                candidate.source.as_str()
+            ),
             source: Some(candidate.source.as_str().to_string()),
+            tool: "bd".to_string(),
+        };
+    }
+    let candidate_paths = candidates
+        .iter()
+        .map(|candidate| candidate.executable_path.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    if let Some(candidate) = candidates.iter().find(|candidate| {
+        matches!(
+            inspect_candidate(candidate),
+            CandidateInspection::NotExecutable
+        )
+    }) {
+        return ToolCapabilityStatus {
+            availability: "notExecutable".to_string(),
+            candidate_paths: Some(candidate_paths),
+            capability: "beadsProjectBoard".to_string(),
+            executable_path: None,
+            guidance: Some("Packaged Ghostex builds must place an executable pinned Beads CLI at the bundled bd resource path. Rebuild the app resources so Project board operations can run.".to_string()),
+            message: format!(
+                "Ghostex Project board requires bundled bd, but bundled bd exists and is not executable: {}.",
+                candidate.executable_path.to_string_lossy()
+            ),
+            source: None,
             tool: "bd".to_string(),
         };
     }
     ToolCapabilityStatus {
         availability: "missing".to_string(),
-        candidate_paths: Some(
-            candidates
-                .iter()
-                .map(|candidate| candidate.executable_path.to_string_lossy().to_string())
-                .collect(),
-        ),
+        candidate_paths: Some(candidate_paths),
         capability: "beadsProjectBoard".to_string(),
         executable_path: None,
-        guidance: None,
+        guidance: Some("Packaged Ghostex builds include the pinned Beads CLI. For source checkouts, build/stage Beads into Ghostex app resources; in a repository, run `gx bd init` if the project has not been initialized.".to_string()),
         message: "Bundled bd was not found in Ghostex resources.".to_string(),
         source: None,
         tool: "bd".to_string(),
@@ -169,7 +199,7 @@ fn bundled_tool_candidates(tool: &str) -> Vec<ToolCandidate> {
         .parent()
         .unwrap_or(Path::new("."))
         .to_path_buf();
-    dedupe_candidates(vec![
+    let mut candidates = vec![
         ToolCandidate {
             executable_path: repo_root.join(tool).join("zig-out").join("bin").join(tool),
             source: ToolSource::DevSubmodule,
@@ -195,7 +225,14 @@ fn bundled_tool_candidates(tool: &str) -> Vec<ToolCandidate> {
                 .join(tool),
             source: ToolSource::AppResource,
         },
-    ])
+    ];
+    if let Some(path) = resources::source_web_resource(&format!("bin/{tool}")) {
+        candidates.push(ToolCandidate {
+            executable_path: path,
+            source: ToolSource::AppResource,
+        });
+    }
+    dedupe_candidates(candidates)
 }
 
 fn bundled_bd_tool_candidates() -> Vec<ToolCandidate> {
@@ -205,7 +242,7 @@ fn bundled_bd_tool_candidates() -> Vec<ToolCandidate> {
         .unwrap_or(Path::new("."))
         .to_path_buf();
     let inferred_source_root = gxserver_root.join("..").join("..");
-    dedupe_candidates(vec![
+    let mut candidates = vec![
         ToolCandidate {
             executable_path: gxserver_root.join("bin").join("bd"),
             source: ToolSource::GxserverBundle,
@@ -247,7 +284,14 @@ fn bundled_bd_tool_candidates() -> Vec<ToolCandidate> {
                 .join("bd"),
             source: ToolSource::AppResource,
         },
-    ])
+    ];
+    if let Some(path) = resources::source_web_resource("bin/bd") {
+        candidates.push(ToolCandidate {
+            executable_path: path,
+            source: ToolSource::AppResource,
+        });
+    }
+    dedupe_candidates(candidates)
 }
 
 fn default_gxserver_root() -> PathBuf {
@@ -290,6 +334,7 @@ fn dedupe_candidates(candidates: Vec<ToolCandidate>) -> Vec<ToolCandidate> {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -312,6 +357,67 @@ mod tests {
         ))
         .is_none());
     }
+
+    #[test]
+    fn bd_status_reports_actual_resolution_source() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bd = dir.path().join("gxserver").join("bin").join("bd");
+        fs::create_dir_all(bd.parent().expect("bd parent")).expect("create bd parent");
+        fs::write(&bd, "#!/bin/sh\nexit 0\n").expect("write bd");
+        make_executable(&bd);
+        let status = get_bd_tool_status_for_candidates(&[ToolCandidate {
+            executable_path: bd.clone(),
+            source: ToolSource::GxserverBundle,
+        }]);
+
+        assert_eq!(status.availability, "available");
+        assert_eq!(
+            status.executable_path.as_deref(),
+            Some(bd.to_str().unwrap())
+        );
+        assert_eq!(status.source.as_deref(), Some("gxserverBundle"));
+        assert!(status.message.contains("gxserverBundle"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bd_status_reports_present_but_not_executable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bd = dir.path().join("app").join("bin").join("bd");
+        fs::create_dir_all(bd.parent().expect("bd parent")).expect("create bd parent");
+        fs::write(&bd, "#!/bin/sh\nexit 0\n").expect("write bd");
+        fs::set_permissions(&bd, fs::Permissions::from_mode(0o644)).expect("chmod bd");
+        let status = get_bd_tool_status_for_candidates(&[ToolCandidate {
+            executable_path: bd.clone(),
+            source: ToolSource::AppResource,
+        }]);
+
+        assert_eq!(status.availability, "notExecutable");
+        assert!(status.message.contains("not executable"));
+        assert!(status
+            .guidance
+            .unwrap_or_default()
+            .contains("Rebuild the app resources"));
+    }
+
+    #[test]
+    fn bd_status_reports_missing_with_project_board_guidance() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("missing").join("bd");
+        let status = get_bd_tool_status_for_candidates(&[ToolCandidate {
+            executable_path: missing,
+            source: ToolSource::AppResource,
+        }]);
+
+        assert_eq!(status.availability, "missing");
+        assert!(status.message.contains("Bundled bd was not found"));
+        assert!(status
+            .guidance
+            .unwrap_or_default()
+            .contains("Packaged Ghostex builds include"));
+    }
 }
 
 fn is_executable_file(path: &Path) -> bool {
@@ -329,5 +435,41 @@ fn is_executable_file(path: &Path) -> bool {
     #[cfg(not(unix))]
     {
         true
+    }
+}
+
+#[cfg(test)]
+fn make_executable(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).expect("chmod executable");
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
+fn inspect_candidate(candidate: &ToolCandidate) -> CandidateInspection {
+    let Ok(metadata) = fs::metadata(&candidate.executable_path) else {
+        return CandidateInspection::Missing;
+    };
+    if !metadata.is_file() {
+        return CandidateInspection::Missing;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o111 != 0 {
+            CandidateInspection::Available
+        } else {
+            CandidateInspection::NotExecutable
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = candidate;
+        CandidateInspection::Available
     }
 }

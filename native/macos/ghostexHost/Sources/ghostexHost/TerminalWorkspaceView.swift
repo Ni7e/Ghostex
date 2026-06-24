@@ -2292,9 +2292,9 @@ final class TerminalWorkspaceView: NSView {
     let diagnosticsBridge: T3CodePaneDiagnosticsBridge
     let hostView: WebPaneHostView
     let isManagedT3Pane: Bool
-    let projectId: String?
+    var projectId: String?
     let sessionId: String
-    let threadId: String?
+    var threadId: String?
     let title: String
     let workspaceRoot: String?
     let browserProfileID: UUID?
@@ -4424,6 +4424,7 @@ final class TerminalWorkspaceView: NSView {
           forMainFrameOnly: true
         ))
       let managedWebView = WKWebView(frame: .zero, configuration: configuration)
+      diagnosticsBridge.webView = managedWebView
       if #available(macOS 13.3, *) {
         managedWebView.isInspectable = true
       }
@@ -6063,21 +6064,28 @@ final class TerminalWorkspaceView: NSView {
   func closeFocusedSession(reason: String) -> Bool {
     /**
      CDXC:PaneClose 2026-05-10-11:56
-     Cmd-W must close the user's focused workspace surface, not the native app
-     window. Prefer AppKit's current responder so embedded Chrome/Ghostty focus
-     wins over stale sidebar state, then fall back to the last focused session id.
+     Cmd-W must close the user's focused workspace terminal/web pane, not the
+     native app window. Prefer AppKit's current responder so embedded
+     Chrome/Ghostty focus wins over stale sidebar state, then fall back to the
+     last focused session id.
 
      CDXC:PaneClose 2026-05-23-10:03:
      Cmd-W is a session-removal command, not a local native-surface disposal.
      Route focused terminal/web pane closes through the sidebar adapter so macOS layout/surface cleanup and gxserver-owned shared terminal lifecycle stay on the normal close path.
+
+     CDXC:PaneClose 2026-06-22-03:14:
+     Source/Browser/Kanban/Manage are persistent project work surfaces on the
+     right side of the macOS workspace, so Cmd+W must never close those project
+     editor panes. In those modes, close the command-pane terminal when it owns
+     first responder, otherwise close only the visible terminal session in the
+     project-editor companion sidepane.
      */
     if closeFocusedCommandsPanel(reason: reason) {
       return true
     }
 
     if let activeProjectEditorId, projectEditorPaneSessions[activeProjectEditorId] != nil {
-      closeProjectEditorPane(projectId: activeProjectEditorId)
-      return true
+      return closeFocusedProjectEditorCompanionSession(reason: reason)
     }
 
     let candidates = [currentResponderSessionId(), focusedSessionId].compactMap { $0 }
@@ -6112,6 +6120,54 @@ final class TerminalWorkspaceView: NSView {
         "sessionId": sessionId,
       ])
     return false
+  }
+
+  @discardableResult
+  private func closeFocusedProjectEditorCompanionSession(reason: String) -> Bool {
+    guard let activeProjectEditorId, projectEditorPaneSessions[activeProjectEditorId] != nil else {
+      return false
+    }
+    let candidates = [
+      currentResponderSessionId(),
+      projectEditorCompanionSessionId,
+      focusedSessionId,
+    ].compactMap { $0 }
+    var seenSessionIds = Set<String>()
+    for sessionId in candidates where !seenSessionIds.contains(sessionId) {
+      seenSessionIds.insert(sessionId)
+      guard isFocusedProjectEditorCompanionCloseTarget(sessionId) else {
+        continue
+      }
+      TerminalFocusDebugLog.append(
+        event: "nativeWorkspace.projectEditor.companion.closeFocused",
+        details: [
+          "candidateCount": candidates.count,
+          "reason": reason,
+          "sessionId": sessionId,
+        ])
+      sendEvent(.paneTabCloseRequested(sessionId: sessionId, scope: .close))
+      return true
+    }
+    TerminalFocusDebugLog.append(
+      event: "nativeWorkspace.projectEditor.companion.closeFocusedSkipped",
+      details: [
+        "candidateCount": candidates.count,
+        "companionHasSession": projectEditorCompanionSessionId != nil,
+        "companionRendered": projectEditorCompanionRenderedSessionId != nil,
+        "companionVisible": projectEditorCompanionIsVisible,
+        "reason": reason,
+      ])
+    return false
+  }
+
+  private func isFocusedProjectEditorCompanionCloseTarget(_ sessionId: String) -> Bool {
+    projectEditorCompanionIsVisible
+      && !projectEditorCompanionPaneHidden
+      && projectEditorCompanionSessionId == sessionId
+      && projectEditorCompanionRenderedSessionId == sessionId
+      && sessions[sessionId] != nil
+      && activeSessionIds.contains(sessionId)
+      && !commandsPanelActiveSessionIds.contains(sessionId)
   }
 
   @discardableResult
@@ -14402,30 +14458,18 @@ final class TerminalWorkspaceView: NSView {
     showPoppedOutPlaceholderImmediately(sessionId: sessionId, reason: "updatePoppedOutWindowTitle")
   }
 
-  private func poppedOutPaneTitleBarActions(sessionId: String) -> [TerminalTitleBarAction] {
+  private func poppedOutPaneTitleBarActions(sessionId _: String) -> [TerminalTitleBarAction] {
     /**
      CDXC:PanePopOut 2026-05-11-18:54
-     Pop-out windows must use the same right-side title-bar action model as the
-     in-workspace tab bar. Reuse the synced action order when available and
-     substitute Restore for Pop Out so the separate window exposes Pop In plus
-     the rest of the pane actions without a parallel implementation.
-     */
-    let baseActions: [TerminalTitleBarAction]
-    if let actions = sessionTitleBarActions[sessionId], !actions.isEmpty {
-      baseActions = actions
-    } else if webPaneSessions[sessionId] != nil {
-      baseActions = TerminalSessionTitleBarView.webPaneCreationActions
-    } else {
-      baseActions = TerminalSessionTitleBarView.defaultActions
-    }
+     Pop-out windows originally reused the same right-side title-bar action
+     model as the in-workspace tab bar.
 
-    var actions = baseActions.map { action in
-      action == .popOut ? .restorePopOut : action
-    }
-    if !actions.contains(.restorePopOut) {
-      actions.append(.restorePopOut)
-    }
-    return actions
+     CDXC:PanePopOut 2026-06-22-13:49:
+     Popped-out session windows should not show the far-right pane-actions grid
+     button. The window close control already owns reattaching the pane, so keep
+     the standalone titlebar free of collapsed pane action chrome.
+     */
+    return []
   }
 
   private func handlePaneTabActionRequested(sessionId: String, action: TerminalTitleBarAction) {
@@ -15345,15 +15389,28 @@ final class TerminalWorkspaceView: NSView {
         switch result {
         case .success(let route):
           self.t3ThreadRouteRetryAttemptsBySessionId.removeValue(forKey: sessionId)
-          self.sendEvent(
-            .t3ThreadReady(
-              sessionId: sessionId,
-              projectId: route.projectId,
-              threadId: route.threadId,
-              serverOrigin: "\(url.scheme ?? "http")://\(url.host ?? "127.0.0.1")\(url.port.map { ":\($0)" } ?? "")",
-              workspaceRoot: session.workspaceRoot ?? ""
+          let shouldNotifyThreadReady =
+            session.projectId != route.projectId || session.threadId != route.threadId
+          self.webPaneSessions[sessionId]?.projectId = route.projectId
+          self.webPaneSessions[sessionId]?.threadId = route.threadId
+          /*
+           CDXC:T3Code 2026-06-23-06:09:
+           WKWebView startup retries can resolve the same T3 draft/thread route
+           more than once before navigation finishes. Only emit t3ThreadReady
+           when the pane binding changes, otherwise the sidebar reprocesses the
+           same native pane as another T3 session during app startup.
+           */
+          if shouldNotifyThreadReady {
+            self.sendEvent(
+              .t3ThreadReady(
+                sessionId: sessionId,
+                projectId: route.projectId,
+                threadId: route.threadId,
+                serverOrigin: "\(url.scheme ?? "http")://\(url.host ?? "127.0.0.1")\(url.port.map { ":\($0)" } ?? "")",
+                workspaceRoot: session.workspaceRoot ?? ""
+              )
             )
-          )
+          }
           NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.load.start", [
             "reason": reason,
             "routeUrl": route.url.absoluteString,
@@ -16030,10 +16087,64 @@ final class TerminalWorkspaceView: NSView {
         const sessionTitle = \(encodedTitle);
         const workspaceRoot = \(encodedWorkspaceRoot);
         const handler = window.webkit?.messageHandlers?.\(T3CodePaneDiagnosticsBridge.messageHandlerName);
+        const nativeBridgeRequests = new Map();
+        let nativeBridgeRequestId = 0;
+        window.__VSMUX_T3_BRIDGE_RESPOND__ = (requestId, response) => {
+          const id = String(requestId || "");
+          const pending = nativeBridgeRequests.get(id);
+          if (!pending) {
+            return;
+          }
+          nativeBridgeRequests.delete(id);
+          if (response && response.ok === true && typeof response.value === "string") {
+            pending.resolve(response.value);
+            return;
+          }
+          pending.reject(new Error(String(response?.error || "Native T3 bridge request failed.")));
+        };
+        const requestNativeBridgeValue = (name) => new Promise((resolve, reject) => {
+          if (!handler) {
+            reject(new Error("Native T3 bridge handler unavailable."));
+            return;
+          }
+          const requestId = `${Date.now()}-${++nativeBridgeRequestId}`;
+          nativeBridgeRequests.set(requestId, { resolve, reject });
+          window.setTimeout(() => {
+            const pending = nativeBridgeRequests.get(requestId);
+            if (!pending) {
+              return;
+            }
+            nativeBridgeRequests.delete(requestId);
+            pending.reject(new Error(`Native T3 bridge request timed out: ${name}`));
+          }, 5000);
+          try {
+            handler.postMessage({
+              name,
+              requestId,
+              type: "bridge-request"
+            });
+          } catch (error) {
+            nativeBridgeRequests.delete(requestId);
+            reject(error);
+          }
+        });
         const threadIdFromPath = () => {
           const parts = location.pathname.split("/").filter(Boolean);
+          /*
+           * CDXC:T3Code 2026-06-23-06:22:
+           * Ghostex loads new panes through T3's draft route so upstream does
+           * not create empty threads during bootstrap. `/draft/<draftId>` is a
+           * route-local id, not a thread navigation event for the Ghostex
+           * sidebar, so the WK bridge must wait until T3 promotes the draft to
+           * a real `/<projectId>/<threadId>` route before reporting a thread.
+           */
+          if (parts[0] === "draft") {
+            return "";
+          }
           return parts.length >= 2 ? parts[1] : "";
         };
+        const isDraftRouteThreadId = (threadId) =>
+          String(threadId || "").trim().toLowerCase().startsWith("ghostex-draft-");
         const wsUrl = () => `${location.origin.replace(/^http/i, "ws")}/ws`;
         const currentThreadId = () => threadIdFromPath();
         let lastReportedThreadId = "";
@@ -16067,6 +16178,9 @@ final class TerminalWorkspaceView: NSView {
         };
         const reportThreadChange = (payload, reason) => {
           const threadId = String(payload?.threadId || "").trim();
+          if (isDraftRouteThreadId(threadId)) {
+            return;
+          }
           const title =
             (isUsableThreadTitle(payload?.title) ? normalizeThreadTitle(payload?.title) : "") ||
             visibleThreadTitle() ||
@@ -16199,6 +16313,29 @@ final class TerminalWorkspaceView: NSView {
             label: sessionTitle || "T3 Code",
             wsBaseUrl: wsUrl()
           }),
+          /**
+           * CDXC:T3CodeUpstreamReset 2026-06-22-23:39:
+           * Current upstream treats desktopBridge pages as bearer-authenticated
+           * and omits cookies on primary environment requests. Ghostex's WK
+           * bridge must expose the same async bearer method as T3 Electron
+           * while keeping the token out of diagnostic postMessage payloads.
+           */
+          getLocalEnvironmentBearerToken: async () => {
+            const cached =
+              typeof window.__VSMUX_T3_OWNER_BEARER_TOKEN__ === "string"
+                ? window.__VSMUX_T3_OWNER_BEARER_TOKEN__.trim()
+                : "";
+            if (cached) {
+              return cached;
+            }
+            const token = await requestNativeBridgeValue("getLocalEnvironmentBearerToken");
+            const normalized = typeof token === "string" ? token.trim() : "";
+            if (!normalized) {
+              throw new Error("Native T3 bridge returned an empty bearer token.");
+            }
+            window.__VSMUX_T3_OWNER_BEARER_TOKEN__ = normalized;
+            return normalized;
+          },
           getWsUrl: () => wsUrl(),
           getSavedEnvironmentRegistry: async () => [],
           getSavedEnvironmentSecret: async () => null,
@@ -18759,6 +18896,7 @@ private final class T3CodePaneDiagnosticsBridge: NSObject, WKScriptMessageHandle
 
   private let onThreadChanged: (String, String, String?) -> Void
   private let sessionId: String
+  weak var webView: WKWebView?
 
   init(sessionId: String, onThreadChanged: @escaping (String, String, String?) -> Void) {
     self.onThreadChanged = onThreadChanged
@@ -18772,6 +18910,9 @@ private final class T3CodePaneDiagnosticsBridge: NSObject, WKScriptMessageHandle
     let type = (details["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
     details["frameInfoIsMainFrame"] = message.frameInfo.isMainFrame
     details["sessionId"] = sessionId
+    if type == "bridge-request", message.frameInfo.isMainFrame {
+      handleBridgeRequest(details, frameURL: message.frameInfo.request.url)
+    }
     if type == "thread-changed", message.frameInfo.isMainFrame {
       let threadId = (details["threadId"] as? String)?
         .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -18785,6 +18926,61 @@ private final class T3CodePaneDiagnosticsBridge: NSObject, WKScriptMessageHandle
       "nativeWorkspace.t3WebPane.javascript.\(type?.isEmpty == false ? type! : "message")",
       details
     )
+  }
+
+  private func handleBridgeRequest(_ details: [String: Any], frameURL: URL?) {
+    let requestId =
+      (details["requestId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard !requestId.isEmpty else {
+      return
+    }
+    guard let frameURL, NativeT3RuntimeLauncher.isManagedRuntimeURL(frameURL) else {
+      respondToBridgeRequest(requestId: requestId, error: "invalid-managed-runtime-origin")
+      return
+    }
+    let name = (details["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    switch name {
+    case "getLocalEnvironmentBearerToken":
+      let ownerBearerToken =
+        NativeT3RuntimeLauncher.currentOwnerBearerToken()
+        ?? NativeT3RuntimeLauncher.readPersistedOwnerBearerToken()
+      guard let ownerBearerToken, !ownerBearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        respondToBridgeRequest(requestId: requestId, error: "missing-owner-bearer-token")
+        return
+      }
+      respondToBridgeRequest(requestId: requestId, value: ownerBearerToken)
+    default:
+      respondToBridgeRequest(requestId: requestId, error: "unsupported-native-bridge-request")
+    }
+  }
+
+  private func respondToBridgeRequest(requestId: String, value: String? = nil, error: String? = nil) {
+    guard let webView else {
+      return
+    }
+    let response: [String: Any] =
+      value.map { ["ok": true, "value": $0] } ?? ["ok": false, "error": error ?? "native-bridge-error"]
+    guard
+      let data = try? JSONSerialization.data(withJSONObject: response, options: []),
+      let responseJSON = String(data: data, encoding: .utf8)
+    else {
+      return
+    }
+    let requestIdLiteral = Self.javascriptStringLiteral(requestId)
+    let script = "window.__VSMUX_T3_BRIDGE_RESPOND__?.(\(requestIdLiteral), \(responseJSON));"
+    webView.evaluateJavaScript(script, completionHandler: nil)
+  }
+
+  private static func javascriptStringLiteral(_ value: String) -> String {
+    guard
+      let data = try? JSONSerialization.data(withJSONObject: [value], options: []),
+      let json = String(data: data, encoding: .utf8),
+      json.hasPrefix("["),
+      json.hasSuffix("]")
+    else {
+      return "\"\""
+    }
+    return String(json.dropFirst().dropLast())
   }
 
   private func normalizeBody(_ body: Any) -> [String: Any] {

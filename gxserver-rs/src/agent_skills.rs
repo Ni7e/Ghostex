@@ -52,7 +52,11 @@ const AGENT_SKILL_INSTALL_ENV_OVERRIDES: &[&str] = &[
 ];
 const AGENT_SKILL_DISCOVERY_MAX_DEPTH: usize = 8;
 const AGENT_SKILL_INSTALL_EXITED_READER_DRAIN_MS: u64 = 1_000;
-const AGENT_SKILL_INSTALL_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
+/*
+CDXC:AgentSkills 2026-06-22-07:21:
+The TypeScript daemon used execFile maxBuffer=10 MiB for agent-skill installs. Keep gxserver-rs at the same stdout/stderr byte ceiling while retaining the Rust runner's explicit process termination and captured-output reporting.
+*/
+const AGENT_SKILL_INSTALL_OUTPUT_LIMIT_BYTES: usize = 10 * 1024 * 1024;
 const AGENT_SKILL_INSTALL_POLL_MS: u64 = 25;
 const AGENT_SKILL_INSTALL_TERMINATED_READER_DRAIN_MS: u64 = 250;
 const AGENT_SKILL_INSTALL_TIMEOUT_MS: u64 = 5 * 60 * 1000;
@@ -379,12 +383,11 @@ async fn run_agent_skill_install_command_with_limits(
     let mut timeout_sleep = Box::pin(sleep(timeout_duration));
     let mut termination = None;
     let status = loop {
-        match child.try_wait().map_err(|error| DomainStateError {
+        if let Some(status) = child.try_wait().map_err(|error| DomainStateError {
             code: "internalError",
             message: format!("Agent skill install command wait failed: {error}"),
         })? {
-            Some(status) => break status,
-            None => {}
+            break status;
         }
         tokio::select! {
             _ = &mut timeout_sleep => {
@@ -409,7 +412,7 @@ async fn run_agent_skill_install_command_with_limits(
     finish_capped_child_output_reader(stderr_reader, "stderr", reader_drain_timeout).await?;
     let stdout = stdout_output.snapshot();
     let stderr = stderr_output.snapshot();
-    let output_limit_termination = termination.or_else(|| {
+    let output_limit_termination = termination.or({
         if stdout.limit_exceeded {
             Some(AgentSkillInstallTermination::OutputLimit {
                 stream_name: "stdout",
@@ -1058,6 +1061,11 @@ mod tests {
             normalize_existing_absolute_path("~/repo"),
             home.join("repo")
         );
+    }
+
+    #[test]
+    fn install_output_limit_matches_typescript_execfile_max_buffer() {
+        assert_eq!(AGENT_SKILL_INSTALL_OUTPUT_LIMIT_BYTES, 10 * 1024 * 1024);
     }
 
     #[cfg(unix)]

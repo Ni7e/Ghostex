@@ -437,19 +437,11 @@ button,
 
  CDXC:SettingsSearch 2026-06-16-09:37: The Settings/Hotkeys search field should match the centered main Settings content exactly: use the same 770px column and 20px inner inset so the input edges align with section cards.
 
- CDXC:AppModals 2026-06-15-10:12:
- The macOS Settings modal is framed by AppKit to the workspace region, below
- the titlebar and beside the sidebar. In the native-window modal host, let the
- React settings surface fill that viewport instead of keeping the older
- centered management-dialog cap.
-
- CDXC:AppModals 2026-06-15-10:37:
- The workspace-sized Settings modal needs a 1px #252525 top separator so the
- modal surface remains visually distinct from the native titlebar above it.
-
- CDXC:AppModals 2026-06-15-10:53:
- Add matching right and bottom separators to the workspace-sized Settings
- modal while keeping the border inside the exact native child-window frame.
+ CDXC:SettingsWindow 2026-06-24-05:39:
+ The macOS Settings surface lives in a separate titled, draggable, resizable
+ native modal with AppKit enforcing 1000x750 minimum/default content size and
+ 1800x1200 maximum content size. In the native-window modal host, let React fill
+ the window content viewport instead of keeping the centered web-dialog cap.
 */
 .ghostex-settings-shadcn.settings-modal-dialog {
   /*
@@ -474,9 +466,6 @@ button,
 }
 
 .app-modal-host-native-window-body .ghostex-settings-shadcn.settings-modal-dialog {
-  border-bottom: 1px solid #252525 !important;
-  border-right: 1px solid #252525 !important;
-  border-top: 1px solid #252525 !important;
   box-sizing: border-box;
   height: 100vh;
   max-height: 100vh;
@@ -2186,55 +2175,83 @@ button,
    * CDXC:SettingsNavigation 2026-06-19-11:15:
    * Tabs should fill the Settings modal, not the centered settings-card column.
    *
-   * CDXC:SettingsNavigation 2026-06-19-12:22:
-   * The Settings tab rail should be darker than the prior muted strip while
-   * staying in the same neutral surface family as settings cards. Use a
-   * stronger selected-tab fill, border, and foreground contrast so the active
-   * Settings tab is immediately readable.
-   *
    * CDXC:SettingsNavigation 2026-06-19-12:34:
    * Keep the tabs rail inset 16px from the modal's left and right edges so the
-   * darker strip does not run flush into the Settings window frame.
+   * rail does not run flush into the Settings window frame.
+   *
+   * CDXC:AppModalTabs 2026-06-23-04:30:
+   * Settings tab appearance now matches the titlebar mode switcher through the
+   * shared .app-modal-tab-rail class instead of the earlier darker filled,
+   * bordered, bold-on-active strip. Keep only the rail inset/width here.
    */
   margin-inline: 1rem;
   min-width: 0;
   width: calc(100% - 2rem);
 }
 
-.ghostex-settings-shadcn .settings-modal-tabs-scroll [data-slot="tabs-list"] {
-  background: color-mix(in srgb, var(--app-modal-background) 72%, var(--muted) 28%) !important;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  display: grid !important;
-  grid-auto-flow: column;
+/*
+ * CDXC:AppModalTabs 2026-06-23-04:30:
+ * Settings and Agents Hub share one tab rail styled after the titlebar mode
+ * switcher (Agents/Source/Browser/Kanban/Manage): a flat row of equal-width
+ * tabs with thin separators and a subtle highlight box behind the active tab.
+ * The active tab brightens its label color instead of bolding it, replacing the
+ * old filled, bordered, 650-weight segmented control users disliked. Theme
+ * variables keep the rail readable across Dark 1, Dark 2, and Light where the
+ * titlebar relies on fixed white overlays. List layout props stay
+ * non-!important so the Settings narrow-width wrap container query can still
+ * override the grid.
+ *
+ * CDXC:AppModalTabs 2026-06-23-04:45:
+ * Each tab now carries a full 4-direction #252525 outline matching the macOS
+ * titlebar mode switcher, instead of the earlier theme-mixed left-only
+ * separators. Top/bottom/left live on every trigger and the last child adds the
+ * right edge so internal separators stay a single 1px line. Inactive tabs read
+ * as slightly dimmed white; hover brightens the label to full --foreground with
+ * no background fill, so the highlight box stays exclusive to the active tab
+ * (data-active wins over :hover by source order at equal specificity).
+ *
+ * CDXC:AppModalTabs 2026-06-24-04:25:
+ * Settings and Agents Hub tabs need a visible 1px #252525 border around the
+ * rail itself, with trigger-side borders limited to internal dividers so the
+ * outside edge stays continuous and never renders as doubled 2px seams.
+ */
+.app-modal-tab-rail[data-slot="tabs-list"] {
+  background: transparent !important;
+  border: 1px solid #252525 !important;
+  border-radius: 0 !important;
+  display: grid;
+  gap: 0;
   grid-auto-columns: minmax(0, 1fr);
-  padding: 0.1875rem !important;
-  width: 100% !important;
-}
-
-.ghostex-settings-shadcn .settings-modal-tabs-scroll [data-slot="tabs-trigger"] {
-  color: color-mix(in srgb, var(--muted-foreground) 84%, var(--foreground) 16%);
-  font-weight: 500;
-  min-width: 0;
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
+  grid-auto-flow: column;
+  height: 2.125rem;
+  padding: 0 !important;
   width: 100%;
 }
 
-.ghostex-settings-shadcn .settings-modal-tabs-scroll [data-slot="tabs-trigger"]:hover {
-  background: color-mix(in srgb, var(--app-modal-background) 60%, var(--muted) 40%) !important;
-  color: color-mix(in srgb, var(--foreground) 86%, var(--muted-foreground) 14%);
+.app-modal-tab-rail [data-slot="tabs-trigger"] {
+  border: 0 !important;
+  border-radius: 0 !important;
+  color: color-mix(in srgb, var(--foreground) 75%, transparent) !important;
+  font-weight: 500 !important;
+  height: 100%;
+  min-width: 0;
+  transition: color 120ms ease;
+  width: 100%;
 }
 
-.ghostex-settings-shadcn .settings-modal-tabs-scroll [data-slot="tabs-trigger"][data-active] {
-  background: color-mix(in srgb, var(--app-modal-background) 42%, var(--muted) 58%) !important;
-  border-color: color-mix(in srgb, var(--foreground) 20%, var(--border) 80%) !important;
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent),
-    0 1px 0 rgb(0 0 0 / 18%);
-  color: var(--foreground);
-  font-weight: 650;
+.app-modal-tab-rail [data-slot="tabs-trigger"] + [data-slot="tabs-trigger"] {
+  border-left: 1px solid #252525 !important;
+}
+
+.app-modal-tab-rail [data-slot="tabs-trigger"]:hover {
+  background: transparent !important;
+  color: var(--foreground) !important;
+}
+
+.app-modal-tab-rail [data-slot="tabs-trigger"][data-active] {
+  background: color-mix(in srgb, var(--foreground) 12%, transparent) !important;
+  color: var(--foreground) !important;
+  font-weight: 500 !important;
 }
 
 .ghostex-settings-shadcn .settings-modal-search-row {

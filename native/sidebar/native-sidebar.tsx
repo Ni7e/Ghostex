@@ -47,7 +47,14 @@ import {
   type NativeSessionTransitionOriginSession,
 } from "./native-session-transition-focus";
 import { splitAgentPromptTextIntoLineChunks } from "./native-agent-prompt-text";
-import type { NativeTerminalLayout } from "../../shared/native-ghostty-host-protocol";
+import type {
+  NativePortlessAdminAction,
+  NativePortlessAdminCommand,
+  NativePortlessAdminInstallAction,
+  NativePortlessAdminResult,
+  NativePortlessProtocol,
+  NativeTerminalLayout,
+} from "../../shared/native-ghostty-host-protocol";
 import {
   clampVisibleSessionCount,
   createAgentSessionDefaultTitle,
@@ -85,6 +92,7 @@ import {
   type SidebarHudChangedMessage,
   type SidebarT3SessionItem,
   type SidebarHydrateMessage,
+  type SidebarPortlessState,
   type SidebarPreviousSessionItem,
   type SidebarRecentProject,
   type SidebarSessionGroup,
@@ -360,6 +368,8 @@ import type {
   GxserverPresentationSearchResult,
   GxserverPresentationSession,
   GxserverPresentationSnapshot,
+  GxserverPortlessStateUpdateParams,
+  GxserverPortlessStateUpdateResult,
   GxserverProjectDirectoryBrowseResult,
   GxserverProjectDomainState,
   GxserverProjectId,
@@ -374,6 +384,7 @@ import type {
   GxserverTerminalTitleEventResult,
   GxserverTypedOperationResult,
   GxserverUpdateAgentActivityResult,
+  GxserverUpdateSessionParams,
 } from "../../shared/gxserver-protocol";
 import "../../sidebar/styles.css";
 
@@ -661,9 +672,12 @@ type NativeHostCommand =
         deactivateOnLowPowerMode: boolean;
         deactivateOnUserSwitch: boolean;
         defaultDurationMinutes: ghostexSettings["keepAwakeDefaultDurationMinutes"];
+        delayedSendSessionCount: number;
         featureEnabled: boolean;
         hideTitlebarControl: boolean;
         preventLidSleep: boolean;
+        whileWorkingSessions: boolean;
+        workingSessionCount: number;
       };
       gxserverDaemon?: NativeGxserverDaemonStatus;
 	      petOverlayEnabled?: boolean;
@@ -691,6 +705,9 @@ type NativeHostCommand =
       agentHookStatus?: SidebarAgentHookStatusMessage;
       ghostexCliStatus?: SidebarGhostexCliStatusMessage;
       sessionPersistenceProvider?: ghostexSettings["sessionPersistenceProvider"];
+      terminalDevServerOpenTarget?: ghostexSettings["terminalDevServerOpenTarget"];
+      titlebarCodeEditorProjectIds?: string[];
+      titlebarPortless?: SidebarPortlessState;
       titlebarResourceGroups?: TitlebarResourceGroup[];
 	      type: "setActiveTerminalSet";
 	      workspaceOpenTargets?: {
@@ -741,6 +758,7 @@ type NativeHostCommand =
        */
       hideFloatingIndicators: boolean;
       hideMenuBarIndicators: boolean;
+      projects?: NativeSessionStatusIndicatorProject[];
       workingCount: number;
       /**
        * CDXC:SessionStatusIndicators 2026-05-07-18:20
@@ -799,6 +817,7 @@ type NativeHostCommand =
       type: "runProcess";
     }
   | { requestId: string; type: "cancelRunProcess" }
+  | NativePortlessAdminCommand
   | NativeGxserverRequestCommand
   | {
       identityFile?: string;
@@ -913,6 +932,20 @@ type NativeSplitLayoutHint = {
 type NativeResolvedSplitLayoutHint = Omit<NativeSplitLayoutHint, "projectId">;
 type NativePaneTabCloseScope = "close" | "closeLeft" | "closeOthers" | "closeRight";
 type NativePaneTabSleepScope = "sleep" | "sleepLeft" | "sleepOthers" | "sleepRight";
+type NativeSessionStatusIndicatorSession = {
+  agentIconColor?: string;
+  agentIconDataUrl?: string;
+  lastActiveAt?: string;
+  sidebarOrder: number;
+  sessionId: string;
+  status: NativeSessionStatusIndicatorStatus;
+  title: string;
+};
+type NativeSessionStatusIndicatorProject = {
+  projectId: string;
+  sessions: NativeSessionStatusIndicatorSession[];
+  title: string;
+};
 
 type NativeHostEvent =
   | {
@@ -1032,6 +1065,8 @@ type NativeHostEvent =
       type: "projectEditorCompanionPaneHiddenChanged";
     }
   | { status: NativeSessionStatusIndicatorStatus; type: "sessionStatusIndicatorClicked" }
+  | { projectId: string; type: "sessionStatusIndicatorProjectClicked" }
+  | { projectId: string; sessionId: string; type: "sessionStatusIndicatorSessionClicked" }
   | { projectId: string; sessionId: string; type: "petOverlayActivityClicked" }
   | { sessionId: string; type: "sessionAttentionNotificationClicked" }
   | {
@@ -1044,6 +1079,7 @@ type NativeHostEvent =
     }
   | { sessionId: string; threadId: string; title?: string; type: "t3ThreadChanged" }
   | { exitCode: number; requestId: string; stderr: string; stdout: string; type: "processResult" }
+  | NativePortlessAdminResult
   | { payloadJson: string; type: "gxserverStatus" }
   | { payloadJson: string; remoteMachineId: string; type: "remoteGxserverStatus" }
   | { payloadJson: string; remoteMachineId: string; type: "remoteGxserverPresentationEvent" }
@@ -1682,6 +1718,18 @@ const pendingProcessResults = new Map<
     timeout: number;
   }
 >();
+const pendingPortlessAdminResults = new Map<
+  string,
+  {
+    reject: (reason?: unknown) => void;
+    resolve: (result: NativePortlessAdminResult) => void;
+    timeout: number;
+  }
+>();
+let lastPortlessAdminResult: NativePortlessAdminResult | undefined;
+type PortlessSetupPromptMode = "firstSetup" | "standaloneReconfigure";
+let activePortlessSetupPromptMode: PortlessSetupPromptMode | undefined;
+let portlessSetupPromptSuppressedUntilRestart = false;
 const activeRepositoryCloneRequests = new Map<
   string,
   {
@@ -4330,6 +4378,20 @@ function remoteGxserverStatusFailureToast(
           nativeMessage,
         ),
         title: `gxserver install failed on ${machineName}`,
+      };
+    case "unsupportedRemotePlatform":
+      /*
+       * CDXC:RemoteMachines 2026-06-23-09:46:
+       * First-time Ubuntu install must fail safely when the macOS app lacks a
+       * matching Linux gxserver artifact. Keep the toast explicit so users do
+       * not mistake a target-package mismatch for SSH auth or write failure.
+       */
+      return {
+        description: remoteFailureDescription(
+          "Ghostex can SSH to this machine, but this app bundle does not include a gxserver package for its operating system and CPU architecture. Install a Ghostex build that bundles the matching remote package, then retry.",
+          nativeMessage,
+        ),
+        title: `No compatible gxserver package for ${machineName}`,
       };
     case "tokenUnavailable":
       return {
@@ -7367,6 +7429,54 @@ function runNativeProcess(
   });
 }
 
+function runNativePortlessAdminAction(
+  action: "remove",
+  options?: { protocol?: NativePortlessProtocol; requestId?: string; timeoutMs?: number },
+): Promise<NativePortlessAdminResult>;
+function runNativePortlessAdminAction(
+  action: NativePortlessAdminInstallAction,
+  options: { protocol: NativePortlessProtocol; requestId?: string; timeoutMs?: number },
+): Promise<NativePortlessAdminResult>;
+function runNativePortlessAdminAction(
+  action: NativePortlessAdminAction,
+  options?: { protocol?: NativePortlessProtocol; requestId?: string; timeoutMs?: number },
+): Promise<NativePortlessAdminResult>;
+function runNativePortlessAdminAction(
+  action: NativePortlessAdminAction,
+  options: { protocol?: NativePortlessProtocol; requestId?: string; timeoutMs?: number } = {},
+): Promise<NativePortlessAdminResult> {
+  const requestId =
+    options.requestId ??
+    `portless-admin-${action}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  let command: NativePortlessAdminCommand;
+  if (action === "remove") {
+    command = {
+      action,
+      requestId,
+      type: "portlessAdminAction",
+    };
+  } else {
+    const protocol = options.protocol;
+    if (protocol !== "https" && protocol !== "http") {
+      return Promise.reject(new Error("portless-admin-protocol-required"));
+    }
+    command = {
+      action,
+      protocol,
+      requestId,
+      type: "portlessAdminAction",
+    };
+  }
+  postNative(command);
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      pendingPortlessAdminResults.delete(requestId);
+      reject(new Error(`portless-admin-${action}-timed-out`));
+    }, options.timeoutMs ?? 120_000);
+    pendingPortlessAdminResults.set(requestId, { reject, resolve, timeout });
+  });
+}
+
 function nativeSidebarBundledCodeServerNodePath(): string | undefined {
   /*
   CDXC:AgentsHub 2026-06-12-03:05:
@@ -7956,6 +8066,7 @@ function saveSettings(nextSettings: ghostexSettings): void {
   settings = normalizeghostexSettings(nextSettings);
   persistSharedSettingsSnapshot(settings);
   syncGxserverAgentSettings(settings, previousSettings, "settings-save");
+  syncPortlessSettings(settings, previousSettings);
   syncNativeSidebarSide(settings.sidebarSide, previousSettings.sidebarSide);
   syncGhosttyTerminalSettings(settings, previousSettings);
   syncCodeServerRuntimeSettings(settings, previousSettings);
@@ -17190,6 +17301,31 @@ function createTitlebarResourceSession(
   };
 }
 
+function createTitlebarKeepAwakeSessionState(
+  resourceGroups: readonly TitlebarResourceGroup[],
+): { delayedSendSessionCount: number; workingSessionCount: number } {
+  /*
+   * CDXC:TitlebarKeepAwake 2026-06-23-08:20:
+   * Delayed Send on any local terminal session is a Mac power-hold input because the scheduled Enter must fire while the laptop is awake. Working-session holds use the same titlebar resource projection so the power policy follows rendered session state without logging names, paths, commands, or terminal text.
+   */
+  let delayedSendSessionCount = 0;
+  let workingSessionCount = 0;
+  for (const group of resourceGroups) {
+    for (const session of group.sessions) {
+      if (session.sessionKind !== "terminal" || session.isSleeping === true) {
+        continue;
+      }
+      if (hasProjectedDelayedSend(session)) {
+        delayedSendSessionCount += 1;
+      }
+      if (session.isRunning === true && session.activity === "working") {
+        workingSessionCount += 1;
+      }
+    }
+  }
+  return { delayedSendSessionCount, workingSessionCount };
+}
+
 function titlebarResourceGroupsContainLiveSupportedAgent(
   resourceGroups: TitlebarResourceGroup[],
 ): boolean {
@@ -17269,6 +17405,7 @@ function createSidebarProjectSettingsProjects() {
         if (shouldHideProjectFromSettingsProjectList(project, localProject)) {
           return [];
         }
+        const worktree = normalizeNativeProjectWorktreeMetadata(project.worktree);
         return [
           {
             beadsDirectory: textValue(project.projectBoardConfig.beadsDirectory),
@@ -17278,6 +17415,9 @@ function createSidebarProjectSettingsProjects() {
             name: project.name,
             path: projectPath,
             projectId: project.projectId,
+            ...(worktree?.parentProjectId
+              ? { worktreeParentProjectId: worktree.parentProjectId }
+              : {}),
             worktreeCommand: textValue(project.gitConfig.worktreeCommand),
           },
         ];
@@ -17299,6 +17439,9 @@ function createSidebarProjectSettingsProjects() {
       name: project.name,
       path: project.path,
       projectId: project.projectId,
+      ...(project.worktree?.parentProjectId
+        ? { worktreeParentProjectId: project.worktree.parentProjectId }
+        : {}),
       worktreeCommand: project.worktreeCommand,
     }));
 }
@@ -18234,6 +18377,347 @@ function createGxserverUnavailableSidebarGroups(): SidebarSessionGroup[] {
   ];
 }
 
+const PORTLESS_NATIVE_ADMIN_ACTIONS: readonly NativePortlessAdminAction[] = [
+  "install",
+  "reconfigure",
+  "retry",
+  "remove",
+];
+
+type NativeSidebarPortlessHealth = NonNullable<
+  NonNullable<NativeSidebarGxserverStatus["health"]>["portless"]
+>;
+
+function currentPortlessHealth(): NativeSidebarPortlessHealth | undefined {
+  return (
+    currentGxserverStatus.health?.portless ??
+    gxserverStartupSnapshot?.health.portless ??
+    gxserverStartupSnapshot?.presentation?.portless?.status
+  );
+}
+
+function applyPortlessStateUpdateResult(result: GxserverPortlessStateUpdateResult): void {
+  if (currentGxserverStatus.health) {
+    currentGxserverStatus = {
+      ...currentGxserverStatus,
+      health: {
+        ...currentGxserverStatus.health,
+        portless: result.status,
+      },
+    };
+  }
+  if (gxserverStartupSnapshot) {
+    gxserverStartupSnapshot = {
+      ...gxserverStartupSnapshot,
+      health: {
+        ...gxserverStartupSnapshot.health,
+        portless: result.status,
+      },
+      ...(gxserverStartupSnapshot.presentation
+        ? {
+            presentation: {
+              ...gxserverStartupSnapshot.presentation,
+              portless: result.presentation,
+            },
+          }
+        : {}),
+    };
+  }
+}
+
+async function updatePortlessGxserverState(
+  params: GxserverPortlessStateUpdateParams,
+): Promise<void> {
+  const result = await gxserverClient.rpc<GxserverPortlessStateUpdateResult>(
+    "/api/updatePortlessState",
+    params as unknown as Record<string, unknown>,
+  );
+  applyPortlessStateUpdateResult(result);
+  publish();
+}
+
+function syncPortlessSettings(nextSettings: ghostexSettings, previousSettings: ghostexSettings): void {
+  /*
+  CDXC:PortlessFailureUX 2026-06-23-04:28:
+  Settings changes are immediate. Persist Portless protocol/enabled changes in
+  gxserver-rs, reconfigure an installed background proxy through the native
+  admin action path, and make Disable clear gxserver-managed routes without
+  calling the explicit service removal action.
+  */
+  if (nextSettings.portlessEnabled !== previousSettings.portlessEnabled) {
+    syncPortlessEnabledSetting(nextSettings.portlessEnabled);
+  }
+  if (
+    nextSettings.portlessEnabled &&
+    nextSettings.portlessProtocol !== previousSettings.portlessProtocol
+  ) {
+    syncPortlessProtocolSetting(nextSettings.portlessProtocol);
+  }
+}
+
+function syncPortlessEnabledSetting(enabled: boolean): void {
+  if (enabled) {
+    portlessSetupPromptSuppressedUntilRestart = false;
+  } else {
+    suppressPortlessSetupPromptForThisRun();
+  }
+  void updatePortlessGxserverState({
+    enabled,
+    kind: "setEnabled",
+  }).catch(() => undefined);
+}
+
+function syncPortlessProtocolSetting(protocol: NativePortlessProtocol): void {
+  const shouldReconfigureInstalledService =
+    isNativePortlessAdminBridgeAvailable() &&
+    isPortlessServiceInstalledForProtocolReconfigure(currentPortlessHealth());
+  if (shouldReconfigureInstalledService) {
+    suppressPortlessSetupPromptForThisRun();
+  }
+  void updatePortlessGxserverState({
+    kind: "setProtocol",
+    protocol,
+  })
+    .then(() => {
+      if (shouldReconfigureInstalledService) {
+        runTrackedPortlessAdminAction("reconfigure", { protocol });
+      }
+    })
+    .catch(() => undefined);
+}
+
+function isPortlessServiceInstalledForProtocolReconfigure(
+  health: NativeSidebarPortlessHealth | undefined,
+): boolean {
+  return (
+    health !== undefined &&
+    health.setupStatus !== "disabled" &&
+    (health.setupOwnership === "ghostex" || health.setupOwnership === "standalone")
+  );
+}
+
+function createSidebarPortlessState(options: { isLocalGxserver: boolean }): SidebarPortlessState | undefined {
+  const presentation = gxserverStartupSnapshot?.presentation?.portless;
+  const health = currentPortlessHealth() ?? presentation?.status;
+  if (!health) {
+    return undefined;
+  }
+  const nativeAdminAvailable =
+    options.isLocalGxserver && isNativePortlessAdminBridgeAvailable();
+  return {
+    health,
+    nativeAdmin: {
+      actions: createSidebarPortlessNativeAdminActions(health, nativeAdminAvailable),
+      available: nativeAdminAvailable,
+      ...(lastPortlessAdminResult ? { lastResult: lastPortlessAdminResult } : {}),
+    },
+    ...(presentation ? { presentation } : {}),
+  };
+}
+
+function createSidebarPortlessNativeAdminActions(
+  health: NonNullable<NonNullable<NativeSidebarGxserverStatus["health"]>["portless"]>,
+  isLocalMac: boolean,
+): SidebarPortlessState["nativeAdmin"]["actions"] {
+  /*
+  CDXC:PortlessProtocol 2026-06-23-00:25:
+  Active Portless setup actions become available only in the local macOS native-sidebar bridge. gxserver health describes the state and recommendation, while this local projection prevents remote/non-native gxserver metadata from rendering runnable privileged actions.
+  */
+  const recommendedAction = recommendedPortlessNativeAdminAction(health);
+  return Object.fromEntries(
+    PORTLESS_NATIVE_ADMIN_ACTIONS.map((action) => {
+      const available =
+        isLocalMac &&
+        (action === recommendedAction ||
+          (action === "remove" && health.setupOwnership === "ghostex"));
+      const unavailableReason =
+        available
+          ? undefined
+          : !isLocalMac
+            ? "localMacOnly"
+            : action === "remove" && health.setupOwnership !== "ghostex"
+              ? "setupNotGhostexOwned"
+              : "notRecommended";
+      return [
+        action,
+        {
+          action,
+          available,
+          ...(unavailableReason ? { unavailableReason } : {}),
+        },
+      ];
+    }),
+  ) as SidebarPortlessState["nativeAdmin"]["actions"];
+}
+
+function recommendedPortlessNativeAdminAction(
+  health: NonNullable<NonNullable<NativeSidebarGxserverStatus["health"]>["portless"]>,
+): NativePortlessAdminAction | undefined {
+  if (!health.enabled || health.setupStatus === "disabled") {
+    return undefined;
+  }
+  if (health.setupOwnership === "missing" && health.setupStatus === "needed") {
+    return "install";
+  }
+  if (
+    (health.setupOwnership === "ghostex" || health.setupOwnership === "standalone") &&
+    health.setupStatus === "needed"
+  ) {
+    return "reconfigure";
+  }
+  if (health.setupOwnership === "ghostex" && health.setupStatus === "failed") {
+    return "retry";
+  }
+  return undefined;
+}
+
+function isNativePortlessAdminBridgeAvailable(): boolean {
+  return typeof window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage === "function";
+}
+
+function maybeOpenPortlessSetupPrompt(portless: SidebarPortlessState | undefined): void {
+  const prompt = resolvePortlessSetupPrompt(portless);
+  if (!prompt || activePortlessSetupPromptMode || portlessSetupPromptSuppressedUntilRestart) {
+    return;
+  }
+  activePortlessSetupPromptMode = prompt.mode;
+  try {
+    openAppModal({
+      modal: "portlessSetup",
+      mode: prompt.mode,
+      protocol: prompt.protocol,
+      type: "open",
+    });
+  } catch {
+    activePortlessSetupPromptMode = undefined;
+  }
+}
+
+function resolvePortlessSetupPrompt(
+  portless: SidebarPortlessState | undefined,
+): { mode: PortlessSetupPromptMode; protocol: NativePortlessProtocol } | undefined {
+  /*
+  CDXC:PortlessSetupModal 2026-06-23-13:42:
+  Phase 13 setup prompts must be derived from Phase 12 HUD metadata only: the
+  global setting and gxserver status say Portless is enabled, native-sidebar is
+  local Mac capable, a Ghostex-owned live listener exists, and setup is either
+  missing or needs reconfigure/takeover. Suppression is memory-only for this
+  app run after Postpone, Cancel, Disable, or launching the admin action.
+  */
+  const health = portless?.health;
+  if (!portless || !health || !settings.portlessEnabled || !health.enabled) {
+    return undefined;
+  }
+  if (!portless.nativeAdmin.available || (portless.presentation?.liveListenerCount ?? 0) <= 0) {
+    return undefined;
+  }
+  if (health.setupStatus !== "needed") {
+    return undefined;
+  }
+  if (health.setupOwnership === "missing") {
+    return { mode: "firstSetup", protocol: health.protocol };
+  }
+  if (health.setupOwnership === "standalone" || health.setupOwnership === "ghostex") {
+    return { mode: "standaloneReconfigure", protocol: health.protocol };
+  }
+  return undefined;
+}
+
+function suppressPortlessSetupPromptForThisRun(): void {
+  portlessSetupPromptSuppressedUntilRestart = true;
+  activePortlessSetupPromptMode = undefined;
+}
+
+function recordPortlessAdminResultInGxserver(result: NativePortlessAdminResult): void {
+  if (result.action !== "remove" && !result.ok) {
+    suppressPortlessSetupPromptForThisRun();
+  }
+  void updatePortlessGxserverState({
+    action: result.action,
+    kind: "recordAdminResult",
+    ok: result.ok,
+    ...(result.protocol ? { protocol: result.protocol } : {}),
+  }).catch(() => undefined);
+}
+
+function runTrackedPortlessAdminAction(
+  action: NativePortlessAdminAction,
+  options: { protocol?: NativePortlessProtocol; requestId?: string } = {},
+): void {
+  if (action === "remove") {
+    void runNativePortlessAdminAction("remove", {
+      requestId: options.requestId,
+    }).catch(() => undefined);
+    return;
+  }
+
+  const protocol = options.protocol;
+  if (protocol !== "https" && protocol !== "http") {
+    void updatePortlessGxserverState({
+      action,
+      kind: "recordAdminResult",
+      ok: false,
+    }).catch(() => undefined);
+    return;
+  }
+  suppressPortlessSetupPromptForThisRun();
+  void runNativePortlessAdminAction(action, {
+    protocol,
+    requestId: options.requestId,
+  }).catch(() => {
+    void updatePortlessGxserverState({
+      action,
+      kind: "recordAdminResult",
+      ok: false,
+      protocol,
+    }).catch(() => undefined);
+  });
+}
+
+function runPortlessSetupPromptAdminAction(
+  message: Extract<SidebarToExtensionMessage, { type: "runPortlessSetupPromptAdminAction" }>,
+): void {
+  runTrackedPortlessAdminAction(message.action, {
+    protocol: message.protocol,
+    requestId: message.requestId,
+  });
+}
+
+function runPortlessSettingsAdminAction(
+  message: Extract<SidebarToExtensionMessage, { type: "runPortlessSettingsAdminAction" }>,
+): void {
+  /*
+  CDXC:PortlessSettings 2026-06-23-03:47:
+  Settings actions use a separate sidebar command from the setup prompt because
+  Settings can retry and remove a Ghostex-managed proxy. Do not accept process
+  details, paths, hostnames, URLs, or arbitrary enable values from React; route
+  only the enum action and selected protocol through the native admin bridge.
+  */
+  if (message.action === "remove") {
+    runTrackedPortlessAdminAction("remove", {
+      requestId: message.requestId,
+    });
+    return;
+  }
+  if (message.action === "retry") {
+    portlessSetupPromptSuppressedUntilRestart = false;
+  }
+  runTrackedPortlessAdminAction(message.action, {
+    protocol: message.protocol,
+    requestId: message.requestId,
+  });
+}
+
+function setPortlessEnabledFromSetupPrompt(
+  _message: Extract<SidebarToExtensionMessage, { type: "setPortlessEnabled" }>,
+): void {
+  suppressPortlessSetupPromptForThisRun();
+  saveSettings({
+    ...settings,
+    portlessEnabled: false,
+  });
+}
+
 function buildSidebarMessage(): SidebarHydrateMessage {
   const project = activeProject();
   const snapshot = activeSnapshot();
@@ -18269,6 +18753,7 @@ function buildSidebarMessage(): SidebarHydrateMessage {
       ),
       agentHookStatus: latestNativeAgentHookStatus,
       customThemeColor: normalizeWorkspaceThemeColor(project.themeColor),
+      portless: createSidebarPortlessState({ isLocalGxserver: true }),
       projectSettingsProjects: createSidebarProjectSettingsProjects(),
       recentProjects: createSidebarRecentProjects(),
       settings,
@@ -18523,6 +19008,7 @@ function finishPublishContext(context: PublishContext, options: PublishOptions =
    * instead of letting modals read stale duplicated state.
   */
   postAppModalHost({ message: sidebarMessage, type: "sidebarState" });
+  maybeOpenPortlessSetupPrompt(sidebarMessage.hud.portless);
   syncNativeT3RuntimeSessionState(sidebarMessage);
   if (options.nativeLayoutBeforeSidebarHydrate !== true) {
     syncNativeLayoutForPublish();
@@ -19291,10 +19777,13 @@ function clearStaleTerminalRuntimeStateBeforeWake(
 }
 
 type NativeSessionStatusIndicatorCandidate = {
+  agentIconColor?: string;
+  agentIconDataUrl?: string;
   hasRunningZmxBacking: boolean;
   lastInteractionAt?: string;
   order: number;
   projectId: string;
+  projectTitle: string;
   sessionId: string;
   status: NativeSessionStatusIndicatorStatus;
   title: string;
@@ -19325,6 +19814,18 @@ function createNativeSessionStatusIndicatorCandidates(
    * terminals, not every neutral sidebar row. Carry live-zmx eligibility on
    * each candidate so the floating buttons, menu bar badge, collapsed pet
    * indicator, and idle click target all read from the same filtered count.
+   *
+   * CDXC:MenuBarStatusIndicator 2026-06-22-23:08:
+   * The menu bar dropdown session order must match the rendered macOS sidebar
+   * inside each project. Build candidate order with the shared display layout
+   * reducer so Last Active, pinned/browser partitioning, and Manual Sorting use
+   * the same visible order instead of raw workspace storage order.
+   *
+   * CDXC:MenuBarStatusIndicator 2026-06-23-04:20:
+   * The menu bar modal should use the sidebar's Last Active priority for every
+   * project: pinned sessions first, then attention, then working, then neutral
+   * sessions by last active time. Do not let Manual Sorting change this modal
+   * order because the dropdown is a running-agent status surface.
    */
   if (gxserverStartupSnapshot?.presentation && sidebarMessage) {
     return createNativeSessionStatusIndicatorCandidatesFromSidebarGroups(sidebarMessage.groups);
@@ -19337,8 +19838,29 @@ function createNativeSessionStatusIndicatorCandidates(
 
   for (const project of openProjects) {
     for (const group of project.workspace.groups) {
-      for (const session of createProjectedSidebarSessionsForGroup(group)) {
-        candidates.push(createNativeSessionStatusIndicatorCandidate(project.projectId, session, order));
+      const projectedSessions = createProjectedSidebarSessionsForGroup(group, project.projectId);
+      const sessionsById = Object.fromEntries(
+        projectedSessions.map((session) => [session.sessionId, session]),
+      );
+      const manualSessionIds = projectedSessions.map((session) => session.sessionId);
+      const displayLayout = createDisplaySessionLayout({
+        sessionIdsByGroup: { [group.groupId]: manualSessionIds },
+        sessionsById,
+        sortMode: "lastActivity",
+        workspaceGroupIds: [group.groupId],
+      });
+      const visualSessionIds = displayLayout.sessionIdsByGroup[group.groupId] ?? manualSessionIds;
+      for (const sessionId of visualSessionIds) {
+        const session = sessionsById[sessionId];
+        if (!session) {
+          continue;
+        }
+        candidates.push(createNativeSessionStatusIndicatorCandidate(
+          project.projectId,
+          nativeAppTitleForProject(project),
+          session,
+          order,
+        ));
         order += 1;
       }
     }
@@ -19354,13 +19876,33 @@ function createNativeSessionStatusIndicatorCandidatesFromSidebarGroups(
   let order = 0;
   for (const group of groups) {
     const projectId = group.projectContext?.editor.projectId;
-    for (const session of group.sessions) {
+    const sessionsById = Object.fromEntries(
+      group.sessions.map((session) => [session.sessionId, session]),
+    );
+    const manualSessionIds = group.sessions.map((session) => session.sessionId);
+    const displayLayout = createDisplaySessionLayout({
+      sessionIdsByGroup: { [group.groupId]: manualSessionIds },
+      sessionsById,
+      sortMode: "lastActivity",
+      workspaceGroupIds: [group.groupId],
+    });
+    const visualSessionIds = displayLayout.sessionIdsByGroup[group.groupId] ?? manualSessionIds;
+    for (const sessionId of visualSessionIds) {
+      const session = sessionsById[sessionId];
+      if (!session) {
+        continue;
+      }
       const combinedReference = parseCombinedProjectSessionId(session.sessionId);
       const candidateProjectId = projectId ?? combinedReference?.projectId;
       if (!candidateProjectId) {
         continue;
       }
-      candidates.push(createNativeSessionStatusIndicatorCandidate(candidateProjectId, session, order));
+      candidates.push(createNativeSessionStatusIndicatorCandidate(
+        candidateProjectId,
+        group.title || findProject(candidateProjectId)?.name || candidateProjectId,
+        session,
+        order,
+      ));
       order += 1;
     }
   }
@@ -19369,14 +19911,19 @@ function createNativeSessionStatusIndicatorCandidatesFromSidebarGroups(
 
 function createNativeSessionStatusIndicatorCandidate(
   projectId: string,
+  projectTitle: string,
   session: SidebarSessionItem,
   order: number,
 ): NativeSessionStatusIndicatorCandidate {
+  const agentIcon = session.agentIcon;
   return {
+    agentIconColor: agentIcon ? AGENT_LOGO_COLORS[agentIcon] : undefined,
+    agentIconDataUrl: agentIcon ? AGENT_LOGOS[agentIcon] : undefined,
     hasRunningZmxBacking: hasRunningZmxBackingForNativeIdleIndicator(session),
     lastInteractionAt: session.lastInteractionAt,
     order,
     projectId,
+    projectTitle,
     sessionId: session.sessionId,
     status: getNativeSessionStatusIndicatorStatus(session),
     title: getNativePetOverlaySessionTitle(session),
@@ -19440,10 +19987,52 @@ function syncNativeSessionStatusIndicators(sidebarMessage?: SidebarHydrateMessag
     availableCount: counts.available,
     hideFloatingIndicators: settings.hideFloatingSessionStatusIndicators,
     hideMenuBarIndicators: settings.hideMenuBarSessionStatusIndicators,
+    projects: createNativeSessionStatusIndicatorModalProjects(sidebarMessage),
     workingCount: counts.working,
     size: settings.sessionStatusIndicatorSize,
     type: "setSessionStatusIndicators",
   });
+}
+
+function createNativeSessionStatusIndicatorModalProjects(
+  sidebarMessage?: SidebarHydrateMessage,
+): NativeSessionStatusIndicatorProject[] {
+  /*
+   * CDXC:MenuBarStatusIndicator 2026-06-22-13:52:
+   * The menu bar primary-click modal lists the same countable running-agent
+   * candidates that drive the badge number, grouped by project with the exact
+   * agent mask SVG/color payload already used by native pane tabs. Project and
+   * session rows carry ids only so AppKit can request navigation without owning
+   * workspace/session state.
+   *
+   * CDXC:MenuBarStatusIndicator 2026-06-22-22:55:
+   * The menu bar modal should match the macOS sidebar's row order and status
+   * vocabulary. Send the sidebar-produced order through to AppKit, keep
+   * last-active text for running rows, and use the working status only for the
+   * amber square affordance.
+   */
+  const projectsById = new Map<string, NativeSessionStatusIndicatorProject>();
+  for (const candidate of createNativeSessionStatusIndicatorCandidates(sidebarMessage)) {
+    if (!shouldCountNativeSessionStatusIndicatorCandidate(candidate)) {
+      continue;
+    }
+    const project = projectsById.get(candidate.projectId) ?? {
+      projectId: candidate.projectId,
+      sessions: [],
+      title: candidate.projectTitle,
+    };
+    project.sessions.push({
+      agentIconColor: candidate.agentIconColor,
+      agentIconDataUrl: candidate.agentIconDataUrl,
+      lastActiveAt: candidate.lastInteractionAt,
+      sidebarOrder: candidate.order,
+      sessionId: candidate.sessionId,
+      status: candidate.status,
+      title: candidate.title,
+    });
+    projectsById.set(candidate.projectId, project);
+  }
+  return [...projectsById.values()];
 }
 
 function syncNativePetOverlayState(sidebarMessage?: SidebarHydrateMessage): void {
@@ -19534,7 +20123,12 @@ function createNativePetOverlayActivityCandidates(
         if (!session) {
           continue;
         }
-        candidates.push(createNativeSessionStatusIndicatorCandidate(project.projectId, session, order));
+        candidates.push(createNativeSessionStatusIndicatorCandidate(
+          project.projectId,
+          nativeAppTitleForProject(project),
+          session,
+          order,
+        ));
         order += 1;
       }
     }
@@ -19648,6 +20242,56 @@ function handleNativeSessionStatusIndicatorClicked(
     focusProject(project.projectId);
   }
   focusSidebarSession(target.sessionId);
+}
+
+function handleNativeSessionStatusIndicatorProjectClicked(projectId: string): void {
+  const project =
+    findProject(projectId) ??
+    materializeNativeProjectFromGxserverPresentationProject(
+      projectId,
+      "status-indicator-modal-project-click",
+    );
+  if (!project) {
+    return;
+  }
+  postNative({ type: "activateApp" });
+  focusProject(project.projectId);
+}
+
+function handleNativeSessionStatusIndicatorSessionClicked(
+  projectId: string,
+  sessionId: string,
+): void {
+  const combinedReference = parseCombinedProjectSessionId(sessionId);
+  const resolvedProjectId = combinedReference?.projectId ?? projectId;
+  const project =
+    findProject(resolvedProjectId) ??
+    materializeNativeProjectFromGxserverPresentationProject(
+      resolvedProjectId,
+      "status-indicator-modal-session-click",
+    );
+  const resolvedSessionId = combinedReference?.sessionId ?? sessionId;
+  const hasLocalSession = project
+    ? findSessionRecordInProject(project, resolvedSessionId) !== undefined
+    : false;
+  const hasPresentationSession =
+    findGxserverPresentationSession(resolvedProjectId, resolvedSessionId) !== undefined;
+  /*
+   * CDXC:MenuBarStatusIndicator 2026-06-22-13:52:
+   * Modal session rows should behave like sidebar session-card clicks. Validate
+   * against both local pane records and gxserver presentation rows, then route
+   * through focusSidebarSession so project switching, wake/attach, and native
+   * focus requests stay in the existing implementation.
+   */
+  if (!project || (!hasLocalSession && !hasPresentationSession)) {
+    return;
+  }
+
+  postNative({ type: "activateApp" });
+  if (activeProjectId !== project.projectId) {
+    focusProject(project.projectId);
+  }
+  focusSidebarSession(sessionId);
 }
 
 function handleNativePetOverlayActivityClicked(projectId: string, sessionId: string): void {
@@ -19955,35 +20599,6 @@ async function installNativeAgentHooksFromSettings(agentIds?: readonly string[])
     );
   } finally {
     void requestNativeAgentHookStatus(agentIds);
-  }
-}
-
-async function installNativeAgentHooksFromTitlebarNotice(): Promise<void> {
-  const toastId = "toast-agent-hooks-titlebar-install";
-  try {
-    /*
-    CDXC:AgentHooks 2026-06-18-03:22:
-    Clicking the titlebar Tips hook warning should install hooks directly. Keep
-    the progress and completion feedback in one toast slot, then tell users to
-    restart running agent CLI sessions so the new hook config is picked up.
-    */
-    showAppToast("info", "Installing agent hooks", "Configuring Ghostex hooks for installed agent CLIs...", { toastId });
-    await gxserverClient.installAgentHooks();
-    showAppToast(
-      "success",
-      "Agent hooks installed",
-      "Please restart all your agent CLI sessions so they pick up the new hooks.",
-      { toastId },
-    );
-  } catch (error) {
-    showAppToast(
-      "error",
-      "Agent hook install failed",
-      error instanceof Error ? error.message : "Ghostex could not install agent hooks.",
-      { toastId },
-    );
-  } finally {
-    void requestNativeAgentHookStatus();
   }
 }
 
@@ -20296,18 +20911,42 @@ const agentOrchestrationSkillInstalled = isFile(agentOrchestrationSkillPath);
 const generateTitleSkillPath = path.join(home, "agents", "skills", "ghostex-generate-title", "SKILL.md");
 const generateTitleSkillInstalled = isFile(generateTitleSkillPath);
 const webResourceDir = String(process.env.GHOSTEX_WEB_RESOURCE_DIR || "");
+function readJsonFile(filePath) {
+  if (!filePath) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+/*
+ * CDXC:ContributorStart 2026-06-22-23:23:
+ * Settings should distinguish optional resources intentionally omitted from a contributor local build from a broken full app package. Read the build capability manifest by feature booleans only; do not include filesystem paths in the status payload.
+ */
+const buildCapabilities = readJsonFile(webResourceDir ? path.join(webResourceDir, "ghostex-build-capabilities.json") : "");
+const optionalSubmodulesMayBeMissing = buildCapabilities?.optionalSubmodulesMayBeMissing === true;
 const t3BundledEntrypoint = webResourceDir ? path.join(webResourceDir, "t3code-server", "dist", "bin.mjs") : "";
 const t3ConfiguredRoot = process.env.VSMUX_T3CODE_REPO_ROOT || process.env.ghostex_T3CODE_REPO_ROOT || "";
 const t3ConfiguredEntrypoint = t3ConfiguredRoot ? path.join(t3ConfiguredRoot, "apps", "server", "src", "bin.ts") : "";
 const t3BundledInstalled = Boolean(t3BundledEntrypoint && isFile(t3BundledEntrypoint));
 const t3DevelopmentInstalled = Boolean(t3ConfiguredEntrypoint && isFile(t3ConfiguredEntrypoint));
 const t3RuntimeInstalled = Boolean(t3BundledInstalled || t3DevelopmentInstalled);
-const t3RuntimeSource = t3BundledInstalled ? "bundled" : t3DevelopmentInstalled ? "development" : "missing";
+const t3RuntimeSource = t3BundledInstalled
+  ? "bundled"
+  : t3DevelopmentInstalled
+    ? "development"
+    : optionalSubmodulesMayBeMissing && buildCapabilities?.resources?.t3Code === false
+      ? "unavailable"
+      : "missing";
 const t3RuntimeDetail = t3BundledInstalled
   ? "T3 Code runtime is bundled with this app."
   : t3DevelopmentInstalled
     ? "T3 Code is using an explicit development checkout."
-    : "T3 Code runtime is missing from this app build. Reinstall Ghostex or rebuild so Web/t3code-server is packaged.";
+    : t3RuntimeSource === "unavailable"
+      ? "T3 Code is not bundled in this contributor local build because the optional t3code checkout was not present."
+      : "T3 Code runtime is missing from this app build. Reinstall Ghostex or rebuild so Web/t3code-server is packaged.";
 const cuaDriverPath = which("cua-driver");
 const cuaAppInstalled = isDirectory("/Applications/CuaDriver.app");
 const cuaDriverInstalled = Boolean(cuaDriverPath || cuaAppInstalled);
@@ -21254,6 +21893,172 @@ function createGxserverTerminalRecordForNativeCreate(
   }
 }
 
+type NativeT3GxserverMetadataInput = {
+  lifecycleState?: NonNullable<GxserverUpdateSessionParams["lifecycleState"]>;
+  serverOrigin?: string;
+  t3ProjectId?: string;
+  threadId?: string;
+  title?: string;
+  titleSource?: string;
+  workspaceRoot?: string;
+};
+
+function createNativeT3GxserverRuntimeMetadata(
+  projectId: string,
+  sessionId: string | undefined,
+  input: NativeT3GxserverMetadataInput,
+): Record<string, unknown> {
+  const threadId = normalizeNativeT3ThreadId(input.threadId);
+  const t3: Record<string, unknown> = {
+    ghostexProjectId: projectId,
+  };
+  if (sessionId) {
+    t3.ghostexSessionId = sessionId;
+  }
+  if (input.t3ProjectId?.trim()) {
+    t3.projectId = input.t3ProjectId.trim();
+  }
+  if (threadId) {
+    t3.boundThreadId = threadId;
+    t3.threadId = threadId;
+  }
+  if (input.serverOrigin?.trim()) {
+    t3.serverOrigin = input.serverOrigin.trim();
+  }
+  if (input.workspaceRoot?.trim()) {
+    t3.workspaceRoot = input.workspaceRoot.trim();
+  }
+  return {
+    provider: "t3code",
+    t3,
+    titleSource: input.titleSource,
+  };
+}
+
+function createNativeT3GxserverProviderState(
+  input: NativeT3GxserverMetadataInput,
+): GxserverUpdateSessionParams["providerState"] {
+  const threadId = normalizeNativeT3ThreadId(input.threadId);
+  const t3: Record<string, unknown> = {};
+  if (input.t3ProjectId?.trim()) {
+    t3.projectId = input.t3ProjectId.trim();
+  }
+  if (threadId) {
+    t3.boundThreadId = threadId;
+    t3.threadId = threadId;
+  }
+  if (input.serverOrigin?.trim()) {
+    t3.serverOrigin = input.serverOrigin.trim();
+  }
+  if (input.workspaceRoot?.trim()) {
+    t3.workspaceRoot = input.workspaceRoot.trim();
+  }
+  return {
+    lifecycleState: input.lifecycleState === "stopped" ? "missing" : "unknown",
+    provider: "t3code",
+    t3,
+  };
+}
+
+function createGxserverT3RecordForNativeCreate(
+  project: NativeProject,
+  title: string,
+  input: NativeT3GxserverMetadataInput = {},
+): GxserverSessionDomainState | undefined {
+  /*
+  CDXC:T3Code 2026-06-23-06:19:
+  New embedded T3 sessions must get their durable G-session id from gxserver
+  before the sidebar creates the local card, but the actual T3 thread is still
+  created by the managed upstream runtime. Store only workspace/runtime intent
+  at creation time, then overwrite the metadata with the resolved T3 project
+  and thread after native emits t3ThreadReady.
+  */
+  try {
+    const session = gxserverClient.createTerminalSessionSync({
+      cwd: project.path,
+      kind: "t3",
+      lifecycleState: "running",
+      providerState: createNativeT3GxserverProviderState({
+        lifecycleState: "running",
+        serverOrigin: input.serverOrigin ?? NATIVE_T3_REMOTE_ACCESS_ORIGIN,
+        t3ProjectId: input.t3ProjectId,
+        threadId: input.threadId,
+        workspaceRoot: input.workspaceRoot ?? project.path,
+      }),
+      projectId: project.projectId as never,
+      runtimeSettings: createNativeT3GxserverRuntimeMetadata(project.projectId, undefined, {
+        lifecycleState: "running",
+        serverOrigin: input.serverOrigin ?? NATIVE_T3_REMOTE_ACCESS_ORIGIN,
+        t3ProjectId: input.t3ProjectId,
+        threadId: input.threadId,
+        titleSource: input.titleSource ?? "placeholder",
+        workspaceRoot: input.workspaceRoot ?? project.path,
+      }),
+      surface: "workspace",
+      title,
+    });
+    return session;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendTerminalLaunchDebugLog("nativeSidebar.gxserverCreateT3Session.failed", {
+      hasMessage: message.length > 0,
+      projectId: project.projectId,
+      titleLength: title.length,
+    });
+    showNativeMessage("error", message);
+    return undefined;
+  }
+}
+
+function syncGxserverNativeT3Session(
+  projectId: string,
+  sessionId: string,
+  input: NativeT3GxserverMetadataInput,
+  reason: string,
+): void {
+  if (!isCanonicalGxserverProjectSession(projectId, sessionId)) {
+    return;
+  }
+  const project = findProject(projectId);
+  const session = project ? findSessionRecordInProject(project, sessionId) : undefined;
+  const t3 = session?.kind === "t3" ? session.t3 : undefined;
+  const title = normalizeNativeT3ThreadTitle(input.title);
+  const metadataInput: NativeT3GxserverMetadataInput = {
+    lifecycleState: input.lifecycleState,
+    serverOrigin: input.serverOrigin ?? t3?.serverOrigin,
+    t3ProjectId: input.t3ProjectId ?? t3?.projectId,
+    threadId: input.threadId ?? t3?.boundThreadId ?? t3?.threadId,
+    title,
+    titleSource: input.titleSource,
+    workspaceRoot: input.workspaceRoot ?? t3?.workspaceRoot ?? project?.path,
+  };
+  const update: GxserverUpdateSessionParams = {
+    kind: "t3",
+    projectId: projectId as never,
+    providerState: createNativeT3GxserverProviderState(metadataInput),
+    runtimeSettings: createNativeT3GxserverRuntimeMetadata(projectId, sessionId, metadataInput),
+    sessionId: sessionId as never,
+    ...(metadataInput.lifecycleState ? { lifecycleState: metadataInput.lifecycleState } : {}),
+    ...(title ? { title } : {}),
+  };
+  void gxserverClient
+    .rpc<{ session: GxserverSessionDomainState }>(
+      "/api/updateSession",
+      update as unknown as Record<string, unknown>,
+    )
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      appendAgentDetectionDebugLog("nativeSidebar.gxserver.t3SessionSyncFailed", {
+        hasMessage: message.length > 0,
+        hasThreadId: Boolean(normalizeNativeT3ThreadId(metadataInput.threadId)),
+        lifecycleState: metadataInput.lifecycleState,
+        projectId,
+        reason,
+        sessionId,
+      });
+    });
+}
+
 function createTerminal(
   title = DEFAULT_TERMINAL_SESSION_TITLE,
   initialInput = "",
@@ -21865,14 +22670,26 @@ function createNativeT3Session(
     visiblePlacement?: VisibleSessionPlacement;
   },
 ): T3SessionRecord | undefined {
-  const project = activeProject();
+  let project = activeProject();
   if (!shouldKeepProjectEditorOpenForNewSession(project.projectId)) {
     activateWorkspaceSurfaceForProject(project.projectId);
   }
+  const canonicalProject = ensureNativeProjectRegisteredWithGxserver(project, "createT3");
+  if (!canonicalProject) {
+    return undefined;
+  }
+  project = canonicalProject;
   const targetWorkspace = groupId
     ? focusGroupInSimpleWorkspace(project.workspace, groupId).snapshot
     : project.workspace;
   const pendingThreadId = `pending-${Date.now().toString(36)}`;
+  const gxserverSession = createGxserverT3RecordForNativeCreate(project, "T3 Code", {
+    serverOrigin: NATIVE_T3_REMOTE_ACCESS_ORIGIN,
+    workspaceRoot: project.path,
+  });
+  if (!gxserverSession) {
+    return undefined;
+  }
   appendPaneLayoutTraceDebugLog("createT3.request", {
     activeProjectId,
     groupId,
@@ -21891,14 +22708,15 @@ function createNativeT3Session(
     targetWorkspace,
     {
       kind: "t3",
+      sessionId: gxserverSession.sessionId,
       t3: {
         boundThreadId: pendingThreadId,
-        projectId: `native-${project.projectId}`,
-        serverOrigin: "http://127.0.0.1:0",
+        projectId: "",
+        serverOrigin: NATIVE_T3_REMOTE_ACCESS_ORIGIN,
         threadId: pendingThreadId,
         workspaceRoot: project.path,
       },
-      title: "T3 Code",
+      title: gxserverSession.title || "T3 Code",
     },
     options?.visiblePlacement ? { visiblePlacement: options.visiblePlacement } : undefined,
   );
@@ -21929,15 +22747,14 @@ function createNativeT3Session(
     visiblePlacement: summarizeVisiblePlacement(options?.visiblePlacement),
   });
   postNative({ cwd: project.path, type: "startT3CodeRuntime" });
-  postNative({
+  postNative(createNativeT3WebPaneCommand({
     cwd: project.path,
     projectId: session.t3.projectId,
     sessionId: nativeSessionId,
     threadId: session.t3.threadId,
     title: "T3 Code",
-    type: "createWebPane",
     url: "http://127.0.0.1:3774",
-  });
+  }));
   postNative({ sessionId: nativeSessionId, type: "focusWebPane" });
   publish();
   return session;
@@ -21962,15 +22779,26 @@ function restoreNativeT3Session(
       ? session.t3.serverOrigin
       : "http://127.0.0.1:3774";
   postNative({ cwd: workspaceRoot, type: "startT3CodeRuntime" });
-  postNative({
+  postNative(createNativeT3WebPaneCommand({
     cwd: workspaceRoot,
     projectId: session.t3.projectId,
     sessionId: nativeSessionId,
     threadId: session.t3.threadId,
     title: session.title || "T3 Code",
-    type: "createWebPane",
     url: serverOrigin,
-  });
+  }));
+  syncGxserverNativeT3Session(
+    project.projectId,
+    session.sessionId,
+    {
+      lifecycleState: "running",
+      serverOrigin,
+      t3ProjectId: session.t3.projectId,
+      threadId: session.t3.boundThreadId || session.t3.threadId,
+      workspaceRoot,
+    },
+    reason,
+  );
   if (options.focusAfterRestore !== false) {
     postNative({ sessionId: nativeSessionId, type: "focusWebPane" });
   }
@@ -22030,6 +22858,14 @@ function createNativeT3SessionForBoundThread(
    * sidebar card as a stable shortcut to its bound thread while keeping multiple
    * T3 threads visible in ghostex at the same time.
    */
+  const canonicalProject = ensureNativeProjectRegisteredWithGxserver(
+    project,
+    "createT3BoundThread",
+  );
+  if (!canonicalProject) {
+    return undefined;
+  }
+  project = canonicalProject;
   const groupId = project.workspace.groups.find((group) =>
     group.snapshot.sessions.some((session) => session.sessionId === sourceSession.sessionId),
   )?.groupId;
@@ -22037,8 +22873,19 @@ function createNativeT3SessionForBoundThread(
     ? focusGroupInSimpleWorkspace(project.workspace, groupId).snapshot
     : project.workspace;
   const resolvedTitle = normalizeNativeT3ThreadTitle(title) ?? "T3 Code";
+  const gxserverSession = createGxserverT3RecordForNativeCreate(project, resolvedTitle, {
+    serverOrigin: sourceSession.t3.serverOrigin || NATIVE_T3_REMOTE_ACCESS_ORIGIN,
+    t3ProjectId: sourceSession.t3.projectId,
+    threadId,
+    titleSource: normalizeNativeT3ThreadTitle(title) ? "generated" : "placeholder",
+    workspaceRoot: sourceSession.t3.workspaceRoot || project.path,
+  });
+  if (!gxserverSession) {
+    return undefined;
+  }
   const result = createSessionInSimpleWorkspace(targetWorkspace, {
     kind: "t3",
+    sessionId: gxserverSession.sessionId,
     t3: {
       ...sourceSession.t3,
       boundThreadId: threadId,
@@ -22054,17 +22901,58 @@ function createNativeT3SessionForBoundThread(
   const nativeSessionId = rememberNativeSessionMapping(project.projectId, session.sessionId);
   updateProjectWorkspace(project.projectId, () => result.snapshot);
   postNative({ cwd: session.t3.workspaceRoot || project.path, type: "startT3CodeRuntime" });
-  postNative({
+  postNative(createNativeT3WebPaneCommand({
     cwd: session.t3.workspaceRoot || project.path,
     projectId: session.t3.projectId,
     sessionId: nativeSessionId,
     threadId: session.t3.threadId,
     title: resolvedTitle,
-    type: "createWebPane",
     url: session.t3.serverOrigin || NATIVE_T3_REMOTE_ACCESS_ORIGIN,
-  });
+  }));
+  syncGxserverNativeT3Session(
+    project.projectId,
+    session.sessionId,
+    {
+      lifecycleState: "running",
+      serverOrigin: session.t3.serverOrigin || NATIVE_T3_REMOTE_ACCESS_ORIGIN,
+      t3ProjectId: session.t3.projectId,
+      threadId: session.t3.boundThreadId || session.t3.threadId,
+      title: normalizeNativeT3ThreadTitle(resolvedTitle),
+      titleSource: normalizeNativeT3ThreadTitle(resolvedTitle) ? "generated" : "placeholder",
+      workspaceRoot: session.t3.workspaceRoot || project.path,
+    },
+    "create-bound-thread",
+  );
   postNative({ sessionId: nativeSessionId, type: "focusWebPane" });
   return session;
+}
+
+function createNativeT3WebPaneCommand(input: {
+  cwd: string;
+  projectId?: string;
+  sessionId: string;
+  threadId?: string;
+  title: string;
+  url: string;
+}): Extract<NativeHostCommand, { type: "createWebPane" }> {
+  /*
+  CDXC:T3Code 2026-06-23-06:19:
+  Pending sidebar thread ids are placeholders only. Native should receive no
+  thread id for a brand-new T3 pane so the managed runtime creates a real
+  thread and returns the binding through t3ThreadReady instead of loading the
+  app's unbound thread-picker shell.
+  */
+  const projectId = input.projectId?.trim();
+  const threadId = normalizeNativeT3ThreadId(input.threadId);
+  return {
+    cwd: input.cwd,
+    ...(projectId && !projectId.startsWith("native-") ? { projectId } : {}),
+    sessionId: input.sessionId,
+    ...(threadId ? { threadId } : {}),
+    title: input.title,
+    type: "createWebPane",
+    url: input.url,
+  };
 }
 
 function normalizeNativeT3ThreadId(threadId: string | undefined): string | undefined {
@@ -22073,6 +22961,17 @@ function normalizeNativeT3ThreadId(threadId: string | undefined): string | undef
     return undefined;
   }
   return normalized.toLowerCase();
+}
+
+function isNativeT3DraftRouteThreadId(threadId: string | undefined): boolean {
+  /*
+  CDXC:T3Code 2026-06-23-06:22:
+  Ghostex draft T3 panes load `/draft/<draftId>` so chat can start without
+  creating an upstream thread. That route id is not a durable T3 thread binding;
+  treating `ghostex-draft-*` as `t3ThreadChanged` creates a new Ghostex T3
+  session, which reloads another draft route and repeats until the sidebar lags.
+  */
+  return normalizeNativeT3ThreadId(threadId)?.startsWith("ghostex-draft-") === true;
 }
 
 function normalizeNativeT3ThreadTitle(title: string | undefined): string | undefined {
@@ -22143,9 +23042,21 @@ async function syncNativeT3ProjectSessionTitleFromRuntime(
   fallbackTitle?: string,
 ): Promise<boolean> {
   const title = await resolveNativeT3ThreadTitle(threadId, fallbackTitle);
-  if (!persistNativeT3SessionTitle(projectId, sessionId, title)) {
+  const normalizedTitle = normalizeNativeT3ThreadTitle(title);
+  if (!persistNativeT3SessionTitle(projectId, sessionId, normalizedTitle)) {
     return false;
   }
+  syncGxserverNativeT3Session(
+    projectId,
+    sessionId,
+    {
+      lifecycleState: "running",
+      threadId,
+      title: normalizedTitle,
+      titleSource: "generated",
+    },
+    "t3-title-sync",
+  );
   publish();
   return true;
 }
@@ -22245,6 +23156,23 @@ function handleNativeT3ThreadReady(
   hostEvent: Extract<NativeHostEvent, { type: "t3ThreadReady" }>,
 ): void {
   const reference = resolveSidebarSessionReference(sidebarSessionId);
+  const currentSession = findSessionRecordInProject(reference.project, reference.sessionId);
+  if (
+    currentSession?.kind === "t3" &&
+    normalizeNativeT3ThreadId(currentSession.t3.boundThreadId || currentSession.t3.threadId) ===
+      normalizeNativeT3ThreadId(hostEvent.threadId) &&
+    currentSession.t3.projectId === hostEvent.projectId &&
+    currentSession.t3.serverOrigin === hostEvent.serverOrigin &&
+    currentSession.t3.workspaceRoot === hostEvent.workspaceRoot
+  ) {
+    /**
+     * CDXC:T3Code 2026-06-23-06:09:
+     * T3 startup can replay t3ThreadReady while WebKit is still retrying the
+     * same native pane load. Treat identical bindings as no-ops so retries do
+     * not republish workspace state or look like new T3 session creation.
+     */
+    return;
+  }
   updateProjectWorkspace(
     reference.project.projectId,
     (workspace) =>
@@ -22255,6 +23183,18 @@ function handleNativeT3ThreadReady(
         threadId: hostEvent.threadId,
         workspaceRoot: hostEvent.workspaceRoot,
       }).snapshot,
+  );
+  syncGxserverNativeT3Session(
+    reference.project.projectId,
+    reference.sessionId,
+    {
+      lifecycleState: "running",
+      serverOrigin: hostEvent.serverOrigin,
+      t3ProjectId: hostEvent.projectId,
+      threadId: hostEvent.threadId,
+      workspaceRoot: hostEvent.workspaceRoot,
+    },
+    "t3-thread-ready",
   );
   publish();
   void syncNativeT3SessionTitleFromRuntime(sidebarSessionId, hostEvent.threadId);
@@ -22308,6 +23248,17 @@ async function relinkNativeT3SessionThread(
       }).snapshot,
   );
   persistNativeT3SessionTitle(reference.project.projectId, reference.sessionId, title);
+  syncGxserverNativeT3Session(
+    reference.project.projectId,
+    reference.sessionId,
+    {
+      lifecycleState: "running",
+      threadId: threadId.trim(),
+      title,
+      titleSource: normalizeNativeT3ThreadTitle(title) ? "generated" : undefined,
+    },
+    "manual-thread-link",
+  );
   const refreshedProject = findProject(reference.project.projectId) ?? reference.project;
   const refreshedSession = findSessionRecordInProject(refreshedProject, reference.sessionId);
   if (refreshedSession?.kind === "t3") {
@@ -22328,6 +23279,9 @@ async function handleNativeT3ThreadChanged(
    * then re-routing the source WKWebView back to its bound thread without taking
    * focus back from the user's selected target thread.
    */
+  if (isNativeT3DraftRouteThreadId(threadId)) {
+    return;
+  }
   const normalizedThreadId = normalizeNativeT3ThreadId(threadId);
   if (!normalizedThreadId || nativeT3ThreadChangeInFlightBySessionId.has(sidebarSessionId)) {
     return;
@@ -24199,11 +25153,11 @@ function applyGxserverSessionTransition(
   const localProvider = session?.kind === "terminal"
     ? getTerminalProviderSessionInfo(session)?.provider ?? session.sessionPersistenceProvider
     : undefined;
-  const canTransitionLocalTerminal = session?.kind === "terminal";
+  const canTransitionLocalSession = session?.kind === "terminal" || session?.kind === "t3";
   const canTransitionPresentationSession =
     session === undefined && hasGxserverPresentationZmxRuntime(presentationSession);
   if (
-    (!canTransitionLocalTerminal && !canTransitionPresentationSession) ||
+    (!canTransitionLocalSession && !canTransitionPresentationSession) ||
     !isCanonicalGxserverProjectSession(reference.project.projectId, reference.sessionId)
   ) {
     return { handled: false, committed: false };
@@ -24234,12 +25188,23 @@ function applyGxserverSessionTransition(
     presentation: presentationSession,
   });
   if (!useProviderTransition) {
-    updateGxserverSessionLifecycleOnly(
-      reference.project.projectId,
-      reference.sessionId,
-      action === "sleep" ? "sleeping" : "stopped",
-      action === "sleep" ? "sleepSession" : "closeTerminal",
-    );
+    if (session?.kind === "t3") {
+      syncGxserverNativeT3Session(
+        reference.project.projectId,
+        reference.sessionId,
+        {
+          lifecycleState: action === "sleep" ? "sleeping" : "stopped",
+        },
+        action === "sleep" ? "sleepSession" : "closeTerminal",
+      );
+    } else {
+      updateGxserverSessionLifecycleOnly(
+        reference.project.projectId,
+        reference.sessionId,
+        action === "sleep" ? "sleeping" : "stopped",
+        action === "sleep" ? "sleepSession" : "closeTerminal",
+      );
+    }
     appendTerminalFocusDebugLog("nativeSidebar.gxserverLifecycleOnly.applied", {
       action,
       focusTarget,
@@ -27009,6 +27974,69 @@ function stopNativeSleepingSessionRuntime(
   });
 }
 
+function setNativeT3SessionSleeping(
+  reference: { project: NativeProject; sessionId: string },
+  session: T3SessionRecord,
+  sleeping: boolean,
+  options: {
+    focusTransition?: boolean;
+    publish?: boolean;
+    transitionOrigin?: NativeGxserverSessionTransitionOrigin;
+  } = {},
+): void {
+  /*
+  CDXC:T3Code 2026-06-23-06:19:
+  T3 web panes use the same visible sleep/wake semantics as native panes: sleep
+  closes the WKWebView surface but keeps the sidebar card and gxserver row,
+  while wake recreates the embedded pane against the stored T3 thread binding.
+  */
+  const wasSleeping = session.isSleeping === true;
+  if (sleeping && wasSleeping) {
+    return;
+  }
+  const transitionOrigin =
+    options.transitionOrigin ?? createProjectSessionListTransitionOrigin(reference.project);
+  const transitionResult: NativeGxserverSessionTransitionResult = sleeping
+    ? applyGxserverSessionTransition(reference, session, "sleep", transitionOrigin)
+    : { handled: false, committed: false };
+  updateProjectWorkspace(
+    reference.project.projectId,
+    (workspace) =>
+      setSessionSleepingInSimpleWorkspace(workspace, reference.sessionId, sleeping).snapshot,
+  );
+  if (sleeping) {
+    const nativeSessionId = forgetNativeSessionMappingForProject(
+      reference.project.projectId,
+      reference.sessionId,
+    );
+    postNative({ sessionId: nativeSessionId, type: "closeWebPane" });
+    setGxserverPresentationSessionLifecycleLocally(
+      reference.project.projectId,
+      reference.sessionId,
+      "sleeping",
+      "sleep-t3-session",
+    );
+  } else {
+    syncGxserverNativeT3Session(
+      reference.project.projectId,
+      reference.sessionId,
+      { lifecycleState: "running" },
+      "wake-t3-session",
+    );
+    const refreshedProject = findProject(reference.project.projectId) ?? reference.project;
+    const refreshedSession = findSessionRecordInProject(refreshedProject, reference.sessionId);
+    if (refreshedSession?.kind === "t3") {
+      restoreNativeT3Session(refreshedProject, refreshedSession, "wake-t3-session");
+    }
+  }
+  if (options.publish !== false) {
+    publish();
+  }
+  if (sleeping && options.focusTransition !== false) {
+    focusGxserverSessionTransitionTarget(transitionResult.focusTarget, transitionOrigin.kind);
+  }
+}
+
 function setNativeSessionSleeping(
   sessionId: string,
   sleeping: boolean,
@@ -27019,7 +28047,12 @@ function setNativeSessionSleeping(
   } = {},
 ): void {
   const reference = resolveSidebarSessionReference(sessionId);
-  const session = findTerminalSessionInProject(reference.project, reference.sessionId);
+  const sessionRecord = findSessionRecordInProject(reference.project, reference.sessionId);
+  if (sessionRecord?.kind === "t3") {
+    setNativeT3SessionSleeping(reference, sessionRecord, sleeping, options);
+    return;
+  }
+  const session = sessionRecord?.kind === "terminal" ? sessionRecord : undefined;
   const presentationSession = findGxserverPresentationSession(
     reference.project.projectId,
     reference.sessionId,
@@ -41319,9 +42352,6 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "installAgentHooks":
       void installNativeAgentHooksFromSettings(message.agentIds);
       return;
-    case "installAgentHooksFromTitlebarNotice":
-      void installNativeAgentHooksFromTitlebarNotice();
-      return;
     case "uninstallAgentHooks":
       void uninstallNativeAgentHooksFromSettings(message.agentIds);
       return;
@@ -42467,6 +43497,19 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
         completionBellEnabled: !settings.completionBellEnabled,
       });
       return;
+    case "runPortlessSetupPromptAdminAction":
+      runPortlessSetupPromptAdminAction(message);
+      return;
+    case "runPortlessSettingsAdminAction":
+      runPortlessSettingsAdminAction(message);
+      return;
+    case "postponePortlessSetupPrompt":
+    case "cancelPortlessSetupPrompt":
+      suppressPortlessSetupPromptForThisRun();
+      return;
+    case "setPortlessEnabled":
+      setPortlessEnabledFromSetupPrompt(message);
+      return;
     case "updateSettings":
       saveSettings(message.settings);
       return;
@@ -43139,6 +44182,7 @@ function syncNativeLayout(
       : undefined;
   const sidebarCardFocusTrace = getRecentSidebarCardFocusTrace(snapshot.focusedSessionId);
   const titlebarResourceGroups = createTitlebarResourceGroups();
+  const keepAwakeSessionState = createTitlebarKeepAwakeSessionState(titlebarResourceGroups);
   const nativeWorkspaceBackgroundColor = resolveNativeWorkspaceBackgroundColor();
   if (
     !latestNativeAgentHookStatus &&
@@ -43265,6 +44309,7 @@ function syncNativeLayout(
       deactivateOnLowPowerMode: settings.keepAwakeDeactivateOnLowPowerMode,
       deactivateOnUserSwitch: settings.keepAwakeDeactivateOnUserSwitch,
       defaultDurationMinutes: settings.keepAwakeDefaultDurationMinutes,
+      delayedSendSessionCount: keepAwakeSessionState.delayedSendSessionCount,
       /*
        * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
        * Keep Awake is beta-only in the macOS titlebar. Layout sync sends both
@@ -43275,6 +44320,8 @@ function syncNativeLayout(
       featureEnabled: settings.showBetaFeatures,
       hideTitlebarControl: !settings.showBetaFeatures || settings.hideKeepAwakeTitlebarControl,
       preventLidSleep: settings.keepAwakePreventLidSleep,
+      whileWorkingSessions: settings.keepAwakeWhileWorkingSessions,
+      workingSessionCount: keepAwakeSessionState.workingSessionCount,
     },
     gxserverDaemon: currentGxserverDaemonStatusForTitlebar(),
     sidebarActions: {
@@ -43290,6 +44337,7 @@ function syncNativeLayout(
      * undefined here; undefined means the titlebar should keep prior state.
      */
     sessionPersistenceProvider: settings.sessionPersistenceProvider,
+    terminalDevServerOpenTarget: settings.terminalDevServerOpenTarget,
     sessionTitleBarActions,
     sessionTitles,
     petOverlayEnabled: settings.petOverlayEnabled,
@@ -43307,6 +44355,12 @@ function syncNativeLayout(
       settings.customSidebarTitlebarBackgroundColor,
     ),
     customSidebarTitlebarBackgroundColor: settings.customSidebarTitlebarBackgroundColor,
+    /*
+     * CDXC:TitlebarResources 2026-06-22-13:50:
+     * The Resources modal renders embedded Code as one shared Code IDE runtime, but row Close still needs the current project editor surfaces to dispose. Forward only awake Code project ids so the titlebar can target surfaces without receiving paths, titles, or command text.
+     */
+    titlebarCodeEditorProjectIds: awakeCodeServerProjectIds(),
+    titlebarPortless: createSidebarPortlessState({ isLocalGxserver: true }),
     titlebarResourceGroups,
     type: "setActiveTerminalSet",
     workspaceOpenTargets: {
@@ -44285,6 +45339,18 @@ window.addEventListener("ghostex-native-host-event", (event) => {
     pending.resolve(hostEvent);
     return;
   }
+  if (hostEvent.type === "portlessAdminResult") {
+    const pending = pendingPortlessAdminResults.get(hostEvent.requestId);
+    lastPortlessAdminResult = hostEvent;
+    recordPortlessAdminResultInGxserver(hostEvent);
+    if (pending) {
+      window.clearTimeout(pending.timeout);
+      pendingPortlessAdminResults.delete(hostEvent.requestId);
+      pending.resolve(hostEvent);
+    }
+    publish();
+    return;
+  }
   if (hostEvent.type === "gxserverResponse") {
     const pending = pendingGxserverResults.get(hostEvent.requestId);
     if (!pending) {
@@ -44373,6 +45439,14 @@ window.addEventListener("ghostex-native-host-event", (event) => {
   }
   if (hostEvent.type === "sessionStatusIndicatorClicked") {
     handleNativeSessionStatusIndicatorClicked(hostEvent.status);
+    return;
+  }
+  if (hostEvent.type === "sessionStatusIndicatorProjectClicked") {
+    handleNativeSessionStatusIndicatorProjectClicked(hostEvent.projectId);
+    return;
+  }
+  if (hostEvent.type === "sessionStatusIndicatorSessionClicked") {
+    handleNativeSessionStatusIndicatorSessionClicked(hostEvent.projectId, hostEvent.sessionId);
     return;
   }
   if (hostEvent.type === "petOverlayActivityClicked") {
@@ -46094,6 +47168,7 @@ window.__ghostex_NATIVE_SIDEBAR__ = {
   toggleCommandsPanelFromTitlebar,
   runSidebarCommandFromTitlebar,
   runSidebarGitActionFromTitlebar,
+  runPortlessAdminAction: runNativePortlessAdminAction,
   setNativePointerInside: setNativeSidebarPointerInside,
 };
 

@@ -46,6 +46,8 @@ export type GhosttyScrollbar = "system" | "never";
 export type TerminalCursorStyle = "bar" | "block" | "underline";
 export type BrowserOpenMode = "browser-pane";
 export type BrowserFeedbackTool = "react-grab" | "agentation";
+export type PortlessProtocol = "https" | "http";
+export type TerminalDevServerOpenTarget = "internal-browser" | "system-default-browser";
 export type DefaultEditorCommand =
   | "code"
   | "code-insiders"
@@ -111,6 +113,19 @@ const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARK_TINTS: ReadonlyMap<string, string>
   ["#854f7a", "#100611"],
   ["#8a4f5f", "#100409"],
 ]);
+export const TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: TerminalDevServerOpenTarget;
+}> = [
+  { label: "System Default Browser", value: "system-default-browser" },
+  { label: "Internal Browser", value: "internal-browser" },
+];
+const DEFAULT_TERMINAL_DEV_SERVER_OPEN_TARGET: TerminalDevServerOpenTarget =
+  "system-default-browser";
+const DEFAULT_TERMINAL_DEV_SERVER_IGNORED_PORT_RULES: readonly string[] = [];
+const TERMINAL_DEV_SERVER_OPEN_TARGET_SET = new Set(
+  TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS.map((option) => option.value),
+);
 export const SESSION_TITLE_GENERATION_AGENT_OPTIONS: ReadonlyArray<{
   label: string;
   value: SessionTitleGenerationAgent;
@@ -532,6 +547,11 @@ export type ghostexSettings = {
   keepAwakeDeactivateOnLowPowerMode: boolean;
   keepAwakeDeactivateOnUserSwitch: boolean;
   keepAwakeDefaultDurationMinutes: KeepAwakeDurationMinutes;
+  /**
+   * CDXC:TitlebarKeepAwake 2026-06-23-08:20:
+   * Users can opt into a Mac power hold while any session is Working, with the titlebar runtime extending that hold for a short reply window after work stops.
+   */
+  keepAwakeWhileWorkingSessions: boolean;
   keepAwakePreventLidSleep: boolean;
   hideKeepAwakeTitlebarControl: boolean;
   showMacOSAttentionNotifications: boolean;
@@ -630,6 +650,19 @@ export type ghostexSettings = {
   terminalPastePreviewableImages: boolean;
   terminalMouseHideWhileTyping: boolean;
   terminalScrollbar: GhosttyScrollbar;
+  /**
+   * CDXC:TerminalDevServers 2026-06-23-19:22:
+   * Dev-server discovery is app-owned terminal behavior, not a terminal emulator config key. Persist detection, a single open-target choice, and ignored ports with the main settings contract so Terminal settings stay focused on opening in the user's system browser or the internal browser instead of exposing per-browser checkboxes.
+   */
+  terminalDevServerDetectionEnabled: boolean;
+  terminalDevServerOpenTarget: TerminalDevServerOpenTarget;
+  terminalDevServerIgnoredPortRules: readonly string[];
+  /**
+   * CDXC:PortlessSettings 2026-06-22-22:35:
+   * Portless is a global app contract, not project state. Keep one default-on toggle and one protocol setting so every project/worktree shares the same local proxy mode without per-project enablement keys.
+   */
+  portlessEnabled: boolean;
+  portlessProtocol: PortlessProtocol;
   promptEditorBackend: PromptEditorBackend;
   customPromptEditorCommand: string;
   richPromptEditingWithGte: boolean;
@@ -692,6 +725,9 @@ export type SidebarSettingsPresetSettings = Pick<ghostexSettings, SidebarSetting
  *
  * CDXC:SessionStatusIndicators 2026-06-15-14:00:
  * Sidebar presets must not control the macOS floating status indicator. Keep the floating badge setting under Status Indicators so switching sidebar chrome cannot enable or disable that desktop surface.
+ *
+ * CDXC:SidebarSettingsPresets 2026-06-23-08:20:
+ * Every sidebar preset must show session-card close buttons on hover. Presets may still tune density, icons, timestamps, project stats, and menu-bar indicators, but they should not remove the primary per-session close affordance.
  */
 export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
   codex: {
@@ -715,7 +751,7 @@ export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
   detailed: {
     hideSessionAgentIconUntilHover: false,
     hideBrowserFaviconUntilHover: false,
-    showCloseButtonOnSessionCards: false,
+    showCloseButtonOnSessionCards: true,
     hideLastActiveTimeOnSessionCards: false,
     hideProjectHeaderDiffStats: false,
     showProjectEditorDiffFileCount: false,
@@ -724,7 +760,7 @@ export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
   recommended: {
     hideSessionAgentIconUntilHover: true,
     hideBrowserFaviconUntilHover: false,
-    showCloseButtonOnSessionCards: false,
+    showCloseButtonOnSessionCards: true,
     hideLastActiveTimeOnSessionCards: true,
     hideProjectHeaderDiffStats: false,
     showProjectEditorDiffFileCount: false,
@@ -941,6 +977,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   keepAwakeDeactivateOnLowPowerMode: false,
   keepAwakeDeactivateOnUserSwitch: false,
   keepAwakeDefaultDurationMinutes: 0,
+  keepAwakeWhileWorkingSessions: false,
   /**
    * CDXC:TitlebarKeepAwake 2026-05-28-19:28:
    * Closing a MacBook lid is not covered by the standard caffeinate idle-sleep assertion.
@@ -1135,6 +1172,19 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   terminalPastePreviewableImages: true,
   terminalMouseHideWhileTyping: false,
   terminalScrollbar: "system",
+  /**
+   * CDXC:TerminalDevServers 2026-06-23-19:22:
+   * New installs should discover local dev servers from terminal output, open detected URLs with the user's system default browser unless changed to the internal browser, and start with no ignored ports.
+   */
+  terminalDevServerDetectionEnabled: true,
+  terminalDevServerOpenTarget: DEFAULT_TERMINAL_DEV_SERVER_OPEN_TARGET,
+  terminalDevServerIgnoredPortRules: DEFAULT_TERMINAL_DEV_SERVER_IGNORED_PORT_RULES,
+  /**
+   * CDXC:PortlessSettings 2026-06-22-22:35:
+   * New installs and legacy settings files should opt into Portless local domains by default over HTTPS. HTTP remains available only as an explicit global protocol value.
+   */
+  portlessEnabled: true,
+  portlessProtocol: "https",
   /**
    * CDXC:PromptEditorBackend 2026-05-13-15:58
    * Ctrl+G rich prompt editing originally defaulted to the floating Monaco editor. Preserve explicit gte choices, but keep new and invalid settings on the current built-in backend.
@@ -1371,6 +1421,10 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
         ? "tmux"
       : DEFAULT_ghostex_SETTINGS.sessionPersistenceProvider,
     ),
+  );
+  const terminalDevServerOpenTarget = normalizeTerminalDevServerOpenTarget(
+    source.terminalDevServerOpenTarget,
+    source.terminalDevServerDefaultBrowserId,
   );
   const rawLegacyCustomSidebarTitlebarBackgroundColor =
     source.customSidebarTitlebarBackgroundColor;
@@ -1740,6 +1794,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
         DEFAULT_ghostex_SETTINGS.keepAwakeDefaultDurationMinutes,
       ),
     ),
+    keepAwakeWhileWorkingSessions: readBoolean(
+      source,
+      "keepAwakeWhileWorkingSessions",
+      DEFAULT_ghostex_SETTINGS.keepAwakeWhileWorkingSessions,
+    ),
     keepAwakePreventLidSleep: readBoolean(
       source,
       "keepAwakePreventLidSleep",
@@ -2009,6 +2068,31 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     terminalScrollbar: normalizeGhosttyScrollbar(
       readString(source, "terminalScrollbar", DEFAULT_ghostex_SETTINGS.terminalScrollbar),
     ),
+    /**
+     * CDXC:TerminalDevServers 2026-06-23-19:22:
+     * Dev-server settings normalize in the app layer because they are not Ghostty keys. Keep the launch choice to system default versus internal browser, migrate legacy per-browser defaults to system default, and canonicalize ignored port rules to sorted, merged strings.
+     */
+    terminalDevServerDetectionEnabled: readBoolean(
+      source,
+      "terminalDevServerDetectionEnabled",
+      DEFAULT_ghostex_SETTINGS.terminalDevServerDetectionEnabled,
+    ),
+    terminalDevServerOpenTarget,
+    terminalDevServerIgnoredPortRules: normalizeTerminalDevServerIgnoredPortRules(
+      source.terminalDevServerIgnoredPortRules,
+    ),
+    /**
+     * CDXC:PortlessSettings 2026-06-22-22:35:
+     * Portless normalization accepts only explicit booleans and lowercase http/https. Missing, legacy, string-boolean, and invalid values fall back to enabled HTTPS without preserving project-scoped Portless keys.
+     */
+    portlessEnabled: readBoolean(
+      source,
+      "portlessEnabled",
+      DEFAULT_ghostex_SETTINGS.portlessEnabled,
+    ),
+    portlessProtocol: normalizePortlessProtocol(
+      readString(source, "portlessProtocol", DEFAULT_ghostex_SETTINGS.portlessProtocol),
+    ),
     promptEditorBackend,
     customPromptEditorCommand: normalizeCustomPromptEditorCommand(
       readString(
@@ -2263,6 +2347,104 @@ function normalizeCustomPromptEditorCommand(value: string | undefined): string {
   return ((value ?? "").trim() || DEFAULT_ghostex_SETTINGS.customPromptEditorCommand).slice(0, 240);
 }
 
+function normalizeTerminalDevServerOpenTarget(
+  candidate: unknown,
+  legacyDefaultBrowserId: unknown,
+): TerminalDevServerOpenTarget {
+  const value = readLooseString(candidate);
+  if (TERMINAL_DEV_SERVER_OPEN_TARGET_SET.has(value as TerminalDevServerOpenTarget)) {
+    return value as TerminalDevServerOpenTarget;
+  }
+
+  const legacyValue = readLooseString(legacyDefaultBrowserId);
+  if (legacyValue !== undefined) {
+    return "system-default-browser";
+  }
+
+  return DEFAULT_TERMINAL_DEV_SERVER_OPEN_TARGET;
+}
+
+type TerminalDevServerPortRule = {
+  lowerBound: number;
+  upperBound: number;
+};
+
+export function normalizeTerminalDevServerIgnoredPortRuleInput(
+  value: string,
+): string | undefined {
+  return parseTerminalDevServerPortRule(value)?.canonicalString;
+}
+
+export function normalizeTerminalDevServerIgnoredPortRules(candidate: unknown): readonly string[] {
+  if (!Array.isArray(candidate)) {
+    return DEFAULT_TERMINAL_DEV_SERVER_IGNORED_PORT_RULES;
+  }
+  const mergedRules = mergeTerminalDevServerPortRules(
+    candidate.map(readLooseString).flatMap((value) => {
+      const rule = parseTerminalDevServerPortRule(value);
+      return rule ? [rule] : [];
+    }),
+  ).map((rule) => rule.canonicalString);
+
+  return mergedRules.length === 0 ? DEFAULT_TERMINAL_DEV_SERVER_IGNORED_PORT_RULES : mergedRules;
+}
+
+function parseTerminalDevServerPortRule(value: string): (TerminalDevServerPortRule & {
+  canonicalString: string;
+}) | undefined {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return undefined;
+  }
+  const rangeMatch = trimmedValue.match(/^(\d+)(?:\s*-\s*(\d+))?$/u);
+  if (!rangeMatch) {
+    return undefined;
+  }
+  const lowerBound = Number(rangeMatch[1]);
+  const upperBound = rangeMatch[2] === undefined ? lowerBound : Number(rangeMatch[2]);
+  if (
+    !Number.isInteger(lowerBound) ||
+    !Number.isInteger(upperBound) ||
+    lowerBound < 1 ||
+    upperBound > 65535 ||
+    lowerBound > upperBound
+  ) {
+    return undefined;
+  }
+  return {
+    lowerBound,
+    upperBound,
+    canonicalString:
+      lowerBound === upperBound ? String(lowerBound) : `${lowerBound}-${upperBound}`,
+  };
+}
+
+function mergeTerminalDevServerPortRules(
+  rules: ReadonlyArray<TerminalDevServerPortRule>,
+): Array<TerminalDevServerPortRule & { canonicalString: string }> {
+  const mergedRules: TerminalDevServerPortRule[] = [];
+  for (const rule of [...rules].sort((left, right) =>
+    left.lowerBound === right.lowerBound
+      ? left.upperBound - right.upperBound
+      : left.lowerBound - right.lowerBound,
+  )) {
+    const previousRule = mergedRules.at(-1);
+    if (!previousRule || rule.lowerBound > previousRule.upperBound + 1) {
+      mergedRules.push({ lowerBound: rule.lowerBound, upperBound: rule.upperBound });
+      continue;
+    }
+    previousRule.upperBound = Math.max(previousRule.upperBound, rule.upperBound);
+  }
+
+  return mergedRules.map((rule) => ({
+    ...rule,
+    canonicalString:
+      rule.lowerBound === rule.upperBound
+        ? String(rule.lowerBound)
+        : `${rule.lowerBound}-${rule.upperBound}`,
+  }));
+}
+
 export function getDefaultEditorCommandForSettings(settings: ghostexSettings): string {
   const customCommand = settings.customDefaultEditorCommand.trim();
   return settings.defaultEditorCommand === "other"
@@ -2362,6 +2544,12 @@ function normalizeGhosttyConfirmCloseSurface(
 
 function normalizeGhosttyScrollbar(value: string | undefined): GhosttyScrollbar {
   return value === "never" ? "never" : "system";
+}
+
+function normalizePortlessProtocol(value: string | undefined): PortlessProtocol {
+  return value === "http" || value === "https"
+    ? value
+    : DEFAULT_ghostex_SETTINGS.portlessProtocol;
 }
 
 function clampNumber(value: number, min: number, max: number, fallback: number): number {

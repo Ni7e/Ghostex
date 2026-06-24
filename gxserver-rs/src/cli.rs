@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     env,
-    net::TcpListener,
     path::PathBuf,
     process::{Command, Stdio},
     time::{Duration, Instant},
@@ -34,6 +33,9 @@ pub async fn run_from_env() -> Result<()> {
 /*
 CDXC:GxserverCli 2026-06-14-20:37:
 The Rust CLI intentionally keeps the TypeScript command surface and --json behavior for start, stop, stop-all, and status so app/CLI opt-in can swap binaries without changing client command construction.
+
+CDXC:GxserverCli 2026-06-22-04:47:
+`gxserver status` reports any reachable same-product, same-protocol daemon as running; build identity is a start-time replacement decision. `gxserver start` must match TypeScript by requesting control-plane shutdown for a running build-identity mismatch instead of returning a Rust-only portConflict status.
 */
 pub async fn run(args: Vec<String>) -> Result<()> {
     let version = GXSERVER_VERSION.to_string();
@@ -92,23 +94,11 @@ pub async fn run(args: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-pub async fn get_gxserver_status(build_identity: &str, _version: &str) -> Result<StatusResponse> {
+pub async fn get_gxserver_status(_build_identity: &str, _version: &str) -> Result<StatusResponse> {
     let paths = get_gxserver_paths(None);
     let metadata = read_runtime_metadata(&paths)?;
     let auth = read_gxserver_auth_token(&paths)?;
-    if let Ok(Some(health)) =
-        fetch_server_health(auth.as_ref().map(|auth| auth.token.as_str()), 800)
-    {
-        if !is_build_identity_reusable(Some(&health.build_identity), Some(build_identity)) {
-            return Ok(StatusResponse {
-                health: Some(health),
-                metadata,
-                message: "gxserver is running with a different build identity.".to_string(),
-                ok: false,
-                product: GXSERVER_PRODUCT.to_string(),
-                state: "protocolMismatch".to_string(),
-            });
-        }
+    if let Some(health) = fetch_server_health(auth.as_ref().map(|auth| auth.token.as_str()), 800)? {
         return Ok(create_running_status(health, metadata));
     }
     if let Some(metadata) = metadata.clone() {
@@ -134,37 +124,44 @@ pub async fn get_gxserver_status(build_identity: &str, _version: &str) -> Result
 async fn start_gxserver_background(build_identity: &str, version: &str) -> Result<StatusResponse> {
     let before = get_gxserver_status(build_identity, version).await?;
     if before.state == "running" {
-        return Ok(before);
-    }
-    if before.health.is_some() {
-        return Ok(StatusResponse {
-            health: before.health,
-            metadata: before.metadata,
-            message: format!(
-                "Rust gxserver was selected, but {GXSERVER_LOCAL_API_HOST}:{} is already owned by a different gxserver build. Stop the current control plane before starting the Rust opt-in.",
-                read_selected_local_api_port()?
-            ),
-            ok: false,
-            product: GXSERVER_PRODUCT.to_string(),
-            state: "portConflict".to_string(),
-        });
-    }
-    if !is_selected_local_port_available()? {
-        /*
-        CDXC:GxserverRustPort 2026-06-14-21:09:
-        Rust opt-in must keep 127.0.0.1:58744 as a strict single-owner port. Refuse to spawn a detached Rust daemon when another process already owns the fixed port, because falling back to TypeScript or racing a second owner hides the selected Rust startup error.
-        */
-        return Ok(StatusResponse {
-            health: None,
-            metadata: before.metadata,
-            message: format!(
-                "Rust gxserver was selected, but {GXSERVER_LOCAL_API_HOST}:{} is already in use. Stop the current owner before starting the Rust opt-in.",
-                read_selected_local_api_port()?
-            ),
-            ok: false,
-            product: GXSERVER_PRODUCT.to_string(),
-            state: "portConflict".to_string(),
-        });
+        if is_build_identity_reusable(
+            before
+                .health
+                .as_ref()
+                .map(|health| health.build_identity.as_str()),
+            Some(build_identity),
+        ) {
+            return Ok(before);
+        }
+        let paths = get_gxserver_paths(None);
+        let auth = read_gxserver_auth_token(&paths)?;
+        let _ = request_server_stop(auth.as_ref().map(|auth| auth.token.as_str()), 2_000)?;
+        let stopped = wait_for_status(
+            build_identity,
+            version,
+            Duration::from_millis(5_000),
+            |status| status.state != "running",
+        )
+        .await?;
+        if stopped.state == "running" {
+            if is_build_identity_reusable(
+                stopped
+                    .health
+                    .as_ref()
+                    .map(|health| health.build_identity.as_str()),
+                Some(build_identity),
+            ) {
+                return Ok(stopped);
+            }
+            return Ok(StatusResponse {
+                message:
+                    "gxserver build identity changed, but the old control plane did not stop. Stop gxserver and start it again so the current migration code can run."
+                        .to_string(),
+                ok: false,
+                state: "stopping".to_string(),
+                ..before
+            });
+        }
     }
 
     let current_exe = env::current_exe().with_context(|| "resolve current gxserver binary")?;
@@ -174,7 +171,7 @@ async fn start_gxserver_background(build_identity: &str, version: &str) -> Resul
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    spawn_detached(&mut command)?;
+    let child_pid = spawn_detached(&mut command)?;
 
     let status = wait_for_status(
         build_identity,
@@ -186,9 +183,9 @@ async fn start_gxserver_background(build_identity: &str, version: &str) -> Resul
     if status.state != "running" {
         return Ok(StatusResponse {
             health: None,
-            metadata: status.metadata,
+            metadata: None,
             message: format!(
-                "gxserver start launched a background process but health did not become ready on {GXSERVER_LOCAL_API_HOST}:{}.",
+                "gxserver start launched pid {child_pid} but health did not become ready on {GXSERVER_LOCAL_API_HOST}:{}.",
                 read_selected_local_api_port()?
             ),
             ok: false,
@@ -197,21 +194,6 @@ async fn start_gxserver_background(build_identity: &str, version: &str) -> Resul
         });
     }
     Ok(status)
-}
-
-fn is_selected_local_port_available() -> Result<bool> {
-    let address = format!(
-        "{GXSERVER_LOCAL_API_HOST}:{}",
-        read_selected_local_api_port()?
-    );
-    match TcpListener::bind(&address) {
-        Ok(listener) => {
-            drop(listener);
-            Ok(true)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => Ok(false),
-        Err(error) => Err(error).with_context(|| format!("probe {address} availability")),
-    }
 }
 
 async fn stop_gxserver_control_plane(
@@ -550,7 +532,7 @@ fn json_array(values: Vec<String>) -> Value {
     Value::Array(values.into_iter().map(Value::String).collect())
 }
 
-fn spawn_detached(command: &mut Command) -> Result<()> {
+fn spawn_detached(command: &mut Command) -> Result<u32> {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -561,10 +543,10 @@ fn spawn_detached(command: &mut Command) -> Result<()> {
             });
         }
     }
-    command
+    let child = command
         .spawn()
         .with_context(|| "spawn gxserver background")?;
-    Ok(())
+    Ok(child.id())
 }
 
 #[allow(dead_code)]

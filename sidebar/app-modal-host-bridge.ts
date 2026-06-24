@@ -21,6 +21,7 @@ export type AppModalKind =
   | "hotkeys"
   | "openTargets"
   | "pinnedPrompts"
+  | "portlessSetup"
   | "previousSessions"
   | "firstUserMessage"
   | "remoteGxserverInstall"
@@ -48,6 +49,7 @@ export type OpenAppModalMessage =
         | "floatingPromptEditor"
         | "gitFileDiff"
         | "deleteWorktree"
+        | "portlessSetup"
         | "remoteGxserverInstall"
         | "renameSession"
         | "remoteProjectPicker"
@@ -91,6 +93,19 @@ export type OpenAppModalMessage =
       collapsedGroupsById?: Record<string, true>;
       initialQuery?: string;
       modal: "commandPalette";
+      type: "open";
+    }
+  | {
+      /*
+       * CDXC:PortlessSetupModal 2026-06-23-13:42:
+       * Portless setup prompts render in the native app-modal child-window host
+       * and carry only enum state needed to choose the exact handoff copy and
+       * native admin protocol. Do not send settings or project/session data
+       * through this modal-open boundary.
+       */
+      modal: "portlessSetup";
+      mode: "firstSetup" | "standaloneReconfigure";
+      protocol: "https" | "http";
       type: "open";
     }
   | {

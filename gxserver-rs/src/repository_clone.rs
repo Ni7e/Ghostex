@@ -7,7 +7,12 @@ use std::{
 };
 
 use serde_json::{json, Map, Value};
-use tokio::{process::Command, sync::Mutex, time::timeout};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt},
+    process::{Child, Command},
+    sync::{mpsc, Mutex},
+    time::{sleep, Instant},
+};
 use uuid::Uuid;
 
 use crate::{
@@ -86,6 +91,9 @@ struct CloneRunOutput {
 /*
 CDXC:GxserverRustPort 2026-06-16-00:49:
 Phase 7 repository clone jobs remain gxserver-owned background work. Rust keeps the TypeScript preview/start/read/cancel lifecycle, rejects existing destinations before spawning Git, stores jobs in memory for initial parity, and writes only job ids plus booleans to persistent logs so clone URLs, branches, paths, argv, stdout, and stderr stay out of support bundles.
+
+CDXC:RepositoryClone 2026-06-22-09:21:
+Repository clone parity depends on matching TypeScript's URL token parsing, destination folder normalization, color-stripped Git environment, and active cancellation semantics. Canceling a running job must terminate the spawned Git process instead of only changing the in-memory job status.
 */
 pub async fn dispatch_repository_clone_endpoint(
     manager: RepositoryCloneJobManager,
@@ -217,10 +225,11 @@ async fn run_clone_job(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    let clone_result = run_git_clone_process(args, parent_path).await;
+    let clone_result = run_git_clone_process(args, parent_path, jobs.clone(), job_id.clone()).await;
     match clone_result {
         Ok(output) => {
             if job_is_canceled(&jobs, &job_id).await {
+                record_job_output(&jobs, &job_id, output).await;
                 return;
             }
             if output.exit_code != 0 {
@@ -291,6 +300,19 @@ async fn run_clone_job(
                 mark_job_failed(&jobs, &runtime, &job_id, error.message, None, error.code).await;
             }
         }
+    }
+}
+
+async fn record_job_output(
+    jobs: &Arc<Mutex<HashMap<String, Value>>>,
+    job_id: &str,
+    output: CloneRunOutput,
+) {
+    let mut jobs = jobs.lock().await;
+    if let Some(job) = jobs.get_mut(job_id).and_then(Value::as_object_mut) {
+        job.insert("exitCode".to_string(), json!(output.exit_code));
+        job.insert("stderr".to_string(), json!(output.stderr));
+        job.insert("stdout".to_string(), json!(output.stdout));
     }
 }
 
@@ -500,54 +522,171 @@ fn build_repository_clone_git_args(preview: &Value) -> Vec<String> {
 async fn run_git_clone_process(
     args: Vec<String>,
     cwd: String,
+    jobs: Arc<Mutex<HashMap<String, Value>>>,
+    job_id: String,
 ) -> Result<CloneRunOutput, RepositoryCloneError> {
-    let mut command = Command::new("git");
+    run_clone_process("git", args, cwd, jobs, job_id).await
+}
+
+async fn run_clone_process(
+    executable: &str,
+    args: Vec<String>,
+    cwd: String,
+    jobs: Arc<Mutex<HashMap<String, Value>>>,
+    job_id: String,
+) -> Result<CloneRunOutput, RepositoryCloneError> {
+    let mut command = Command::new(executable);
     command
         .args(args)
         .current_dir(cwd)
+        .env_clear()
         .envs(repository_clone_environment())
         .kill_on_drop(true)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    let child = command.spawn().map_err(|error| {
+    let mut child = command.spawn().map_err(|error| {
         RepositoryCloneError::dependency_unavailable(format!("Could not start git clone: {error}"))
     })?;
-    let output = match timeout(
-        Duration::from_millis(REPOSITORY_CLONE_TIMEOUT_MS),
-        child.wait_with_output(),
-    )
-    .await
-    {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) => {
-            return Err(RepositoryCloneError::dependency_unavailable(format!(
-                "git clone failed: {error}"
-            )))
+    let (limit_sender, mut limit_receiver) = mpsc::unbounded_channel();
+    let stdout_task = child
+        .stdout
+        .take()
+        .map(|stdout| tokio::spawn(read_capped_output(stdout, "stdout", limit_sender.clone())));
+    let stderr_task = child
+        .stderr
+        .take()
+        .map(|stderr| tokio::spawn(read_capped_output(stderr, "stderr", limit_sender)));
+    let deadline = Instant::now() + Duration::from_millis(REPOSITORY_CLONE_TIMEOUT_MS);
+    let mut terminal_error: Option<RepositoryCloneError> = None;
+    let mut sigkill_deadline: Option<Instant> = None;
+    let mut sigkill_sent = false;
+    let mut termination_requested = false;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => {
+                return Err(RepositoryCloneError::dependency_unavailable(format!(
+                    "git clone failed: {error}"
+                )));
+            }
         }
-        Err(_) => {
-            return Err(RepositoryCloneError::dependency_unavailable(format!(
+        while let Ok(limit_error) = limit_receiver.try_recv() {
+            if terminal_error.is_none() {
+                terminal_error = Some(limit_error);
+                if !termination_requested {
+                    sigkill_deadline = request_child_termination(&mut child);
+                    termination_requested = true;
+                }
+            }
+        }
+        if terminal_error.is_none() && Instant::now() >= deadline {
+            terminal_error = Some(RepositoryCloneError::dependency_unavailable(format!(
                 "git clone timed out after {REPOSITORY_CLONE_TIMEOUT_MS}ms."
-            )))
+            )));
+            if !termination_requested {
+                sigkill_deadline = request_child_termination(&mut child);
+                termination_requested = true;
+            }
+        }
+        if terminal_error.is_none()
+            && !termination_requested
+            && job_is_canceled(&jobs, &job_id).await
+        {
+            sigkill_deadline = request_child_termination(&mut child);
+            termination_requested = true;
+        }
+        if let Some(deadline) = sigkill_deadline {
+            if !sigkill_sent && Instant::now() >= deadline {
+                let _ = child.start_kill();
+                sigkill_sent = true;
+            }
+        }
+        tokio::select! {
+            Some(limit_error) = limit_receiver.recv() => {
+                if terminal_error.is_none() {
+                    terminal_error = Some(limit_error);
+                    if !termination_requested {
+                        sigkill_deadline = request_child_termination(&mut child);
+                        termination_requested = true;
+                    }
+                }
+            }
+            _ = sleep(Duration::from_millis(25)) => {}
         }
     };
-    let stdout_len = output.stdout.len();
-    let stderr_len = output.stderr.len();
-    if stdout_len > REPOSITORY_CLONE_OUTPUT_LIMIT_BYTES {
-        return Err(RepositoryCloneError::dependency_unavailable(format!(
-            "git clone stdout exceeded {REPOSITORY_CLONE_OUTPUT_LIMIT_BYTES} bytes."
-        )));
+    let stdout = join_output_task(stdout_task).await;
+    let stderr = join_output_task(stderr_task).await;
+    while let Ok(limit_error) = limit_receiver.try_recv() {
+        if terminal_error.is_none() {
+            terminal_error = Some(limit_error);
+        }
     }
-    if stderr_len > REPOSITORY_CLONE_OUTPUT_LIMIT_BYTES {
-        return Err(RepositoryCloneError::dependency_unavailable(format!(
-            "git clone stderr exceeded {REPOSITORY_CLONE_OUTPUT_LIMIT_BYTES} bytes."
-        )));
+    if let Some(error) = terminal_error {
+        return Err(error);
     }
+    let was_canceled = job_is_canceled(&jobs, &job_id).await;
     Ok(CloneRunOutput {
-        exit_code: output.status.code().unwrap_or(1),
-        stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        stdout: String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        exit_code: status.code().unwrap_or(if was_canceled { 130 } else { 1 }),
+        stderr,
+        stdout,
     })
+}
+
+async fn read_capped_output<R>(
+    mut reader: R,
+    stream_name: &'static str,
+    limit_sender: mpsc::UnboundedSender<RepositoryCloneError>,
+) -> String
+where
+    R: AsyncRead + Unpin,
+{
+    let mut output = Vec::new();
+    let mut total_bytes = 0usize;
+    let mut reported_limit = false;
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = match reader.read(&mut buffer).await {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(_) => break,
+        };
+        let next_bytes = total_bytes.saturating_add(read);
+        let remaining = REPOSITORY_CLONE_OUTPUT_LIMIT_BYTES.saturating_sub(total_bytes);
+        if remaining > 0 {
+            output.extend_from_slice(&buffer[..read.min(remaining)]);
+        }
+        if next_bytes > REPOSITORY_CLONE_OUTPUT_LIMIT_BYTES && !reported_limit {
+            let _ = limit_sender.send(RepositoryCloneError::dependency_unavailable(format!(
+                "git clone {stream_name} exceeded {REPOSITORY_CLONE_OUTPUT_LIMIT_BYTES} bytes."
+            )));
+            reported_limit = true;
+        }
+        total_bytes = next_bytes;
+    }
+    String::from_utf8_lossy(&output).trim().to_string()
+}
+
+async fn join_output_task(task: Option<tokio::task::JoinHandle<String>>) -> String {
+    match task {
+        Some(task) => task.await.unwrap_or_default(),
+        None => String::new(),
+    }
+}
+
+fn request_child_termination(child: &mut Child) -> Option<Instant> {
+    #[cfg(unix)]
+    {
+        if let Some(pid) = child.id() {
+            unsafe {
+                libc::kill(pid as libc::pid_t, libc::SIGTERM);
+            }
+            return Some(Instant::now() + Duration::from_millis(1_000));
+        }
+    }
+    let _ = child.start_kill();
+    None
 }
 
 fn repository_clone_environment() -> Vec<(String, String)> {
@@ -563,10 +702,11 @@ fn repository_clone_environment() -> Vec<(String, String)> {
 
 fn parse_repository_clone_input(input: &str) -> Option<ParsedRepositoryCloneInput> {
     let token = extract_repository_input_token(input)?;
-    if let Some((host, repository_path)) = token
-        .strip_prefix("git@")
-        .and_then(|rest| rest.split_once(':'))
+    if token
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("git@"))
     {
+        let (host, repository_path) = token[4..].split_once(':')?;
         let repository_path = normalize_repository_path(repository_path);
         if host.trim().is_empty() || repository_path.is_empty() {
             return None;
@@ -576,9 +716,7 @@ fn parse_repository_clone_input(input: &str) -> Option<ParsedRepositoryCloneInpu
             repository_name: repository_name_from_path(&repository_path),
         });
     }
-    if let Some(rest) = token.strip_prefix("ssh://") {
-        let after_user = rest.split('@').last().unwrap_or(rest);
-        let (host, path) = after_user.split_once('/')?;
+    if let Some((host, path)) = parse_ssh_repository_token(&token) {
         let repository_path = normalize_repository_path(path);
         if host.trim().is_empty() || repository_path.is_empty() {
             return None;
@@ -588,13 +726,7 @@ fn parse_repository_clone_input(input: &str) -> Option<ParsedRepositoryCloneInpu
             repository_name: repository_name_from_path(&repository_path),
         });
     }
-    if token.starts_with("http://") || token.starts_with("https://") || looks_like_host_path(&token)
-    {
-        let without_scheme = token
-            .strip_prefix("https://")
-            .or_else(|| token.strip_prefix("http://"))
-            .unwrap_or(&token);
-        let (host, path) = without_scheme.split_once('/')?;
+    if let Some((host, path)) = parse_http_repository_token(&token) {
         let repository_path = normalize_repository_path(path);
         if host.trim().is_empty() || repository_path.is_empty() || !host.contains('.') {
             return None;
@@ -643,14 +775,31 @@ fn clean_repository_input_token(token: &str) -> String {
 }
 
 fn is_repository_like_token(token: &str) -> bool {
-    !token.is_empty()
-        && !token.starts_with('-')
-        && (token.starts_with("git@")
-            || token.starts_with("ssh://")
-            || token.starts_with("http://")
-            || token.starts_with("https://")
-            || looks_like_host_path(token)
-            || token.split('/').count() >= 2)
+    if token.is_empty() || token.starts_with('-') {
+        return false;
+    }
+    if token
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("git@"))
+    {
+        return token[4..]
+            .split_once(':')
+            .is_some_and(|(host, path)| !host.is_empty() && !path.is_empty());
+    }
+    if let Some(rest) = strip_ascii_case_prefix(token, "ssh://") {
+        return has_repository_like_scheme_path(rest);
+    }
+    if let Some(rest) = strip_ascii_case_prefix(token, "http://")
+        .or_else(|| strip_ascii_case_prefix(token, "https://"))
+    {
+        return has_repository_like_scheme_path(rest);
+    }
+    if looks_like_host_path(token) {
+        return true;
+    }
+    token.split_once('/').is_some_and(|(owner, path)| {
+        !owner.is_empty() && !path.is_empty() && !path.starts_with('/')
+    })
 }
 
 fn looks_like_host_path(token: &str) -> bool {
@@ -659,12 +808,48 @@ fn looks_like_host_path(token: &str) -> bool {
         .is_some_and(|(host, path)| host.contains('.') && !path.is_empty())
 }
 
+fn has_repository_like_scheme_path(rest: &str) -> bool {
+    rest.char_indices()
+        .any(|(index, ch)| ch == '/' && index > 0 && index < rest.len() - 1)
+}
+
+fn parse_ssh_repository_token(token: &str) -> Option<(&str, &str)> {
+    let rest = strip_ascii_case_prefix(token, "ssh://")?;
+    let slash_index = rest.find('/')?;
+    let authority = &rest[..slash_index];
+    let path = &rest[slash_index + 1..];
+    if authority.is_empty() || path.is_empty() {
+        return None;
+    }
+    let host = match authority.find('@') {
+        Some(index) if index > 0 => &authority[index + 1..],
+        _ => authority,
+    };
+    if host.is_empty() {
+        return None;
+    }
+    Some((host, path))
+}
+
+fn parse_http_repository_token(token: &str) -> Option<(&str, &str)> {
+    let without_scheme = strip_ascii_case_prefix(token, "https://")
+        .or_else(|| strip_ascii_case_prefix(token, "http://"))
+        .unwrap_or(token);
+    let (host, path) = without_scheme.split_once('/')?;
+    if host.contains('.') && !path.is_empty() {
+        Some((host, path))
+    } else {
+        None
+    }
+}
+
 fn normalize_repository_path(repository_path: &str) -> String {
     let before_hash = repository_path.split('#').next().unwrap_or_default();
     let before_query = before_hash.split('?').next().unwrap_or_default();
+    let before_git_suffix = normalize_git_suffix(before_query);
     let mut segments: Vec<String> = Vec::new();
-    for segment in before_query.split('/') {
-        let segment = segment.trim();
+    for segment in before_git_suffix.split('/') {
+        let segment = decode_repository_path_segment(segment);
         if segment.is_empty() {
             continue;
         }
@@ -696,12 +881,68 @@ fn normalize_repository_path(repository_path: &str) -> String {
 }
 
 fn repository_name_from_path(path: &str) -> String {
-    path.split('/')
+    let repository_name = path
+        .split('/')
         .filter(|segment| !segment.is_empty())
         .next_back()
-        .unwrap_or("repository")
-        .trim_end_matches(".git")
+        .unwrap_or("repository");
+    repository_name
+        .strip_suffix(".git")
+        .unwrap_or(repository_name)
         .to_string()
+}
+
+fn strip_ascii_case_prefix<'a>(input: &'a str, prefix: &str) -> Option<&'a str> {
+    input
+        .get(..prefix.len())
+        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
+        .then(|| &input[prefix.len()..])
+}
+
+fn normalize_git_suffix(path: &str) -> String {
+    let lower = path.to_ascii_lowercase();
+    let mut search_start = 0usize;
+    while let Some(relative_index) = lower[search_start..].find(".git") {
+        let index = search_start + relative_index;
+        let rest = &path[index + 4..];
+        if rest.is_empty() || rest.starts_with('/') {
+            return format!("{}.git", &path[..index]);
+        }
+        search_start = index + 4;
+    }
+    path.to_string()
+}
+
+fn decode_repository_path_segment(segment: &str) -> String {
+    let segment = segment.trim();
+    percent_decode_utf8(segment).unwrap_or_else(|| segment.to_string())
+}
+
+fn percent_decode_utf8(input: &str) -> Option<String> {
+    let bytes = input.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = bytes.get(index + 1).and_then(|byte| hex_value(*byte))?;
+            let low = bytes.get(index + 2).and_then(|byte| hex_value(*byte))?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn normalize_repository_destination_folder_name(
@@ -715,18 +956,24 @@ fn normalize_repository_destination_folder_name(
         .unwrap_or(fallback);
     let mut normalized = String::new();
     let mut previous_space = false;
+    let mut previous_separator = false;
     for ch in raw_name.chars() {
         if matches!(ch, '/' | ':' | '\\') {
-            normalized.push('-');
+            if !previous_separator {
+                normalized.push('-');
+            }
+            previous_separator = true;
             previous_space = false;
         } else if ch.is_whitespace() {
             if !previous_space {
                 normalized.push(' ');
                 previous_space = true;
             }
+            previous_separator = false;
         } else {
             normalized.push(ch);
             previous_space = false;
+            previous_separator = false;
         }
     }
     let normalized = normalized.trim().to_string();
@@ -763,7 +1010,7 @@ fn normalize_repository_branch_name(
 }
 
 fn is_repository_branch_name_valid(branch_name: &str) -> bool {
-    branch_name.len() <= 255
+    branch_name.encode_utf16().count() <= 255
         && branch_name != "@"
         && !branch_name.starts_with(['-', '/'])
         && !branch_name.ends_with(['/', '.'])
@@ -772,7 +1019,7 @@ fn is_repository_branch_name_valid(branch_name: &str) -> bool {
         && !branch_name.chars().any(|ch| {
             ch.is_whitespace()
                 || matches!(ch, '~' | '^' | ':' | '?' | '*' | '[' | '\\')
-                || ch.is_control()
+                || matches!(ch, '\u{0}'..='\u{1F}' | '\u{7F}')
         })
         && branch_name.split('/').all(|segment| {
             !segment.is_empty() && !segment.starts_with('.') && !segment.ends_with(".lock")
@@ -887,11 +1134,21 @@ fn home_dir() -> PathBuf {
 }
 
 fn normalize_path_string(path: impl AsRef<Path>) -> String {
-    path.as_ref()
-        .components()
-        .collect::<PathBuf>()
-        .to_string_lossy()
-        .to_string()
+    let mut normalized = PathBuf::new();
+    for component in path.as_ref().components() {
+        match component {
+            std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            std::path::Component::RootDir => normalized.push(Path::new("/")),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push("..");
+                }
+            }
+            std::path::Component::Normal(segment) => normalized.push(segment),
+        }
+    }
+    normalized.to_string_lossy().to_string()
 }
 
 fn is_path_inside(parent_path: &str, candidate_path: &str) -> bool {
@@ -952,6 +1209,71 @@ mod tests {
     }
 
     #[test]
+    fn preview_repository_clone_matches_typescript_url_path_and_name_edges() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("parent");
+        fs::create_dir(&parent).unwrap();
+        let parent_with_segments = parent.join("..").join("parent");
+        let mut params = Map::new();
+        params.insert(
+            "repositoryInput".to_string(),
+            json!("HTTPS://GitHub.com/factory-ai/ghost%65x.git/blob/main?tab=readme"),
+        );
+        params.insert(
+            "parentPath".to_string(),
+            json!(parent_with_segments.to_string_lossy()),
+        );
+        params.insert(
+            "destinationFolderName".to_string(),
+            json!("repo//copy: final\\name"),
+        );
+        let preview = preview_repository_clone(&params).unwrap();
+        assert_eq!(
+            preview.get("cloneUrl").and_then(Value::as_str),
+            Some("https://GitHub.com/factory-ai/ghostex.git")
+        );
+        assert_eq!(
+            preview.get("defaultFolderName").and_then(Value::as_str),
+            Some("ghostex")
+        );
+        assert_eq!(
+            preview.get("destinationFolderName").and_then(Value::as_str),
+            Some("repo-copy- final-name")
+        );
+        assert_eq!(
+            preview.get("parentPath").and_then(Value::as_str),
+            Some(parent.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            preview.get("destinationPath").and_then(Value::as_str),
+            Some(
+                parent
+                    .join("repo-copy- final-name")
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+    }
+
+    #[test]
+    fn repository_clone_input_parsing_matches_typescript_token_edges() {
+        let ssh =
+            parse_repository_clone_input("ssh://git@GitHub.com/Factory-AI/Ghost%65x.GIT/tree/main")
+                .unwrap();
+        assert_eq!(ssh.clone_url, "ssh://git@GitHub.com/Factory-AI/Ghostex.git");
+        assert_eq!(ssh.repository_name, "Ghostex");
+
+        let scheme_without_dotted_host =
+            parse_repository_clone_input("http://internal/repo").unwrap();
+        assert_eq!(
+            scheme_without_dotted_host.clone_url,
+            "https://github.com/http:/internal/repo.git"
+        );
+
+        assert!(parse_repository_clone_input("owner//repo").is_none());
+    }
+
+    #[test]
     fn preview_rejects_existing_destination() {
         let dir = tempdir().unwrap();
         fs::create_dir(dir.path().join("repo")).unwrap();
@@ -976,7 +1298,68 @@ mod tests {
     #[test]
     fn repository_branch_validation_matches_clone_contract() {
         assert!(is_repository_branch_name_valid("feature/demo"));
+        assert!(is_repository_branch_name_valid(&"é".repeat(255)));
+        assert!(!is_repository_branch_name_valid(&"\u{1F680}".repeat(128)));
         assert!(!is_repository_branch_name_valid("../bad"));
         assert!(!is_repository_branch_name_valid("bad branch"));
+    }
+
+    #[tokio::test]
+    async fn clone_process_terminates_when_job_is_canceled() {
+        if !Path::new("/bin/sh").exists() {
+            return;
+        }
+        let dir = tempdir().unwrap();
+        let started_path = dir.path().join("started");
+        let script_path = dir.path().join("fake-git.sh");
+        fs::write(
+            &script_path,
+            r#"trap 'exit 130' TERM
+printf 'clone started\n'
+: > "$1"
+while :; do :; done
+"#,
+        )
+        .unwrap();
+        let jobs = Arc::new(Mutex::new(HashMap::new()));
+        let job_id = "job-cancel".to_string();
+        jobs.lock().await.insert(
+            job_id.clone(),
+            json!({
+                "jobId": job_id,
+                "state": "running"
+            }),
+        );
+        let run = tokio::spawn(run_clone_process(
+            "/bin/sh",
+            vec![
+                script_path.to_string_lossy().to_string(),
+                started_path.to_string_lossy().to_string(),
+            ],
+            dir.path().to_string_lossy().to_string(),
+            jobs.clone(),
+            job_id.clone(),
+        ));
+        for _ in 0..100 {
+            if started_path.exists() {
+                break;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+        assert!(started_path.exists());
+        {
+            let mut jobs = jobs.lock().await;
+            jobs.get_mut(&job_id)
+                .and_then(Value::as_object_mut)
+                .unwrap()
+                .insert("state".to_string(), json!("canceled"));
+        }
+        let output = tokio::time::timeout(Duration::from_secs(5), run)
+            .await
+            .expect("canceled clone should exit")
+            .expect("join")
+            .expect("clone output");
+        assert_eq!(output.exit_code, 130);
+        assert_eq!(output.stdout, "clone started");
     }
 }

@@ -112,6 +112,12 @@ describe("T3 runtime packaging", () => {
       "fileprivate static func readOwnerBearerTokenForManagedRuntime",
     );
     expect(browserAuth).toContain("completion: @escaping (Result<Void, Error>) -> Void");
+    expect(browserAuth).toContain('path: "/oauth/token"');
+    expect(browserAuth).toContain('path: "/api/auth/browser-session"');
+    expect(browserAuth).not.toContain('path: "/api/auth/bootstrap/bearer"');
+    expect(browserAuth).not.toContain('path: "/api/auth/bootstrap"');
+    expect(browserAuth).toContain('request.setValue("application/json", forHTTPHeaderField: "Content-Type")');
+    expect(browserAuth).toContain("request.httpBody = try? JSONSerialization.data(withJSONObject: [:])");
     expect(browserAuth).toContain("nativeT3Runtime.browserAuth.retry.exhausted");
     expect(browserAuth).toContain("result: .failure(NativeT3RuntimeFailureNotice.error(reason: reason))");
 
@@ -139,6 +145,54 @@ describe("T3 runtime packaging", () => {
     expect(nativeSidebarSource).toContain("toastId: T3_RUNTIME_TOAST_ID");
   });
 
+  test("native T3 WK bridge exposes the upstream desktop bearer contract", () => {
+    /*
+    CDXC:T3CodeUpstreamReset 2026-06-22-23:39:
+    Current upstream T3 web code switches primary environment requests to desktop bearer auth whenever window.desktopBridge exists. The Ghostex WK bridge must provide getLocalEnvironmentBearerToken through a native request/response path, or the embedded app fails fetch-session-state before making a usable authenticated request.
+    */
+    const bridgeScript = sourceBetween(
+      terminalWorkspaceSource,
+      "private static func t3WebPaneBridgeScript",
+      "private static func javascriptStringLiteral",
+    );
+    expect(bridgeScript).toContain("getLocalEnvironmentBearerToken: async ()");
+    expect(bridgeScript).toContain('requestNativeBridgeValue("getLocalEnvironmentBearerToken")');
+    expect(bridgeScript).toContain('type: "bridge-request"');
+    expect(bridgeScript).toContain("window.__VSMUX_T3_BRIDGE_RESPOND__");
+    expect(bridgeScript).toContain("window.__VSMUX_T3_OWNER_BEARER_TOKEN__");
+
+    const diagnosticsBridge = sourceBetween(
+      terminalWorkspaceSource,
+      "private final class T3CodePaneDiagnosticsBridge",
+      "private func normalizeBody",
+    );
+    expect(diagnosticsBridge).toContain('case "getLocalEnvironmentBearerToken"');
+    expect(diagnosticsBridge).toContain("NativeT3RuntimeLauncher.currentOwnerBearerToken()");
+    expect(diagnosticsBridge).toContain("NativeT3RuntimeLauncher.readPersistedOwnerBearerToken()");
+    expect(diagnosticsBridge).toContain("webView.evaluateJavaScript(script, completionHandler: nil)");
+  });
+
+  test("native T3 WK bridge ignores draft route ids when reporting thread changes", () => {
+    /*
+    CDXC:T3Code 2026-06-23-06:22:
+    Draft route ids are only bootstrap addresses. The native bridge must not
+    report them as thread navigation because the sidebar preserves one card per
+    reported T3 thread and would otherwise create a new Ghostex session for
+    every draft reload.
+    */
+    const bridgeScript = sourceBetween(
+      terminalWorkspaceSource,
+      "private static func t3WebPaneBridgeScript",
+      "private static func javascriptStringLiteral",
+    );
+    expect(bridgeScript).toContain('if (parts[0] === "draft")');
+    expect(bridgeScript).toContain("const isDraftRouteThreadId = (threadId)");
+    expect(bridgeScript).toContain('startsWith("ghostex-draft-")');
+    expect(bridgeScript.indexOf("if (isDraftRouteThreadId(threadId))")).toBeLessThan(
+      bridgeScript.indexOf('type: "thread-changed"'),
+    );
+  });
+
   test("local starts validate the same packaged T3 architecture shape as release", () => {
     /*
     CDXC:LocalStartReleaseParity 2026-06-09-09:07:
@@ -146,6 +200,9 @@ describe("T3 runtime packaging", () => {
 
     CDXC:LocalStartSingleApp 2026-06-09-09:27:
     Ghostex-dev local start and build entry points were removed because agents were invoking the alternate app by mistake. Source-level tests should keep package scripts, docs, verifier instructions, and native build gates aligned on the single Ghostex app path.
+
+    CDXC:ContributorStart 2026-06-22-23:23:
+    Contributor local starts may omit optional submodules, but zmx, the app shell, and shared runtime validation remain required. Keep the permissive validator flag only on the local start path while release validation stays strict.
     */
     const configurationResolver = sourceBetween(
       startGhostexSource,
@@ -182,7 +239,10 @@ describe("T3 runtime packaging", () => {
     expect(codeSignGhostexHostSource).toContain("CDXC:MacOSPermissions 2026-06-16-02:27");
     expect(codeSignGhostexHostSource).toContain("local_start_signing()");
     expect(codeSignGhostexHostSource).toContain("can_reuse_local_signature");
-    expect(startGhostexSource).toContain("await validateMacosAppBundle({ appName, appPath: installedApp, arch })");
+    expect(startGhostexSource).toContain("await validateMacosAppBundle({ allowMissingOptionalResources: true, appName, appPath: installedApp, arch })");
+    expect(nativeSidebarSource).toContain("ghostex-build-capabilities.json");
+    expect(nativeSidebarSource).toContain("optionalSubmodulesMayBeMissing");
+    expect(nativeSidebarSource).toContain("T3 Code is not bundled in this contributor local build");
     expect(startGhostexSource).toContain("CDXC:LocalStartGxserver 2026-06-12-09:58");
     expect(startGhostexSource).toContain("resolveBundledNodeForGxserverPreflight(appPath, runtime)");
     expect(startGhostexSource).toContain("runtime.nodeVersion || `v${runtime.nodeMajor}.0.0`");
@@ -215,6 +275,9 @@ describe("T3 runtime packaging", () => {
     expect(buildGhostexHostSource).toContain("code_server_vscode_ripgrep_bin()");
     expect(buildGhostexHostSource).toContain("code-server-vscode-payload-$GHOSTEX_MACOS_ARCH");
     expect(buildGhostexHostSource).toContain("$target_dir/lib/vscode/node_modules/@vscode/ripgrep/bin/rg");
+    expect(buildGhostexHostSource).toContain('GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES="${GHOSTEX_ALLOW_MISSING_OPTIONAL_SUBMODULES:-${GHOSTEX_LOCAL_START:-0}}"');
+    expect(buildGhostexHostSource).toContain("stage_shared_code_server_node_runtime()");
+    expect(buildGhostexHostSource).toContain("ghostex-build-capabilities.json");
     expect(codeServerBuildVscodeSource).toContain("ensure-vscode-ripgrep-platform()");
     expect(codeServerBuildVscodeSource).toContain('env npm_config_arch="$(vscode-ripgrep-node-arch)"');
     expect(codeServerBuildVscodeSource).toContain("ensure-github-token-for-vscode-build");
@@ -226,6 +289,12 @@ describe("T3 runtime packaging", () => {
     expect(releaseGhostexSource).toContain("import { validateMacosAppBundle } from \"./validate-macos-app-bundle.mjs\"");
     expect(releaseGhostexSource).toContain("await validateMacosAppBundle({ appName: config.appName, appPath: entry.appPath, arch: entry.arch })");
     expect(bundleValidatorSource).toContain("CDXC:LocalStartRuntimePolicy 2026-06-12-09:58");
+    expect(bundleValidatorSource).toContain("allowMissingOptionalResources = false");
+    expect(bundleValidatorSource).toContain("validateSharedCodeServerNodeRuntime");
+    expect(bundleValidatorSource).toContain("shouldValidateOptionalResource");
+    expect(bundleValidatorSource).toContain('resourceName: "sourceEditor"');
+    expect(bundleValidatorSource).toContain('resourceName: "t3Code"');
+    expect(bundleValidatorSource).toContain('resourceName: "beads"');
     expect(bundleValidatorSource).not.toContain("T3 Code --help smoke test");
     expect(bundleValidatorSource).not.toContain("assertNativeModuleLoads");
     expect(bundleValidatorSource).toContain("nativeRuntime.nodeModuleVersion");
