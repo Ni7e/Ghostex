@@ -56,21 +56,26 @@ static const char* GhostexCEFSystemPreferredColorSchemeValue(void) {
   return GhostexCEFSystemUsesDarkPageAppearance() ? "dark" : "light";
 }
 
+/*
+CDXC:BrowserPageAppearance 2026-06-24-13:16:
+Toolbar CEF browser pages should match Chrome's default document canvas: text-only or transparent pages without an authored background remain white even when macOS dark appearance drives prefers-color-scheme.
+Keep the dark #161616 backing only for non-toolbar editor/source CEF panes.
+*/
 static NSColor* GhostexCEFNativePageBackingColor(BOOL usesSystemPageAppearance) {
-  return usesSystemPageAppearance && !GhostexCEFSystemUsesDarkPageAppearance()
+  return usesSystemPageAppearance
     ? [NSColor whiteColor]
     : [NSColor colorWithCalibratedWhite:0.086 alpha:1];
 }
 
 static cef_color_t GhostexCEFBrowserPageBackingColor(BOOL usesSystemPageAppearance) {
-  return usesSystemPageAppearance && !GhostexCEFSystemUsesDarkPageAppearance()
+  return usesSystemPageAppearance
     ? CefColorSetARGB(255, 255, 255, 255)
     : CefColorSetARGB(255, 22, 22, 22);
 }
 
 static CefRefPtr<CefDictionaryValue> GhostexCEFPageBackingDevToolsColor(BOOL usesSystemPageAppearance) {
   CefRefPtr<CefDictionaryValue> color = CefDictionaryValue::Create();
-  if (usesSystemPageAppearance && !GhostexCEFSystemUsesDarkPageAppearance()) {
+  if (usesSystemPageAppearance) {
     color->SetInt("r", 255);
     color->SetInt("g", 255);
     color->SetInt("b", 255);
@@ -1575,7 +1580,10 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   }
   /*
   CDXC:BrowserPageAppearance 2026-06-19-18:13:
-  Browser panes no longer expose System/Light/Dark controls or per-origin persistence. Toolbar browser pages follow the current macOS effective appearance at the renderer boundary and use a matching opaque default page canvas. Sites such as plus.excalidraw.com can leave the document and hero SVG transparent, so the CEF backing color must come from the same system-derived scheme as `prefers-color-scheme`.
+  Browser panes no longer expose System/Light/Dark controls or per-origin persistence. Toolbar browser pages follow the current macOS effective appearance at the renderer boundary.
+
+  CDXC:BrowserPageAppearance 2026-06-24-13:16:
+  The renderer's unspecified document background must stay Chrome-like white instead of inheriting Ghostex dark chrome. Plain HTML files and transparent pages with no authored background should not show black text on the app's #161616 surface.
   */
   CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
   params->SetString("media", "");
@@ -1668,7 +1676,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
     GPUI integrates CEF through external_message_pump instead of CEF's blocking run loop. In that host, synchronous browser creation can fail even with a valid AppKit child frame, so use CEF's async CreateBrowser path and attach the returned native Chromium view from OnAfterCreated.
 
     CDXC:BrowserPageAppearance 2026-06-19-18:13:
-    Toolbar browser panes that use system page appearance must create about:blank first, apply Chromium media emulation plus the matching default page canvas, and only then load the real URL. This keeps transparent public pages from flashing or settling on a backing color that disagrees with macOS while preserving direct startup for editor panes.
+    Toolbar browser panes that use system page appearance must create about:blank first, apply Chromium media emulation plus the Chrome-like default page canvas, and only then load the real URL. This keeps transparent public pages from flashing onto Ghostex chrome while preserving direct startup for editor panes.
     */
     bool started = CefBrowserHost::CreateBrowser(
       windowInfo,
@@ -1696,7 +1704,7 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
   Non-toolbar CEF panes can still start on the requested page directly, avoiding a visible blank-render turn for editor surfaces.
 
   CDXC:BrowserPageAppearance 2026-06-19-18:13:
-  Toolbar browser panes intentionally stage the first public navigation behind about:blank so the system-derived page appearance and matching default page canvas are in place before sites such as Excalidraw+ paint transparent content.
+  Toolbar browser panes intentionally stage the first public navigation behind about:blank so the system-derived page media and Chrome-like default page canvas are in place before public pages paint transparent content.
   */
   browser_ = CefBrowserHost::CreateBrowserSync(
     windowInfo,

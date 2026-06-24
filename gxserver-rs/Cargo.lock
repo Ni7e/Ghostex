@@ -381,6 +381,7 @@ dependencies = [
  "subtle",
  "tempfile",
  "tokio",
+ "tower",
  "url",
  "uuid",
 ]

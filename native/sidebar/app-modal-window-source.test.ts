@@ -29,6 +29,10 @@ const remoteGxserverInstallModalSource = readFileSync(
   new URL("../../sidebar/remote-gxserver-install-modal.tsx", import.meta.url),
   "utf8",
 );
+const remoteProjectPickerModalSource = readFileSync(
+  new URL("../../sidebar/remote-project-picker/remote-project-picker-modal.tsx", import.meta.url),
+  "utf8",
+);
 const sidebarStylesSource = readFileSync(
   new URL("../../sidebar/styles.css", import.meta.url),
   "utf8",
@@ -700,6 +704,152 @@ describe("native app modal window source", () => {
     expect(modalHostSource).toContain('type: "reconnectRemoteMachine"');
   });
 
+  test("shows create-time remote passwords without storing raw settings data", () => {
+    /*
+    CDXC:RemoteMachines 2026-06-24-10:40:
+    The Add remote machine card should render the password row like saved
+    machine cards so the new and created cards stay the same height. Passwords
+    entered before Add Machine must still use the one-shot Keychain command and
+    must not be normalized into Remote machine settings.
+    */
+    const remoteSettingsTab = sourceBetween(
+      settingsModalSource,
+      "function RemoteSettingsTab({",
+      "function RemoteMachineFields({",
+    );
+    const addRemoteMachine = sourceBetween(
+      settingsModalSource,
+      "  const addRemoteMachine = () => {",
+      "  const removeRemoteMachine =",
+    );
+    const postPasswordSave = sourceBetween(
+      settingsModalSource,
+      "  const postRemoteMachinePasswordSave = (remoteMachineId: string, password: string) => {",
+      "  const saveRemoteMachinePassword =",
+    );
+    const remoteMachineFields = sourceBetween(
+      settingsModalSource,
+      "function RemoteMachineFields({",
+      "function normalizeRemoteMachineDraft(",
+    );
+    const remoteMachineHeaderStyles = sourceBetween(
+      modalStylesSource,
+      ".settings-remote-machine-summary {",
+      ".settings-remote-machine-body {",
+    );
+    const normalizeDraft = sourceBetween(
+      settingsModalSource,
+      "function normalizeRemoteMachineDraft(",
+      "function formatRemoteMachineSshTarget(",
+    );
+
+    expect(remoteSettingsTab).not.toContain("hidePasswordField");
+    expect(remoteSettingsTab).toContain("New SSH machine");
+    expect(remoteSettingsTab).toContain(
+      'passwordDescription="Passwords are stored in macOS Keychain. Leave blank to add the machine without a saved password."',
+    );
+    expect(addRemoteMachine).toContain("const machineId =");
+    expect(addRemoteMachine).toContain("const password = newMachine.sshPassword;");
+    expect(addRemoteMachine).toContain("postRemoteMachinePasswordSave(machine.id, password);");
+    expect(addRemoteMachine).toContain("setNewMachine(createRemoteMachineDraft());");
+    expect(postPasswordSave).toContain('type: "saveRemoteMachinePassword"');
+    expect(postPasswordSave).toContain("remoteMachineId,");
+    expect(remoteMachineFields).toContain(">Password</FieldLabel>");
+    expect(remoteMachineFields).toContain("settings-remote-machine-password-row-single");
+    expect(remoteMachineFields).not.toContain("hidePasswordField");
+    expect(remoteMachineHeaderStyles).toContain(".settings-remote-machine-add-summary");
+    expect(remoteMachineHeaderStyles).toContain("padding-block: 10px;");
+    expect(remoteMachineHeaderStyles).toContain(".settings-remote-machine-add-icon");
+    expect(remoteMachineHeaderStyles).toContain("height: 36px;");
+    expect(remoteMachineHeaderStyles).toContain("width: 36px;");
+    expect(normalizeDraft).not.toContain("sshPassword:");
+  });
+
+  test("sizes remote setup modals to their compact native content", () => {
+    /*
+    CDXC:RemoteMachines 2026-06-24-10:43:
+    The remote gxserver approval modal and Add Remote Project picker should fit
+    their React content instead of inheriting generic app-modal padding from all
+    four sides. Keep their native child windows locked to compact content sizes
+    and center the picker command surface inside the smaller frame.
+    */
+    const defaultSize = sourceBetween(
+      appDelegateSource,
+      "private func defaultSize(for modal: String) -> CGSize",
+      "private func constrainedSize(_ size: CGSize, parentWindow: NSWindow) -> CGSize",
+    );
+    expect(defaultSize).toContain('case "remoteGxserverInstall":');
+    expect(defaultSize).toContain("return CGSize(width: 520, height: 340)");
+    expect(defaultSize).toContain('case "remoteProjectPicker":');
+    expect(defaultSize).toContain("return CGSize(width: 480, height: 260)");
+    expect(defaultSize).toContain('case "scratchPad":');
+    expect(defaultSize).not.toContain('case "scratchPad", "addRepository", "remoteProjectPicker":');
+
+    const shouldLockContentSize = sourceBetween(
+      appDelegateSource,
+      "private func shouldLockContentSize(modal: String) -> Bool",
+      "private func minimumContentSize(for modal: String?) -> CGSize",
+    );
+    expect(shouldLockContentSize).toContain('|| modal == "remoteGxserverInstall"');
+    expect(shouldLockContentSize).toContain('|| modal == "remoteProjectPicker"');
+
+    const minimumContentSize = sourceBetween(
+      appDelegateSource,
+      "private func minimumContentSize(for modal: String?) -> CGSize",
+      "private func maximumContentSize(for modal: String?) -> CGSize?",
+    );
+    expect(minimumContentSize).toContain('case "remoteGxserverInstall":');
+    expect(minimumContentSize).toContain("return CGSize(width: 520, height: 340)");
+    expect(minimumContentSize).toContain('case "remoteProjectPicker":');
+    expect(minimumContentSize).toContain("return CGSize(width: 480, height: 260)");
+
+    const remoteProjectPickerRule = sourceBetween(
+      modalStylesSource,
+      ".remote-project-picker-dialog {",
+      "/*\n * CDXC:SettingsRoundness",
+    );
+    expect(remoteProjectPickerRule).toContain("top: 50% !important;");
+    expect(remoteProjectPickerRule).toContain("translate: -50% -50% !important;");
+    expect(remoteProjectPickerModalSource).toContain(
+      'className="remote-project-picker-dialog max-w-2xl"',
+    );
+  });
+
+  test("keeps Clone Repository fields from overlapping in native validation states", () => {
+    /*
+    CDXC:AddRepository 2026-06-24-10:35:
+    Clone Repository must have enough native child-window height for the branch
+    row, remote folder help, and inline clone errors. It may reuse Rename Session
+    chrome, but it must not reuse Rename Session's first-field shrink behavior
+    because that can overlap repository validation text with the folder row.
+    */
+    const defaultSize = sourceBetween(
+      appDelegateSource,
+      "private func defaultSize(for modal: String) -> CGSize",
+      "private func constrainedSize(_ size: CGSize, parentWindow: NSWindow) -> CGSize",
+    );
+    expect(defaultSize).toContain('case "scratchPad":');
+    expect(defaultSize).toContain("return CGSize(width: 760, height: 640)");
+    expect(defaultSize).toContain('case "addRepository":');
+    expect(defaultSize).toContain("return CGSize(width: 760, height: 760)");
+    expect(defaultSize).not.toContain('case "scratchPad", "addRepository":');
+
+    const addRepositoryStyles = sourceBetween(
+      modalStylesSource,
+      ".add-repository-modal-shadcn {",
+      ".worktree-create-modal-shadcn {",
+    );
+    expect(addRepositoryStyles).toContain(
+      ".app-modal-host-native-window-body .add-repository-modal-shadcn .session-rename-field-group",
+    );
+    expect(addRepositoryStyles).toContain("overflow-y: auto;");
+    expect(addRepositoryStyles).toContain(
+      ".add-repository-modal-shadcn\n  .session-rename-field-group\n  > [data-slot=\"field\"]:first-child",
+    );
+    expect(addRepositoryStyles).toContain("flex: 0 0 auto;");
+    expect(addRepositoryStyles).toContain("min-height: auto;");
+  });
+
   test("probes remote gxserver install target before choosing the package", () => {
     /*
     CDXC:RemoteMachines 2026-06-23-09:46:
@@ -729,8 +879,19 @@ describe("native app modal window source", () => {
     expect(remoteGxserverClientSource).toContain("CLI/ghostex-cli.mjs");
     expect(remoteGxserverClientSource).toContain("$HOME/.local/bin/ghostex");
     expect(remoteGxserverClientSource).toContain("$HOME/.local/bin/gx");
+    expect(remoteGxserverClientSource).toContain("if [ -f \"$package_link/bin/ghostex\" ]; then");
+    expect(remoteGxserverClientSource).toContain("chmod 755 \"$package_link/bin/ghostex\"");
+    expect(remoteGxserverClientSource).toContain('while [ -L "$SOURCE" ]; do');
+    expect(remoteGxserverClientSource).toContain('SOURCE_TARGET="$(readlink "$SOURCE")"');
+    expect(remoteGxserverClientSource).toContain("COPYFILE_DISABLE");
     expect(remoteGxserverClientSource).toContain("package.backup.");
     expect(remoteGxserverClientSource).toContain("releases/\\(releaseId)");
+    expect(remoteGxserverClientSource).toContain("ghostex_remote_stop_existing_gxserver");
+    expect(remoteGxserverClientSource).toContain("ss -ltnp");
+    expect(remoteGxserverClientSource).toContain("lsof -nP -iTCP:$ghostex_remote_gxserver_port");
+    expect(remoteGxserverClientSource).toContain("kill -TERM");
+    expect(remoteGxserverClientSource).toContain("kill -KILL");
+    expect(remoteGxserverClientSource).toContain(".ghostex/gxserver/");
     expect(remoteGxserverClientSource).not.toContain("rm -rf");
     expect(remoteGxserverClientSource).not.toContain("command -v gxserver");
     expect(remoteGxserverInstallModalSource).toContain("compatible bundled remote package");
@@ -822,6 +983,23 @@ describe("native app modal window source", () => {
       "</DialogFooter>",
     );
     expect(worktreeFooter).not.toContain("Cancel");
+
+    /*
+    CDXC:WorktreeBaseBranch 2026-06-24-11:32:
+    Add Worktree Create New mode must expose a required base-branch selector
+    and carry the selected branch through the native modal bridge.
+    */
+    expect(worktreeCreateModalSource).toContain('export type WorktreeBaseBranchOption = {');
+    expect(worktreeCreateModalSource).toContain('htmlFor={baseBranchId}>Base branch');
+    expect(worktreeCreateModalSource).toContain('className="worktree-create-base-branch-select"');
+    expect(modalStylesSource).toContain(".worktree-create-base-branch-select");
+    expect(worktreeCreateModalSource).toContain("selectedAgentId && selectedBaseBranch");
+    expect(worktreeCreateModalSource).toContain("normalizeWorktreeBaseBranchOptions(result.branches)");
+    expect(modalHostSource).toContain(
+      "baseBranch: draft.mode === \"create\" ? draft.baseBranch : undefined",
+    );
+    expect(nativeSidebarSource).toContain('action: "listBranches"');
+    expect(nativeSidebarSource).toContain("baseRef: baseBranch");
   });
 
   test("retries Add Worktree first-prompt focus across native child-window focus", () => {
@@ -855,7 +1033,7 @@ describe("native app modal window source", () => {
     expect(enterHandler).toContain('event.key !== "Enter"');
     expect(enterHandler).toContain("event.preventDefault();");
     expect(enterHandler).toContain("event.stopPropagation();");
-    expect(enterHandler).toContain("onConfirm(createDraft(");
+    expect(enterHandler).toContain("createDraft(");
   });
 
   test("uses Settings search focus treatment for modal text controls", () => {

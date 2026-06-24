@@ -1,41 +1,39 @@
-import {
-  GRID_COLUMN_COUNT,
-  clampVisibleSessionCount,
-  type SidebarSessionGroup,
-  type SidebarSessionItem,
-} from "../../shared/session-grid-contract";
+import type { SidebarSessionGroup, SidebarSessionItem } from "../../shared/session-grid-contract";
 import type {
-  GxserverDomainLifecycleState,
   GxserverPresentationProject,
   GxserverPresentationSession,
   GxserverPresentationSnapshot,
 } from "../../shared/gxserver-protocol";
-import { orderProjectsWithWorktrees } from "../../shared/project-worktree-order";
 import {
   createCombinedProjectGroupId,
   createCombinedProjectSessionId,
   parseCombinedProjectSessionId,
 } from "./combined-sidebar-mode";
-import { createDefaultSidebarProjectDiffStats } from "../../shared/project-diff-stats";
+import {
+  GXSERVER_PRESENTATION_CHATS_GROUP_ID,
+  createGxserverPresentationSidebarGroup,
+  createGxserverPresentationSidebarSession,
+  createGxserverPresentationSidebarSessionKey,
+  createGxserverPresentationSessionsByProjectFromGroups,
+  orderGxserverPresentationSidebarProjects,
+  presentationLifecycleStateForSidebar,
+  providerSessionStateForGxserverPresentation,
+  visibleCountForGxserverPresentationSidebarSessions,
+  type GxserverPresentationCloseAfterDoneProjection,
+  type GxserverPresentationDelayedSendProjection,
+  type GxserverPresentationSidebarProjectOverlay,
+  type GxserverPresentationSidebarSessionKey,
+} from "../../shared/gxserver-presentation-sidebar-projection";
 
-export const NATIVE_PRESENTATION_CHATS_GROUP_ID = "combined-chats";
+export const NATIVE_PRESENTATION_CHATS_GROUP_ID = GXSERVER_PRESENTATION_CHATS_GROUP_ID;
 
-export type NativePresentationProjectionSessionKey = string;
+export type NativePresentationProjectionSessionKey = GxserverPresentationSidebarSessionKey;
 
-export type NativePresentationDelayedSendProjection = {
-  deadlineAt?: string;
-  remainingLabel?: string;
-  remainingMs?: number;
-};
+export type NativePresentationDelayedSendProjection = GxserverPresentationDelayedSendProjection;
 
-export type NativePresentationCloseAfterDoneProjection = {
-  armed: boolean;
-  deadlineAt?: string;
-  remainingLabel?: string;
-  remainingMs?: number;
-};
+export type NativePresentationCloseAfterDoneProjection = GxserverPresentationCloseAfterDoneProjection;
 
-export type NativePresentationProjectProjection = {
+export type NativePresentationProjectProjection = GxserverPresentationSidebarProjectOverlay & {
   editor?: NonNullable<SidebarSessionGroup["projectContext"]>["editor"];
   isChatProject?: boolean;
   isQuickProject?: boolean;
@@ -73,22 +71,13 @@ export type NativePresentationProjectionInput = {
   visibleSessionIds?: ReadonlySet<string>;
 };
 
-type OrderedPresentationProject = {
-  isChat?: boolean;
-  isQuick?: boolean;
-  orderIndex: number;
-  project: GxserverPresentationProject;
-  projectId: string;
-  sortKey: string;
-  updatedAt?: string;
-  worktree?: NonNullable<SidebarSessionGroup["projectContext"]>["worktree"];
-};
+export { presentationLifecycleStateForSidebar, providerSessionStateForGxserverPresentation };
 
 export function createNativePresentationProjectionSessionKey(
   projectId: string,
   sessionId: string,
 ): NativePresentationProjectionSessionKey {
-  return `${projectId}\u0000${sessionId}`;
+  return createGxserverPresentationSidebarSessionKey(projectId, sessionId);
 }
 
 export function createNativePresentationSidebarGroups(
@@ -97,15 +86,18 @@ export function createNativePresentationSidebarGroups(
   /*
   CDXC:NativePresentationProjection 2026-06-13-00:49:
   Native gxserver presentation must be a pure value projection from gxserver rows plus macOS-local pane facts. Keep hidden overlays, local-only pane rows, Quick/Chats classification, and routing callbacks in the input so this module cannot mutate sidebar state, pane chrome, or publish state.
+
+  CDXC:GxserverPresentationParity 2026-06-24-10:45:
+  Shared gxserver projection owns presentation row mapping for macOS and GPUI. This wrapper keeps macOS-only overlays here: local browser/T3 pane rows, Quick/Chats carriers, remote-attach carrier suppression, delayed-send timers, and Close After Done countdowns.
   */
   const localProjectsById = new Map(input.localProjects.map((project) => [project.projectId, project]));
-  const sessionsByProject = createPresentationSessionsByProjectFromGroups(input);
+  const sessionsByProject = createGxserverPresentationSessionsByProjectFromGroups(input);
   const visibleProjects = input.presentation.projects.filter(
     (project) => !input.hiddenProjectIds?.has(project.projectId) &&
       localProjectsById.get(project.projectId)?.isRemoteAttachCarrier !== true &&
       !input.remoteAttachCarrierProjectIds?.has(project.projectId),
   );
-  const chatProjects = orderPresentationProjects(
+  const chatProjects = orderGxserverPresentationSidebarProjects(
     visibleProjects.filter((project) =>
       isPresentationChatProject(input, project, localProjectsById.get(project.projectId)),
     ),
@@ -117,7 +109,7 @@ export function createNativePresentationSidebarGroups(
     localProjectsById,
     sessionsByProject,
   });
-  const projectGroups = orderPresentationProjects(
+  const projectGroups = orderGxserverPresentationSidebarProjects(
     visibleProjects.filter((project) =>
       !isPresentationChatProject(input, project, localProjectsById.get(project.projectId)),
     ),
@@ -152,93 +144,14 @@ export function createNativePresentationSidebarGroups(
       isChatCollection: true,
       isFocusModeActive: false,
       kind: "workspace",
-      layoutVisibleCount: visibleCountForSessions(chatSessions),
+      layoutVisibleCount: visibleCountForGxserverPresentationSidebarSessions(chatSessions),
       sessions: chatSessions,
       title: "Chats",
       viewMode: "grid",
-      visibleCount: visibleCountForSessions(chatSessions),
+      visibleCount: visibleCountForGxserverPresentationSidebarSessions(chatSessions),
     },
     ...projectGroups,
   ];
-}
-
-export function presentationLifecycleStateForSidebar(
-  lifecycleState: GxserverDomainLifecycleState,
-): NonNullable<SidebarSessionItem["lifecycleState"]> {
-  switch (lifecycleState) {
-    case "running":
-      return "running";
-    case "sleeping":
-      return "sleeping";
-    case "missing":
-    case "unknown":
-      return "error";
-    case "stopped":
-    default:
-      return "done";
-  }
-}
-
-export function providerSessionStateForGxserverPresentation(
-  presentation: Pick<GxserverPresentationSession, "lifecycleState" | "providerSessionState">,
-): NonNullable<SidebarSessionItem["providerSessionState"]> {
-  /*
-  CDXC:PaneTabs 2026-06-13-00:49:
-  Native tab moons follow zmx provider liveness, not mounted renderer state. gxserver sleep/stop transitions remove the named provider session, while unknown must avoid claiming the provider is inactive.
-
-  CDXC:GxserverPresentation 2026-06-15-17:32:
-  gxserver now publishes provider liveness separately from lifecycle. Use that field when present so persistence-disabled or missing-provider rows do not look provider-live merely because the domain row is still running.
-  */
-  if (presentation.providerSessionState) {
-    return presentation.providerSessionState;
-  }
-  switch (presentation.lifecycleState) {
-    case "running":
-      return "exists";
-    case "sleeping":
-    case "missing":
-    case "stopped":
-      return "missing";
-    case "unknown":
-    default:
-      return "unknown";
-  }
-}
-
-function createPresentationSessionsByProjectFromGroups(
-  input: NativePresentationProjectionInput,
-): Map<string, GxserverPresentationSession[]> {
-  const sessionByProjectSessionKey = new Map(
-    input.presentation.sessions.map((session) => [
-      createNativePresentationProjectionSessionKey(session.projectId, session.sessionId),
-      session,
-    ]),
-  );
-  const sessionsByProject = new Map<string, GxserverPresentationSession[]>();
-  for (const group of input.presentation.groups) {
-    if (input.hiddenProjectIds?.has(group.projectId)) {
-      continue;
-    }
-    const sessions = sessionsByProject.get(group.projectId) ?? [];
-    for (const sessionId of group.sessionIds) {
-      const session = sessionByProjectSessionKey.get(
-        createNativePresentationProjectionSessionKey(group.projectId, sessionId),
-      );
-      if (
-        !session ||
-        session.visibleInSidebarByDefault !== true ||
-        session.surface === "commands" ||
-        input.hiddenSessionKeys?.has(
-          createNativePresentationProjectionSessionKey(session.projectId, session.sessionId),
-        )
-      ) {
-        continue;
-      }
-      sessions.push(session);
-    }
-    sessionsByProject.set(group.projectId, sessions);
-  }
-  return sessionsByProject;
 }
 
 function createPresentationQuickSidebarSessions({
@@ -342,19 +255,8 @@ function createPresentationProjectSidebarGroup({
   CDXC:T3Code 2026-06-13-00:49:
   T3 Code and browser panes are macOS-local WKWebView sessions even when gxserver owns terminal presentation. Merge only those native pane cards into normal project groups with project-scoped ids so native tabs and the React sidebar stay aligned while stale pre-cutover terminal rows stay suppressed.
   */
-  const isActiveProject = project.projectId === input.activeProjectId;
   const presentationSessionIds = new Set<string>(sessions.map((session) => session.sessionId));
   const localRows = localProject?.localSidebarSessions ?? [];
-  const presentationSidebarSessions = sessions.map((session, index) =>
-    createPresentationSidebarSession({
-      index,
-      input,
-      isActiveProject,
-      localSession: findLocalSidebarSession(localRows, session.sessionId),
-      presentation: session,
-      projectId: project.projectId,
-    }),
-  );
   const localPaneSessions = localRows
     .filter(
       (session) =>
@@ -365,34 +267,24 @@ function createPresentationProjectSidebarGroup({
         ),
     )
     .map((session) => combineLocalSidebarSession(project.projectId, session));
-  const sidebarSessions = [...presentationSidebarSessions, ...localPaneSessions];
-  const projectContext = localProject
-    ? {
-        canRemoveProject: true,
-        editor: localProject.editor ?? createIdlePresentationProjectEditorState(project.projectId),
-        path: localProject.path || project.path || "",
-        theme: localProject.theme,
-        themeColor: localProject.themeColor,
-        worktree: localProject.worktree,
-      }
-    : {
-        canRemoveProject: true,
-        editor: createIdlePresentationProjectEditorState(project.projectId),
-        path: project.path ?? "",
-      };
-  return {
-    groupId: createCombinedProjectGroupId(project.projectId),
-    canFocusMode: false,
-    isActive: isActiveProject,
-    isFocusModeActive: false,
-    kind: "workspace",
-    layoutVisibleCount: visibleCountForSessions(sidebarSessions),
-    projectContext,
-    sessions: sidebarSessions,
-    title: project.title,
-    viewMode: "grid",
-    visibleCount: visibleCountForSessions(sidebarSessions),
-  };
+  return createGxserverPresentationSidebarGroup({
+    activeProjectId: input.activeProjectId,
+    createProjectGroupId: createCombinedProjectGroupId,
+    createProjectSessionId: createCombinedProjectSessionId,
+    extraSessions: localPaneSessions,
+    focusedSessionId: input.focusedSessionId,
+    project,
+    projectOverlay: localProject,
+    resolveAgentIcon: input.resolveAgentIcon,
+    resolveCloseAfterDone: input.resolveCloseAfterDone,
+    resolveDelayedSend: input.resolveDelayedSend,
+    resolveLocalSession: (_projectId, sessionId) => findLocalSidebarSession(localRows, sessionId),
+    resolveProviderSessionState: (presentation, localSession) =>
+      providerSessionStateForPresentationLocalPane(presentation, localSession?.nativePaneState),
+    resolveSessionRoutingId: input.resolveSessionRoutingId,
+    sessions,
+    visibleSessionIds: input.visibleSessionIds,
+  });
 }
 
 function createPresentationSidebarSession({
@@ -410,75 +302,34 @@ function createPresentationSidebarSession({
   presentation: GxserverPresentationSession;
   projectId: string;
 }): SidebarSessionItem {
-  const lifecycleState = presentationLifecycleStateForSidebar(presentation.lifecycleState);
-  const nativePaneState = localSession?.nativePaneState;
-  const providerSessionState = providerSessionStateForPresentationLocalPane(
+  /*
+  CDXC:GxserverPresentationIdentity 2026-06-13-00:49:
+  Presentation-backed rows receive captured provider session identity from gxserver. Prefer that server-owned identity so hover tooltips and resume actions show the Codex/Claude session id even when no local terminal row exists.
+
+  CDXC:DelayedSend 2026-06-13-00:49:
+  Delayed Send timers remain native window state keyed by project/session. Join that timer projection onto the presentation-backed row so the leading clock keeps precedence over tags and agent icons.
+
+  CDXC:CloseAfterDone 2026-06-15-21:00:
+  Close After Done is also native-window timer state keyed by project/session.
+  Join it here so presentation-backed rows show the pastel red clock before
+  and during the three-minute Done close countdown.
+  */
+  return createGxserverPresentationSidebarSession({
+    createProjectSessionId: createCombinedProjectSessionId,
+    focusedSessionId: input.focusedSessionId,
+    index,
+    isActiveProject,
+    localSession,
     presentation,
-    nativePaneState,
-  );
-  const isLive =
-    providerSessionState === "exists" ||
-    nativePaneState === "mounted" ||
-    nativePaneState === "mounting";
-  const closeAfterDone = input.resolveCloseAfterDone(projectId, presentation.sessionId);
-  const delayedSend = input.resolveDelayedSend(projectId, presentation.sessionId);
-  return {
-    activity: presentation.activity,
-    agentIcon: input.resolveAgentIcon(presentation.agentIcon ?? presentation.agentName ?? presentation.agentId),
-    /*
-    CDXC:GxserverPresentationIdentity 2026-06-13-00:49:
-    Presentation-backed rows receive captured provider session identity from gxserver. Prefer that server-owned identity so hover tooltips and resume actions show the Codex/Claude session id even when no local terminal row exists.
-
-    CDXC:DelayedSend 2026-06-13-00:49:
-    Delayed Send timers remain native window state keyed by project/session. Join that timer projection onto the presentation-backed row so the leading clock keeps precedence over tags and agent icons.
-
-    CDXC:CloseAfterDone 2026-06-15-21:00:
-    Close After Done is also native-window timer state keyed by project/session.
-    Join it here so presentation-backed rows show the pastel red clock before
-    and during the three-minute Done close countdown.
-    */
-    agentSessionId: presentation.agentSessionId ?? localSession?.agentSessionId,
-    alias: presentation.title,
-    closeAfterDone: closeAfterDone?.armed,
-    closeAfterDoneDeadlineAt: closeAfterDone?.deadlineAt,
-    closeAfterDoneRemainingLabel: closeAfterDone?.remainingLabel,
-    closeAfterDoneRemainingMs: closeAfterDone?.remainingMs,
-    column: index % GRID_COLUMN_COUNT,
-    detail: presentation.subtitle,
-    delayedSendDeadlineAt: delayedSend?.deadlineAt,
-    delayedSendRemainingLabel: delayedSend?.remainingLabel,
-    delayedSendRemainingMs: delayedSend?.remainingMs,
-    displayTitle: presentation.displayTitle,
-    displayTitleTooltip: presentation.displayTitleTooltip,
-    isFavorite: presentation.isFavorite,
-    isFocused: isActiveProject && input.focusedSessionId === presentation.sessionId,
-    isGeneratingFirstPromptTitle: presentation.isGeneratingFirstPromptTitle,
-    isLive,
-    isPinned: presentation.isPinned,
-    isPrimaryTitleTerminalTitle: presentation.isPrimaryTitleTerminalTitle,
-    isRunning: isLive,
-    isSleeping: lifecycleState === "sleeping",
-    isVisible: isActiveProject && (
-      input.visibleSessionIds?.has(presentation.sessionId) === true ||
-      index === 0
-    ),
-    lastInteractionAt: presentation.lastActiveAt ?? presentation.updatedAt,
-    lifecycleState,
-    nativePaneState,
-    primaryTitle: presentation.primaryTitle ?? presentation.title,
-    providerSessionState,
-    row: Math.floor(index / GRID_COLUMN_COUNT),
-    sessionId: createCombinedProjectSessionId(projectId, presentation.sessionId),
-    sessionKind: presentation.kind === "agent" ? "terminal" : presentation.kind,
-    sessionTag: presentation.sessionTag,
-    sessionNumber: String(index + 1),
-    sessionPersistenceName: presentation.zmxName,
-    sessionPersistenceProvider: presentation.sessionPersistenceProvider,
-    sessionRoutingId: input.resolveSessionRoutingId(projectId, presentation.sessionId),
-    shortcutLabel: String(index + 1),
-    terminalTitle: presentation.terminalTitle,
-    titleObservation: presentation.titleObservation,
-  };
+    projectId,
+    resolveAgentIcon: input.resolveAgentIcon,
+    resolveCloseAfterDone: input.resolveCloseAfterDone,
+    resolveDelayedSend: input.resolveDelayedSend,
+    resolveProviderSessionState: (presentation, localSession) =>
+      providerSessionStateForPresentationLocalPane(presentation, localSession?.nativePaneState),
+    resolveSessionRoutingId: input.resolveSessionRoutingId,
+    visibleSessionIds: input.visibleSessionIds,
+  });
 }
 
 function providerSessionStateForPresentationLocalPane(
@@ -507,57 +358,6 @@ function combineLocalSidebarSession(
     ...session,
     sessionId: createCombinedProjectSessionId(projectId, originalSidebarSessionId(session.sessionId)),
   };
-}
-
-function createIdlePresentationProjectEditorState(
-  projectId: string,
-): NonNullable<SidebarSessionGroup["projectContext"]>["editor"] {
-  return {
-    diffStats: createDefaultSidebarProjectDiffStats(),
-    isOpen: false,
-    isSleeping: false,
-    projectId,
-    status: "idle",
-  };
-}
-
-function orderPresentationProjects(
-  presentationProjects: readonly GxserverPresentationProject[],
-  localProjectsById: ReadonlyMap<string, NativePresentationProjectProjection>,
-): GxserverPresentationProject[] {
-  const presentationProjectById = new Map(
-    presentationProjects.map((project) => [project.projectId, project]),
-  );
-  return orderProjectsWithWorktrees(
-    [...presentationProjects]
-      .sort((left, right) => {
-        const leftLocalIndex = localProjectsById.get(left.projectId)?.orderIndex;
-        const rightLocalIndex = localProjectsById.get(right.projectId)?.orderIndex;
-        if (leftLocalIndex !== undefined || rightLocalIndex !== undefined) {
-          return (leftLocalIndex ?? Number.MAX_SAFE_INTEGER) - (rightLocalIndex ?? Number.MAX_SAFE_INTEGER);
-        }
-        return (
-          left.sortKey.localeCompare(right.sortKey) ||
-          right.updatedAt.localeCompare(left.updatedAt) ||
-          left.projectId.localeCompare(right.projectId)
-        );
-      })
-      .map((project) => {
-        const localProject = localProjectsById.get(project.projectId);
-        return {
-          isChat: localProject?.isChatProject,
-          isQuick: localProject?.isQuickProject,
-          orderIndex: localProject?.orderIndex ?? Number.MAX_SAFE_INTEGER,
-          project,
-          projectId: project.projectId,
-          sortKey: project.sortKey,
-          updatedAt: project.updatedAt,
-          worktree: localProject?.worktree,
-        };
-      }),
-  )
-    .map((item) => presentationProjectById.get(item.projectId))
-    .filter((project): project is GxserverPresentationProject => project !== undefined);
 }
 
 function orderLocalProjects(
@@ -589,8 +389,4 @@ function findLocalSidebarSession(
 
 function originalSidebarSessionId(sessionId: string): string {
   return parseCombinedProjectSessionId(sessionId)?.sessionId ?? sessionId;
-}
-
-function visibleCountForSessions(sessions: readonly SidebarSessionItem[]) {
-  return clampVisibleSessionCount(Math.max(1, sessions.filter((session) => session.isVisible).length));
 }

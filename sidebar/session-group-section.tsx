@@ -1326,6 +1326,13 @@ export function SessionGroupSection({
   const primaryProjectAgent =
     agents.find((agent) => agent.agentId === primaryProjectAgentLauncherId) ?? agents[0];
   const primaryProjectAgentLabel = primaryProjectAgent?.name ?? "Agent";
+  /*
+   * CDXC:RemoteRecentProjects 2026-06-24-10:36:
+   * Remote project rows can be closed into Recent Projects even though remote remove/delete remains disabled from the normal project context. Keep close eligibility separate from canRemoveProject so the menu does not expose remote deletion.
+   */
+  const canCloseProject =
+    Boolean(projectContext) &&
+    (projectContext?.canRemoveProject === true || Boolean(group.remoteMachineContext));
   useEffect(() => {
     postGroupDebugLog("group.sectionMounted", {
       orderedSessionIds,
@@ -1748,7 +1755,7 @@ export function SessionGroupSection({
   };
 
   const closeProject = () => {
-    if (!projectContext?.canRemoveProject) {
+    if (!canCloseProject) {
       return;
     }
 
@@ -2931,7 +2938,7 @@ export function SessionGroupSection({
                     </button>
                     <button
                       className="session-context-menu-item session-context-menu-item-danger"
-                      disabled={!projectContext.canRemoveProject}
+                      disabled={!canCloseProject}
                       onClick={closeProject}
                       role="menuitem"
                       type="button"

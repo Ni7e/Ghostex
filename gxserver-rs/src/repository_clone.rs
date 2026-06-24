@@ -16,9 +16,12 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{
+    constants::GXSERVER_PROTOCOL_VERSION,
     domain::DomainRepository,
+    events::GxserverEventHub,
     logging::{GxserverLogInput, GxserverLogger, LogLevel},
     paths::GxserverPaths,
+    presentation::{build_presentation_project_delta, increment_presentation_revision},
     storage::open_gxserver_database,
 };
 
@@ -70,6 +73,7 @@ pub struct RepositoryCloneJobManager {
 
 #[derive(Clone)]
 pub struct RepositoryCloneRuntime {
+    pub event_hub: GxserverEventHub,
     pub logger: Arc<GxserverLogger>,
     pub paths: GxserverPaths,
     pub server_id: String,
@@ -94,6 +98,9 @@ Phase 7 repository clone jobs remain gxserver-owned background work. Rust keeps 
 
 CDXC:RepositoryClone 2026-06-22-09:21:
 Repository clone parity depends on matching TypeScript's URL token parsing, destination folder normalization, color-stripped Git environment, and active cancellation semantics. Canceling a running job must terminate the spawned Git process instead of only changing the in-memory job status.
+
+CDXC:RemoteClone 2026-06-24-19:35:
+Remote GPUI clone parity needs the daemon-owned clone job to register the cloned project and publish the authoritative project presentation delta after Git succeeds. Clients may refresh snapshots after completion, but the remote daemon remains the producer of project state and never relies on renderer paths as launch authority.
 */
 pub async fn dispatch_repository_clone_endpoint(
     manager: RepositoryCloneJobManager,
@@ -251,6 +258,9 @@ async fn run_clone_job(
             mark_job_adding(&jobs, &job_id).await;
             match add_cloned_project(&runtime, &preview) {
                 Ok(project) => {
+                    if let Some(project_id) = project.get("projectId").and_then(Value::as_str) {
+                        let _ = publish_cloned_project_presentation(&runtime, project_id);
+                    }
                     let project_path = project
                         .get("path")
                         .and_then(Value::as_str)
@@ -372,6 +382,27 @@ async fn job_is_canceled(jobs: &Arc<Mutex<HashMap<String, Value>>>, job_id: &str
         .and_then(|job| job.get("state"))
         .and_then(Value::as_str)
         == Some("canceled")
+}
+
+fn publish_cloned_project_presentation(
+    runtime: &RepositoryCloneRuntime,
+    project_id: &str,
+) -> Result<(), RepositoryCloneError> {
+    let db = open_gxserver_database(&runtime.paths)
+        .map_err(|error| RepositoryCloneError::dependency_unavailable(error.to_string()))?;
+    let repository = DomainRepository::new(&db, runtime.server_id.as_str());
+    let delta = build_presentation_project_delta(&repository, project_id, "projectAdded")
+        .map_err(|error| RepositoryCloneError::dependency_unavailable(error.to_string()))?;
+    let revision = increment_presentation_revision(&db)
+        .map_err(|error| RepositoryCloneError::dependency_unavailable(error.to_string()))?;
+    runtime.event_hub.broadcast(json!({
+        "delta": delta,
+        "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+        "revision": revision,
+        "serverId": runtime.server_id.clone(),
+        "type": "presentationDelta",
+    }));
+    Ok(())
 }
 
 fn add_cloned_project(

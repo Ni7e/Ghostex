@@ -41,6 +41,7 @@ function project(
     gitConfig: {},
     isFavorite: false,
     isPinned: false,
+    isRecentProject: false,
     launchSettings: {},
     name: projectId,
     notificationRules: {},

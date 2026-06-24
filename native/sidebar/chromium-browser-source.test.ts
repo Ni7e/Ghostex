@@ -45,21 +45,39 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("chromium browser source", () => {
-  test("routes Cmd+F to CEF browser search before generic hotkeys", () => {
+  test("routes Cmd+F to CEF browser search before generic hotkeys outside Source", () => {
     /*
      * CDXC:BrowserSearch 2026-06-13-00:00:
      * Cmd+F in focused embedded CEF panes should open browser page search, not
      * terminal search or the app-wide hotkey path.
+     *
+     * CDXC:BrowserSearch 2026-06-24-13:13:
+     * Source view embeds VS Code in CEF, so Cmd+F must pass through to VS Code's
+     * editor search instead of opening Ghostex's browser find bar.
      */
     const hotkeyEquivalentSource = sourceBetween(
       appDelegateSource,
       "func handleHotkeyEquivalent(_ event: NSEvent) -> Bool",
       "private func shouldUseNativeAppModalWindow",
     );
+    const chromiumFindShortcutSource = sourceBetween(
+      terminalWorkspaceSource,
+      "func handleFocusedChromiumFindShortcut(_ event: NSEvent) -> Bool",
+      "private static func chromiumZoomShortcut(for event: NSEvent) -> ChromiumZoomShortcut?",
+    );
+    const sourceFindExclusionSource = sourceBetween(
+      terminalWorkspaceSource,
+      "private func isSourceProjectEditorChromiumFindTarget(",
+      "private func chromiumHostView(containing responderView: NSView) -> WebPaneHostView?",
+    );
     const findShortcutIndex = hotkeyEquivalentSource.indexOf("handleFocusedChromiumFindShortcut(event)");
     const genericHotkeyIndex = hotkeyEquivalentSource.indexOf("let hotkeyText = Self.hotkeyText(for: event)");
+    const sourceExclusionIndex = chromiumFindShortcutSource.indexOf("isSourceProjectEditorChromiumFindTarget(target)");
+    const browserFindSwitchIndex = chromiumFindShortcutSource.indexOf("switch shortcut");
     expect(findShortcutIndex).toBeGreaterThanOrEqual(0);
     expect(findShortcutIndex).toBeLessThan(genericHotkeyIndex);
+    expect(sourceExclusionIndex).toBeGreaterThanOrEqual(0);
+    expect(sourceExclusionIndex).toBeLessThan(browserFindSwitchIndex);
 
     expect(cefBridgeHeaderSource).toContain("findResultHandler");
     expect(cefBridgeHeaderSource).toContain("findText(_:forward:findNext:)");
@@ -74,6 +92,9 @@ describe("chromium browser source", () => {
     expect(terminalWorkspaceSource).toContain("return flags.contains(.shift) ? nil : .open");
     expect(terminalWorkspaceSource).toContain("chromiumView.findText(query, forward: forward, findNext: findNext)");
     expect(terminalWorkspaceSource).toContain("openBrowserFind(reason: \"keyboardShortcut\")");
+    expect(sourceFindExclusionSource).toContain('session.mode == "code"');
+    expect(sourceFindExclusionSource).toContain("session.hostView === target.hostView");
+    expect(sourceFindExclusionSource).toContain("session.chromiumView.map { $0 === target.chromiumView } == true");
   });
 
   test("keeps CEF browser find bar styled and typable like terminal search", () => {
@@ -138,8 +159,8 @@ describe("chromium browser source", () => {
      * CDXC:BrowserPageAppearance 2026-06-21-04:20:
      * Toolbar browser panes that follow macOS system appearance intentionally
      * stage their first public navigation behind about:blank so CEF can apply
-     * media emulation and the default page canvas before transparent pages
-     * paint.
+     * media emulation and the Chrome-like default page canvas before
+     * transparent pages paint.
      */
     const didCreateBrowserSource = sourceBetween(
       cefBridgeSource,
@@ -387,10 +408,29 @@ describe("chromium browser source", () => {
      *
      * CDXC:BrowserPageAppearance 2026-06-21-04:20:
      * The toolbar menu no longer exposes manual System/Light/Dark choices.
-     * Browser panes follow the current macOS appearance at the CEF/WKWebView
-     * boundary and CEF owns a matching default page canvas for transparent
-     * public pages.
+     * Browser panes follow the current macOS appearance for CEF/WKWebView media
+     * queries.
+     *
+     * CDXC:BrowserPageAppearance 2026-06-24-13:16:
+     * Plain HTML and transparent public pages with no authored background
+     * should keep Chrome's white default document canvas instead of revealing
+     * Ghostex dark pane chrome.
      */
+    const nativeBackingSource = sourceBetween(
+      cefBridgeSource,
+      "static NSColor* GhostexCEFNativePageBackingColor(BOOL usesSystemPageAppearance)",
+      "static cef_color_t GhostexCEFBrowserPageBackingColor",
+    );
+    const browserBackingSource = sourceBetween(
+      cefBridgeSource,
+      "static cef_color_t GhostexCEFBrowserPageBackingColor(BOOL usesSystemPageAppearance)",
+      "static CefRefPtr<CefDictionaryValue> GhostexCEFPageBackingDevToolsColor",
+    );
+    const devToolsBackingSource = sourceBetween(
+      cefBridgeSource,
+      "static CefRefPtr<CefDictionaryValue> GhostexCEFPageBackingDevToolsColor",
+      "struct GhostexCEFProfileFlushState",
+    );
     expect(cefBridgeHeaderSource).toContain("setUsesSystemPageAppearance(_:)");
     expect(cefBridgeSource).toContain("GhostexCEFSystemPreferredColorSchemeValue");
     expect(cefBridgeSource).toContain('#include "include/cef_values.h"');
@@ -398,6 +438,16 @@ describe("chromium browser source", () => {
     expect(cefBridgeSource).toContain('"Emulation.setDefaultBackgroundColorOverride"');
     expect(cefBridgeSource).toContain('"prefers-color-scheme"');
     expect(cefBridgeSource).toContain("usesSystemPageAppearance_");
+    expect(cefBridgeSource).toContain("Chrome-like white instead of inheriting Ghostex dark chrome");
+    expect(nativeBackingSource).toContain("return usesSystemPageAppearance");
+    expect(nativeBackingSource).toContain("? [NSColor whiteColor]");
+    expect(nativeBackingSource).toContain(": [NSColor colorWithCalibratedWhite:0.086 alpha:1]");
+    expect(browserBackingSource).toContain("return usesSystemPageAppearance");
+    expect(browserBackingSource).toContain("? CefColorSetARGB(255, 255, 255, 255)");
+    expect(browserBackingSource).toContain(": CefColorSetARGB(255, 22, 22, 22)");
+    expect(devToolsBackingSource).toContain("if (usesSystemPageAppearance)");
+    expect(devToolsBackingSource).toContain('color->SetInt("r", 255)');
+    expect(devToolsBackingSource).toContain('color->SetInt("r", 22)');
 
     const hostInitSource = sourceBetween(
       terminalWorkspaceSource,

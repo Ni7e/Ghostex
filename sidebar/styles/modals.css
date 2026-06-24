@@ -3486,8 +3486,27 @@ html:has(body.app-modal-host-native-window-body) {
    * CDXC:AddRepository 2026-05-29-11:45:
    * Clone Repository copies Rename Session's compact modal chrome, with a
    * slightly wider body for the folder picker row and inline clone errors.
+   *
+   * CDXC:AddRepository 2026-06-24-10:35:
+   * Clone Repository must keep repository, folder, new-folder, branch, option,
+   * and inline error rows in normal vertical flow. It reuses Rename Session
+   * chrome, but its multi-field form must not inherit Rename Session's
+   * first-field flex growth because that can collapse the repository field and
+   * overlap the following folder label when validation text is visible.
    */
   max-width: min(560px, calc(100vw - 2rem));
+}
+
+.app-modal-host-native-window-body .add-repository-modal-shadcn .session-rename-field-group {
+  overflow-y: auto;
+}
+
+.app-modal-host-native-window-body
+  .add-repository-modal-shadcn
+  .session-rename-field-group
+  > [data-slot="field"]:first-child {
+  flex: 0 0 auto;
+  min-height: auto;
 }
 
 .worktree-create-modal-shadcn {
@@ -3503,6 +3522,11 @@ html:has(body.app-modal-host-native-window-body) {
    * Add Worktree now uses Rename Session's top-right close X instead of a
    * footer Cancel button. Keep the native-window top and bottom insets at 17px
    * so the title row and footer read as one fitted child-window surface.
+   *
+   * CDXC:WorktreeBaseBranch 2026-06-24-11:32:
+   * Create New mode now includes a required Base branch selector. Keep it on
+   * the same full-width select treatment as Agent and Existing worktree so the
+   * added control does not resize or overlap the compact native child window.
    */
   max-width: min(560px, calc(100vw - 2rem));
 }
@@ -3790,8 +3814,13 @@ html:has(body.app-modal-host-native-window-body) {
   /*
    * CDXC:WorktreeProjectRegistration 2026-06-01-20:59:
    * Add Worktree has two explicit modes: create a fresh checkout or open an
-   * existing Git worktree. Keep the mode switch compact and let Open Existing
-   * hide the create-only prompt and agent controls below it.
+   * existing Git worktree. Keep the mode switch compact while the shared
+   * prompt/agent controls stay available for both modes; only base-branch
+   * selection is create-only.
+   *
+   * CDXC:GPUIWorktrees 2026-06-24-14:06:
+   * GPUI reuses this modal for Open Existing agent starts, so the layout must
+   * not depend on GPUI-only controls or hide the shared first-prompt draft.
    */
   display: grid;
   gap: 8px;
@@ -3803,6 +3832,7 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .worktree-create-agent-select,
+.worktree-create-base-branch-select,
 .worktree-create-existing-select {
   width: 100%;
 }
@@ -4287,6 +4317,11 @@ html:has(body.app-modal-host-native-window-body) {
 /*
  * CDXC:RemoteMachines 2026-06-08-19:12:
  * Saved remote machine cards need a quiet summary header, compact SSH fields, and hover-revealed delete controls so the Remote tab matches Agents/Actions management styling in the settings modal.
+ *
+ * CDXC:RemoteMachines 2026-06-24-10:49:
+ * New and saved machine cards must use the same title/subtitle header rhythm
+ * and password-help line count so cards in the two-column Remote grid resolve
+ * to the same height instead of the add card looking shorter.
  */
 .settings-remote-machine-card {
   background: color-mix(in srgb, var(--app-card-active) 38%, transparent);
@@ -4307,7 +4342,7 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .settings-remote-machine-add-summary {
-  padding-block: 11px;
+  padding-block: 10px;
 }
 
 .settings-remote-machine-add-icon {
@@ -4315,15 +4350,9 @@ html:has(body.app-modal-host-native-window-body) {
   background: color-mix(in srgb, var(--app-card-active) 70%, transparent);
   color: color-mix(in srgb, var(--app-muted) 70%, var(--app-foreground) 30%);
   display: flex;
-  height: 26px;
+  height: 36px;
   justify-content: center;
-  width: 26px;
-}
-
-.settings-remote-machine-add-title {
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.2;
+  width: 36px;
 }
 
 .settings-remote-machine-body {
@@ -4364,6 +4393,10 @@ html:has(body.app-modal-host-native-window-body) {
   display: grid;
   gap: 8px;
   grid-template-columns: minmax(0, 1fr) 2.125rem;
+}
+
+.settings-remote-machine-password-row-single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .settings-remote-machine-user-port {
@@ -4508,6 +4541,35 @@ html:has(body.app-modal-host-native-window-body) {
   gap: 10px;
   justify-content: flex-end;
   padding-top: 6px;
+}
+
+/*
+ * CDXC:RemoteProjectPicker 2026-06-24-21:09:
+ * Worktree Add Project should sit at the top of the native child window instead
+ * of vertically centering in the available panel. Keep the command surface inset
+ * equally from the top, left, and right, and give the path input visible inline
+ * text padding while preserving its existing action-button reserve.
+ */
+.remote-project-picker-dialog {
+  --remote-project-picker-window-inset: 12px;
+  --remote-project-picker-input-inline-padding: 12px;
+  max-width: calc(
+    100% - var(--remote-project-picker-window-inset) - var(--remote-project-picker-window-inset)
+  ) !important;
+  top: var(--remote-project-picker-window-inset) !important;
+  translate: -50% 0 !important;
+  width: min(
+    42rem,
+    calc(100% - var(--remote-project-picker-window-inset) - var(--remote-project-picker-window-inset))
+  ) !important;
+}
+
+.remote-project-picker-dialog .remote-project-picker-input[data-slot="command-input"] {
+  padding-left: var(--remote-project-picker-input-inline-padding);
+}
+
+.remote-project-picker-dialog .remote-project-picker-input[data-slot="command-input"]:not(.pr-20):not(.pr-36) {
+  padding-right: var(--remote-project-picker-input-inline-padding);
 }
 
 /*

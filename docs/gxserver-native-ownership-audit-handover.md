@@ -46,7 +46,7 @@ Implemented or mostly aligned:
 - command-panel creation now creates gxserver `surface: "commands"` sessions before macOS inserts tabs.
 - sidebar command runs now pass stable action `commandId` to gxserver instead of using visible command titles as canonical command ids.
 - command-pane display title updates remain local-first but mirror through gxserver rename ownership.
-- existing-worktree mode is selection-only and should not show agent/prompt/image controls.
+- existing-worktree mode remains project-open-only when the prompt is blank, and can start the submitted visible agent when the shared modal carries a non-blank prompt.
 - gxserver presentation revisions advance for project/session mutations even without connected clients.
 
 Do not treat this as complete until the remaining audit buckets below are checked against current code and verified.

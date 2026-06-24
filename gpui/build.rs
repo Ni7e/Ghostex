@@ -18,11 +18,16 @@ fn main() {
     let gpui_hooks = manifest_dir.join("native/macos/GpuiCefAppKitHooks.m");
     let gpui_terminal_appkit_adapter =
         manifest_dir.join("native/macos/GpuiTerminalAppKitAdapter.m");
+    let gpui_settings_notifications = manifest_dir.join("native/macos/GpuiSettingsNotifications.m");
 
     println!("cargo:rerun-if-changed={}", gpui_hooks.display());
     println!(
         "cargo:rerun-if-changed={}",
         gpui_terminal_appkit_adapter.display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        gpui_settings_notifications.display()
     );
 
     /*
@@ -49,6 +54,17 @@ fn main() {
         .flag("-Wno-deprecated-declarations")
         .file(gpui_terminal_appkit_adapter)
         .compile("ghostex_gpui_terminal_appkit_adapter");
+
+    /*
+    CDXC:GPUISettingsNotifications 2026-06-24-12:44:
+    Compile the GPUI Settings notification shim separately from CEF and terminal AppKit adapters. It owns only UserNotifications permission/status/test-banner calls, requests alert authorization, emits no notification sound, and must not grow into session attention routing or persistent logging.
+    */
+    cc::Build::new()
+        .flag("-fobjc-arc")
+        .flag("-fblocks")
+        .flag("-Wno-deprecated-declarations")
+        .file(gpui_settings_notifications)
+        .compile("ghostex_gpui_settings_notifications");
 
     /*
     CDXC:GPUIGhosttyKitAdapter 2026-06-22-22:29:
@@ -80,4 +96,5 @@ fn main() {
     println!("cargo:rustc-link-lib=framework=IOKit");
     println!("cargo:rustc-link-lib=framework=IOSurface");
     println!("cargo:rustc-link-lib=framework=UniformTypeIdentifiers");
+    println!("cargo:rustc-link-lib=framework=UserNotifications");
 }

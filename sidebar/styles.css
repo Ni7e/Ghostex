@@ -429,11 +429,11 @@ button,
 
  CDXC:SettingsNavigation 2026-05-13-08:11: The modal should be 20% wider than the first section-sidebar layout and use a taller viewport so more settings remain visible without scrolling.
 
- CDXC:SettingsNavigation 2026-05-23-11:05: Size top tabs and section nav from the modal width, not the viewport, so narrow sidebar webviews wrap labels instead of clipping them.
+ CDXC:SettingsNavigation 2026-05-23-11:05: Superseded by CDXC:SettingsNavigation 2026-06-24-22:16.
 
  CDXC:SettingsNavigation 2026-05-27-10:44: Do not draw a vertical divider between the section table of contents and the settings body on Settings or Hotkeys tabs.
 
- CDXC:SettingsNavigation 2026-06-13: The Settings tabs and search field should align with the content body's right edge (20px inset, matching the px-5 settings body padding) instead of stopping short of it.
+ CDXC:SettingsNavigation 2026-06-13: Superseded by CDXC:SettingsNavigation 2026-06-24-22:16.
 
  CDXC:SettingsSearch 2026-06-16-09:37: The Settings/Hotkeys search field should match the centered main Settings content exactly: use the same 770px column and 20px inner inset so the input edges align with section cards.
 
@@ -453,9 +453,12 @@ button,
    * the settings pages instead of reserving a layout column. Keep shared panel
    * geometry on the modal root so the floating rail can sit consistently near
    * the tabs row without shifting the centered search and card columns.
+   *
+   * CDXC:SettingsNavigation 2026-06-24-22:16:
+   * Superseded by the sidebar-owned navigation layout. Keep the sidebar width
+   * token on the modal root, but the rail now participates in the normal body
+   * grid instead of floating over tab content.
    */
-  --settings-section-sidebar-left: 1rem;
-  --settings-section-sidebar-tabs-offset: 3.25rem;
   --settings-section-sidebar-width: 12rem;
   container-name: settings-modal;
   container-type: inline-size;
@@ -2029,7 +2032,7 @@ button,
    * Give the rail an owned layout column and pin the filter to the sidebar footer while the settings body centers inside the remaining content area.
    *
    * CDXC:SettingsNavigation 2026-06-19-10:30:
-   * The Settings sidebar should start at the tab bar instead of below the search field, stay transparent over the modal surface, and be 20px wider than the first owned-column layout.
+   * Superseded by CDXC:SettingsNavigation 2026-06-24-22:16.
    *
    * CDXC:SettingsNavigation 2026-06-19-11:15:
    * Superseded by CDXC:SettingsNavigation 2026-06-19-12:18.
@@ -2037,11 +2040,45 @@ button,
    * CDXC:SettingsNavigation 2026-06-19-12:18:
    * The section rail is a floating overlay in General Settings and Hotkeys, so
    * it must not reserve a column that pushes the main settings content right.
+   *
+   * CDXC:SettingsNavigation 2026-06-24-22:16:
+   * Superseded by the shared Settings sidebar. Individual tab panels now own
+   * only their scrollable content while the sidebar grid outside TabsContent
+   * owns top-level page and section navigation.
    */
   display: block;
   height: 100%;
   min-height: 0;
   position: relative;
+}
+
+.ghostex-settings-shadcn .settings-modal-body-layout {
+  /*
+   * CDXC:SettingsNavigation 2026-06-24-22:16:
+   * Settings no longer renders a top tab bar. Use one normal two-column body:
+   * a left sidebar for page/section navigation and a right content column with
+   * search pinned above whichever Settings page is active.
+   */
+  box-sizing: border-box;
+  display: grid;
+  flex: 1;
+  gap: 1rem;
+  grid-template-columns: var(--settings-section-sidebar-width) minmax(0, 1fr);
+  min-height: 0;
+  padding: 0 1rem 1rem;
+}
+
+.ghostex-settings-shadcn .settings-modal-body-layout-first-launch {
+  display: block;
+  padding: 0;
+}
+
+.ghostex-settings-shadcn .settings-modal-main-column {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
 }
 
 .ghostex-settings-shadcn .settings-main-tabs-content {
@@ -2050,8 +2087,12 @@ button,
    * The sidebar intentionally extends upward to the tabs row while the body
    * keeps scrolling inside ScrollArea. Let this tab content expose that
    * sidebar extension instead of clipping it at the search-field baseline.
+   *
+   * CDXC:SettingsNavigation 2026-06-24-22:16:
+   * The sidebar is no longer inside tab content, so tab panels can keep normal
+   * overflow clipping inside the content column.
    */
-  overflow: visible !important;
+  overflow: hidden !important;
 }
 
 .ghostex-settings-shadcn .settings-main-scroll {
@@ -2085,30 +2126,92 @@ button,
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  left: var(--settings-section-sidebar-left);
   min-height: 0;
   overflow: hidden;
   padding: 0.625rem 0.5rem;
-  position: absolute;
-  top: calc(var(--settings-section-sidebar-tabs-offset) * -1);
-  bottom: 1rem;
-  width: var(--settings-section-sidebar-width);
-  z-index: 2;
+  width: 100%;
 }
 
-.ghostex-settings-shadcn .settings-section-sidebar-list {
+.ghostex-settings-shadcn .settings-sidebar-tabs-list[data-slot="tabs-list"] {
   /*
    * CDXC:ScrollFades 2026-06-19-14:16:
    * Settings section navigation can scroll independently from the main page.
    * Use the shared Codex-style mask so the rail matches command palettes,
    * dropdowns, and sidebar lists.
+   *
+   * CDXC:SettingsNavigation 2026-06-24-22:16:
+   * The list now contains top-level Settings pages plus collapsible section
+   * groups, so override the horizontal tab-list default into a vertical rail.
    */
   --edge-fade-distance: 12px;
-  align-content: start;
-  display: grid;
+  align-items: stretch;
+  background: transparent;
+  border: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   gap: 0.25rem;
+  height: auto;
+  justify-content: flex-start;
   min-height: 0;
   overflow: auto;
+  padding: 0;
+  width: 100%;
+}
+
+.ghostex-settings-shadcn .settings-sidebar-page-group {
+  display: grid;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.ghostex-settings-shadcn .settings-sidebar-page-row {
+  align-items: stretch;
+  display: grid;
+  gap: 0.125rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.ghostex-settings-shadcn .settings-sidebar-tab-trigger[data-slot="tabs-trigger"] {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: var(--settings-radius-control) !important;
+  color: var(--foreground) !important;
+  font-size: 0.8125rem;
+  font-weight: 500 !important;
+  height: auto;
+  justify-content: flex-start !important;
+  letter-spacing: 0;
+  line-height: 1.125rem;
+  min-height: 2rem;
+  min-width: 0;
+  padding: 0.375rem 0.625rem !important;
+  text-align: left;
+  width: 100%;
+}
+
+.ghostex-settings-shadcn .settings-sidebar-tab-trigger[data-slot="tabs-trigger"]:hover,
+.ghostex-settings-shadcn .settings-sidebar-tab-trigger[data-slot="tabs-trigger"][data-active] {
+  background: var(--accent) !important;
+  color: var(--accent-foreground) !important;
+}
+
+.ghostex-settings-shadcn .settings-sidebar-tab-trigger[data-slot="tabs-trigger"]::after {
+  display: none;
+}
+
+.ghostex-settings-shadcn .settings-sidebar-page-disclosure {
+  align-self: stretch;
+  min-height: 2rem;
+  width: 2rem;
+}
+
+.ghostex-settings-shadcn .settings-sidebar-subsection-list {
+  display: grid;
+  gap: 0.125rem;
+  margin-left: 0.5rem;
+  min-width: 0;
 }
 
 .ghostex-settings-shadcn .settings-section-sidebar-footer {
@@ -2161,6 +2264,12 @@ button,
   width: 100%;
 }
 
+.ghostex-settings-shadcn .settings-sidebar-subsection-button {
+  color: var(--muted-foreground);
+  font-size: 0.78125rem;
+  min-height: 1.75rem;
+}
+
 .ghostex-settings-shadcn .settings-section-sidebar-button[data-active="true"] {
   background: var(--accent);
   color: var(--accent-foreground);
@@ -2170,36 +2279,12 @@ button,
   scroll-margin-top: 1rem;
 }
 
-.ghostex-settings-shadcn .settings-modal-tabs-scroll {
-  /*
-   * CDXC:SettingsNavigation 2026-06-19-11:15:
-   * Tabs should fill the Settings modal, not the centered settings-card column.
-   *
-   * CDXC:SettingsNavigation 2026-06-19-12:34:
-   * Keep the tabs rail inset 16px from the modal's left and right edges so the
-   * rail does not run flush into the Settings window frame.
-   *
-   * CDXC:AppModalTabs 2026-06-23-04:30:
-   * Settings tab appearance now matches the titlebar mode switcher through the
-   * shared .app-modal-tab-rail class instead of the earlier darker filled,
-   * bordered, bold-on-active strip. Keep only the rail inset/width here.
-   */
-  margin-inline: 1rem;
-  min-width: 0;
-  width: calc(100% - 2rem);
-}
-
 /*
  * CDXC:AppModalTabs 2026-06-23-04:30:
- * Settings and Agents Hub share one tab rail styled after the titlebar mode
+ * Agents Hub uses the app-modal tab rail styled after the titlebar mode
  * switcher (Agents/Source/Browser/Kanban/Manage): a flat row of equal-width
  * tabs with thin separators and a subtle highlight box behind the active tab.
- * The active tab brightens its label color instead of bolding it, replacing the
- * old filled, bordered, 650-weight segmented control users disliked. Theme
- * variables keep the rail readable across Dark 1, Dark 2, and Light where the
- * titlebar relies on fixed white overlays. List layout props stay
- * non-!important so the Settings narrow-width wrap container query can still
- * override the grid.
+ * The active tab brightens its label color instead of bolding it.
  *
  * CDXC:AppModalTabs 2026-06-23-04:45:
  * Each tab now carries a full 4-direction #252525 outline matching the macOS
@@ -2211,9 +2296,13 @@ button,
  * (data-active wins over :hover by source order at equal specificity).
  *
  * CDXC:AppModalTabs 2026-06-24-04:25:
- * Settings and Agents Hub tabs need a visible 1px #252525 border around the
- * rail itself, with trigger-side borders limited to internal dividers so the
- * outside edge stays continuous and never renders as doubled 2px seams.
+ * Agents Hub tabs need a visible 1px #252525 border around the rail itself,
+ * with trigger-side borders limited to internal dividers so the outside edge
+ * stays continuous and never renders as doubled 2px seams.
+ *
+ * CDXC:SettingsNavigation 2026-06-24-22:16:
+ * Settings no longer uses this top tab rail; Settings page navigation lives in
+ * the left sidebar instead.
  */
 .app-modal-tab-rail[data-slot="tabs-list"] {
   background: transparent !important;
@@ -2262,10 +2351,15 @@ button,
    * CDXC:SettingsNavigation 2026-06-19-12:18:
    * Settings and Hotkeys search should center over the same card column as the
    * settings body, independent of the floating sidebar overlay.
+   *
+   * CDXC:SettingsNavigation 2026-06-24-22:16:
+   * Search is a single top-of-content control for the sidebar-driven Settings
+   * modal. Keep it above active page content rather than inside the sidebar or
+   * a removed tab bar.
    */
   box-sizing: border-box;
   display: block;
-  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
   width: 100%;
 }
 
@@ -2352,21 +2446,6 @@ button,
   color: var(--foreground);
 }
 
-@container settings-modal (max-width: 920px) {
-  .ghostex-settings-shadcn .settings-modal-tabs-scroll [data-slot="tabs-list"] {
-    display: flex !important;
-    flex-wrap: wrap;
-    height: auto !important;
-    justify-content: flex-start;
-    row-gap: 0.25rem;
-    width: 100% !important;
-  }
-
-  .ghostex-settings-shadcn .settings-modal-tabs-scroll [data-slot="tabs-trigger"] {
-    flex: 0 0 auto !important;
-  }
-}
-
 @container settings-modal (max-width: 720px) {
   .ghostex-settings-shadcn .settings-modal-title-row {
     align-items: flex-start;
@@ -2376,20 +2455,20 @@ button,
 }
 
 @container settings-modal (max-width: 820px) {
+  .ghostex-settings-shadcn .settings-modal-body-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ghostex-settings-shadcn .settings-section-sidebar {
+    max-height: 18rem;
+  }
+
   .ghostex-settings-shadcn .settings-main-tab-layout {
     display: block;
   }
 
   .ghostex-settings-shadcn .settings-main-scroll {
     grid-column: auto;
-  }
-
-  .ghostex-settings-shadcn .settings-modal-search-row {
-    display: block;
-  }
-
-  .ghostex-settings-shadcn .settings-section-sidebar {
-    display: none;
   }
 }
 

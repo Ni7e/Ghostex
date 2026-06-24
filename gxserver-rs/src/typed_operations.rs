@@ -13,6 +13,7 @@ use tokio::{
     process::Command,
     time::{timeout, Instant},
 };
+use url::Url;
 
 use crate::{platform::shell::command_shell, toolchain::require_bundled_bd};
 
@@ -154,6 +155,41 @@ pub async fn dispatch_typed_operation_endpoint(
         _ => Err(TypedOperationError::not_found(format!(
             "{endpoint_path} is not a gxserver typed operation endpoint."
         ))),
+    }
+}
+
+/*
+CDXC:GPUISidebarGit 2026-06-24-16:28:
+GPUI direct PR creation needs gxserver to own `gh pr create --fill` completion
+and return only a verified open PR record. Do not expose command output, branch
+names, titles, commit messages, argv text, or daemon stderr/stdout through this
+result; callers only need a success boolean and trusted PR state/URL metadata
+before opening a browser or deleting a completed worktree.
+*/
+pub async fn create_pull_request_for_project(
+    params: &Map<String, Value>,
+    projects: Vec<Value>,
+) -> Result<Value, TypedOperationError> {
+    let context = resolve_project_operation_context("/api/createPullRequest", params, projects)?;
+
+    if let PullRequestProbe::Open(pr) = probe_open_github_pull_request(&context).await? {
+        return Ok(github_pull_request_success(false, pr));
+    }
+
+    let create_command = build_github_command("prCreateFill", &context.cwd);
+    let create_output = match run_process_command(&create_command, &context).await {
+        Ok(output) => output,
+        Err(_) => return Ok(github_pull_request_failure("githubCliUnavailable")),
+    };
+
+    let created = create_output.exit_code == 0 && create_output.error.is_none();
+    match probe_open_github_pull_request(&context).await? {
+        PullRequestProbe::Open(pr) => Ok(github_pull_request_success(created, pr)),
+        PullRequestProbe::Failed if created => Ok(github_pull_request_failure("viewFailed")),
+        PullRequestProbe::Invalid | PullRequestProbe::NotOpen if created => {
+            Ok(github_pull_request_failure("invalidResult"))
+        }
+        _ => Ok(github_pull_request_failure("createFailed")),
     }
 }
 
@@ -343,7 +379,19 @@ async fn run_git_action(
     }
     let command = build_git_command(&action, params, &context.cwd)?;
     let output = run_process_command(&command, context).await?;
-    Ok(typed_result(&action, &command, output))
+    let mut result = typed_result(&action, &command, output);
+    if action == "listBranches" && result.get("exitCode").and_then(Value::as_i64) == Some(0) {
+        let stdout = result
+            .get("stdout")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        result.as_object_mut().expect("result object").insert(
+            "branches".to_string(),
+            Value::Array(parse_git_branch_list(&stdout)),
+        );
+    }
+    Ok(result)
 }
 
 async fn run_github_action(
@@ -530,7 +578,12 @@ fn build_git_command(
                     executable: "git".to_string(),
                 })
             };
-            ProcessCommand::new("git", args, cwd).with_result_command(result_command)
+            let command = ProcessCommand::new("git", args, cwd).with_result_command(result_command);
+            if files.is_empty() {
+                command
+            } else {
+                command.with_env("GIT_LITERAL_PATHSPECS", "1")
+            }
         }
         "branch" => ProcessCommand::new("git", vec!["branch", "--show-current"], cwd),
         "checkout" => ProcessCommand::new(
@@ -580,6 +633,36 @@ fn build_git_command(
             ProcessCommand::new("git", args, cwd)
         }
         "diffCached" => ProcessCommand::new("git", vec!["diff", "--cached"], cwd),
+        /*
+        CDXC:GPUISidebarGit 2026-06-24-16:11:
+        GPUI blank commit-message generation needs staged diff text for exactly
+        the review-approved file set. Keep this as an allowlisted cached-diff
+        action with path validation and redacted file-count command metadata
+        instead of exposing a free-form git command or logging file paths.
+        */
+        "diffCachedFiles" => {
+            let files = required_relative_file_paths(params.get("filePaths"))?;
+            let mut args = vec![
+                "diff".to_string(),
+                "--cached".to_string(),
+                "--no-ext-diff".to_string(),
+                "--".to_string(),
+            ];
+            args.extend(files.clone());
+            ProcessCommand::new("git", args, cwd)
+                .with_result_command(Some(CommandSummary {
+                    args: vec![
+                        "diff".to_string(),
+                        "--cached".to_string(),
+                        "--no-ext-diff".to_string(),
+                        "--".to_string(),
+                        format!("<{} files>", files.len()),
+                    ],
+                    cwd: cwd.to_string(),
+                    executable: "git".to_string(),
+                }))
+                .with_env("GIT_LITERAL_PATHSPECS", "1")
+        }
         "diffCachedNoExt" => ProcessCommand::new(
             "git",
             vec![
@@ -592,6 +675,29 @@ fn build_git_command(
             cwd,
         ),
         "diffCachedStat" => ProcessCommand::new("git", vec!["diff", "--cached", "--stat"], cwd),
+        "diffCachedStatFiles" => {
+            let files = required_relative_file_paths(params.get("filePaths"))?;
+            let mut args = vec![
+                "diff".to_string(),
+                "--cached".to_string(),
+                "--stat".to_string(),
+                "--".to_string(),
+            ];
+            args.extend(files.clone());
+            ProcessCommand::new("git", args, cwd)
+                .with_result_command(Some(CommandSummary {
+                    args: vec![
+                        "diff".to_string(),
+                        "--cached".to_string(),
+                        "--stat".to_string(),
+                        "--".to_string(),
+                        format!("<{} files>", files.len()),
+                    ],
+                    cwd: cwd.to_string(),
+                    executable: "git".to_string(),
+                }))
+                .with_env("GIT_LITERAL_PATHSPECS", "1")
+        }
         "diffNoExt" => ProcessCommand::new(
             "git",
             vec![
@@ -643,6 +749,25 @@ fn build_git_command(
             ],
             cwd,
         ),
+        "listBranches" => {
+            /*
+            CDXC:WorktreeBaseBranch 2026-06-24-11:32:
+            Add Worktree needs an explicit base-branch picker. Keep branch
+            discovery inside the gxserver typed Git boundary, include local and
+            remote-tracking refs, and parse structured metadata server-side so
+            UI clients do not shell out or parse raw Git output.
+            */
+            ProcessCommand::new(
+                "git",
+                vec![
+                    "for-each-ref",
+                    "--format=%(refname:short)%09%(refname)%09%(HEAD)",
+                    "refs/heads",
+                    "refs/remotes",
+                ],
+                cwd,
+            )
+        }
         "listRemotes" => ProcessCommand::new("git", vec!["remote"], cwd),
         "listUntracked" => ProcessCommand::new(
             "git",
@@ -651,6 +776,7 @@ fn build_git_command(
         ),
         "status" => ProcessCommand::new("git", vec!["status", "--short", "--branch"], cwd),
         "statusPorcelain" => ProcessCommand::new("git", vec!["status", "--porcelain"], cwd),
+        "statusPorcelainZ" => ProcessCommand::new("git", vec!["status", "--porcelain", "-z"], cwd),
         "upstreamCounts" => ProcessCommand::new(
             "git",
             vec!["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
@@ -700,6 +826,20 @@ fn build_git_command(
             ProcessCommand::new("git", vec!["pull", "--ff-only"], cwd)
         }
         "push" => ProcessCommand::new("git", vec!["push"], cwd),
+        /*
+        CDXC:GPUIRemoteGit 2026-06-24-17:47:
+        Remote GPUI push parity must not send renderer-observed branch names as mutation authority. Push the current HEAD to origin with upstream tracking so gxserver/Git derive the branch from the checked-out repository state.
+        */
+        "pushSetUpstreamCurrent" => ProcessCommand::new(
+            "git",
+            vec![
+                "push".to_string(),
+                "-u".to_string(),
+                "origin".to_string(),
+                "HEAD".to_string(),
+            ],
+            cwd,
+        ),
         "pushSetUpstream" => ProcessCommand::new(
             "git",
             vec![
@@ -761,6 +901,124 @@ fn build_github_command(action: &str, cwd: &str) -> ProcessCommand {
         "version" => ProcessCommand::new("gh", vec!["--version"], cwd),
         _ => unreachable!("validated GitHub action"),
     }
+}
+
+enum PullRequestProbe {
+    Failed,
+    Invalid,
+    NotOpen,
+    Open(Value),
+}
+
+async fn probe_open_github_pull_request(
+    context: &TypedOperationContext,
+) -> Result<PullRequestProbe, TypedOperationError> {
+    let command = ProcessCommand::new(
+        "gh",
+        vec!["pr", "view", "--json", "number,state,url"],
+        context.cwd.as_str(),
+    );
+    let output = match run_process_command(&command, context).await {
+        Ok(output) => output,
+        Err(_) => return Ok(PullRequestProbe::Failed),
+    };
+    if output.exit_code != 0 || output.error.is_some() || output.stdout.trim().is_empty() {
+        return Ok(PullRequestProbe::Failed);
+    }
+    let Some(pr) = parse_github_pull_request_summary(&output.stdout) else {
+        return Ok(PullRequestProbe::Invalid);
+    };
+    if pr.get("state").and_then(Value::as_str) == Some("open") {
+        Ok(PullRequestProbe::Open(pr))
+    } else {
+        Ok(PullRequestProbe::NotOpen)
+    }
+}
+
+fn parse_github_pull_request_summary(stdout: &str) -> Option<Value> {
+    let value = serde_json::from_str::<Value>(stdout.trim()).ok()?;
+    let object = value.as_object()?;
+    let state_value = object.get("state")?.as_str()?.to_ascii_lowercase();
+    let state = match state_value.as_str() {
+        "open" => "open",
+        "closed" => "closed",
+        "merged" => "merged",
+        _ => return None,
+    };
+    let url = validate_github_pull_request_url(object.get("url")?.as_str()?)?;
+    let number = object
+        .get("number")
+        .and_then(Value::as_u64)
+        .or_else(|| github_pull_request_number_from_url(&url));
+    let mut summary = Map::new();
+    if let Some(number) = number {
+        summary.insert("number".to_string(), json!(number));
+    }
+    summary.insert("state".to_string(), json!(state));
+    summary.insert("url".to_string(), json!(url));
+    Some(Value::Object(summary))
+}
+
+fn validate_github_pull_request_url(candidate: &str) -> Option<String> {
+    let trimmed = candidate.trim();
+    if trimmed.is_empty()
+        || trimmed.chars().count() > 2048
+        || trimmed.contains('\\')
+        || trimmed
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
+        return None;
+    }
+    let parsed = Url::parse(trimmed).ok()?;
+    if parsed.scheme() != "https"
+        || !parsed
+            .host_str()
+            .is_some_and(|host| host.eq_ignore_ascii_case("github.com"))
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return None;
+    }
+    let segments = parsed.path_segments()?.collect::<Vec<_>>();
+    if segments.len() != 4
+        || segments[0].is_empty()
+        || segments[1].is_empty()
+        || segments[2] != "pull"
+        || segments[3].is_empty()
+        || !segments[3].bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(parsed.as_str().to_string())
+}
+
+fn github_pull_request_number_from_url(url: &str) -> Option<u64> {
+    Url::parse(url)
+        .ok()?
+        .path_segments()?
+        .nth(3)?
+        .parse::<u64>()
+        .ok()
+}
+
+fn github_pull_request_success(created: bool, pr: Value) -> Value {
+    json!({
+        "created": created,
+        "ok": true,
+        "pr": pr,
+    })
+}
+
+fn github_pull_request_failure(reason: &str) -> Value {
+    json!({
+        "created": false,
+        "ok": false,
+        "reason": reason,
+    })
 }
 
 fn build_worktree_command(
@@ -1616,6 +1874,16 @@ fn optional_relative_file_paths(input: Option<&Value>) -> Result<Vec<String>, Ty
         .collect()
 }
 
+fn required_relative_file_paths(input: Option<&Value>) -> Result<Vec<String>, TypedOperationError> {
+    let paths = optional_relative_file_paths(input)?;
+    if paths.is_empty() {
+        return Err(TypedOperationError::bad_request(
+            "filePaths must include at least one relative path.",
+        ));
+    }
+    Ok(paths)
+}
+
 fn normalize_relative_file_path(input: Option<&Value>) -> Result<String, TypedOperationError> {
     let text = input.and_then(Value::as_str).unwrap_or("");
     if text.is_empty()
@@ -1997,6 +2265,8 @@ fn normalize_git_action(input: Option<&Value>) -> Result<String, TypedOperationE
         | "deleteRemoteBranch"
         | "diff"
         | "diffCached"
+        | "diffCachedFiles"
+        | "diffCachedStatFiles"
         | "diffCachedNoExt"
         | "diffCachedStat"
         | "diffNoExt"
@@ -2006,15 +2276,18 @@ fn normalize_git_action(input: Option<&Value>) -> Result<String, TypedOperationE
         | "isInsideWorkTree"
         | "isUntrackedFile"
         | "list"
+        | "listBranches"
         | "listRemotes"
         | "listUntracked"
         | "merge"
         | "pullFastForward"
         | "push"
+        | "pushSetUpstreamCurrent"
         | "pushSetUpstream"
         | "remoteBranchExists"
         | "status"
         | "statusPorcelain"
+        | "statusPorcelainZ"
         | "upstreamCounts"
         | "verifyRef" => Ok(action.to_string()),
         _ => Err(TypedOperationError::bad_request(format!(
@@ -2452,6 +2725,33 @@ fn parse_git_worktree_list_porcelain(stdout: &str) -> Vec<Value> {
     entries
 }
 
+fn parse_git_branch_list(stdout: &str) -> Vec<Value> {
+    let mut branches = Vec::new();
+    let mut seen: HashMap<String, bool> = HashMap::new();
+    for line in stdout.lines() {
+        let mut columns = line.split('\t');
+        let name = columns.next().unwrap_or_default().trim();
+        let ref_name = columns.next().unwrap_or_default().trim();
+        let head_marker = columns.next().unwrap_or_default().trim();
+        if name.is_empty()
+            || ref_name.is_empty()
+            || name.ends_with("/HEAD")
+            || ref_name.ends_with("/HEAD")
+            || !is_allowed_git_ref(name)
+            || seen.contains_key(name)
+        {
+            continue;
+        }
+        seen.insert(name.to_string(), true);
+        branches.push(json!({
+            "current": head_marker == "*",
+            "name": name,
+            "remote": ref_name.starts_with("refs/remotes/"),
+        }));
+    }
+    branches
+}
+
 fn normalize_worktree_branch(branch: Option<&str>) -> String {
     branch
         .map(|branch| {
@@ -2828,6 +3128,52 @@ mod tests {
         assert_eq!(
             normalize_git_action(Some(&json!("pullFastForward"))).unwrap(),
             "pullFastForward"
+        );
+    }
+
+    #[test]
+    fn git_list_branches_plans_structured_branch_command() {
+        /*
+        CDXC:WorktreeBaseBranch 2026-06-24-11:32:
+        Add Worktree branch selection must use a typed Git action that lists
+        local and remote-tracking branch refs without exposing a generic shell.
+        */
+        let dir = tempdir().unwrap();
+        let command =
+            build_git_command("listBranches", &Map::new(), &dir.path().to_string_lossy()).unwrap();
+
+        assert_eq!(
+            command.args,
+            vec![
+                "for-each-ref",
+                "--format=%(refname:short)%09%(refname)%09%(HEAD)",
+                "refs/heads",
+                "refs/remotes",
+            ]
+        );
+        assert_eq!(
+            normalize_git_action(Some(&json!("listBranches"))).unwrap(),
+            "listBranches"
+        );
+    }
+
+    #[test]
+    fn git_branch_list_parser_filters_symbolic_and_invalid_refs() {
+        let branches = parse_git_branch_list(
+            "main\trefs/heads/main\t*\n\
+feature/worktree-base\trefs/heads/feature/worktree-base\t\n\
+origin/main\trefs/remotes/origin/main\t\n\
+origin/HEAD\trefs/remotes/origin/HEAD\t\n\
+bad branch\trefs/heads/bad branch\t\n",
+        );
+
+        assert_eq!(
+            branches,
+            vec![
+                json!({"current": true, "name": "main", "remote": false}),
+                json!({"current": false, "name": "feature/worktree-base", "remote": false}),
+                json!({"current": false, "name": "origin/main", "remote": true}),
+            ]
         );
     }
 

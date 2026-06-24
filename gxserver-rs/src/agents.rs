@@ -343,6 +343,24 @@ pub(crate) fn create_agent_session_params_for_project(
             .or_else(|| read_text_from_map(&launch_settings, "icon")),
     });
     let launch_plan_object = launch_plan.as_object().cloned().unwrap_or_default();
+    let has_launch_command = launch_plan_object
+        .get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    if params
+        .get("requireLaunchCommand")
+        .and_then(Value::as_bool)
+        == Some(true)
+        && !has_launch_command
+    {
+        /*
+        CDXC:GPUIRemoteSessions 2026-06-24-17:19:
+        Remote GPUI starts send only the selected agent id and require gxserver to resolve the command from remote project metadata or built-in defaults. Reject commandless launches so unknown custom agent ids do not create inert sessions that look successful.
+        */
+        return Err(DomainStateError::bad_request(
+            "Agent command is required to create this session.",
+        ));
+    }
     let has_launch_startup_text = launch_plan_object
         .get("startupText")
         .and_then(Value::as_str)
@@ -420,7 +438,58 @@ pub(crate) fn create_agent_session_params_for_project(
         "runtimeSettings".to_string(),
         Value::Object(runtime_settings),
     );
+    if read_text(&normalized, "title").is_none() {
+        normalized.insert(
+            "title".to_string(),
+            Value::String(create_agent_session_default_title(
+                read_text_from_map(&agent_config, "name").as_deref(),
+                normalized.get("agentId").and_then(Value::as_str),
+            )),
+        );
+    }
     Ok(normalized)
+}
+
+fn create_agent_session_default_title(agent_name: Option<&str>, agent_id: Option<&str>) -> String {
+    let title_name = normalize_agent_session_title_name(agent_name)
+        .or_else(|| default_agent_session_title_name(agent_id.unwrap_or_default()).map(str::to_string))
+        .or_else(|| normalize_agent_session_title_name(agent_id));
+    title_name
+        .map(|name| format!("{name} Session"))
+        .unwrap_or_else(|| "Terminal Session".to_string())
+}
+
+fn normalize_agent_session_title_name(value: Option<&str>) -> Option<String> {
+    let normalized = value?
+        .split_whitespace()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn default_agent_session_title_name(agent_id: &str) -> Option<&'static str> {
+    match agent_id.trim().to_ascii_lowercase().as_str() {
+        "amp" => Some("Amp CLI"),
+        "antigravity" => Some("Antigravity CLI"),
+        "claude" => Some("Claude"),
+        "codebuddy" => Some("CodeBuddy"),
+        "codex" => Some("Codex"),
+        "copilot" => Some("Copilot"),
+        "cursor" => Some("Cursor CLI"),
+        "droid" => Some("Factory Droid"),
+        "gemini" => Some("Gemini"),
+        "grok" => Some("Grok Build"),
+        "hermes-agent" => Some("Hermes Agent"),
+        "kiro" => Some("Kiro"),
+        "omp" => Some("OMP"),
+        "opencode" => Some("OpenCode"),
+        "pi" => Some("Pi"),
+        "qoder" => Some("Qoder"),
+        "rovodev" => Some("Rovo Dev"),
+        "t3" => Some("T3 Code"),
+        _ => None,
+    }
 }
 
 struct AgentLaunchInput {
@@ -4642,7 +4711,7 @@ fn is_agent_associated(session: &Value, identity: &ResolvedIdentity) -> bool {
         || read_text_from_map(&object_field(session, "runtimeSettings"), "agentName").is_some()
 }
 
-fn resolve_project_agent_config(
+pub(crate) fn resolve_project_agent_config(
     project: &Value,
     agent_id: &str,
     launch_settings: Option<&Map<String, Value>>,
@@ -4935,7 +5004,7 @@ fn default_agent_icon_to_id(icon: &str) -> Option<&'static str> {
     }
 }
 
-fn default_agent_command(agent_id: &str) -> Option<&'static str> {
+pub(crate) fn default_agent_command(agent_id: &str) -> Option<&'static str> {
     match agent_id {
         "amp" => Some("amp"),
         "antigravity" => Some("agy"),
@@ -5571,7 +5640,7 @@ fn read_text_value(value: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn read_text_from_map(map: &Map<String, Value>, key: &str) -> Option<String> {
+pub(crate) fn read_text_from_map(map: &Map<String, Value>, key: &str) -> Option<String> {
     map.get(key)
         .and_then(Value::as_str)
         .map(str::trim)

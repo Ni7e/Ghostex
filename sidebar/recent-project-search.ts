@@ -28,10 +28,14 @@ export function filterRecentProjects(
    * CDXC:RecentProjects 2026-05-04-14:25
    * The Recent Projects drawer needs lightweight fuzzy search across project
    * names and paths without changing the native-provided recency order.
+   *
+   * CDXC:RemoteRecentProjects 2026-06-24-10:36:
+   * Remote parked rows visibly append the machine name to the project title, so
+   * search must include that machine suffix as part of the row identity.
    */
   const searchRecords = projects.map((project, itemIndex) => ({
     itemIndex,
-    searchText: [project.title, project.path]
+    searchText: [project.title, project.remoteMachineName, project.path]
       .map((part) => normalizeRecentProjectSearchValue(part))
       .filter(Boolean)
       .join(" "),

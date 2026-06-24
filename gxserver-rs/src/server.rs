@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    convert::Infallible,
     fs,
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -32,6 +33,7 @@ use tokio::{
     process::Command,
     sync::broadcast,
 };
+use tower::service_fn;
 use uuid::Uuid;
 
 use crate::{
@@ -39,9 +41,10 @@ use crate::{
     agent_skills::{install_agent_skills, read_agent_skill_status},
     agents::{
         apply_created_session_identity, apply_live_process_session_identity,
-        create_agent_session_params_for_project, dispatch_agent_endpoint,
+        create_agent_session_params_for_project, default_agent_command, dispatch_agent_endpoint,
         get_visible_terminal_title, normalize_agent_hook_activity, read_agent_settings,
-        reconcile_agent_metadata_title_for_session, AgentEndpointError,
+        read_text_from_map, reconcile_agent_metadata_title_for_session,
+        resolve_project_agent_config, AgentEndpointError,
     },
     auth::{
         ensure_gxserver_auth_token, is_authorized_headers, is_expected_gxserver_auth_token,
@@ -91,14 +94,15 @@ use crate::{
         create_source_build_identity, is_build_identity_reusable, remove_runtime_metadata,
         write_runtime_metadata,
     },
+    sidebar_hud::{create_sidebar_hud_settings_mutation, read_sidebar_hud},
     session_status::agent_activity_stale_projection_delay_ms,
     storage::{
         create_gxserver_migration_status, initialize_gxserver_storage, open_gxserver_database,
     },
     toolchain::{get_gxserver_tool_statuses, require_bundled_zmx},
     typed_operations::{
-        dispatch_typed_operation_endpoint, typed_operation_log_details, typed_operation_log_level,
-        TypedOperationError,
+        create_pull_request_for_project, dispatch_typed_operation_endpoint,
+        typed_operation_log_details, typed_operation_log_level, TypedOperationError,
     },
     zmx::{
         dispatch_zmx_lifecycle_endpoint, dispatch_zmx_session_interaction_endpoint,
@@ -156,6 +160,7 @@ const GXSERVER_BARE_RENAME_GENERATING_WINDOW_MS: u64 = 400;
 const GXSERVER_FIRST_PROMPT_TITLE_SOURCE_MAX_LENGTH: usize = 250;
 const GXSERVER_GENERATED_SESSION_TITLE_MAX_LENGTH: usize = 39;
 const GXSERVER_FIRST_PROMPT_TITLE_GENERATION_TIMEOUT_MS: u64 = 30_000;
+const GXSERVER_COMMIT_MESSAGE_GENERATION_TIMEOUT_MS: u64 = 120_000;
 const GXSERVER_SESSION_STATE_SIDECAR_MAX_BYTES: u64 = 1024 * 1024;
 
 const RENDERER_COMMAND_ACTIONS: &[&str] = &[
@@ -279,9 +284,19 @@ pub async fn run_gxserver_foreground(
         version,
         zmx_title_observers: Arc::new(Mutex::new(HashMap::new())),
     });
+    /*
+    CDXC:GxserverRustBuild 2026-06-24-20:22:
+    The JSON RPC catch-all needs the raw Request so gxserver-rs can preserve the
+    TypeScript protocol/auth/body gate order for every endpoint, including app
+    user data. Use Axum's service fallback instead of the Handler extractor path
+    so all non-/api/events requests still flow through the single RPC router.
+    */
+    let http_state = state.clone();
     let app = Router::new()
         .route("/api/events", any(handle_events))
-        .fallback(any(handle_http))
+        .fallback_service(service_fn(move |request| {
+            handle_http_request(http_state.clone(), request)
+        }))
         .with_state(state.clone());
 
     let address: SocketAddr = format!("{local_host}:{local_port}")
@@ -428,7 +443,10 @@ fn classify_existing_gxserver(
     }
 }
 
-async fn handle_http(State(state): State<Arc<AppState>>, request: Request<Body>) -> Response<Body> {
+async fn handle_http_request(
+    state: Arc<AppState>,
+    request: Request<Body>,
+) -> std::result::Result<Response<Body>, Infallible> {
     let started_at = Instant::now();
     let client = request
         .extensions()
@@ -462,7 +480,7 @@ async fn handle_http(State(state): State<Arc<AppState>>, request: Request<Body>)
             "type": "apiRequestHandled",
         }));
     }
-    routed.response
+    Ok(routed.response)
 }
 
 async fn route_http(
@@ -700,6 +718,86 @@ async fn route_http(
                     .map(|projects| json!({ "projects": projects }))
             },
         ),
+        "/api/listRecentProjects" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, _, _, _| {
+                repository
+                    .list_recent_projects()
+                    .map(|recent_projects| json!({ "recentProjects": recent_projects }))
+            },
+        ),
+        "/api/closeProjectToRecent" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, db, params, _| {
+                /*
+                CDXC:GPUIRecentProjects 2026-06-24-12:38:
+                GPUI's reused SidebarApp sends the same close-vs-remove command split as macOS. Close parks the canonical gxserver project with a server timestamp and broadcasts a presentation removal for active groups; remove remains the hard-delete endpoint.
+                */
+                let project_id = read_project_id(params)?;
+                let project = repository.close_project_to_recent(&project_id)?;
+                schedule_presentation_project_delta(
+                    &state,
+                    db,
+                    repository,
+                    &project_id,
+                    "projectUpdated",
+                )?;
+                let recent_projects = repository.list_recent_projects()?;
+                Ok(json!({ "project": project, "recentProjects": recent_projects }))
+            },
+        ),
+        "/api/restoreRecentProject" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, db, params, _| {
+                /*
+                CDXC:GPUIRecentProjects 2026-06-24-12:27:
+                GPUI restores Recent Projects through gxserver project ids.
+                The daemon clears explicit parked state and publishes the
+                project presentation update; clients must not reconstruct rows
+                from labels, stopped sessions, trusted client paths, or command
+                output.
+                */
+                let project_id = read_project_id(params)?;
+                let project = repository.restore_recent_project(&project_id)?;
+                schedule_presentation_project_delta(
+                    &state,
+                    db,
+                    repository,
+                    &project_id,
+                    "projectUpdated",
+                )?;
+                let recent_projects = repository.list_recent_projects()?;
+                Ok(json!({ "project": project, "recentProjects": recent_projects }))
+            },
+        ),
+        "/api/removeRecentProject" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, db, params, _| {
+                let project_id = read_project_id(params)?;
+                let project = repository.remove_recent_project(&project_id)?;
+                schedule_presentation_project_delta(
+                    &state,
+                    db,
+                    repository,
+                    &project_id,
+                    "projectRemoved",
+                )?;
+                let recent_projects = repository.list_recent_projects()?;
+                Ok(json!({ "project": project, "recentProjects": recent_projects }))
+            },
+        ),
         "/api/readProjectStatus" => handle_domain_http(
             &state,
             endpoint.path,
@@ -747,6 +845,14 @@ async fn route_http(
                 Ok(json!({ "project": project }))
             },
         ),
+        "/api/listProjectWorktrees"
+        | "/api/createProjectWorktree"
+        | "/api/openProjectWorktree"
+        | "/api/mergeWorktreeIntoMain"
+        | "/api/checkoutProjectNewBranch" => {
+            handle_project_worktree_operation_http(&state, endpoint.path, request_id, &body_json)
+                .await
+        }
         "/api/removeProject" => handle_domain_http(
             &state,
             endpoint.path,
@@ -920,6 +1026,89 @@ async fn route_http(
                     .map(|snapshot| json!({ "snapshot": snapshot }))
             },
         ),
+        "/api/readSidebarHud" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, _, params, _| {
+                /*
+                CDXC:SidebarHudContract 2026-06-24-20:34:
+                GPUI Settings and SidebarApp read normalized launcher/action HUD rows through gxserver so app-modal Rust does not hand-mirror the shared TypeScript projection. The response is derived only from project domain metadata and carries no paths, project names, prompts, tokens, stdout/stderr, daemon bodies, or renderer payload authority.
+                */
+                let projects = repository.list_projects()?;
+                let active_project_id = params
+                    .get("activeProjectId")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty());
+                Ok(read_sidebar_hud(&projects, active_project_id))
+            },
+        ),
+        "/api/mutateSidebarHudSettings" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, db, params, _| {
+                /*
+                CDXC:SidebarHudSettingsMutation 2026-06-24-20:54:
+                Settings mutation RPCs write through the production project repository after gxserver normalizes the narrow agent/action intent. Return refreshed HUD rows and updated project rows so GPUI clients do not reparse raw metadata or log command text, URLs, project names, paths, prompts, tokens, stdout/stderr, daemon bodies, or renderer payload contents.
+                */
+                let projects = repository.list_projects()?;
+                let mutation = create_sidebar_hud_settings_mutation(&projects, params)?;
+                let hud_active_project_id = mutation.hud_active_project_id;
+                let item_ids = mutation.item_ids;
+                let mut updated_projects = Vec::new();
+                for update in mutation.updates {
+                    let project = repository.update_project(&update.params)?;
+                    schedule_presentation_project_delta(
+                        &state,
+                        db,
+                        repository,
+                        &update.project_id,
+                        "projectUpdated",
+                    )?;
+                    updated_projects.push(project);
+                }
+                let projects = repository.list_projects()?;
+                let hud = read_sidebar_hud(&projects, hud_active_project_id.as_deref());
+                let mut result = Map::new();
+                result.insert("hud".to_string(), hud);
+                if let Some(item_ids) = item_ids {
+                    result.insert(
+                        "itemIds".to_string(),
+                        Value::Array(item_ids.into_iter().map(Value::String).collect()),
+                    );
+                }
+                result.insert(
+                    "projects".to_string(),
+                    Value::Array(updated_projects),
+                );
+                Ok(Value::Object(result))
+            },
+        ),
+        "/api/readAppUserData" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, _, _, _| repository.read_app_user_data(),
+        ),
+        "/api/saveScratchPad" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, _, params, _| repository.save_scratch_pad(params),
+        ),
+        "/api/savePinnedPrompt" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, _, params, _| repository.save_pinned_prompt(params),
+        ),
         "/api/searchSessions" => handle_domain_http(
             &state,
             endpoint.path,
@@ -978,6 +1167,12 @@ async fn route_http(
         | "/api/runProjectSetupCommand"
         | "/api/runBeadsAction" => {
             handle_typed_operation_http(&state, endpoint.path, request_id, &body_json).await
+        }
+        "/api/generateCommitMessage" => {
+            handle_generate_commit_message_http(&state, endpoint.path, request_id, &body_json).await
+        }
+        "/api/createPullRequest" => {
+            handle_create_pull_request_http(&state, endpoint.path, request_id, &body_json).await
         }
         "/api/queryLogs" => handle_query_logs_http(&state, endpoint.path, request_id, &body_json),
         "/api/updatePortlessState" => {
@@ -1982,7 +2177,7 @@ async fn generate_first_prompt_session_title(
     let mut child = Command::new(&shell.executable);
     child.args(shell.interactive_script_args(&shell_command));
     child.current_dir(cwd.unwrap_or_else(|| state.paths.home_dir.to_str().unwrap_or(".")));
-    child.envs(internal_title_generation_environment(&state.paths.home_dir));
+    child.envs(internal_prompt_generation_environment(&state.paths.home_dir));
     child.stdout(std::process::Stdio::piped());
     child.stderr(std::process::Stdio::piped());
     let output = tokio::time::timeout(
@@ -2169,7 +2364,14 @@ fn js_string_slice_prefix(text: &str, max_code_units: usize) -> String {
     output
 }
 
-fn internal_title_generation_environment(home_dir: &std::path::Path) -> Vec<(String, String)> {
+fn internal_prompt_generation_environment(home_dir: &std::path::Path) -> Vec<(String, String)> {
+    /*
+    CDXC:GxserverPromptGeneration 2026-06-24-16:11:
+    Background title and commit-message generation must not inherit active
+    Ghostex session identity. Clear session-binding variables and mark the
+    process as internal so installed agent hooks do not attach generated prompt
+    runs to user-restorable terminal sessions.
+    */
     let mut environment = std::env::vars().collect::<std::collections::HashMap<_, _>>();
     for key in [
         "ANSI_COLORS_DISABLED",
@@ -2383,6 +2585,570 @@ async fn handle_typed_operation_http(
     }
 }
 
+async fn handle_generate_commit_message_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    match generate_commit_message_for_project(state, &params).await {
+        Ok(result) => routed_json(
+            Some(endpoint_path),
+            StatusCode::OK,
+            rpc_success(request_id, result),
+        ),
+        Err(error) => domain_error_response(endpoint_path, request_id, error),
+    }
+}
+
+async fn handle_create_pull_request_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let projects = {
+        let db = match open_gxserver_database(&state.paths) {
+            Ok(db) => db,
+            Err(error) => {
+                return domain_error_response(
+                    endpoint_path,
+                    request_id,
+                    DomainStateError {
+                        code: "internalError",
+                        message: format!("SQLite gxserver state error: {error}"),
+                    },
+                );
+            }
+        };
+        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+        match repository.list_projects() {
+            Ok(projects) => projects,
+            Err(error) => return domain_error_response(endpoint_path, request_id, error),
+        }
+    };
+    match create_pull_request_for_project(&params, projects).await {
+        Ok(result) => routed_json(
+            Some(endpoint_path),
+            StatusCode::OK,
+            rpc_success(request_id, result),
+        ),
+        Err(error) => typed_operation_error_response(endpoint_path, request_id, error),
+    }
+}
+
+struct CommitMessageGenerationAgent {
+    agent_id: String,
+    command: String,
+    is_default: bool,
+    name: String,
+}
+
+/*
+CDXC:GPUISidebarGit 2026-06-24-16:11:
+GPUI blank commit-message generation is a local gxserver operation over a
+registered project, not renderer shell execution. The endpoint stages only the
+review-approved project-relative paths, derives branch/diff text from fixed Git
+actions, resolves prompt-agent commands from stored gxserver project/settings
+state, and returns only parsed subject/body text to the commit pipeline.
+*/
+async fn generate_commit_message_for_project(
+    state: &AppState,
+    params: &Map<String, Value>,
+) -> std::result::Result<Value, DomainStateError> {
+    let project_id = read_project_id(params)?;
+    let file_paths = read_commit_message_generation_file_paths(params)?;
+    let (project, project_path, projects, settings) = {
+        let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+            code: "internalError",
+            message: format!("SQLite gxserver state error: {error}"),
+        })?;
+        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+        let project = repository
+            .get_project(&project_id)?
+            .ok_or_else(|| DomainStateError::not_found(format!("Project {project_id} does not exist.")))?;
+        let project_path = project
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .ok_or_else(|| DomainStateError::bad_request("Project has no filesystem path."))?
+            .to_string();
+        let projects = repository.list_projects()?;
+        let settings = read_agent_settings(&db)?;
+        /*
+        CDXC:GxserverRustBuild 2026-06-24-20:22:
+        Axum requires the HTTP fallback future to be Send. Read commit-message
+        generation metadata from SQLite up front and leave the rusqlite-backed
+        repository inside this block before awaiting Git actions or agent output.
+        */
+        (project, project_path, projects, settings)
+    };
+
+    let status = run_commit_message_generation_git_action(
+        &projects,
+        &project_id,
+        "statusPorcelainZ",
+        None,
+    )
+    .await?;
+    ensure_commit_message_generation_git_success(
+        &status,
+        "Could not inspect selected changes.",
+    )?;
+    ensure_commit_message_generation_paths_are_currently_changed(
+        &file_paths,
+        typed_result_stdout_raw(&status),
+    )?;
+
+    let add = run_commit_message_generation_git_action(
+        &projects,
+        &project_id,
+        "addAll",
+        Some(&file_paths),
+    )
+    .await?;
+    ensure_commit_message_generation_git_success(&add, "Could not stage selected changes.")?;
+
+    let (summary, patch, branch) = tokio::try_join!(
+        run_commit_message_generation_git_action(
+            &projects,
+            &project_id,
+            "diffCachedStatFiles",
+            Some(&file_paths),
+        ),
+        run_commit_message_generation_git_action(
+            &projects,
+            &project_id,
+            "diffCachedFiles",
+            Some(&file_paths),
+        ),
+        run_commit_message_generation_git_action(&projects, &project_id, "branch", None),
+    )?;
+    ensure_commit_message_generation_git_success(
+        &summary,
+        "Could not inspect selected staged changes.",
+    )?;
+    ensure_commit_message_generation_git_success(
+        &patch,
+        "Could not inspect selected staged changes.",
+    )?;
+
+    let staged_summary = typed_result_stdout(&summary);
+    let staged_patch = typed_result_stdout(&patch);
+    if staged_summary.trim().is_empty() && staged_patch.trim().is_empty() {
+        return Err(DomainStateError::bad_request(
+            "No staged changes are available for commit message generation.",
+        ));
+    }
+
+    let agent = resolve_commit_message_generation_agent(&project, params, &settings)?;
+    let prompt = build_gxserver_commit_message_generation_prompt(
+        typed_result_stdout(&branch).trim(),
+        read_project_generate_commit_body(&project),
+        &staged_summary,
+        &staged_patch,
+    );
+    let stdout =
+        run_commit_message_generation_agent(state, &project_path, &agent, &prompt).await?;
+    parse_gxserver_generated_commit_message(&stdout, &agent.name)
+}
+
+fn read_commit_message_generation_file_paths(
+    params: &Map<String, Value>,
+) -> std::result::Result<Vec<String>, DomainStateError> {
+    let file_paths = params
+        .get("filePaths")
+        .and_then(Value::as_array)
+        .ok_or_else(|| DomainStateError::bad_request("filePaths must be a non-empty array."))?;
+    if file_paths.is_empty() {
+        return Err(DomainStateError::bad_request(
+            "filePaths must include at least one changed file.",
+        ));
+    }
+    if file_paths.len() > 500 {
+        return Err(DomainStateError::bad_request(
+            "filePaths exceeds the 500-file limit.",
+        ));
+    }
+    let mut normalized = Vec::with_capacity(file_paths.len());
+    for value in file_paths {
+        let text = value
+            .as_str()
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .ok_or_else(|| DomainStateError::bad_request("filePaths must contain relative paths."))?;
+        if text.contains('\0')
+            || Path::new(text).is_absolute()
+            || text.split(['/', '\\']).any(|part| part == "..")
+        {
+            return Err(DomainStateError::bad_request(
+                "filePaths must contain relative paths inside the project.",
+            ));
+        }
+        let path = text.replace('\\', "/").trim_start_matches('/').to_string();
+        if !normalized.contains(&path) {
+            normalized.push(path);
+        }
+    }
+    Ok(normalized)
+}
+
+async fn run_commit_message_generation_git_action(
+    projects: &[Value],
+    project_id: &str,
+    action: &str,
+    file_paths: Option<&[String]>,
+) -> std::result::Result<Value, DomainStateError> {
+    let mut params = Map::new();
+    params.insert("action".to_string(), json!(action));
+    params.insert("projectId".to_string(), json!(project_id));
+    if let Some(file_paths) = file_paths {
+        params.insert(
+            "filePaths".to_string(),
+            Value::Array(file_paths.iter().map(|path| json!(path)).collect()),
+        );
+    }
+    dispatch_typed_operation_endpoint("/api/runGitAction", &params, projects.to_vec())
+        .await
+        .map_err(|error| typed_operation_commit_generation_error(error, "Git inspection failed."))
+}
+
+fn ensure_commit_message_generation_git_success(
+    result: &Value,
+    message: &str,
+) -> std::result::Result<(), DomainStateError> {
+    let exit_code = result.get("exitCode").and_then(Value::as_i64).unwrap_or(1);
+    if exit_code == 0 && result.get("error").is_none() {
+        return Ok(());
+    }
+    Err(DomainStateError {
+        code: "badRequest",
+        message: message.to_string(),
+    })
+}
+
+fn typed_operation_commit_generation_error(
+    error: TypedOperationError,
+    message: &str,
+) -> DomainStateError {
+    DomainStateError {
+        code: error.code,
+        message: message.to_string(),
+    }
+}
+
+fn typed_result_stdout(result: &Value) -> String {
+    result
+        .get("stdout")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn typed_result_stdout_raw(result: &Value) -> &str {
+    result
+        .get("stdout")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
+
+/*
+CDXC:GPUISidebarGit 2026-06-24-16:11:
+The generation endpoint must re-derive the current changed-file set from
+gxserver-owned Git status before staging. The renderer's review request chooses
+from that set, but Rust rejects stale or arbitrary file paths at the writer
+boundary so prompt generation cannot inspect unrelated project content.
+*/
+fn ensure_commit_message_generation_paths_are_currently_changed(
+    file_paths: &[String],
+    status_stdout: &str,
+) -> std::result::Result<(), DomainStateError> {
+    let changed_paths = parse_commit_message_generation_status_paths(status_stdout);
+    if file_paths.iter().all(|path| changed_paths.contains(path)) {
+        return Ok(());
+    }
+    Err(DomainStateError::bad_request(
+        "Selected files are no longer part of the current Git review.",
+    ))
+}
+
+fn parse_commit_message_generation_status_paths(status_stdout: &str) -> HashSet<String> {
+    let mut changed_paths = HashSet::new();
+    let mut entries = status_stdout.split('\0').filter(|entry| !entry.is_empty());
+    while let Some(entry) = entries.next() {
+        if entry.len() < 4 {
+            continue;
+        }
+        let status = &entry[..2];
+        if let Some(path) = normalize_commit_message_generation_status_path(&entry[3..]) {
+            changed_paths.insert(path);
+        }
+        if status.contains('R') || status.contains('C') {
+            let _ = entries.next();
+        }
+    }
+    changed_paths
+}
+
+fn normalize_commit_message_generation_status_path(path: &str) -> Option<String> {
+    let text = path.trim();
+    if text.is_empty()
+        || text.contains('\0')
+        || Path::new(text).is_absolute()
+        || text.split(['/', '\\']).any(|part| part == "..")
+    {
+        return None;
+    }
+    let normalized = text.replace('\\', "/").trim_start_matches('/').to_string();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+fn read_project_generate_commit_body(project: &Value) -> bool {
+    project
+        .get("gitConfig")
+        .and_then(Value::as_object)
+        .and_then(|config| config.get("generateCommitBody"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+}
+
+fn resolve_commit_message_generation_agent(
+    project: &Value,
+    params: &Map<String, Value>,
+    settings: &Map<String, Value>,
+) -> std::result::Result<CommitMessageGenerationAgent, DomainStateError> {
+    let agent_id = params
+        .get("agentId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| read_text_from_map(settings, "defaultPromptAgentId"))
+        .unwrap_or_else(|| "codex".to_string());
+    let agent_config = resolve_project_agent_config(project, &agent_id, None);
+    let command = read_text_from_map(&agent_config, "command")
+        .or_else(|| default_agent_command(&agent_id).map(str::to_string))
+        .ok_or_else(|| DomainStateError {
+            code: "dependencyUnavailable",
+            message: "Choose a configured prompt agent before generating a commit message."
+                .to_string(),
+        })?;
+    let is_default = default_agent_command(&agent_id).is_some();
+    let name = read_text_from_map(&agent_config, "name").unwrap_or_else(|| {
+        default_agent_name(&agent_id)
+            .unwrap_or(agent_id.as_str())
+            .to_string()
+    });
+    Ok(CommitMessageGenerationAgent {
+        agent_id,
+        command,
+        is_default,
+        name,
+    })
+}
+
+fn default_agent_name(agent_id: &str) -> Option<&'static str> {
+    match agent_id {
+        "amp" => Some("Amp CLI"),
+        "antigravity" => Some("Antigravity CLI"),
+        "claude" => Some("Claude"),
+        "codebuddy" => Some("CodeBuddy"),
+        "codex" => Some("Codex"),
+        "copilot" => Some("Copilot"),
+        "cursor" => Some("Cursor CLI"),
+        "droid" => Some("Factory Droid"),
+        "gemini" => Some("Gemini"),
+        "grok" => Some("Grok Build"),
+        "hermes-agent" => Some("Hermes Agent"),
+        "kiro" => Some("Kiro CLI"),
+        "omp" => Some("OMP"),
+        "opencode" => Some("OpenCode"),
+        "pi" => Some("Pi Agent"),
+        "qoder" => Some("Qoder"),
+        "rovodev" => Some("Rovo Dev"),
+        "t3" => Some("T3 Code"),
+        _ => None,
+    }
+}
+
+fn build_gxserver_commit_message_generation_prompt(
+    branch: &str,
+    generate_body: bool,
+    staged_summary: &str,
+    staged_patch: &str,
+) -> String {
+    let branch_line = format!(
+        "Branch: {}",
+        if branch.trim().is_empty() {
+            "(detached)"
+        } else {
+            branch.trim()
+        }
+    );
+    let summary = staged_summary.chars().take(6_000).collect::<String>();
+    let patch = staged_patch.chars().take(40_000).collect::<String>();
+    [
+        "You write concise git commit messages.",
+        "Return only a JSON object with keys: subject, body.",
+        "Rules:",
+        "- subject must be imperative, <= 72 chars, and no trailing period",
+        if generate_body {
+            "- body can be empty string or short bullet points"
+        } else {
+            "- body must be an empty string"
+        },
+        "- capture the primary user-visible or developer-visible change",
+        "",
+        &branch_line,
+        "",
+        "Staged files:",
+        &summary,
+        "",
+        "Staged patch:",
+        &patch,
+    ]
+    .join("\n")
+}
+
+async fn run_commit_message_generation_agent(
+    state: &AppState,
+    cwd: &str,
+    agent: &CommitMessageGenerationAgent,
+    prompt: &str,
+) -> std::result::Result<String, DomainStateError> {
+    let delimiter = format!(
+        "ghostex_GXSERVER_GIT_COMMIT_{}",
+        chrono::Utc::now().timestamp_millis()
+    );
+    let shell_command = build_commit_message_generation_shell_command(agent, &delimiter, prompt)?;
+    let shell = command_shell();
+    let mut child = Command::new(&shell.executable);
+    child
+        .args(shell.interactive_script_args(&shell_command))
+        .current_dir(cwd)
+        .envs(internal_prompt_generation_environment(&state.paths.home_dir))
+        .kill_on_drop(true)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let output = tokio::time::timeout(
+        Duration::from_millis(GXSERVER_COMMIT_MESSAGE_GENERATION_TIMEOUT_MS),
+        child.output(),
+    )
+    .await
+    .map_err(|_| DomainStateError {
+        code: "dependencyUnavailable",
+        message: "Commit message generation timed out.".to_string(),
+    })?
+    .map_err(|_| DomainStateError {
+        code: "dependencyUnavailable",
+        message: "Could not start commit message generation.".to_string(),
+    })?;
+    if !output.status.success() {
+        return Err(DomainStateError {
+            code: "dependencyUnavailable",
+            message: format!("{} commit message generation failed.", agent.name),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn build_commit_message_generation_shell_command(
+    agent: &CommitMessageGenerationAgent,
+    delimiter: &str,
+    prompt: &str,
+) -> std::result::Result<String, DomainStateError> {
+    Ok(match agent.agent_id.as_str() {
+        "codex" => create_here_doc_command(
+            &format!(
+                "{} exec --ephemeral --skip-git-repo-check -m gpt-5.4-mini -c 'model_reasoning_effort=\"low\"'",
+                agent.command
+            ),
+            delimiter,
+            prompt,
+        ),
+        "cursor" => format!(
+            "{} --print --mode ask --trust --output-format text {}",
+            agent.command,
+            quote_shell_arg(prompt)
+        ),
+        "claude" | "gemini" => {
+            create_here_doc_command(&format!("{} -p", agent.command), delimiter, prompt)
+        }
+        _ if !agent.is_default => create_here_doc_command(&agent.command, delimiter, prompt),
+        _ => {
+            return Err(DomainStateError {
+                code: "badRequest",
+                message: format!(
+                    "{} does not support background commit message generation.",
+                    agent.name
+                ),
+            })
+        }
+    })
+}
+
+fn parse_gxserver_generated_commit_message(
+    stdout: &str,
+    agent_name: &str,
+) -> std::result::Result<Value, DomainStateError> {
+    let start = stdout.find('{').ok_or_else(|| DomainStateError::bad_request(format!(
+        "{agent_name} did not return a commit message JSON object."
+    )))?;
+    let end = stdout.rfind('}').ok_or_else(|| DomainStateError::bad_request(format!(
+        "{agent_name} did not return a commit message JSON object."
+    )))?;
+    if end < start {
+        return Err(DomainStateError::bad_request(format!(
+            "{agent_name} did not return a commit message JSON object."
+        )));
+    }
+    let parsed = serde_json::from_str::<Value>(&stdout[start..=end]).map_err(|_| {
+        DomainStateError::bad_request(format!(
+            "{agent_name} did not return a commit message JSON object."
+        ))
+    })?;
+    let subject = parsed
+        .get("subject")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_end_matches(['.', '。'])
+        .chars()
+        .take(72)
+        .collect::<String>()
+        .trim()
+        .to_string();
+    if subject.is_empty() {
+        return Err(DomainStateError::bad_request(format!(
+            "{agent_name} returned an empty commit subject."
+        )));
+    }
+    let body = parsed
+        .get("body")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    Ok(json!({ "body": body, "subject": subject }))
+}
+
 fn typed_operation_scope_rejection_details(
     endpoint_path: &str,
     params: &Map<String, Value>,
@@ -2432,6 +3198,892 @@ fn typed_operation_error_response(
         status,
         rpc_error(error.code, error.message, Some(request_id)),
     )
+}
+
+#[derive(Clone)]
+struct ProjectWorktreeOperationContext {
+    parent_path: String,
+    parent_project: Value,
+    parent_project_id: String,
+    projects: Vec<Value>,
+    source_path: String,
+    source_project_id: String,
+}
+
+#[derive(Clone)]
+struct ProjectWorktreeOptionRow {
+    branch: String,
+    is_current_project: bool,
+    is_registered: bool,
+    name: String,
+    path: String,
+    worktree_key: String,
+}
+
+struct ProjectWorktreeTarget {
+    branch: String,
+    name: String,
+    path: String,
+}
+
+enum ProjectWorktreeOperationError {
+    Domain(DomainStateError),
+    ProjectPath(ProjectPathHttpError),
+    Typed(TypedOperationError),
+}
+
+impl From<DomainStateError> for ProjectWorktreeOperationError {
+    fn from(error: DomainStateError) -> Self {
+        Self::Domain(error)
+    }
+}
+
+impl From<ProjectPathHttpError> for ProjectWorktreeOperationError {
+    fn from(error: ProjectPathHttpError) -> Self {
+        Self::ProjectPath(error)
+    }
+}
+
+impl From<TypedOperationError> for ProjectWorktreeOperationError {
+    fn from(error: TypedOperationError) -> Self {
+        Self::Typed(error)
+    }
+}
+
+/*
+CDXC:RemoteWorktrees 2026-06-24-18:40:
+GPUI remote Add Worktree, Open Existing, direct merge, and commit-on-new-branch
+must be id-scoped gxserver operations. The daemon resolves registered
+project/worktree ids to paths, derives target branch/path names from bounded
+labels, re-lists worktrees before opening by opaque key, and never accepts a
+renderer-provided absolute path as remote mutation authority.
+*/
+async fn handle_project_worktree_operation_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let result = match endpoint_path.as_str() {
+        "/api/listProjectWorktrees" => list_project_worktrees_for_project(state, &params).await,
+        "/api/createProjectWorktree" => create_project_worktree_for_project(state, &params).await,
+        "/api/openProjectWorktree" => open_project_worktree_for_project(state, &params).await,
+        "/api/mergeWorktreeIntoMain" => merge_worktree_into_main_for_project(state, &params).await,
+        "/api/checkoutProjectNewBranch" => {
+            checkout_project_new_branch_for_commit(state, &params).await
+        }
+        _ => Err(DomainStateError::not_found(format!(
+            "{endpoint_path} is not a gxserver worktree endpoint."
+        ))
+        .into()),
+    };
+    match result {
+        Ok(result) => routed_json(
+            Some(endpoint_path),
+            StatusCode::OK,
+            rpc_success(request_id, result),
+        ),
+        Err(error) => project_worktree_operation_error_response(endpoint_path, request_id, error),
+    }
+}
+
+async fn list_project_worktrees_for_project(
+    state: &AppState,
+    params: &Map<String, Value>,
+) -> std::result::Result<Value, ProjectWorktreeOperationError> {
+    let context = resolve_project_worktree_operation_context(state, params)?;
+    project_worktree_list_payload(&context).await
+}
+
+async fn create_project_worktree_for_project(
+    state: &AppState,
+    params: &Map<String, Value>,
+) -> std::result::Result<Value, ProjectWorktreeOperationError> {
+    let context = resolve_project_worktree_operation_context(state, params)?;
+    let base_ref = normalize_project_worktree_git_ref(params.get("baseRef"), "baseRef")?;
+    let name_hint = normalize_project_worktree_name_hint(params.get("nameHint"))?;
+    let target = resolve_unique_project_worktree_target(&context, &name_hint).await?;
+    let mut create_params = Map::new();
+    create_params.insert("baseRef".to_string(), Value::String(base_ref));
+    create_params.insert("branch".to_string(), Value::String(target.branch.clone()));
+    create_params.insert("worktreePath".to_string(), Value::String(target.path.clone()));
+    let create = run_project_worktree_action(
+        &context.projects,
+        "create",
+        &context.source_path,
+        create_params,
+    )
+    .await?;
+    if exit_code(&create) != 0 {
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&create, "git worktree add failed."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+
+    let parent_name = context
+        .parent_project
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("Project");
+    let project = register_project_worktree_path(
+        state,
+        &target.path,
+        &format!("{parent_name}-{}", target.name),
+        "projectAdded",
+    )?;
+    prepare_registered_worktree_project(state, &project, &context.source_project_id).await?;
+    Ok(json!({ "project": project }))
+}
+
+async fn open_project_worktree_for_project(
+    state: &AppState,
+    params: &Map<String, Value>,
+) -> std::result::Result<Value, ProjectWorktreeOperationError> {
+    let context = resolve_project_worktree_operation_context(state, params)?;
+    let worktree_key = normalize_project_worktree_key(params.get("worktreeKey"))?;
+    let options = project_worktree_options(&context).await?;
+    let selected = options
+        .into_iter()
+        .find(|option| option.worktree_key == worktree_key)
+        .ok_or_else(|| {
+            DomainStateError::bad_request(
+                "Selected worktree is no longer in the current gxserver worktree list.",
+            )
+        })?;
+    let project = register_project_worktree_path(
+        state,
+        &selected.path,
+        &selected.name,
+        "projectAdded",
+    )?;
+    prepare_registered_worktree_project(state, &project, &context.source_project_id).await?;
+    Ok(json!({ "project": project }))
+}
+
+async fn merge_worktree_into_main_for_project(
+    state: &AppState,
+    params: &Map<String, Value>,
+) -> std::result::Result<Value, ProjectWorktreeOperationError> {
+    let plan = prepare_project_worktree_merge_plan(state, params)?;
+    let branch =
+        resolve_current_project_worktree_branch_name(&plan.projects, &plan.worktree_path)
+            .await?
+            .or(plan.worktree_branch)
+            .ok_or_else(|| {
+                DomainStateError::bad_request("Create and checkout a branch before merging.")
+            })?;
+
+    let mut main_params = Map::new();
+    main_params.insert("ref".to_string(), Value::String("main".to_string()));
+    let main_check =
+        run_project_git_action(&plan.projects, "verifyRef", &plan.parent_path, main_params).await?;
+    if exit_code(&main_check) != 0 {
+        return Err(DomainStateError::bad_request(
+            "The parent project does not have a local main branch.",
+        )
+        .into());
+    }
+
+    let status =
+        run_project_git_action(&plan.projects, "status", &plan.parent_path, Map::new()).await?;
+    if exit_code(&status) != 0 {
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&status, "Could not read parent project status."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+    if has_porcelain_status_changes(status.get("stdout").and_then(Value::as_str).unwrap_or("")) {
+        return Err(DomainStateError::bad_request(
+            "Commit or stash changes in the main project before merging this worktree.",
+        )
+        .into());
+    }
+
+    let mut checkout_params = Map::new();
+    checkout_params.insert("branch".to_string(), Value::String("main".to_string()));
+    let checkout =
+        run_project_git_action(&plan.projects, "checkout", &plan.parent_path, checkout_params)
+            .await?;
+    if exit_code(&checkout) != 0 {
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&checkout, "Could not checkout main."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+
+    let mut merge_params = Map::new();
+    merge_params.insert("branch".to_string(), Value::String(branch));
+    let merge =
+        run_project_git_action(&plan.projects, "merge", &plan.parent_path, merge_params).await?;
+    let status = if exit_code(&merge) == 0 {
+        "merged"
+    } else {
+        "conflicts"
+    };
+    Ok(json!({
+        "parentProjectId": plan.parent_project_id,
+        "status": status,
+    }))
+}
+
+async fn checkout_project_new_branch_for_commit(
+    state: &AppState,
+    params: &Map<String, Value>,
+) -> std::result::Result<Value, ProjectWorktreeOperationError> {
+    let project_id = read_project_id(params)?;
+    let branch_label = normalize_project_branch_label(params.get("branchLabel"))?;
+    let (projects, project_path) = resolve_registered_project_path(state, &project_id)?;
+    for index in 0..20 {
+        let branch = if index == 0 {
+            branch_label.clone()
+        } else {
+            format!("{branch_label}-{}", index + 1)
+        };
+        let mut verify_params = Map::new();
+        verify_params.insert(
+            "ref".to_string(),
+            Value::String(format!("refs/heads/{branch}")),
+        );
+        let exists =
+            run_project_git_action(&projects, "verifyRef", &project_path, verify_params).await?;
+        if exit_code(&exists) == 0 {
+            continue;
+        }
+        let mut checkout_params = Map::new();
+        checkout_params.insert("branch".to_string(), Value::String(branch));
+        let checkout =
+            run_project_git_action(&projects, "checkoutNewBranch", &project_path, checkout_params)
+                .await?;
+        if exit_code(&checkout) == 0 {
+            return Ok(json!({ "checkedOut": true }));
+        }
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&checkout, "Could not create a new branch."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+    Err(DomainStateError::bad_request("Could not create a unique branch.").into())
+}
+
+fn resolve_project_worktree_operation_context(
+    state: &AppState,
+    params: &Map<String, Value>,
+) -> std::result::Result<ProjectWorktreeOperationContext, ProjectWorktreeOperationError> {
+    let project_id = read_project_id(params)?;
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let projects = repository.list_projects()?;
+    let source_project = repository
+        .get_project(&project_id)?
+        .ok_or_else(|| DomainStateError::not_found(format!("Project {project_id} does not exist.")))?;
+    if source_project.get("isRecentProject").and_then(Value::as_bool) == Some(true) {
+        return Err(DomainStateError::bad_request(
+            "Restore the project before using worktree actions.",
+        )
+        .into());
+    }
+    let source_path = project_required_path(&source_project, "Project")?;
+    let source_path = normalize_existing_directory_path(
+        Some(&Value::String(source_path)),
+        "project.path",
+        &state.paths.home_dir,
+    )?;
+    let source_project_id = value_text(&source_project, "projectId")?;
+    let (parent_project, parent_project_id) =
+        if let Some(worktree) = normalize_worktree_metadata(source_project.get("worktree")) {
+            let parent_project = resolve_worktree_parent_project(&projects, &worktree)?;
+            let parent_project_id = value_text(&parent_project, "projectId")?;
+            (parent_project, parent_project_id)
+        } else {
+            (source_project.clone(), source_project_id.clone())
+        };
+    let parent_path = project_required_path(&parent_project, "Parent project")?;
+    let parent_path = normalize_existing_directory_path(
+        Some(&Value::String(parent_path)),
+        "parentProject.path",
+        &state.paths.home_dir,
+    )?;
+    Ok(ProjectWorktreeOperationContext {
+        parent_path,
+        parent_project,
+        parent_project_id,
+        projects,
+        source_path,
+        source_project_id,
+    })
+}
+
+async fn project_worktree_list_payload(
+    context: &ProjectWorktreeOperationContext,
+) -> std::result::Result<Value, ProjectWorktreeOperationError> {
+    let worktrees = project_worktree_options(context).await?;
+    let branches = project_worktree_base_branches(context).await?;
+    Ok(json!({
+        "branches": branches,
+        "parentProjectId": context.parent_project_id,
+        "sourceProjectId": context.source_project_id,
+        "worktrees": worktrees.into_iter().map(project_worktree_option_json).collect::<Vec<_>>(),
+    }))
+}
+
+async fn project_worktree_options(
+    context: &ProjectWorktreeOperationContext,
+) -> std::result::Result<Vec<ProjectWorktreeOptionRow>, ProjectWorktreeOperationError> {
+    let result =
+        run_project_worktree_action(&context.projects, "list", &context.parent_path, Map::new())
+            .await?;
+    if exit_code(&result) != 0 {
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&result, "Could not list worktrees."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+    let entries = result
+        .get("worktrees")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let main_path = entries
+        .iter()
+        .find(|entry| entry.get("bare").and_then(Value::as_bool) != Some(true))
+        .and_then(|entry| entry.get("path").and_then(Value::as_str))
+        .map(normalize_project_path_for_comparison)
+        .filter(|path| !path.is_empty())
+        .unwrap_or_else(|| normalize_project_path_for_comparison(&context.parent_path));
+    let source_path = normalize_project_path_for_comparison(&context.source_path);
+    let registered_paths = context
+        .projects
+        .iter()
+        .filter_map(|project| project.get("path").and_then(Value::as_str))
+        .map(normalize_project_path_for_comparison)
+        .collect::<HashSet<_>>();
+
+    let mut options = Vec::new();
+    for entry in entries {
+        if entry.get("bare").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let path = entry
+            .get("path")
+            .and_then(Value::as_str)
+            .map(normalize_project_path_for_comparison)
+            .unwrap_or_default();
+        if path.is_empty() || path == main_path {
+            continue;
+        }
+        let branch = entry
+            .get("branch")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        options.push(ProjectWorktreeOptionRow {
+            branch: branch.clone(),
+            is_current_project: path == source_path,
+            is_registered: registered_paths.contains(&path),
+            name: path_file_name_for_project(&path),
+            worktree_key: project_worktree_selection_key(&path, &branch),
+            path,
+        });
+    }
+    Ok(options)
+}
+
+async fn project_worktree_base_branches(
+    context: &ProjectWorktreeOperationContext,
+) -> std::result::Result<Value, ProjectWorktreeOperationError> {
+    let result =
+        run_project_git_action(&context.projects, "listBranches", &context.parent_path, Map::new())
+            .await?;
+    if exit_code(&result) != 0 {
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&result, "Could not list branches."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+    Ok(result
+        .get("branches")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new())))
+}
+
+async fn resolve_unique_project_worktree_target(
+    context: &ProjectWorktreeOperationContext,
+    name_hint: &str,
+) -> std::result::Result<ProjectWorktreeTarget, ProjectWorktreeOperationError> {
+    let source_path = Path::new(&context.source_path);
+    let parent_directory = source_path.parent().unwrap_or_else(|| Path::new("/"));
+    let project_folder_name = source_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("project");
+    let registered_paths = context
+        .projects
+        .iter()
+        .filter_map(|project| project.get("path").and_then(Value::as_str))
+        .map(normalize_project_path_for_comparison)
+        .collect::<HashSet<_>>();
+    for index in 0..50 {
+        let name = if index == 0 {
+            name_hint.to_string()
+        } else {
+            format!("{name_hint}-{}", index + 1)
+        };
+        let branch = name.clone();
+        let path = path_to_string(&parent_directory.join(format!("{project_folder_name}-{name}")));
+        let normalized_path = normalize_project_path_for_comparison(&path);
+        let mut branch_params = Map::new();
+        branch_params.insert(
+            "ref".to_string(),
+            Value::String(format!("refs/heads/{branch}")),
+        );
+        let mut path_params = Map::new();
+        path_params.insert("worktreePath".to_string(), Value::String(path.clone()));
+        let branch_check =
+            run_project_git_action(&context.projects, "verifyRef", &context.source_path, branch_params)
+                .await?;
+        let path_check =
+            run_project_worktree_action(&context.projects, "pathExists", &context.source_path, path_params)
+                .await?;
+        if exit_code(&branch_check) != 0
+            && exit_code(&path_check) != 0
+            && !registered_paths.contains(&normalized_path)
+        {
+            return Ok(ProjectWorktreeTarget {
+                branch,
+                name,
+                path: normalized_path,
+            });
+        }
+    }
+    Err(DomainStateError::bad_request("Could not create a unique worktree name.").into())
+}
+
+fn register_project_worktree_path(
+    state: &AppState,
+    path: &str,
+    name: &str,
+    delta_type: &str,
+) -> std::result::Result<Value, ProjectWorktreeOperationError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let mut params = Map::new();
+    params.insert("name".to_string(), Value::String(name.to_string()));
+    params.insert("path".to_string(), Value::String(path.to_string()));
+    let project = repository.add_project_path(&params)?;
+    let project_id = value_text(&project, "projectId")?;
+    schedule_presentation_project_delta(state, &db, &repository, &project_id, delta_type)?;
+    Ok(project)
+}
+
+async fn prepare_registered_worktree_project(
+    state: &AppState,
+    project: &Value,
+    setup_project_id: &str,
+) -> std::result::Result<(), ProjectWorktreeOperationError> {
+    let project_id = value_text(project, "projectId")?;
+    let projects = list_domain_projects(state)?;
+    let hooks =
+        run_project_worktree_action_by_project_id(&projects, "ensureBeadsHooks", &project_id, Map::new())
+            .await?;
+    if exit_code(&hooks) != 0 {
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&hooks, "Could not prepare Beads hooks."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+    let setup_project = projects
+        .iter()
+        .find(|candidate| candidate.get("projectId").and_then(Value::as_str) == Some(setup_project_id))
+        .cloned();
+    if setup_project
+        .as_ref()
+        .and_then(|project| project.get("gitConfig"))
+        .and_then(Value::as_object)
+        .and_then(|config| config.get("worktreeCommand"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+        .is_none()
+    {
+        return Ok(());
+    }
+    let mut setup_params = Map::new();
+    setup_params.insert(
+        "action".to_string(),
+        Value::String("worktreeSetupCommand".to_string()),
+    );
+    setup_params.insert("projectId".to_string(), Value::String(project_id));
+    setup_params.insert(
+        "setupCommandProjectId".to_string(),
+        Value::String(setup_project_id.to_string()),
+    );
+    let setup = dispatch_typed_operation_endpoint("/api/runProjectSetupCommand", &setup_params, projects)
+        .await?;
+    if exit_code(&setup) != 0 {
+        return Err(TypedOperationError {
+            code: "badRequest",
+            details: None,
+            message: operation_failure_message(&setup, "Worktree setup command failed."),
+            scope_rejection: false,
+        }
+        .into());
+    }
+    Ok(())
+}
+
+struct ProjectWorktreeMergePlan {
+    parent_path: String,
+    parent_project_id: String,
+    projects: Vec<Value>,
+    worktree_branch: Option<String>,
+    worktree_path: String,
+}
+
+fn prepare_project_worktree_merge_plan(
+    state: &AppState,
+    params: &Map<String, Value>,
+) -> std::result::Result<ProjectWorktreeMergePlan, ProjectWorktreeOperationError> {
+    let project_id = read_project_id(params)?;
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let projects = repository.list_projects()?;
+    let worktree_project = repository
+        .get_project(&project_id)?
+        .ok_or_else(|| DomainStateError::not_found(format!("Project {project_id} does not exist.")))?;
+    let worktree = normalize_worktree_metadata(worktree_project.get("worktree"))
+        .ok_or_else(|| DomainStateError::bad_request("Project is not a worktree."))?;
+    let parent_project = resolve_worktree_parent_project(&projects, &worktree)?;
+    let worktree_path = project_required_path(&worktree_project, "Worktree project")?;
+    let parent_path = project_required_path(&parent_project, "Parent project")?;
+    Ok(ProjectWorktreeMergePlan {
+        parent_path: normalize_existing_directory_path(
+            Some(&Value::String(parent_path)),
+            "parentProject.path",
+            &state.paths.home_dir,
+        )?,
+        parent_project_id: value_text(&parent_project, "projectId")?,
+        projects,
+        worktree_branch: worktree.branch,
+        worktree_path: normalize_existing_directory_path(
+            Some(&Value::String(worktree_path)),
+            "project.path",
+            &state.paths.home_dir,
+        )?,
+    })
+}
+
+async fn resolve_current_project_worktree_branch_name(
+    projects: &[Value],
+    worktree_path: &str,
+) -> std::result::Result<Option<String>, ProjectWorktreeOperationError> {
+    let branch = run_project_git_action(projects, "branch", worktree_path, Map::new()).await?;
+    if exit_code(&branch) == 0 {
+        if let Some(branch_name) = branch
+            .get("stdout")
+            .and_then(Value::as_str)
+            .and_then(normalize_branch_name)
+        {
+            return Ok(Some(branch_name));
+        }
+    }
+    Ok(None)
+}
+
+fn resolve_registered_project_path(
+    state: &AppState,
+    project_id: &str,
+) -> std::result::Result<(Vec<Value>, String), ProjectWorktreeOperationError> {
+    let projects = list_domain_projects(state)?;
+    let project = projects
+        .iter()
+        .find(|candidate| candidate.get("projectId").and_then(Value::as_str) == Some(project_id))
+        .ok_or_else(|| DomainStateError::not_found(format!("Project {project_id} does not exist.")))?;
+    let path = project_required_path(project, "Project")?;
+    let path = normalize_existing_directory_path(
+        Some(&Value::String(path)),
+        "project.path",
+        &state.paths.home_dir,
+    )?;
+    Ok((projects, path))
+}
+
+fn list_domain_projects(
+    state: &AppState,
+) -> std::result::Result<Vec<Value>, ProjectWorktreeOperationError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    repository.list_projects().map_err(Into::into)
+}
+
+async fn run_project_git_action(
+    projects: &[Value],
+    action: &str,
+    project_path: &str,
+    mut extra_params: Map<String, Value>,
+) -> std::result::Result<Value, ProjectWorktreeOperationError> {
+    extra_params.insert("action".to_string(), Value::String(action.to_string()));
+    extra_params.insert(
+        "projectPath".to_string(),
+        Value::String(project_path.to_string()),
+    );
+    dispatch_typed_operation_endpoint("/api/runGitAction", &extra_params, projects.to_vec())
+        .await
+        .map_err(Into::into)
+}
+
+async fn run_project_worktree_action(
+    projects: &[Value],
+    action: &str,
+    project_path: &str,
+    mut extra_params: Map<String, Value>,
+) -> std::result::Result<Value, ProjectWorktreeOperationError> {
+    extra_params.insert("action".to_string(), Value::String(action.to_string()));
+    extra_params.insert(
+        "projectPath".to_string(),
+        Value::String(project_path.to_string()),
+    );
+    dispatch_typed_operation_endpoint("/api/runWorktreeAction", &extra_params, projects.to_vec())
+        .await
+        .map_err(Into::into)
+}
+
+async fn run_project_worktree_action_by_project_id(
+    projects: &[Value],
+    action: &str,
+    project_id: &str,
+    mut extra_params: Map<String, Value>,
+) -> std::result::Result<Value, ProjectWorktreeOperationError> {
+    extra_params.insert("action".to_string(), Value::String(action.to_string()));
+    extra_params.insert("projectId".to_string(), Value::String(project_id.to_string()));
+    dispatch_typed_operation_endpoint("/api/runWorktreeAction", &extra_params, projects.to_vec())
+        .await
+        .map_err(Into::into)
+}
+
+fn project_worktree_operation_error_response(
+    endpoint_path: String,
+    request_id: String,
+    error: ProjectWorktreeOperationError,
+) -> RoutedResponse {
+    match error {
+        ProjectWorktreeOperationError::Domain(error) => {
+            domain_error_response(endpoint_path, request_id, error)
+        }
+        ProjectWorktreeOperationError::ProjectPath(error) => {
+            project_path_error_response(endpoint_path, request_id, error)
+        }
+        ProjectWorktreeOperationError::Typed(error) => {
+            typed_operation_error_response(endpoint_path, request_id, error)
+        }
+    }
+}
+
+fn project_worktree_option_json(option: ProjectWorktreeOptionRow) -> Value {
+    json!({
+        "branch": option.branch,
+        "isCurrentProject": option.is_current_project,
+        "isRegistered": option.is_registered,
+        "name": option.name,
+        "path": option.path,
+        "worktreeKey": option.worktree_key,
+    })
+}
+
+fn project_worktree_selection_key(path: &str, branch: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"gxserver-worktree-selection-v1\0");
+    hasher.update(path.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(branch.as_bytes());
+    let digest = hasher.finalize();
+    format!("W{}", hex_prefix(&digest, 32))
+}
+
+fn hex_prefix(bytes: &[u8], max_chars: usize) -> String {
+    let mut output = String::new();
+    for byte in bytes {
+        if output.len() >= max_chars {
+            break;
+        }
+        output.push_str(&format!("{byte:02x}"));
+    }
+    output.truncate(max_chars);
+    output
+}
+
+fn normalize_project_path_for_comparison(path: &str) -> String {
+    let normalized = path_to_string(&resolve_path_syntax(PathBuf::from(path.trim())));
+    if normalized == "/" {
+        normalized
+    } else {
+        normalized.trim_end_matches('/').to_string()
+    }
+}
+
+fn path_file_name_for_project(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Worktree")
+        .to_string()
+}
+
+fn project_required_path(project: &Value, label: &str) -> std::result::Result<String, DomainStateError> {
+    project
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| DomainStateError::bad_request(format!("{label} has no filesystem path.")))
+}
+
+fn normalize_project_worktree_key(input: Option<&Value>) -> std::result::Result<String, DomainStateError> {
+    let value = input
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| DomainStateError::bad_request("worktreeKey must be a non-empty string."))?;
+    if value.len() <= 80
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        Ok(value.to_string())
+    } else {
+        Err(DomainStateError::bad_request(
+            "worktreeKey contains unsupported characters.",
+        ))
+    }
+}
+
+fn normalize_project_worktree_git_ref(
+    input: Option<&Value>,
+    field: &str,
+) -> std::result::Result<String, DomainStateError> {
+    let value = input
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| DomainStateError::bad_request(format!("{field} must be a non-empty string.")))?;
+    if value.len() <= 200 && is_allowed_project_git_ref(value) {
+        Ok(value.to_string())
+    } else {
+        Err(DomainStateError::bad_request(format!(
+            "{field} is not an allowed Git ref."
+        )))
+    }
+}
+
+fn normalize_project_worktree_name_hint(
+    input: Option<&Value>,
+) -> std::result::Result<String, DomainStateError> {
+    let value = input
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| DomainStateError::bad_request("nameHint must be a non-empty string."))?;
+    normalize_project_slug_label(value, "nameHint")
+}
+
+fn normalize_project_branch_label(
+    input: Option<&Value>,
+) -> std::result::Result<String, DomainStateError> {
+    let value = input
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| DomainStateError::bad_request("branchLabel must be a non-empty string."))?;
+    normalize_project_slug_label(value, "branchLabel")
+}
+
+fn normalize_project_slug_label(
+    value: &str,
+    field: &str,
+) -> std::result::Result<String, DomainStateError> {
+    if value.chars().count() > 160 || value.contains('\0') {
+        return Err(DomainStateError::bad_request(format!(
+            "{field} exceeds the allowed label size."
+        )));
+    }
+    let mut output = String::new();
+    let mut last_was_dash = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            output.push(ch.to_ascii_lowercase());
+            last_was_dash = false;
+        } else if !last_was_dash {
+            output.push('-');
+            last_was_dash = true;
+        }
+        if output.len() >= 48 {
+            break;
+        }
+    }
+    let normalized = output.trim_matches('-').to_string();
+    if normalized.is_empty()
+        || !normalized
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+    {
+        return Err(DomainStateError::bad_request(format!(
+            "{field} must contain at least one ASCII letter or number."
+        )));
+    }
+    Ok(normalized)
+}
+
+fn is_allowed_project_git_ref(value: &str) -> bool {
+    let mut chars = value.chars();
+    matches!(chars.next(), Some(first) if first.is_ascii_alphanumeric())
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '/' | '-'))
+        && !value.contains("..")
+        && !value.contains("//")
+        && !value.ends_with('/')
 }
 
 #[derive(Clone)]
@@ -2960,6 +4612,7 @@ async fn handle_repository_clone_http(
         Err(error) => return domain_error_response(endpoint_path, request_id, error),
     };
     let runtime = RepositoryCloneRuntime {
+        event_hub: state.event_hub.clone(),
         logger: state.logger.clone(),
         paths: state.paths.clone(),
         server_id: state.metadata.server_id.clone(),

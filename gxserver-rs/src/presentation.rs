@@ -62,6 +62,12 @@ pub fn build_presentation_project_delta(
             "type": "projectRemoved",
         }));
     };
+    if project.get("isRecentProject").and_then(Value::as_bool) == Some(true) {
+        return Ok(json!({
+            "projectId": project_id,
+            "type": "projectRemoved",
+        }));
+    }
     Ok(json!({
         "domainProject": project,
         "project": project_presentation_project(&project),
@@ -144,6 +150,16 @@ fn project_snapshot(projects: Vec<Value>, sessions: Vec<Value>, revision: i64) -
     let mut groups = Vec::new();
     let mut presentation_sessions = Vec::new();
     for project in projects_sorted {
+        /*
+        CDXC:GPUIRecentProjects 2026-06-24-12:27:
+        Parked Recent Projects remain durable gxserver projects but are not
+        active sidebar presentation groups. The only sidebar drawer source for
+        them is `/api/listRecentProjects`, which returns explicit path-bearing
+        rows instead of deriving recency from inactive sessions or labels.
+        */
+        if project.get("isRecentProject").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
         let project_id = string_field(&project, "projectId").unwrap_or_default();
         let group_id = default_group_id(&project_id);
         let mut project_sessions = sessions
@@ -201,6 +217,9 @@ fn project_presentation_project(project: &Value) -> Value {
         "groupIds".to_string(),
         json!([default_group_id(&project_id)]),
     );
+    if let Some(git_config) = project_presentation_git_config(project) {
+        output.insert("gitConfig".to_string(), git_config);
+    }
     output.insert("isFavorite".to_string(), value_field(project, "isFavorite"));
     output.insert("isPinned".to_string(), value_field(project, "isPinned"));
     insert_optional_value(&mut output, "path", project.get("path").cloned());
@@ -213,6 +232,44 @@ fn project_presentation_project(project: &Value) -> Value {
     output.insert("updatedAt".to_string(), value_field(project, "updatedAt"));
     insert_optional_value(&mut output, "worktree", project.get("worktree").cloned());
     Value::Object(output)
+}
+
+fn project_presentation_git_config(project: &Value) -> Option<Value> {
+    /*
+    CDXC:GPUIRemoteGit 2026-06-24-18:22:
+    Presentation may expose only Git preference keys needed by reused sidebar controls. Do not forward arbitrary project gitConfig values, command text, paths, URLs, branch names, tokens, or daemon output through remote sidebar presentation.
+    */
+    let source = project.get("gitConfig")?.as_object()?;
+    let mut output = Map::new();
+    if let Some(confirm_commit) = source.get("confirmCommit").and_then(Value::as_bool) {
+        output.insert("confirmCommit".to_string(), Value::Bool(confirm_commit));
+    }
+    if let Some(generate_commit_body) =
+        source.get("generateCommitBody").and_then(Value::as_bool)
+    {
+        output.insert(
+            "generateCommitBody".to_string(),
+            Value::Bool(generate_commit_body),
+        );
+    }
+    if let Some(primary_action) = source
+        .get("primaryAction")
+        .and_then(Value::as_str)
+        .filter(|value| is_presentation_git_action(*value))
+    {
+        output.insert(
+            "primaryAction".to_string(),
+            Value::String(primary_action.to_string()),
+        );
+    }
+    (!output.is_empty()).then(|| Value::Object(output))
+}
+
+fn is_presentation_git_action(value: &str) -> bool {
+    matches!(
+        value,
+        "commit" | "push" | "pr" | "syncRemote" | "syncMain" | "multiRelease" | "release"
+    )
 }
 
 fn project_presentation_session(

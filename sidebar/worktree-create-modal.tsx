@@ -42,11 +42,24 @@ export type ExistingWorktreeOption = {
   isRegistered?: boolean;
   name: string;
   path: string;
+  worktreeKey?: string;
+};
+
+export type WorktreeBaseBranchOption = {
+  current?: boolean;
+  name: string;
+  remote?: boolean;
 };
 
 export type WorktreeCreateModalDraft =
-  | { agentId: string; mode: "create"; prompt: string }
-  | { existingWorktreePath: string; mode: "openExisting" };
+  | { agentId: string; baseBranch: string; mode: "create"; prompt: string }
+  | {
+      agentId?: string;
+      existingWorktreeKey?: string;
+      existingWorktreePath: string;
+      mode: "openExisting";
+      prompt?: string;
+    };
 
 export type WorktreeCreateModalProps = {
   agents: SidebarAgentButton[];
@@ -61,6 +74,7 @@ export type WorktreeCreateModalProps = {
 type WorktreeCreateMode = WorktreeCreateModalDraft["mode"];
 
 type ProjectWorktreesResultMessage = {
+  branches?: unknown;
   error?: unknown;
   ok: boolean;
   requestId: string;
@@ -80,6 +94,7 @@ export function WorktreeCreateModal({
   const promptId = useId();
   const agentId = useId();
   const existingWorktreeId = useId();
+  const baseBranchId = useId();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const userInteractedAfterOpenRef = useRef(false);
   const worktreeListRequestIdRef = useRef<string | undefined>(undefined);
@@ -94,8 +109,10 @@ export function WorktreeCreateModal({
   const [prompt, setPrompt] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState(commandAgents[0]?.agentId ?? "");
   const [mode, setMode] = useState<WorktreeCreateMode>("create");
+  const [baseBranches, setBaseBranches] = useState<WorktreeBaseBranchOption[]>([]);
+  const [selectedBaseBranch, setSelectedBaseBranch] = useState("");
   const [existingWorktrees, setExistingWorktrees] = useState<ExistingWorktreeOption[]>([]);
-  const [selectedExistingWorktreePath, setSelectedExistingWorktreePath] = useState("");
+  const [selectedExistingWorktreeValue, setSelectedExistingWorktreeValue] = useState("");
   const [worktreeListError, setWorktreeListError] = useState<string | undefined>(undefined);
   const [isLoadingWorktrees, setIsLoadingWorktrees] = useState(false);
   const [imageCount, setImageCount] = useState(0);
@@ -126,20 +143,34 @@ export function WorktreeCreateModal({
    * the modal opens and submit carries the selected path so native registers and
    * opens it through gxserver.
    *
-   * CDXC:WorktreeProjectRegistration 2026-06-01-21:33:
-   * Open Existing is a project-open flow, not an agent-start flow. In that mode
-   * the modal only shows the worktree picker and primary Open Worktree action;
-   * hide agent, prompt, image attachment, and prompt-helper controls.
+   * CDXC:GPUIWorktrees 2026-06-24-14:06:
+   * Open Existing remains valid as a project-open-only flow when the first
+   * prompt is blank. When the user enters a prompt, the reused modal must carry
+   * that prompt plus the visible selected agent with the trusted worktree path
+   * so macOS and GPUI can start the real agent session without inventing a
+   * default prompt or accepting arbitrary renderer paths.
    *
    * CDXC:WorktreeModal 2026-06-13-18:39:
    * Add Worktree should close from the same top-right shadcn X used by Rename
    * Session. Do not keep a footer Cancel row; the bottom of the modal should
-   * be reserved for the primary worktree action and create-mode image picker.
+   * be reserved for the primary worktree action and shared prompt image picker.
    *
    * CDXC:WorktreeModal 2026-06-15-11:30:
    * Add Worktree opens in the same hidden native child-window host as Rename
    * Session, so the first-prompt textarea must retry focus across native
    * window activation and stop retrying after any user click or key input.
+   *
+   * CDXC:WorktreeBaseBranch 2026-06-24-11:32:
+   * Creating a new Git worktree must expose the source branch explicitly. The
+   * modal loads branch options with the existing worktree request, requires one
+   * selected base branch for create mode, and sends that branch through submit
+   * so backend creation does not silently default to HEAD.
+   *
+   * CDXC:RemoteWorktrees 2026-06-24-18:40:
+   * Remote Open Existing selections may carry an opaque gxserver worktree key in
+   * addition to the display path. Submit both fields so remote GPUI can send
+   * only the list-derived key back to the owning daemon while local/native
+   * receivers continue to use the selected path.
    */
   const hasInitializedOpenDraftRef = useRef(false);
   useEffect(() => {
@@ -157,8 +188,10 @@ export function WorktreeCreateModal({
     setPrompt("");
     setImageCount(0);
     setMode("create");
+    setBaseBranches([]);
+    setSelectedBaseBranch("");
     setExistingWorktrees([]);
-    setSelectedExistingWorktreePath("");
+    setSelectedExistingWorktreeValue("");
     setWorktreeListError(undefined);
     setSelectedAgentId(resolveInitialWorktreeAgentId(commandAgents, defaultAgentId));
     if (onRequestExistingWorktrees) {
@@ -232,8 +265,8 @@ export function WorktreeCreateModal({
   const trimmedPrompt = normalizedPrompt.trim();
   const canCreate = Boolean(
     mode === "openExisting"
-      ? selectedExistingWorktreePath
-      : trimmedPrompt && selectedAgentId,
+      ? selectedExistingWorktreeValue && (!trimmedPrompt || selectedAgentId)
+      : trimmedPrompt && selectedAgentId && selectedBaseBranch,
   );
 
   const insertImageLinks = (files: readonly File[]) => {
@@ -288,7 +321,16 @@ export function WorktreeCreateModal({
     if (!canCreate) {
       return;
     }
-    onConfirm(createDraft(mode, selectedAgentId, trimmedPrompt, selectedExistingWorktreePath));
+    onConfirm(
+      createDraft(
+        mode,
+        selectedAgentId,
+        selectedBaseBranch,
+        trimmedPrompt,
+        selectedExistingWorktreeValue,
+        existingWorktrees,
+      ),
+    );
   };
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -298,7 +340,16 @@ export function WorktreeCreateModal({
     event.preventDefault();
     event.stopPropagation();
     if (canCreate) {
-      onConfirm(createDraft(mode, selectedAgentId, trimmedPrompt, selectedExistingWorktreePath));
+      onConfirm(
+        createDraft(
+          mode,
+          selectedAgentId,
+          selectedBaseBranch,
+          trimmedPrompt,
+          selectedExistingWorktreeValue,
+          existingWorktrees,
+        ),
+      );
     }
   };
 
@@ -342,15 +393,24 @@ export function WorktreeCreateModal({
             setWorktreeListError(
               typeof result.error === "string" ? result.error : "Could not load existing worktrees.",
             );
+            setBaseBranches([]);
+            setSelectedBaseBranch("");
             setExistingWorktrees([]);
             return;
           }
+          const branches = normalizeWorktreeBaseBranchOptions(result.branches);
+          setBaseBranches(branches);
+          setSelectedBaseBranch((current) =>
+            branches.some((branch) => branch.name === current)
+              ? current
+              : branches.find((branch) => branch.current)?.name ?? branches[0]?.name ?? "",
+          );
           const worktrees = normalizeExistingWorktreeOptions(result.worktrees);
           setExistingWorktrees(worktrees);
-          setSelectedExistingWorktreePath((current) =>
-            worktrees.some((worktree) => worktree.path === current)
+          setSelectedExistingWorktreeValue((current) =>
+            worktrees.some((worktree) => existingWorktreeOptionValue(worktree) === current)
               ? current
-              : worktrees.find((worktree) => !worktree.isRegistered)?.path ?? worktrees[0]?.path ?? "",
+              : existingWorktreeOptionValue(worktrees.find((worktree) => !worktree.isRegistered) ?? worktrees[0]),
           );
           return;
         }
@@ -427,8 +487,8 @@ export function WorktreeCreateModal({
               <Field>
                 <FieldLabel htmlFor={existingWorktreeId}>Existing worktree</FieldLabel>
                 <Select
-                  onValueChange={setSelectedExistingWorktreePath}
-                  value={selectedExistingWorktreePath}
+                  onValueChange={setSelectedExistingWorktreeValue}
+                  value={selectedExistingWorktreeValue}
                 >
                   <SelectTrigger
                     aria-label="Existing worktree"
@@ -441,8 +501,8 @@ export function WorktreeCreateModal({
                     <SelectGroup>
                       {existingWorktrees.map((worktree) => (
                         <SelectItem
-                          key={worktree.path}
-                          value={worktree.path}
+                          key={existingWorktreeOptionValue(worktree)}
+                          value={existingWorktreeOptionValue(worktree)}
                         >
                           {worktree.name} {worktree.branch ? `(${worktree.branch})` : ""}
                         </SelectItem>
@@ -452,74 +512,106 @@ export function WorktreeCreateModal({
                 </Select>
                 <FieldDescription>
                   {worktreeListError ??
-                    (selectedExistingWorktreePath ||
+                    (selectedExistingWorktreeDisplayPath(existingWorktrees, selectedExistingWorktreeValue) ||
                       (isLoadingWorktrees ? "Loading existing worktrees." : "No existing worktrees found."))}
                 </FieldDescription>
               </Field>
             ) : null}
             {mode === "create" ? (
-              <>
-                <Field>
-                  <FieldLabel htmlFor={agentId}>Agent</FieldLabel>
-                  <Select
-                    items={agentSelectItems}
-                    onValueChange={setSelectedAgentId}
-                    value={selectedAgentId}
+              <Field>
+                <FieldLabel htmlFor={baseBranchId}>Base branch</FieldLabel>
+                <Select
+                  onValueChange={setSelectedBaseBranch}
+                  value={selectedBaseBranch}
+                >
+                  <SelectTrigger
+                    aria-label="Base branch"
+                    className="worktree-create-base-branch-select"
+                    id={baseBranchId}
                   >
-                    <SelectTrigger
-                      aria-label="Agent"
-                      className="worktree-create-agent-select"
-                      id={agentId}
-                    >
-                      <SelectValue placeholder="Select agent" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {commandAgents.map((agent) => (
-                          <SelectItem key={agent.agentId} value={agent.agentId}>
-                            {agent.name}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={promptId}>First prompt</FieldLabel>
-                  <Textarea
-                    aria-label="First prompt"
-                    autoFocus
-                    id={promptId}
-                    onChange={(event) => setPrompt(event.currentTarget.value)}
-                    onKeyDown={handleKeyDown}
-                    onPaste={handlePaste}
-                    placeholder="Describe the worktree task"
-                    ref={inputRef}
-                    value={prompt}
-                  />
+                    <SelectValue placeholder={isLoadingWorktrees ? "Loading branches" : "Select branch"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {baseBranches.map((branch) => (
+                        <SelectItem key={branch.name} value={branch.name}>
+                          {branch.name}
+                          {branch.current ? " (current)" : branch.remote ? " (remote)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                {!selectedBaseBranch ? (
                   <FieldDescription>
-                    Paste images or pick files to insert image links into the prompt.
+                    {isLoadingWorktrees ? "Loading branches." : "No branches found."}
                   </FieldDescription>
-                </Field>
-              </>
+                ) : null}
+              </Field>
             ) : null}
+            <Field>
+              <FieldLabel htmlFor={agentId}>Agent</FieldLabel>
+              <Select
+                items={agentSelectItems}
+                onValueChange={setSelectedAgentId}
+                value={selectedAgentId}
+              >
+                <SelectTrigger
+                  aria-label="Agent"
+                  className="worktree-create-agent-select"
+                  id={agentId}
+                >
+                  <SelectValue placeholder="Select agent" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {commandAgents.map((agent) => (
+                      <SelectItem key={agent.agentId} value={agent.agentId}>
+                        {agent.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={promptId}>
+                {mode === "openExisting" ? "First prompt (optional)" : "First prompt"}
+              </FieldLabel>
+              <Textarea
+                aria-label="First prompt"
+                autoFocus
+                id={promptId}
+                onChange={(event) => setPrompt(event.currentTarget.value)}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                placeholder={
+                  mode === "openExisting"
+                    ? "Optional prompt after opening"
+                    : "Describe the worktree task"
+                }
+                ref={inputRef}
+                value={prompt}
+              />
+              <FieldDescription>
+                Paste images or pick files to insert image links into the prompt.
+              </FieldDescription>
+            </Field>
           </FieldGroup>
           <DialogFooter>
-            {mode === "create" ? (
-              <Button
-                onClick={() =>
-                  postAppModalHostMessage(
-                    { type: "pickWorktreeImages" },
-                    "AppModals:pickWorktreeImages",
-                  )
-                }
-                type="button"
-                variant="secondary"
-              >
-                <IconPhotoPlus aria-hidden="true" data-icon="inline-start" />
-                Add Images
-              </Button>
-            ) : null}
+            <Button
+              onClick={() =>
+                postAppModalHostMessage(
+                  { type: "pickWorktreeImages" },
+                  "AppModals:pickWorktreeImages",
+                )
+              }
+              type="button"
+              variant="secondary"
+            >
+              <IconPhotoPlus aria-hidden="true" data-icon="inline-start" />
+              Add Images
+            </Button>
             <Button disabled={!canCreate} type="submit">
               {mode === "openExisting" ? "Open Worktree" : "New Worktree"}
             </Button>
@@ -544,16 +636,60 @@ function resolveInitialWorktreeAgentId(
 function createDraft(
   mode: WorktreeCreateMode,
   agentId: string,
+  baseBranch: string,
   prompt: string,
-  existingWorktreePath: string,
+  existingWorktreeValue: string,
+  existingWorktrees: readonly ExistingWorktreeOption[],
 ): WorktreeCreateModalDraft {
   if (mode === "openExisting") {
+    const openExistingPrompt = prompt.trim();
+    const selectedWorktree = existingWorktrees.find(
+      (worktree) => existingWorktreeOptionValue(worktree) === existingWorktreeValue,
+    );
     return {
-      existingWorktreePath,
+      ...(openExistingPrompt ? { agentId, prompt: openExistingPrompt } : {}),
+      ...(selectedWorktree?.worktreeKey ? { existingWorktreeKey: selectedWorktree.worktreeKey } : {}),
+      existingWorktreePath: selectedWorktree?.path ?? existingWorktreeValue,
       mode,
     };
   }
-  return { agentId, mode, prompt };
+  return { agentId, baseBranch, mode, prompt };
+}
+
+function existingWorktreeOptionValue(worktree: ExistingWorktreeOption | undefined): string {
+  return worktree?.worktreeKey?.trim() || worktree?.path?.trim() || "";
+}
+
+function selectedExistingWorktreeDisplayPath(
+  worktrees: readonly ExistingWorktreeOption[],
+  value: string,
+): string {
+  return worktrees.find((worktree) => existingWorktreeOptionValue(worktree) === value)?.path ?? "";
+}
+
+function normalizeWorktreeBaseBranchOptions(candidate: unknown): WorktreeBaseBranchOption[] {
+  if (!Array.isArray(candidate)) {
+    return [];
+  }
+  const seenBranches = new Set<string>();
+  return candidate.flatMap((entry): WorktreeBaseBranchOption[] => {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+    const branch = entry as Partial<WorktreeBaseBranchOption>;
+    const name = branch.name?.trim();
+    if (!name || seenBranches.has(name)) {
+      return [];
+    }
+    seenBranches.add(name);
+    return [
+      {
+        current: branch.current === true,
+        name,
+        remote: branch.remote === true,
+      },
+    ];
+  });
 }
 
 function normalizeExistingWorktreeOptions(candidate: unknown): ExistingWorktreeOption[] {
@@ -577,6 +713,7 @@ function normalizeExistingWorktreeOptions(candidate: unknown): ExistingWorktreeO
         isRegistered: worktree.isRegistered === true,
         name,
         path,
+        ...(worktree.worktreeKey?.trim() ? { worktreeKey: worktree.worktreeKey.trim() } : {}),
       },
     ];
   });

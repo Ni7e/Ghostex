@@ -230,6 +230,11 @@ export function RemoteProjectPickerModal({
        * that machine's gxserver, hidden folders appear only for a dot prefix,
        * Enter adds the typed/exact path, and highlighted directories require
        * the primary modifier plus Enter to add instead of navigate.
+       *
+       * CDXC:RemoteProjectPicker 2026-06-24-21:09:
+       * Worktree Add Project should open from the top of the native child window
+       * with equal top and side insets. The path input also needs explicit inline
+       * text padding so typed project paths do not hug the input border or action.
        */}
       <Command
         key={`${browseGeneration}-${isBrowsing}`}
@@ -240,7 +245,10 @@ export function RemoteProjectPickerModal({
       >
         <div className="relative">
           <CommandInput
-            className={isBrowsing ? (willCreateProjectPath ? "pr-36" : "pr-20") : undefined}
+            className={cn(
+              "remote-project-picker-input",
+              isBrowsing ? (willCreateProjectPath ? "pr-36" : "pr-20") : undefined,
+            )}
             onKeyDown={handleKeyDown}
             onValueChange={(value) => {
               setHighlightedItemValue(null);

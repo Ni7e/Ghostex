@@ -33,6 +33,7 @@ import {
   readAndroidReadinessSettings,
   requestGxserverRpc,
   resolveBundledBeadsLaunchFromRoot,
+  resolveCliInteractiveShellLaunch,
   resolveGxserverCliLaunchFromRoot,
   resolveGxserverCliLaunchForPath,
   resolveGxserverServerTarget,
@@ -1562,6 +1563,33 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
     expect(line).not.toContain("group:");
   });
 
+  test("resolves attach shell per remote platform", () => {
+    /**
+     * CDXC:RemoteUbuntuAttach 2026-06-24-22:32:
+     * Ubuntu remote attaches run the same bundled Node CLI as macOS, but the
+     * process wrapper must use an installed POSIX shell instead of assuming
+     * `/bin/zsh` exists. macOS stays pinned to `/bin/zsh` to avoid changing the
+     * local app attach environment.
+     */
+    expect(resolveCliInteractiveShellLaunch({
+      env: { SHELL: "/bin/bash" },
+      isExecutable: () => false,
+      platform: "darwin",
+    })).toEqual({ commandFlag: "-lc", executable: "/bin/zsh", loginFlag: "-l" });
+
+    expect(resolveCliInteractiveShellLaunch({
+      env: { SHELL: "/usr/bin/bash" },
+      isExecutable: (candidate) => candidate === "/usr/bin/bash",
+      platform: "linux",
+    })).toEqual({ commandFlag: "-lc", executable: "/usr/bin/bash", loginFlag: "-l" });
+
+    expect(resolveCliInteractiveShellLaunch({
+      env: { SHELL: "/usr/bin/fish" },
+      isExecutable: (candidate) => candidate === "/bin/sh",
+      platform: "linux",
+    })).toEqual({ commandFlag: "-c", executable: "/bin/sh", loginFlag: "" });
+  });
+
   test("creates a missing zmx session with the agent resume command before attach", () => {
     /**
      * CDXC:AndroidRemoteSessions 2026-05-21-07:21:
@@ -1582,10 +1610,15 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
     expect(command).toContain("zmx list --short");
     expect(command).toContain('exec zmx attach "$zmx_session"');
     expect(command).toContain(
-      'exec zmx attach "$zmx_session" /bin/zsh -lc "$zmx_resume_launcher"',
+      'exec zmx attach "$zmx_session" "$zmx_resume_shell" "$zmx_resume_shell_flag" "$zmx_resume_launcher"',
     );
+    expect(command).toContain("zmx_resume_shell=");
+    expect(command).toContain("/bin/zsh");
+    expect(command).toContain("zmx_resume_shell_flag=");
+    expect(command).toContain("-lc");
     expect(command).toContain("codex resume");
-    expect(command).toContain('exec "${SHELL:-/bin/zsh}" -l');
+    expect(command).toContain("zmx_keepalive_shell=${SHELL:-/bin/zsh}");
+    expect(command).toContain('exec "$zmx_keepalive_shell" "$zmx_keepalive_shell_login_flag"');
     expect(command).toContain("Leaving this pane open for inspection.");
   });
 
@@ -1603,7 +1636,7 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
 
     expect(command).toContain("zmx_resume_fallback_command=");
     expect(command).toContain("Exact resume failed; trying saved fallback resume command.");
-    expect(command).toContain('/bin/zsh -lc "$zmx_resume_fallback_command"');
+    expect(command).toContain('"$zmx_resume_shell" "$zmx_resume_shell_flag" "$zmx_resume_fallback_command"');
   });
 
   test("uses full zmx replay for live attach sessions", () => {

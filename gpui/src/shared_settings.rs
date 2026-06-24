@@ -1,0 +1,1712 @@
+use std::{
+    collections::hash_map::DefaultHasher,
+    env,
+    ffi::OsString,
+    fs,
+    hash::Hasher as _,
+    io,
+    path::{Path, PathBuf},
+    process,
+    sync::{Mutex, OnceLock},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use serde_json::{Map, Value};
+
+pub const PROJECT_EDITOR_AUTO_SLEEP_DEFAULT_IDLE_MINUTES: f64 = 5.0;
+pub const PROJECT_EDITOR_AUTO_SLEEP_MAX_IDLE_MINUTES: f64 = 300.0;
+pub const DEFAULT_TERMINAL_FONT_SIZE: f32 = 13.0;
+pub const MIN_TERMINAL_FONT_SIZE: f32 = 8.0;
+pub const MAX_TERMINAL_FONT_SIZE: f32 = 32.0;
+pub const DEFAULT_AGENT_ACCEPT_ALL_ENABLED: bool = true;
+pub const DEFAULT_PROMPT_AGENT_ID: &str = "codex";
+pub const MAX_DEFAULT_PROMPT_AGENT_ID_LEN: usize = 120;
+pub const DEFAULT_DEFAULT_EDITOR_COMMAND: &str = "code";
+pub const DEFAULT_KEEP_AWAKE_DURATION_MINUTES: SharedKeepAwakeDurationMinutes =
+    SharedKeepAwakeDurationMinutes::UntilTurnedOff;
+pub const DEFAULT_KEEP_AWAKE_ALLOW_DISPLAY_SLEEP: bool = false;
+pub const DEFAULT_HIDE_KEEP_AWAKE_TITLEBAR_CONTROL: bool = false;
+const MAX_CUSTOM_DEFAULT_EDITOR_COMMAND_CHARS: usize = 240;
+const DEFAULT_TERMINAL_CURSOR_STYLE: &str = "bar";
+const DEFAULT_TERMINAL_FONT_FAMILY: &str = "JetBrains Mono";
+const DEFAULT_TERMINAL_FONT_WEIGHT: f64 = 300.0;
+const NORMAL_TERMINAL_FONT_WEIGHT: f64 = 400.0;
+const DEFAULT_TERMINAL_GHOSTTY_THEME: &str = "GitHub Dark";
+const DEFAULT_TERMINAL_LETTER_SPACING: f64 = 0.0;
+const DEFAULT_TERMINAL_LINE_HEIGHT: f64 = 1.2;
+const DEFAULT_TERMINAL_CURSOR_STYLE_BLINK: bool = true;
+const DEFAULT_TERMINAL_SCROLLBACK_LIMIT_MB: f64 = 15.0;
+const DEFAULT_TERMINAL_COPY_ON_SELECT: &str = "false";
+const DEFAULT_TERMINAL_CONFIRM_CLOSE_SURFACE: &str = "true";
+const DEFAULT_TERMINAL_CLIPBOARD_TRIM_TRAILING_SPACES: bool = true;
+const DEFAULT_TERMINAL_CLIPBOARD_PASTE_PROTECTION: bool = true;
+const DEFAULT_TERMINAL_MOUSE_HIDE_WHILE_TYPING: bool = false;
+const DEFAULT_TERMINAL_SCROLLBAR: &str = "system";
+const DEFAULT_TERMINAL_MOUSE_SCROLL_MULTIPLIER_DISCRETE: f64 = 1.0;
+const DEFAULT_TERMINAL_MOUSE_SCROLL_MULTIPLIER_PRECISION: f64 = 1.0;
+const MIN_TERMINAL_FONT_WEIGHT: f64 = 100.0;
+const MAX_TERMINAL_FONT_WEIGHT: f64 = 900.0;
+const MIN_TERMINAL_LINE_HEIGHT: f64 = 0.8;
+const MAX_TERMINAL_LINE_HEIGHT: f64 = 2.0;
+const MIN_TERMINAL_LETTER_SPACING: f64 = -2.0;
+const MAX_TERMINAL_LETTER_SPACING: f64 = 8.0;
+const MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER: f64 = 0.25;
+const MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER: f64 = 8.0;
+const MIN_GHOSTTY_SCROLLBACK_LIMIT_MB: f64 = 1.0;
+const MAX_GHOSTTY_SCROLLBACK_LIMIT_MB: f64 = 200.0;
+const GHOSTTY_THEME_UNMANAGED_SENTINEL: &str = "__ghostex_ghostty_theme_unmanaged__";
+const GHOSTTY_CONFIG_DEFAULT_RELATIVE_PATH: &str =
+    "Library/Application Support/com.mitchellh.ghostty/config.ghostty";
+const GHOSTTY_CONFIG_CANDIDATE_RELATIVE_PATHS: &[&str] = &[
+    "Library/Application Support/com.mitchellh.ghostty/config.ghostty",
+    "Library/Application Support/com.ghostty.org/config.ghostty",
+    "Library/Application Support/Ghostty/config.ghostty",
+    "Library/Application Support/com.mitchellh.ghostty/config",
+    "Library/Application Support/com.ghostty.org/config",
+    "Library/Application Support/Ghostty/config",
+];
+const GHOSTEX_GHOSTTY_MANAGED_CONFIG_KEYS: &[&str] = &[
+    "adjust-cell-height",
+    "adjust-cell-width",
+    "background",
+    "clipboard-paste-protection",
+    "clipboard-trim-trailing-spaces",
+    "confirm-close-surface",
+    "copy-on-select",
+    "cursor-color",
+    "cursor-style",
+    "cursor-style-blink",
+    "font-family",
+    "font-variation",
+    "font-size",
+    "font-thicken",
+    "font-thicken-strength",
+    "foreground",
+    "macos-option-as-alt",
+    "mouse-hide-while-typing",
+    "mouse-scroll-multiplier",
+    "mouse-shift-capture",
+    "scrollback-limit",
+    "scrollbar",
+    "selection-background",
+    "shell-integration-features",
+    "split-divider-color",
+    "theme",
+    "unfocused-split-opacity",
+];
+const GHOSTEX_GHOSTTY_TERMINAL_MANAGED_CONFIG_KEYS: &[&str] = &[
+    "adjust-cell-height",
+    "adjust-cell-width",
+    "background",
+    "clipboard-paste-protection",
+    "clipboard-trim-trailing-spaces",
+    "confirm-close-surface",
+    "copy-on-select",
+    "cursor-color",
+    "cursor-style",
+    "cursor-style-blink",
+    "font-size",
+    "font-thicken",
+    "font-thicken-strength",
+    "foreground",
+    "macos-option-as-alt",
+    "mouse-hide-while-typing",
+    "mouse-scroll-multiplier",
+    "mouse-shift-capture",
+    "scrollbar",
+    "scrollback-limit",
+    "selection-background",
+    "shell-integration-features",
+    "split-divider-color",
+    "unfocused-split-opacity",
+];
+const GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES: &[&str] = &[
+    "# Applied by Ghostex:",
+    "theme = GitHub Dark",
+    "background = #000000",
+    "foreground = #ffffff",
+    "palette = 6=#39c5cf",
+    "selection-background = #07284f",
+    "cursor-style = bar",
+    "cursor-color = #FFFFFF",
+    "cursor-style-blink = true",
+    "",
+    "unfocused-split-opacity = 1",
+    "split-divider-color = #8f8f8f",
+    "mouse-shift-capture = always",
+    "keybind = super+e=toggle_command_palette",
+    "macos-option-as-alt = true",
+    "shell-integration-features = ssh-env,ssh-terminfo",
+    "",
+    "font-family = \"JetBrains Mono\"",
+    "font-size = 13",
+    "adjust-cell-height = 20%",
+    "adjust-cell-width = 0",
+    "scrollback-limit = 15000000",
+    "clipboard-trim-trailing-spaces = true",
+    "clipboard-paste-protection = true",
+    "copy-on-select = false",
+    "confirm-close-surface = true",
+    "mouse-hide-while-typing = false",
+    "scrollbar = system",
+    "mouse-scroll-multiplier = precision:1,discrete:1",
+    "font-variation = wght=300",
+];
+
+static SHARED_SIDEBAR_SETTINGS_SERVICE: OnceLock<Mutex<SharedSidebarSettingsService>> =
+    OnceLock::new();
+
+/*
+CDXC:GPUISettingsService 2026-06-24-10:50:
+GPUI must read and persist the same shared sidebar settings JSON as the macOS sidebar: `GHOSTEX_HOME/state/native-sidebar-settings.json` when `GHOSTEX_HOME` is set, otherwise the existing GPUI shared root under the user's `.ghostex` home. Keep this module as the single GPUI path/read/write contract so Settings UI parity handles `updateSettings` without introducing a second settings store.
+
+CDXC:GPUISettingsService 2026-06-24-10:50:
+Rust should parse only the GPUI runtime fields it consumes today: debuggingMode, showBetaFeatures, browserFeedbackTool, sidebarDefaultWidthPx, project-editor auto-sleep fields, Agents Hub default-editor command fields, and the supported embedded Ghostty surface font-size field. The raw JSON object is preserved for whole-object writes, but this service intentionally does not duplicate the full TypeScript `ghostexSettings` schema.
+
+CDXC:GPUISettingsService 2026-06-24-10:50:
+GPUI `updateSettings` handling needs a production write path: accept only JSON object payloads, create the shared state directory, write through an adjacent temp file then rename, skip byte-identical writes, and maintain a monotonic in-memory revision/hash/snapshot signal without logging paths, project names, URLs, commands, environment values, tokens, stdout/stderr, or user-owned content.
+
+CDXC:GPUISettingsService 2026-06-24-11:14:
+The real React app-modal host now saves through GPUI, so the service exposes immutable snapshot object reads and a central object write entrypoint. Keep validation at this boundary: only object-shaped Settings payloads may persist, and callers must use the returned snapshot for post-save hydration instead of re-reading the settings file ad hoc.
+
+CDXC:GPUITerminalSettings 2026-06-24-11:27:
+GPUI-owned embedded Ghostty surfaces may consume shared Settings directly only for FFI fields that already exist on `ghostty_surface_config_s` and are safe for the surface request boundary. Today that means the normalized `terminalFontSize` number mapped to `font_size`; font family, themes, scrollback, clipboard behavior, command/cwd/env, terminal content, paths, URLs, tokens, and raw settings payloads stay out of this GPUI FFI parse layer until a direct safe runtime path exists.
+
+CDXC:GPUISettingsGxserverAgentPolicy 2026-06-24-11:39:
+GPUI Settings matches macOS for gxserver-owned agent launch policy: `agentAcceptAllEnabled` and `defaultPromptAgentId` remain in shared Settings only as a synchronous render cache. Parse them with the same default/normalization semantics as the TypeScript settings schema so GPUI can compare saves and reconcile gxserver canonical responses without duplicating the full settings model.
+
+CDXC:GPUISettingsGhosttyConfig 2026-06-24-12:24:
+GPUI Settings owns a bounded Ghostty config-file writer, not an arbitrary path bridge. Select only the same Application Support config candidates used by macOS, create the preferred `com.mitchellh.ghostty/config.ghostty` file when none exist, merge only Ghostex-managed keys plus the owned Cmd+E keybind and palette slot, and never accept config paths from React or shared Settings JSON.
+
+CDXC:GPUISettingsGhosttyConfig 2026-06-24-12:24:
+GPUI can write Ghostty's config file for external Ghostty reloads and future/recreated embedded surfaces, but the current GPUI GhosttyKit wrapper exposes no safe app config reload/update FFI. Do not claim live embedded terminal reload, do not drop running surfaces as a fallback, and surface file write/open failures explicitly without creating a second config file.
+*/
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SharedSettingsAutoSleepTarget {
+    CodeEditor,
+    Browser,
+    ProjectEditor,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SharedTerminalGhosttySurfaceConfig {
+    font_size: f32,
+}
+
+impl SharedTerminalGhosttySurfaceConfig {
+    pub fn font_size(self) -> f32 {
+        self.font_size
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SharedGxserverAgentSettings {
+    pub agent_accept_all_enabled: bool,
+    pub default_prompt_agent_id: String,
+}
+
+impl SharedGxserverAgentSettings {
+    pub fn new(agent_accept_all_enabled: bool, default_prompt_agent_id: &str) -> Self {
+        Self {
+            agent_accept_all_enabled,
+            default_prompt_agent_id: normalize_default_prompt_agent_id(Some(
+                default_prompt_agent_id,
+            )),
+        }
+    }
+
+    pub fn write_to_settings_object(&self, object: &mut Map<String, Value>) {
+        object.insert(
+            "agentAcceptAllEnabled".to_string(),
+            Value::Bool(self.agent_accept_all_enabled),
+        );
+        object.insert(
+            "defaultPromptAgentId".to_string(),
+            Value::String(self.default_prompt_agent_id.clone()),
+        );
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SharedKeepAwakeDurationMinutes {
+    UntilTurnedOff,
+    TwoHours,
+    FiveHours,
+}
+
+impl SharedKeepAwakeDurationMinutes {
+    pub fn from_minutes(minutes: u64) -> Option<Self> {
+        match minutes {
+            0 => Some(Self::UntilTurnedOff),
+            120 => Some(Self::TwoHours),
+            300 => Some(Self::FiveHours),
+            _ => None,
+        }
+    }
+
+    pub fn minutes(self) -> u64 {
+        match self {
+            Self::UntilTurnedOff => 0,
+            Self::TwoHours => 120,
+            Self::FiveHours => 300,
+        }
+    }
+
+    pub fn menu_label(self) -> &'static str {
+        match self {
+            Self::UntilTurnedOff => "Until turned off",
+            Self::TwoHours => "For 2 hours",
+            Self::FiveHours => "For 5 hours",
+        }
+    }
+}
+
+pub const KEEP_AWAKE_DURATION_OPTIONS: &[SharedKeepAwakeDurationMinutes] = &[
+    SharedKeepAwakeDurationMinutes::UntilTurnedOff,
+    SharedKeepAwakeDurationMinutes::TwoHours,
+    SharedKeepAwakeDurationMinutes::FiveHours,
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SharedKeepAwakeTitlebarSettings {
+    pub feature_enabled: bool,
+    pub hide_titlebar_control: bool,
+    pub default_duration_minutes: SharedKeepAwakeDurationMinutes,
+    pub allow_display_sleep: bool,
+}
+
+impl SharedKeepAwakeTitlebarSettings {
+    pub fn titlebar_control_visible(self) -> bool {
+        self.feature_enabled && !self.hide_titlebar_control
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SharedDefaultEditorCommand {
+    Code,
+    CodeInsiders,
+    Codium,
+    Cursor,
+    Windsurf,
+    Zed,
+    Zeditor,
+    Subl,
+    Other,
+}
+
+impl SharedDefaultEditorCommand {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Code => "code",
+            Self::CodeInsiders => "code-insiders",
+            Self::Codium => "codium",
+            Self::Cursor => "cursor",
+            Self::Windsurf => "windsurf",
+            Self::Zed => "zed",
+            Self::Zeditor => "zeditor",
+            Self::Subl => "subl",
+            Self::Other => "other",
+        }
+    }
+
+    pub fn is_vscode_compatible(self) -> bool {
+        matches!(
+            self,
+            Self::Code | Self::CodeInsiders | Self::Codium | Self::Cursor | Self::Windsurf
+        )
+    }
+
+    pub fn is_zed_compatible(self) -> bool {
+        matches!(self, Self::Zed | Self::Zeditor)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SharedDefaultEditorSettings {
+    default_editor_command: SharedDefaultEditorCommand,
+    editor_command: String,
+}
+
+impl SharedDefaultEditorSettings {
+    pub fn default_editor_command(&self) -> SharedDefaultEditorCommand {
+        self.default_editor_command
+    }
+
+    pub fn editor_command(&self) -> &str {
+        &self.editor_command
+    }
+}
+
+pub fn apply_recommended_ghostty_visible_settings(object: &mut Map<String, Value>) {
+    insert_string(object, "terminalCursorStyle", "bar");
+    insert_string(object, "terminalFontFamily", "JetBrains Mono");
+    insert_number(object, "terminalFontSize", 13.0);
+    insert_number(object, "terminalFontWeight", 400.0);
+    insert_number(object, "terminalLetterSpacing", 0.0);
+    insert_number(object, "terminalLineHeight", 1.2);
+    insert_number(object, "terminalMouseScrollMultiplierDiscrete", 1.0);
+    insert_number(object, "terminalMouseScrollMultiplierPrecision", 1.0);
+}
+
+pub fn reset_ghostty_visible_settings_to_defaults(object: &mut Map<String, Value>) {
+    insert_string(object, "terminalCursorStyle", "bar");
+    insert_string(object, "terminalFontFamily", "JetBrains Mono");
+    insert_number(object, "terminalFontSize", 13.0);
+    insert_number(object, "terminalFontWeight", 300.0);
+    insert_number(object, "terminalLetterSpacing", 0.0);
+    insert_number(object, "terminalLineHeight", 1.2);
+    insert_number(object, "terminalMouseScrollMultiplierDiscrete", 1.0);
+    insert_number(object, "terminalMouseScrollMultiplierPrecision", 1.0);
+    insert_bool(object, "terminalScrollToBottomWhenTyping", true);
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SharedSidebarSettingsSnapshot {
+    revision: u64,
+    content_hash: u64,
+    object: Map<String, Value>,
+}
+
+impl SharedSidebarSettingsSnapshot {
+    pub fn empty() -> Self {
+        Self {
+            revision: 0,
+            content_hash: hash_bytes(&[]),
+            object: Map::new(),
+        }
+    }
+
+    pub fn from_object(object: Map<String, Value>) -> Self {
+        let content_hash = hash_settings_object(&object);
+        Self {
+            revision: 0,
+            content_hash,
+            object,
+        }
+    }
+
+    fn with_signal(object: Map<String, Value>, revision: u64, content_hash: u64) -> Self {
+        Self {
+            revision,
+            content_hash,
+            object,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    #[allow(dead_code)]
+    pub fn content_hash(&self) -> u64 {
+        self.content_hash
+    }
+
+    pub fn object(&self) -> &Map<String, Value> {
+        &self.object
+    }
+
+    pub fn debugging_mode(&self) -> bool {
+        strict_bool_field(&self.object, "debuggingMode") == Some(true)
+    }
+
+    pub fn show_beta_features(&self) -> bool {
+        strict_bool_field(&self.object, "showBetaFeatures") == Some(true)
+    }
+
+    pub fn keep_awake_titlebar_settings(&self) -> SharedKeepAwakeTitlebarSettings {
+        /*
+        CDXC:GPUITitlebarKeepAwake 2026-06-24-13:16:
+        GPUI consumes only the shared Keep Awake fields needed for the titlebar runtime. Match the TypeScript Settings defaults exactly: beta is strict boolean true only, hide and allow-display-sleep are strict booleans with false defaults, and duration normalizes only to 0, 120, or 300 minutes with 0 as the default.
+        */
+        SharedKeepAwakeTitlebarSettings {
+            feature_enabled: self.show_beta_features(),
+            hide_titlebar_control: strict_bool_field(&self.object, "hideKeepAwakeTitlebarControl")
+                .unwrap_or(DEFAULT_HIDE_KEEP_AWAKE_TITLEBAR_CONTROL),
+            default_duration_minutes: normalize_keep_awake_duration_minutes(
+                self.object.get("keepAwakeDefaultDurationMinutes"),
+            ),
+            allow_display_sleep: strict_bool_field(&self.object, "keepAwakeAllowDisplaySleep")
+                .unwrap_or(DEFAULT_KEEP_AWAKE_ALLOW_DISPLAY_SLEEP),
+        }
+    }
+
+    pub fn browser_feedback_tool(&self) -> Option<&str> {
+        self.object.get("browserFeedbackTool")?.as_str()
+    }
+
+    pub fn gxserver_agent_settings(&self) -> SharedGxserverAgentSettings {
+        SharedGxserverAgentSettings {
+            agent_accept_all_enabled: strict_bool_field(&self.object, "agentAcceptAllEnabled")
+                .unwrap_or(DEFAULT_AGENT_ACCEPT_ALL_ENABLED),
+            default_prompt_agent_id: normalize_default_prompt_agent_id(
+                self.object
+                    .get("defaultPromptAgentId")
+                    .and_then(Value::as_str),
+            ),
+        }
+    }
+
+    pub fn agents_hub_external_editor_settings(&self) -> SharedDefaultEditorSettings {
+        /*
+        CDXC:GPUIAgentsHubEditor 2026-06-24-12:37:
+        GPUI Agents Hub external edit must honor the same Settings-owned editor command as macOS without cloning the full TypeScript settings schema. Parse only `defaultEditorCommand` and `customDefaultEditorCommand`, normalize invalid ids to `code`, and fall back from empty custom commands to `code` before the Rust bridge builds the editor launch command.
+        */
+        let default_editor_command = normalize_default_editor_command(
+            self.object
+                .get("defaultEditorCommand")
+                .and_then(Value::as_str),
+        );
+        let custom_editor_command = normalize_custom_default_editor_command(
+            self.object
+                .get("customDefaultEditorCommand")
+                .and_then(Value::as_str),
+        );
+        let editor_command = if default_editor_command == SharedDefaultEditorCommand::Other {
+            if custom_editor_command.is_empty() {
+                DEFAULT_DEFAULT_EDITOR_COMMAND.to_string()
+            } else {
+                custom_editor_command
+            }
+        } else {
+            default_editor_command.as_str().to_string()
+        };
+
+        SharedDefaultEditorSettings {
+            default_editor_command,
+            editor_command,
+        }
+    }
+
+    pub fn sidebar_default_width_px(&self) -> Option<f32> {
+        self.object
+            .get("sidebarDefaultWidthPx")
+            .and_then(json_value_to_f32)
+    }
+
+    pub fn terminal_ghostty_surface_config(&self) -> SharedTerminalGhosttySurfaceConfig {
+        SharedTerminalGhosttySurfaceConfig {
+            font_size: normalize_terminal_font_size(
+                self.object
+                    .get("terminalFontSize")
+                    .and_then(json_number_value_to_f32),
+            ),
+        }
+    }
+
+    pub fn auto_sleep_duration(&self, target: SharedSettingsAutoSleepTarget) -> Option<Duration> {
+        let (enabled_key, minutes_key) = match target {
+            SharedSettingsAutoSleepTarget::CodeEditor => (
+                "autoSleepCodeEditorEnabled",
+                "autoSleepCodeEditorIdleMinutes",
+            ),
+            SharedSettingsAutoSleepTarget::Browser => (
+                "autoSleepBrowserSessionsEnabled",
+                "autoSleepBrowserIdleMinutes",
+            ),
+            SharedSettingsAutoSleepTarget::ProjectEditor => (
+                "autoSleepProjectEditorEnabled",
+                "autoSleepProjectEditorIdleMinutes",
+            ),
+        };
+
+        let enabled = self
+            .object
+            .get(enabled_key)
+            .and_then(json_value_to_bool)
+            .unwrap_or(true);
+        if !enabled {
+            return None;
+        }
+
+        let minutes = normalize_project_editor_auto_sleep_idle_minutes(
+            self.object.get(minutes_key).and_then(json_value_to_f32),
+        );
+        Some(Duration::from_secs_f64(minutes * 60.0))
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SharedSidebarSettingsWriteResult {
+    pub status: SharedSidebarSettingsWriteStatus,
+    pub snapshot: SharedSidebarSettingsSnapshot,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SharedSidebarSettingsWriteStatus {
+    Changed,
+    Unchanged,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub enum SharedSidebarSettingsWriteError {
+    MalformedJson,
+    ExpectedObject,
+    Io(io::Error),
+    Serialize(serde_json::Error),
+}
+
+impl From<io::Error> for SharedSidebarSettingsWriteError {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<serde_json::Error> for SharedSidebarSettingsWriteError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Serialize(error)
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub enum SharedGhosttyConfigFileError {
+    HomeUnavailable,
+    Io(io::Error),
+}
+
+impl From<io::Error> for SharedGhosttyConfigFileError {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SharedGhosttyConfigFileWriteStatus {
+    Changed,
+    Unchanged,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct SharedGhosttyTerminalConfigValues {
+    adjust_cell_height_percent: f64,
+    adjust_cell_width: f64,
+    clipboard_paste_protection: bool,
+    clipboard_trim_trailing_spaces: bool,
+    confirm_close_surface: String,
+    copy_on_select: String,
+    cursor_style: String,
+    cursor_style_blink: bool,
+    font_family: String,
+    font_size: f64,
+    font_variation_weight: Option<i64>,
+    ghostty_theme: String,
+    mouse_hide_while_typing: bool,
+    mouse_scroll_multiplier_discrete: f64,
+    mouse_scroll_multiplier_precision: f64,
+    scrollback_limit_bytes: i64,
+    scrollbar: String,
+}
+
+impl SharedGhosttyTerminalConfigValues {
+    fn from_settings_object(object: &Map<String, Value>) -> Self {
+        let line_height =
+            read_finite_number_field(object, "terminalLineHeight", DEFAULT_TERMINAL_LINE_HEIGHT)
+                .clamp(MIN_TERMINAL_LINE_HEIGHT, MAX_TERMINAL_LINE_HEIGHT);
+        let letter_spacing = read_finite_number_field(
+            object,
+            "terminalLetterSpacing",
+            DEFAULT_TERMINAL_LETTER_SPACING,
+        )
+        .clamp(MIN_TERMINAL_LETTER_SPACING, MAX_TERMINAL_LETTER_SPACING);
+        let font_weight =
+            read_finite_number_field(object, "terminalFontWeight", DEFAULT_TERMINAL_FONT_WEIGHT)
+                .clamp(MIN_TERMINAL_FONT_WEIGHT, MAX_TERMINAL_FONT_WEIGHT);
+        let scrollback_limit_mb = read_finite_number_field(
+            object,
+            "terminalScrollbackLimitMb",
+            DEFAULT_TERMINAL_SCROLLBACK_LIMIT_MB,
+        )
+        .clamp(
+            MIN_GHOSTTY_SCROLLBACK_LIMIT_MB,
+            MAX_GHOSTTY_SCROLLBACK_LIMIT_MB,
+        );
+
+        Self {
+            adjust_cell_height_percent: line_height - 1.0,
+            adjust_cell_width: letter_spacing,
+            clipboard_paste_protection: read_bool_field(
+                object,
+                "terminalClipboardPasteProtection",
+                DEFAULT_TERMINAL_CLIPBOARD_PASTE_PROTECTION,
+            ),
+            clipboard_trim_trailing_spaces: read_bool_field(
+                object,
+                "terminalClipboardTrimTrailingSpaces",
+                DEFAULT_TERMINAL_CLIPBOARD_TRIM_TRAILING_SPACES,
+            ),
+            confirm_close_surface: normalize_ghostty_confirm_close_surface(read_string_field(
+                object,
+                "terminalConfirmCloseSurface",
+                DEFAULT_TERMINAL_CONFIRM_CLOSE_SURFACE,
+            )),
+            copy_on_select: normalize_ghostty_copy_on_select(read_string_field(
+                object,
+                "terminalCopyOnSelect",
+                DEFAULT_TERMINAL_COPY_ON_SELECT,
+            )),
+            cursor_style: normalize_terminal_cursor_style(read_string_field(
+                object,
+                "terminalCursorStyle",
+                DEFAULT_TERMINAL_CURSOR_STYLE,
+            )),
+            cursor_style_blink: read_bool_field(
+                object,
+                "terminalCursorStyleBlink",
+                DEFAULT_TERMINAL_CURSOR_STYLE_BLINK,
+            ),
+            font_family: normalize_ghostty_font_family(read_string_field(
+                object,
+                "terminalFontFamily",
+                DEFAULT_TERMINAL_FONT_FAMILY,
+            )),
+            font_size: f64::from(normalize_terminal_font_size(
+                object
+                    .get("terminalFontSize")
+                    .and_then(json_number_value_to_f32),
+            )),
+            font_variation_weight: if font_weight == NORMAL_TERMINAL_FONT_WEIGHT {
+                None
+            } else {
+                Some(font_weight.round() as i64)
+            },
+            ghostty_theme: normalize_ghostty_theme(read_string_field(
+                object,
+                "terminalGhosttyTheme",
+                DEFAULT_TERMINAL_GHOSTTY_THEME,
+            )),
+            mouse_hide_while_typing: read_bool_field(
+                object,
+                "terminalMouseHideWhileTyping",
+                DEFAULT_TERMINAL_MOUSE_HIDE_WHILE_TYPING,
+            ),
+            mouse_scroll_multiplier_discrete: read_finite_number_field(
+                object,
+                "terminalMouseScrollMultiplierDiscrete",
+                DEFAULT_TERMINAL_MOUSE_SCROLL_MULTIPLIER_DISCRETE,
+            )
+            .clamp(
+                MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER,
+                MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER,
+            ),
+            mouse_scroll_multiplier_precision: read_finite_number_field(
+                object,
+                "terminalMouseScrollMultiplierPrecision",
+                DEFAULT_TERMINAL_MOUSE_SCROLL_MULTIPLIER_PRECISION,
+            )
+            .clamp(
+                MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER,
+                MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER,
+            ),
+            scrollback_limit_bytes: (scrollback_limit_mb * 1_000_000.0).round() as i64,
+            scrollbar: normalize_ghostty_scrollbar(read_string_field(
+                object,
+                "terminalScrollbar",
+                DEFAULT_TERMINAL_SCROLLBAR,
+            )),
+        }
+    }
+
+    fn managed_config_lines(&self) -> Vec<String> {
+        let mut lines = vec![
+            format!("font-size = {}", format_ghostty_number(self.font_size)),
+            format!(
+                "adjust-cell-height = {}",
+                format_ghostty_percent(self.adjust_cell_height_percent)
+            ),
+            format!(
+                "adjust-cell-width = {}",
+                format_ghostty_number(self.adjust_cell_width)
+            ),
+            "background = #000000".to_string(),
+            "foreground = #ffffff".to_string(),
+            "palette = 6=#39c5cf".to_string(),
+            "selection-background = #07284f".to_string(),
+            format!("cursor-style = {}", self.cursor_style),
+            "cursor-color = #FFFFFF".to_string(),
+            "unfocused-split-opacity = 1".to_string(),
+            "split-divider-color = #8f8f8f".to_string(),
+            "mouse-shift-capture = always".to_string(),
+            "keybind = super+e=toggle_command_palette".to_string(),
+            "macos-option-as-alt = true".to_string(),
+            "shell-integration-features = ssh-env,ssh-terminfo".to_string(),
+            format!("scrollback-limit = {}", self.scrollback_limit_bytes.max(1)),
+            format!(
+                "cursor-style-blink = {}",
+                format_ghostty_bool(self.cursor_style_blink)
+            ),
+            format!(
+                "clipboard-trim-trailing-spaces = {}",
+                format_ghostty_bool(self.clipboard_trim_trailing_spaces)
+            ),
+            format!(
+                "clipboard-paste-protection = {}",
+                format_ghostty_bool(self.clipboard_paste_protection)
+            ),
+            format!("copy-on-select = {}", self.copy_on_select),
+            format!("confirm-close-surface = {}", self.confirm_close_surface),
+            format!(
+                "mouse-hide-while-typing = {}",
+                format_ghostty_bool(self.mouse_hide_while_typing)
+            ),
+            format!("scrollbar = {}", self.scrollbar),
+            format!(
+                "mouse-scroll-multiplier = precision:{},discrete:{}",
+                format_ghostty_number(self.mouse_scroll_multiplier_precision),
+                format_ghostty_number(self.mouse_scroll_multiplier_discrete)
+            ),
+        ];
+        if !self.font_family.is_empty() {
+            lines.insert(
+                0,
+                format!("font-family = {}", format_ghostty_string(&self.font_family)),
+            );
+        }
+        if let Some(font_variation_weight) = self.font_variation_weight {
+            lines.push(format!("font-variation = wght={font_variation_weight}"));
+        }
+        if !self.ghostty_theme.is_empty() {
+            lines.push(format!(
+                "theme = {}",
+                format_ghostty_string(&self.ghostty_theme)
+            ));
+        }
+        lines
+    }
+}
+
+#[derive(Debug)]
+pub struct SharedSidebarSettingsService {
+    path: PathBuf,
+    snapshot: SharedSidebarSettingsSnapshot,
+}
+
+impl SharedSidebarSettingsService {
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            snapshot: SharedSidebarSettingsSnapshot::empty(),
+        }
+    }
+
+    pub fn for_default_path() -> Self {
+        Self::new(shared_sidebar_settings_path())
+    }
+
+    pub fn read_snapshot(&mut self) -> SharedSidebarSettingsSnapshot {
+        let read = read_settings_object_from_path(&self.path);
+        if read.content_hash != self.snapshot.content_hash {
+            self.snapshot = SharedSidebarSettingsSnapshot::with_signal(
+                read.object,
+                self.snapshot.revision.wrapping_add(1),
+                read.content_hash,
+            );
+        }
+        self.snapshot.clone()
+    }
+
+    #[allow(dead_code)]
+    pub fn write_json_object_payload(
+        &mut self,
+        payload: &str,
+    ) -> Result<SharedSidebarSettingsWriteResult, SharedSidebarSettingsWriteError> {
+        let value = serde_json::from_str::<Value>(payload)
+            .map_err(|_| SharedSidebarSettingsWriteError::MalformedJson)?;
+        let object = match value {
+            Value::Object(object) => object,
+            _ => return Err(SharedSidebarSettingsWriteError::ExpectedObject),
+        };
+        self.write_json_object(object)
+    }
+
+    #[allow(dead_code)]
+    pub fn write_json_object(
+        &mut self,
+        object: Map<String, Value>,
+    ) -> Result<SharedSidebarSettingsWriteResult, SharedSidebarSettingsWriteError> {
+        let value = Value::Object(object.clone());
+        let bytes = serde_json::to_vec_pretty(&value)?;
+        let existing = fs::read(&self.path).ok();
+
+        if existing.as_deref() == Some(bytes.as_slice()) {
+            let snapshot = self.apply_observed_settings(object, hash_bytes(&bytes));
+            return Ok(SharedSidebarSettingsWriteResult {
+                status: SharedSidebarSettingsWriteStatus::Unchanged,
+                snapshot,
+            });
+        }
+
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let temp_path = self.atomic_write_temp_path();
+        fs::write(&temp_path, &bytes)?;
+        if let Err(error) = fs::rename(&temp_path, &self.path) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(error.into());
+        }
+
+        let snapshot = self.apply_observed_settings(object, hash_bytes(&bytes));
+        Ok(SharedSidebarSettingsWriteResult {
+            status: SharedSidebarSettingsWriteStatus::Changed,
+            snapshot,
+        })
+    }
+
+    fn apply_observed_settings(
+        &mut self,
+        object: Map<String, Value>,
+        content_hash: u64,
+    ) -> SharedSidebarSettingsSnapshot {
+        if content_hash != self.snapshot.content_hash {
+            self.snapshot = SharedSidebarSettingsSnapshot::with_signal(
+                object,
+                self.snapshot.revision.wrapping_add(1),
+                content_hash,
+            );
+        }
+        self.snapshot.clone()
+    }
+
+    fn atomic_write_temp_path(&self) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let temp_name = format!(".native-sidebar-settings.{}.{}.tmp", process::id(), stamp);
+        self.path
+            .parent()
+            .map(|parent| parent.join(&temp_name))
+            .unwrap_or_else(|| PathBuf::from(temp_name))
+    }
+}
+
+pub fn shared_sidebar_settings_snapshot() -> SharedSidebarSettingsSnapshot {
+    let mut service = shared_sidebar_settings_service()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    service.read_snapshot()
+}
+
+#[allow(dead_code)]
+pub fn write_shared_sidebar_settings_payload(
+    payload: &str,
+) -> Result<SharedSidebarSettingsWriteResult, SharedSidebarSettingsWriteError> {
+    let mut service = shared_sidebar_settings_service()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    service.write_json_object_payload(payload)
+}
+
+pub fn write_shared_sidebar_settings_object(
+    object: Map<String, Value>,
+) -> Result<SharedSidebarSettingsWriteResult, SharedSidebarSettingsWriteError> {
+    let mut service = shared_sidebar_settings_service()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    service.write_json_object(object)
+}
+
+fn shared_sidebar_settings_service() -> &'static Mutex<SharedSidebarSettingsService> {
+    SHARED_SIDEBAR_SETTINGS_SERVICE
+        .get_or_init(|| Mutex::new(SharedSidebarSettingsService::for_default_path()))
+}
+
+pub fn ghostty_terminal_config_backed_settings_changed(
+    previous_object: &Map<String, Value>,
+    next_object: &Map<String, Value>,
+) -> bool {
+    SharedGhosttyTerminalConfigValues::from_settings_object(previous_object)
+        != SharedGhosttyTerminalConfigValues::from_settings_object(next_object)
+}
+
+pub fn write_ghostty_terminal_config_from_settings_object(
+    object: &Map<String, Value>,
+) -> Result<SharedGhosttyConfigFileWriteStatus, SharedGhosttyConfigFileError> {
+    let values = SharedGhosttyTerminalConfigValues::from_settings_object(object);
+    merge_selected_ghostty_config_file(|existing_config| {
+        merge_ghostty_terminal_settings(existing_config, &values)
+    })
+}
+
+pub fn apply_recommended_ghostty_config_file()
+-> Result<SharedGhosttyConfigFileWriteStatus, SharedGhosttyConfigFileError> {
+    merge_selected_ghostty_config_file(|existing_config| {
+        merge_ghostty_config_lines(existing_config, GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES)
+    })
+}
+
+pub fn reset_ghostty_config_file_to_defaults()
+-> Result<SharedGhosttyConfigFileWriteStatus, SharedGhosttyConfigFileError> {
+    merge_selected_ghostty_config_file(|existing_config| {
+        merge_ghostty_config_lines(existing_config, &[])
+    })
+}
+
+pub fn prepare_ghostty_config_file_for_open() -> Result<PathBuf, SharedGhosttyConfigFileError> {
+    let path = selected_ghostty_config_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    match fs::metadata(&path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            atomic_write_file(&path, b"")?;
+        }
+        Err(error) => return Err(error.into()),
+    }
+    Ok(path)
+}
+
+fn merge_selected_ghostty_config_file<F>(
+    merge: F,
+) -> Result<SharedGhosttyConfigFileWriteStatus, SharedGhosttyConfigFileError>
+where
+    F: FnOnce(&str) -> String,
+{
+    let path = selected_ghostty_config_path()?;
+    let existing_config = match fs::read_to_string(&path) {
+        Ok(config) => config,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.into()),
+    };
+    let merged_config = merge(&existing_config);
+    if existing_config == merged_config {
+        return Ok(SharedGhosttyConfigFileWriteStatus::Unchanged);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    atomic_write_file(&path, merged_config.as_bytes())?;
+    Ok(SharedGhosttyConfigFileWriteStatus::Changed)
+}
+
+fn selected_ghostty_config_path() -> Result<PathBuf, SharedGhosttyConfigFileError> {
+    selected_ghostty_config_path_from_home(env::var_os("HOME"))
+        .ok_or(SharedGhosttyConfigFileError::HomeUnavailable)
+}
+
+fn selected_ghostty_config_path_from_home(home: Option<OsString>) -> Option<PathBuf> {
+    let home = PathBuf::from(home?);
+    let candidates = ghostty_config_candidate_paths_from_home(&home);
+    candidates
+        .iter()
+        .find(|candidate| candidate.exists())
+        .cloned()
+        .or_else(|| Some(home.join(Path::new(GHOSTTY_CONFIG_DEFAULT_RELATIVE_PATH))))
+}
+
+fn ghostty_config_candidate_paths_from_home(home: &Path) -> Vec<PathBuf> {
+    GHOSTTY_CONFIG_CANDIDATE_RELATIVE_PATHS
+        .iter()
+        .map(|relative_path| home.join(Path::new(relative_path)))
+        .collect()
+}
+
+fn merge_ghostty_config_lines(config: &str, managed_lines: &[&str]) -> String {
+    let mut retained_lines: Vec<String> = config
+        .lines()
+        .filter(|line| should_retain_ghostty_config_action_line(line))
+        .map(str::to_string)
+        .collect();
+    trim_trailing_blank_lines(&mut retained_lines);
+
+    let mut next_lines = retained_lines;
+    next_lines.extend(managed_lines.iter().map(|line| (*line).to_string()));
+    trim_trailing_blank_lines(&mut next_lines);
+    if next_lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", next_lines.join("\n"))
+    }
+}
+
+fn merge_ghostty_terminal_settings(
+    config: &str,
+    values: &SharedGhosttyTerminalConfigValues,
+) -> String {
+    let mut retained_lines: Vec<String> = config
+        .lines()
+        .filter(|line| should_retain_ghostty_terminal_config_line(line, values))
+        .map(str::to_string)
+        .collect();
+    trim_trailing_blank_lines(&mut retained_lines);
+
+    let mut next_lines = retained_lines;
+    next_lines.extend(values.managed_config_lines());
+    if next_lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", next_lines.join("\n"))
+    }
+}
+
+fn should_retain_ghostty_config_action_line(line: &str) -> bool {
+    let key = read_ghostty_config_key(line);
+    if GHOSTEX_GHOSTTY_MANAGED_CONFIG_KEYS.contains(&key.as_str()) {
+        return false;
+    }
+    should_retain_owned_ghostty_keybind_and_palette_line(line, &key)
+}
+
+fn should_retain_ghostty_terminal_config_line(
+    line: &str,
+    values: &SharedGhosttyTerminalConfigValues,
+) -> bool {
+    let key = read_ghostty_config_key(line);
+    if GHOSTEX_GHOSTTY_TERMINAL_MANAGED_CONFIG_KEYS.contains(&key.as_str()) {
+        return false;
+    }
+    if key == "font-family" {
+        return values.font_family.is_empty();
+    }
+    if key == "theme" {
+        return values.ghostty_theme.is_empty();
+    }
+    if !should_retain_owned_ghostty_keybind_and_palette_line(line, &key) {
+        return false;
+    }
+    if key != "font-variation" {
+        return true;
+    }
+    let Some(_) = values.font_variation_weight else {
+        return true;
+    };
+    !read_ghostty_config_value(line)
+        .split(',')
+        .any(|segment| segment.trim().to_lowercase().starts_with("wght="))
+}
+
+fn should_retain_owned_ghostty_keybind_and_palette_line(line: &str, key: &str) -> bool {
+    if key == "keybind" {
+        return !read_ghostty_config_value(line)
+            .to_lowercase()
+            .starts_with("super+e=");
+    }
+    if key == "palette" {
+        return !read_ghostty_config_value(line)
+            .to_lowercase()
+            .starts_with("6=");
+    }
+    true
+}
+
+fn read_ghostty_config_key(line: &str) -> String {
+    let trimmed_line = line.trim();
+    if trimmed_line.is_empty() || trimmed_line.starts_with('#') {
+        return String::new();
+    }
+    trimmed_line
+        .split_once('=')
+        .map(|(key, _)| key.trim().to_string())
+        .unwrap_or_else(|| trimmed_line.trim().to_string())
+}
+
+fn read_ghostty_config_value(line: &str) -> String {
+    let trimmed_line = line.trim();
+    if trimmed_line.is_empty() || trimmed_line.starts_with('#') {
+        return String::new();
+    }
+    trimmed_line
+        .split_once('=')
+        .map(|(_, value)| value.trim().to_string())
+        .unwrap_or_default()
+}
+
+fn trim_trailing_blank_lines(lines: &mut Vec<String>) {
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
+        lines.pop();
+    }
+}
+
+fn atomic_write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let temp_path = atomic_temp_path(path);
+    fs::write(&temp_path, bytes)?;
+    if let Err(error) = fs::rename(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn atomic_temp_path(path: &Path) -> PathBuf {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_else(|| "config.ghostty".into());
+    let temp_name = format!(".{file_name}.{}.{}.tmp", process::id(), stamp);
+    path.parent()
+        .map(|parent| parent.join(&temp_name))
+        .unwrap_or_else(|| PathBuf::from(temp_name))
+}
+
+pub fn ghostex_home_root() -> PathBuf {
+    ghostex_home_root_from_env(env::var_os("GHOSTEX_HOME"), env::var_os("HOME"))
+}
+
+fn ghostex_home_root_from_env(
+    ghostex_home: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> PathBuf {
+    ghostex_home
+        .map(PathBuf::from)
+        .or_else(|| home.map(|home| PathBuf::from(home).join(".ghostex")))
+        .unwrap_or_else(|| PathBuf::from(".ghostex"))
+}
+
+pub fn shared_sidebar_settings_path() -> PathBuf {
+    shared_sidebar_settings_path_from_root(&ghostex_home_root())
+}
+
+fn shared_sidebar_settings_path_from_root(root: &Path) -> PathBuf {
+    root.join("state/native-sidebar-settings.json")
+}
+
+pub fn normalize_project_editor_auto_sleep_idle_minutes(value: Option<f32>) -> f64 {
+    value
+        .map(f64::from)
+        .filter(|minutes| minutes.is_finite() && *minutes > 0.0)
+        .map(|minutes| minutes.min(PROJECT_EDITOR_AUTO_SLEEP_MAX_IDLE_MINUTES))
+        .unwrap_or(PROJECT_EDITOR_AUTO_SLEEP_DEFAULT_IDLE_MINUTES)
+}
+
+pub fn normalize_terminal_font_size(value: Option<f32>) -> f32 {
+    value
+        .filter(|font_size| font_size.is_finite())
+        .map(|font_size| font_size.clamp(MIN_TERMINAL_FONT_SIZE, MAX_TERMINAL_FONT_SIZE))
+        .unwrap_or(DEFAULT_TERMINAL_FONT_SIZE)
+}
+
+pub fn normalize_default_prompt_agent_id(value: Option<&str>) -> String {
+    let normalized = value
+        .unwrap_or("")
+        .trim()
+        .chars()
+        .take(MAX_DEFAULT_PROMPT_AGENT_ID_LEN)
+        .collect::<String>();
+    if normalized.is_empty() {
+        DEFAULT_PROMPT_AGENT_ID.to_string()
+    } else {
+        normalized
+    }
+}
+
+pub fn normalize_default_editor_command(value: Option<&str>) -> SharedDefaultEditorCommand {
+    match value.unwrap_or(DEFAULT_DEFAULT_EDITOR_COMMAND) {
+        "code-insiders" => SharedDefaultEditorCommand::CodeInsiders,
+        "zed" => SharedDefaultEditorCommand::Zed,
+        "zeditor" => SharedDefaultEditorCommand::Zeditor,
+        "cursor" => SharedDefaultEditorCommand::Cursor,
+        "windsurf" => SharedDefaultEditorCommand::Windsurf,
+        "codium" => SharedDefaultEditorCommand::Codium,
+        "subl" => SharedDefaultEditorCommand::Subl,
+        "other" => SharedDefaultEditorCommand::Other,
+        _ => SharedDefaultEditorCommand::Code,
+    }
+}
+
+pub fn normalize_custom_default_editor_command(value: Option<&str>) -> String {
+    value
+        .unwrap_or("")
+        .trim()
+        .chars()
+        .take(MAX_CUSTOM_DEFAULT_EDITOR_COMMAND_CHARS)
+        .collect()
+}
+
+fn read_bool_field(object: &Map<String, Value>, key: &str, fallback: bool) -> bool {
+    object.get(key).and_then(Value::as_bool).unwrap_or(fallback)
+}
+
+fn read_finite_number_field(object: &Map<String, Value>, key: &str, fallback: f64) -> f64 {
+    object
+        .get(key)
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite())
+        .unwrap_or(fallback)
+}
+
+fn read_string_field<'a>(object: &'a Map<String, Value>, key: &str, fallback: &'a str) -> &'a str {
+    object.get(key).and_then(Value::as_str).unwrap_or(fallback)
+}
+
+fn normalize_terminal_cursor_style(value: &str) -> String {
+    match value {
+        "block" | "underline" => value.to_string(),
+        _ => DEFAULT_TERMINAL_CURSOR_STYLE.to_string(),
+    }
+}
+
+fn normalize_ghostty_font_family(value: &str) -> String {
+    value.trim().to_string()
+}
+
+fn normalize_ghostty_theme(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == GHOSTTY_THEME_UNMANAGED_SENTINEL {
+        String::new()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn normalize_ghostty_copy_on_select(value: &str) -> String {
+    match value {
+        "true" | "clipboard" => value.to_string(),
+        _ => DEFAULT_TERMINAL_COPY_ON_SELECT.to_string(),
+    }
+}
+
+fn normalize_ghostty_confirm_close_surface(value: &str) -> String {
+    match value {
+        "false" | "always" => value.to_string(),
+        _ => DEFAULT_TERMINAL_CONFIRM_CLOSE_SURFACE.to_string(),
+    }
+}
+
+fn normalize_ghostty_scrollbar(value: &str) -> String {
+    if value == "never" {
+        "never".to_string()
+    } else {
+        DEFAULT_TERMINAL_SCROLLBAR.to_string()
+    }
+}
+
+fn format_ghostty_bool(value: bool) -> &'static str {
+    if value { "true" } else { "false" }
+}
+
+fn format_ghostty_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn format_ghostty_number(value: f64) -> String {
+    if value.round() == value {
+        return (value as i64).to_string();
+    }
+    let formatted = format!("{value:.2}");
+    formatted
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string()
+}
+
+fn format_ghostty_percent(value: f64) -> String {
+    format!("{}%", format_ghostty_number(value * 100.0))
+}
+
+fn insert_string(object: &mut Map<String, Value>, key: &str, value: &str) {
+    object.insert(key.to_string(), Value::String(value.to_string()));
+}
+
+fn insert_bool(object: &mut Map<String, Value>, key: &str, value: bool) {
+    object.insert(key.to_string(), Value::Bool(value));
+}
+
+fn insert_number(object: &mut Map<String, Value>, key: &str, value: f64) {
+    let number = serde_json::Number::from_f64(value).unwrap_or_else(|| serde_json::Number::from(0));
+    object.insert(key.to_string(), Value::Number(number));
+}
+
+fn read_settings_object_from_path(path: &Path) -> SharedSidebarSettingsRead {
+    let bytes = fs::read(path).unwrap_or_default();
+    let content_hash = hash_bytes(&bytes);
+    let object = serde_json::from_slice::<Value>(&bytes)
+        .ok()
+        .and_then(|value| match value {
+            Value::Object(object) => Some(object),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    SharedSidebarSettingsRead {
+        object,
+        content_hash,
+    }
+}
+
+struct SharedSidebarSettingsRead {
+    object: Map<String, Value>,
+    content_hash: u64,
+}
+
+fn hash_settings_object(object: &Map<String, Value>) -> u64 {
+    serde_json::to_vec(&Value::Object(object.clone()))
+        .map(|bytes| hash_bytes(&bytes))
+        .unwrap_or_else(|_| hash_bytes(&[]))
+}
+
+fn hash_bytes(bytes: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hasher.write(bytes);
+    hasher.finish()
+}
+
+fn strict_bool_field(object: &Map<String, Value>, key: &str) -> Option<bool> {
+    object.get(key)?.as_bool()
+}
+
+fn normalize_keep_awake_duration_minutes(value: Option<&Value>) -> SharedKeepAwakeDurationMinutes {
+    let Some(minutes) = value
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite())
+    else {
+        return DEFAULT_KEEP_AWAKE_DURATION_MINUTES;
+    };
+    if (minutes - 0.0).abs() < f64::EPSILON {
+        SharedKeepAwakeDurationMinutes::UntilTurnedOff
+    } else if (minutes - 120.0).abs() < f64::EPSILON {
+        SharedKeepAwakeDurationMinutes::TwoHours
+    } else if (minutes - 300.0).abs() < f64::EPSILON {
+        SharedKeepAwakeDurationMinutes::FiveHours
+    } else {
+        DEFAULT_KEEP_AWAKE_DURATION_MINUTES
+    }
+}
+
+fn json_value_to_bool(value: &Value) -> Option<bool> {
+    match value {
+        Value::Bool(value) => Some(*value),
+        Value::String(text) if text.eq_ignore_ascii_case("true") => Some(true),
+        Value::String(text) if text.eq_ignore_ascii_case("false") => Some(false),
+        _ => None,
+    }
+}
+
+fn json_value_to_f32(value: &Value) -> Option<f32> {
+    let number = match value {
+        Value::Number(number) => number.as_f64()?,
+        Value::String(text) => text.parse::<f64>().ok()?,
+        _ => return None,
+    };
+    number.is_finite().then_some(number as f32)
+}
+
+fn json_number_value_to_f32(value: &Value) -> Option<f32> {
+    let number = value.as_f64()?;
+    number.is_finite().then_some(number as f32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    #[test]
+    fn path_contract_prefers_ghostex_home_then_existing_gpui_home_root() {
+        let ghostex_home = OsString::from("/tmp/ghostex-home");
+        let home = OsString::from("/tmp/home");
+
+        assert_eq!(
+            ghostex_home_root_from_env(Some(ghostex_home), Some(home.clone())),
+            PathBuf::from("/tmp/ghostex-home")
+        );
+        assert_eq!(
+            ghostex_home_root_from_env(None, Some(home)),
+            PathBuf::from("/tmp/home/.ghostex")
+        );
+        assert_eq!(
+            shared_sidebar_settings_path_from_root(Path::new("/tmp/ghostex-home")),
+            PathBuf::from("/tmp/ghostex-home/state/native-sidebar-settings.json")
+        );
+    }
+
+    #[test]
+    fn write_payload_rejects_non_objects_and_skips_byte_identical_writes() {
+        let root = std::env::temp_dir().join(format!(
+            "ghostex-gpui-shared-settings-test-{}-{}",
+            process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let path = root.join("state/native-sidebar-settings.json");
+        let mut service = SharedSidebarSettingsService::new(path.clone());
+
+        assert!(matches!(
+            service.write_json_object_payload("[]"),
+            Err(SharedSidebarSettingsWriteError::ExpectedObject)
+        ));
+
+        let first = service
+            .write_json_object_payload(
+                r#"{"debuggingMode":true,"showBetaFeatures":true,"browserFeedbackTool":"react-grab"}"#,
+            )
+            .expect("object payload should write");
+        assert_eq!(first.status, SharedSidebarSettingsWriteStatus::Changed);
+        assert!(first.snapshot.debugging_mode());
+        assert!(first.snapshot.show_beta_features());
+        assert_eq!(first.snapshot.browser_feedback_tool(), Some("react-grab"));
+
+        let second = service
+            .write_json_object_payload(
+                r#"{"debuggingMode":true,"showBetaFeatures":true,"browserFeedbackTool":"react-grab"}"#,
+            )
+            .expect("identical object payload should parse");
+        assert_eq!(second.status, SharedSidebarSettingsWriteStatus::Unchanged);
+        assert_eq!(second.snapshot.revision(), first.snapshot.revision());
+
+        let persisted = fs::read_to_string(path).expect("settings should persist");
+        assert!(persisted.contains("\"debuggingMode\": true"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn terminal_ghostty_surface_config_normalizes_font_size_only() {
+        assert_eq!(
+            normalize_terminal_font_size(None),
+            DEFAULT_TERMINAL_FONT_SIZE
+        );
+        assert_eq!(
+            normalize_terminal_font_size(Some(4.0)),
+            MIN_TERMINAL_FONT_SIZE
+        );
+        assert_eq!(
+            normalize_terminal_font_size(Some(40.0)),
+            MAX_TERMINAL_FONT_SIZE
+        );
+
+        let mut object = Map::new();
+        object.insert("terminalFontSize".to_string(), Value::from(16.5));
+        let settings = SharedSidebarSettingsSnapshot::from_object(object);
+        assert_eq!(settings.terminal_ghostty_surface_config().font_size(), 16.5);
+    }
+
+    #[test]
+    fn ghostty_config_path_prefers_existing_application_support_configs_then_default() {
+        let root = std::env::temp_dir().join(format!(
+            "ghostex-gpui-ghostty-config-path-test-{}-{}",
+            process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let home = root.join("home");
+        let ghostty_config_ghostty = home
+            .join("Library/Application Support/Ghostty")
+            .join("config.ghostty");
+        fs::create_dir_all(ghostty_config_ghostty.parent().unwrap()).unwrap();
+        fs::write(&ghostty_config_ghostty, "").unwrap();
+
+        assert_eq!(
+            selected_ghostty_config_path_from_home(Some(home.clone().into_os_string())).unwrap(),
+            ghostty_config_ghostty
+        );
+
+        let ghostty_org_config_ghostty = home
+            .join("Library/Application Support/com.ghostty.org")
+            .join("config.ghostty");
+        fs::create_dir_all(ghostty_org_config_ghostty.parent().unwrap()).unwrap();
+        fs::write(&ghostty_org_config_ghostty, "").unwrap();
+        assert_eq!(
+            selected_ghostty_config_path_from_home(Some(home.clone().into_os_string())).unwrap(),
+            ghostty_org_config_ghostty
+        );
+
+        let empty_home = root.join("empty-home");
+        assert_eq!(
+            selected_ghostty_config_path_from_home(Some(empty_home.clone().into_os_string()))
+                .unwrap(),
+            empty_home.join(GHOSTTY_CONFIG_DEFAULT_RELATIVE_PATH)
+        );
+        assert_eq!(selected_ghostty_config_path_from_home(None), None);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ghostty_config_action_merge_preserves_unrelated_keybinds_and_palette_entries() {
+        let merged = merge_ghostty_config_lines(
+            &[
+                "keybind = cmd+t=new_tab",
+                "keybind = super+e=previous_value",
+                "palette = 1=#ff0000",
+                "palette = 6=#old",
+                "theme = Dracula",
+                "font-size = 18",
+                "window-padding-x = 4",
+            ]
+            .join("\n"),
+            GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES,
+        );
+
+        assert!(merged.contains("keybind = cmd+t=new_tab"));
+        assert!(merged.contains("palette = 1=#ff0000"));
+        assert!(merged.contains("window-padding-x = 4"));
+        assert!(merged.contains("# Applied by Ghostex:"));
+        assert!(merged.contains("theme = GitHub Dark"));
+        assert!(!merged.contains("previous_value"));
+        assert!(!merged.contains("palette = 6=#old"));
+
+        assert_eq!(
+            merge_ghostty_config_lines(
+                &["theme = Dracula", "font-size = 18", "window-padding-x = 4"].join("\n"),
+                &[],
+            ),
+            "window-padding-x = 4\n"
+        );
+    }
+
+    #[test]
+    fn ghostty_terminal_config_merge_formats_managed_settings_and_preserves_user_lines() {
+        let mut object = Map::new();
+        object.insert(
+            "terminalFontFamily".to_string(),
+            Value::String("JetBrains Mono".to_string()),
+        );
+        object.insert("terminalFontSize".to_string(), Value::from(13.0));
+        object.insert("terminalFontWeight".to_string(), Value::from(650.0));
+        object.insert("terminalLineHeight".to_string(), Value::from(1.1));
+        object.insert("terminalLetterSpacing".to_string(), Value::from(0.5));
+        object.insert(
+            "terminalGhosttyTheme".to_string(),
+            Value::String("GitHub Dark Default".to_string()),
+        );
+        object.insert(
+            "terminalConfirmCloseSurface".to_string(),
+            Value::String("always".to_string()),
+        );
+        object.insert(
+            "terminalCopyOnSelect".to_string(),
+            Value::String("clipboard".to_string()),
+        );
+        object.insert("terminalCursorStyleBlink".to_string(), Value::Bool(false));
+        object.insert(
+            "terminalClipboardPasteProtection".to_string(),
+            Value::Bool(false),
+        );
+        object.insert(
+            "terminalClipboardTrimTrailingSpaces".to_string(),
+            Value::Bool(false),
+        );
+        object.insert(
+            "terminalMouseHideWhileTyping".to_string(),
+            Value::Bool(true),
+        );
+        object.insert(
+            "terminalMouseScrollMultiplierDiscrete".to_string(),
+            Value::from(4.0),
+        );
+        object.insert(
+            "terminalMouseScrollMultiplierPrecision".to_string(),
+            Value::from(0.75),
+        );
+        object.insert("terminalScrollbackLimitMb".to_string(), Value::from(25.0));
+        object.insert(
+            "terminalScrollbar".to_string(),
+            Value::String("never".to_string()),
+        );
+        let values = SharedGhosttyTerminalConfigValues::from_settings_object(&object);
+        let merged = merge_ghostty_terminal_settings(
+            &[
+                "font-family = Old",
+                "font-variation = wdth=110,wght=500",
+                "font-variation = ital=1",
+                "theme = Dracula",
+                "keybind = cmd+t=new_tab",
+                "keybind = super+e=previous_value",
+                "palette = 1=#ff0000",
+                "palette = 6=#old",
+                "window-padding-x = 4",
+            ]
+            .join("\n"),
+            &values,
+        );
+
+        assert!(merged.contains("font-family = \"JetBrains Mono\""));
+        assert!(merged.contains("font-size = 13"));
+        assert!(merged.contains("adjust-cell-height = 10%"));
+        assert!(merged.contains("adjust-cell-width = 0.5"));
+        assert!(merged.contains("scrollback-limit = 25000000"));
+        assert!(merged.contains("cursor-style-blink = false"));
+        assert!(merged.contains("copy-on-select = clipboard"));
+        assert!(merged.contains("confirm-close-surface = always"));
+        assert!(merged.contains("scrollbar = never"));
+        assert!(merged.contains("mouse-scroll-multiplier = precision:0.75,discrete:4"));
+        assert!(merged.contains("font-variation = ital=1"));
+        assert!(merged.contains("font-variation = wght=650"));
+        assert!(merged.contains("theme = \"GitHub Dark Default\""));
+        assert!(merged.contains("keybind = cmd+t=new_tab"));
+        assert!(merged.contains("palette = 1=#ff0000"));
+        assert!(merged.contains("window-padding-x = 4"));
+        assert!(!merged.contains("font-family = Old"));
+        assert!(!merged.contains("wght=500"));
+        assert!(!merged.contains("previous_value"));
+        assert!(!merged.contains("palette = 6=#old"));
+    }
+
+    #[test]
+    fn ghostty_terminal_config_change_detection_ignores_runtime_only_image_paste() {
+        let previous = Map::new();
+        let mut runtime_only = Map::new();
+        runtime_only.insert(
+            "terminalPastePreviewableImages".to_string(),
+            Value::Bool(false),
+        );
+        assert!(!ghostty_terminal_config_backed_settings_changed(
+            &previous,
+            &runtime_only
+        ));
+
+        let mut next = Map::new();
+        next.insert("terminalFontSize".to_string(), Value::from(16.0));
+        assert!(ghostty_terminal_config_backed_settings_changed(
+            &previous, &next
+        ));
+    }
+
+    #[test]
+    fn gxserver_agent_settings_use_shared_defaults_and_normalize_default_agent_id() {
+        let settings = SharedSidebarSettingsSnapshot::from_object(Map::new());
+        assert_eq!(
+            settings.gxserver_agent_settings(),
+            SharedGxserverAgentSettings::new(
+                DEFAULT_AGENT_ACCEPT_ALL_ENABLED,
+                DEFAULT_PROMPT_AGENT_ID,
+            )
+        );
+
+        let mut object = Map::new();
+        object.insert("agentAcceptAllEnabled".to_string(), Value::Bool(false));
+        object.insert(
+            "defaultPromptAgentId".to_string(),
+            Value::String(" claude ".to_string()),
+        );
+        let settings = SharedSidebarSettingsSnapshot::from_object(object);
+        assert_eq!(
+            settings.gxserver_agent_settings(),
+            SharedGxserverAgentSettings::new(false, "claude")
+        );
+
+        let mut malformed = Map::new();
+        malformed.insert(
+            "agentAcceptAllEnabled".to_string(),
+            Value::String("false".to_string()),
+        );
+        malformed.insert(
+            "defaultPromptAgentId".to_string(),
+            Value::String("".to_string()),
+        );
+        let settings = SharedSidebarSettingsSnapshot::from_object(malformed);
+        assert_eq!(
+            settings.gxserver_agent_settings(),
+            SharedGxserverAgentSettings::new(
+                DEFAULT_AGENT_ACCEPT_ALL_ENABLED,
+                DEFAULT_PROMPT_AGENT_ID,
+            )
+        );
+    }
+}

@@ -74,6 +74,7 @@ describe("remote attach sidebar ownership", () => {
     /*
      * CDXC:RemoteAttach 2026-06-08-21:12:
      * macOS Remote clicks should attach like Android: force an SSH PTY, target the Ghostex session id through `ghostex attach`, include project id when present, and run through a shell that loads user-managed Node/Homebrew paths.
+     * CDXC:RemoteAttach 2026-06-24-05:42: Ubuntu package installs must attach through the absolute app-installed wrapper before falling back to shell PATH so non-login /bin/sh does not report `ghostex: not found`.
      */
     const attachSshCommand = sourceBetween(
       nativeSidebarSource,
@@ -88,7 +89,9 @@ describe("remote attach sidebar ownership", () => {
       "function buildRemoteGhostexAttachCommand",
       "function buildRemoteLoginShellCommand",
     );
-    expect(attachCommand).toContain('"ghostex"');
+    expect(attachCommand).toContain('remote_ghostex="$HOME/.ghostex/gxserver/package/bin/ghostex"');
+    expect(attachCommand).toContain('$HOME/.local/bin/ghostex');
+    expect(attachCommand).toContain('remote_ghostex="ghostex"');
     expect(attachCommand).toContain('"attach"');
     expect(attachCommand).toContain('"--session-id"');
     expect(attachCommand).toContain("quoteNativeShellArg(target.sessionId)");

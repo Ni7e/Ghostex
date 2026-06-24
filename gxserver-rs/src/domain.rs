@@ -82,17 +82,17 @@ impl<'a> DomainRepository<'a> {
             .execute(
                 r#"
                 INSERT INTO projects (
-                  projectId, name, path, identityIconJson, isPinned, isFavorite, defaultCommand, worktreeJson,
+                  projectId, name, path, identityIconJson, isPinned, isFavorite, isRecentProject, recentClosedAt, defaultCommand, worktreeJson,
                   customAgentsJson, customAgentOrderJson, customCommandsJson, customCommandOrderJson,
                   deletedDefaultCommandIdsJson, launchSettingsJson, runtimeSettingsJson, completionRulesJson,
                   attentionRulesJson, notificationRulesJson, gitConfigJson, projectBoardConfigJson,
                   previousSessionHistoryJson, createdAt, updatedAt
                 ) VALUES (
-                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                  ?9, ?10, ?11, ?12,
-                  ?13, ?14, ?15, ?16,
-                  ?17, ?18, ?19, ?20,
-                  ?21, ?22, ?23
+                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                  ?11, ?12, ?13, ?14,
+                  ?15, ?16, ?17, ?18,
+                  ?19, ?20, ?21, ?22,
+                  ?23, ?24, ?25
                 )
                 "#,
                 project_insert_params(&project)?,
@@ -118,22 +118,24 @@ impl<'a> DomainRepository<'a> {
                   identityIconJson = ?4,
                   isPinned = ?5,
                   isFavorite = ?6,
-                  defaultCommand = ?7,
-                  worktreeJson = ?8,
-                  customAgentsJson = ?9,
-                  customAgentOrderJson = ?10,
-                  customCommandsJson = ?11,
-                  customCommandOrderJson = ?12,
-                  deletedDefaultCommandIdsJson = ?13,
-                  launchSettingsJson = ?14,
-                  runtimeSettingsJson = ?15,
-                  completionRulesJson = ?16,
-                  attentionRulesJson = ?17,
-                  notificationRulesJson = ?18,
-                  gitConfigJson = ?19,
-                  projectBoardConfigJson = ?20,
-                  previousSessionHistoryJson = ?21,
-                  updatedAt = ?23
+                  isRecentProject = ?7,
+                  recentClosedAt = ?8,
+                  defaultCommand = ?9,
+                  worktreeJson = ?10,
+                  customAgentsJson = ?11,
+                  customAgentOrderJson = ?12,
+                  customCommandsJson = ?13,
+                  customCommandOrderJson = ?14,
+                  deletedDefaultCommandIdsJson = ?15,
+                  launchSettingsJson = ?16,
+                  runtimeSettingsJson = ?17,
+                  completionRulesJson = ?18,
+                  attentionRulesJson = ?19,
+                  notificationRulesJson = ?20,
+                  gitConfigJson = ?21,
+                  projectBoardConfigJson = ?22,
+                  previousSessionHistoryJson = ?23,
+                  updatedAt = ?25
                 WHERE projectId = ?1
                 "#,
                 project_insert_params(&project)?,
@@ -153,6 +155,154 @@ impl<'a> DomainRepository<'a> {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(sql_error)?;
         rows.into_iter().map(project_from_row).collect()
+    }
+
+    pub fn list_recent_projects(&self) -> DomainResult<Vec<Value>> {
+        /*
+        CDXC:GPUIRecentProjects 2026-06-24-12:27:
+        Recent Projects are explicit parked gxserver projects. Return only
+        path-bearing rows marked `isRecentProject` and compute sessionCount
+        from the domain sessions table; do not infer recency from presentation
+        labels, inactive lifecycle states, shell titles, stdout, commands, or
+        filesystem scans.
+        */
+        let mut statement = self
+            .db
+            .prepare(
+                r#"
+                SELECT * FROM projects
+                WHERE isRecentProject = 1
+                  AND path IS NOT NULL
+                  AND trim(path) <> ''
+                ORDER BY recentClosedAt DESC, updatedAt DESC, projectId ASC
+                "#,
+            )
+            .map_err(sql_error)?;
+        let rows = statement
+            .query_map([], project_row_from_sql)
+            .map_err(sql_error)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sql_error)?;
+        rows.into_iter()
+            .map(|row| {
+                let project_id = row.project_id.clone();
+                let session_count = self.count_project_sessions(&project_id)?;
+                project_from_row(row)
+                    .and_then(|project| recent_project_from_project(&project, session_count))
+            })
+            .collect()
+    }
+
+    pub fn read_app_user_data(&self) -> DomainResult<Value> {
+        /*
+        CDXC:GxserverAppUserData 2026-06-24-13:30:
+        Scratch Pad and Pinned Prompts hydrate through one gxserver-owned
+        product-data snapshot. Return only the exact shared React fields and do
+        not derive values from GPUI product-state files, presentation labels,
+        terminal text, project paths, command text, URLs, or logs.
+        */
+        read_app_user_data_state(self.db)
+    }
+
+    pub fn save_scratch_pad(&self, params: &Map<String, Value>) -> DomainResult<Value> {
+        /*
+        CDXC:GxserverAppUserData 2026-06-24-13:30:
+        Scratch Pad autosave stores freeform user text in gxserver state and
+        returns the refreshed app-user-data snapshot. The daemon must not log or
+        echo note content outside the authenticated RPC response.
+        */
+        let content = required_string_param(params, "content")?;
+        let timestamp = now_iso();
+        let created_at = self
+            .db
+            .query_row(
+                "SELECT createdAt FROM app_user_data WHERE itemKind = 'scratchPad' AND itemId = 'global'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(sql_error)?
+            .unwrap_or_else(|| timestamp.clone());
+        self.db
+            .execute(
+                r#"
+                INSERT INTO app_user_data (
+                  itemKind, itemId, content, title, createdAt, updatedAt
+                ) VALUES (
+                  'scratchPad', 'global', ?1, NULL, ?2, ?3
+                )
+                ON CONFLICT(itemKind, itemId) DO UPDATE SET
+                  content = excluded.content,
+                  updatedAt = excluded.updatedAt
+                "#,
+                params![content, created_at, timestamp],
+            )
+            .map_err(sql_error)?;
+        read_app_user_data_state(self.db)
+    }
+
+    pub fn save_pinned_prompt(&self, params: &Map<String, Value>) -> DomainResult<Value> {
+        /*
+        CDXC:GxserverAppUserData 2026-06-24-13:30:
+        Pinned Prompt saves mirror the existing SidebarPinnedPrompt behavior:
+        create or update by promptId, preserve createdAt, stamp updatedAt on
+        save, normalize empty titles from content, and treat an empty content
+        save as removing that prompt instead of storing an unusable row.
+        */
+        let content = required_string_param(params, "content")?;
+        let title = required_string_param(params, "title")?;
+        let supplied_prompt_id = optional_trimmed_string_param(params, "promptId")?;
+        if content.is_empty() {
+            if let Some(prompt_id) = supplied_prompt_id {
+                self.db
+                    .execute(
+                        "DELETE FROM app_user_data WHERE itemKind = 'pinnedPrompt' AND itemId = ?1",
+                        [prompt_id],
+                    )
+                    .map_err(sql_error)?;
+            }
+            return read_app_user_data_state(self.db);
+        }
+
+        let prompt_id = match supplied_prompt_id {
+            Some(prompt_id) => prompt_id,
+            None => create_unique_app_pinned_prompt_id(self.db)?,
+        };
+        let timestamp = now_iso();
+        let created_at = self
+            .db
+            .query_row(
+                "SELECT createdAt FROM app_user_data WHERE itemKind = 'pinnedPrompt' AND itemId = ?1",
+                [&prompt_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(sql_error)?
+            .unwrap_or_else(|| timestamp.clone());
+        let normalized_title = normalize_app_pinned_prompt_title(title, content);
+        self.db
+            .execute(
+                r#"
+                INSERT INTO app_user_data (
+                  itemKind, itemId, content, title, createdAt, updatedAt
+                ) VALUES (
+                  'pinnedPrompt', ?1, ?2, ?3, ?4, ?5
+                )
+                ON CONFLICT(itemKind, itemId) DO UPDATE SET
+                  content = excluded.content,
+                  title = excluded.title,
+                  updatedAt = excluded.updatedAt
+                "#,
+                params![
+                    prompt_id,
+                    content,
+                    normalized_title,
+                    created_at,
+                    timestamp
+                ],
+            )
+            .map_err(sql_error)?;
+        read_app_user_data_state(self.db)
     }
 
     pub fn get_project(&self, project_id: &str) -> DomainResult<Option<Value>> {
@@ -176,6 +326,68 @@ impl<'a> DomainRepository<'a> {
             .execute("DELETE FROM projects WHERE projectId = ?1", [project_id])
             .map_err(sql_error)?;
         Ok(current)
+    }
+
+    pub fn close_project_to_recent(&self, project_id: &str) -> DomainResult<Value> {
+        /*
+        CDXC:GPUIRecentProjects 2026-06-24-12:38:
+        GPUI Close Project is a producer-side park mutation, not a generic project update. The daemon must verify the trusted project id still exists, require a stored path so `/api/listRecentProjects` can expose only real path-bearing rows, and stamp `recentClosedAt` with server time instead of accepting renderer-supplied timestamps.
+        */
+        let current = self.get_project(project_id)?.ok_or_else(|| {
+            DomainStateError::not_found(format!("Project {project_id} does not exist."))
+        })?;
+        let has_path = current
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .map_or(false, |path| !path.is_empty());
+        if !has_path {
+            return Err(DomainStateError::bad_request(
+                "Project must have a stored path before it can be parked as recent.",
+            ));
+        }
+        let mut params = Map::new();
+        params.insert("projectId".to_string(), Value::String(project_id.to_string()));
+        params.insert("isRecentProject".to_string(), Value::Bool(true));
+        params.insert("recentClosedAt".to_string(), Value::String(now_iso()));
+        self.update_project(&params)
+    }
+
+    pub fn restore_recent_project(&self, project_id: &str) -> DomainResult<Value> {
+        let current = self.get_project(project_id)?.ok_or_else(|| {
+            DomainStateError::not_found(format!("Recent project {project_id} does not exist."))
+        })?;
+        if current.get("isRecentProject").and_then(Value::as_bool) != Some(true) {
+            return Ok(current);
+        }
+        let mut params = Map::new();
+        params.insert("projectId".to_string(), Value::String(project_id.to_string()));
+        params.insert("isRecentProject".to_string(), Value::Bool(false));
+        params.insert("recentClosedAt".to_string(), Value::Null);
+        self.update_project(&params)
+    }
+
+    pub fn remove_recent_project(&self, project_id: &str) -> DomainResult<Value> {
+        let current = self.get_project(project_id)?.ok_or_else(|| {
+            DomainStateError::not_found(format!("Recent project {project_id} does not exist."))
+        })?;
+        if current.get("isRecentProject").and_then(Value::as_bool) != Some(true) {
+            return Err(DomainStateError::not_found(format!(
+                "Recent project {project_id} does not exist."
+            )));
+        }
+        self.remove_project(project_id)
+    }
+
+    fn count_project_sessions(&self, project_id: &str) -> DomainResult<usize> {
+        self.db
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE projectId = ?1",
+                [project_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count.max(0) as usize)
+            .map_err(sql_error)
     }
 
     pub fn add_project_path(&self, params: &Map<String, Value>) -> DomainResult<Value> {
@@ -772,6 +984,116 @@ fn path_file_name(path: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+fn read_app_user_data_state(db: &Connection) -> DomainResult<Value> {
+    let scratch_pad_content = db
+        .query_row(
+            "SELECT content FROM app_user_data WHERE itemKind = 'scratchPad' AND itemId = 'global'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sql_error)?
+        .unwrap_or_default();
+    let mut statement = db
+        .prepare(
+            r#"
+            SELECT itemId, content, title, createdAt, updatedAt
+            FROM app_user_data
+            WHERE itemKind = 'pinnedPrompt'
+            ORDER BY updatedAt DESC, itemId ASC
+            "#,
+        )
+        .map_err(sql_error)?;
+    let pinned_prompts = statement
+        .query_map([], |row| {
+            let prompt_id: String = row.get(0)?;
+            let content: String = row.get(1)?;
+            let title: Option<String> = row.get(2)?;
+            let created_at: String = row.get(3)?;
+            let updated_at: String = row.get(4)?;
+            let normalized_title =
+                normalize_app_pinned_prompt_title(title.as_deref().unwrap_or(""), &content);
+            Ok(json!({
+                "content": content,
+                "createdAt": created_at,
+                "promptId": prompt_id,
+                "title": normalized_title,
+                "updatedAt": updated_at,
+            }))
+        })
+        .map_err(sql_error)?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(sql_error)?;
+    Ok(json!({
+        "pinnedPrompts": pinned_prompts,
+        "scratchPadContent": scratch_pad_content,
+    }))
+}
+
+fn required_string_param<'a>(
+    params: &'a Map<String, Value>,
+    key: &str,
+) -> DomainResult<&'a str> {
+    params
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| DomainStateError::bad_request(format!("{key} must be a string.")))
+}
+
+fn optional_trimmed_string_param(
+    params: &Map<String, Value>,
+    key: &str,
+) -> DomainResult<Option<String>> {
+    match params.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => {
+            let trimmed = value.trim();
+            Ok((!trimmed.is_empty()).then(|| trimmed.to_string()))
+        }
+        Some(_) => Err(DomainStateError::bad_request(format!(
+            "{key} must be a string when provided."
+        ))),
+    }
+}
+
+fn create_unique_app_pinned_prompt_id(db: &Connection) -> DomainResult<String> {
+    let millis = chrono::Utc::now().timestamp_millis();
+    for attempt in 0..MAX_ID_GENERATION_ATTEMPTS {
+        let candidate = if attempt == 0 {
+            format!("gxserver-prompt-{millis}")
+        } else {
+            format!("gxserver-prompt-{millis}-{attempt}")
+        };
+        let exists: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM app_user_data WHERE itemKind = 'pinnedPrompt' AND itemId = ?1)",
+                [&candidate],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)?;
+        if !exists {
+            return Ok(candidate);
+        }
+    }
+    Err(DomainStateError::corrupt_state(
+        "Could not allocate a unique pinned prompt id.",
+    ))
+}
+
+fn normalize_app_pinned_prompt_title(title_candidate: &str, content: &str) -> String {
+    let trimmed_title = title_candidate.trim();
+    if !trimmed_title.is_empty() {
+        return trimmed_title.to_string();
+    }
+    content
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| line.chars().take(80).collect::<String>())
+        .filter(|line| !line.is_empty())
+        .unwrap_or_else(|| "Untitled Prompt".to_string())
+}
+
 pub fn read_domain_rpc_params(body: &Value) -> DomainResult<Map<String, Value>> {
     let Some(object) = body.as_object() else {
         return Err(DomainStateError::bad_request(
@@ -935,6 +1257,10 @@ fn normalize_project_input(
         Value::Bool(input.get("isPinned").and_then(Value::as_bool) == Some(true)),
     );
     project.insert(
+        "isRecentProject".to_string(),
+        Value::Bool(input.get("isRecentProject").and_then(Value::as_bool) == Some(true)),
+    );
+    project.insert(
         "launchSettings".to_string(),
         Value::Object(normalize_object(input.get("launchSettings"))),
     );
@@ -958,6 +1284,11 @@ fn normalize_project_input(
     project.insert(
         "projectId".to_string(),
         Value::String(project_id.to_string()),
+    );
+    insert_optional_string(
+        &mut project,
+        "recentClosedAt",
+        read_optional_text(input.get("recentClosedAt")),
     );
     project.insert(
         "runtimeSettings".to_string(),
@@ -1006,6 +1337,12 @@ fn merge_project_update(
             Value::Bool(value.as_bool() == Some(true)),
         );
     }
+    if let Some(value) = input.get("isRecentProject") {
+        next.insert(
+            "isRecentProject".to_string(),
+            Value::Bool(value.as_bool() == Some(true)),
+        );
+    }
     update_object_field(&mut next, input, "launchSettings");
     if input.contains_key("name") {
         next.insert(
@@ -1017,6 +1354,7 @@ fn merge_project_update(
     update_optional_text_field(&mut next, input, "path");
     update_object_array_field(&mut next, input, "previousSessionHistory");
     update_object_field(&mut next, input, "projectBoardConfig");
+    update_optional_text_field(&mut next, input, "recentClosedAt");
     update_object_field(&mut next, input, "runtimeSettings");
     update_optional_object_field(&mut next, input, "worktree");
     next.insert(
@@ -1510,6 +1848,7 @@ struct ProjectRow {
     identity_icon_json: String,
     is_favorite: i64,
     is_pinned: i64,
+    is_recent_project: i64,
     launch_settings_json: String,
     name: String,
     notification_rules_json: String,
@@ -1517,6 +1856,7 @@ struct ProjectRow {
     previous_session_history_json: String,
     project_board_config_json: String,
     project_id: String,
+    recent_closed_at: Option<String>,
     runtime_settings_json: String,
     updated_at: String,
     worktree_json: String,
@@ -1530,6 +1870,8 @@ fn project_row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow>
         identity_icon_json: row.get("identityIconJson")?,
         is_pinned: row.get("isPinned")?,
         is_favorite: row.get("isFavorite")?,
+        is_recent_project: row.get("isRecentProject")?,
+        recent_closed_at: row.get("recentClosedAt")?,
         default_command: row.get("defaultCommand")?,
         worktree_json: row.get("worktreeJson")?,
         custom_agents_json: row.get("customAgentsJson")?,
@@ -1637,6 +1979,10 @@ fn project_from_row(row: ProjectRow) -> DomainResult<Value> {
     project.insert("isFavorite".to_string(), Value::Bool(row.is_favorite == 1));
     project.insert("isPinned".to_string(), Value::Bool(row.is_pinned == 1));
     project.insert(
+        "isRecentProject".to_string(),
+        Value::Bool(row.is_recent_project == 1),
+    );
+    project.insert(
         "launchSettings".to_string(),
         parse_object(
             &row.launch_settings_json,
@@ -1678,6 +2024,7 @@ fn project_from_row(row: ProjectRow) -> DomainResult<Value> {
         "projectId".to_string(),
         Value::String(row.project_id.clone()),
     );
+    insert_optional_string(&mut project, "recentClosedAt", row.recent_closed_at);
     project.insert(
         "runtimeSettings".to_string(),
         parse_object(
@@ -1697,6 +2044,62 @@ fn project_from_row(row: ProjectRow) -> DomainResult<Value> {
         &row.project_id,
     )?;
     Ok(Value::Object(project))
+}
+
+fn recent_project_from_project(project: &Value, session_count: usize) -> DomainResult<Value> {
+    let object = project.as_object().ok_or_else(|| {
+        DomainStateError::corrupt_state("Project row did not decode as an object.")
+    })?;
+    let project_id = required_string(object, "projectId")?;
+    let title = required_string(object, "name")?;
+    let path = optional_string(object, "path")
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| {
+            DomainStateError::corrupt_state(format!(
+                "Recent project {project_id} did not have a path."
+            ))
+        })?;
+    let mut recent_project = Map::new();
+    recent_project.insert("path".to_string(), Value::String(path));
+    recent_project.insert("projectId".to_string(), Value::String(project_id));
+    recent_project.insert(
+        "sessionCount".to_string(),
+        Value::Number(serde_json::Number::from(session_count)),
+    );
+    recent_project.insert("title".to_string(), Value::String(title));
+    insert_optional_string(
+        &mut recent_project,
+        "recentClosedAt",
+        optional_string(object, "recentClosedAt"),
+    );
+    if let Some(identity_icon) = object.get("identityIcon").and_then(Value::as_object) {
+        insert_optional_value(&mut recent_project, "icon", identity_icon.get("icon").cloned());
+        insert_optional_string(
+            &mut recent_project,
+            "iconDataUrl",
+            identity_icon
+                .get("iconDataUrl")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        );
+        insert_optional_string(
+            &mut recent_project,
+            "theme",
+            identity_icon
+                .get("theme")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        );
+        insert_optional_string(
+            &mut recent_project,
+            "themeColor",
+            identity_icon
+                .get("themeColor")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        );
+    }
+    Ok(Value::Object(recent_project))
 }
 
 #[derive(Debug)]
@@ -1915,6 +2318,8 @@ fn project_insert_params(
         )?),
         sql_i64(bool_field(object, "isPinned") as i64),
         sql_i64(bool_field(object, "isFavorite") as i64),
+        sql_i64(bool_field(object, "isRecentProject") as i64),
+        sql_optional_text(optional_string(object, "recentClosedAt")),
         sql_optional_text(optional_string(object, "defaultCommand")),
         sql_text(stringify_domain_json_field(
             "worktree",
@@ -2274,6 +2679,14 @@ fn has_string_field(map: &Map<String, Value>, key: &str) -> bool {
 fn insert_optional_string(map: &mut Map<String, Value>, key: &str, value: Option<String>) {
     if let Some(value) = value {
         map.insert(key.to_string(), Value::String(value));
+    }
+}
+
+fn insert_optional_value(map: &mut Map<String, Value>, key: &str, value: Option<Value>) {
+    if let Some(value) = value {
+        if !value.is_null() {
+            map.insert(key.to_string(), value);
+        }
     }
 }
 

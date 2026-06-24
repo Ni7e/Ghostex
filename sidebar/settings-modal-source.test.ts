@@ -26,12 +26,16 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe("settings modal source", () => {
-  test("keeps Settings and Agents Hub tab rails visibly bordered", () => {
+  test("keeps Agents Hub tab rail visibly bordered while Settings uses sidebar navigation", () => {
     /*
      * CDXC:AppModalTabs 2026-06-24-04:25:
-     * Settings and Agents Hub top-level tab rails share the app-modal tab style,
-     * and that style must keep a visible 1px #252525 outside border plus
-     * single-pixel internal dividers.
+     * Agents Hub top-level tabs use the app-modal tab style, and that style
+     * must keep a visible 1px #252525 outside border plus single-pixel internal
+     * dividers.
+     *
+     * CDXC:SettingsNavigation 2026-06-24-22:16:
+     * Settings must not render the app-modal top tab rail anymore; Settings
+     * page navigation belongs in the left sidebar.
      */
     const tabRailStyles = sourceBetween(
       sidebarStylesSource,
@@ -44,34 +48,45 @@ describe("settings modal source", () => {
       ".app-modal-tab-rail [data-slot=\"tabs-trigger\"] + [data-slot=\"tabs-trigger\"]",
     );
     expect(tabRailStyles).toContain("border-left: 1px solid #252525 !important;");
-    expect(settingsModalSource).toContain('<TabsList className="app-modal-tab-rail">');
+    expect(settingsModalSource).not.toContain('<TabsList className="app-modal-tab-rail">');
+    expect(settingsModalSource).not.toContain("settings-modal-tabs-scroll");
     expect(agentsHubModalSource).toContain(
       '<TabsList className="agents-hub-tabs-list app-modal-tab-rail">',
     );
   });
 
-  test("keeps Show Advanced inside the Settings section sidebar", () => {
+  test("keeps Settings page navigation and Show Advanced inside the sidebar", () => {
     /*
      * CDXC:SettingsNavigation 2026-06-19-08:40:
      * The macOS Settings section list and Show Advanced filter should render
      * as one sidebar surface, not as separate floating controls.
+     *
+     * CDXC:SettingsNavigation 2026-06-24-22:16:
+     * Top-level Settings pages and expandable page sections now share that
+     * sidebar, replacing the old top tab bar.
      */
     const settingsSidebar = sourceBetween(
       settingsModalSource,
-      '<aside aria-label="Settings sections" className="settings-section-sidebar">',
+      '<aside aria-label="Settings pages and sections" className="settings-section-sidebar">',
       "</aside>",
     );
-    expect(settingsSidebar).toContain("settings-section-sidebar-list");
+    expect(settingsSidebar).toContain("settings-sidebar-tabs-list");
+    expect(settingsSidebar).toContain("settings-sidebar-page-disclosure");
+    expect(settingsSidebar).toContain("settings-sidebar-subsection-list");
     expect(settingsSidebar).toContain("settings-section-sidebar-footer");
     expect(settingsSidebar).toContain("Show Advanced");
     expect(settingsModalSource).not.toContain("settings-show-advanced-anchor");
   });
 
-  test("keeps settings search in a header row outside the floating sidebar", () => {
+  test("keeps settings search at the top of the content column outside the sidebar", () => {
     /*
      * CDXC:SettingsNavigation 2026-06-19-12:18:
      * Settings and Hotkeys search should center above the settings card column,
      * independent of the floating left sidebar.
+     *
+     * CDXC:SettingsNavigation 2026-06-24-22:16:
+     * Settings has one search field above the active content column while page
+     * and section navigation lives in the sidebar.
      */
     const headerSearch = sourceBetween(
       settingsModalSource,
@@ -79,6 +94,7 @@ describe("settings modal source", () => {
       'toolbarClassName="settings-modal-search-toolbar"',
     );
     expect(headerSearch).toContain("<SidebarSessionSearchField");
+    expect(headerSearch).toContain('placeholder="Search settings"');
   });
 
   test("keeps focused text fields from being redirected into settings search", () => {

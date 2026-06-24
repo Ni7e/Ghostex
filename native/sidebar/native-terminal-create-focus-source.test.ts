@@ -107,6 +107,8 @@ describe("native terminal create focus source", () => {
       "async function createProjectWorktreeFromPrompt",
     );
     expect(worktreeCreateSource).toContain("await createNativeWorktreeForAgentPrompt({");
+    expect(worktreeCreateSource).toContain('showAppToast("warning", "Choose a base branch")');
+    expect(worktreeCreateSource).toContain("baseBranch,");
     expect(worktreeCreateSource).toContain("focusAfterCreate: true,");
     expect(worktreeAgentCreateSource).toContain(
       "revealFocusedSidebarSessionAfterCreate: input.focusAfterCreate !== false",

@@ -1,47 +1,69 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as esbuild from "esbuild";
 import { defineConfig, type Plugin } from "vite";
 
 const gpuiRoot = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = path.resolve(gpuiRoot, "..");
 const sidebarOutDir = path.resolve(gpuiRoot, "dist/sidebar");
+const cefHtmlEntries = ["index.html", "kanban.html", "manage.html", "modal-host.html"] as const;
+const cefHtmlEntryScripts = {
+  "index.html": path.resolve(gpuiRoot, "sidebar/phase1-main.tsx"),
+  "kanban.html": path.resolve(gpuiRoot, "sidebar/phase1-kanban-main.tsx"),
+  "manage.html": path.resolve(gpuiRoot, "sidebar/phase1-manage-main.tsx"),
+  "modal-host.html": path.resolve(repoRoot, "native/sidebar/modal-host.tsx"),
+} satisfies Record<(typeof cefHtmlEntries)[number], string>;
 
-function inlineSidebarAssetsForCef(): Plugin {
+function inlineCefHtmlAssets(): Plugin {
   return {
-    name: "ghostex-gpui-inline-sidebar-assets-for-cef",
-    writeBundle(options, bundle) {
+    name: "ghostex-gpui-inline-cef-html-assets",
+    async writeBundle(options, bundle) {
       const outDir = options.dir ?? sidebarOutDir;
-      const htmlPath = path.join(outDir, "index.html");
-      if (!fs.existsSync(htmlPath)) {
-        throw new Error(`Ghostex GPUI sidebar build did not emit ${htmlPath}.`);
-      }
       /*
        * CDXC:GPUIPhase1 2026-06-14-14:37:
        * The packaged GPUI sidebar is loaded by CEF from a file:// app resource URL. Chromium blocks external module scripts and stylesheets from that opaque origin, so the app bundle must ship a self-contained HTML entry that mounts React without relaxing file-origin security switches.
+       *
+       * CDXC:GPUIProjectWorkareaCefBundles 2026-06-24-11:03:
+       * Source-independent Kanban and Manage GPUI workarea pages are first-party CEF HTML entries beside the sidebar entry. Inline every emitted CEF entry so real runtime surfaces can navigate to bundled file URLs without a dev server, WKWebView/WebKit, temporary pages, or relaxed file-origin switches.
+       *
+       * CDXC:GPUITitlebarAppModalHost 2026-06-24-10:42:
+       * The GPUI app-modal window loads the same React modal host entry as macOS through a first-party CEF HTML file. Keep modal-host.html in the inlined CEF entry set so Settings, Hotkeys, and Command Palette can open without WebKit, duplicated modal UI, temporary pages, or dev-server-only assets.
+       *
+       * CDXC:GPUICefBundleInlining 2026-06-24-22:01:
+       * Inlining only Vite's entry chunks leaves `import "./chunk.js"` specifiers inside the HTML-root module, even though emitted chunks live under assets/. CEF then loads a blank file:// sidebar before React can mount. Keep Vite as the CSS/HTML producer, but replace each CEF entry script with a single esbuild browser bundle so sidebar, Kanban, Manage, and app-modal hosts do not depend on file-url module graph loading or relaxed Chromium switches.
+       *
+       * CDXC:GPUICefBundleInlining 2026-06-24-22:07:
+       * Rebuild the final file from the source HTML instead of regex-editing Vite's transformed inline JavaScript. Generated React code can contain script-tag-shaped strings, so final HTML assembly must extract only emitted style tags from Vite output, then inject the esbuild single-file module into the original CEF wrapper.
        */
-      let html = fs.readFileSync(htmlPath, "utf8");
-      for (const entry of Object.values(bundle)) {
-        if (entry.type === "chunk" && entry.isEntry) {
-          html = html.replace(
-            new RegExp(
-              `<script([^>]*?)src="${escapeRegExp(`./${entry.fileName}`)}"([^>]*)></script>`,
-            ),
-            () => `<script type="module">\n${inlineScriptContent(entry.code)}\n</script>`,
-          );
+      for (const htmlEntry of cefHtmlEntries) {
+        const htmlPath = path.join(outDir, htmlEntry);
+        if (!fs.existsSync(htmlPath)) {
+          throw new Error(`Ghostex GPUI CEF build did not emit ${htmlPath}.`);
         }
 
-        if (entry.type === "asset" && entry.fileName.endsWith(".css")) {
-          html = html.replace(
-            new RegExp(
-              `<link([^>]*?)href="${escapeRegExp(`./${entry.fileName}`)}"([^>]*?)>`,
-            ),
-            () => `<style>\n${inlineStyleContent(String(entry.source))}\n</style>`,
-          );
+        let html = fs.readFileSync(htmlPath, "utf8");
+        for (const entry of Object.values(bundle)) {
+          if (entry.type === "asset" && entry.fileName.endsWith(".css")) {
+            html = html.replace(
+              new RegExp(
+                `<link([^>]*?)href="${escapeRegExp(`./${entry.fileName}`)}"([^>]*?)>`,
+              ),
+              () => `<style>\n${inlineStyleContent(String(entry.source))}\n</style>`,
+            );
+          }
         }
+        const styleTags = collectInlineStyleTags(stripModulePreloadLinks(html));
+        const finalHtml = injectInlineStyleTags(
+          replaceCefEntryModuleScript(
+            fs.readFileSync(path.join(gpuiRoot, htmlEntry), "utf8"),
+            await buildInlineCefEntryScript(cefHtmlEntryScripts[htmlEntry]),
+          ),
+          styleTags,
+        );
+
+        fs.writeFileSync(htmlPath, finalHtml);
       }
-
-      fs.writeFileSync(htmlPath, html);
     },
   };
 }
@@ -58,10 +80,108 @@ function inlineStyleContent(value: string): string {
   return value.replace(/<\/style/gi, "<\\/style");
 }
 
+function stripModulePreloadLinks(html: string): string {
+  return html.replace(/^\s*<link\b(?=[^>]*\brel=["']modulepreload["'])[^>]*>\s*$/gim, "");
+}
+
+function collectInlineStyleTags(html: string): string[] {
+  return [...html.matchAll(/<style\b[^>]*>[\s\S]*?<\/style>/gi)].map((match) => match[0]);
+}
+
+function injectInlineStyleTags(html: string, styleTags: readonly string[]): string {
+  if (styleTags.length === 0) {
+    return html;
+  }
+  return html.replace("</head>", `${styleTags.join("\n")}\n  </head>`);
+}
+
+function replaceCefEntryModuleScript(html: string, bundledScript: string): string {
+  const inlineModuleScript = `<script type="module">\n${inlineScriptContent(bundledScript)}\n</script>`;
+  const moduleScriptWithSrc =
+    /<script\b(?=[^>]*\btype=["']module["'])(?=[^>]*\bsrc=["'][^"']+["'])[^>]*>\s*<\/script>/i;
+  if (moduleScriptWithSrc.test(html)) {
+    return html.replace(moduleScriptWithSrc, () => inlineModuleScript);
+  }
+
+  const existingInlineModuleScript =
+    /<script\b(?=[^>]*\btype=["']module["'])(?![^>]*\bsrc=["'][^"']+["'])[^>]*>[\s\S]*?<\/script>/i;
+  if (existingInlineModuleScript.test(html)) {
+    return html.replace(existingInlineModuleScript, () => inlineModuleScript);
+  }
+
+  throw new Error("Ghostex GPUI CEF build did not emit a module script to inline.");
+}
+
+async function buildInlineCefEntryScript(entryPoint: string): Promise<string> {
+  const result = await esbuild.build({
+    absWorkingDir: repoRoot,
+    alias: {
+      "@": repoRoot,
+    },
+    bundle: true,
+    define: {
+      "process.env.NODE_ENV": "\"production\"",
+    },
+    entryPoints: [entryPoint],
+    format: "esm",
+    jsx: "automatic",
+    loader: {
+      ".gif": "dataurl",
+      ".jpeg": "dataurl",
+      ".jpg": "dataurl",
+      ".mp3": "dataurl",
+      ".png": "dataurl",
+      ".svg": "text",
+      ".wav": "dataurl",
+      ".webp": "dataurl",
+      ".woff": "dataurl",
+      ".woff2": "dataurl",
+    },
+    logLevel: "silent",
+    minify: true,
+    platform: "browser",
+    plugins: [createCefSingleFileEsbuildPlugin()],
+    target: ["chrome120"],
+    write: false,
+  });
+  const script = result.outputFiles.find((file) => file.path === "<stdout>");
+  if (!script) {
+    throw new Error(`Ghostex GPUI CEF esbuild bundle did not emit ${entryPoint}.`);
+  }
+  return script.text;
+}
+
+function createCefSingleFileEsbuildPlugin(): esbuild.Plugin {
+  return {
+    name: "ghostex-gpui-cef-single-file",
+    setup(build) {
+      build.onResolve({ filter: /\.css$/ }, (args) => ({
+        namespace: "ghostex-gpui-empty-css",
+        path: args.path,
+      }));
+      build.onLoad({ filter: /.*/, namespace: "ghostex-gpui-empty-css" }, () => ({
+        contents: "",
+        loader: "js",
+      }));
+      build.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async (args) => {
+        const contents = await fs.promises.readFile(args.path, "utf8");
+        return {
+          contents: contents.replace(
+            /\s+with\s*\{\s*type\s*:\s*["']text["']\s*\}/g,
+            "",
+          ),
+          loader: args.path.endsWith(".tsx") || args.path.endsWith(".jsx") ? "tsx" : "ts",
+          resolveDir: path.dirname(args.path),
+        };
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: "./",
   root: gpuiRoot,
-  plugins: [inlineSidebarAssetsForCef()],
+  plugins: [inlineCefHtmlAssets()],
   build: {
     emptyOutDir: true,
     outDir: sidebarOutDir,
@@ -70,7 +190,12 @@ export default defineConfig({
        * CDXC:GPUIPhase1 2026-06-14-12:50:
        * The GPUI shell resolves the bundled sidebar through Contents/Resources/sidebar/index.html. Keep the Vite HTML entry at the package root so production-style packaging and local development share that single entry URL.
        */
-      input: path.resolve(gpuiRoot, "index.html"),
+      input: {
+        index: path.resolve(gpuiRoot, "index.html"),
+        kanban: path.resolve(gpuiRoot, "kanban.html"),
+        manage: path.resolve(gpuiRoot, "manage.html"),
+        modalHost: path.resolve(gpuiRoot, "modal-host.html"),
+      },
     },
   },
   resolve: {

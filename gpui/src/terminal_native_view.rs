@@ -9,7 +9,7 @@ use std::{
 
 #[cfg(target_os = "macos")]
 use crate::terminal_ghostty_surface::{
-    GhosttySurfaceConfigRequest, GhosttySurfaceConfigRequestError,
+    self, GhosttySurfaceConfigRequest, GhosttySurfaceConfigRequestError,
 };
 #[cfg(target_os = "macos")]
 use crate::terminal_surface_host::{
@@ -71,6 +71,9 @@ Slice 115 wires AppKit first-responder handoff through only the App-owned termin
 
 CDXC:GPUICommandTerminalSurface 2026-06-23-05:03:
 Runtime AppKit host ownership is shared across Agents and command-pane terminal bodies by a typed mount-slot key. Command hosts use command group/session ids and never reuse Agents pane/session keys, startup host keys, shell-state JSON, or launch payload sources; collapse and close detach through the normal host/surface cleanup order.
+
+CDXC:GPUITerminalNativeKeyBridge 2026-06-24-20:58:
+Real terminal host views now accept native key focus only as exact App-owned child views. Visibility false and Drop both unregister the host from the Ghostty key-target registry so a stale NSView pointer cannot keep forwarding Return, Backspace, or modifier events after the mounted surface pairing is gone.
 */
 #[cfg(target_os = "macos")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,7 +95,7 @@ impl RealTerminalNativeViewHandle {
         self.native_view
     }
 
-    fn as_ptr(self) -> *mut c_void {
+    pub(crate) fn as_ptr(self) -> *mut c_void {
         self.native_view.as_ptr()
     }
 }
@@ -283,6 +286,7 @@ impl OwnedTerminalHostNativeView {
 #[cfg(target_os = "macos")]
 impl Drop for OwnedTerminalHostNativeView {
     fn drop(&mut self) {
+        terminal_ghostty_surface::unregister_native_key_target(self.native_view);
         match &self.destroyer {
             OwnedTerminalHostNativeViewDestroyer::AppKit => unsafe {
                 GhostexGpuiTerminalDestroyHostNativeView(self.native_view.as_ptr());
@@ -331,6 +335,10 @@ where
 
     fn real_native_view_handle(&self) -> RealTerminalNativeViewHandle {
         self.native_view.real_native_view_handle()
+    }
+
+    pub(crate) fn native_view_handle(&self) -> RealTerminalNativeViewHandle {
+        self.real_native_view_handle()
     }
 
     fn matches_plan_identity(&self, plan: NativeTerminalSurfaceAttachmentPlan<SlotId>) -> bool {
@@ -810,6 +818,11 @@ pub(crate) fn set_app_owned_terminal_host_native_view_visible<SlotId>(
     let Some(owned_host_view) = owned_host_view else {
         return;
     };
+    if !visible {
+        terminal_ghostty_surface::unregister_native_key_target(
+            owned_host_view.real_native_view_handle(),
+        );
+    }
     let executor =
         NativeTerminalSurfaceAppKitExecutor::new(owned_host_view.real_native_view_handle());
     let operation = if visible {

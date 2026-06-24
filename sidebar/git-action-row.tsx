@@ -25,6 +25,12 @@ import type { WebviewApi } from "./webview-api";
 
 export type GitActionRowProps = {
   git: SidebarGitState;
+  /*
+   * CDXC:GPUIRemoteGit 2026-06-24-21:26:
+   * Reused Git controls must include the owning project/group scope for project-specific reads, opens, actions, and preference writes so GPUI routes remote project work through the selected machine tunnel instead of the active local project.
+   */
+  groupId?: string;
+  projectId?: string;
   vscode: WebviewApi;
 };
 
@@ -38,7 +44,7 @@ const GIT_MENU_MAX_WIDTH_PX = 260;
 const GIT_MENU_MARGIN_PX = 12;
 const GIT_MENU_OFFSET_PX = 8;
 
-export function GitActionRow({ git, vscode }: GitActionRowProps) {
+export function GitActionRow({ git, groupId, projectId, vscode }: GitActionRowProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<GitMenuPosition>();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -127,12 +133,14 @@ export function GitActionRow({ git, vscode }: GitActionRowProps) {
   }, [isMenuOpen, menuItems.length]);
 
   const requestRefresh = () => {
-    vscode.postMessage({ type: "refreshGitState" });
+    vscode.postMessage({ groupId, projectId, type: "refreshGitState" });
   };
 
   const setCommitConfirmationEnabled = (enabled: boolean) => {
     vscode.postMessage({
       enabled,
+      groupId,
+      projectId,
       type: "setSidebarGitCommitConfirmationEnabled",
     });
   };
@@ -140,6 +148,8 @@ export function GitActionRow({ git, vscode }: GitActionRowProps) {
   const setGenerateCommitBodyEnabled = (enabled: boolean) => {
     vscode.postMessage({
       enabled,
+      groupId,
+      projectId,
       type: "setSidebarGitGenerateCommitBodyEnabled",
     });
   };
@@ -148,6 +158,8 @@ export function GitActionRow({ git, vscode }: GitActionRowProps) {
     setIsMenuOpen(false);
     vscode.postMessage({
       action,
+      groupId,
+      projectId,
       type: "runSidebarGitAction",
     });
   };
@@ -155,6 +167,8 @@ export function GitActionRow({ git, vscode }: GitActionRowProps) {
   const openChangedFile = (filePath: string) => {
     vscode.postMessage({
       filePath,
+      groupId,
+      projectId,
       type: "openSidebarGitChangedFile",
     });
   };

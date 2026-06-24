@@ -179,6 +179,7 @@ type AppModalHostMessage =
   | { type: "pickWorktreeImages" }
   | { paths: string[]; type: "worktreeImageFilesPicked" }
   | {
+      branches?: unknown;
       error?: string;
       ok: boolean;
       requestId: string;
@@ -2589,11 +2590,16 @@ function AppModalHost() {
        * owns the agent, first prompt, and image attachment drafts before submit,
        * while gxserver owns the branch/worktree mutation and returned project.
        *
-       * CDXC:WorktreeProjectRegistration 2026-06-02-12:53:
-       * Open Existing mode in this same modal is selection-only UI. It sends
-       * only the selected worktree path through the native sidebar to gxserver
-       * and must not expose agent, first-prompt, image attachment, or prompt
-       * helper controls.
+       * CDXC:GPUIWorktrees 2026-06-24-14:06:
+       * Open Existing mode shares the worktree first-prompt controls. Blank
+       * prompt submits remain project-open-only; non-blank prompts carry the
+       * user-selected agent and prompt alongside the selected worktree path so
+       * native and GPUI receivers can start the actual agent session.
+       *
+       * CDXC:WorktreeBaseBranch 2026-06-24-11:32:
+       * Create New mode must send the selected base branch through the sidebar
+       * command so the worktree starts from the chosen branch instead of the
+       * currently checked-out HEAD.
        */}
       <WorktreeCreateModal
         agents={agents}
@@ -2602,13 +2608,16 @@ function AppModalHost() {
         onCancel={closeModal}
         onConfirm={(draft) => {
           vscode.postMessage({
-            agentId: draft.mode === "create" ? draft.agentId : undefined,
+            agentId: draft.agentId,
+            baseBranch: draft.mode === "create" ? draft.baseBranch : undefined,
+            existingWorktreeKey:
+              draft.mode === "openExisting" ? draft.existingWorktreeKey : undefined,
             existingWorktreePath:
               draft.mode === "openExisting" ? draft.existingWorktreePath : undefined,
             mode: draft.mode,
             projectId: worktree?.projectId,
             projectPath: worktree?.projectPath,
-            prompt: draft.mode === "create" ? draft.prompt : undefined,
+            prompt: draft.prompt,
             remoteMachineId: worktree?.remoteMachineId,
             type: "createProjectWorktree",
           } satisfies SidebarToExtensionMessage);

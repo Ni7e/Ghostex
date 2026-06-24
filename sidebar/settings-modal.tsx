@@ -122,6 +122,7 @@ import {
   type SidebarGhostexCliStatusMessage,
   type SidebarGhostexFolderStatsMessage,
   type SidebarOSIntegrationStatusMessage,
+  type SidebarOSIntegrationStatusItem,
   type SidebarPortlessState,
   type SidebarProjectSettingsItem,
   type SidebarTheme,
@@ -459,6 +460,34 @@ type SettingsSectionNavigationItem<SectionId extends string> = {
   title: string;
 };
 
+type SettingsSidebarPageSection = {
+  active: boolean;
+  id: string;
+  onSelect: () => void;
+  title: string;
+};
+
+type SettingsSidebarPage = {
+  id: SettingsModalTab;
+  sections?: readonly SettingsSidebarPageSection[];
+  title: string;
+};
+
+type HotkeySettingsDefinitionById = ReadonlyMap<
+  ghostexHotkeyActionId,
+  (typeof GHOSTEX_HOTKEY_DEFINITIONS)[number]
+>;
+
+type HotkeySettingsSectionRefs = Record<
+  HotkeySettingsSectionId,
+  RefObject<HTMLDivElement | null>
+>;
+
+type HotkeySettingsSectionSearches = Record<
+  HotkeySettingsSectionId,
+  SettingsSectionSearchResult
+>;
+
 type SettingModificationProps = {
   advanced?: boolean;
   isModified?: boolean;
@@ -772,10 +801,6 @@ function getInitialSettingsModalTab(
   return resolveSettingsModalTabForVisibility(requestedTab, visibility);
 }
 
-function isSearchableSettingsModalTab(tab: SettingsModalTab): tab is "settings" | "hotkeys" {
-  return tab === "settings" || tab === "hotkeys";
-}
-
 function hasActiveHotkeyRecorder(): boolean {
   return Boolean(document.querySelector("[data-hotkey-recorder='true'][data-recording='true']"));
 }
@@ -972,9 +997,15 @@ export function SettingsModal({
   const [draft, setDraft] = useState<ghostexSettings>(normalizedInitialSettings);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [settingsSearchQuery, setSettingsSearchQuery] = useState("");
-  const [hotkeysSearchQuery, setHotkeysSearchQuery] = useState("");
   const [activeMainSettingsSectionId, setActiveMainSettingsSectionId] =
     useState<MainSettingsSectionId>("sidebar");
+  const [activeHotkeySettingsSectionId, setActiveHotkeySettingsSectionId] =
+    useState<HotkeySettingsSectionId>("general");
+  const [expandedSettingsSidebarPages, setExpandedSettingsSidebarPages] = useState<
+    Partial<Record<SettingsModalTab, boolean>>
+  >({
+    settings: true,
+  });
   const showOSIntegrationSettingsTab = shouldShowOSIntegrationSettingsTab({
     isFirstLaunchSetup,
     showBetaFeatures: draft.showBetaFeatures,
@@ -1011,6 +1042,12 @@ export function SettingsModal({
   const soundsSectionRef = useRef<HTMLDivElement>(null);
   const storageSectionRef = useRef<HTMLDivElement>(null);
   const workspaceSectionRef = useRef<HTMLDivElement>(null);
+  const hotkeyActionsSectionRef = useRef<HTMLDivElement>(null);
+  const hotkeyGeneralSectionRef = useRef<HTMLDivElement>(null);
+  const hotkeyNavigationSectionRef = useRef<HTMLDivElement>(null);
+  const hotkeyPaneActionsSectionRef = useRef<HTMLDivElement>(null);
+  const hotkeyProjectsSectionRef = useRef<HTMLDivElement>(null);
+  const hotkeySessionSlotsSectionRef = useRef<HTMLDivElement>(null);
   const hasRequestedStorageStatsRef = useRef(false);
   const modalTheme = resolveSidebarTheme(draft.sidebarTheme, getSidebarThemeVariant(theme));
   const isModalDarkTheme = getSidebarThemeVariant(modalTheme) === "dark";
@@ -1021,23 +1058,10 @@ export function SettingsModal({
     }
   };
   const focusSearchInput = () => {
-    if (isFirstLaunchSetup || !isSearchableSettingsModalTab(activeTab)) {
+    if (isFirstLaunchSetup) {
       return;
     }
     searchInputRef.current?.focus({ preventScroll: true });
-  };
-  const getActiveSearchQuery = () => {
-    if (activeTab === "hotkeys") {
-      return hotkeysSearchQuery;
-    }
-    return settingsSearchQuery;
-  };
-  const setActiveSearchQuery = (nextQuery: string) => {
-    if (activeTab === "hotkeys") {
-      setHotkeysSearchQuery(nextQuery);
-      return;
-    }
-    setSettingsSearchQuery(nextQuery);
   };
   const handleSettingsModalScrollCapture = (event: ReactUIEvent<HTMLDivElement>) => {
     if (event.target instanceof HTMLElement && event.target.dataset.slot === "scroll-area-viewport") {
@@ -1061,7 +1085,6 @@ export function SettingsModal({
       event.ctrlKey ||
       event.altKey ||
       isFirstLaunchSetup ||
-      !isSearchableSettingsModalTab(activeTab) ||
       event.key.length !== 1 ||
       isEditableSettingsModalEventTarget(event.target) ||
       isEditableSettingsModalElement(event.currentTarget.ownerDocument.activeElement)
@@ -1070,7 +1093,7 @@ export function SettingsModal({
     }
 
     event.preventDefault();
-    setActiveSearchQuery(`${getActiveSearchQuery()}${event.key}`);
+    setSettingsSearchQuery(`${settingsSearchQuery}${event.key}`);
     requestAnimationFrame(focusSearchInput);
   };
   const setActiveTab = (nextTab: SettingsModalTab) => {
@@ -1079,11 +1102,32 @@ export function SettingsModal({
     });
     rememberActiveScrollPosition();
     rememberedSettingsModalTab = visibleTab;
+    if (visibleTab === "settings" || visibleTab === "hotkeys") {
+      setExpandedSettingsSidebarPages((expandedPages) => ({
+        ...expandedPages,
+        [visibleTab]: true,
+      }));
+    }
     setActiveTabState(visibleTab);
   };
 
   const scrollSettingsSectionIntoView = (sectionRef: RefObject<HTMLDivElement | null>) => {
     sectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const toggleSettingsSidebarPage = (pageId: SettingsModalTab) => {
+    setExpandedSettingsSidebarPages((expandedPages) => ({
+      ...expandedPages,
+      [pageId]: !expandedPages[pageId],
+    }));
+  };
+
+  const selectSettingsSidebarSection = (
+    tab: SettingsModalTab,
+    sectionRef: RefObject<HTMLDivElement | null>,
+  ) => {
+    setActiveTab(tab);
+    requestAnimationFrame(() => scrollSettingsSectionIntoView(sectionRef));
   };
 
   useEffect(() => {
@@ -1109,19 +1153,19 @@ export function SettingsModal({
       return;
     }
     const nextQuery = initialSearchQuery.trim();
-    const nextTab = getInitialSettingsModalTab(initialTab, { showOSIntegrationSettingsTab });
     /**
      * CDXC:SessionPersistence 2026-06-04-02:52:
      * Titlebar Tips notices can deep-link into Settings by opening a searchable
      * tab and pre-filling the search box with the setting label. Seed the
      * correct tab-specific query instead of typing through the DOM so repeated
      * opens land on the intended control without depending on focus timing.
+     *
+     * CDXC:SettingsNavigation 2026-06-24-22:16:
+     * Settings has one top search field for the sidebar-driven modal. Seed the
+     * shared Settings query for every non-first-launch entry point so Hotkeys
+     * and General use the same search state.
      */
-    if (nextTab === "hotkeys") {
-      setHotkeysSearchQuery(nextQuery);
-    } else if (nextTab === "settings") {
-      setSettingsSearchQuery(nextQuery);
-    }
+    setSettingsSearchQuery(nextQuery);
     const animationFrame = requestAnimationFrame(() => {
       searchInputRef.current?.focus({ preventScroll: true });
       searchInputRef.current?.select();
@@ -1994,6 +2038,79 @@ export function SettingsModal({
   const visibleMainSettingsSectionIds = visibleMainSettingsSectionNavigation
     .map((section) => section.id)
     .join("|");
+  const hotkeyDefinitionsById = useMemo<HotkeySettingsDefinitionById>(
+    () => new Map(GHOSTEX_HOTKEY_DEFINITIONS.map((definition) => [definition.id, definition])),
+    [],
+  );
+  const hotkeySectionSearches = useMemo(
+    () =>
+      getHotkeySettingsSectionSearches({
+        definitionsById: hotkeyDefinitionsById,
+        expandCollapsedProjectsOnJump: draft.expandCollapsedProjectsOnJump,
+        searchQuery: settingsSearchQuery,
+      }),
+    [draft.expandCollapsedProjectsOnJump, hotkeyDefinitionsById, settingsSearchQuery],
+  );
+  const hotkeySectionRefs: HotkeySettingsSectionRefs = {
+    actions: hotkeyActionsSectionRef,
+    general: hotkeyGeneralSectionRef,
+    navigation: hotkeyNavigationSectionRef,
+    paneActions: hotkeyPaneActionsSectionRef,
+    projects: hotkeyProjectsSectionRef,
+    sessionSlots: hotkeySessionSlotsSectionRef,
+  };
+  const visibleHotkeySections = HOTKEY_SETTINGS_SECTIONS.filter((section) =>
+    shouldShowSettingsSection(hotkeySectionSearches[section.id]),
+  );
+  const visibleHotkeySectionNavigation: SettingsSectionNavigationItem<HotkeySettingsSectionId>[] =
+    visibleHotkeySections.map((section) => ({
+      id: section.id,
+      ref: hotkeySectionRefs[section.id],
+      title: section.title,
+    }));
+  /*
+   * CDXC:SettingsNavigation 2026-06-24-22:16:
+   * Settings no longer has a top tab bar. Keep top-level Settings pages in the
+   * left sidebar and let section-rich pages expand there so navigation, section
+   * jumps, search results, and the Show Advanced footer share one rail.
+   */
+  const settingsSidebarPages: SettingsSidebarPage[] = [
+    {
+      id: "settings",
+      sections: visibleMainSettingsSectionNavigation.map((section) => ({
+        active: activeTab === "settings" && activeMainSettingsSectionId === section.id,
+        id: section.id,
+        onSelect: () => {
+          setActiveMainSettingsSectionId(section.id);
+          selectSettingsSidebarSection("settings", section.ref);
+        },
+        title: section.title,
+      })),
+      title: "General",
+    },
+    { id: "integrations", title: "Integrations" },
+    { id: "remote", title: "Remote" },
+    { id: "projects", title: "Projects" },
+    {
+      id: "hotkeys",
+      sections: visibleHotkeySectionNavigation.map((section) => ({
+        active: activeTab === "hotkeys" && activeHotkeySettingsSectionId === section.id,
+        id: section.id,
+        onSelect: () => {
+          setActiveHotkeySettingsSectionId(section.id);
+          selectSettingsSidebarSection("hotkeys", section.ref);
+        },
+        title: section.title,
+      })),
+      title: "Hotkeys",
+    },
+    { id: "agents", title: "Agents" },
+    { id: "actions", title: "Actions" },
+    { id: "openTargets", title: "Open In" },
+    ...(showOSIntegrationSettingsTab
+      ? [{ id: "osIntegration" as const, title: "OS Integration" }]
+      : []),
+  ];
 
   useEffect(() => {
     if (!isOpen || activeTab !== "settings" || initialSection === undefined) {
@@ -2285,7 +2402,7 @@ export function SettingsModal({
           }
         }}
         onOpenAutoFocus={(event) => {
-          if (!isFirstLaunchSetup && isSearchableSettingsModalTab(activeTab)) {
+          if (!isFirstLaunchSetup) {
             event.preventDefault();
             requestAnimationFrame(focusSearchInput);
           }
@@ -2306,6 +2423,7 @@ export function SettingsModal({
           <Tabs
             className="flex min-h-0 flex-1 flex-col"
             onValueChange={(value) => setActiveTab(value as SettingsModalTab)}
+            orientation="vertical"
             value={activeTab}
           >
           <DialogHeader className="ghostex-modal-heading-bar">
@@ -2319,76 +2437,67 @@ export function SettingsModal({
                 Choose a few defaults for Ghostex. You can change everything later in Settings.
               </p>
             ) : null}
-            {/*
-             * CDXC:UnifiedSettings 2026-05-09-15:30
-             * Settings is the single configuration surface for app controls,
-             * terminal controls, Agents, Actions, Open In, and Hotkeys.
-             *
-             * CDXC:SettingsNavigation 2026-06-12-04:13:
-             * Ghostty terminal settings are merged into the main Settings page
-             * so one Settings search covers app settings and terminal settings.
-             *
-             * CDXC:SettingsNavigation 2026-06-15-03:06:
-             * OS Integration should be the final Settings tab because default
-             * app-handler actions are less frequently used than daily app,
-             * integration, remote, project, hotkey, agent, action, and Open In
-             * controls.
-             *
-             * CDXC:SettingsNavigation 2026-06-15-20:48:
-             * The first tab label should read General so the modal title can
-             * own the Settings name while the tab describes its general app and
-             * terminal preference content.
-             */}
-            {!isFirstLaunchSetup ? (
-            <div className="settings-modal-tabs-scroll mt-3">
-              <TabsList className="app-modal-tab-rail">
-                <TabsTrigger value="settings">General</TabsTrigger>
-                <TabsTrigger value="integrations">Integrations</TabsTrigger>
-                <TabsTrigger value="remote">Remote</TabsTrigger>
-                <TabsTrigger value="projects">Projects</TabsTrigger>
-                <TabsTrigger value="hotkeys">Hotkeys</TabsTrigger>
-                <TabsTrigger value="agents">Agents</TabsTrigger>
-                <TabsTrigger value="actions">Actions</TabsTrigger>
-                <TabsTrigger value="openTargets">Open In</TabsTrigger>
-                {showOSIntegrationSettingsTab ? (
-                  <TabsTrigger value="osIntegration">OS Integration</TabsTrigger>
-                ) : null}
-              </TabsList>
-            </div>
-            ) : null}
-            {!isFirstLaunchSetup && (activeTab === "settings" || activeTab === "hotkeys") ? (
-              <div className="settings-modal-search-row">
-                <SidebarSessionSearchField
-                  ariaLabel={
-                    activeTab === "hotkeys"
-                      ? "Search hotkeys"
-                      : "Search settings"
-                  }
-                  autoCapitalize="none"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  clearLabel={
-                    activeTab === "hotkeys"
-                      ? "Clear hotkeys search"
-                      : "Clear settings search"
-                  }
-                  inputClassName="settings-modal-search-input"
-                  inputRef={searchInputRef}
-                  placeholder={activeTab === "hotkeys" ? "Search hotkeys" : "Search settings"}
-                  query={activeTab === "hotkeys" ? hotkeysSearchQuery : settingsSearchQuery}
-                  setQuery={(nextQuery) => {
-                    if (activeTab === "hotkeys") {
-                      setHotkeysSearchQuery(nextQuery);
-                      return;
-                    }
-                    setSettingsSearchQuery(nextQuery);
-                  }}
-                  spellCheck={false}
-                  toolbarClassName="settings-modal-search-toolbar"
-                />
-              </div>
-            ) : null}
           </DialogHeader>
+
+          <div
+            className={cn(
+              "settings-modal-body-layout",
+              isFirstLaunchSetup && "settings-modal-body-layout-first-launch",
+            )}
+          >
+            {!isFirstLaunchSetup ? (
+              <SettingsSidebarNavigation
+                expandedPages={expandedSettingsSidebarPages}
+                pages={settingsSidebarPages}
+                showAdvancedSettings={showAdvancedSettings}
+                showAdvancedSettingsId={showAdvancedSettingsId}
+                onShowAdvancedSettingsChange={setShowAdvancedSettings}
+                onTogglePage={toggleSettingsSidebarPage}
+              />
+            ) : null}
+            <div className="settings-modal-main-column">
+              {/*
+               * CDXC:UnifiedSettings 2026-05-09-15:30
+               * Settings is the single configuration surface for app controls,
+               * terminal controls, Agents, Actions, Open In, and Hotkeys.
+               *
+               * CDXC:SettingsNavigation 2026-06-12-04:13:
+               * Ghostty terminal settings are merged into the main Settings page
+               * so one Settings search covers app settings and terminal settings.
+               *
+               * CDXC:SettingsNavigation 2026-06-15-03:06:
+               * OS Integration should be the final Settings tab because default
+               * app-handler actions are less frequently used than daily app,
+               * integration, remote, project, hotkey, agent, action, and Open In
+               * controls.
+               *
+               * CDXC:SettingsNavigation 2026-06-15-20:48:
+               * The first navigation label should read General so the modal
+               * title can own the Settings name while the page label describes
+               * its general app and terminal preference content.
+               *
+               * CDXC:SettingsNavigation 2026-06-24-22:16:
+               * Top-level Settings tabs belong in the left sidebar, while one
+               * global search field stays at the top of the content column.
+               */}
+              {!isFirstLaunchSetup ? (
+                <div className="settings-modal-search-row">
+                  <SidebarSessionSearchField
+                    ariaLabel="Search settings"
+                    autoCapitalize="none"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    clearLabel="Clear settings search"
+                    inputClassName="settings-modal-search-input"
+                    inputRef={searchInputRef}
+                    placeholder="Search settings"
+                    query={settingsSearchQuery}
+                    setQuery={setSettingsSearchQuery}
+                    spellCheck={false}
+                    toolbarClassName="settings-modal-search-toolbar"
+                  />
+                </div>
+              ) : null}
 
           <TabsContent className="settings-main-tabs-content mt-0 min-h-0 flex-1 overflow-hidden" value="settings">
           {/* CDXC:Settings 2026-04-26-10:43: The settings dialog lives inside a
@@ -2398,48 +2507,18 @@ export function SettingsModal({
               tabbed surface with variable header height. The active tab owns
               the remaining vertical space so the dialog never clips the bottom
               of a fixed-height scroll area. */}
-          {/* CDXC:SettingsNavigation 2026-05-13-08:05
-              The main Settings tab uses a left section navigator inside the
-              widened modal so long configuration groups remain directly
-              reachable.
+          {/* CDXC:SettingsNavigation 2026-05-13-08:05:
+              Superseded by CDXC:SettingsNavigation 2026-06-24-22:16.
 
               CDXC:SettingsNavigation 2026-06-12-04:13:
               Terminal sections share this navigator with app settings so search
-          and section jumps operate on one main Settings page. */}
+              and section jumps operate on one main Settings page.
+
+              CDXC:SettingsNavigation 2026-06-24-22:16:
+              General section jumps now come from the shared Settings sidebar
+              outside this tab panel, while this panel owns only scrollable
+              General settings content. */}
           <div className="settings-main-tab-layout">
-            <aside aria-label="Settings sections" className="settings-section-sidebar">
-              <div className="settings-section-sidebar-list vertical-scroll-fade-mask">
-                {visibleMainSettingsSectionNavigation.map((section) => (
-                  <Button
-                    className="settings-section-sidebar-button"
-                    data-active={activeMainSettingsSectionId === section.id ? "true" : "false"}
-                    key={section.id}
-                    onClick={() => scrollSettingsSectionIntoView(section.ref)}
-                    type="button"
-                    variant="ghost"
-                  >
-                    {section.title}
-                  </Button>
-                ))}
-              </div>
-              {/*
-               * CDXC:SettingsNavigation 2026-06-19-08:40:
-               * The macOS Settings section list and Show Advanced filter should live in one real sidebar, not as separate floating cards.
-               * Keep the filter inside the sidebar footer so the left rail owns both navigation and page-density controls.
-               */}
-              {!isFirstLaunchSetup ? (
-                <div className="settings-section-sidebar-footer">
-                  <label className="settings-show-advanced-toggle" htmlFor={showAdvancedSettingsId}>
-                    <span className="settings-show-advanced-copy">Show Advanced</span>
-                    <Switch
-                      checked={showAdvancedSettings}
-                      id={showAdvancedSettingsId}
-                      onCheckedChange={setShowAdvancedSettings}
-                    />
-                  </label>
-                </div>
-              ) : null}
-            </aside>
           <ScrollArea className="settings-main-scroll h-full min-h-0">
           <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
             {isFirstLaunchSetup && mainSectionVisible("agents", settingsSearch.sidebar) ? (
@@ -4040,17 +4119,22 @@ export function SettingsModal({
           {!isFirstLaunchSetup ? (
           <TabsContent className="settings-main-tabs-content mt-0 min-h-0 flex-1 overflow-hidden" value="hotkeys">
             <HotkeysSettingsTab
+              definitionsById={hotkeyDefinitionsById}
               expandCollapsedProjectsOnJump={draft.expandCollapsedProjectsOnJump}
               expandCollapsedProjectsOnJumpModification={getSettingModificationProps(
                 "expandCollapsedProjectsOnJump",
               )}
               hotkeys={draft.hotkeys}
+              sectionRefs={hotkeySectionRefs}
+              sectionSearches={hotkeySectionSearches}
               showLessForExpandedProjectJumps={draft.showLessForExpandedProjectJumps}
               showLessForExpandedProjectJumpsModification={getSettingModificationProps(
                 "showLessForExpandedProjectJumps",
               )}
-              searchQuery={hotkeysSearchQuery}
+              visibleSections={visibleHotkeySections}
+              searchQuery={settingsSearchQuery}
               onChange={(hotkeys) => updateDraft("hotkeys", hotkeys)}
+              onActiveSectionChange={setActiveHotkeySettingsSectionId}
               onExpandCollapsedProjectsOnJumpChange={(checked) =>
                 updateDraft("expandCollapsedProjectsOnJump", checked)
               }
@@ -4060,10 +4144,108 @@ export function SettingsModal({
             />
           </TabsContent>
           ) : null}
+            </div>
+          </div>
           </Tabs>
         </TooltipProvider>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function SettingsSidebarNavigation({
+  expandedPages,
+  onShowAdvancedSettingsChange,
+  onTogglePage,
+  pages,
+  showAdvancedSettings,
+  showAdvancedSettingsId,
+}: {
+  expandedPages: Partial<Record<SettingsModalTab, boolean>>;
+  onShowAdvancedSettingsChange: (checked: boolean) => void;
+  onTogglePage: (pageId: SettingsModalTab) => void;
+  pages: readonly SettingsSidebarPage[];
+  showAdvancedSettings: boolean;
+  showAdvancedSettingsId: string;
+}) {
+  return (
+    <aside aria-label="Settings pages and sections" className="settings-section-sidebar">
+      <TabsList className="settings-sidebar-tabs-list vertical-scroll-fade-mask">
+        {pages.map((page) => {
+          const hasSections = Boolean(page.sections?.length);
+          const expanded = Boolean(expandedPages[page.id]);
+          return (
+            <div className="settings-sidebar-page-group" key={page.id}>
+              <div className="settings-sidebar-page-row">
+                <TabsTrigger
+                  className="settings-sidebar-tab-trigger"
+                  onClick={() => {
+                    if (hasSections && !expanded) {
+                      onTogglePage(page.id);
+                    }
+                  }}
+                  value={page.id}
+                >
+                  {page.title}
+                </TabsTrigger>
+                {hasSections ? (
+                  <Button
+                    aria-label={`${expanded ? "Collapse" : "Expand"} ${page.title} sections`}
+                    className="settings-sidebar-page-disclosure"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onTogglePage(page.id);
+                    }}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    {expanded ? (
+                      <IconChevronDown aria-hidden="true" />
+                    ) : (
+                      <IconChevronRight aria-hidden="true" />
+                    )}
+                  </Button>
+                ) : null}
+              </div>
+              {hasSections && expanded ? (
+                <div className="settings-sidebar-subsection-list">
+                  {page.sections?.map((section) => (
+                    <Button
+                      className="settings-section-sidebar-button settings-sidebar-subsection-button"
+                      data-active={section.active ? "true" : "false"}
+                      key={section.id}
+                      onClick={section.onSelect}
+                      type="button"
+                      variant="ghost"
+                    >
+                      {section.title}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </TabsList>
+      {/*
+       * CDXC:SettingsNavigation 2026-06-24-22:16:
+       * The sidebar owns both top-level Settings pages and expandable section
+       * links, while Show Advanced remains pinned to the bottom of that same
+       * rail instead of returning to header chrome.
+       */}
+      <div className="settings-section-sidebar-footer">
+        <label className="settings-show-advanced-toggle" htmlFor={showAdvancedSettingsId}>
+          <span className="settings-show-advanced-copy">Show Advanced</span>
+          <Switch
+            checked={showAdvancedSettings}
+            id={showAdvancedSettingsId}
+            onCheckedChange={onShowAdvancedSettingsChange}
+          />
+        </label>
+      </div>
+    </aside>
   );
 }
 
@@ -4209,14 +4391,27 @@ function RemoteSettingsTab({
   };
 
   const addRemoteMachine = () => {
+    const machineId = `remote-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const password = newMachine.sshPassword;
     const machine = normalizeRemoteMachineDraft({
       ...newMachine,
-      id: `remote-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+      id: machineId,
     });
     if (!machine) {
       return;
     }
+    /*
+     * CDXC:RemoteMachines 2026-06-24-10:40:
+     * The add-machine card must show the same password row as saved-machine
+     * cards so a new machine and a created machine keep matching grid height.
+     * If a create-time password is present, create the machine with a stable id
+     * first and send that password as a one-shot Keychain save for the same id;
+     * raw SSH passwords still never enter normalized settings.
+     */
     onChange(normalizeRemoteMachineSettings([...remoteMachines, machine]));
+    if (password.trim().length > 0) {
+      postRemoteMachinePasswordSave(machine.id, password);
+    }
     setNewMachine(createRemoteMachineDraft());
   };
 
@@ -4224,22 +4419,27 @@ function RemoteSettingsTab({
     onChange(remoteMachines.filter((machine) => machine.id !== machineId));
   };
 
+  const postRemoteMachinePasswordSave = (remoteMachineId: string, password: string) => {
+    /*
+     * CDXC:RemoteMachines 2026-06-09-18:23:
+     * The Remote settings password field is a transient entry box. Send the
+     * password only from explicit Add Machine or save-icon actions, then clear
+     * the React draft so the settings JSON and modal state never retain the
+     * secret.
+     */
+    vscode?.postMessage({
+      password,
+      remoteMachineId,
+      type: "saveRemoteMachinePassword",
+    });
+  };
+
   const saveRemoteMachinePassword = (machine: RemoteMachineSettings) => {
     const password = sshPasswordDrafts[machine.id] ?? "";
     if (!password && machine.sshPasswordSaved !== true) {
       return;
     }
-    /*
-     * CDXC:RemoteMachines 2026-06-09-18:23:
-     * The Remote settings password field is a transient entry box. Send the
-     * password only when the user presses the save-icon button, then clear the
-     * React draft so the settings JSON and modal state never retain the secret.
-     */
-    vscode?.postMessage({
-      password,
-      remoteMachineId: machine.id,
-      type: "saveRemoteMachinePassword",
-    });
+    postRemoteMachinePasswordSave(machine.id, password);
     setSshPasswordDrafts((drafts) => ({
       ...drafts,
       [machine.id]: "",
@@ -4314,17 +4514,21 @@ function RemoteSettingsTab({
            * Remote settings require a human name and SSH host before saving because the sidebar section title comes from this user label and v1 remote connections support SSH only.
            */}
           <Card className="settings-remote-machine-card settings-remote-machine-add-card" size="sm">
-            <div className="settings-remote-machine-summary settings-remote-machine-add-summary">
-              <span aria-hidden="true" className="settings-remote-machine-add-icon">
+            <div className="settings-remote-machine-summary settings-remote-machine-add-summary settings-management-row">
+              <span aria-hidden="true" className="settings-management-icon settings-remote-machine-add-icon">
                 <IconPlus size={16} />
               </span>
-              <CardTitle className="settings-remote-machine-add-title">Add remote machine</CardTitle>
+              <span className="settings-management-main min-w-0 flex-1">
+                <CardTitle className="settings-management-title">Add remote machine</CardTitle>
+                <span className="settings-management-detail">New SSH machine</span>
+              </span>
             </div>
             <CardContent className="settings-remote-machine-body">
               <RemoteMachineFields
                 draft={newMachine}
-                hidePasswordField
+                identityDescription="Provide either an SSH identity file now or an SSH password below."
                 onChange={(patch) => setNewMachine((draft) => ({ ...draft, ...patch }))}
+                passwordDescription="Passwords are stored in macOS Keychain. Leave blank to add the machine without a saved password."
               />
               <div className="settings-management-actions settings-remote-machine-add-actions">
                 <Button disabled={!canAddMachine} onClick={addRemoteMachine} type="button">
@@ -4426,20 +4630,23 @@ function RemoteSettingsTab({
 
 function RemoteMachineFields({
   draft,
-  hidePasswordField = false,
+  identityDescription,
   onChange,
   onPasswordSave,
   passwordSaveDisabled = false,
+  passwordDescription,
 }: {
   draft: RemoteMachineDraft;
-  hidePasswordField?: boolean;
+  identityDescription?: string;
   onChange: (patch: Partial<RemoteMachineDraft>) => void;
   onPasswordSave?: () => void;
   passwordSaveDisabled?: boolean;
+  passwordDescription?: string;
 }) {
+  const showPasswordSaveButton = typeof onPasswordSave === "function";
   const canSavePassword =
     !passwordSaveDisabled &&
-    typeof onPasswordSave === "function" &&
+    showPasswordSaveButton &&
     (draft.sshPassword.trim().length > 0 || draft.sshPasswordSaved);
   return (
     <FieldGroup className="settings-remote-machine-fields">
@@ -4501,25 +4708,28 @@ function RemoteMachineFields({
           value={draft.sshIdentityFile}
         />
         <FieldDescription className="settings-remote-machine-field-description">
-          {hidePasswordField
-            ? "Provide an SSH identity file now, or add the machine and save an SSH password from its card."
-            : "Provide either an SSH identity file or save an SSH password below."}
+          {identityDescription ?? "Provide either an SSH identity file or save an SSH password below."}
         </FieldDescription>
       </Field>
-      {!hidePasswordField ? (
-        <Field className="settings-remote-machine-field">
-          <FieldLabel className="settings-remote-machine-field-label">Password</FieldLabel>
-          <div className="settings-remote-machine-password-row">
-            <SettingsInput
-              aria-label="Remote machine SSH password"
-              autoComplete="off"
-              className="settings-remote-machine-input"
-              maxLength={500}
-              onChange={(event) => onChange({ sshPassword: event.currentTarget.value })}
-              placeholder={draft.sshPasswordSaved ? "Saved in Keychain" : "SSH password"}
-              type="password"
-              value={draft.sshPassword}
-            />
+      <Field className="settings-remote-machine-field">
+        <FieldLabel className="settings-remote-machine-field-label">Password</FieldLabel>
+        <div
+          className={cn(
+            "settings-remote-machine-password-row",
+            !showPasswordSaveButton && "settings-remote-machine-password-row-single",
+          )}
+        >
+          <SettingsInput
+            aria-label="Remote machine SSH password"
+            autoComplete="off"
+            className="settings-remote-machine-input"
+            maxLength={500}
+            onChange={(event) => onChange({ sshPassword: event.currentTarget.value })}
+            placeholder={draft.sshPasswordSaved ? "Saved in Keychain" : "SSH password"}
+            type="password"
+            value={draft.sshPassword}
+          />
+          {showPasswordSaveButton ? (
             <Button
               aria-label="Save SSH password"
               disabled={!canSavePassword}
@@ -4530,12 +4740,13 @@ function RemoteMachineFields({
             >
               <IconDeviceFloppy aria-hidden="true" />
             </Button>
-          </div>
-          <FieldDescription className="settings-remote-machine-field-description">
-            Passwords are stored in macOS Keychain. Leave blank and press Save to remove a saved password.
-          </FieldDescription>
-        </Field>
-      ) : null}
+          ) : null}
+        </div>
+        <FieldDescription className="settings-remote-machine-field-description">
+          {passwordDescription ??
+            "Passwords are stored in macOS Keychain. Leave blank and press Save to remove a saved password."}
+        </FieldDescription>
+      </Field>
     </FieldGroup>
   );
 }
@@ -5546,6 +5757,9 @@ function OSIntegrationSettingsTab({
       : 0;
   const terminalDefault =
     Boolean(status?.terminalLinkDefaultBundleId && status.terminalLinkDefaultBundleId === ghostexBundleId);
+  const statusItems = status?.statusItems ?? [];
+  const visibleStatusItems = statusItems.slice(0, 6);
+  const remainingStatusItemCount = Math.max(0, statusItems.length - visibleStatusItems.length);
   return (
     <ScrollArea className="h-full min-h-0">
       <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
@@ -5625,6 +5839,42 @@ function OSIntegrationSettingsTab({
             </div>
             {status ? (
               <div className="grid gap-2">
+                {statusItems.length > 0 ? (
+                  <div className="grid gap-2 rounded-none border border-destructive/30 bg-destructive/5 p-3 text-xs text-muted-foreground">
+                    {/*
+                     * CDXC:OSIntegration 2026-06-24-15:10:
+                     * Settings must account for shared Launch Services status items without exposing raw OSStatus values or native paths. Show generic repair guidance and sanitized target/extension labels so the same UI works for Swift and GPUI senders.
+                     */}
+                    <div className="flex items-start gap-2">
+                      <IconAlertTriangle
+                        aria-hidden="true"
+                        className="mt-0.5 shrink-0 text-destructive"
+                        size={16}
+                      />
+                      <div className="grid gap-1">
+                        <div className="font-medium text-foreground">
+                          {getOSIntegrationStatusNoticeTitle(statusItems)}
+                        </div>
+                        <div>{getOSIntegrationStatusNoticeDescription(statusItems)}</div>
+                      </div>
+                    </div>
+                    <div className="grid gap-1">
+                      {visibleStatusItems.map((item, index) => (
+                        <div className="flex items-center justify-between gap-3" key={index}>
+                          <span>{formatOSIntegrationStatusItemSubject(item)}</span>
+                          <span className="text-right font-medium text-foreground">
+                            {formatOSIntegrationStatusItemReason(item)}
+                          </span>
+                        </div>
+                      ))}
+                      {remainingStatusItemCount > 0 ? (
+                        <div className="text-muted-foreground">
+                          {remainingStatusItemCount} more handler updates need attention.
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
                 <OSIntegrationDiagnosticRow
                   label="Available editor"
                   value={status.registeredEditableFiles ? "Registered" : "Missing"}
@@ -5660,6 +5910,65 @@ function OSIntegrationSettingsTab({
       </div>
     </ScrollArea>
   );
+}
+
+function getOSIntegrationStatusNoticeTitle(
+  items: readonly SidebarOSIntegrationStatusItem[],
+): string {
+  if (items.some((item) => item.reason === "unsupportedPlatform")) {
+    return "macOS Launch Services is unavailable in this build.";
+  }
+  return "Some macOS handler updates need attention.";
+}
+
+function getOSIntegrationStatusNoticeDescription(
+  items: readonly SidebarOSIntegrationStatusItem[],
+): string {
+  if (items.some((item) => item.reason === "unsupportedPlatform")) {
+    return "This platform cannot inspect or change macOS app defaults.";
+  }
+  return "Refresh after macOS finishes updating Launch Services, or choose Ghostex manually in macOS Open With/System Settings.";
+}
+
+function formatOSIntegrationStatusItemSubject(item: SidebarOSIntegrationStatusItem): string {
+  const fileExtension = formatOSIntegrationStatusExtension(item.extension);
+  if (item.target === "editor") {
+    return fileExtension ? `Editor default .${fileExtension}` : "Editor defaults";
+  }
+  if (item.target === "scriptRunner") {
+    return fileExtension ? `Script runner .${fileExtension}` : "Script runner";
+  }
+  if (item.target === "terminalLinks") {
+    return item.scheme === "ghostex" ? "Terminal links ghostex://" : "Terminal links";
+  }
+  if (item.target === "bundleRegistration") {
+    return item.operation === "registerBundle" ? "App registration" : "App identity";
+  }
+  return "Platform support";
+}
+
+function formatOSIntegrationStatusExtension(extension: string | undefined): string | undefined {
+  if (!extension || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,24}$/u.test(extension)) {
+    return undefined;
+  }
+  return extension;
+}
+
+function formatOSIntegrationStatusItemReason(item: SidebarOSIntegrationStatusItem): string {
+  switch (item.reason) {
+    case "bundleIdentifierMissing":
+      return "App identity missing";
+    case "bundleRegistrationFailed":
+      return "Registration failed";
+    case "contentTypeUnavailable":
+      return "File type unavailable";
+    case "invalidTarget":
+      return "Unsupported action";
+    case "launchServicesRejected":
+      return "Default change rejected";
+    case "unsupportedPlatform":
+      return "Unavailable";
+  }
 }
 
 function OSIntegrationDiagnosticRow({ label, value }: { label: string; value: string }) {
@@ -7459,111 +7768,51 @@ function normalizeSettingsCommandTitle(value: string | undefined): string | unde
 }
 
 function HotkeysSettingsTab({
+  definitionsById,
   expandCollapsedProjectsOnJump,
   expandCollapsedProjectsOnJumpModification,
   hotkeys,
+  onActiveSectionChange,
   onChange,
   onExpandCollapsedProjectsOnJumpChange,
   onShowLessForExpandedProjectJumpsChange,
   searchQuery,
+  sectionRefs,
+  sectionSearches,
   showLessForExpandedProjectJumps,
   showLessForExpandedProjectJumpsModification,
+  visibleSections,
 }: {
+  definitionsById: HotkeySettingsDefinitionById;
   expandCollapsedProjectsOnJump: boolean;
   expandCollapsedProjectsOnJumpModification: Required<SettingModificationProps>;
   hotkeys?: ghostexHotkeySettings;
+  onActiveSectionChange: (sectionId: HotkeySettingsSectionId) => void;
   onChange: (hotkeys: ghostexHotkeySettings) => void;
   onExpandCollapsedProjectsOnJumpChange: (checked: boolean) => void;
   onShowLessForExpandedProjectJumpsChange: (checked: boolean) => void;
   searchQuery: string;
+  sectionRefs: HotkeySettingsSectionRefs;
+  sectionSearches: HotkeySettingsSectionSearches;
   showLessForExpandedProjectJumps: boolean;
   showLessForExpandedProjectJumpsModification: Required<SettingModificationProps>;
+  visibleSections: readonly HotkeySettingsSectionDefinition[];
 }) {
   const normalizedHotkeys = normalizeghostexHotkeySettings(hotkeys);
-  const [activeHotkeySettingsSectionId, setActiveHotkeySettingsSectionId] =
-    useState<HotkeySettingsSectionId>("general");
-  const actionsSectionRef = useRef<HTMLDivElement>(null);
-  const generalSectionRef = useRef<HTMLDivElement>(null);
-  const navigationSectionRef = useRef<HTMLDivElement>(null);
-  const paneActionsSectionRef = useRef<HTMLDivElement>(null);
-  const projectsSectionRef = useRef<HTMLDivElement>(null);
-  const sessionSlotsSectionRef = useRef<HTMLDivElement>(null);
   const duplicateIds = useMemo(
     () => getDuplicateHotkeyIds(normalizedHotkeys),
     [normalizedHotkeys],
   );
-  const definitionsById = useMemo(
-    () => new Map(GHOSTEX_HOTKEY_DEFINITIONS.map((definition) => [definition.id, definition])),
-    [],
-  );
   /**
    * CDXC:Hotkeys 2026-05-13-16:05
-   * Hotkey settings are split by workflow and searched independently from the
-   * Settings tab. Section nav should jump to matching groups while
-   * search still filters individual bindings inside each group.
+   * Superseded by CDXC:SettingsNavigation 2026-06-24-22:16.
+   *
+   * CDXC:SettingsNavigation 2026-06-24-22:16:
+   * Hotkey section refs and search results are owned by SettingsModal so the
+   * shared sidebar can expand Hotkeys and jump into its internal sections.
+   * The same top search query filters General and Hotkeys instead of keeping a
+   * hidden tab-specific search state.
    */
-  const sectionSearches = useMemo(
-    () =>
-      Object.fromEntries(
-        HOTKEY_SETTINGS_SECTIONS.map((section) => {
-          const projectJumpSettings: SettingSearchDefinition[] =
-            section.id === "projects"
-              ? [
-                  {
-                    key: "expandCollapsedProjectsOnJump",
-                    subtitle: "Reveal a collapsed Projects row before focusing it from Jump to Project hotkeys.",
-                    title: "Expand collapsed projects on jump",
-                  },
-                  ...(expandCollapsedProjectsOnJump
-                    ? [
-                        {
-                          key: "showLessForExpandedProjectJumps",
-                          subtitle:
-                            "After a project jump expands a collapsed project, switch that project session list to Show less.",
-                          title: "Use Show less after jump expand",
-                        },
-                      ]
-                    : []),
-                ]
-              : [];
-          return [
-            section.id,
-            getSettingsSectionSearch(
-              searchQuery,
-              section.title,
-              [
-                ...projectJumpSettings,
-                ...section.ids.flatMap((id) => {
-                  const definition = definitionsById.get(id);
-                  return definition
-                    ? [
-                        {
-                          key: definition.id,
-                          options: [{ label: definition.defaultKey, value: definition.defaultKey }],
-                          subtitle: definition.description,
-                          title: definition.title,
-                        },
-                      ]
-                    : [];
-                }),
-              ],
-            ),
-          ];
-        }),
-      ) as Record<HotkeySettingsSectionId, SettingsSectionSearchResult>,
-    [definitionsById, expandCollapsedProjectsOnJump, searchQuery],
-  );
-  const sectionRefs: Record<HotkeySettingsSectionId, RefObject<HTMLDivElement | null>> = {
-    actions: actionsSectionRef,
-    general: generalSectionRef,
-    navigation: navigationSectionRef,
-    paneActions: paneActionsSectionRef,
-    projects: projectsSectionRef,
-    sessionSlots: sessionSlotsSectionRef,
-  };
-  const visibleSections = HOTKEY_SETTINGS_SECTIONS.filter((section) =>
-    shouldShowSettingsSection(sectionSearches[section.id]),
-  );
   const visibleHotkeySectionNavigation: SettingsSectionNavigationItem<HotkeySettingsSectionId>[] =
     visibleSections.map((section) => ({
       id: section.id,
@@ -7597,7 +7846,7 @@ function HotkeysSettingsTab({
       visibleHotkeySectionNavigation,
     );
     if (mostlyVisibleSectionId) {
-      setActiveHotkeySettingsSectionId(mostlyVisibleSectionId);
+      onActiveSectionChange(mostlyVisibleSectionId);
     }
   };
 
@@ -7613,30 +7862,14 @@ function HotkeysSettingsTab({
         visibleHotkeySectionNavigation,
       );
       if (mostlyVisibleSectionId) {
-        setActiveHotkeySettingsSectionId(mostlyVisibleSectionId);
+        onActiveSectionChange(mostlyVisibleSectionId);
       }
     });
     return () => cancelAnimationFrame(animationFrame);
-  }, [searchQuery, visibleHotkeySectionIds]);
+  }, [onActiveSectionChange, searchQuery, visibleHotkeySectionIds]);
 
   return (
     <div className="settings-main-tab-layout">
-      <aside aria-label="Hotkey sections" className="settings-section-sidebar">
-        <div className="settings-section-sidebar-list vertical-scroll-fade-mask">
-          {visibleSections.map((section) => (
-            <Button
-              className="settings-section-sidebar-button"
-              data-active={activeHotkeySettingsSectionId === section.id ? "true" : "false"}
-              key={section.id}
-              onClick={() => sectionRefs[section.id].current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-              type="button"
-              variant="ghost"
-            >
-              {section.title}
-            </Button>
-          ))}
-        </div>
-      </aside>
       <ScrollArea
         className="settings-main-scroll h-full min-h-0"
         onScrollCapture={handleHotkeySettingsScrollCapture}
@@ -8146,6 +8379,64 @@ function GtePromptEditingField({
  */
 function getSidebarThemeVariant(theme: SidebarTheme): SidebarThemeVariant {
   return theme.startsWith("light-") || theme === "plain-light" ? "light" : "dark";
+}
+
+function getHotkeySettingsSectionSearches({
+  definitionsById,
+  expandCollapsedProjectsOnJump,
+  searchQuery,
+}: {
+  definitionsById: HotkeySettingsDefinitionById;
+  expandCollapsedProjectsOnJump: boolean;
+  searchQuery: string;
+}): HotkeySettingsSectionSearches {
+  return Object.fromEntries(
+    HOTKEY_SETTINGS_SECTIONS.map((section) => {
+      const projectJumpSettings: SettingSearchDefinition[] =
+        section.id === "projects"
+          ? [
+              {
+                key: "expandCollapsedProjectsOnJump",
+                subtitle: "Reveal a collapsed Projects row before focusing it from Jump to Project hotkeys.",
+                title: "Expand collapsed projects on jump",
+              },
+              ...(expandCollapsedProjectsOnJump
+                ? [
+                    {
+                      key: "showLessForExpandedProjectJumps",
+                      subtitle:
+                        "After a project jump expands a collapsed project, switch that project session list to Show less.",
+                      title: "Use Show less after jump expand",
+                    },
+                  ]
+                : []),
+            ]
+          : [];
+      return [
+        section.id,
+        getSettingsSectionSearch(
+          searchQuery,
+          section.title,
+          [
+            ...projectJumpSettings,
+            ...section.ids.flatMap((id) => {
+              const definition = definitionsById.get(id);
+              return definition
+                ? [
+                    {
+                      key: definition.id,
+                      options: [{ label: definition.defaultKey, value: definition.defaultKey }],
+                      subtitle: definition.description,
+                      title: definition.title,
+                    },
+                  ]
+                : [];
+            }),
+          ],
+        ),
+      ];
+    }),
+  ) as HotkeySettingsSectionSearches;
 }
 
 function getSettingsSectionSearch(

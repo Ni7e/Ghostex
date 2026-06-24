@@ -29,7 +29,10 @@ const LEGACY_IMPORT_METADATA_KEY: &str = "migration.legacy_macos_sidebar_state_v
 
 /*
 CDXC:GxserverStorage 2026-06-14-20:37:
-SQLite remains TypeScript-compatible during the Rust port. Open every connection with foreign_keys=ON and journal_mode=WAL, then apply migration IDs 0001 through 0011 without inventing a parallel schema.
+SQLite remains TypeScript-compatible during the Rust port. Open every connection with foreign_keys=ON and journal_mode=WAL, then apply migration IDs 0001 through 0013 without inventing a parallel schema.
+
+CDXC:GxserverAppUserData 2026-06-24-13:30:
+Scratch Pad and Pinned Prompts are shared user-data surfaces, not GPUI-local modal state. Store their content in gxserver SQLite behind explicit product-data RPCs so macOS and GPUI hydrate the same React contract without logging prompt or note bodies.
 */
 pub fn initialize_gxserver_storage(paths: &GxserverPaths) -> Result<StorageInitResult> {
     ensure_gxserver_storage_layout(paths)?;
@@ -582,6 +585,55 @@ pub const GXSERVER_STORAGE_MIGRATIONS: &[Migration] = &[
         */
         sql: rebuild_sessions_with_session_tag!("11"),
     },
+    Migration {
+        id: "0012_recent_projects",
+        /*
+        CDXC:GPUIRecentProjects 2026-06-24-12:27:
+        Recent Projects is a first-class gxserver project-domain state. Store
+        explicit parked state and closed time on the project row so GPUI can
+        hydrate a real path-bearing recent list without deriving rows from
+        labels, inactive sessions, shell titles, command text, or filesystem
+        guesses.
+        */
+        sql: r#"
+      ALTER TABLE projects ADD COLUMN isRecentProject INTEGER NOT NULL DEFAULT 0 CHECK (isRecentProject IN (0, 1));
+      ALTER TABLE projects ADD COLUMN recentClosedAt TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_projects_recent_closed
+        ON projects(isRecentProject, recentClosedAt, updatedAt);
+
+      PRAGMA user_version = 12;
+    "#,
+    },
+    Migration {
+        id: "0013_app_user_data",
+        /*
+        CDXC:GxserverAppUserData 2026-06-24-13:30:
+        Scratch Pad and Pinned Prompts need a global gxserver-owned source of
+        truth for reused React app-modal surfaces. Keep their user-authored
+        bodies out of project/session metadata, presentation deltas, and logs by
+        storing only the explicit app-user-data rows read by the product-data
+        RPCs.
+        */
+        sql: r#"
+      CREATE TABLE IF NOT EXISTS app_user_data (
+        itemKind TEXT NOT NULL CHECK (itemKind IN ('scratchPad', 'pinnedPrompt')),
+        itemId TEXT NOT NULL,
+        content TEXT NOT NULL,
+        title TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        PRIMARY KEY (itemKind, itemId),
+        CHECK (itemKind <> 'scratchPad' OR itemId = 'global'),
+        CHECK (itemKind <> 'pinnedPrompt' OR content <> '')
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_app_user_data_kind_updated
+        ON app_user_data(itemKind, updatedAt, itemId);
+
+      PRAGMA user_version = 13;
+    "#,
+    },
 ];
 
 #[cfg(unix)]
@@ -630,18 +682,20 @@ mod tests {
         let journal_mode: String = db
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("journal_mode");
-        assert_eq!(user_version, 11);
+        assert_eq!(user_version, 13);
         assert_eq!(foreign_keys, 1);
         assert_eq!(journal_mode, "wal");
-        assert_eq!(schema_migration_count(&db), 11);
+        assert_eq!(schema_migration_count(&db), 13);
         assert_eq!(
             explicit_index_names(&db),
             vec![
+                "idx_app_user_data_kind_updated".to_string(),
                 "idx_id_allocations_kind_parent".to_string(),
                 "idx_portless_domain_project_identity".to_string(),
                 "idx_portless_domain_project_slug".to_string(),
                 "idx_portless_domain_worktree_identity".to_string(),
                 "idx_portless_domain_worktree_slug".to_string(),
+                "idx_projects_recent_closed".to_string(),
                 "idx_sessions_project_sidebar_order".to_string(),
                 "idx_sessions_project_updated".to_string(),
             ]
@@ -672,6 +726,8 @@ mod tests {
                 "previousSessionHistoryJson",
                 "createdAt",
                 "updatedAt",
+                "isRecentProject",
+                "recentClosedAt",
             ]
         );
         assert_eq!(

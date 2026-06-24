@@ -3872,21 +3872,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       SessionAttentionNotificationController.openMacOSNotificationSettings()
     case .setOSIntegrationDefaults(let command):
       guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
-        showMessage(.init(level: .error, message: "Ghostex bundle identifier is missing."))
+        let statusItems = [AppDelegate.osIntegrationStatusItem(
+          target: "bundleRegistration",
+          operation: "setDefault",
+          status: "failed",
+          reason: "bundleIdentifierMissing")]
+        showMessage(.init(level: .error, message: "Could not update macOS OS Integration defaults."))
+        let event = AppDelegate.osIntegrationStatusEvent(bundleIdentifier: "", statusItems: statusItems)
+        bridge?.send(event)
+        (window?.contentView as? ghostexRootView)?.postHostEvent(event)
         return
       }
-      let failures = AppDelegate.osIntegrationDefaultFailures(
+      let statusItems = AppDelegate.osIntegrationDefaultStatusItems(
         target: command.target,
         bundleIdentifier: bundleIdentifier)
-      if failures.isEmpty {
+      if statusItems.isEmpty {
         (window?.contentView as? ghostexRootView)?.presentAppToast(
           level: "success",
           title: "Updated macOS OS Integration defaults."
         )
       } else {
-        showMessage(.init(level: .error, message: "Could not set defaults: \(failures.joined(separator: ", "))"))
+        showMessage(.init(level: .error, message: AppDelegate.osIntegrationDefaultFailureMessage(statusItems)))
       }
-      sendOSIntegrationStatus()
+      sendOSIntegrationStatus(statusItems: statusItems)
     case .requestOSIntegrationStatus:
       sendOSIntegrationStatus()
     case .openExternalUrl(let command):
@@ -4590,86 +4598,179 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
      Default editor, terminal-link, and script-runner ownership is opt-in from
      Settings. Registration makes Ghostex available in Open With; this method is
      the explicit user action that mutates Launch Services defaults.
-     */
+    */
     guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
-      showMessage(.init(level: .error, message: "Ghostex bundle identifier is missing."))
+      let statusItems = [Self.osIntegrationStatusItem(
+        target: "bundleRegistration",
+        operation: "setDefault",
+        status: "failed",
+        reason: "bundleIdentifierMissing")]
+      showMessage(.init(level: .error, message: "Could not update macOS OS Integration defaults."))
+      sendOSIntegrationStatus(statusItems: statusItems)
       return
     }
     let target = command.target
-    var failures: [String] = []
-    failures.append(contentsOf: Self.osIntegrationDefaultFailures(target: target, bundleIdentifier: bundleIdentifier))
-    if failures.isEmpty {
+    let statusItems = Self.osIntegrationDefaultStatusItems(
+      target: target,
+      bundleIdentifier: bundleIdentifier)
+    if statusItems.isEmpty {
       (window?.contentView as? ghostexRootView)?.presentAppToast(
         level: "success",
         title: "Updated macOS OS Integration defaults."
       )
     } else {
-      showMessage(.init(level: .error, message: "Could not set defaults: \(failures.joined(separator: ", "))"))
+      showMessage(.init(level: .error, message: Self.osIntegrationDefaultFailureMessage(statusItems)))
     }
-    sendOSIntegrationStatus()
+    sendOSIntegrationStatus(statusItems: statusItems)
   }
 
-  @MainActor private func sendOSIntegrationStatus() {
+  @MainActor private func sendOSIntegrationStatus(statusItems: [[String: Any]] = []) {
     /**
      CDXC:OSIntegration 2026-05-27-18:06:
      Settings -> OS Integration must show both availability and current
      Launch Services defaults. Native owns these diagnostics because React
      cannot reliably inspect Info.plist registrations or LS default handlers
      from a sandboxed webview.
+
+     CDXC:OSIntegration 2026-06-24-15:10:
+     Swift and GPUI Settings send the same privacy-safe `statusItems` channel
+     for Launch Services mutation failures. Keep the payload generic and do not
+     expose raw OSStatus values, file paths, URLs, command text, environment
+     values, stdout/stderr, daemon bodies, or bundle paths.
      */
     let bundleIdentifier = Bundle.main.bundleIdentifier ?? ""
-    let event = Self.osIntegrationStatusEvent(bundleIdentifier: bundleIdentifier)
+    let event = Self.osIntegrationStatusEvent(
+      bundleIdentifier: bundleIdentifier,
+      statusItems: statusItems)
     bridge?.send(event)
     (window?.contentView as? ghostexRootView)?.postHostEvent(event)
   }
 
-  fileprivate static func osIntegrationDefaultFailures(
+  fileprivate static func osIntegrationDefaultStatusItems(
     target: String,
     bundleIdentifier: String
-  ) -> [String] {
-    var failures: [String] = []
+  ) -> [[String: Any]] {
+    guard target == "editor" || target == "terminalLinks" || target == "scriptRunner" || target == "all" else {
+      return [osIntegrationStatusItem(
+        target: "platform",
+        operation: "setDefault",
+        status: "skipped",
+        reason: "invalidTarget")]
+    }
+
+    var statusItems: [[String: Any]] = []
     if target == "editor" || target == "all" {
-      failures.append(contentsOf: setDefaultEditorHandlers(bundleIdentifier: bundleIdentifier))
+      statusItems.append(contentsOf: setDefaultEditorHandlers(bundleIdentifier: bundleIdentifier))
     }
     if target == "terminalLinks" || target == "all" {
       let status = LSSetDefaultHandlerForURLScheme("ghostex" as CFString, bundleIdentifier as CFString)
       if status != noErr {
-        failures.append("ghostex:// (\(status))")
+        statusItems.append(osIntegrationStatusItem(
+          target: "terminalLinks",
+          operation: "setDefault",
+          status: "failed",
+          reason: "launchServicesRejected",
+          scheme: "ghostex"))
       }
     }
     if target == "scriptRunner" || target == "all" {
-      failures.append(contentsOf: setDefaultScriptHandlers(bundleIdentifier: bundleIdentifier))
+      statusItems.append(contentsOf: setDefaultScriptHandlers(bundleIdentifier: bundleIdentifier))
     }
-    return failures
+    return statusItems
   }
 
-  fileprivate static func setDefaultEditorHandlers(bundleIdentifier: String) -> [String] {
+  fileprivate static func setDefaultEditorHandlers(bundleIdentifier: String) -> [[String: Any]] {
     return ghostexOSIntegrationEditorExtensions.compactMap { fileExtension in
       guard let contentType = UTType(filenameExtension: fileExtension) else {
-        return fileExtension
+        return osIntegrationStatusItem(
+          target: "editor",
+          operation: "setDefault",
+          status: "skipped",
+          reason: "contentTypeUnavailable",
+          fileExtension: fileExtension)
       }
       let status = LSSetDefaultRoleHandlerForContentType(
         contentType.identifier as CFString,
         LSRolesMask.editor,
         bundleIdentifier as CFString)
-      return status == noErr ? nil : "\(fileExtension) (\(status))"
+      return status == noErr ? nil : osIntegrationStatusItem(
+        target: "editor",
+        operation: "setDefault",
+        status: "failed",
+        reason: "launchServicesRejected",
+        fileExtension: fileExtension)
     }
   }
 
-  fileprivate static func setDefaultScriptHandlers(bundleIdentifier: String) -> [String] {
+  fileprivate static func setDefaultScriptHandlers(bundleIdentifier: String) -> [[String: Any]] {
     return ghostexOSIntegrationScriptExtensions.compactMap { fileExtension in
       guard let contentType = UTType(filenameExtension: fileExtension) else {
-        return fileExtension
+        return osIntegrationStatusItem(
+          target: "scriptRunner",
+          operation: "setDefault",
+          status: "skipped",
+          reason: "contentTypeUnavailable",
+          fileExtension: fileExtension)
       }
       let status = LSSetDefaultRoleHandlerForContentType(
         contentType.identifier as CFString,
         LSRolesMask.shell,
         bundleIdentifier as CFString)
-      return status == noErr ? nil : "\(fileExtension) (\(status))"
+      return status == noErr ? nil : osIntegrationStatusItem(
+        target: "scriptRunner",
+        operation: "setDefault",
+        status: "failed",
+        reason: "launchServicesRejected",
+        fileExtension: fileExtension)
     }
   }
 
-  fileprivate static func osIntegrationStatusPayload(bundleIdentifier: String) -> [String: Any] {
+  fileprivate static func osIntegrationDefaultFailureMessage(_ statusItems: [[String: Any]]) -> String {
+    let targets = Set(statusItems.compactMap { $0["target"] as? String })
+    var affected: [String] = []
+    if targets.contains("editor") {
+      affected.append("editor defaults")
+    }
+    if targets.contains("terminalLinks") {
+      affected.append("terminal links")
+    }
+    if targets.contains("scriptRunner") {
+      affected.append("script runner defaults")
+    }
+    if targets.contains("bundleRegistration") {
+      affected.append("app registration")
+    }
+    let affectedText = affected.isEmpty ? "macOS defaults" : affected.joined(separator: ", ")
+    return "Could not update \(affectedText). Refresh OS Integration status or choose Ghostex manually in macOS."
+  }
+
+  fileprivate static func osIntegrationStatusItem(
+    target: String,
+    operation: String,
+    status: String,
+    reason: String,
+    fileExtension: String? = nil,
+    scheme: String? = nil
+  ) -> [String: Any] {
+    var item: [String: Any] = [
+      "operation": operation,
+      "reason": reason,
+      "status": status,
+      "target": target,
+    ]
+    if let fileExtension {
+      item["extension"] = fileExtension
+    }
+    if let scheme {
+      item["scheme"] = scheme
+    }
+    return item
+  }
+
+  fileprivate static func osIntegrationStatusPayload(
+    bundleIdentifier: String,
+    statusItems: [[String: Any]] = []
+  ) -> [String: Any] {
     let info = Bundle.main.infoDictionary ?? [:]
     let documentTypes = info["CFBundleDocumentTypes"] as? [[String: Any]] ?? []
     let urlTypes = info["CFBundleURLTypes"] as? [[String: Any]] ?? []
@@ -4689,7 +4790,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     }
     let terminalLinkDefaultBundleId =
       LSCopyDefaultHandlerForURLScheme("ghostex" as CFString)?.takeRetainedValue() as String?
-    return [
+    var payload: [String: Any] = [
       "bundleIdentifier": bundleIdentifier,
       "editorDefaults": defaultRoleHandlers(
         extensions: ["txt", "md", "json", "js", "ts", "sh"],
@@ -4704,11 +4805,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       "terminalLinkDefaultBundleId": terminalLinkDefaultBundleId as Any,
       "type": "osIntegrationStatus",
     ]
+    if !statusItems.isEmpty {
+      payload["statusItems"] = statusItems
+    }
+    return payload
   }
 
-  fileprivate static func osIntegrationStatusEvent(bundleIdentifier: String) -> HostEvent {
+  fileprivate static func osIntegrationStatusEvent(
+    bundleIdentifier: String,
+    statusItems: [[String: Any]] = []
+  ) -> HostEvent {
     return .osIntegrationStatus(
-      payloadJson: jsonObjectString(osIntegrationStatusPayload(bundleIdentifier: bundleIdentifier)))
+      payloadJson: jsonObjectString(osIntegrationStatusPayload(
+        bundleIdentifier: bundleIdentifier,
+        statusItems: statusItems)))
   }
 
   fileprivate static func defaultRoleHandlers(
@@ -9496,18 +9606,26 @@ final class ghostexRootView: NSView {
       SessionAttentionNotificationController.openMacOSNotificationSettings()
     case .setOSIntegrationDefaults(let command):
       guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
-        showMessage(.init(level: .error, message: "Ghostex bundle identifier is missing."))
+        let statusItems = [AppDelegate.osIntegrationStatusItem(
+          target: "bundleRegistration",
+          operation: "setDefault",
+          status: "failed",
+          reason: "bundleIdentifierMissing")]
+        showMessage(.init(level: .error, message: "Could not update macOS OS Integration defaults."))
+        postHostEvent(AppDelegate.osIntegrationStatusEvent(bundleIdentifier: "", statusItems: statusItems))
         return
       }
-      let failures = AppDelegate.osIntegrationDefaultFailures(
+      let statusItems = AppDelegate.osIntegrationDefaultStatusItems(
         target: command.target,
         bundleIdentifier: bundleIdentifier)
-      if failures.isEmpty {
+      if statusItems.isEmpty {
         presentAppToast(level: "success", title: "Updated macOS OS Integration defaults.")
       } else {
-        showMessage(.init(level: .error, message: "Could not set defaults: \(failures.joined(separator: ", "))"))
+        showMessage(.init(level: .error, message: AppDelegate.osIntegrationDefaultFailureMessage(statusItems)))
       }
-      postHostEvent(AppDelegate.osIntegrationStatusEvent(bundleIdentifier: bundleIdentifier))
+      postHostEvent(AppDelegate.osIntegrationStatusEvent(
+        bundleIdentifier: bundleIdentifier,
+        statusItems: statusItems))
     case .requestOSIntegrationStatus:
       postHostEvent(AppDelegate.osIntegrationStatusEvent(bundleIdentifier: Bundle.main.bundleIdentifier ?? ""))
     case .openExternalUrl(let command):
@@ -16088,6 +16206,12 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
        Previous Sessions remains a compact picker whose React shell is 546px wide inside the modal host's 12px viewport padding. Size the native child window to that fitted component instead of the generic management-modal size, and keep it fixed so users do not reveal empty #0e0e0e gutters around the React component.
        */
       return CGSize(width: 570, height: 568)
+    case "remoteGxserverInstall":
+      /*
+       CDXC:RemoteMachines 2026-06-24-10:43:
+       The remote gxserver approval dialog is a compact confirmation surface. Size the native child window to the React dialog's 520px content width and fitted height so users do not see the generic modal gutters around the text and Install gxserver actions.
+       */
+      return CGSize(width: 520, height: 340)
     case "renameSession":
       /*
        CDXC:SidebarRename 2026-06-12-02:50:
@@ -16114,8 +16238,20 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return CGSize(width: 472, height: 336)
     case "pinnedPrompts", "daemonSessions":
       return CGSize(width: 760, height: 680)
-    case "scratchPad", "addRepository", "remoteProjectPicker":
+    case "scratchPad":
       return CGSize(width: 760, height: 640)
+    case "addRepository":
+      /*
+       CDXC:AddRepository 2026-06-24-10:35:
+       Clone Repository now includes branch controls, remote-destination help, and inline clone errors. The native child window needs a taller fitted WebView so validation states keep each field in normal document flow instead of compressing labels, inputs, and helper text into each other.
+       */
+      return CGSize(width: 760, height: 760)
+    case "remoteProjectPicker":
+      /*
+       CDXC:RemoteProjectPicker 2026-06-24-10:43:
+       The remote Add Project picker should wrap its CommandDialog instead of inheriting the large repository picker frame. Keep enough vertical room for a short scrollable directory list while removing the visible empty top, side, and bottom gutters from the empty-folder state.
+       */
+      return CGSize(width: 480, height: 260)
     case "commandPalette":
       /*
        CDXC:CommandPalette 2026-06-12-05:04:
@@ -16254,7 +16390,8 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
 
   private func shouldLockContentSize(modal: String) -> Bool {
     modal == "previousSessions" || modal == "renameSession" || modal == "delayedSend"
-      || modal == "worktree"
+      || modal == "worktree" || modal == "remoteGxserverInstall"
+      || modal == "remoteProjectPicker"
   }
 
   private func minimumContentSize(for modal: String?) -> CGSize {
@@ -16263,6 +16400,10 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return CGSize(width: 472, height: 336)
     case "floatingPromptEditor":
       return Self.floatingPromptEditorMinimumSize
+    case "remoteGxserverInstall":
+      return CGSize(width: 520, height: 340)
+    case "remoteProjectPicker":
+      return CGSize(width: 480, height: 260)
     case "settings", "configureAgents", "configureActions", "openTargets", "hotkeys":
       /*
        CDXC:SettingsWindow 2026-06-24-05:39:

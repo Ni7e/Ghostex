@@ -17984,6 +17984,14 @@ final class TerminalWorkspaceView: NSView {
     else {
       return false
     }
+    if isSourceProjectEditorChromiumFindTarget(target) {
+      /*
+       CDXC:BrowserSearch 2026-06-24-13:13:
+       Source view is a CEF host for embedded VS Code, but Cmd+F must stay with VS Code's editor search instead of Ghostex's browser find bar.
+       Return false so AppKit continues dispatching the key event to code-server.
+       */
+      return false
+    }
     /*
      CDXC:BrowserSearch 2026-06-13-00:00:
      Cmd+F, Cmd+G, and Cmd+Shift+G in focused CEF panes should use Chromium page search for the current browser pane only.
@@ -18075,6 +18083,18 @@ final class TerminalWorkspaceView: NSView {
       return nil
     }
     return (target.chromiumView, hostView)
+  }
+
+  private func isSourceProjectEditorChromiumFindTarget(
+    _ target: (chromiumView: GhostexCEFBrowserView, hostView: WebPaneHostView)
+  ) -> Bool {
+    projectEditorPaneSessions.values.contains { session in
+      session.mode == "code"
+        && (
+          session.hostView === target.hostView
+            || session.chromiumView.map { $0 === target.chromiumView } == true
+        )
+    }
   }
 
   private func chromiumHostView(containing responderView: NSView) -> WebPaneHostView? {
@@ -27737,7 +27757,10 @@ final class WebPaneHostView: NSView, NSTextFieldDelegate {
     }
     /*
      CDXC:BrowserPageAppearance 2026-06-19-18:13:
-     Browser address bars no longer expose manual System/Light/Dark controls or persist per-origin choices. Browser panes follow macOS effective appearance at the renderer boundary; CEF also owns a matching default page canvas for transparent sites, so public pages do not reveal a backing color that disagrees with the system scheme.
+     Browser address bars no longer expose manual System/Light/Dark controls or persist per-origin choices. Browser panes follow macOS effective appearance for renderer media queries.
+
+     CDXC:BrowserPageAppearance 2026-06-24-13:16:
+     The default document canvas should remain Chrome-like white for toolbar browser pages, so plain HTML and transparent pages without an authored background do not reveal Ghostex's dark pane chrome.
      */
     webView?.appearance = nil
     chromiumView?.setUsesSystemPageAppearance(true)

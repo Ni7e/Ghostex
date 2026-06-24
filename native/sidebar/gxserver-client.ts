@@ -3,6 +3,7 @@ import {
   GXSERVER_PROTOCOL_VERSION,
   type GxserverEndpointPath,
   type GxserverAgentSettings,
+  type GxserverAppUserData,
   type GxserverReadAgentSettingsResult,
   type GxserverInstallAgentHooksResult,
   type GxserverAgentLaunchPlan,
@@ -28,6 +29,7 @@ import {
   type GxserverRunGitActionParams,
   type GxserverRunGitHubActionParams,
   type GxserverRunWorktreeActionParams,
+  type GxserverSavePinnedPromptParams,
   type GxserverSessionProviderProbeResponse,
   type GxserverProjectDomainState,
   type GxserverRemoveSessionParams,
@@ -66,6 +68,7 @@ export type NativeSidebarGxserverStatus = NativeSidebarGxserverBootstrap & {
 export type NativeSidebarGxserverStartupSnapshot = {
   agentSettings: GxserverAgentSettings;
   agentSettingsIsPersisted: boolean;
+  appUserData: GxserverAppUserData;
   health: GxserverServerHealthResponse;
   presentation?: GxserverPresentationSnapshot;
   projects: GxserverProjectDomainState[];
@@ -251,8 +254,9 @@ export function createNativeSidebarGxserverClient(
 
   async function fetchStartupSnapshot(): Promise<NativeSidebarGxserverStartupSnapshot> {
     const health = await fetchHealth();
-    const [agentSettingsResult, { projects }, { snapshot }] = await Promise.all([
+    const [agentSettingsResult, appUserData, { projects }, { snapshot }] = await Promise.all([
       rpc<GxserverReadAgentSettingsResult>("/api/readAgentSettings"),
+      rpc<GxserverAppUserData>("/api/readAppUserData"),
       rpc<{ projects: GxserverProjectDomainState[] }>("/api/listProjects"),
       rpc<{ snapshot: GxserverPresentationSnapshot }>("/api/readPresentationSnapshot"),
     ]);
@@ -263,10 +267,29 @@ export function createNativeSidebarGxserverClient(
     return {
       agentSettings: agentSettingsResult.settings,
       agentSettingsIsPersisted: agentSettingsResult.isPersisted,
+      appUserData,
       health,
       presentation: snapshot,
       projects,
     };
+  }
+
+  async function readAppUserData(): Promise<GxserverAppUserData> {
+    /*
+    CDXC:GxserverAppUserData 2026-06-24-13:30:
+    Native Scratch Pad and Pinned Prompts hydrate from gxserver product data so
+    macOS and GPUI share the same app-modal React state. The client returns the
+    payload only to the sidebar store and must not log note or prompt bodies.
+    */
+    return rpc<GxserverAppUserData>("/api/readAppUserData");
+  }
+
+  async function saveScratchPad(content: string): Promise<GxserverAppUserData> {
+    return rpc<GxserverAppUserData>("/api/saveScratchPad", { content });
+  }
+
+  async function savePinnedPrompt(params: GxserverSavePinnedPromptParams): Promise<GxserverAppUserData> {
+    return rpc<GxserverAppUserData>("/api/savePinnedPrompt", params as Record<string, unknown>);
   }
 
   async function updateAgentSettings(
@@ -640,6 +663,7 @@ export function createNativeSidebarGxserverClient(
     getCurrentStatus,
     probeSessionProvider,
     listPreviousSessions,
+    readAppUserData,
     removeProject,
     removeSession,
     resolveGitRootForPath,
@@ -655,6 +679,8 @@ export function createNativeSidebarGxserverClient(
     transitionSessionSync,
     updateAgentSettings,
     updateSessionLifecycle,
+    savePinnedPrompt,
+    saveScratchPad,
   };
 }
 
@@ -945,6 +971,12 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "load agent settings";
     case "/api/updateAgentSettings":
       return "save agent settings";
+    case "/api/readAppUserData":
+      return "load app user data";
+    case "/api/saveScratchPad":
+      return "save scratch pad";
+    case "/api/savePinnedPrompt":
+      return "save pinned prompt";
     case "/api/readAgentSkillStatus":
       return "check agent skill status";
     case "/api/installAgentSkills":
@@ -1009,6 +1041,12 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "update the project";
     case "/api/listProjects":
       return "load projects";
+    case "/api/listRecentProjects":
+      return "load recent projects";
+    case "/api/restoreRecentProject":
+      return "restore the recent project";
+    case "/api/removeRecentProject":
+      return "remove the recent project";
     case "/api/readProjectStatus":
       return "load project status";
     case "/api/removeProject":
@@ -1021,6 +1059,8 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "save the session order";
     case "/api/runGitAction":
       return "run the Git action";
+    case "/api/generateCommitMessage":
+      return "generate the commit message";
     case "/api/runGitHubAction":
       return "run the GitHub action";
     case "/api/runWorktreeAction":

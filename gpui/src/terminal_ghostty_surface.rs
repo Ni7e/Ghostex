@@ -64,7 +64,79 @@ Zero-length text and preedit are distinct FFI edge cases. Text uses a stable non
 
 CDXC:GPUITerminalCloseConfirm 2026-06-23-20:04:
 Slice 237 binds GhosttyKit's real `ghostty_surface_needs_confirm_quit` query so close-confirm prompts can be backed by source-side ABI evidence. Surface owners may expose only a boolean for the current mounted surface; they must not log, persist, or reveal process ids, tty names, commands, paths, runtime ids, or terminal content.
+
+CDXC:GPUITerminalNativeKeyBridge 2026-06-24-20:58:
+Mounted GPUI terminal host NSViews own native AppKit key events because GPUI's root `KeyDownEvent` drops the macOS native keycode Ghostty needs for Return, Backspace, arrows, modifiers, and bindings. Register only the exact host-view to Ghostty-surface pairing while a real surface is mounted, keep the registry runtime-only, and never store typed text beyond the synchronous FFI call.
 */
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy)]
+struct GhosttyNativeKeyTarget {
+    surface: usize,
+    functions: GhosttyKitFunctionTable,
+}
+
+#[cfg(target_os = "macos")]
+fn ghostty_native_key_targets()
+-> &'static Mutex<std::collections::HashMap<usize, GhosttyNativeKeyTarget>> {
+    static TARGETS: OnceLock<Mutex<std::collections::HashMap<usize, GhosttyNativeKeyTarget>>> =
+        OnceLock::new();
+    TARGETS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn register_native_key_target<SlotId>(
+    native_view: RealTerminalNativeViewHandle,
+    surface: &GhosttySurfaceOwner<SlotId>,
+) where
+    SlotId: TerminalSurfaceMountSlotKey,
+{
+    let target = GhosttyNativeKeyTarget {
+        surface: surface.as_raw() as usize,
+        functions: surface.functions,
+    };
+    if let Ok(mut targets) = ghostty_native_key_targets().lock() {
+        targets.insert(native_view.as_ptr() as usize, target);
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn unregister_native_key_target(native_view: RealTerminalNativeViewHandle) {
+    if let Ok(mut targets) = ghostty_native_key_targets().lock() {
+        targets.remove(&(native_view.as_ptr() as usize));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn native_key_target_for_view(native_view: *mut c_void) -> Option<GhosttyNativeKeyTarget> {
+    let native_view = NonNull::new(native_view)?;
+    ghostty_native_key_targets()
+        .lock()
+        .ok()
+        .and_then(|targets| targets.get(&(native_view.as_ptr() as usize)).copied())
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn native_key_translation_mods_for_view(
+    native_view: *mut c_void,
+    mods: ffi::ghostty_input_mods_e,
+) -> ffi::ghostty_input_mods_e {
+    let Some(target) = native_key_target_for_view(native_view) else {
+        return mods;
+    };
+    unsafe { (target.functions.surface_key_translation_mods)(target.surface as *mut c_void, mods) }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn send_native_key_event_for_view(
+    native_view: *mut c_void,
+    event: ffi::ghostty_input_key_s,
+) -> bool {
+    let Some(target) = native_key_target_for_view(native_view) else {
+        return false;
+    };
+    unsafe { (target.functions.surface_key)(target.surface as *mut c_void, event) }
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct GhosttyKitFunctionTable {
@@ -362,9 +434,7 @@ unsafe fn production_ghostty_surface_process_exited(surface: ffi::ghostty_surfac
     unsafe { ffi::ghostty_surface_process_exited(surface) }
 }
 
-unsafe fn production_ghostty_surface_needs_confirm_quit(
-    surface: ffi::ghostty_surface_t,
-) -> bool {
+unsafe fn production_ghostty_surface_needs_confirm_quit(surface: ffi::ghostty_surface_t) -> bool {
     unsafe { ffi::ghostty_surface_needs_confirm_quit(surface) }
 }
 
@@ -688,10 +758,30 @@ fn validate_launch_string(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct GhosttySurfaceTerminalConfig {
+    font_size: f32,
+}
+
+impl GhosttySurfaceTerminalConfig {
+    pub(crate) fn unmanaged() -> Self {
+        Self { font_size: 0.0 }
+    }
+
+    pub(crate) fn with_font_size(font_size: f32) -> Self {
+        Self { font_size }
+    }
+
+    fn font_size(self) -> f32 {
+        self.font_size
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub(crate) struct GhosttySurfaceConfigRequest {
     nsview: GhosttySurfaceNsViewHandle,
     scale_factor: GhosttySurfaceScaleFactor,
+    terminal_config: GhosttySurfaceTerminalConfig,
     launch_payload: Option<GhosttySurfaceLaunchPayload>,
 }
 
@@ -703,6 +793,7 @@ impl GhosttySurfaceConfigRequest {
         Self {
             nsview,
             scale_factor,
+            terminal_config: GhosttySurfaceTerminalConfig::unmanaged(),
             launch_payload: None,
         }
     }
@@ -723,6 +814,18 @@ impl GhosttySurfaceConfigRequest {
     ) -> Self {
         self.launch_payload = Some(launch_payload);
         self
+    }
+
+    pub(crate) fn with_terminal_config(
+        mut self,
+        terminal_config: GhosttySurfaceTerminalConfig,
+    ) -> Self {
+        self.terminal_config = terminal_config;
+        self
+    }
+
+    pub(crate) fn set_terminal_config(&mut self, terminal_config: GhosttySurfaceTerminalConfig) {
+        self.terminal_config = terminal_config;
     }
 
     #[cfg(target_os = "macos")]
@@ -759,6 +862,10 @@ impl GhosttySurfaceConfigRequest {
     }
 
     fn apply_base_to_ffi_config(&self, config: &mut ffi::ghostty_surface_config_s) {
+        /*
+        CDXC:GPUITerminalSettings 2026-06-24-11:27:
+        Embedded Ghostty surface requests keep typography settings separate from launch payload privacy fields. A `font_size` of 0.0 remains the unmanaged Ghostty default for generic callers, while GPUI-owned request builders attach the shared Settings `terminalFontSize` value before creating Agents, command, or startup surfaces; live surface reload is not claimed here.
+        */
         let nsview = self.nsview.as_ptr();
 
         config.platform_tag = ffi::GHOSTTY_PLATFORM_MACOS;
@@ -768,7 +875,7 @@ impl GhosttySurfaceConfigRequest {
         config.userdata = nsview;
         config.write_pty_cb = None;
         config.scale_factor = self.scale_factor.get();
-        config.font_size = 0.0;
+        config.font_size = self.terminal_config.font_size();
         config.working_directory = ptr::null();
         config.command = ptr::null();
         config.env_vars = ptr::null_mut();
@@ -2522,7 +2629,9 @@ mod tests {
         confirmed: bool,
     ) {
         let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_complete_clipboard_request");
+        state
+            .calls
+            .push("ghostty_surface_complete_clipboard_request");
         state.surface_complete_clipboard_request_count += 1;
         state.last_completed_clipboard_data_present = Some(!data.is_null());
         state.last_completed_clipboard_data_empty = if data.is_null() {
@@ -2602,6 +2711,22 @@ mod tests {
         assert_eq!(config.scale_factor, 2.0);
         assert_eq!(config.font_size, 0.0);
         assert_eq!(config.context, ffi::GHOSTTY_SURFACE_CONTEXT_WINDOW);
+    }
+
+    #[test]
+    fn terminal_config_sets_ffi_font_size_without_launch_payload_fields() {
+        let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0)
+            .unwrap()
+            .with_terminal_config(GhosttySurfaceTerminalConfig::with_font_size(16.5));
+
+        let config = request.to_ffi_config();
+
+        assert_eq!(config.font_size, 16.5);
+        assert!(config.working_directory.is_null());
+        assert!(config.command.is_null());
+        assert!(config.env_vars.is_null());
+        assert_eq!(config.env_var_count, 0);
+        assert!(config.initial_input.is_null());
     }
 
     #[test]
@@ -2859,7 +2984,8 @@ mod tests {
         let private_confirm =
             CString::new("private clipboard confirm content must stay local").unwrap();
         let mime = CString::new("text/plain").unwrap();
-        let private_write = CString::new("private clipboard write content must stay local").unwrap();
+        let private_write =
+            CString::new("private clipboard write content must stay local").unwrap();
         let content = [ffi::ghostty_clipboard_content_s {
             mime: mime.as_ptr(),
             data: private_write.as_ptr(),
@@ -2924,9 +3050,11 @@ mod tests {
             fake_state().lock().unwrap().calls.clear();
 
             let request_state = 0xBCDEusize as *mut c_void;
-            assert!(surface
-                .close_token
-                .enqueue_runtime_clipboard_read(request_state));
+            assert!(
+                surface
+                    .close_token
+                    .enqueue_runtime_clipboard_read(request_state)
+            );
             surface
                 .close_token
                 .enqueue_runtime_clipboard_write("blocked synthetic clipboard write".to_string());
@@ -2943,7 +3071,10 @@ mod tests {
             assert_eq!(state.last_completed_clipboard_data_empty, Some(true));
             assert_eq!(state.last_completed_clipboard_state_present, Some(true));
             assert_eq!(state.last_completed_clipboard_confirmed, Some(true));
-            assert_eq!(state.calls, vec!["ghostty_surface_complete_clipboard_request"]);
+            assert_eq!(
+                state.calls,
+                vec!["ghostty_surface_complete_clipboard_request"]
+            );
             drop(state);
         }
         drop(app);
@@ -3246,6 +3377,74 @@ mod tests {
                     "ghostty_surface_key_is_binding"
                 ]
             );
+        }
+        drop(app);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_key_target_registry_dispatches_only_registered_host_view() {
+        let _guard = fake_test_lock();
+        reset_fake_state();
+        {
+            let mut state = fake_state().lock().unwrap();
+            state.key_translation_mods_return = 0x24;
+            state.key_event_return = true;
+        }
+        let native_view = unsafe {
+            RealTerminalNativeViewHandle::from_existing_native_view(test_nsview_pointer())
+        };
+        unregister_native_key_target(native_view);
+
+        let app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
+        {
+            let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0).unwrap();
+            let surface =
+                GhosttySurfaceOwner::new(&app, test_slot(), test_runtime_session_id(), &request)
+                    .unwrap();
+            fake_state().lock().unwrap().calls.clear();
+            register_native_key_target(native_view, &surface);
+
+            let private_text = CString::new("private key text").unwrap();
+            let event = ffi::ghostty_input_key_s {
+                action: 1,
+                mods: 2,
+                consumed_mods: 0,
+                keycode: 36,
+                text: private_text.as_ptr(),
+                unshifted_codepoint: 13,
+                composing: false,
+            };
+
+            assert_eq!(
+                native_key_translation_mods_for_view(native_view.as_ptr(), 0x12),
+                0x24
+            );
+            assert!(send_native_key_event_for_view(native_view.as_ptr(), event));
+
+            let state = fake_state().lock().unwrap();
+            assert_eq!(state.last_key_translation_mods, Some(0x12));
+            assert_eq!(state.surface_key_count, 1);
+            assert_eq!(state.last_key_action, Some(1));
+            assert_eq!(state.last_key_mods, Some(2));
+            assert_eq!(state.last_key_text_present, Some(true));
+            assert_eq!(
+                state.calls,
+                vec![
+                    "ghostty_surface_key_translation_mods",
+                    "ghostty_surface_key"
+                ]
+            );
+            drop(state);
+
+            unregister_native_key_target(native_view);
+            fake_state().lock().unwrap().calls.clear();
+            assert_eq!(
+                native_key_translation_mods_for_view(native_view.as_ptr(), 0x55),
+                0x55
+            );
+            assert!(!send_native_key_event_for_view(native_view.as_ptr(), event));
+            assert!(fake_state().lock().unwrap().calls.is_empty());
         }
         drop(app);
     }

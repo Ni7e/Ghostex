@@ -351,6 +351,65 @@ final class RemoteGxserverClient {
     """
   }
 
+  private func remoteStopStaleGxserverListenerCommand() -> String {
+    """
+    ghostex_remote_gxserver_port=58744
+    ghostex_remote_listener_pids() {
+      ss -ltnp 2>/dev/null | awk -v port=":$ghostex_remote_gxserver_port" '$0 ~ port "[[:space:]]" { while (match($0, /pid=[0-9]+/)) { print substr($0, RSTART + 4, RLENGTH - 4); $0 = substr($0, RSTART + RLENGTH) } }' || true
+      lsof -nP -iTCP:$ghostex_remote_gxserver_port -sTCP:LISTEN -Fp 2>/dev/null | sed -n 's/^p//p' || true
+    }
+    ghostex_remote_is_gxserver_pid() {
+      candidate_pid="$1"
+      case "$candidate_pid" in
+        ''|*[!0-9]*) return 1 ;;
+      esac
+      [ "$candidate_pid" -gt 0 ] 2>/dev/null || return 1
+      if [ -r "/proc/$candidate_pid/cmdline" ]; then
+        candidate_cmdline="$(tr '\000' ' ' < "/proc/$candidate_pid/cmdline" 2>/dev/null || true)"
+        case "$candidate_cmdline" in
+          *".ghostex/gxserver/"*"gxserver"*|*"gxserver --foreground"*) return 0 ;;
+        esac
+      fi
+      candidate_command="$(ps -p "$candidate_pid" -o command= 2>/dev/null || ps -p "$candidate_pid" -o args= 2>/dev/null || true)"
+      case "$candidate_command" in
+        *".ghostex/gxserver/"*"gxserver"*|*"gxserver --foreground"*) return 0 ;;
+      esac
+      candidate_exe="$(readlink "/proc/$candidate_pid/exe" 2>/dev/null || true)"
+      case "$candidate_exe" in
+        *".ghostex/gxserver/"*"/gxserver"*|*"/gxserver (deleted)"*) return 0 ;;
+      esac
+      return 1
+    }
+    ghostex_remote_wait_for_pid_exit() {
+      wait_pid="$1"
+      wait_count=0
+      while kill -0 "$wait_pid" 2>/dev/null && [ "$wait_count" -lt 30 ]; do
+        sleep 0.1
+        wait_count=$((wait_count + 1))
+      done
+      ! kill -0 "$wait_pid" 2>/dev/null
+    }
+    ghostex_remote_stop_existing_gxserver() {
+      if [ -x "$package_link/bin/gxserver" ]; then
+        "$package_link/bin/gxserver" stop --json >/dev/null 2>&1 || "$package_link/bin/gxserver" stop >/dev/null 2>&1 || true
+      fi
+      for listener_pid in $(ghostex_remote_listener_pids | sort -u); do
+        if ghostex_remote_is_gxserver_pid "$listener_pid"; then
+          kill -TERM "$listener_pid" 2>/dev/null || true
+        fi
+      done
+      for listener_pid in $(ghostex_remote_listener_pids | sort -u); do
+        if ghostex_remote_is_gxserver_pid "$listener_pid" && ! ghostex_remote_wait_for_pid_exit "$listener_pid"; then
+          if ghostex_remote_is_gxserver_pid "$listener_pid"; then
+            kill -KILL "$listener_pid" 2>/dev/null || true
+          fi
+        fi
+      done
+    }
+    ghostex_remote_stop_existing_gxserver
+    """
+  }
+
   private func installBundledGxserverAndReadToken(target: RemoteSshTarget, packageURL: URL) -> RemoteProcessResult {
     let tempDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("ghostex-remote-gxserver-\(UUID().uuidString)", isDirectory: true)
@@ -380,10 +439,26 @@ final class RemoteGxserverClient {
      target-matched package into a release directory, atomically retarget the
      stable package symlink, expose gxserver/zmx/zehn/bd/ghostex/gx from
      ~/.local/bin, and avoid PATH probing or broad package-directory deletion.
+
+     CDXC:RemoteMachines 2026-06-24-05:42:
+     Remote attach opens through non-login /bin/sh on Ubuntu test machines, so
+     install must chmod the generated ghostex wrapper before creating public
+     links and archive without macOS AppleDouble files. The wrapper must also
+     resolve its symlink path because users and attach flows may invoke it from
+     ~/.local/bin or /usr/local/bin instead of the package bin directory.
+
+     CDXC:RemoteMachines 2026-06-24-20:49:
+     Reinstalling gxserver from Remote Settings must recover from a machine that
+     has only a stale daemon process left after its install directory or token
+     was removed. Stop the previous package first when possible, then terminate
+     only a verified Ghostex-owned gxserver listener on the fixed API port
+     before starting the freshly uploaded package so the tunnel authenticates
+     against the new token instead of an orphaned old process.
      */
     let tarResult = runProcess(
       executable: "/usr/bin/tar",
       arguments: ["-czf", archiveURL.path, "-C", packageURL.path, "."],
+      environment: ["COPYFILE_DISABLE": "1"],
       timeoutSeconds: 60
     )
     if tarResult.exitCode != 0 {
@@ -417,6 +492,7 @@ final class RemoteGxserverClient {
     release_dir="$install_root/releases/\(releaseId)"
     package_link="$install_root/package"
     mkdir -p "$install_root/releases" "$release_dir" "$HOME/.local/bin"
+    \(remoteStopStaleGxserverListenerCommand())
     tar -xzf "$upload_path" -C "$release_dir"
     if [ -e "$package_link" ] && [ ! -L "$package_link" ]; then
       mv "$package_link" "$install_root/package.backup.\(releaseId)"
@@ -445,7 +521,16 @@ final class RemoteGxserverClient {
       cat > "$package_link/bin/ghostex" <<'__GHOSTEX_REMOTE_CLI__'
     #!/bin/sh
     set -eu
-    HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+    SOURCE="$0"
+    while [ -L "$SOURCE" ]; do
+      SOURCE_DIR="$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)"
+      SOURCE_TARGET="$(readlink "$SOURCE")"
+      case "$SOURCE_TARGET" in
+        /*) SOURCE="$SOURCE_TARGET" ;;
+        *) SOURCE="$SOURCE_DIR/$SOURCE_TARGET" ;;
+      esac
+    done
+    HERE="$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)"
     if [ -f "$HERE/../CLI/ghostex-cli.mjs" ]; then
       exec "$HERE/../code-server/lib/node" "$HERE/../CLI/ghostex-cli.mjs" "$@"
     fi
@@ -453,7 +538,7 @@ final class RemoteGxserverClient {
     __GHOSTEX_REMOTE_CLI__
       ghostex_cli_wrapper_written=1
     fi
-    if [ -x "$package_link/bin/ghostex" ]; then
+    if [ -f "$package_link/bin/ghostex" ]; then
       chmod 755 "$package_link/bin/ghostex" 2>/dev/null || true
       ln -sfn "$package_link/bin/ghostex" "$HOME/.local/bin/ghostex" 2>/dev/null || true
       if [ "$ghostex_cli_wrapper_written" = "1" ] || [ ! -x "$package_link/bin/gx" ]; then

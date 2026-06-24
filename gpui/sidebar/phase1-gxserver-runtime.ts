@@ -1,0 +1,7872 @@
+import {
+  GXSERVER_PROTOCOL_VERSION,
+  type GxserverAppUserData,
+  type GxserverCheckoutProjectNewBranchResult,
+  type GxserverCreatePullRequestResult,
+  type GxserverDeleteWorktreeProjectResult,
+  type GxserverForkSessionResult,
+  type GxserverEndpointPath,
+  type GxserverGenerateCommitMessageResult,
+  type GxserverMergeWorktreeIntoMainResult,
+  type GxserverPresentationDelta,
+  type GxserverPresentationProject,
+  type GxserverPresentationSearchResponse,
+  type GxserverPresentationSearchResult,
+  type GxserverPresentationSession,
+  type GxserverPresentationSnapshot,
+  type GxserverProjectDomainState,
+  type GxserverProjectId,
+  type GxserverProjectWorktreeListResult,
+  type GxserverRecentProjectDomainState,
+  type GxserverSessionId,
+  type GxserverSidebarHudResponse,
+  type GxserverSidebarHudSettingsMutationParams,
+  type GxserverSidebarHudSettingsMutationResult,
+  type GxserverTypedOperationResult,
+} from "../../shared/gxserver-protocol";
+import {
+  reduceGxserverPresentationDelta,
+  reorderPresentationProjectSessions,
+} from "../../shared/gxserver-presentation-cache";
+import {
+  createGxserverPresentationProjectGroupId,
+  createGxserverPresentationProjectSessionId,
+  createGxserverPresentationSidebarGroup,
+  createGxserverPresentationSidebarGroups,
+  createGxserverPresentationSessionsByProjectFromGroups,
+  parseGxserverPresentationProjectGroupId,
+  parseGxserverPresentationProjectSessionId,
+  type GxserverPresentationSidebarProjectOverlay,
+} from "../../shared/gxserver-presentation-sidebar-projection";
+import {
+  createAgentSessionDefaultTitle,
+  DEFAULT_TERMINAL_SESSION_TITLE,
+  resolveSidebarTheme,
+  type ExtensionToSidebarMessage,
+  type SidebarGroupsChangedMessage,
+  type SidebarHudChangedMessage,
+  type SidebarHudState,
+  type SidebarHydrateMessage,
+  type SidebarOrderSyncResultMessage,
+  type SidebarPreviousSessionsResultMessage,
+  type SidebarPreviousSessionItem,
+  type SidebarPromptGitCommitMessage,
+  type SidebarProjectSettingsItem,
+  type SidebarRemoteMachineStatusMessage,
+  type SidebarRecentProject,
+  type SidebarSessionGroup,
+  type SidebarTheme,
+  type SidebarToExtensionMessage,
+} from "../../shared/session-grid-contract";
+import {
+  createSidebarAgentButtons,
+  DEFAULT_SIDEBAR_AGENTS,
+  getSidebarAgentIconById,
+  isDefaultSidebarAgentId,
+  type SidebarAgentButton,
+} from "../../shared/sidebar-agents";
+import {
+  createSidebarCommandButtons,
+} from "../../shared/sidebar-commands";
+import { getCompletionSoundLabel } from "../../shared/completion-sound";
+import { createAppToastRequest, type AppToastLevel } from "../../shared/app-toast-contract";
+import { normalizeghostexSettings, type ghostexSettings } from "../../shared/ghostex-settings";
+import {
+  createDefaultSidebarGitState,
+  hasSidebarGitRemoteCommitDelta,
+  normalizeSidebarGitAction,
+  type SidebarGitAction,
+  type SidebarGitChangedFile,
+  type SidebarGitFileDiffDraft,
+  type SidebarGitState,
+} from "../../shared/sidebar-git";
+import {
+  createDefaultSidebarProjectDiffStats,
+  parseGitZeroDelimitedPaths,
+} from "../../shared/project-diff-stats";
+import {
+  normalizeWorkspaceProjectIcon,
+  normalizeWorkspaceProjectIconDataUrl,
+  normalizeWorkspaceThemeColor,
+} from "../../shared/workspace-project-appearance";
+import type { SidebarSessionTag } from "../../shared/session-tags";
+import { openAppModal, postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
+import type { WebviewApi } from "../../sidebar/webview-api";
+import {
+  createGpuiSidebarActiveProjectContextPayloadFromGroups,
+  type GpuiSidebarRuntimeSettings,
+  type GpuiSidebarRuntimeSettingsSnapshot,
+} from "./phase1-active-project-context";
+
+export type GpuiGxserverBootstrap = {
+  authToken?: string;
+  baseUrl?: string;
+  clientId?: string;
+  focusedSessionId?: string;
+  initialActiveProjectId?: string;
+  protocolVersion?: number;
+  visibleSessionIds?: readonly string[];
+};
+
+export type GhostexGpuiSidebarBridge = {
+  gxserverBootstrap?: GpuiGxserverBootstrap;
+  onGxserverBootstrapChanged?: (bootstrap: GpuiGxserverBootstrap) => void;
+  onRuntimeSettingsChanged?: (
+    runtimeSettings: GpuiSidebarRuntimeSettingsSnapshot,
+  ) => void;
+  postActiveProjectContext?: (payload: string) => boolean;
+  postGxserverPresentationFocusState?: (payload: string) => boolean;
+  postNativeProjectPathAction?: (payload: string) => boolean;
+  runtimeSettings?: GpuiSidebarRuntimeSettings;
+};
+
+declare global {
+  interface Window {
+    ghostexGpui?: GhostexGpuiSidebarBridge;
+  }
+}
+
+type GpuiSidebarRuntimeSnapshotKind = "hydrate" | "patch";
+
+type GpuiValidatedGxserverBootstrap = {
+  authToken: string;
+  baseUrl: string;
+  clientId: string;
+  focusedSessionId?: string;
+  initialActiveProjectId?: string;
+  visibleSessionIds?: readonly string[];
+};
+
+type GpuiSidebarGroupsPatch = {
+  groupOrder: string[];
+  groups: SidebarSessionGroup[];
+  removedGroupIds: string[];
+  removedSessionIds: string[];
+};
+
+type GpuiGxserverRpcSuccess<TResult> = {
+  ok: true;
+  product: "gxserver";
+  protocolVersion: number;
+  result: TResult;
+};
+
+type GpuiProjectWorktreesResultMessage = {
+  branches?: unknown;
+  error?: string;
+  ok: boolean;
+  requestId: string;
+  type: "projectWorktreesResult";
+  worktrees?: unknown;
+};
+
+type GpuiSidebarRemotePresentationEvent = {
+  payload:
+    | {
+        snapshot: GxserverPresentationSnapshot;
+        type: "presentationSnapshot";
+      }
+    | {
+        delta: GxserverPresentationDelta;
+        revision: number;
+        type: "presentationDelta";
+      };
+  remoteMachineId: string;
+  type: "remoteGxserverPresentation";
+};
+
+type GpuiSidebarRemoteGxserverResponseEvent = {
+  error?: string;
+  ok: boolean;
+  remoteMachineId: string;
+  requestId: string;
+  result?: unknown;
+  type: "remoteGxserverResponse";
+};
+
+type GpuiSidebarRemoteEvent =
+  | SidebarRemoteMachineStatusMessage
+  | GpuiSidebarRemoteGxserverResponseEvent
+  | GpuiSidebarRemotePresentationEvent;
+
+const GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS = 20;
+const GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS = 250;
+const GPUI_SIDEBAR_DEFAULT_CLIENT_ID = "ghostex-gpui-sidebar";
+const GPUI_GXSERVER_UNAVAILABLE_GROUP_ID = "gxserver-unavailable";
+const GPUI_GXSERVER_CHATS_GROUP_ID = "combined-chats";
+const GPUI_DEFAULT_VISIBLE_COUNT = 1;
+const GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.nativeProjectPathAction";
+const GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.gxserverPresentationFocusState";
+const GPUI_SIDEBAR_REMOTE_EVENT_NAME = "ghostex-gpui-sidebar-remote-event";
+const DEFAULT_GPUI_PROMPT_AGENT_ID = "codex";
+const GPUI_BACKGROUND_COMMIT_MESSAGE_DEFAULT_AGENT_IDS = new Set([
+  "claude",
+  "codex",
+  "cursor",
+  "gemini",
+]);
+
+type GpuiSidebarNativeProjectPathAction =
+  | "copyRecentProjectPath"
+  | "openRecentProjectInFinder"
+  | "copyWorkspaceProjectPath"
+  | "openWorkspaceProjectInFinder"
+  | "openWorkspaceProjectInIde"
+  | "openActiveWorkspaceProjectInFinder"
+  | "openActiveWorkspaceProjectInVscode"
+  | "openActiveWorkspaceProjectInZed"
+  | "openExistingPullRequestInBrowser"
+  | "openSidebarGitChangedFileInIde"
+  | "copyRemoteProjectPath"
+  | "openRemoteWorkspaceProjectInIde"
+  | "openRemoteWorkspaceProjectInVscode"
+  | "openRemoteWorkspaceProjectInZed"
+  | "openRemoteExistingPullRequestInBrowser"
+  | "openRemoteSidebarGitChangedFileInIde"
+  | "openRemoteSessionTerminal"
+  | "copyRemoteAttachCommand"
+  | "copyRemoteResumeCommand";
+
+type GpuiTrustedExistingWorktreeList = {
+  parentProjectId: string;
+  paths: Set<string>;
+  remoteMachineId?: string;
+  sourceProjectId: string;
+  worktreeKeys?: Set<string>;
+};
+
+type GpuiPendingGitCommitRequest = {
+  action: Extract<SidebarGitAction, "commit" | "pr" | "push">;
+  files: SidebarGitChangedFile[];
+  hasCommit: boolean;
+  projectId: string;
+  remoteReference?: GpuiRemoteProjectReference;
+  remoteTitle?: string;
+  subject: string;
+};
+
+type GpuiTrustedGitReviewFileSelection = {
+  explicit: boolean;
+  filePaths: string[];
+};
+
+type GpuiPendingRemoteGxserverRequest = {
+  reject: (error: Error) => void;
+  resolve: (result: unknown) => void;
+  timeoutId: number;
+};
+
+type GpuiGxserverCreatedSessionResult = {
+  session?: {
+    projectId?: string;
+    sessionId?: string;
+  };
+};
+
+type GpuiWorktreeMetadata = {
+  branch?: string;
+  name?: string;
+  parentProjectId: string;
+  parentProjectName?: string;
+};
+
+type GpuiGitPreferences = {
+  confirmCommit: boolean;
+  generateCommitBody: boolean;
+  primaryAction: SidebarGitAction;
+};
+
+type GpuiRemoteProjectReference = {
+  machineId: string;
+  projectId: string;
+};
+
+type GpuiRemoteProjectScope = GpuiRemoteProjectReference & {
+  machineName?: string;
+  project: GxserverPresentationProject;
+};
+
+type GpuiRemoteCreatePullRequestResult = {
+  created?: boolean;
+  ok?: boolean;
+  pr?: {
+    number?: number;
+    state?: string;
+  };
+  reason?: string;
+};
+
+class GpuiUserVisibleGitError extends Error {}
+
+const GPUI_GIT_MULTIPLE_COMMITS_PROMPT = `Please review my current changes and commit them as multiple focused commits.
+
+Commit-splitting rules:
+- Group changes by related feature, fix, or topic.
+- Do not combine unrelated work in the same commit.
+- Use file-based splitting only; do not split individual hunks.
+- Make each commit easy to revert or cherry-pick later.
+- Use clear, concise commit messages.`;
+
+const GPUI_REMOTE_MERGE_CONFLICT_PROMPT =
+  "A direct merge into main has conflicts in this remote project. Inspect the repository state, resolve the conflicts, and commit the merge when it is correct.";
+
+const GPUI_GIT_RELEASE_STEPS_PROMPT = `1. Push any local commits to remote.
+2. Review the commits since the last released version.
+3. Update CHANGELOG.md to mention the new changes.
+4. Publish the next minor version to the usual places we publish this app.`;
+
+const GPUI_GIT_MULTICOMMIT_RELEASE_PROMPT = `${GPUI_GIT_MULTIPLE_COMMITS_PROMPT}
+
+After all focused commits are created:
+${GPUI_GIT_RELEASE_STEPS_PROMPT}`;
+
+const GPUI_GIT_RELEASE_ONLY_PROMPT = `Please release this app using the usual release workflow.
+
+${GPUI_GIT_RELEASE_STEPS_PROMPT}`;
+
+function createEmptyGpuiAppUserData(): GxserverAppUserData {
+  return {
+    pinnedPrompts: [],
+    scratchPadContent: "",
+  };
+}
+
+/*
+CDXC:GPUISidebarGxserverRuntime 2026-06-24-11:00:
+The production GPUI sidebar must mount the shared SidebarApp and hydrate it from gxserver presentation, never Storybook fixtures. Keep the renderer contract narrow: Rust/CEF installs baseUrl, authToken, protocolVersion, and optional active/focus ids on window.ghostexGpui.gxserverBootstrap; this adapter owns HTTP/WebSocket presentation flow, shared reducer/projection, active-project posting, and explicit unsupported handling for sidebar commands outside this slice.
+
+CDXC:GPUISettingsMetadata 2026-06-24-11:59:
+Settings project/worktree metadata in the GPUI SidebarApp still comes from real gxserver project domain rows, but read-side agent/action chrome now comes from `/api/readSidebarHud` so the renderer does not duplicate custom launcher/action normalization. Keep Beads/worktree metadata on project rows and never invent project paths when gxserver omits them.
+
+CDXC:GPUISidebarProjectPathActions 2026-06-24-14:18:
+Reused SidebarApp project path actions in GPUI may send only fixed action names plus trusted gxserver project ids to the sidebar-native bridge. The renderer must never send paths from DOM text, group labels, project titles, or cached project domain rows; Rust resolves ids through gxserver immediately before clipboard/Finder side effects.
+
+CDXC:GPUISidebarProjectPathActions 2026-06-24-13:49:
+Reused SidebarApp IDE-open messages in GPUI use the same pathless native project action bridge. The renderer maps group IDE opens to a Settings-owned fixed action and active workspace IDE opens to fixed VS Code/Zed action names plus gxserver project ids only; targetApp, editor commands, app names, paths, labels, URLs, and shell snippets stay out of the bridge payload so Rust owns editor selection and launch.
+
+CDXC:GPUIWorktrees 2026-06-24-18:21:
+The reused Add Worktree modal in GPUI must run local worktree create/open flows through gxserver typed endpoints instead of shelling from TypeScript or accepting arbitrary renderer paths. Remote worktree create/open must use id-scoped gxserver endpoints where the owning daemon derives target paths, branch refs, and Open Existing selections from project ids plus daemon-issued keys; do not route remote checkout paths or branch text through the renderer as authority.
+
+CDXC:GPUIWorktrees 2026-06-24-14:06:
+Open Existing prompt starts come from the reused modal's real prompt and
+visible agent selector. Blank prompts keep the project-open-only behavior, but
+a non-blank prompt must fail if the submitted agent is not configured instead
+of silently opening the worktree without starting the requested session.
+
+CDXC:GxserverAppUserData 2026-06-24-13:30:
+Scratch Pad and Pinned Prompts in the reused GPUI SidebarApp must hydrate and
+save through gxserver app-user-data, matching the app-modal host and macOS
+sidebar. Keep note and prompt bodies inside authenticated RPC payloads only;
+do not log them or persist them in a GPUI-only JSON file.
+
+CDXC:GPUISidebarGit 2026-06-24-15:22:
+GPUI Git controls may use gxserver-owned project ids and typed Git/GitHub/Beads endpoints for status, diffs, commit, push, and direct remote sync. Commit and PR creation paths must use the reused review modal or visible gxserver agent sessions, with remote-machine actions routed through the Rust-owned saved-machine tunnel and the owning remote gxserver.
+
+CDXC:GPUISidebarGit 2026-06-24-15:43:
+Existing pull-request browser open and changed-file IDE open are native GPUI side effects. React may send only fixed action names, gxserver project ids, and normalized project-relative file candidates from current HUD/review state; Rust must re-resolve PR URLs and changed-file membership through gxserver before launching a browser or editor.
+
+CDXC:GPUISidebarGit 2026-06-24-15:55:
+GPUI worktree completion may run direct merge-to-main and delete-after-cleanup only from a confirmed Git review request. The renderer uses the pending machine-scoped gxserver project id plus gxserver worktree parent metadata, fixed Git action names, and `/api/deleteWorktreeProject`; renderer paths, branch text, shell snippets, command output, and modal labels are never authority for side effects.
+
+CDXC:GPUISidebarGit 2026-06-24-16:11:
+Blank GPUI commit messages use a local gxserver generation endpoint after the reused commit modal validates the selected review files. The renderer sends only the trusted project id, review-approved relative paths, and selected prompt-agent id; gxserver stages/diffs the registered project and returns the subject/body used by the same commit pipeline.
+
+CDXC:GPUISidebarGit 2026-06-24-16:28:
+Direct/background GPUI PR creation must complete through gxserver before the UI opens a PR or removes a worktree. Reused review confirmations commit only validated review files, push with fixed Git action names, call the sanitized `/api/createPullRequest` project-id RPC, and run delete-after cleanup only after that result confirms an open PR; visible-agent PR workflows remain non-delete because they have no gxserver-owned PR completion signal.
+
+CDXC:GPUISidebarGit 2026-06-24-16:45:
+Visible PR-agent sessions expose gxserver lifecycle/activity only, not a trusted PR-created result. Preserve visible PR sessions for non-delete-after workflows, but route every delete-after PR request through the direct/background gxserver PR result before removing the original validated worktree.
+
+CDXC:GPUIRemoteGit 2026-06-24-17:47:
+Remote GPUI Git/GitHub/worktree actions must route through the Rust-owned saved-machine gxserver tunnel with machine-scoped project ids, reviewed file paths, fixed endpoint action names, and id-scoped worktree/branch operations only. Native side effects stay explicit: terminal focus uses remote attach, PR browser opens and copy-path use Rust revalidation, while remote Finder remains unsupported and remote IDE opens require Rust-owned fixed editor support.
+
+CDXC:GPUIRemoteAttach 2026-06-24-19:06:
+Remote terminal focus and copy-attach commands may leave React only as fixed native action names plus machine-scoped remote presentation session ids. Rust owns saved-machine SSH details, gxserver attach/resume metadata, GPUI terminal launch payloads, and clipboard command construction so renderer state never carries tokens, hostnames, paths, or command text.
+
+CDXC:GPUIRemoteNativeActions 2026-06-24-19:25:
+Remote project copy-path, existing-PR browser open, and changed-file open intents may leave React only as fixed native action names plus machine-scoped project ids and review-approved relative file candidates. Rust must revalidate through the saved-machine gxserver tunnel before clipboard/browser/editor side effects; remote Finder stays unsupported because local Finder cannot dereference remote paths safely.
+
+CDXC:GPUIRemoteNativeActions 2026-06-24-20:26:
+Remote IDE project and changed-file opens are allowed only through Rust-owned fixed editor openers. React may request a fixed action for a machine-scoped project id, but it must never send remote paths, URI strings, SSH host/user/port/identity details, Settings custom commands, or editor command text.
+
+CDXC:GPUIRemoteNativeActions 2026-06-24-21:33:
+Zed remote opens are allowed through Rust-owned documented `zed ssh://[user@]host[:port]/path` argv only. React still sends only fixed action names and machine-scoped project ids; Cursor, Windsurf, VSCodium, Sublime, and custom remote editor commands remain unsupported without an equally reviewed native opener contract.
+
+CDXC:GPUISidebarGxserverFocusState 2026-06-24-21:07:
+Focused and visible session bootstrap state may use only gxserver presentation session ids the GPUI runtime already owns from create/focus/fork/restore results or machine-scoped remote presentation ids. Local ids stay raw gxserver session ids; remote ids use the existing `remote:<machine>:session:<project>:<session>` convention so React, Rust, and the CEF bootstrap never infer focus from labels, paths, terminal text, project names, or shell placeholder ids.
+
+CDXC:GPUISidebarProjectClassification 2026-06-24-22:18:
+GPUI must mirror the macOS sidebar projection rules for gxserver project domain metadata and canonical chat-folder paths. Legacy `isChat`/`isQuick`, `launchSettings.isChat`, `launchSettings.isQuick`, and projects under the Ghostex chats roots feed the synthetic Chats group instead of normal Project groups, `isRecentProject` rows stay out of active presentation groups, and automatic fallback focus must choose a visible non-chat project while explicit chat-session focus keeps the Chats group active.
+
+CDXC:GPUISidebarProjectClassification 2026-06-24-22:51:
+Generated Chat folders must not render as individual GPUI project groups, and clicking a chat session must not publish that chat folder as the active project to Rust. Treat host Ghostex-home chat roots, including dev `.active/chats` homes, as projectless Chats containers before building active-project context, Settings project rows, or Git HUD state.
+*/
+export function createGpuiSidebarRuntime(): {
+  messageSource: GpuiSidebarLocalMessageSource;
+  start: () => void;
+  vscode: WebviewApi;
+} {
+  const runtime = new GpuiSidebarRuntime();
+  return {
+    messageSource: runtime.messageSource,
+    start: () => runtime.start(),
+    vscode: runtime.vscode,
+  };
+}
+
+export class GpuiSidebarLocalMessageSource {
+  private readonly eventTarget = new EventTarget();
+
+  addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+    options?: AddEventListenerOptions | boolean,
+  ): void {
+    this.eventTarget.addEventListener(type, listener, options);
+  }
+
+  removeEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+    options?: EventListenerOptions | boolean,
+  ): void {
+    this.eventTarget.removeEventListener(type, listener, options);
+  }
+
+  postMessage(
+    message:
+      | ExtensionToSidebarMessage
+      | SidebarHydrateMessage
+      | SidebarGroupsChangedMessage
+      | SidebarHudChangedMessage
+      | SidebarOrderSyncResultMessage
+      | SidebarPreviousSessionsResultMessage
+      | GpuiProjectWorktreesResultMessage,
+  ): void {
+    this.eventTarget.dispatchEvent(
+      new MessageEvent("message", {
+        data: message,
+      }),
+    );
+  }
+}
+
+class GpuiSidebarRuntime {
+  readonly messageSource = new GpuiSidebarLocalMessageSource();
+  readonly vscode: WebviewApi = {
+    postMessage: (message) => {
+      void this.handleSidebarMessage(message);
+    },
+  };
+
+  private activeProjectContextRetryId: number | undefined;
+  private activeGroupId: string | undefined;
+  private activeProjectId: string | undefined;
+  private appUserData: GxserverAppUserData = createEmptyGpuiAppUserData();
+  private bootstrapPollTimeoutId: number | undefined;
+  private client: GpuiGxserverClient | undefined;
+  private domainProjects: GxserverProjectDomainState[] = [];
+  private focusedSessionId: string | undefined;
+  private gxserverBootstrap: GpuiValidatedGxserverBootstrap | undefined;
+  private gitState: SidebarGitState = createDefaultSidebarGitState();
+  private hasHydrated = false;
+  private latestGroups: SidebarSessionGroup[] = [];
+  private latestHud: SidebarHudState = createGpuiSidebarHudState();
+  private lastGitRefreshProjectId: string | undefined;
+  private pendingGitCommitRequests = new Map<string, GpuiPendingGitCommitRequest>();
+  private pendingRemoteGxserverRequests = new Map<string, GpuiPendingRemoteGxserverRequest>();
+  private presentation: GxserverPresentationSnapshot | undefined;
+  private previousSessionsByHistoryId = new Map<string, SidebarPreviousSessionItem>();
+  private previousSessionsResult:
+    | {
+        previousSessions: SidebarPreviousSessionItem[];
+        query?: string;
+        requestId: string;
+      }
+    | undefined;
+  private recentProjects: GxserverRecentProjectDomainState[] = [];
+  private remoteGxserverRequestSequence = 0;
+  private remotePresentations = new Map<string, GxserverPresentationSnapshot>();
+  private remoteRecentProjectsByMachineId = new Map<string, GxserverRecentProjectDomainState[]>();
+  private revision = 0;
+  private runtimeSettings: GpuiSidebarRuntimeSettings | undefined;
+  private sidebarHud: GxserverSidebarHudResponse | undefined;
+  private subscription: GpuiPresentationSubscription | undefined;
+  private trustedExistingWorktreeList: GpuiTrustedExistingWorktreeList | undefined;
+  private visibleSessionIds = new Set<string>();
+
+  start(): void {
+    this.installGpuiBridgeCallbacks();
+    this.runtimeSettings = currentGpuiRuntimeSettings();
+    window.addEventListener(GPUI_SIDEBAR_REMOTE_EVENT_NAME, this.handleGpuiSidebarRemoteEvent);
+    this.publishUnavailable("bootstrap-pending");
+    this.tryStartFromInstalledBootstrap(0);
+  }
+
+  private installGpuiBridgeCallbacks(): void {
+    const gpuiBridge = (window.ghostexGpui = window.ghostexGpui ?? {});
+    gpuiBridge.onRuntimeSettingsChanged = (runtimeSettings) => {
+      const didChange = !hasSameGpuiRuntimeSettings(this.runtimeSettings, runtimeSettings);
+      this.runtimeSettings = runtimeSettings;
+      if (!didChange) {
+        return;
+      }
+      this.publishHudPatch();
+      this.postActiveProjectContext();
+    };
+    gpuiBridge.onGxserverBootstrapChanged = (bootstrap) => {
+      this.applyGxserverBootstrapChanged(bootstrap);
+    };
+  }
+
+  private applyGxserverBootstrapChanged(bootstrap: GpuiGxserverBootstrap): void {
+    const validated = validateGpuiGxserverBootstrap(bootstrap);
+    if (!validated) {
+      this.startFromBootstrap(bootstrap);
+      return;
+    }
+    if (!this.gxserverBootstrap || !hasSameGpuiGxserverBootstrapTransport(this.gxserverBootstrap, validated)) {
+      this.startFromBootstrap(bootstrap);
+      return;
+    }
+    this.gxserverBootstrap = validated;
+    if (!this.applyGxserverBootstrapPresentationState(validated)) {
+      return;
+    }
+    if (this.presentation) {
+      this.publishPresentation("patch");
+    } else {
+      this.publishRemotePresentationPatch();
+    }
+  }
+
+  private readonly handleGpuiSidebarRemoteEvent = (event: Event): void => {
+    const remoteEvent = normalizeGpuiSidebarRemoteEvent((event as CustomEvent<unknown>).detail);
+    if (!remoteEvent) {
+      return;
+    }
+    if (remoteEvent.type === "remoteMachineStatus") {
+      this.messageSource.postMessage(remoteEvent);
+      if (
+        remoteEvent.state === "disconnected" ||
+        remoteEvent.state === "failed" ||
+        remoteEvent.state === "installApprovalRequired"
+      ) {
+        this.remotePresentations.delete(remoteEvent.machineId);
+        this.remoteRecentProjectsByMachineId.delete(remoteEvent.machineId);
+        this.dropRemotePresentationSessionFocus(remoteEvent.machineId);
+        this.publishRemotePresentationPatch();
+      }
+      return;
+    }
+
+    if (remoteEvent.type === "remoteGxserverResponse") {
+      this.resolveRemoteGxserverRequest(remoteEvent);
+      return;
+    }
+
+    if (remoteEvent.payload.type === "presentationSnapshot") {
+      this.remotePresentations.set(remoteEvent.remoteMachineId, remoteEvent.payload.snapshot);
+      this.publishRemotePresentationPatch();
+      void this.refreshRemoteRecentProjectsFromGxserver(remoteEvent.remoteMachineId);
+      return;
+    }
+
+    const previous = this.remotePresentations.get(remoteEvent.remoteMachineId);
+    if (!previous || remoteEvent.payload.revision <= previous.revision) {
+      return;
+    }
+    this.remotePresentations.set(
+      remoteEvent.remoteMachineId,
+      reduceGxserverPresentationDelta(
+        previous,
+        remoteEvent.payload.delta,
+        remoteEvent.payload.revision,
+      ),
+    );
+    this.publishRemotePresentationPatch();
+    if (remoteEvent.payload.delta.type === "projectRemoved" || "domainProject" in remoteEvent.payload.delta) {
+      void this.refreshRemoteRecentProjectsFromGxserver(remoteEvent.remoteMachineId);
+    }
+  };
+
+  private tryStartFromInstalledBootstrap(attempt: number): void {
+    const bootstrap = window.ghostexGpui?.gxserverBootstrap;
+    if (bootstrap) {
+      this.startFromBootstrap(bootstrap);
+      return;
+    }
+    if (attempt >= GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS) {
+      return;
+    }
+    this.bootstrapPollTimeoutId = window.setTimeout(() => {
+      this.tryStartFromInstalledBootstrap(attempt + 1);
+    }, GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS);
+  }
+
+  private startFromBootstrap(bootstrap: GpuiGxserverBootstrap): void {
+    if (this.bootstrapPollTimeoutId !== undefined) {
+      window.clearTimeout(this.bootstrapPollTimeoutId);
+      this.bootstrapPollTimeoutId = undefined;
+    }
+
+    const validated = validateGpuiGxserverBootstrap(bootstrap);
+    if (!validated) {
+      this.publishUnavailable("bootstrap-invalid");
+      return;
+    }
+
+    this.subscription?.close();
+    this.gxserverBootstrap = validated;
+    this.client = new GpuiGxserverClient(validated);
+    this.applyGxserverBootstrapPresentationState(validated);
+
+    const client = this.client;
+    void Promise.all([
+      client.fetchPresentationSnapshot(),
+      client.fetchAppUserData(),
+      client.fetchProjectList().catch(() => undefined),
+      client.fetchRecentProjects().catch(() => undefined),
+      client.fetchSidebarHud(validated.initialActiveProjectId),
+    ])
+      .then(([snapshot, appUserData, domainProjects, recentProjects, sidebarHud]) => {
+        if (this.client !== client) {
+          return;
+        }
+        this.appUserData = appUserData;
+        this.domainProjects = domainProjects ? [...domainProjects] : [];
+        this.recentProjects = recentProjects ? [...recentProjects] : [];
+        this.sidebarHud = sidebarHud;
+        this.applyPresentationSnapshot(snapshot, "hydrate");
+        this.openPresentationSubscription(validated.clientId, snapshot.revision);
+      })
+      .catch(() => {
+        this.publishUnavailable("snapshot-failed");
+      });
+  }
+
+  private applyGxserverBootstrapPresentationState(
+    bootstrap: GpuiValidatedGxserverBootstrap,
+  ): boolean {
+    const nextFocusedSessionId = bootstrap.focusedSessionId;
+    const nextVisibleSessionIds = new Set(bootstrap.visibleSessionIds ?? []);
+    const nextActiveProjectId = bootstrap.initialActiveProjectId;
+    const nextActiveGroupId = activeGroupIdForGpuiGxserverBootstrapPresentationState({
+      focusedSessionId: nextFocusedSessionId,
+      initialActiveProjectId: nextActiveProjectId,
+    });
+    const didChange =
+      this.activeProjectId !== nextActiveProjectId ||
+      this.activeGroupId !== nextActiveGroupId ||
+      this.focusedSessionId !== nextFocusedSessionId ||
+      !sameStringSet(this.visibleSessionIds, nextVisibleSessionIds);
+    this.activeProjectId = nextActiveProjectId;
+    this.activeGroupId = nextActiveGroupId;
+    this.focusedSessionId = nextFocusedSessionId;
+    this.visibleSessionIds = nextVisibleSessionIds;
+    return didChange;
+  }
+
+  private openPresentationSubscription(clientId: string, lastRevision: number): void {
+    if (!this.client) {
+      return;
+    }
+    this.subscription = this.client.subscribePresentation({
+      clientId,
+      lastRevision,
+      onClose: () => {
+        this.recoverPresentationStream(clientId);
+      },
+      onDelta: (delta, revision) => {
+        this.applyPresentationDelta(delta, revision);
+      },
+      onError: () => {
+        this.recoverPresentationStream(clientId);
+      },
+      onSnapshot: (snapshot) => {
+        this.applyPresentationSnapshot(snapshot, this.hasHydrated ? "patch" : "hydrate");
+      },
+    });
+  }
+
+  private recoverPresentationStream(clientId: string): void {
+    if (!this.client) {
+      return;
+    }
+    const client = this.client;
+    this.subscription?.close();
+    this.subscription = undefined;
+    void Promise.all([
+      client.fetchPresentationSnapshot(),
+      client.fetchProjectList().catch(() => undefined),
+      client.fetchRecentProjects().catch(() => undefined),
+      client.fetchSidebarHud(this.activeProjectId),
+    ])
+      .then(([snapshot, domainProjects, recentProjects, sidebarHud]) => {
+        if (this.client !== client) {
+          return;
+        }
+        if (domainProjects) {
+          this.domainProjects = [...domainProjects];
+        }
+        if (recentProjects) {
+          this.recentProjects = [...recentProjects];
+        }
+        this.sidebarHud = sidebarHud;
+        this.applyPresentationSnapshot(snapshot, this.hasHydrated ? "patch" : "hydrate");
+        this.openPresentationSubscription(clientId, snapshot.revision);
+      })
+      .catch(() => {
+        this.publishUnavailable("stream-recovery-failed");
+      });
+  }
+
+  private applyPresentationSnapshot(
+    snapshot: GxserverPresentationSnapshot,
+    kind: GpuiSidebarRuntimeSnapshotKind,
+  ): void {
+    this.presentation = snapshot;
+    this.publishPresentation(kind);
+  }
+
+  private applyPresentationDelta(delta: GxserverPresentationDelta, gxserverRevision: number): void {
+    if (!this.presentation || gxserverRevision <= this.presentation.revision) {
+      return;
+    }
+    this.applyDomainProjectDelta(delta);
+    this.presentation = reduceGxserverPresentationDelta(
+      this.presentation,
+      delta,
+      gxserverRevision,
+    );
+    this.publishPresentation("patch");
+  }
+
+  private publishPresentation(kind: GpuiSidebarRuntimeSnapshotKind): void {
+    const presentation = this.presentation;
+    if (!presentation) {
+      this.publishUnavailable("presentation-missing");
+      return;
+    }
+
+    const previousGroups = this.latestGroups;
+    const groups = this.createSidebarGroups(presentation);
+    this.latestHud = createGpuiSidebarHudState({
+      focusedSessionId: this.focusedSessionId,
+      git: this.gitStateForHud(),
+      groups,
+      presentation,
+      runtimeSettings: this.runtimeSettings,
+      domainProjects: this.domainProjects,
+      recentProjects: this.recentProjects,
+      remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
+      sidebarHud: this.sidebarHud,
+    });
+
+    if (kind === "hydrate" || !this.hasHydrated) {
+      this.messageSource.postMessage(this.createHydrateMessage(groups, this.latestHud));
+      this.hasHydrated = true;
+    } else {
+      const patch = createGpuiSidebarGroupsPatch(previousGroups, groups);
+      const revision = ++this.revision;
+      this.messageSource.postMessage({
+        groupOrder: patch.groupOrder,
+        groups: patch.groups,
+        removedGroupIds: patch.removedGroupIds,
+        removedSessionIds: patch.removedSessionIds,
+        revision,
+        type: "sidebarGroupsChanged",
+      });
+      this.messageSource.postMessage({
+        hud: this.latestHud,
+        revision,
+        type: "sidebarHudChanged",
+      });
+    }
+    this.latestGroups = groups;
+    this.postActiveProjectContext();
+    this.postGxserverPresentationFocusState();
+    this.refreshGitStateForActiveProjectIfNeeded();
+  }
+
+  private publishUnavailable(_reason: string): void {
+    this.presentation = undefined;
+    this.appUserData = createEmptyGpuiAppUserData();
+    this.domainProjects = [];
+    this.dropLocalPresentationSessionFocus();
+    this.gitState = createDefaultSidebarGitState();
+    this.lastGitRefreshProjectId = undefined;
+    this.pendingGitCommitRequests.clear();
+    this.recentProjects = [];
+    this.sidebarHud = undefined;
+    this.latestGroups = [
+      ...createGpuiGxserverUnavailableSidebarGroups(),
+      ...this.createRemoteSidebarGroups(),
+    ];
+    this.latestHud = createGpuiSidebarHudState({
+      git: this.gitStateForHud(),
+      groups: this.latestGroups,
+      runtimeSettings: this.runtimeSettings,
+      domainProjects: this.domainProjects,
+      recentProjects: this.recentProjects,
+      remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
+      sidebarHud: this.sidebarHud,
+    });
+    this.messageSource.postMessage(
+      this.createHydrateMessage(this.latestGroups, this.latestHud),
+    );
+    this.hasHydrated = true;
+    this.postActiveProjectContext();
+    this.postGxserverPresentationFocusState();
+  }
+
+  private publishRemotePresentationPatch(): void {
+    const previousGroups = this.latestGroups;
+    const groups = this.presentation
+      ? this.createSidebarGroups(this.presentation)
+      : [
+          ...createGpuiGxserverUnavailableSidebarGroups(),
+          ...this.createRemoteSidebarGroups(),
+        ];
+    this.latestHud = createGpuiSidebarHudState({
+      focusedSessionId: this.focusedSessionId,
+      git: this.gitStateForHud(),
+      groups,
+      presentation: this.presentation,
+      runtimeSettings: this.runtimeSettings,
+      domainProjects: this.domainProjects,
+      recentProjects: this.recentProjects,
+      remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
+      sidebarHud: this.sidebarHud,
+    });
+    if (!this.hasHydrated) {
+      this.messageSource.postMessage(this.createHydrateMessage(groups, this.latestHud));
+      this.hasHydrated = true;
+    } else {
+      const patch = createGpuiSidebarGroupsPatch(previousGroups, groups);
+      const revision = ++this.revision;
+      this.messageSource.postMessage({
+        groupOrder: patch.groupOrder,
+        groups: patch.groups,
+        removedGroupIds: patch.removedGroupIds,
+        removedSessionIds: patch.removedSessionIds,
+        revision,
+        type: "sidebarGroupsChanged",
+      });
+      this.messageSource.postMessage({
+        hud: this.latestHud,
+        revision,
+        type: "sidebarHudChanged",
+      });
+    }
+    this.latestGroups = groups;
+    this.postActiveProjectContext();
+    this.postGxserverPresentationFocusState();
+  }
+
+  private applyDomainProjectDelta(delta: GxserverPresentationDelta): void {
+    if ("domainProject" in delta && delta.domainProject) {
+      const nextProject = delta.domainProject;
+      const existingIndex = this.domainProjects.findIndex(
+        (project) => project.projectId === nextProject.projectId,
+      );
+      this.domainProjects =
+        existingIndex >= 0
+          ? this.domainProjects.map((project, index) =>
+              index === existingIndex ? nextProject : project,
+            )
+          : [...this.domainProjects, nextProject];
+      if (
+        nextProject.isRecentProject === true ||
+        this.recentProjects.some((project) => project.projectId === nextProject.projectId)
+      ) {
+        this.refreshRecentProjectsFromClient();
+      }
+      this.refreshSidebarHudFromClient();
+      return;
+    }
+    if (delta.type === "projectRemoved") {
+      this.domainProjects = this.domainProjects.filter(
+        (project) => project.projectId !== delta.projectId,
+      );
+      this.refreshRecentProjectsFromClient();
+      this.refreshSidebarHudFromClient();
+    }
+  }
+
+  private refreshRecentProjectsFromClient(): void {
+    const client = this.client;
+    if (!client) {
+      return;
+    }
+    void client.fetchRecentProjects()
+      .then((recentProjects) => {
+        if (this.client !== client) {
+          return;
+        }
+        this.recentProjects = [...recentProjects];
+        this.publishHudPatch();
+      })
+      .catch(() => undefined);
+  }
+
+  private refreshSidebarHudFromClient(): void {
+    const client = this.client;
+    if (!client) {
+      return;
+    }
+    void client.fetchSidebarHud(this.activeProjectId)
+      .then((sidebarHud) => {
+        if (this.client !== client) {
+          return;
+        }
+        this.sidebarHud = sidebarHud;
+        this.publishHudPatch();
+      })
+      .catch(() => {
+        /*
+         * CDXC:SidebarHudContract 2026-06-24-20:34:
+         * Sidebar HUD projection refresh is best-effort after active-project or
+         * project-metadata changes. Failure keeps the previous gxserver
+         * projection instead of rebuilding custom launcher/action rows from
+         * raw project metadata in the renderer.
+         */
+      });
+  }
+
+  private async refreshRemoteRecentProjectsFromGxserver(remoteMachineId: string): Promise<void> {
+    try {
+      const response = await this.requestRemoteGxserver<{
+        recentProjects?: GxserverRecentProjectDomainState[];
+      }>(remoteMachineId, "/api/listRecentProjects", {});
+      this.remoteRecentProjectsByMachineId.set(
+        remoteMachineId,
+        Array.isArray(response.recentProjects) ? [...response.recentProjects] : [],
+      );
+      this.publishHudPatch();
+    } catch {
+      // CDXC:GPUIRemoteProjects 2026-06-24-18:22: Remote recent-project refresh is best-effort after presentation changes; failures keep existing rows rather than fabricating Recent Projects from presentation titles or paths.
+    }
+  }
+
+  private publishHudPatch(): void {
+    this.latestHud = createGpuiSidebarHudState({
+      focusedSessionId: this.focusedSessionId,
+      git: this.gitStateForHud(),
+      groups: this.latestGroups,
+      presentation: this.presentation,
+      runtimeSettings: this.runtimeSettings,
+      domainProjects: this.domainProjects,
+      recentProjects: this.recentProjects,
+      remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
+      sidebarHud: this.sidebarHud,
+    });
+    if (!this.hasHydrated) {
+      return;
+    }
+    this.messageSource.postMessage({
+      hud: this.latestHud,
+      revision: ++this.revision,
+      type: "sidebarHudChanged",
+    });
+  }
+
+  private postActiveProjectContext(attempt = 0): void {
+    if (this.activeProjectContextRetryId !== undefined) {
+      window.clearTimeout(this.activeProjectContextRetryId);
+      this.activeProjectContextRetryId = undefined;
+    }
+
+    const postActiveProjectContext = window.ghostexGpui?.postActiveProjectContext;
+    if (typeof postActiveProjectContext !== "function") {
+      /*
+      CDXC:GPUISidebarGxserverRuntime 2026-06-24-11:00:
+      CEF may install the sidebar bridge after the React entrypoint starts. Retry only the bridge send and rebuild the active-project payload from the latest live groups at send time, so startup never replays a stale fixture/workspace payload.
+      */
+      if (attempt < GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS) {
+        this.activeProjectContextRetryId = window.setTimeout(() => {
+          this.postActiveProjectContext(attempt + 1);
+        }, GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS);
+      }
+      return;
+    }
+
+    const payload = createGpuiSidebarActiveProjectContextPayloadFromGroups({
+      groups: this.latestGroups,
+      runtimeSettings: this.runtimeSettings,
+    });
+    postActiveProjectContext(JSON.stringify(payload));
+  }
+
+  private postGxserverPresentationFocusState(): void {
+    const postFocusState = window.ghostexGpui?.postGxserverPresentationFocusState;
+    if (typeof postFocusState !== "function") {
+      return;
+    }
+    const payload = JSON.stringify({
+      focusedSessionId: this.focusedSessionId,
+      type: GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE,
+      version: GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_VERSION,
+      visibleSessionIds: [...this.visibleSessionIds],
+    });
+    try {
+      postFocusState(payload);
+    } catch {
+      /*
+      CDXC:GPUISidebarGxserverFocusState 2026-06-24-21:07:
+      Focus-state publication is a sidebar-native synchronization hint for Rust bootstrap replay only. A missing or rejecting CEF bridge must not change gxserver data, create fallback focus ids, log renderer payloads, or block the visible SidebarApp state that React already owns.
+      */
+    }
+  }
+
+  private createHydrateMessage(
+    groups: SidebarSessionGroup[],
+    hud: SidebarHudState,
+  ): SidebarHydrateMessage {
+    return {
+      groups,
+      hud,
+      pinnedPrompts: [...this.appUserData.pinnedPrompts],
+      previousSessions: [],
+      revision: ++this.revision,
+      scratchPadContent: this.appUserData.scratchPadContent,
+      type: "hydrate",
+    };
+  }
+
+  private createSidebarGroups(presentation: GxserverPresentationSnapshot): SidebarSessionGroup[] {
+    const projectProjection = createGpuiPresentationProjectProjectionMetadata({
+      domainProjects: this.domainProjects,
+      presentation,
+    });
+    this.ensureActiveProject(presentation, projectProjection);
+    const groups = createGxserverPresentationSidebarGroups({
+      activeProjectId: this.activeProjectId,
+      chatProjectIds: projectProjection.chatProjectIds,
+      focusedSessionId: this.focusedSessionId,
+      hiddenProjectIds: projectProjection.hiddenProjectIds,
+      presentation,
+      projectOverlays: projectProjection.projectOverlays,
+      resolveAgentIcon: resolveGpuiSidebarAgentIcon,
+      resolveSessionRoutingId: createGpuiSidebarSessionRoutingId,
+      visibleSessionIds: this.visibleSessionIds,
+    });
+
+    if (!this.activeGroupId) {
+      this.activeGroupId =
+        groups.find((group) => group.isActive)?.groupId ??
+        groups.find((group) => group.projectContext)?.groupId ??
+        groups.find((group) => group.isChatCollection)?.groupId;
+    }
+
+    const localGroups = groups.map((group) => ({
+      ...group,
+      isActive: group.groupId === this.activeGroupId,
+      sessions: group.sessions.map((session) => ({
+        ...session,
+        isFocused:
+          group.groupId === this.activeGroupId &&
+          this.focusedSessionId === parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId,
+        isVisible:
+          group.groupId === this.activeGroupId &&
+          (
+            this.visibleSessionIds.has(
+              parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId ?? session.sessionId,
+            ) ||
+            session.isVisible
+          ),
+      })),
+    }));
+    return [...localGroups, ...this.createRemoteSidebarGroups()];
+  }
+
+  private createRemoteSidebarGroups(): SidebarSessionGroup[] {
+    const settings = createGpuiSidebarSettings(this.runtimeSettings);
+    return createGpuiRemotePresentationSidebarGroups({
+      activeGroupId: this.activeGroupId,
+      focusedSessionId: this.focusedSessionId,
+      presentationsByMachineId: this.remotePresentations,
+      resolveAgentIcon: resolveGpuiSidebarAgentIcon,
+      settings,
+      visibleSessionIds: this.visibleSessionIds,
+    });
+  }
+
+  private ensureActiveProject(
+    presentation: GxserverPresentationSnapshot,
+    projectProjection: GpuiPresentationProjectProjectionMetadata,
+  ): void {
+    const projectIds = new Set(presentation.projects.map((project) => project.projectId));
+    if (!this.activeProjectId && this.focusedSessionId) {
+      const focusedProjectId = presentation.sessions.find(
+        (session) => session.sessionId === this.focusedSessionId,
+      )?.projectId;
+      if (focusedProjectId && projectIds.has(focusedProjectId)) {
+        this.activeProjectId = focusedProjectId;
+        this.activeGroupId = projectProjection.chatProjectIds.has(focusedProjectId)
+          ? GPUI_GXSERVER_CHATS_GROUP_ID
+          : createGxserverPresentationProjectGroupId(focusedProjectId);
+        this.refreshSidebarHudFromClient();
+        return;
+      }
+    }
+    if (
+      this.activeProjectId &&
+      projectIds.has(this.activeProjectId) &&
+      !projectProjection.hiddenProjectIds.has(this.activeProjectId) &&
+    ) {
+      if (projectProjection.chatProjectIds.has(this.activeProjectId)) {
+        if (this.activeGroupId !== GPUI_GXSERVER_CHATS_GROUP_ID) {
+          this.activeGroupId = GPUI_GXSERVER_CHATS_GROUP_ID;
+          this.refreshSidebarHudFromClient();
+        }
+        return;
+      }
+      return;
+    }
+    const firstProject = presentation.projects.find(
+      (project) =>
+        !projectProjection.hiddenProjectIds.has(project.projectId) &&
+        !projectProjection.chatProjectIds.has(project.projectId),
+    );
+    if (firstProject) {
+      this.focusProjectId(firstProject.projectId);
+      return;
+    }
+    this.activeProjectId = undefined;
+    this.activeGroupId = GPUI_GXSERVER_CHATS_GROUP_ID;
+    this.refreshSidebarHudFromClient();
+  }
+
+  private async handleSidebarMessage(message: SidebarToExtensionMessage): Promise<void> {
+    switch (message.type) {
+      case "sidebarDebugLog":
+        return;
+      case "focusGroup":
+        this.focusGroup(message.groupId, message);
+        return;
+      case "focusSession":
+        await this.focusSession(message.sessionId, message);
+        return;
+      case "focusSessionMode":
+        if (parseGpuiRemotePresentationSessionId(message.sessionId)) {
+          await this.focusSession(message.sessionId, message);
+          return;
+        }
+        this.handleUnsupportedSidebarMessage(message);
+        return;
+      case "createSession":
+        await this.createSession();
+        return;
+      case "createSessionInGroup":
+        await this.createSession(message.groupId);
+        return;
+      case "runSidebarAgent":
+        await this.createAgentSession(message.agentId, message.groupId);
+        return;
+      case "setSessionSleeping":
+        await this.setSessionSleeping(message.sessionId, message.sleeping);
+        return;
+      case "setSessionsSleeping":
+        await Promise.all(message.sessionIds.map((sessionId) =>
+          this.setSessionSleeping(sessionId, message.sleeping),
+        ));
+        return;
+      case "setGroupSleeping":
+        await this.setGroupSleeping(message.groupId, message.sleeping);
+        return;
+      case "closeSession":
+        await this.transitionSession(message.sessionId, "close");
+        return;
+      case "closeSessions":
+        await Promise.all(message.sessionIds.map((sessionId) =>
+          this.transitionSession(sessionId, "close"),
+        ));
+        return;
+      case "forkSession":
+        await this.forkSession(message.sessionId);
+        return;
+      case "renameSession":
+        await this.renameSession(message);
+        return;
+      case "setSessionFavorite":
+        await this.updateSessionFlags(message.sessionId, {
+          isFavorite: message.favorite,
+          sessionTag: message.favorite ? "favorite" : null,
+        });
+        return;
+      case "setSessionTag":
+        await this.updateSessionFlags(message.sessionId, {
+          isFavorite: message.sessionTag === "favorite",
+          sessionTag: message.sessionTag ?? null,
+        });
+        return;
+      case "setSessionPinned":
+        await this.updateSessionFlags(message.sessionId, {
+          isPinned: message.pinned,
+        });
+        return;
+      case "syncSessionOrder":
+        await this.syncSessionOrder(message.groupId, message.sessionIds);
+        return;
+      case "requestPreviousSessions":
+        await this.requestPreviousSessions(message);
+        return;
+      case "restorePreviousSession":
+        await this.restorePreviousSession(message.historyId);
+        return;
+      case "deletePreviousSession":
+        await this.deletePreviousSession(message.historyId);
+        return;
+      case "copyAttachCommand": {
+        const remoteSession = parseGpuiRemotePresentationSessionId(message.sessionId);
+        if (remoteSession) {
+          this.postRemoteSessionNativeAction("copyRemoteAttachCommand", remoteSession, message);
+          return;
+        }
+        this.handleUnsupportedSidebarMessage(message);
+        return;
+      }
+      case "copyResumeCommand": {
+        const remoteSession = parseGpuiRemotePresentationSessionId(message.sessionId);
+        if (remoteSession) {
+          this.postRemoteSessionNativeAction("copyRemoteResumeCommand", remoteSession, message);
+          return;
+        }
+        this.handleUnsupportedSidebarMessage(message);
+        return;
+      }
+      case "requestProjectWorktrees":
+        await this.requestProjectWorktrees(message);
+        return;
+      case "saveScratchPad":
+        await this.saveScratchPad(message.content);
+        return;
+      case "savePinnedPrompt":
+        await this.savePinnedPrompt(message);
+        return;
+      case "createProjectWorktree":
+        await this.createProjectWorktree(message);
+        return;
+      case "openSettings":
+        this.openAppModal("settings");
+        return;
+      case "openWorkspaceWelcome":
+        this.openAppModal("firstLaunchSetup");
+        return;
+      case "openHighlightedFeatures":
+      case "openGhostexTutorialVideo":
+        this.openAppModal("watchGhostexVideo");
+        return;
+      case "reconnectRemoteMachine":
+        this.reconnectRemoteMachine(message.remoteMachineId, message.installApproved === true);
+        return;
+      case "openRemoteCloneRepository":
+        this.openRemoteCloneRepository(message.remoteMachineId);
+        return;
+      case "removeProject":
+        await this.removeProject(message.projectId);
+        return;
+      case "restoreRecentProject":
+        await this.restoreRecentProject(message.projectId);
+        return;
+      case "removeRecentProject":
+        await this.removeRecentProject(message.projectId);
+        return;
+      case "copyRecentProjectPath":
+        {
+          const remoteProject = parseGpuiRemotePresentationProjectId(message.projectId);
+          if (remoteProject) {
+            this.postRemoteProjectNativeAction("copyRemoteProjectPath", remoteProject, message);
+            return;
+          }
+        }
+        this.postNativeProjectPathAction("copyRecentProjectPath", message.projectId, message);
+        return;
+      case "openRecentProjectInFinder":
+        if (parseGpuiRemotePresentationProjectId(message.projectId)) {
+          this.postRemoteToast("warning", "Remote folder open unavailable", {
+            description: "GPUI does not open remote project paths in local Finder.",
+          });
+          return;
+        }
+        this.postNativeProjectPathAction("openRecentProjectInFinder", message.projectId, message);
+        return;
+      case "closeWorkspaceProjectForGroup":
+        await this.closeProjectForGroup(message.groupId);
+        return;
+      case "copyWorkspaceProjectPathForGroup":
+        this.postProjectPathActionForGroup(
+          "copyWorkspaceProjectPath",
+          message.groupId,
+          message,
+        );
+        return;
+      case "openWorkspaceProjectInFinderForGroup":
+        this.postProjectPathActionForGroup(
+          "openWorkspaceProjectInFinder",
+          message.groupId,
+          message,
+        );
+        return;
+      case "openWorkspaceProjectInIdeForGroup":
+        this.postProjectPathActionForGroup(
+          "openWorkspaceProjectInIde",
+          message.groupId,
+          message,
+        );
+        return;
+      case "openActiveWorkspaceProjectInFinder":
+        this.postActiveProjectPathAction("openActiveWorkspaceProjectInFinder", message);
+        return;
+      case "openActiveWorkspaceProjectInIde":
+        if (message.targetApp !== "vscode" && message.targetApp !== "zed") {
+          this.handleUnsupportedSidebarMessage(message);
+          return;
+        }
+        this.postActiveProjectPathAction(
+          message.targetApp === "vscode"
+            ? "openActiveWorkspaceProjectInVscode"
+            : "openActiveWorkspaceProjectInZed",
+          message,
+        );
+        return;
+      case "removeWorkspaceProjectForGroup":
+        await this.removeProjectForGroup(message.groupId);
+        return;
+      case "setProjectWorktreeCommand":
+        await this.updateProjectWorktreeCommand(message.projectId, message.command);
+        return;
+      case "setProjectBeadsDisplayKey":
+        await this.updateProjectBeadsDisplayKey(message.projectId, message.displayKey);
+        return;
+      case "setProjectBeadsDirectory":
+        await this.updateProjectBeadsDirectory(message.projectId, message.directory);
+        return;
+      case "refreshGitState":
+        await this.refreshGitStateForMessage(message);
+        return;
+      case "setSidebarGitPrimaryAction":
+        await this.persistGitPreferences({ primaryAction: message.action }, message);
+        return;
+      case "setSidebarGitCommitConfirmationEnabled":
+        await this.persistGitPreferences({ confirmCommit: message.enabled }, message);
+        return;
+      case "setSidebarGitGenerateCommitBodyEnabled":
+        await this.persistGitPreferences({ generateCommitBody: message.enabled }, message);
+        return;
+      case "runSidebarGitAction":
+        await this.runSidebarGitAction(message);
+        return;
+      case "confirmSidebarGitCommit":
+        await this.confirmSidebarGitCommit(message);
+        return;
+      case "cancelSidebarGitCommit":
+        this.pendingGitCommitRequests.delete(message.requestId);
+        this.publishHudPatch();
+        return;
+      case "runSidebarGitMultipleCommits":
+        await this.runSidebarGitMultipleCommits(message.requestId, message.agentId);
+        return;
+      case "confirmSidebarGitDirectMerge":
+        await this.confirmSidebarGitDirectMerge(message);
+        return;
+      case "commitWorktreeBeforeDelete":
+        await this.runSidebarGitAction({
+          action: "commit",
+          groupId: message.groupId,
+          type: "runSidebarGitAction",
+        });
+        return;
+      case "openSidebarGitChangedFileDiff":
+        await this.openSidebarGitChangedFileDiff(message.filePath, message.requestId);
+        return;
+      case "openSidebarGitChangedFile":
+        await this.openSidebarGitChangedFileInIde(message);
+        return;
+      case "saveSidebarAgent":
+        await this.saveSidebarAgent(message);
+        return;
+      case "deleteSidebarAgent":
+        await this.deleteSidebarAgent(message.agentId);
+        return;
+      case "syncSidebarAgentOrder":
+        await this.syncSidebarAgentOrder(message.requestId, message.agentIds);
+        return;
+      case "saveSidebarCommand":
+        await this.saveSidebarCommand(message);
+        return;
+      case "deleteSidebarCommand":
+        await this.deleteSidebarCommand(message.commandId);
+        return;
+      case "syncSidebarCommandOrder":
+        await this.syncSidebarCommandOrder(message.requestId, message.commandIds);
+        return;
+      default:
+        this.handleUnsupportedSidebarMessage(message);
+        return;
+    }
+  }
+
+  private focusGroup(groupId: string, originalMessage: SidebarToExtensionMessage): void {
+    const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
+    if (remoteGroup) {
+      const target = this.selectRemoteGroupAttachTarget(remoteGroup);
+      if (!target) {
+        this.postRemoteToast("info", "Remote attach unavailable", {
+          description: "This remote project has no attachable sessions.",
+        });
+        return;
+      }
+      if (this.postRemoteSessionNativeAction("openRemoteSessionTerminal", target, originalMessage)) {
+        this.setRemotePresentationSessionFocus(target);
+        this.publishRemotePresentationPatch();
+      }
+      return;
+    }
+    const projectId = parseGxserverPresentationProjectGroupId(groupId);
+    if (projectId) {
+      this.focusProjectId(projectId);
+    } else {
+      this.activeGroupId = groupId;
+      this.refreshSidebarHudFromClient();
+    }
+    this.publishPresentation("patch");
+  }
+
+  private async focusSession(
+    sessionId: string,
+    originalMessage?: SidebarToExtensionMessage,
+  ): Promise<void> {
+    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
+    if (remoteSession) {
+      if (this.postRemoteSessionNativeAction(
+        "openRemoteSessionTerminal",
+        remoteSession,
+        originalMessage ?? { sessionId, type: "focusSession" },
+      )) {
+        this.setRemotePresentationSessionFocus(remoteSession);
+        this.publishRemotePresentationPatch();
+      }
+      return;
+    }
+    const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    if (!reference || !this.client) {
+      return;
+    }
+    this.setLocalPresentationSessionFocus(reference.projectId, reference.sessionId);
+    this.publishPresentation("patch");
+    await this.client.rpc("/api/focusSession", {
+      projectId: reference.projectId,
+      sessionId: reference.sessionId,
+    });
+  }
+
+  private async createSession(groupId = this.activeGroupId): Promise<void> {
+    const remoteGroup = groupId ? parseGpuiRemotePresentationGroupId(groupId) : undefined;
+    if (remoteGroup) {
+      await this.requestRemoteGxserver<GpuiGxserverCreatedSessionResult>(
+        remoteGroup.machineId,
+        "/api/createSession",
+        {
+          kind: "terminal",
+          lifecycleState: "running",
+          projectId: remoteGroup.projectId,
+          surface: "workspace",
+          title: DEFAULT_TERMINAL_SESSION_TITLE,
+        },
+      ).then((response) => {
+        const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
+        if (createdSessionId) {
+          this.setRemotePresentationSessionFocus({
+            machineId: remoteGroup.machineId,
+            projectId: normalizeNonEmptyString(response.session?.projectId) ?? remoteGroup.projectId,
+            sessionId: createdSessionId,
+          });
+        }
+        this.refreshRemotePresentationFromGxserver(remoteGroup.machineId).catch(() => undefined);
+      }).catch(() => {
+        this.postRemoteToast("warning", "Remote session failed", {
+          description: "The remote gxserver could not create that session.",
+        });
+      });
+      return;
+    }
+    const projectId = groupId ? parseGxserverPresentationProjectGroupId(groupId) : this.activeProjectId;
+    if (!this.client) {
+      return;
+    }
+    const response = await this.client.rpc<GpuiGxserverCreatedSessionResult>("/api/createSession", {
+      ...(projectId ? { projectId } : {}),
+      kind: "terminal",
+      surface: "workspace",
+    });
+    const createdProjectId = normalizeNonEmptyString(response.session?.projectId) ?? projectId;
+    const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
+    if (createdProjectId && createdSessionId) {
+      this.setLocalPresentationSessionFocus(createdProjectId, createdSessionId);
+    }
+  }
+
+  private async createAgentSession(agentId: string, groupId = this.activeGroupId): Promise<void> {
+    const remoteGroup = groupId ? parseGpuiRemotePresentationGroupId(groupId) : undefined;
+    if (remoteGroup) {
+      const normalizedAgentId = agentId.trim();
+      if (!normalizedAgentId) {
+        this.postRemoteToast("warning", "Remote agent unavailable", {
+          description: "Choose a configured agent for this remote project.",
+        });
+        return;
+      }
+      /*
+      CDXC:GPUIRemoteSessions 2026-06-24-17:19:
+      Remote agent launches must let the owning remote gxserver resolve default and project-custom agent commands from remote project metadata. GPUI sends only the selected agent id, project id, surface, and a require-command guard through Rust's authenticated tunnel, never a renderer-provided command string.
+      */
+      const response = await this.requestRemoteGxserver<GpuiGxserverCreatedSessionResult>(remoteGroup.machineId, "/api/createAgentSession", {
+        agentId: normalizedAgentId,
+        projectId: remoteGroup.projectId,
+        requireLaunchCommand: true,
+        surface: "workspace",
+      }).catch(() => {
+        this.postRemoteToast("warning", "Remote agent failed", {
+          description: "The remote gxserver could not create that agent session.",
+        });
+        return undefined;
+      });
+      if (response) {
+        const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
+        if (createdSessionId) {
+          this.setRemotePresentationSessionFocus({
+            machineId: remoteGroup.machineId,
+            projectId: normalizeNonEmptyString(response.session?.projectId) ?? remoteGroup.projectId,
+            sessionId: createdSessionId,
+          });
+        }
+        this.refreshRemotePresentationFromGxserver(remoteGroup.machineId).catch(() => undefined);
+      }
+      return;
+    }
+    const projectId = groupId ? parseGxserverPresentationProjectGroupId(groupId) : this.activeProjectId;
+    const agent = this.resolveSidebarAgent(agentId);
+    if (!this.client || !projectId || !agent?.command) {
+      return;
+    }
+    const response = await this.client.rpc<GpuiGxserverCreatedSessionResult>("/api/createAgentSession", {
+      agentId: agent.agentId,
+      launchSettings: {
+        agentCommand: agent.command,
+        icon: agent.icon,
+      },
+      projectId,
+      surface: "workspace",
+      title: createAgentSessionDefaultTitle(agent.name),
+    });
+    const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
+    if (createdSessionId) {
+      this.setLocalPresentationSessionFocus(
+        normalizeNonEmptyString(response.session?.projectId) ?? projectId,
+        createdSessionId,
+      );
+    }
+  }
+
+  private async setGroupSleeping(groupId: string, sleeping: boolean): Promise<void> {
+    const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
+    if (remoteGroup) {
+      const presentation = this.remotePresentations.get(remoteGroup.machineId);
+      const sessionIds = (presentation?.sessions ?? [])
+        .filter((session) => session.projectId === remoteGroup.projectId)
+        .map((session) =>
+          createGpuiRemotePresentationSessionId(
+            remoteGroup.machineId,
+            remoteGroup.projectId,
+            session.sessionId,
+          ),
+        );
+      await Promise.all(sessionIds.map((sessionId) => this.setSessionSleeping(sessionId, sleeping)));
+      return;
+    }
+    const projectId = parseGxserverPresentationProjectGroupId(groupId);
+    if (!projectId || !this.presentation) {
+      return;
+    }
+    const sessionIds = this.presentation.sessions
+      .filter((session) => session.projectId === projectId)
+      .map((session) => createGxserverPresentationProjectSessionId(projectId, session.sessionId));
+    await Promise.all(sessionIds.map((sessionId) => this.setSessionSleeping(sessionId, sleeping)));
+  }
+
+  private async setSessionSleeping(sessionId: string, sleeping: boolean): Promise<void> {
+    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
+    if (remoteSession) {
+      this.postRemoteGxserverSidebarRequest(
+        remoteSession.machineId,
+        sleeping ? "/api/sleepSession" : "/api/wakeSession",
+        {
+          projectId: remoteSession.projectId,
+          reason: "gpui-sidebar",
+          sessionId: remoteSession.sessionId,
+        },
+      );
+      return;
+    }
+    const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    if (!reference || !this.client) {
+      return;
+    }
+    await this.client.rpc(sleeping ? "/api/sleepSession" : "/api/wakeSession", {
+      projectId: reference.projectId,
+      reason: "gpui-sidebar",
+      sessionId: reference.sessionId,
+    });
+    this.patchPresentationSession(reference.projectId, reference.sessionId, {
+      lifecycleState: sleeping ? "sleeping" : "running",
+    });
+  }
+
+  private async transitionSession(
+    sessionId: string,
+    action: "close" | "sleep",
+  ): Promise<void> {
+    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
+    if (remoteSession) {
+      this.postRemoteGxserverSidebarRequest(
+        remoteSession.machineId,
+        action === "close" ? "/api/killSession" : "/api/sleepSession",
+        {
+          projectId: remoteSession.projectId,
+          reason: "gpui-sidebar",
+          sessionId: remoteSession.sessionId,
+        },
+      );
+      return;
+    }
+    const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    if (!reference || !this.client) {
+      return;
+    }
+    await this.client.rpc("/api/transitionSession", {
+      action,
+      projectId: reference.projectId,
+      reason: "gpui-sidebar",
+      sessionId: reference.sessionId,
+    });
+    if (action === "close") {
+      this.removePresentationSession(reference.projectId, reference.sessionId);
+    } else {
+      this.patchPresentationSession(reference.projectId, reference.sessionId, {
+        lifecycleState: "sleeping",
+      });
+    }
+  }
+
+  private async forkSession(sessionId: string): Promise<void> {
+    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
+    if (remoteSession) {
+      if (!this.findRemotePresentationSession(remoteSession)) {
+        this.postRemoteToast("warning", "Remote fork unavailable", {
+          description: "Reconnect the remote machine before forking this session.",
+        });
+        return;
+      }
+      /*
+      CDXC:GPUIRemoteSessions 2026-06-24-17:19:
+      Remote fork authority comes only from a machine-prefixed session id already present in the remote presentation snapshot. Route the project/session ids to `/api/forkSession` on that machine; do not derive ids from labels or terminal text.
+      */
+      const response = await this.requestRemoteGxserver<GxserverForkSessionResult>(remoteSession.machineId, "/api/forkSession", {
+        projectId: remoteSession.projectId,
+        reason: "gpui-sidebar",
+        sessionId: remoteSession.sessionId,
+      }).catch(() => {
+        this.postRemoteToast("warning", "Remote fork failed", {
+          description: "The remote gxserver could not fork that session.",
+        });
+        return undefined;
+      });
+      if (response) {
+        this.setRemotePresentationSessionFocus({
+          machineId: remoteSession.machineId,
+          projectId: response.session.projectId ?? remoteSession.projectId,
+          sessionId: response.session.sessionId,
+        });
+        this.refreshRemotePresentationFromGxserver(remoteSession.machineId).catch(() => undefined);
+      }
+      return;
+    }
+    const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    if (!reference || !this.client) {
+      return;
+    }
+    const response = await this.client.rpc<GxserverForkSessionResult>("/api/forkSession", {
+      projectId: reference.projectId,
+      reason: "gpui-sidebar",
+      sessionId: reference.sessionId,
+    });
+    this.setLocalPresentationSessionFocus(
+      response.session.projectId ?? reference.projectId,
+      response.session.sessionId,
+    );
+  }
+
+  private async renameSession(
+    message: Extract<SidebarToExtensionMessage, { type: "renameSession" }>,
+  ): Promise<void> {
+    const remoteSession = parseGpuiRemotePresentationSessionId(message.sessionId);
+    if (remoteSession) {
+      this.postRemoteGxserverSidebarRequest(remoteSession.machineId, "/api/updateSession", {
+        projectId: remoteSession.projectId,
+        sessionId: remoteSession.sessionId,
+        title: message.title,
+      });
+      return;
+    }
+    const reference = parseGxserverPresentationProjectSessionId(message.sessionId);
+    if (!reference || !this.client) {
+      return;
+    }
+    await this.client.rpc("/api/requestSessionRename", {
+      agentName: message.agentId,
+      projectId: reference.projectId,
+      reason: "gpui-sidebar",
+      sessionId: reference.sessionId,
+      title: message.title,
+      titleSource: message.shouldGenerateTitle ? "generated" : "user",
+    });
+    this.patchPresentationSession(reference.projectId, reference.sessionId, {
+      title: message.title,
+    });
+  }
+
+  private async updateSessionFlags(
+    sessionId: string,
+    flags: { isFavorite?: boolean; isPinned?: boolean; sessionTag?: SidebarSessionTag | null },
+  ): Promise<void> {
+    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
+    if (remoteSession) {
+      this.postRemoteGxserverSidebarRequest(remoteSession.machineId, "/api/updateSession", {
+        ...flags,
+        projectId: remoteSession.projectId,
+        sessionId: remoteSession.sessionId,
+      });
+      return;
+    }
+    const reference = parseGxserverPresentationProjectSessionId(sessionId);
+    if (!reference || !this.client) {
+      return;
+    }
+    await this.client.rpc("/api/updateSession", {
+      ...flags,
+      projectId: reference.projectId,
+      sessionId: reference.sessionId,
+    });
+    this.patchPresentationSession(reference.projectId, reference.sessionId, flags);
+  }
+
+  private async syncSessionOrder(groupId: string, sessionIds: readonly string[]): Promise<void> {
+    const projectId = parseGxserverPresentationProjectGroupId(groupId);
+    if (!projectId || !this.client || !this.presentation) {
+      return;
+    }
+    const gxserverSessionIds = sessionIds.flatMap((sessionId) => {
+      const reference = parseGxserverPresentationProjectSessionId(sessionId);
+      return reference?.projectId === projectId ? [reference.sessionId] : [];
+    });
+    if (gxserverSessionIds.length === 0) {
+      return;
+    }
+    this.presentation = reorderPresentationProjectSessions(
+      this.presentation,
+      projectId as GxserverProjectId,
+      gxserverSessionIds as GxserverSessionId[],
+    );
+    this.publishPresentation("patch");
+    await this.client.rpc("/api/updateSessionOrder", {
+      projectId,
+      sessionIds: gxserverSessionIds,
+    });
+  }
+
+  private async requestPreviousSessions(
+    message: Extract<SidebarToExtensionMessage, { type: "requestPreviousSessions" }>,
+  ): Promise<void> {
+    const limit = message.limit ?? 80;
+    const sessionTags = message.sessionTags;
+    const remoteMachines = this.connectedRemotePreviousSessionMachines();
+    try {
+      const [localResponse, ...remoteResponses] = await Promise.all([
+        this.client
+          ? this.client.rpc<GxserverPresentationSearchResponse>(
+              "/api/listPreviousSessions",
+              {
+                includeActive: false,
+                includePrevious: true,
+                limit,
+                query: message.query,
+                sessionTags,
+              },
+            ).catch(() => ({ results: [] }))
+          : Promise.resolve({ results: [] }),
+        ...remoteMachines.map((machine) =>
+          this.requestRemoteGxserver<GxserverPresentationSearchResponse>(
+            machine.machineId,
+            "/api/listPreviousSessions",
+            {
+              includeActive: false,
+              includePrevious: true,
+              limit,
+              query: message.query,
+              sessionTags,
+            },
+          ).catch(() => ({ results: [] })),
+        ),
+      ]);
+      /*
+      CDXC:GPUIRemotePreviousSessions 2026-06-24-17:19:
+      Previous-session list/search combines local gxserver rows with connected remote gxserver rows, but remote history ids are machine-prefixed so restore/delete can route back through Rust's tunnel owner. Keep only the current result page in memory and do not persist remote metadata in GPUI.
+      */
+      const remoteItems = remoteResponses.flatMap((response, index) =>
+        response.results.map((result) =>
+          gxserverSearchResultToPreviousSessionItem(result, {
+            historyIdPrefix: `remote-gxserver:${remoteMachines[index]?.machineId ?? ""}`,
+            projectNamePrefix: remoteMachines[index]?.machineName,
+          }),
+        ),
+      );
+      this.postPreviousSessionsResult(
+        message.requestId,
+        message.query,
+        [
+          ...localResponse.results.map(gxserverSearchResultToPreviousSessionItem),
+          ...remoteItems,
+        ]
+          .sort(comparePreviousSessionItemsByClosedTime)
+          .slice(0, limit),
+      );
+    } catch {
+      this.postPreviousSessionsResult(message.requestId, message.query, []);
+    }
+  }
+
+  private async restorePreviousSession(historyId: string): Promise<void> {
+    const remoteReference = parseGpuiRemotePreviousSessionHistoryId(historyId);
+    if (remoteReference) {
+      await this.restoreRemotePreviousSession(remoteReference, historyId);
+      return;
+    }
+    const reference = parseGpuiGxserverPreviousSessionHistoryId(historyId);
+    if (!reference || !this.client) {
+      return;
+    }
+    const previousSession = this.previousSessionsByHistoryId.get(historyId);
+    if (previousSession && previousSession.isRestorable !== true) {
+      return;
+    }
+    try {
+      const response = await this.client.rpc<GpuiGxserverCreatedSessionResult>("/api/createSession", {
+        kind: "terminal",
+        lifecycleState: "running",
+        projectId: reference.projectId,
+        restoredFromSessionId: reference.sessionId,
+        ...(previousSession?.sessionTag ? { sessionTag: previousSession.sessionTag } : {}),
+        ...(previousSession?.sidebarOrder !== undefined ? { sidebarOrder: previousSession.sidebarOrder } : {}),
+        surface: "workspace",
+        title: previousSessionTitle(previousSession),
+      });
+      const restoredSessionId = normalizeNonEmptyString(response.session?.sessionId);
+      if (restoredSessionId) {
+        this.setLocalPresentationSessionFocus(
+          normalizeNonEmptyString(response.session?.projectId) ?? reference.projectId,
+          restoredSessionId,
+        );
+      }
+      await this.client.rpc("/api/removeSession", {
+        projectId: reference.projectId,
+        reason: "restorePreviousSession",
+        sessionId: reference.sessionId,
+      }).catch(() => undefined);
+      this.removePreviousSessionFromCurrentResult(historyId);
+    } catch {
+      this.postRemoteToast("warning", "Previous session restore failed", {
+        description: "gxserver could not restore that previous session.",
+      });
+    }
+  }
+
+  private async restoreRemotePreviousSession(
+    reference: { machineId: string; projectId: string; sessionId: string },
+    historyId: string,
+  ): Promise<void> {
+    const previousSession = this.previousSessionsByHistoryId.get(historyId);
+    if (previousSession && previousSession.isRestorable !== true) {
+      return;
+    }
+    /*
+    CDXC:GPUIRemotePreviousSessions 2026-06-24-17:19:
+    Restoring remote history recreates a real workspace session on the owning remote gxserver and then removes the stopped history row from that same machine. GPUI does not create a local terminal, synthesize resume commands, or trust visible previous-session labels as operation ids.
+
+    CDXC:GPUIRemoteAttach 2026-06-24-19:06:
+    When remote previous-session restore returns a new gxserver session id, GPUI may immediately ask Rust to attach that exact restored id through the same native remote terminal action as a direct session click. If gxserver does not return the new id, the restore remains server-only instead of guessing from labels or the old history id.
+    */
+    try {
+      const response = await this.requestRemoteGxserver<{
+        session?: { projectId?: string; sessionId?: string };
+      }>(reference.machineId, "/api/createSession", {
+        kind: "terminal",
+        lifecycleState: "running",
+        projectId: reference.projectId,
+        restoredFromSessionId: reference.sessionId,
+        ...(previousSession?.sessionTag ? { sessionTag: previousSession.sessionTag } : {}),
+        ...(previousSession?.sidebarOrder !== undefined ? { sidebarOrder: previousSession.sidebarOrder } : {}),
+        surface: "workspace",
+        title: previousSessionTitle(previousSession),
+      });
+      await this.requestRemoteGxserver(reference.machineId, "/api/removeSession", {
+        projectId: reference.projectId,
+        reason: "restorePreviousSession",
+        sessionId: reference.sessionId,
+      }).catch(() => undefined);
+      this.removePreviousSessionFromCurrentResult(historyId);
+      const restoredSessionId = response.session?.sessionId;
+      if (restoredSessionId) {
+        const restoredReference = {
+          machineId: reference.machineId,
+          projectId: response.session?.projectId ?? reference.projectId,
+          sessionId: restoredSessionId,
+        };
+        this.setRemotePresentationSessionFocus(restoredReference);
+        this.postRemoteSessionNativeAction(
+          "openRemoteSessionTerminal",
+          restoredReference,
+          { historyId, type: "restorePreviousSession" },
+        );
+      }
+    } catch {
+      this.postRemoteToast("warning", "Remote restore failed", {
+        description: "The remote gxserver could not restore that previous session.",
+      });
+    }
+  }
+
+  private async deletePreviousSession(historyId: string): Promise<void> {
+    const remoteReference = parseGpuiRemotePreviousSessionHistoryId(historyId);
+    if (remoteReference) {
+      await this.requestRemoteGxserver(remoteReference.machineId, "/api/removeSession", {
+        projectId: remoteReference.projectId,
+        reason: "deletePreviousSession",
+        sessionId: remoteReference.sessionId,
+      }).catch(() => undefined);
+      this.removePreviousSessionFromCurrentResult(historyId);
+      return;
+    }
+    const reference = parseGpuiGxserverPreviousSessionHistoryId(historyId);
+    if (!reference || !this.client) {
+      return;
+    }
+    await this.client.rpc("/api/removeSession", {
+      projectId: reference.projectId,
+      reason: "deletePreviousSession",
+      sessionId: reference.sessionId,
+    }).catch(() => undefined);
+    this.removePreviousSessionFromCurrentResult(historyId);
+  }
+
+  private connectedRemotePreviousSessionMachines(): Array<{
+    machineId: string;
+    machineName: string;
+  }> {
+    const settings = createGpuiSidebarSettings(this.runtimeSettings);
+    return settings.remoteMachines.flatMap((machine) =>
+      this.remotePresentations.has(machine.id)
+        ? [{ machineId: machine.id, machineName: machine.name }]
+        : [],
+    );
+  }
+
+  private postPreviousSessionsResult(
+    requestId: string,
+    query: string | undefined,
+    previousSessions: SidebarPreviousSessionItem[],
+  ): void {
+    this.previousSessionsResult = {
+      previousSessions,
+      query,
+      requestId,
+    };
+    for (const session of previousSessions) {
+      this.previousSessionsByHistoryId.set(session.historyId, session);
+    }
+    this.messageSource.postMessage({
+      previousSessions,
+      query,
+      requestId,
+      type: "previousSessionsResult",
+    });
+  }
+
+  private removePreviousSessionFromCurrentResult(historyId: string): void {
+    this.previousSessionsByHistoryId.delete(historyId);
+    const previousResult = this.previousSessionsResult;
+    if (!previousResult) {
+      return;
+    }
+    this.postPreviousSessionsResult(
+      previousResult.requestId,
+      previousResult.query,
+      previousResult.previousSessions.filter((session) => session.historyId !== historyId),
+    );
+  }
+
+  private async requestProjectWorktrees(
+    message: Extract<SidebarToExtensionMessage, { type: "requestProjectWorktrees" }>,
+  ): Promise<void> {
+    const requestId = message.requestId.trim();
+    if (!requestId) {
+      return;
+    }
+    if (message.remoteMachineId?.trim()) {
+      await this.requestRemoteProjectWorktrees(message, requestId);
+      return;
+    }
+    const sourceProject = this.resolveDomainProjectScope(message) ?? this.activeDomainProject();
+    if (!sourceProject || !this.client) {
+      this.trustedExistingWorktreeList = undefined;
+      this.postProjectWorktreesResult(requestId, {
+        error: "No active gxserver project is available.",
+        ok: false,
+      });
+      return;
+    }
+    const parentProject = this.resolveWorktreeFamilyParentProject(sourceProject) ?? sourceProject;
+    try {
+      const [worktreeResult, branchResult] = await Promise.all([
+        this.client.rpc<GxserverTypedOperationResult>("/api/runWorktreeAction", {
+          action: "list",
+          projectId: parentProject.projectId,
+        }),
+        this.client.rpc<GxserverTypedOperationResult>("/api/runGitAction", {
+          action: "listBranches",
+          projectId: parentProject.projectId,
+        }),
+      ]);
+      if (worktreeResult.exitCode !== 0 || branchResult.exitCode !== 0) {
+        throw new Error("gxserver could not read worktree metadata.");
+      }
+      const worktrees = createGpuiExistingWorktreeOptions(
+        worktreeResult.worktrees,
+        parentProject,
+        sourceProject,
+        this.domainProjects,
+      );
+      this.trustedExistingWorktreeList = {
+        parentProjectId: parentProject.projectId,
+        paths: new Set(worktrees.map((worktree) => worktree.path)),
+        sourceProjectId: sourceProject.projectId,
+      };
+      this.postProjectWorktreesResult(requestId, {
+        branches: normalizeGpuiWorktreeBaseBranches(branchResult.branches),
+        ok: true,
+        worktrees,
+      });
+    } catch {
+      this.trustedExistingWorktreeList = undefined;
+      this.postProjectWorktreesResult(requestId, {
+        error: "Could not load gxserver worktrees.",
+        ok: false,
+      });
+    }
+  }
+
+  private async requestRemoteProjectWorktrees(
+    message: Extract<SidebarToExtensionMessage, { type: "requestProjectWorktrees" }>,
+    requestId: string,
+  ): Promise<void> {
+    const sourceProject = this.resolveRemotePresentationProjectScope({
+      projectId: message.projectId,
+      remoteMachineId: message.remoteMachineId,
+    });
+    if (!sourceProject) {
+      this.trustedExistingWorktreeList = undefined;
+      this.postProjectWorktreesResult(requestId, {
+        error: "Reconnect the remote machine before loading worktrees.",
+        ok: false,
+      });
+      return;
+    }
+    try {
+      const result = await this.requestRemoteGxserver<GxserverProjectWorktreeListResult>(
+        sourceProject.machineId,
+        "/api/listProjectWorktrees",
+        {
+          projectId: sourceProject.projectId,
+        },
+        { timeoutMs: 30_000 },
+      );
+      const worktrees = normalizeGpuiExistingWorktreeOptions(result.worktrees);
+      this.trustedExistingWorktreeList = {
+        parentProjectId: result.parentProjectId,
+        paths: new Set(worktrees.map((worktree) => worktree.path)),
+        remoteMachineId: sourceProject.machineId,
+        sourceProjectId: result.sourceProjectId,
+        worktreeKeys: new Set(
+          worktrees
+            .map((worktree) => worktree.worktreeKey?.trim())
+            .filter((key): key is string => Boolean(key)),
+        ),
+      };
+      this.postProjectWorktreesResult(requestId, {
+        branches: normalizeGpuiWorktreeBaseBranches(result.branches),
+        ok: true,
+        worktrees,
+      });
+    } catch {
+      this.trustedExistingWorktreeList = undefined;
+      this.postProjectWorktreesResult(requestId, {
+        error: "Could not load remote gxserver worktrees.",
+        ok: false,
+      });
+    }
+  }
+
+  private async createProjectWorktree(
+    message: Extract<SidebarToExtensionMessage, { type: "createProjectWorktree" }>,
+  ): Promise<void> {
+    const mode =
+      message.mode === "openExisting" ||
+      normalizeGpuiProjectPath(message.existingWorktreePath) ||
+      message.existingWorktreeKey?.trim()
+        ? "openExisting"
+        : "create";
+    const toastId = createGpuiWorktreeToastId();
+    this.postWorktreeToast("info", mode === "openExisting" ? "Opening worktree" : "Creating worktree", {
+      persistent: true,
+      toastId,
+    });
+    try {
+      if (message.remoteMachineId?.trim()) {
+        await this.createRemoteProjectWorktree(message);
+        this.trustedExistingWorktreeList = undefined;
+        this.postWorktreeToast("success", "Remote worktree ready", { toastId });
+        return;
+      }
+      if (!this.client) {
+        throw new Error("gxserver is unavailable.");
+      }
+      const sourceProject = this.resolveDomainProjectScope(message) ?? this.activeDomainProject();
+      if (!sourceProject || !normalizeGpuiProjectPath(sourceProject.path)) {
+        throw new Error("Open an active code project before creating a worktree.");
+      }
+      if (sourceProject.isRecentProject === true) {
+        throw new Error("Restore the project before creating a worktree.");
+      }
+
+      if (mode === "openExisting") {
+        await this.openExistingProjectWorktree(message, sourceProject);
+      } else {
+        await this.createNewProjectWorktree(message, sourceProject);
+      }
+      this.trustedExistingWorktreeList = undefined;
+      await this.refreshDomainPresentationFromClient("patch").catch(() => undefined);
+      this.postWorktreeToast("success", "Worktree ready", { toastId });
+    } catch (error) {
+      this.postWorktreeToast(
+        "error",
+        mode === "openExisting" ? "Could not open worktree" : "Could not create worktree",
+        {
+          description: gpuiWorktreeUserVisibleErrorMessage(error),
+          toastId,
+        },
+      );
+    }
+  }
+
+  private async createNewProjectWorktree(
+    message: Extract<SidebarToExtensionMessage, { type: "createProjectWorktree" }>,
+    sourceProject: GxserverProjectDomainState,
+  ): Promise<void> {
+    if (!this.client) {
+      throw new Error("gxserver is unavailable.");
+    }
+    const prompt = message.prompt?.trim() ?? "";
+    const baseBranch = message.baseBranch?.trim() ?? "";
+    const agent = this.resolveSidebarAgent(message.agentId?.trim() ?? "");
+    if (!prompt) {
+      throw new Error("Worktree prompt is empty.");
+    }
+    if (!baseBranch) {
+      throw new Error("Choose a base branch.");
+    }
+    if (!agent?.command?.trim()) {
+      throw new Error("Choose an agent with a configured command.");
+    }
+
+    const parentProject = this.resolveWorktreeFamilyParentProject(sourceProject) ?? sourceProject;
+    const gxserverParentProject = await this.registerDomainProjectPath(parentProject);
+    let gxserverOperationProject = gxserverParentProject;
+    let gxserverSetupCommandProject = gxserverParentProject;
+    if (
+      normalizeGpuiProjectPath(sourceProject.path) !== normalizeGpuiProjectPath(parentProject.path)
+    ) {
+      gxserverOperationProject = await this.registerDomainProjectPath(sourceProject);
+      gxserverSetupCommandProject = gxserverOperationProject;
+    }
+
+    const target = await this.resolveUniqueWorktreeTarget(gxserverOperationProject, prompt);
+    const createResult = await this.client.rpc<GxserverTypedOperationResult>(
+      "/api/runWorktreeAction",
+      {
+        action: "create",
+        baseRef: baseBranch,
+        branch: target.branch,
+        projectId: gxserverOperationProject.projectId,
+        worktreePath: target.path,
+      },
+    );
+    if (createResult.exitCode !== 0) {
+      throw new Error("git worktree add failed.");
+    }
+
+    const gxserverWorktreeProject = await this.registerProjectPath({
+      name: `${gxserverParentProject.name || gpuiProjectNameFromPath(gxserverParentProject.path ?? "")}-${target.name}`,
+      path: target.path,
+    });
+    if (!normalizeGpuiWorktreeParentProjectId(gxserverWorktreeProject.worktree)) {
+      throw new Error("gxserver did not register the new checkout as a worktree project.");
+    }
+    await this.ensureWorktreeBeadsHooks(gxserverWorktreeProject);
+    await this.runWorktreeSetupCommandIfConfigured(
+      gxserverWorktreeProject,
+      gxserverSetupCommandProject,
+    );
+    await this.createAgentSessionForProject(gxserverWorktreeProject, agent, prompt);
+    this.focusProjectId(gxserverWorktreeProject.projectId);
+  }
+
+  private async createRemoteProjectWorktree(
+    message: Extract<SidebarToExtensionMessage, { type: "createProjectWorktree" }>,
+  ): Promise<void> {
+    const remoteScope = this.resolveRemotePresentationProjectScope({
+      projectId: message.projectId,
+      remoteMachineId: message.remoteMachineId,
+    });
+    if (!remoteScope) {
+      throw new Error("Reconnect the remote machine before creating a worktree.");
+    }
+    const mode =
+      message.mode === "openExisting" || message.existingWorktreeKey?.trim()
+        ? "openExisting"
+        : "create";
+    const prompt = message.prompt?.trim() ?? "";
+    const agentId = message.agentId?.trim() ?? "";
+    const agentTitle = createAgentSessionDefaultTitle(
+      this.resolveSidebarAgent(agentId)?.name ?? agentId,
+    );
+    /*
+    CDXC:RemoteWorktrees 2026-06-24-18:40:
+    GPUI remote Add Worktree submits only the selected remote project id plus
+    bounded create/open labels to gxserver. The remote daemon derives checkout
+    paths, branch names, and open-existing worktree paths; GPUI preserves the
+    shared modal's optional Open Existing prompt behavior by creating an agent
+    session after the daemon returns a registered project id.
+    */
+    if (mode === "openExisting") {
+      const worktreeKey = message.existingWorktreeKey?.trim() ?? "";
+      if (!worktreeKey || !this.isTrustedRemoteExistingWorktreeKey(worktreeKey, remoteScope)) {
+        throw new Error("Choose an existing remote worktree from the latest worktree list.");
+      }
+      const response = await this.requestRemoteGxserver<{
+        project?: GxserverPresentationProject;
+      }>(
+        remoteScope.machineId,
+        "/api/openProjectWorktree",
+        {
+          projectId: remoteScope.projectId,
+          worktreeKey,
+        },
+        { timeoutMs: 45_000 },
+      );
+      const project = await this.resolveRemoteWorktreeMutationProject(
+        remoteScope.machineId,
+        response.project,
+      );
+      if (prompt) {
+        if (!agentId) {
+          throw new Error("Choose an agent before starting a remote worktree prompt.");
+        }
+        await this.createRemoteAgentSessionForProject(
+          { machineId: remoteScope.machineId, projectId: project.projectId },
+          agentId,
+          prompt,
+          agentTitle,
+        );
+      }
+      return;
+    }
+
+    const baseRef = message.baseBranch?.trim() ?? "";
+    if (!prompt) {
+      throw new Error("Worktree prompt is empty.");
+    }
+    if (!baseRef) {
+      throw new Error("Choose a base branch.");
+    }
+    if (!agentId) {
+      throw new Error("Choose an agent before creating a remote worktree.");
+    }
+    const response = await this.requestRemoteGxserver<{
+      project?: GxserverPresentationProject;
+    }>(
+      remoteScope.machineId,
+      "/api/createProjectWorktree",
+      {
+        baseRef,
+        nameHint: gpuiWorktreeSlugFromPrompt(prompt),
+        projectId: remoteScope.projectId,
+      },
+      { timeoutMs: 90_000 },
+    );
+    const project = await this.resolveRemoteWorktreeMutationProject(
+      remoteScope.machineId,
+      response.project,
+    );
+    await this.createRemoteAgentSessionForProject(
+      { machineId: remoteScope.machineId, projectId: project.projectId },
+      agentId,
+      prompt,
+      agentTitle,
+    );
+  }
+
+  private async openExistingProjectWorktree(
+    message: Extract<SidebarToExtensionMessage, { type: "createProjectWorktree" }>,
+    sourceProject: GxserverProjectDomainState,
+  ): Promise<void> {
+    const existingWorktreePath = normalizeGpuiProjectPath(message.existingWorktreePath);
+    if (!existingWorktreePath) {
+      throw new Error("Choose an existing worktree.");
+    }
+    const parentProject = this.resolveWorktreeFamilyParentProject(sourceProject) ?? sourceProject;
+    if (!this.isTrustedExistingWorktreePath(existingWorktreePath, sourceProject, parentProject)) {
+      throw new Error("Choose an existing worktree from the latest worktree list.");
+    }
+    const gxserverWorktreeProject = await this.registerProjectPath({
+      name: gpuiProjectNameFromPath(existingWorktreePath),
+      path: existingWorktreePath,
+    });
+    if (!normalizeGpuiWorktreeParentProjectId(gxserverWorktreeProject.worktree)) {
+      throw new Error("The selected checkout is not a registered worktree.");
+    }
+    await this.ensureWorktreeBeadsHooks(gxserverWorktreeProject);
+    const prompt = message.prompt?.trim() ?? "";
+    const agent = this.resolveSidebarAgent(message.agentId?.trim() ?? "");
+    if (prompt && !agent?.command?.trim()) {
+      throw new Error("Choose an agent with a configured command.");
+    }
+    if (prompt && agent) {
+      await this.createAgentSessionForProject(gxserverWorktreeProject, agent, prompt);
+    }
+    this.focusProjectId(gxserverWorktreeProject.projectId);
+  }
+
+  private postProjectWorktreesResult(
+    requestId: string,
+    result: {
+      branches?: unknown;
+      error?: string;
+      ok: boolean;
+      worktrees?: unknown;
+    },
+  ): void {
+    this.messageSource.postMessage({
+      branches: result.branches,
+      error: result.error,
+      ok: result.ok,
+      requestId,
+      type: "projectWorktreesResult",
+      worktrees: result.worktrees,
+    });
+  }
+
+  private async updateProjectWorktreeCommand(
+    projectId: string,
+    command: string,
+  ): Promise<void> {
+    const project = this.domainProjectById(projectId);
+    if (!project || !this.client) {
+      return;
+    }
+    const normalizedCommand = command.trim();
+    await this.updateProjectDomainState(project.projectId, {
+      gitConfig: {
+        ...project.gitConfig,
+        worktreeCommand: normalizedCommand || null,
+      },
+    });
+  }
+
+  private async updateProjectBeadsDisplayKey(
+    projectId: string,
+    displayKey: string,
+  ): Promise<void> {
+    const project = this.domainProjectById(projectId);
+    if (!project || !this.client) {
+      return;
+    }
+    const normalizedDisplayKey = displayKey.trim().toUpperCase().replace(/[^A-Z0-9]/gu, "").slice(0, 3);
+    await this.updateProjectDomainState(project.projectId, {
+      gitConfig: {
+        ...project.gitConfig,
+        beadsDisplayKey: normalizedDisplayKey || null,
+      },
+      projectBoardConfig: {
+        ...project.projectBoardConfig,
+        beadsDisplayKey: normalizedDisplayKey || null,
+      },
+    });
+  }
+
+  private async updateProjectBeadsDirectory(
+    projectId: string,
+    directory: string,
+  ): Promise<void> {
+    const project = this.domainProjectById(projectId);
+    if (!project || !this.client) {
+      return;
+    }
+    const normalizedDirectory = directory.trim();
+    await this.updateProjectDomainState(project.projectId, {
+      projectBoardConfig: {
+        ...project.projectBoardConfig,
+        beadsDirectory: normalizedDirectory || null,
+      },
+    });
+  }
+
+  private refreshGitStateForActiveProjectIfNeeded(): void {
+    const project = this.activeDomainProject();
+    if (!project || project.projectId === this.lastGitRefreshProjectId) {
+      return;
+    }
+    this.lastGitRefreshProjectId = project.projectId;
+    void this.refreshGitState({ project, toastOnFailure: false });
+  }
+
+  private async refreshGitState({
+    force = false,
+    project = this.activeDomainProject(),
+    publishBusy = false,
+    toastOnFailure = false,
+  }: {
+    force?: boolean;
+    project?: GxserverProjectDomainState;
+    publishBusy?: boolean;
+    toastOnFailure?: boolean;
+  } = {}): Promise<SidebarGitState> {
+    if (!project) {
+      this.gitState = createDefaultSidebarGitState();
+      this.publishHudPatch();
+      return this.gitState;
+    }
+    if (force) {
+      this.lastGitRefreshProjectId = project.projectId;
+    }
+    const nextState = await this.readSidebarGitState(project, {
+      publishBusy,
+      toastOnFailure,
+    });
+    if (this.activeProjectId === project.projectId) {
+      this.gitState = nextState;
+      this.publishHudPatch();
+    }
+    return nextState;
+  }
+
+  private async refreshGitStateForMessage(
+    message: Extract<SidebarToExtensionMessage, { type: "refreshGitState" }>,
+  ): Promise<void> {
+    /*
+    CDXC:GPUISidebarGit 2026-06-24-21:26:
+    Reused Git controls can refresh from a scoped local or remote project row. Resolve that owner before reading Git state; unscoped callers keep the active-project behavior, but scoped remote rows must never refresh the active local project by accident.
+    */
+    const explicitScope = Boolean(message.groupId?.trim() || message.projectId?.trim());
+    const remoteScope = this.resolveGitPreferenceRemoteScope(message);
+    if (remoteScope) {
+      const activeRemoteGroupId = createGpuiRemotePresentationGroupId(
+        remoteScope.machineId,
+        remoteScope.projectId,
+      );
+      if (this.activeGroupId === activeRemoteGroupId) {
+        const preferences = this.gitPreferencesForPresentationProject(
+          this.findRemotePresentationProject(remoteScope) ?? remoteScope.project,
+        );
+        this.gitState = {
+          ...createDefaultSidebarGitState(
+            preferences.primaryAction,
+            preferences.confirmCommit,
+            preferences.generateCommitBody,
+          ),
+          isBusy: true,
+        };
+        this.publishHudPatch();
+      }
+      const nextState = await this.readRemoteSidebarGitState(remoteScope);
+      if (this.activeGroupId === activeRemoteGroupId) {
+        this.gitState = nextState;
+        this.publishHudPatch();
+      }
+      return;
+    }
+    if (explicitScope && this.isGitPreferenceRemoteScope(message)) {
+      this.postRemoteToast("warning", "Remote Git unavailable", {
+        description: "Reconnect the remote machine before refreshing Git state.",
+      });
+      return;
+    }
+    const project =
+      this.resolveGitPreferenceLocalProject(message) ??
+      (explicitScope ? undefined : this.activeDomainProject());
+    if (!project) {
+      this.postGitToast("warning", "Git unavailable", {
+        description: "No active gxserver project is available.",
+      });
+      return;
+    }
+    await this.refreshGitState({
+      force: true,
+      project,
+      publishBusy: true,
+      toastOnFailure: true,
+    });
+  }
+
+  private async readSidebarGitState(
+    project: GxserverProjectDomainState,
+    options: { publishBusy?: boolean; toastOnFailure?: boolean } = {},
+  ): Promise<SidebarGitState> {
+    const baseState = createDefaultSidebarGitState(
+      this.gitPreferencesForProject(project).primaryAction,
+      this.gitPreferencesForProject(project).confirmCommit,
+      this.gitPreferencesForProject(project).generateCommitBody,
+    );
+    if (
+      !this.client ||
+      project.isRecentProject === true ||
+      isGpuiPresentationQuickDomainProject(project) ||
+      !normalizeGpuiProjectPath(project.path)
+    ) {
+      return { ...baseState, hasCheckedGitHubRemote: true, isRepo: false };
+    }
+    if (options.publishBusy && this.activeProjectId === project.projectId) {
+      this.gitState = { ...baseState, isBusy: true };
+      this.publishHudPatch();
+    }
+    try {
+      const repoCheck = await this.runGitAction(project, { action: "isInsideWorkTree" });
+      if (repoCheck.exitCode !== 0 || repoCheck.stdout.trim() !== "true") {
+        return { ...baseState, hasCheckedGitHubRemote: true, isRepo: false };
+      }
+
+      const [
+        branch,
+        status,
+        diff,
+        untrackedFiles,
+        upstream,
+        remotes,
+        originRemote,
+        ghVersion,
+        pr,
+      ] = await Promise.all([
+        this.runGitAction(project, { action: "branch" }),
+        this.runGitAction(project, { action: "statusPorcelain" }),
+        this.runGitAction(project, { action: "diffNumstat" }),
+        this.runGitAction(project, { action: "listUntracked" }),
+        this.runGitAction(project, { action: "upstreamCounts" }),
+        this.runGitAction(project, { action: "listRemotes" }),
+        this.runGitAction(project, { action: "getOriginRemoteUrl" }),
+        this.runGitHubAction(project, { action: "version" }),
+        this.runGitHubAction(project, { action: "prView" }),
+      ]);
+      const files = mergeGpuiGitChangedFiles([
+        ...parseGpuiGitNumstatFiles(diff.stdout),
+        ...parseGpuiGitStatusPorcelainFiles(status.stdout),
+        ...parseGitZeroDelimitedPaths(untrackedFiles.stdout).flatMap((path) => {
+          const normalizedPath = normalizeGpuiRelativeGitFilePath(path);
+          return normalizedPath
+            ? [
+                {
+                  additions: 0,
+                  deletions: 0,
+                  path: normalizedPath,
+                },
+              ]
+            : [];
+        }),
+      ]);
+      const totals = summarizeGpuiGitChangedFiles(files);
+      const upstreamParts = upstream.exitCode === 0 ? upstream.stdout.trim().split(/\s+/) : [];
+      return {
+        ...baseState,
+        additions: totals.additions,
+        aheadCount: Number(upstreamParts[0] || 0) || 0,
+        behindCount: Number(upstreamParts[1] || 0) || 0,
+        branch: branch.stdout.trim() || null,
+        deletions: totals.deletions,
+        hasCheckedGitHubRemote: true,
+        hasGitHubCli: ghVersion.exitCode === 0,
+        hasGitHubRemote:
+          originRemote.exitCode === 0 && normalizeGpuiGitHubRemoteUrl(originRemote.stdout) !== undefined,
+        hasOriginRemote: remotes.stdout.split(/\s+/).includes("origin"),
+        hasUpstream: upstream.exitCode === 0,
+        hasWorkingTreeChanges: status.stdout.trim().length > 0,
+        isBusy: false,
+        isRepo: true,
+        files,
+        isWorktree: normalizeGpuiWorktreeParentProjectId(project.worktree) !== undefined,
+        pr: parseGpuiGitHubPullRequest(pr.stdout, pr.exitCode === 0),
+        worktreeName: stringFromRecord(project.worktree, "name"),
+      };
+    } catch {
+      if (options.toastOnFailure) {
+        this.postGitToast("error", "Could not refresh Git state", {
+          description: "gxserver could not inspect the selected project.",
+        });
+      }
+      return { ...baseState, isBusy: false };
+    }
+  }
+
+  private async readRemoteSidebarGitState(
+    remoteScope: GpuiRemoteProjectScope,
+  ): Promise<SidebarGitState> {
+    const remotePreferences = this.gitPreferencesForPresentationProject(
+      this.findRemotePresentationProject(remoteScope) ?? remoteScope.project,
+    );
+    const baseState = createDefaultSidebarGitState(
+      remotePreferences.primaryAction,
+      remotePreferences.confirmCommit,
+      remotePreferences.generateCommitBody,
+    );
+    try {
+      const repoCheck = await this.runRemoteGitAction(remoteScope, { action: "isInsideWorkTree" });
+      if (repoCheck.exitCode !== 0 || repoCheck.stdout.trim() !== "true") {
+        return { ...baseState, hasCheckedGitHubRemote: true, isRepo: false };
+      }
+
+      const [
+        branch,
+        status,
+        diff,
+        untrackedFiles,
+        upstream,
+        remotes,
+        originRemote,
+        ghVersion,
+        pr,
+      ] = await Promise.all([
+        this.runRemoteGitAction(remoteScope, { action: "branch" }),
+        this.runRemoteGitAction(remoteScope, { action: "statusPorcelain" }),
+        this.runRemoteGitAction(remoteScope, { action: "diffNumstat" }),
+        this.runRemoteGitAction(remoteScope, { action: "listUntracked" }),
+        this.runRemoteGitAction(remoteScope, { action: "upstreamCounts" }),
+        this.runRemoteGitAction(remoteScope, { action: "listRemotes" }),
+        this.runRemoteGitAction(remoteScope, { action: "getOriginRemoteUrl" }),
+        this.runRemoteGitHubAction(remoteScope, { action: "version" }),
+        this.runRemoteGitHubAction(remoteScope, { action: "prView" }),
+      ]);
+      const files = mergeGpuiGitChangedFiles([
+        ...parseGpuiGitNumstatFiles(diff.stdout),
+        ...parseGpuiGitStatusPorcelainFiles(status.stdout),
+        ...parseGitZeroDelimitedPaths(untrackedFiles.stdout).flatMap((path) => {
+          const normalizedPath = normalizeGpuiRelativeGitFilePath(path);
+          return normalizedPath
+            ? [
+                {
+                  additions: 0,
+                  deletions: 0,
+                  path: normalizedPath,
+                },
+              ]
+            : [];
+        }),
+      ]);
+      const totals = summarizeGpuiGitChangedFiles(files);
+      const upstreamParts = upstream.exitCode === 0 ? upstream.stdout.trim().split(/\s+/) : [];
+      const presentationProject =
+        this.findRemotePresentationProject(remoteScope) ?? remoteScope.project;
+      return {
+        ...baseState,
+        additions: totals.additions,
+        aheadCount: Number(upstreamParts[0] || 0) || 0,
+        behindCount: Number(upstreamParts[1] || 0) || 0,
+        branch: branch.stdout.trim() || null,
+        deletions: totals.deletions,
+        files,
+        hasCheckedGitHubRemote: true,
+        hasGitHubCli: ghVersion.exitCode === 0,
+        hasGitHubRemote:
+          originRemote.exitCode === 0 && normalizeGpuiGitHubRemoteUrl(originRemote.stdout) !== undefined,
+        hasOriginRemote: remotes.stdout.split(/\s+/).includes("origin"),
+        hasUpstream: upstream.exitCode === 0,
+        hasWorkingTreeChanges: status.stdout.trim().length > 0,
+        isBusy: false,
+        isRepo: true,
+        isWorktree: normalizeGpuiWorktreeParentProjectId(presentationProject.worktree) !== undefined,
+        pr: parseGpuiGitHubPullRequest(pr.stdout, pr.exitCode === 0),
+        worktreeName: stringFromRecord(presentationProject.worktree, "name") ?? presentationProject.title,
+      };
+    } catch {
+      this.postRemoteToast("warning", "Remote Git unavailable", {
+        description: "The remote gxserver could not inspect the selected project.",
+      });
+      return { ...baseState, hasCheckedGitHubRemote: true, isBusy: false, isRepo: false };
+    }
+  }
+
+  private async runRemoteSidebarGitAction(
+    message: Extract<SidebarToExtensionMessage, { type: "runSidebarGitAction" }>,
+    remoteScope: GpuiRemoteProjectScope,
+  ): Promise<void> {
+    if (message.action === "multiRelease") {
+      await this.runRemoteSidebarGitPromptAction(
+        remoteScope,
+        "Multicommit & Release",
+        GPUI_GIT_MULTICOMMIT_RELEASE_PROMPT,
+      );
+      return;
+    }
+    if (message.action === "release") {
+      await this.runRemoteSidebarGitPromptAction(
+        remoteScope,
+        "Release",
+        GPUI_GIT_RELEASE_ONLY_PROMPT,
+      );
+      return;
+    }
+
+    const gitState = await this.readRemoteSidebarGitState(remoteScope);
+    if (!gitState.isRepo) {
+      this.postRemoteToast("warning", "Remote Git unavailable", {
+        description: "Open a Git repository on the remote machine to use Git actions.",
+      });
+      return;
+    }
+
+    if (message.action === "syncMain") {
+      if (!normalizeGpuiWorktreeParentProjectId(remoteScope.project.worktree)) {
+        this.postRemoteToast("warning", "Remote worktree unavailable", {
+          description: "Open a remote worktree project to sync with main.",
+        });
+        return;
+      }
+      await this.runRemoteSidebarGitPromptAction(
+        remoteScope,
+        "Sync with Main",
+        buildGpuiGitSyncWithMainPrompt(),
+      );
+      return;
+    }
+
+    if (message.action === "syncRemote") {
+      if (!hasSidebarGitRemoteCommitDelta(gitState)) {
+        this.postRemoteToast("info", "Remote already synced");
+        return;
+      }
+      await this.runRemoteGitMutation(
+        remoteScope,
+        "Syncing remote",
+        "Remote sync complete",
+        async () => {
+          await this.syncRemoteCurrentBranchWithRemote(remoteScope, gitState);
+        },
+      );
+      return;
+    }
+
+    if (
+      normalizeGpuiWorktreeMetadata(remoteScope.project.worktree) &&
+      (message.action === "commit" || message.action === "push" || message.action === "pr")
+    ) {
+      this.promptRemoteSidebarGitActionReview(remoteScope, gitState, message.action);
+      return;
+    }
+
+    if (message.action === "pr") {
+      if (gitState.pr?.state === "open") {
+        this.postRemoteProjectNativeAction(
+          "openRemoteExistingPullRequestInBrowser",
+          remoteScope,
+          message,
+        );
+        return;
+      }
+      if (!gitState.hasGitHubCli) {
+        this.postRemoteToast("warning", "Remote GitHub CLI unavailable", {
+          description: "Install GitHub CLI on the remote machine before creating a pull request.",
+        });
+        return;
+      }
+      if (gitState.hasWorkingTreeChanges) {
+        this.promptRemoteSidebarGitActionReview(remoteScope, gitState, "pr");
+        return;
+      }
+      await this.runRemoteSidebarGitPullRequestAgentWorkflow({
+        gitState,
+        hasCommit: false,
+        hasExplicitFileSelection: false,
+        message: "",
+        remoteScope,
+      });
+      return;
+    }
+
+    if (message.action === "commit") {
+      if (!gitState.hasWorkingTreeChanges) {
+        this.postRemoteToast("info", "No remote changes to commit");
+        return;
+      }
+      this.promptRemoteSidebarGitActionReview(remoteScope, gitState, "commit");
+      return;
+    }
+
+    if (message.action === "push") {
+      if (gitState.hasWorkingTreeChanges) {
+        this.promptRemoteSidebarGitActionReview(remoteScope, gitState, "push");
+        return;
+      }
+      await this.runRemoteGitMutation(remoteScope, "Pushing", "Remote push complete", async () => {
+        await this.pushRemoteCurrentBranch(remoteScope, gitState);
+      });
+    }
+  }
+
+  private promptRemoteSidebarGitActionReview(
+    remoteScope: GpuiRemoteProjectScope,
+    gitState: SidebarGitState,
+    action: Extract<SidebarGitAction, "commit" | "pr" | "push">,
+  ): void {
+    const requestId = `gpui-remote-git-action-${Date.now().toString(36)}`;
+    const hasCommit = gitState.hasWorkingTreeChanges;
+    this.pendingGitCommitRequests.set(requestId, {
+      action,
+      files: [...gitState.files],
+      hasCommit,
+      projectId: createGpuiRemotePresentationProjectId(remoteScope.machineId, remoteScope.projectId),
+      remoteReference: {
+        machineId: remoteScope.machineId,
+        projectId: remoteScope.projectId,
+      },
+      remoteTitle: remoteScope.project.title || remoteScope.machineName || "Remote project",
+      subject: "",
+    });
+    const modalDraft: SidebarPromptGitCommitMessage = {
+      action,
+      agentId: this.resolveDefaultPromptAgentId(),
+      branch: gitState.branch,
+      changedFiles: gitState.files,
+      confirmLabel: resolveGpuiSidebarGitConfirmLabel(action, hasCommit),
+      deleteWorktreeAfterDefault: false,
+      description: hasCommit
+        ? "Review and confirm your remote commit. Leave the message blank to auto-generate one."
+        : resolveGpuiSidebarGitPromptDescription(action),
+      isDefaultRef: gitState.branch === "main" || gitState.branch === "master",
+      isWorktree: normalizeGpuiWorktreeMetadata(remoteScope.project.worktree) !== undefined,
+      requestId,
+      showCommitMessage: hasCommit,
+      suggestedBody: undefined,
+      suggestedSubject: "",
+      type: "promptGitCommit",
+      worktreeName: stringFromRecord(remoteScope.project.worktree, "name") ?? remoteScope.project.title,
+    };
+    this.messageSource.postMessage(modalDraft);
+  }
+
+  private async runSidebarGitAction(
+    message: Extract<SidebarToExtensionMessage, { type: "runSidebarGitAction" }>,
+  ): Promise<void> {
+    const remoteReference = message.groupId
+      ? parseGpuiRemotePresentationGroupId(message.groupId)
+      : message.projectId
+        ? parseGpuiRemotePresentationProjectId(message.projectId)
+        : undefined;
+    if (remoteReference) {
+      const remoteScope = this.resolveRemotePresentationProjectScope({
+        groupId: message.groupId,
+        projectId: message.projectId,
+      });
+      if (!remoteScope) {
+        this.postRemoteToast("warning", "Remote Git unavailable", {
+          description: "Reconnect the remote machine before using Git actions.",
+        });
+        return;
+      }
+      await this.runRemoteSidebarGitAction(message, remoteScope);
+      return;
+    }
+    const project = this.resolveGitProjectForMessage(message);
+    if (!project) {
+      this.postGitToast("warning", "Git unavailable", {
+        description: "No active gxserver project is available.",
+      });
+      return;
+    }
+
+    if (message.action === "multiRelease") {
+      await this.runSidebarGitPromptAction(
+        project,
+        "Multicommit & Release",
+        GPUI_GIT_MULTICOMMIT_RELEASE_PROMPT,
+      );
+      return;
+    }
+    if (message.action === "release") {
+      await this.runSidebarGitPromptAction(project, "Release", GPUI_GIT_RELEASE_ONLY_PROMPT);
+      return;
+    }
+
+    const gitState = await this.refreshGitState({
+      force: true,
+      project,
+      publishBusy: true,
+      toastOnFailure: true,
+    });
+    if (!gitState.isRepo) {
+      this.postGitToast("warning", "Git unavailable", {
+        description: "Open a Git repository to use Git actions.",
+      });
+      return;
+    }
+
+    if (message.action === "syncMain") {
+      if (!normalizeGpuiWorktreeParentProjectId(project.worktree)) {
+        this.postGitToast("warning", "Worktree unavailable", {
+          description: "Open a worktree project to sync with main.",
+        });
+        return;
+      }
+      await this.runSidebarGitPromptAction(
+        project,
+        "Sync with Main",
+        buildGpuiGitSyncWithMainPrompt(),
+      );
+      return;
+    }
+
+    if (message.action === "syncRemote") {
+      if (!hasSidebarGitRemoteCommitDelta(gitState)) {
+        this.postGitToast("info", "Remote already synced");
+        return;
+      }
+      await this.runGitMutation(project, "Syncing remote", "Remote sync complete", async () => {
+        await this.syncCurrentBranchWithRemote(project, gitState);
+      });
+      return;
+    }
+
+    if (
+      normalizeGpuiWorktreeMetadata(project.worktree) &&
+      (message.action === "commit" || message.action === "push" || message.action === "pr")
+    ) {
+      this.promptSidebarGitActionReview(project, gitState, message.action);
+      return;
+    }
+
+    if (message.action === "pr") {
+      if (gitState.pr?.state === "open") {
+        this.postNativeProjectPathAction(
+          "openExistingPullRequestInBrowser",
+          project.projectId,
+          message,
+        );
+        return;
+      }
+      if (!gitState.hasGitHubCli) {
+        this.postGitToast("warning", "GitHub CLI unavailable", {
+          description: "Install GitHub CLI before creating a pull request.",
+        });
+        return;
+      }
+      if (gitState.hasWorkingTreeChanges) {
+        this.promptSidebarGitActionReview(project, gitState, "pr");
+        return;
+      }
+      await this.runSidebarGitPullRequestAgentWorkflow({
+        gitState,
+        hasCommit: false,
+        hasExplicitFileSelection: false,
+        message: "",
+        project,
+      });
+      return;
+    }
+
+    if (message.action === "commit") {
+      if (!gitState.hasWorkingTreeChanges) {
+        this.postGitToast("info", "No changes to commit");
+        return;
+      }
+      this.promptSidebarGitActionReview(project, gitState, "commit");
+      return;
+    }
+
+    if (message.action === "push") {
+      if (gitState.hasWorkingTreeChanges) {
+        this.promptSidebarGitActionReview(project, gitState, "push");
+        return;
+      }
+      await this.runGitMutation(project, "Pushing", "Push complete", async () => {
+        await this.pushCurrentBranch(project, gitState);
+      });
+    }
+  }
+
+  private async confirmSidebarGitCommit(
+    message: Extract<SidebarToExtensionMessage, { type: "confirmSidebarGitCommit" }>,
+  ): Promise<void> {
+    const pending = this.pendingGitCommitRequests.get(message.requestId);
+    this.pendingGitCommitRequests.delete(message.requestId);
+    if (!pending) {
+      this.publishHudPatch();
+      return;
+    }
+    if (pending.remoteReference) {
+      await this.confirmRemoteSidebarGitCommit(pending, message);
+      return;
+    }
+    const project = this.domainProjectById(pending.projectId);
+    if (!project) {
+      this.postGitToast("error", "Git action unavailable", {
+        description: "The selected gxserver project is no longer available.",
+      });
+      this.publishHudPatch();
+      return;
+    }
+    const gitState = await this.refreshGitState({
+      force: true,
+      project,
+      publishBusy: true,
+      toastOnFailure: true,
+    });
+    if (!gitState.isRepo) {
+      this.postGitToast("warning", "Git unavailable", {
+        description: "Open a Git repository to use Git actions.",
+      });
+      return;
+    }
+    if (pending.action === "pr") {
+      let trustedFileSelection: GpuiTrustedGitReviewFileSelection | undefined;
+      if (pending.hasCommit) {
+        try {
+          trustedFileSelection = this.resolveTrustedGitReviewFileSelection(pending, message.filePaths);
+        } catch {
+          this.postGitToast("warning", "Invalid file selection", {
+            description: "Choose files from the current Git review before creating a pull request.",
+          });
+          this.gitState = { ...this.gitStateForHud(), isBusy: false };
+          this.publishHudPatch();
+          return;
+        }
+      }
+      if (message.deleteWorktreeAfter !== true) {
+        await this.runSidebarGitPullRequestAgentWorkflow({
+          agentId: message.agentId,
+          filePaths: trustedFileSelection?.filePaths,
+          gitState,
+          hasCommit: pending.hasCommit,
+          hasExplicitFileSelection: trustedFileSelection?.explicit ?? false,
+          message: message.message,
+          project,
+        });
+        return;
+      }
+      let confirmedPullRequest = false;
+      const completed = await this.runGitMutation(
+        project,
+        resolveGpuiSidebarGitStartedTitle("pr", pending.hasCommit),
+        resolveGpuiSidebarGitFinishedTitle("pr"),
+        async () => {
+          if (pending.hasCommit) {
+            await this.commitWithMessage(project, message.message, trustedFileSelection?.filePaths, {
+              agentId: message.agentId,
+              commitOnNewRef: message.commitOnNewRef === true,
+            });
+          }
+          const nextGitState = await this.refreshGitState({ force: true, project });
+          await this.pushCurrentBranch(project, nextGitState);
+          const result = await this.createPullRequest(project);
+          if (!isGpuiConfirmedOpenPullRequest(result)) {
+            throw new GpuiUserVisibleGitError("GitHub CLI could not create or find an open pull request.");
+          }
+          confirmedPullRequest = true;
+          this.postNativeProjectPathAction("openExistingPullRequestInBrowser", project.projectId, message);
+        },
+      );
+      if (completed && confirmedPullRequest) {
+        await this.deleteWorktreeAfterCompletedGitAction(project);
+      }
+      if (completed && !confirmedPullRequest) {
+        this.postGitToast("warning", "Worktree cleanup skipped", {
+          description: "Pull request creation was not confirmed.",
+        });
+      }
+      if (!completed) {
+        this.postGitToast("warning", "Worktree cleanup skipped", {
+          description: "Pull request creation did not complete.",
+        });
+      }
+      return;
+    }
+    let trustedFileSelection: GpuiTrustedGitReviewFileSelection | undefined;
+    if (pending.hasCommit) {
+      try {
+        trustedFileSelection = this.resolveTrustedGitReviewFileSelection(pending, message.filePaths);
+      } catch {
+        this.postGitToast("warning", "Invalid file selection", {
+          description: "Choose files from the current Git review before committing.",
+        });
+        this.gitState = { ...this.gitStateForHud(), isBusy: false };
+        this.publishHudPatch();
+        return;
+      }
+    }
+
+    const completed = await this.runGitMutation(
+      project,
+      resolveGpuiSidebarGitStartedTitle(pending.action, pending.hasCommit),
+      resolveGpuiSidebarGitFinishedTitle(pending.action),
+      async () => {
+        if (pending.hasCommit) {
+          await this.commitWithMessage(project, message.message, trustedFileSelection?.filePaths, {
+            agentId: message.agentId,
+            commitOnNewRef: message.commitOnNewRef === true,
+          });
+        }
+        if (pending.action === "push") {
+          const nextState = await this.refreshGitState({ force: true, project });
+          await this.pushCurrentBranch(project, nextState);
+        }
+      },
+    );
+    if (completed && message.deleteWorktreeAfter === true) {
+      await this.deleteWorktreeAfterCompletedGitAction(project);
+    }
+  }
+
+  private async confirmRemoteSidebarGitCommit(
+    pending: GpuiPendingGitCommitRequest & { remoteReference: GpuiRemoteProjectReference },
+    message: Extract<SidebarToExtensionMessage, { type: "confirmSidebarGitCommit" }>,
+  ): Promise<void> {
+    const remoteScope = this.resolveRemotePresentationProjectScope(pending.remoteReference);
+    if (!remoteScope) {
+      this.postRemoteToast("warning", "Remote Git unavailable", {
+        description: "Reconnect the remote machine before confirming this Git action.",
+      });
+      return;
+    }
+    const gitState = await this.readRemoteSidebarGitState(remoteScope);
+    if (!gitState.isRepo) {
+      this.postRemoteToast("warning", "Remote Git unavailable", {
+        description: "Open a Git repository on the remote machine to use Git actions.",
+      });
+      return;
+    }
+    if (pending.action === "pr") {
+      let trustedFileSelection: GpuiTrustedGitReviewFileSelection | undefined;
+      if (pending.hasCommit) {
+        try {
+          trustedFileSelection = this.resolveTrustedGitReviewFileSelection(pending, message.filePaths);
+        } catch {
+          this.postRemoteToast("warning", "Invalid file selection", {
+            description: "Choose files from the current remote Git review before creating a pull request.",
+          });
+          return;
+        }
+      }
+      if (message.deleteWorktreeAfter !== true) {
+        await this.runRemoteSidebarGitPullRequestAgentWorkflow({
+          agentId: message.agentId,
+          filePaths: trustedFileSelection?.filePaths,
+          gitState,
+          hasCommit: pending.hasCommit,
+          hasExplicitFileSelection: trustedFileSelection?.explicit ?? false,
+          message: message.message,
+          remoteScope,
+        });
+        return;
+      }
+      let confirmedPullRequest = false;
+      const completed = await this.runRemoteGitMutation(
+        remoteScope,
+        resolveGpuiSidebarGitStartedTitle("pr", pending.hasCommit),
+        resolveGpuiSidebarGitFinishedTitle("pr"),
+        async () => {
+          if (pending.hasCommit) {
+            await this.commitRemoteWithMessage(
+              remoteScope,
+              message.message,
+              trustedFileSelection?.filePaths,
+              {
+                agentId: message.agentId,
+                commitOnNewRef: message.commitOnNewRef === true,
+              },
+            );
+          }
+          const nextGitState = await this.readRemoteSidebarGitState(remoteScope);
+          await this.pushRemoteCurrentBranch(remoteScope, nextGitState);
+          const result = await this.createRemotePullRequest(remoteScope);
+          if (!isGpuiConfirmedOpenRemotePullRequest(result)) {
+            throw new GpuiUserVisibleGitError("GitHub CLI could not create or find an open remote pull request.");
+          }
+          confirmedPullRequest = true;
+          this.postRemoteProjectNativeAction(
+            "openRemoteExistingPullRequestInBrowser",
+            remoteScope,
+            message,
+          );
+        },
+      );
+      if (completed && confirmedPullRequest) {
+        await this.deleteRemoteWorktreeAfterCompletedGitAction(remoteScope);
+      }
+      if (completed && !confirmedPullRequest) {
+        this.postRemoteToast("warning", "Remote worktree cleanup skipped", {
+          description: "Pull request creation was not confirmed.",
+        });
+      }
+      if (!completed) {
+        this.postRemoteToast("warning", "Remote worktree cleanup skipped", {
+          description: "Pull request creation did not complete.",
+        });
+      }
+      return;
+    }
+
+    let trustedFileSelection: GpuiTrustedGitReviewFileSelection | undefined;
+    if (pending.hasCommit) {
+      try {
+        trustedFileSelection = this.resolveTrustedGitReviewFileSelection(pending, message.filePaths);
+      } catch {
+        this.postRemoteToast("warning", "Invalid file selection", {
+          description: "Choose files from the current remote Git review before committing.",
+        });
+        return;
+      }
+    }
+
+    const completed = await this.runRemoteGitMutation(
+      remoteScope,
+      resolveGpuiSidebarGitStartedTitle(pending.action, pending.hasCommit),
+      resolveGpuiSidebarGitFinishedTitle(pending.action),
+      async () => {
+        if (pending.hasCommit) {
+          await this.commitRemoteWithMessage(
+            remoteScope,
+            message.message,
+            trustedFileSelection?.filePaths,
+            {
+              agentId: message.agentId,
+              commitOnNewRef: message.commitOnNewRef === true,
+            },
+          );
+        }
+        if (pending.action === "push") {
+          const nextState = await this.readRemoteSidebarGitState(remoteScope);
+          await this.pushRemoteCurrentBranch(remoteScope, nextState);
+        }
+      },
+    );
+    if (completed && message.deleteWorktreeAfter === true) {
+      await this.deleteRemoteWorktreeAfterCompletedGitAction(remoteScope);
+    }
+  }
+
+  private async confirmSidebarGitDirectMerge(
+    message: Extract<SidebarToExtensionMessage, { type: "confirmSidebarGitDirectMerge" }>,
+  ): Promise<void> {
+    const pending = this.pendingGitCommitRequests.get(message.requestId);
+    this.pendingGitCommitRequests.delete(message.requestId);
+    if (!pending) {
+      this.publishHudPatch();
+      return;
+    }
+    if (pending.remoteReference) {
+      await this.confirmRemoteSidebarGitDirectMerge(pending, message);
+      return;
+    }
+    const project = this.domainProjectById(pending.projectId);
+    if (!project) {
+      this.postGitToast("error", "Direct merge unavailable", {
+        description: "The selected gxserver project is no longer available.",
+      });
+      this.publishHudPatch();
+      return;
+    }
+    const worktree = normalizeGpuiWorktreeMetadata(project.worktree);
+    if (!worktree) {
+      this.postGitToast("warning", "Worktree unavailable", {
+        description: "Direct merge is only available from a gxserver worktree project.",
+      });
+      this.publishHudPatch();
+      return;
+    }
+    const conflictAgent = this.resolveDefaultPromptAgent(message.agentId);
+    if (!conflictAgent?.command?.trim()) {
+      this.postGitToast("error", "Agent unavailable", {
+        description: "Choose a configured prompt agent before merging.",
+      });
+      this.publishHudPatch();
+      return;
+    }
+
+    const gitState = await this.refreshGitState({
+      force: true,
+      project,
+      publishBusy: true,
+      toastOnFailure: true,
+    });
+    if (!gitState.isRepo) {
+      this.postGitToast("warning", "Git unavailable", {
+        description: "Open a Git repository before merging this worktree.",
+      });
+      return;
+    }
+
+    let trustedFileSelection: GpuiTrustedGitReviewFileSelection | undefined;
+    if (pending.hasCommit) {
+      try {
+        trustedFileSelection = this.resolveTrustedGitReviewFileSelection(pending, message.filePaths);
+      } catch {
+        this.postGitToast("warning", "Invalid file selection", {
+          description: "Choose files from the current Git review before merging.",
+        });
+        this.gitState = { ...this.gitStateForHud(), isBusy: false };
+        this.publishHudPatch();
+        return;
+      }
+    }
+
+    const toastId = createGpuiGitToastId();
+    this.postGitToast("info", "Merging worktree into main", {
+      persistent: true,
+      toastId,
+    });
+    this.gitState = { ...this.gitStateForHud(), isBusy: true };
+    this.publishHudPatch();
+    try {
+      if (pending.hasCommit) {
+        await this.commitWithMessage(project, message.message, trustedFileSelection?.filePaths, {
+          agentId: message.agentId,
+        });
+      }
+      const nextGitState = await this.readSidebarGitState(project);
+      const result = await this.mergeWorktreeIntoMain({
+        branch: nextGitState.branch ?? worktree.branch,
+        conflictAgent,
+        deleteWorktreeAfter: message.deleteWorktreeAfter === true,
+        worktreeProject: project,
+      });
+      this.gitState = { ...this.gitStateForHud(), isBusy: false };
+      this.publishHudPatch();
+      if (result === "conflicts") {
+        this.postGitToast("warning", "Merge conflicts need resolution", { toastId });
+        return;
+      }
+      await this.refreshDomainPresentationFromClient("patch").catch(() => undefined);
+      this.postGitToast("success", "Worktree merged to main", { toastId });
+    } catch (error) {
+      this.gitState = { ...this.gitStateForHud(), isBusy: false };
+      this.publishHudPatch();
+      this.postGitToast("error", "Direct merge failed", {
+        description: gpuiUserVisibleGitErrorMessage(
+          error,
+          "gxserver could not merge the selected worktree.",
+        ),
+        toastId,
+      });
+    }
+  }
+
+  private async confirmRemoteSidebarGitDirectMerge(
+    pending: GpuiPendingGitCommitRequest & { remoteReference: GpuiRemoteProjectReference },
+    message: Extract<SidebarToExtensionMessage, { type: "confirmSidebarGitDirectMerge" }>,
+  ): Promise<void> {
+    const remoteScope = this.resolveRemotePresentationProjectScope(pending.remoteReference);
+    if (!remoteScope) {
+      this.postRemoteToast("warning", "Remote merge unavailable", {
+        description: "Reconnect the remote machine before merging this worktree.",
+      });
+      return;
+    }
+    if (!normalizeGpuiWorktreeMetadata(remoteScope.project.worktree)) {
+      this.postRemoteToast("warning", "Remote worktree unavailable", {
+        description: "Direct merge is only available from a remote worktree project.",
+      });
+      return;
+    }
+    let trustedFileSelection: GpuiTrustedGitReviewFileSelection | undefined;
+    if (pending.hasCommit) {
+      try {
+        trustedFileSelection = this.resolveTrustedGitReviewFileSelection(pending, message.filePaths);
+      } catch {
+        this.postRemoteToast("warning", "Invalid file selection", {
+          description: "Choose files from the current remote Git review before merging.",
+        });
+        return;
+      }
+    }
+    const toastId = createGpuiGitToastId();
+    this.postGitToast("info", "Merging remote worktree", {
+      persistent: true,
+      toastId,
+    });
+    /*
+    CDXC:RemoteGitBranching 2026-06-24-18:55:
+    Remote direct merge and commit-on-new-branch must go through id-scoped gxserver operations so the daemon derives main, parent, and branch targets. GPUI may refresh presentation and create a conflict-resolution agent session, but it must not attach terminals, focus remote panes, open native apps, or expose branch/path/command details in status text.
+    */
+    try {
+      if (pending.hasCommit) {
+        await this.commitRemoteWithMessage(
+          remoteScope,
+          message.message,
+          trustedFileSelection?.filePaths,
+          {
+            agentId: message.agentId,
+          },
+        );
+      }
+      const result = await this.mergeRemoteWorktreeIntoMain(remoteScope);
+      await this.refreshRemotePresentationFromGxserver(remoteScope.machineId).catch(() => undefined);
+      if (result.status === "conflicts") {
+        this.postGitToast("warning", "Remote merge conflicts need resolution", { toastId });
+        const conflictAgentId = this.resolveDefaultPromptAgentId(message.agentId);
+        if (conflictAgentId && result.parentProjectId) {
+          await this.createRemoteAgentSessionForProject(
+            { machineId: remoteScope.machineId, projectId: result.parentProjectId },
+            conflictAgentId,
+            GPUI_REMOTE_MERGE_CONFLICT_PROMPT,
+            formatGpuiGitAgentWorkflowTitle("Merge Conflicts"),
+          ).catch(() => undefined);
+        }
+        return;
+      }
+      this.postGitToast("success", "Remote worktree merged", { toastId });
+      if (message.deleteWorktreeAfter === true) {
+        await this.deleteRemoteWorktreeAfterCompletedGitAction(remoteScope);
+      }
+    } catch (error) {
+      this.postGitToast("error", "Remote direct merge failed", {
+        description: gpuiUserVisibleGitErrorMessage(
+          error,
+          "Remote gxserver could not merge the selected worktree.",
+        ),
+        toastId,
+      });
+    }
+  }
+
+  private async mergeRemoteWorktreeIntoMain(
+    remoteScope: GpuiRemoteProjectScope,
+  ): Promise<GxserverMergeWorktreeIntoMainResult> {
+    return this.requestRemoteGxserver<GxserverMergeWorktreeIntoMainResult>(
+      remoteScope.machineId,
+      "/api/mergeWorktreeIntoMain",
+      { projectId: remoteScope.projectId },
+      { timeoutMs: 60_000 },
+    );
+  }
+
+  private async mergeWorktreeIntoMain(input: {
+    branch?: string | null;
+    conflictAgent: SidebarAgentButton;
+    deleteWorktreeAfter: boolean;
+    worktreeProject: GxserverProjectDomainState;
+  }): Promise<"conflicts" | "merged"> {
+    const worktree = normalizeGpuiWorktreeMetadata(input.worktreeProject.worktree);
+    if (!worktree) {
+      throw new Error("Direct merge requires a worktree project.");
+    }
+    const branch = input.branch?.trim() || worktree.branch;
+    if (!branch) {
+      throw new Error("Create and checkout a branch before merging.");
+    }
+    const parentProject = this.domainProjectById(worktree.parentProjectId);
+    if (
+      !parentProject ||
+      parentProject.projectId === input.worktreeProject.projectId ||
+      parentProject.isRecentProject === true ||
+      !normalizeGpuiProjectPath(parentProject.path)
+    ) {
+      throw new Error("The gxserver worktree parent project is unavailable.");
+    }
+
+    const mainCheck = await this.runGitAction(parentProject, {
+      action: "verifyRef",
+      ref: "main",
+    });
+    if (mainCheck.exitCode !== 0) {
+      throw new Error('The parent project does not have a local "main" branch.');
+    }
+    const parentStatus = await this.runGitAction(parentProject, { action: "status" });
+    if (parentStatus.exitCode !== 0) {
+      throw new Error("Could not read parent project status.");
+    }
+    if (hasGpuiGxserverShortStatusChanges(parentStatus.stdout)) {
+      throw new Error("Commit or stash changes in the main project before merging this worktree.");
+    }
+
+    const checkoutResult = await this.runGitAction(parentProject, {
+      action: "checkout",
+      branch: "main",
+    });
+    if (checkoutResult.exitCode !== 0) {
+      throw new Error("Could not checkout main.");
+    }
+    const mergeResult = await this.runGitAction(parentProject, {
+      action: "merge",
+      branch,
+    });
+    if (mergeResult.exitCode !== 0) {
+      await this.launchMergeConflictAgent({
+        agent: input.conflictAgent,
+        branch,
+        mergeOutput: mergeResult.stderr.trim() || mergeResult.stdout.trim(),
+        parentProject,
+        worktree,
+        worktreeProject: input.worktreeProject,
+      });
+      return "conflicts";
+    }
+
+    if (input.deleteWorktreeAfter) {
+      await this.deleteWorktreeAfterCompletedGitAction(input.worktreeProject);
+    }
+    return "merged";
+  }
+
+  private async launchMergeConflictAgent(input: {
+    agent: SidebarAgentButton;
+    branch: string;
+    mergeOutput: string;
+    parentProject: GxserverProjectDomainState;
+    worktree: GpuiWorktreeMetadata;
+    worktreeProject: GxserverProjectDomainState;
+  }): Promise<void> {
+    this.focusProjectId(input.parentProject.projectId);
+    await this.createAgentSessionForProject(
+      input.parentProject,
+      input.agent,
+      buildGpuiMergeConflictPrompt(input),
+      formatGpuiGitAgentWorkflowTitle("Merge Conflicts"),
+    );
+  }
+
+  private async deleteWorktreeAfterCompletedGitAction(
+    worktreeProject: GxserverProjectDomainState,
+  ): Promise<void> {
+    if (!this.client) {
+      return;
+    }
+    const currentProject = this.domainProjectById(worktreeProject.projectId) ?? worktreeProject;
+    const worktree = normalizeGpuiWorktreeMetadata(currentProject.worktree);
+    if (!worktree) {
+      this.postGitToast("warning", "Worktree cleanup skipped", {
+        description: "The selected gxserver project is no longer a worktree.",
+      });
+      return;
+    }
+    const parentProject = this.domainProjectById(worktree.parentProjectId);
+    const toastId = createGpuiGitToastId();
+    this.postGitToast("info", "Removing worktree", {
+      persistent: true,
+      toastId,
+    });
+    try {
+      const result = await this.client.rpc<GxserverDeleteWorktreeProjectResult>(
+        "/api/deleteWorktreeProject",
+        {
+          deleteLocalBranch: false,
+          deleteRemoteBranch: false,
+          projectId: currentProject.projectId,
+        },
+      );
+      this.postGxserverWorktreeDeleteWarnings(result);
+      this.domainProjects = this.domainProjects.filter(
+        (project) => project.projectId !== currentProject.projectId,
+      );
+      if (parentProject) {
+        this.focusProjectId(parentProject.projectId);
+      } else if (this.activeProjectId === currentProject.projectId) {
+        const fallbackProjectId = this.domainProjects[0]?.projectId;
+        this.activeProjectId = fallbackProjectId;
+        this.activeGroupId = fallbackProjectId
+          ? createGxserverPresentationProjectGroupId(fallbackProjectId)
+          : GPUI_GXSERVER_CHATS_GROUP_ID;
+      }
+      await this.refreshDomainPresentationFromClient("patch").catch(() => {
+        this.publishHudPatch();
+      });
+      this.postGitToast("success", "Worktree removed", { toastId });
+    } catch {
+      this.postGitToast("error", "Could not remove worktree", {
+        description: "gxserver worktree cleanup failed.",
+        toastId,
+      });
+    }
+  }
+
+  private async deleteRemoteWorktreeAfterCompletedGitAction(
+    remoteScope: GpuiRemoteProjectScope,
+  ): Promise<void> {
+    const currentProject =
+      this.findRemotePresentationProject(remoteScope) ?? remoteScope.project;
+    const worktree = normalizeGpuiWorktreeMetadata(currentProject.worktree);
+    if (!worktree) {
+      this.postRemoteToast("warning", "Remote worktree cleanup skipped", {
+        description: "The selected remote project is no longer a worktree.",
+      });
+      return;
+    }
+    const toastId = createGpuiGitToastId();
+    this.postGitToast("info", "Removing remote worktree", {
+      persistent: true,
+      toastId,
+    });
+    try {
+      const result = await this.requestRemoteGxserver<GxserverDeleteWorktreeProjectResult>(
+        remoteScope.machineId,
+        "/api/deleteWorktreeProject",
+        {
+          deleteLocalBranch: false,
+          deleteRemoteBranch: false,
+          projectId: remoteScope.projectId,
+        },
+        { timeoutMs: 45_000 },
+      );
+      this.postGxserverWorktreeDeleteWarnings(result);
+      await this.refreshRemotePresentationFromGxserver(remoteScope.machineId).catch(() => undefined);
+      this.postGitToast("success", "Remote worktree removed", { toastId });
+    } catch {
+      this.postGitToast("error", "Could not remove remote worktree", {
+        description: "Remote gxserver worktree cleanup failed.",
+        toastId,
+      });
+    }
+  }
+
+  private postGxserverWorktreeDeleteWarnings(
+    result: GxserverDeleteWorktreeProjectResult,
+  ): void {
+    for (const warning of result.warnings) {
+      switch (warning.kind) {
+        case "localBranchDeleteFailed":
+        case "localBranchNotResolved":
+          this.postGitToast("warning", "Worktree removed, but local branch cleanup needs attention");
+          break;
+        case "remoteBranchDeleteFailed":
+        case "remoteBranchNotResolved":
+          this.postGitToast("warning", "Worktree removed, but remote branch cleanup needs attention");
+          break;
+        case "pruneFailed":
+          this.postGitToast("warning", "Worktree removed, but stale metadata cleanup needs attention");
+          break;
+      }
+    }
+  }
+
+  private async runSidebarGitMultipleCommits(
+    requestId: string,
+    agentId?: string,
+  ): Promise<void> {
+    const pending = this.pendingGitCommitRequests.get(requestId);
+    this.pendingGitCommitRequests.delete(requestId);
+    if (pending?.remoteReference) {
+      const remoteScope = this.resolveRemotePresentationProjectScope(pending.remoteReference);
+      if (!remoteScope) {
+        this.postRemoteToast("warning", "Remote Git unavailable", {
+          description: "Reconnect the remote machine before starting this Git workflow.",
+        });
+        return;
+      }
+      await this.runRemoteSidebarGitPromptAction(
+        remoteScope,
+        "Multiple Commits",
+        GPUI_GIT_MULTIPLE_COMMITS_PROMPT,
+        agentId,
+      );
+      return;
+    }
+    const project = pending ? this.domainProjectById(pending.projectId) : this.activeDomainProject();
+    if (!project) {
+      this.postGitToast("warning", "Git unavailable", {
+        description: "No active gxserver project is available.",
+      });
+      this.publishHudPatch();
+      return;
+    }
+    await this.runSidebarGitPromptAction(project, "Multiple Commits", GPUI_GIT_MULTIPLE_COMMITS_PROMPT, agentId);
+  }
+
+  private promptSidebarGitActionReview(
+    project: GxserverProjectDomainState,
+    gitState: SidebarGitState,
+    action: Extract<SidebarGitAction, "commit" | "pr" | "push">,
+  ): void {
+    const requestId = `gpui-git-action-${Date.now().toString(36)}`;
+    const hasCommit = gitState.hasWorkingTreeChanges;
+    /*
+    CDXC:GPUISidebarGit 2026-06-24-15:22:
+    GPUI commit review stores the gxserver-derived changed-file list with the request id. Later modal selections and diff clicks may only reference those paths, so CEF cannot stage or inspect arbitrary renderer-supplied paths.
+    Treat the modal's all-selected case as that stored review list instead of a fresh unbounded add-all, so files created after review opens cannot slip into the confirmed commit.
+    */
+    this.pendingGitCommitRequests.set(requestId, {
+      action,
+      files: [...gitState.files],
+      hasCommit,
+      projectId: project.projectId,
+      subject: "",
+    });
+    const modalDraft: SidebarPromptGitCommitMessage = {
+      action,
+      agentId: this.resolveDefaultPromptAgent()?.agentId,
+      branch: gitState.branch,
+      changedFiles: gitState.files,
+      confirmLabel: resolveGpuiSidebarGitConfirmLabel(action, hasCommit),
+      deleteWorktreeAfterDefault: false,
+      description: hasCommit
+        ? "Review and confirm your commit. Leave the message blank to auto-generate one."
+        : resolveGpuiSidebarGitPromptDescription(action),
+      isDefaultRef: gitState.branch === "main" || gitState.branch === "master",
+      isWorktree: normalizeGpuiWorktreeMetadata(project.worktree) !== undefined,
+      requestId,
+      showCommitMessage: hasCommit,
+      suggestedBody: undefined,
+      suggestedSubject: "",
+      type: "promptGitCommit",
+      worktreeName: stringFromRecord(project.worktree, "name"),
+    };
+    this.messageSource.postMessage(modalDraft);
+    this.gitState = { ...gitState, isBusy: false };
+    this.publishHudPatch();
+  }
+
+  private async openSidebarGitChangedFileDiff(
+    filePath: string,
+    requestId?: string,
+  ): Promise<void> {
+    const request = requestId ? this.pendingGitCommitRequests.get(requestId) : undefined;
+    if (request?.remoteReference) {
+      await this.openRemoteSidebarGitChangedFileDiff(
+        request.remoteReference,
+        filePath,
+        requestId,
+      );
+      return;
+    }
+    const project = request ? this.domainProjectById(request.projectId) : undefined;
+    const normalizedFilePath = normalizeGpuiRelativeGitFilePath(filePath);
+    if (!requestId || !request || !project || !normalizedFilePath) {
+      return;
+    }
+    const reviewFile = request.files.find((file) => file.path === normalizedFilePath);
+    if (!reviewFile) {
+      return;
+    }
+    try {
+      const [stagedDiff, unstagedDiff] = await Promise.all([
+        this.runGitAction(project, {
+          action: "diffCachedNoExt",
+          filePath: normalizedFilePath,
+        }),
+        this.runGitAction(project, {
+          action: "diffNoExt",
+          filePath: normalizedFilePath,
+        }),
+      ]);
+      const patchParts = [stagedDiff.stdout.trimEnd(), unstagedDiff.stdout.trimEnd()].filter(
+        (part) => part.trim().length > 0,
+      );
+      let patch = patchParts.join("\n\n");
+      if (!patch.trim()) {
+        const untracked = await this.runGitAction(project, {
+          action: "isUntrackedFile",
+          filePath: normalizedFilePath,
+        });
+        if (untracked.stdout.trim()) {
+          const noIndexDiff = await this.runGitAction(project, {
+            action: "diffNoIndexAgainstNull",
+            filePath: normalizedFilePath,
+          });
+          patch = noIndexDiff.stdout.trimEnd() || noIndexDiff.stderr.trimEnd();
+        }
+      }
+      this.postSidebarGitFileDiff(requestId, {
+        additions: reviewFile.additions,
+        deletions: reviewFile.deletions,
+        filePath: normalizedFilePath,
+        patch: patch.trim() || `No diff is available for ${normalizedFilePath}.`,
+      });
+    } catch {
+      this.postSidebarGitFileDiff(requestId, {
+        additions: reviewFile.additions,
+        deletions: reviewFile.deletions,
+        filePath: normalizedFilePath,
+        patch: `No diff is available for ${normalizedFilePath}.`,
+      });
+    }
+  }
+
+  private async openRemoteSidebarGitChangedFileDiff(
+    remoteReference: GpuiRemoteProjectReference,
+    filePath: string,
+    requestId?: string,
+  ): Promise<void> {
+    const request = requestId ? this.pendingGitCommitRequests.get(requestId) : undefined;
+    const remoteScope = this.resolveRemotePresentationProjectScope(remoteReference);
+    const normalizedFilePath = normalizeGpuiRelativeGitFilePath(filePath);
+    if (!requestId || !request || !remoteScope || !normalizedFilePath) {
+      return;
+    }
+    const reviewFile = request.files.find((file) => file.path === normalizedFilePath);
+    if (!reviewFile) {
+      return;
+    }
+    try {
+      const [stagedDiff, unstagedDiff] = await Promise.all([
+        this.runRemoteGitAction(remoteScope, {
+          action: "diffCachedNoExt",
+          filePath: normalizedFilePath,
+        }),
+        this.runRemoteGitAction(remoteScope, {
+          action: "diffNoExt",
+          filePath: normalizedFilePath,
+        }),
+      ]);
+      const patchParts = [stagedDiff.stdout.trimEnd(), unstagedDiff.stdout.trimEnd()].filter(
+        (part) => part.trim().length > 0,
+      );
+      let patch = patchParts.join("\n\n");
+      if (!patch.trim()) {
+        const untracked = await this.runRemoteGitAction(remoteScope, {
+          action: "isUntrackedFile",
+          filePath: normalizedFilePath,
+        });
+        if (untracked.stdout.trim()) {
+          const noIndexDiff = await this.runRemoteGitAction(remoteScope, {
+            action: "diffNoIndexAgainstNull",
+            filePath: normalizedFilePath,
+          });
+          patch = noIndexDiff.stdout.trimEnd() || noIndexDiff.stderr.trimEnd();
+        }
+      }
+      this.postSidebarGitFileDiff(requestId, {
+        additions: reviewFile.additions,
+        deletions: reviewFile.deletions,
+        filePath: normalizedFilePath,
+        patch: patch.trim() || `No diff is available for ${normalizedFilePath}.`,
+      });
+    } catch {
+      this.postSidebarGitFileDiff(requestId, {
+        additions: reviewFile.additions,
+        deletions: reviewFile.deletions,
+        filePath: normalizedFilePath,
+        patch: `No diff is available for ${normalizedFilePath}.`,
+      });
+    }
+  }
+
+  private async openSidebarGitChangedFileInIde(
+    message: Extract<SidebarToExtensionMessage, { type: "openSidebarGitChangedFile" }>,
+  ): Promise<void> {
+    /*
+    CDXC:GPUISidebarGit 2026-06-24-21:26:
+    Changed-file IDE opens reuse the shared SidebarApp file row. GPUI sends Rust only the gxserver project id and a normalized relative file candidate already present in the current HUD or review request; Rust remains authoritative and re-validates the file against gxserver before resolving an absolute path.
+    Scoped non-review opens must re-read the owning local or remote gxserver project instead of using the active local HUD file list, so remote rows cannot open stale or cross-project file candidates.
+    */
+    const normalizedFilePath = normalizeGpuiRelativeGitFilePath(message.filePath);
+    const request = message.requestId
+      ? this.pendingGitCommitRequests.get(message.requestId)
+      : undefined;
+    if (request?.remoteReference) {
+      const remoteScope = this.resolveRemotePresentationProjectScope(request.remoteReference);
+      if (
+        !normalizedFilePath ||
+        !remoteScope ||
+        !request.files.some((file) => file.path === normalizedFilePath)
+      ) {
+        this.postRemoteToast("warning", "Remote file open unavailable", {
+          description: "Choose a changed file from the current remote Git review.",
+        });
+        return;
+      }
+      this.postRemoteProjectNativeAction(
+        "openRemoteSidebarGitChangedFileInIde",
+        remoteScope,
+        message,
+        { filePath: normalizedFilePath },
+      );
+      return;
+    }
+    if (!request) {
+      const remoteScope = this.resolveGitPreferenceRemoteScope(message);
+      if (remoteScope) {
+        if (!normalizedFilePath) {
+          this.postRemoteToast("warning", "Remote file open unavailable", {
+            description: "Choose a changed file from the current remote Git state.",
+          });
+          return;
+        }
+        const gitState = await this.readRemoteSidebarGitState(remoteScope);
+        if (!gitState.files.some((file) => file.path === normalizedFilePath)) {
+          this.postRemoteToast("warning", "Remote file open unavailable", {
+            description: "Choose a changed file from the current remote Git state.",
+          });
+          return;
+        }
+        this.postRemoteProjectNativeAction(
+          "openRemoteSidebarGitChangedFileInIde",
+          remoteScope,
+          message,
+          { filePath: normalizedFilePath },
+        );
+        return;
+      }
+      if (this.isGitPreferenceRemoteScope(message)) {
+        this.postRemoteToast("warning", "Remote file open unavailable", {
+          description: "Reconnect the remote machine before opening changed files.",
+        });
+        return;
+      }
+    }
+    const project = request ? this.domainProjectById(request.projectId) : this.activeDomainProject();
+    const explicitScope = !request && Boolean(message.groupId?.trim() || message.projectId?.trim());
+    const scopedProject = request
+      ? project
+      : this.resolveGitPreferenceLocalProject(message) ?? (explicitScope ? undefined : project);
+    const trustedFiles =
+      request?.files ??
+      (scopedProject && scopedProject.projectId !== this.activeProjectId
+        ? (await this.readSidebarGitState(scopedProject)).files
+        : this.gitState.files);
+    if (
+      !normalizedFilePath ||
+      !scopedProject ||
+      scopedProject.isRecentProject === true ||
+      !trustedFiles.some((file) => file.path === normalizedFilePath)
+    ) {
+      this.postGitToast("warning", "Open file unavailable", {
+        description: "Choose a changed file from the current Git state.",
+      });
+      return;
+    }
+    this.postNativeProjectPathAction(
+      "openSidebarGitChangedFileInIde",
+      scopedProject.projectId,
+      message,
+      { filePath: normalizedFilePath },
+    );
+  }
+
+  private postSidebarGitFileDiff(
+    requestId: string,
+    draft: SidebarGitFileDiffDraft,
+  ): void {
+    this.messageSource.postMessage({
+      draft,
+      requestId,
+      type: "sidebarGitFileDiff",
+    });
+  }
+
+  private resolveTrustedGitReviewFileSelection(
+    request: GpuiPendingGitCommitRequest,
+    filePaths?: readonly string[],
+  ): GpuiTrustedGitReviewFileSelection {
+    const explicit = filePaths !== undefined;
+    const candidatePaths = explicit ? filePaths : request.files.map((file) => file.path);
+    const allowedPaths = new Map(request.files.map((file) => [file.path, file.path]));
+    const selectedPaths: string[] = [];
+    for (const filePath of candidatePaths) {
+      const normalizedPath = normalizeGpuiRelativeGitFilePath(filePath);
+      const trustedPath = normalizedPath ? allowedPaths.get(normalizedPath) : undefined;
+      if (!trustedPath) {
+        throw new Error("Selected file is not part of the current Git review.");
+      }
+      if (!selectedPaths.includes(trustedPath)) {
+        selectedPaths.push(trustedPath);
+      }
+    }
+    if (selectedPaths.length === 0) {
+      throw new Error("Select at least one changed file.");
+    }
+    return { explicit, filePaths: selectedPaths };
+  }
+
+  private async runGitMutation(
+    project: GxserverProjectDomainState,
+    startedTitle: string,
+    finishedTitle: string,
+    operation: () => Promise<void>,
+  ): Promise<boolean> {
+    const toastId = createGpuiGitToastId();
+    this.postGitToast("info", startedTitle, { persistent: true, toastId });
+    this.gitState = { ...this.gitStateForHud(), isBusy: true };
+    this.publishHudPatch();
+    try {
+      await operation();
+      await this.refreshGitState({ force: true, project });
+      this.postGitToast("success", finishedTitle, { toastId });
+      return true;
+    } catch (error) {
+      this.gitState = { ...this.gitStateForHud(), isBusy: false };
+      this.publishHudPatch();
+      this.postGitToast("error", `${startedTitle} failed`, {
+        description: gpuiUserVisibleGitErrorMessage(error, "gxserver Git operation failed."),
+        toastId,
+      });
+      return false;
+    }
+  }
+
+  private async commitWithMessage(
+    project: GxserverProjectDomainState,
+    message: string,
+    filePaths?: readonly string[],
+    options: { agentId?: string; commitOnNewRef?: boolean } = {},
+  ): Promise<void> {
+    const parsedMessage = parseGpuiSidebarGitCommitMessage(message);
+    let resolvedMessage = parsedMessage;
+    if (parsedMessage.subject) {
+      const addResult = await this.runGitAction(project, {
+        action: "addAll",
+        filePaths,
+      });
+      if (addResult.exitCode !== 0) {
+        throw new Error("Could not stage changes.");
+      }
+    } else {
+      resolvedMessage = await this.generateCommitMessage(project, filePaths, options.agentId);
+    }
+    if (options.commitOnNewRef) {
+      await this.checkoutSidebarGitFeatureBranch(project, resolvedMessage.subject);
+    }
+    const commitResult = await this.runGitAction(project, {
+      action: "commit",
+      messageBody: resolvedMessage.body,
+      messageSubject: resolvedMessage.subject,
+      noVerify: await this.shouldBypassMissingBeadsDatabasePreCommitHook(project),
+    });
+    if (commitResult.exitCode !== 0) {
+      throw new Error("Could not commit changes.");
+    }
+  }
+
+  private async generateCommitMessage(
+    project: GxserverProjectDomainState,
+    filePaths: readonly string[] | undefined,
+    agentId?: string,
+  ): Promise<{ body: string; subject: string }> {
+    if (!this.client) {
+      throw new Error("gxserver is unavailable.");
+    }
+    if (!filePaths || filePaths.length === 0) {
+      throw new Error("Select at least one changed file before generating a commit message.");
+    }
+    const agent = this.resolveDefaultPromptAgent(agentId);
+    if (!agent?.command?.trim()) {
+      throw new GpuiUserVisibleGitError(
+        "Choose a configured prompt agent before generating a commit message.",
+      );
+    }
+    if (!supportsGpuiBackgroundCommitMessageGeneration(agent)) {
+      throw new GpuiUserVisibleGitError(
+        "Selected prompt agent does not support background commit message generation.",
+      );
+    }
+    this.postGitToast("info", "Generating commit message");
+    return this.client.rpc<GxserverGenerateCommitMessageResult>("/api/generateCommitMessage", {
+      agentId: agent.agentId,
+      filePaths: [...filePaths],
+      projectId: project.projectId,
+    });
+  }
+
+  private async generateRemoteCommitMessage(
+    remoteScope: GpuiRemoteProjectScope,
+    filePaths: readonly string[] | undefined,
+    agentId?: string,
+  ): Promise<{ body: string; subject: string }> {
+    if (!filePaths || filePaths.length === 0) {
+      throw new Error("Select at least one changed file before generating a commit message.");
+    }
+    const resolvedAgentId = this.resolveDefaultPromptAgentId(agentId);
+    if (!resolvedAgentId) {
+      throw new GpuiUserVisibleGitError(
+        "Choose a prompt agent before generating a remote commit message.",
+      );
+    }
+    this.postGitToast("info", "Generating remote commit message");
+    return this.requestRemoteGxserver<GxserverGenerateCommitMessageResult>(
+      remoteScope.machineId,
+      "/api/generateCommitMessage",
+      {
+        agentId: resolvedAgentId,
+        filePaths: [...filePaths],
+        projectId: remoteScope.projectId,
+      },
+      { timeoutMs: 125_000 },
+    );
+  }
+
+  private async checkoutSidebarGitFeatureBranch(
+    project: GxserverProjectDomainState,
+    subject: string,
+  ): Promise<string> {
+    const baseName = sanitizeGpuiSidebarGitBranchName(subject);
+    for (let index = 0; index < 20; index += 1) {
+      const candidate = index === 0 ? baseName : `${baseName}-${index + 1}`;
+      const exists = await this.runGitAction(project, {
+        action: "verifyRef",
+        ref: candidate,
+      });
+      if (exists.exitCode !== 0) {
+        const checkout = await this.runGitAction(project, {
+          action: "checkoutNewBranch",
+          branch: candidate,
+        });
+        if (checkout.exitCode !== 0) {
+          throw new Error("Could not create a new branch.");
+        }
+        return candidate;
+      }
+    }
+    throw new Error("Could not create a unique branch.");
+  }
+
+  private async pushCurrentBranch(
+    project: GxserverProjectDomainState,
+    gitState: Pick<SidebarGitState, "branch" | "behindCount" | "hasOriginRemote" | "hasUpstream">,
+  ): Promise<void> {
+    const branch = gitState.branch;
+    if (!branch) {
+      throw new Error("Create and checkout a branch before pushing.");
+    }
+    if (gitState.behindCount > 0) {
+      throw new Error("Branch is behind upstream.");
+    }
+    const push = gitState.hasUpstream
+      ? await this.runGitAction(project, { action: "push" })
+      : gitState.hasOriginRemote
+        ? await this.runGitAction(project, { action: "pushSetUpstream", branch })
+        : undefined;
+    if (!push) {
+      throw new Error('Add an "origin" remote before pushing.');
+    }
+    if (push.exitCode !== 0) {
+      throw new Error("Could not push branch.");
+    }
+  }
+
+  private async syncCurrentBranchWithRemote(
+    project: GxserverProjectDomainState,
+    gitState: SidebarGitState,
+  ): Promise<void> {
+    const branch = gitState.branch;
+    if (!branch) {
+      throw new Error("Create and checkout a branch before syncing.");
+    }
+    if (gitState.hasUpstream) {
+      const pull = await this.runGitAction(project, { action: "pullFastForward" });
+      if (pull.exitCode !== 0) {
+        throw new Error("Could not pull branch.");
+      }
+      const nextGitState = await this.refreshGitState({ force: true, project });
+      if (nextGitState.aheadCount > 0) {
+        await this.pushCurrentBranch(project, nextGitState);
+      }
+      return;
+    }
+    await this.pushCurrentBranch(project, gitState);
+  }
+
+  private async commitRemoteWithMessage(
+    remoteScope: GpuiRemoteProjectScope,
+    message: string,
+    filePaths?: readonly string[],
+    options: { agentId?: string; commitOnNewRef?: boolean } = {},
+  ): Promise<void> {
+    const parsedMessage = parseGpuiSidebarGitCommitMessage(message);
+    let resolvedMessage = parsedMessage;
+    if (parsedMessage.subject) {
+      const addResult = await this.runRemoteGitAction(remoteScope, {
+        action: "addAll",
+        filePaths,
+      });
+      if (addResult.exitCode !== 0) {
+        throw new Error("Could not stage remote changes.");
+      }
+    } else {
+      resolvedMessage = await this.generateRemoteCommitMessage(
+        remoteScope,
+        filePaths,
+        options.agentId,
+      );
+    }
+    if (options.commitOnNewRef) {
+      await this.checkoutRemoteSidebarGitFeatureBranch(remoteScope, resolvedMessage.subject);
+    }
+    const commitResult = await this.runRemoteGitAction(remoteScope, {
+      action: "commit",
+      messageBody: resolvedMessage.body,
+      messageSubject: resolvedMessage.subject,
+      noVerify: await this.shouldBypassRemoteMissingBeadsDatabasePreCommitHook(remoteScope),
+    });
+    if (commitResult.exitCode !== 0) {
+      throw new Error("Could not commit remote changes.");
+    }
+  }
+
+  private async checkoutRemoteSidebarGitFeatureBranch(
+    remoteScope: GpuiRemoteProjectScope,
+    subject: string,
+  ): Promise<void> {
+    const result = await this.requestRemoteGxserver<GxserverCheckoutProjectNewBranchResult>(
+      remoteScope.machineId,
+      "/api/checkoutProjectNewBranch",
+      {
+        branchLabel: subject,
+        projectId: remoteScope.projectId,
+      },
+      { timeoutMs: 30_000 },
+    );
+    if (result.checkedOut !== true) {
+      throw new Error("Could not create a new remote branch.");
+    }
+  }
+
+  private async pushRemoteCurrentBranch(
+    remoteScope: GpuiRemoteProjectScope,
+    gitState: Pick<SidebarGitState, "branch" | "behindCount" | "hasOriginRemote" | "hasUpstream">,
+  ): Promise<void> {
+    const branch = gitState.branch;
+    if (!branch) {
+      throw new Error("Create and checkout a branch before pushing.");
+    }
+    if (gitState.behindCount > 0) {
+      throw new Error("Remote branch is behind upstream.");
+    }
+    const push = gitState.hasUpstream
+      ? await this.runRemoteGitAction(remoteScope, { action: "push" })
+      : gitState.hasOriginRemote
+        ? await this.runRemoteGitAction(remoteScope, { action: "pushSetUpstreamCurrent" })
+        : undefined;
+    if (!push) {
+      throw new Error('Add an "origin" remote before pushing.');
+    }
+    if (push.exitCode !== 0) {
+      throw new Error("Could not push remote branch.");
+    }
+  }
+
+  private async syncRemoteCurrentBranchWithRemote(
+    remoteScope: GpuiRemoteProjectScope,
+    gitState: SidebarGitState,
+  ): Promise<void> {
+    const branch = gitState.branch;
+    if (!branch) {
+      throw new Error("Create and checkout a branch before syncing.");
+    }
+    if (gitState.hasUpstream) {
+      const pull = await this.runRemoteGitAction(remoteScope, { action: "pullFastForward" });
+      if (pull.exitCode !== 0) {
+        throw new Error("Could not pull remote branch.");
+      }
+      const nextGitState = await this.readRemoteSidebarGitState(remoteScope);
+      if (nextGitState.aheadCount > 0) {
+        await this.pushRemoteCurrentBranch(remoteScope, nextGitState);
+      }
+      return;
+    }
+    await this.pushRemoteCurrentBranch(remoteScope, gitState);
+  }
+
+  private async shouldBypassRemoteMissingBeadsDatabasePreCommitHook(
+    remoteScope: GpuiRemoteProjectScope,
+  ): Promise<boolean> {
+    const beadsStorage = await this.runRemoteBeadsAction(remoteScope, { action: "storageExists" });
+    if (beadsStorage.exitCode !== 0 || beadsStorage.stdout.trim() !== "true") {
+      return false;
+    }
+    try {
+      const status = await this.runRemoteBeadsAction(remoteScope, { action: "status" });
+      return status.exitCode !== 0 && isMissingGpuiBeadsDatabaseError(`${status.stderr}\n${status.stdout}`);
+    } catch {
+      return false;
+    }
+  }
+
+  private async shouldBypassMissingBeadsDatabasePreCommitHook(
+    project: GxserverProjectDomainState,
+  ): Promise<boolean> {
+    const beadsStorage = await this.runBeadsAction(project, { action: "storageExists" });
+    if (beadsStorage.exitCode !== 0 || beadsStorage.stdout.trim() !== "true") {
+      return false;
+    }
+    try {
+      const status = await this.runBeadsAction(project, { action: "status" });
+      return status.exitCode !== 0 && isMissingGpuiBeadsDatabaseError(`${status.stderr}\n${status.stdout}`);
+    } catch {
+      return false;
+    }
+  }
+
+  private async runSidebarGitPromptAction(
+    project: GxserverProjectDomainState,
+    title: string,
+    prompt: string,
+    agentId?: string,
+  ): Promise<void> {
+    const gitState = await this.refreshGitState({
+      force: true,
+      project,
+      publishBusy: true,
+      toastOnFailure: true,
+    });
+    if (!gitState.isRepo) {
+      this.postGitToast("warning", "Git unavailable", {
+        description: "Open a Git repository to use this workflow.",
+      });
+      return;
+    }
+    const agent = this.resolveDefaultPromptAgent(agentId);
+    if (!agent?.command?.trim()) {
+      this.postGitToast("error", "Agent unavailable", {
+        description: "Choose a configured prompt agent before starting this Git workflow.",
+      });
+      return;
+    }
+    await this.createAgentSessionForProject(
+      project,
+      agent,
+      prompt,
+      formatGpuiGitAgentWorkflowTitle(title),
+    );
+    this.postGitToast("success", "Git workflow started");
+  }
+
+  private async runRemoteSidebarGitPromptAction(
+    remoteScope: GpuiRemoteProjectScope,
+    title: string,
+    prompt: string,
+    agentId?: string,
+  ): Promise<void> {
+    const gitState = await this.readRemoteSidebarGitState(remoteScope);
+    if (!gitState.isRepo) {
+      this.postRemoteToast("warning", "Remote Git unavailable", {
+        description: "Open a Git repository on the remote machine to use this workflow.",
+      });
+      return;
+    }
+    const resolvedAgentId = this.resolveDefaultPromptAgentId(agentId);
+    try {
+      await this.createRemoteAgentSessionForProject(
+        remoteScope,
+        resolvedAgentId,
+        prompt,
+        formatGpuiGitAgentWorkflowTitle(title),
+      );
+      this.postRemoteToast("success", "Remote Git workflow started");
+    } catch {
+      this.postRemoteToast("error", "Remote Git workflow failed", {
+        description: "The remote gxserver could not start the selected prompt agent.",
+      });
+    }
+  }
+
+  private async runSidebarGitPullRequestAgentWorkflow(input: {
+    agentId?: string;
+    filePaths?: readonly string[];
+    gitState: SidebarGitState;
+    hasExplicitFileSelection: boolean;
+    hasCommit: boolean;
+    message: string;
+    project: GxserverProjectDomainState;
+  }): Promise<void> {
+    const agent = this.resolveDefaultPromptAgent(input.agentId);
+    if (!agent?.command?.trim()) {
+      this.postGitToast("error", "Agent unavailable", {
+        description: "Choose a configured prompt agent before creating a pull request.",
+      });
+      return;
+    }
+    /*
+    CDXC:GPUISidebarGit 2026-06-24-16:45:
+    Visible PR-agent workflows are for user-observable, non-delete PR creation only. The terminal session can report gxserver lifecycle/activity, but it cannot prove that `gh pr create` produced an open PR; delete-after cleanup must stay on the direct gxserver PR result path.
+    */
+    const prompt = buildGpuiGitPullRequestAgentPrompt({
+      filePaths: input.filePaths,
+      hasExplicitFileSelection: input.hasExplicitFileSelection,
+      hasCommit: input.hasCommit,
+      message: input.message.trim(),
+      selectedFiles:
+        input.filePaths && input.filePaths.length > 0
+          ? input.filePaths
+          : input.gitState.files.map((file) => file.path),
+    });
+    try {
+      await this.createAgentSessionForProject(
+        input.project,
+        agent,
+        prompt,
+        formatGpuiGitAgentWorkflowTitle("Commit, Push & PR"),
+      );
+      this.postGitToast("success", "Pull request workflow started");
+    } catch {
+      this.postGitToast("error", "Pull request workflow failed", {
+        description: "gxserver could not start the selected prompt agent.",
+      });
+    }
+  }
+
+  private async runRemoteSidebarGitPullRequestAgentWorkflow(input: {
+    agentId?: string;
+    filePaths?: readonly string[];
+    gitState: SidebarGitState;
+    hasExplicitFileSelection: boolean;
+    hasCommit: boolean;
+    message: string;
+    remoteScope: GpuiRemoteProjectScope;
+  }): Promise<void> {
+    const resolvedAgentId = this.resolveDefaultPromptAgentId(input.agentId);
+    const prompt = buildGpuiGitPullRequestAgentPrompt({
+      filePaths: input.filePaths,
+      hasExplicitFileSelection: input.hasExplicitFileSelection,
+      hasCommit: input.hasCommit,
+      message: input.message.trim(),
+      selectedFiles:
+        input.filePaths && input.filePaths.length > 0
+          ? input.filePaths
+          : input.gitState.files.map((file) => file.path),
+    });
+    try {
+      await this.createRemoteAgentSessionForProject(
+        input.remoteScope,
+        resolvedAgentId,
+        prompt,
+        formatGpuiGitAgentWorkflowTitle("Commit, Push & PR"),
+      );
+      this.postRemoteToast("success", "Remote pull request workflow started");
+    } catch {
+      this.postRemoteToast("error", "Remote pull request workflow failed", {
+        description: "The remote gxserver could not start the selected prompt agent.",
+      });
+    }
+  }
+
+  private async persistGitPreferences(
+    updates: Partial<GpuiGitPreferences>,
+    scopeMessage?: {
+      groupId?: string;
+      projectId?: string;
+    },
+  ): Promise<void> {
+    const explicitScope = Boolean(scopeMessage?.groupId?.trim() || scopeMessage?.projectId?.trim());
+    const remoteScope = this.resolveGitPreferenceRemoteScope(scopeMessage);
+    if (remoteScope) {
+      await this.persistRemoteGitPreferences(remoteScope, updates);
+      return;
+    }
+    if (explicitScope && this.isGitPreferenceRemoteScope(scopeMessage)) {
+      this.postRemoteToast("warning", "Remote Git preferences unavailable", {
+        description: "Reconnect the remote machine before changing Git preferences.",
+      });
+      return;
+    }
+
+    const scopedProject = this.resolveGitPreferenceLocalProject(scopeMessage);
+    if (explicitScope && !scopedProject) {
+      this.postGitToast("warning", "Git preferences unavailable", {
+        description: "Choose a current project before changing Git preferences.",
+      });
+      return;
+    }
+    const currentPreferences = this.gitPreferencesForProject(scopedProject ?? this.activeDomainProject());
+    const nextPreferences: GpuiGitPreferences = {
+      ...currentPreferences,
+      ...updates,
+      primaryAction: normalizeSidebarGitAction(updates.primaryAction ?? currentPreferences.primaryAction),
+    };
+    if (scopedProject && this.client) {
+      const nextProject = await this.updateProjectDomainState(scopedProject.projectId, {
+        gitConfig: {
+          ...scopedProject.gitConfig,
+          confirmCommit: nextPreferences.confirmCommit,
+          generateCommitBody: nextPreferences.generateCommitBody,
+          primaryAction: nextPreferences.primaryAction,
+        },
+      });
+      if (this.activeProjectId === scopedProject.projectId || this.activeProjectId === nextProject?.projectId) {
+        this.gitState = {
+          ...this.gitState,
+          confirmSuggestedCommit: nextPreferences.confirmCommit,
+          generateCommitBody: nextPreferences.generateCommitBody,
+          primaryAction: nextPreferences.primaryAction,
+        };
+        this.publishHudPatch();
+      }
+      return;
+    }
+    if (!this.client || this.domainProjects.length === 0) {
+      this.gitState = {
+        ...this.gitState,
+        confirmSuggestedCommit: nextPreferences.confirmCommit,
+        generateCommitBody: nextPreferences.generateCommitBody,
+        primaryAction: nextPreferences.primaryAction,
+      };
+      this.publishHudPatch();
+      return;
+    }
+    await Promise.all(
+      this.domainProjects.map((project) =>
+        this.updateProjectDomainState(project.projectId, {
+          gitConfig: {
+            ...project.gitConfig,
+            confirmCommit: nextPreferences.confirmCommit,
+            generateCommitBody: nextPreferences.generateCommitBody,
+            primaryAction: nextPreferences.primaryAction,
+          },
+        }),
+      ),
+    );
+    this.gitState = {
+      ...this.gitState,
+      confirmSuggestedCommit: nextPreferences.confirmCommit,
+      generateCommitBody: nextPreferences.generateCommitBody,
+      primaryAction: nextPreferences.primaryAction,
+    };
+    this.publishHudPatch();
+  }
+
+  private resolveGitPreferenceRemoteScope(scopeMessage?: {
+    groupId?: string;
+    projectId?: string;
+  }): GpuiRemoteProjectScope | undefined {
+    if (!scopeMessage) {
+      return undefined;
+    }
+    if (scopeMessage.groupId && parseGpuiRemotePresentationGroupId(scopeMessage.groupId)) {
+      return this.resolveRemotePresentationProjectScope({ groupId: scopeMessage.groupId });
+    }
+    const remoteProject = scopeMessage.projectId
+      ? parseGpuiRemotePresentationProjectId(scopeMessage.projectId)
+      : undefined;
+    return remoteProject ? this.resolveRemotePresentationProjectScope(remoteProject) : undefined;
+  }
+
+  private isGitPreferenceRemoteScope(scopeMessage?: {
+    groupId?: string;
+    projectId?: string;
+  }): boolean {
+    return Boolean(
+      (scopeMessage?.groupId && parseGpuiRemotePresentationGroupId(scopeMessage.groupId)) ||
+        (scopeMessage?.projectId && parseGpuiRemotePresentationProjectId(scopeMessage.projectId)),
+    );
+  }
+
+  private resolveGitPreferenceLocalProject(scopeMessage?: {
+    groupId?: string;
+    projectId?: string;
+  }): GxserverProjectDomainState | undefined {
+    if (scopeMessage?.groupId) {
+      const projectId = this.resolveProjectIdForGroup(scopeMessage.groupId);
+      return projectId ? this.domainProjectById(projectId) : undefined;
+    }
+    if (scopeMessage?.projectId) {
+      return this.domainProjectById(scopeMessage.projectId);
+    }
+    return undefined;
+  }
+
+  private async persistRemoteGitPreferences(
+    remoteScope: GpuiRemoteProjectScope,
+    updates: Partial<GpuiGitPreferences>,
+  ): Promise<void> {
+    const currentPreferences = this.gitPreferencesForPresentationProject(
+      this.findRemotePresentationProject(remoteScope) ?? remoteScope.project,
+    );
+    const nextPreferences: GpuiGitPreferences = {
+      ...currentPreferences,
+      ...updates,
+      primaryAction: normalizeSidebarGitAction(updates.primaryAction ?? currentPreferences.primaryAction),
+    };
+    /*
+    CDXC:GPUIRemoteGit 2026-06-24-18:22:
+    Remote Git preference writes use only the selected machine id, gxserver project id, and the three known preference keys. Rust owns the tunnel and response shaping; the renderer never sends paths, labels, branch names, command text, URLs, tokens, stdout/stderr, or raw daemon bodies as write authority.
+    */
+    try {
+      const response = await this.requestRemoteGxserver<{
+        project?: GxserverPresentationProject;
+      }>(
+        remoteScope.machineId,
+        "/api/updateProject",
+        {
+          gitConfig: {
+            confirmCommit: nextPreferences.confirmCommit,
+            generateCommitBody: nextPreferences.generateCommitBody,
+            primaryAction: nextPreferences.primaryAction,
+          },
+          projectId: remoteScope.projectId,
+        },
+      );
+      if (response.project) {
+        this.upsertRemotePresentationProject(remoteScope.machineId, response.project);
+      } else {
+        await this.refreshRemotePresentationFromGxserver(remoteScope.machineId).catch(() => undefined);
+      }
+      if (this.activeGroupId === createGpuiRemotePresentationGroupId(remoteScope.machineId, remoteScope.projectId)) {
+        this.gitState = {
+          ...this.gitState,
+          confirmSuggestedCommit: nextPreferences.confirmCommit,
+          generateCommitBody: nextPreferences.generateCommitBody,
+          primaryAction: nextPreferences.primaryAction,
+        };
+      }
+      this.publishRemotePresentationPatch();
+    } catch {
+      this.postRemoteToast("warning", "Remote Git preferences unavailable", {
+        description: "The remote gxserver could not save that Git preference.",
+      });
+    }
+  }
+
+  private resolveGitProjectForMessage(
+    message: Extract<SidebarToExtensionMessage, { type: "runSidebarGitAction" }>,
+  ): GxserverProjectDomainState | undefined {
+    const projectId = message.groupId
+      ? this.resolveProjectIdForGroup(message.groupId)
+      : message.projectId ?? this.activeProjectId;
+    const project = projectId ? this.domainProjectById(projectId) : this.activeDomainProject();
+    if (project && this.activeProjectId !== project.projectId) {
+      this.focusProjectId(project.projectId);
+      this.publishPresentation("patch");
+    }
+    return project;
+  }
+
+  private gitStateForHud(): SidebarGitState {
+    const preferences = this.gitPreferencesForProject(this.activeDomainProject());
+    return {
+      ...this.gitState,
+      confirmSuggestedCommit: preferences.confirmCommit,
+      generateCommitBody: preferences.generateCommitBody,
+      primaryAction: preferences.primaryAction,
+    };
+  }
+
+  private gitPreferencesForProject(
+    project: GxserverProjectDomainState | undefined,
+  ): GpuiGitPreferences {
+    return {
+      confirmCommit: booleanFromRecord(project?.gitConfig, "confirmCommit") ?? false,
+      generateCommitBody: booleanFromRecord(project?.gitConfig, "generateCommitBody") ?? true,
+      primaryAction: normalizeSidebarGitAction(stringFromRecord(project?.gitConfig, "primaryAction")),
+    };
+  }
+
+  private gitPreferencesForPresentationProject(
+    project: GxserverPresentationProject | undefined,
+  ): GpuiGitPreferences {
+    return {
+      confirmCommit: booleanFromRecord(project?.gitConfig, "confirmCommit") ?? false,
+      generateCommitBody: booleanFromRecord(project?.gitConfig, "generateCommitBody") ?? true,
+      primaryAction: normalizeSidebarGitAction(stringFromRecord(project?.gitConfig, "primaryAction")),
+    };
+  }
+
+  private resolveDefaultPromptAgent(agentId?: string): SidebarAgentButton | undefined {
+    const requestedAgentId = this.resolveDefaultPromptAgentId(agentId);
+    return this.resolveSidebarAgent(requestedAgentId);
+  }
+
+  private resolveDefaultPromptAgentId(agentId?: string): string {
+    return (
+      agentId?.trim() ||
+      this.latestHud.settings?.defaultPromptAgentId?.trim() ||
+      DEFAULT_GPUI_PROMPT_AGENT_ID
+    );
+  }
+
+  private async runGitAction(
+    project: GxserverProjectDomainState,
+    params: Record<string, unknown>,
+  ): Promise<GxserverTypedOperationResult> {
+    if (!this.client) {
+      throw new Error("gxserver is unavailable.");
+    }
+    return this.client.rpc<GxserverTypedOperationResult>("/api/runGitAction", {
+      ...params,
+      projectId: project.projectId,
+    });
+  }
+
+  private async runRemoteGitAction(
+    remoteScope: GpuiRemoteProjectReference,
+    params: Record<string, unknown>,
+  ): Promise<GxserverTypedOperationResult> {
+    return this.requestRemoteGxserver<GxserverTypedOperationResult>(
+      remoteScope.machineId,
+      "/api/runGitAction",
+      {
+        ...params,
+        projectId: remoteScope.projectId,
+      },
+    );
+  }
+
+  private async runGitHubAction(
+    project: GxserverProjectDomainState,
+    params: Record<string, unknown>,
+  ): Promise<GxserverTypedOperationResult> {
+    if (!this.client) {
+      throw new Error("gxserver is unavailable.");
+    }
+    return this.client.rpc<GxserverTypedOperationResult>("/api/runGitHubAction", {
+      ...params,
+      projectId: project.projectId,
+    });
+  }
+
+  private async runRemoteGitHubAction(
+    remoteScope: GpuiRemoteProjectReference,
+    params: Record<string, unknown>,
+  ): Promise<GxserverTypedOperationResult> {
+    return this.requestRemoteGxserver<GxserverTypedOperationResult>(
+      remoteScope.machineId,
+      "/api/runGitHubAction",
+      {
+        ...params,
+        projectId: remoteScope.projectId,
+      },
+    );
+  }
+
+  private async createPullRequest(
+    project: GxserverProjectDomainState,
+  ): Promise<GxserverCreatePullRequestResult> {
+    if (!this.client) {
+      throw new Error("gxserver is unavailable.");
+    }
+    /*
+    CDXC:GPUISidebarGit 2026-06-24-16:28:
+    Direct GPUI PR creation must use a gxserver completion result before opening
+    the PR or deleting a worktree. The renderer sends only the trusted project
+    id; gxserver owns `gh pr create --fill`, current-branch PR lookup, and
+    validated state/URL return data.
+    */
+    return this.client.rpc<GxserverCreatePullRequestResult>("/api/createPullRequest", {
+      projectId: project.projectId,
+    });
+  }
+
+  private async createRemotePullRequest(
+    remoteScope: GpuiRemoteProjectReference,
+  ): Promise<GpuiRemoteCreatePullRequestResult> {
+    return this.requestRemoteGxserver<GpuiRemoteCreatePullRequestResult>(
+      remoteScope.machineId,
+      "/api/createPullRequest",
+      {
+        projectId: remoteScope.projectId,
+      },
+      { timeoutMs: 45_000 },
+    );
+  }
+
+  private async runBeadsAction(
+    project: GxserverProjectDomainState,
+    params: Record<string, unknown>,
+  ): Promise<GxserverTypedOperationResult> {
+    if (!this.client) {
+      throw new Error("gxserver is unavailable.");
+    }
+    return this.client.rpc<GxserverTypedOperationResult>("/api/runBeadsAction", {
+      ...params,
+      projectId: project.projectId,
+    });
+  }
+
+  private async runRemoteBeadsAction(
+    remoteScope: GpuiRemoteProjectReference,
+    params: Record<string, unknown>,
+  ): Promise<GxserverTypedOperationResult> {
+    return this.requestRemoteGxserver<GxserverTypedOperationResult>(
+      remoteScope.machineId,
+      "/api/runBeadsAction",
+      {
+        ...params,
+        projectId: remoteScope.projectId,
+      },
+      { timeoutMs: 60_000 },
+    );
+  }
+
+  private async runRemoteGitMutation(
+    remoteScope: GpuiRemoteProjectScope,
+    startedTitle: string,
+    finishedTitle: string,
+    operation: () => Promise<void>,
+  ): Promise<boolean> {
+    const toastId = createGpuiGitToastId();
+    this.postGitToast("info", startedTitle, { persistent: true, toastId });
+    try {
+      await operation();
+      await this.refreshRemotePresentationFromGxserver(remoteScope.machineId).catch(() => undefined);
+      this.postGitToast("success", finishedTitle, { toastId });
+      return true;
+    } catch (error) {
+      this.postGitToast("error", `${startedTitle} failed`, {
+        description: gpuiUserVisibleGitErrorMessage(error, "Remote gxserver Git operation failed."),
+        toastId,
+      });
+      return false;
+    }
+  }
+
+  private postGitToast(
+    level: AppToastLevel,
+    title: string,
+    options: {
+      description?: string;
+      persistent?: boolean;
+      toastId?: string;
+    } = {},
+  ): void {
+    try {
+      postAppModalHostMessage(
+        createAppToastRequest(level, title, options.description, {
+          persistent: options.persistent,
+          toastId: options.toastId,
+        }),
+        "AppModals:gpuiGitToast",
+      );
+    } catch {
+      /*
+      CDXC:GPUISidebarGit 2026-06-24-15:22:
+      Git mutations and agent workflows must not depend on toast-host availability. Missing toast presentation is not a reason to fake success or skip gxserver-owned Git state changes.
+      */
+    }
+  }
+
+  private reconnectRemoteMachine(remoteMachineId: string, installApproved: boolean): void {
+    try {
+      postAppModalHostMessage(
+        {
+          installApproved,
+          remoteMachineId,
+          type: "reconnectRemoteMachine",
+        },
+        "GPUISidebarRemoteMachines:reconnect",
+      );
+      this.messageSource.postMessage({
+        machineId: remoteMachineId,
+        state: "connecting",
+        type: "remoteMachineStatus",
+      });
+    } catch {
+      this.postRemoteToast("warning", "Remote connect unavailable", {
+        description: "GPUI could not reach the native remote-machine bridge.",
+      });
+    }
+  }
+
+  private openRemoteCloneRepository(remoteMachineId: string): void {
+    /*
+    CDXC:RemoteClone 2026-06-24-19:35:
+    GPUI remote machine headers reuse the shared Clone Repository modal, but only after the selected machine has a live Rust-delivered gxserver presentation. The renderer may carry the saved machine id/name into the modal; clone preview, Git execution, project registration, and presentation refresh remain Rust/remote-gxserver owned.
+    */
+    const normalizedMachineId = remoteMachineId.trim();
+    if (!normalizedMachineId || !this.remotePresentations.has(normalizedMachineId)) {
+      this.postRemoteToast("warning", "Remote clone unavailable", {
+        description: "Reconnect the remote machine before cloning a repository.",
+      });
+      return;
+    }
+    try {
+      openAppModal({
+        modal: "addRepository",
+        remoteMachineId: normalizedMachineId,
+        remoteMachineName: this.remoteMachineName(normalizedMachineId) ?? "Remote",
+        type: "open",
+      });
+    } catch {
+      this.postRemoteToast("warning", "Remote clone unavailable", {
+        description: "GPUI could not open the shared Clone Repository modal.",
+      });
+    }
+  }
+
+  private requestRemoteGxserver<TResult = unknown>(
+    remoteMachineId: string,
+    path: GxserverEndpointPath,
+    params: Record<string, unknown>,
+    options: { timeoutMs?: number } = {},
+  ): Promise<TResult> {
+    const requestId = `remote-${Date.now().toString(36)}-${++this.remoteGxserverRequestSequence}`;
+    const timeoutMs = Math.min(Math.max(options.timeoutMs ?? 20_000, 1_000), 130_000);
+    return new Promise<TResult>((resolve, reject) => {
+      const timeoutId = window.setTimeout(() => {
+        this.pendingRemoteGxserverRequests.delete(requestId);
+        reject(new Error("Remote gxserver request timed out."));
+      }, timeoutMs + 2_000);
+      this.pendingRemoteGxserverRequests.set(requestId, {
+        reject,
+        resolve: (result) => resolve(result as TResult),
+        timeoutId,
+      });
+      try {
+        /*
+        CDXC:GPUIRemoteMachines 2026-06-24-17:19:
+        Response-capable remote sidebar RPCs still carry only a bounded request id plus the allowlisted endpoint params into Rust. Rust owns the live tunnel, token, endpoint allowlist, response sanitization, and presentation refresh; renderer code must not receive tokens, SSH details, command text, URLs, or raw daemon bodies.
+        */
+        postAppModalHostMessage(
+          {
+            params,
+            path,
+            remoteMachineId,
+            requestId,
+            timeoutMs,
+            type: "gpuiRemoteGxserverSidebarRequest",
+          },
+          "GPUISidebarRemoteMachines:request",
+        );
+      } catch (error) {
+        window.clearTimeout(timeoutId);
+        this.pendingRemoteGxserverRequests.delete(requestId);
+        reject(error instanceof Error ? error : new Error("Remote gxserver bridge failed."));
+      }
+    });
+  }
+
+  private resolveRemoteGxserverRequest(
+    event: GpuiSidebarRemoteGxserverResponseEvent,
+  ): void {
+    const pending = this.pendingRemoteGxserverRequests.get(event.requestId);
+    if (!pending) {
+      return;
+    }
+    window.clearTimeout(pending.timeoutId);
+    this.pendingRemoteGxserverRequests.delete(event.requestId);
+    if (event.ok) {
+      pending.resolve(event.result);
+      return;
+    }
+    pending.reject(new Error(event.error || "Remote gxserver request failed."));
+  }
+
+  private postRemoteGxserverSidebarRequest(
+    remoteMachineId: string,
+    path: GxserverEndpointPath,
+    params: Record<string, unknown>,
+  ): void {
+    try {
+      postAppModalHostMessage(
+        {
+          params,
+          path,
+          remoteMachineId,
+          type: "gpuiRemoteGxserverSidebarRequest",
+        },
+        "GPUISidebarRemoteMachines:request",
+      );
+    } catch {
+      this.postRemoteToast("warning", "Remote action unavailable", {
+        description: "GPUI could not reach the native remote gxserver bridge.",
+      });
+    }
+  }
+
+  private findRemotePresentationSession(reference: {
+    machineId: string;
+    projectId: string;
+    sessionId: string;
+  }): GxserverPresentationSession | undefined {
+    return this.remotePresentations
+      .get(reference.machineId)
+      ?.sessions.find(
+        (session) =>
+          session.projectId === reference.projectId &&
+          session.sessionId === reference.sessionId,
+      );
+  }
+
+  private postRemoteToast(
+    level: AppToastLevel,
+    title: string,
+    options: { description?: string } = {},
+  ): void {
+    try {
+      postAppModalHostMessage(
+        createAppToastRequest(level, title, options.description),
+        "GPUISidebarRemoteMachines:toast",
+      );
+    } catch {
+      /*
+      CDXC:GPUIRemoteMachines 2026-06-24-16:48:
+      Remote-machine operations must never depend on toast-host availability. If the shared app-modal toast bridge is missing, keep the native-owned request/status path honest and avoid logging payloads, SSH details, tokens, paths, daemon responses, or renderer contents.
+      */
+    }
+  }
+
+  private resolveRemotePresentationProjectScope(input: {
+    groupId?: string;
+    projectId?: string;
+    remoteMachineId?: string;
+  } | GpuiRemoteProjectReference): GpuiRemoteProjectScope | undefined {
+    const groupReference = "groupId" in input && input.groupId
+      ? parseGpuiRemotePresentationGroupId(input.groupId)
+      : undefined;
+    const projectReference = !groupReference && "projectId" in input && input.projectId
+      ? parseGpuiRemotePresentationProjectId(input.projectId)
+      : undefined;
+    const machineId =
+      groupReference?.machineId ??
+      projectReference?.machineId ??
+      ("remoteMachineId" in input ? input.remoteMachineId?.trim() : undefined) ??
+      ("machineId" in input ? input.machineId : undefined);
+    const projectId =
+      groupReference?.projectId ??
+      projectReference?.projectId ??
+      ("projectId" in input ? input.projectId?.trim() : undefined);
+    if (!machineId || !projectId) {
+      return undefined;
+    }
+    const presentation = this.remotePresentations.get(machineId);
+    const project = presentation?.projects.find((candidate) => candidate.projectId === projectId);
+    if (!project) {
+      return undefined;
+    }
+    return {
+      machineId,
+      machineName: this.remoteMachineName(machineId),
+      project,
+      projectId,
+    };
+  }
+
+  private findRemotePresentationProject(
+    reference: GpuiRemoteProjectReference,
+  ): GxserverPresentationProject | undefined {
+    return this.remotePresentations
+      .get(reference.machineId)
+      ?.projects.find((project) => project.projectId === reference.projectId);
+  }
+
+  private upsertRemotePresentationProject(
+    remoteMachineId: string,
+    nextProject: GxserverPresentationProject,
+  ): void {
+    const presentation = this.remotePresentations.get(remoteMachineId);
+    if (!presentation) {
+      return;
+    }
+    const existingIndex = presentation.projects.findIndex(
+      (project) => project.projectId === nextProject.projectId,
+    );
+    const projects =
+      existingIndex >= 0
+        ? presentation.projects.map((project, index) =>
+            index === existingIndex ? nextProject : project,
+          )
+        : [...presentation.projects, nextProject];
+    this.remotePresentations.set(remoteMachineId, {
+      ...presentation,
+      projects,
+    });
+  }
+
+  private removeRemotePresentationProject(remoteMachineId: string, projectId: string): void {
+    const presentation = this.remotePresentations.get(remoteMachineId);
+    if (!presentation) {
+      return;
+    }
+    this.remotePresentations.set(remoteMachineId, {
+      ...presentation,
+      groups: presentation.groups.filter((group) => group.projectId !== projectId),
+      projects: presentation.projects.filter((project) => project.projectId !== projectId),
+      sessions: presentation.sessions.filter((session) => session.projectId !== projectId),
+    });
+  }
+
+  private remoteMachineName(machineId: string): string | undefined {
+    return createGpuiSidebarSettings(this.runtimeSettings).remoteMachines
+      .find((machine) => machine.id === machineId)
+      ?.name;
+  }
+
+  private resolveRemoteWorktreeFamilyParentProjectFromPresentation(
+    sourceProject: GpuiRemoteProjectScope,
+  ): GpuiRemoteProjectScope | undefined {
+    const parentProjectId = normalizeGpuiWorktreeParentProjectId(sourceProject.project.worktree);
+    if (!parentProjectId) {
+      return sourceProject;
+    }
+    const parentProject = this.remotePresentations
+      .get(sourceProject.machineId)
+      ?.projects.find((project) => project.projectId === parentProjectId);
+    return parentProject
+      ? {
+          machineId: sourceProject.machineId,
+          machineName: sourceProject.machineName,
+          project: parentProject,
+          projectId: parentProject.projectId,
+      }
+      : undefined;
+  }
+
+  private isTrustedRemoteExistingWorktreeKey(
+    worktreeKey: string,
+    sourceProject: GpuiRemoteProjectScope,
+  ): boolean {
+    const trusted = this.trustedExistingWorktreeList;
+    return Boolean(
+      trusted &&
+        trusted.remoteMachineId === sourceProject.machineId &&
+        trusted.sourceProjectId === sourceProject.projectId &&
+        trusted.worktreeKeys?.has(worktreeKey.trim()),
+    );
+  }
+
+  private async resolveRemoteWorktreeMutationProject(
+    remoteMachineId: string,
+    project: GxserverPresentationProject | undefined,
+  ): Promise<GxserverPresentationProject> {
+    if (!project?.projectId) {
+      throw new Error("Remote gxserver did not return a worktree project.");
+    }
+    this.upsertRemotePresentationProject(remoteMachineId, project);
+    this.publishRemotePresentationPatch();
+    await this.refreshRemotePresentationFromGxserver(remoteMachineId).catch(() => undefined);
+    return (
+      this.findRemotePresentationProject({
+        machineId: remoteMachineId,
+        projectId: project.projectId,
+      }) ?? project
+    );
+  }
+
+  private async refreshRemotePresentationFromGxserver(remoteMachineId: string): Promise<void> {
+    const response = await this.requestRemoteGxserver<{ snapshot?: unknown }>(
+      remoteMachineId,
+      "/api/readPresentationSnapshot",
+      {},
+    );
+    if (isPresentationSnapshot(response.snapshot)) {
+      this.remotePresentations.set(remoteMachineId, response.snapshot);
+      this.publishPresentation("patch");
+    }
+  }
+
+  private async registerDomainProjectPath(
+    project: GxserverProjectDomainState,
+  ): Promise<GxserverProjectDomainState> {
+    const path = normalizeGpuiProjectPath(project.path);
+    if (!path) {
+      throw new Error("Project has no registered path.");
+    }
+    return this.registerProjectPath({
+      name: project.name || gpuiProjectNameFromPath(path),
+      path,
+    });
+  }
+
+  private async registerProjectPath(input: {
+    name: string;
+    path: string;
+  }): Promise<GxserverProjectDomainState> {
+    if (!this.client) {
+      throw new Error("gxserver is unavailable.");
+    }
+    const response = await this.client.rpc<{ project: GxserverProjectDomainState }>(
+      "/api/addProjectPath",
+      {
+        name: input.name,
+        path: input.path,
+      },
+    );
+    this.upsertDomainProject(response.project);
+    return response.project;
+  }
+
+  private async ensureWorktreeBeadsHooks(
+    project: GxserverProjectDomainState,
+  ): Promise<void> {
+    if (!this.client) {
+      throw new Error("gxserver is unavailable.");
+    }
+    const result = await this.client.rpc<GxserverTypedOperationResult>(
+      "/api/runWorktreeAction",
+      {
+        action: "ensureBeadsHooks",
+        projectId: project.projectId,
+      },
+    );
+    if (result.exitCode !== 0) {
+      throw new Error("Could not prepare Beads hooks for this worktree.");
+    }
+  }
+
+  private async runWorktreeSetupCommandIfConfigured(
+    worktreeProject: GxserverProjectDomainState,
+    setupCommandProject: GxserverProjectDomainState,
+  ): Promise<void> {
+    const setupCommand = stringFromRecord(setupCommandProject.gitConfig, "worktreeCommand");
+    if (!setupCommand || !this.client) {
+      return;
+    }
+    const result = await this.client.rpc<GxserverTypedOperationResult>(
+      "/api/runProjectSetupCommand",
+      {
+        action: "worktreeSetupCommand",
+        projectId: worktreeProject.projectId,
+        setupCommandProjectId: setupCommandProject.projectId,
+      },
+    );
+    if (result.exitCode !== 0) {
+      throw new Error("Worktree setup command failed.");
+    }
+  }
+
+  private async createAgentSessionForProject(
+    project: GxserverProjectDomainState,
+    agent: SidebarAgentButton,
+    prompt: string,
+    title = createAgentSessionDefaultTitle(agent.name),
+  ): Promise<void> {
+    if (!this.client) {
+      throw new Error("gxserver is unavailable.");
+    }
+    const response = await this.client.rpc<{
+      session?: { sessionId?: string };
+    }>("/api/createAgentSession", {
+      agentId: agent.agentId,
+      launchSettings: {
+        agentCommand: agent.command,
+        icon: agent.icon,
+      },
+      projectId: project.projectId,
+      runtimeSettings: {
+        firstUserMessage: prompt,
+      },
+      surface: "workspace",
+      title,
+    });
+    const sessionId = response.session?.sessionId?.trim();
+    if (!sessionId) {
+      throw new Error("Could not create an agent session in the worktree.");
+    }
+    this.setLocalPresentationSessionFocus(project.projectId, sessionId);
+  }
+
+  private async createRemoteAgentSessionForProject(
+    remoteScope: GpuiRemoteProjectReference,
+    agentId: string,
+    prompt: string,
+    title: string,
+  ): Promise<void> {
+    const response = await this.requestRemoteGxserver<GpuiGxserverCreatedSessionResult>(
+      remoteScope.machineId,
+      "/api/createAgentSession",
+      {
+        agentId,
+        projectId: remoteScope.projectId,
+        requireLaunchCommand: true,
+        runtimeSettings: {
+          firstUserMessage: prompt,
+        },
+        surface: "workspace",
+        title,
+      },
+      { timeoutMs: 20_000 },
+    );
+    const sessionId = normalizeNonEmptyString(response.session?.sessionId);
+    if (sessionId) {
+      this.setRemotePresentationSessionFocus({
+        machineId: remoteScope.machineId,
+        projectId: normalizeNonEmptyString(response.session?.projectId) ?? remoteScope.projectId,
+        sessionId,
+      });
+    }
+    await this.refreshRemotePresentationFromGxserver(remoteScope.machineId).catch(() => undefined);
+  }
+
+  private async resolveUniqueWorktreeTarget(
+    project: GxserverProjectDomainState,
+    prompt: string,
+  ): Promise<{ branch: string; name: string; path: string }> {
+    if (!this.client) {
+      throw new Error("gxserver is unavailable.");
+    }
+    const sourcePath = normalizeGpuiProjectPath(project.path);
+    if (!sourcePath) {
+      throw new Error("Project has no registered path.");
+    }
+    const parentDirectory = gpuiDirname(sourcePath);
+    const projectFolderName = gpuiProjectNameFromPath(sourcePath);
+    const baseSlug = gpuiWorktreeSlugFromPrompt(prompt);
+    const registeredPaths = new Set(
+      this.domainProjects
+        .map((candidate) => normalizeGpuiProjectPath(candidate.path))
+        .filter((path): path is string => Boolean(path)),
+    );
+    for (let index = 0; index < 50; index += 1) {
+      const name = index === 0 ? baseSlug : `${baseSlug}-${index + 1}`;
+      const branch = name;
+      const path = `${parentDirectory}/${projectFolderName}-${name}`;
+      const [branchCheck, pathCheck] = await Promise.all([
+        this.client.rpc<GxserverTypedOperationResult>("/api/runGitAction", {
+          action: "verifyRef",
+          projectId: project.projectId,
+          ref: `refs/heads/${branch}`,
+        }),
+        this.client.rpc<GxserverTypedOperationResult>("/api/runWorktreeAction", {
+          action: "pathExists",
+          projectId: project.projectId,
+          worktreePath: path,
+        }),
+      ]);
+      if (branchCheck.exitCode !== 0 && pathCheck.exitCode !== 0 && !registeredPaths.has(path)) {
+        return { branch, name, path };
+      }
+    }
+    throw new Error("Could not find an unused worktree name.");
+  }
+
+  private async saveSidebarAgent(
+    message: Extract<SidebarToExtensionMessage, { type: "saveSidebarAgent" }>,
+  ): Promise<void> {
+    const name = message.name.trim();
+    const command = message.command.trim();
+    if (!name || !command || !this.client || this.domainProjects.length === 0) {
+      return;
+    }
+    await this.mutateSidebarHudSettings({
+      acceptAllMode: message.acceptAllMode,
+      activeProjectId: this.activeProjectId,
+      agentId: message.agentId,
+      command,
+      icon: message.icon,
+      name,
+      operation: "save",
+      target: "agent",
+    });
+  }
+
+  private async deleteSidebarAgent(agentId: string): Promise<void> {
+    if (!this.client || this.domainProjects.length === 0) {
+      return;
+    }
+    await this.mutateSidebarHudSettings({
+      activeProjectId: this.activeProjectId,
+      agentId,
+      operation: "delete",
+      target: "agent",
+    });
+  }
+
+  private async syncSidebarAgentOrder(
+    requestId: string,
+    agentIds: readonly string[],
+  ): Promise<void> {
+    if (!this.client) {
+      return;
+    }
+    const result = await this.mutateSidebarHudSettings({
+      activeProjectId: this.activeProjectId,
+      agentIds,
+      operation: "order",
+      target: "agent",
+    });
+    this.messageSource.postMessage({
+      itemIds: result?.itemIds ?? [],
+      kind: "agent",
+      requestId,
+      status: "success",
+      type: "sidebarOrderSyncResult",
+    });
+  }
+
+  private async saveSidebarCommand(
+    message: Extract<SidebarToExtensionMessage, { type: "saveSidebarCommand" }>,
+  ): Promise<void> {
+    const project = this.activeDomainProject();
+    if (!project || !this.client) {
+      return;
+    }
+    const name = message.name.trim();
+    const command = message.command?.trim();
+    const url = message.url?.trim();
+    if (!name && !message.icon) {
+      return;
+    }
+    if (message.actionType === "browser" && !url) {
+      return;
+    }
+    if (message.actionType === "terminal" && !command) {
+      return;
+    }
+    await this.mutateSidebarHudSettings({
+      actionType: message.actionType,
+      activeProjectId: project.projectId,
+      closeTerminalOnExit: message.actionType === "terminal" ? message.closeTerminalOnExit : false,
+      command,
+      commandId: message.commandId,
+      icon: message.icon,
+      name,
+      playCompletionSound: message.actionType === "terminal" ? message.playCompletionSound : false,
+      operation: "save",
+      target: "command",
+      url,
+    });
+  }
+
+  private async deleteSidebarCommand(commandId: string): Promise<void> {
+    const project = this.activeDomainProject();
+    if (!project || !this.client) {
+      return;
+    }
+    await this.mutateSidebarHudSettings({
+      activeProjectId: project.projectId,
+      commandId,
+      operation: "delete",
+      target: "command",
+    });
+  }
+
+  private async syncSidebarCommandOrder(
+    requestId: string,
+    commandIds: readonly string[],
+  ): Promise<void> {
+    const project = this.activeDomainProject();
+    if (!project || !this.client) {
+      return;
+    }
+    const result = await this.mutateSidebarHudSettings({
+      activeProjectId: project.projectId,
+      commandIds,
+      operation: "order",
+      target: "command",
+    });
+    this.messageSource.postMessage({
+      itemIds: result?.itemIds ?? [],
+      kind: "command",
+      requestId,
+      status: "success",
+      type: "sidebarOrderSyncResult",
+    });
+  }
+
+  private async removeProject(projectId: string): Promise<void> {
+    const remoteReference = parseGpuiRemotePresentationProjectId(projectId);
+    if (remoteReference) {
+      await this.removeRemoteProject(remoteReference);
+      return;
+    }
+    if (!this.client) {
+      return;
+    }
+    await this.client.rpc("/api/removeProject", {
+      projectId,
+    });
+  }
+
+  private async restoreRecentProject(projectId: string): Promise<void> {
+    const remoteReference = parseGpuiRemotePresentationProjectId(projectId);
+    if (remoteReference) {
+      await this.restoreRemoteRecentProject(remoteReference);
+      return;
+    }
+    if (!this.client) {
+      return;
+    }
+    const response = await this.client.rpc<{
+      project?: GxserverProjectDomainState;
+      recentProjects: GxserverRecentProjectDomainState[];
+    }>("/api/restoreRecentProject", {
+      projectId,
+    });
+    if (response.project) {
+      this.upsertDomainProject(response.project);
+    }
+    this.recentProjects = [...response.recentProjects];
+    this.publishHudPatch();
+  }
+
+  private async removeRecentProject(projectId: string): Promise<void> {
+    const remoteReference = parseGpuiRemotePresentationProjectId(projectId);
+    if (remoteReference) {
+      await this.removeRemoteRecentProject(remoteReference);
+      return;
+    }
+    if (!this.client) {
+      return;
+    }
+    const response = await this.client.rpc<{
+      recentProjects: GxserverRecentProjectDomainState[];
+    }>("/api/removeRecentProject", {
+      projectId,
+    });
+    this.domainProjects = this.domainProjects.filter(
+      (project) => project.projectId !== projectId,
+    );
+    this.recentProjects = [...response.recentProjects];
+    this.publishHudPatch();
+  }
+
+  private async closeRemoteProjectForGroup(
+    remoteScope: GpuiRemoteProjectScope,
+    groupId: string,
+  ): Promise<void> {
+    /*
+    CDXC:GPUIRemoteProjects 2026-06-24-18:22:
+    Remote project Close must park the project through the owning remote gxserver `/api/closeProjectToRecent` endpoint. GPUI sends only the selected machine id and gxserver project id, then displays gxserver's recent list; it never creates local fake recent rows from project labels, paths, or session counts.
+    */
+    try {
+      const response = await this.requestRemoteGxserver<{
+        recentProjects?: GxserverRecentProjectDomainState[];
+      }>(remoteScope.machineId, "/api/closeProjectToRecent", {
+        projectId: remoteScope.projectId,
+      });
+      this.removeRemotePresentationProject(remoteScope.machineId, remoteScope.projectId);
+      if (this.activeGroupId === groupId) {
+        this.activeGroupId = undefined;
+      }
+      this.remoteRecentProjectsByMachineId.set(
+        remoteScope.machineId,
+        Array.isArray(response.recentProjects) ? [...response.recentProjects] : [],
+      );
+      this.publishRemotePresentationPatch();
+    } catch {
+      this.postRemoteToast("warning", "Remote project close failed", {
+        description: "The remote gxserver could not close that project.",
+      });
+    }
+  }
+
+  private async restoreRemoteRecentProject(
+    remoteReference: GpuiRemoteProjectReference,
+  ): Promise<void> {
+    try {
+      const response = await this.requestRemoteGxserver<{
+        project?: GxserverPresentationProject;
+        recentProjects?: GxserverRecentProjectDomainState[];
+      }>(remoteReference.machineId, "/api/restoreRecentProject", {
+        projectId: remoteReference.projectId,
+      });
+      if (response.project) {
+        this.upsertRemotePresentationProject(remoteReference.machineId, response.project);
+      }
+      this.remoteRecentProjectsByMachineId.set(
+        remoteReference.machineId,
+        Array.isArray(response.recentProjects) ? [...response.recentProjects] : [],
+      );
+      this.activeGroupId = createGpuiRemotePresentationGroupId(
+        remoteReference.machineId,
+        remoteReference.projectId,
+      );
+      await this.refreshRemotePresentationFromGxserver(remoteReference.machineId).catch(() => undefined);
+      this.publishRemotePresentationPatch();
+    } catch {
+      this.postRemoteToast("warning", "Remote project restore failed", {
+        description: "Reconnect the remote machine before restoring that project.",
+      });
+    }
+  }
+
+  private async removeRemoteRecentProject(
+    remoteReference: GpuiRemoteProjectReference,
+  ): Promise<void> {
+    try {
+      const response = await this.requestRemoteGxserver<{
+        recentProjects?: GxserverRecentProjectDomainState[];
+      }>(remoteReference.machineId, "/api/removeRecentProject", {
+        projectId: remoteReference.projectId,
+      });
+      this.remoteRecentProjectsByMachineId.set(
+        remoteReference.machineId,
+        Array.isArray(response.recentProjects) ? [...response.recentProjects] : [],
+      );
+      this.removeRemotePresentationProject(remoteReference.machineId, remoteReference.projectId);
+      this.publishRemotePresentationPatch();
+    } catch {
+      this.postRemoteToast("warning", "Remote project removal failed", {
+        description: "The remote gxserver could not remove that recent project.",
+      });
+    }
+  }
+
+  private async removeRemoteProject(remoteReference: GpuiRemoteProjectReference): Promise<void> {
+    try {
+      await this.requestRemoteGxserver(remoteReference.machineId, "/api/removeProject", {
+        projectId: remoteReference.projectId,
+      });
+      this.removeRemotePresentationProject(remoteReference.machineId, remoteReference.projectId);
+      this.remoteRecentProjectsByMachineId.set(
+        remoteReference.machineId,
+        (this.remoteRecentProjectsByMachineId.get(remoteReference.machineId) ?? []).filter(
+          (project) => project.projectId !== remoteReference.projectId,
+        ),
+      );
+      this.publishRemotePresentationPatch();
+    } catch {
+      this.postRemoteToast("warning", "Remote project removal failed", {
+        description: "The remote gxserver could not remove that project.",
+      });
+    }
+  }
+
+  private async closeProjectForGroup(groupId: string): Promise<void> {
+    const remoteScope = this.resolveRemotePresentationProjectScope({ groupId });
+    if (parseGpuiRemotePresentationGroupId(groupId)) {
+      if (!remoteScope) {
+        this.postRemoteToast("warning", "Remote project close unavailable", {
+          description: "Reconnect the remote machine before closing the project.",
+        });
+        return;
+      }
+      await this.closeRemoteProjectForGroup(remoteScope, groupId);
+      return;
+    }
+    if (!this.client) {
+      return;
+    }
+    const projectId = this.resolveProjectIdForGroup(groupId);
+    if (!projectId) {
+      return;
+    }
+    /*
+    CDXC:GPUIRecentProjects 2026-06-24-12:38:
+    GPUI reuses SidebarApp's macOS close/remove split. Close must call the gxserver park endpoint with the project id resolved from the live presentation group, then consume gxserver's authoritative parked row; never synthesize a Recent Project row or map Close to hard delete when resolution or the daemon mutation fails.
+    */
+    const response = await this.client.rpc<{
+      project: GxserverProjectDomainState;
+      recentProjects: GxserverRecentProjectDomainState[];
+    }>("/api/closeProjectToRecent", {
+      projectId,
+    });
+    this.upsertDomainProject(response.project);
+    this.recentProjects = [...response.recentProjects];
+    this.publishHudPatch();
+  }
+
+  private async removeProjectForGroup(groupId: string): Promise<void> {
+    const remoteScope = this.resolveRemotePresentationProjectScope({ groupId });
+    if (parseGpuiRemotePresentationGroupId(groupId)) {
+      if (!remoteScope) {
+        this.postRemoteToast("warning", "Remote project removal unavailable", {
+          description: "Reconnect the remote machine before removing the project.",
+        });
+        return;
+      }
+      await this.removeRemoteProject(remoteScope);
+      return;
+    }
+    const projectId = parseGxserverPresentationProjectGroupId(groupId);
+    if (projectId) {
+      await this.removeProject(projectId);
+    }
+  }
+
+  private resolveProjectIdForGroup(groupId: string): string | undefined {
+    if (parseGpuiRemotePresentationGroupId(groupId)) {
+      return undefined;
+    }
+    const projectId = parseGxserverPresentationProjectGroupId(groupId);
+    if (!projectId) {
+      return undefined;
+    }
+    const group = this.latestGroups.find((candidate) => candidate.groupId === groupId);
+    if (group?.projectContext) {
+      return projectId;
+    }
+    return undefined;
+  }
+
+  private postProjectPathActionForGroup(
+    action: Extract<
+      GpuiSidebarNativeProjectPathAction,
+      "copyWorkspaceProjectPath" | "openWorkspaceProjectInFinder" | "openWorkspaceProjectInIde"
+    >,
+    groupId: string,
+    originalMessage: SidebarToExtensionMessage,
+  ): void {
+    const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
+    if (remoteGroup) {
+      if (action === "copyWorkspaceProjectPath") {
+        this.postRemoteProjectNativeAction("copyRemoteProjectPath", remoteGroup, originalMessage);
+        return;
+      }
+      if (action === "openWorkspaceProjectInIde") {
+        this.postRemoteProjectNativeAction(
+          "openRemoteWorkspaceProjectInIde",
+          remoteGroup,
+          originalMessage,
+        );
+        return;
+      }
+      this.postRemoteToast("warning", "Remote project open unavailable", {
+        description: "GPUI does not open remote project paths in local Finder.",
+      });
+      return;
+    }
+    const projectId = this.resolveProjectIdForGroup(groupId);
+    if (!projectId) {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+      return;
+    }
+    this.postNativeProjectPathAction(action, projectId, originalMessage);
+  }
+
+  private postActiveProjectPathAction(
+    action: Extract<
+      GpuiSidebarNativeProjectPathAction,
+      | "openActiveWorkspaceProjectInFinder"
+      | "openActiveWorkspaceProjectInVscode"
+      | "openActiveWorkspaceProjectInZed"
+    >,
+    originalMessage: SidebarToExtensionMessage,
+  ): void {
+    const remoteGroup = this.activeGroupId
+      ? parseGpuiRemotePresentationGroupId(this.activeGroupId)
+      : undefined;
+    if (remoteGroup) {
+      if (action === "openActiveWorkspaceProjectInVscode") {
+        this.postRemoteProjectNativeAction(
+          "openRemoteWorkspaceProjectInVscode",
+          remoteGroup,
+          originalMessage,
+        );
+        return;
+      }
+      if (action === "openActiveWorkspaceProjectInZed") {
+        this.postRemoteProjectNativeAction(
+          "openRemoteWorkspaceProjectInZed",
+          remoteGroup,
+          originalMessage,
+        );
+        return;
+      }
+      this.postRemoteToast("warning", "Remote project open unavailable", {
+        description:
+          action === "openActiveWorkspaceProjectInFinder"
+            ? "GPUI does not open remote project paths in local Finder."
+            : "That editor is not supported for GPUI remote project opens.",
+      });
+      return;
+    }
+    const projectId = this.activeProjectId;
+    if (!projectId || !this.domainProjectById(projectId)) {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+      return;
+    }
+    this.postNativeProjectPathAction(action, projectId, originalMessage);
+  }
+
+  private selectRemoteGroupAttachTarget(
+    reference: GpuiRemoteProjectReference,
+  ): { machineId: string; projectId: string; sessionId: string } | undefined {
+    const presentation = this.remotePresentations.get(reference.machineId);
+    const session = (presentation?.sessions ?? [])
+      .filter((candidate) =>
+        candidate.projectId === reference.projectId &&
+        (candidate.kind === "terminal" || candidate.kind === "agent"),
+      )
+      .sort(compareGpuiRemoteAttachCandidateSessions)[0];
+    return session
+      ? {
+          machineId: reference.machineId,
+          projectId: reference.projectId,
+          sessionId: session.sessionId,
+        }
+      : undefined;
+  }
+
+  private postRemoteSessionNativeAction(
+    action: Extract<
+      GpuiSidebarNativeProjectPathAction,
+      "openRemoteSessionTerminal" | "copyRemoteAttachCommand" | "copyRemoteResumeCommand"
+    >,
+    reference: { machineId: string; projectId: string; sessionId: string },
+    originalMessage: SidebarToExtensionMessage,
+  ): boolean {
+    return this.postNativeProjectPathAction(
+      action,
+      createGpuiRemotePresentationSessionId(
+        reference.machineId,
+        reference.projectId,
+        reference.sessionId,
+      ),
+      originalMessage,
+    );
+  }
+
+  private postRemoteProjectNativeAction(
+    action: Extract<
+      GpuiSidebarNativeProjectPathAction,
+      | "copyRemoteProjectPath"
+      | "openRemoteWorkspaceProjectInIde"
+      | "openRemoteWorkspaceProjectInVscode"
+      | "openRemoteWorkspaceProjectInZed"
+      | "openRemoteExistingPullRequestInBrowser"
+      | "openRemoteSidebarGitChangedFileInIde"
+    >,
+    reference: GpuiRemoteProjectReference,
+    originalMessage: SidebarToExtensionMessage,
+    options: { filePath?: string } = {},
+  ): boolean {
+    return this.postNativeProjectPathAction(
+      action,
+      createGpuiRemotePresentationProjectId(reference.machineId, reference.projectId),
+      originalMessage,
+      options,
+    );
+  }
+
+  private postNativeProjectPathAction(
+    action: GpuiSidebarNativeProjectPathAction,
+    projectId: string,
+    originalMessage: SidebarToExtensionMessage,
+    options: { filePath?: string } = {},
+  ): boolean {
+    const normalizedProjectId = projectId.trim();
+    if (!normalizedProjectId) {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+      return false;
+    }
+    const bridge = window.ghostexGpui?.postNativeProjectPathAction;
+    if (!bridge) {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+      return false;
+    }
+    const payload = JSON.stringify({
+      action,
+      ...(options.filePath ? { filePath: options.filePath } : {}),
+      projectId: normalizedProjectId,
+      type: GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE,
+      version: GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION,
+    });
+    try {
+      if (!bridge(payload)) {
+        this.handleUnsupportedSidebarMessage(originalMessage);
+        return false;
+      }
+      return true;
+    } catch {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+      return false;
+    }
+  }
+
+  private focusProjectId(projectId: string): void {
+    const normalizedProjectId = normalizeNonEmptyString(projectId);
+    if (!normalizedProjectId) {
+      return;
+    }
+    this.activeProjectId = normalizedProjectId;
+    this.activeGroupId = this.isGpuiPresentationChatProjectId(normalizedProjectId)
+      ? GPUI_GXSERVER_CHATS_GROUP_ID
+      : createGxserverPresentationProjectGroupId(normalizedProjectId);
+    this.refreshSidebarHudFromClient();
+  }
+
+  private setLocalPresentationSessionFocus(projectId: string, sessionId: string): void {
+    const normalizedProjectId = normalizeNonEmptyString(projectId);
+    const normalizedSessionId = normalizeNonEmptyString(sessionId);
+    if (!normalizedProjectId || !normalizedSessionId) {
+      return;
+    }
+    this.activeProjectId = normalizedProjectId;
+    this.activeGroupId = this.isGpuiPresentationChatProjectId(normalizedProjectId)
+      ? GPUI_GXSERVER_CHATS_GROUP_ID
+      : createGxserverPresentationProjectGroupId(normalizedProjectId);
+    this.refreshSidebarHudFromClient();
+    this.focusedSessionId = normalizedSessionId;
+    this.visibleSessionIds = new Set([normalizedSessionId]);
+    this.postGxserverPresentationFocusState();
+  }
+
+  private isGpuiPresentationChatProjectId(projectId: string): boolean {
+    return isGpuiPresentationChatDomainProject(this.domainProjectById(projectId)) ||
+      isGpuiPresentationChatProjectPath(
+        this.presentation?.projects.find((project) => project.projectId === projectId)?.path,
+      );
+  }
+
+  private setRemotePresentationSessionFocus(reference: {
+    machineId: string;
+    projectId: string;
+    sessionId: string;
+  }): void {
+    const machineId = normalizeNonEmptyString(reference.machineId);
+    const projectId = normalizeNonEmptyString(reference.projectId);
+    const sessionId = normalizeNonEmptyString(reference.sessionId);
+    if (!machineId || !projectId || !sessionId) {
+      return;
+    }
+    const scopedSessionId = createGpuiRemotePresentationSessionId(machineId, projectId, sessionId);
+    this.activeGroupId = createGpuiRemotePresentationGroupId(machineId, projectId);
+    this.focusedSessionId = scopedSessionId;
+    this.visibleSessionIds = new Set([scopedSessionId]);
+    this.postGxserverPresentationFocusState();
+  }
+
+  private dropLocalPresentationSessionFocus(): void {
+    if (this.focusedSessionId && !parseGpuiRemotePresentationSessionId(this.focusedSessionId)) {
+      this.focusedSessionId = undefined;
+    }
+    this.visibleSessionIds = new Set(
+      [...this.visibleSessionIds].filter((sessionId) =>
+        Boolean(parseGpuiRemotePresentationSessionId(sessionId)),
+      ),
+    );
+  }
+
+  private dropRemotePresentationSessionFocus(machineId: string): void {
+    if (
+      this.focusedSessionId &&
+      parseGpuiRemotePresentationSessionId(this.focusedSessionId)?.machineId === machineId
+    ) {
+      this.focusedSessionId = undefined;
+    }
+    this.visibleSessionIds = new Set(
+      [...this.visibleSessionIds].filter(
+        (sessionId) => parseGpuiRemotePresentationSessionId(sessionId)?.machineId !== machineId,
+      ),
+    );
+  }
+
+  private activeDomainProject(): GxserverProjectDomainState | undefined {
+    return this.activeProjectId
+      ? this.domainProjectById(this.activeProjectId)
+      : this.domainProjects.find(
+          (project) =>
+            project.isRecentProject !== true &&
+            !isGpuiPresentationQuickDomainProject(project),
+        );
+  }
+
+  private domainProjectById(projectId: string): GxserverProjectDomainState | undefined {
+    return this.domainProjects.find((project) => project.projectId === projectId);
+  }
+
+  private resolveDomainProjectScope(scope: {
+    projectId?: string;
+    projectPath?: string;
+  }): GxserverProjectDomainState | undefined {
+    if (scope.projectId) {
+      const byId = this.domainProjectById(scope.projectId);
+      if (byId) {
+        return byId;
+      }
+    }
+    const normalizedPath = normalizeGpuiProjectPath(scope.projectPath);
+    if (!normalizedPath) {
+      return undefined;
+    }
+    return this.domainProjects.find(
+      (project) => normalizeGpuiProjectPath(project.path) === normalizedPath,
+    );
+  }
+
+  private resolveWorktreeFamilyParentProject(
+    project: GxserverProjectDomainState,
+  ): GxserverProjectDomainState | undefined {
+    const parentProjectId = normalizeGpuiWorktreeParentProjectId(project.worktree);
+    return parentProjectId ? this.domainProjectById(parentProjectId) : project;
+  }
+
+  private isTrustedExistingWorktreePath(
+    path: string,
+    sourceProject: GxserverProjectDomainState,
+    parentProject: GxserverProjectDomainState,
+  ): boolean {
+    const trusted = this.trustedExistingWorktreeList;
+    return Boolean(
+      trusted &&
+        trusted.sourceProjectId === sourceProject.projectId &&
+        trusted.parentProjectId === parentProject.projectId &&
+        trusted.paths.has(path),
+    );
+  }
+
+  private resolveSidebarAgent(agentId: string): SidebarAgentButton | undefined {
+    const normalizedAgentId = agentId.trim();
+    if (!normalizedAgentId) {
+      return undefined;
+    }
+    const agents = this.sidebarHud
+      ? ([...this.sidebarHud.agents] as SidebarAgentButton[])
+      : createSidebarAgentButtons([], []);
+    return agents.find(
+      (agent) => agent.agentId === normalizedAgentId,
+    );
+  }
+
+  private async mutateSidebarHudSettings(
+    params: GxserverSidebarHudSettingsMutationParams,
+  ): Promise<GxserverSidebarHudSettingsMutationResult | undefined> {
+    const client = this.client;
+    if (!client) {
+      return undefined;
+    }
+    /*
+     * CDXC:SidebarHudSettingsMutation 2026-06-24-20:54:
+     * GPUI SidebarApp forwards Settings agent/action save, delete, and order
+     * intents to gxserver instead of normalizing custom project metadata in the
+     * renderer. Apply the returned canonical project rows and HUD projection so
+     * Settings rows and sidebar buttons refresh from the same daemon contract.
+     */
+    const response = await client.mutateSidebarHudSettings(params);
+    if (this.client !== client) {
+      return undefined;
+    }
+    for (const project of response.projects) {
+      this.upsertDomainProject(project);
+    }
+    this.sidebarHud = response.hud;
+    this.publishHudPatch();
+    return response;
+  }
+
+  private async updateProjectDomainState(
+    projectId: string,
+    params: Record<string, unknown>,
+  ): Promise<GxserverProjectDomainState | undefined> {
+    if (!this.client) {
+      return undefined;
+    }
+    const response = await this.client.rpc<{ project: GxserverProjectDomainState }>(
+      "/api/updateProject",
+      {
+        ...params,
+        projectId,
+      },
+    );
+    this.upsertDomainProject(response.project);
+    this.publishHudPatch();
+    this.refreshSidebarHudFromClient();
+    return response.project;
+  }
+
+  private upsertDomainProject(nextProject: GxserverProjectDomainState): void {
+    const existingIndex = this.domainProjects.findIndex(
+      (project) => project.projectId === nextProject.projectId,
+    );
+    this.domainProjects =
+      existingIndex >= 0
+        ? this.domainProjects.map((project, index) =>
+            index === existingIndex ? nextProject : project,
+          )
+        : [...this.domainProjects, nextProject];
+  }
+
+  private async refreshDomainPresentationFromClient(
+    kind: GpuiSidebarRuntimeSnapshotKind,
+  ): Promise<void> {
+    const client = this.client;
+    if (!client) {
+      return;
+    }
+    const [snapshot, domainProjects, recentProjects] = await Promise.all([
+      client.fetchPresentationSnapshot(),
+      client.fetchProjectList(),
+      client.fetchRecentProjects().catch(() => this.recentProjects),
+    ]);
+    if (this.client !== client) {
+      return;
+    }
+    this.domainProjects = [...domainProjects];
+    this.recentProjects = [...recentProjects];
+    this.applyPresentationSnapshot(snapshot, kind);
+  }
+
+  private postWorktreeToast(
+    level: AppToastLevel,
+    title: string,
+    options: {
+      description?: string;
+      persistent?: boolean;
+      toastId?: string;
+    } = {},
+  ): void {
+    try {
+      postAppModalHostMessage(
+        createAppToastRequest(level, title, options.description, {
+          persistent: options.persistent,
+          toastId: options.toastId,
+        }),
+        "AppModals:gpuiWorktreeToast",
+      );
+    } catch {
+      /*
+      CDXC:GPUIWorktrees 2026-06-24-18:21:
+      Worktree mutations should still run when the toast host is unavailable.
+      The missing toast bridge is a presentation problem, while gxserver remains
+      the production owner for Git, setup, Beads hook, and agent-session state.
+      */
+    }
+  }
+
+  private openAppModal(
+    modal: "firstLaunchSetup" | "settings" | "watchGhostexVideo",
+  ): void {
+    /*
+    CDXC:GPUISidebarAppModalBridge 2026-06-24-11:40:
+    Sidebar-origin Settings, first-launch welcome, and tutorial-video requests in GPUI must use the shared app-modal host bridge installed by the CEF sidebar surface. Do not fork Settings React UI, duplicate modal state, or route these first-party modals through fixture/sidebar-only alternate paths.
+    */
+    try {
+      openAppModal({ modal, type: "open" });
+    } catch {
+      this.handleUnsupportedSidebarMessage({ type: "openSettings" });
+    }
+  }
+
+  private async saveScratchPad(content: string): Promise<void> {
+    const client = this.client;
+    if (!client) {
+      return;
+    }
+    this.appUserData = await client.saveScratchPad(content);
+    this.publishAppUserDataHydrate();
+  }
+
+  private async savePinnedPrompt(
+    message: Extract<SidebarToExtensionMessage, { type: "savePinnedPrompt" }>,
+  ): Promise<void> {
+    const client = this.client;
+    if (!client) {
+      return;
+    }
+    this.appUserData = await client.savePinnedPrompt({
+      content: message.content,
+      promptId: message.promptId,
+      title: message.title,
+    });
+    this.publishAppUserDataHydrate();
+  }
+
+  private publishAppUserDataHydrate(): void {
+    if (!this.hasHydrated) {
+      return;
+    }
+    this.messageSource.postMessage(
+      this.createHydrateMessage(this.latestGroups, this.latestHud),
+    );
+  }
+
+  private patchPresentationSession(
+    projectId: string,
+    sessionId: string,
+    patch: Partial<GxserverPresentationSnapshot["sessions"][number]>,
+  ): void {
+    const presentation = this.presentation;
+    const session = presentation?.sessions.find(
+      (candidate) => candidate.projectId === projectId && candidate.sessionId === sessionId,
+    );
+    if (!presentation || !session) {
+      return;
+    }
+    this.presentation = reduceGxserverPresentationDelta(
+      presentation,
+      {
+        session: {
+          ...session,
+          ...patch,
+        },
+        type: "sessionUpdated",
+      },
+      presentation.revision + 1,
+    );
+    this.publishPresentation("patch");
+  }
+
+  private removePresentationSession(projectId: string, sessionId: string): void {
+    const presentation = this.presentation;
+    if (!presentation) {
+      return;
+    }
+    this.presentation = reduceGxserverPresentationDelta(
+      presentation,
+      {
+        projectId: projectId as GxserverProjectId,
+        sessionId: sessionId as GxserverSessionId,
+        type: "sessionRemoved",
+      },
+      presentation.revision + 1,
+    );
+    this.publishPresentation("patch");
+  }
+
+  private handleUnsupportedSidebarMessage(_message: SidebarToExtensionMessage): void {
+    /*
+    CDXC:GPUISidebarGxserverRuntime 2026-06-24-11:00:
+    GPUI command parity is intentionally incremental. Unsupported SidebarApp messages must be explicit no-ops in this adapter instead of mutating fixture state, inventing host behavior, logging user content, or pretending native-only Browser/Git/settings/chrome actions succeeded.
+    */
+  }
+}
+
+class GpuiGxserverClient {
+  constructor(private readonly bootstrap: GpuiValidatedGxserverBootstrap) {}
+
+  async fetchPresentationSnapshot(): Promise<GxserverPresentationSnapshot> {
+    const { snapshot } = await this.rpc<{ snapshot: GxserverPresentationSnapshot }>(
+      "/api/readPresentationSnapshot",
+    );
+    return snapshot;
+  }
+
+  async fetchProjectList(): Promise<GxserverProjectDomainState[]> {
+    const { projects } = await this.rpc<{ projects: GxserverProjectDomainState[] }>(
+      "/api/listProjects",
+    );
+    return projects;
+  }
+
+  async fetchRecentProjects(): Promise<GxserverRecentProjectDomainState[]> {
+    const { recentProjects } = await this.rpc<{
+      recentProjects: GxserverRecentProjectDomainState[];
+    }>("/api/listRecentProjects");
+    return recentProjects;
+  }
+
+  async fetchSidebarHud(activeProjectId: string | undefined): Promise<GxserverSidebarHudResponse> {
+    const normalizedActiveProjectId = activeProjectId?.trim();
+    return this.rpc<GxserverSidebarHudResponse>(
+      "/api/readSidebarHud",
+      normalizedActiveProjectId ? { activeProjectId: normalizedActiveProjectId } : {},
+    );
+  }
+
+  async mutateSidebarHudSettings(
+    params: GxserverSidebarHudSettingsMutationParams,
+  ): Promise<GxserverSidebarHudSettingsMutationResult> {
+    return this.rpc<GxserverSidebarHudSettingsMutationResult>(
+      "/api/mutateSidebarHudSettings",
+      params,
+    );
+  }
+
+  async fetchAppUserData(): Promise<GxserverAppUserData> {
+    return this.rpc<GxserverAppUserData>("/api/readAppUserData");
+  }
+
+  async saveScratchPad(content: string): Promise<GxserverAppUserData> {
+    return this.rpc<GxserverAppUserData>("/api/saveScratchPad", { content });
+  }
+
+  async savePinnedPrompt(params: {
+    content: string;
+    promptId?: string;
+    title: string;
+  }): Promise<GxserverAppUserData> {
+    return this.rpc<GxserverAppUserData>("/api/savePinnedPrompt", params);
+  }
+
+  async rpc<TResult>(
+    path: GxserverEndpointPath,
+    params: Record<string, unknown> = {},
+  ): Promise<TResult> {
+    const response = await fetch(`${this.bootstrap.baseUrl}${path}`, {
+      body: JSON.stringify({
+        params,
+        protocolVersion: GXSERVER_PROTOCOL_VERSION,
+      }),
+      headers: {
+        authorization: `Bearer ${this.bootstrap.authToken}`,
+        "content-type": "application/json",
+        "x-gxserver-protocol-version": String(GXSERVER_PROTOCOL_VERSION),
+      },
+      method: "POST",
+    });
+    const body = await readJson(response);
+    if (!response.ok || !isGxserverRpcSuccess<TResult>(body)) {
+      throw new Error("gxserver RPC failed.");
+    }
+    if (body.protocolVersion !== GXSERVER_PROTOCOL_VERSION) {
+      throw new Error("gxserver protocol mismatch.");
+    }
+    return body.result;
+  }
+
+  subscribePresentation({
+    clientId,
+    lastRevision,
+    onClose,
+    onDelta,
+    onError,
+    onSnapshot,
+  }: {
+    clientId: string;
+    lastRevision: number;
+    onClose: () => void;
+    onDelta: (delta: GxserverPresentationDelta, revision: number) => void;
+    onError: () => void;
+    onSnapshot: (snapshot: GxserverPresentationSnapshot) => void;
+  }): GpuiPresentationSubscription {
+    const url = new URL(`${this.bootstrap.baseUrl}/api/events`);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.searchParams.set("protocolVersion", String(GXSERVER_PROTOCOL_VERSION));
+    url.searchParams.set("authToken", this.bootstrap.authToken);
+
+    const socket = new WebSocket(url.toString());
+    let closedByClient = false;
+    socket.addEventListener("open", () => {
+      socket.send(JSON.stringify({
+        clientId,
+        lastRevision,
+        type: "subscribePresentation",
+      }));
+    });
+    socket.addEventListener("message", (event) => {
+      const message = parseObject(event.data);
+      if (!message) {
+        return;
+      }
+      if (message.type === "presentationSnapshot" && isPresentationSnapshot(message.snapshot)) {
+        onSnapshot(message.snapshot);
+        return;
+      }
+      if (
+        message.type === "presentationDelta" &&
+        typeof message.revision === "number" &&
+        isPresentationDelta(message.delta)
+      ) {
+        onDelta(message.delta, message.revision);
+      }
+    });
+    socket.addEventListener("error", () => {
+      onError();
+    });
+    socket.addEventListener("close", () => {
+      if (!closedByClient) {
+        onClose();
+      }
+    });
+    return {
+      close: () => {
+        closedByClient = true;
+        socket.close();
+      },
+    };
+  }
+}
+
+type GpuiPresentationSubscription = {
+  close: () => void;
+};
+
+function validateGpuiGxserverBootstrap(
+  bootstrap: GpuiGxserverBootstrap,
+): GpuiValidatedGxserverBootstrap | undefined {
+  if (
+    bootstrap.protocolVersion !== undefined &&
+    bootstrap.protocolVersion !== GXSERVER_PROTOCOL_VERSION
+  ) {
+    return undefined;
+  }
+  if (typeof bootstrap.baseUrl !== "string" || bootstrap.baseUrl.trim().length === 0) {
+    return undefined;
+  }
+  if (typeof bootstrap.authToken !== "string" || bootstrap.authToken.trim().length === 0) {
+    return undefined;
+  }
+  try {
+    const baseUrl = new URL(bootstrap.baseUrl);
+    return {
+      authToken: bootstrap.authToken,
+      baseUrl: baseUrl.toString().replace(/\/$/u, ""),
+      clientId: normalizeNonEmptyString(bootstrap.clientId) ?? GPUI_SIDEBAR_DEFAULT_CLIENT_ID,
+      focusedSessionId: normalizeNonEmptyString(bootstrap.focusedSessionId),
+      initialActiveProjectId: normalizeNonEmptyString(bootstrap.initialActiveProjectId),
+      visibleSessionIds: uniqueNonEmptyStrings(bootstrap.visibleSessionIds),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function hasSameGpuiGxserverBootstrapTransport(
+  left: GpuiValidatedGxserverBootstrap,
+  right: GpuiValidatedGxserverBootstrap,
+): boolean {
+  return (
+    left.authToken === right.authToken &&
+    left.baseUrl === right.baseUrl &&
+    left.clientId === right.clientId
+  );
+}
+
+function activeGroupIdForGpuiGxserverBootstrapPresentationState({
+  focusedSessionId,
+  initialActiveProjectId,
+}: Pick<GpuiValidatedGxserverBootstrap, "focusedSessionId" | "initialActiveProjectId">): string | undefined {
+  const remoteSession = focusedSessionId
+    ? parseGpuiRemotePresentationSessionId(focusedSessionId)
+    : undefined;
+  if (remoteSession) {
+    return createGpuiRemotePresentationGroupId(remoteSession.machineId, remoteSession.projectId);
+  }
+  return initialActiveProjectId
+    ? createGxserverPresentationProjectGroupId(initialActiveProjectId)
+    : undefined;
+}
+
+function uniqueNonEmptyStrings(values: readonly unknown[] | undefined): readonly string[] | undefined {
+  if (!Array.isArray(values)) {
+    return undefined;
+  }
+  return [...new Set(values.flatMap((value) => {
+    const normalized = typeof value === "string" ? normalizeNonEmptyString(value) : undefined;
+    return normalized ? [normalized] : [];
+  }))];
+}
+
+function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const value of left) {
+    if (!right.has(value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function createGpuiSidebarHudState({
+  domainProjects = [],
+  focusedSessionId,
+  git,
+  groups = [],
+  presentation,
+  recentProjects = [],
+  remoteRecentProjectsByMachineId,
+  runtimeSettings,
+  sidebarHud,
+}: {
+  domainProjects?: readonly GxserverProjectDomainState[];
+  focusedSessionId?: string;
+  git?: SidebarGitState;
+  groups?: readonly SidebarSessionGroup[];
+  presentation?: GxserverPresentationSnapshot;
+  recentProjects?: readonly GxserverRecentProjectDomainState[];
+  remoteRecentProjectsByMachineId?: ReadonlyMap<string, readonly GxserverRecentProjectDomainState[]>;
+  runtimeSettings?: GpuiSidebarRuntimeSettings;
+  sidebarHud?: GxserverSidebarHudResponse;
+} = {}): SidebarHudState {
+  const settings = createGpuiSidebarSettings(runtimeSettings);
+  /*
+   * CDXC:SidebarHudContract 2026-06-24-20:34:
+   * GPUI SidebarApp uses gxserver's `/api/readSidebarHud` projection for read-side agent/action buttons so live sidebar and app-modal Settings share one production contract. The local shared defaults are only for pre-bootstrap or unavailable gxserver state; project metadata is not re-normalized here.
+   */
+  const agents = sidebarHud
+    ? ([...sidebarHud.agents] as SidebarAgentButton[])
+    : createSidebarAgentButtons([], []);
+  const commands = sidebarHud
+    ? ([...sidebarHud.commands] as ReturnType<typeof createSidebarCommandButtons>)
+    : createSidebarCommandButtons([], [], []);
+  const focusedSession = groups
+    .flatMap((group) => group.sessions)
+    .find((session) =>
+      parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId === focusedSessionId ||
+      session.sessionId === focusedSessionId,
+    );
+  const visibleSessions = groups.flatMap((group) => group.sessions.filter((session) => session.isVisible));
+  return {
+    activeSessionsSortMode: "lastActivity",
+    agentManagerZoomPercent: settings.agentManagerZoomPercent,
+    agents,
+    commands,
+    commandSessionIndicators: [],
+    completionBellEnabled: settings.completionBellEnabled,
+    completionSound: settings.completionSound,
+    completionSoundLabel: getCompletionSoundLabel(settings.completionSound),
+    debuggingMode: settings.debuggingMode,
+    focusedSessionTitle: focusedSession?.displayTitle ?? focusedSession?.primaryTitle ?? focusedSession?.alias,
+    git: git ?? createDefaultSidebarGitState(),
+    highlightedVisibleCount: GPUI_DEFAULT_VISIBLE_COUNT,
+    isFocusModeActive: false,
+    pendingAgentIds: [],
+    projectSettingsProjects: createGpuiProjectSettingsProjects(domainProjects, presentation),
+    /*
+    CDXC:GPUIRecentProjects 2026-06-24-12:27:
+    GPUI Recent Projects hydrate from `/api/listRecentProjects`, a
+    gxserver-owned parked-project contract. Keep an empty drawer when the
+    endpoint has no explicit rows; never derive recent projects from labels,
+    inactive sessions, presentation titles, command text, or path guessing.
+    */
+    recentProjects: [
+      ...createGpuiRecentProjects(recentProjects, settings),
+      ...createGpuiRemoteRecentProjects(remoteRecentProjectsByMachineId, settings),
+    ].sort(compareGpuiRecentProjectsByClosedAt),
+    settings,
+    createSessionOnSidebarDoubleClick: settings.createSessionOnSidebarDoubleClick,
+    renameSessionOnDoubleClick: settings.renameSessionOnDoubleClick,
+    showCloseButtonOnSessionCards: settings.showCloseButtonOnSessionCards,
+    theme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
+    viewMode: "grid",
+    visibleCount: GPUI_DEFAULT_VISIBLE_COUNT,
+    visibleSlotLabels: visibleSessions.map((session) => session.shortcutLabel),
+  };
+}
+
+function createGpuiSidebarSettings(
+  runtimeSettings?: GpuiSidebarRuntimeSettings,
+): ghostexSettings {
+  /*
+  CDXC:GPUISettingsSidebarHandoff 2026-06-24-11:22:
+  GPUI SidebarApp must receive the real saved shared Settings object, normalized through the same TypeScript settings schema as macOS, instead of hardcoded phase-1 defaults. Keep Manage availability strict by overriding only debuggingMode/showBetaFeatures from the CEF-provided booleans; missing, malformed, string-like truthy, or numeric truthy values cannot enable Manage.
+  */
+  const settings = normalizeghostexSettings(runtimeSettings?.settings);
+  return {
+    ...settings,
+    debuggingMode: runtimeSettings?.debuggingMode === true,
+    showBetaFeatures: runtimeSettings?.showBetaFeatures === true,
+  };
+}
+
+function createGpuiRecentProjects(
+  recentProjects: readonly GxserverRecentProjectDomainState[],
+  settings: ghostexSettings,
+): SidebarRecentProject[] {
+  return recentProjects
+    .flatMap((project) => {
+      const projectId = typeof project.projectId === "string" ? project.projectId.trim() : "";
+      const title = typeof project.title === "string" ? project.title.trim() : "";
+      const path = normalizeGpuiProjectPath(project.path);
+      if (!projectId || !title || !path) {
+        return [];
+      }
+      const icon = normalizeWorkspaceProjectIcon(project.icon);
+      const iconDataUrl = normalizeWorkspaceProjectIconDataUrl(project.iconDataUrl);
+      const theme = normalizeGpuiSidebarTheme(project.theme) ??
+        resolveSidebarTheme(settings.sidebarTheme, "dark");
+      const themeColor = normalizeWorkspaceThemeColor(project.themeColor);
+      const recentClosedAt =
+        typeof project.recentClosedAt === "string" && project.recentClosedAt.trim().length > 0
+          ? project.recentClosedAt.trim()
+          : undefined;
+      return [
+        {
+          ...(icon ? { icon } : {}),
+          ...(iconDataUrl ? { iconDataUrl } : {}),
+          ...(recentClosedAt ? { recentClosedAt } : {}),
+          ...(themeColor ? { themeColor } : {}),
+          path,
+          projectId,
+          sessionCount: Number.isFinite(project.sessionCount)
+            ? Math.max(0, Math.floor(project.sessionCount))
+            : 0,
+          theme,
+          title,
+        },
+      ];
+    })
+    .sort(compareGpuiRecentProjectsByClosedAt);
+}
+
+function createGpuiRemoteRecentProjects(
+  recentProjectsByMachineId: ReadonlyMap<string, readonly GxserverRecentProjectDomainState[]> | undefined,
+  settings: ghostexSettings,
+): SidebarRecentProject[] {
+  /*
+  CDXC:GPUIRemoteProjects 2026-06-24-18:22:
+  Remote Recent Projects come from each connected remote gxserver's explicit recent-project endpoint. Keep ids machine-scoped and include only the saved machine label for disambiguation; do not fabricate rows from active presentation groups or cache local close timestamps.
+  */
+  if (!recentProjectsByMachineId) {
+    return [];
+  }
+  const remoteMachinesById = new Map(
+    settings.remoteMachines.map((machine) => [machine.id, machine]),
+  );
+  return [...recentProjectsByMachineId.entries()].flatMap(([machineId, recentProjects]) => {
+    const machine = remoteMachinesById.get(machineId);
+    if (!machine) {
+      return [];
+    }
+    return recentProjects.flatMap((project) => {
+      const projectId = typeof project.projectId === "string" ? project.projectId.trim() : "";
+      const title = typeof project.title === "string" ? project.title.trim() : "";
+      const path = normalizeGpuiProjectPath(project.path);
+      if (!projectId || !title || !path) {
+        return [];
+      }
+      const icon = normalizeWorkspaceProjectIcon(project.icon);
+      const iconDataUrl = normalizeWorkspaceProjectIconDataUrl(project.iconDataUrl);
+      const theme = normalizeGpuiSidebarTheme(project.theme) ??
+        resolveSidebarTheme(settings.sidebarTheme, "dark");
+      const themeColor = normalizeWorkspaceThemeColor(project.themeColor);
+      const recentClosedAt =
+        typeof project.recentClosedAt === "string" && project.recentClosedAt.trim().length > 0
+          ? project.recentClosedAt.trim()
+          : undefined;
+      return [
+        {
+          ...(icon ? { icon } : {}),
+          ...(iconDataUrl ? { iconDataUrl } : {}),
+          ...(recentClosedAt ? { recentClosedAt } : {}),
+          ...(themeColor ? { themeColor } : {}),
+          path,
+          projectId: createGpuiRemotePresentationProjectId(machineId, projectId),
+          remoteMachineId: machineId,
+          remoteMachineName: machine.name || "Remote",
+          sessionCount: Number.isFinite(project.sessionCount)
+            ? Math.max(0, Math.floor(project.sessionCount))
+            : 0,
+          theme,
+          title,
+        },
+      ];
+    });
+  });
+}
+
+function normalizeGpuiSidebarTheme(value: unknown): SidebarTheme | undefined {
+  if (value === "plain-dark") {
+    return "dark-2";
+  }
+  return GPUI_SIDEBAR_THEME_VALUES.has(value as SidebarTheme)
+    ? (value as SidebarTheme)
+    : undefined;
+}
+
+const GPUI_SIDEBAR_THEME_VALUES = new Set<SidebarTheme>([
+  "dark-1",
+  "dark-2",
+  "plain-dark",
+  "plain-light",
+  "dark-green",
+  "dark-blue",
+  "dark-red",
+  "dark-pink",
+  "dark-orange",
+  "light-blue",
+  "light-green",
+  "light-pink",
+  "light-orange",
+]);
+
+function compareGpuiRecentProjectsByClosedAt(
+  left: SidebarRecentProject,
+  right: SidebarRecentProject,
+): number {
+  return (
+    gpuiRecentProjectClosedAtMillis(right) - gpuiRecentProjectClosedAtMillis(left) ||
+    right.title.localeCompare(left.title) ||
+    left.projectId.localeCompare(right.projectId)
+  );
+}
+
+function gpuiRecentProjectClosedAtMillis(project: SidebarRecentProject): number {
+  const millis = Date.parse(project.recentClosedAt ?? "");
+  return Number.isFinite(millis) ? millis : 0;
+}
+
+type GpuiPresentationProjectProjectionMetadata = {
+  chatProjectIds: ReadonlySet<string>;
+  hiddenProjectIds: ReadonlySet<string>;
+  projectOverlays: readonly GxserverPresentationSidebarProjectOverlay[];
+};
+
+function createGpuiPresentationProjectProjectionMetadata({
+  domainProjects,
+  presentation,
+}: {
+  domainProjects: readonly GxserverProjectDomainState[];
+  presentation: GxserverPresentationSnapshot;
+}): GpuiPresentationProjectProjectionMetadata {
+  const chatProjectIds = new Set<string>();
+  const hiddenProjectIds = new Set<string>();
+  const projectOverlays: GxserverPresentationSidebarProjectOverlay[] = [];
+  const domainProjectIds = new Set(domainProjects.map((project) => project.projectId));
+
+  for (const project of domainProjects) {
+    const isChatProject = isGpuiPresentationChatDomainProject(project);
+    const isQuickProject = isGpuiPresentationQuickDomainProject(project);
+    if (project.isRecentProject === true) {
+      hiddenProjectIds.add(project.projectId);
+    }
+    if (isChatProject || isQuickProject) {
+      chatProjectIds.add(project.projectId);
+      projectOverlays.push({
+        isChatProject,
+        isQuickProject,
+        projectId: project.projectId,
+      });
+    }
+  }
+
+  for (const project of presentation.projects) {
+    if (domainProjectIds.has(project.projectId) || !isGpuiPresentationChatProjectPath(project.path)) {
+      continue;
+    }
+    chatProjectIds.add(project.projectId);
+    projectOverlays.push({
+      isChatProject: true,
+      isQuickProject: true,
+      projectId: project.projectId,
+    });
+  }
+
+  return {
+    chatProjectIds,
+    hiddenProjectIds,
+    projectOverlays,
+  };
+}
+
+function isGpuiPresentationChatDomainProject(
+  project: GxserverProjectDomainState | undefined,
+): boolean {
+  return booleanFromRecord(project as Record<string, unknown> | undefined, "isChat") === true ||
+    booleanFromRecord(project?.launchSettings, "isChat") === true ||
+    isGpuiPresentationChatProjectPath(project?.path);
+}
+
+function isGpuiPresentationQuickDomainProject(
+  project: GxserverProjectDomainState | undefined,
+): boolean {
+  return booleanFromRecord(project as Record<string, unknown> | undefined, "isQuick") === true ||
+    booleanFromRecord(project?.launchSettings, "isQuick") === true ||
+    isGpuiPresentationChatDomainProject(project);
+}
+
+function isGpuiPresentationChatProjectPath(value: unknown): boolean {
+  const path = normalizeGpuiProjectPath(value)?.replace(/\\/gu, "/").replace(/\/+$/u, "");
+  if (!path) {
+    return false;
+  }
+  /*
+  CDXC:GPUISidebarProjectClassification 2026-06-24-22:51:
+  Match macOS chat-project detection by storage root instead of display title. `~/ghostex/chats`, `~/.ghostex[-variant]/chats`, and host-provided Ghostex homes such as repo-local `.active/chats` are projectless Chats containers; arbitrary projects named "Chat ..." are not.
+  */
+  return (
+    /(?:^|\/)(?:ghostex|\.ghostex(?:-[^/]+)?|\.active)\/chats(?:\/|$)/u.test(path) ||
+    /^~\/(?:ghostex|\.ghostex(?:-[^/]+)?|\.active)\/chats(?:\/|$)/u.test(path)
+  );
+}
+
+function createGpuiProjectSettingsProjects(
+  domainProjects: readonly GxserverProjectDomainState[],
+  presentation: GxserverPresentationSnapshot | undefined,
+): SidebarProjectSettingsItem[] {
+  if (domainProjects.length > 0) {
+    return domainProjects.flatMap((project) => {
+      const path = normalizeGpuiProjectPath(project.path);
+      if (
+        !path ||
+        project.isRecentProject === true ||
+        isGpuiPresentationQuickDomainProject(project)
+      ) {
+        return [];
+      }
+      return [
+        {
+          ...optionalGpuiProjectSettingsString("beadsDirectory", stringFromRecord(project.projectBoardConfig, "beadsDirectory")),
+          ...optionalGpuiProjectSettingsString(
+            "beadsDisplayKey",
+            stringFromRecord(project.projectBoardConfig, "beadsDisplayKey") ??
+              stringFromRecord(project.gitConfig, "beadsDisplayKey"),
+          ),
+          name: project.name,
+          path,
+          projectId: project.projectId,
+          ...optionalGpuiProjectSettingsString(
+            "worktreeCommand",
+            stringFromRecord(project.gitConfig, "worktreeCommand"),
+          ),
+          ...optionalGpuiProjectSettingsString(
+            "worktreeParentProjectId",
+            normalizeGpuiWorktreeParentProjectId(project.worktree),
+          ),
+        },
+      ];
+    });
+  }
+  return (presentation?.projects ?? []).flatMap((project) => {
+    const path = normalizeGpuiProjectPath(project.path);
+    if (!path || isGpuiPresentationChatProjectPath(path)) {
+      return [];
+    }
+    return [
+      {
+        name: project.title,
+        path,
+        projectId: project.projectId,
+        ...optionalGpuiProjectSettingsString(
+          "worktreeParentProjectId",
+          normalizeGpuiWorktreeParentProjectId(project.worktree),
+        ),
+      },
+    ];
+  });
+}
+
+function optionalGpuiProjectSettingsString<TKey extends keyof SidebarProjectSettingsItem>(
+  key: TKey,
+  value: string | undefined,
+): Partial<Pick<SidebarProjectSettingsItem, TKey>> {
+  return value ? { [key]: value } as Partial<Pick<SidebarProjectSettingsItem, TKey>> : {};
+}
+
+function normalizeGpuiWorktreeParentProjectId(
+  worktree: Record<string, unknown> | undefined,
+): string | undefined {
+  return stringFromRecord(worktree, "parentProjectId");
+}
+
+function normalizeGpuiWorktreeMetadata(
+  worktree: Record<string, unknown> | undefined,
+): GpuiWorktreeMetadata | undefined {
+  const parentProjectId = normalizeGpuiWorktreeParentProjectId(worktree);
+  if (!parentProjectId) {
+    return undefined;
+  }
+  return {
+    ...optionalStringField("branch", stringFromRecord(worktree, "branch")),
+    ...optionalStringField("name", stringFromRecord(worktree, "name")),
+    ...optionalStringField("parentProjectName", stringFromRecord(worktree, "parentProjectName")),
+    parentProjectId,
+  };
+}
+
+function stringFromRecord(
+  record: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function booleanFromRecord(
+  record: Record<string, unknown> | undefined,
+  key: string,
+): boolean | undefined {
+  const value = record?.[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function optionalStringField<TKey extends string>(
+  key: TKey,
+  value: string | undefined,
+): Partial<Record<TKey, string>> {
+  return value ? { [key]: value } as Partial<Record<TKey, string>> : {};
+}
+
+function parseGpuiGitNumstatFiles(stdout: string): SidebarGitChangedFile[] {
+  return stdout
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .flatMap((line) => {
+      const [additions, deletions, ...pathParts] = line.split(/\s+/);
+      const path = normalizeGpuiRelativeGitFilePath(pathParts.join(" "));
+      if (!path) {
+        return [];
+      }
+      return [
+        {
+          additions: normalizeGpuiGitNumstatNumber(additions),
+          deletions: normalizeGpuiGitNumstatNumber(deletions),
+          path,
+        },
+      ];
+    });
+}
+
+function parseGpuiGitStatusPorcelainFiles(stdout: string): SidebarGitChangedFile[] {
+  return stdout
+    .split(/\r?\n/)
+    .filter((line) => line.length >= 4)
+    .flatMap((line) => {
+      const rawPath = line.slice(3).trim();
+      const path = normalizeGpuiRelativeGitFilePath(
+        rawPath.includes(" -> ") ? rawPath.split(" -> ").at(-1) ?? "" : rawPath,
+      );
+      return path ? [{ additions: 0, deletions: 0, path }] : [];
+    });
+}
+
+function mergeGpuiGitChangedFiles(
+  files: readonly SidebarGitChangedFile[],
+): SidebarGitChangedFile[] {
+  const mergedFiles = new Map<string, SidebarGitChangedFile>();
+  for (const file of files) {
+    const existing = mergedFiles.get(file.path);
+    mergedFiles.set(file.path, {
+      additions: Math.max(existing?.additions ?? 0, file.additions),
+      deletions: Math.max(existing?.deletions ?? 0, file.deletions),
+      path: file.path,
+    });
+  }
+  return [...mergedFiles.values()];
+}
+
+function normalizeGpuiGitNumstatNumber(value: string | undefined): number {
+  if (!value || value === "-") {
+    return 0;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function summarizeGpuiGitChangedFiles(files: readonly SidebarGitChangedFile[]): {
+  additions: number;
+  deletions: number;
+} {
+  return files.reduce(
+    (stats, file) => ({
+      additions: stats.additions + file.additions,
+      deletions: stats.deletions + file.deletions,
+    }),
+    { additions: 0, deletions: 0 },
+  );
+}
+
+function parseGpuiGitHubPullRequest(
+  stdout: string,
+  success: boolean,
+): SidebarGitState["pr"] {
+  if (!success || !stdout.trim()) {
+    return null;
+  }
+  try {
+    const candidate = JSON.parse(stdout) as Partial<NonNullable<SidebarGitState["pr"]>>;
+    const state = String(candidate.state || "").toLowerCase();
+    if (!candidate.url || !candidate.title || !["open", "closed", "merged"].includes(state)) {
+      return null;
+    }
+    return {
+      number: typeof candidate.number === "number" ? candidate.number : undefined,
+      state: state as NonNullable<SidebarGitState["pr"]>["state"],
+      title: candidate.title,
+      url: candidate.url,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isGpuiConfirmedOpenPullRequest(result: GxserverCreatePullRequestResult): boolean {
+  return (
+    result.ok === true &&
+    result.pr?.state === "open" &&
+    typeof result.pr.url === "string" &&
+    /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/u.test(result.pr.url)
+  );
+}
+
+function isGpuiConfirmedOpenRemotePullRequest(result: GpuiRemoteCreatePullRequestResult): boolean {
+  return result.ok === true && result.pr?.state === "open";
+}
+
+function normalizeGpuiGitHubRemoteUrl(remoteUrl: string): string | undefined {
+  const trimmed = remoteUrl.trim().split(/\s+/)[0]?.replace(/\.git$/u, "") ?? "";
+  if (!trimmed) {
+    return undefined;
+  }
+  const sshMatch = /^git@github\.com:(?<path>[^#?]+)$/u.exec(trimmed);
+  const sshPath = sshMatch?.groups?.path;
+  if (sshPath) {
+    return `https://github.com/${sshPath.replace(/^\/+/u, "").replace(/\.git$/u, "")}`;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.hostname !== "github.com") {
+      return undefined;
+    }
+    const repoPath = parsed.pathname.replace(/^\/+/u, "").replace(/\.git$/u, "");
+    return repoPath ? `https://github.com/${repoPath}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseGpuiSidebarGitCommitMessage(message: string): {
+  body: string;
+  subject: string;
+} {
+  const trimmedMessage = message.trim();
+  if (!trimmedMessage) {
+    return { body: "", subject: "" };
+  }
+  const [firstLine = "", ...restLines] = trimmedMessage.split(/\r?\n/);
+  return {
+    body: restLines.join("\n").trim(),
+    subject: firstLine.trim(),
+  };
+}
+
+/*
+CDXC:GPUISidebarGit 2026-06-24-16:11:
+Blank commit-message generation in GPUI mirrors the native background prompt
+support set. Built-in agents that do not expose a safe headless prompt mode
+must fail explicitly, while configured non-default custom agents may use their
+stored command through the local gxserver generation endpoint.
+*/
+function supportsGpuiBackgroundCommitMessageGeneration(agent: SidebarAgentButton): boolean {
+  return (
+    GPUI_BACKGROUND_COMMIT_MESSAGE_DEFAULT_AGENT_IDS.has(agent.agentId) ||
+    !isDefaultSidebarAgentId(agent.agentId)
+  );
+}
+
+function gpuiUserVisibleGitErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof GpuiUserVisibleGitError ? error.message : fallback;
+}
+
+function sanitizeGpuiSidebarGitBranchName(subject: string): string {
+  return (
+    subject
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[^\w\s-]/gu, "")
+      .trim()
+      .replace(/[\s_]+/gu, "-")
+      .replace(/-+/gu, "-")
+      .replace(/^-|-$/gu, "")
+      .slice(0, 48) || `change-${Date.now().toString(36)}`
+  );
+}
+
+function normalizeGpuiRelativeGitFilePath(filePath: string): string | undefined {
+  const normalizedFilePath = filePath.replaceAll("\\", "/").replace(/^\/+/, "").trim();
+  if (!normalizedFilePath || normalizedFilePath.includes("\0")) {
+    return undefined;
+  }
+  const segments = normalizedFilePath.split("/");
+  if (segments.some((segment) => !segment || segment === "." || segment === "..")) {
+    return undefined;
+  }
+  return normalizedFilePath;
+}
+
+function isMissingGpuiBeadsDatabaseError(message: string): boolean {
+  return /no beads database found|run ['"]?bd init['"]?|not initialized|no storage/iu.test(message);
+}
+
+function resolveGpuiSidebarGitConfirmLabel(
+  action: Extract<SidebarGitAction, "commit" | "pr" | "push">,
+  hasCommit: boolean,
+): string {
+  if (action === "commit") {
+    return "Commit";
+  }
+  if (action === "push") {
+    return hasCommit ? "Commit & Push" : "Push";
+  }
+  return hasCommit ? "Commit, Push & PR" : "Push & Create PR";
+}
+
+function resolveGpuiSidebarGitPromptDescription(
+  action: Extract<SidebarGitAction, "commit" | "pr" | "push">,
+): string {
+  if (action === "commit") {
+    return "Review and commit changes.";
+  }
+  if (action === "push") {
+    return "Push the current branch.";
+  }
+  return "Create or open a pull request.";
+}
+
+function resolveGpuiSidebarGitStartedTitle(
+  action: Extract<SidebarGitAction, "commit" | "pr" | "push">,
+  hasCommit: boolean,
+): string {
+  if (action === "pr") {
+    return hasCommit ? "Committing, pushing, and creating PR" : "Pushing and creating PR";
+  }
+  if (action === "push") {
+    return hasCommit ? "Committing and pushing" : "Pushing";
+  }
+  return "Committing";
+}
+
+function resolveGpuiSidebarGitFinishedTitle(
+  action: Extract<SidebarGitAction, "commit" | "pr" | "push">,
+): string {
+  if (action === "pr") {
+    return "Pull request ready";
+  }
+  return action === "push" ? "Push complete" : "Commit complete";
+}
+
+function formatGpuiGitAgentWorkflowTitle(title: string): string {
+  const normalizedTitle = title.trim();
+  return normalizedTitle.startsWith("Git:") ? normalizedTitle : `Git: ${normalizedTitle}`;
+}
+
+function buildGpuiGitSyncWithMainPrompt(): string {
+  return [
+    "Please sync the latest main branch changes into this worktree so it can be merged back to main afterward.",
+    "",
+    "Use the current repository and branch in this terminal. Inspect Git state directly before changing anything.",
+    "",
+    "Requirements:",
+    "- Fetch the latest remote refs before syncing.",
+    "- Bring main into this worktree branch using the safest normal project workflow for this repository, such as merge or rebase only if that is clearly the repo convention.",
+    "- Preserve work from both main and this worktree. If conflicts happen, resolve them without dropping code, behavior, or UX from either side.",
+    "- After resolving conflicts, run the relevant checks you can run locally.",
+    "- Leave the worktree branch ready for the user to merge back into main.",
+    "- Stop and explain clearly if the repository state is unsafe or if a decision is needed.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildGpuiGitPullRequestAgentPrompt(input: {
+  filePaths?: readonly string[];
+  hasExplicitFileSelection: boolean;
+  hasCommit: boolean;
+  message: string;
+  selectedFiles: readonly string[];
+}): string {
+  const selectedFiles = input.selectedFiles.filter((filePath) => filePath.trim().length > 0);
+  return [
+    "Please complete the Git pull request flow in this terminal.",
+    "",
+    "Use the current repository checkout in this terminal. Inspect branch, remote, and PR state directly before changing anything.",
+    "",
+    "Do these steps visibly:",
+    input.hasCommit
+      ? input.hasExplicitFileSelection
+        ? "- Stage and commit only the selected files listed below. Do not stage excluded files."
+        : "- Stage and commit all new/modified files."
+      : "- There were no working tree changes when the modal opened, so skip committing unless you find new user changes.",
+    input.message
+      ? "- Use the requested commit message below unless it is clearly invalid for the actual diff."
+      : "- Write a concise commit message that matches the staged diff.",
+    "- If you encounter conflicts, rebases, merge state, or divergent local/remote changes, make sure not to lose changes from either side.",
+    "- Push the current branch to origin, setting upstream if needed.",
+    "- Create a GitHub pull request with `gh pr create --fill`, or open/show the existing PR if one already exists.",
+    "- Stop and explain clearly if a command fails, authentication is missing, or a merge/rebase/conflict situation needs the user's decision.",
+    "",
+    input.hasExplicitFileSelection && selectedFiles.length > 0
+      ? ["Selected files:", ...selectedFiles.map((filePath) => `- ${filePath}`)].join("\n")
+      : "Selected files: all new/modified files.",
+    input.message ? `\nRequested commit message:\n${input.message}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildGpuiMergeConflictPrompt(input: {
+  branch: string;
+  mergeOutput: string;
+  parentProject: GxserverProjectDomainState;
+  worktree: GpuiWorktreeMetadata;
+  worktreeProject: GxserverProjectDomainState;
+}): string {
+  const output = input.mergeOutput.trim();
+  const worktreeName = input.worktree.name ?? input.worktreeProject.name ?? "this worktree";
+  const parentName = input.parentProject.name || input.worktree.parentProjectName || "the main project";
+  return [
+    "Please handle the current Git merge conflicts on the main branch.",
+    "",
+    `Target project: ${parentName}`,
+    "Target branch: main",
+    `Merged worktree branch: ${input.branch}`,
+    `Worktree: ${worktreeName}`,
+    "",
+    "Resolve the conflicts without losing any code, behavior, or UX from either side.",
+    "Inspect the conflict markers, preserve the important intent from main and the worktree branch, run the relevant checks you can run locally, stage the resolved files, and leave the final state ready for review.",
+    output ? `\nMerge output:\n${output}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function hasGpuiGxserverShortStatusChanges(stdout: string): boolean {
+  return stdout
+    .split("\n")
+    .some((line) => {
+      const trimmed = line.trim();
+      return trimmed.length > 0 && !trimmed.startsWith("##");
+    });
+}
+
+function normalizeGpuiProjectPath(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim().replace(/\/+$/u, "")
+    : undefined;
+}
+
+function normalizeGpuiWorktreeBaseBranches(
+  branches: GxserverTypedOperationResult["branches"],
+): Array<{ current: boolean; name: string; remote: boolean }> {
+  const seenBranches = new Set<string>();
+  return (branches ?? []).flatMap((branch) => {
+    const name = branch.name?.trim();
+    if (!name || seenBranches.has(name)) {
+      return [];
+    }
+    seenBranches.add(name);
+    return [
+      {
+        current: branch.current === true,
+        name,
+        remote: branch.remote === true,
+      },
+    ];
+  });
+}
+
+function normalizeGpuiExistingWorktreeOptions(
+  worktrees: GxserverProjectWorktreeListResult["worktrees"] | unknown,
+): Array<{
+  branch: string;
+  isCurrentProject: boolean;
+  isRegistered: boolean;
+  name: string;
+  path: string;
+  worktreeKey: string;
+}> {
+  if (!Array.isArray(worktrees)) {
+    return [];
+  }
+  return worktrees.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+    const worktree = entry as Record<string, unknown>;
+    const path = normalizeGpuiProjectPath(worktree.path);
+    const name =
+      stringFromRecord(worktree, "name") ?? (path ? gpuiProjectNameFromPath(path) : undefined);
+    const worktreeKey = stringFromRecord(worktree, "worktreeKey");
+    if (!path || !name || !worktreeKey) {
+      return [];
+    }
+    return [
+      {
+        branch: stringFromRecord(worktree, "branch") ?? "",
+        isCurrentProject: booleanFromRecord(worktree, "isCurrentProject") === true,
+        isRegistered: booleanFromRecord(worktree, "isRegistered") === true,
+        name,
+        path,
+        worktreeKey,
+      },
+    ];
+  });
+}
+
+function createGpuiExistingWorktreeOptions(
+  worktrees: GxserverTypedOperationResult["worktrees"],
+  parentProject: GxserverProjectDomainState,
+  sourceProject: GxserverProjectDomainState,
+  domainProjects: readonly GxserverProjectDomainState[],
+): Array<{
+  branch: string;
+  isCurrentProject: boolean;
+  isRegistered: boolean;
+  name: string;
+  path: string;
+}> {
+  const entries = worktrees ?? [];
+  const mainEntry = entries.find((entry) => entry.bare !== true);
+  const mainPath = normalizeGpuiProjectPath(mainEntry?.path) ?? normalizeGpuiProjectPath(parentProject.path);
+  const sourcePath = normalizeGpuiProjectPath(sourceProject.path);
+  const registeredPaths = new Set(
+    domainProjects
+      .map((project) => normalizeGpuiProjectPath(project.path))
+      .filter((path): path is string => Boolean(path)),
+  );
+  return entries.flatMap((entry) => {
+    if (entry.bare === true) {
+      return [];
+    }
+    const path = normalizeGpuiProjectPath(entry.path);
+    if (!path || path === mainPath) {
+      return [];
+    }
+    return [
+      {
+        branch: entry.branch?.trim() ?? "",
+        isCurrentProject: path === sourcePath,
+        isRegistered: registeredPaths.has(path),
+        name: gpuiProjectNameFromPath(path),
+        path,
+      },
+    ];
+  });
+}
+
+function gpuiProjectNameFromPath(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? "Project";
+}
+
+function gpuiDirname(path: string): string {
+  const parts = path.replace(/\/+$/u, "").split("/").filter(Boolean);
+  if (parts.length <= 1) {
+    return "/";
+  }
+  return `/${parts.slice(0, -1).join("/")}`;
+}
+
+function gpuiWorktreeSlugFromPrompt(prompt: string): string {
+  const firstWords = prompt
+    .trim()
+    .toLowerCase()
+    .replace(/[`'"]/gu, "")
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .split("-")
+    .filter(Boolean)
+    .slice(0, 6)
+    .join("-");
+  return (firstWords || "worktree").slice(0, 48).replace(/-+$/u, "") || "worktree";
+}
+
+function createGpuiWorktreeToastId(): string {
+  return `toast-gpui-worktree-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createGpuiGitToastId(): string {
+  return `toast-gpui-git-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function gpuiWorktreeUserVisibleErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message.trim() : "";
+  if (
+    message &&
+    !message.includes("/") &&
+    !message.includes("\\") &&
+    !message.includes("\n") &&
+    message.length <= 160
+  ) {
+    return message;
+  }
+  return "The gxserver worktree operation failed.";
+}
+
+function createGpuiGxserverUnavailableSidebarGroups(): SidebarSessionGroup[] {
+  return [
+    {
+      groupId: GPUI_GXSERVER_CHATS_GROUP_ID,
+      isActive: false,
+      isChatCollection: true,
+      isFocusModeActive: false,
+      kind: "workspace",
+      layoutVisibleCount: GPUI_DEFAULT_VISIBLE_COUNT,
+      sessions: [],
+      title: "Chats",
+      viewMode: "grid",
+      visibleCount: GPUI_DEFAULT_VISIBLE_COUNT,
+    },
+    {
+      groupId: GPUI_GXSERVER_UNAVAILABLE_GROUP_ID,
+      isActive: true,
+      isFocusModeActive: false,
+      kind: "workspace",
+      layoutVisibleCount: GPUI_DEFAULT_VISIBLE_COUNT,
+      sessions: [],
+      title: "",
+      viewMode: "grid",
+      visibleCount: GPUI_DEFAULT_VISIBLE_COUNT,
+    },
+  ];
+}
+
+function createGpuiRemotePresentationSidebarGroups({
+  activeGroupId,
+  focusedSessionId,
+  presentationsByMachineId,
+  resolveAgentIcon,
+  settings,
+  visibleSessionIds,
+}: {
+  activeGroupId?: string;
+  focusedSessionId?: string;
+  presentationsByMachineId: ReadonlyMap<string, GxserverPresentationSnapshot>;
+  resolveAgentIcon: (agentName: string | undefined) => SidebarAgentButton["icon"];
+  settings: ghostexSettings;
+  visibleSessionIds?: ReadonlySet<string>;
+}): SidebarSessionGroup[] {
+  /*
+  CDXC:GPUIRemoteMachines 2026-06-24-16:48:
+  GPUI remote machine sections must render only saved machines with Rust-delivered gxserver presentation snapshots. Prefix every project/session id with the machine id so reused SidebarApp rows cannot collide with local gxserver rows or another remote machine, while tokens, SSH hosts, usernames, key paths, and remote URLs stay outside renderer state.
+  */
+  return settings.remoteMachines.flatMap((machine) => {
+    const presentation = presentationsByMachineId.get(machine.id);
+    if (!presentation) {
+      return [];
+    }
+    const sessionsByProject = createGxserverPresentationSessionsByProjectFromGroups({
+      presentation,
+    });
+    const projectsById = new Map(
+      presentation.projects.map((project) => [project.projectId, project]),
+    );
+    return presentation.groups.flatMap((group) => {
+      const project = projectsById.get(group.projectId);
+      if (!project) {
+        return [];
+      }
+      return [
+        createGpuiRemotePresentationSidebarGroup({
+          activeGroupId,
+          focusedSessionId,
+          machineId: machine.id,
+          machineName: machine.name,
+          project,
+          resolveAgentIcon,
+          sessions: sessionsByProject.get(project.projectId) ?? [],
+          settings,
+          visibleSessionIds,
+        }),
+      ];
+    });
+  });
+}
+
+function createGpuiRemotePresentationSidebarGroup({
+  activeGroupId,
+  focusedSessionId,
+  machineId,
+  machineName,
+  project,
+  resolveAgentIcon,
+  sessions,
+  settings,
+  visibleSessionIds,
+}: {
+  activeGroupId?: string;
+  focusedSessionId?: string;
+  machineId: string;
+  machineName: string;
+  project: GxserverPresentationProject;
+  resolveAgentIcon: (agentName: string | undefined) => SidebarAgentButton["icon"];
+  sessions: readonly GxserverPresentationSession[];
+  settings: ghostexSettings;
+  visibleSessionIds?: ReadonlySet<string>;
+}): SidebarSessionGroup {
+  const groupId = createGpuiRemotePresentationGroupId(machineId, project.projectId);
+  const isActiveGroup = groupId === activeGroupId;
+  const scopedProjectId = createGpuiRemotePresentationProjectId(machineId, project.projectId);
+  const focusedRemoteSession = focusedSessionId
+    ? parseGpuiRemotePresentationSessionId(focusedSessionId)
+    : undefined;
+  const focusedSessionIdForGroup =
+    isActiveGroup &&
+    focusedRemoteSession?.machineId === machineId &&
+    focusedRemoteSession.projectId === project.projectId
+      ? focusedRemoteSession.sessionId
+      : undefined;
+  const visibleSessionIdsForGroup = new Set(
+    [...(visibleSessionIds ?? [])].flatMap((sessionId) => {
+      const reference = parseGpuiRemotePresentationSessionId(sessionId);
+      if (
+        !isActiveGroup ||
+        reference?.machineId !== machineId ||
+        reference.projectId !== project.projectId
+      ) {
+        return [];
+      }
+      return [reference.sessionId];
+    }),
+  );
+  const group = createGxserverPresentationSidebarGroup({
+    activeProjectId: isActiveGroup ? project.projectId : undefined,
+    canRemoveProject: false,
+    createProjectGroupId: (projectId) =>
+      createGpuiRemotePresentationGroupId(machineId, projectId),
+    createProjectSessionId: (projectId, sessionId) =>
+      createGpuiRemotePresentationSessionId(machineId, projectId, sessionId),
+    project,
+    projectOverlay: {
+      editor: {
+        diffStats: createDefaultSidebarProjectDiffStats(),
+        isOpen: false,
+        isSleeping: false,
+        projectId: scopedProjectId,
+        status: "idle",
+      },
+      path: project.path ?? "",
+      projectId: project.projectId,
+      theme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
+    },
+    focusedSessionId: focusedSessionIdForGroup,
+    resolveAgentIcon,
+    resolveSessionRoutingId: (projectId, sessionId) =>
+      createGpuiRemotePresentationSessionRoutingId(machineId, projectId, sessionId),
+    sessions,
+    visibleSessionIds: visibleSessionIdsForGroup,
+  });
+  return {
+    ...group,
+    groupId,
+    isActive: isActiveGroup,
+    projectContext: group.projectContext
+      ? {
+          ...group.projectContext,
+          canRemoveProject: false,
+          path: project.path ?? "",
+        }
+      : group.projectContext,
+    remoteMachineContext: {
+      machineId,
+      machineName,
+    },
+  };
+}
+
+function compareGpuiRemoteAttachCandidateSessions(
+  left: GxserverPresentationSession,
+  right: GxserverPresentationSession,
+): number {
+  const score = (session: GxserverPresentationSession): number => {
+    let value = 0;
+    if (session.lifecycleState === "running") {
+      value += 100;
+    }
+    if (session.activity === "attention") {
+      value += 40;
+    } else if (session.activity === "working") {
+      value += 30;
+    }
+    if (session.isPinned) {
+      value += 10;
+    }
+    if (session.isFavorite) {
+      value += 5;
+    }
+    return value;
+  };
+  const scoreDelta = score(right) - score(left);
+  if (scoreDelta !== 0) {
+    return scoreDelta;
+  }
+  const rightTime = Date.parse(right.lastActiveAt ?? right.updatedAt ?? right.createdAt);
+  const leftTime = Date.parse(left.lastActiveAt ?? left.updatedAt ?? left.createdAt);
+  return (Number.isFinite(rightTime) ? rightTime : 0) -
+    (Number.isFinite(leftTime) ? leftTime : 0);
+}
+
+function createGpuiRemotePresentationGroupId(machineId: string, projectId: string): string {
+  return `remote:${machineId}:group:${projectId}`;
+}
+
+function parseGpuiRemotePresentationGroupId(
+  groupId: string,
+): { machineId: string; projectId: string } | undefined {
+  const match = /^remote:([^:]+):group:(.+)$/u.exec(groupId);
+  if (!match) {
+    return undefined;
+  }
+  return { machineId: match[1]!, projectId: match[2]! };
+}
+
+function createGpuiRemotePresentationProjectId(machineId: string, projectId: string): string {
+  return `remote:${machineId}:project:${projectId}`;
+}
+
+function parseGpuiRemotePresentationProjectId(
+  projectId: string,
+): { machineId: string; projectId: string } | undefined {
+  const match = /^remote:([^:]+):project:(.+)$/u.exec(projectId);
+  if (!match) {
+    return undefined;
+  }
+  return { machineId: match[1]!, projectId: match[2]! };
+}
+
+function createGpuiRemotePresentationSessionId(
+  machineId: string,
+  projectId: string,
+  sessionId: string,
+): string {
+  return `remote:${machineId}:session:${projectId}:${sessionId}`;
+}
+
+function parseGpuiRemotePresentationSessionId(
+  sessionId: string,
+): { machineId: string; projectId: string; sessionId: string } | undefined {
+  const match = /^remote:([^:]+):session:([^:]+):(.+)$/u.exec(sessionId);
+  if (!match) {
+    return undefined;
+  }
+  return { machineId: match[1]!, projectId: match[2]!, sessionId: match[3]! };
+}
+
+function createGpuiRemotePresentationSessionRoutingId(
+  machineId: string,
+  projectId: string,
+  sessionId: string,
+): string {
+  return `${machineId}:${projectId}:${sessionId}`;
+}
+
+function createGpuiSidebarGroupsPatch(
+  previousGroups: readonly SidebarSessionGroup[],
+  nextGroups: SidebarSessionGroup[],
+): GpuiSidebarGroupsPatch {
+  const previousGroupIds = new Set(previousGroups.map((group) => group.groupId));
+  const nextGroupIds = new Set(nextGroups.map((group) => group.groupId));
+  const previousSessionIds = new Set(previousGroups.flatMap((group) => group.sessions.map((session) => session.sessionId)));
+  const nextSessionIds = new Set(nextGroups.flatMap((group) => group.sessions.map((session) => session.sessionId)));
+  return {
+    groupOrder: nextGroups.map((group) => group.groupId),
+    groups: nextGroups,
+    removedGroupIds: [...previousGroupIds].filter((groupId) => !nextGroupIds.has(groupId)),
+    removedSessionIds: [...previousSessionIds].filter((sessionId) => !nextSessionIds.has(sessionId)),
+  };
+}
+
+function gxserverSearchResultToPreviousSessionItem(
+  result: GxserverPresentationSearchResult,
+  options: { historyIdPrefix?: string; projectNamePrefix?: string } = {},
+): SidebarPreviousSessionItem {
+  const title = result.displayTitle || result.primaryTitle || result.title || "Previous Session";
+  const closedAt = result.closedAt ?? result.updatedAt ?? result.createdAt;
+  const agentName = result.agentName ?? result.agentId;
+  const sessionPersistenceProvider = result.sessionPersistenceProvider ?? "zmx";
+  const sessionPersistenceName = result.sessionPersistenceName ?? result.zmxName;
+  return {
+    activity: "idle",
+    agentIcon: resolveGpuiSidebarAgentIcon(result.agentIcon ?? agentName),
+    agentSessionId: result.agentSessionId,
+    alias: title,
+    closedAt,
+    column: 0,
+    displayTitle: result.displayTitle,
+    displayTitleTooltip: result.displayTitleTooltip,
+    historyId: `${options.historyIdPrefix ?? "gxserver"}:${result.projectId}:${result.sessionId}`,
+    isFavorite: result.isFavorite,
+    isFocused: false,
+    isGeneratedName: false,
+    isPinned: result.isPinned,
+    isPrimaryTitleTerminalTitle: result.isPrimaryTitleTerminalTitle,
+    isRestorable: true,
+    isRunning: false,
+    isVisible: false,
+    lastInteractionAt: result.lastActiveAt,
+    lifecycleState: "done",
+    primaryTitle: result.primaryTitle ?? title,
+    projectId: result.projectId,
+    projectName: options.projectNamePrefix
+      ? `${options.projectNamePrefix} / ${result.projectTitle}`
+      : result.projectTitle,
+    row: 0,
+    sessionId: result.sessionId,
+    sessionKind: "terminal",
+    sessionPersistenceName,
+    sessionPersistenceProvider,
+    sessionTag: result.sessionTag,
+    shortcutLabel: "",
+    terminalTitle: result.terminalTitle,
+  };
+}
+
+function comparePreviousSessionItemsByClosedTime(
+  left: SidebarPreviousSessionItem,
+  right: SidebarPreviousSessionItem,
+): number {
+  return previousSessionClosedTime(right) - previousSessionClosedTime(left);
+}
+
+function previousSessionClosedTime(session: SidebarPreviousSessionItem): number {
+  const time = Date.parse(session.closedAt);
+  return Number.isFinite(time) ? time : 0;
+}
+
+function parseGpuiGxserverPreviousSessionHistoryId(
+  historyId: string,
+): { projectId: string; sessionId: string } | undefined {
+  const match = /^gxserver:([^:]+):([^:]+)$/u.exec(historyId);
+  if (!match) {
+    return undefined;
+  }
+  return { projectId: match[1]!, sessionId: match[2]! };
+}
+
+function parseGpuiRemotePreviousSessionHistoryId(
+  historyId: string,
+): { machineId: string; projectId: string; sessionId: string } | undefined {
+  const match = /^remote-gxserver:([^:]+):([^:]+):([^:]+)$/u.exec(historyId);
+  if (!match) {
+    return undefined;
+  }
+  return { machineId: match[1]!, projectId: match[2]!, sessionId: match[3]! };
+}
+
+function previousSessionTitle(
+  previousSession: SidebarPreviousSessionItem | undefined,
+): string {
+  return (
+    previousSession?.primaryTitle ||
+    previousSession?.terminalTitle ||
+    previousSession?.alias ||
+    DEFAULT_TERMINAL_SESSION_TITLE
+  );
+}
+
+function resolveGpuiSidebarAgentIcon(agentName: string | undefined): SidebarAgentButton["icon"] {
+  const directIcon = getSidebarAgentIconById(agentName);
+  if (directIcon) {
+    return directIcon;
+  }
+
+  const normalizedAgentName = agentName?.trim().toLowerCase();
+  if (!normalizedAgentName) {
+    return undefined;
+  }
+  return DEFAULT_SIDEBAR_AGENTS.find(
+    (agent) =>
+      agent.agentId === normalizedAgentName ||
+      agent.name.trim().toLowerCase() === normalizedAgentName ||
+      agent.icon === normalizedAgentName,
+  )?.icon;
+}
+
+function createGpuiSidebarSessionRoutingId(projectId: string, sessionId: string): string {
+  return `${projectId}:${sessionId}`;
+}
+
+function currentGpuiRuntimeSettings(): GpuiSidebarRuntimeSettings | undefined {
+  return window.ghostexGpui?.runtimeSettings;
+}
+
+function hasSameGpuiRuntimeSettings(
+  previous: GpuiSidebarRuntimeSettings | undefined,
+  next: GpuiSidebarRuntimeSettingsSnapshot,
+): boolean {
+  return (
+    previous?.debuggingMode === next.debuggingMode &&
+    previous?.showBetaFeatures === next.showBetaFeatures &&
+    previous?.settings === next.settings
+  );
+}
+
+function normalizeNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+async function readJson(response: Response): Promise<unknown> {
+  const text = await response.text();
+  return text.trim() ? JSON.parse(text) as unknown : undefined;
+}
+
+function isGxserverRpcSuccess<TResult>(
+  value: unknown,
+): value is GpuiGxserverRpcSuccess<TResult> {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    (value as Partial<GpuiGxserverRpcSuccess<TResult>>).ok === true &&
+    (value as Partial<GpuiGxserverRpcSuccess<TResult>>).product === "gxserver" &&
+    "result" in value
+  );
+}
+
+function parseObject(value: unknown): Record<string, unknown> | undefined {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isPresentationSnapshot(value: unknown): value is GxserverPresentationSnapshot {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    Array.isArray((value as GxserverPresentationSnapshot).groups) &&
+    Array.isArray((value as GxserverPresentationSnapshot).projects) &&
+    Array.isArray((value as GxserverPresentationSnapshot).sessions) &&
+    typeof (value as GxserverPresentationSnapshot).revision === "number"
+  );
+}
+
+function isPresentationDelta(value: unknown): value is GxserverPresentationDelta {
+  return Boolean(value) && typeof value === "object" && typeof (value as { type?: unknown }).type === "string";
+}
+
+function normalizeGpuiSidebarRemoteEvent(value: unknown): GpuiSidebarRemoteEvent | undefined {
+  const event = parseObject(value);
+  if (!event || typeof event.type !== "string") {
+    return undefined;
+  }
+  if (event.type === "remoteMachineStatus") {
+    const machineId = normalizeNonEmptyString(event.machineId);
+    const state = event.state;
+    if (!machineId || !GPUI_REMOTE_MACHINE_STATUS_STATES.has(state as string)) {
+      return undefined;
+    }
+    return {
+      machineId,
+      state: state as SidebarRemoteMachineStatusMessage["state"],
+      type: "remoteMachineStatus",
+    };
+  }
+  if (event.type === "remoteGxserverResponse") {
+    const remoteMachineId = normalizeNonEmptyString(event.remoteMachineId);
+    const requestId = normalizeNonEmptyString(event.requestId);
+    if (!remoteMachineId || !requestId || typeof event.ok !== "boolean") {
+      return undefined;
+    }
+    return {
+      error: normalizeNonEmptyString(event.error),
+      ok: event.ok,
+      remoteMachineId,
+      requestId,
+      result: event.result,
+      type: "remoteGxserverResponse",
+    };
+  }
+  if (event.type !== "remoteGxserverPresentation") {
+    return undefined;
+  }
+  const remoteMachineId = normalizeNonEmptyString(event.remoteMachineId);
+  const payload = parseObject(event.payload);
+  if (!remoteMachineId || !payload || typeof payload.type !== "string") {
+    return undefined;
+  }
+  if (payload.type === "presentationSnapshot" && isPresentationSnapshot(payload.snapshot)) {
+    return {
+      payload: {
+        snapshot: payload.snapshot,
+        type: "presentationSnapshot",
+      },
+      remoteMachineId,
+      type: "remoteGxserverPresentation",
+    };
+  }
+  if (
+    payload.type === "presentationDelta" &&
+    isPresentationDelta(payload.delta) &&
+    typeof payload.revision === "number"
+  ) {
+    return {
+      payload: {
+        delta: payload.delta,
+        revision: payload.revision,
+        type: "presentationDelta",
+      },
+      remoteMachineId,
+      type: "remoteGxserverPresentation",
+    };
+  }
+  return undefined;
+}
+
+const GPUI_REMOTE_MACHINE_STATUS_STATES = new Set([
+  "connecting",
+  "connected",
+  "disconnected",
+  "installApprovalRequired",
+  "installing",
+  "failed",
+]);

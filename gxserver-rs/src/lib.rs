@@ -19,6 +19,7 @@ pub mod protocol;
 pub mod repository_clone;
 pub mod runtime;
 pub mod server;
+pub mod sidebar_hud;
 pub mod session_status;
 pub mod storage;
 pub mod toolchain;

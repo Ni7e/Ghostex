@@ -29,4 +29,6 @@ pub const GXSERVER_MIGRATION_IDS: &[&str] = &[
     "0009_remove_legacy_zmux_chat_projects",
     "0010_portless_persistence_model",
     "0011_t3_session_kind",
+    "0012_recent_projects",
+    "0013_app_user_data",
 ];

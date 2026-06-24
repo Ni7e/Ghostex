@@ -87,7 +87,7 @@ Native host/AppKit code must not independently decide canonical project/worktree
 - macOS owns add-project, new-worktree, open-existing-worktree, clone, command palette, previous-sessions modal display, and picker UI.
 - macOS owns selected agent, first prompt, image attachments, selected existing worktree row, clone URL draft, branch/name draft, toggles, and validation until the user submits.
 - gxserver owns the submitted mutation and the canonical project/session/worktree state returned or published by that mutation.
-- Open Existing worktree mode is selection-only. It must not show create-session controls such as agent selection, first prompt, add images, or prompt helper text.
+- Open Existing worktree mode may submit only the selected worktree path when the first prompt is blank. If the shared modal submits a non-blank prompt, it must also submit the visible selected agent so the receiver starts that real agent session instead of inventing defaults.
 
 ## Projects and Worktrees
 

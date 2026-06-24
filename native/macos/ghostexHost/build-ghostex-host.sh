@@ -890,6 +890,7 @@ EOF
 	cargo_bin="$(resolve_gxserver_rust_cargo)"
 	cargo_target="$(gxserver_rust_cargo_target)"
 	output_path="$GXSERVER_RS_ROOT/target/$cargo_target/release/gxserver"
+	GXSERVER_RUST_BIN=""
 	cargo_version="$("$cargo_bin" --version 2>/dev/null || true)"
 	build_digest="$(fingerprint_inputs \
 		--value "gxserver-rs-build-v1" \
@@ -901,17 +902,18 @@ EOF
 	if cache_matches "gxserver-rs-$GHOSTEX_MACOS_ARCH" "$build_digest" "$output_path" &&
 		binary_supports_macos_arch "$output_path" "$GHOSTEX_MACOS_ARCH"; then
 		echo "Rust gxserver is current; skipping Cargo build." >&2
-		printf '%s\n' "$output_path"
+		GXSERVER_RUST_BIN="$output_path"
 		return 0
 	fi
 
+	# CDXC:GxserverRustBuild 2026-06-24-20:22: Local start must fail before packaging when gxserver-rs no longer compiles. This function is called outside command substitution so `set -e` can abort on Cargo errors instead of stamping the current source digest and copying a stale daemon binary.
 	"$cargo_bin" build --release --manifest-path "$GXSERVER_RS_ROOT/Cargo.toml" --target "$cargo_target"
 	if ! binary_supports_macos_arch "$output_path" "$GHOSTEX_MACOS_ARCH"; then
 		echo "Rust gxserver binary does not contain $GHOSTEX_MACOS_ARCH: $output_path" >&2
 		exit 1
 	fi
 	write_cache_stamp "gxserver-rs-$GHOSTEX_MACOS_ARCH" "$build_digest"
-	printf '%s\n' "$output_path"
+	GXSERVER_RUST_BIN="$output_path"
 }
 
 build_zehn_if_needed() {
@@ -1355,7 +1357,12 @@ package_gxserver_if_needed() {
 	# CDXC:GxserverRustPackaging 2026-06-22-16:17: Rust is the only normal local-start package path now that gxserver/ is removed. Default packaging must consume gxserver-rs and shared/gxserver-protocol.ts directly; the TypeScript branch remains explicit validation only and may fail fast when that source tree is absent.
 	if [[ "$GHOSTEX_GXSERVER_PACKAGE_MODE" == "rust" ]]; then
 		package_dir="$BUILD_CACHE_DIR/gxserver-rs/server-package"
-		rust_bin="$(build_gxserver_rust_if_needed)"
+		build_gxserver_rust_if_needed
+		rust_bin="$GXSERVER_RUST_BIN"
+		if [[ -z "$rust_bin" || ! -x "$rust_bin" ]]; then
+			echo "Rust gxserver build did not produce an executable daemon path." >&2
+			exit 1
+		fi
 		package_version="$(gxserver_rust_package_version)"
 		package_digest="$(fingerprint_inputs \
 			--value "gxserver-package-v7" \

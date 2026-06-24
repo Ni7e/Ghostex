@@ -68,6 +68,8 @@ const GHOSTEX_AGENT_ORCHESTRATION_SKILL_NAME = "ghostex-agent-orchestration";
 const GHOSTEX_GENERATE_TITLE_SKILL_NAME = "ghostex-generate-title";
 const GHOSTEX_MANAGE_BEADS_SKILL_NAME = "ghostex-manage-beads";
 const QUICK_TERMINALS_PROJECT_NAME = "Quick Terminals";
+const CLI_POSIX_SHELL_NAMES = new Set(["ash", "bash", "dash", "ksh", "mksh", "sh", "zsh"]);
+const CLI_LOGIN_COMMAND_SHELL_NAMES = new Set(["bash", "zsh"]);
 const RESET_ANSI = "\x1b[0m";
 const PICKER_TITLE = "Attach to Ghostex Session";
 const PICKER_TITLE_STYLE = "\x1b[1m\x1b[38;2;255;255;255m";
@@ -3411,7 +3413,8 @@ async function resolveExecutable(command) {
   if (command.includes("/")) {
     return command;
   }
-  const { stdout } = await execFileAsync("/bin/zsh", ["-lc", `command -v -- ${shellQuote(command)}`]);
+  const shell = resolveCliInteractiveShellLaunch();
+  const { stdout } = await execFileAsync(shell.executable, [shell.commandFlag, `command -v -- ${shellQuote(command)}`]);
   return stdout.trim().split(/\r?\n/)[0] || command;
 }
 
@@ -3599,6 +3602,78 @@ async function readDebuggingMode() {
 
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function shellWord(value) {
+  const text = String(value ?? "");
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(text) ? text : shellQuote(text);
+}
+
+function resolveCliInteractiveShellLaunch(options = {}) {
+  /**
+   * CDXC:RemoteUbuntuAttach 2026-06-24-22:32:
+   * Remote `ghostex attach` runs from the bundled CLI on the target machine, so
+   * it must not spawn macOS-only `/bin/zsh` on Ubuntu. Keep macOS pinned to zsh
+   * for compatibility, but resolve Linux attaches through an installed POSIX
+   * shell so SSH attaches reach zmx instead of failing with ENOENT.
+   */
+  const platform = options.platform ?? process.platform;
+  if (platform === "darwin") {
+    return {
+      commandFlag: "-lc",
+      executable: "/bin/zsh",
+      loginFlag: "-l",
+    };
+  }
+  const env = options.env ?? process.env;
+  const isExecutable = options.isExecutable ?? isExecutableFileSync;
+  const candidates = cliInteractiveShellCandidates(env);
+  const executable = candidates.find((candidate) => isExecutable(candidate)) ?? candidates[0] ?? "/bin/sh";
+  return {
+    commandFlag: cliShellCommandFlag(executable),
+    executable,
+    loginFlag: cliShellLoginFlag(executable),
+  };
+}
+
+function cliInteractiveShellCandidates(env = process.env) {
+  const candidates = [];
+  const shell = String(env.SHELL ?? "").trim();
+  if (shell && isSupportedCliPosixShell(shell)) {
+    candidates.push(shell);
+  }
+  candidates.push("/bin/bash", "/usr/bin/bash", "/bin/sh", "/usr/bin/sh");
+  return uniqueStrings(candidates);
+}
+
+function uniqueStrings(values) {
+  const seen = new Set();
+  const unique = [];
+  for (const value of values) {
+    const normalized = String(value ?? "").trim();
+    if (normalized && !seen.has(normalized)) {
+      seen.add(normalized);
+      unique.push(normalized);
+    }
+  }
+  return unique;
+}
+
+function isSupportedCliPosixShell(shellPath) {
+  return CLI_POSIX_SHELL_NAMES.has(path.basename(String(shellPath ?? "")).toLowerCase());
+}
+
+function cliShellCommandFlag(shellPath) {
+  return CLI_LOGIN_COMMAND_SHELL_NAMES.has(path.basename(String(shellPath ?? "")).toLowerCase()) ? "-lc" : "-c";
+}
+
+function cliShellLoginFlag(shellPath) {
+  return CLI_LOGIN_COMMAND_SHELL_NAMES.has(path.basename(String(shellPath ?? "")).toLowerCase()) ? "-l" : "";
+}
+
+function cliShellCommandString(command, options = {}) {
+  const shell = resolveCliInteractiveShellLaunch(options);
+  return `${shellWord(shell.executable)} ${shell.commandFlag} ${shellQuote(command)}`;
 }
 
 function sleep(ms) {
@@ -3813,7 +3888,8 @@ async function readAndroidReadinessSettings(settingsPath = SHARED_SETTINGS_PATH)
 }
 
 async function resolveCommandPath(command) {
-  const { stdout } = await execFileAsync("/bin/zsh", ["-lc", `command -v -- ${shellQuote(command)}`]).catch(() => ({
+  const shell = resolveCliInteractiveShellLaunch();
+  const { stdout } = await execFileAsync(shell.executable, [shell.commandFlag, `command -v -- ${shellQuote(command)}`]).catch(() => ({
     stdout: "",
   }));
   return stdout.trim().split(/\r?\n/)[0] || "";
@@ -4467,12 +4543,20 @@ function buildZmxAttachOrResumeCommand(session) {
   const resumeCommand = String(session.resumeCommand).trim();
   const resumeFallbackCommand = String(session.resumeFallbackCommand ?? "").trim();
   const cwd = String(session.projectPath || ".").trim() || ".";
+  const shell = resolveCliInteractiveShellLaunch();
+  const keepaliveShellAssignment = process.platform === "darwin"
+    ? "zmx_keepalive_shell=${SHELL:-/bin/zsh}"
+    : `zmx_keepalive_shell=${shellQuote(shell.executable)}`;
   const script = `
 zmx_session=${shellQuote(sessionName)}
 zmx_resume_command=${shellQuote(resumeCommand)}
 zmx_resume_fallback_command=${shellQuote(resumeFallbackCommand)}
 zmx_cwd=${shellQuote(cwd)}
-export zmx_resume_command zmx_resume_fallback_command
+zmx_resume_shell=${shellQuote(shell.executable)}
+zmx_resume_shell_flag=${shellQuote(shell.commandFlag)}
+${keepaliveShellAssignment}
+zmx_keepalive_shell_login_flag=${shellQuote(shell.loginFlag)}
+export zmx_resume_command zmx_resume_fallback_command zmx_resume_shell zmx_resume_shell_flag zmx_keepalive_shell zmx_keepalive_shell_login_flag
 unset ZMX_SESSION ZMX_SESSION_PREFIX
 if ! command -v zmx >/dev/null 2>&1; then
   printf '%s\\n' 'zmx was not found on PATH.'
@@ -4484,20 +4568,23 @@ fi
 cd "$zmx_cwd" || exit
 zmx_resume_launcher='
 set +e
-/bin/zsh -lc "$zmx_resume_command"
+"$zmx_resume_shell" "$zmx_resume_shell_flag" "$zmx_resume_command"
 zmx_resume_status=$?
 if [ "$zmx_resume_status" -ne 0 ] && [ -n "$zmx_resume_fallback_command" ] && [ "$zmx_resume_fallback_command" != "$zmx_resume_command" ]; then
   printf '"'"'%s\\n'"'"' "Exact resume failed; trying saved fallback resume command."
-  /bin/zsh -lc "$zmx_resume_fallback_command"
+  "$zmx_resume_shell" "$zmx_resume_shell_flag" "$zmx_resume_fallback_command"
   zmx_resume_status=$?
 fi
 if [ "$zmx_resume_status" -ne 0 ]; then
   printf '"'"'\\n%s\\n'"'"' "Resume command exited with status $zmx_resume_status. Leaving this pane open for inspection."
-  exec "\${SHELL:-/bin/zsh}" -l
+  if [ -n "$zmx_keepalive_shell_login_flag" ]; then
+    exec "$zmx_keepalive_shell" "$zmx_keepalive_shell_login_flag"
+  fi
+  exec "$zmx_keepalive_shell"
 fi
 exit 0
 '
-exec zmx attach "$zmx_session" /bin/zsh -lc "$zmx_resume_launcher"
+exec zmx attach "$zmx_session" "$zmx_resume_shell" "$zmx_resume_shell_flag" "$zmx_resume_launcher"
 `;
   /**
    * CDXC:AndroidRemoteSessions 2026-05-21-07:21:
@@ -4506,7 +4593,7 @@ exec zmx attach "$zmx_session" /bin/zsh -lc "$zmx_resume_launcher"
    * zmx session and run the agent resume command there instead of opening an
    * attach terminal that immediately exits or becomes an empty shell.
    */
-  return `/bin/zsh -lc ${shellQuote(script)}`;
+  return cliShellCommandString(script);
 }
 
 function sessionActionCommand(action, pastTense, extraPayload = {}) {
@@ -5288,7 +5375,8 @@ function formatActiveTime(value) {
 }
 
 async function runInteractiveShellCommand(command, cwd) {
-  await runInteractiveProcess("/bin/zsh", ["-lc", command], { cwd });
+  const shell = resolveCliInteractiveShellLaunch();
+  await runInteractiveProcess(shell.executable, [shell.commandFlag, command], { cwd });
 }
 
 async function runInteractiveProcess(command, args, options = {}) {
@@ -6149,6 +6237,7 @@ export {
   readAndroidReadinessSettings,
   requestGxserverRpc,
   resolveBundledBeadsLaunchFromRoot,
+  resolveCliInteractiveShellLaunch,
   resolveGxserverCliLaunchFromRoot,
   resolveGxserverCliLaunchForPath,
   resolveGxserverServerTarget,

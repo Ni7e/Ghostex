@@ -15,6 +15,14 @@ const PROJECTS: SidebarRecentProject[] = [
     sessionCount: 0,
     title: "open-design",
   },
+  {
+    path: "/home/story/dev/remote-control",
+    projectId: "remote:main-machine:project:remote-control",
+    remoteMachineId: "main-machine",
+    remoteMachineName: "Raspberry Pi",
+    sessionCount: 1,
+    title: "remote-control",
+  },
 ];
 
 describe("filterRecentProjects", () => {
@@ -34,5 +42,16 @@ describe("filterRecentProjects", () => {
     expect(
       filterRecentProjects(PROJECTS, "open design").map((project) => project.projectId),
     ).toEqual(["open-design"]);
+  });
+
+  test("matches remote project machine names", () => {
+    /**
+     * CDXC:RemoteRecentProjects 2026-06-24-10:36:
+     * Recent Projects includes closed remote projects with a visible machine
+     * suffix, so filtering must match the machine name as well as path/title.
+     */
+    expect(filterRecentProjects(PROJECTS, "raspberry").map((project) => project.projectId)).toEqual([
+      "remote:main-machine:project:remote-control",
+    ]);
   });
 });

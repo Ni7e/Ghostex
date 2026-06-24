@@ -8,7 +8,12 @@ import type {
   SidebarCommandButton,
   SidebarCommandRunMode,
 } from "./sidebar-commands";
-import type { SidebarGitAction, SidebarGitChangedFile, SidebarGitState } from "./sidebar-git";
+import type {
+  SidebarGitAction,
+  SidebarGitChangedFile,
+  SidebarGitFileDiffDraft,
+  SidebarGitState,
+} from "./sidebar-git";
 import type { SidebarProjectDiffStats } from "./project-diff-stats";
 import type { ghostexSettings } from "./ghostex-settings";
 import type { ghostexHotkeyActionId } from "./ghostex-hotkeys";
@@ -177,12 +182,53 @@ export type SidebarGhostexCliStatusMessage = {
   type: "ghostexCliStatus";
 };
 
+export type SidebarOSIntegrationStatusTarget =
+  | "bundleRegistration"
+  | "editor"
+  | "platform"
+  | "scriptRunner"
+  | "terminalLinks";
+
+export type SidebarOSIntegrationStatusOperation =
+  | "readStatus"
+  | "registerBundle"
+  | "setDefault";
+
+export type SidebarOSIntegrationStatusState =
+  | "failed"
+  | "skipped"
+  | "unsupported";
+
+export type SidebarOSIntegrationStatusReason =
+  | "bundleIdentifierMissing"
+  | "bundleRegistrationFailed"
+  | "contentTypeUnavailable"
+  | "invalidTarget"
+  | "launchServicesRejected"
+  | "unsupportedPlatform";
+
+export type SidebarOSIntegrationStatusItem = {
+  extension?: string;
+  operation: SidebarOSIntegrationStatusOperation;
+  reason: SidebarOSIntegrationStatusReason;
+  scheme?: "ghostex";
+  status: SidebarOSIntegrationStatusState;
+  target: SidebarOSIntegrationStatusTarget;
+};
+
 export type SidebarOSIntegrationStatusMessage = {
   /**
    * CDXC:OSIntegration 2026-05-27-18:06:
    * Settings -> OS Integration shows native Launch Services diagnostics so the
    * user can tell whether Ghostex is merely available in Open With or is the
    * current default for editor, terminal-link, and script-runner roles.
+   *
+   * CDXC:OSIntegration 2026-06-24-15:10:
+   * Reused Settings surfaces need a shared privacy-safe status channel for
+   * Launch Services failures. `statusItems` carries only enum reasons, target,
+   * operation, known file extensions, and the fixed ghostex scheme; it must not
+   * expose bundle paths, file paths, URLs, command text, environment values,
+   * tokens, stdout/stderr, daemon bodies, or raw OSStatus values.
    */
   bundleIdentifier: string;
   editorDefaults: Record<string, string>;
@@ -191,6 +237,7 @@ export type SidebarOSIntegrationStatusMessage = {
   registeredGhostexURLScheme: boolean;
   registeredScriptRunner: boolean;
   scriptDefaults: Record<string, string>;
+  statusItems?: SidebarOSIntegrationStatusItem[];
   terminalLinkDefaultBundleId?: string;
   type: "osIntegrationStatus";
 };
@@ -454,6 +501,12 @@ export type SidebarRecentProject = {
   path: string;
   projectId: string;
   recentClosedAt?: string;
+  /**
+   * CDXC:RemoteRecentProjects 2026-06-24-10:36:
+   * Remote closed projects share the Recent Projects drawer with local parked projects. Carry the owning machine separately so React can display "Project (Machine)" while native still routes restore/open/remove by the trusted scoped project id.
+   */
+  remoteMachineId?: string;
+  remoteMachineName?: string;
   sessionCount: number;
   theme?: SidebarTheme;
   themeColor?: string;
@@ -727,6 +780,26 @@ export type SidebarPromptGitCommitMessage = {
   worktreeName?: string;
 };
 
+export type SidebarGitFileDiffMessage = {
+  /*
+  CDXC:GitReview 2026-06-24-15:22:
+  Reused SidebarApp commit review can run outside the native app-modal host.
+  Return selected-file diffs through a request-scoped shared message so non-native hosts can fill the inline review pane without opening files, trusting renderer paths as authority, or adding GPUI-only UI.
+  */
+  draft: SidebarGitFileDiffDraft;
+  requestId: string;
+  type: "sidebarGitFileDiff";
+};
+
+export type SidebarGitPreferenceScope = {
+  /*
+  CDXC:GPUIRemoteGit 2026-06-24-18:22:
+  Git preference writes are project-scoped when the shared UI knows the owning project row. Carry a trusted group id or machine-scoped project id with preference changes so GPUI can route remote writes through the owning gxserver tunnel instead of inferring from the active local project, labels, or DOM text.
+  */
+  groupId?: string;
+  projectId?: string;
+};
+
 export type SidebarT3BrowserAccessMode = "external" | "local-network" | "local-only" | "tailscale";
 
 export type SidebarShowT3BrowserAccessMessage = {
@@ -823,6 +896,7 @@ export type ExtensionToSidebarMessage =
   | SidebarCommandRunStateClearedMessage
   | SidebarDaemonSessionsStateMessage
   | SidebarPromptGitCommitMessage
+  | SidebarGitFileDiffMessage
   | SidebarShowT3BrowserAccessMessage
   | SidebarGhostexFolderStatsMessage
   | SidebarAgentHookStatusMessage
@@ -1831,21 +1905,34 @@ export type SidebarToExtensionMessage =
   | {
       action: SidebarGitAction;
       groupId?: string;
+      projectId?: string;
       type: "runSidebarGitAction";
     }
   | {
       action: SidebarGitAction;
+      groupId?: string;
+      projectId?: string;
       type: "setSidebarGitPrimaryAction";
     }
   | {
+      /*
+      CDXC:GPUISidebarGit 2026-06-24-21:26:
+      Git refreshes can originate from reused project-scoped controls, including remote project rows. Carry the optional group/project scope so GPUI refreshes the owning gxserver project instead of falling back to the active local project.
+      */
+      groupId?: string;
+      projectId?: string;
       type: "refreshGitState";
     }
   | {
       enabled: boolean;
+      groupId?: string;
+      projectId?: string;
       type: "setSidebarGitCommitConfirmationEnabled";
     }
   | {
       enabled: boolean;
+      groupId?: string;
+      projectId?: string;
       type: "setSidebarGitGenerateCommitBodyEnabled";
     }
   | {
@@ -1872,6 +1959,16 @@ export type SidebarToExtensionMessage =
     }
   | {
       filePath: string;
+      /*
+      CDXC:GPUISidebarGit 2026-06-24-15:43:
+      Commit-review changed-file opens may include the active review request id so non-native hosts can validate the file against the gxserver-derived review list before native code resolves and opens the project-relative path.
+
+      CDXC:GPUISidebarGit 2026-06-24-21:26:
+      Non-review changed-file opens may come from scoped Git controls. Carry the same optional group/project scope as Git actions so GPUI can re-read the owning local or remote gxserver project before opening a file.
+      */
+      groupId?: string;
+      projectId?: string;
+      requestId?: string;
       type: "openSidebarGitChangedFile";
     }
   | {
@@ -1927,6 +2024,8 @@ export type SidebarToExtensionMessage =
   | {
       type: "createProjectWorktree";
       agentId?: string;
+      baseBranch?: string;
+      existingWorktreeKey?: string;
       existingWorktreePath?: string;
       mode?: "create" | "openExisting";
       prompt?: string;

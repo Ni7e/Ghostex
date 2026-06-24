@@ -365,6 +365,8 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/ingestTerminalTitleEvent"
         | "/api/updateAgentActivity"
         | "/api/readPresentationSnapshot"
+        | "/api/readSidebarHud"
+        | "/api/mutateSidebarHudSettings"
         | "/api/searchSessions"
         | "/api/listPreviousSessions"
         | "/api/transitionSession"
@@ -385,8 +387,17 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/createProject"
         | "/api/updateProject"
         | "/api/listProjects"
+        | "/api/closeProjectToRecent"
+        | "/api/listRecentProjects"
+        | "/api/restoreRecentProject"
+        | "/api/removeRecentProject"
         | "/api/readProjectStatus"
         | "/api/addProjectPath"
+        | "/api/listProjectWorktrees"
+        | "/api/createProjectWorktree"
+        | "/api/openProjectWorktree"
+        | "/api/mergeWorktreeIntoMain"
+        | "/api/checkoutProjectNewBranch"
         | "/api/removeProject"
         | "/api/deleteWorktreeProject"
         | "/api/updateSession"
@@ -410,6 +421,32 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/uninstallAgentHooks"
         | "/api/readAgentSkillStatus"
         | "/api/installAgentSkills"
+        /*
+        CDXC:GxserverAppUserData 2026-06-24-13:30:
+        Scratch Pad and Pinned Prompts can carry user-authored bodies, so their
+        shared gxserver RPCs are local-only authenticated endpoints rather than
+        remote-listener APIs.
+        */
+        | "/api/readAppUserData"
+        | "/api/saveScratchPad"
+        | "/api/savePinnedPrompt"
+        /*
+        CDXC:GPUISidebarGit 2026-06-24-16:11:
+        Commit-message generation carries staged diff content and generated
+        commit text through the authenticated response. Keep this endpoint on
+        the local listener, but allow GPUI saved-machine SSH tunnels to reach
+        the remote daemon's localhost API after the Rust bridge validates the
+        machine id, endpoint, timeout, and response shape.
+
+        CDXC:GPUISidebarGit 2026-06-24-16:28:
+        Background PR creation confirms `gh pr create --fill` through a
+        sanitized gxserver result before GPUI can open the PR or delete a
+        worktree. Remote GPUI may use the same local-listener endpoint only
+        through its saved-machine tunnel, and the GPUI bridge strips PR URL
+        launch authority from remote responses.
+        */
+        | "/api/generateCommitMessage"
+        | "/api/createPullRequest"
         | "/api/updatePortlessState"
         | "/api/queryLogs" => full_local(path),
         "/api/resolveGitRootForPath"

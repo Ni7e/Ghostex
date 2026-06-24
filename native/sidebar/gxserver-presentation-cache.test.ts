@@ -99,6 +99,7 @@ function domainProject(
     gitConfig: {},
     isFavorite: false,
     isPinned: false,
+    isRecentProject: false,
     launchSettings: {},
     name: "Repo",
     notificationRules: {},

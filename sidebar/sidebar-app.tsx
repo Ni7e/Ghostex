@@ -1387,6 +1387,18 @@ export function SidebarApp({
       return;
     }
 
+    if (event.data.type === "sidebarGitFileDiff") {
+      /*
+      CDXC:GitReview 2026-06-24-15:22:
+      Inline commit-review diffs may now arrive from any shared SidebarApp host.
+      Apply them only to the matching open request so an async gxserver diff from an older review cannot populate a later modal.
+      */
+      if (useSidebarStore.getState().gitCommitDraft?.requestId === event.data.requestId) {
+        setGitFileDiffDraft(event.data.draft);
+      }
+      return;
+    }
+
     if (event.data.type === "previousSessionsResult") {
       if (event.data.requestId !== latestSessionSearchPreviousRequestIdRef.current) {
         return;
@@ -5187,6 +5199,7 @@ function RecentProjectRow({
 }: RecentProjectRowProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [ isTooltipOpen, setIsTooltipOpen ] = useState(false);
+  const displayTitle = formatRecentProjectTitle(project);
 
   const setRecentProjectTooltipOpen = (nextOpen: boolean) => {
     if (
@@ -5206,7 +5219,7 @@ function RecentProjectRow({
 
   return (
     <AppTooltip
-      content={project.path}
+      content={project.remoteMachineName ? `${project.path} (${project.remoteMachineName})` : project.path}
       onOpenChange={setRecentProjectTooltipOpen}
       open={isTooltipOpen}
     >
@@ -5233,7 +5246,7 @@ function RecentProjectRow({
             </span>
             <span className="group-title-handle">
               <span className="recent-projects-row-title group-title section-titlebar-label">
-                {project.title}
+                {displayTitle}
               </span>
             </span>
             <span className="group-title-spacer" />
@@ -5248,6 +5261,14 @@ function RecentProjectRow({
       </button>
     </AppTooltip>
   );
+}
+
+function formatRecentProjectTitle(project: SidebarRecentProject): string {
+  /*
+   * CDXC:RemoteRecentProjects 2026-06-24-10:36:
+   * Recent Projects should show remote closed projects beside local ones and append the owning machine name after the project name so identical remote/local project titles remain distinguishable.
+   */
+  return project.remoteMachineName ? `${project.title} (${project.remoteMachineName})` : project.title;
 }
 
 function createWorkspaceSessionIdsByGroup(

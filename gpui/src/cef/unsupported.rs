@@ -29,14 +29,45 @@ pub enum SidebarBridgeEvent {
     BrowserWorkareaReadiness(String),
     ProjectWorkareaReadiness(String),
     ManageFileWorkareaOperationRequest(String),
+    NativeProjectPathAction(String),
+    GxserverPresentationFocusState(String),
 }
 
 pub type SidebarBridgeEventHandler = Rc<dyn Fn(SidebarBridgeEvent)>;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProjectWorkareaBridgeEvent {
+    ProjectBeadsRequest(String),
+    ProjectBoardRequest(String),
+    ProjectBoardImageRequest(String),
+    ManageFilesRequest(String),
+}
+
+pub type ProjectWorkareaBridgeEventHandler = Rc<dyn Fn(ProjectWorkareaBridgeEvent)>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AppModalHostBridgeEvent {
+    Message(String),
+}
+
+pub type AppModalHostBridgeEventHandler = Rc<dyn Fn(AppModalHostBridgeEvent)>;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SidebarRuntimeSettingsSnapshot {
     pub debugging_mode: bool,
     pub show_beta_features: bool,
+    pub saved_settings_json: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SidebarGxserverBootstrap {
+    pub base_url: String,
+    pub auth_token: String,
+    pub protocol_version: i32,
+    pub client_id: String,
+    pub initial_active_project_id: Option<String>,
+    pub focused_session_id: Option<String>,
+    pub visible_session_ids: Vec<String>,
 }
 
 pub struct CefBrowser;
@@ -49,7 +80,10 @@ impl CefBrowser {
         _popup_open_handler: Option<BrowserPopupOpenHandler>,
         _page_metadata_handler: Option<BrowserPageMetadataHandler>,
         _sidebar_runtime_settings: Option<SidebarRuntimeSettingsSnapshot>,
+        _sidebar_gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
         _sidebar_bridge_event_handler: Option<SidebarBridgeEventHandler>,
+        _project_workarea_bridge_event_handler: Option<ProjectWorkareaBridgeEventHandler>,
+        _app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
     ) -> Self {
         Self
     }
@@ -79,6 +113,16 @@ impl CefBrowser {
         &self,
         _runtime_settings: SidebarRuntimeSettingsSnapshot,
     ) {
+    }
+
+    pub fn refresh_sidebar_gxserver_bootstrap(
+        &self,
+        _gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
+    ) {
+        /*
+        CDXC:GPUISidebarGxserverBootstrap 2026-06-24-11:17:
+        Non-macOS CEF remains explicitly unsupported, but its Rust API mirrors the macOS sidebar gxserver bootstrap refresh surface so shared GPUI code can compile when platform backends are added. This no-op must not create fallback gxserver data, expose tokens, log, persist, or pretend a CEF renderer exists.
+        */
     }
 
     pub fn can_go_back(&self) -> bool {
