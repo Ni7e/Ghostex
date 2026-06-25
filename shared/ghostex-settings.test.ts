@@ -294,6 +294,26 @@ describe("normalizeghostexSettings", () => {
     });
   });
 
+  test("normalizes the app icon source id", () => {
+    /*
+     * CDXC:AppIconPicker 2026-06-25-21:50:
+     * The app icon source id is a trimmed filename, or "" for the default
+     * bundled icon. Missing or non-string values fall back to the default.
+     */
+    expect(DEFAULT_ghostex_SETTINGS.appIconSourceId).toBe("");
+    expect(normalizeghostexSettings({})).toMatchObject({
+      appIconSourceId: "",
+    });
+    expect(normalizeghostexSettings({ appIconSourceId: "  panda.icns  " })).toMatchObject({
+      appIconSourceId: "panda.icns",
+    });
+    expect(
+      normalizeghostexSettings({ appIconSourceId: 42 as unknown as string }),
+    ).toMatchObject({
+      appIconSourceId: "",
+    });
+  });
+
   test("previews session title generation commands", () => {
     /*
     CDXC:GxserverSessionTitle 2026-06-04-22:44:

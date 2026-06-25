@@ -45,6 +45,8 @@ import type {
   SidebarGhostexCliStatusMessage,
   SidebarGhostexFolderStatsMessage,
   SidebarOSIntegrationStatusMessage,
+  // CDXC:AppIconPicker 2026-06-25-21:50: App Icon state flows to Settings through the modal-state relay.
+  SidebarAppIconStateMessage,
   SidebarToExtensionMessage,
 } from "../../shared/session-grid-contract";
 import {
@@ -102,6 +104,8 @@ type AgentsHubFileContentMessage = Extract<
 type AgentHookStatusMessage = Extract<ExtensionToSidebarMessage, { type: "agentHookStatus" }>;
 type GhostexCliStatusMessage = Extract<ExtensionToSidebarMessage, { type: "ghostexCliStatus" }>;
 type OSIntegrationStatusMessage = Extract<ExtensionToSidebarMessage, { type: "osIntegrationStatus" }>;
+// CDXC:AppIconPicker 2026-06-25-21:50: App Icon state message threaded through modal state into Settings.
+type AppIconStateMessage = Extract<ExtensionToSidebarMessage, { type: "appIconState" }>;
 
 type AppModalHostMessage =
   | {
@@ -2008,6 +2012,8 @@ function AppModalHost() {
     ghostexCliStatus,
     ghostexFolderStats,
     osIntegrationStatus,
+    // CDXC:AppIconPicker 2026-06-25-21:50: Pull relayed App Icon state for the Settings modal.
+    appIconState,
     portlessSetup,
     settingsInitialSection,
     settingsInitialRemoteMachineId,
@@ -2801,6 +2807,8 @@ function AppModalHost() {
         ghostexFolderStatsLoading={ghostexFolderStatsLoading}
         osIntegrationStatus={osIntegrationStatus}
         osIntegrationStatusLoading={osIntegrationStatusLoading}
+        // CDXC:AppIconPicker 2026-06-25-21:50: Prop-driven App Icon state for Settings (mirrors osIntegrationStatus).
+        appIconState={appIconState}
       />
       <DiscoverGhostexModal
         isOpen={activeModal === "discoverGhostex"}
@@ -3070,6 +3078,8 @@ function useModalStateFromNative() {
   const [ghostexCliStatus, setGhostexCliStatus] = useState<GhostexCliStatusMessage>();
   const [ghostexFolderStats, setGhostexFolderStats] = useState<SidebarGhostexFolderStatsMessage>();
   const [osIntegrationStatus, setOSIntegrationStatus] = useState<OSIntegrationStatusMessage>();
+  // CDXC:AppIconPicker 2026-06-25-21:50: Latest native App Icon state passed to Settings.
+  const [appIconState, setAppIconState] = useState<AppIconStateMessage>();
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<MainSettingsInitialSectionId>();
   const [settingsInitialRemoteMachineId, setSettingsInitialRemoteMachineId] = useState<string>();
@@ -3098,6 +3108,8 @@ function useModalStateFromNative() {
     setPortlessSetup(undefined);
     setGhostexFolderStats(undefined);
     setOSIntegrationStatus(undefined);
+    // CDXC:AppIconPicker 2026-06-25-21:50: Drop stale App Icon state when the modal closes.
+    setAppIconState(undefined);
     setAgentsHubCatalog(undefined);
     setAgentsHubFileContent(undefined);
     setCommandPaletteCollapsedGroupsById({});
@@ -3781,6 +3793,11 @@ function useModalStateFromNative() {
             setOSIntegrationStatus(message.message);
             return;
           }
+          // CDXC:AppIconPicker 2026-06-25-21:50: Route relayed App Icon state into Settings modal state.
+          if (isAppIconStateMessage(message.message)) {
+            setAppIconState(message.message);
+            return;
+          }
           if (isPreviousSessionsResultMessage(message.message)) {
             window.postMessage(message.message, "*");
             return;
@@ -3851,6 +3868,8 @@ function useModalStateFromNative() {
     ghostexCliStatus,
     ghostexFolderStats,
     osIntegrationStatus,
+    // CDXC:AppIconPicker 2026-06-25-21:50: Expose App Icon state to the modal component.
+    appIconState,
     settingsInitialSection,
     settingsInitialRemoteMachineId,
     settingsInitialSearchQuery,
@@ -3891,6 +3910,16 @@ function isOSIntegrationStatusMessage(message: unknown): message is SidebarOSInt
       typeof message === "object" &&
       "type" in message &&
       message.type === "osIntegrationStatus",
+  );
+}
+
+// CDXC:AppIconPicker 2026-06-25-21:50: Narrow relayed sidebarState payloads to the App Icon contract.
+function isAppIconStateMessage(message: unknown): message is SidebarAppIconStateMessage {
+  return Boolean(
+    message &&
+      typeof message === "object" &&
+      "type" in message &&
+      message.type === "appIconState",
   );
 }
 

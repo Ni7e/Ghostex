@@ -35,6 +35,11 @@ enum HostCommand: Decodable {
   case setTerminalVisibility(SetTerminalVisibility)
   case pickWorkspaceFolder
   case pickWorkspaceIcon(PickWorkspaceIcon)
+  // CDXC:AppIconPicker 2026-06-25-21:50: Sidebar app-icon picker commands cross the host bridge so AppKit owns NSApp.applicationIconImage, ~/.ghostex/icons file copies, and Finder reveal while React only sends the selected source id.
+  case listAppIcons
+  case setAppIcon(SetAppIcon)
+  case pickAppIconFile
+  case revealAppIconsFolder
   case showMessage(ShowMessage)
   case appendAgentDetectionDebugLog(AppendAgentDetectionDebugLog)
   case appendLayoutLayeringDebugLog(AppendLayoutLayeringDebugLog)
@@ -147,6 +152,11 @@ enum HostCommand: Decodable {
     case setTerminalVisibility
     case pickWorkspaceFolder
     case pickWorkspaceIcon
+    // CDXC:AppIconPicker 2026-06-25-21:50: Register the app-icon picker command type strings exactly as the parallel TS sidebar emits them.
+    case listAppIcons
+    case setAppIcon
+    case pickAppIconFile
+    case revealAppIconsFolder
     case showMessage
     case appendAgentDetectionDebugLog
     case appendLayoutLayeringDebugLog
@@ -292,6 +302,15 @@ enum HostCommand: Decodable {
       self = .pickWorkspaceFolder
     case .pickWorkspaceIcon:
       self = .pickWorkspaceIcon(try PickWorkspaceIcon(from: decoder))
+    // CDXC:AppIconPicker 2026-06-25-21:50: Decode the app-icon picker commands; only setAppIcon carries a payload (the selected source id).
+    case .listAppIcons:
+      self = .listAppIcons
+    case .setAppIcon:
+      self = .setAppIcon(try SetAppIcon(from: decoder))
+    case .pickAppIconFile:
+      self = .pickAppIconFile
+    case .revealAppIconsFolder:
+      self = .revealAppIconsFolder
     case .showMessage:
       self = .showMessage(try ShowMessage(from: decoder))
     case .appendAgentDetectionDebugLog:
@@ -1147,6 +1166,11 @@ struct PickWorkspaceIcon: Decodable {
   let projectId: String
 }
 
+// CDXC:AppIconPicker 2026-06-25-21:50: The selected app-icon source id is a filename inside ~/.ghostex/icons, or "" for the default/bundle Dock icon. No paths or image bytes cross this boundary.
+struct SetAppIcon: Decodable {
+  let sourceId: String
+}
+
 struct ShowMessage: Decodable {
   let level: MessageLevel
   let message: String
@@ -1636,6 +1660,8 @@ enum HostEvent: Encodable {
     remoteMachineId: String, requestId: String, ok: Bool, hasPassword: Bool, error: String?)
   case sidebarCliResult(requestId: String, ok: Bool, payloadJson: String)
   case gxserverStatus(payloadJson: String)
+  // CDXC:AppIconPicker 2026-06-25-21:50: The native app-icon state pushes the current selection and the masked thumbnail list back to the sidebar over the typed host-event bus, matching how requestOSIntegrationStatus pushes its status. Thumbnails are base64 data URLs only; no absolute paths are ever encoded.
+  case appIconState(ok: Bool, error: String?, selectedId: String, icons: [AppIconDescriptor])
 
   private enum CodingKeys: String, CodingKey {
     case exitCode
@@ -1703,6 +1729,9 @@ enum HostEvent: Encodable {
     case targetSessionId
     case tmuxSessionName
     case remoteMachineId
+    // CDXC:AppIconPicker 2026-06-25-21:50: appIconState carries the selected source id and the masked icon descriptor list.
+    case selectedId
+    case icons
   }
 
   func encode(to encoder: Encoder) throws {
@@ -2134,8 +2163,28 @@ enum HostEvent: Encodable {
        */
       try container.encode("gxserverStatus", forKey: .type)
       try container.encode(payloadJson, forKey: .payloadJson)
+    case .appIconState(let ok, let error, let selectedId, let icons):
+      /**
+       CDXC:AppIconPicker 2026-06-25-21:50:
+       Encode only stable UI fields: ok/error booleans and strings, the selected
+       source id, and per-icon descriptors whose thumbnails are base64 data URLs.
+       Never encode absolute filesystem paths or raw source image bytes.
+       */
+      try container.encode("appIconState", forKey: .type)
+      try container.encode(ok, forKey: .ok)
+      try container.encodeIfPresent(error, forKey: .error)
+      try container.encode(selectedId, forKey: .selectedId)
+      try container.encode(icons, forKey: .icons)
     }
   }
+}
+
+// CDXC:AppIconPicker 2026-06-25-21:50: One row in the sidebar app-icon picker. id is a ~/.ghostex/icons filename or "" for the default/bundle icon; thumbnailDataUrl is a masked squircle PNG data URL.
+struct AppIconDescriptor: Encodable {
+  let id: String
+  let name: String
+  let thumbnailDataUrl: String
+  let selected: Bool
 }
 
 enum TerminalTitleBarAction: String, Codable, Hashable {

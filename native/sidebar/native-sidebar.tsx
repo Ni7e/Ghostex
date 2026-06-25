@@ -105,6 +105,9 @@ import {
   type SidebarGhostexCliStatusMessage,
   type SidebarGhostexFolderStatsMessage,
   type SidebarOSIntegrationStatusMessage,
+  // CDXC:AppIconPicker 2026-06-25-21:50: App Icon state is relayed to the modal host like OS Integration status.
+  type SidebarAppIconStateMessage,
+  type SidebarAppIconInfo,
   type TerminalSessionPersistenceProvider,
   type TerminalSessionRecord,
   type T3SessionRecord,
@@ -1049,6 +1052,19 @@ type NativeHostEvent =
     }
   | (ProjectBoardBridgeRequest & { type: "projectBoardRequest" })
   | { payloadJson: string; type: "osIntegrationStatus" }
+  /*
+   * CDXC:AppIconPicker 2026-06-25-21:50:
+   * The Swift app-icon host event carries the app icon state as direct fields
+   * (ok, error, selectedId, icons) rather than a payloadJson string, so it can
+   * be relayed to the modal host without an intermediate JSON parse.
+   */
+  | {
+      error?: string | null;
+      icons?: SidebarAppIconInfo[];
+      ok?: boolean;
+      selectedId?: string;
+      type: "appIconState";
+    }
   | {
       activeTabId?: string;
       projectId: string;
@@ -5142,6 +5158,17 @@ function postGhostexCliStatus(message: SidebarGhostexCliStatusMessage): void {
 }
 
 function postOSIntegrationStatus(message: SidebarOSIntegrationStatusMessage): void {
+  sidebarBus.post(message);
+  postAppModalHost({ message, type: "sidebarState" });
+}
+
+/*
+ * CDXC:AppIconPicker 2026-06-25-21:50:
+ * App Icon state follows the exact OS Integration relay: post to the main
+ * sidebar bus and relay to the modal-host child window through the sidebarState
+ * message, since Settings (the App Icon consumer) renders in that child window.
+ */
+function postAppIconState(message: SidebarAppIconStateMessage): void {
   sidebarBus.post(message);
   postAppModalHost({ message, type: "sidebarState" });
 }
@@ -46153,6 +46180,24 @@ window.addEventListener("ghostex-native-host-event", (event) => {
         type: "osIntegrationStatus",
       });
     }
+    return;
+  }
+  /*
+   * CDXC:AppIconPicker 2026-06-25-21:50:
+   * The Swift app-icon host event carries direct fields, so coerce them into the
+   * SidebarAppIconStateMessage contract and relay it through the same
+   * main-bus + modal-host path used for OS Integration status. Defensive
+   * coercion keeps a malformed native payload from breaking the Settings UI.
+   */
+  if (hostEvent.type === "appIconState") {
+    const icons = Array.isArray(hostEvent.icons) ? hostEvent.icons : [];
+    postAppIconState({
+      error: typeof hostEvent.error === "string" ? hostEvent.error : null,
+      icons,
+      ok: hostEvent.ok === true,
+      selectedId: typeof hostEvent.selectedId === "string" ? hostEvent.selectedId : "",
+      type: "appIconState",
+    });
     return;
   }
   if (hostEvent.type === "projectBoardRequest") {

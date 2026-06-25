@@ -481,6 +481,13 @@ export type ghostexSettings = {
   codeServerLinkVscodeUserConfig: boolean;
   codeServerUseVscodeInsidersUserConfig: boolean;
   customDefaultEditorCommand: string;
+  /**
+   * CDXC:AppIconPicker 2026-06-25-21:50: Persisted id of the selected Dock /
+   * app-switcher icon. Empty string means the default bundled app icon. The
+   * value is a filename living in the native icons folder; native confirms the
+   * selection via an appIconState ok event before the sidebar persists it.
+   */
+  appIconSourceId: string;
   defaultEditorCommand: DefaultEditorCommand;
   hideProjectHeaderDiffStats: boolean;
   showProjectEditorDiffFileCount: boolean;
@@ -853,6 +860,8 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * commands for users who prefer a different editor.
    */
   customDefaultEditorCommand: "",
+  // CDXC:AppIconPicker 2026-06-25-21:50: New installs use the default bundled app icon (empty source id).
+  appIconSourceId: "",
   defaultEditorCommand: "code",
   /**
    * CDXC:ProjectDiffStats 2026-05-16-08:46:
@@ -1566,6 +1575,10 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
         DEFAULT_ghostex_SETTINGS.customDefaultEditorCommand,
       ),
     ),
+    // CDXC:AppIconPicker 2026-06-25-21:50: Coerce stored app icon source id to a trimmed string, defaulting to the bundled icon.
+    appIconSourceId: normalizeAppIconSourceId(
+      readString(source, "appIconSourceId", DEFAULT_ghostex_SETTINGS.appIconSourceId),
+    ),
     /**
      * CDXC:ProjectDiffStats 2026-05-16-08:46:
      * Missing project-header visibility now follows the Codex preset, which
@@ -2271,6 +2284,11 @@ function normalizeDefaultEditorCommand(value: string | undefined): DefaultEditor
 }
 
 function normalizeCustomDefaultEditorCommand(value: string | undefined): string {
+  return (value ?? "").trim().slice(0, 240);
+}
+
+// CDXC:AppIconPicker 2026-06-25-21:50: Empty string means default icon; otherwise a bounded filename id.
+function normalizeAppIconSourceId(value: string | undefined): string {
   return (value ?? "").trim().slice(0, 240);
 }
 
