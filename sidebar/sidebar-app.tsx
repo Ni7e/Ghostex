@@ -74,6 +74,7 @@ import {
   SidebarSessionSearchField,
 } from "./sidebar-session-search-overlay";
 import { SidebarContextMenuPortal } from "./sidebar-context-menu-portal";
+import { SidebarFixedTooltipButton } from "./sidebar-fixed-tooltip-button";
 import {
   createSidebarSessionSearchResults,
   createSidebarSessionSearchSelection,
@@ -4156,19 +4157,20 @@ export function SidebarApp({
                   CDXC:CommandsPanel 2026-06-18-23:28:
                   Move the Commands Pane launcher from the removed sidebar Settings footer onto the Recent Projects header as a sibling hover action so the header toggle keeps valid button semantics.
                 */}
-                <button
+                <SidebarFixedTooltipButton
                   aria-label="Show Commands Pane"
                   className="reference-sidebar-hover-action reference-sidebar-hover-action-tooltip reference-sidebar-commands-pane-action"
-                  data-tooltip="Commands Pane"
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
                     createFullWidthTerminalPane();
                   }}
+                  tooltip="Commands Pane"
+                  tooltipSide="left"
                   type="button"
                 >
                   <IconTerminal2 aria-hidden="true" size={15} stroke={1.9} />
-                </button>
+                </SidebarFixedTooltipButton>
               </div>
               <div
                 aria-hidden={!isRecentProjectsOpen}
@@ -4571,15 +4573,15 @@ function SidebarReferenceSearchNavItem({
       ) : (
         <div className="reference-sidebar-nav-item">
           <SidebarReferenceNavButton icon={IconSearch} label="Search" onClick={onSearch} />
-          <button
+          <SidebarFixedTooltipButton
             aria-label="Search by Text"
             className="reference-sidebar-hover-action reference-sidebar-hover-action-tooltip reference-sidebar-text-search-button"
-            data-tooltip="Search by Text"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
               onSearchPreviousSessionsByText();
             }}
+            tooltip="Search by Text"
             type="button"
           >
             {/*
@@ -4589,16 +4591,16 @@ function SidebarReferenceSearchNavItem({
              * text search without opening the full history modal first.
              */}
             <IconFileSearch aria-hidden="true" size={15} stroke={1.9} />
-          </button>
-          <button
+          </SidebarFixedTooltipButton>
+          <SidebarFixedTooltipButton
             aria-label="Previous Sessions"
             className="reference-sidebar-hover-action reference-sidebar-hover-action-tooltip reference-sidebar-previous-sessions-button"
-            data-tooltip="Previous Sessions"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
               onOpenPreviousSessions();
             }}
+            tooltip="Previous Sessions"
             type="button"
           >
             {/*
@@ -4608,7 +4610,7 @@ function SidebarReferenceSearchNavItem({
              * generic list.
              */}
             <IconHistoryToggle aria-hidden="true" size={15} stroke={1.9} />
-          </button>
+          </SidebarFixedTooltipButton>
         </div>
       )}
     </div>
@@ -4837,123 +4839,133 @@ function SidebarReferenceSectionHeader({
       {hasActions ? (
         <div className="reference-sidebar-section-actions">
           {onSetActiveSessionsSortMode || onToggleSessionTagFilter ? (
-            <button
+            <SidebarFixedTooltipButton
               aria-expanded={sortMenuPosition !== undefined}
               aria-haspopup="menu"
               aria-label={`Filter sessions: ${filterLabel}`}
               className="reference-sidebar-section-action reference-sidebar-section-sort-action reference-sidebar-hover-action-tooltip"
               data-selected={String(activeSessionsSortMode === "manual" || hasTagFilters)}
-              data-tooltip="Sort & Filter"
               onClick={openSortMenu}
+              tooltip="Sort & Filter"
+              tooltipAlign="end"
               type="button"
             >
               <IconFilter2 aria-hidden="true" size={14} stroke={1.9} />
-            </button>
+            </SidebarFixedTooltipButton>
           ) : null}
           {onCreateBrowserChat ? (
-            <button
+            <SidebarFixedTooltipButton
               aria-label="Quick Browser Tab"
               className="reference-sidebar-section-action reference-sidebar-hover-action-tooltip"
-              data-tooltip="Quick Browser Tab"
               onClick={onCreateBrowserChat}
+              tooltip="Quick Browser Tab"
+              tooltipAlign="end"
               type="button"
             >
               <IconWorld aria-hidden="true" size={15} stroke={1.9} />
-            </button>
+            </SidebarFixedTooltipButton>
           ) : null}
           {onCreateChat ? (
-            <button
+            <SidebarFixedTooltipButton
               aria-label="Quick Terminal"
               className="reference-sidebar-section-action reference-sidebar-hover-action-tooltip"
-              data-tooltip="Quick Terminal"
               onClick={onCreateChat}
+              tooltip="Quick Terminal"
+              tooltipAlign="end"
               type="button"
             >
               <IconTerminal2 aria-hidden="true" size={14} stroke={2} />
-            </button>
+            </SidebarFixedTooltipButton>
           ) : null}
           {onRunAgent || onConfigureAgents ? (
             <div
               className="group-agent-split-button reference-sidebar-section-agent-picker"
               data-open={String(agentMenuPosition !== undefined)}
             >
-              <button
+              <SidebarFixedTooltipButton
                 aria-label={`Create ${primaryAgentLabel}`}
                 className="group-agent-main-button reference-sidebar-hover-action-tooltip"
-                data-tooltip={`Create ${primaryAgentLabel}`}
                 onClick={() => runAgent(primaryAgent)}
+                tooltip={`Create ${primaryAgentLabel}`}
+                tooltipAlign="end"
                 type="button"
               >
                 <ProjectAgentLauncherIcon agent={primaryAgent} />
-              </button>
-              <button
+              </SidebarFixedTooltipButton>
+              <SidebarFixedTooltipButton
                 aria-expanded={agentMenuPosition !== undefined}
                 aria-haspopup="menu"
                 aria-label="Select agent"
                 className="group-agent-toggle-button reference-sidebar-hover-action-tooltip"
                 data-open={String(agentMenuPosition !== undefined)}
-                data-tooltip="Select Agent"
                 onClick={openAgentMenu}
+                tooltip="Select Agent"
+                tooltipAlign="end"
                 type="button"
               >
                 <IconChevronDown aria-hidden="true" size={13} stroke={2} />
-              </button>
+              </SidebarFixedTooltipButton>
             </div>
           ) : null}
           {onBulkProjectToggle && bulkActionLabel ? (
-            <button
+            <SidebarFixedTooltipButton
               aria-label={bulkActionLabel}
               className="reference-sidebar-section-action reference-sidebar-section-bulk-project-action reference-sidebar-hover-action-tooltip"
-              data-tooltip={bulkActionLabel}
               onClick={onBulkProjectToggle}
+              tooltip={bulkActionLabel}
+              tooltipAlign="end"
               type="button"
             >
               <BulkProjectIcon aria-hidden="true" size={14} stroke={1.9} />
-            </button>
+            </SidebarFixedTooltipButton>
           ) : null}
           {onReconnect ? (
-            <button
+            <SidebarFixedTooltipButton
               aria-label={`Reload ${title}`}
               className="reference-sidebar-section-action reference-sidebar-hover-action-tooltip"
-              data-tooltip="Reload"
               onClick={onReconnect}
+              tooltip="Reload"
+              tooltipAlign="end"
               type="button"
             >
               <IconRefresh aria-hidden="true" size={14} stroke={1.9} />
-            </button>
+            </SidebarFixedTooltipButton>
           ) : null}
           {onEdit ? (
-            <button
+            <SidebarFixedTooltipButton
               aria-label={`Edit ${title}`}
               className="reference-sidebar-section-action reference-sidebar-hover-action-tooltip"
-              data-tooltip="Edit"
               onClick={onEdit}
+              tooltip="Edit"
+              tooltipAlign="end"
               type="button"
             >
               <IconEdit aria-hidden="true" size={14} stroke={1.9} />
-            </button>
+            </SidebarFixedTooltipButton>
           ) : null}
           {onAddRepository ? (
-            <button
+            <SidebarFixedTooltipButton
               aria-label="Clone Repository"
               className="reference-sidebar-section-action reference-sidebar-hover-action-tooltip"
-              data-tooltip="Clone Repository"
               onClick={onAddRepository}
+              tooltip="Clone Repository"
+              tooltipAlign="end"
               type="button"
             >
               <IconDownload aria-hidden="true" size={14} stroke={2} />
-            </button>
+            </SidebarFixedTooltipButton>
           ) : null}
           {onAddProject ? (
-            <button
+            <SidebarFixedTooltipButton
               aria-label="Add project"
               className="reference-sidebar-section-action reference-sidebar-hover-action-tooltip"
-              data-tooltip="Add project"
               onClick={onAddProject}
+              tooltip="Add project"
+              tooltipAlign="end"
               type="button"
             >
               <IconPlus aria-hidden="true" size={14} stroke={2} />
-            </button>
+            </SidebarFixedTooltipButton>
           ) : null}
         </div>
       ) : null}

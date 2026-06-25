@@ -291,6 +291,14 @@ describe("native app modal window source", () => {
     expect(appDelegateSource).toContain(
       'case "settings", "configureAgents", "configureActions", "openTargets", "hotkeys":',
     );
+    const modalTitle = sourceBetween(
+      appDelegateSource,
+      "private func title(for modal: String) -> String",
+      "private final class TitlebarDropdownPanel",
+    );
+    expect(modalTitle).toContain("if isSettingsAppModal(modal)");
+    expect(modalTitle).toContain('return "Ghostex Settings"');
+    expect(modalTitle).not.toContain('return "Settings"');
 
     const openNativeModal = sourceBetween(
       appDelegateSource,

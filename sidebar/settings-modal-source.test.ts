@@ -64,6 +64,10 @@ describe("settings modal source", () => {
      * CDXC:SettingsNavigation 2026-06-24-22:16:
      * Top-level Settings pages and expandable page sections now share that
      * sidebar, replacing the old top tab bar.
+     *
+     * CDXC:SettingsNavigation 2026-06-25-17:12:
+     * Only top-level Settings categories should get Tabler icons; nested
+     * expandable section rows remain text-only.
      */
     const settingsSidebar = sourceBetween(
       settingsModalSource,
@@ -75,7 +79,65 @@ describe("settings modal source", () => {
     expect(settingsSidebar).toContain("settings-sidebar-subsection-list");
     expect(settingsSidebar).toContain("settings-section-sidebar-footer");
     expect(settingsSidebar).toContain("Show Advanced");
+    expect(settingsSidebar).toContain('<PageIcon aria-hidden="true" data-icon="inline-start" />');
+    expect(settingsSidebar).toContain('className="settings-sidebar-page-title truncate"');
     expect(settingsModalSource).not.toContain("settings-show-advanced-anchor");
+    for (const categoryIcon of [
+      "icon: IconSettings",
+      "icon: IconDeviceDesktop",
+      "icon: IconCloud",
+      "icon: IconFolderOpen",
+      "icon: IconKeyboard",
+      "icon: IconCodeDots",
+      "icon: IconTools",
+      "icon: IconPlayerPlay",
+      "icon: IconExternalLink",
+    ]) {
+      expect(settingsModalSource).toContain(categoryIcon);
+    }
+    const subsectionButton = sourceBetween(
+      settingsSidebar,
+      'className="settings-section-sidebar-button settings-sidebar-subsection-button"',
+      "</Button>",
+    );
+    expect(subsectionButton).toContain("{section.title}");
+    expect(subsectionButton).not.toContain("data-icon");
+
+    const sidebarPageRowStyles = sourceBetween(
+      sidebarStylesSource,
+      ".ghostex-settings-shadcn .settings-sidebar-page-row {",
+      ".ghostex-settings-shadcn .settings-sidebar-tab-trigger[data-slot=\"tabs-trigger\"] {",
+    );
+    expect(sidebarPageRowStyles).toContain(
+      ".settings-sidebar-page-row:has(.settings-sidebar-tab-trigger[data-active])",
+    );
+    expect(sidebarPageRowStyles).toContain("background: var(--accent);");
+    expect(sidebarPageRowStyles).toContain("including the disclosure chevron");
+    const sidebarTriggerStyles = sourceBetween(
+      sidebarStylesSource,
+      ".ghostex-settings-shadcn .settings-sidebar-tab-trigger[data-slot=\"tabs-trigger\"] {",
+      ".ghostex-settings-shadcn .settings-sidebar-tab-trigger[data-slot=\"tabs-trigger\"]:hover",
+    );
+    expect(sidebarTriggerStyles).toContain("gap: 0.5rem;");
+    expect(sidebarTriggerStyles).toContain(".settings-sidebar-page-title");
+  });
+
+  test("uses the native window title instead of duplicate Settings chrome", () => {
+    /*
+     * CDXC:SettingsWindow 2026-06-25-17:05:
+     * The native Settings titlebar owns the visible "Ghostex Settings" title.
+     * React should not duplicate a large Settings heading or render an extra
+     * close button inside the content surface.
+     */
+    const dialogHeader = sourceBetween(
+      settingsModalSource,
+      '<DialogHeader className="ghostex-modal-heading-bar">',
+      "</DialogHeader>",
+    );
+    expect(dialogHeader).toContain("Ghostex Settings");
+    expect(dialogHeader).toContain('!isFirstLaunchSetup && "sr-only"');
+    expect(settingsModalSource).not.toContain('aria-label="Close Settings"');
+    expect(settingsModalSource).not.toContain("ghostex-modal-icon-close");
   });
 
   test("keeps settings search at the top of the content column outside the sidebar", () => {

@@ -3908,3 +3908,988 @@ Slice 315 implements real GPUI Kanban and Manage CEF runtime surfaces instead of
 - Added the Manage CEF file bridge for list/read/save against the explicit active project root, with project identity validation, ignored generated/dependency directories, bounded list/read/save sizes, project-relative path normalization, UTF-8 text previews, and save containment checks.
 - No validation/app/check commands were run due to user instruction: no formatting, tests, checks, typecheck, cargo check/test/fmt, whitespace checks, markdown whitespace checks, `git diff --check`, app launch/restart, browser/visual automation, `bun run start`, or equivalent validation/app commands were run.
 - Remaining state: this is source-only implementation work. Source/code-server still has no real GPUI CEF runtime URL/process authority in this slice, and Project Board conversation/start-work/title-generation automation actions are not implemented by the GPUI runtime surface yet; the Kanban board itself now has real CEF surface creation, Beads execution, and image handling, and Manage now has real CEF surface creation plus scoped file operations.
+
+### 2026-06-24-23:17 Task slice 316
+
+<!--
+CDXC:GPUICommandPane 2026-06-24-23:17:
+Slice 316 wires shared SidebarApp `runSidebarCommand` into the GPUI app action path so project terminal Actions create command-pane terminals like titlebar Actions instead of no-oping. The sidebar sends only live gxserver HUD action metadata through a fixed CEF bridge; Rust strictly parses that payload, reuses the existing Browser/action runner, and launches terminal Actions through the command-pane Ghostty launch-command payload instead of visible initial input.
+-->
+
+- Updated `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/src/cef/macos.rs`, `gpui/src/main.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added the sidebar command-action CEF bridge function `postSidebarCommandAction`, routed `runSidebarCommand` from the reused SidebarApp through the live gxserver HUD command definition, and kept unconfigured actions on the Settings path instead of silently doing nothing.
+- Added Rust-side command-action parsing and dispatch so shared sidebar/command-palette project Actions reuse the same window-aware action runner as GPUI titlebar Actions. Browser actions still enter the Browser CEF path, while terminal actions create command-pane tabs.
+- Changed GPUI command-pane terminal Actions to populate Ghostty's launch `command` field with a zsh wrapper that runs the saved action and returns to an interactive login shell, matching the macOS command-pane process-command model more closely than visible initial-input paste.
+- Preserved privacy and layout boundaries: no project paths, cwd/env from React, command output, terminal content, stdout/stderr, tokens, logs, persistence fields, generic IPC, fallback project detection, hidden hit regions, overlays, app launch/restart, or runtime visual validation were added.
+- Verification run from repo root/`gpui`: `cargo fmt`; `cargo test gpui_command_action`; `cargo test sidebar_command_action_parser`; `cargo test sidebar_bridge_allowlist_maps_only_fixed_functions_to_private_messages`; `cargo test sidebar_workarea_bridge_events_noop_private_or_missing_identity_payloads`; `git diff --check -- gpui/src/main.rs gpui/src/cef/macos.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- `bun run typecheck` was attempted and failed on existing unrelated `native/sidebar/gxserver-client.ts` errors (`TS2352` at line 292 and `TS2366` at line 965), so TypeScript project-wide verification is still blocked outside this GPUI slice. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-24-23:33 Task slice 317
+
+<!--
+CDXC:GPUISourceRuntime 2026-06-24-23:33:
+Slice 317 gives the GPUI Source workarea the same shared code-server runtime shape as the macOS app. Source now derives the folder URL only from the strict sidebar snapshot, starts the app-owned Web/code-server runtime on 127.0.0.1:3775 in the background, waits for /healthz before creating the Source CEF child, and keeps process/URL/path state runtime-only instead of logging or persisting it.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/scripts/build-macos-app.sh`, `gpui/ARCHITECTURE.md`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a GPUI Source code-server runtime owner with launch generation, owned child process cleanup on app drop, launch-time VS Code settings-link normalization from shared Settings, Dark 2026 default profile seeding, Node 22/runtime resolution matching the macOS launcher, `/healthz` polling, and stale-launch invalidation.
+- Wired Source into the existing workarea CEF surface path: awake visible Source starts or reuses the shared runtime, transitions the Source readiness bridge through loading/ready/load-failed, issues the `http://127.0.0.1:3775/?folder=...` URL only from the explicit sidebar project path, and creates the normal-layout Source `CefSurface` only after readiness succeeds.
+- Updated GPUI macOS packaging to stage and validate the full native-reviewed `Web/code-server` runtime, including entrypoint, VS Code server payload, Git native module, and Node, instead of copying only `Web/code-server/lib/node` for Portless.
+- Added focused source tests for strict Source folder URL construction, missing-authority rejection, and shared Settings defaults for code-server VS Code config linking.
+- Verification: `bash -n gpui/scripts/build-macos-app.sh` passed; `git diff --check -- gpui/src/main.rs gpui/scripts/build-macos-app.sh gpui/ARCHITECTURE.md gpui/WORKSPACE_PARITY_PROGRESS.md` passed. `cargo check` and `cargo test source_code_server_runtime` from `gpui/` reached the GPUI crate with Rust 1.95 but remain blocked by existing unrelated titlebar/command-action compile errors (`OpenGpuiTipsDocs`, `PopoverState`, `GPUI_TITLEBAR_TIP_ACTIONS`, `gpui_agent_hook_status_message` argument type, command action move/signature issues). No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-24-23:36 Task slice 318
+
+<!--
+CDXC:GPUICommandPane 2026-06-24-23:36:
+Slice 318 closes the next macOS command-pane parity gap for GPUI Actions: repeated terminal Actions now reuse a matching idle command-pane tab, mark that tab Working while the hidden wrapper runs, and clear it back to Idle from the same session-state file contract the wrapper writes. Action ids, run ids, status paths, command text, cwd/env, stdout/stderr, and terminal content remain live-only and out of shell-state JSON.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added live-only action ownership to GPUI command sessions so sidebar/titlebar terminal Actions can select a matching idle tab by action id/title instead of always creating another command-pane tab.
+- Added the hidden command wrapper's status-file stamps plus a bounded GPUI status poller. The wrapper writes only fixed lifecycle keys, and GPUI uses those keys to move command tabs from Working back to Idle without parsing titles, output, command text, paths, env, tokens, or terminal content.
+- Kept the existing Ghostty launch-payload boundary for new or inactive reused tabs; already-mounted reused tabs receive the same wrapper through the exact command terminal surface after exporting the session-state env keys.
+- Verification: `cargo fmt`; `cargo check`; `cargo test command_pane_action_session_reuses_only_idle_matching_actions`; `cargo test command_action_status_file_refresh_marks_idle_without_persisting_private_fields`; `cargo test gpui_command_action_process_command_uses_hidden_zsh_wrapper`; `cargo test gpui_sidebar_command_action_parser_accepts_only_matching_action_target`; `cargo test sidebar_bridge_allowlist_maps_only_fixed_functions_to_private_messages`; `cargo test sidebar_workarea_bridge_events_noop_private_or_missing_identity_payloads`; `git diff --check -- gpui/src/main.rs gpui/src/cef/macos.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing dead-code warnings remain. `bun run typecheck` still fails on unrelated `native/sidebar/gxserver-client.ts` errors (`TS2352` at line 292 and `TS2366` at line 965). No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-24-23:49 Task slice 319
+
+<!--
+CDXC:GPUICommandPane 2026-06-24-23:49:
+Slice 319 adds the macOS-style command Action feedback loop to GPUI: the sidebar runtime accepts Rust-owned host messages, terminal Actions carry their per-action completion-sound preference, GPUI posts running/success/error button state by command id/run id, and command exits play the configured action completion sound on failure or when the action opted in. Feedback remains live-only and excludes command text, cwd/env, terminal output, status-file paths, project names, tokens, logs, and shell-state persistence.
+-->
+
+- Updated `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/src/main.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a typed `window.ghostexGpui.onSidebarHostMessage` callback that routes Rust-owned sidebar messages into the reused SidebarApp local message source, so command Action buttons receive the same run-state messages the shared sidebar already handles.
+- Extended the strict command-action payload/parser with terminal-only `playCompletionSound`, rejecting that field on browser actions and keeping command text/URLs matched to their action type.
+- Changed the command Action status refresh result to include only command id, run id, exit code, and the live action sound flag. The app posts `running` when the run starts, posts `success` or `error` when the status file reaches idle, and plays the configured action completion sound for failures or opt-in successful runs.
+- Kept all new feedback metadata live-only: command ids, run ids, sound preferences, status paths, command text, cwd/env, stdout/stderr, and terminal content stay out of shell-state JSON and logs.
+- Verification: `cargo fmt`; `cargo check`; `cargo test command_action`; `cargo test gpui_sidebar_host_message_script_targets_typed_sidebar_callback`; `cargo test command_pane_action_session_reuses_only_idle_matching_actions`; `cargo test sidebar_bridge_allowlist_maps_only_fixed_functions_to_private_messages`; `git diff --check -- gpui/src/main.rs gpui/src/cef/macos.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. `bun run typecheck` still fails only on unrelated `native/sidebar/gxserver-client.ts` errors (`TS2352` at line 292 and `TS2366` at line 965). No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-10:29 Task slice 320
+
+<!--
+CDXC:GPUICommandPane 2026-06-25-10:29:
+Slice 320 adds the macOS Debug Action branch to GPUI command Actions. The sidebar bridge now forwards terminal-only `runMode:"debug"`, Rust strictly parses it, and debug runs create a normal visible Agents workspace terminal titled `Debug: <Action>` with visible Atuin-ignored initial input instead of using command-pane reuse, status files, hidden wrappers, or sidebar run-state feedback.
+-->
+
+- Updated `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/src/main.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Forwarded `runMode` only for terminal Actions through the fixed GPUI sidebar command-action bridge, with shared `isSidebarCommandRunMode` validation before Rust sees it.
+- Added a strict Rust run-mode enum to command-action parsing. `debug` is accepted only for terminal Actions; browser Actions and unknown run modes are rejected before they reach execution.
+- Added GPUI Debug Action execution through the existing Agents terminal startup payload source: it creates a selected visible workspace terminal, titles it `Debug: <Action>`, uses the active project snapshot path as the working directory when available, and sends the saved command as visible initial input with the Atuin-ignore prefix.
+- Preserved default command-pane behavior for normal runs: command-pane reuse, hidden wrapper launch, status files, sidebar run-state feedback, and action completion sounds remain only on default terminal Actions.
+- Verification: `cargo fmt`; `cargo test gpui_sidebar_command_action_parser_accepts_only_matching_action_target`; `cargo test gpui_debug_command_action_initial_input_is_visible_atuin_ignored_command`; `cargo test command_action`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/src/cef/macos.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. `bun run typecheck` still fails only on unrelated `native/sidebar/gxserver-client.ts` errors (`TS2352` at line 292 and `TS2366` at line 965). No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-10:34 Task slice 321
+
+<!--
+CDXC:GPUICommandPane 2026-06-25-10:34:
+Slice 321 wires shared SidebarApp `endSidebarCommandRun` into GPUI command-pane ownership. The sidebar bridge now emits a command-id-only close payload, Rust strictly parses only that shape, clears sidebar button feedback, and closes the mapped live command-pane Action session through existing command-terminal close ownership without title, command text, path, output, run-id, status-file, or persisted-shell inference.
+-->
+
+- Updated `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/src/cef/macos.rs`, `gpui/src/cef/unsupported.rs`, `gpui/src/main.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added `postSidebarCommandRunEnd` as a separate fixed sidebar CEF bridge from Action launch, so `endSidebarCommandRun` carries only `commandId`, `type`, and `version`.
+- Added the macOS/unsupported CEF event variant and allowlist mapping for `ghostex.gpui.sidebar.commandRunEnd`, keeping it sidebar-only and out of workarea readiness stores.
+- Added strict Rust parsing for the close payload plus command-pane model selection by live action command id: selected matching tab first, then active running Action tab, then any matching action-owned tab. The close path clears sidebar run feedback, clears live run metadata, uses existing mounted Ghostty close requests when needed, and removes unmounted placeholders through `CommandPaneModel`.
+- Added parser/model tests proving the close bridge rejects command text, URLs, project paths, run ids, and status paths, and that command-run-end selection never falls back to titles, command text, output, paths, persisted shell JSON, or status-file contents.
+- Verification: `cargo fmt`; `cargo test gpui_sidebar_command_run_end_parser_accepts_only_command_id`; `cargo test command_pane_action_session_slot_for_command_run_end_prefers_selected_then_active_run`; `cargo test command_action`; `cargo test gpui_sidebar_host_message_script_targets_typed_sidebar_callback`; `cargo test sidebar_bridge_allowlist_maps_only_fixed_functions_to_private_messages`; `cargo test sidebar_bridge_events_are_typed_and_installed_only_with_sidebar_handler`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/src/cef/macos.rs gpui/src/cef/unsupported.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. `bun run typecheck` still fails only on unrelated `native/sidebar/gxserver-client.ts` errors (`TS2352` at line 292 and `TS2366` at line 965). No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-11:18 Task slice 322
+
+<!--
+CDXC:GPUICommandPane 2026-06-25-11:18:
+Slice 322 brings GPUI command Action tab reuse closer to macOS restore behavior. Re-running a terminal Action now reclaims an idle command-pane tab by normalized Action title when the live command-id mapping is missing or stale, then rewrites the live mapping at run-start; it still refuses running tabs and does not infer from command text, terminal output, paths, status files, persisted shell JSON, or filesystem probes.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Changed `CommandPaneModel::find_reusable_action_session` to keep exact command-id/title reuse first, then allow idle normalized-title reuse regardless of stale or missing live action id, matching macOS `findReusableNativeSidebarCommandPane` after restore.
+- Kept the safety boundary that duplicate Action titles are rejected at Settings save time and that `mark_action_session_run_started` rewrites the live action id, run id, status file path, title, and Working state when a restored title-owned tab is claimed.
+- Added model coverage proving an idle stale-title command tab is reused and remapped, while a running same-title command tab still causes a new command-pane Action tab to be created.
+- Verification: `cargo fmt`; `cargo test command_pane_action_session_reuses_idle_title_owned_restored_actions`; `cargo test command_action`; `cargo test command_pane_action_session_reuses_only_idle_matching_actions`; `cargo test command_pane_action_session_slot_for_command_run_end_prefers_selected_then_active_run`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-11:42 Task slice 323
+
+<!--
+CDXC:GPUICommandPane 2026-06-25-11:42:
+Slice 323 aligns GPUI unnamed Action titles with macOS command-pane behavior. Sidebar and titlebar Action paths now preserve blank names until the title boundary, then derive visible menu/tab titles from normalized command text or URL text truncated to 20 characters; command ids remain only the final fallback and are not used for title-owned command-pane reuse when command text exists.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Changed `GpuiTitlebarAction` title derivation so terminal command-pane tabs use normalized Action name first, then normalized command text truncated to 20 characters, matching macOS `getNativeSidebarCommandSessionTitle`.
+- Changed Action menu labels to use the same normalized visible Action title fallback, including URL text for browser Actions, while retaining command id only as the final no-title fallback.
+- Changed sidebar command-action parsing and titlebar HUD parsing to preserve blank names instead of replacing them with command ids before command-pane title derivation.
+- Kept duplicate-title validation aligned with macOS by checking unnamed Actions through the same normalized command/URL fallback title key.
+- Added focused tests for unnamed sidebar Action parsing, titlebar Action menu/tab fallback titles, and duplicate unnamed command-title rejection.
+- Verification: `cargo fmt`; `cargo test gpui_command_action_titles_match_macos_fallbacks_for_unnamed_actions`; `cargo test gpui_sidebar_duplicate_unnamed_action_command_title_is_rejected`; `cargo test gpui_sidebar_duplicate_visible_action_title_is_rejected`; `cargo test command_action`; `cargo test sidebar_command`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-10:50 Task slice 324
+
+<!--
+CDXC:GPUICommandPane 2026-06-25-10:50:
+Slice 324 adds macOS-style command-session indicators to the GPUI sidebar HUD. Rust publishes sanitized command-pane session summaries through a dedicated sidebar bridge, and the SidebarApp runtime matches current terminal Actions by command id first and normalized title second so restored title-owned command tabs show the same running/idle/error affordance without exposing command text, cwd/env, status-file paths, terminal output, project paths, or shell-state JSON.
+-->
+
+- Updated `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/src/main.rs`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a typed `window.ghostexGpui.onCommandPaneSessionsChanged` callback plus cached `window.ghostexGpui.commandPaneSessions` bootstrap value so restored command-pane tabs can hydrate before React installs listeners.
+- Added a Rust command-pane summary projection for sidebar indicators: session id, normalized title, semantic status, focused-tab boolean, and optional live action command id only.
+- Projected `commandSessionIndicators` into the GPUI live sidebar HUD and app-modal sidebar hydrates by matching terminal command buttons exactly like macOS: command-id/title match first, normalized-title fallback second, browser Actions ignored.
+- Added Rust and TypeScript coverage for the script callback, sanitized summary output, app-modal hydrate matching, unnamed Action title fallback matching, restored title-owned sessions, exact command-id precedence, and browser Action exclusion.
+- Verification: `cargo fmt`; `cargo test gpui_sidebar_command_pane_sessions_script_targets_typed_sidebar_callback`; `cargo test command_pane_sidebar_session_sources_are_sanitized_for_hud_indicators`; `cargo test app_modal_command_session_indicators_match_command_id_then_title`; `cargo test command_action`; `cargo check`; `bunx vitest run gpui/sidebar/phase1-gxserver-runtime.test.ts`; `bun run typecheck`; `git diff --check -- gpui/src/main.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. `bun run typecheck` still fails only on unrelated `native/sidebar/gxserver-client.ts` errors (`TS2352` at line 292 and `TS2366` at line 965). No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-11:11 Task slice 325
+
+<!--
+CDXC:GPUICommandPane 2026-06-25-11:11:
+Slice 325 closes the GPUI command-pane Action feedback gap when a mapped Ghostty command surface exits before the status-file poller clears the run. Process-exit cleanup now finishes sidebar button feedback before removing the command tab, trusts only a matching idle status-file stamp for the exit code, and reports missing or non-idle status as error so the reused SidebarApp cannot keep an orphaned running state. It does not read terminal output, command text, cwd/env, project paths, logs, or shell-state JSON.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Changed command process-exit cleanup to return a structured cleanup result with live Action completions, so host sync can dispatch success/error sidebar feedback and refresh sidebar command-session indicators immediately after closing exited mapped command tabs.
+- Kept the cleanup boundary command-pane-only: it still acts only on exact current command body slots, never requests Ghostty close for already-exited surfaces, and leaves Agents runtime/startup maps and command close-confirm pending state alone.
+- Added macOS-only tests for exited mapped Action sessions with a matching idle status stamp and with a non-idle status stamp, including privacy assertions that status-file paths, private command text, and private paths do not appear in cleanup output.
+- Verification: `cargo fmt`; `cargo test command_exited_action_surface`; `cargo test command_exited_surface_removes_only_matching_command_session`; `cargo test command_exited_surface_ignores_stale_inactive_and_non_current_slots`; `cargo test command_action`; `cargo check`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-11:20 Task slice 326
+
+<!--
+CDXC:GPUICommandPaneTabs 2026-06-25-11:20:
+Slice 326 adds macOS-style scoped command-tab close commands to the GPUI command-pane tab menu. Close Left, Close Other Tabs, and Close Right resolve the clicked tab's sibling list before mutation, stay inside the clicked command group, and reuse the same mounted Ghostty close-request path as single-tab close without carrying command text, paths, terminal output, or cross-pane identifiers.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a typed `CloseCommandPaneTabsByScope` NativeMenu action with fixed close-scope values, plus visible disabled rows when there are no left/right/other sibling targets.
+- Added command-pane model target resolution for close scopes that mirrors macOS `getCommandPaneTabSessionIds`: `close` targets the clicked tab, `closeLeft` targets previous siblings, `closeOthers` targets all sibling tabs except the clicked tab, and `closeRight` targets following siblings.
+- Wired scoped close execution through the existing command close ownership boundary: mounted current Ghostty command surfaces receive close requests and remain pending for callbacks, while unmounted sibling tabs are removed from the command model immediately.
+- Added pure model tests proving scoped targets do not cross command split groups and that Close Other Tabs preserves the clicked group, active anchor, expanded command pane, and remaining session.
+- Verification: `cargo fmt`; `cargo test command_tab_close_scope`; `cargo test command_close_selects_neighbors_collapses_empty_branch_and_final_panel`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-11:24 Task slice 327
+
+<!--
+CDXC:GPUICommandPaneTabs 2026-06-25-11:24:
+Slice 327 aligns GPUI command-tab status dots with macOS command-pane tab chrome. Idle remains a semantic command session state for persistence and sidebar indicators, but the command tab and drag preview now render no idle dot; only working, attention, and delayed-send states draw status dots.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a command-tab dot visibility helper so idle command tabs keep their model status without reserving a visual dot or dot spacing in the titlebar or drag preview.
+- Updated CDXC requirement comments that previously described idle command dots as visible, preserving the separate sidebar indicator contract where idle still reports as `idle`.
+- Added focused assertions that `CommandTerminalTabStatus::Idle` is not dot-visible while working, attention, and delayed-send are dot-visible.
+- Verification: `cargo fmt`; `cargo test command_terminal_tab_status`; `cargo test command_tab_chrome_signature_preserves_semantic_status_inputs`; `cargo test command_action`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-11:37 Task slice 328
+
+<!--
+CDXC:GPUICommandPane 2026-06-25-11:37:
+Slice 328 aligns GPUI command-pane default/reset height with the macOS Workspace setting. GPUI now reads the shared `commandsPanelDefaultHeightPx` value for app startup defaults, missing persisted command-pane height, and double-click resize-rail reset, while preserving explicit persisted ratios and the shared 125px default with the 40px-600px clamp.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Reused the initial shared settings snapshot for both sidebar runtime settings and command-pane shell-layout load defaults, avoiding a second settings source at startup.
+- Added a Rust command-pane default-height normalizer that matches shared Settings semantics: JSON numbers only, whole-pixel rounding, 40px-600px clamp, and 125px for missing or malformed values.
+- Routed command-pane restore through the setting only when persisted `heightRatio` is absent, so saved user-resized ratios remain authoritative.
+- Routed command-pane resize-rail double-click reset through the latest shared settings snapshot.
+- Added focused coverage for default, malformed, low, high, and fractional setting values, settings-aware first height, missing-height restore, explicit-height preservation, and reset cleanup.
+- Verification: `cargo fmt`; `cargo test command_height_defaults_follow_shared_workspace_setting`; `cargo test command_height_and_project_companion_resets_clamp_to_layout_bounds`; `cargo test gpui_shell_state`; `cargo check`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-11:44 Task slice 329
+
+<!--
+CDXC:GPUICommandPane 2026-06-25-11:44:
+Slice 329 removes GPUI's startup-only fake Command/Shell command tabs so the command pane starts like macOS: hidden and empty. Opening an empty command pane now creates exactly one selected `Command Terminal` placeholder, while existing command tabs, Action titles, and transferred workspace titles remain preserved.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Changed the production command-pane default constructor to an empty collapsed model with the same height ratio and id sequencing, leaving the old two-tab seeded model only as a test fixture for existing pure split/close/focus coverage.
+- Added an open helper that creates the first `Command Terminal` placeholder only when no command tab exists; re-opening an already populated pane preserves the selected command tab and does not add another session.
+- Aligned command-pane chrome-created tabs and command-pane split hotkeys with macOS `createCommandTerminal("Command Terminal", ...)` by using `Command Terminal` for generated command sessions and restore fallback titles.
+- Added focused model coverage for empty startup state, first-open creation, no duplicate tab on reopen, generated split title, and title fallback.
+- Verification: `cargo fmt`; `cargo test command_pane_default_starts_empty_and_first_open_creates_command_terminal`; `cargo test command_close_selects_neighbors_collapses_empty_branch_and_final_panel`; `cargo test command_groups_join_directional_focus_only_when_expanded_with_sessions`; `cargo test command_height_defaults_follow_shared_workspace_setting`; `cargo test gpui_shell_state`; `cargo test command_action`; `cargo check`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-11:50 Task slice 330
+
+<!--
+CDXC:GPUICommandPane 2026-06-25-11:50:
+Slice 330 aligns GPUI hidden-open height behavior with macOS `createCommandsPanelOpenStatePatch`. F12/open controls and terminal Actions now reset the command-pane height from the current Workspace default only when the pane was hidden; already-visible command panes preserve the user's live resize while adding, reusing, or focusing command tabs.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a command-pane model helper for hidden opens that resets height from the supplied default only when the pane is collapsed/hidden, then reused it for F12/open, command chrome expansion, plus-on-collapsed creation, and command Action launches.
+- Threaded `Window` through the GPUI command-pane open and terminal Action paths so the default-height ratio is computed from the current content height and latest shared settings snapshot instead of a stale or guessed workspace size.
+- Fixed Action tab creation from an empty command pane so it creates the first real command group instead of inserting into the dummy empty group.
+- Added focused coverage proving hidden opens reset height, visible opens preserve live resize, hidden Action launches reset before creating an Action tab, and empty Action launches allocate the first real command group.
+- Verification: `cargo fmt`; `cargo test command_pane_default_starts_empty_and_first_open_creates_command_terminal`; `cargo test command_pane_hidden_open_resets_default_height_while_visible_open_preserves_resize`; `cargo test command_height_defaults_follow_shared_workspace_setting`; `cargo test command_action`; `cargo test command_close_selects_neighbors_collapses_empty_branch_and_final_panel`; `cargo check`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-11:56 Task slice 331
+
+<!--
+CDXC:GPUICommandPane 2026-06-25-11:56:
+Slice 331 repairs the command-pane shell-state test drift after the macOS `Command Terminal` title fallback change. Restored GPUI command placeholders now assert the same generic fallback as newly created command-pane terminals while still proving private command titles, command text, paths, stdout/stderr hints, delayed-send deadlines, and command content stay out of shell-state JSON.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a CDXC fallback-title requirement comment beside `command_session_title_for_id`.
+- Updated the command-pane shell-state round-trip test to expect `Command Terminal` for restored placeholder titles, matching current macOS command-pane creation and the recent fake-tab removal work.
+- Verification: `cargo fmt`; `cargo test command_pane_shell_state_round_trip_preserves_layout_without_command_content`; `cargo test command_pane_default_starts_empty_and_first_open_creates_command_terminal`; `cargo test command_pane_hidden_open_resets_default_height_while_visible_open_preserves_resize`; `cargo test command_action`; `cargo test command_height_defaults_follow_shared_workspace_setting`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-12:00 Task slice 332
+
+<!--
+CDXC:GPUICommandTabContextMenu 2026-06-25-12:00:
+Slice 332 adds the missing macOS command-panel action block to GPUI command-tab context menus. Expanded command-pane tab menus now expose Pin/Float Command Pane and Close Command Pane before tab-specific rows, while collapsed-strip menus keep the expand/select path and omit panel mutation rows because hidden macOS command panels publish expand-only tab chrome actions.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added typed NativeMenu actions for command-pane panel pin/float and close-panel menu rows, wired through the existing command-pane mode/collapse/focus/persistence helpers without deleting command tabs or launching command processes.
+- Changed collapsed-strip command-tab context menu selection copy to `Expand Command Pane`, matching the visible effect of selecting a collapsed command tab.
+- Added focused coverage for visible pinned/floating panel action labels and collapsed-strip omission of panel action rows.
+- Verification: `cargo fmt`; `cargo test command_tab_context_menu_panel_actions_match_visible_command_panel_state`; `cargo test command_tab_close_scope`; `cargo check`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-12:05 Task slice 333
+
+<!--
+CDXC:GPUICommandPaneControls 2026-06-25-12:05:
+Slice 333 removes the GPUI collapsed-strip Pin/Float control to match macOS hidden command-panel chrome. Collapsed command strips keep New Command and Expand, but panel mode mutation remains a visible-titlebar action so clicking hidden chrome can no longer flip pinned/floating state while claiming to open the panel.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a command-pane control visibility helper that treats Pin/Float as an expanded-titlebar-only panel action.
+- Left collapsed-strip New Command and Expand controls intact for the existing GPUI collapsed creation/open behavior, while preventing hidden-strip panel mode mutation.
+- Added focused coverage proving panel mode controls are visible for expanded chrome and hidden for collapsed strip chrome.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_tab_context_menu_panel_actions_match_visible_command_panel_state`; `cargo test command_pane_hidden_open_resets_default_height_while_visible_open_preserves_resize`; `cargo check`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-12:10 Task slice 334
+
+<!--
+CDXC:GPUICommandPane 2026-06-25-12:10:
+Slice 334 routes collapsed-strip command-tab selection through the same hidden-open height rule as macOS `openCommandsPanelForActiveProject`. Clicking a hidden command tab or choosing Select from its menu now selects that tab, restores the last pinned/floating mode, and resets height from the current Workspace default only while hidden; already-visible tab selection preserves the user's live resize.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a command-pane model helper for collapsed-tab selection that applies the hidden-open height reset before expansion.
+- Routed both collapsed-strip left-click selection and NativeMenu `SelectCommandPaneTab` actions through the window-aware selection path so current content height and shared Workspace settings are used.
+- Added focused coverage proving collapsed tab selection resets hidden height while visible selection preserves live resize.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_tab_selection_uses_hidden_open_height_rule`; `cargo test command_pane_hidden_open_resets_default_height_while_visible_open_preserves_resize`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_tab_context_menu_panel_actions_match_visible_command_panel_state`; `cargo check`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-12:13 Task slice 335
+
+<!--
+CDXC:GPUICommandPaneControls 2026-06-25-12:13:
+Slice 335 moves GPUI New Command chrome out of the fixed command-pane action cluster and into the command tab run, matching macOS command titlebar layout. The fixed cluster stays panel-scoped: collapsed command chrome shows only Expand there, while expanded command titlebars show Pin/Float, Expand/Collapse, and Close Command Pane.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a command-pane New Command placement policy that keeps creation as inline tab-run chrome instead of a fixed panel action.
+- Rendered inline New Command buttons after expanded command group tabs and after the collapsed command strip's tab run, reusing the existing command-placeholder creation behavior.
+- Removed New Command from the fixed command-pane control cluster while leaving Pin/Float expanded-only and Close Command Pane expanded-only.
+- Updated focused control-placement coverage for inline New Command and expanded-only Pin/Float.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_pane_collapsed_tab_selection_uses_hidden_open_height_rule`; `cargo test command_tab_context_menu_panel_actions_match_visible_command_panel_state`; `cargo test command_pane_hidden_open_resets_default_height_while_visible_open_preserves_resize`; `cargo check`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-12:19 Task slice 336
+
+<!--
+CDXC:GPUICommandPaneControls 2026-06-25-12:19:
+Slice 336 aligns GPUI command-panel action copy with macOS native chrome. The mode toggle now reads Pin/Unpin Commands Panel, and the hide action reads Minimize Commands Panel because it preserves command sessions instead of closing them.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Changed the command-panel mode toggle labels and tooltips from Float/Pin command-pane wording to native Pin/Unpin Commands Panel wording.
+- Changed the panel hide menu/control copy from Close/Collapse Command Pane to Minimize Commands Panel, matching native `closeCommandsPanel` behavior.
+- Updated focused command-tab context menu coverage for the native Pin/Unpin and Minimize labels.
+- Verification: `cargo fmt`; `cargo test command_tab_context_menu_panel_actions_match_visible_command_panel_state`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_pane_hidden_open_resets_default_height_while_visible_open_preserves_resize`; `cargo test command_pane_collapsed_tab_selection_uses_hidden_open_height_rule`; `cargo check`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-12:23 Task slice 337
+
+<!--
+CDXC:GPUICommandPaneControls 2026-06-25-12:23:
+Slice 337 aligns the remaining GPUI command-panel creation/open copy with native command chrome. The inline plus action now presents as New Terminal, and collapsed-strip open actions use Expand Commands Panel, matching macOS `.newTerminal` and `.expandCommandsPanel` titles while preserving the existing command-placeholder model.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Changed the command-pane inline plus tooltip from `New command` to native `New Terminal`.
+- Changed collapsed command-tab menu open copy from `Expand Command Pane` to native `Expand Commands Panel`.
+- Added focused helper assertions so command-panel menu and inline-plus labels stay aligned with native copy.
+- Verification: `cargo fmt`; `cargo test command_tab_context_menu_panel_actions_match_visible_command_panel_state`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-12:26 Task slice 338
+
+<!--
+CDXC:GPUICommandPaneControls 2026-06-25-12:26:
+Slice 338 removes GPUI's redundant expanded command-panel `x` minimize control. Native visible command panels publish exactly Pin/Unpin Commands Panel plus closeCommandsPanel, rendered as the Minimize chevron; collapsed strips publish only Expand Commands Panel.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Removed the separate expanded-titlebar `x` panel-minimize button and its now-unused control action.
+- Kept the chevron as the single Minimize/Expand command-panel visibility action, matching native `closeCommandsPanel` and `expandCommandsPanel`.
+- Added focused control-count assertions for expanded and collapsed command-panel fixed chrome.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `cargo test command_tab_context_menu_panel_actions_match_visible_command_panel_state`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-12:29 Task slice 339
+
+<!--
+CDXC:GPUICommandPaneControls 2026-06-25-12:29:
+Slice 339 aligns GPUI fixed command-panel control sizing with native command chrome. Native Pin/Unpin and Minimize/Expand buttons use the full 26px command titlebar height, so GPUI controls now use the command tab-bar height instead of smaller inset 22px buttons.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Changed the fixed command-panel control button size to derive from `COMMAND_PANE_TAB_BAR_HEIGHT`.
+- Added focused coverage proving command-panel control buttons stay square to the command titlebar height.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-12:32 Task slice 340
+
+<!--
+CDXC:GPUICommandPaneControls 2026-06-25-12:32:
+Slice 340 aligns the GPUI minimized command strip with native collapsed command-panel geometry. Native minimized command panels start with command tab chrome inside 4px/8px side margins and do not render a separate leading "Command" label block.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Removed the synthetic leading `Command` label block from the collapsed command strip.
+- Added native collapsed command-panel side margins as normal layout around the interactive strip.
+- Added focused coverage for the 4px/8px margins and absence of a leading collapsed-strip label.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:11 Task slice 341
+
+<!--
+CDXC:GPUICommandTabChrome 2026-06-25-13:11:
+Slice 341 aligns GPUI command-tab close chrome with native command tabs. Native command tabs draw the inline close control only while the owning tab is hovered, use a 20px close frame with 4px trailing padding, and position it over the tab trailing edge instead of inserting it into the title layout.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added runtime-only hovered-command-tab tracking so GPUI can reveal close chrome for exactly the hovered command tab without changing command model state or persistence.
+- Changed command-tab close buttons from always-visible 16px flex children to hover-only absolute 20px controls with native trailing padding and flat command-tab corners.
+- Added focused coverage for hover-only visibility, native close frame metrics, and non-flex title layout.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `cargo test command_tab_close_scope`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:18 Task slice 342
+
+<!--
+CDXC:GPUICommandTabStatus 2026-06-25-13:18:
+Slice 342 aligns GPUI command-tab status chrome with native command tabs. Visible command status now lives in the native trailing slot: working/attention render as 8px square fills 9px from the trailing edge, Delayed Send renders as a 14px clock centered on that slot, and status chrome hides while hover close chrome is visible while the title reservation remains stable.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/assets/titlebar/clock.svg`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Moved command-tab status rendering out of the leading title prefix and into absolute trailing status chrome with the native 8px/9px slot geometry.
+- Added Delayed Send clock chrome using the shared titlebar SVG path instead of drawing it as another rounded dot.
+- Kept status title reservation based on semantic status rather than hover state, so hovering a command tab swaps to close chrome without reflowing the title.
+- Updated focused command status coverage for native colors, hover hiding, trailing title reservation, square indicator metrics, and delayed-send clock size.
+- Verification: `cargo fmt`; `cargo test command_terminal_tab_status_prioritizes_delayed_send_and_maps_command_colors`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:25 Task slice 343
+
+<!--
+CDXC:GPUICommandTabTypography 2026-06-25-13:25:
+Slice 343 aligns GPUI command-tab title typography with native command-role tabs. Command titles now use stable 11pt semibold light text for active and inactive tabs; selection changes the tab fill, not title weight, size, or inactive label opacity.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a documented command-tab title font-size constant matching native command role typography.
+- Changed command-tab and command-tab drag-preview text from 11.5px to 11px.
+- Removed active-state font-weight branching and inactive label dimming from command tab titles while preserving active/inactive tab fill behavior.
+- Added focused chrome assertions that command title typography does not depend on active state and inactive command labels are not dimmed.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_terminal_tab_status_prioritizes_delayed_send_and_maps_command_colors`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:32 Task slice 344
+
+<!--
+CDXC:GPUICommandTabSizing 2026-06-25-13:32:
+Slice 344 aligns GPUI command-tab sizing with native command-role tab strips. Command tabs now use equal responsive flex sizing clamped between 72px and 160px in both expanded and collapsed command chrome, and the tab-strip end drop target stays fixed so it cannot steal width from the tab fit calculation.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Replaced separate fixed expanded/collapsed command-tab widths with native min/max tab-width constants.
+- Changed rendered command tabs to grow equally from a zero flex basis with 72px minimum and 160px maximum width.
+- Kept the tab-strip end drop target as a fixed 20px trailing target instead of a flex-growing participant in tab width distribution.
+- Added focused command-pane chrome assertions for the shared expanded/collapsed sizing policy and fixed end drop target.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_terminal_tab_status_prioritizes_delayed_send_and_maps_command_colors`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:40 Task slice 345
+
+<!--
+CDXC:GPUICommandPaneControls 2026-06-25-13:40:
+Slice 345 aligns GPUI command-pane action chrome with native command-role buttons. New Terminal now uses terminal symbol chrome, Pin/Unpin uses pin/pin-slash symbols, and Minimize/Expand uses chevron-down/chevron-up symbols instead of visible fallback text labels.
+-->
+
+- Updated `gpui/src/main.rs`, added command action SVG assets under `gpui/assets/titlebar/`, and updated `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added terminal, pin, pin-slash, chevron-up, and chevron-down titlebar SVG assets so command controls inherit the existing GPUI command button tint.
+- Routed inline New Terminal and fixed command-panel controls through native-equivalent icon path helpers while keeping existing tooltips and command-pane action handlers.
+- Removed normal visible `+`, `P`, `U`, `v`, and `^` fallback text from command-pane action chrome.
+- Added focused command-pane chrome assertions for command action icon size and the native icon mapping.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_terminal_tab_status_prioritizes_delayed_send_and_maps_command_colors`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/terminal.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:47 Task slice 346
+
+<!--
+CDXC:GPUICommandPaneControls 2026-06-25-13:47:
+Slice 346 aligns GPUI command-pane action button frames and colors with native command titlebar layout. Command action buttons are now contiguous flat 26px frames with stable #0e0e0e backgrounds, #cfcfcf icon tint, no hover color change, no wrapper left border, and an 8px trailing inset only in expanded command titlebars.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Removed the GPUI command action cluster's inter-button gap, left border, and symmetric horizontal padding.
+- Added native trailing-inset logic: expanded command titlebars keep an 8px right inset after the action buttons, while collapsed command strips keep no inner action inset because the strip already owns the outer right margin.
+- Changed command action button frames to flat corners with stable #0e0e0e background and #cfcfcf icon tint, matching native tab-bar icon button chrome.
+- Added focused command-pane chrome assertions for frame gap, corner radius, expanded/collapsed trailing padding, stable hover background, and native colors.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_terminal_tab_status_prioritizes_delayed_send_and_maps_command_colors`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/terminal.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:54 Task slice 347
+
+<!--
+CDXC:GPUICommandPaneControls 2026-06-25-13:54:
+Slice 347 corrects the inline command-tab New Terminal icon to match the native tab-add button path. The generic `.newTerminal` action button uses a terminal symbol, but command-pane tab chrome keeps New Terminal inline through `tabAddButton`, whose normal image is plus with the New Terminal tooltip.
+-->
+
+- Updated `gpui/src/main.rs`, replaced the temporary command `terminal.svg` asset with `plus.svg`, and updated `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Changed `command_pane_tab_add_icon_path()` to return the plus icon instead of the generic terminal action icon.
+- Updated focused command-pane chrome assertions to prove inline command-tab New Terminal uses native plus chrome while preserving the native `New Terminal` tooltip.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:01 Task slice 348
+
+<!--
+CDXC:GPUICommandTabChrome 2026-06-25-14:01:
+Slice 348 aligns GPUI command-tab inline close chrome with native command tabs. The hover-only close affordance now uses a stable #0e0e0e command icon-button background and #cfcfcf X symbol inside the 20px frame instead of a lowercase text x with hover-only fill.
+-->
+
+- Updated `gpui/src/main.rs`, added `gpui/assets/titlebar/xmark.svg`, and updated `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Changed the command-tab close button to use stable command icon-button background and tint once the hovered tab reveals it.
+- Replaced the visible lowercase text `x` with an X-mark SVG icon, matching native stroke-style close chrome.
+- Removed active/inactive text-color branching from command-tab close chrome because native command close tint is stable across active and inactive command tabs.
+- Added focused command-pane chrome assertions for the close icon path, icon size, stable background, and stable icon tint.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:17 Task slice 349
+
+<!--
+CDXC:GPUICommandTabSeparators 2026-06-25-14:17:
+Slice 349 aligns GPUI command-tab separators with native command tab buttons. Separators are now explicit 1px white/10% trailing fills only on tabs that have a following command tab, so the final command tab no longer gets a heavier panel-border separator.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Replaced the unconditional command-tab right border with an explicit absolute separator element using the native command separator color.
+- Passed following-tab state from expanded command groups and the flattened collapsed command strip so separators appear only between command tabs in both command panel states.
+- Added focused command-pane chrome assertions for separator width, visibility rule, color, and separation from the heavier command-panel border.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:36 Task slice 350
+
+<!--
+CDXC:GPUICommandTabBackground 2026-06-25-14:36:
+Slice 350 aligns GPUI command-tab background fills with native AppKit command tabs. Active and inactive command tabs now use the native #050608 base plus 13%/6% white overlay compositing, and hover reveals close chrome without brightening the tab fill.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Replaced the approximate command active/hover tab colors with a native composited-tab-color helper using the same base RGB and active/inactive overlay alpha values as macOS.
+- Rendered inactive command tabs with an explicit native inactive fill instead of falling through to the command titlebar background.
+- Removed hover-only tab fill brightening from command tabs while preserving hover tracking for the native trailing close/status swap.
+- Updated the command-tab drag preview to use the same native active command-tab fill.
+- Added focused command-pane chrome assertions for the native base, overlay alphas, active/inactive resolved fills, and hover fill stability.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:44 Task slice 351
+
+<!--
+CDXC:GPUICommandPaneControls 2026-06-25-14:44:
+Slice 351 aligns the GPUI inline command-tab New Terminal button with native tab-add icon chrome. The plus button now has the same stable #0e0e0e background and #cfcfcf tint before hover as the native `setTabBarIconChrome` path, instead of appearing transparent until hover.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added stable command icon-button background to the inline command-tab plus/New Terminal button in both expanded command titlebars and the collapsed command strip.
+- Preserved the existing plus icon, New Terminal tooltip, command-placeholder action, and normal-layout inline placement.
+- Added focused command-pane chrome assertions proving the tab-add button shares fixed command action background and hover color.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:19 Task slice 352
+
+<!--
+CDXC:GPUICommandPaneChrome 2026-06-25-13:19:
+Slice 352 splits GPUI command-pane chrome colors by native role. Command backgrounds are black, panel-edge separators use #1e1e1e, command titlebar separators use the native translucent white separator, inactive command pane outlines use #111111, and focused command pane outlines use neutral #737373 instead of blue.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Replaced generic dark command chrome backgrounds with the native black command-panel/titlebar background.
+- Split command chrome color helpers so panel boundaries, titlebar separators, inactive command outlines, and focused command outlines no longer share one opaque `#2d2d2d` color.
+- Applied the panel separator to command panel and collapsed-strip top edges, the titlebar separator to command titlebar/tab-add/edge-reveal separators, and native outline colors to command groups.
+- Added focused command-pane chrome assertions for every split native color role and for keeping titlebar separators distinct from inactive pane outlines.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:19 Task slice 353
+
+<!--
+CDXC:GPUICommandPaneResize 2026-06-25-13:19:
+Slice 353 aligns GPUI command-pane resize rail chrome with native resize handles. The command-panel rail is now a 12px transparent hit region with 3px hover-line geometry, and command split rails no longer draw permanent dark bars or center separators in normal state.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Changed the command-panel resize rail height from 5px to native 12px while keeping it as a real normal-layout row above the command titlebar.
+- Added the native 3px resize hover-line geometry constant and removed the always-visible 1px rail line by making normal-state rail/line chrome transparent.
+- Changed command split handle and center separator colors to transparent normal-state chrome, leaving command pane borders as the visible separators like native resize rails.
+- Added focused command-pane chrome assertions for resize rail height, hover-line height, and transparent normal-state resize/split rail colors.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:19 Task slice 354
+
+<!--
+CDXC:GPUICommandPaneResize 2026-06-25-13:19:
+Slice 354 adds native delayed resize-hover feedback to GPUI command resize rails. The command-panel rail and each command split rail now own runtime-only hover state, reveal a white 3px line after the native 50ms delay, and fade it in over 180ms without changing resize hit geometry or persisted command layout.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added runtime-only command resize hover target state for the command-panel rail and individual command split rails.
+- Added delayed hover reveal using the native/sidebar 50ms delay and 180ms fade, with a white 3px command-panel line bottom-aligned inside the 12px rail and a centered white 3px line in split rails.
+- Kept normal resize hit regions unchanged and kept hover state out of command-pane model persistence, drag state, shell state, logs, terminal content, command text, paths, or layout serialization.
+- Added focused command-pane chrome assertions for resize hover delay, fade duration, and white hover-line color.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:30 Task slice 355
+
+<!--
+CDXC:GPUICommandTabOverflow 2026-06-25-13:30:
+Slice 355 removes GPUI's permanent decorative command-tab edge reveal so normal command tab strips match native. Native command overflow chrome is the conditional 30px Show Active Tab proxy when the active tab is clipped below 60px visible, using a 12px reveal scroll margin; GPUI now records those constants and no longer burns a permanent 10px non-interactive reveal slot in expanded or collapsed command chrome.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Removed the always-rendered command-tab edge reveal sibling from expanded command pane titlebars and the collapsed command strip.
+- Removed the now-unused command edge-reveal renderer and color helpers while leaving the workspace/browser edge reveal width in place for non-command tab chrome.
+- Added focused command-pane chrome assertions for the native sticky active-tab proxy size, reveal scroll margin, clipped-tab visibility threshold, and the rule that no decorative command edge reveal appears without clipped active-tab geometry.
+- Remaining gap: the geometry-backed conditional Show Active Tab proxy still needs a runtime implementation before command overflow behavior fully matches native.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:34 Task slice 356
+
+<!--
+CDXC:GPUICommandTabOverflow 2026-06-25-13:34:
+Slice 356 implements GPUI's command Show Active Tab overflow proxy from native scroll geometry. Expanded command titlebars and the collapsed command strip now render a real 30px command-role button only when the active tab is clipped below 60px visible; activation reveal uses the native 12px margin, and clicking the proxy centers the active tab with clamped runtime scroll offsets.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added command-specific sticky active-tab edge detection from `ScrollHandle` viewport bounds, active-tab bounds, current x offset, and max scroll offset.
+- Rendered the proxy as normal-layout command chrome at the leading or trailing scroll-strip edge, with stable native command icon-button colors, an 11px left/right chevron, a one-sided #2a2a2a inner border, and the native `Show Active Tab` tooltip.
+- Changed command active-tab reveal to preserve visible tabs and, when the active command tab is clipped, reveal it with the native 12px margin instead of always using the minimal built-in item reveal.
+- Wired proxy clicks to focus command chrome and center the existing active tab using explicit clamped scroll offsets, without mutating command tab order, session identity, command/action metadata, logs, or shell persistence.
+- Added focused geometry coverage for leading/trailing visibility, the 60px threshold, no-overflow hiding, centered click offsets, reveal-margin offsets, and end clamping.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_pane_sticky_active_tab_proxy_matches_native_scroll_geometry`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:45 Task slice 357
+
+<!--
+CDXC:GPUICommandTabScrolling 2026-06-25-13:45:
+Slice 357 aligns GPUI command tab-strip wheel scrolling with native pane tabs. Expanded command titlebars and the collapsed command strip now own command-specific wheel routing: horizontal wheel deltas move tabs directly, precise vertical trackpad deltas are not remapped into horizontal tab movement, and non-precision vertical wheel ticks are amplified by 18x with a 96px minimum before applying clamped runtime scroll offsets.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added command tab wheel constants for the native 18x vertical multiplier and 96px minimum discrete vertical-wheel delta.
+- Replaced the command tab strips' built-in `overflow_x_scroll` wheel behavior with clipped tracked scroll regions plus a command-owned scroll-wheel handler.
+- Preserved direct horizontal wheel behavior while preventing precise vertical trackpad gestures from becoming horizontal tab movement.
+- Added native non-precision vertical-wheel amplification and clamped offset application for overflowing command tab strips in both expanded and collapsed command chrome.
+- Added focused delta-rule coverage for horizontal deltas, precise vertical no-op behavior, positive/negative amplified vertical ticks, large vertical ticks, and scroll-offset clamping.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_pane_sticky_active_tab_proxy_matches_native_scroll_geometry`; `cargo test command_pane_tab_wheel_scroll_matches_native_delta_rules`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:50 Task slice 358
+
+<!--
+CDXC:GPUICommandTabDoubleClick 2026-06-25-13:50:
+Slice 358 adds the native empty-command-titlebar double-click New Terminal gesture to GPUI. The command tab-strip end target now uses the native 34px preferred empty target width, ignores single clicks, and double-clicks create a new command placeholder in the owning command group through the same New Terminal action path as the inline plus button.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added native empty titlebar double-click constants for the 34px preferred target and 24px minimum target contract.
+- Changed the command tab-strip end target width from the smaller fixed drop-only width to the native preferred empty titlebar double-click target width.
+- Added double-click handling to the expanded command tab-strip end target so empty command chrome creates a new command terminal in the owning group.
+- Preserved single-click behavior by allowing ordinary clicks to bubble to the titlebar focus path, and reused the existing command New Terminal action path without adding new command persistence, logs, or terminal content fields.
+- Added focused command-pane chrome assertions for the target width, minimum target contract, and double-click-only creation rule.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-13:58 Task slice 359
+
+<!--
+CDXC:GPUICommandTabDoubleClick 2026-06-25-13:58:
+Slice 359 broadens GPUI command titlebar double-click handling to match native `isEmptyTitleBarDoubleClickPoint`. Expanded command tabstrips and the collapsed command strip now create New Terminal from empty tabstrip background double-clicks after child tabs and controls decline the hit, while single clicks keep bubbling to normal focus behavior.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Moved empty command-titlebar double-click New Terminal handling into a shared handler that preserves the existing single-click focus path.
+- Attached the handler to expanded command tabstrip backgrounds and the collapsed command strip tab background, while keeping the explicit trailing end target on the same action path.
+- Relied on existing child tab, inline plus, sticky active-tab, and fixed action button event handling to keep real controls isolated from the empty-titlebar gesture.
+- Added focused command-pane chrome assertions proving the gesture is double-click-only and owned by empty tabstrip backgrounds, not only the fixed trailing target.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:01 Task slice 360
+
+<!--
+CDXC:GPUICommandTabClose 2026-06-25-14:01:
+Slice 360 aligns GPUI command-tab button-2 handling with native AppKit tab buttons. Middle-click on a command tab is consumed by the clicked tab, closes on mouse-up through the same command close request path as the visible close affordance, and does not first select the tab or enter empty-titlebar behavior.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added middle-mouse ownership to command tab elements: mouse-down is consumed locally and mouse-up closes the clicked command tab.
+- Reused the existing `close_command_pane_tab` path so mounted command Ghostty surfaces still request close and unmounted placeholders still mutate command-pane model state through the normal close lifecycle.
+- Kept left-click selection, right-click command-tab menus, hover close chrome, tab drag/drop, empty-titlebar double-click, logs, command text, terminal content, and persisted shell data unchanged.
+- Added a focused command-pane chrome assertion for native middle-click close behavior.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_tab_close_scope_model_mutation_preserves_anchor_group`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:04 Task slice 361
+
+<!--
+CDXC:GPUICommandTabClose 2026-06-25-14:04:
+Slice 361 aligns GPUI visible command-tab Close timing with native inline tab actions. The hover close affordance now consumes mouse-down, then invokes the existing command close request path on mouse-up, matching native's pending inline action instead of tearing down the command tab on down.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Changed the hover-only command-tab close button to consume left mouse-down without closing and perform the close on left mouse-up.
+- Reused the existing `close_command_pane_tab` path, preserving mounted Ghostty close requests, placeholder removal, focus restore, sidebar refresh, and shell layout persistence.
+- Kept close geometry, icon chrome, hover visibility, middle-click close, tab selection, right-click menus, tab drag/drop, logs, command text, terminal content, and persisted shell data unchanged.
+- Added a focused command-pane chrome assertion for native mouse-up close invocation.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_tab_close_scope_model_mutation_preserves_anchor_group`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:07 Task slice 362
+
+<!--
+CDXC:GPUICommandTabContextMenu 2026-06-25-14:07:
+Slice 362 aligns GPUI command-tab scoped close menu labels and ordering with native tab-button menus. Command tab context menus now present Close Right, Close Left, then Close Other Tabs, while keeping the same clicked-group close-scope resolution and close request lifecycle.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added command-tab context-menu helpers for native scoped close labels and row order.
+- Changed the scoped close rows from `Close Tabs to the Left`, `Close Other Tabs`, `Close Tabs to the Right` to native `Close Right`, `Close Left`, `Close Other Tabs`.
+- Kept scoped close action payloads, disabled-row logic, clicked command-group resolution, mounted Ghostty close requests, placeholder removal, panel actions, Select Tab behavior, logs, command text, terminal content, and persisted shell data unchanged.
+- Added focused command-tab context-menu assertions for the native labels and row order.
+- Verification: `cargo fmt`; `cargo test command_tab_context_menu_panel_actions_match_visible_command_panel_state`; `cargo test command_tab_close_scope_model_mutation_preserves_anchor_group`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:13 Task slice 363
+
+<!--
+CDXC:GPUICommandTabContextMenu 2026-06-25-14:13:
+Slice 363 removes GPUI command-panel Pin/Unpin and Minimize rows from command-tab right-click menus. AppKit assigns those panel actions to command titlebar buttons, but `primaryTabContextMenuActions` filters tab context menus to clicked-tab actions before Sleep/Close scopes, so GPUI command tab menus must stay tab-scoped.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Removed command-tab context menu rows and action handlers for Pin/Unpin Commands Panel and Minimize Commands Panel.
+- Kept fixed command-panel action buttons as the owner for Pin/Unpin, Minimize, and Expand labels/icons.
+- Updated the command-tab context-menu test to cover the native tab-scoped Select/Expand, Close Tab, and scoped Close row contract.
+- Kept clicked command-group selection, close action payloads, scoped close disabled-row logic, fixed panel controls, command text, terminal content, and persisted shell data unchanged.
+- Verification: `cargo fmt`; `cargo test command_tab_context_menu_matches_native_tab_scoped_rows`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_tab_close_scope_model_mutation_preserves_anchor_group`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:19 Task slice 364
+
+<!--
+CDXC:GPUICommandTabContextMenu 2026-06-25-14:19:
+Slice 364 removes the direct Close Tab row from GPUI command-tab right-click menus. Native tab context menus keep direct tab close on hover and middle-click chrome, while right-click close commands begin at Close Right, Close Left, and Close Other Tabs.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Removed the command-tab menu-only `CloseCommandPaneTab` action, listener, helper, and direct Close Tab row.
+- Kept hover Close and middle-click Close on the existing direct command tab close path.
+- Kept scoped Close Right, Close Left, and Close Other Tabs rows with their clicked-group target resolution and disabled-row behavior.
+- Updated the focused command-tab context-menu assertion to prove direct Close is not part of the scoped right-click close row order.
+- Verification: `cargo fmt`; `cargo test command_tab_context_menu_matches_native_tab_scoped_rows`; `cargo test command_tab_close_scope_model_mutation_preserves_anchor_group`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:22 Task slice 365
+
+<!--
+CDXC:GPUICommandTabContextMenu 2026-06-25-14:22:
+Slice 365 removes GPUI's Select Tab / Expand Commands Panel activation row from command-tab right-click menus. Native tab context menus do not select, focus, or expand the clicked tab from right-click; command-tab activation remains a left-click gesture.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Removed the command-tab menu-only `SelectCommandPaneTab` action, listener, helper, and Select/Expand row.
+- Kept left-click tab selection and collapsed-strip expansion on the existing `select_command_pane_tab` path.
+- Kept scoped Close Right, Close Left, and Close Other Tabs rows as the remaining command-tab right-click rows.
+- Updated the focused context-menu assertion and comments so the tested contract no longer includes select/expand activation rows.
+- Verification: `cargo fmt`; `cargo test command_tab_context_menu_matches_native_tab_scoped_rows`; `cargo test command_tab_close_scope_model_mutation_preserves_anchor_group`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:27 Task slice 366
+
+<!--
+CDXC:GPUICommandTabSleep 2026-06-25-14:27:
+Slice 366 adds native command-tab Sleep scope behavior to GPUI. Sleep marks command sessions as parked lifecycle state inside the clicked command group, keeps tabs/layout visible, removes sleeping active command sessions from terminal body mount slots, persists only the safe sleeping boolean, and wakes only from explicit sleeping body activation.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added native Sleep, Sleep Right, Sleep Left, and Sleep Other Tabs rows before command-tab Close scope rows, with direct Sleep omitted for already sleeping clicked tabs.
+- Added a command-session `is_sleeping` lifecycle flag, clicked-group sleep-scope resolution, action dispatch, safe shell-state round trip, and sidebar bridge `isSleeping` metadata without command text, output, paths, status-file paths, process ids, or terminal content.
+- Withheld mounted command terminal body slots for sleeping active command tabs and wired left-click body activation to wake the sleeping session; tab selection and right-click menus do not wake it.
+- Added focused Rust coverage for Sleep row labels/order, sleep scope mutation, group isolation, status/delayed-send cleanup, mount-slot exclusion/restore, sidebar sanitization, and shell-state restore.
+- Verification: `cargo fmt`; `cargo test command_tab_`; `cargo test command_pane_sidebar_session_sources_are_sanitized_for_hud_indicators`; `cargo test command_pane_shell_state_round_trip_preserves_layout_without_command_content`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:39 Task slice 367
+
+<!--
+CDXC:GPUICommandTabSleepVisuals 2026-06-25-14:39:
+Slice 367 aligns GPUI sleeping command-tab visuals with native AppKit command-role tabs. Selected sleeping command tabs keep selected fill/title treatment, while inactive sleeping command tabs use the native parked 3.2% white overlay and 48% title alpha multiplier.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added sleeping-aware command-tab background and title color helpers with native active-selected and inactive-parked behavior.
+- Passed command-session sleeping state into command tab rendering so inactive sleeping tabs visibly dim while active sleeping tabs still read as selected before wake.
+- Kept hover fill stable, because native hover reveals close chrome only and does not brighten awake or sleeping command tabs.
+- Added focused command-pane chrome assertions for active sleeping fill parity, inactive sleeping fill, sleeping title alpha, and hover stability.
+- Verification: `cargo fmt`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_tab_`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:42 Task slice 368
+
+<!--
+CDXC:GPUICommandTabContextMenu 2026-06-25-14:42:
+Slice 368 aligns GPUI scoped command-tab menu row enablement with native AppKit. Sleep Right/Left/Others and Close Right/Left/Others remain enabled even when a clicked command tab has no matching sibling targets; selecting an empty scope safely no-ops through the clicked-group resolver.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Changed command-tab scoped Sleep and Close rows from `menu_with_disabled` to action-backed enabled `NativeMenu` rows.
+- Kept target resolution inside the existing clicked-group scope helpers, so empty left/right/other scopes resolve to an empty target list and do not mutate command sessions.
+- Updated command-tab context-menu comments and added focused model coverage for single-tab empty Sleep/Close scopes resolving to no-op targets.
+- Verification: `cargo fmt`; `cargo test command_tab_`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:46 Task slice 369
+
+<!--
+CDXC:GPUICommandTabWake 2026-06-25-14:46:
+Slice 369 aligns GPUI command-tab wake policy with the shared macOS clickToWakeSleepingSessions setting. The default keeps sleeping command-tab selection as a cold placeholder selection; strict false wakes the selected sleeping command tab immediately.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a narrow command-pane reader for the shared `clickToWakeSleepingSessions` setting, defaulting missing or malformed values to true like shared Settings.
+- Threaded the setting into command-tab selection so sleeping tabs wake on selection only when click-to-wake placeholders are disabled.
+- Preserved the default native flow where sleeping command-tab selection only selects the placeholder and the command body click performs wake.
+- Added focused coverage for default, true, false, and malformed setting values.
+- Verification: `cargo fmt`; `cargo test command_tab_wake_policy_follows_shared_click_to_wake_setting`; `cargo test command_tab_`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/assets/titlebar/clock.svg gpui/assets/titlebar/plus.svg gpui/assets/titlebar/pin.svg gpui/assets/titlebar/pin-slash.svg gpui/assets/titlebar/chevron-left.svg gpui/assets/titlebar/chevron-right.svg gpui/assets/titlebar/chevron-up.svg gpui/assets/titlebar/chevron-down.svg gpui/assets/titlebar/xmark.svg gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:49 Task slice 370
+
+<!--
+CDXC:GPUICommandSleepingPlaceholder 2026-06-25-14:49:
+Slice 370 aligns GPUI sleeping command body placeholders with native AppKit. The active sleeping command body paints the centered "Press Any Key to Wake" affordance only when click-to-wake placeholders are enabled, and focused sleeping command placeholders wake on plain alphanumeric key-down before terminal text delivery.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added the native sleeping command placeholder label, 13px medium typography, black body background, and neutral 55% white label color while keeping mounting placeholders blank.
+- Kept the body element as the only click/drag/drop owner; the label is visual child content and does not introduce overlays, hidden hit regions, or synthetic routing.
+- Added focused keyboard wake resolution for the command pane's active sleeping tab, rejecting non-command focus, running command tabs, punctuation, multi-character text, Option/Alt characters, Control shortcuts, and Cmd shortcuts.
+- Added focused source coverage for label gating, wake-key filtering, and active-tab-only keyboard wake targeting.
+- Verification: `cargo fmt`; `cargo test command_sleeping_placeholder`; `cargo test focused_sleeping_command_placeholder_keyboard_wake_targets_active_tab_only`; `cargo test command_tab_`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-14:56 Task slice 371
+
+<!--
+CDXC:GPUICommandFocusedSessionActions 2026-06-25-14:56:
+Slice 371 adds GPUI command-pane support for the native Sleep Focused Session shortcut. Option+Shift+S now resolves the expanded shell-focused command pane's active command tab and parks it through the existing command-tab sleep lifecycle instead of ignoring command-pane terminal focus.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added the `SleepFocusedSession` GPUI action and bound the native default `alt-shift-s` key through a named constant that represents macOS Option+Shift+S.
+- Routed the action only when the command pane owns shell focus and is visibly expanded, so collapsed strips, non-command focus, missing command sessions, and already sleeping command tabs no-op.
+- Reused the existing command-tab sleep mutation so the focused command tab stays visible, its mounted terminal slot detaches, sidebar command metadata refreshes, and shell persistence records only the safe sleeping boolean.
+- Added focused source coverage for the default shortcut string and command-pane sleep target guards.
+- Verification: `cargo fmt`; `cargo test focused_command_pane_sleep_target_requires_visible_command_focus`; `cargo test command_tab_`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-15:01 Task slice 372
+
+<!--
+CDXC:GPUICommandFocusedSessionActions 2026-06-25-15:01:
+Slice 372 wires GPUI command-palette focused-session Wake behavior for command panes. The shared `runGhostexHotkeyAction` bridge now recognizes Sleep/Wake focused-session ids and wakes only the expanded shell-focused command pane's active sleeping tab through the existing command-pane wake lifecycle.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added an unbound `WakeFocusedSession` GPUI action and a command-pane wake resolver for the expanded shell-focused active sleeping command tab.
+- Routed shared `runGhostexHotkeyAction` messages for `sleepFocusedSession` and `wakeFocusedSession` into command-pane lifecycle handlers before modal routing, matching native command-palette focused-session behavior.
+- Kept unrelated hotkey ids on their existing routes so modal actions such as Settings still open modals and unimplemented focused-session commands are not swallowed by command-pane code.
+- Added focused source coverage for the bridge action-id classifier and wake-target guards.
+- Verification: `cargo fmt`; `cargo test focused_command_pane_`; `cargo test command_tab_`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-15:05 Task slice 373
+
+<!--
+CDXC:GPUICommandFocusedSessionActions 2026-06-25-15:05:
+Slice 373 adds GPUI command-palette Close Focused Session parity for command panes. The shared `closeFocusedSession` hotkey action id now resolves only while the command pane owns shell focus and then delegates to the existing focused close path for the active command terminal.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added `closeFocusedSession` to the command-pane focused-session hotkey classifier used by the shared command-palette bridge.
+- Guarded the close bridge so it runs only when the command pane owns shell focus, avoiding unrelated surface closes from this command-pane parity path.
+- Reused `close_focused_surface` for the command-pane case, preserving mounted Ghostty close confirmation, placeholder close behavior, shell-state persistence, sidebar refresh, and post-close focus handling.
+- Extended focused source coverage for the bridge classifier and command-pane close-focus guard.
+- Verification: `cargo fmt`; `cargo test focused_command_pane_`; `cargo test command_tab_`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-15:11 Task slice 374
+
+<!--
+CDXC:GPUICommandDelayedSend 2026-06-25-15:11:
+Slice 374 wires GPUI command-pane Delayed Send through the shared compact React modal and a runtime-only command-session timer. Timers validate whole-minute native bounds, show command tab clock chrome while armed, submit Return through Ghostty's key path for the exact mounted command surface, and do not persist live timer deadlines or stale timer-owned delayed-send state.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added `delayedSend` command-palette bridge handling for focused command panes, opening the shared 472x336 Delayed Send modal with the focused command session id, title, and active timer projection.
+- Added runtime command delayed-send timers keyed by command session id with generation-based cancel/supersede behavior, schedule/cancel modal command handling, exact mounted-slot target validation, and programmatic Return key dispatch through Ghostty's key ABI.
+- Kept live timer-owned clock state out of shell-state persistence so restored command placeholders do not show stale Delayed Send state without a restart re-arm contract.
+- Added focused source coverage for modal recognition/window size, focused target guards, delay validation and formatting, modal session-id parsing, and timer-owned persistence filtering.
+- Verification: `cargo fmt`; `cargo test focused_command_pane_`; `cargo test command_delayed_send_validation_and_persistence_skip_live_timer_deadlines`; `cargo test command_tab_`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-15:24 Task slice 375
+
+<!--
+CDXC:GPUICommandCloseAfterDone 2026-06-25-15:24:
+Slice 375 wires GPUI command-pane Close After Done through the shared focused command-palette bridge and a command-session runtime watcher. The armed flag persists as safe lifecycle metadata, countdown deadlines stay process-local, and tabs close only after an armed Action-owned or Attention command session remains done for the native three-minute window.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added `closeAfterDone` to the GPUI command-pane focused hotkey bridge so the shared command-palette row toggles the focused mounted command tab before modal routing.
+- Added command Close After Done state, runtime timers, generation-based cancel/supersede behavior, startup rehydration from the persisted armed flag, and status-poller refresh when command Actions finish.
+- Cleared Close After Done timers on command tab removal, scoped close, sleep, sidebar-run close, and command model prune paths, while rerunning an armed Action cancels only the active countdown and keeps the armed request.
+- Persisted only the `closeAfterDone` boolean for non-sleeping command sessions; action ids, run ids, status-file paths, countdown deadlines, generations, command text, output, and paths remain runtime-only.
+- Added focused source coverage for bridge recognition, done-state classification, sleeping exclusions, and shell-state privacy.
+- Verification: `cargo fmt`; `cargo test focused_command_pane_`; `cargo test command_close_after_done`; `cargo test command_tab_`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo test command_delayed_send_validation_and_persistence_skip_live_timer_deadlines`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-15:42 Task slice 376
+
+<!--
+CDXC:GPUICommandDelayedSend 2026-06-25-15:42:
+Slice 376 adds the native centered Delayed Send body badge to GPUI command terminals. Active command Delayed Send timers now paint a non-interactive countdown badge in the existing command body and tick once per second while runtime timers exist, without persisting deadlines or introducing overlay hit-test ownership.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added native-matched command body Delayed Send badge constants for 23px bold countdown text, #f6c945 foreground, 58px badge height, 12px radius, dark translucent background, and subtle border.
+- Rendered the badge as visual child chrome inside the existing command terminal body only for the active mounted command session with a live GPUI delayed-send timer.
+- Added a runtime-only one-second countdown ticker that starts when command delayed-send timers are armed and stops once the timer map is empty, so body badge labels update without persisted deadlines, logs, command text, paths, or terminal content.
+- Kept command body focus, Ghostty mouse/key forwarding, sleeping wake, drag/drop, and native host bounds on the existing body element; no new interactive overlay or hit-test routing was added.
+- Extended focused Delayed Send coverage for body-badge countdown projection from runtime timers.
+- Verification: `cargo fmt`; `cargo test command_delayed_send_validation_and_persistence_skip_live_timer_deadlines`; `cargo test focused_command_pane_`; `cargo test command_tab_`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-15:46 Task slice 377
+
+<!--
+CDXC:GPUICommandDelayedSend 2026-06-25-15:46:
+Slice 377 aligns command-tab Sleep with native timer ownership. Sleeping a GPUI command tab now preserves Delayed Send and Close After Done intent instead of canceling it; Delayed Send submits only if the tab is awake again at the deadline, and Close After Done countdown evaluation resumes after wake.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Removed the sleep-path cancellation of command Delayed Send timers and Close After Done timers while keeping close/reload/action-rerun cleanup unchanged.
+- Preserved non-runtime Delayed Send and Close After Done flags in sleeping command shell-state records, while live timer-owned Delayed Send deadlines still serialize as false because GPUI has no restart re-arm contract.
+- Re-evaluated Close After Done when a sleeping command tab wakes, and suppressed the “no longer mounted” warning when a Delayed Send timer expires while the command tab is intentionally sleeping.
+- Updated focused model/persistence coverage for sleeping command tabs preserving timer/armed intent without rendering sleeping body mount slots.
+- Verification: `cargo fmt`; `cargo test command_tab_sleep_scope_model_mutation_preserves_anchor_group`; `cargo test command_delayed_send_validation_and_persistence_skip_live_timer_deadlines`; `cargo test command_close_after_done_persistence_keeps_only_armed_boolean`; `cargo test focused_command_pane_`; `cargo test command_tab_`; `cargo test command_close_after_done`; `cargo test command_pane_collapsed_strip_hides_panel_mode_controls`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-16:05 Task slice 378
+
+<!--
+CDXC:GPUIFocusedSplits 2026-06-25-16:05:
+Slice 378 aligns command-pane focused split hotkeys with native direction handling. GPUI command panes now intentionally coerce both Cmd+D and Cmd+Shift+D to horizontal command splits like macOS, persist the command split axis as safe shell layout metadata, and render/resize command splits from the stored orientation.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added an axis field to GPUI command-pane split nodes, persisted it as `horizontal` or `vertical`, restored older missing-axis command layouts as horizontal, and kept the persisted payload limited to layout metadata without command text, terminal content, paths, or runtime mount state.
+- Kept command-pane focused split hotkeys horizontal-only for both requested directions, matching native `splitFocusedCommandPanelPane` while still recording the stored split axis.
+- Made command split rendering and resizing axis-aware, keeping the visible split handle as a real non-overlapping layout sibling for both stored orientations.
+- Updated command-pane shell-state coverage for sleeping Delayed Send preservation that the broader filter exposed, and added focused split-direction coverage for native horizontal-only geometry plus shell-state restore.
+- Verification: `cargo fmt`; `cargo test command_pane_focused_split_hotkeys_keep_native_horizontal_geometry`; `cargo test command_pane_`; `cargo test command_tab_`; `cargo test focused_command_pane_`; `cargo test resize`; `cargo test split_ratio`; `cargo check`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-16:14 Task slice 379
+
+<!--
+CDXC:GPUICommandPaneSplits 2026-06-25-16:14:
+Slice 379 aligns repeated GPUI command-pane split insertion with native default geometry. Native command panes flatten same-direction split children and give untouched children equal space; GPUI keeps binary storage but rebalances only default same-axis command split chains by visible command group count while preserving explicit user-resized ratios.
+
+CDXC:GPUICommandPaneSplits 2026-06-25-16:18:
+Same-direction command split insertion must happen beside the matching child of the existing split, matching native flattened-child semantics. GPUI preserves that boundary in binary form so explicit first-child ratios retain native meaning even when inserting before or after the first command pane.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added command split insertion helpers that detect whether the target same-axis split chain still uses native default ratios before insertion.
+- Rebalanced only those untouched command split chains after same-axis insertion, so repeated focused splits or right-edge command drops produce equal thirds instead of a half plus nested quarters.
+- Preserved explicit user-resized command split ratios when later inserting another same-axis command pane, including insertion beside the first child of a resized split, matching native `paneLayout.ratio` behavior without converting the GPUI command model to n-ary storage.
+- Extended command-pane split coverage for repeated hotkey insertion, shell-state persistence of the adjusted ratio, workspace-to-command right-edge insertion, and user-resized ratio preservation.
+- Verification: `cargo fmt`; `cargo test command_pane_focused_split_hotkeys_keep_native_horizontal_geometry`; `cargo test command_pane_repeated_split_insertion_preserves_explicit_user_ratio`; `cargo test command_pane_`; `cargo test resize`; `cargo test split_ratio`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-16:22 Task slice 380
+
+<!--
+CDXC:GPUICommandPaneActions 2026-06-25-16:22:
+Slice 380 aligns GPUI command Action reuse with native running-terminal requirements. Sleeping command-pane tabs are not reusable Action runners because they have no mounted command body; run-start also clears any stale sleeping flag before marking the session Working so Action wrappers cannot target an unmounted pane.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a command Action reuse predicate that requires idle and non-sleeping command sessions, matching native's running-and-idle command-pane reuse condition.
+- Prevented exact command-id and normalized-title reuse from selecting sleeping command tabs, so rerunning an Action creates/selects an executable command tab instead of marking a parked placeholder Working.
+- Made command Action run-start defensively clear `is_sleeping` before setting Working state, preserving the invariant that a Working command Action is wakeable/renderable through the command terminal body path.
+- Added focused model coverage for sleeping exact-id and title-owned Action tabs, plus existing Action reuse/status coverage.
+- Verification: `cargo fmt`; `cargo test command_pane_action_session_does_not_reuse_sleeping_actions`; `cargo test command_pane_action_session_reuses`; `cargo test command_action`; `cargo test command_pane_`; `cargo test focused_command_pane_`; `cargo check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-16:33 Task slice 381
+
+<!--
+CDXC:GPUICommandPaneRename 2026-06-25-16:33:
+Slice 381 aligns GPUI command-pane Rename Active Session hotkey handling with native focused-session routing. When the expanded command pane owns shell focus, GPUI opens the shared Rename Session modal for the active command tab, accepts only local command-session rename submissions, and updates the live tab title without persisting user-entered titles into shell-state JSON.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added `renameSession` to the GPUI app-modal allowlist with the native compact 570x480 Rename Session window footprint and sidebar-state hydration for the shared React modal host.
+- Added `renameActiveSession` recognition to the command-pane focused hotkey bridge, scoped to an expanded command pane that owns shell focus, so non-command focus and collapsed command strips do not open stale rename modals.
+- Added a command-pane rename submit handler that accepts only local command-session ids plus normalized direct titles, rejects generated-title requests for local command tabs, refreshes live command pane/sidebar chrome, and avoids writing user-entered titles to shell-state JSON.
+- Added focused coverage for hotkey recognition, target scoping, modal sizing/whitelist behavior, direct title normalization, live title mutation, and the title-free persistence boundary.
+- Verification: `cargo fmt`; `cargo test command_pane_rename`; `cargo test focused_command_pane_rename_target_requires_visible_command_focus`; `cargo test focused_command_pane_wake_target_requires_sleeping_command_focus`; `cargo test focused_command_pane_`; `cargo test command_pane_`; `cargo test command_pane_action_session_reuses`; `cargo check`; `cargo fmt --check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-16:41 Task slice 382
+
+<!--
+CDXC:GPUICommandDelayedSend 2026-06-25-16:41:
+Slice 382 aligns GPUI command-pane Delayed Send restart behavior with native command-panel local persistence. Live timer-owned command tabs now persist only a bounded UTC deadline plus remaining-duration checkpoint, restore that checkpoint as a fresh runtime timer with the native 2s fire grace on startup, and still exclude command text, titles, terminal content, paths, runtime ids, stdout/stderr, and countdown labels from shell-state JSON.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a command Delayed Send restore checkpoint path that writes `delayedSendDeadlineAt` and `delayedSendRemainingMs` only from the app-level runtime timer map; model-only command-pane serialization still omits timer deadlines.
+- Parsed restored command-pane timer checkpoints into explicit restore intents only for sessions that survive command-pane layout normalization, with zero, missing, oversized, or stale rows ignored.
+- Re-armed restored command Delayed Send timers during GPUI app startup using the saved remaining milliseconds plus the native 2s restored-fire grace, so closed-app time is not spent and near-expired timers still get a mount window.
+- Added a one-minute GPUI Delayed Send persistence ticker so the remaining-duration checkpoint advances while the app stays open, matching native's restart-resume behavior without writing command text or terminal content.
+- Persisted shell state immediately when scheduling, canceling, or firing GPUI command Delayed Send so restart metadata is written and cleared without waiting for unrelated layout changes.
+- Updated delayed-send tests for validation, app-level timer persistence, title/content privacy, restore-intent extraction, restored-fire grace, one-minute checkpoint cadence, and invalid checkpoint rejection.
+- Verification: `cargo fmt`; `cargo test command_delayed_send_validation_and_persistence_restores_live_timer_checkpoints`; `cargo test focused_command_pane_delayed_send_target_requires_mounted_command_focus`; `cargo test command_close_after_done_persistence_keeps_only_armed_boolean`; `cargo test command_pane_`; `cargo test focused_command_pane_`; `cargo test command_delayed_send`; `cargo check`; `cargo fmt --check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-16:52 Task slice 383
+
+<!--
+CDXC:GPUICommandCloseAfterDone 2026-06-25-16:52:
+Slice 383 aligns GPUI command-pane Close After Done focused-session routing with native. Native toggles Close After Done by command session id, so GPUI now resolves the expanded shell-focused command tab even when it is sleeping, persists only the armed intent, and starts no countdown until the tab wakes and is actually Done.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a focused command-pane Close After Done target resolver that requires expanded command-pane shell focus but does not require a mounted command Ghostty surface.
+- Removed the sleeping-tab early return from the command Close After Done toggle so sleeping command tabs can arm or cancel the same safe persisted boolean as native without waking or mounting.
+- Kept countdown creation gated by the existing Done predicate, so sleeping command tabs remain parked and do not start Close After Done timers until they wake and qualify as Done.
+- Added focused coverage proving the command-pane Close After Done target still rejects non-command focus and collapsed command strips while accepting sleeping active command tabs.
+- Verification: `cargo fmt`; `cargo test focused_command_pane_close_after_done_target_allows_sleeping_command_focus`; `cargo test command_close_after_done`; `cargo test focused_command_pane_`; `cargo test command_pane_`; `cargo check`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-16:56 Task slice 384
+
+<!--
+CDXC:GPUICommandDelayedSend 2026-06-25-16:56:
+Slice 384 aligns GPUI command-pane Delayed Send startup wake behavior with native command-panel restore. A persisted delayed-send checkpoint now wakes the command tab when GPUI re-arms the timer at startup so the pending Return can target a live command body, while manual in-process Sleep still parks active timers until the user wakes the tab.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a command-pane restore-intent helper that marks a restored timer as runtime-owned and clears the sleeping flag only for persisted Delayed Send startup restore.
+- Routed GPUI startup timer re-arm through that helper, preserving the existing schedule/cancel/fire behavior and the manual Sleep rule for timers that are already active in the running app.
+- Extended delayed-send persistence coverage to prove shell-state parsing can preserve a sleeping placeholder, while applying a persisted timer restore wakes the session, marks it timer-owned, and ignores missing sessions.
+- Verification: `cargo fmt`; `cargo test command_delayed_send`; `cargo test command_pane_`; `cargo test focused_command_pane_`; `cargo check`; `cargo fmt --check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-17:09 Task slice 385
+
+<!--
+CDXC:GPUICommandPaneTimers 2026-06-25-17:09:
+Slice 385 aligns GPUI command-pane sidebar/titlebar timer projection with native command-panel rows. Command-pane session indicators now include Delayed Send countdown fields and Close After Done armed/deadline fields from runtime timers, while keeping command text, terminal output, paths, run ids, status-file paths, and shell-state JSON out of the bridge.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Extended the GPUI command-pane sidebar session summary with the same safe timer fields native projects for command-panel terminal rows: `delayedSendDeadlineAt`, `delayedSendRemainingLabel`, `delayedSendRemainingMs`, `closeAfterDone`, `closeAfterDoneDeadlineAt`, `closeAfterDoneRemainingLabel`, and `closeAfterDoneRemainingMs`.
+- Passed those allowlisted timer fields through the app-modal command-session indicator merge so shared sidebar HUD/action rows can render Delayed Send and Close After Done state without receiving command text, status-file paths, terminal output, or project paths.
+- Added a process-local Close After Done one-second projection ticker so runtime countdown labels refresh like native while countdown timers exist; labels remain runtime-only and are not persisted.
+- Extended focused coverage for command-pane sidebar summaries and app-modal indicator merging to prove timer projection and privacy boundaries.
+- Verification: `cargo fmt`; `cargo test command_pane_sidebar_session_sources_are_sanitized_for_hud_indicators`; `cargo test app_modal_command_session_indicators_match_command_id_then_title`; `cargo test command_close_after_done`; `cargo test command_delayed_send`; `cargo test command_pane_`; `cargo test focused_command_pane_`; `cargo test command_tab_`; `cargo check`; `cargo fmt --check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-25-17:19 Task slice 386
+
+<!--
+CDXC:GPUICommandDelayedSend 2026-06-25-17:19:
+Slice 386 closes the restored Delayed Send stranded-timer gap in GPUI command panes. Because GPUI command terminals are mounted only through visible normal layout, a persisted timer restore now expands the command pane and selects the restored command tab so the timer has an executable command body instead of staying hidden behind collapsed or inactive tab state.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Extended the restored Delayed Send startup intent so it marks the command session runtime-owned, clears sleeping state, expands a hidden command pane through normal command-pane layout, and selects the restored timer tab when it was inactive.
+- Kept manual in-process Sleep unchanged: only persisted restart timer restore promotes the tab into a visible command body; ordinary sleeping command tabs still stay parked until explicit wake.
+- Added focused regression coverage for a collapsed command pane with an inactive sleeping timer tab, proving restore exposes a command body mount slot and stays idempotent on a second restore pass.
+- Verification: `cargo fmt`; `cargo test command_delayed_send_validation_and_persistence_restores_live_timer_checkpoints`; `cargo test command_delayed_send`; `cargo test command_pane_`; `cargo test focused_command_pane_`; `cargo test command_tab_`; `cargo check`; `cargo fmt --check`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md`. Existing Rust dead-code warnings remain. No app launch/restart, browser automation, or `bun run start` was run.

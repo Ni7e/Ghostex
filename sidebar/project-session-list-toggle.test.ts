@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   PROJECT_SESSION_LIST_COLLAPSED_COUNT,
+  getProjectSessionListBoundaryHeight,
   getProjectSessionListCollapsedHeight,
   getVisibleProjectSessionIds,
   normalizeStoredProjectSessionListCollapsedState,
@@ -169,6 +170,32 @@ describe("getProjectSessionListCollapsedHeight", () => {
         sessionListElement,
       }),
     ).toBe(80);
+  });
+
+  test("measures expanded scroll bounds without the collapsed-list more row", () => {
+    /*
+     * CDXC:ProjectSessionLists 2026-06-25-12:20:
+     * Expanded Show more lists use the measured visible session boundary as
+     * their scroll cap. The collapsed-list count row is only part of the
+     * collapsed Show more state and must not enlarge the expanded scroll area.
+     */
+    const sessionListElement = createSessionListElement({
+      bottom: 140,
+      moreToggleElement: createMeasuredElement(68, 90),
+      sessions: [
+        createSessionElement("session-1", 10, 38),
+        createSessionElement("session-2", 39, 67),
+        createSessionElement("session-3", 91, 119),
+      ],
+      top: 10,
+    });
+
+    expect(
+      getProjectSessionListBoundaryHeight({
+        boundarySessionId: "session-2",
+        sessionListElement,
+      }),
+    ).toBe(57);
   });
 
   test("uses zero height for an empty collapsed list", () => {

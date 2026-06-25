@@ -150,3 +150,10 @@ Bring the GPUI app titlebar and related modal UI/UX to production parity with th
 - Exact files touched: `gpui/src/main.rs`, `gpui/src/shared_settings.rs`, `gpui/TITLEBAR_APP_MODAL_PARITY_PROGRESS.md`, and `gpui/SETTINGS_PARITY_PROGRESS.md`.
 - Remaining Keep Awake gaps: GPUI still does not implement the lid-close helper, external-display auto-start, battery-threshold/low-power/user-switch deactivation, delayed-send holds, working-session automatic holds, or runtime validation of the menu/process behavior.
 - Verification: no verification commands were run; no build, test, format, typecheck, app launch/restart, browser automation, or `bun run start` command was run.
+
+### 2026-06-24-23:17 GPUI Info Dropdown React Panel
+
+- User-facing behavior delivered: the visible GPUI info glyph now opens a dropdown panel instead of doing nothing, and the panel renders the shared React Tips content from `native/sidebar/titlebar-host.tsx`.
+- High-level technical approach: added a controlled `gpui_component::popover::Popover` trigger, a GPUI-owned CEF panel sized like the macOS Tips panel, a thin `titlebar-host.html` GPUI CEF entry, and first-party bridge access for the titlebar host so Tips header commands can open Browser/docs/changelog or shared app-modal setup/video routes.
+- Layout/privacy behavior: no AppKit/Swift dropdown window, transparent overlay, hidden hit region, duplicated GPUI tips data, arbitrary browser-page bridge, raw URL bridge, or titlebar command logging was added.
+- Verification: `cargo +1.95.0 check --manifest-path gpui/Cargo.toml --bin ghostex-gpui` passed with existing dead-code warnings; `bunx vite build --config gpui/vite.config.ts` passed and emitted `titlebar-host.html`; `git diff --check` passed for the touched dropdown files. No app launch/restart, browser automation, or `bun run start` was run.

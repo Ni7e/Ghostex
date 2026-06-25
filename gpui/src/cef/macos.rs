@@ -59,6 +59,8 @@ const SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_PROCESS_MESSAGE_NAME: &str 
     "ghostex.gpui.sidebar.manageFileWorkareaOperationRequest";
 const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.nativeProjectPathAction";
+const SIDEBAR_COMMAND_ACTION_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.commandAction";
+const SIDEBAR_COMMAND_RUN_END_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.commandRunEnd";
 const SIDEBAR_GXSERVER_FOCUS_STATE_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.gxserverPresentationFocusState";
 const SIDEBAR_PROJECT_CONTEXT_INSTALL_MESSAGE_NAME: &str =
@@ -75,6 +77,8 @@ const SIDEBAR_PROJECT_WORKAREA_READINESS_JS_FUNCTION: &str = "postProjectWorkare
 const SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_JS_FUNCTION: &str =
     "postManageFileWorkareaOperationRequest";
 const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_JS_FUNCTION: &str = "postNativeProjectPathAction";
+const SIDEBAR_COMMAND_ACTION_JS_FUNCTION: &str = "postSidebarCommandAction";
+const SIDEBAR_COMMAND_RUN_END_JS_FUNCTION: &str = "postSidebarCommandRunEnd";
 const SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION: &str = "postGxserverPresentationFocusState";
 const SIDEBAR_RUNTIME_SETTINGS_JS_OBJECT: &str = "runtimeSettings";
 const SIDEBAR_RUNTIME_SETTINGS_CHANGED_JS_CALLBACK: &str = "onRuntimeSettingsChanged";
@@ -142,6 +146,8 @@ enum SidebarBridgeEventKind {
     ProjectWorkareaReadiness,
     ManageFileWorkareaOperationRequest,
     NativeProjectPathAction,
+    SidebarCommandAction,
+    SidebarCommandRunEnd,
     GxserverPresentationFocusState,
 }
 
@@ -152,7 +158,7 @@ struct SidebarBridgeFunctionSpec {
     event_kind: SidebarBridgeEventKind,
 }
 
-const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 7] = [
+const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 9] = [
     SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION,
         process_message_name: SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME,
@@ -182,6 +188,16 @@ const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 7] = [
         js_function_name: SIDEBAR_NATIVE_PROJECT_PATH_ACTION_JS_FUNCTION,
         process_message_name: SIDEBAR_NATIVE_PROJECT_PATH_ACTION_PROCESS_MESSAGE_NAME,
         event_kind: SidebarBridgeEventKind::NativeProjectPathAction,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_COMMAND_ACTION_JS_FUNCTION,
+        process_message_name: SIDEBAR_COMMAND_ACTION_PROCESS_MESSAGE_NAME,
+        event_kind: SidebarBridgeEventKind::SidebarCommandAction,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_COMMAND_RUN_END_JS_FUNCTION,
+        process_message_name: SIDEBAR_COMMAND_RUN_END_PROCESS_MESSAGE_NAME,
+        event_kind: SidebarBridgeEventKind::SidebarCommandRunEnd,
     },
     SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION,
@@ -272,6 +288,10 @@ fn is_app_modal_host_frame_url(url: &str) -> bool {
     is_gpui_first_party_cef_entry_url(url, "modal-host.html")
 }
 
+fn is_gpui_titlebar_host_frame_url(url: &str) -> bool {
+    is_gpui_first_party_cef_entry_url(url, "titlebar-host.html")
+}
+
 fn is_gpui_sidebar_frame_url(url: &str) -> bool {
     is_gpui_first_party_cef_entry_url(url, "index.html")
 }
@@ -304,6 +324,8 @@ pub enum SidebarBridgeEvent {
     ProjectWorkareaReadiness(String),
     ManageFileWorkareaOperationRequest(String),
     NativeProjectPathAction(String),
+    SidebarCommandAction(String),
+    SidebarCommandRunEnd(String),
     GxserverPresentationFocusState(String),
 }
 
@@ -337,6 +359,8 @@ impl SidebarBridgeEventKind {
                 SidebarBridgeEvent::ManageFileWorkareaOperationRequest(payload)
             }
             Self::NativeProjectPathAction => SidebarBridgeEvent::NativeProjectPathAction(payload),
+            Self::SidebarCommandAction => SidebarBridgeEvent::SidebarCommandAction(payload),
+            Self::SidebarCommandRunEnd => SidebarBridgeEvent::SidebarCommandRunEnd(payload),
             Self::GxserverPresentationFocusState => {
                 SidebarBridgeEvent::GxserverPresentationFocusState(payload)
             }
@@ -587,6 +611,9 @@ wrap_client! {
 
             CDXC:GPUISidebarGit 2026-06-24-15:43:
             Existing-PR browser open and changed-file IDE open are still sidebar-only native side effects on this fixed bridge. CEF does not trust or inspect URLs or paths; app-side Rust must re-query gxserver and treat any file path as a relative candidate only.
+
+            CDXC:GPUICommandPane 2026-06-24-23:17:
+            Sidebar command actions use their own fixed sidebar bridge function so the shared SidebarApp and command palette can ask GPUI to run the gxserver-projected action through Rust-owned Browser or command-pane paths. CEF still forwards only one bounded string from the sidebar main frame and does not log, persist, inspect, or execute command text.
             */
             if source_process != ProcessId::RENDERER {
                 return 0;
@@ -653,7 +680,7 @@ wrap_client! {
                 };
                 /*
                 CDXC:GPUITitlebarAppModalHost 2026-06-24-10:42:
-                The GPUI app-modal host reuses the macOS React modal bridge shape, but CEF forwards it as a single bounded JSON string from the bundled modal-host page. Keep this main-frame-only and handler-scoped so Browser tabs, workarea pages, logs, persistence, raw URLs, page titles, and generic IPC never receive app-modal payloads.
+                The GPUI app-modal host and titlebar Tips panel reuse the macOS React bridge shape, but CEF forwards each message as a single bounded JSON string from first-party bundled pages only. Keep this main-frame-only and handler-scoped so Browser tabs, workarea pages, logs, persistence, raw URLs, page titles, and generic IPC never receive app-modal payloads.
                 */
                 if payload.chars().count() > APP_MODAL_HOST_BRIDGE_PAYLOAD_MAX_CHARS {
                     return 1;
@@ -755,13 +782,14 @@ wrap_render_process_handler! {
             }
             let frame_url = CefString::from(&frame.url()).to_string();
             let is_modal_host = is_app_modal_host_frame_url(&frame_url);
+            let is_titlebar_host = is_gpui_titlebar_host_frame_url(&frame_url);
             let is_sidebar = is_gpui_sidebar_frame_url(&frame_url);
-            if !is_modal_host && !is_sidebar {
+            if !is_modal_host && !is_titlebar_host && !is_sidebar {
                 return;
             }
             /*
             CDXC:GPUITitlebarAppModalHost 2026-06-24-11:09:
-            Install the CEF-compatible `window.webkit.messageHandlers.ghostexAppModalHost` shim at V8 context creation for only the bundled modal-host.html and sidebar index.html entries. The shared React modal host posts `ready` during mount, and the shared sidebar can emit Settings/Hotkeys/Command Palette opens after hydration, so waiting for load-end would race real app-modal presentation. Only modal-host.html receives the native-window identity fields; Browser tabs, project workareas, arbitrary pages, raw URLs, titles, logs, persistence, and generic IPC do not receive this bridge.
+            Install the CEF-compatible `window.webkit.messageHandlers.ghostexAppModalHost` shim at V8 context creation for only bundled modal-host.html, titlebar-host.html, and sidebar index.html entries. The shared React modal host posts `ready` during mount, the titlebar Tips panel posts sidebarCommand header actions, and the shared sidebar can emit Settings/Hotkeys/Command Palette opens after hydration, so waiting for load-end would race real presentation. Only modal-host.html receives the native-window identity fields; Browser tabs, project workareas, arbitrary pages, raw URLs, titles, logs, persistence, and generic IPC do not receive this bridge.
             */
             install_app_modal_host_v8_bridge(context, is_modal_host);
         }
@@ -964,6 +992,9 @@ fn install_sidebar_project_context_v8_bridge(
 
     CDXC:GPUISidebarGxserverFocusState 2026-06-24-21:07:
     The focus-state bridge is a fixed sidebar-only string payload used to return React-owned gxserver presentation session ids to Rust for bootstrap replay. It must remain separate from native path actions and must not carry paths, titles, command text, terminal contents, tokens, daemon response bodies, or renderer-derived labels.
+
+    CDXC:GPUICommandPane 2026-06-24-23:17:
+    The sidebar command-action bridge is a fixed-function handoff for the shared SidebarApp `runSidebarCommand` message. It may carry the selected gxserver HUD action fields to app Rust, but it must not expose generic IPC, filesystem/project discovery, logs, persistence, terminal content, stdout/stderr, or renderer-side execution authority.
     */
     let Some(context) = context else {
         return;
@@ -2424,10 +2455,16 @@ mod tests {
 
     CDXC:GPUISidebarGxserverFocusState 2026-06-24-21:07:
     Gxserver focus-state publication is included as an allowlisted bridge function because Rust needs the real presentation session ids React receives from gxserver create/focus/fork/restore flows. The payload is still one bounded string and is parsed by Rust before it can update bootstrap state.
+
+    CDXC:GPUICommandPane 2026-06-24-23:17:
+    Sidebar command actions are included as an allowlisted bridge function so `runSidebarCommand` reaches the same GPUI app action path as titlebar Actions. The test proves only fixed function/message routing; Rust owns strict payload parsing and command-pane launch boundaries.
+
+    CDXC:GPUICommandPane 2026-06-25-10:34:
+    `endSidebarCommandRun` has its own allowlisted bridge function because closing a mapped command-pane run needs only a command id. Keep it separate from Action launch payloads so renderer code cannot reuse the launch bridge to smuggle command text, URLs, project paths, cwd/env, status paths, run ids, or terminal output.
     */
     #[test]
     fn sidebar_bridge_allowlist_maps_only_fixed_functions_to_private_messages() {
-        assert_eq!(SIDEBAR_BRIDGE_FUNCTION_SPECS.len(), 7);
+        assert_eq!(SIDEBAR_BRIDGE_FUNCTION_SPECS.len(), 9);
         assert_eq!(SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS, 32 * 1024);
 
         for (function_name, process_message_name, event_kind) in [
@@ -2460,6 +2497,16 @@ mod tests {
                 SIDEBAR_NATIVE_PROJECT_PATH_ACTION_JS_FUNCTION,
                 SIDEBAR_NATIVE_PROJECT_PATH_ACTION_PROCESS_MESSAGE_NAME,
                 SidebarBridgeEventKind::NativeProjectPathAction,
+            ),
+            (
+                SIDEBAR_COMMAND_ACTION_JS_FUNCTION,
+                SIDEBAR_COMMAND_ACTION_PROCESS_MESSAGE_NAME,
+                SidebarBridgeEventKind::SidebarCommandAction,
+            ),
+            (
+                SIDEBAR_COMMAND_RUN_END_JS_FUNCTION,
+                SIDEBAR_COMMAND_RUN_END_PROCESS_MESSAGE_NAME,
+                SidebarBridgeEventKind::SidebarCommandRunEnd,
             ),
             (
                 SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION,
@@ -2520,6 +2567,14 @@ mod tests {
         assert_eq!(
             SidebarBridgeEventKind::NativeProjectPathAction.with_payload("native".to_string()),
             SidebarBridgeEvent::NativeProjectPathAction("native".to_string())
+        );
+        assert_eq!(
+            SidebarBridgeEventKind::SidebarCommandAction.with_payload("command".to_string()),
+            SidebarBridgeEvent::SidebarCommandAction("command".to_string())
+        );
+        assert_eq!(
+            SidebarBridgeEventKind::SidebarCommandRunEnd.with_payload("command-end".to_string()),
+            SidebarBridgeEvent::SidebarCommandRunEnd("command-end".to_string())
         );
         assert_eq!(
             SidebarBridgeEventKind::GxserverPresentationFocusState

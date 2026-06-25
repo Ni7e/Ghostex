@@ -123,10 +123,26 @@ validate_cli_resources() {
 validate_portless_admin_runtime_resources() {
 	local missing=0
 
-	# CDXC:GPUIPortlessAdminRuntime 2026-06-24-14:28:
-	# GPUI privileged Portless setup actions must use the same bundled Web/code-server Node and Web/portless CLI payload as the reviewed macOS helper. Package only those native-staged runtime resources into Contents/Resources/Web and fail packaging when they are absent instead of resolving user PATH, global npm, gxserver-rs, or source checkout commands at runtime.
+	# CDXC:GPUISourceRuntime 2026-06-24-23:17:
+	# Packaged GPUI Source must ship the same full Web/code-server runtime as the macOS app, not only the shared Node binary used by Portless. Validate the entrypoint, VS Code server payload, Git native module, Node runtime, and Portless CLI up front so installed apps fail packaging instead of opening a dead Source page.
 	if [[ ! -x "$WEB_SOURCE_DIR/code-server/lib/node" ]]; then
 		echo "Missing GPUI Portless admin Node runtime: $WEB_SOURCE_DIR/code-server/lib/node" >&2
+		missing=1
+	fi
+	if [[ ! -f "$WEB_SOURCE_DIR/code-server/out/node/entry.js" ]]; then
+		echo "Missing GPUI Source code-server entrypoint: $WEB_SOURCE_DIR/code-server/out/node/entry.js" >&2
+		missing=1
+	fi
+	if [[ ! -f "$WEB_SOURCE_DIR/code-server/lib/vscode/package.json" ]]; then
+		echo "Missing GPUI Source VS Code payload: $WEB_SOURCE_DIR/code-server/lib/vscode/package.json" >&2
+		missing=1
+	fi
+	if [[ ! -f "$WEB_SOURCE_DIR/code-server/lib/vscode/out/server-main.js" ]]; then
+		echo "Missing GPUI Source VS Code server output: $WEB_SOURCE_DIR/code-server/lib/vscode/out/server-main.js" >&2
+		missing=1
+	fi
+	if [[ ! -f "$WEB_SOURCE_DIR/code-server/lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/build/Release/vscode_fs.node" ]]; then
+		echo "Missing GPUI Source VS Code Git native module: $WEB_SOURCE_DIR/code-server/lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/build/Release/vscode_fs.node" >&2
 		missing=1
 	fi
 	if [[ ! -f "$WEB_SOURCE_DIR/portless/dist/cli.js" ]]; then
@@ -331,11 +347,12 @@ for skill_name in "${bundled_cli_skill_assets[@]}"; do
 	copy_cli_skill "$skill_name"
 done
 
-# CDXC:GPUIPortlessAdminRuntime 2026-06-24-14:28:
-# Stage the fixed privileged Portless runtime beside the GPUI app resources so Settings/setup admin actions never depend on developer-local Node, npm, source checkout paths, or gxserver-rs. Portless continues to reuse Web/code-server/lib/node and must not carry a second Node runtime.
+# CDXC:GPUISourceRuntime 2026-06-24-23:17:
+# Stage the full native-reviewed Web/code-server runtime beside the GPUI app resources so Source opens from the packaged app exactly like macOS. Portless still reuses Web/code-server/lib/node and must not carry a second Node runtime.
 rm -rf "$WEB_DIR/code-server" "$WEB_DIR/portless"
-mkdir -p "$WEB_DIR/code-server/lib" "$WEB_DIR/portless"
-install -m 0755 "$WEB_SOURCE_DIR/code-server/lib/node" "$WEB_DIR/code-server/lib/node"
+mkdir -p "$WEB_DIR/portless"
+rsync -a --delete "$WEB_SOURCE_DIR/code-server/" "$WEB_DIR/code-server/"
+chmod 755 "$WEB_DIR/code-server/lib/node"
 rsync -a --delete "$WEB_SOURCE_DIR/portless/" "$WEB_DIR/portless/"
 chmod 755 "$WEB_DIR/portless/dist/cli.js"
 stage_remote_gxserver_linux_packages_if_available

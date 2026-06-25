@@ -37,7 +37,7 @@ use cef::CefBrowser;
 use futures::{StreamExt as _, channel::mpsc};
 use gpui::http_client::HttpRequestExt as _;
 use gpui::{
-    Action, Animation, AnimationExt as _, AnyElement, App, AppContext as _, Asset, Bounds,
+    Action, Anchor, Animation, AnimationExt as _, AnyElement, App, AppContext as _, Asset, Bounds,
     ClipboardEntry, ClipboardItem, ContentMask, Element, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, FocusHandle, FontWeight, GlobalElementId, Hitbox, Hsla, Image,
     ImageCacheError, ImageFormat, InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent,
@@ -49,10 +49,13 @@ use gpui::{
     prelude::FluentBuilder as _, px, relative, rgb, size, svg,
 };
 use gpui_component::{
-    Root, Sizable as _, Size as ComponentSize, WindowExt, h_flex,
+    Root, Sizable as _, Size as ComponentSize, WindowExt,
+    button::{Button, ButtonVariants as _},
+    h_flex,
     input::{Input, InputEvent, InputState},
     native_menu::NativeMenu,
     notification::Notification,
+    popover::Popover,
     tooltip::Tooltip,
     v_flex,
 };
@@ -71,6 +74,7 @@ const SIDEBAR_DIVIDER_LINE_WIDTH: f32 = 1.0;
 const SIDEBAR_DIVIDER_HOVER_LINE_WIDTH: f32 = 3.0;
 const SIDEBAR_DIVIDER_HOVER_DELAY: Duration = Duration::from_millis(50);
 const SIDEBAR_DIVIDER_HOVER_FADE_DURATION: Duration = Duration::from_millis(180);
+const COMMAND_ACTION_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const WORKSPACE_MIN_WIDTH: f32 = 240.0;
 const CEF_KEY_CONTEXT: &str = "GhostexGpuiCef";
 const GHOSTTY_MOUSE_ZERO_MODS: ghostty_kit::ffi::ghostty_input_mods_e = 0;
@@ -135,6 +139,8 @@ const TITLEBAR_SLEEPING_MODE_DOT_SIZE: f32 = 5.5;
 const TITLEBAR_PROJECT_CONTEXT_DISABLED_REASON: &str = "Switch to a project to access this view";
 const TITLEBAR_BUTTON_WIDTH: f32 = 42.0;
 const TITLEBAR_SETTINGS_BUTTON_WIDTH: f32 = 45.0;
+const TITLEBAR_DROPDOWN_TIPS_PANEL_WIDTH: f32 = 556.0;
+const TITLEBAR_DROPDOWN_READING_PANEL_HEIGHT: f32 = 650.0;
 const TITLEBAR_PROJECT_LABEL_FALLBACK: &str = "Ghostex";
 const GPUI_PROJECT_IS_QUICK_ENV: &str = "GHOSTEX_GPUI_PROJECT_IS_QUICK";
 const GPUI_SIDEBAR_PROJECT_CONTEXT_MESSAGE_VERSION: u64 = 1;
@@ -142,6 +148,10 @@ const GPUI_SIDEBAR_PROJECT_CONTEXT_MESSAGE_TYPE: &str = "ghostex.gpui.sidebar.ac
 const GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.nativeProjectPathAction";
+const GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE: &str = "ghostex.gpui.sidebar.commandAction";
+const GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE: &str = "ghostex.gpui.sidebar.commandRunEnd";
 const GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.gxserverPresentationFocusState";
@@ -226,10 +236,16 @@ const BROWSER_PROFILE_MAX_PROFILES: usize = 32;
 const BROWSER_PROFILE_DEFAULT_CEF_ID: &str = "default";
 const APP_MODAL_HOST_CEF_PROFILE_ID: &str = "app-modal";
 const APP_MODAL_HOST_ID: &str = "ghostex-gpui-app-modal-host";
+const TITLEBAR_TIPS_PANEL_CEF_PROFILE_ID: &str = "titlebar-tips-panel";
+const TITLEBAR_TIPS_PANEL_ID: &str = "ghostex-gpui-titlebar-tips-panel";
 const APP_MODAL_HOST_WINDOW_WIDTH: f32 = 1080.0;
 const APP_MODAL_HOST_WINDOW_HEIGHT: f32 = 760.0;
 const APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH: f32 = 760.0;
 const APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_HEIGHT: f32 = 500.0;
+const APP_MODAL_HOST_DELAYED_SEND_WINDOW_WIDTH: f32 = 472.0;
+const APP_MODAL_HOST_DELAYED_SEND_WINDOW_HEIGHT: f32 = 336.0;
+const APP_MODAL_HOST_RENAME_SESSION_WINDOW_WIDTH: f32 = 570.0;
+const APP_MODAL_HOST_RENAME_SESSION_WINDOW_HEIGHT: f32 = 480.0;
 const BROWSER_IMPORT_UNSUPPORTED_NOTIFICATION: &str = "Browser data import is not supported in GPUI yet. No cookies, credentials, or history were imported.";
 const BROWSER_ICON_CHEVRON_RIGHT: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -241,12 +257,40 @@ const BROWSER_ICON_SEARCH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/search.svg");
 const BROWSER_ICON_HISTORY: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/history.svg");
+const COMMAND_ICON_PLUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/plus.svg");
+const COMMAND_ICON_CLOCK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/clock.svg");
+const COMMAND_ICON_PIN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/pin.svg");
+const COMMAND_ICON_PIN_SLASH: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/pin-slash.svg");
+const COMMAND_ICON_CHEVRON_UP: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/titlebar/chevron-up.svg"
+);
+const COMMAND_ICON_CHEVRON_DOWN: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/titlebar/chevron-down.svg"
+);
+const COMMAND_ICON_CHEVRON_LEFT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/titlebar/chevron-left.svg"
+);
+const COMMAND_ICON_CHEVRON_RIGHT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/titlebar/chevron-right.svg"
+);
+const COMMAND_ICON_XMARK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/xmark.svg");
 const BROWSER_ICON_LOCK_FILLED: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/assets/titlebar/lock-filled.svg"
 );
 const BROWSER_ICON_WORLD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/world.svg");
 const BROWSER_ICON_TOOLS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/tools.svg");
+/*
+CDXC:GPUITitlebarTips 2026-06-24-23:17:
+The GPUI titlebar info glyph must open the shared React titlebar-host Tips panel inside a gpui-component Popover, not a duplicate GPUI-local tips list, NativeMenu, AppKit/Swift child window, transparent overlay, hidden hit region, or placeholder fallback. Header link actions are bounded to these first-party Tips URLs before they enter the Browser pane.
+*/
+const GHOSTEX_CHANGELOG_URL: &str = "https://github.com/maddada/ghostex/releases";
+const GHOSTEX_DOCS_URL: &str = "https://ghostex.dev/docs";
 const BROWSER_ICON_POINTER: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/assets/titlebar/pointer.svg");
 const BROWSER_ICON_USER_CIRCLE: &str = concat!(
@@ -274,7 +318,10 @@ CDXC:GPUIWorkspacePresentation 2026-06-22-06:24:
 GPUI workspace chrome should match the macOS workspace shell constants: terminal tab bars are 36px high, workspace tabs stay in the 170-175px macOS width band, command titlebars and collapsed strips are 26px high, and divider/resize rails remain real layout siblings around 5px with 1px visual separators.
 
 CDXC:GPUIWorkspacePresentation 2026-06-22-06:24:
-The command panel stores an in-memory height ratio, but its default and double-click reset derive from the macOS 125px command height when that fits within the 5%-90% available-content clamp. Project-editor companions default to roughly 32% of the editor area with a practical minimum and persist resize/reset mutations through the GPUI shell state.
+The command panel stores an in-memory height ratio, but its default and double-click reset derive from the shared command-pane default-height setting when that fits within the 5%-90% available-content clamp. Project-editor companions default to roughly 32% of the editor area with a practical minimum and persist resize/reset mutations through the GPUI shell state.
+
+CDXC:GPUICommandPane 2026-06-25-11:29:
+GPUI command-pane initial height, missing persisted height, and double-click reset must honor the same Settings.commandsPanelDefaultHeightPx value as the macOS app. Keep the Rust side on the shared 125px default and 40px-600px setting clamp so changing the Workspace setting affects future opens/resets without rewriting explicit persisted ratios.
 
 CDXC:GPUIAgentsTerminalLifecycle 2026-06-22-23:33:
 Full-width secondary terminal creation is a distinct Agents shell action from pane-local Split Below. It wraps the entire existing Agents workspace tree as the top branch, appends a selected Mounting terminal in a bottom row, and keeps startup honest without fake Running state, libghostty mount, process launch, command text, stdout/stderr, or terminal content.
@@ -294,8 +341,11 @@ Browser tab right-click context menus are NativeMenus scoped to the clicked Brow
 CDXC:GPUIBrowserPaneActions 2026-06-22-13:46:
 The far-right Browser pane overflow is a NativeMenu scoped to the clicked Browser pane id. It exposes pane/layout actions only, omits per-tab close/select plus toolbar/history/profile/devtools commands, and creates address-only Browser tabs through the existing Browser sync path so split panes do not load new CEF surfaces.
 
-CDXC:GPUICommandTabContextMenu 2026-06-22-11:31:
-Command-pane tab right-click context menus are NativeMenus scoped to the clicked command group and command session. They expose only Select Tab and Close Tab, let collapsed-strip Select Tab expand the command pane through the same tab-selection helper, and preserve placeholder-only command behavior with no process creation, teardown, command content, Browser/CEF changes, overlapping panel, hidden hit region, or hit-test routing.
+    CDXC:GPUICommandTabContextMenu 2026-06-22-11:31:
+    Command-pane tab right-click context menus are NativeMenus scoped to the clicked command group and command session. They expose scoped close rows while tab selection and collapsed-strip expansion stay on left-click tab activation. Preserve placeholder-only command behavior with no process creation, teardown, command content, Browser/CEF changes, overlapping panel, hidden hit region, or hit-test routing.
+
+    CDXC:GPUICommandTabContextMenu 2026-06-25-14:13:
+    AppKit command tabs receive panel actions in their titlebar action model, but `primaryTabContextMenuActions` filters tab right-click menus to per-session actions before Sleep/Close scopes. Keep GPUI command-tab context menus tab-scoped and leave Pin/Unpin plus Minimize on the fixed command-panel action buttons.
 
         CDXC:GPUIBrowserHistoryMenu 2026-06-22-11:38:
         Browser Back and Forward history affordances are OS-owned NativeMenus opened at the click position, not in-layout GPUI panels. Each menu derives labels from sanitized URL history through the existing URL display helper, omits the current row, carries only the target history index in a typed action, and reuses the existing history navigation path without creating Browser CEF surfaces from menu open.
@@ -303,11 +353,14 @@ Command-pane tab right-click context menus are NativeMenus scoped to the clicked
         CDXC:GPUITabOverflowReveal 2026-06-22-12:09:
         Browser and command tab bars need the same sticky edge affordance as Agents when the active tab is clipped by horizontal overflow. Render the affordance as fixed-width, visible, non-interactive sibling chrome between the scrollable tab strip and the fixed control cluster; do not use overlays, hidden hit regions, hit-test routing, or synthetic coordinate routing.
 
+        CDXC:GPUICommandTabOverflow 2026-06-25-13:30:
+        Command tabs no longer use the permanent workspace-style edge reveal. Native command chrome only shows a conditional active-tab proxy when horizontal overflow clips the active command tab.
+
         CDXC:GPUIFocusedNewTabs 2026-06-22-23:33:
         Cmd+T and Cmd+N parity places keyboard-created and clicked-pane new terminal/browser tabs immediately after the active tab in the target split pane. Cmd+T is shell-focus scoped: focused Agents panes in Agents mode add Mounting startup placeholders, while focused command panes add command placeholders to the focused command group. Cmd+N switches and wakes Browser because existing Browser popup and toolbar commands already select Browser through the Browser sync path.
 
-        CDXC:GPUIFocusedSplits 2026-06-22-23:33:
-        Cmd+D and Cmd+Shift+D are focused terminal split hotkeys in the placeholder shell. Agents focus in Agents mode creates Mounting startup placeholders to the right or below the focused Agents pane; command-pane focus maps both hotkeys to a new horizontal command-only split beside the focused command group because command panes do not create vertical splits.
+        CDXC:GPUIFocusedSplits 2026-06-25-16:05:
+        Cmd+D and Cmd+Shift+D are focused terminal split hotkeys in the placeholder shell. Agents focus in Agents mode creates Mounting startup placeholders to the right or below the focused Agents pane; command-pane focus must match native by treating both hotkeys as horizontal command splits beside the focused command group.
 
         CDXC:GPUICommandPaneDragDrop 2026-06-22-13:05:
         Agents workspace tabs can be dragged into an expanded command-pane group body as a placeholder transfer. The command pane gets a command-only placeholder session with the same visible title, the Agents tab is removed only when that move would not empty the final root Agents leaf, command drops keep center grouping plus left/right horizontal splits, and no libghostty mount, real process, command text, stdout/stderr, overlay, hidden hit region, or hit-test routing is introduced.
@@ -331,17 +384,160 @@ const SPATIAL_FOCUS_HALF_PLANE_TOLERANCE: f32 = 2.0;
 const WORKSPACE_DROP_EDGE_BAND_MIN: f32 = 36.0;
 const WORKSPACE_DROP_EDGE_BAND_MAX: f32 = 96.0;
 const WORKSPACE_DROP_EDGE_BAND_FRACTION: f32 = 0.22;
-const COMMAND_PANE_RESIZE_RAIL_HEIGHT: f32 = 5.0;
+/*
+CDXC:GPUICommandPaneResize 2026-06-25-13:19:
+Native command-panel resize uses a 12px transparent hit rail above the command panel, with a 3px hover line as delayed feedback. Keep GPUI's rail as real layout but do not paint a permanent dark bar.
+*/
+const COMMAND_PANE_RESIZE_RAIL_HEIGHT: f32 = 12.0;
+const COMMAND_PANE_RESIZE_HOVER_LINE_HEIGHT: f32 = 3.0;
+const COMMAND_PANE_RESIZE_HOVER_DELAY: Duration = Duration::from_millis(50);
+const COMMAND_PANE_RESIZE_HOVER_FADE_DURATION: Duration = Duration::from_millis(180);
 const COMMAND_PANE_TAB_BAR_HEIGHT: f32 = 26.0;
 const COMMAND_PANE_STRIP_HEIGHT: f32 = 26.0;
-const COMMAND_PANE_TAB_WIDTH: f32 = 118.0;
-const COMMAND_PANE_STRIP_TAB_WIDTH: f32 = 104.0;
-const COMMAND_PANE_TAB_CLOSE_SIZE: f32 = 16.0;
-const COMMAND_PANE_CONTROL_BUTTON_SIZE: f32 = 22.0;
+const COMMAND_PANE_COLLAPSED_STRIP_LEFT_MARGIN: f32 = 4.0;
+const COMMAND_PANE_COLLAPSED_STRIP_RIGHT_MARGIN: f32 = 8.0;
+/*
+CDXC:GPUICommandTabOverflow 2026-06-25-13:30:
+Native command tab strips do not render a permanent decorative edge reveal. Their overflow affordance is the conditional 30px Show Active Tab proxy when the active tab is clipped below 60px visible, using a 12px reveal scroll margin.
+*/
+const COMMAND_PANE_STICKY_ACTIVE_TAB_BUTTON_SIZE: f32 = 30.0;
+const COMMAND_PANE_STICKY_ACTIVE_TAB_ICON_SIZE: f32 = 11.0;
+const COMMAND_PANE_ACTIVE_TAB_REVEAL_SCROLL_MARGIN: f32 = 12.0;
+const COMMAND_PANE_ACTIVE_TAB_REVEAL_MINIMUM_VISIBLE_WIDTH: f32 = 60.0;
+/*
+CDXC:GPUICommandTabScrolling 2026-06-25-13:45:
+Native command tab strips keep direct horizontal scrolling native, ignore precise vertical trackpad gestures, and amplify non-precision vertical wheel ticks by 18x with a 96px minimum so mouse wheels traverse overflowing command tabs quickly.
+*/
+const COMMAND_PANE_VERTICAL_WHEEL_TAB_SCROLL_MULTIPLIER: f32 = 18.0;
+const COMMAND_PANE_MINIMUM_DISCRETE_VERTICAL_WHEEL_TAB_SCROLL_DELTA: f32 = 96.0;
+/*
+CDXC:GPUICommandTabDoubleClick 2026-06-25-13:50:
+Native pane titlebars reserve empty command tab chrome for double-click New Terminal when a real tab/add/control was not hit. Use the native 34px preferred target width, keep the 24px minimum as an asserted contract, and route only double-clicks through terminal creation.
+*/
+const COMMAND_PANE_EMPTY_TITLEBAR_DOUBLE_CLICK_TARGET_WIDTH: f32 = 34.0;
+#[cfg(test)]
+const COMMAND_PANE_EMPTY_TITLEBAR_DOUBLE_CLICK_TARGET_MIN_WIDTH: f32 = 24.0;
+/*
+CDXC:GPUICommandTabSizing 2026-06-25-13:32:
+Native command tabs fit equally inside the available command tab viewport, clamped from 72px to 160px, and the collapsed command-panel bar uses the same command-role tab sizing as expanded command titlebars. Do not keep separate fixed expanded/collapsed tab widths.
+*/
+const COMMAND_PANE_TAB_MIN_WIDTH: f32 = 72.0;
+const COMMAND_PANE_TAB_MAX_WIDTH: f32 = 160.0;
+const COMMAND_PANE_TAB_END_DROP_TARGET_WIDTH: f32 =
+    COMMAND_PANE_EMPTY_TITLEBAR_DOUBLE_CLICK_TARGET_WIDTH;
+/*
+CDXC:GPUICommandTabTypography 2026-06-25-13:25:
+Native command tabs keep the compact old command typography for both active and inactive tabs: 11pt semibold text with stable light color. Do not reuse workspace-style inactive dimming or active-state font-weight changes for command chrome.
+*/
+const COMMAND_PANE_TAB_TITLE_FONT_SIZE: f32 = 11.0;
+/*
+CDXC:GPUICommandTabChrome 2026-06-25-13:11:
+Native command tabs reveal the inline close affordance only while the owning tab is hovered. Keep the close frame at the native 20px size, 4px from the trailing edge, flat-cornered, and out of tab flex layout so hover does not remeasure the title.
+*/
+const COMMAND_PANE_TAB_CLOSE_SIZE: f32 = 20.0;
+const COMMAND_PANE_TAB_CLOSE_TRAILING_PADDING: f32 = 4.0;
+const COMMAND_PANE_TAB_CLOSE_TOP_OFFSET: f32 =
+    (COMMAND_PANE_TAB_BAR_HEIGHT - COMMAND_PANE_TAB_CLOSE_SIZE) / 2.0;
+const COMMAND_PANE_TAB_CLOSE_CORNER_RADIUS: f32 = 0.0;
+/*
+CDXC:GPUICommandTabChrome 2026-06-25-14:01:
+Native command-tab close chrome uses the same stable #0e0e0e icon-button background and #cfcfcf stroked X as command tab-bar buttons. Render an icon inside the hover-only 20px frame instead of a lowercase text x with hover-only background.
+*/
+const COMMAND_PANE_TAB_CLOSE_ICON_SIZE: f32 = 10.0;
+/*
+CDXC:GPUICommandTabSeparators 2026-06-25-14:17:
+Native command tab separators are explicit 1px white/10% trailing fills on command tabs that have a following command tab. Do not rely on a right border because the last tab must not draw separator chrome.
+*/
+const COMMAND_PANE_TAB_SEPARATOR_WIDTH: f32 = 1.0;
+/*
+CDXC:GPUICommandTabBackground 2026-06-25-14:36:
+Native command tabs use the AppKit pane-tab compositing base (#050608) with white overlays: 13% for active command tabs and 6% for inactive command tabs. Hover reveals close chrome only; it does not brighten the tab fill.
+
+CDXC:GPUICommandTabSleepVisuals 2026-06-25-14:39:
+Inactive sleeping command tabs use the native parked-tab visual treatment: keep selected sleeping tabs visually selected, but reduce inactive sleeping tab fill to a 3.2% white overlay and dim its title by 48%.
+*/
+const COMMAND_PANE_TAB_BACKGROUND_BASE_RED: u8 = 0x05;
+const COMMAND_PANE_TAB_BACKGROUND_BASE_GREEN: u8 = 0x06;
+const COMMAND_PANE_TAB_BACKGROUND_BASE_BLUE: u8 = 0x08;
+const COMMAND_PANE_TAB_ACTIVE_OVERLAY_ALPHA: f32 = 0.13;
+const COMMAND_PANE_TAB_INACTIVE_OVERLAY_ALPHA: f32 = 0.06;
+const COMMAND_PANE_TAB_SLEEPING_INACTIVE_OVERLAY_ALPHA: f32 = 0.032;
+const COMMAND_PANE_TAB_TITLE_SLEEPING_INACTIVE_ALPHA_MULTIPLIER: f32 = 0.48;
+/*
+CDXC:GPUICommandTabStatus 2026-06-25-13:18:
+Native command tabs reserve a trailing status slot for working, attention, and Delayed Send. Working/attention render as 8px square fills 9px from the trailing edge; Delayed Send renders a 14px clock centered on that slot; all status chrome is hidden while hover close chrome is visible, but title reservation stays stable.
+*/
+const COMMAND_PANE_TAB_STATUS_INDICATOR_SIZE: f32 = 8.0;
+const COMMAND_PANE_TAB_STATUS_INDICATOR_TRAILING_PADDING: f32 = 9.0;
+const COMMAND_PANE_TAB_STATUS_TITLE_GAP: f32 = 4.0;
+const COMMAND_PANE_TAB_STATUS_TITLE_RESERVED_WIDTH: f32 = COMMAND_PANE_TAB_STATUS_INDICATOR_SIZE
+    + COMMAND_PANE_TAB_STATUS_INDICATOR_TRAILING_PADDING
+    + COMMAND_PANE_TAB_STATUS_TITLE_GAP;
+const COMMAND_PANE_TAB_STATUS_INDICATOR_TOP_OFFSET: f32 =
+    (COMMAND_PANE_TAB_BAR_HEIGHT - COMMAND_PANE_TAB_STATUS_INDICATOR_SIZE) / 2.0;
+const COMMAND_PANE_TAB_DELAYED_SEND_ICON_SIZE: f32 = 14.0;
+const COMMAND_PANE_TAB_DELAYED_SEND_ICON_TRAILING_PADDING: f32 =
+    COMMAND_PANE_TAB_STATUS_INDICATOR_TRAILING_PADDING
+        - ((COMMAND_PANE_TAB_DELAYED_SEND_ICON_SIZE - COMMAND_PANE_TAB_STATUS_INDICATOR_SIZE)
+            / 2.0);
+const COMMAND_PANE_TAB_DELAYED_SEND_ICON_TOP_OFFSET: f32 =
+    ((COMMAND_PANE_TAB_BAR_HEIGHT - COMMAND_PANE_TAB_DELAYED_SEND_ICON_SIZE) / 2.0) - 1.0;
+const COMMAND_PANE_TAB_TITLE_TRAILING_PADDING: f32 = 8.0;
+/*
+CDXC:GPUICommandPaneControls 2026-06-25-12:29:
+Native command-panel action buttons use the full 26px command titlebar height as their button frame. Keep GPUI fixed command-panel controls square to the tab-bar height so Pin/Unpin and Minimize/Expand occupy the same normal-layout region as macOS.
+*/
+const COMMAND_PANE_CONTROL_BUTTON_SIZE: f32 = COMMAND_PANE_TAB_BAR_HEIGHT;
+const COMMAND_PANE_CONTROL_ICON_SIZE: f32 = 14.0;
+/*
+CDXC:GPUICommandPaneControls 2026-06-25-13:47:
+Native command-panel action buttons are contiguous full-height 26px frames with no inter-button gap, no wrapper left border, flat corners, and an 8px trailing inset only for expanded command titlebars. Collapsed command bars use the outer strip margin instead of an inner action inset.
+*/
+const COMMAND_PANE_CONTROL_BUTTON_GAP: f32 = 0.0;
+const COMMAND_PANE_CONTROL_CORNER_RADIUS: f32 = 0.0;
+const COMMAND_PANE_CONTROL_EXPANDED_TRAILING_PADDING: f32 = 8.0;
+const COMMAND_PANE_CONTROL_COLLAPSED_TRAILING_PADDING: f32 = 0.0;
 const COMMAND_PANE_SPLIT_HANDLE_THICKNESS: f32 = 5.0;
+const COMMAND_PANE_DEFAULT_SESSION_TITLE: &str = "Command Terminal";
 const COMMAND_PANE_DEFAULT_HEIGHT_PX: f32 = 125.0;
+const COMMAND_PANE_MIN_DEFAULT_HEIGHT_PX: f32 = 40.0;
+const COMMAND_PANE_MAX_DEFAULT_HEIGHT_PX: f32 = 600.0;
 const COMMAND_PANE_MIN_HEIGHT_RATIO: f32 = 0.05;
 const COMMAND_PANE_MAX_HEIGHT_RATIO: f32 = 0.90;
+/*
+CDXC:GPUICommandSleepingPlaceholder 2026-06-25-14:49:
+Sleeping command-pane bodies should mirror native AppKit placeholders: black body, centered medium 13px wake text, and the exact "Press Any Key to Wake" affordance only when click-to-wake placeholders are enabled.
+*/
+const COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL: &str = "Press Any Key to Wake";
+const COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL_FONT_SIZE: f32 = 13.0;
+const COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL_LINE_HEIGHT: f32 = 18.0;
+const COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL_HORIZONTAL_PADDING: f32 = 4.0;
+const COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL_VERTICAL_PADDING: f32 = 8.0;
+/*
+CDXC:GPUICommandDelayedSend 2026-06-25-15:42:
+Native command terminals show an active Delayed Send countdown as a centered terminal-body badge, not only as tab chrome. Match the AppKit badge typography, color, padding, and minimum size inside the existing command body element without adding an interactive overlay.
+*/
+const COMMAND_PANE_DELAYED_SEND_BADGE_FONT_SIZE: f32 = 23.0;
+const COMMAND_PANE_DELAYED_SEND_BADGE_LINE_HEIGHT: f32 = 30.0;
+const COMMAND_PANE_DELAYED_SEND_BADGE_HORIZONTAL_PADDING: f32 = 30.0;
+const COMMAND_PANE_DELAYED_SEND_BADGE_MIN_HEIGHT: f32 = 58.0;
+const COMMAND_PANE_DELAYED_SEND_BADGE_CORNER_RADIUS: f32 = 12.0;
+const COMMAND_PANE_DELAYED_SEND_BADGE_MIN_BODY_WIDTH: f32 = 48.0;
+const COMMAND_PANE_DELAYED_SEND_BADGE_MIN_BODY_HEIGHT: f32 = 32.0;
+const COMMAND_PANE_DELAYED_SEND_MIN_DELAY_MS: u64 = 60_000;
+const COMMAND_PANE_DELAYED_SEND_MAX_DELAY_MS: u64 = 2_147_483_647;
+const COMMAND_PANE_DELAYED_SEND_RESTORE_FIRE_GRACE_MS: u64 = 2_000;
+const COMMAND_PANE_DELAYED_SEND_PERSIST_INTERVAL: Duration = Duration::from_secs(60);
+const COMMAND_PANE_DELAYED_SEND_RETURN_KEYCODE: u32 = 36;
+const COMMAND_PANE_DELAYED_SEND_RETURN_TEXT: &str = "\r";
+const COMMAND_PANE_DELAYED_SEND_RETURN_UNSHIFTED_CODEPOINT: u32 = 13;
+const COMMAND_PANE_GHOSTTY_KEY_ACTION_PRESS: ghostty_kit::ffi::ghostty_input_action_e = 1;
+const COMMAND_PANE_CLOSE_AFTER_DONE_DELAY: Duration = Duration::from_secs(3 * 60);
+/*
+CDXC:GPUICommandFocusedSessionActions 2026-06-25-14:56:
+The GPUI command pane should honor the shared native default for Sleep Focused Session. GPUI key strings use `alt` for macOS Option, so keep this constant aligned with the shared `alt+shift+s` default.
+*/
+const SLEEP_FOCUSED_SESSION_DEFAULT_KEY: &str = "alt-shift-s";
 const PROJECT_EDITOR_COMPANION_WIDTH_RATIO: f32 = 0.32;
 const PROJECT_EDITOR_COMPANION_MIN_WIDTH: f32 = 280.0;
 const PROJECT_EDITOR_COMPANION_RESTORE_RAIL_WIDTH: f32 = 32.0;
@@ -359,6 +555,8 @@ gpui::actions!(
         CycleFocusedTabForward,
         CycleFocusedTabBackward,
         CloseFocusedSurface,
+        SleepFocusedSession,
+        WakeFocusedSession,
         NewTerminalTab,
         SplitFocusedTerminalRight,
         SplitFocusedTerminalDown,
@@ -555,17 +753,76 @@ impl BrowserProfileId {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
 #[action(namespace = ghostex_gpui, no_json)]
-struct SelectCommandPaneTab {
+struct CloseCommandPaneTabsByScope {
     group_id: u64,
     session_id: u64,
-    expand_pane: bool,
+    scope: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
 #[action(namespace = ghostex_gpui, no_json)]
-struct CloseCommandPaneTab {
+struct SleepCommandPaneTabsByScope {
     group_id: u64,
     session_id: u64,
+    scope: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommandPaneTabCloseScope {
+    Close,
+    CloseLeft,
+    CloseOthers,
+    CloseRight,
+}
+
+impl CommandPaneTabCloseScope {
+    fn action_value(self) -> u8 {
+        match self {
+            Self::Close => 0,
+            Self::CloseLeft => 1,
+            Self::CloseOthers => 2,
+            Self::CloseRight => 3,
+        }
+    }
+
+    fn from_action_value(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Close),
+            1 => Some(Self::CloseLeft),
+            2 => Some(Self::CloseOthers),
+            3 => Some(Self::CloseRight),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommandPaneTabSleepScope {
+    Sleep,
+    SleepLeft,
+    SleepOthers,
+    SleepRight,
+}
+
+impl CommandPaneTabSleepScope {
+    fn action_value(self) -> u8 {
+        match self {
+            Self::Sleep => 0,
+            Self::SleepLeft => 1,
+            Self::SleepOthers => 2,
+            Self::SleepRight => 3,
+        }
+    }
+
+    fn from_action_value(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Sleep),
+            1 => Some(Self::SleepLeft),
+            2 => Some(Self::SleepOthers),
+            3 => Some(Self::SleepRight),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -579,9 +836,13 @@ enum GpuiAppModalKind {
     PinnedPrompts,
     ScratchPad,
     AgentsHub,
+    DelayedSend,
+    RenameSession,
     ConfigureAgents,
     ConfigureActions,
     OpenTargets,
+    FirstLaunchSetup,
+    WatchGhostexVideo,
     RemoteGxserverInstall,
     RemoteProjectPicker,
 }
@@ -598,9 +859,13 @@ impl GpuiAppModalKind {
             "pinnedPrompts" => Some(Self::PinnedPrompts),
             "scratchPad" => Some(Self::ScratchPad),
             "agentsHub" => Some(Self::AgentsHub),
+            "delayedSend" => Some(Self::DelayedSend),
+            "renameSession" => Some(Self::RenameSession),
             "configureAgents" => Some(Self::ConfigureAgents),
             "configureActions" => Some(Self::ConfigureActions),
             "openTargets" => Some(Self::OpenTargets),
+            "firstLaunchSetup" | "tipsAndTricks" => Some(Self::FirstLaunchSetup),
+            "watchGhostexVideo" => Some(Self::WatchGhostexVideo),
             "remoteGxserverInstall" => Some(Self::RemoteGxserverInstall),
             "remoteProjectPicker" => Some(Self::RemoteProjectPicker),
             _ => None,
@@ -618,9 +883,13 @@ impl GpuiAppModalKind {
             Self::PinnedPrompts => "pinnedPrompts",
             Self::ScratchPad => "scratchPad",
             Self::AgentsHub => "agentsHub",
+            Self::DelayedSend => "delayedSend",
+            Self::RenameSession => "renameSession",
             Self::ConfigureAgents => "configureAgents",
             Self::ConfigureActions => "configureActions",
             Self::OpenTargets => "openTargets",
+            Self::FirstLaunchSetup => "firstLaunchSetup",
+            Self::WatchGhostexVideo => "watchGhostexVideo",
             Self::RemoteGxserverInstall => "remoteGxserverInstall",
             Self::RemoteProjectPicker => "remoteProjectPicker",
         }
@@ -637,9 +906,13 @@ impl GpuiAppModalKind {
             Self::PinnedPrompts => "Ghostex Pinned Prompts",
             Self::ScratchPad => "Ghostex Scratch Pad",
             Self::AgentsHub => "Ghostex Agents Hub",
+            Self::DelayedSend => "Ghostex Delayed Send",
+            Self::RenameSession => "Ghostex Rename Session",
             Self::ConfigureAgents => "Ghostex Configure Agents",
             Self::ConfigureActions => "Ghostex Actions",
             Self::OpenTargets => "Ghostex Open Targets",
+            Self::FirstLaunchSetup => "Ghostex Tips",
+            Self::WatchGhostexVideo => "Ghostex Tutorial Video",
             Self::RemoteGxserverInstall => "Ghostex Remote Setup",
             Self::RemoteProjectPicker => "Ghostex Remote Project",
         }
@@ -650,6 +923,14 @@ impl GpuiAppModalKind {
             Self::CommandPalette => size(
                 px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_HEIGHT),
+            ),
+            Self::DelayedSend => size(
+                px(APP_MODAL_HOST_DELAYED_SEND_WINDOW_WIDTH),
+                px(APP_MODAL_HOST_DELAYED_SEND_WINDOW_HEIGHT),
+            ),
+            Self::RenameSession => size(
+                px(APP_MODAL_HOST_RENAME_SESSION_WINDOW_WIDTH),
+                px(APP_MODAL_HOST_RENAME_SESSION_WINDOW_HEIGHT),
             ),
             Self::PreviousSessions
             | Self::DaemonSessions
@@ -673,6 +954,8 @@ impl GpuiAppModalKind {
                 px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_HEIGHT),
             ),
+            Self::FirstLaunchSetup => size(px(1120.0), px(850.0)),
+            Self::WatchGhostexVideo => size(px(1120.0), px(750.0)),
         }
     }
 
@@ -695,9 +978,11 @@ impl GpuiAppModalKind {
                 | Self::ConfigureAgents
                 | Self::ConfigureActions
                 | Self::OpenTargets
+                | Self::FirstLaunchSetup
                 | Self::AgentsHub
                 | Self::PinnedPrompts
                 | Self::ScratchPad
+                | Self::RenameSession
         )
     }
 
@@ -717,7 +1002,11 @@ impl GpuiAppModalKind {
             | Self::DaemonSessions
             | Self::PinnedPrompts
             | Self::ScratchPad
-            | Self::AgentsHub => serde_json::json!({
+            | Self::AgentsHub
+            | Self::DelayedSend
+            | Self::RenameSession
+            | Self::FirstLaunchSetup
+            | Self::WatchGhostexVideo => serde_json::json!({
                 "modal": self.modal_id(),
                 "type": "open",
             }),
@@ -1248,6 +1537,9 @@ Normal sidebar project payloads may now carry the explicit Source workarea ident
 CDXC:GPUISourceWorkarea 2026-06-24-07:41:
 Source identity is not Source readiness. Accepted Source readiness and CEF/code-server source-ledger contracts stay separate from snapshot identity; this boundary must not treat raw URLs, localhost values, paths, filesystem probes, or placeholder shell state as readiness, runtime URL authority, mount permission, or placeholder replacement.
 
+CDXC:GPUISourceRuntime 2026-06-24-23:17:
+GPUI Source runtime authority now starts after this snapshot boundary: the snapshot may supply only explicit project identity, Source workarea identity, and in-memory project path; the app-owned runtime owner turns that into the macOS-compatible code-server folder URL only at the visible Source startup edge.
+
 CDXC:GPUISourceWorkarea 2026-06-23-14:36:
 Phase 5 Source sleep/wake evidence must preserve explicit Source runtime identity while keeping bridge load, ready, and failed states separate from shell lifecycle. Shell sleep/wake may only toggle the placeholder lifecycle; it must not synthesize Source readiness, mount CEF/code-server, persist private ids/paths/URLs, or reset companion and command-pane shell state.
 
@@ -1600,6 +1892,9 @@ Source-only runtime parity may now be recorded as a plan only after the exact re
 
 CDXC:GPUISourcePlaceholderReplacement 2026-06-24-05:20:
 Source placeholder replacement now has a centralized CEF-only preflight gate formed from the existing Source CEF/code-server runtime-parity evidence. Current source behavior must report the gate but keep replacement disallowed until a future runtime slice proves a real code-server process, issued runtime URL, instantiated CEF browser, normal-layout CEF surface, and explicit replacement permission without hidden mounts, private payloads, or non-CEF engines.
+
+CDXC:GPUISourceRuntime 2026-06-24-23:17:
+The strict Source readiness bridge remains URL-free and path-free, but GPUI now has a separate app-owned runtime owner that can set the bridge to loading, ready, or load-failed after launching the shared macOS-compatible code-server process. Keep runtime process/URL state out of this readiness contract JSON.
 */
 #[allow(dead_code)]
 #[derive(Clone, PartialEq, Eq)]
@@ -1762,6 +2057,12 @@ const SOURCE_CODE_SERVER_ENTRYPOINT_RESOURCE_PRIVACY_LABEL: &str =
     "appResourceCodeServerEntrypoint";
 const SOURCE_CODE_SERVER_NODE_RUNTIME_RESOURCE_PRIVACY_LABEL: &str =
     "appResourceCodeServerNodeRuntime";
+const SOURCE_CODE_SERVER_EDITOR_HOST: &str = "127.0.0.1";
+const SOURCE_CODE_SERVER_EDITOR_PORT: u16 = 3775;
+const SOURCE_CODE_SERVER_EDITOR_ORIGIN: &str = "http://127.0.0.1:3775";
+const SOURCE_CODE_SERVER_STARTUP_GRACE_INTERVAL: Duration = Duration::from_secs(10);
+const SOURCE_CODE_SERVER_PORT_BUSY_WAIT_INTERVAL: Duration = Duration::from_secs(2);
+const SOURCE_CODE_SERVER_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -6912,6 +7213,12 @@ fn store_sidebar_workarea_bridge_event(
 
     CDXC:GPUISidebarProjectPathActions 2026-06-24-14:18:
     Native project path actions are deliberately outside the readiness stores. They have a separate parser/resolver path that may perform clipboard/Finder side effects after gxserver id lookup, so this store treats them as no-ops.
+
+    CDXC:GPUICommandPane 2026-06-24-23:17:
+    Sidebar command actions are also outside workarea readiness stores. They are parsed by the app action path and may create Browser/command-pane surfaces only through that path, never through Source/Browser/Kanban/Manage readiness or operation state.
+
+    CDXC:GPUICommandPane 2026-06-25-10:34:
+    Sidebar command-run-end events are outside workarea readiness stores for the same reason: they close mapped command-pane Action sessions through the command-pane owner path and clear sidebar button feedback, never through Source/Browser/Kanban/Manage readiness or file-operation state.
     */
     match event {
         cef::SidebarBridgeEvent::ActiveProjectContext(_) => false,
@@ -6939,6 +7246,8 @@ fn store_sidebar_workarea_bridge_event(
             Ok(ManageFileWorkareaOperationRequestStoreResult::Changed)
         ),
         cef::SidebarBridgeEvent::NativeProjectPathAction(_) => false,
+        cef::SidebarBridgeEvent::SidebarCommandAction(_) => false,
+        cef::SidebarBridgeEvent::SidebarCommandRunEnd(_) => false,
         cef::SidebarBridgeEvent::GxserverPresentationFocusState(_) => false,
     }
 }
@@ -9042,7 +9351,42 @@ struct CommandSessionId(u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct CommandPaneGroupId(u64);
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CommandPaneHoverTab {
+    group_id: CommandPaneGroupId,
+    session_id: CommandSessionId,
+}
+
+/*
+CDXC:GPUICommandPaneResize 2026-06-25-13:19:
+Resize hover affordance is runtime-only chrome owned by the exact rail under the pointer: the command-panel rail or one command split rail. Do not persist it into command-pane layout state or infer it from drag state.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommandPaneResizeHoverTarget {
+    PanelRail,
+    Split(CommandPaneSplitId),
+}
+
+/*
+CDXC:GPUICommandTabOverflow 2026-06-25-13:34:
+The command sticky active-tab proxy is runtime-only tab-strip navigation chrome. It appears at the edge where the selected command tab is clipped and never enters command-pane persistence or tab identity state.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommandPaneStickyActiveTabEdge {
+    Leading,
+    Trailing,
+}
+
+impl CommandPaneStickyActiveTabEdge {
+    fn element_slug(self) -> &'static str {
+        match self {
+            CommandPaneStickyActiveTabEdge::Leading => "leading",
+            CommandPaneStickyActiveTabEdge::Trailing => "trailing",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct CommandPaneSplitId(u64);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -9080,6 +9424,586 @@ impl CommandPaneMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommandPaneNewCommandControlPlacement {
+    FixedActionCluster,
+    InlineTabRun,
+}
+
+fn command_pane_tab_context_close_scope_label(scope: CommandPaneTabCloseScope) -> &'static str {
+    match scope {
+        CommandPaneTabCloseScope::Close => "Close Tab",
+        CommandPaneTabCloseScope::CloseLeft => "Close Left",
+        CommandPaneTabCloseScope::CloseOthers => "Close Other Tabs",
+        CommandPaneTabCloseScope::CloseRight => "Close Right",
+    }
+}
+
+fn command_pane_tab_context_sleep_scope_label(scope: CommandPaneTabSleepScope) -> &'static str {
+    match scope {
+        CommandPaneTabSleepScope::Sleep => "Sleep",
+        CommandPaneTabSleepScope::SleepLeft => "Sleep Left",
+        CommandPaneTabSleepScope::SleepOthers => "Sleep Other Tabs",
+        CommandPaneTabSleepScope::SleepRight => "Sleep Right",
+    }
+}
+
+fn command_pane_tab_context_scoped_close_order() -> [CommandPaneTabCloseScope; 3] {
+    /*
+    CDXC:GPUICommandTabContextMenu 2026-06-25-14:07:
+    Native tab-button context menus order scoped close rows as Close Right, Close Left, then Close Other Tabs. Command-role GPUI menus should match those labels and order while preserving the existing clicked-group close resolution.
+    */
+    [
+        CommandPaneTabCloseScope::CloseRight,
+        CommandPaneTabCloseScope::CloseLeft,
+        CommandPaneTabCloseScope::CloseOthers,
+    ]
+}
+
+fn command_pane_tab_context_sleep_order(
+    clicked_tab_is_sleeping: bool,
+) -> Vec<CommandPaneTabSleepScope> {
+    /*
+    CDXC:GPUICommandTabContextMenu 2026-06-25-14:27:
+    Native tab menus show direct Sleep only for awake clicked tabs, then always show Sleep Right, Sleep Left, and Sleep Other Tabs before the close group. Keep the row order separate from close ordering so sleeping command tabs remain visible while not offering a redundant direct Sleep action.
+    */
+    let mut scopes = Vec::with_capacity(4);
+    if !clicked_tab_is_sleeping {
+        scopes.push(CommandPaneTabSleepScope::Sleep);
+    }
+    scopes.extend([
+        CommandPaneTabSleepScope::SleepRight,
+        CommandPaneTabSleepScope::SleepLeft,
+        CommandPaneTabSleepScope::SleepOthers,
+    ]);
+    scopes
+}
+
+fn command_pane_new_command_control_placement() -> CommandPaneNewCommandControlPlacement {
+    /*
+    CDXC:GPUICommandPaneControls 2026-06-25-12:13:
+    macOS command-pane chrome keeps New Terminal inline with the tab run, while the fixed right action cluster is reserved for panel actions such as Pin/Unpin and Minimize/Expand. GPUI should not render New Terminal in that fixed cluster.
+    */
+    CommandPaneNewCommandControlPlacement::InlineTabRun
+}
+
+fn command_pane_tab_add_tooltip() -> &'static str {
+    /*
+    CDXC:GPUICommandPaneControls 2026-06-25-12:23:
+    Native command chrome names the inline plus action New Terminal, even inside the command panel. Keep GPUI's visible tooltip aligned with the macOS tab-add button while the internal model still creates a command-terminal placeholder.
+    */
+    "New Terminal"
+}
+
+fn command_pane_tab_add_icon_path() -> &'static str {
+    /*
+    CDXC:GPUICommandPaneControls 2026-06-25-13:54:
+    Native command-pane New Terminal chrome is the tab-strip add button, not the generic `.newTerminal` titlebar action button. It uses plus symbol chrome with the New Terminal tooltip, so GPUI should render a plus icon rather than the terminal action symbol here.
+    */
+    COMMAND_ICON_PLUS
+}
+
+#[cfg(test)]
+fn command_pane_tab_add_background_color() -> Hsla {
+    /*
+    CDXC:GPUICommandPaneControls 2026-06-25-14:44:
+    Native command tab-add uses stable tab-bar icon chrome for normal, hover, and active states. The GPUI inline New Terminal plus should share the fixed command action button background instead of relying on hover-only fill.
+    */
+    command_pane_control_button_color()
+}
+
+fn command_pane_panel_mode_controls_visible(expanded_chrome: bool) -> bool {
+    /*
+    CDXC:GPUICommandPaneControls 2026-06-25-12:05:
+    Hidden/collapsed command-panel chrome mirrors macOS expand-only panel actions, so Pin/Unpin is visible only in expanded command-pane titlebars. Keep New Terminal as inline tab-run chrome and Expand in the collapsed strip for existing GPUI collapsed-strip creation/open behavior, but do not expose panel mode mutation while hidden.
+    */
+    expanded_chrome
+}
+
+fn command_pane_panel_pin_icon_path(mode: CommandPaneMode) -> &'static str {
+    /*
+    CDXC:GPUICommandPaneControls 2026-06-25-13:40:
+    macOS command-panel mode chrome uses pin and pin.slash symbols for Pin/Unpin Commands Panel. GPUI should not expose raw P/U fallback letters when SVG chrome is available.
+    */
+    match mode {
+        CommandPaneMode::Pinned => COMMAND_ICON_PIN_SLASH,
+        CommandPaneMode::Floating | CommandPaneMode::Collapsed => COMMAND_ICON_PIN,
+    }
+}
+
+fn command_pane_panel_visibility_icon_path(expanded: bool) -> &'static str {
+    /*
+    CDXC:GPUICommandPaneControls 2026-06-25-13:40:
+    macOS command-panel visibility chrome uses chevron.down for Minimize Commands Panel and chevron.up for Expand Commands Panel. Keep GPUI on symbol chrome instead of visible v/^ fallback text.
+    */
+    if expanded {
+        COMMAND_ICON_CHEVRON_DOWN
+    } else {
+        COMMAND_ICON_CHEVRON_UP
+    }
+}
+
+fn command_pane_control_trailing_padding(expanded_chrome: bool) -> f32 {
+    /*
+    CDXC:GPUICommandPaneControls 2026-06-25-13:47:
+    Native command titlebars leave an 8px trailing inset after the rightmost command action button, but the collapsed command strip uses its existing outer right margin and keeps the expand button flush inside that strip.
+    */
+    if expanded_chrome {
+        COMMAND_PANE_CONTROL_EXPANDED_TRAILING_PADDING
+    } else {
+        COMMAND_PANE_CONTROL_COLLAPSED_TRAILING_PADDING
+    }
+}
+
+#[cfg(test)]
+fn command_pane_collapsed_strip_has_leading_label() -> bool {
+    /*
+    CDXC:GPUICommandPaneControls 2026-06-25-12:32:
+    Native minimized command panels do not render a separate "Command" prefix before command tabs. The collapsed strip starts with tab chrome inside the native 4px/8px side margins.
+    */
+    false
+}
+
+#[cfg(test)]
+fn command_pane_tab_close_visible(tab_hovered: bool) -> bool {
+    /*
+    CDXC:GPUICommandTabChrome 2026-06-25-13:11:
+    Native command tabs only draw the inline close affordance while the tab is hovered. A non-hovered command tab should spend all available width on status and title chrome instead of reserving a persistent close button.
+    */
+    tab_hovered
+}
+
+#[cfg(test)]
+fn command_pane_tab_close_participates_in_flex_layout() -> bool {
+    /*
+    CDXC:GPUICommandTabChrome 2026-06-25-13:11:
+    The hover-only command-tab close affordance is positioned over the tab's trailing edge, not inserted as a flex child. This prevents title reflow when hover chrome appears.
+    */
+    false
+}
+
+#[cfg(test)]
+fn command_pane_tab_middle_click_closes_clicked_tab() -> bool {
+    /*
+    CDXC:GPUICommandTabClose 2026-06-25-14:01:
+    Native command tab buttons consume button-2 clicks and close the clicked tab on mouse-up through the same close request path as the visible close affordance. GPUI should not treat middle-click as tab selection or empty-titlebar chrome.
+    */
+    true
+}
+
+#[cfg(test)]
+fn command_pane_tab_close_affordance_invokes_on_mouse_up() -> bool {
+    /*
+    CDXC:GPUICommandTabClose 2026-06-25-14:04:
+    Native inline Close is a pending tab-button action after mouse-down and invokes only on mouse-up while the close control still resolves. GPUI command tabs should consume close mouse-down and use mouse-up for the existing command close request.
+    */
+    true
+}
+
+#[cfg(test)]
+fn command_pane_tab_title_style_depends_on_active_state() -> bool {
+    /*
+    CDXC:GPUICommandTabTypography 2026-06-25-13:25:
+    Native command-tab title typography is active-state invariant. Active selection changes command tab fill, not title font size, font weight, or inactive label dimming.
+    */
+    false
+}
+
+#[cfg(test)]
+fn command_pane_tab_inactive_title_uses_dimmed_text() -> bool {
+    /*
+    CDXC:GPUICommandTabTypography 2026-06-25-13:25:
+    Command tab inactive labels stay on the same stable light title color as active command tabs; dimmed inactive labels belong to workspace-style chrome, not command role chrome.
+    */
+    false
+}
+
+#[cfg(test)]
+fn command_pane_tab_close_icon_path() -> &'static str {
+    /*
+    CDXC:GPUICommandTabChrome 2026-06-25-14:01:
+    Native command-tab close chrome draws a stroked X glyph in the hover-only inline action frame. Keep GPUI on icon chrome rather than lowercase text.
+    */
+    COMMAND_ICON_XMARK
+}
+
+#[cfg(test)]
+fn command_pane_tab_close_background_color() -> Hsla {
+    /*
+    CDXC:GPUICommandTabChrome 2026-06-25-14:01:
+    Command-tab close appears only while the tab is hovered, but once visible its 20px command-role frame has the same stable background as native tab-bar icon buttons.
+    */
+    command_pane_control_button_color()
+}
+
+#[cfg(test)]
+fn command_pane_tab_close_icon_color() -> Hsla {
+    /*
+    CDXC:GPUICommandTabChrome 2026-06-25-14:01:
+    Command-tab close uses the same #cfcfcf command icon tint as native tab-bar icon buttons, independent of active tab state.
+    */
+    command_pane_control_text_color()
+}
+
+fn command_pane_tab_separator_visible(has_following_command_tab: bool) -> bool {
+    /*
+    CDXC:GPUICommandTabSeparators 2026-06-25-14:17:
+    Native command tab buttons draw the trailing separator only when another command tab follows. The final tab in either expanded titlebar or collapsed strip must not get separator chrome.
+    */
+    has_following_command_tab
+}
+
+fn command_pane_sticky_active_tab_edge_for_scroll_handle(
+    scroll_handle: &ScrollHandle,
+    active_index: usize,
+) -> Option<CommandPaneStickyActiveTabEdge> {
+    /*
+    CDXC:GPUICommandTabOverflow 2026-06-25-13:34:
+    Match native command overflow visibility from actual scroll geometry: hide the proxy unless the tab strip overflows and the active command tab has less than the native usable visible width.
+    */
+    command_pane_sticky_active_tab_edge(
+        scroll_handle.bounds(),
+        scroll_handle.bounds_for_item(active_index)?,
+        scroll_handle.offset().x,
+        scroll_handle.max_offset().x,
+    )
+}
+
+fn command_pane_sticky_active_tab_edge(
+    viewport_bounds: Bounds<Pixels>,
+    active_tab_bounds: Bounds<Pixels>,
+    scroll_offset_x: Pixels,
+    max_scroll_x: Pixels,
+) -> Option<CommandPaneStickyActiveTabEdge> {
+    if !command_pane_tab_scroll_geometry_ready(viewport_bounds, active_tab_bounds, max_scroll_x) {
+        return None;
+    }
+
+    if command_pane_active_tab_visible_width(viewport_bounds, active_tab_bounds, scroll_offset_x)
+        >= command_pane_active_tab_minimum_usable_visible_width(active_tab_bounds)
+    {
+        return None;
+    }
+
+    if active_tab_bounds.left() + scroll_offset_x < viewport_bounds.left() {
+        Some(CommandPaneStickyActiveTabEdge::Leading)
+    } else {
+        Some(CommandPaneStickyActiveTabEdge::Trailing)
+    }
+}
+
+fn command_pane_tab_scroll_geometry_ready(
+    viewport_bounds: Bounds<Pixels>,
+    active_tab_bounds: Bounds<Pixels>,
+    max_scroll_x: Pixels,
+) -> bool {
+    viewport_bounds.size.width >= px(COMMAND_PANE_STICKY_ACTIVE_TAB_BUTTON_SIZE)
+        && active_tab_bounds.size.width > px(0.0)
+        && max_scroll_x > px(0.0)
+}
+
+fn command_pane_active_tab_visible_width(
+    viewport_bounds: Bounds<Pixels>,
+    active_tab_bounds: Bounds<Pixels>,
+    scroll_offset_x: Pixels,
+) -> Pixels {
+    let visible_left = if active_tab_bounds.left() + scroll_offset_x > viewport_bounds.left() {
+        active_tab_bounds.left() + scroll_offset_x
+    } else {
+        viewport_bounds.left()
+    };
+    let visible_right = if active_tab_bounds.right() + scroll_offset_x < viewport_bounds.right() {
+        active_tab_bounds.right() + scroll_offset_x
+    } else {
+        viewport_bounds.right()
+    };
+    if visible_right > visible_left {
+        visible_right - visible_left
+    } else {
+        px(0.0)
+    }
+}
+
+fn command_pane_active_tab_minimum_usable_visible_width(
+    active_tab_bounds: Bounds<Pixels>,
+) -> Pixels {
+    if active_tab_bounds.size.width < px(COMMAND_PANE_ACTIVE_TAB_REVEAL_MINIMUM_VISIBLE_WIDTH) {
+        active_tab_bounds.size.width
+    } else {
+        px(COMMAND_PANE_ACTIVE_TAB_REVEAL_MINIMUM_VISIBLE_WIDTH)
+    }
+}
+
+fn command_pane_active_tab_reveal_scroll_offset_x(
+    viewport_bounds: Bounds<Pixels>,
+    active_tab_bounds: Bounds<Pixels>,
+    current_offset_x: Pixels,
+    max_scroll_x: Pixels,
+) -> Option<Pixels> {
+    /*
+    CDXC:GPUICommandTabOverflow 2026-06-25-13:34:
+    Native command tab activation preserves scroll position when the selected tab is already usable, and otherwise reveals the active tab with a 12px margin instead of snapping the strip more than needed.
+    */
+    if !command_pane_tab_scroll_geometry_ready(viewport_bounds, active_tab_bounds, max_scroll_x) {
+        return None;
+    }
+
+    if command_pane_active_tab_visible_width(viewport_bounds, active_tab_bounds, current_offset_x)
+        >= command_pane_active_tab_minimum_usable_visible_width(active_tab_bounds)
+    {
+        return Some(current_offset_x);
+    }
+
+    let target_offset = if active_tab_bounds.left() + current_offset_x < viewport_bounds.left() {
+        viewport_bounds.left() + px(COMMAND_PANE_ACTIVE_TAB_REVEAL_SCROLL_MARGIN)
+            - active_tab_bounds.left()
+    } else {
+        viewport_bounds.right()
+            - px(COMMAND_PANE_ACTIVE_TAB_REVEAL_SCROLL_MARGIN)
+            - active_tab_bounds.right()
+    };
+    Some(command_pane_clamped_tab_scroll_offset_x(
+        target_offset,
+        max_scroll_x,
+    ))
+}
+
+fn command_pane_clamped_tab_scroll_offset_x(
+    target_offset_x: Pixels,
+    max_scroll_x: Pixels,
+) -> Pixels {
+    let min_offset = px(0.0) - max_scroll_x;
+    if target_offset_x < min_offset {
+        min_offset
+    } else if target_offset_x > px(0.0) {
+        px(0.0)
+    } else {
+        target_offset_x
+    }
+}
+
+fn command_pane_reveal_active_tab_with_native_margin(
+    scroll_handle: &ScrollHandle,
+    active_index: usize,
+) {
+    let Some(active_tab_bounds) = scroll_handle.bounds_for_item(active_index) else {
+        scroll_handle.scroll_to_item(active_index);
+        return;
+    };
+    let current_offset = scroll_handle.offset();
+    let Some(next_x) = command_pane_active_tab_reveal_scroll_offset_x(
+        scroll_handle.bounds(),
+        active_tab_bounds,
+        current_offset.x,
+        scroll_handle.max_offset().x,
+    ) else {
+        scroll_handle.scroll_to_item(active_index);
+        return;
+    };
+    if next_x != current_offset.x {
+        scroll_handle.set_offset(gpui::point(next_x, current_offset.y));
+    }
+}
+
+fn command_pane_tab_wheel_scroll_delta_x(
+    delta: ScrollDelta,
+    line_height: Pixels,
+) -> Option<Pixels> {
+    /*
+    CDXC:GPUICommandTabScrolling 2026-06-25-13:45:
+    Match native command tab wheel routing: horizontal gestures move tabs directly, precise vertical gestures are not remapped, and non-precision vertical wheel ticks are amplified before becoming horizontal tab movement.
+    */
+    let pixel_delta = delta.pixel_delta(line_height);
+    let vertical_gesture = pixel_delta.y.abs() >= pixel_delta.x.abs();
+    if !vertical_gesture {
+        return Some(pixel_delta.x);
+    }
+    if delta.precise() {
+        return None;
+    }
+    Some(command_pane_amplified_vertical_wheel_tab_delta(
+        pixel_delta.y,
+    ))
+}
+
+fn command_pane_amplified_vertical_wheel_tab_delta(delta_y: Pixels) -> Pixels {
+    let scaled_delta = delta_y * COMMAND_PANE_VERTICAL_WHEEL_TAB_SCROLL_MULTIPLIER;
+    if scaled_delta == px(0.0) {
+        return scaled_delta;
+    }
+    let minimum_delta = px(COMMAND_PANE_MINIMUM_DISCRETE_VERTICAL_WHEEL_TAB_SCROLL_DELTA);
+    if scaled_delta.abs() >= minimum_delta {
+        scaled_delta
+    } else if scaled_delta < px(0.0) {
+        px(0.0) - minimum_delta
+    } else {
+        minimum_delta
+    }
+}
+
+fn command_pane_handle_tab_strip_scroll_wheel(
+    scroll_handle: &ScrollHandle,
+    delta: ScrollDelta,
+    line_height: Pixels,
+) -> bool {
+    let max_scroll_x = scroll_handle.max_offset().x;
+    if max_scroll_x <= px(0.0) {
+        return false;
+    }
+    let Some(delta_x) = command_pane_tab_wheel_scroll_delta_x(delta, line_height) else {
+        return false;
+    };
+    if delta_x == px(0.0) {
+        return false;
+    }
+    let current_offset = scroll_handle.offset();
+    let next_x = command_pane_clamped_tab_scroll_offset_x(current_offset.x + delta_x, max_scroll_x);
+    if next_x == current_offset.x {
+        return false;
+    }
+    scroll_handle.set_offset(gpui::point(next_x, current_offset.y));
+    true
+}
+
+fn command_pane_centered_active_tab_scroll_offset_x(
+    viewport_bounds: Bounds<Pixels>,
+    active_tab_bounds: Bounds<Pixels>,
+    max_scroll_x: Pixels,
+) -> Pixels {
+    /*
+    CDXC:GPUICommandTabOverflow 2026-06-25-13:34:
+    Clicking native Show Active Tab centers the real active tab when scroll bounds allow, then clamps at the strip ends. Keep GPUI on explicit scroll-offset math instead of the minimal `scroll_to_item` reveal path.
+    */
+    if viewport_bounds.size.width <= px(0.0)
+        || active_tab_bounds.size.width <= px(0.0)
+        || max_scroll_x <= px(0.0)
+    {
+        return px(0.0);
+    }
+    let centered_offset = viewport_bounds.center().x - active_tab_bounds.center().x;
+    command_pane_clamped_tab_scroll_offset_x(centered_offset, max_scroll_x)
+}
+
+fn command_pane_center_active_tab_in_scroll_handle(
+    scroll_handle: &ScrollHandle,
+    active_index: usize,
+) -> bool {
+    let Some(active_tab_bounds) = scroll_handle.bounds_for_item(active_index) else {
+        return false;
+    };
+    let current_offset = scroll_handle.offset();
+    let next_x = command_pane_centered_active_tab_scroll_offset_x(
+        scroll_handle.bounds(),
+        active_tab_bounds,
+        scroll_handle.max_offset().x,
+    );
+    if next_x == current_offset.x {
+        return false;
+    }
+    scroll_handle.set_offset(gpui::point(next_x, current_offset.y));
+    true
+}
+
+fn command_pane_sticky_active_tab_icon_path(edge: CommandPaneStickyActiveTabEdge) -> &'static str {
+    match edge {
+        CommandPaneStickyActiveTabEdge::Leading => COMMAND_ICON_CHEVRON_LEFT,
+        CommandPaneStickyActiveTabEdge::Trailing => COMMAND_ICON_CHEVRON_RIGHT,
+    }
+}
+
+fn command_pane_sticky_active_tab_tooltip() -> &'static str {
+    "Show Active Tab"
+}
+
+#[cfg(test)]
+fn command_pane_collapsed_and_expanded_tabs_share_width_policy() -> bool {
+    /*
+    CDXC:GPUICommandTabSizing 2026-06-25-13:32:
+    Native collapsed command-panel bars and expanded command titlebars both use command-role tab sizing. A separate collapsed fixed width would diverge from macOS because the command tab strip fits tabs from the same 72px-160px range in both states.
+    */
+    true
+}
+
+#[cfg(test)]
+fn command_pane_tab_edge_reveal_visible_without_clipped_active_tab() -> bool {
+    /*
+    CDXC:GPUICommandTabOverflow 2026-06-25-13:30:
+    Native command chrome must not spend a permanent tab-strip slot on decorative edge reveal. The active-tab proxy appears only when scroll geometry proves the active command tab is clipped below the native visibility threshold.
+    */
+    false
+}
+
+#[cfg(test)]
+fn command_pane_tab_end_drop_target_participates_in_tab_width_distribution() -> bool {
+    /*
+    CDXC:GPUICommandTabSizing 2026-06-25-13:32:
+    The command tab-strip end drop target must stay a fixed trailing hit target so flex distribution is owned by command tabs. If the end target grows, tabs become narrower than the native equal-fit rule.
+    */
+    false
+}
+
+fn command_pane_empty_titlebar_double_click_creates_new_terminal(click_count: usize) -> bool {
+    /*
+    CDXC:GPUICommandTabDoubleClick 2026-06-25-13:50:
+    Native command titlebars create New Terminal only for double-clicks on empty tab chrome. Single clicks and real tab/control hits must keep their normal focus, selection, drag, and action behavior.
+    */
+    click_count >= 2
+}
+
+#[cfg(test)]
+fn command_pane_empty_tabstrip_background_owns_double_click_new_terminal() -> bool {
+    /*
+    CDXC:GPUICommandTabDoubleClick 2026-06-25-13:58:
+    Native accepts double-click on any empty titlebar chrome after rejecting tabs and real controls. GPUI must therefore attach the gesture to the command tab-strip background, not only to the fixed end target.
+    */
+    true
+}
+
+#[cfg(test)]
+fn command_pane_fixed_panel_control_count(expanded_chrome: bool) -> usize {
+    /*
+    CDXC:GPUICommandPaneControls 2026-06-25-12:26:
+    Native command-panel fixed chrome has one visibility action in all states, plus Pin/Unpin only while visible. New Terminal stays inline with tabs, and visible panels do not add a second close/minimize button.
+    */
+    let mut count = 1;
+    if command_pane_new_command_control_placement()
+        == CommandPaneNewCommandControlPlacement::FixedActionCluster
+    {
+        count += 1;
+    }
+    if command_pane_panel_mode_controls_visible(expanded_chrome) {
+        count += 1;
+    }
+    count
+}
+
+fn command_pane_panel_pin_label(mode: CommandPaneMode) -> &'static str {
+    /*
+    CDXC:GPUICommandPaneControls 2026-06-25-12:19:
+    macOS command-panel chrome labels the mode toggle as Pin/Unpin Commands Panel, not Float/Pin Command Pane. Keep the label tied to the native action vocabulary while preserving the existing pinned/floating state mutation.
+    */
+    match mode {
+        CommandPaneMode::Pinned => "Unpin Commands Panel",
+        CommandPaneMode::Floating | CommandPaneMode::Collapsed => "Pin Commands Panel",
+    }
+}
+
+fn command_pane_panel_minimize_label() -> &'static str {
+    /*
+    CDXC:GPUICommandPaneControls 2026-06-25-12:19:
+    Native `closeCommandsPanel` hides/minimizes the command panel while preserving command sessions. Surface that action as Minimize Commands Panel so GPUI copy matches macOS and does not imply terminal/session deletion.
+    */
+    "Minimize Commands Panel"
+}
+
+fn command_pane_panel_expand_menu_label() -> &'static str {
+    /*
+    CDXC:GPUICommandPaneControls 2026-06-25-12:23:
+    Native collapsed command-panel chrome exposes `.expandCommandsPanel` as Expand Commands Panel. Use that plural panel wording in GPUI collapsed-strip menus and controls instead of the older command-pane phrase.
+    */
+    "Expand Commands Panel"
+}
+
 #[derive(Clone, Copy)]
 struct CommandPaneResizeDragState {
     start_y: f32,
@@ -9104,7 +10028,8 @@ struct WorkspaceSplitResizeDragState {
 #[derive(Clone, Copy)]
 struct CommandPaneSplitResizeDragState {
     split_id: CommandPaneSplitId,
-    start_x: f32,
+    axis: WorkspaceSplitAxis,
+    start_position: f32,
     start_ratio: f32,
     content_span: f32,
 }
@@ -9127,9 +10052,18 @@ struct ProjectEditorCompanionResizeDragState {
 
 /*
 CDXC:GPUICommandTabStatus 2026-06-22-16:40:
-Command-pane tab dots need command-scoped semantic placeholder state so native tab chrome can show idle, working, attention, or Delayed Send without creating real command processes. Persist only this enum/boolean metadata; never persist command text, stdout/stderr, terminal content, deadlines, countdown labels, paths, tokens, or private titles.
+Command-pane tab status indicators need command-scoped semantic placeholder state so native tab chrome can show idle, working, attention, or Delayed Send without creating real command processes. Persist only this enum/boolean metadata for status; the app-level Delayed Send restart checkpoint is the only deadline-like exception, and neither path may persist command text, stdout/stderr, terminal content, countdown labels, paths, tokens, or private titles.
+
+CDXC:GPUICommandPaneTabs 2026-06-25-11:24:
+The command-pane model still keeps an idle enum for persistence and sidebar indicators, but command tab chrome should match macOS by rendering indicators only for working, attention, and delayed-send states. Idle command tabs show no status indicator.
+
+CDXC:GPUICommandTabStatus 2026-06-25-13:18:
+Command-tab status chrome is a trailing native slot, not a leading title prefix: the tab title reserves trailing space for active status, the indicator hides while hover close chrome is visible, and Delayed Send uses clock glyph chrome instead of a rounded dot.
+
+CDXC:GPUICommandTabSleep 2026-06-25-14:27:
+Command-pane Sleep is a renderer lifecycle flag, not tab deletion. Persist only the sleeping boolean with safe command metadata so tabs remain in their command group while mounted command terminal body slots are withheld until explicit wake.
 */
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommandTerminalActivity {
     Idle,
     Working,
@@ -9157,6 +10091,14 @@ impl CommandTerminalActivity {
             Self::Idle => "idle",
             Self::Working => "working",
             Self::Attention => "attention",
+        }
+    }
+
+    fn sidebar_indicator_status(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Working => "running",
+            Self::Attention => "error",
         }
     }
 }
@@ -9200,6 +10142,13 @@ struct CommandTerminalSession {
     title: String,
     activity: CommandTerminalActivity,
     delayed_send_active: bool,
+    delayed_send_timer_owned: bool,
+    close_after_done_armed: bool,
+    is_sleeping: bool,
+    action_command_id: Option<String>,
+    action_play_completion_sound: bool,
+    action_run_id: Option<String>,
+    action_status_file_path: Option<PathBuf>,
 }
 
 impl CommandTerminalSession {
@@ -9209,6 +10158,13 @@ impl CommandTerminalSession {
             title,
             activity: CommandTerminalActivity::Idle,
             delayed_send_active: false,
+            delayed_send_timer_owned: false,
+            close_after_done_armed: false,
+            is_sleeping: false,
+            action_command_id: None,
+            action_play_completion_sound: false,
+            action_run_id: None,
+            action_status_file_path: None,
         }
     }
 
@@ -9219,12 +10175,300 @@ impl CommandTerminalSession {
 
     fn with_delayed_send_active(mut self, delayed_send_active: bool) -> Self {
         self.delayed_send_active = delayed_send_active;
+        self.delayed_send_timer_owned = false;
+        self
+    }
+
+    fn set_delayed_send_active(&mut self, delayed_send_active: bool, timer_owned: bool) {
+        self.delayed_send_active = delayed_send_active;
+        self.delayed_send_timer_owned = delayed_send_active && timer_owned;
+    }
+
+    fn with_sleeping(mut self, is_sleeping: bool) -> Self {
+        self.is_sleeping = is_sleeping;
+        self
+    }
+
+    fn with_close_after_done_armed(mut self, close_after_done_armed: bool) -> Self {
+        self.close_after_done_armed = close_after_done_armed;
+        self
+    }
+
+    fn with_action_command_id(mut self, action_command_id: String) -> Self {
+        self.action_command_id = Some(action_command_id);
         self
     }
 
     fn tab_status(&self) -> CommandTerminalTabStatus {
+        if self.is_sleeping {
+            return CommandTerminalTabStatus::Idle;
+        }
         command_terminal_tab_status(self.activity, self.delayed_send_active)
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct GpuiCommandDelayedSendTimer {
+    deadline_at: SystemTime,
+    generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GpuiCommandDelayedSendRestoreTimer {
+    session_id: CommandSessionId,
+    remaining_ms: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GpuiCommandStartupActivityRestoreIntent {
+    session_id: CommandSessionId,
+    activity: CommandTerminalActivity,
+}
+
+impl GpuiCommandDelayedSendTimer {
+    fn remaining_ms(self, now: SystemTime) -> u64 {
+        self.deadline_at
+            .duration_since(now)
+            .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+            .unwrap_or(0)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct GpuiCommandCloseAfterDoneTimer {
+    deadline_at: SystemTime,
+    generation: u64,
+}
+
+impl GpuiCommandCloseAfterDoneTimer {
+    fn remaining_ms(self, now: SystemTime) -> u64 {
+        self.deadline_at
+            .duration_since(now)
+            .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+            .unwrap_or(0)
+    }
+}
+
+fn gpui_command_delayed_send_duration_from_millis(delay_ms: u64) -> Option<Duration> {
+    /*
+    CDXC:GPUICommandDelayedSend 2026-06-25-15:11:
+    The shared Delayed Send modal posts only a session id and delay duration. GPUI must keep the same whole-minute, one-minute-minimum, 24-day JavaScript-timer-compatible bounds as native before arming a command-pane timer.
+    */
+    if !(COMMAND_PANE_DELAYED_SEND_MIN_DELAY_MS..=COMMAND_PANE_DELAYED_SEND_MAX_DELAY_MS)
+        .contains(&delay_ms)
+        || delay_ms % COMMAND_PANE_DELAYED_SEND_MIN_DELAY_MS != 0
+    {
+        return None;
+    }
+    Some(Duration::from_millis(delay_ms))
+}
+
+fn gpui_command_delayed_send_countdown_label(remaining_ms: u64) -> String {
+    let total_seconds = remaining_ms.saturating_add(999) / 1_000;
+    let hours = total_seconds / 3_600;
+    let minutes = (total_seconds % 3_600) / 60;
+    let seconds = total_seconds % 60;
+    if hours > 0 {
+        format!("{hours:02}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
+    }
+}
+
+fn gpui_command_delayed_send_body_badge_label(
+    timer: Option<GpuiCommandDelayedSendTimer>,
+    now: SystemTime,
+) -> Option<String> {
+    /*
+    CDXC:GPUICommandDelayedSend 2026-06-25-15:42:
+    The command body badge projects only a countdown string from a runtime timer. It must not inspect command text, titles, terminal content, paths, shell-state JSON, or persisted delayed-send placeholders.
+    */
+    timer.map(|timer| gpui_command_delayed_send_countdown_label(timer.remaining_ms(now)))
+}
+
+fn gpui_command_delayed_send_duration_label(duration: Duration) -> String {
+    let total_seconds = duration.as_secs().max(1);
+    let hours = total_seconds / 3_600;
+    let minutes = (total_seconds % 3_600) / 60;
+    let seconds = total_seconds % 60;
+    let mut parts = Vec::new();
+    if hours > 0 {
+        parts.push(format!("{hours}h"));
+    }
+    if minutes > 0 {
+        parts.push(format!("{minutes}m"));
+    }
+    if seconds > 0 {
+        parts.push(format!("{seconds}s"));
+    }
+    parts.join(" ")
+}
+
+fn gpui_command_delayed_send_restore_remaining_ms(value: &serde_json::Value) -> Option<u64> {
+    /*
+    CDXC:GPUICommandDelayedSend 2026-06-25-16:41:
+    Restored GPUI command Delayed Send timers should match macOS by resuming from a saved remaining-duration checkpoint, not by spending countdown time while the app is closed. Accept only bounded numeric milliseconds and keep command text, titles, terminal content, paths, runtime ids, and stdout/stderr out of the restart contract.
+    */
+    let remaining_ms = value.as_u64()?;
+    (remaining_ms > 0 && remaining_ms <= COMMAND_PANE_DELAYED_SEND_MAX_DELAY_MS)
+        .then_some(remaining_ms)
+}
+
+fn gpui_command_delayed_send_restore_duration(remaining_ms: u64) -> Duration {
+    /*
+    CDXC:GPUICommandDelayedSend 2026-06-25-16:41:
+    macOS gives restored Delayed Send timers a 2s fire grace even when the saved checkpoint is nearly expired. GPUI should use the same startup grace so a restored command tab has time to mount before the pending Return key can fire.
+    */
+    Duration::from_millis(remaining_ms.max(COMMAND_PANE_DELAYED_SEND_RESTORE_FIRE_GRACE_MS))
+}
+
+fn gpui_command_session_id_from_modal_value(value: &serde_json::Value) -> Option<CommandSessionId> {
+    let id = value.as_str()?.trim().parse::<u64>().ok()?;
+    (id > 0).then_some(CommandSessionId(id))
+}
+
+fn gpui_command_session_rename_title_from_modal_value(value: &serde_json::Value) -> Option<String> {
+    /*
+    CDXC:GPUICommandPaneRename 2026-06-25-16:33:
+    The shared Rename Session modal already applies the normal sidebar rename normalization before posting. Revalidate the GPUI boundary by accepting only non-empty, non-control text and collapsing whitespace so direct bridge messages cannot store multiline terminal content as command-tab chrome.
+    */
+    let title = value
+        .as_str()?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!title.is_empty() && !title.chars().any(char::is_control)).then_some(title)
+}
+
+fn command_pane_mounted_slot_for_session(
+    command_pane: &CommandPaneModel,
+    session_id: CommandSessionId,
+) -> Option<CommandTerminalBodyMountSlotId> {
+    command_pane
+        .rendered_terminal_body_mount_slots()
+        .into_iter()
+        .find(|slot_id| slot_id.session_id == session_id)
+}
+
+fn command_pane_group_for_session(
+    command_pane: &CommandPaneModel,
+    session_id: CommandSessionId,
+) -> Option<CommandPaneGroupId> {
+    command_pane
+        .flat_tab_ids()
+        .into_iter()
+        .find_map(|(group_id, candidate)| (candidate == session_id).then_some(group_id))
+}
+
+fn gpui_command_close_after_done_session_marked_done(session: &CommandTerminalSession) -> bool {
+    /*
+    CDXC:GPUICommandCloseAfterDone 2026-06-25-15:24:
+    GPUI command Close After Done mirrors native's terminal-scoped watcher for command-pane Actions: Attention is done/error, and action-owned tabs become done once their live run is no longer Working. Generic idle command placeholders without an Action identity are not treated as done.
+    */
+    if session.is_sleeping {
+        return false;
+    }
+    if session.activity == CommandTerminalActivity::Attention {
+        return true;
+    }
+    session.action_command_id.is_some()
+        && session.action_run_id.is_none()
+        && session.activity != CommandTerminalActivity::Working
+}
+
+fn command_session_is_reusable_for_action(session: &CommandTerminalSession) -> bool {
+    session.activity == CommandTerminalActivity::Idle && !session.is_sleeping
+}
+
+fn focused_command_pane_delayed_send_target(
+    shell_focus: ShellFocusTarget,
+    command_pane: &CommandPaneModel,
+) -> Option<(CommandPaneGroupId, CommandSessionId)> {
+    let slot_id = focused_command_terminal_surface_mount_slot(shell_focus, command_pane)?;
+    Some((slot_id.group_id, slot_id.session_id))
+}
+
+fn focused_command_pane_close_after_done_target(
+    shell_focus: ShellFocusTarget,
+    command_pane: &CommandPaneModel,
+) -> Option<(CommandPaneGroupId, CommandSessionId)> {
+    /*
+    CDXC:GPUICommandCloseAfterDone 2026-06-25-16:52:
+    Native routes Close After Done for command terminals by focused session id, not by mounted terminal surface. GPUI should resolve the expanded shell-focused command tab even when it is sleeping so users can arm or cancel the safe persisted intent without waking or mounting the terminal.
+    */
+    if shell_focus != ShellFocusTarget::CommandPane || !command_pane.is_expanded() {
+        return None;
+    }
+
+    let (group_id, session_id) = command_pane.active_group_and_session_id()?;
+    command_pane
+        .session(session_id)
+        .is_some()
+        .then_some((group_id, session_id))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommandPaneActionSessionSelectionKind {
+    Created,
+    Reused,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CommandPaneActionSessionSelection {
+    kind: CommandPaneActionSessionSelectionKind,
+    group_id: CommandPaneGroupId,
+    session_id: CommandSessionId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GpuiSidebarCommandRunState {
+    Error,
+    Running,
+    Success,
+}
+
+impl GpuiSidebarCommandRunState {
+    fn as_str(self) -> &'static str {
+        match self {
+            GpuiSidebarCommandRunState::Error => "error",
+            GpuiSidebarCommandRunState::Running => "running",
+            GpuiSidebarCommandRunState::Success => "success",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CommandPaneActionRunCompletion {
+    command_id: String,
+    exit_code: i32,
+    play_completion_sound: bool,
+    run_id: String,
+}
+
+impl CommandPaneActionRunCompletion {
+    fn run_state(&self) -> GpuiSidebarCommandRunState {
+        if self.exit_code == 0 {
+            GpuiSidebarCommandRunState::Success
+        } else {
+            GpuiSidebarCommandRunState::Error
+        }
+    }
+
+    fn should_play_completion_sound(&self) -> bool {
+        self.exit_code != 0 || self.play_completion_sound
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct CommandPaneActionRunRefresh {
+    changed: bool,
+    completions: Vec<CommandPaneActionRunCompletion>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct CommandTerminalProcessExitCleanup {
+    changed: bool,
+    completions: Vec<CommandPaneActionRunCompletion>,
 }
 
 /*
@@ -9278,6 +10522,7 @@ struct CommandPaneLeaf {
 
 struct CommandPaneSplit {
     id: CommandPaneSplitId,
+    axis: WorkspaceSplitAxis,
     ratio: f32,
     first: Box<CommandPaneNode>,
     second: Box<CommandPaneNode>,
@@ -10284,6 +11529,238 @@ impl ProjectWorkareaRealRuntimeUrl {
     fn into_cef_url(self) -> String {
         self.value
     }
+}
+
+/*
+CDXC:GPUISourceRuntime 2026-06-24-23:17:
+The GPUI Source page now owns the same shared code-server runtime shape as the macOS app: one localhost process on 127.0.0.1:3775, a project folder URL derived only from the explicit sidebar snapshot, and runtime-only process/URL state that is never written to shell persistence or logs.
+*/
+#[derive(Clone, PartialEq, Eq)]
+struct SourceCodeServerRuntimeTarget {
+    active_project_id: GpuiProjectId,
+    source_workarea_id: String,
+    project_path: PathBuf,
+    runtime_url: ProjectWorkareaRealRuntimeUrl,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SourceCodeServerRuntimeSettings {
+    link_vscode_user_config: bool,
+    use_vscode_insiders_user_config: bool,
+    vscode_user_config_dir: String,
+}
+
+impl SourceCodeServerRuntimeSettings {
+    fn from_shared_settings(settings: &shared_settings::SharedSidebarSettingsSnapshot) -> Self {
+        let link_vscode_user_config = settings
+            .object()
+            .get("codeServerLinkVscodeUserConfig")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let use_vscode_insiders_user_config = settings
+            .object()
+            .get("codeServerUseVscodeInsidersUserConfig")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let app_name = if use_vscode_insiders_user_config {
+            "Code - Insiders"
+        } else {
+            "Code"
+        };
+        Self {
+            link_vscode_user_config,
+            use_vscode_insiders_user_config,
+            vscode_user_config_dir: gpui_path_string(
+                &home_dir().join(format!("Library/Application Support/{app_name}/User")),
+            ),
+        }
+    }
+
+    fn linked_vscode_user_config_dir(&self) -> Option<&str> {
+        self.link_vscode_user_config
+            .then_some(self.vscode_user_config_dir.as_str())
+    }
+
+    fn from_sidebar_runtime_settings(settings: &cef::SidebarRuntimeSettingsSnapshot) -> Self {
+        let object = serde_json::from_str::<serde_json::Value>(&settings.saved_settings_json)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        Self::from_shared_settings(
+            &shared_settings::SharedSidebarSettingsSnapshot::from_object(object),
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SourceCodeServerRuntimeLaunchState {
+    Idle,
+    Launching,
+    Ready,
+    Failed,
+}
+
+impl Default for SourceCodeServerRuntimeLaunchState {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
+struct SourceCodeServerRuntimeOwner {
+    child: Option<Child>,
+    started_at: Option<Instant>,
+    generation: u64,
+    state: SourceCodeServerRuntimeLaunchState,
+    target: Option<SourceCodeServerRuntimeTarget>,
+    settings: Option<SourceCodeServerRuntimeSettings>,
+}
+
+impl SourceCodeServerRuntimeOwner {
+    fn new() -> Self {
+        Self {
+            child: None,
+            started_at: None,
+            generation: 0,
+            state: SourceCodeServerRuntimeLaunchState::Idle,
+            target: None,
+            settings: None,
+        }
+    }
+
+    fn next_generation(&mut self) -> u64 {
+        self.generation = self.generation.saturating_add(1);
+        self.generation
+    }
+
+    fn runtime_url_for_target(
+        &self,
+        target: &SourceCodeServerRuntimeTarget,
+    ) -> Option<ProjectWorkareaRealRuntimeUrl> {
+        (self.state == SourceCodeServerRuntimeLaunchState::Ready
+            && self.target.as_ref() == Some(target)
+            && self.child.is_some())
+        .then(|| target.runtime_url.clone())
+    }
+
+    fn can_reuse_ready_process(&self, settings: &SourceCodeServerRuntimeSettings) -> bool {
+        self.state == SourceCodeServerRuntimeLaunchState::Ready
+            && self.settings.as_ref() == Some(settings)
+            && self.child.is_some()
+    }
+
+    fn launching_matches(
+        &self,
+        target: &SourceCodeServerRuntimeTarget,
+        settings: &SourceCodeServerRuntimeSettings,
+    ) -> bool {
+        self.state == SourceCodeServerRuntimeLaunchState::Launching
+            && self.target.as_ref() == Some(target)
+            && self.settings.as_ref() == Some(settings)
+    }
+
+    fn child_is_within_startup_grace(&self) -> bool {
+        self.child.is_some()
+            && self.started_at.is_some_and(|started_at| {
+                started_at.elapsed() < SOURCE_CODE_SERVER_STARTUP_GRACE_INTERVAL
+            })
+    }
+
+    fn set_launching(
+        &mut self,
+        target: SourceCodeServerRuntimeTarget,
+        settings: SourceCodeServerRuntimeSettings,
+    ) {
+        self.state = SourceCodeServerRuntimeLaunchState::Launching;
+        self.target = Some(target);
+        self.settings = Some(settings);
+        self.started_at = Some(Instant::now());
+    }
+
+    fn set_ready_target(
+        &mut self,
+        target: SourceCodeServerRuntimeTarget,
+        settings: SourceCodeServerRuntimeSettings,
+    ) {
+        self.state = SourceCodeServerRuntimeLaunchState::Ready;
+        self.target = Some(target);
+        self.settings = Some(settings);
+        if self.started_at.is_none() {
+            self.started_at = Some(Instant::now());
+        }
+    }
+
+    fn set_ready(
+        &mut self,
+        target: SourceCodeServerRuntimeTarget,
+        settings: SourceCodeServerRuntimeSettings,
+        child: Child,
+        started_at: Instant,
+    ) {
+        self.replace_child(child);
+        self.started_at = Some(started_at);
+        self.set_ready_target(target, settings);
+    }
+
+    fn set_failed(
+        &mut self,
+        target: SourceCodeServerRuntimeTarget,
+        settings: SourceCodeServerRuntimeSettings,
+        child: Option<Child>,
+        started_at: Option<Instant>,
+    ) {
+        if let Some(child) = child {
+            self.replace_child(child);
+        }
+        self.started_at = started_at;
+        self.state = SourceCodeServerRuntimeLaunchState::Failed;
+        self.target = Some(target);
+        self.settings = Some(settings);
+    }
+
+    fn replace_child(&mut self, child: Child) {
+        if let Some(mut previous_child) = self.child.take() {
+            let _ = previous_child.kill();
+            let _ = previous_child.wait();
+        }
+        self.child = Some(child);
+    }
+
+    fn refresh_child_exit(&mut self) -> bool {
+        let Some(child) = self.child.as_mut() else {
+            return false;
+        };
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => {
+                self.child = None;
+                self.started_at = None;
+                self.state = SourceCodeServerRuntimeLaunchState::Idle;
+                true
+            }
+            Ok(None) => false,
+        }
+    }
+
+    fn stop(&mut self) -> bool {
+        let had_state = self.child.is_some()
+            || self.target.is_some()
+            || self.state != SourceCodeServerRuntimeLaunchState::Idle;
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        self.generation = self.generation.saturating_add(1);
+        self.started_at = None;
+        self.state = SourceCodeServerRuntimeLaunchState::Idle;
+        self.target = None;
+        self.settings = None;
+        had_state
+    }
+}
+
+struct SourceCodeServerRuntimeStartOutput {
+    child: Child,
+    started_at: Instant,
+    responsive: bool,
 }
 
 #[allow(dead_code)]
@@ -13183,6 +14660,18 @@ enum FocusedTerminalSplitDirection {
     Down,
 }
 
+fn command_pane_focused_split_axis(direction: FocusedTerminalSplitDirection) -> WorkspaceSplitAxis {
+    /*
+    CDXC:GPUIFocusedSplits 2026-06-25-16:05:
+    macOS command-panel split hotkeys log the requested direction but force command panes to horizontal split placement. Mirror that rule in GPUI so Cmd+Shift+D inside the command pane does not create a vertical command split.
+    */
+    match direction {
+        FocusedTerminalSplitDirection::Right | FocusedTerminalSplitDirection::Down => {
+            WorkspaceSplitAxis::Horizontal
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SpatialFocusTarget {
     AgentsPane(WorkspacePaneId),
@@ -14453,7 +15942,6 @@ enum CommandPaneControlAction {
     NewCommandPlaceholder,
     TogglePinned,
     ToggleExpanded,
-    ClosePanel,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -14836,29 +16324,28 @@ impl Render for WorkspaceTabDragPreview {
 
 impl Render for CommandTabDragPreview {
     fn render(&mut self, _window: &mut Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let show_status_indicator =
+            command_terminal_tab_status_indicator_visible(self.tab_status, false);
+        let title_trailing_reserved_width =
+            command_terminal_tab_status_title_trailing_reserved_width(self.tab_status);
+
         div()
+            .relative()
             .flex()
             .h(px(COMMAND_PANE_TAB_BAR_HEIGHT))
-            .w(px(COMMAND_PANE_TAB_WIDTH))
+            .w(px(COMMAND_PANE_TAB_MAX_WIDTH))
             .items_center()
             .overflow_hidden()
             .rounded(px(5.0))
             .border_1()
             .border_color(workspace_drop_feedback_border_color())
-            .bg(command_pane_tab_active_color())
-            .pl(px(9.0))
-            .pr(px(8.0))
-            .text_size(px(11.5))
+            .bg(command_pane_tab_background_color(true, false))
+            .pl(px(8.0))
+            .pr(px(0.0))
+            .text_size(px(COMMAND_PANE_TAB_TITLE_FONT_SIZE))
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(command_pane_tab_active_text_color())
+            .text_color(command_pane_tab_title_text_color(true, false))
             .shadow_md()
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .size(px(6.0))
-                    .rounded_full()
-                    .bg(command_pane_tab_dot_color(self.tab_status, true)),
-            )
             .child(
                 div()
                     .flex_1()
@@ -14866,9 +16353,15 @@ impl Render for CommandTabDragPreview {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .ml(px(7.0))
+                    .pr(px(title_trailing_reserved_width))
                     .child(self.title.clone()),
             )
+            .when(show_status_indicator, |this| {
+                this.child(command_pane_tab_status_indicator_element(
+                    "ghostex-gpui-command-tab-drag-preview-status",
+                    self.tab_status,
+                ))
+            })
     }
 }
 
@@ -15114,6 +16607,31 @@ fn committed_terminal_text_from_keystroke(keystroke: &Keystroke) -> Option<&str>
 
     let text = keystroke.key_char.as_deref()?;
     if text.is_empty() { None } else { Some(text) }
+}
+
+fn command_pane_sleeping_placeholder_keystroke_requests_wake(keystroke: &Keystroke) -> bool {
+    /*
+    CDXC:GPUICommandSleepingPlaceholder 2026-06-25-14:49:
+    Sleeping command placeholders wake on plain alphanumeric key-downs like native AppKit. Reject Cmd, Control, and Option/Alt modified keys, and use GPUI's layout key only as a wake-affordance identity for shifted digits rather than as terminal input.
+    */
+    let modifiers = keystroke.modifiers;
+    if modifiers.platform || modifiers.control || modifiers.alt {
+        return false;
+    }
+
+    command_pane_sleeping_placeholder_wake_text_is_alphanumeric(keystroke.key_char.as_deref())
+        || command_pane_sleeping_placeholder_wake_text_is_alphanumeric(Some(&keystroke.key))
+}
+
+fn command_pane_sleeping_placeholder_wake_text_is_alphanumeric(text: Option<&str>) -> bool {
+    let Some(text) = text else {
+        return false;
+    };
+    let mut chars = text.chars();
+    let Some(character) = chars.next() else {
+        return false;
+    };
+    chars.next().is_none() && character.is_ascii_alphanumeric()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16486,19 +18004,61 @@ struct CommandPaneModel {
 }
 
 impl CommandPaneModel {
+    #[cfg(test)]
     fn shell_default(content_height: f32) -> Self {
+        Self::shell_sample_with_default_height_px(content_height, COMMAND_PANE_DEFAULT_HEIGHT_PX)
+    }
+
+    #[cfg(test)]
+    fn shell_default_from_shared_settings(
+        content_height: f32,
+        settings: &shared_settings::SharedSidebarSettingsSnapshot,
+    ) -> Self {
+        Self::shell_default_with_default_height_px(
+            content_height,
+            command_pane_default_height_px_from_shared_settings(settings),
+        )
+    }
+
+    fn shell_default_with_default_height_px(content_height: f32, default_height_px: f32) -> Self {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-11:40:
+        The production GPUI command pane starts like macOS: hidden and empty. Opening the pane creates the first `Command Terminal` placeholder at the open boundary, while Action runs and transferred tabs can still supply specific titles. Do not seed fake Command/Shell sessions into app startup or persisted fallback state.
+        */
+        Self {
+            terminal_sessions: Vec::new(),
+            root: command_pane_dummy_node(),
+            focused_group: CommandPaneGroupId(0),
+            mode: CommandPaneMode::Collapsed,
+            last_expanded_mode: CommandPaneMode::Pinned,
+            height_ratio: command_pane_default_height_ratio_for_default_height_px(
+                default_height_px,
+                content_height,
+            ),
+            resize_drag: None,
+            next_group_id: 1,
+            next_split_id: 1,
+            next_session_id: 1,
+        }
+    }
+
+    #[cfg(test)]
+    fn shell_sample_with_default_height_px(content_height: f32, default_height_px: f32) -> Self {
         /*
         CDXC:GPUICommandPane 2026-06-22-05:42:
         The GPUI command pane is a separate bottom workspace surface, not an Agents workspace leaf. Command terminal placeholders use their own session ids and active-session state so future command terminals cannot be merged into the normal workspace tab tree, while real command process creation, command splits, persistence, and libghostty mounting remain deferred.
 
-        CDXC:GPUICommandPane 2026-06-22-06:13:
-        Command terminals need a command-pane-only tab/split tree instead of a flat tab list. Keep command tabs in command tab groups with left/right horizontal splits only, track active selection per command group, and keep all operations in memory so Agents workspace tab actions can never merge or close command terminals.
+        CDXC:GPUICommandPane 2026-06-25-15:54:
+        Command terminals need a command-pane-only tab/split tree instead of a flat tab list. Keep command tabs in command tab groups with axis-aware command splits, track active selection per command group, and keep all operations in memory so Agents workspace tab actions can never merge or close command terminals.
 
-        CDXC:GPUICommandPane 2026-06-22-06:24:
-        The command pane still stores height as a ratio for drag updates, but the initial ratio must be derived from the macOS 125px default command height and clamped to 5%-90% of the available content height.
+        CDXC:GPUICommandPane 2026-06-25-11:29:
+        The command pane still stores height as a ratio for drag updates, but the app-owned constructor must accept the shared Workspace command-pane default height so first paint can match macOS Settings while tests and legacy pure model callers keep the 125px built-in default.
 
         CDXC:GPUICommandTabStatus 2026-06-22-16:40:
-        Default command placeholders should visibly show the command-specific idle blue plus one non-idle working dot without making the command pane noisy. These are still semantic shell placeholders only, not real command runtime state.
+        Default command placeholders keep one idle semantic tab and one working semantic tab without creating real command runtime state. Since 2026-06-25-13:18, idle command tabs intentionally render without a status indicator, while visible command status uses the native trailing slot.
+
+        CDXC:GPUICommandPane 2026-06-25-11:40:
+        This seeded two-tab command model is retained only for existing pure model tests that exercise split, close, drag, focus, and status behavior. Production app startup must use the empty constructor above so fake sample tabs never appear before the user opens or launches a command.
         */
         let terminal_sessions = vec![
             CommandTerminalSession::placeholder(CommandSessionId(1), "Command".to_string()),
@@ -16526,7 +18086,10 @@ impl CommandPaneModel {
             focused_group: group_id,
             mode: CommandPaneMode::Pinned,
             last_expanded_mode: CommandPaneMode::Pinned,
-            height_ratio: command_pane_default_height_ratio(content_height),
+            height_ratio: command_pane_default_height_ratio_for_default_height_px(
+                default_height_px,
+                content_height,
+            ),
             resize_drag: None,
             next_group_id: 2,
             next_split_id: 1,
@@ -16564,8 +18127,29 @@ impl CommandPaneModel {
             .find(|session| session.id == id)
     }
 
+    fn session_mut(&mut self, id: CommandSessionId) -> Option<&mut CommandTerminalSession> {
+        self.terminal_sessions
+            .iter_mut()
+            .find(|session| session.id == id)
+    }
+
     fn has_session(&self, id: CommandSessionId) -> bool {
         self.session(id).is_some()
+    }
+
+    fn rename_session(&mut self, id: CommandSessionId, title: String) -> bool {
+        /*
+        CDXC:GPUICommandPaneRename 2026-06-25-16:33:
+            GPUI command-pane Rename Session updates only the live command-tab title. Command shell persistence remains layout/lifecycle-only and must not write user-entered titles, command text, terminal content, paths, stdout, stderr, or action payloads into shell-state JSON.
+            */
+        let Some(session) = self.session_mut(id) else {
+            return false;
+        };
+        if title.is_empty() || session.title == title {
+            return false;
+        }
+        session.title = title;
+        true
     }
 
     #[cfg(test)]
@@ -16604,6 +18188,26 @@ impl CommandPaneModel {
             self.focused_group = group_id;
         }
         selected
+    }
+
+    fn select_session_in_group_for_hidden_open(
+        &mut self,
+        group_id: CommandPaneGroupId,
+        session_id: CommandSessionId,
+        content_height: f32,
+        default_height_px: f32,
+    ) -> bool {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-12:10:
+        Selecting a tab from collapsed command-strip chrome is a hidden-open path like macOS `openCommandsPanelForActiveProject`. Apply the Workspace default-height reset before expanding so collapsed tab clicks and context-menu Select do not preserve a stale hidden pane height.
+        */
+        if !self.select_session_in_group(group_id, session_id) {
+            return false;
+        }
+
+        self.prepare_hidden_open_with_default_height_px(content_height, default_height_px);
+        self.expand();
+        true
     }
 
     fn focus_group(&mut self, group_id: CommandPaneGroupId) -> bool {
@@ -16660,10 +18264,147 @@ impl CommandPaneModel {
         true
     }
 
+    fn tab_session_ids_for_close_scope(
+        &self,
+        group_id: CommandPaneGroupId,
+        session_id: CommandSessionId,
+        scope: CommandPaneTabCloseScope,
+    ) -> Vec<CommandSessionId> {
+        /*
+        CDXC:GPUICommandPaneTabs 2026-06-25-11:20:
+        GPUI command-tab context menu close scopes must match macOS command-panel tab behavior: resolve the clicked tab's sibling ids before closing anything, stay inside that command group, and never cross into another command split group, Agents workspace pane, Browser tab, project-editor surface, command text, terminal output, paths, or persisted shell inference.
+        */
+        let Some(leaf) = self.find_leaf(group_id) else {
+            return Vec::new();
+        };
+        let tab_session_ids = leaf
+            .tab_group
+            .tabs
+            .iter()
+            .map(|tab| tab.session_id)
+            .collect::<Vec<_>>();
+        let Some(tab_index) = tab_session_ids
+            .iter()
+            .position(|candidate| *candidate == session_id)
+        else {
+            return Vec::new();
+        };
+
+        match scope {
+            CommandPaneTabCloseScope::Close => vec![session_id],
+            CommandPaneTabCloseScope::CloseLeft => tab_session_ids[..tab_index].to_vec(),
+            CommandPaneTabCloseScope::CloseOthers => tab_session_ids
+                .into_iter()
+                .filter(|candidate| *candidate != session_id)
+                .collect(),
+            CommandPaneTabCloseScope::CloseRight => tab_session_ids[tab_index + 1..].to_vec(),
+        }
+    }
+
+    fn tab_session_ids_for_sleep_scope(
+        &self,
+        group_id: CommandPaneGroupId,
+        session_id: CommandSessionId,
+        scope: CommandPaneTabSleepScope,
+    ) -> Vec<CommandSessionId> {
+        /*
+        CDXC:GPUICommandTabSleep 2026-06-25-14:27:
+        Command-tab Sleep scopes use the clicked command group's sibling list, just like native pane-tab sleep. Keep sleep resolution inside the command group so Sleep Right/Left/Others never crosses command splits, Agents workspace panes, Browser tabs, project-editor surfaces, command text, terminal output, paths, or persisted shell inference.
+        */
+        let Some(leaf) = self.find_leaf(group_id) else {
+            return Vec::new();
+        };
+        let tab_session_ids = leaf
+            .tab_group
+            .tabs
+            .iter()
+            .map(|tab| tab.session_id)
+            .collect::<Vec<_>>();
+        let Some(tab_index) = tab_session_ids
+            .iter()
+            .position(|candidate| *candidate == session_id)
+        else {
+            return Vec::new();
+        };
+
+        match scope {
+            CommandPaneTabSleepScope::Sleep => vec![session_id],
+            CommandPaneTabSleepScope::SleepLeft => tab_session_ids[..tab_index].to_vec(),
+            CommandPaneTabSleepScope::SleepOthers => tab_session_ids
+                .into_iter()
+                .filter(|candidate| *candidate != session_id)
+                .collect(),
+            CommandPaneTabSleepScope::SleepRight => tab_session_ids[tab_index + 1..].to_vec(),
+        }
+    }
+
+    fn set_session_sleeping(&mut self, session_id: CommandSessionId, is_sleeping: bool) -> bool {
+        let Some(session) = self.session_mut(session_id) else {
+            return false;
+        };
+        if session.is_sleeping == is_sleeping {
+            return false;
+        }
+        session.is_sleeping = is_sleeping;
+        if is_sleeping {
+            /*
+            CDXC:GPUICommandDelayedSend 2026-06-25-15:46:
+            Manual command-tab Sleep parks the terminal surface but must not cancel Delayed Send or Close After Done intent. Native keeps those timers/flags attached to the session; Delayed Send fires only if the tab is awake again at the deadline, and Close After Done resumes countdown evaluation after wake.
+            */
+            session.activity = CommandTerminalActivity::Idle;
+            session.action_run_id = None;
+            session.action_status_file_path = None;
+        }
+        true
+    }
+
+    fn prepare_hidden_open_with_default_height_px(
+        &mut self,
+        content_height: f32,
+        default_height_px: f32,
+    ) -> bool {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-11:47:
+        Opening a hidden GPUI command pane must match macOS `createCommandsPanelOpenStatePatch`: reset height from the Workspace default only when the pane is hidden, and preserve the user's live resize while the pane is already expanded. Keep this model-local so F12, titlebar Actions, sidebar Actions, and command chrome share the same rule.
+        */
+        if self.is_expanded() {
+            return false;
+        }
+
+        self.reset_height_with_default_height_px(content_height, default_height_px);
+        true
+    }
+
+    fn open_with_default_height_px(
+        &mut self,
+        content_height: f32,
+        default_height_px: f32,
+    ) -> Option<(CommandPaneGroupId, CommandSessionId, bool)> {
+        self.prepare_hidden_open_with_default_height_px(content_height, default_height_px);
+        self.ensure_session_for_open()
+    }
+
+    fn ensure_session_for_open(&mut self) -> Option<(CommandPaneGroupId, CommandSessionId, bool)> {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-11:40:
+        Opening an empty command pane mirrors macOS `openCommandsPanelForActiveProject`: create exactly one selected `Command Terminal` placeholder at open time. If a valid command tab already exists, preserve it and only expand/focus the pane so opening never invents extra tabs.
+        */
+        if let Some((group_id, session_id)) = self.active_group_and_session_id() {
+            self.focused_group = group_id;
+            self.expand();
+            return Some((group_id, session_id, false));
+        }
+
+        let session_id = self.add_session_to_focused_group();
+        Some((self.focused_group, session_id, true))
+    }
+
     fn add_session_to_focused_group(&mut self) -> CommandSessionId {
         let session_id = self.allocate_session_id();
-        let title = format!("Command {}", session_id.0);
-        self.add_titled_session_to_focused_group(session_id, title);
+        self.add_titled_session_to_focused_group(
+            session_id,
+            COMMAND_PANE_DEFAULT_SESSION_TITLE.to_string(),
+        );
         session_id
     }
 
@@ -16672,7 +18413,10 @@ impl CommandPaneModel {
             .push(CommandTerminalSession::placeholder(session_id, title));
         let tab = CommandPaneTab { session_id };
 
-        if let Some(leaf) = self.find_leaf_mut(self.focused_group) {
+        if self.has_sessions()
+            && self.focused_group.0 != 0
+            && let Some(leaf) = self.find_leaf_mut(self.focused_group)
+        {
             leaf.tab_group
                 .insert_session_at(tab, leaf.tab_group.tabs.len());
             leaf.tab_group.active_session = session_id;
@@ -16691,34 +18435,285 @@ impl CommandPaneModel {
         self.expand();
     }
 
-    fn add_action_session_to_focused_group(
+    fn select_or_create_action_session(
         &mut self,
+        command_id: String,
         title: String,
-    ) -> (CommandPaneGroupId, CommandSessionId) {
+    ) -> CommandPaneActionSessionSelection {
         /*
-        CDXC:GPUITitlebarActions 2026-06-24-14:24:
-        GPUI titlebar terminal Actions create a fresh command-pane tab for the current run because the command-pane model does not yet expose a safe write-into-existing-terminal capability or reliable idle/run ownership. The tab title uses only the action label/id, never raw command text, cwd, env, stdout/stderr, or terminal content.
+        CDXC:GPUICommandPane 2026-06-24-23:36:
+        GPUI sidebar/titlebar terminal Actions own one live command-pane tab per action when that tab is idle, matching macOS command-pane reuse without persisting action titles, command text, cwd, env, stdout/stderr, terminal content, or renderer payloads. The command id and run id are process-memory ownership only; restored shell state intentionally falls back to generic command placeholders.
         */
+        if let Some((group_id, session_id)) = self.find_reusable_action_session(&command_id, &title)
+        {
+            self.select_session_in_group(group_id, session_id);
+            if let Some(session) = self.session_mut(session_id) {
+                session.title = title;
+                session.action_command_id = Some(command_id);
+            }
+            self.expand();
+            return CommandPaneActionSessionSelection {
+                kind: CommandPaneActionSessionSelectionKind::Reused,
+                group_id,
+                session_id,
+            };
+        }
+
         let session_id = self.allocate_session_id();
-        self.add_titled_session_to_focused_group(session_id, title);
+        self.terminal_sessions.push(
+            CommandTerminalSession::placeholder(session_id, title)
+                .with_action_command_id(command_id),
+        );
+        let tab = CommandPaneTab { session_id };
+
+        if self.has_sessions()
+            && self.focused_group.0 != 0
+            && let Some(leaf) = self.find_leaf_mut(self.focused_group)
+        {
+            leaf.tab_group
+                .insert_session_at(tab, leaf.tab_group.tabs.len());
+            leaf.tab_group.active_session = session_id;
+        } else {
+            let group_id = self.allocate_group_id();
+            self.root = CommandPaneNode::Leaf(CommandPaneLeaf {
+                group_id,
+                tab_group: CommandPaneTabGroup {
+                    tabs: vec![tab],
+                    active_session: session_id,
+                },
+            });
+            self.focused_group = group_id;
+        }
+
+        self.expand();
         let group_id = self
             .active_group_and_session_id()
             .map(|(group_id, _session_id)| group_id)
             .unwrap_or(self.focused_group);
-        (group_id, session_id)
+        CommandPaneActionSessionSelection {
+            kind: CommandPaneActionSessionSelectionKind::Created,
+            group_id,
+            session_id,
+        }
     }
 
+    fn find_reusable_action_session(
+        &self,
+        command_id: &str,
+        title: &str,
+    ) -> Option<(CommandPaneGroupId, CommandSessionId)> {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-11:18:
+        MacOS command Actions reuse one idle command-pane tab per normalized Action title after restore, even when the live command-id map is missing. Keep the exact command-id match first, then allow idle title-owned reuse regardless of stale/missing action id; duplicate Action titles are rejected at save time, and run-start rewrites the live mapping.
+
+        CDXC:GPUICommandPaneActions 2026-06-25-16:22:
+        Native command Action reuse requires a running idle command-pane terminal. GPUI sleeping command tabs have no mounted command body, so they must not be selected as reusable Action runners; otherwise the run can become Working while no surface exists to execute the wrapper.
+        */
+        let title_key = gpui_command_action_title_key(title);
+        if title_key.is_empty() {
+            return None;
+        }
+        let tabs = self.flat_tab_ids();
+        tabs.iter()
+            .copied()
+            .find(|(_group_id, session_id)| {
+                self.session(*session_id).is_some_and(|session| {
+                    command_session_is_reusable_for_action(session)
+                        && session.action_command_id.as_deref() == Some(command_id)
+                        && gpui_command_action_title_key(&session.title) == title_key
+                })
+            })
+            .or_else(|| {
+                tabs.iter().copied().find(|(_group_id, session_id)| {
+                    self.session(*session_id).is_some_and(|session| {
+                        command_session_is_reusable_for_action(session)
+                            && gpui_command_action_title_key(&session.title) == title_key
+                    })
+                })
+            })
+    }
+
+    fn action_session_slot_for_command_id(
+        &self,
+        command_id: &str,
+    ) -> Option<(CommandPaneGroupId, CommandSessionId)> {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-10:34:
+        `endSidebarCommandRun` mirrors macOS's one mapped command-pane session per Action. GPUI keeps mapping live-only on command sessions, so prefer the selected matching tab, then an active matching run, then any matching action-owned tab; never infer from titles, command text, status paths, terminal output, project paths, or persisted shell JSON.
+        */
+        let active = self
+            .active_group_and_session_id()
+            .filter(|(_group_id, session_id)| {
+                self.session(*session_id)
+                    .is_some_and(|session| session.action_command_id.as_deref() == Some(command_id))
+            });
+        active
+            .or_else(|| {
+                self.flat_tab_ids()
+                    .into_iter()
+                    .find(|(_group_id, session_id)| {
+                        self.session(*session_id).is_some_and(|session| {
+                            session.action_command_id.as_deref() == Some(command_id)
+                                && session.action_run_id.is_some()
+                        })
+                    })
+            })
+            .or_else(|| {
+                self.flat_tab_ids()
+                    .into_iter()
+                    .find(|(_group_id, session_id)| {
+                        self.session(*session_id).is_some_and(|session| {
+                            session.action_command_id.as_deref() == Some(command_id)
+                        })
+                    })
+            })
+    }
+
+    fn clear_action_run_for_session(&mut self, session_id: CommandSessionId) -> bool {
+        let Some(session) = self.session_mut(session_id) else {
+            return false;
+        };
+        let changed = session.action_run_id.is_some()
+            || session.action_status_file_path.is_some()
+            || session.activity != CommandTerminalActivity::Idle;
+        session.activity = CommandTerminalActivity::Idle;
+        session.action_run_id = None;
+        session.action_status_file_path = None;
+        changed
+    }
+
+    fn take_action_run_completion_for_exited_session(
+        &mut self,
+        session_id: CommandSessionId,
+    ) -> Option<CommandPaneActionRunCompletion> {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-11:11:
+        If a mapped command-pane terminal exits before the status-file poller clears the run, GPUI must still finish sidebar Action feedback like macOS terminal-exit cleanup. Trust only the matching session-state file when it already reached idle; otherwise report the live run as error so button feedback cannot remain running after the command-pane surface is gone. Do not read terminal output, command text, cwd/env, project paths, logs, or shell-state JSON.
+        */
+        let session = self.session_mut(session_id)?;
+        let command_id = session.action_command_id.clone()?;
+        let run_id = session.action_run_id.clone()?;
+        let play_completion_sound = session.action_play_completion_sound;
+        let exit_code = session
+            .action_status_file_path
+            .as_ref()
+            .and_then(|status_file_path| gpui_command_action_status_from_file(status_file_path))
+            .filter(|status| {
+                status.run_id == run_id && status.status == GpuiCommandActionRunFileStatus::Idle
+            })
+            .map(|status| status.exit_code)
+            .unwrap_or(1);
+        session.activity = CommandTerminalActivity::Idle;
+        session.action_run_id = None;
+        session.action_status_file_path = None;
+        Some(CommandPaneActionRunCompletion {
+            command_id,
+            exit_code,
+            play_completion_sound,
+            run_id,
+        })
+    }
+
+    fn mark_action_session_run_started(
+        &mut self,
+        session_id: CommandSessionId,
+        command_id: String,
+        title: String,
+        run_id: String,
+        status_file_path: PathBuf,
+        play_completion_sound: bool,
+    ) -> bool {
+        let Some(session) = self.session_mut(session_id) else {
+            return false;
+        };
+        session.title = title;
+        session.activity = CommandTerminalActivity::Working;
+        session.is_sleeping = false;
+        session.delayed_send_active = false;
+        session.delayed_send_timer_owned = false;
+        session.action_command_id = Some(command_id);
+        session.action_play_completion_sound = play_completion_sound;
+        session.action_run_id = Some(run_id);
+        session.action_status_file_path = Some(status_file_path);
+        true
+    }
+
+    fn refresh_action_run_states_from_status_files(&mut self) -> CommandPaneActionRunRefresh {
+        /*
+        CDXC:GPUICommandPane 2026-06-24-23:36:
+        Command Action completion is observed only through the same session-state file env contract the hidden shell wrapper writes. Refreshing this state may change a live tab's safe activity enum and clear its run id, but it must not persist command ids, command text, output, paths, env, tokens, or status-file paths into shell state.
+
+        CDXC:GPUICommandPane 2026-06-24-23:49:
+        The refresh result carries only command id, run id, exit code, and the saved per-action sound flag so the app can mirror macOS button success/error feedback and action completion sounds. Do not include command text, cwd, env, terminal output, status-file paths, project names, or renderer payloads in the completion record.
+        */
+        let mut refresh = CommandPaneActionRunRefresh::default();
+        for session in &mut self.terminal_sessions {
+            let Some(run_id) = session.action_run_id.as_deref() else {
+                continue;
+            };
+            let Some(status_file_path) = session.action_status_file_path.as_ref() else {
+                continue;
+            };
+            let Some(status) = gpui_command_action_status_from_file(status_file_path) else {
+                continue;
+            };
+            if status.run_id != run_id {
+                continue;
+            }
+            match status.status {
+                GpuiCommandActionRunFileStatus::Working => {
+                    if session.activity != CommandTerminalActivity::Working {
+                        session.activity = CommandTerminalActivity::Working;
+                        refresh.changed = true;
+                    }
+                }
+                GpuiCommandActionRunFileStatus::Idle => {
+                    if session.activity != CommandTerminalActivity::Idle {
+                        session.activity = CommandTerminalActivity::Idle;
+                        refresh.changed = true;
+                    }
+                    if let Some(command_id) = session.action_command_id.clone() {
+                        refresh.completions.push(CommandPaneActionRunCompletion {
+                            command_id,
+                            exit_code: status.exit_code,
+                            play_completion_sound: session.action_play_completion_sound,
+                            run_id: status.run_id.clone(),
+                        });
+                    }
+                    session.action_run_id = None;
+                    session.action_status_file_path = None;
+                }
+            }
+        }
+        refresh
+    }
+
+    fn has_active_action_runs(&self) -> bool {
+        self.terminal_sessions
+            .iter()
+            .any(|session| session.action_run_id.is_some())
+    }
+
+    #[cfg(test)]
     fn split_session_to_right_of_focused_group(
         &mut self,
     ) -> Option<(CommandPaneGroupId, CommandSessionId)> {
+        self.split_session_adjacent_to_focused_group(FocusedTerminalSplitDirection::Right)
+    }
+
+    fn split_session_adjacent_to_focused_group(
+        &mut self,
+        direction: FocusedTerminalSplitDirection,
+    ) -> Option<(CommandPaneGroupId, CommandSessionId)> {
         /*
-        CDXC:GPUIFocusedSplits 2026-06-22-13:28:
-        Focused command-pane split hotkeys create command-only placeholder sessions in a new horizontal group to the right of the focused command group. Cmd+Shift+D intentionally uses this same horizontal split path because native command panes do not create vertical command splits.
+        CDXC:GPUIFocusedSplits 2026-06-25-16:05:
+        Native command panels intentionally coerce both Cmd+D and Cmd+Shift+D to horizontal command splits. Keep GPUI command hotkey splits beside the focused command group while still storing split axis metadata for layout restore; do not create Agents tabs, processes, or terminal content.
         */
         let target_group_id = self
             .find_leaf(self.focused_group)
             .filter(|leaf| !leaf.tab_group.tabs.is_empty())
             .map(|leaf| leaf.group_id)?;
+        let axis = command_pane_focused_split_axis(direction);
         let session_id = self.allocate_session_id();
         let group_id = self.allocate_group_id();
         let split_id = self.allocate_split_id();
@@ -16730,11 +18725,18 @@ impl CommandPaneModel {
             },
         };
 
-        if insert_command_leaf_split(&mut self.root, target_group_id, new_leaf, false, split_id) {
+        if insert_command_leaf_split(
+            &mut self.root,
+            target_group_id,
+            new_leaf,
+            axis,
+            false,
+            split_id,
+        ) {
             self.terminal_sessions
                 .push(CommandTerminalSession::placeholder(
                     session_id,
-                    command_session_title_for_id(session_id),
+                    COMMAND_PANE_DEFAULT_SESSION_TITLE.to_string(),
                 ));
             self.focused_group = group_id;
             self.expand();
@@ -16834,6 +18836,7 @@ impl CommandPaneModel {
             &mut self.root,
             target_group_id,
             new_leaf,
+            WorkspaceSplitAxis::Horizontal,
             dragged_first,
             split_id,
         ) {
@@ -16853,6 +18856,71 @@ impl CommandPaneModel {
         tabs
     }
 
+    fn sidebar_command_session_sources(
+        &self,
+        command_pane_focused: bool,
+        delayed_send_timers: &HashMap<CommandSessionId, GpuiCommandDelayedSendTimer>,
+        close_after_done_timers: &HashMap<CommandSessionId, GpuiCommandCloseAfterDoneTimer>,
+        now: SystemTime,
+    ) -> serde_json::Value {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-10:50:
+        GPUI Sidebar command-session indicators need the same live command-pane session matching as macOS. Export only sanitized command-pane summary fields: runtime command/session ids, normalized title, semantic status, and focused-tab boolean. Do not include command text, cwd, env, status-file paths, terminal output, shell-state JSON, or project paths.
+
+        CDXC:GPUICommandTabSleep 2026-06-25-14:27:
+        Sleeping command tabs stay represented in the GPUI sidebar bridge with a boolean lifecycle marker while their command activity is idle. Keep the bridge sanitized to ids, normalized title, enum status, focus, action command id, and isSleeping only.
+
+        CDXC:GPUICommandPaneTimers 2026-06-25-17:09:
+        Native projects Delayed Send and Close After Done timer state into sidebar/titlebar terminal rows. GPUI command indicators should carry only the same safe timer fields: armed booleans, UTC deadlines, remaining labels, and remaining milliseconds. Keep command text, terminal output, paths, run ids, status files, titles beyond the visible sanitized label, and shell-state JSON out of this bridge.
+        */
+        let active = self.active_group_and_session_id();
+        serde_json::Value::Array(
+            self.flat_tab_ids()
+                .into_iter()
+                .filter_map(|(group_id, session_id)| {
+                    let session = self.session(session_id)?;
+                    let title = gpui_command_pane_sidebar_indicator_text(&session.title)?;
+                    let mut summary = serde_json::json!({
+                        "isActive": command_pane_focused && active == Some((group_id, session_id)),
+                        "isSleeping": session.is_sleeping,
+                        "sessionId": session.id.0.to_string(),
+                        "status": session.activity.sidebar_indicator_status(),
+                        "title": title,
+                    });
+                    if let Some(command_id) = session
+                        .action_command_id
+                        .as_deref()
+                        .and_then(gpui_command_pane_sidebar_indicator_text)
+                    {
+                        summary["commandId"] = serde_json::json!(command_id);
+                    }
+                    if let Some(timer) = delayed_send_timers.get(&session_id).copied() {
+                        let remaining_ms = timer.remaining_ms(now);
+                        summary["delayedSendDeadlineAt"] =
+                            serde_json::json!(gpui_iso8601_utc(timer.deadline_at));
+                        summary["delayedSendRemainingLabel"] = serde_json::json!(
+                            gpui_command_delayed_send_countdown_label(remaining_ms,)
+                        );
+                        summary["delayedSendRemainingMs"] = serde_json::json!(remaining_ms);
+                    }
+                    if session.close_after_done_armed {
+                        summary["closeAfterDone"] = serde_json::json!(true);
+                        if let Some(timer) = close_after_done_timers.get(&session_id).copied() {
+                            let remaining_ms = timer.remaining_ms(now);
+                            summary["closeAfterDoneDeadlineAt"] =
+                                serde_json::json!(gpui_iso8601_utc(timer.deadline_at));
+                            summary["closeAfterDoneRemainingLabel"] = serde_json::json!(
+                                gpui_command_delayed_send_countdown_label(remaining_ms,)
+                            );
+                            summary["closeAfterDoneRemainingMs"] = serde_json::json!(remaining_ms);
+                        }
+                    }
+                    Some(summary)
+                })
+                .collect(),
+        )
+    }
+
     fn group_order(&self) -> Vec<CommandPaneGroupId> {
         let mut group_ids = Vec::new();
         collect_command_leaf_ids(&self.root, &mut group_ids);
@@ -16863,6 +18931,9 @@ impl CommandPaneModel {
         /*
         CDXC:GPUICommandTerminalSurface 2026-06-23-05:03:
         Real command-pane terminal bodies are limited to the expanded command pane and the active tab in each visible command group. Inactive command tabs, collapsed strip tabs, missing sessions, and command titles/status are intentionally excluded so command Ghostty surfaces stay body-bounds-driven and runtime-only.
+
+        CDXC:GPUICommandTabSleep 2026-06-25-14:27:
+        Sleeping command tabs remain in the tab/group model but are not renderable body mount slots. Withhold their command terminal body until an explicit body activation wakes the session.
         */
         if !self.is_expanded() {
             return Vec::new();
@@ -16873,7 +18944,8 @@ impl CommandPaneModel {
             .filter_map(|group_id| {
                 let leaf = self.find_leaf(group_id)?;
                 let session_id = leaf.tab_group.active_session_id()?;
-                self.has_session(session_id)
+                self.session(session_id)
+                    .is_some_and(|session| !session.is_sleeping)
                     .then_some(CommandTerminalBodyMountSlotId {
                         group_id,
                         session_id,
@@ -16995,6 +19067,7 @@ impl CommandPaneModel {
             &mut self.root,
             target_group_id,
             new_leaf,
+            WorkspaceSplitAxis::Horizontal,
             dragged_first,
             split_id,
         ) {
@@ -17039,6 +19112,11 @@ impl CommandPaneModel {
 
     fn split_ratio(&self, split_id: CommandPaneSplitId) -> Option<f32> {
         find_command_split(&self.root, split_id).map(|split| workspace_split_ratio(split.ratio))
+    }
+
+    #[cfg(test)]
+    fn split_axis(&self, split_id: CommandPaneSplitId) -> Option<WorkspaceSplitAxis> {
+        find_command_split(&self.root, split_id).map(|split| split.axis)
     }
 
     fn set_split_ratio(&mut self, split_id: CommandPaneSplitId, ratio: f32) -> bool {
@@ -17115,8 +19193,27 @@ impl CommandPaneModel {
         }
     }
 
+    #[cfg(test)]
     fn reset_height(&mut self, content_height: f32) {
-        self.height_ratio = command_pane_default_height_ratio(content_height);
+        self.reset_height_with_default_height_px(content_height, COMMAND_PANE_DEFAULT_HEIGHT_PX);
+    }
+
+    fn reset_height_from_shared_settings(
+        &mut self,
+        content_height: f32,
+        settings: &shared_settings::SharedSidebarSettingsSnapshot,
+    ) {
+        self.reset_height_with_default_height_px(
+            content_height,
+            command_pane_default_height_px_from_shared_settings(settings),
+        );
+    }
+
+    fn reset_height_with_default_height_px(&mut self, content_height: f32, default_height_px: f32) {
+        self.height_ratio = command_pane_default_height_ratio_for_default_height_px(
+            default_height_px,
+            content_height,
+        );
         self.resize_drag = None;
     }
 }
@@ -17296,6 +19393,31 @@ fn insert_command_leaf_split(
     node: &mut CommandPaneNode,
     target_group_id: CommandPaneGroupId,
     new_leaf: CommandPaneLeaf,
+    axis: WorkspaceSplitAxis,
+    dragged_first: bool,
+    split_id: CommandPaneSplitId,
+) -> bool {
+    let should_rebalance_default_axis_chain =
+        command_insert_target_axis_chain_uses_native_default_ratios(node, target_group_id, axis);
+    let inserted = insert_command_leaf_split_inner(
+        node,
+        target_group_id,
+        new_leaf,
+        axis,
+        dragged_first,
+        split_id,
+    );
+    if inserted && should_rebalance_default_axis_chain {
+        rebalance_command_split_axis_chain_containing_group(node, target_group_id, axis);
+    }
+    inserted
+}
+
+fn insert_command_leaf_split_inner(
+    node: &mut CommandPaneNode,
+    target_group_id: CommandPaneGroupId,
+    new_leaf: CommandPaneLeaf,
+    axis: WorkspaceSplitAxis,
     dragged_first: bool,
     split_id: CommandPaneSplitId,
 ) -> bool {
@@ -17311,6 +19433,7 @@ fn insert_command_leaf_split(
 
             *node = CommandPaneNode::Split(CommandPaneSplit {
                 id: split_id,
+                axis,
                 ratio: 0.5,
                 first: Box::new(first),
                 second: Box::new(second),
@@ -17319,23 +19442,200 @@ fn insert_command_leaf_split(
         }
         CommandPaneNode::Leaf(_) => false,
         CommandPaneNode::Split(split) => {
-            if command_node_contains_group(&split.first, target_group_id) {
-                insert_command_leaf_split(
+            let target_in_first = command_node_contains_group(&split.first, target_group_id);
+            let target_in_second = command_node_contains_group(&split.second, target_group_id);
+            if split.axis == axis && (target_in_first || target_in_second) {
+                insert_command_leaf_at_same_axis_split(
+                    split,
+                    target_in_first,
+                    new_leaf,
+                    dragged_first,
+                    split_id,
+                );
+                true
+            } else if target_in_first {
+                insert_command_leaf_split_inner(
                     &mut split.first,
                     target_group_id,
                     new_leaf,
+                    axis,
                     dragged_first,
                     split_id,
                 )
             } else {
-                insert_command_leaf_split(
+                insert_command_leaf_split_inner(
                     &mut split.second,
                     target_group_id,
                     new_leaf,
+                    axis,
                     dragged_first,
                     split_id,
                 )
             }
+        }
+    }
+}
+
+fn insert_command_leaf_at_same_axis_split(
+    split: &mut CommandPaneSplit,
+    target_in_first: bool,
+    new_leaf: CommandPaneLeaf,
+    dragged_first: bool,
+    split_id: CommandPaneSplitId,
+) {
+    /*
+    CDXC:GPUICommandPaneSplits 2026-06-25-16:18:
+    Native same-direction command split insertion happens beside the matching child of the existing split, not inside that child. Preserve that boundary in GPUI's binary model so explicit first-child ratios keep native meaning when the user later inserts before or after a command pane in a resized split.
+    */
+    let existing_first = take_command_node(&mut split.first);
+    let existing_second = take_command_node(&mut split.second);
+    let new_node = CommandPaneNode::Leaf(new_leaf);
+    let axis = split.axis;
+
+    let (first, second_first, second_second) = match (target_in_first, dragged_first) {
+        (true, true) => (new_node, existing_first, existing_second),
+        (true, false) => (existing_first, new_node, existing_second),
+        (false, true) => (existing_first, new_node, existing_second),
+        (false, false) => (existing_first, existing_second, new_node),
+    };
+
+    split.first = Box::new(first);
+    split.second = Box::new(CommandPaneNode::Split(CommandPaneSplit {
+        id: split_id,
+        axis,
+        ratio: 0.5,
+        first: Box::new(second_first),
+        second: Box::new(second_second),
+    }));
+}
+
+fn command_insert_target_axis_chain_uses_native_default_ratios(
+    node: &CommandPaneNode,
+    target_group_id: CommandPaneGroupId,
+    axis: WorkspaceSplitAxis,
+) -> bool {
+    match node {
+        CommandPaneNode::Leaf(leaf) => leaf.group_id == target_group_id,
+        CommandPaneNode::Split(split) => {
+            let target_in_first = command_node_contains_group(&split.first, target_group_id);
+            let target_in_second = command_node_contains_group(&split.second, target_group_id);
+            if !target_in_first && !target_in_second {
+                return false;
+            }
+
+            if split.axis == axis {
+                command_split_axis_tree_uses_native_default_ratios(node, axis)
+            } else if target_in_first {
+                command_insert_target_axis_chain_uses_native_default_ratios(
+                    &split.first,
+                    target_group_id,
+                    axis,
+                )
+            } else {
+                command_insert_target_axis_chain_uses_native_default_ratios(
+                    &split.second,
+                    target_group_id,
+                    axis,
+                )
+            }
+        }
+    }
+}
+
+fn command_split_axis_tree_uses_native_default_ratios(
+    node: &CommandPaneNode,
+    axis: WorkspaceSplitAxis,
+) -> bool {
+    match node {
+        CommandPaneNode::Leaf(_) => true,
+        CommandPaneNode::Split(split) => {
+            (split.axis != axis || command_split_ratio_matches_native_default(split))
+                && command_split_axis_tree_uses_native_default_ratios(&split.first, axis)
+                && command_split_axis_tree_uses_native_default_ratios(&split.second, axis)
+        }
+    }
+}
+
+fn command_split_ratio_matches_native_default(split: &CommandPaneSplit) -> bool {
+    let Some(expected_ratio) = command_split_native_default_ratio(split) else {
+        return false;
+    };
+    (workspace_split_ratio(split.ratio) - expected_ratio).abs() < 0.001
+}
+
+fn command_split_native_default_ratio(split: &CommandPaneSplit) -> Option<f32> {
+    let first_count = command_node_leaf_count(&split.first);
+    let second_count = command_node_leaf_count(&split.second);
+    let total_count = first_count + second_count;
+    if total_count < 2 {
+        return None;
+    }
+    Some(workspace_split_ratio(
+        first_count as f32 / total_count as f32,
+    ))
+}
+
+fn command_node_leaf_count(node: &CommandPaneNode) -> usize {
+    match node {
+        CommandPaneNode::Leaf(leaf) => usize::from(!leaf.tab_group.tabs.is_empty()),
+        CommandPaneNode::Split(split) => {
+            command_node_leaf_count(&split.first) + command_node_leaf_count(&split.second)
+        }
+    }
+}
+
+fn rebalance_command_split_axis_chain_containing_group(
+    node: &mut CommandPaneNode,
+    target_group_id: CommandPaneGroupId,
+    axis: WorkspaceSplitAxis,
+) -> bool {
+    match node {
+        CommandPaneNode::Leaf(leaf) => leaf.group_id == target_group_id,
+        CommandPaneNode::Split(split) => {
+            let target_in_first = command_node_contains_group(&split.first, target_group_id);
+            let target_in_second = command_node_contains_group(&split.second, target_group_id);
+            if !target_in_first && !target_in_second {
+                return false;
+            }
+
+            if split.axis == axis {
+                /*
+                CDXC:GPUICommandPaneSplits 2026-06-25-16:14:
+                Native command pane layouts flatten repeated same-direction split insertion into one split node whose children default to equal ratios until the user resizes. GPUI still stores binary splits, so rebalance only untouched same-axis chains by visible leaf count after insertion; explicit user-resized ratios stay unchanged instead of being hidden by fallback geometry.
+                */
+                rebalance_command_split_axis_to_native_default_ratios(node, axis);
+                true
+            } else if target_in_first {
+                rebalance_command_split_axis_chain_containing_group(
+                    &mut split.first,
+                    target_group_id,
+                    axis,
+                )
+            } else {
+                rebalance_command_split_axis_chain_containing_group(
+                    &mut split.second,
+                    target_group_id,
+                    axis,
+                )
+            }
+        }
+    }
+}
+
+fn rebalance_command_split_axis_to_native_default_ratios(
+    node: &mut CommandPaneNode,
+    axis: WorkspaceSplitAxis,
+) {
+    match node {
+        CommandPaneNode::Leaf(_) => {}
+        CommandPaneNode::Split(split) => {
+            if split.axis == axis
+                && let Some(default_ratio) = command_split_native_default_ratio(split)
+            {
+                split.ratio = default_ratio;
+            }
+            rebalance_command_split_axis_to_native_default_ratios(&mut split.first, axis);
+            rebalance_command_split_axis_to_native_default_ratios(&mut split.second, axis);
         }
     }
 }
@@ -17899,13 +20199,28 @@ struct GpuiShellLayoutState {
     previous_non_command_focus: Option<ShellFocusTarget>,
     agents_workspace: WorkspaceModel,
     command_pane: CommandPaneModel,
+    command_startup_activity_restore_intents: Vec<GpuiCommandStartupActivityRestoreIntent>,
+    command_delayed_send_restore_timers: Vec<GpuiCommandDelayedSendRestoreTimer>,
     project_editor_shell: ProjectEditorShellModel,
     browser_profiles: BrowserProfileModel,
     browser_tabs: BrowserTabModel,
 }
 
 impl GpuiShellLayoutState {
-    fn shell_default(content_height: f32) -> Self {
+    fn shell_default_from_shared_settings(
+        content_height: f32,
+        settings: &shared_settings::SharedSidebarSettingsSnapshot,
+    ) -> Self {
+        Self::shell_default_with_command_default_height_px(
+            content_height,
+            command_pane_default_height_px_from_shared_settings(settings),
+        )
+    }
+
+    fn shell_default_with_command_default_height_px(
+        content_height: f32,
+        command_default_height_px: f32,
+    ) -> Self {
         let agents_workspace = WorkspaceModel::first_slice_default();
         let shell_focus = ShellFocusTarget::AgentsPane(agents_workspace.focused_pane);
         let browser_profiles = BrowserProfileModel::shell_default();
@@ -17916,7 +20231,12 @@ impl GpuiShellLayoutState {
             shell_focus,
             previous_non_command_focus: Some(shell_focus),
             agents_workspace,
-            command_pane: CommandPaneModel::shell_default(content_height),
+            command_pane: CommandPaneModel::shell_default_with_default_height_px(
+                content_height,
+                command_default_height_px,
+            ),
+            command_startup_activity_restore_intents: Vec::new(),
+            command_delayed_send_restore_timers: Vec::new(),
             project_editor_shell: ProjectEditorShellModel::shell_default(),
             browser_profiles,
             browser_tabs,
@@ -17926,18 +20246,53 @@ impl GpuiShellLayoutState {
     fn load_or_default(
         content_height: f32,
         fallback_availability: ProjectScopedWorkareaAvailability,
+        settings: &shared_settings::SharedSidebarSettingsSnapshot,
     ) -> Self {
         read_json_object(&gpui_workspace_shell_state_path())
             .and_then(|object| {
-                Self::from_json_object(&object, content_height, fallback_availability)
+                Self::from_json_object_with_shared_settings(
+                    &object,
+                    content_height,
+                    fallback_availability,
+                    settings,
+                )
             })
-            .unwrap_or_else(|| Self::shell_default(content_height))
+            .unwrap_or_else(|| Self::shell_default_from_shared_settings(content_height, settings))
     }
 
+    #[cfg(test)]
     fn from_json_object(
         object: &serde_json::Map<String, serde_json::Value>,
         content_height: f32,
         fallback_availability: ProjectScopedWorkareaAvailability,
+    ) -> Option<Self> {
+        Self::from_json_object_with_command_default_height_px(
+            object,
+            content_height,
+            fallback_availability,
+            COMMAND_PANE_DEFAULT_HEIGHT_PX,
+        )
+    }
+
+    fn from_json_object_with_shared_settings(
+        object: &serde_json::Map<String, serde_json::Value>,
+        content_height: f32,
+        fallback_availability: ProjectScopedWorkareaAvailability,
+        settings: &shared_settings::SharedSidebarSettingsSnapshot,
+    ) -> Option<Self> {
+        Self::from_json_object_with_command_default_height_px(
+            object,
+            content_height,
+            fallback_availability,
+            command_pane_default_height_px_from_shared_settings(settings),
+        )
+    }
+
+    fn from_json_object_with_command_default_height_px(
+        object: &serde_json::Map<String, serde_json::Value>,
+        content_height: f32,
+        fallback_availability: ProjectScopedWorkareaAvailability,
+        command_default_height_px: f32,
     ) -> Option<Self> {
         /*
         CDXC:GPUIWorkspacePersistence 2026-06-22-06:29:
@@ -17981,9 +20336,19 @@ impl GpuiShellLayoutState {
         let agents_workspace = object
             .get("agentsWorkspace")
             .and_then(workspace_model_from_shell_state)?;
-        let command_pane = object
-            .get("commandPane")
-            .and_then(|value| command_pane_model_from_shell_state(value, content_height))?;
+        let command_pane_value = object.get("commandPane")?;
+        let command_pane = command_pane_model_from_shell_state_with_default_height_px(
+            command_pane_value,
+            content_height,
+            command_default_height_px,
+        )?;
+        let command_startup_activity_restore_intents =
+            command_startup_activity_restore_intents_from_shell_state(
+                command_pane_value,
+                &command_pane,
+            );
+        let command_delayed_send_restore_timers =
+            command_delayed_send_restore_timers_from_shell_state(command_pane_value, &command_pane);
         let project_editor_shell = object
             .get("projectEditorShell")
             .and_then(|value| project_editor_shell_from_shell_state(value, active_mode))?;
@@ -18034,6 +20399,8 @@ impl GpuiShellLayoutState {
             previous_non_command_focus,
             agents_workspace,
             command_pane,
+            command_startup_activity_restore_intents,
+            command_delayed_send_restore_timers,
             project_editor_shell,
             browser_profiles,
             browser_tabs,
@@ -18125,7 +20492,11 @@ fn gpui_workspace_shell_state_json(app: &GhostexGpuiApp) -> serde_json::Value {
             .previous_non_command_focus
             .map(shell_focus_to_shell_state_json),
         "agentsWorkspace": workspace_model_to_shell_state_json(&app.agents_workspace),
-        "commandPane": command_pane_model_to_shell_state_json(&app.command_pane),
+        "commandPane": command_pane_model_to_shell_state_json_with_delayed_send_timers(
+            &app.command_pane,
+            &app.command_delayed_send_timers,
+            SystemTime::now(),
+        ),
         "browserProfiles": browser_profile_model_to_shell_state_json(&app.browser_profiles),
         "browserTabs": browser_tab_model_to_shell_state_json(&app.browser_tabs),
         "projectEditorShell": project_editor_shell_to_shell_state_json(&app.project_editor_shell),
@@ -18439,20 +20810,86 @@ fn collect_workspace_split_ids(node: &WorkspaceNode, split_ids: &mut Vec<Workspa
 }
 
 fn command_pane_model_to_shell_state_json(model: &CommandPaneModel) -> serde_json::Value {
+    command_pane_model_to_shell_state_json_with_optional_delayed_send_timers(model, None, None)
+}
+
+fn command_pane_model_to_shell_state_json_with_delayed_send_timers(
+    model: &CommandPaneModel,
+    delayed_send_timers: &HashMap<CommandSessionId, GpuiCommandDelayedSendTimer>,
+    now: SystemTime,
+) -> serde_json::Value {
+    command_pane_model_to_shell_state_json_with_optional_delayed_send_timers(
+        model,
+        Some(delayed_send_timers),
+        Some(now),
+    )
+}
+
+fn command_pane_model_to_shell_state_json_with_optional_delayed_send_timers(
+    model: &CommandPaneModel,
+    delayed_send_timers: Option<&HashMap<CommandSessionId, GpuiCommandDelayedSendTimer>>,
+    now: Option<SystemTime>,
+) -> serde_json::Value {
     /*
     CDXC:GPUICommandTabStatus 2026-06-22-16:40:
-    Command tab status persistence is limited to enum/boolean shell metadata so restored command placeholders keep semantic dots without storing command text, command output, terminal content, delayed-send deadlines, private titles, paths, tokens, or user content.
+    Command tab status persistence is limited to enum/boolean shell metadata so restored command placeholders keep semantic status indicators without storing command text, command output, terminal content, delayed-send deadlines, private titles, paths, tokens, or user content.
+
+    CDXC:GPUICommandPane 2026-06-24-23:49:
+    Action reuse metadata is live-only. Persisting command ids, run ids, per-action sound preferences, or session-state file paths would create durable command-action provenance without a user requirement, so shell JSON keeps only the preexisting command layout and activity enums.
+
+    CDXC:GPUICommandTabSleep 2026-06-25-14:27:
+    Command tab sleep is safe shell lifecycle metadata. Persist only the isSleeping boolean beside activity and delayed-send state so restored tabs stay parked without storing command text, output, paths, process ids, status-file paths, or terminal content.
+
+    CDXC:GPUICommandDelayedSend 2026-06-25-15:11:
+    Live GPUI Delayed Send timers are process-memory contracts that press Return later through the exact mounted Ghostty surface. App-level persistence may snapshot only the deadline and remaining milliseconds for restart re-arm; model-only persistence still writes only semantic restored delayed-send placeholders.
+
+    CDXC:GPUICommandCloseAfterDone 2026-06-25-15:24:
+    Close After Done arming is safe command lifecycle metadata. Persist only the armed boolean so restored command-pane Action tabs can keep the user request, while deadlines/countdowns/generations stay process-local and restart from the current visible done state.
+
+        CDXC:GPUICommandDelayedSend 2026-06-25-15:46:
+        Sleeping command tabs preserve Delayed Send and Close After Done intent in shell state like native session records. Timer-owned Delayed Send writes only the safe restart checkpoint, while non-runtime restored placeholders keep the boolean intent.
+
+    CDXC:GPUIFocusedSplits 2026-06-25-16:05:
+    Command split axis is shell layout metadata. Persist it so command-pane split geometry round-trips without storing command text, terminal content, paths, process ids, or runtime mount state. Focused command hotkeys still write horizontal command splits for both directions to match native.
+
+    CDXC:GPUICommandDelayedSend 2026-06-25-16:41:
+    App-level command-pane persistence now mirrors native delayed-send restart behavior by writing only a live timer's UTC deadline and remaining-duration checkpoint. The model-only serializer still emits no deadlines, and neither path stores command text, titles, terminal content, paths, runtime ids, stdout/stderr, or countdown labels.
     */
     serde_json::json!({
         "terminalSessions": model
             .terminal_sessions
             .iter()
             .map(|session| {
-                serde_json::json!({
+                let restored_timer = delayed_send_timers
+                    .and_then(|timers| timers.get(&session.id).copied())
+                    .filter(|_| session.delayed_send_active && session.delayed_send_timer_owned)
+                    .and_then(|timer| now.map(|now| (timer, timer.remaining_ms(now))))
+                    .filter(|(_, remaining_ms)| *remaining_ms > 0);
+                let mut session_json = serde_json::json!({
                     "id": session.id.0,
-                    "activity": session.activity.element_slug(),
-                    "delayedSendActive": session.delayed_send_active,
-                })
+                    "activity": if session.is_sleeping {
+                        CommandTerminalActivity::Idle.element_slug()
+                    } else {
+                        session.activity.element_slug()
+                    },
+                    "delayedSendActive": restored_timer.is_some()
+                        || (session.delayed_send_active && !session.delayed_send_timer_owned),
+                    "closeAfterDone": session.close_after_done_armed,
+                    "isSleeping": session.is_sleeping,
+                });
+                if let Some((timer, remaining_ms)) = restored_timer
+                    && let Some(object) = session_json.as_object_mut()
+                {
+                    object.insert(
+                        "delayedSendDeadlineAt".to_string(),
+                        serde_json::json!(gpui_iso8601_utc(timer.deadline_at)),
+                    );
+                    object.insert(
+                        "delayedSendRemainingMs".to_string(),
+                        serde_json::json!(remaining_ms),
+                    );
+                }
+                session_json
             })
             .collect::<Vec<_>>(),
         "root": command_pane_node_to_shell_state_json(&model.root),
@@ -18482,6 +20919,7 @@ fn command_pane_node_to_shell_state_json(node: &CommandPaneNode) -> serde_json::
         CommandPaneNode::Split(split) => serde_json::json!({
             "type": "split",
             "splitId": split.id.0,
+            "axis": split.axis.element_slug(),
             "ratio": json_number_f32(workspace_split_ratio(split.ratio)),
             "first": command_pane_node_to_shell_state_json(&split.first),
             "second": command_pane_node_to_shell_state_json(&split.second),
@@ -18489,9 +20927,22 @@ fn command_pane_node_to_shell_state_json(node: &CommandPaneNode) -> serde_json::
     }
 }
 
+#[cfg(test)]
 fn command_pane_model_from_shell_state(
     value: &serde_json::Value,
     content_height: f32,
+) -> Option<CommandPaneModel> {
+    command_pane_model_from_shell_state_with_default_height_px(
+        value,
+        content_height,
+        COMMAND_PANE_DEFAULT_HEIGHT_PX,
+    )
+}
+
+fn command_pane_model_from_shell_state_with_default_height_px(
+    value: &serde_json::Value,
+    content_height: f32,
+    default_height_px: f32,
 ) -> Option<CommandPaneModel> {
     let object = value.as_object()?;
     let sessions = json_array_field(object, "terminalSessions")?
@@ -18516,7 +20967,12 @@ fn command_pane_model_from_shell_state(
             last_expanded_mode: CommandPaneMode::Pinned,
             height_ratio: json_f32_field(object, "heightRatio")
                 .map(command_pane_height_ratio)
-                .unwrap_or_else(|| command_pane_default_height_ratio(content_height)),
+                .unwrap_or_else(|| {
+                    command_pane_default_height_ratio_for_default_height_px(
+                        default_height_px,
+                        content_height,
+                    )
+                }),
             resize_drag: None,
             next_group_id: json_u64_field(object, "nextGroupId").unwrap_or(1).max(1),
             next_split_id: json_u64_field(object, "nextSplitId").unwrap_or(1).max(1),
@@ -18594,7 +21050,12 @@ fn command_pane_model_from_shell_state(
         last_expanded_mode,
         height_ratio: json_f32_field(object, "heightRatio")
             .map(command_pane_height_ratio)
-            .unwrap_or_else(|| command_pane_default_height_ratio(content_height)),
+            .unwrap_or_else(|| {
+                command_pane_default_height_ratio_for_default_height_px(
+                    default_height_px,
+                    content_height,
+                )
+            }),
         resize_drag: None,
         next_group_id: json_u64_field(object, "nextGroupId").unwrap_or(0).max(
             group_ids
@@ -18629,15 +21090,174 @@ fn command_session_from_shell_state(value: &serde_json::Value) -> Option<Command
     if id.0 == 0 {
         return None;
     }
-    let activity = json_string_field(object, "activity")
-        .and_then(CommandTerminalActivity::from_slug)
-        .unwrap_or_default();
+    let is_sleeping = json_bool_field(object, "isSleeping").unwrap_or(false);
+    let activity = if is_sleeping {
+        CommandTerminalActivity::Idle
+    } else {
+        json_string_field(object, "activity")
+            .and_then(CommandTerminalActivity::from_slug)
+            .unwrap_or_default()
+    };
     let delayed_send_active = json_bool_field(object, "delayedSendActive").unwrap_or(false);
+    let close_after_done_armed = json_bool_field(object, "closeAfterDone").unwrap_or(false);
     Some(
         CommandTerminalSession::placeholder(id, command_session_title_for_id(id))
             .with_activity(activity)
-            .with_delayed_send_active(delayed_send_active),
+            .with_delayed_send_active(delayed_send_active)
+            .with_close_after_done_armed(close_after_done_armed)
+            .with_sleeping(is_sleeping),
     )
+}
+
+fn command_delayed_send_restore_timers_from_shell_state(
+    value: &serde_json::Value,
+    command_pane: &CommandPaneModel,
+) -> Vec<GpuiCommandDelayedSendRestoreTimer> {
+    let Some(object) = value.as_object() else {
+        return Vec::new();
+    };
+    let Some(sessions) = json_array_field(object, "terminalSessions") else {
+        return Vec::new();
+    };
+    sessions
+        .iter()
+        .filter_map(|value| {
+            let object = value.as_object()?;
+            if json_bool_field(object, "delayedSendActive") != Some(true) {
+                return None;
+            }
+            let session_id = CommandSessionId(json_u64_field(object, "id")?);
+            if command_pane.session(session_id).is_none() {
+                return None;
+            }
+            let remaining_ms = object
+                .get("delayedSendRemainingMs")
+                .and_then(gpui_command_delayed_send_restore_remaining_ms)?;
+            Some(GpuiCommandDelayedSendRestoreTimer {
+                session_id,
+                remaining_ms,
+            })
+        })
+        .collect()
+}
+
+fn command_startup_activity_restore_intents_from_shell_state(
+    value: &serde_json::Value,
+    command_pane: &CommandPaneModel,
+) -> Vec<GpuiCommandStartupActivityRestoreIntent> {
+    let Some(object) = value.as_object() else {
+        return Vec::new();
+    };
+    let Some(sessions) = json_array_field(object, "terminalSessions") else {
+        return Vec::new();
+    };
+    sessions
+        .iter()
+        .filter_map(|value| {
+            let object = value.as_object()?;
+            let activity = json_string_field(object, "activity")
+                .and_then(CommandTerminalActivity::from_slug)?;
+            if !matches!(
+                activity,
+                CommandTerminalActivity::Working | CommandTerminalActivity::Attention
+            ) {
+                return None;
+            }
+            let session_id = CommandSessionId(json_u64_field(object, "id")?);
+            if command_pane.session(session_id).is_none() {
+                return None;
+            }
+            Some(GpuiCommandStartupActivityRestoreIntent {
+                session_id,
+                activity,
+            })
+        })
+        .collect()
+}
+
+fn command_pane_apply_startup_activity_restore_intents(
+    command_pane: &mut CommandPaneModel,
+    restore_intents: &[GpuiCommandStartupActivityRestoreIntent],
+) -> bool {
+    /*
+    CDXC:GPUICommandStartupRestore 2026-06-25-17:25:
+    Native command-panel restoreActivity treats Working as a one-shot startup wake hint and Attention as a wake plus visible status. GPUI must parse those raw activity hints before sleeping-session normalization, then use normal visible command-pane layout to expand/select/wake the restored tab; Working is cleared to Idle after the wake while Attention remains visible.
+    */
+    let mut changed = false;
+    for restore_intent in restore_intents {
+        if command_pane.session(restore_intent.session_id).is_none() {
+            continue;
+        }
+        let target_group_id =
+            command_pane_group_for_session(command_pane, restore_intent.session_id);
+        let active_before = command_pane.active_group_and_session_id();
+        if let Some(group_id) = target_group_id
+            && active_before != Some((group_id, restore_intent.session_id))
+            && command_pane.select_session_in_group(group_id, restore_intent.session_id)
+        {
+            changed = true;
+        }
+        if !command_pane.is_expanded() {
+            command_pane.expand();
+            changed = true;
+        }
+        let Some(session) = command_pane.session_mut(restore_intent.session_id) else {
+            continue;
+        };
+        if session.is_sleeping {
+            session.is_sleeping = false;
+            changed = true;
+        }
+        let restored_activity = match restore_intent.activity {
+            CommandTerminalActivity::Idle => CommandTerminalActivity::Idle,
+            CommandTerminalActivity::Working => CommandTerminalActivity::Idle,
+            CommandTerminalActivity::Attention => CommandTerminalActivity::Attention,
+        };
+        if session.activity != restored_activity {
+            session.activity = restored_activity;
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn command_pane_apply_delayed_send_restore_intent(
+    command_pane: &mut CommandPaneModel,
+    session_id: CommandSessionId,
+) -> bool {
+    /*
+    CDXC:GPUICommandDelayedSend 2026-06-25-16:56:
+    Native startup restores command-panel terminal sessions with active Delayed Send deadlines so the pending Enter has a live terminal when the timer fires. GPUI should wake only this persisted restore path while preserving the existing in-process manual Sleep rule that parks active timers until the user wakes the tab.
+
+    CDXC:GPUICommandDelayedSend 2026-06-25-17:19:
+    A restored GPUI Delayed Send timer needs the command body to exist through normal visible layout because GPUI command terminals do not use hidden/offscreen mounts. Promote the restored command tab to the active visible command-pane body during startup restore so the timer is not stranded behind a collapsed pane or inactive tab.
+    */
+    if command_pane.session(session_id).is_none() {
+        return false;
+    }
+    let target_group_id = command_pane_group_for_session(command_pane, session_id);
+    let active_before = command_pane.active_group_and_session_id();
+    let mut changed = false;
+    if let Some(group_id) = target_group_id
+        && active_before != Some((group_id, session_id))
+        && command_pane.select_session_in_group(group_id, session_id)
+    {
+        changed = true;
+    }
+    if !command_pane.is_expanded() {
+        command_pane.expand();
+        changed = true;
+    }
+    let Some(session) = command_pane.session_mut(session_id) else {
+        return changed;
+    };
+    changed = changed
+        || !session.delayed_send_active
+        || !session.delayed_send_timer_owned
+        || session.is_sleeping;
+    session.set_delayed_send_active(true, true);
+    session.is_sleeping = false;
+    changed
 }
 
 fn command_pane_node_from_shell_state(
@@ -18691,6 +21311,9 @@ fn command_pane_node_from_shell_state(
             }
             Some(CommandPaneNode::Split(CommandPaneSplit {
                 id: split_id,
+                axis: json_string_field(object, "axis")
+                    .and_then(WorkspaceSplitAxis::from_slug)
+                    .unwrap_or(WorkspaceSplitAxis::Horizontal),
                 ratio: json_f32_field(object, "ratio")
                     .map(workspace_split_ratio)
                     .unwrap_or(0.5),
@@ -20438,12 +23061,15 @@ fn consume_exited_command_terminal_ghostty_surfaces(
         CommandTerminalBodyMountSlotId,
         terminal_ghostty_surface::GhosttySurfaceOwner<CommandTerminalBodyMountSlotId>,
     >,
-) -> bool {
+) -> CommandTerminalProcessExitCleanup {
     /*
     CDXC:GPUICommandTerminalProcessExit 2026-06-23-05:30:
     Mounted command process-exit cleanup is command-pane-only and removes only exact current command body slots through `CommandPaneModel::close_session`. Already-exited surfaces must not receive a Ghostty close request, and this helper cannot touch Agents workspace/runtime/startup maps or command close-confirm callback state.
+
+    CDXC:GPUICommandPane 2026-06-25-11:11:
+    Mapped Action sessions that disappear through process-exit cleanup must also finish sidebar button feedback before the command tab is removed. The completion record is derived only from live command ownership plus the matching status-file stamp when available; missing or non-idle status stamps become error feedback so the reused SidebarApp cannot keep an orphaned running state.
     */
-    let mut changed = false;
+    let mut cleanup = CommandTerminalProcessExitCleanup::default();
     for slot_id in command_pane.rendered_terminal_body_mount_slots() {
         if !command_pane.is_current_terminal_body_mount_slot(slot_id) {
             continue;
@@ -20454,11 +23080,18 @@ fn consume_exited_command_terminal_ghostty_surfaces(
                 && surface.runtime_session_id() == command_terminal_runtime_session_id(slot_id)
                 && surface.process_exited()
         });
-        if process_exited && command_pane.close_session(slot_id.group_id, slot_id.session_id) {
-            changed = true;
+        if process_exited {
+            let completion =
+                command_pane.take_action_run_completion_for_exited_session(slot_id.session_id);
+            if command_pane.close_session(slot_id.group_id, slot_id.session_id) {
+                cleanup.changed = true;
+                if let Some(completion) = completion {
+                    cleanup.completions.push(completion);
+                }
+            }
         }
     }
-    changed
+    cleanup
 }
 
 fn focused_agents_terminal_surface_mount_slot(
@@ -20664,6 +23297,116 @@ fn focused_command_terminal_surface_mount_slot(
     command_pane
         .is_current_terminal_body_mount_slot(slot_id)
         .then_some(slot_id)
+}
+
+fn focused_sleeping_command_placeholder_wake_target(
+    shell_focus: ShellFocusTarget,
+    command_pane: &CommandPaneModel,
+    keystroke: &Keystroke,
+) -> Option<(CommandPaneGroupId, CommandSessionId)> {
+    /*
+    CDXC:GPUICommandSleepingPlaceholder 2026-06-25-14:49:
+    Keyboard wake is scoped to the command pane's focused active tab and only when that command session is parked sleeping. Non-command focus, running command terminals, collapsed/missing groups, and non-alphanumeric keys must not create terminals, reroute input, or mutate shell state.
+    */
+    if shell_focus != ShellFocusTarget::CommandPane
+        || !command_pane_sleeping_placeholder_keystroke_requests_wake(keystroke)
+    {
+        return None;
+    }
+
+    let (group_id, session_id) = command_pane.active_group_and_session_id()?;
+    command_pane
+        .session(session_id)
+        .is_some_and(|session| session.is_sleeping)
+        .then_some((group_id, session_id))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GpuiCommandPaneFocusedSessionHotkeyAction {
+    Rename,
+    DelayedSend,
+    CloseAfterDone,
+    Sleep,
+    Wake,
+    Close,
+}
+
+fn gpui_command_pane_focused_session_hotkey_action(
+    action_id: &str,
+) -> Option<GpuiCommandPaneFocusedSessionHotkeyAction> {
+    /*
+    CDXC:GPUICommandFocusedSessionActions 2026-06-25-15:01:
+    GPUI handles command-pane focused Delayed Send, Close After Done, Sleep, Wake, and Close action ids from the shared command-palette hotkey bridge. Other hotkey ids must continue to use their existing modal or shell handlers instead of being swallowed by command-pane lifecycle code.
+    */
+    match action_id {
+        "renameActiveSession" => Some(GpuiCommandPaneFocusedSessionHotkeyAction::Rename),
+        "delayedSend" => Some(GpuiCommandPaneFocusedSessionHotkeyAction::DelayedSend),
+        "closeAfterDone" => Some(GpuiCommandPaneFocusedSessionHotkeyAction::CloseAfterDone),
+        "sleepFocusedSession" => Some(GpuiCommandPaneFocusedSessionHotkeyAction::Sleep),
+        "wakeFocusedSession" => Some(GpuiCommandPaneFocusedSessionHotkeyAction::Wake),
+        "closeFocusedSession" => Some(GpuiCommandPaneFocusedSessionHotkeyAction::Close),
+        _ => None,
+    }
+}
+
+fn gpui_command_pane_close_focused_hotkey_should_run(shell_focus: ShellFocusTarget) -> bool {
+    /*
+    CDXC:GPUICommandFocusedSessionActions 2026-06-25-15:05:
+    Close Focused Session from the shared command-palette bridge should close the command terminal only when the command pane owns shell focus. Non-command focus remains out of this command-pane parity path so GPUI does not widen command-pane work into unrelated surface close behavior.
+    */
+    shell_focus == ShellFocusTarget::CommandPane
+}
+
+fn focused_command_pane_sleep_target(
+    shell_focus: ShellFocusTarget,
+    command_pane: &CommandPaneModel,
+) -> Option<(CommandPaneGroupId, CommandSessionId)> {
+    /*
+    CDXC:GPUICommandFocusedSessionActions 2026-06-25-14:56:
+    Sleep Focused Session should target the active command terminal only when the command pane owns shell focus and is visibly expanded, matching native focused-session routing from AppKit first responder state. Collapsed strips, non-command focus, missing sessions, and already sleeping command tabs must no-op instead of mutating stale command state.
+    */
+    if shell_focus != ShellFocusTarget::CommandPane || !command_pane.is_expanded() {
+        return None;
+    }
+
+    let (group_id, session_id) = command_pane.active_group_and_session_id()?;
+    command_pane
+        .session(session_id)
+        .is_some_and(|session| !session.is_sleeping)
+        .then_some((group_id, session_id))
+}
+
+fn focused_command_pane_rename_target(
+    shell_focus: ShellFocusTarget,
+    command_pane: &CommandPaneModel,
+) -> Option<(CommandPaneGroupId, CommandSessionId)> {
+    /*
+    CDXC:GPUICommandFocusedSessionActions 2026-06-25-16:33:
+    Rename Active Session is a focused-session action in native command panes. In GPUI, route it only when the expanded command pane owns shell focus, then open the shared Rename Session modal for the active command tab without deriving titles from command text, paths, output, or persisted shell JSON.
+    */
+    if shell_focus != ShellFocusTarget::CommandPane || !command_pane.is_expanded() {
+        return None;
+    }
+    command_pane.active_group_and_session_id()
+}
+
+fn focused_command_pane_wake_target(
+    shell_focus: ShellFocusTarget,
+    command_pane: &CommandPaneModel,
+) -> Option<(CommandPaneGroupId, CommandSessionId)> {
+    /*
+    CDXC:GPUICommandFocusedSessionActions 2026-06-25-15:01:
+    Wake Focused Session is the inverse focused command-terminal lifecycle action. Resolve only the expanded command pane's active sleeping tab while it owns shell focus, matching native command-palette focused-session routing without waking non-command focus, running command tabs, or collapsed command strips.
+    */
+    if shell_focus != ShellFocusTarget::CommandPane || !command_pane.is_expanded() {
+        return None;
+    }
+
+    let (group_id, session_id) = command_pane.active_group_and_session_id()?;
+    command_pane
+        .session(session_id)
+        .is_some_and(|session| session.is_sleeping)
+        .then_some((group_id, session_id))
 }
 
 fn command_terminal_surface_focus_states_for_slots(
@@ -21156,12 +23899,20 @@ fn terminal_session_title_for_id(id: TerminalSessionId) -> String {
     }
 }
 
-fn command_session_title_for_id(id: CommandSessionId) -> String {
-    match id.0 {
-        1 => "Command".to_string(),
-        2 => "Shell".to_string(),
-        _ => format!("Command {}", id.0),
-    }
+fn command_session_title_for_id(_id: CommandSessionId) -> String {
+    /*
+    CDXC:GPUICommandPane 2026-06-25-11:56:
+    Restored GPUI command placeholders must use the same generic `Command Terminal` fallback as newly created macOS command-pane terminals. Do not derive fallback titles from command ids or persist visible/private command titles, because shell-state JSON is layout metadata rather than command-content storage.
+    */
+    COMMAND_PANE_DEFAULT_SESSION_TITLE.to_string()
+}
+
+fn gpui_command_pane_sidebar_indicator_text(value: &str) -> Option<String> {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!normalized.is_empty()
+        && normalized.chars().count() <= GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS
+        && !normalized.chars().any(char::is_control))
+    .then_some(normalized)
 }
 
 fn sanitize_browser_tab_url_for_state(url: &str) -> Option<String> {
@@ -21684,8 +24435,61 @@ fn command_pane_height_ratio(ratio: f32) -> f32 {
     ratio.clamp(COMMAND_PANE_MIN_HEIGHT_RATIO, COMMAND_PANE_MAX_HEIGHT_RATIO)
 }
 
+fn command_pane_default_height_px_from_shared_settings(
+    settings: &shared_settings::SharedSidebarSettingsSnapshot,
+) -> f32 {
+    /*
+    CDXC:GPUICommandPane 2026-06-25-11:29:
+    The GPUI command-pane default-height reader mirrors shared Settings normalization: accept only JSON numbers, round to whole pixels, clamp to 40px-600px, and use the 125px product default for missing or malformed values. This keeps app startup, missing shell-state restore, and resize-rail reset aligned with the macOS command pane without persisting a second setting.
+    */
+    settings
+        .object()
+        .get("commandsPanelDefaultHeightPx")
+        .and_then(serde_json::Value::as_f64)
+        .filter(|value| value.is_finite())
+        .map(|value| value.round() as f32)
+        .unwrap_or(COMMAND_PANE_DEFAULT_HEIGHT_PX)
+        .clamp(
+            COMMAND_PANE_MIN_DEFAULT_HEIGHT_PX,
+            COMMAND_PANE_MAX_DEFAULT_HEIGHT_PX,
+        )
+}
+
+fn command_pane_click_to_wake_sleeping_sessions_from_shared_settings(
+    settings: &shared_settings::SharedSidebarSettingsSnapshot,
+) -> bool {
+    /*
+    CDXC:GPUICommandTabWake 2026-06-25-14:46:
+    GPUI command-tab selection must honor the shared clickToWakeSleepingSessions setting like macOS. Missing or malformed settings default to true, where tab selection keeps a sleeping placeholder cold; strict false makes selecting a sleeping command tab wake it immediately.
+    */
+    settings
+        .object()
+        .get("clickToWakeSleepingSessions")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
+}
+
+fn command_pane_sleeping_placeholder_wake_label(
+    active_session_is_sleeping: bool,
+    click_to_wake_enabled: bool,
+) -> Option<&'static str> {
+    (active_session_is_sleeping && click_to_wake_enabled)
+        .then_some(COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL)
+}
+
+#[cfg(test)]
 fn command_pane_default_height_ratio(content_height: f32) -> f32 {
-    command_pane_height_ratio(COMMAND_PANE_DEFAULT_HEIGHT_PX / content_height.max(1.0))
+    command_pane_default_height_ratio_for_default_height_px(
+        COMMAND_PANE_DEFAULT_HEIGHT_PX,
+        content_height,
+    )
+}
+
+fn command_pane_default_height_ratio_for_default_height_px(
+    default_height_px: f32,
+    content_height: f32,
+) -> f32 {
+    command_pane_height_ratio(default_height_px / content_height.max(1.0))
 }
 
 fn command_pane_content_height(window: &Window) -> f32 {
@@ -21768,6 +24572,11 @@ pub struct GhostexGpuiApp {
     Remote attach focus state is runtime-only glue from a machine/project/session id to the GPUI terminal tab that owns the SSH attach process. Store no SSH targets, tokens, remote paths, command text, project/session names, logs, or persistent shell state in this map.
     */
     remote_attach_sessions: HashMap<GpuiRemoteAttachSessionKey, TerminalSessionId>,
+    /*
+    CDXC:GPUISourceRuntime 2026-06-24-23:17:
+    GPUI Source uses a runtime-only code-server owner equivalent to macOS's shared editor process. It may hold the owned Child and current in-memory folder URL target while the app runs, but it must not persist paths, URLs, command text, stdout/stderr, tokens, page titles, or project names into shell state or support logs.
+    */
+    source_code_server_runtime: SourceCodeServerRuntimeOwner,
     source_workarea_runtime: SourceWorkareaRuntimeState,
     browser_workarea_runtime: BrowserWorkareaRuntimeState,
     kanban_workarea_runtime: ProjectScopedRealSurfaceRuntimeState,
@@ -21831,6 +24640,29 @@ pub struct GhostexGpuiApp {
     */
     sidebar_gxserver_bootstrap: Option<cef::SidebarGxserverBootstrap>,
     sidebar_gxserver_presentation_focus_state: GpuiGxserverPresentationFocusState,
+    /*
+    CDXC:GPUICommandPane 2026-06-25-10:50:
+    Sidebar command-session indicator refresh is change-detected against a sanitized JSON summary of command-pane sessions. Cache only that safe summary string for CEF bridge dedupe; do not store command text, paths, status-file paths, env, output, or persisted shell-state JSON here.
+    */
+    sidebar_command_pane_sessions_snapshot: String,
+    /*
+    CDXC:GPUICommandDelayedSend 2026-06-25-15:11:
+    GPUI Delayed Send timers for command-pane terminals are runtime-owned session timers. Store only shell session ids, UTC deadlines, and cancellation generations in memory; persist only the bounded restart checkpoint described below.
+
+    CDXC:GPUICommandDelayedSend 2026-06-25-16:41:
+    The runtime map remains process-owned, but shell persistence may snapshot the UTC deadline plus remaining milliseconds for restart re-arm parity with macOS. Never expand that snapshot to command text, terminal content, titles, paths, runtime ids, stdout/stderr, or countdown labels.
+    */
+    command_delayed_send_timers: HashMap<CommandSessionId, GpuiCommandDelayedSendTimer>,
+    command_delayed_send_generation: u64,
+    command_delayed_send_countdown_ticker_active: bool,
+    command_delayed_send_persistence_ticker_active: bool,
+    /*
+    CDXC:GPUICommandCloseAfterDone 2026-06-25-15:24:
+    Command Close After Done deadlines are runtime-only countdowns derived from armed command sessions that are currently done. Store only command session ids, deadlines, and cancellation generations here; the persisted shell state carries only the safe armed boolean.
+    */
+    command_close_after_done_timers: HashMap<CommandSessionId, GpuiCommandCloseAfterDoneTimer>,
+    command_close_after_done_generation: u64,
+    command_close_after_done_countdown_ticker_active: bool,
     /*
     CDXC:GPUISettingsGxserverAgentPolicy 2026-06-24-12:14:
     Startup and Settings-open hydration may both ask local gxserver for canonical agent policy. Keep only a runtime in-flight guard here so a missing daemon row is not seeded twice concurrently; the persisted values still live only in gxserver plus the central shared Settings render cache.
@@ -21941,12 +24773,22 @@ pub struct GhostexGpuiApp {
     command_split_drag: Option<CommandPaneSplitResizeDragState>,
     browser_split_drag: Option<BrowserSplitResizeDragState>,
     project_editor_companion_drag: Option<ProjectEditorCompanionResizeDragState>,
+    hovered_command_tab: Option<CommandPaneHoverTab>,
+    command_resize_hovering: Option<CommandPaneResizeHoverTarget>,
+    command_resize_hover_visible: Option<CommandPaneResizeHoverTarget>,
+    command_resize_hover_epoch: u64,
     sidebar_width: f32,
     sidebar_drag: Option<SidebarDragState>,
     sidebar_divider_hovering: bool,
     sidebar_divider_hover_visible: bool,
     sidebar_divider_hover_epoch: u64,
     app_modal_window: Option<WindowHandle<GpuiAppModalHostWindow>>,
+    /*
+    CDXC:GPUITitlebarTips 2026-06-24-23:17:
+    The titlebar Tips dropdown owns a runtime-only React titlebar-host CEF panel inside a gpui-component Popover. Store only the panel entity and open boolean so closing the popover can hide the native CEF child view; do not duplicate tips data, persist dropdown state, create AppKit child windows, or rely on invisible overlays.
+    */
+    titlebar_tips_panel_open: bool,
+    titlebar_tips_panel: Option<Entity<GpuiTitlebarTipsPanel>>,
     sidebar: Option<Entity<CefSurface>>,
     browser_surfaces: HashMap<BrowserTabId, Entity<CefSurface>>,
     address_input: Entity<InputState>,
@@ -21954,6 +24796,7 @@ pub struct GhostexGpuiApp {
 
 impl Drop for GhostexGpuiApp {
     fn drop(&mut self) {
+        self.source_code_server_runtime.stop();
         self.stop_gpui_keep_awake_runtime();
         self.stop_all_gpui_remote_gxserver_connections();
     }
@@ -21964,7 +24807,9 @@ impl GhostexGpuiApp {
         let parent = macos_parent_view(window)?;
         let project_name = titlebar_project_label_from_latest_sidebar_snapshot(None);
         let sidebar_url = sidebar_url().context("failed to resolve sidebar bundle URL")?;
-        let sidebar_runtime_settings_snapshot = sidebar_runtime_settings_snapshot_from_settings();
+        let shared_settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
+        let sidebar_runtime_settings_snapshot =
+            sidebar_runtime_settings_snapshot_from_shared_settings(&shared_settings_snapshot);
         let sidebar_gxserver_presentation_focus_state =
             GpuiGxserverPresentationFocusState::default();
         let sidebar_gxserver_bootstrap =
@@ -21978,7 +24823,14 @@ impl GhostexGpuiApp {
             ProjectScopedWorkareaAvailability::from_env_bridge_and_sidebar_runtime_settings(
                 &sidebar_runtime_settings_snapshot,
             ),
+            &shared_settings_snapshot,
         );
+        let command_startup_activity_restore_intents = shell_layout_state
+            .command_startup_activity_restore_intents
+            .clone();
+        let command_delayed_send_restore_timers = shell_layout_state
+            .command_delayed_send_restore_timers
+            .clone();
         let browser_url = shell_layout_state.browser_tabs.active_address_value();
         let browser_address_default = browser_url.clone();
         let project_editor_auto_sleep_policy = ProjectEditorAutoSleepPolicySnapshot::read_current();
@@ -22012,6 +24864,7 @@ impl GhostexGpuiApp {
                 remote_gxserver_connections: HashMap::new(),
                 remote_gxserver_presentation_stream_generation: 0,
                 remote_repository_clone_requests: HashMap::new(),
+                source_code_server_runtime: SourceCodeServerRuntimeOwner::new(),
                 source_workarea_runtime: SourceWorkareaRuntimeState::new(),
                 browser_workarea_runtime: BrowserWorkareaRuntimeState::new(),
                 kanban_workarea_runtime: ProjectScopedRealSurfaceRuntimeState::new(
@@ -22031,6 +24884,14 @@ impl GhostexGpuiApp {
                 sidebar_runtime_settings_snapshot,
                 sidebar_gxserver_bootstrap,
                 sidebar_gxserver_presentation_focus_state,
+                sidebar_command_pane_sessions_snapshot: String::new(),
+                command_delayed_send_timers: HashMap::new(),
+                command_delayed_send_generation: 0,
+                command_delayed_send_countdown_ticker_active: false,
+                command_delayed_send_persistence_ticker_active: false,
+                command_close_after_done_timers: HashMap::new(),
+                command_close_after_done_generation: 0,
+                command_close_after_done_countdown_ticker_active: false,
                 gxserver_agent_settings_reconciliation_in_flight: false,
                 workspace_drop_feedback: None,
                 command_drop_feedback: None,
@@ -22103,12 +24964,18 @@ impl GhostexGpuiApp {
                 command_split_drag: None,
                 browser_split_drag: None,
                 project_editor_companion_drag: None,
+                hovered_command_tab: None,
+                command_resize_hovering: None,
+                command_resize_hover_visible: None,
+                command_resize_hover_epoch: 0,
                 sidebar_width,
                 sidebar_drag: None,
                 sidebar_divider_hovering: false,
                 sidebar_divider_hover_visible: false,
                 sidebar_divider_hover_epoch: 0,
                 app_modal_window: None,
+                titlebar_tips_panel_open: false,
+                titlebar_tips_panel: None,
                 sidebar: None,
                 browser_surfaces: HashMap::new(),
                 address_input: address_input.clone(),
@@ -22128,9 +24995,20 @@ impl GhostexGpuiApp {
 
             this
         });
-        app.update(cx, |this, cx| {
+        app.update(cx, move |this, cx| {
+            let startup_activity_changed = this.restore_gpui_command_startup_activity_intents(
+                command_startup_activity_restore_intents,
+                cx,
+            );
+            let delayed_send_changed = this
+                .restore_gpui_command_delayed_send_timers(command_delayed_send_restore_timers, cx);
+            if startup_activity_changed || delayed_send_changed {
+                this.persist_shell_layout_state();
+            }
             this.schedule_project_editor_auto_sleep_for_inactive_modes(cx);
             this.start_project_editor_auto_sleep_policy_polling(cx);
+            this.start_command_action_status_polling(cx);
+            this.refresh_gpui_command_close_after_done_timers(cx);
             this.reconcile_gpui_gxserver_agent_settings_in_background(cx);
         });
 
@@ -22248,13 +25126,211 @@ impl GhostexGpuiApp {
         true
     }
 
+    fn ensure_source_code_server_runtime_for_current_context(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        /*
+        CDXC:GPUISourceRuntime 2026-06-24-23:17:
+        Source startup is lazy and visible-workarea scoped. Selecting or focusing awake Source may launch the shared code-server process in the background, but CEF creation still waits for the runtime readiness result and an authorized folder URL; no hidden Source CEF prewarm, fallback localhost adoption, persistent URL storage, or renderer-provided path is allowed.
+        */
+        if !self.project_workarea_runtime_cef_surface_may_be_visible(
+            ProjectWorkareaCefSurfaceSlotKey::Source,
+        ) {
+            return false;
+        }
+        let Some(target) = self
+            .latest_sidebar_project_snapshot
+            .as_ref()
+            .and_then(source_code_server_runtime_target_from_project_snapshot)
+        else {
+            return false;
+        };
+        let settings = SourceCodeServerRuntimeSettings::from_sidebar_runtime_settings(
+            &self.sidebar_runtime_settings_snapshot,
+        );
+        let mut changed = self.source_code_server_runtime.refresh_child_exit();
+        if self
+            .source_code_server_runtime
+            .can_reuse_ready_process(&settings)
+        {
+            self.source_code_server_runtime
+                .set_ready_target(target, settings);
+            if self.source_workarea_runtime.readiness_bridge
+                != SourceWorkareaReadinessBridgeState::Ready
+            {
+                self.source_workarea_runtime.readiness_bridge =
+                    SourceWorkareaReadinessBridgeState::Ready;
+                changed = true;
+            }
+            return changed;
+        }
+        if self
+            .source_code_server_runtime
+            .launching_matches(&target, &settings)
+        {
+            return changed;
+        }
+        if self
+            .source_code_server_runtime
+            .child_is_within_startup_grace()
+            && self.source_code_server_runtime.settings.as_ref() == Some(&settings)
+        {
+            if self.source_workarea_runtime.readiness_bridge
+                != SourceWorkareaReadinessBridgeState::Loading
+            {
+                self.source_workarea_runtime.readiness_bridge =
+                    SourceWorkareaReadinessBridgeState::Loading;
+                changed = true;
+            }
+            return changed;
+        }
+
+        if self.source_code_server_runtime.child.is_some() {
+            self.stop_source_code_server_runtime(cx);
+        }
+
+        let generation = self.source_code_server_runtime.next_generation();
+        self.source_code_server_runtime
+            .set_launching(target.clone(), settings.clone());
+        if self.source_workarea_runtime.readiness_bridge
+            != SourceWorkareaReadinessBridgeState::Loading
+        {
+            self.source_workarea_runtime.readiness_bridge =
+                SourceWorkareaReadinessBridgeState::Loading;
+        }
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let result = background
+                .spawn(async move { source_code_server_start_runtime_for_target(target, settings) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.finish_source_code_server_runtime_start(generation, result, cx);
+            });
+        })
+        .detach();
+        true
+    }
+
+    fn finish_source_code_server_runtime_start(
+        &mut self,
+        generation: u64,
+        result: Result<
+            (
+                SourceCodeServerRuntimeTarget,
+                SourceCodeServerRuntimeSettings,
+                SourceCodeServerRuntimeStartOutput,
+            ),
+            (
+                SourceCodeServerRuntimeTarget,
+                SourceCodeServerRuntimeSettings,
+            ),
+        >,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.source_code_server_runtime.generation != generation {
+            if let Ok((_, _, mut output)) = result {
+                let _ = output.child.kill();
+                let _ = output.child.wait();
+            }
+            return;
+        }
+
+        match result {
+            Ok((target, settings, output)) if output.responsive => {
+                self.source_code_server_runtime.set_ready(
+                    target,
+                    settings,
+                    output.child,
+                    output.started_at,
+                );
+                self.source_workarea_runtime.readiness_bridge =
+                    SourceWorkareaReadinessBridgeState::Ready;
+                self.refresh_project_workarea_cef_surface_slots_from_source_state(cx);
+                self.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
+            }
+            Ok((target, settings, output)) => {
+                self.source_code_server_runtime.set_failed(
+                    target,
+                    settings,
+                    Some(output.child),
+                    Some(output.started_at),
+                );
+                self.source_workarea_runtime.readiness_bridge =
+                    SourceWorkareaReadinessBridgeState::LoadFailed;
+                self.remove_project_workarea_runtime_cef_surface(
+                    ProjectWorkareaCefSurfaceSlotKey::Source,
+                    cx,
+                );
+                self.refresh_project_workarea_cef_surface_slots_from_source_state(cx);
+            }
+            Err((target, settings)) => {
+                self.source_code_server_runtime
+                    .set_failed(target, settings, None, None);
+                self.source_workarea_runtime.readiness_bridge =
+                    SourceWorkareaReadinessBridgeState::LoadFailed;
+                self.remove_project_workarea_runtime_cef_surface(
+                    ProjectWorkareaCefSurfaceSlotKey::Source,
+                    cx,
+                );
+                self.refresh_project_workarea_cef_surface_slots_from_source_state(cx);
+            }
+        }
+        self.update_project_workarea_runtime_cef_surface_visibility(cx);
+        cx.notify();
+    }
+
+    fn stop_source_code_server_runtime(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+        let changed = self.source_code_server_runtime.stop();
+        let removed = self.remove_project_workarea_runtime_cef_surface(
+            ProjectWorkareaCefSurfaceSlotKey::Source,
+            cx,
+        );
+        if changed || removed {
+            self.source_workarea_runtime.readiness_bridge =
+                SourceWorkareaReadinessBridgeState::MissingExplicitBridge;
+            self.refresh_project_workarea_cef_surface_slots_from_source_state(cx);
+        }
+        changed || removed
+    }
+
+    fn restart_source_code_server_runtime_after_settings_change(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if !self
+            .project_editor_shell
+            .is_mode_awake(TitlebarMode::Source)
+        {
+            return false;
+        }
+        let stopped = self.stop_source_code_server_runtime(cx);
+        self.ensure_source_code_server_runtime_for_current_context(cx) || stopped
+    }
+
+    fn remove_project_workarea_runtime_cef_surface(
+        &mut self,
+        slot_key: ProjectWorkareaCefSurfaceSlotKey,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(surface) = self.project_workarea_runtime_cef_surfaces.remove(&slot_key) else {
+            return false;
+        };
+        surface.update(cx, |surface, _| surface.set_visible(false));
+        self.update_project_workarea_runtime_cef_surface_visibility(cx);
+        true
+    }
+
     fn project_workarea_runtime_cef_surface_replacement_permitted(
         &self,
         slot_key: ProjectWorkareaCefSurfaceSlotKey,
     ) -> bool {
         /*
         CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-11:03:
-        Runtime placeholder replacement now follows real navigable CEF URL authority, not the retired source-ledger-only owner gates. Kanban and Manage can replace placeholders only when the current explicit project snapshot can issue a first-party bundled CEF URL; Source remains blocked until real code-server URL/process authority exists.
+        Runtime placeholder replacement now follows real navigable CEF URL authority, not the retired source-ledger-only owner gates. Kanban and Manage can replace placeholders only when the current explicit project snapshot can issue a first-party bundled CEF URL.
+
+        CDXC:GPUISourceRuntime 2026-06-24-23:17:
+        Source joins this same replacement edge only after the app-owned code-server runtime has reached the ready state for the current explicit sidebar project target. The URL may be used immediately for CefSurface creation but is not retained in shell state, logs, or source-ledger JSON.
         */
         self.project_workarea_runtime_url_for_slot(slot_key)
             .is_some()
@@ -22266,7 +25342,11 @@ impl GhostexGpuiApp {
     ) -> Option<ProjectWorkareaRealRuntimeUrl> {
         let snapshot = self.latest_sidebar_project_snapshot.as_ref()?;
         match slot_key {
-            ProjectWorkareaCefSurfaceSlotKey::Source => None,
+            ProjectWorkareaCefSurfaceSlotKey::Source => {
+                let target = source_code_server_runtime_target_from_project_snapshot(snapshot)?;
+                self.source_code_server_runtime
+                    .runtime_url_for_target(&target)
+            }
             ProjectWorkareaCefSurfaceSlotKey::Kanban => {
                 kanban_workarea_runtime_url_from_project_snapshot(snapshot)
             }
@@ -22364,8 +25444,17 @@ impl GhostexGpuiApp {
         /*
         CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-11:03:
         Workarea CEF surface materialization is active-workarea-only. The app creates Kanban/Manage CefSurface entities only when CEF is initialized, the workarea is selected and awake, and a real bundled runtime URL can be issued from the current explicit sidebar snapshot; it does not prewarm hidden surfaces or synthesize Source/code-server URLs.
+
+        CDXC:GPUISourceRuntime 2026-06-24-23:17:
+        Source uses the same active-workarea-only materialization edge, with one extra predecessor: ensure the shared code-server runtime is launching or ready before asking the URL gate for a Source CefSurface. Until readiness succeeds, this method leaves Source on its loading/error placeholder instead of creating an about:blank or dead localhost surface.
         */
         let mut changed = false;
+        if !self
+            .project_workarea_runtime_cef_surfaces
+            .contains_key(&ProjectWorkareaCefSurfaceSlotKey::Source)
+        {
+            changed |= self.ensure_source_code_server_runtime_for_current_context(cx);
+        }
         for slot_key in ProjectWorkareaCefSurfaceSlotKey::project_placeholder_slots() {
             if self
                 .project_workarea_runtime_cef_surfaces
@@ -22599,7 +25688,7 @@ impl GhostexGpuiApp {
             return;
         };
         if let Some(handle) = self.command_tab_scroll_handles.get(&group_id) {
-            handle.scroll_to_item(active_index);
+            command_pane_reveal_active_tab_with_native_margin(handle, active_index);
         }
     }
 
@@ -22619,8 +25708,29 @@ impl GhostexGpuiApp {
         else {
             return;
         };
-        self.command_collapsed_tab_scroll_handle
-            .scroll_to_item(active_index);
+        command_pane_reveal_active_tab_with_native_margin(
+            &self.command_collapsed_tab_scroll_handle,
+            active_index,
+        );
+    }
+
+    fn show_command_pane_active_tab_from_sticky_proxy(
+        &mut self,
+        group_id: Option<CommandPaneGroupId>,
+        scroll_handle: ScrollHandle,
+        active_index: usize,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUICommandTabOverflow 2026-06-25-13:34:
+        Clicking Show Active Tab should focus command chrome and center the already-selected command tab in the current scroll strip. This is runtime-only navigation state and must not mutate tab order, session identity, action metadata, command text, shell persistence, or logs.
+        */
+        if let Some(group_id) = group_id {
+            self.command_pane.focus_group(group_id);
+        }
+        self.focus_command_pane();
+        let _ = command_pane_center_active_tab_in_scroll_handle(&scroll_handle, active_index);
+        cx.notify();
     }
 
     fn mark_project_editor_mode_awake(
@@ -22696,7 +25806,54 @@ impl GhostexGpuiApp {
                             this.refresh_sidebar_runtime_settings_if_changed(cx);
                         let gxserver_bootstrap_changed =
                             this.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
-                        if runtime_settings_changed || gxserver_bootstrap_changed {
+                        let command_pane_sessions_changed =
+                            this.refresh_sidebar_command_pane_sessions_if_changed(cx);
+                        if runtime_settings_changed
+                            || gxserver_bootstrap_changed
+                            || command_pane_sessions_changed
+                        {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn start_command_action_status_polling(&mut self, cx: &mut gpui::Context<Self>) {
+        /*
+        CDXC:GPUICommandPane 2026-06-24-23:36:
+        Command-pane Action status polling is bounded to GPUI-owned session-state files while live action runs exist. It updates only safe tab activity metadata and never reads command output, terminal content, paths from renderer payloads, logs, shell-state JSON, or persisted command text.
+        */
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(COMMAND_ACTION_STATUS_POLL_INTERVAL)
+                    .await;
+
+                if this
+                    .update(cx, |this, cx| {
+                        if !this.command_pane.has_active_action_runs() {
+                            return;
+                        }
+                        let refresh = this
+                            .command_pane
+                            .refresh_action_run_states_from_status_files();
+                        let has_completions = !refresh.completions.is_empty();
+                        this.dispatch_gpui_command_action_completions(refresh.completions, cx);
+                        let close_after_done_changed =
+                            this.refresh_gpui_command_close_after_done_timers(cx);
+                        if refresh.changed || close_after_done_changed {
+                            this.persist_shell_layout_state();
+                        }
+                        if refresh.changed || has_completions || close_after_done_changed {
+                            this.refresh_sidebar_command_pane_sessions_if_changed(cx);
+                        }
+                        if refresh.changed || close_after_done_changed {
                             cx.notify();
                         }
                     })
@@ -22752,6 +25909,9 @@ impl GhostexGpuiApp {
 
         CDXC:GPUISettingsPersistence 2026-06-24-11:14:
         Settings saves use this same sidebar CEF runtime-settings refresh path immediately after the shared service write succeeds. The save path must not wait for polling, add a broad settings event bus, or leak raw Settings JSON into Browser tabs, logs, paths, titles, commands, tokens, stdout/stderr, or user content.
+
+        CDXC:GPUISourceRuntime 2026-06-24-23:17:
+        code-server consumes VS Code settings-link choices only at process launch. When shared Settings changes those choices while Source is awake, restart the GPUI-owned runtime through the same lazy Source path instead of mutating a live process or trusting renderer-provided launch flags.
         */
         self.stop_gpui_keep_awake_if_hidden_by_settings(settings, cx);
         let next_snapshot = sidebar_runtime_settings_snapshot_from_shared_settings(settings);
@@ -22761,6 +25921,10 @@ impl GhostexGpuiApp {
         ) else {
             return false;
         };
+        let source_code_server_settings_changed =
+            SourceCodeServerRuntimeSettings::from_sidebar_runtime_settings(
+                &self.sidebar_runtime_settings_snapshot,
+            ) != SourceCodeServerRuntimeSettings::from_sidebar_runtime_settings(&next_snapshot);
 
         self.sidebar_runtime_settings_snapshot = next_snapshot.clone();
         if let Some(sidebar) = self.sidebar.clone() {
@@ -22771,6 +25935,9 @@ impl GhostexGpuiApp {
         }
         if self.coerce_active_mode_to_available_project_context(cx) {
             self.update_project_workarea_runtime_cef_surface_visibility(cx);
+        }
+        if source_code_server_settings_changed {
+            self.restart_source_code_server_runtime_after_settings_change(cx);
         }
         true
     }
@@ -22797,6 +25964,161 @@ impl GhostexGpuiApp {
                 surface.refresh_sidebar_gxserver_bootstrap(next_bootstrap);
             });
         }
+        true
+    }
+
+    fn dispatch_gpui_sidebar_host_message(
+        &mut self,
+        message: serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        /*
+        CDXC:GPUICommandPane 2026-06-24-23:49:
+        Command-pane Action run-state feedback targets only the first-party GPUI sidebar CEF surface and the typed `window.ghostexGpui.onSidebarHostMessage` callback installed by the SidebarApp runtime. The generated script carries only existing sidebar message JSON and must not expose generic eval IPC, command text, paths, terminal output, status-file paths, tokens, or persisted shell-state fields.
+        */
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let script = gpui_sidebar_host_message_script(&message);
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+    }
+
+    fn refresh_sidebar_command_pane_sessions_if_changed(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let sessions = self.command_pane.sidebar_command_session_sources(
+            self.shell_focus == ShellFocusTarget::CommandPane,
+            &self.command_delayed_send_timers,
+            &self.command_close_after_done_timers,
+            SystemTime::now(),
+        );
+        let snapshot = sessions.to_string();
+        if self.sidebar_command_pane_sessions_snapshot == snapshot {
+            return false;
+        }
+        if !self.dispatch_gpui_sidebar_command_pane_sessions(&sessions, cx) {
+            return false;
+        }
+        self.sidebar_command_pane_sessions_snapshot = snapshot;
+        true
+    }
+
+    fn dispatch_gpui_sidebar_command_pane_sessions(
+        &mut self,
+        sessions: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-10:50:
+        Command-pane session indicators use a dedicated first-party sidebar bridge callback and cached `window.ghostexGpui.commandPaneSessions` value so restored tabs can hydrate before React installs listeners. The script may carry only sanitized session summaries, never action command text, cwd, env, status-file paths, terminal output, or project paths.
+        */
+        let Some(sidebar) = self.sidebar.clone() else {
+            return false;
+        };
+        let script = gpui_sidebar_command_pane_sessions_script(sessions);
+        sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
+    }
+
+    fn dispatch_gpui_sidebar_command_run_state(
+        &mut self,
+        command_id: &str,
+        run_id: &str,
+        state: GpuiSidebarCommandRunState,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        self.dispatch_gpui_sidebar_host_message(
+            serde_json::json!({
+                "commandId": command_id,
+                "runId": run_id,
+                "state": state.as_str(),
+                "type": "sidebarCommandRunStateChanged",
+            }),
+            cx,
+        )
+    }
+
+    fn dispatch_gpui_sidebar_command_run_state_cleared(
+        &mut self,
+        command_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        self.dispatch_gpui_sidebar_host_message(
+            serde_json::json!({
+                "commandId": command_id,
+                "type": "sidebarCommandRunStateCleared",
+            }),
+            cx,
+        )
+    }
+
+    fn dispatch_gpui_command_action_completions(
+        &mut self,
+        completions: Vec<CommandPaneActionRunCompletion>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        for completion in completions {
+            self.dispatch_gpui_sidebar_command_run_state(
+                &completion.command_id,
+                &completion.run_id,
+                completion.run_state(),
+                cx,
+            );
+            if completion.should_play_completion_sound() {
+                let _ = gpui_play_completion_sound(gpui_action_completion_sound_from_settings());
+            }
+        }
+    }
+
+    fn close_gpui_sidebar_command_run(
+        &mut self,
+        command_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-10:34:
+        Ending a sidebar command run closes only the live command-pane Action tab mapped to that command id and clears sidebar button feedback. Mounted command terminals go through the existing Ghostty close request first; unmounted placeholders are removed from the command-pane model. This path must not inspect command text, terminal output, titles, status-file contents, paths, URLs, or persisted shell JSON.
+        */
+        let slot = self
+            .command_pane
+            .action_session_slot_for_command_id(command_id)
+            .map(|(group_id, session_id)| CommandTerminalBodyMountSlotId {
+                group_id,
+                session_id,
+            });
+        self.dispatch_gpui_sidebar_command_run_state_cleared(command_id, cx);
+        let Some(slot) = slot else {
+            cx.notify();
+            return false;
+        };
+
+        self.command_pane
+            .clear_action_run_for_session(slot.session_id);
+        if self.request_close_command_terminal_surface_if_mounted(slot) {
+            self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+            cx.notify();
+            return true;
+        }
+
+        if !self
+            .command_pane
+            .close_session(slot.group_id, slot.session_id)
+        {
+            cx.notify();
+            return false;
+        }
+        self.clear_gpui_command_delayed_send_timer(slot.session_id);
+        self.clear_gpui_command_close_after_done_timer(slot.session_id);
+        if self.command_pane.has_sessions() {
+            self.focus_command_pane();
+        } else {
+            self.restore_previous_non_command_focus_or_default();
+        }
+        self.scroll_command_group_active_tab(slot.group_id);
+        self.scroll_focused_command_active_tab();
+        self.persist_shell_layout_state();
+        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+        cx.notify();
         true
     }
 
@@ -22989,8 +26311,8 @@ impl GhostexGpuiApp {
             let mut async_cx = async_cx.clone();
             foreground
                 .spawn(async move {
-                    let _ = app.update(&mut async_cx, |this, cx| {
-                        this.receive_sidebar_bridge_event(event, cx);
+                    let _ = app.update_in(&mut async_cx, |this, window, cx| {
+                        this.receive_sidebar_bridge_event(event, window, cx);
                     });
                 })
                 .detach();
@@ -23010,8 +26332,8 @@ impl GhostexGpuiApp {
             let mut async_cx = async_cx.clone();
             foreground
                 .spawn(async move {
-                    let _ = app.update(&mut async_cx, |this, cx| {
-                        this.receive_app_modal_host_bridge_event(event, cx);
+                    let _ = app.update_in(&mut async_cx, |this, window, cx| {
+                        this.receive_app_modal_host_bridge_event(event, window, cx);
                     });
                 })
                 .detach();
@@ -23054,6 +26376,187 @@ impl GhostexGpuiApp {
             open_message,
             sidebar_state_message,
             Some(window),
+            cx,
+        );
+    }
+
+    fn gpui_command_delayed_send_open_message(
+        &self,
+        session_id: CommandSessionId,
+        title: &str,
+    ) -> serde_json::Value {
+        let mut message = serde_json::json!({
+            "modal": GpuiAppModalKind::DelayedSend.modal_id(),
+            "sessionId": session_id.0.to_string(),
+            "title": title,
+            "type": "open",
+        });
+        if let Some(timer) = self.command_delayed_send_timers.get(&session_id).copied() {
+            let remaining_ms = timer.remaining_ms(SystemTime::now());
+            message["delayedSendDeadlineAt"] =
+                serde_json::json!(gpui_iso8601_utc(timer.deadline_at));
+            message["delayedSendRemainingLabel"] =
+                serde_json::json!(gpui_command_delayed_send_countdown_label(remaining_ms));
+        }
+        message
+    }
+
+    fn gpui_command_delayed_send_remaining_label_for_session(
+        &self,
+        session_id: CommandSessionId,
+    ) -> Option<String> {
+        self.command_delayed_send_timers
+            .get(&session_id)
+            .copied()
+            .and_then(|timer| {
+                gpui_command_delayed_send_body_badge_label(Some(timer), SystemTime::now())
+            })
+    }
+
+    fn open_gpui_delayed_send_modal_for_focused_command_pane(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        /*
+        CDXC:GPUICommandDelayedSend 2026-06-25-15:11:
+        Command-palette Delayed Send parity opens the shared compact React modal for the shell-focused mounted command tab. The modal receives only the safe command session id, visible title, and runtime timer projection; it does not receive command text, terminal content, paths, output, or persisted shell-state data.
+        */
+        let Some((_group_id, session_id)) =
+            focused_command_pane_delayed_send_target(self.shell_focus, &self.command_pane)
+        else {
+            return false;
+        };
+        let Some(title) = self
+            .command_pane
+            .session(session_id)
+            .map(|session| session.title.clone())
+        else {
+            return false;
+        };
+        let modal = GpuiAppModalKind::DelayedSend;
+        let sidebar_state_message = self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
+        let open_message = self.gpui_command_delayed_send_open_message(session_id, &title);
+        self.open_gpui_app_modal_window(modal, open_message, sidebar_state_message, None, cx);
+        true
+    }
+
+    fn open_gpui_rename_session_modal_for_focused_command_pane(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some((_group_id, session_id)) =
+            focused_command_pane_rename_target(self.shell_focus, &self.command_pane)
+        else {
+            return false;
+        };
+        let Some(title) = self
+            .command_pane
+            .session(session_id)
+            .map(|session| session.title.clone())
+        else {
+            return false;
+        };
+        let modal = GpuiAppModalKind::RenameSession;
+        let sidebar_state_message = self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
+        let mut open_message = serde_json::json!({
+            "initialTitle": title,
+            "modal": modal.modal_id(),
+            "sessionId": session_id.0.to_string(),
+            "type": "open",
+        });
+        if modal.requires_sidebar_state() {
+            open_message["latestSidebarStateMessage"] = sidebar_state_message.clone();
+        }
+        self.open_gpui_app_modal_window(modal, open_message, sidebar_state_message, None, cx);
+        true
+    }
+
+    fn set_gpui_titlebar_tips_panel_open(
+        &mut self,
+        open: bool,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUITitlebarTips 2026-06-24-23:17:
+        The GPUI info glyph opens the shared React `titlebar-host.html?ghostexTitlebarPanel=tips` document inside a gpui-component Popover. Because the rendered child is a native CEF view, popover state changes must explicitly show/hide the CEF surface instead of relying on GPUI paint removal.
+        */
+        if open {
+            let Some(panel) = self.ensure_gpui_titlebar_tips_panel(window, cx) else {
+                return;
+            };
+            self.titlebar_tips_panel_open = true;
+            panel.update(cx, |panel, cx| {
+                panel.set_visible(true, cx);
+            });
+            self.dispatch_gpui_titlebar_tips_project_state_update(
+                self.gpui_titlebar_tips_initial_project_state_update(),
+                cx,
+            );
+            self.request_gpui_titlebar_tips_runtime_status(cx);
+        } else {
+            self.titlebar_tips_panel_open = false;
+            if let Some(panel) = self.titlebar_tips_panel.clone() {
+                panel.update(cx, |panel, cx| {
+                    panel.set_visible(false, cx);
+                });
+            }
+        }
+        cx.notify();
+    }
+
+    fn ensure_gpui_titlebar_tips_panel(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<Entity<GpuiTitlebarTipsPanel>> {
+        if let Some(panel) = self.titlebar_tips_panel.clone() {
+            return Some(panel);
+        }
+        let url = match titlebar_tips_panel_url() {
+            Ok(url) => url,
+            Err(_) => {
+                window.push_notification(
+                    Notification::warning("The GPUI titlebar host bundle is missing."),
+                    cx,
+                );
+                return None;
+            }
+        };
+        let parent_ns_view = self.parent_ns_view;
+        let event_handler = self.app_modal_host_bridge_event_handler(cx);
+        let panel = GpuiTitlebarTipsPanel::new(parent_ns_view, url, event_handler, cx);
+        self.titlebar_tips_panel = Some(panel.clone());
+        Some(panel)
+    }
+
+    fn gpui_titlebar_tips_initial_project_state_update(&self) -> serde_json::Value {
+        let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
+        serde_json::json!({
+            "activeMode": self.active_mode.element_slug(),
+            "debuggingMode": settings_snapshot.debugging_mode(),
+            "projectName": self.project_name,
+            "sessionPersistenceProvider": gpui_titlebar_session_persistence_provider_from_settings(
+                settings_snapshot.object(),
+            ),
+            "showBetaFeatures": settings_snapshot.show_beta_features(),
+            "sidebarTheme": gpui_app_modal_sidebar_theme_from_settings(settings_snapshot.object()),
+        })
+    }
+
+    fn request_gpui_titlebar_tips_runtime_status(&mut self, cx: &mut gpui::Context<Self>) {
+        self.run_gpui_app_modal_and_titlebar_status_task(
+            || gpui_ghostex_cli_status_message(None),
+            cx,
+        );
+        self.run_gpui_app_modal_and_titlebar_status_task(
+            || {
+                gpui_agent_hook_status_message(
+                    "/api/readAgentHookStatus",
+                    None,
+                    "Unable to inspect agent hook status.",
+                )
+            },
             cx,
         );
     }
@@ -23150,6 +26653,7 @@ impl GhostexGpuiApp {
     fn receive_app_modal_host_bridge_event(
         &mut self,
         event: cef::AppModalHostBridgeEvent,
+        window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         let cef::AppModalHostBridgeEvent::Message(payload) = event;
@@ -23169,6 +26673,17 @@ impl GhostexGpuiApp {
                 else {
                     return;
                 };
+                if modal == GpuiAppModalKind::RenameSession {
+                    let Some(session_id) = message
+                        .get("sessionId")
+                        .and_then(gpui_command_session_id_from_modal_value)
+                    else {
+                        return;
+                    };
+                    if !self.command_pane.has_session(session_id) {
+                        return;
+                    }
+                }
                 let sidebar_state_message =
                     self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
                 let mut open_message = message;
@@ -23260,7 +26775,10 @@ impl GhostexGpuiApp {
                 }
             }
             "sidebarCommand" => {
-                self.handle_gpui_app_modal_sidebar_command(message, cx);
+                self.handle_gpui_app_modal_sidebar_command(message, window, cx);
+            }
+            "closeTitlebarDropdownPanel" => {
+                self.set_gpui_titlebar_tips_panel_open(false, window, cx);
             }
             "debugLog" | "logError" | "toast" => {}
             _ => {}
@@ -25271,7 +28789,49 @@ impl GhostexGpuiApp {
         if modal.is_settings_modal_entry() {
             self.reconcile_gpui_gxserver_agent_settings_in_background(cx);
         }
-        gpui_app_modal_sidebar_state_message(self.latest_sidebar_project_snapshot.as_ref())
+        self.gpui_app_modal_sidebar_state_message()
+    }
+
+    fn gpui_app_modal_sidebar_state_message(&self) -> serde_json::Value {
+        self.with_gpui_command_pane_sidebar_indicators(gpui_app_modal_sidebar_state_message(
+            self.latest_sidebar_project_snapshot.as_ref(),
+        ))
+    }
+
+    fn gpui_app_modal_sidebar_state_message_from_settings_snapshot(
+        &self,
+        settings_snapshot: &shared_settings::SharedSidebarSettingsSnapshot,
+    ) -> serde_json::Value {
+        self.with_gpui_command_pane_sidebar_indicators(
+            gpui_app_modal_sidebar_state_message_from_settings_snapshot(
+                settings_snapshot,
+                self.latest_sidebar_project_snapshot.as_ref(),
+            ),
+        )
+    }
+
+    fn with_gpui_command_pane_sidebar_indicators(
+        &self,
+        mut message: serde_json::Value,
+    ) -> serde_json::Value {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-10:50:
+        App-modal sidebar hydrates must carry the same command-session indicators as the live GPUI sidebar HUD. Reuse the sanitized command-pane summary and gxserver command rows; never compute from command text, paths, status-file paths, terminal output, logs, or persisted shell-state JSON.
+        */
+        let commands = message
+            .get("hud")
+            .and_then(|hud| hud.get("commands"))
+            .cloned()
+            .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+        let sessions = self.command_pane.sidebar_command_session_sources(
+            self.shell_focus == ShellFocusTarget::CommandPane,
+            &self.command_delayed_send_timers,
+            &self.command_close_after_done_timers,
+            SystemTime::now(),
+        );
+        message["hud"]["commandSessionIndicators"] =
+            gpui_sidebar_command_session_indicators_from_command_pane_sources(&commands, &sessions);
+        message
     }
 
     fn apply_gpui_gxserver_agent_settings_hydration_result(
@@ -25337,10 +28897,8 @@ impl GhostexGpuiApp {
         self.refresh_terminal_ghostty_surface_config_requests_from_shared_settings(
             settings_snapshot,
         );
-        let sidebar_state_message = gpui_app_modal_sidebar_state_message_from_settings_snapshot(
-            settings_snapshot,
-            self.latest_sidebar_project_snapshot.as_ref(),
-        );
+        let sidebar_state_message =
+            self.gpui_app_modal_sidebar_state_message_from_settings_snapshot(settings_snapshot);
         self.refresh_open_gpui_app_modal_sidebar_state(sidebar_state_message, cx);
         cx.notify();
     }
@@ -25412,6 +28970,32 @@ impl GhostexGpuiApp {
         if update_result.is_err() {
             self.app_modal_window = None;
         }
+    }
+
+    fn dispatch_gpui_titlebar_tips_project_state_update(
+        &mut self,
+        project_state_update: serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(panel) = self.titlebar_tips_panel.clone() else {
+            return;
+        };
+        panel.update(cx, |panel, cx| {
+            panel.dispatch_project_state_update(project_state_update.clone(), cx);
+        });
+    }
+
+    fn dispatch_gpui_titlebar_tips_sidebar_state_payload(
+        &mut self,
+        payload: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(project_state_update) =
+            gpui_titlebar_project_state_update_from_sidebar_state_payload(payload)
+        else {
+            return;
+        };
+        self.dispatch_gpui_titlebar_tips_project_state_update(project_state_update, cx);
     }
 
     fn dispatch_open_gpui_app_modal_message(
@@ -25511,6 +29095,24 @@ impl GhostexGpuiApp {
             let payload = background.spawn(async move { task() }).await;
             let _ = this.update(cx, |this, cx| {
                 this.dispatch_open_gpui_app_modal_sidebar_state_payload(payload, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn run_gpui_app_modal_and_titlebar_status_task<F>(
+        &mut self,
+        task: F,
+        cx: &mut gpui::Context<Self>,
+    ) where
+        F: FnOnce() -> serde_json::Value + Send + 'static,
+    {
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let payload = background.spawn(async move { task() }).await;
+            let _ = this.update(cx, |this, cx| {
+                this.dispatch_open_gpui_app_modal_sidebar_state_payload(payload.clone(), cx);
+                this.dispatch_gpui_titlebar_tips_sidebar_state_payload(&payload, cx);
             });
         })
         .detach();
@@ -26413,7 +30015,7 @@ impl GhostexGpuiApp {
         };
         if gpui_save_gxserver_scratch_pad(content).is_ok() {
             self.refresh_open_gpui_app_modal_sidebar_state(
-                gpui_app_modal_sidebar_state_message(self.latest_sidebar_project_snapshot.as_ref()),
+                self.gpui_app_modal_sidebar_state_message(),
                 cx,
             );
         }
@@ -26452,15 +30054,630 @@ impl GhostexGpuiApp {
             .map(str::to_string);
         if gpui_save_gxserver_pinned_prompt(content, title, prompt_id.as_deref()).is_ok() {
             self.refresh_open_gpui_app_modal_sidebar_state(
-                gpui_app_modal_sidebar_state_message(self.latest_sidebar_project_snapshot.as_ref()),
+                self.gpui_app_modal_sidebar_state_message(),
                 cx,
             );
         }
     }
 
+    fn handle_gpui_schedule_delayed_send_command(
+        &mut self,
+        command: &serde_json::Map<String, serde_json::Value>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(session_id) = command
+            .get("sessionId")
+            .and_then(gpui_command_session_id_from_modal_value)
+        else {
+            return;
+        };
+        let Some(delay_ms) = command.get("delayMs").and_then(serde_json::Value::as_u64) else {
+            return;
+        };
+        let Some(duration) = gpui_command_delayed_send_duration_from_millis(delay_ms) else {
+            self.dispatch_gpui_app_modal_toast(
+                "warning",
+                "Delayed Send unavailable",
+                "Choose a Delayed Send timer between 1 minute and 24 days.",
+                cx,
+            );
+            return;
+        };
+        if self.schedule_gpui_command_delayed_send(session_id, duration, cx) {
+            let description = format!(
+                "Presses Enter in {}.",
+                gpui_command_delayed_send_duration_label(duration)
+            );
+            self.dispatch_gpui_app_modal_toast("info", "Delayed Send scheduled", &description, cx);
+        } else {
+            self.dispatch_gpui_app_modal_toast(
+                "warning",
+                "Delayed Send unavailable",
+                "Select a visible command terminal before scheduling Delayed Send.",
+                cx,
+            );
+        }
+    }
+
+    fn handle_gpui_rename_command_session_command(
+        &mut self,
+        command: &serde_json::Map<String, serde_json::Value>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUICommandPaneRename 2026-06-25-16:33:
+        Rename Session submissions from a GPUI command-pane modal are local command-tab title edits. Accept only the command session id and normalized title; generated-title requests require a gxserver-backed agent session and must not write long prompt text into a local command tab.
+        */
+        let Some(session_id) = command
+            .get("sessionId")
+            .and_then(gpui_command_session_id_from_modal_value)
+        else {
+            return;
+        };
+        if command
+            .get("shouldGenerateTitle")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            self.dispatch_gpui_app_modal_toast(
+                "warning",
+                "Rename unavailable",
+                "Generate Name is not available for local GPUI command tabs yet.",
+                cx,
+            );
+            return;
+        }
+        let Some(title) = command
+            .get("title")
+            .and_then(gpui_command_session_rename_title_from_modal_value)
+        else {
+            return;
+        };
+        if !self.command_pane.rename_session(session_id, title) {
+            return;
+        }
+        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+        cx.notify();
+    }
+
+    fn handle_gpui_cancel_delayed_send_command(
+        &mut self,
+        command: &serde_json::Map<String, serde_json::Value>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(session_id) = command
+            .get("sessionId")
+            .and_then(gpui_command_session_id_from_modal_value)
+        else {
+            return;
+        };
+        if self.clear_gpui_command_delayed_send_timer(session_id) {
+            self.dispatch_gpui_app_modal_toast("info", "Delayed Send canceled", "", cx);
+            self.persist_shell_layout_state();
+            cx.notify();
+        } else {
+            self.dispatch_gpui_app_modal_toast("info", "No Delayed Send timer is active", "", cx);
+        }
+    }
+
+    fn restore_gpui_command_startup_activity_intents(
+        &mut self,
+        restore_intents: Vec<GpuiCommandStartupActivityRestoreIntent>,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        /*
+        CDXC:GPUICommandStartupRestore 2026-06-25-17:25:
+        Startup activity restore mutates only the command-pane model and leaves persistence to the app startup pass after Delayed Send restore also runs. This keeps Working wake hints one-shot without rewriting a restored timer checkpoint before the runtime timer map is installed.
+        */
+        if !command_pane_apply_startup_activity_restore_intents(
+            &mut self.command_pane,
+            &restore_intents,
+        ) {
+            return false;
+        }
+        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+        cx.notify();
+        true
+    }
+
+    fn restore_gpui_command_delayed_send_timers(
+        &mut self,
+        restore_timers: Vec<GpuiCommandDelayedSendRestoreTimer>,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        /*
+        CDXC:GPUICommandDelayedSend 2026-06-25-16:41:
+        Startup re-arms restored command Delayed Send timers from the saved remaining-duration checkpoint as normal runtime timers. This keeps native parity without persisting command text, terminal content, paths, titles, Ghostty runtime ids, stdout/stderr, or old deadlines as authority after restart.
+
+        CDXC:GPUICommandDelayedSend 2026-06-25-16:56:
+        Restored Delayed Send timers are also startup wake reasons for command-pane tabs. Wake only after loading a safe persisted checkpoint so a restarted timer can reach a command terminal body, while manual in-process Sleep remains parked until the user wakes it.
+        */
+        let mut changed = false;
+        for restore_timer in restore_timers {
+            if self
+                .command_pane
+                .session(restore_timer.session_id)
+                .is_none()
+            {
+                continue;
+            }
+            self.command_delayed_send_generation =
+                self.command_delayed_send_generation.wrapping_add(1);
+            let generation = self.command_delayed_send_generation;
+            let duration = gpui_command_delayed_send_restore_duration(restore_timer.remaining_ms);
+            let deadline_at = SystemTime::now()
+                .checked_add(duration)
+                .unwrap_or_else(SystemTime::now);
+            self.command_delayed_send_timers.insert(
+                restore_timer.session_id,
+                GpuiCommandDelayedSendTimer {
+                    deadline_at,
+                    generation,
+                },
+            );
+            command_pane_apply_delayed_send_restore_intent(
+                &mut self.command_pane,
+                restore_timer.session_id,
+            );
+            self.schedule_gpui_command_delayed_send_fire(
+                restore_timer.session_id,
+                generation,
+                duration,
+                cx,
+            );
+            changed = true;
+        }
+        if changed {
+            self.ensure_gpui_command_delayed_send_countdown_ticker(cx);
+            self.ensure_gpui_command_delayed_send_persistence_ticker(cx);
+            self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+            cx.notify();
+        }
+        changed
+    }
+
+    fn schedule_gpui_command_delayed_send(
+        &mut self,
+        session_id: CommandSessionId,
+        duration: Duration,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        /*
+        CDXC:GPUICommandDelayedSend 2026-06-25-15:11:
+        A GPUI Delayed Send timer may be armed only for a currently mounted command terminal body. This preserves native's exact target-session behavior without falling back to shell focus, titles, command text, persisted state, or another visible terminal when the original command surface is unavailable.
+        */
+        if command_pane_mounted_slot_for_session(&self.command_pane, session_id).is_none() {
+            return false;
+        }
+        let Some(session) = self.command_pane.session_mut(session_id) else {
+            return false;
+        };
+        if session.is_sleeping {
+            return false;
+        }
+        self.command_delayed_send_generation = self.command_delayed_send_generation.wrapping_add(1);
+        let generation = self.command_delayed_send_generation;
+        let deadline_at = SystemTime::now()
+            .checked_add(duration)
+            .unwrap_or_else(SystemTime::now);
+        self.command_delayed_send_timers.insert(
+            session_id,
+            GpuiCommandDelayedSendTimer {
+                deadline_at,
+                generation,
+            },
+        );
+        session.set_delayed_send_active(true, true);
+        self.ensure_gpui_command_delayed_send_countdown_ticker(cx);
+        self.ensure_gpui_command_delayed_send_persistence_ticker(cx);
+        self.schedule_gpui_command_delayed_send_fire(session_id, generation, duration, cx);
+        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+        self.persist_shell_layout_state();
+        cx.notify();
+        true
+    }
+
+    fn ensure_gpui_command_delayed_send_countdown_ticker(&mut self, cx: &mut gpui::Context<Self>) {
+        /*
+        CDXC:GPUICommandDelayedSend 2026-06-25-15:42:
+        The command-pane Delayed Send body badge is live countdown chrome. Run a process-local one-second ticker only while timers exist so the centered badge can update without persisting deadlines, logging command content, or creating a renderer-owned timer fallback.
+        */
+        if self.command_delayed_send_countdown_ticker_active
+            || self.command_delayed_send_timers.is_empty()
+        {
+            return;
+        }
+        self.command_delayed_send_countdown_ticker_active = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let keep_running = this
+                    .update(cx, |this, cx| {
+                        if this.command_delayed_send_timers.is_empty() {
+                            this.command_delayed_send_countdown_ticker_active = false;
+                            cx.notify();
+                            false
+                        } else {
+                            this.refresh_sidebar_command_pane_sessions_if_changed(cx);
+                            cx.notify();
+                            true
+                        }
+                    })
+                    .unwrap_or(false);
+                if !keep_running {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn ensure_gpui_command_delayed_send_persistence_ticker(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUICommandDelayedSend 2026-06-25-16:41:
+        Native refreshes Delayed Send remaining-duration checkpoints once per minute so restart resumes near the live countdown position. GPUI mirrors that with a low-frequency shell-state write while timers exist, still serializing only safe timer metadata through the central writer.
+        */
+        if self.command_delayed_send_persistence_ticker_active
+            || self.command_delayed_send_timers.is_empty()
+        {
+            return;
+        }
+        self.command_delayed_send_persistence_ticker_active = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(COMMAND_PANE_DELAYED_SEND_PERSIST_INTERVAL)
+                    .await;
+                let keep_running = this
+                    .update(cx, |this, _cx| {
+                        if this.command_delayed_send_timers.is_empty() {
+                            this.command_delayed_send_persistence_ticker_active = false;
+                            false
+                        } else {
+                            this.persist_shell_layout_state();
+                            true
+                        }
+                    })
+                    .unwrap_or(false);
+                if !keep_running {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn schedule_gpui_command_delayed_send_fire(
+        &mut self,
+        session_id: CommandSessionId,
+        generation: u64,
+        duration: Duration,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(duration).await;
+            let _ = this.update(cx, |this, cx| {
+                this.fire_gpui_command_delayed_send(session_id, generation, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn fire_gpui_command_delayed_send(
+        &mut self,
+        session_id: CommandSessionId,
+        generation: u64,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(timer) = self.command_delayed_send_timers.get(&session_id).copied() else {
+            return false;
+        };
+        if timer.generation != generation {
+            return false;
+        }
+        let target_was_sleeping = self
+            .command_pane
+            .session(session_id)
+            .is_some_and(|session| session.is_sleeping);
+        self.command_delayed_send_timers.remove(&session_id);
+        if let Some(session) = self.command_pane.session_mut(session_id) {
+            session.set_delayed_send_active(false, false);
+        }
+        let sent = command_pane_mounted_slot_for_session(&self.command_pane, session_id)
+            .is_some_and(|slot_id| {
+                self.send_return_key_to_mounted_command_terminal_surface(slot_id)
+            });
+        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+        self.persist_shell_layout_state();
+        cx.notify();
+        if !sent && !target_was_sleeping {
+            self.dispatch_gpui_app_modal_toast(
+                "warning",
+                "Delayed Send skipped",
+                "The command terminal was no longer mounted.",
+                cx,
+            );
+        }
+        sent
+    }
+
+    fn clear_gpui_command_delayed_send_timer(&mut self, session_id: CommandSessionId) -> bool {
+        let removed = self
+            .command_delayed_send_timers
+            .remove(&session_id)
+            .is_some();
+        if let Some(session) = self.command_pane.session_mut(session_id)
+            && session.delayed_send_timer_owned
+        {
+            session.set_delayed_send_active(false, false);
+        }
+        removed
+    }
+
+    fn prune_gpui_command_delayed_send_timers_for_command_model(&mut self) -> bool {
+        let stale_session_ids = self
+            .command_delayed_send_timers
+            .keys()
+            .copied()
+            .filter(|session_id| self.command_pane.session(*session_id).is_none())
+            .collect::<Vec<_>>();
+        let changed = !stale_session_ids.is_empty();
+        for session_id in stale_session_ids {
+            self.command_delayed_send_timers.remove(&session_id);
+        }
+        changed
+    }
+
+    fn toggle_gpui_command_close_after_done_for_focused_command_pane(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some((_group_id, session_id)) =
+            focused_command_pane_close_after_done_target(self.shell_focus, &self.command_pane)
+        else {
+            return false;
+        };
+        self.toggle_gpui_command_close_after_done(session_id, cx)
+    }
+
+    fn toggle_gpui_command_close_after_done(
+        &mut self,
+        session_id: CommandSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        /*
+        CDXC:GPUICommandCloseAfterDone 2026-06-25-15:24:
+        The command-palette Close After Done row is terminal-scoped command-pane behavior. Toggle the focused command session's armed flag, start the three-minute countdown only once the session is done/non-working, and keep deadlines/countdowns runtime-only.
+
+        CDXC:GPUICommandCloseAfterDone 2026-06-25-16:52:
+        Sleeping command tabs may still toggle Close After Done like native focused-session routing. Arming a sleeping tab persists only the boolean intent; no countdown starts until the tab wakes and becomes Done.
+        */
+        let Some(session) = self.command_pane.session_mut(session_id) else {
+            return false;
+        };
+        if session.close_after_done_armed {
+            self.clear_gpui_command_close_after_done_timer(session_id);
+            self.dispatch_gpui_app_modal_toast("info", "Close After Done canceled", "", cx);
+            self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+            self.persist_shell_layout_state();
+            cx.notify();
+            return true;
+        }
+
+        session.close_after_done_armed = true;
+        self.refresh_gpui_command_close_after_done_timer_for_session(session_id, cx);
+        self.dispatch_gpui_app_modal_toast(
+            "info",
+            "Close After Done enabled",
+            "Closes after Done stays visible for 3m.",
+            cx,
+        );
+        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+        self.persist_shell_layout_state();
+        cx.notify();
+        true
+    }
+
+    fn clear_gpui_command_close_after_done_timer(&mut self, session_id: CommandSessionId) -> bool {
+        let removed = self
+            .command_close_after_done_timers
+            .remove(&session_id)
+            .is_some();
+        let mut changed = removed;
+        if let Some(session) = self.command_pane.session_mut(session_id)
+            && session.close_after_done_armed
+        {
+            session.close_after_done_armed = false;
+            changed = true;
+        }
+        changed
+    }
+
+    fn refresh_gpui_command_close_after_done_timers(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let session_ids = self
+            .command_pane
+            .terminal_sessions
+            .iter()
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        session_ids.into_iter().fold(false, |changed, session_id| {
+            self.refresh_gpui_command_close_after_done_timer_for_session(session_id, cx) || changed
+        })
+    }
+
+    fn refresh_gpui_command_close_after_done_timer_for_session(
+        &mut self,
+        session_id: CommandSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(session) = self.command_pane.session(session_id) else {
+            return self
+                .command_close_after_done_timers
+                .remove(&session_id)
+                .is_some();
+        };
+        if !session.close_after_done_armed {
+            return self
+                .command_close_after_done_timers
+                .remove(&session_id)
+                .is_some();
+        }
+        if !gpui_command_close_after_done_session_marked_done(session) {
+            return self
+                .command_close_after_done_timers
+                .remove(&session_id)
+                .is_some();
+        }
+        if self
+            .command_close_after_done_timers
+            .contains_key(&session_id)
+        {
+            return false;
+        }
+
+        self.command_close_after_done_generation =
+            self.command_close_after_done_generation.wrapping_add(1);
+        let generation = self.command_close_after_done_generation;
+        let deadline_at = SystemTime::now()
+            .checked_add(COMMAND_PANE_CLOSE_AFTER_DONE_DELAY)
+            .unwrap_or_else(SystemTime::now);
+        self.command_close_after_done_timers.insert(
+            session_id,
+            GpuiCommandCloseAfterDoneTimer {
+                deadline_at,
+                generation,
+            },
+        );
+        self.schedule_gpui_command_close_after_done_fire(
+            session_id,
+            generation,
+            COMMAND_PANE_CLOSE_AFTER_DONE_DELAY,
+            cx,
+        );
+        self.ensure_gpui_command_close_after_done_countdown_ticker(cx);
+        true
+    }
+
+    fn ensure_gpui_command_close_after_done_countdown_ticker(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUICommandPaneTimers 2026-06-25-17:09:
+        Close After Done remaining labels are sidebar/titlebar projection chrome, matching native's one-second publish loop. Keep this ticker process-local and active only while runtime countdowns exist; it must not persist countdown labels, inspect command output, or read status-file paths.
+        */
+        if self.command_close_after_done_countdown_ticker_active
+            || self.command_close_after_done_timers.is_empty()
+        {
+            return;
+        }
+        self.command_close_after_done_countdown_ticker_active = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let keep_running = this
+                    .update(cx, |this, cx| {
+                        if this.command_close_after_done_timers.is_empty() {
+                            this.command_close_after_done_countdown_ticker_active = false;
+                            cx.notify();
+                            false
+                        } else {
+                            this.refresh_sidebar_command_pane_sessions_if_changed(cx);
+                            cx.notify();
+                            true
+                        }
+                    })
+                    .unwrap_or(false);
+                if !keep_running {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn schedule_gpui_command_close_after_done_fire(
+        &mut self,
+        session_id: CommandSessionId,
+        generation: u64,
+        duration: Duration,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(duration).await;
+            let _ = this.update(cx, |this, cx| {
+                this.fire_gpui_command_close_after_done(session_id, generation, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn fire_gpui_command_close_after_done(
+        &mut self,
+        session_id: CommandSessionId,
+        generation: u64,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(timer) = self
+            .command_close_after_done_timers
+            .get(&session_id)
+            .copied()
+        else {
+            return false;
+        };
+        if timer.generation != generation {
+            return false;
+        }
+        let _deadline_at = timer.deadline_at;
+        let Some(session) = self.command_pane.session(session_id) else {
+            self.command_close_after_done_timers.remove(&session_id);
+            return false;
+        };
+        if !session.close_after_done_armed
+            || !gpui_command_close_after_done_session_marked_done(session)
+        {
+            self.command_close_after_done_timers.remove(&session_id);
+            self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+            cx.notify();
+            return false;
+        }
+
+        self.command_close_after_done_timers.remove(&session_id);
+        if let Some(session) = self.command_pane.session_mut(session_id) {
+            session.close_after_done_armed = false;
+        }
+        let Some(group_id) = command_pane_group_for_session(&self.command_pane, session_id) else {
+            self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+            cx.notify();
+            return false;
+        };
+        self.close_command_pane_tab(group_id, session_id, cx)
+    }
+
+    fn prune_gpui_command_close_after_done_timers_for_command_model(&mut self) -> bool {
+        let stale_session_ids = self
+            .command_close_after_done_timers
+            .keys()
+            .copied()
+            .filter(|session_id| self.command_pane.session(*session_id).is_none())
+            .collect::<Vec<_>>();
+        let changed = !stale_session_ids.is_empty();
+        for session_id in stale_session_ids {
+            self.command_close_after_done_timers.remove(&session_id);
+        }
+        changed
+    }
+
     fn handle_gpui_app_modal_sidebar_command(
         &mut self,
         message: serde_json::Value,
+        window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         let Some(command) = message
@@ -26504,11 +30721,81 @@ impl GhostexGpuiApp {
             "gpuiRemoteGxserverSidebarRequest" => {
                 self.handle_gpui_remote_gxserver_sidebar_request_message(command, cx);
             }
+            "openBrowserPane" => {
+                let Some(url) = command
+                    .get("url")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|url| gpui_titlebar_tips_browser_url_allowed(url))
+                    .map(str::to_string)
+                else {
+                    return;
+                };
+                self.set_gpui_titlebar_tips_panel_open(false, window, cx);
+                self.open_gpui_browser_action_url(url, window, cx);
+            }
+            "openWorkspaceWelcome" => {
+                self.set_gpui_titlebar_tips_panel_open(false, window, cx);
+                self.open_gpui_app_modal_from_titlebar(
+                    GpuiAppModalKind::FirstLaunchSetup,
+                    window,
+                    cx,
+                );
+            }
+            "openGhostexTutorialVideo" => {
+                self.set_gpui_titlebar_tips_panel_open(false, window, cx);
+                self.open_gpui_app_modal_from_titlebar(
+                    GpuiAppModalKind::WatchGhostexVideo,
+                    window,
+                    cx,
+                );
+            }
             "runGhostexHotkeyAction" => {
                 let Some(action_id) = command.get("actionId").and_then(serde_json::Value::as_str)
                 else {
                     return;
                 };
+                /*
+                CDXC:GPUICommandFocusedSessionActions 2026-06-25-15:01:
+                The shared command palette posts focused-session commands as `runGhostexHotkeyAction`. Handle command-pane Sleep/Wake/Close focused-session ids directly in GPUI before modal routing so command-palette rows operate on the shell-focused command tab instead of no-oping or trying to open another modal.
+
+                CDXC:GPUICommandDelayedSend 2026-06-25-15:11:
+                The shared Delayed Send row is also a focused-pane action. In GPUI command panes it must open the compact shared Delayed Send modal for the focused mounted command terminal instead of falling through to Settings/modal action routing or using another surface's focus.
+
+                CDXC:GPUICommandCloseAfterDone 2026-06-25-15:24:
+                The shared Close After Done row is also a focused command-terminal action. In GPUI command panes it toggles the focused mounted command tab's terminal-scoped watcher before modal routing, matching native command-palette behavior without applying the timer to Agents, Browser, or project-editor focus.
+
+                CDXC:GPUICommandPaneRename 2026-06-25-16:33:
+                Rename Active Session is also a focused command-terminal action. When the command pane owns shell focus, open the shared Rename Session modal for the active command tab instead of falling through to unrelated app-modal commands.
+                */
+                match gpui_command_pane_focused_session_hotkey_action(action_id) {
+                    Some(GpuiCommandPaneFocusedSessionHotkeyAction::Rename) => {
+                        self.open_gpui_rename_session_modal_for_focused_command_pane(cx);
+                        return;
+                    }
+                    Some(GpuiCommandPaneFocusedSessionHotkeyAction::DelayedSend) => {
+                        self.open_gpui_delayed_send_modal_for_focused_command_pane(cx);
+                        return;
+                    }
+                    Some(GpuiCommandPaneFocusedSessionHotkeyAction::CloseAfterDone) => {
+                        self.toggle_gpui_command_close_after_done_for_focused_command_pane(cx);
+                        return;
+                    }
+                    Some(GpuiCommandPaneFocusedSessionHotkeyAction::Sleep) => {
+                        self.sleep_focused_command_pane_session(cx);
+                        return;
+                    }
+                    Some(GpuiCommandPaneFocusedSessionHotkeyAction::Wake) => {
+                        self.wake_focused_command_pane_session(cx);
+                        return;
+                    }
+                    Some(GpuiCommandPaneFocusedSessionHotkeyAction::Close) => {
+                        if gpui_command_pane_close_focused_hotkey_should_run(self.shell_focus) {
+                            self.close_focused_surface(window, cx);
+                        }
+                        return;
+                    }
+                    None => {}
+                }
                 let modal = match action_id {
                     "openSettings" => GpuiAppModalKind::Settings,
                     "openHotkeys" => GpuiAppModalKind::Hotkeys,
@@ -26545,6 +30832,15 @@ impl GhostexGpuiApp {
             }
             "savePinnedPrompt" => {
                 self.handle_gpui_save_pinned_prompt_command(command, cx);
+            }
+            "renameSession" => {
+                self.handle_gpui_rename_command_session_command(command, cx);
+            }
+            "scheduleDelayedSend" => {
+                self.handle_gpui_schedule_delayed_send_command(command, cx);
+            }
+            "cancelDelayedSend" => {
+                self.handle_gpui_cancel_delayed_send_command(command, cx);
             }
             "killDaemonSession" => {
                 let project_id = command
@@ -26586,7 +30882,7 @@ impl GhostexGpuiApp {
                 );
             }
             "requestGhostexCliStatus" => {
-                self.run_gpui_app_modal_sidebar_status_task(
+                self.run_gpui_app_modal_and_titlebar_status_task(
                     || gpui_ghostex_cli_status_message(None),
                     cx,
                 );
@@ -26635,7 +30931,7 @@ impl GhostexGpuiApp {
             }
             "requestAgentHookStatus" => {
                 let agent_ids = gpui_settings_command_agent_ids(command);
-                self.run_gpui_app_modal_sidebar_status_task(
+                self.run_gpui_app_modal_and_titlebar_status_task(
                     move || {
                         gpui_agent_hook_status_message(
                             "/api/readAgentHookStatus",
@@ -27055,6 +31351,7 @@ impl GhostexGpuiApp {
     fn receive_sidebar_bridge_event(
         &mut self,
         event: cef::SidebarBridgeEvent,
+        window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         match event {
@@ -27082,6 +31379,12 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::NativeProjectPathAction(payload) => {
                 self.receive_sidebar_native_project_path_action_payload(&payload, cx);
             }
+            cef::SidebarBridgeEvent::SidebarCommandAction(payload) => {
+                self.receive_sidebar_command_action_payload(&payload, window, cx);
+            }
+            cef::SidebarBridgeEvent::SidebarCommandRunEnd(payload) => {
+                self.receive_sidebar_command_run_end_payload(&payload, cx);
+            }
         }
     }
 
@@ -27094,7 +31397,8 @@ impl GhostexGpuiApp {
         CDXC:GPUISidebarGxserverFocusState 2026-06-24-21:07:
         React may return only the gxserver presentation session ids it already owns from daemon create/focus/fork/restore flows. Store the parsed focus state in runtime memory, refresh only the sidebar bootstrap bridge on changes, and ignore malformed payloads without logging raw renderer JSON or deriving ids from terminal tabs, labels, paths, project names, or command text.
         */
-        let Ok(next_state) = gpui_gxserver_presentation_focus_state_from_sidebar_contract_json(payload)
+        let Ok(next_state) =
+            gpui_gxserver_presentation_focus_state_from_sidebar_contract_json(payload)
         else {
             return;
         };
@@ -27188,6 +31492,37 @@ impl GhostexGpuiApp {
             });
         })
         .detach();
+    }
+
+    fn receive_sidebar_command_action_payload(
+        &mut self,
+        payload: &str,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUICommandPane 2026-06-24-23:17:
+        Shared SidebarApp project Actions must run in GPUI through the same Browser or command-pane path as titlebar Actions. Parse only the fixed sidebar command-action JSON emitted from the gxserver HUD projection, then reuse the window-aware action runner so command text enters only the command-terminal launch payload boundary and never logs, shell-state JSON, paths, fallback project detection, or renderer execution.
+        */
+        let Ok(action) = gpui_sidebar_command_action_from_json(payload) else {
+            return;
+        };
+        self.run_gpui_titlebar_action(action, window, cx);
+    }
+
+    fn receive_sidebar_command_run_end_payload(
+        &mut self,
+        payload: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-10:34:
+        Shared SidebarApp `endSidebarCommandRun` must close the GPUI command-pane Action tab mapped to the command id and clear sidebar button feedback, matching macOS. Accept only the fixed command-run-end payload; do not accept command text, URLs, cwd/env, run ids, status-file paths, terminal output, project paths, or generic IPC fields.
+        */
+        let Ok(command_id) = gpui_sidebar_command_run_end_from_json(payload) else {
+            return;
+        };
+        self.close_gpui_sidebar_command_run(&command_id, cx);
     }
 
     fn receive_sidebar_project_context_payload(
@@ -29135,6 +33470,91 @@ impl GhostexGpuiApp {
         true
     }
 
+    fn send_return_key_to_mounted_command_terminal_surface(
+        &mut self,
+        slot_id: CommandTerminalBodyMountSlotId,
+    ) -> bool {
+        /*
+        CDXC:GPUICommandDelayedSend 2026-06-25-15:11:
+        Delayed Send must submit the staged prompt through Ghostty's key path, matching native `sendTerminalEnter`, rather than writing carriage-return text. Use the exact current mounted command slot and the macOS Return keycode/text tuple; if the surface is missing or stale, no other terminal receives the key.
+        */
+        #[cfg(target_os = "macos")]
+        {
+            if !self
+                .command_pane
+                .is_current_terminal_body_mount_slot(slot_id)
+            {
+                return false;
+            }
+            let runtime_session_id = command_terminal_runtime_session_id(slot_id);
+            let Some(surface) = self.command_terminal_ghostty_surfaces.get_mut(&slot_id) else {
+                return false;
+            };
+            if surface.mount_slot_id() != slot_id
+                || surface.runtime_session_id() != runtime_session_id
+            {
+                return false;
+            }
+            let Ok(return_text) = std::ffi::CString::new(COMMAND_PANE_DELAYED_SEND_RETURN_TEXT)
+            else {
+                return false;
+            };
+            surface.send_key(ghostty_kit::ffi::ghostty_input_key_s {
+                action: COMMAND_PANE_GHOSTTY_KEY_ACTION_PRESS,
+                mods: 0,
+                consumed_mods: 0,
+                keycode: COMMAND_PANE_DELAYED_SEND_RETURN_KEYCODE,
+                text: return_text.as_ptr(),
+                unshifted_codepoint: COMMAND_PANE_DELAYED_SEND_RETURN_UNSHIFTED_CODEPOINT,
+                composing: false,
+            })
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = slot_id;
+            false
+        }
+    }
+
+    fn send_gpui_command_action_script_to_mounted_terminal(
+        &mut self,
+        slot_id: CommandTerminalBodyMountSlotId,
+        execution_text: &str,
+        status_file_path: &Path,
+    ) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            if !self
+                .command_pane
+                .is_current_terminal_body_mount_slot(slot_id)
+            {
+                return false;
+            }
+            let runtime_session_id = command_terminal_runtime_session_id(slot_id);
+            let Some(surface) = self.command_terminal_ghostty_surfaces.get_mut(&slot_id) else {
+                return false;
+            };
+            if surface.mount_slot_id() != slot_id
+                || surface.runtime_session_id() != runtime_session_id
+            {
+                return false;
+            }
+            let text = format!(
+                "{}\n{execution_text}\n",
+                gpui_command_action_state_export_text(status_file_path)
+            );
+            surface.send_text_bytes(text.as_bytes());
+            true
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (slot_id, execution_text, status_file_path);
+            false
+        }
+    }
+
     #[cfg(target_os = "macos")]
     #[allow(dead_code)]
     fn confirm_pending_agents_terminal_close(
@@ -29281,11 +33701,11 @@ impl GhostexGpuiApp {
     ) {
         /*
         CDXC:GPUIFocusedSplits 2026-06-22-23:33:
-        Cmd+D/Cmd+Shift+D use live shell focus instead of remembered workspace focus. Agents-pane focus in Agents mode reuses the right/below mounting split helpers because a new terminal runtime has not launched yet; command-pane focus creates a command-only horizontal split for both hotkeys, expands/focuses the command pane, persists, and scrolls active command tabs.
+        Cmd+D/Cmd+Shift+D use live shell focus instead of remembered workspace focus. Agents-pane focus in Agents mode reuses the right/below mounting split helpers because a new terminal runtime has not launched yet; command-pane focus follows native by coercing both directions to a command-only horizontal split, expands/focuses the command pane, persists, and scrolls active command tabs.
         */
         match self.shell_focus {
             ShellFocusTarget::CommandPane => {
-                self.split_command_placeholder_terminal_from_hotkey(cx);
+                self.split_command_placeholder_terminal_from_hotkey(direction, cx);
             }
             ShellFocusTarget::AgentsPane(pane_id) if self.active_mode == TitlebarMode::Agents => {
                 match direction {
@@ -29304,9 +33724,14 @@ impl GhostexGpuiApp {
         }
     }
 
-    fn split_command_placeholder_terminal_from_hotkey(&mut self, cx: &mut gpui::Context<Self>) {
-        let Some((group_id, _session_id)) =
-            self.command_pane.split_session_to_right_of_focused_group()
+    fn split_command_placeholder_terminal_from_hotkey(
+        &mut self,
+        direction: FocusedTerminalSplitDirection,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some((group_id, _session_id)) = self
+            .command_pane
+            .split_session_adjacent_to_focused_group(direction)
         else {
             return;
         };
@@ -29316,6 +33741,7 @@ impl GhostexGpuiApp {
         self.scroll_command_group_active_tab(group_id);
         self.scroll_focused_command_active_tab();
         self.persist_shell_layout_state();
+        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
         cx.notify();
     }
 
@@ -29581,15 +34007,33 @@ impl GhostexGpuiApp {
         &self,
         group_id: CommandPaneGroupId,
         session_id: CommandSessionId,
-        expand_pane: bool,
+        _expand_pane: bool,
         position: gpui::Point<Pixels>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         /*
         CDXC:GPUICommandTabContextMenu 2026-06-22-11:31:
-        Individual command-pane tabs, including collapsed-strip tabs, need an OS-owned NativeMenu at the right-click position. The menu is scoped to the clicked command group id and session id, contains only tab-level Select Tab and Close Tab commands, and carries the collapsed-strip expand requirement in the Select Tab action instead of global mutable menu state.
-        */
+        Individual command-pane tabs, including collapsed-strip tabs, need an OS-owned NativeMenu at the right-click position. The menu is scoped to the clicked command group id and session id and contains macOS-style Close Left/Right/Others commands. Tab selection and collapsed-strip expansion stay on left-click activation, not right-click menu rows.
+
+            CDXC:GPUICommandPaneTabs 2026-06-25-11:20:
+            Scoped command tab rows carry only group id, session id, and a fixed scope enum; they do not carry command text, paths, terminal output, or cross-pane identifiers.
+
+            CDXC:GPUICommandTabContextMenu 2026-06-25-14:13:
+            Native command tab right-click menus filter out command-panel titlebar actions. Keep this menu focused on scoped tab operations, while the fixed command action cluster owns Pin/Unpin, Minimize, and Expand.
+
+            CDXC:GPUICommandTabContextMenu 2026-06-25-14:19:
+            Native tab context menus do not add a direct Close Tab row; direct close is hover/middle-click chrome, while right-click close commands start at Close Right, Close Left, and Close Other Tabs.
+
+            CDXC:GPUICommandTabContextMenu 2026-06-25-14:22:
+            Native tab context menus do not add Select Tab or Expand Commands Panel rows. Opening a context menu must not select the clicked tab or expand a hidden command panel; those remain left-click tab activation behavior.
+
+            CDXC:GPUICommandTabSleep 2026-06-25-14:27:
+            Native command-tab context menus offer Sleep scopes before Close scopes. GPUI resolves those rows against the clicked command group and marks command sessions sleeping without removing their tabs, content-derived titles, or group layout.
+
+            CDXC:GPUICommandTabContextMenu 2026-06-25-14:42:
+            Native AppKit command-tab menus leave Sleep Right/Left/Others and Close Right/Left/Others enabled even when the clicked tab has no targets in that scope. Keep GPUI rows action-backed and let the scope resolver no-op on empty target lists instead of disabling rows.
+            */
         let tab_exists = self
             .command_pane
             .find_leaf(group_id)
@@ -29597,24 +34041,36 @@ impl GhostexGpuiApp {
         if !tab_exists {
             return;
         }
+        let clicked_tab_is_sleeping = self
+            .command_pane
+            .session(session_id)
+            .is_some_and(|session| session.is_sleeping);
+        let mut menu = NativeMenu::new();
 
-        NativeMenu::new()
-            .menu(
-                "Select Tab",
-                Box::new(SelectCommandPaneTab {
+        for scope in command_pane_tab_context_sleep_order(clicked_tab_is_sleeping) {
+            menu = menu.menu(
+                command_pane_tab_context_sleep_scope_label(scope),
+                Box::new(SleepCommandPaneTabsByScope {
                     group_id: group_id.0,
                     session_id: session_id.0,
-                    expand_pane,
+                    scope: scope.action_value(),
                 }),
-            )
-            .menu(
-                "Close Tab",
-                Box::new(CloseCommandPaneTab {
+            );
+        }
+        menu = menu.separator();
+
+        for scope in command_pane_tab_context_scoped_close_order() {
+            menu = menu.menu(
+                command_pane_tab_context_close_scope_label(scope),
+                Box::new(CloseCommandPaneTabsByScope {
                     group_id: group_id.0,
                     session_id: session_id.0,
+                    scope: scope.action_value(),
                 }),
-            )
-            .show(position, window, cx);
+            );
+        }
+
+        menu.show(position, window, cx);
     }
 
     fn select_command_pane_tab(
@@ -29622,33 +34078,109 @@ impl GhostexGpuiApp {
         group_id: CommandPaneGroupId,
         session_id: CommandSessionId,
         expand_pane: bool,
+        window: &Window,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        if !self
-            .command_pane
-            .select_session_in_group(group_id, session_id)
-        {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-12:10:
+        Collapsed-strip command-tab selection must match native hidden-open behavior: select the clicked command tab, restore the last pinned/floating mode, and reset height from the current Workspace default only while hidden. Expanded titlebar tab selection stays a pure tab focus change.
+
+        CDXC:GPUICommandTabWake 2026-06-25-14:46:
+        Native command-tab clicks wake sleeping command sessions immediately only when click-to-wake placeholders are disabled. With the default click-to-wake setting, tab selection stays layout-only and the sleeping body click performs wake.
+        */
+        let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
+        let wake_on_tab_selection =
+            !command_pane_click_to_wake_sleeping_sessions_from_shared_settings(&settings_snapshot)
+                && self
+                    .command_pane
+                    .session(session_id)
+                    .is_some_and(|session| session.is_sleeping);
+        let selected = if expand_pane {
+            self.command_pane.select_session_in_group_for_hidden_open(
+                group_id,
+                session_id,
+                command_pane_content_height(window),
+                command_pane_default_height_px_from_shared_settings(&settings_snapshot),
+            )
+        } else {
+            self.command_pane
+                .select_session_in_group(group_id, session_id)
+        };
+        if !selected {
             return false;
         }
-        self.focus_command_pane();
-        if expand_pane {
-            self.command_pane.expand();
+        if wake_on_tab_selection && self.command_pane.set_session_sleeping(session_id, false) {
+            self.refresh_gpui_command_close_after_done_timer_for_session(session_id, cx);
         }
+        self.focus_command_pane();
         self.scroll_command_group_active_tab(group_id);
         self.scroll_focused_command_active_tab();
         self.persist_shell_layout_state();
+        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
         cx.notify();
         true
     }
 
-    fn select_command_pane_tab_from_action(
+    fn wake_command_pane_session(
         &mut self,
         group_id: CommandPaneGroupId,
         session_id: CommandSessionId,
-        expand_pane: bool,
         cx: &mut gpui::Context<Self>,
-    ) {
-        self.select_command_pane_tab(group_id, session_id, expand_pane, cx);
+    ) -> bool {
+        /*
+        CDXC:GPUICommandTabSleep 2026-06-25-14:27:
+        With the default click-to-wake setting, selecting a sleeping command tab only makes that tab active; activating the sleeping command body wakes it. This mirrors native placeholder behavior and prevents right-click tab menus from recreating a command terminal surface early.
+        */
+        if !self.command_pane.set_session_sleeping(session_id, false) {
+            return false;
+        }
+        self.refresh_gpui_command_close_after_done_timer_for_session(session_id, cx);
+        self.command_pane.focus_group(group_id);
+        self.focus_command_pane();
+        self.scroll_command_group_active_tab(group_id);
+        self.scroll_focused_command_active_tab();
+        self.persist_shell_layout_state();
+        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+        cx.notify();
+        true
+    }
+
+    fn wake_focused_sleeping_command_placeholder_from_keystroke(
+        &mut self,
+        keystroke: &Keystroke,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some((group_id, session_id)) = focused_sleeping_command_placeholder_wake_target(
+            self.shell_focus,
+            &self.command_pane,
+            keystroke,
+        ) else {
+            return false;
+        };
+        self.wake_command_pane_session(group_id, session_id, cx)
+    }
+
+    fn sleep_focused_command_pane_session(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+        let Some((group_id, session_id)) =
+            focused_command_pane_sleep_target(self.shell_focus, &self.command_pane)
+        else {
+            return false;
+        };
+        self.sleep_command_pane_tabs_for_scope(
+            group_id,
+            session_id,
+            CommandPaneTabSleepScope::Sleep,
+            cx,
+        )
+    }
+
+    fn wake_focused_command_pane_session(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+        let Some((group_id, session_id)) =
+            focused_command_pane_wake_target(self.shell_focus, &self.command_pane)
+        else {
+            return false;
+        };
+        self.wake_command_pane_session(group_id, session_id, cx)
     }
 
     fn close_command_pane_tab(
@@ -29668,6 +34200,8 @@ impl GhostexGpuiApp {
         if !self.command_pane.close_session(group_id, session_id) {
             return false;
         }
+        self.clear_gpui_command_delayed_send_timer(session_id);
+        self.clear_gpui_command_close_after_done_timer(session_id);
         if self.command_pane.has_sessions() {
             self.focus_command_pane();
         } else {
@@ -29676,17 +34210,135 @@ impl GhostexGpuiApp {
         self.scroll_command_group_active_tab(group_id);
         self.scroll_focused_command_active_tab();
         self.persist_shell_layout_state();
+        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
         cx.notify();
         true
     }
 
-    fn close_command_pane_tab_from_action(
+    fn close_command_pane_tabs_for_scope(
         &mut self,
         group_id: CommandPaneGroupId,
         session_id: CommandSessionId,
+        scope: CommandPaneTabCloseScope,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        /*
+        CDXC:GPUICommandPaneTabs 2026-06-25-11:20:
+        Bulk command-tab closes must reuse the same close ownership as single command tabs. Mounted current Ghostty command surfaces receive close requests and stay pending until callbacks, while unmounted sibling tabs are removed from the command model immediately; the target list is resolved before mutation so Close Left/Right/Others cannot drift while tabs are removed.
+        */
+        if scope == CommandPaneTabCloseScope::Close {
+            return self.close_command_pane_tab(group_id, session_id, cx);
+        }
+
+        let session_ids = self
+            .command_pane
+            .tab_session_ids_for_close_scope(group_id, session_id, scope);
+        if session_ids.is_empty() {
+            return false;
+        }
+
+        let mut close_requested = false;
+        let mut model_changed = false;
+        for close_session_id in session_ids {
+            if self.request_close_command_terminal_surface_if_mounted(
+                CommandTerminalBodyMountSlotId {
+                    group_id,
+                    session_id: close_session_id,
+                },
+            ) {
+                close_requested = true;
+                continue;
+            }
+            if self.command_pane.close_session(group_id, close_session_id) {
+                self.clear_gpui_command_delayed_send_timer(close_session_id);
+                self.clear_gpui_command_close_after_done_timer(close_session_id);
+                model_changed = true;
+            }
+        }
+
+        if model_changed {
+            if self.command_pane.has_sessions() {
+                self.focus_command_pane();
+            } else {
+                self.restore_previous_non_command_focus_or_default();
+            }
+            self.scroll_command_group_active_tab(group_id);
+            self.scroll_focused_command_active_tab();
+            self.persist_shell_layout_state();
+            self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+        }
+        if model_changed || close_requested {
+            cx.notify();
+        }
+        model_changed || close_requested
+    }
+
+    fn sleep_command_pane_tabs_for_scope(
+        &mut self,
+        group_id: CommandPaneGroupId,
+        session_id: CommandSessionId,
+        scope: CommandPaneTabSleepScope,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        /*
+        CDXC:GPUICommandTabSleep 2026-06-25-14:27:
+        Sleeping command tabs is a lifecycle mutation, not a close. Mark the resolved clicked-group command sessions sleeping so tabs and layout remain intact, the body mount-slot list drops sleeping active sessions, and persistence records only safe enum/boolean state without command text, output, paths, process ids, status-file paths, or terminal content.
+
+        CDXC:GPUICommandDelayedSend 2026-06-25-15:46:
+        Scoped command-tab Sleep must not cancel Delayed Send or Close After Done. Preserve native's parked-session contract: timers remain session-owned while sleeping, Delayed Send submits only if the tab is awake by the deadline, and Close After Done countdown evaluation resumes on wake.
+        */
+        let session_ids = self
+            .command_pane
+            .tab_session_ids_for_sleep_scope(group_id, session_id, scope);
+        if session_ids.is_empty() {
+            return false;
+        }
+
+        let mut model_changed = false;
+        for sleep_session_id in session_ids {
+            if self
+                .command_pane
+                .set_session_sleeping(sleep_session_id, true)
+            {
+                model_changed = true;
+            }
+        }
+
+        if model_changed {
+            self.focus_command_pane();
+            self.scroll_command_group_active_tab(group_id);
+            self.scroll_focused_command_active_tab();
+            self.persist_shell_layout_state();
+            self.refresh_sidebar_command_pane_sessions_if_changed(cx);
+            cx.notify();
+        }
+        model_changed
+    }
+
+    fn sleep_command_pane_tabs_for_scope_from_action(
+        &mut self,
+        group_id: CommandPaneGroupId,
+        session_id: CommandSessionId,
+        scope_value: u8,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.close_command_pane_tab(group_id, session_id, cx);
+        let Some(scope) = CommandPaneTabSleepScope::from_action_value(scope_value) else {
+            return;
+        };
+        self.sleep_command_pane_tabs_for_scope(group_id, session_id, scope, cx);
+    }
+
+    fn close_command_pane_tabs_for_scope_from_action(
+        &mut self,
+        group_id: CommandPaneGroupId,
+        session_id: CommandSessionId,
+        scope_value: u8,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(scope) = CommandPaneTabCloseScope::from_action_value(scope_value) else {
+            return;
+        };
+        self.close_command_pane_tabs_for_scope(group_id, session_id, scope, cx);
     }
 
     fn agents_pane_focus_mode_menu_label(&self, pane_id: WorkspacePaneId) -> Option<&'static str> {
@@ -29927,6 +34579,7 @@ impl GhostexGpuiApp {
                 }
                 if closed {
                     self.scroll_focused_command_active_tab();
+                    self.refresh_sidebar_command_pane_sessions_if_changed(cx);
                 }
                 closed
             }
@@ -30649,16 +35302,20 @@ impl GhostexGpuiApp {
                 &mut self.command_terminal_close_confirms,
                 &self.command_terminal_ghostty_surfaces,
             );
-            if consume_exited_command_terminal_ghostty_surfaces(
+            let exit_cleanup = consume_exited_command_terminal_ghostty_surfaces(
                 &mut self.command_pane,
                 &self.command_terminal_ghostty_surfaces,
-            ) {
+            );
+            if exit_cleanup.changed {
                 shell_state_changed = true;
+                self.dispatch_gpui_command_action_completions(exit_cleanup.completions, cx);
                 self.command_terminal_close_confirms
                     .prune_stale(&self.command_pane, &self.command_terminal_ghostty_surfaces);
             }
 
             if shell_state_changed {
+                self.prune_gpui_command_delayed_send_timers_for_command_model();
+                self.prune_gpui_command_close_after_done_timers_for_command_model();
                 if self.command_pane.has_sessions() {
                     self.set_shell_focus(ShellFocusTarget::CommandPane);
                     self.scroll_focused_command_active_tab();
@@ -30666,6 +35323,7 @@ impl GhostexGpuiApp {
                     self.restore_previous_non_command_focus_or_default();
                 }
                 self.persist_shell_layout_state();
+                self.refresh_sidebar_command_pane_sessions_if_changed(cx);
             }
         }
         let current_slot_ids = self.command_pane.rendered_terminal_body_mount_slots();
@@ -32838,45 +37496,99 @@ impl GhostexGpuiApp {
         cx.notify();
     }
 
+    fn prepare_hidden_command_pane_open_height_from_shared_settings(&mut self, window: &Window) {
+        let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
+        self.command_pane
+            .prepare_hidden_open_with_default_height_px(
+                command_pane_content_height(window),
+                command_pane_default_height_px_from_shared_settings(&settings_snapshot),
+            );
+    }
+
+    fn open_command_pane_from_shared_settings(
+        &mut self,
+        window: &Window,
+    ) -> Option<(CommandPaneGroupId, CommandSessionId, bool)> {
+        let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
+        self.command_pane.open_with_default_height_px(
+            command_pane_content_height(window),
+            command_pane_default_height_px_from_shared_settings(&settings_snapshot),
+        )
+    }
+
     fn handle_command_pane_control_action(
         &mut self,
         action: CommandPaneControlAction,
+        window: &Window,
         cx: &mut gpui::Context<Self>,
     ) {
         match action {
             CommandPaneControlAction::NewCommandPlaceholder => {
+                self.prepare_hidden_command_pane_open_height_from_shared_settings(window);
                 self.command_pane.add_session_to_focused_group();
                 self.focus_command_pane();
                 self.scroll_focused_command_active_tab();
             }
             CommandPaneControlAction::TogglePinned => {
                 let was_expanded = self.command_pane.is_expanded();
+                if !was_expanded {
+                    self.prepare_hidden_command_pane_open_height_from_shared_settings(window);
+                }
                 self.command_pane.toggle_pinned();
                 if !was_expanded && self.command_pane.is_expanded() {
+                    self.command_pane.ensure_session_for_open();
                     self.focus_command_pane();
                     self.scroll_focused_command_active_tab();
                 }
             }
             CommandPaneControlAction::ToggleExpanded => {
                 let was_expanded = self.command_pane.is_expanded();
+                if !was_expanded {
+                    self.prepare_hidden_command_pane_open_height_from_shared_settings(window);
+                }
                 self.command_pane.toggle_expanded();
                 if !was_expanded && self.command_pane.is_expanded() {
+                    self.command_pane.ensure_session_for_open();
                     self.focus_command_pane();
                     self.scroll_focused_command_active_tab();
                 } else if was_expanded && !self.command_pane.is_expanded() {
                     self.restore_previous_non_command_focus_or_default();
                 }
             }
-            CommandPaneControlAction::ClosePanel => {
-                self.command_pane.collapse();
-                self.restore_previous_non_command_focus_or_default();
-            }
         }
         self.persist_shell_layout_state();
+        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
         cx.notify();
     }
 
-    fn toggle_command_pane_from_keyboard(&mut self, cx: &mut gpui::Context<Self>) {
+    fn handle_command_pane_empty_titlebar_mouse_down(
+        &mut self,
+        group_id: Option<CommandPaneGroupId>,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUICommandTabDoubleClick 2026-06-25-13:58:
+        Native accepts double-click on empty pane-titlebar chrome after real tabs and controls decline the hit. GPUI command tab-strip backgrounds use this shared handler so expanded and collapsed command chrome create a New Terminal without affecting child tab/control clicks.
+        */
+        if !command_pane_empty_titlebar_double_click_creates_new_terminal(event.click_count) {
+            return;
+        }
+
+        window.prevent_default();
+        cx.stop_propagation();
+        if let Some(group_id) = group_id {
+            self.command_pane.focus_group(group_id);
+        }
+        self.handle_command_pane_control_action(
+            CommandPaneControlAction::NewCommandPlaceholder,
+            window,
+            cx,
+        );
+    }
+
+    fn toggle_command_pane_from_keyboard(&mut self, window: &Window, cx: &mut gpui::Context<Self>) {
         /*
         CDXC:GPUICommandPane 2026-06-22-05:42:
         F12 is wired as a shell-level command-pane command in this slice because the pane has no real terminal focus model yet. Collapsed panes restore the last pinned/floating shell mode and move keyboard ownership into the command pane.
@@ -32890,7 +37602,7 @@ impl GhostexGpuiApp {
         let was_expanded = self.command_pane.is_expanded();
         let command_pane_was_focused = self.shell_focus == ShellFocusTarget::CommandPane;
         if !was_expanded {
-            self.command_pane.expand();
+            self.open_command_pane_from_shared_settings(window);
             self.focus_command_pane();
             self.scroll_focused_command_active_tab();
         } else if command_pane_was_focused {
@@ -32901,6 +37613,7 @@ impl GhostexGpuiApp {
             self.scroll_focused_command_active_tab();
         }
         self.persist_shell_layout_state();
+        self.refresh_sidebar_command_pane_sessions_if_changed(cx);
         cx.notify();
     }
 
@@ -32921,11 +37634,10 @@ impl GhostexGpuiApp {
     fn record_command_split_layout_metrics(
         &mut self,
         split_id: CommandPaneSplitId,
+        axis: WorkspaceSplitAxis,
         child_bounds: &[Bounds<Pixels>],
     ) {
-        let Some(content_span) =
-            split_resize_content_span(child_bounds, WorkspaceSplitAxis::Horizontal)
-        else {
+        let Some(content_span) = split_resize_content_span(child_bounds, axis) else {
             return;
         };
 
@@ -33052,13 +37764,14 @@ impl GhostexGpuiApp {
     fn handle_command_split_handle_mouse_down(
         &mut self,
         split_id: CommandPaneSplitId,
+        axis: WorkspaceSplitAxis,
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         /*
         CDXC:GPUICommandPaneResize 2026-06-22-06:45:
-        Command-pane split handles use the same real-layout resize contract as Agents splits, but command layouts only support horizontal left/right splits. Dragging updates the command split ratio in memory, double-click resets it to 0.5, and finished mutations persist with the placeholder shell state without starting real command processes.
+        Command-pane split handles use the same real-layout resize contract as Agents splits. Dragging updates horizontal split ratios from x movement and vertical split ratios from y movement, double-click resets to 0.5, and finished mutations persist with the placeholder shell state without starting real command processes.
         */
         window.prevent_default();
         cx.stop_propagation();
@@ -33082,7 +37795,8 @@ impl GhostexGpuiApp {
 
         self.command_split_drag = Some(CommandPaneSplitResizeDragState {
             split_id,
-            start_x: event.position.x.as_f32(),
+            axis,
+            start_position: split_resize_event_position(axis, event.position),
             start_ratio,
             content_span: metrics.content_span.max(1.0),
         });
@@ -33107,8 +37821,9 @@ impl GhostexGpuiApp {
         window.prevent_default();
         cx.stop_propagation();
 
-        let next_ratio =
-            drag.start_ratio + (event.position.x.as_f32() - drag.start_x) / drag.content_span;
+        let next_ratio = drag.start_ratio
+            + (split_resize_event_position(drag.axis, event.position) - drag.start_position)
+                / drag.content_span.max(1.0);
         if self.command_pane.set_split_ratio(drag.split_id, next_ratio) {
             cx.notify();
         }
@@ -33327,8 +38042,11 @@ impl GhostexGpuiApp {
         cx.stop_propagation();
 
         if event.click_count >= 2 {
-            self.command_pane
-                .reset_height(command_pane_content_height(window));
+            let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
+            self.command_pane.reset_height_from_shared_settings(
+                command_pane_content_height(window),
+                &settings_snapshot,
+            );
             self.persist_shell_layout_state();
             cx.notify();
             return;
@@ -33693,11 +38411,7 @@ impl GhostexGpuiApp {
             ))
             .overflow_hidden()
             .border_t_1()
-            .border_color(if self.shell_focus == ShellFocusTarget::CommandPane {
-                command_pane_focused_border_color()
-            } else {
-                command_pane_border_color()
-            })
+            .border_color(command_pane_panel_separator_color())
             .bg(command_pane_chrome_color())
             .when(floating, |this| {
                 this.absolute().left_0().right_0().bottom_0().shadow_md()
@@ -33714,9 +38428,13 @@ impl GhostexGpuiApp {
 
         CDXC:GPUICommandPane 2026-06-22-06:24:
         Keep the resize rail as its own top row above the 26px command titlebar so resizing never relies on overlap with command tabs. The rail uses the same real-layout sibling discipline as workspace split handles.
+
+        CDXC:GPUICommandPaneResize 2026-06-25-13:19:
+        Native command-panel resize rails are transparent AppKit hit regions. Do not paint a permanent dark rail or one-pixel line; the visible command-panel edge is the separate panel separator, and resize feedback belongs to hover chrome.
         */
         div()
             .id("ghostex-gpui-command-pane-resize-rail")
+            .relative()
             .flex()
             .flex_shrink_0()
             .h(px(COMMAND_PANE_RESIZE_RAIL_HEIGHT))
@@ -33725,6 +38443,16 @@ impl GhostexGpuiApp {
             .justify_center()
             .cursor_ns_resize()
             .bg(command_pane_resize_rail_color())
+            .on_hover(cx.listener(|this, hovered, _, cx| {
+                this.set_command_resize_hovering(
+                    CommandPaneResizeHoverTarget::PanelRail,
+                    *hovered,
+                    cx,
+                );
+            }))
+            .on_mouse_move(cx.listener(|this, _event: &MouseMoveEvent, _window, cx| {
+                this.set_command_resize_hovering(CommandPaneResizeHoverTarget::PanelRail, true, cx);
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
@@ -33733,9 +38461,30 @@ impl GhostexGpuiApp {
             )
             .child(
                 div()
-                    .h(px(1.0))
+                    .h(px(COMMAND_PANE_RESIZE_HOVER_LINE_HEIGHT))
                     .w_full()
                     .bg(command_pane_resize_rail_line_color()),
+            )
+            .when(
+                self.command_resize_hover_visible == Some(CommandPaneResizeHoverTarget::PanelRail),
+                |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .h(px(COMMAND_PANE_RESIZE_HOVER_LINE_HEIGHT))
+                            .cursor_ns_resize()
+                            .bg(command_pane_resize_hover_line_color())
+                            .with_animation(
+                                "ghostex-gpui-command-pane-resize-hover-line",
+                                Animation::new(COMMAND_PANE_RESIZE_HOVER_FADE_DURATION)
+                                    .with_easing(gpui::ease_out_quint()),
+                                |line, delta| line.opacity(delta),
+                            ),
+                    )
+                },
             )
             .into_any_element()
     }
@@ -33757,6 +38506,7 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let split_id = split.id;
+        let axis = split.axis;
         let ratio = workspace_split_ratio(split.ratio);
         let first = div()
             .id(format!("ghostex-gpui-command-split-{}-first", split_id.0))
@@ -33764,6 +38514,7 @@ impl GhostexGpuiApp {
             .flex_col()
             .min_w_0()
             .min_h_0()
+            .when(axis == WorkspaceSplitAxis::Horizontal, |this| this.h_full())
             .flex_grow(ratio)
             .flex_shrink_1()
             .flex_basis(relative(0.0))
@@ -33774,27 +38525,54 @@ impl GhostexGpuiApp {
             .flex_col()
             .min_w_0()
             .min_h_0()
+            .when(axis == WorkspaceSplitAxis::Horizontal, |this| this.h_full())
             .flex_grow(1.0 - ratio)
             .flex_shrink_1()
             .flex_basis(relative(0.0))
             .child(self.render_command_pane_node(&split.second, cx));
-        let view = cx.entity().clone();
 
-        h_flex()
-            .on_children_prepainted(move |child_bounds, _window, cx| {
-                let _ = view.update(cx, |this, _cx| {
-                    this.record_command_split_layout_metrics(split_id, &child_bounds);
-                });
-            })
-            .id(format!("ghostex-gpui-command-split-{}", split_id.0))
-            .flex_1()
-            .min_w_0()
-            .min_h_0()
-            .overflow_hidden()
-            .child(first)
-            .child(self.render_command_pane_split_handle(split, cx))
-            .child(second)
-            .into_any_element()
+        /*
+        CDXC:GPUIFocusedSplits 2026-06-25-16:05:
+        Command-pane split layout is axis-aware so persisted command split geometry renders from its stored axis. Focused command hotkeys currently create horizontal splits only, matching native; the split handle remains a real non-overlapping layout sibling when restored layouts carry either orientation.
+        */
+        match split.axis {
+            WorkspaceSplitAxis::Horizontal => {
+                let view = cx.entity().clone();
+                h_flex()
+                    .on_children_prepainted(move |child_bounds, _window, cx| {
+                        let _ = view.update(cx, |this, _cx| {
+                            this.record_command_split_layout_metrics(split_id, axis, &child_bounds);
+                        });
+                    })
+                    .id(format!("ghostex-gpui-command-split-{}", split_id.0))
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(first)
+                    .child(self.render_command_pane_split_handle(split, cx))
+                    .child(second)
+                    .into_any_element()
+            }
+            WorkspaceSplitAxis::Vertical => {
+                let view = cx.entity().clone();
+                v_flex()
+                    .on_children_prepainted(move |child_bounds, _window, cx| {
+                        let _ = view.update(cx, |this, _cx| {
+                            this.record_command_split_layout_metrics(split_id, axis, &child_bounds);
+                        });
+                    })
+                    .id(format!("ghostex-gpui-command-split-{}", split_id.0))
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(first)
+                    .child(self.render_command_pane_split_handle(split, cx))
+                    .child(second)
+                    .into_any_element()
+            }
+        }
     }
 
     fn render_command_pane_split_handle(
@@ -33803,30 +38581,149 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let split_id = split.id;
-        div()
-            .id(format!("ghostex-gpui-command-split-handle-{}", split_id.0))
-            .flex()
-            .flex_shrink_0()
-            .h_full()
-            .w(px(COMMAND_PANE_SPLIT_HANDLE_THICKNESS))
-            .items_center()
-            .justify_center()
-            .cursor_ew_resize()
-            .bg(command_pane_split_handle_color())
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.handle_command_split_handle_mouse_down(split_id, event, window, cx);
-                }),
-            )
-            .child(
-                div()
-                    .h_full()
-                    .w(px(WORKSPACE_SPLIT_SEPARATOR_THICKNESS))
-                    .cursor_ew_resize()
-                    .bg(command_pane_split_separator_color()),
-            )
-            .into_any_element()
+        let axis = split.axis;
+        match split.axis {
+            WorkspaceSplitAxis::Horizontal => div()
+                .id(format!("ghostex-gpui-command-split-handle-{}", split_id.0))
+                .relative()
+                .flex()
+                .flex_shrink_0()
+                .h_full()
+                .w(px(COMMAND_PANE_SPLIT_HANDLE_THICKNESS))
+                .items_center()
+                .justify_center()
+                .cursor_ew_resize()
+                .bg(command_pane_split_handle_color())
+                .on_hover(cx.listener(move |this, hovered, _, cx| {
+                    this.set_command_resize_hovering(
+                        CommandPaneResizeHoverTarget::Split(split_id),
+                        *hovered,
+                        cx,
+                    );
+                }))
+                .on_mouse_move(
+                    cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
+                        this.set_command_resize_hovering(
+                            CommandPaneResizeHoverTarget::Split(split_id),
+                            true,
+                            cx,
+                        );
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        this.handle_command_split_handle_mouse_down(
+                            split_id, axis, event, window, cx,
+                        );
+                    }),
+                )
+                .child(
+                    div()
+                        .h_full()
+                        .w(px(WORKSPACE_SPLIT_SEPARATOR_THICKNESS))
+                        .cursor_ew_resize()
+                        .bg(command_pane_split_separator_color()),
+                )
+                .when(
+                    self.command_resize_hover_visible
+                        == Some(CommandPaneResizeHoverTarget::Split(split_id)),
+                    |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .bottom_0()
+                                .left(px((COMMAND_PANE_SPLIT_HANDLE_THICKNESS
+                                    - COMMAND_PANE_RESIZE_HOVER_LINE_HEIGHT)
+                                    / 2.0))
+                                .w(px(COMMAND_PANE_RESIZE_HOVER_LINE_HEIGHT))
+                                .cursor_ew_resize()
+                                .bg(command_pane_resize_hover_line_color())
+                                .with_animation(
+                                    format!(
+                                        "ghostex-gpui-command-split-resize-hover-line-{}",
+                                        split_id.0
+                                    ),
+                                    Animation::new(COMMAND_PANE_RESIZE_HOVER_FADE_DURATION)
+                                        .with_easing(gpui::ease_out_quint()),
+                                    |line, delta| line.opacity(delta),
+                                ),
+                        )
+                    },
+                )
+                .into_any_element(),
+            WorkspaceSplitAxis::Vertical => div()
+                .id(format!("ghostex-gpui-command-split-handle-{}", split_id.0))
+                .relative()
+                .flex()
+                .flex_shrink_0()
+                .h(px(COMMAND_PANE_SPLIT_HANDLE_THICKNESS))
+                .w_full()
+                .items_center()
+                .justify_center()
+                .cursor_ns_resize()
+                .bg(command_pane_split_handle_color())
+                .on_hover(cx.listener(move |this, hovered, _, cx| {
+                    this.set_command_resize_hovering(
+                        CommandPaneResizeHoverTarget::Split(split_id),
+                        *hovered,
+                        cx,
+                    );
+                }))
+                .on_mouse_move(
+                    cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
+                        this.set_command_resize_hovering(
+                            CommandPaneResizeHoverTarget::Split(split_id),
+                            true,
+                            cx,
+                        );
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        this.handle_command_split_handle_mouse_down(
+                            split_id, axis, event, window, cx,
+                        );
+                    }),
+                )
+                .child(
+                    div()
+                        .h(px(WORKSPACE_SPLIT_SEPARATOR_THICKNESS))
+                        .w_full()
+                        .cursor_ns_resize()
+                        .bg(command_pane_split_separator_color()),
+                )
+                .when(
+                    self.command_resize_hover_visible
+                        == Some(CommandPaneResizeHoverTarget::Split(split_id)),
+                    |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .top(px((COMMAND_PANE_SPLIT_HANDLE_THICKNESS
+                                    - COMMAND_PANE_RESIZE_HOVER_LINE_HEIGHT)
+                                    / 2.0))
+                                .h(px(COMMAND_PANE_RESIZE_HOVER_LINE_HEIGHT))
+                                .cursor_ns_resize()
+                                .bg(command_pane_resize_hover_line_color())
+                                .with_animation(
+                                    format!(
+                                        "ghostex-gpui-command-split-resize-hover-line-{}",
+                                        split_id.0
+                                    ),
+                                    Animation::new(COMMAND_PANE_RESIZE_HOVER_FADE_DURATION)
+                                        .with_easing(gpui::ease_out_quint()),
+                                    |line, delta| line.opacity(delta),
+                                ),
+                        )
+                    },
+                )
+                .into_any_element(),
+        }
     }
 
     fn render_command_pane_leaf(
@@ -33872,6 +38769,19 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         let group_id = leaf.group_id;
         let scroll_handle = self.command_tab_scroll_handle(group_id);
+        let wheel_scroll_handle = scroll_handle.clone();
+        let tab_count = leaf.tab_group.tabs.len();
+        let sticky_active_tab = leaf
+            .tab_group
+            .active_session_index()
+            .and_then(|active_index| {
+                command_pane_sticky_active_tab_edge_for_scroll_handle(&scroll_handle, active_index)
+                    .map(|edge| (edge, active_index))
+            });
+        let leading_sticky_active_tab =
+            sticky_active_tab.filter(|(edge, _)| *edge == CommandPaneStickyActiveTabEdge::Leading);
+        let trailing_sticky_active_tab =
+            sticky_active_tab.filter(|(edge, _)| *edge == CommandPaneStickyActiveTabEdge::Trailing);
 
         h_flex()
             .id(format!("ghostex-gpui-command-pane-titlebar-{}", group_id.0))
@@ -33881,7 +38791,7 @@ impl GhostexGpuiApp {
             .items_center()
             .overflow_hidden()
             .border_b_1()
-            .border_color(command_pane_border_color())
+            .border_color(command_pane_titlebar_separator_color())
             .bg(command_pane_chrome_color())
             .on_mouse_down(
                 MouseButton::Left,
@@ -33891,6 +38801,16 @@ impl GhostexGpuiApp {
                     cx.notify();
                 }),
             )
+            .when_some(leading_sticky_active_tab, |this, (edge, active_index)| {
+                this.child(self.render_command_pane_sticky_active_tab_button(
+                    format!("group-{}-{}", group_id.0, edge.element_slug()),
+                    edge,
+                    scroll_handle.clone(),
+                    active_index,
+                    Some(group_id),
+                    cx,
+                ))
+            })
             .child(
                 h_flex()
                     .id(format!("ghostex-gpui-command-pane-tabs-{}", group_id.0))
@@ -33898,8 +38818,32 @@ impl GhostexGpuiApp {
                     .min_w_0()
                     .h_full()
                     .items_center()
-                    .overflow_x_scroll()
+                    .overflow_hidden()
                     .track_scroll(&scroll_handle)
+                    .on_scroll_wheel(cx.listener(
+                        move |_this, event: &ScrollWheelEvent, window, cx| {
+                            if command_pane_handle_tab_strip_scroll_wheel(
+                                &wheel_scroll_handle,
+                                event.delta,
+                                window.line_height(),
+                            ) {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                cx.notify();
+                            }
+                        },
+                    ))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            this.handle_command_pane_empty_titlebar_mouse_down(
+                                Some(group_id),
+                                event,
+                                window,
+                                cx,
+                            );
+                        }),
+                    )
                     .children(
                         leaf.tab_group
                             .tabs
@@ -33910,11 +38854,22 @@ impl GhostexGpuiApp {
                                     group_id,
                                     tab.session_id,
                                     Some(tab_index),
-                                    COMMAND_PANE_TAB_WIDTH,
+                                    tab_index + 1 < tab_count,
                                     false,
                                     cx,
                                 )
                             }),
+                    )
+                    .when(
+                        command_pane_new_command_control_placement()
+                            == CommandPaneNewCommandControlPlacement::InlineTabRun,
+                        |this| {
+                            this.child(self.render_command_pane_tab_add_button(
+                                Some(group_id),
+                                false,
+                                cx,
+                            ))
+                        },
                     )
                     .child(self.render_command_tab_strip_end_drop_target(
                         group_id,
@@ -33922,66 +38877,145 @@ impl GhostexGpuiApp {
                         cx,
                     )),
             )
-            .child(self.render_command_tab_edge_reveal(format!("group-{}", group_id.0)))
+            .when_some(trailing_sticky_active_tab, |this, (edge, active_index)| {
+                this.child(self.render_command_pane_sticky_active_tab_button(
+                    format!("group-{}-{}", group_id.0, edge.element_slug()),
+                    edge,
+                    scroll_handle.clone(),
+                    active_index,
+                    Some(group_id),
+                    cx,
+                ))
+            })
             .child(self.render_command_pane_controls(Some(group_id), true, cx))
             .into_any_element()
     }
 
     fn render_command_pane_strip(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         let flat_tabs = self.command_pane.flat_tab_ids();
+        let flat_tab_count = flat_tabs.len();
         let scroll_handle = self.command_collapsed_tab_scroll_handle.clone();
+        let wheel_scroll_handle = scroll_handle.clone();
+        let active_flat_tab = self.command_pane.active_group_and_session_id().and_then(
+            |(active_group_id, active_session_id)| {
+                flat_tabs
+                    .iter()
+                    .position(|(group_id, session_id)| {
+                        *group_id == active_group_id && *session_id == active_session_id
+                    })
+                    .map(|active_index| (active_group_id, active_index))
+            },
+        );
+        let sticky_active_tab = active_flat_tab.and_then(|(active_group_id, active_index)| {
+            command_pane_sticky_active_tab_edge_for_scroll_handle(&scroll_handle, active_index)
+                .map(|edge| (edge, active_group_id, active_index))
+        });
+        let leading_sticky_active_tab = sticky_active_tab
+            .filter(|(edge, _, _)| *edge == CommandPaneStickyActiveTabEdge::Leading);
+        let trailing_sticky_active_tab = sticky_active_tab
+            .filter(|(edge, _, _)| *edge == CommandPaneStickyActiveTabEdge::Trailing);
 
+        /*
+        CDXC:GPUICommandPaneControls 2026-06-25-12:32:
+        Native minimized command panels are command tab chrome only: the panel frame starts after a 4px left margin, leaves an 8px black right margin, and does not prepend a separate "Command" label block before the tabs.
+        */
         h_flex()
-            .id("ghostex-gpui-command-pane-collapsed-strip")
+            .id("ghostex-gpui-command-pane-collapsed-strip-row")
             .flex_shrink_0()
             .h(px(COMMAND_PANE_STRIP_HEIGHT))
             .w_full()
             .items_center()
             .overflow_hidden()
-            .border_t_1()
-            .border_color(if self.shell_focus == ShellFocusTarget::CommandPane {
-                command_pane_focused_border_color()
-            } else {
-                command_pane_border_color()
-            })
             .bg(command_pane_strip_color())
             .child(
-                div()
-                    .flex()
-                    .flex_shrink_0()
-                    .h_full()
-                    .w(px(82.0))
-                    .items_center()
-                    .border_r_1()
-                    .border_color(command_pane_border_color())
-                    .px(px(10.0))
-                    .text_size(px(11.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(command_pane_label_color())
-                    .child("Command"),
-            )
-            .child(
                 h_flex()
-                    .id("ghostex-gpui-command-pane-strip-tabs")
+                    .id("ghostex-gpui-command-pane-collapsed-strip")
                     .flex_1()
                     .min_w_0()
                     .h_full()
                     .items_center()
-                    .overflow_x_scroll()
-                    .track_scroll(&scroll_handle)
-                    .children(flat_tabs.into_iter().map(|(group_id, session_id)| {
-                        self.render_command_pane_tab(
-                            group_id,
-                            session_id,
-                            None,
-                            COMMAND_PANE_STRIP_TAB_WIDTH,
-                            true,
-                            cx,
-                        )
-                    })),
+                    .overflow_hidden()
+                    .border_t_1()
+                    .border_color(command_pane_panel_separator_color())
+                    .bg(command_pane_strip_color())
+                    .ml(px(COMMAND_PANE_COLLAPSED_STRIP_LEFT_MARGIN))
+                    .mr(px(COMMAND_PANE_COLLAPSED_STRIP_RIGHT_MARGIN))
+                    .when_some(
+                        leading_sticky_active_tab,
+                        |this, (edge, active_group_id, active_index)| {
+                            this.child(self.render_command_pane_sticky_active_tab_button(
+                                format!("collapsed-{}", edge.element_slug()),
+                                edge,
+                                scroll_handle.clone(),
+                                active_index,
+                                Some(active_group_id),
+                                cx,
+                            ))
+                        },
+                    )
+                    .child(
+                        h_flex()
+                            .id("ghostex-gpui-command-pane-strip-tabs")
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .items_center()
+                            .overflow_hidden()
+                            .track_scroll(&scroll_handle)
+                            .on_scroll_wheel(cx.listener(
+                                move |_this, event: &ScrollWheelEvent, window, cx| {
+                                    if command_pane_handle_tab_strip_scroll_wheel(
+                                        &wheel_scroll_handle,
+                                        event.delta,
+                                        window.line_height(),
+                                    ) {
+                                        window.prevent_default();
+                                        cx.stop_propagation();
+                                        cx.notify();
+                                    }
+                                },
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                    this.handle_command_pane_empty_titlebar_mouse_down(
+                                        None, event, window, cx,
+                                    );
+                                }),
+                            )
+                            .children(flat_tabs.into_iter().enumerate().map(
+                                |(tab_index, (group_id, session_id))| {
+                                    self.render_command_pane_tab(
+                                        group_id,
+                                        session_id,
+                                        None,
+                                        tab_index + 1 < flat_tab_count,
+                                        true,
+                                        cx,
+                                    )
+                                },
+                            )),
+                    )
+                    .when(
+                        command_pane_new_command_control_placement()
+                            == CommandPaneNewCommandControlPlacement::InlineTabRun,
+                        |this| this.child(self.render_command_pane_tab_add_button(None, true, cx)),
+                    )
+                    .when_some(
+                        trailing_sticky_active_tab,
+                        |this, (edge, active_group_id, active_index)| {
+                            this.child(self.render_command_pane_sticky_active_tab_button(
+                                format!("collapsed-{}", edge.element_slug()),
+                                edge,
+                                scroll_handle.clone(),
+                                active_index,
+                                Some(active_group_id),
+                                cx,
+                            ))
+                        },
+                    )
+                    .child(self.render_command_pane_controls(None, false, cx)),
             )
-            .child(self.render_command_tab_edge_reveal("collapsed"))
-            .child(self.render_command_pane_controls(None, false, cx))
             .into_any_element()
     }
 
@@ -33990,15 +39024,27 @@ impl GhostexGpuiApp {
         group_id: CommandPaneGroupId,
         session_id: CommandSessionId,
         tab_index: Option<usize>,
-        width: f32,
+        has_following_command_tab: bool,
         expand_on_click: bool,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        let (title, tab_status) = self
+        let (title, tab_status, is_sleeping) = self
             .command_pane
             .session(session_id)
-            .map(|session| (session.title.clone(), session.tab_status()))
-            .unwrap_or_else(|| ("Command".to_string(), CommandTerminalTabStatus::Idle));
+            .map(|session| {
+                (
+                    session.title.clone(),
+                    session.tab_status(),
+                    session.is_sleeping,
+                )
+            })
+            .unwrap_or_else(|| {
+                (
+                    COMMAND_PANE_DEFAULT_SESSION_TITLE.to_string(),
+                    CommandTerminalTabStatus::Idle,
+                    false,
+                )
+            });
         let chrome_signature = self
             .command_pane
             .find_leaf(group_id)
@@ -34023,6 +39069,15 @@ impl GhostexGpuiApp {
                     target: CommandPaneDropTarget::TabStrip(tab_index),
                 })
         });
+        let tab_hover_key = CommandPaneHoverTab {
+            group_id,
+            session_id,
+        };
+        let is_tab_hovered = self.hovered_command_tab == Some(tab_hover_key);
+        let show_status_indicator =
+            command_terminal_tab_status_indicator_visible(tab_status, is_tab_hovered);
+        let title_trailing_reserved_width =
+            command_terminal_tab_status_title_trailing_reserved_width(tab_status);
 
         div()
             .id(format!(
@@ -34031,28 +39086,21 @@ impl GhostexGpuiApp {
             ))
             .relative()
             .flex()
-            .flex_shrink_0()
+            .flex_grow(1.0)
+            .flex_shrink_1()
+            .flex_basis(relative(0.0))
             .h(px(COMMAND_PANE_TAB_BAR_HEIGHT))
-            .w(px(width))
+            .min_w(px(COMMAND_PANE_TAB_MIN_WIDTH))
+            .max_w(px(COMMAND_PANE_TAB_MAX_WIDTH))
             .items_center()
             .overflow_hidden()
-            .border_r_1()
-            .border_color(command_pane_border_color())
-            .pl(px(9.0))
-            .pr(px(5.0))
-            .text_size(px(11.5))
-            .font_weight(if is_active {
-                FontWeight::SEMIBOLD
-            } else {
-                FontWeight::NORMAL
-            })
-            .text_color(if is_active {
-                command_pane_tab_active_text_color()
-            } else {
-                command_pane_tab_inactive_text_color()
-            })
+            .pl(px(8.0))
+            .pr(px(0.0))
+            .text_size(px(COMMAND_PANE_TAB_TITLE_FONT_SIZE))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(command_pane_tab_title_text_color(is_active, is_sleeping))
             .cursor_default()
-            .when(is_active, |this| this.bg(command_pane_tab_active_color()))
+            .bg(command_pane_tab_background_color(is_active, is_sleeping))
             .when(show_insertion_marker, |this| {
                 this.child(self.render_command_tab_insertion_marker(
                     group_id,
@@ -34060,19 +39108,21 @@ impl GhostexGpuiApp {
                     "before",
                 ))
             })
-            .hover(|this| {
-                if is_active {
-                    this.bg(command_pane_tab_active_color())
-                } else {
-                    this.bg(command_pane_tab_hover_color())
-                }
+            .hover(move |this| {
+                this.bg(command_pane_tab_hover_background_color(
+                    is_active,
+                    is_sleeping,
+                ))
             })
+            .on_hover(cx.listener(move |this, hovered, _, cx| {
+                this.set_command_pane_tab_hovered(tab_hover_key, *hovered, cx);
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
-                    this.select_command_pane_tab(group_id, session_id, expand_on_click, cx);
+                    this.select_command_pane_tab(group_id, session_id, expand_on_click, window, cx);
                 }),
             )
             .on_mouse_down(
@@ -34088,6 +39138,25 @@ impl GhostexGpuiApp {
                         window,
                         cx,
                     );
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Middle,
+                cx.listener(move |_this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Middle,
+                cx.listener(move |this, _event: &MouseUpEvent, window, cx| {
+                    /*
+                    CDXC:GPUICommandTabClose 2026-06-25-14:01:
+                    Command tabs mirror native AppKit tab buttons: button-2 is owned by the clicked tab and closes it on mouse-up through the normal command close path, without selecting the tab or creating separate session teardown behavior.
+                    */
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.close_command_pane_tab(group_id, session_id, cx);
                 }),
             )
             .when_some(tab_index, |this, tab_index| {
@@ -34135,27 +39204,165 @@ impl GhostexGpuiApp {
             })
             .child(
                 div()
-                    .id(format!(
-                        "ghostex-gpui-command-tab-status-dot-{}-{}",
-                        session_id.0,
-                        tab_status.element_slug()
-                    ))
-                    .flex_shrink_0()
-                    .size(px(6.0))
-                    .rounded_full()
-                    .bg(command_pane_tab_dot_color(tab_status, is_active)),
-            )
-            .child(
-                div()
                     .flex_1()
                     .min_w_0()
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .ml(px(7.0))
+                    .pr(px(title_trailing_reserved_width))
                     .child(title),
             )
-            .child(self.render_command_pane_tab_close_button(group_id, session_id, is_active, cx))
+            .when(show_status_indicator, |this| {
+                this.child(command_pane_tab_status_indicator_element(
+                    format!(
+                        "ghostex-gpui-command-tab-status-indicator-{}-{}",
+                        session_id.0,
+                        tab_status.element_slug()
+                    ),
+                    tab_status,
+                ))
+            })
+            .when(
+                command_pane_tab_separator_visible(has_following_command_tab),
+                |this| this.child(self.render_command_pane_tab_separator()),
+            )
+            .when(is_tab_hovered, |this| {
+                this.child(self.render_command_pane_tab_close_button(group_id, session_id, cx))
+            })
+            .into_any_element()
+    }
+
+    fn render_command_pane_tab_separator(&self) -> AnyElement {
+        div()
+            .absolute()
+            .right_0()
+            .top_0()
+            .h_full()
+            .w(px(COMMAND_PANE_TAB_SEPARATOR_WIDTH))
+            .bg(command_pane_tab_separator_color())
+            .into_any_element()
+    }
+
+    fn render_command_pane_tab_add_button(
+        &self,
+        group_id: Option<CommandPaneGroupId>,
+        collapsed_strip: bool,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let element_id = match group_id {
+            Some(group_id) => format!("ghostex-gpui-command-pane-tab-add-{}", group_id.0),
+            None => "ghostex-gpui-command-pane-strip-tab-add".to_string(),
+        };
+        let size = if collapsed_strip {
+            COMMAND_PANE_STRIP_HEIGHT
+        } else {
+            COMMAND_PANE_TAB_BAR_HEIGHT
+        };
+
+        /*
+        CDXC:GPUICommandPaneControls 2026-06-25-12:13:
+        New Terminal is command-tab chrome, not a fixed panel action. Render it inline after the command tab run so expanded titlebars and the collapsed strip mirror macOS command chrome while reusing the existing command-placeholder creation path.
+
+        CDXC:GPUICommandPaneControls 2026-06-25-14:44:
+        Native command tab-add chrome uses `setTabBarIconChrome`, so its #0e0e0e background and #cfcfcf plus tint are stable in normal, hover, and active states. Do not leave the inline New Terminal button transparent until hover.
+        */
+        div()
+            .id(element_id)
+            .flex()
+            .flex_shrink_0()
+            .h_full()
+            .w(px(size))
+            .items_center()
+            .justify_center()
+            .border_r_1()
+            .border_color(command_pane_titlebar_separator_color())
+            .bg(command_pane_control_button_color())
+            .text_color(command_pane_control_text_color())
+            .cursor_default()
+            .hover(|this| this.bg(command_pane_control_hover_color()))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    if let Some(group_id) = group_id {
+                        this.command_pane.focus_group(group_id);
+                    }
+                    this.handle_command_pane_control_action(
+                        CommandPaneControlAction::NewCommandPlaceholder,
+                        window,
+                        cx,
+                    );
+                }),
+            )
+            .tooltip(move |window, cx| {
+                Tooltip::new(command_pane_tab_add_tooltip()).build(window, cx)
+            })
+            .child(titlebar_svg_icon(
+                command_pane_tab_add_icon_path(),
+                COMMAND_PANE_CONTROL_ICON_SIZE,
+                command_pane_control_text_color(),
+            ))
+            .into_any_element()
+    }
+
+    fn render_command_pane_sticky_active_tab_button(
+        &self,
+        element_id: impl Into<String>,
+        edge: CommandPaneStickyActiveTabEdge,
+        scroll_handle: ScrollHandle,
+        active_index: usize,
+        group_id: Option<CommandPaneGroupId>,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        /*
+        CDXC:GPUICommandTabOverflow 2026-06-25-13:34:
+        Render native Show Active Tab as a real 30px command-role button at the clipped tab-strip edge. It owns only one inner border, uses stable command icon-button chrome, and scrolls the existing active tab instead of creating a decorative reveal slot.
+        */
+        div()
+            .id(format!(
+                "ghostex-gpui-command-sticky-active-tab-{}",
+                element_id.into()
+            ))
+            .flex()
+            .flex_shrink_0()
+            .h_full()
+            .w(px(COMMAND_PANE_STICKY_ACTIVE_TAB_BUTTON_SIZE))
+            .items_center()
+            .justify_center()
+            .bg(command_pane_sticky_active_tab_button_color())
+            .text_color(command_pane_sticky_active_tab_icon_color())
+            .cursor_default()
+            .when(edge == CommandPaneStickyActiveTabEdge::Leading, |this| {
+                this.border_r_1()
+                    .border_color(command_pane_sticky_active_tab_border_color())
+            })
+            .when(edge == CommandPaneStickyActiveTabEdge::Trailing, |this| {
+                this.border_l_1()
+                    .border_color(command_pane_sticky_active_tab_border_color())
+            })
+            .hover(|this| this.bg(command_pane_sticky_active_tab_button_color()))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.show_command_pane_active_tab_from_sticky_proxy(
+                        group_id,
+                        scroll_handle.clone(),
+                        active_index,
+                        cx,
+                    );
+                }),
+            )
+            .tooltip(move |window, cx| {
+                Tooltip::new(command_pane_sticky_active_tab_tooltip()).build(window, cx)
+            })
+            .child(titlebar_svg_icon(
+                command_pane_sticky_active_tab_icon_path(edge),
+                COMMAND_PANE_STICKY_ACTIVE_TAB_ICON_SIZE,
+                command_pane_sticky_active_tab_icon_color(),
+            ))
             .into_any_element()
     }
 
@@ -34178,8 +39385,19 @@ impl GhostexGpuiApp {
             ))
             .relative()
             .h_full()
-            .flex_grow_1()
-            .min_w(px(20.0))
+            .flex_shrink_0()
+            .w(px(COMMAND_PANE_TAB_END_DROP_TARGET_WIDTH))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.handle_command_pane_empty_titlebar_mouse_down(
+                        Some(group_id),
+                        event,
+                        window,
+                        cx,
+                    );
+                }),
+            )
             .when(show_insertion_marker, |this| {
                 this.child(self.render_command_tab_insertion_marker(
                     group_id,
@@ -34254,36 +39472,10 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
-    fn render_command_tab_edge_reveal(&self, element_id: impl Into<String>) -> AnyElement {
-        div()
-            .id(format!(
-                "ghostex-gpui-command-tab-edge-reveal-{}",
-                element_id.into()
-            ))
-            .flex()
-            .flex_shrink_0()
-            .h_full()
-            .w(px(WORKSPACE_TAB_EDGE_REVEAL_WIDTH))
-            .items_center()
-            .justify_center()
-            .bg(command_pane_tab_edge_reveal_color())
-            .border_l_1()
-            .border_color(command_pane_border_color())
-            .child(
-                div()
-                    .w(px(2.0))
-                    .h(px(12.0))
-                    .rounded_full()
-                    .bg(command_pane_tab_edge_reveal_mark_color()),
-            )
-            .into_any_element()
-    }
-
     fn render_command_pane_tab_close_button(
         &self,
         group_id: CommandPaneGroupId,
         session_id: CommandSessionId,
-        is_active: bool,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         div()
@@ -34291,33 +39483,114 @@ impl GhostexGpuiApp {
                 "ghostex-gpui-command-pane-tab-close-{}-{}",
                 group_id.0, session_id.0
             ))
+            .absolute()
+            .right(px(COMMAND_PANE_TAB_CLOSE_TRAILING_PADDING))
+            .top(px(COMMAND_PANE_TAB_CLOSE_TOP_OFFSET))
             .flex()
-            .flex_shrink_0()
             .size(px(COMMAND_PANE_TAB_CLOSE_SIZE))
-            .ml(px(5.0))
             .items_center()
             .justify_center()
-            .rounded(px(4.0))
-            .text_size(px(12.0))
-            .line_height(px(COMMAND_PANE_TAB_CLOSE_SIZE))
-            .font_weight(FontWeight::NORMAL)
-            .text_color(if is_active {
-                workspace_tab_close_active_color()
-            } else {
-                workspace_tab_close_inactive_color()
-            })
+            .rounded(px(COMMAND_PANE_TAB_CLOSE_CORNER_RADIUS))
+            .bg(command_pane_control_button_color())
+            .text_color(command_pane_control_text_color())
             .cursor_default()
-            .hover(|this| this.bg(workspace_tab_close_hover_color()))
+            .hover(|this| this.bg(command_pane_control_hover_color()))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                cx.listener(move |_this, _event: &MouseDownEvent, window, cx| {
+                    /*
+                    CDXC:GPUICommandTabClose 2026-06-25-14:04:
+                    Native inline tab Close records the clicked action on mouse-down but invokes the close only on mouse-up if the close control still owns the pointer. GPUI command close chrome should consume down without tearing down the tab early.
+                    */
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, _event: &MouseUpEvent, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
                     this.close_command_pane_tab(group_id, session_id, cx);
                 }),
             )
-            .child("x")
+            .child(titlebar_svg_icon(
+                COMMAND_ICON_XMARK,
+                COMMAND_PANE_TAB_CLOSE_ICON_SIZE,
+                command_pane_control_text_color(),
+            ))
             .into_any_element()
+    }
+
+    fn set_command_pane_tab_hovered(
+        &mut self,
+        tab: CommandPaneHoverTab,
+        hovered: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUICommandTabChrome 2026-06-25-13:11:
+        macOS command-tab close controls are draw-time hover chrome. Track the hovered command tab separately from command model state so hover can reveal one absolute close affordance without changing selection, persistence, tab order, or title layout.
+        */
+        if hovered {
+            if self.hovered_command_tab != Some(tab) {
+                self.hovered_command_tab = Some(tab);
+                cx.notify();
+            }
+            return;
+        }
+
+        if self.hovered_command_tab == Some(tab) {
+            self.hovered_command_tab = None;
+            cx.notify();
+        }
+    }
+
+    fn set_command_resize_hovering(
+        &mut self,
+        target: CommandPaneResizeHoverTarget,
+        hovered: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUICommandPaneResize 2026-06-25-13:19:
+        Native resize rails reveal a white hover line only after a 50ms delay and fade it over 180ms, scoped to the exact rail under the pointer. Keep GPUI command resize hover as runtime chrome state separate from command-pane layout, drag, and persistence.
+        */
+        if hovered {
+            if self.command_resize_hovering == Some(target) {
+                return;
+            }
+            self.command_resize_hover_epoch = self.command_resize_hover_epoch.wrapping_add(1);
+            self.command_resize_hovering = Some(target);
+            self.command_resize_hover_visible = None;
+            let epoch = self.command_resize_hover_epoch;
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(COMMAND_PANE_RESIZE_HOVER_DELAY)
+                    .await;
+
+                let _ = this.update(cx, |this, cx| {
+                    if this.command_resize_hover_epoch == epoch
+                        && this.command_resize_hovering == Some(target)
+                    {
+                        this.command_resize_hover_visible = Some(target);
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+            cx.notify();
+            return;
+        }
+
+        if self.command_resize_hovering == Some(target)
+            || self.command_resize_hover_visible == Some(target)
+        {
+            self.command_resize_hover_epoch = self.command_resize_hover_epoch.wrapping_add(1);
+            self.command_resize_hovering = None;
+            self.command_resize_hover_visible = None;
+            cx.notify();
+        }
     }
 
     fn render_command_pane_controls(
@@ -34326,26 +39599,15 @@ impl GhostexGpuiApp {
         expanded_chrome: bool,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        let pin_label = if self.command_pane.mode == CommandPaneMode::Pinned {
-            "F"
-        } else {
-            "P"
-        };
-        let pin_tooltip = if self.command_pane.mode == CommandPaneMode::Pinned {
-            "Float command pane"
-        } else {
-            "Pin command pane"
-        };
-        let expand_label = if self.command_pane.is_expanded() {
-            "v"
-        } else {
-            "^"
-        };
+        let pin_tooltip = command_pane_panel_pin_label(self.command_pane.mode);
         let expand_tooltip = if self.command_pane.is_expanded() {
-            "Collapse command pane"
+            command_pane_panel_minimize_label()
         } else {
-            "Expand command pane"
+            command_pane_panel_expand_menu_label()
         };
+        let pin_icon_path = command_pane_panel_pin_icon_path(self.command_pane.mode);
+        let expand_icon_path =
+            command_pane_panel_visibility_icon_path(self.command_pane.is_expanded());
         let controls_id = if expanded_chrome {
             match group_id {
                 Some(group_id) => {
@@ -34360,58 +39622,70 @@ impl GhostexGpuiApp {
         /*
         CDXC:GPUICommandPaneControls 2026-06-24-07:33:
         Visible command-pane chrome copy should describe command actions instead of placeholder internals. This source-only control stays non-launching and private-detail-free: it creates only the existing command shell entry without terminal/CEF runtime work, command text, or output.
+
+        CDXC:GPUICommandPaneControls 2026-06-25-12:05:
+        Collapsed command-strip chrome keeps New Terminal inline with the tab run and keeps Expand in the fixed panel cluster, but omits Pin/Unpin because macOS hidden command tabs expose expand-only panel actions. Panel mode mutation stays scoped to expanded titlebars so a hidden strip cannot flip pinned/floating state before opening.
+
+        CDXC:GPUICommandPaneControls 2026-06-25-12:13:
+        The fixed command-pane action cluster excludes New Terminal because macOS renders creation as an inline tab-run plus button. Keep this cluster panel-scoped so collapsed chrome has only Expand while expanded titlebars have Pin/Unpin plus the single Minimize affordance.
+
+        CDXC:GPUICommandPaneControls 2026-06-25-12:26:
+        Native visible command panels publish exactly Pin/Unpin Commands Panel plus closeCommandsPanel, rendered as the Minimize chevron. Do not add a second `x` minimize button to expanded GPUI command titlebars.
+
+        CDXC:GPUICommandPaneControls 2026-06-25-13:47:
+        Native command-panel action buttons are normal titlebar button frames, not a padded cluster: keep buttons contiguous, flat, stable-colored, and apply the 8px trailing inset only in expanded command titlebars.
         */
         h_flex()
             .id(controls_id)
             .flex_shrink_0()
             .h_full()
             .items_center()
-            .gap(px(4.0))
-            .border_l_1()
-            .border_color(command_pane_border_color())
-            .px(px(6.0))
+            .gap(px(COMMAND_PANE_CONTROL_BUTTON_GAP))
+            .pl(px(0.0))
+            .pr(px(command_pane_control_trailing_padding(expanded_chrome)))
             .bg(command_pane_control_cluster_color())
-            .child(self.render_command_pane_control_button(
-                "new-command",
-                "+",
-                "New command",
-                CommandPaneControlAction::NewCommandPlaceholder,
-                group_id,
-                cx,
-            ))
-            .child(self.render_command_pane_control_button(
-                "pin",
-                pin_label,
-                pin_tooltip,
-                CommandPaneControlAction::TogglePinned,
-                group_id,
-                cx,
-            ))
+            .when(
+                command_pane_new_command_control_placement()
+                    == CommandPaneNewCommandControlPlacement::FixedActionCluster,
+                |this| {
+                    this.child(self.render_command_pane_control_button(
+                        "new-command",
+                        command_pane_tab_add_icon_path(),
+                        command_pane_tab_add_tooltip(),
+                        CommandPaneControlAction::NewCommandPlaceholder,
+                        group_id,
+                        cx,
+                    ))
+                },
+            )
+            .when(
+                command_pane_panel_mode_controls_visible(expanded_chrome),
+                |this| {
+                    this.child(self.render_command_pane_control_button(
+                        "pin",
+                        pin_icon_path,
+                        pin_tooltip,
+                        CommandPaneControlAction::TogglePinned,
+                        group_id,
+                        cx,
+                    ))
+                },
+            )
             .child(self.render_command_pane_control_button(
                 "expand",
-                expand_label,
+                expand_icon_path,
                 expand_tooltip,
                 CommandPaneControlAction::ToggleExpanded,
                 group_id,
                 cx,
             ))
-            .when(expanded_chrome, |this| {
-                this.child(self.render_command_pane_control_button(
-                    "close-panel",
-                    "x",
-                    "Close command panel",
-                    CommandPaneControlAction::ClosePanel,
-                    group_id,
-                    cx,
-                ))
-            })
             .into_any_element()
     }
 
     fn render_command_pane_control_button(
         &self,
         id: &'static str,
-        label: &'static str,
+        icon_path: &'static str,
         tooltip: &'static str,
         action: CommandPaneControlAction,
         group_id: Option<CommandPaneGroupId>,
@@ -34428,10 +39702,8 @@ impl GhostexGpuiApp {
             .size(px(COMMAND_PANE_CONTROL_BUTTON_SIZE))
             .items_center()
             .justify_center()
-            .rounded(px(4.0))
-            .text_size(px(12.0))
-            .font_weight(FontWeight::SEMIBOLD)
-            .line_height(px(COMMAND_PANE_CONTROL_BUTTON_SIZE))
+            .rounded(px(COMMAND_PANE_CONTROL_CORNER_RADIUS))
+            .bg(command_pane_control_button_color())
             .text_color(command_pane_control_text_color())
             .cursor_default()
             .hover(|this| this.bg(command_pane_control_hover_color()))
@@ -34445,11 +39717,15 @@ impl GhostexGpuiApp {
                     {
                         this.command_pane.focus_group(group_id);
                     }
-                    this.handle_command_pane_control_action(action, cx);
+                    this.handle_command_pane_control_action(action, window, cx);
                 }),
             )
             .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
-            .child(label)
+            .child(titlebar_svg_icon(
+                icon_path,
+                COMMAND_PANE_CONTROL_ICON_SIZE,
+                command_pane_control_text_color(),
+            ))
             .into_any_element()
     }
 
@@ -34774,12 +40050,27 @@ impl GhostexGpuiApp {
             .tab_group
             .active_session_id()
             .unwrap_or(CommandSessionId(0));
-        let mount_slot_id = self.command_pane.has_session(active_session_id).then_some(
-            CommandTerminalBodyMountSlotId {
-                group_id,
-                session_id: active_session_id,
-            },
+        let active_session_is_sleeping = self
+            .command_pane
+            .session(active_session_id)
+            .is_some_and(|session| session.is_sleeping);
+        let mount_slot_id = self
+            .command_pane
+            .session(active_session_id)
+            .and_then(|session| {
+                (!session.is_sleeping).then_some(CommandTerminalBodyMountSlotId {
+                    group_id,
+                    session_id: active_session_id,
+                })
+            });
+        let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
+        let sleeping_wake_label = command_pane_sleeping_placeholder_wake_label(
+            active_session_is_sleeping,
+            command_pane_click_to_wake_sleeping_sessions_from_shared_settings(&settings_snapshot),
         );
+        let delayed_send_remaining_label = mount_slot_id.and_then(|_| {
+            self.gpui_command_delayed_send_remaining_label_for_session(active_session_id)
+        });
 
         /*
         CDXC:GPUICommandTerminalInputForwarding 2026-06-23-09:41:
@@ -34799,6 +40090,15 @@ impl GhostexGpuiApp {
 
         CDXC:GPUITerminalTextInput 2026-06-23-10:45:
         Mounted command terminal IME input is owned by the same body div that owns mouse focus and drop behavior. Track the shared terminal text focus handle and register GPUI's ElementInputHandler only from the body paint callback when this exact command mount slot is the focused terminal target; do not add overlays, hidden hit regions, root/window input routing, synthetic coordinates, logs, persistence, or raw preedit storage.
+
+        CDXC:GPUICommandTabSleep 2026-06-25-14:27:
+        A sleeping active command tab renders the same body placeholder but no Ghostty mount slot. Left-clicking that body wakes the command session; tab selection, right-click menus, and placeholder paint do not wake it.
+
+        CDXC:GPUICommandSleepingPlaceholder 2026-06-25-14:49:
+        The sleeping command body paints the native centered wake label only while click-to-wake placeholders are enabled. Mounting command placeholders stay blank, while the normal body element continues to own click wake, drag/drop, and any future terminal mount slot.
+
+        CDXC:GPUICommandDelayedSend 2026-06-25-15:42:
+        Active command Delayed Send timers also paint a centered countdown badge inside the same body element. This is visual-only child chrome so command body focus, mouse forwarding, wake, drag/drop, and native host bounds stay owned by the normal command body layout.
         */
         div()
             .id(format!(
@@ -34834,6 +40134,8 @@ impl GhostexGpuiApp {
                             event.button,
                             event.modifiers,
                         );
+                    } else if active_session_is_sleeping {
+                        this.wake_command_pane_session(group_id, active_session_id, cx);
                     } else {
                         this.command_pane.focus_group(group_id);
                         this.focus_command_pane();
@@ -34841,6 +40143,62 @@ impl GhostexGpuiApp {
                     }
                 }),
             )
+            .when_some(sleeping_wake_label, |this, label| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left_0()
+                        .right_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .px(px(
+                            COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL_HORIZONTAL_PADDING,
+                        ))
+                        .py(px(
+                            COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL_VERTICAL_PADDING,
+                        ))
+                        .text_size(px(COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL_FONT_SIZE))
+                        .line_height(px(COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL_LINE_HEIGHT))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(command_pane_sleeping_placeholder_wake_label_color())
+                        .child(label),
+                )
+            })
+            .when_some(delayed_send_remaining_label, |this, label| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left_0()
+                        .right_0()
+                        .min_w(px(COMMAND_PANE_DELAYED_SEND_BADGE_MIN_BODY_WIDTH))
+                        .min_h(px(COMMAND_PANE_DELAYED_SEND_BADGE_MIN_BODY_HEIGHT))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            div()
+                                .h(px(COMMAND_PANE_DELAYED_SEND_BADGE_MIN_HEIGHT))
+                                .px(px(COMMAND_PANE_DELAYED_SEND_BADGE_HORIZONTAL_PADDING))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(COMMAND_PANE_DELAYED_SEND_BADGE_CORNER_RADIUS))
+                                .border_1()
+                                .border_color(command_pane_delayed_send_badge_border_color())
+                                .bg(command_pane_delayed_send_badge_background_color())
+                                .text_size(px(COMMAND_PANE_DELAYED_SEND_BADGE_FONT_SIZE))
+                                .line_height(px(COMMAND_PANE_DELAYED_SEND_BADGE_LINE_HEIGHT))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(command_pane_delayed_send_badge_text_color())
+                                .child(label),
+                        ),
+                )
+            })
             .on_drag_move::<DraggedCommandTab>(cx.listener(
                 move |this, event: &gpui::DragMoveEvent<DraggedCommandTab>, _window, cx| {
                     this.update_command_pane_drag_feedback(event, group_id, cx);
@@ -38853,8 +44211,23 @@ impl GhostexGpuiApp {
                     return;
                 };
                 let title = action.command_title();
-                self.active_action_command_id = Some(action.command_id);
-                self.open_gpui_command_action_terminal(title, command, cx);
+                let command_id = action.command_id.clone();
+                self.active_action_command_id = Some(command_id.clone());
+                match action.run_mode {
+                    GpuiTitlebarActionRunMode::Default => {
+                        self.open_gpui_command_action_terminal(
+                            command_id,
+                            title,
+                            command,
+                            action.play_completion_sound,
+                            window,
+                            cx,
+                        );
+                    }
+                    GpuiTitlebarActionRunMode::Debug => {
+                        self.open_gpui_debug_command_action_terminal(title, command, cx);
+                    }
+                }
             }
         }
     }
@@ -38879,38 +44252,164 @@ impl GhostexGpuiApp {
         self.commit_browser_address(url, cx);
     }
 
-    fn open_gpui_command_action_terminal(
+    fn open_gpui_debug_command_action_terminal(
         &mut self,
         title: String,
         command: String,
         cx: &mut gpui::Context<Self>,
     ) {
         /*
-        CDXC:GPUITitlebarActions 2026-06-24-14:24:
-        Terminal Actions must create a real command-pane terminal startup path, not run a process from the titlebar. Insert command text only as an explicit launch payload for the newly selected command-pane body slot, use the active project snapshot path only when the sidebar supplied it, and leave run-state success/error feedback to future real command lifecycle plumbing.
+        CDXC:GPUICommandPane 2026-06-25-10:29:
+        `runMode:"debug"` must match macOS Debug Action behavior: create a normal visible Agents workspace terminal titled `Debug: <Action>` and send the saved command as visible initial input with the Atuin-ignore prefix. Do not reuse command-pane tabs, post command-button run state, write command status files, or hide the wrapper process for debug runs.
         */
-        let (group_id, session_id) = self.command_pane.add_action_session_to_focused_group(title);
-        let slot_id = CommandTerminalBodyMountSlotId {
-            group_id,
-            session_id,
-        };
         let working_directory = self
             .latest_sidebar_project_snapshot
             .as_ref()
             .and_then(|snapshot| snapshot.in_memory_project_path.as_ref())
             .and_then(|path| path.to_str())
             .map(str::to_string);
-        self.command_terminal_launch_payload_source
-            .insert_explicit_payload_for_mount_slot(
-                slot_id,
-                CommandTerminalExplicitLaunchPayload {
-                    working_directory,
-                    command: None,
-                    env_vars: Vec::new(),
-                    initial_input: Some(format!("{command}\r")),
-                    wait_after_command: false,
-                },
+        let payload = AgentsTerminalStartupExplicitLaunchPayload {
+            working_directory,
+            command: None,
+            env_vars: Vec::new(),
+            initial_input: Some(gpui_debug_command_action_initial_input(&command)),
+            wait_after_command: false,
+        };
+        if payload.to_ghostty_launch_payload().is_err() {
+            self.dispatch_gpui_app_modal_toast(
+                "warning",
+                "Action unavailable",
+                "GPUI could not prepare the debug Action terminal.",
+                cx,
             );
+            return;
+        }
+
+        let requested_pane_id = self.agents_workspace.focused_pane;
+        let Some(session_id) = self
+            .agents_workspace
+            .add_mounting_session_to_pane(requested_pane_id)
+        else {
+            self.dispatch_gpui_app_modal_toast(
+                "warning",
+                "Action unavailable",
+                "GPUI could not create a debug Action terminal.",
+                cx,
+            );
+            return;
+        };
+        if let Some(session) = self
+            .agents_workspace
+            .terminal_sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+        {
+            session.title = format!("Debug: {title}");
+        }
+        let pane_id = self.agents_workspace.focused_pane;
+        let runtime_session_id = self
+            .agents_terminal_runtime_sessions
+            .ensure_runtime_session_id(session_id);
+        self.agents_terminal_startup_launch_payload_source
+            .insert_explicit_payload_for_startup_key(
+                runtime_session_id,
+                session_id,
+                AgentsTerminalStartupBodySlotId {
+                    pane_id,
+                    session_id,
+                },
+                payload,
+            );
+        self.active_mode = TitlebarMode::Agents;
+        self.set_shell_focus_with_terminal_handoff(ShellFocusTarget::AgentsPane(pane_id), true);
+        self.scroll_workspace_pane_active_tab(pane_id);
+        self.persist_shell_layout_state();
+        cx.notify();
+    }
+
+    fn open_gpui_command_action_terminal(
+        &mut self,
+        command_id: String,
+        title: String,
+        command: String,
+        play_completion_sound: bool,
+        window: &Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUITitlebarActions 2026-06-24-14:24:
+        Terminal Actions must create a real command-pane terminal startup path, not run a process from the titlebar. Insert command text only as an explicit launch payload for the newly selected command-pane body slot, use the active project snapshot path only when the sidebar supplied it, and keep run-state success/error feedback tied to the command Action lifecycle rather than titlebar-side command execution.
+
+        CDXC:GPUICommandPane 2026-06-24-23:17:
+        Sidebar/titlebar terminal Actions should mirror macOS command-pane startup by using Ghostty's launch command field for the wrapped zsh action process instead of pasting command text as visible initial input. The payload remains process-local and exact-slot keyed; command text is not logged, persisted, inferred from labels, or stored in shell-state JSON.
+
+        CDXC:GPUICommandPane 2026-06-24-23:36:
+        Re-running an action should reuse a matching idle command-pane tab instead of multiplying tabs. New or inactive reused tabs receive the wrapped command through the launch-payload boundary; an already mounted reused tab receives the same wrapper through the exact mounted command surface, with status reset driven by the session-state file.
+
+        CDXC:GPUICommandPane 2026-06-24-23:49:
+        GPUI command Actions now mirror macOS sidebar button feedback: post `running` for the selected run id immediately, then let the status-file poller post success/error and play the configured action completion sound when the wrapped command exits. The feedback path carries only command id, run id, state, exit code, and sound preference.
+
+        CDXC:GPUICommandPane 2026-06-25-11:47:
+        Command Actions open the hidden command pane through the same default-height rule as macOS sidebar Actions. Reset height only when the pane was hidden before selecting or creating the Action-owned tab; visible panes keep their live resize while the run metadata and launch payload update.
+        */
+        self.prepare_hidden_command_pane_open_height_from_shared_settings(window);
+        let selection = self
+            .command_pane
+            .select_or_create_action_session(command_id.clone(), title.clone());
+        let group_id = selection.group_id;
+        let session_id = selection.session_id;
+        let slot_id = CommandTerminalBodyMountSlotId {
+            group_id,
+            session_id,
+        };
+        let run_id = create_gpui_command_action_run_id();
+        let status_file_path = gpui_command_action_status_file_path(session_id);
+        self.clear_gpui_command_delayed_send_timer(session_id);
+        self.command_pane.mark_action_session_run_started(
+            session_id,
+            command_id.clone(),
+            title,
+            run_id.clone(),
+            status_file_path.clone(),
+            play_completion_sound,
+        );
+        self.refresh_gpui_command_close_after_done_timer_for_session(session_id, cx);
+        self.dispatch_gpui_sidebar_command_run_state(
+            &command_id,
+            &run_id,
+            GpuiSidebarCommandRunState::Running,
+            cx,
+        );
+        let working_directory = self
+            .latest_sidebar_project_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.in_memory_project_path.as_ref())
+            .and_then(|path| path.to_str())
+            .map(str::to_string);
+        let execution_text = gpui_command_action_execution_text(&command, &run_id);
+        let process_command = gpui_command_action_process_command(&execution_text);
+        let env_vars = gpui_command_action_state_env_vars(&status_file_path);
+        let wrote_to_mounted_reuse = matches!(
+            selection.kind,
+            CommandPaneActionSessionSelectionKind::Reused
+        ) && self.send_gpui_command_action_script_to_mounted_terminal(
+            slot_id,
+            &execution_text,
+            &status_file_path,
+        );
+        if !wrote_to_mounted_reuse {
+            self.command_terminal_launch_payload_source
+                .insert_explicit_payload_for_mount_slot(
+                    slot_id,
+                    CommandTerminalExplicitLaunchPayload {
+                        working_directory,
+                        command: Some(process_command),
+                        env_vars,
+                        initial_input: None,
+                        wait_after_command: false,
+                    },
+                );
+        }
         self.focus_command_pane();
         self.scroll_command_group_active_tab(group_id);
         self.scroll_focused_command_active_tab();
@@ -38994,7 +44493,7 @@ impl GhostexGpuiApp {
             .top(px(1.0))
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .items_center()
-            .child(self.render_titlebar_icon_button("tips", TITLEBAR_ICON_INFO, 16.0, true, cx))
+            .child(self.render_titlebar_tips_popover(cx))
             .when(show_keep_awake_control, |this| {
                 this.child(self.render_titlebar_icon_button(
                     "keep-awake",
@@ -39041,6 +44540,68 @@ impl GhostexGpuiApp {
             ))
     }
 
+    fn render_titlebar_tips_popover(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let app = cx.entity().downgrade();
+        let panel = self.titlebar_tips_panel.clone();
+        Popover::new("ghostex-gpui-titlebar-tips-popover")
+            .anchor(Anchor::BottomRight)
+            .appearance(false)
+            .open(self.titlebar_tips_panel_open)
+            .on_open_change(move |open, window, cx| {
+                if let Some(app) = app.upgrade() {
+                    let _ = app.update(cx, |this, cx| {
+                        this.set_gpui_titlebar_tips_panel_open(*open, window, cx);
+                    });
+                }
+            })
+            .trigger(self.render_titlebar_tips_trigger())
+            .child(
+                div()
+                    .w(px(TITLEBAR_DROPDOWN_TIPS_PANEL_WIDTH))
+                    .h(px(TITLEBAR_DROPDOWN_READING_PANEL_HEIGHT))
+                    .overflow_hidden()
+                    .bg(titlebar_background())
+                    .when_some(panel, |this, panel| this.child(panel)),
+            )
+    }
+
+    fn render_titlebar_tips_trigger(&self) -> Button {
+        Button::new("ghostex-gpui-titlebar-button-tips")
+            .ghost()
+            .tab_stop(false)
+            .relative()
+            .flex()
+            .h(px(TITLEBAR_CONTROL_HEIGHT))
+            .w(px(TITLEBAR_BUTTON_WIDTH))
+            .items_center()
+            .justify_center()
+            .border_l_1()
+            .border_color(titlebar_button_border_color())
+            .rounded(px(0.0))
+            .text_color(titlebar_icon_color())
+            .cursor_default()
+            .hover(|this| {
+                this.bg(titlebar_button_hover_color())
+                    .text_color(titlebar_icon_hover_color())
+            })
+            .child(titlebar_svg_icon(
+                TITLEBAR_ICON_INFO,
+                16.0,
+                titlebar_icon_color(),
+            ))
+            .child(
+                div()
+                    .absolute()
+                    .right(px(8.0))
+                    .top(px(5.0))
+                    .size(px(7.5))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(titlebar_background())
+                    .bg(rgb(0x95d7f6)),
+            )
+    }
+
     fn render_titlebar_icon_button(
         &self,
         id: &'static str,
@@ -39048,7 +44609,7 @@ impl GhostexGpuiApp {
         icon_size: f32,
         show_badge: bool,
         cx: &mut gpui::Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         div()
             .id(format!("ghostex-gpui-titlebar-button-{id}"))
             .relative()
@@ -39161,6 +44722,7 @@ impl GhostexGpuiApp {
                         .bg(rgb(0x95d7f6)),
                 )
             })
+            .into_any_element()
     }
 
     fn render_browser_toolbar(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
@@ -39905,8 +45467,17 @@ impl Render for GhostexGpuiApp {
             Root key-down forwarding remains committed-character-only and terminal-focus-only. It consumes the GPUI event only after the exact mounted Agents or command Ghostty surface accepts the text; Browser/CEF/project-editor focus, placeholders, stale surfaces, missing surfaces, non-macOS builds, and physical keys without native keycodes must no-op here.
             CDXC:GPUITerminalTextInput 2026-06-23-10:45:
             IME composition is owned by the mounted terminal body paint-time ElementInputHandler, not the root key-down path. The root listener must not observe, store, log, or persist preedit text and must not add a fallback route for composition events.
+            CDXC:GPUICommandSleepingPlaceholder 2026-06-25-14:49:
+            Focused sleeping command placeholders consume plain alphanumeric key-downs to wake before terminal text delivery. This matches native "Press Any Key to Wake" behavior without forwarding the wake key to Ghostty or creating a broad keyboard fallback for non-terminal surfaces.
             */
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this
+                    .wake_focused_sleeping_command_placeholder_from_keystroke(&event.keystroke, cx)
+                {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    return;
+                }
                 let Some(text) = committed_terminal_text_from_key_down_event(event) else {
                     return;
                 };
@@ -39915,8 +45486,8 @@ impl Render for GhostexGpuiApp {
                     cx.stop_propagation();
                 }
             }))
-            .on_action(cx.listener(|this, _: &ToggleCommandPane, _window, cx| {
-                this.toggle_command_pane_from_keyboard(cx);
+            .on_action(cx.listener(|this, _: &ToggleCommandPane, window, cx| {
+                this.toggle_command_pane_from_keyboard(window, cx);
             }))
             .on_action(
                 cx.listener(|this, _: &PasteIntoFocusedTerminal, _window, cx| {
@@ -39933,6 +45504,20 @@ impl Render for GhostexGpuiApp {
             )
             .on_action(cx.listener(|this, _: &CloseFocusedSurface, window, cx| {
                 this.close_focused_surface(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SleepFocusedSession, _window, cx| {
+                /*
+                CDXC:GPUICommandFocusedSessionActions 2026-06-25-14:56:
+                The shared default Option+Shift+S Sleep Focused Session shortcut must work while a command terminal owns GPUI shell focus. Route it through the same command-tab sleep mutation so the tab stays visible, the mount slot is detached, sidebar metadata refreshes, and no command text, terminal content, paths, or logs are created.
+                */
+                this.sleep_focused_command_pane_session(cx);
+            }))
+            .on_action(cx.listener(|this, _: &WakeFocusedSession, _window, cx| {
+                /*
+                CDXC:GPUICommandFocusedSessionActions 2026-06-25-15:01:
+                Wake Focused Session has no default key, but the shared command palette and Hotkeys UI expose it. Keep the GPUI action unbound by default and route it only through the command-pane focused sleeping tab wake path.
+                */
+                this.wake_focused_command_pane_session(cx);
             }))
             .on_action(cx.listener(|this, _: &NewTerminalTab, _window, cx| {
                 this.add_terminal_placeholder_tab_from_hotkey(cx);
@@ -40229,20 +45814,21 @@ impl Render for GhostexGpuiApp {
                 this.import_browser_data_from_profile_menu(window, cx);
             }))
             .on_action(
-                cx.listener(|this, action: &SelectCommandPaneTab, _window, cx| {
-                    this.select_command_pane_tab_from_action(
+                cx.listener(|this, action: &CloseCommandPaneTabsByScope, _window, cx| {
+                    this.close_command_pane_tabs_for_scope_from_action(
                         CommandPaneGroupId(action.group_id),
                         CommandSessionId(action.session_id),
-                        action.expand_pane,
+                        action.scope,
                         cx,
                     );
                 }),
             )
             .on_action(
-                cx.listener(|this, action: &CloseCommandPaneTab, _window, cx| {
-                    this.close_command_pane_tab_from_action(
+                cx.listener(|this, action: &SleepCommandPaneTabsByScope, _window, cx| {
+                    this.sleep_command_pane_tabs_for_scope_from_action(
                         CommandPaneGroupId(action.group_id),
                         CommandSessionId(action.session_id),
+                        action.scope,
                         cx,
                     );
                 }),
@@ -40482,6 +46068,73 @@ impl Render for GpuiAppModalHostWindow {
     fn render(&mut self, _window: &mut Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
         div()
             .size_full()
+            .bg(titlebar_background())
+            .child(self.surface.clone())
+    }
+}
+
+struct GpuiTitlebarTipsPanel {
+    surface: Entity<CefSurface>,
+}
+
+impl GpuiTitlebarTipsPanel {
+    fn new(
+        parent_ns_view: *mut std::ffi::c_void,
+        url: String,
+        event_handler: cef::AppModalHostBridgeEventHandler,
+        cx: &mut gpui::Context<GhostexGpuiApp>,
+    ) -> Entity<Self> {
+        /*
+        CDXC:GPUITitlebarTips 2026-06-24-23:17:
+        The GPUI Tips dropdown reuses the production React titlebar-host panel in a CEF surface owned by the GPUI popover. This keeps the content source aligned with macOS while avoiding AppKit/Swift dropdown windows, duplicated GPUI tips data, and broad native hit-test routing.
+        */
+        let surface = cx.new(move |cx| {
+            CefSurface::new(
+                TITLEBAR_TIPS_PANEL_ID.to_string(),
+                parent_ns_view,
+                url,
+                TITLEBAR_TIPS_PANEL_CEF_PROFILE_ID.to_string(),
+                true,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(event_handler),
+                cx,
+            )
+        });
+        cx.new(move |_cx| Self { surface })
+    }
+
+    fn set_visible(&mut self, visible: bool, cx: &mut gpui::Context<Self>) {
+        self.surface.update(cx, |surface, _| {
+            surface.set_visible(visible);
+        });
+    }
+
+    fn dispatch_project_state_update(
+        &mut self,
+        project_state_update: serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let script = format!(
+            "(function(){{const update = {};const titlebar = window.__ghostex_TITLEBAR__;if (titlebar && typeof titlebar.setActiveProjectState === 'function'){{titlebar.setActiveProjectState(update);}}else{{window.__ghostex_PENDING_TITLEBAR_PROJECT_STATE__ = Object.assign({{}}, window.__ghostex_PENDING_TITLEBAR_PROJECT_STATE__ || {{}}, update);}}}})(); undefined;",
+            project_state_update
+        );
+        self.surface.update(cx, |surface, _| {
+            surface.execute_app_owned_script(&script);
+        });
+    }
+}
+
+impl Render for GpuiTitlebarTipsPanel {
+    fn render(&mut self, _window: &mut Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        div()
+            .w(px(TITLEBAR_DROPDOWN_TIPS_PANEL_WIDTH))
+            .h(px(TITLEBAR_DROPDOWN_READING_PANEL_HEIGHT))
+            .overflow_hidden()
             .bg(titlebar_background())
             .child(self.surface.clone())
     }
@@ -40795,6 +46448,7 @@ fn main() {
             KeyBinding::new("ctrl-tab", CycleFocusedTabForward, None),
             KeyBinding::new("ctrl-shift-tab", CycleFocusedTabBackward, None),
             KeyBinding::new("cmd-w", CloseFocusedSurface, None),
+            KeyBinding::new(SLEEP_FOCUSED_SESSION_DEFAULT_KEY, SleepFocusedSession, None),
             KeyBinding::new("cmd-t", NewTerminalTab, None),
             KeyBinding::new("cmd-d", SplitFocusedTerminalRight, None),
             KeyBinding::new("cmd-shift-d", SplitFocusedTerminalDown, None),
@@ -42497,108 +48151,289 @@ fn project_editor_sleeping_placeholder_card_color(mode: TitlebarMode) -> Hsla {
 }
 
 fn command_pane_chrome_color() -> Hsla {
-    rgb(0x121212).into()
+    /*
+    CDXC:GPUICommandPaneChrome 2026-06-25-13:19:
+    Native command-panel chrome and command titlebars use an opaque black background. Keep GPUI command chrome on black instead of the generic dark titlebar gray so tabs, tab-add, and panel actions sit on the same base as macOS.
+    */
+    rgb(0x000000).into()
 }
 
 fn command_pane_strip_color() -> Hsla {
-    rgb(0x101010).into()
+    /*
+    CDXC:GPUICommandPaneChrome 2026-06-25-13:19:
+    The collapsed command strip is native command titlebar chrome with side margins, so its background stays black like expanded command titlebars.
+    */
+    command_pane_chrome_color()
+}
+
+fn command_pane_panel_separator_color() -> Hsla {
+    /*
+    CDXC:GPUICommandPaneChrome 2026-06-25-13:19:
+    Native command-panel boundaries use the workspace separator line #1e1e1e for the panel edge, separate from focused pane outlines and titlebar command separators.
+    */
+    rgb(0x1e1e1e).into()
+}
+
+fn command_pane_titlebar_separator_color() -> Hsla {
+    /*
+    CDXC:GPUICommandPaneChrome 2026-06-25-13:19:
+    Native command titlebar separators use `calibratedWhite:0.54 alpha:0.24`, which is lighter and more translucent than the inactive command pane outline.
+    */
+    rgb(0x8a8a8a).opacity(0.24).into()
 }
 
 fn command_pane_border_color() -> Hsla {
-    rgb(0x2d2d2d).into()
+    /*
+    CDXC:GPUICommandPaneChrome 2026-06-25-13:19:
+    Native inactive command terminal pane outlines use #111111, not the translucent command titlebar separator. Keep the inactive command group outline distinct from titlebar chrome.
+    */
+    rgb(0x111111).into()
 }
 
 fn command_pane_focused_border_color() -> Hsla {
-    rgb(0x58b7ff).opacity(0.70).into()
+    /*
+    CDXC:GPUICommandPaneChrome 2026-06-25-13:19:
+    Native focused terminal pane chrome is a neutral #737373 outline at 95% alpha, while #95d7f6 remains reserved for attention/done status. Do not tint command focus blue.
+    */
+    rgb(0x737373).opacity(0.95).into()
 }
 
 fn command_pane_resize_rail_color() -> Hsla {
-    rgb(0x0b0b0b).into()
+    /*
+    CDXC:GPUICommandPaneResize 2026-06-25-13:19:
+    Native command-panel resize rails are visually transparent in normal state; cursor and delayed hover feedback communicate resizing without a persistent filled bar.
+    */
+    rgb(0x000000).opacity(0.0).into()
 }
 
 fn command_pane_resize_rail_line_color() -> Hsla {
-    rgb(0x393939).into()
+    /*
+    CDXC:GPUICommandPaneResize 2026-06-25-13:19:
+    The native 3px resize hover line is feedback, not a permanent separator. Keep the normal-state GPUI line transparent so the panel edge separator owns visible chrome.
+    */
+    rgb(0x000000).opacity(0.0).into()
 }
 
-fn command_pane_label_color() -> Hsla {
-    rgb(0xffffff).opacity(0.72).into()
+fn command_pane_resize_hover_line_color() -> Hsla {
+    /*
+    CDXC:GPUICommandPaneResize 2026-06-25-13:19:
+    Native resize hover indicators use a white 3px line after the short hover delay. Keep command pane resize feedback on the same color as native AppKit rails.
+    */
+    rgb(0xffffff).into()
 }
 
-fn command_pane_tab_active_color() -> Hsla {
-    rgb(0x252525).into()
+fn command_pane_tab_background_color(is_active: bool, is_sleeping: bool) -> Hsla {
+    /*
+    CDXC:GPUICommandTabBackground 2026-06-25-14:36:
+    Match macOS `compositedWorkspaceTabColor` for command-role tabs instead of using generic GPUI dark fills. The channel math keeps the active and inactive tab backgrounds tied to the native AppKit source values.
+
+    CDXC:GPUICommandTabSleepVisuals 2026-06-25-14:39:
+    Native command-role sleeping tabs keep the active fill when selected and use the parked 3.2% inactive overlay only as inactive siblings.
+    */
+    let overlay_alpha = if is_active {
+        COMMAND_PANE_TAB_ACTIVE_OVERLAY_ALPHA
+    } else if is_sleeping {
+        COMMAND_PANE_TAB_SLEEPING_INACTIVE_OVERLAY_ALPHA
+    } else {
+        COMMAND_PANE_TAB_INACTIVE_OVERLAY_ALPHA
+    };
+    command_pane_native_composited_tab_color(overlay_alpha)
 }
 
-fn command_pane_tab_hover_color() -> Hsla {
-    rgb(0x1d1d1d).into()
+fn command_pane_tab_hover_background_color(is_active: bool, is_sleeping: bool) -> Hsla {
+    /*
+    CDXC:GPUICommandTabBackground 2026-06-25-14:36:
+    Native command tabs do not brighten the tab fill on hover; hover state only affects the drawn trailing status/close affordance.
+    */
+    command_pane_tab_background_color(is_active, is_sleeping)
 }
 
-fn command_pane_tab_active_text_color() -> Hsla {
-    rgb(0xf5f5f5).into()
+fn command_pane_native_composited_tab_color(overlay_alpha: f32) -> Hsla {
+    let channel =
+        |base: u8| -> u32 { (base as f32 + (255.0 - base as f32) * overlay_alpha).round() as u32 };
+    let red = channel(COMMAND_PANE_TAB_BACKGROUND_BASE_RED);
+    let green = channel(COMMAND_PANE_TAB_BACKGROUND_BASE_GREEN);
+    let blue = channel(COMMAND_PANE_TAB_BACKGROUND_BASE_BLUE);
+    rgb((red << 16) | (green << 8) | blue).into()
 }
 
-fn command_pane_tab_inactive_text_color() -> Hsla {
-    rgb(0xd9d9d9).opacity(0.62).into()
+fn command_pane_tab_title_text_color(is_active: bool, is_sleeping: bool) -> Hsla {
+    /*
+    CDXC:GPUICommandTabSleepVisuals 2026-06-25-14:39:
+    Command-role tab titles use selected-label white for both active and inactive tabs, but inactive sleeping tabs multiply title alpha by the native 0.48 parked-session treatment. Active sleeping tabs keep full selected label opacity.
+    */
+    let sleep_alpha_multiplier = if is_sleeping && !is_active {
+        COMMAND_PANE_TAB_TITLE_SLEEPING_INACTIVE_ALPHA_MULTIPLIER
+    } else {
+        1.0
+    };
+    rgb(0xf5f5f5).opacity(0.98 * sleep_alpha_multiplier).into()
 }
 
-fn command_pane_tab_dot_color(tab_status: CommandTerminalTabStatus, is_active: bool) -> Hsla {
+fn command_pane_tab_separator_color() -> Hsla {
+    /*
+    CDXC:GPUICommandTabSeparators 2026-06-25-14:17:
+    macOS command tab separators use calibrated white at 10% alpha, separate from the heavier command-pane structural border color.
+    */
+    rgb(0xffffff).opacity(0.10).into()
+}
+
+fn command_pane_tab_status_indicator_element(
+    element_id: impl Into<String>,
+    tab_status: CommandTerminalTabStatus,
+) -> AnyElement {
+    let indicator_color = command_pane_tab_status_indicator_color(tab_status);
+    match tab_status {
+        CommandTerminalTabStatus::DelayedSend => div()
+            .id(element_id.into())
+            .absolute()
+            .right(px(COMMAND_PANE_TAB_DELAYED_SEND_ICON_TRAILING_PADDING))
+            .top(px(COMMAND_PANE_TAB_DELAYED_SEND_ICON_TOP_OFFSET))
+            .flex()
+            .size(px(COMMAND_PANE_TAB_DELAYED_SEND_ICON_SIZE))
+            .items_center()
+            .justify_center()
+            .text_color(indicator_color)
+            .child(titlebar_svg_icon(
+                COMMAND_ICON_CLOCK,
+                COMMAND_PANE_TAB_DELAYED_SEND_ICON_SIZE,
+                indicator_color,
+            ))
+            .into_any_element(),
+        CommandTerminalTabStatus::Working | CommandTerminalTabStatus::Attention => div()
+            .id(element_id.into())
+            .absolute()
+            .right(px(COMMAND_PANE_TAB_STATUS_INDICATOR_TRAILING_PADDING))
+            .top(px(COMMAND_PANE_TAB_STATUS_INDICATOR_TOP_OFFSET))
+            .size(px(COMMAND_PANE_TAB_STATUS_INDICATOR_SIZE))
+            .bg(indicator_color)
+            .into_any_element(),
+        CommandTerminalTabStatus::Idle => {
+            div().id(element_id.into()).size(px(0.0)).into_any_element()
+        }
+    }
+}
+
+fn command_pane_tab_status_indicator_color(tab_status: CommandTerminalTabStatus) -> Hsla {
     let color = rgb(command_terminal_tab_status_color(tab_status));
     color
-        .opacity(if is_active {
-            0.88
-        } else {
-            command_terminal_tab_status_inactive_opacity(tab_status)
-        })
+        .opacity(command_terminal_tab_status_indicator_opacity(tab_status))
         .into()
+}
+
+fn command_terminal_tab_status_has_indicator(tab_status: CommandTerminalTabStatus) -> bool {
+    !matches!(tab_status, CommandTerminalTabStatus::Idle)
+}
+
+fn command_terminal_tab_status_indicator_visible(
+    tab_status: CommandTerminalTabStatus,
+    tab_hovered: bool,
+) -> bool {
+    /*
+    CDXC:GPUICommandTabStatus 2026-06-25-13:18:
+    Native command tabs hide working/attention/Delayed Send status chrome while the tab is hovered so the inline close affordance owns the trailing slot. Title reservation remains status-based, not hover-based, to avoid reflow.
+    */
+    command_terminal_tab_status_has_indicator(tab_status) && !tab_hovered
+}
+
+fn command_terminal_tab_status_title_trailing_reserved_width(
+    tab_status: CommandTerminalTabStatus,
+) -> f32 {
+    if command_terminal_tab_status_has_indicator(tab_status) {
+        COMMAND_PANE_TAB_STATUS_TITLE_RESERVED_WIDTH
+    } else {
+        COMMAND_PANE_TAB_TITLE_TRAILING_PADDING
+    }
 }
 
 fn command_terminal_tab_status_color(tab_status: CommandTerminalTabStatus) -> u32 {
     match tab_status {
         CommandTerminalTabStatus::Idle => 0x58b7ff,
-        CommandTerminalTabStatus::Working => 0xff9f43,
+        CommandTerminalTabStatus::Working => 0xf59e0b,
         CommandTerminalTabStatus::Attention => 0x95d7f6,
-        CommandTerminalTabStatus::DelayedSend => 0xffcf5a,
+        CommandTerminalTabStatus::DelayedSend => 0xf59e0b,
     }
 }
 
-fn command_terminal_tab_status_inactive_opacity(tab_status: CommandTerminalTabStatus) -> f32 {
+fn command_terminal_tab_status_indicator_opacity(tab_status: CommandTerminalTabStatus) -> f32 {
     match tab_status {
-        CommandTerminalTabStatus::Idle => 0.44,
-        CommandTerminalTabStatus::Working => 0.48,
-        CommandTerminalTabStatus::Attention => 0.48,
-        CommandTerminalTabStatus::DelayedSend => 0.46,
+        CommandTerminalTabStatus::DelayedSend => 0.96,
+        CommandTerminalTabStatus::Idle
+        | CommandTerminalTabStatus::Working
+        | CommandTerminalTabStatus::Attention => 1.0,
     }
 }
 
 fn command_pane_control_cluster_color() -> Hsla {
-    rgb(0x0f0f0f).into()
+    rgb(0x0e0e0e).into()
+}
+
+fn command_pane_control_button_color() -> Hsla {
+    rgb(0x0e0e0e).into()
 }
 
 fn command_pane_control_text_color() -> Hsla {
-    rgb(0xffffff).opacity(0.74).into()
+    rgb(0xcfcfcf).into()
 }
 
 fn command_pane_control_hover_color() -> Hsla {
-    rgb(0xffffff).opacity(0.08).into()
+    command_pane_control_button_color()
 }
 
-fn command_pane_tab_edge_reveal_color() -> Hsla {
-    rgb(0x101010).into()
+fn command_pane_sticky_active_tab_button_color() -> Hsla {
+    /*
+    CDXC:GPUICommandTabOverflow 2026-06-25-13:34:
+    Native sticky active-tab navigation shares the command tab-bar icon-button background with Pin, Minimize, and inline New Terminal.
+    */
+    command_pane_control_button_color()
 }
 
-fn command_pane_tab_edge_reveal_mark_color() -> Hsla {
-    rgb(0xffffff).opacity(0.22).into()
+fn command_pane_sticky_active_tab_icon_color() -> Hsla {
+    command_pane_control_text_color()
+}
+
+fn command_pane_sticky_active_tab_border_color() -> Hsla {
+    rgb(0x2a2a2a).into()
 }
 
 fn command_pane_split_handle_color() -> Hsla {
-    rgb(0x0b0b0b).into()
+    /*
+    CDXC:GPUICommandPaneResize 2026-06-25-13:19:
+    Native pane split rails are transparent five-pixel hit regions; pane borders provide visible separation until hover feedback appears.
+    */
+    rgb(0x000000).opacity(0.0).into()
 }
 
 fn command_pane_split_separator_color() -> Hsla {
-    rgb(0x343434).into()
+    /*
+    CDXC:GPUICommandPaneResize 2026-06-25-13:19:
+    Command split handles should not draw a persistent center separator because native resize rails are transparent in their normal state.
+    */
+    rgb(0x000000).opacity(0.0).into()
 }
 
 fn command_terminal_placeholder_color() -> Hsla {
     rgb(0x000000).into()
+}
+
+fn command_pane_sleeping_placeholder_wake_label_color() -> Hsla {
+    /*
+    CDXC:GPUICommandSleepingPlaceholder 2026-06-25-14:49:
+    Native AppKit uses calibrated white 0.55 for the sleeping placeholder wake label; keep the GPUI label on the equivalent neutral gray instead of reusing brighter tab or state-placeholder text colors.
+    */
+    rgb(0x8c8c8c).into()
+}
+
+fn command_pane_delayed_send_badge_background_color() -> Hsla {
+    rgb(0x0d0d0d).opacity(0.78).into()
+}
+
+fn command_pane_delayed_send_badge_border_color() -> Hsla {
+    rgb(0xffffff).opacity(0.12).into()
+}
+
+fn command_pane_delayed_send_badge_text_color() -> Hsla {
+    rgb(0xf6c945).into()
 }
 
 fn sidebar_background_color() -> Hsla {
@@ -43122,6 +48957,35 @@ fn gpui_cef_html_entry_url(env_var: &str, entry_file_name: &str) -> Result<Strin
 fn app_modal_host_url() -> Result<String> {
     gpui_cef_html_entry_url("GHOSTEX_GPUI_APP_MODAL_HOST_URL", "modal-host.html")
         .context("failed to resolve GPUI app-modal host bundle URL")
+}
+
+fn titlebar_tips_panel_url() -> Result<String> {
+    let base_url = gpui_cef_html_entry_url("GHOSTEX_GPUI_TITLEBAR_HOST_URL", "titlebar-host.html")
+        .context("failed to resolve GPUI titlebar host bundle URL")?;
+    Ok(gpui_url_with_query_param(
+        &base_url,
+        "ghostexTitlebarPanel",
+        "tips",
+    ))
+}
+
+fn gpui_url_with_query_param(url: &str, key: &str, value: &str) -> String {
+    let separator = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{separator}{key}={value}")
+}
+
+fn gpui_titlebar_tips_browser_url_allowed(url: &str) -> bool {
+    matches!(url, GHOSTEX_DOCS_URL | GHOSTEX_CHANGELOG_URL)
+}
+
+fn gpui_titlebar_project_state_update_from_sidebar_state_payload(
+    payload: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    match payload.get("type").and_then(serde_json::Value::as_str)? {
+        "agentHookStatus" => Some(serde_json::json!({ "agentHookStatus": payload })),
+        "ghostexCliStatus" => Some(serde_json::json!({ "ghostexCliStatus": payload })),
+        _ => None,
+    }
 }
 
 fn gpui_app_modal_unsupported_settings_command_noop(command_type: &str) -> bool {
@@ -46726,8 +52590,199 @@ fn gpui_login_shell_remote_command(command: &str) -> String {
     )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GpuiCommandActionRunFileStatus {
+    Working,
+    Idle,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiCommandActionStatusFile {
+    exit_code: i32,
+    status: GpuiCommandActionRunFileStatus,
+    run_id: String,
+}
+
+fn gpui_command_action_execution_text(command: &str, run_id: &str) -> String {
+    /*
+    CDXC:GPUICommandPane 2026-06-24-23:36:
+    GPUI command-pane Actions need the same hidden process-command shape as the macOS app: wrap the saved command in a function, preserve the user's output as the visible terminal result, then return to an interactive login shell instead of pasting the wrapper into the prompt or closing the pane.
+
+    CDXC:GPUICommandPane 2026-06-24-23:36:
+    The wrapper stamps only safe command lifecycle fields into the env-provided session-state file before and after the action. That file is how GPUI can clear a reused command-pane tab from Working back to Idle without parsing terminal output, titles, command text, cwd, env, or stdout/stderr.
+    */
+    let working_stamp = gpui_command_action_status_stamp_text("working", run_id, "0");
+    let idle_stamp = gpui_command_action_status_stamp_text("idle", run_id, "$__ghostex_exit");
+    gpui_with_atuin_ignored_shell_history_prefix(
+        vec![
+            "__ghostex_command_pane_action() {",
+            command,
+            "}",
+            working_stamp.as_str(),
+            "__ghostex_command_pane_action",
+            "__ghostex_exit=$?",
+            "unset -f __ghostex_command_pane_action",
+            idle_stamp.as_str(),
+            "exec /bin/zsh -l",
+        ]
+        .join("\n"),
+    )
+}
+
+fn gpui_command_action_process_command(execution_text: &str) -> String {
+    format!("/bin/zsh -lic {}", gpui_shell_single_quote(execution_text))
+}
+
+fn gpui_debug_command_action_initial_input(command: &str) -> String {
+    gpui_with_atuin_ignored_shell_history_prefix(format!("{command}\r"))
+}
+
+fn gpui_with_atuin_ignored_shell_history_prefix(text: String) -> String {
+    if text.starts_with(' ') {
+        text
+    } else {
+        format!(" {text}")
+    }
+}
+
 fn gpui_shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn gpui_command_action_status_stamp_text(status: &str, run_id: &str, exit_code: &str) -> String {
+    let status = gpui_shell_single_quote(status);
+    let run_id = gpui_shell_single_quote(run_id);
+    vec![
+        "__ghostex_session_state_file=\"${GHOSTEX_SESSION_STATE_FILE:-${VSMUX_SESSION_STATE_FILE:-$ghostex_SESSION_STATE_FILE}}\"".to_string(),
+        "if [ -n \"$__ghostex_session_state_file\" ]; then".to_string(),
+        "  __ghostex_state_dir=\"${__ghostex_session_state_file:h}\"".to_string(),
+        "  [ \"$__ghostex_state_dir\" = \"$__ghostex_session_state_file\" ] && __ghostex_state_dir=\".\"".to_string(),
+        "  mkdir -p -- \"$__ghostex_state_dir\"".to_string(),
+        "  __ghostex_status_updated_at=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"".to_string(),
+        "  __ghostex_state_tmp=\"$__ghostex_session_state_file.$$.$RANDOM.command.tmp\"".to_string(),
+        "  {".to_string(),
+        format!("    printf 'status=%s\\n' {status}"),
+        "    printf 'statusUpdatedAt=%s\\n' \"$__ghostex_status_updated_at\"".to_string(),
+        format!("    printf 'commandRunId=%s\\n' {run_id}"),
+        format!("    printf 'commandExitCode=%s\\n' {exit_code}"),
+        "    printf 'lastActivityAt=%s\\n' \"$__ghostex_status_updated_at\"".to_string(),
+        "  } > \"$__ghostex_state_tmp\" && mv \"$__ghostex_state_tmp\" \"$__ghostex_session_state_file\"".to_string(),
+        "fi".to_string(),
+    ]
+    .join("\n")
+}
+
+fn create_gpui_command_action_run_id() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    format!("gpui-{millis}-{}", std::process::id())
+}
+
+fn gpui_command_action_status_file_path(session_id: CommandSessionId) -> PathBuf {
+    ghostex_home_root()
+        .join("state/gpui-command-actions")
+        .join(format!("command-session-{}.state", session_id.0))
+}
+
+fn gpui_command_action_state_env_vars(path: &Path) -> Vec<(String, String)> {
+    let path = path.to_string_lossy().to_string();
+    vec![
+        ("GHOSTEX_SESSION_STATE_FILE".to_string(), path.clone()),
+        ("VSMUX_SESSION_STATE_FILE".to_string(), path.clone()),
+        ("ghostex_SESSION_STATE_FILE".to_string(), path),
+    ]
+}
+
+fn gpui_command_action_state_export_text(path: &Path) -> String {
+    let path = gpui_shell_single_quote(path.to_string_lossy().as_ref());
+    [
+        format!("export GHOSTEX_SESSION_STATE_FILE={path}"),
+        format!("export VSMUX_SESSION_STATE_FILE={path}"),
+        format!("export ghostex_SESSION_STATE_FILE={path}"),
+    ]
+    .join("\n")
+}
+
+fn gpui_command_action_title_key(title: &str) -> String {
+    title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn gpui_command_action_status_from_file(path: &Path) -> Option<GpuiCommandActionStatusFile> {
+    let metadata = fs::metadata(path).ok()?;
+    if metadata.len() > 8 * 1024 {
+        return None;
+    }
+    let text = fs::read_to_string(path).ok()?;
+    let mut exit_code = None;
+    let mut status = None;
+    let mut run_id = None;
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key {
+            "status" => {
+                status = match value {
+                    "working" => Some(GpuiCommandActionRunFileStatus::Working),
+                    "idle" => Some(GpuiCommandActionRunFileStatus::Idle),
+                    _ => None,
+                };
+            }
+            "commandRunId" => {
+                if !value.is_empty()
+                    && value.chars().count() <= GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS
+                    && !value.chars().any(char::is_control)
+                {
+                    run_id = Some(value.to_string());
+                }
+            }
+            "commandExitCode" => {
+                if !value.is_empty()
+                    && value.len() <= 3
+                    && value.chars().all(|character| character.is_ascii_digit())
+                {
+                    exit_code = value
+                        .parse::<i32>()
+                        .ok()
+                        .filter(|code| (0..=255).contains(code));
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(GpuiCommandActionStatusFile {
+        exit_code: exit_code?,
+        status: status?,
+        run_id: run_id?,
+    })
+}
+
+fn gpui_sidebar_host_message_script(message: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui;if(bridge&&typeof bridge.onSidebarHostMessage==='function'){{bridge.onSidebarHostMessage({message});}}}})(); undefined;"
+    )
+}
+
+fn gpui_sidebar_command_pane_sessions_script(sessions: &serde_json::Value) -> String {
+    format!(
+        "(function(){{const bridge=window.ghostexGpui=window.ghostexGpui||{{}};bridge.commandPaneSessions={sessions};if(typeof bridge.onCommandPaneSessionsChanged==='function'){{bridge.onCommandPaneSessionsChanged(bridge.commandPaneSessions);}}}})(); undefined;"
+    )
+}
+
+fn gpui_action_completion_sound_from_settings() -> &'static str {
+    let settings = shared_settings::shared_sidebar_settings_snapshot();
+    gpui_normalize_completion_sound(
+        settings
+            .object()
+            .get("actionCompletionSound")
+            .and_then(serde_json::Value::as_str),
+    )
 }
 
 fn gpui_remote_attach_session_reference_from_project_id(
@@ -51457,12 +57512,20 @@ enum GpuiTitlebarActionType {
     Terminal,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GpuiTitlebarActionRunMode {
+    Default,
+    Debug,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct GpuiTitlebarAction {
     action_type: GpuiTitlebarActionType,
     command: Option<String>,
     command_id: String,
     name: String,
+    play_completion_sound: bool,
+    run_mode: GpuiTitlebarActionRunMode,
     url: Option<String>,
 }
 
@@ -51483,15 +57546,34 @@ impl GpuiTitlebarAction {
     }
 
     fn menu_label(&self) -> String {
-        gpui_trimmed_nonempty_str(Some(&self.name))
-            .unwrap_or(self.command_id.as_str())
-            .to_string()
+        self.action_title()
+            .unwrap_or_else(|| self.command_id.clone())
     }
 
     fn command_title(&self) -> String {
-        gpui_trimmed_nonempty_str(Some(&self.name))
-            .unwrap_or(self.command_id.as_str())
-            .to_string()
+        /*
+        CDXC:GPUICommandPane 2026-06-25-11:42:
+        Command-pane Action tabs must use the same visible title rule as macOS: normalized Action name first, otherwise the normalized command text truncated to 20 characters. Do not substitute command ids for unnamed terminal Actions because title-owned reuse and duplicate-title checks depend on this user-facing Action title.
+        */
+        gpui_normalized_sidebar_command_title(Some(&self.name))
+            .or_else(|| {
+                gpui_normalized_sidebar_command_title(self.command.as_deref())
+                    .map(gpui_sidebar_command_short_title)
+            })
+            .unwrap_or_else(|| self.command_id.clone())
+    }
+
+    fn action_title(&self) -> Option<String> {
+        gpui_normalized_sidebar_command_title(Some(&self.name)).or_else(|| {
+            match self.action_type {
+                GpuiTitlebarActionType::Browser => self.url.as_deref(),
+                GpuiTitlebarActionType::Terminal => self.command.as_deref(),
+            }
+            .and_then(|target| {
+                gpui_normalized_sidebar_command_title(Some(target))
+                    .map(gpui_sidebar_command_short_title)
+            })
+        })
     }
 }
 
@@ -52139,7 +58221,7 @@ fn gpui_titlebar_action_from_sidebar_command_button(
         .get("name")
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
-        .unwrap_or(command_id.as_str())
+        .unwrap_or_default()
         .to_string();
     let command = object
         .get("command")
@@ -52156,6 +58238,12 @@ fn gpui_titlebar_action_from_sidebar_command_button(
         command,
         command_id,
         name,
+        play_completion_sound: action_type == GpuiTitlebarActionType::Terminal
+            && object
+                .get("playCompletionSound")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true),
+        run_mode: GpuiTitlebarActionRunMode::Default,
         url,
     })
 }
@@ -53127,10 +59215,14 @@ fn gpui_sidebar_command_title_key(name: &str, command: Option<&str>, url: Option
     let title = gpui_normalized_sidebar_command_title(Some(name))
         .or_else(|| {
             gpui_normalized_sidebar_command_title(command.or(url))
-                .map(|value| value.chars().take(20).collect::<String>())
+                .map(gpui_sidebar_command_short_title)
         })
         .unwrap_or_default();
     title.to_lowercase()
+}
+
+fn gpui_sidebar_command_short_title(value: String) -> String {
+    value.chars().take(20).collect()
 }
 
 fn gpui_normalized_sidebar_command_title(value: Option<&str>) -> Option<String> {
@@ -53747,6 +59839,144 @@ fn gpui_active_project_id_from_snapshot(snapshot: Option<&GpuiProjectSnapshot>) 
         .map(|project_id| project_id.0.as_str())
 }
 
+fn gpui_sidebar_command_session_indicators_from_command_pane_sources(
+    commands: &serde_json::Value,
+    command_pane_sessions: &serde_json::Value,
+) -> serde_json::Value {
+    let Some(commands) = commands.as_array() else {
+        return serde_json::Value::Array(Vec::new());
+    };
+    let sessions = command_pane_sessions
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    serde_json::Value::Array(
+        commands
+            .iter()
+            .filter_map(|command| {
+                if command
+                    .get("actionType")
+                    .and_then(serde_json::Value::as_str)
+                    != Some("terminal")
+                {
+                    return None;
+                }
+                let command_id = command
+                    .get("commandId")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(gpui_command_pane_sidebar_indicator_text)?;
+                let command_title = gpui_sidebar_command_indicator_title_from_command(command)?;
+                let command_title_key = gpui_command_pane_sidebar_indicator_key(&command_title);
+                if command_title_key.is_empty() {
+                    return None;
+                }
+                let mapped_session = sessions.iter().find(|session| {
+                    session
+                        .get("commandId")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|candidate| candidate == command_id.as_str())
+                        && gpui_command_pane_sidebar_indicator_key(
+                            session
+                                .get("title")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or_default(),
+                        ) == command_title_key
+                });
+                let session = mapped_session.or_else(|| {
+                    sessions.iter().find(|session| {
+                        gpui_command_pane_sidebar_indicator_key(
+                            session
+                                .get("title")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or_default(),
+                        ) == command_title_key
+                    })
+                })?;
+                let session_id = session
+                    .get("sessionId")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(gpui_command_pane_sidebar_indicator_text)?;
+                let status = match session.get("status").and_then(serde_json::Value::as_str) {
+                    Some("idle") => "idle",
+                    Some("running") => "running",
+                    Some("error") => "error",
+                    _ => return None,
+                };
+                let title = session
+                    .get("title")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(gpui_command_pane_sidebar_indicator_text);
+                let mut indicator = serde_json::json!({
+                    "commandId": command_id,
+                    "isActive": session
+                        .get("isActive")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                    "sessionId": session_id,
+                    "status": status,
+                });
+                if let Some(title) = title {
+                    indicator["title"] = serde_json::json!(title);
+                }
+                for key in [
+                    "delayedSendDeadlineAt",
+                    "delayedSendRemainingLabel",
+                    "closeAfterDoneDeadlineAt",
+                    "closeAfterDoneRemainingLabel",
+                ] {
+                    if let Some(value) = session
+                        .get(key)
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(gpui_command_pane_sidebar_indicator_text)
+                    {
+                        indicator[key] = serde_json::json!(value);
+                    }
+                }
+                for key in ["delayedSendRemainingMs", "closeAfterDoneRemainingMs"] {
+                    if let Some(value) = session.get(key).and_then(serde_json::Value::as_u64) {
+                        indicator[key] = serde_json::json!(value);
+                    }
+                }
+                if session
+                    .get("closeAfterDone")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true)
+                {
+                    indicator["closeAfterDone"] = serde_json::json!(true);
+                }
+                Some(indicator)
+            })
+            .collect(),
+    )
+}
+
+fn gpui_sidebar_command_indicator_title_from_command(
+    command: &serde_json::Value,
+) -> Option<String> {
+    if let Some(name) = command
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .and_then(gpui_command_pane_sidebar_indicator_text)
+    {
+        return Some(name);
+    }
+    let command_text = command
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .chars()
+        .take(20)
+        .collect::<String>();
+    gpui_command_pane_sidebar_indicator_text(&command_text)
+}
+
+fn gpui_command_pane_sidebar_indicator_key(value: &str) -> String {
+    gpui_command_pane_sidebar_indicator_text(value)
+        .map(|text| text.to_lowercase())
+        .unwrap_or_default()
+}
+
 fn gpui_app_modal_sidebar_state_message(
     latest_snapshot: Option<&GpuiProjectSnapshot>,
 ) -> serde_json::Value {
@@ -53949,6 +60179,21 @@ fn gpui_app_modal_sidebar_theme_from_settings(
     }
 }
 
+fn gpui_titlebar_session_persistence_provider_from_settings(
+    settings: &serde_json::Map<String, serde_json::Value>,
+) -> &'static str {
+    match settings
+        .get("sessionPersistenceProvider")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("off") => "off",
+        Some("tmux") => "tmux",
+        Some("zellij") => "zellij",
+        Some("zmx") => "zmx",
+        _ => "zmx",
+    }
+}
+
 fn gpui_completion_sound_label(sound: &str) -> &'static str {
     match gpui_normalize_completion_sound(Some(sound)) {
         "success-chime" => "Success Chime",
@@ -54001,6 +60246,533 @@ fn append_url_query_params(mut url: String, params: &[(&str, String)]) -> String
         url.push_str(&encode_search_query(value));
     }
     url
+}
+
+fn source_code_server_runtime_target_from_project_snapshot(
+    snapshot: &GpuiProjectSnapshot,
+) -> Option<SourceCodeServerRuntimeTarget> {
+    /*
+    CDXC:GPUISourceRuntime 2026-06-24-23:17:
+    Source folder URLs are authorized only from the strict in-memory sidebar project snapshot: explicit project id, Source workarea id, project path, and Source availability. This mirrors the macOS sidebar's `createCodeServerProjectEditorUrl(project.path)` contract without accepting renderer URLs, filesystem probes, fallback localhost strings, or persisted project facts.
+    */
+    if !snapshot.feature_availability.source || snapshot.is_quick_projectless {
+        return None;
+    }
+    let active_project_id = snapshot.active_project_id.as_ref()?.clone();
+    let source_workarea_id = snapshot.surface_ids.source_workarea_id.as_ref()?.clone();
+    let project_path = snapshot.in_memory_project_path.as_ref()?.clone();
+    let runtime_url =
+        ProjectWorkareaRealRuntimeUrl::from_authorized_runtime_url(append_url_query_params(
+            format!("{SOURCE_CODE_SERVER_EDITOR_ORIGIN}/"),
+            &[("folder", gpui_path_string(&project_path))],
+        ))?;
+    Some(SourceCodeServerRuntimeTarget {
+        active_project_id,
+        source_workarea_id,
+        project_path,
+        runtime_url,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_start_runtime_for_target(
+    target: SourceCodeServerRuntimeTarget,
+    settings: SourceCodeServerRuntimeSettings,
+) -> Result<
+    (
+        SourceCodeServerRuntimeTarget,
+        SourceCodeServerRuntimeSettings,
+        SourceCodeServerRuntimeStartOutput,
+    ),
+    (
+        SourceCodeServerRuntimeTarget,
+        SourceCodeServerRuntimeSettings,
+    ),
+> {
+    let result = source_code_server_spawn_runtime(&target, &settings);
+    match result {
+        Ok(output) => Ok((target, settings, output)),
+        Err(_) => Err((target, settings)),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn source_code_server_start_runtime_for_target(
+    target: SourceCodeServerRuntimeTarget,
+    settings: SourceCodeServerRuntimeSettings,
+) -> Result<
+    (
+        SourceCodeServerRuntimeTarget,
+        SourceCodeServerRuntimeSettings,
+        SourceCodeServerRuntimeStartOutput,
+    ),
+    (
+        SourceCodeServerRuntimeTarget,
+        SourceCodeServerRuntimeSettings,
+    ),
+> {
+    Err((target, settings))
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_spawn_runtime(
+    target: &SourceCodeServerRuntimeTarget,
+    settings: &SourceCodeServerRuntimeSettings,
+) -> Result<SourceCodeServerRuntimeStartOutput, String> {
+    if source_code_server_health_check() {
+        let _ = source_code_server_wait_until_not_responsive(
+            SOURCE_CODE_SERVER_PORT_BUSY_WAIT_INTERVAL,
+        );
+    }
+
+    let repo_root = source_code_server_resolve_repo_root()?;
+    let entrypoint = repo_root.join("out/node/entry.js");
+    let node_path = source_code_server_resolve_node_path(&repo_root)?;
+    let (user_data_dir, extensions_dir) = source_code_server_runtime_storage()?;
+    if source_code_server_should_seed_default_theme(settings) {
+        source_code_server_ensure_default_theme(&user_data_dir)?;
+    }
+
+    let mut command = Command::new(&node_path);
+    command
+        .arg(&entrypoint)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .current_dir(&target.project_path)
+        .envs(source_code_server_runtime_environment(&repo_root));
+    if let Some(vscode_user_config_dir) = settings.linked_vscode_user_config_dir() {
+        command
+            .arg("--link-vscode-user-config")
+            .arg("--vscode-user-config-dir")
+            .arg(vscode_user_config_dir);
+    }
+    command
+        .arg("--auth")
+        .arg("none")
+        .arg("--bind-addr")
+        .arg(format!(
+            "{}:{}",
+            SOURCE_CODE_SERVER_EDITOR_HOST, SOURCE_CODE_SERVER_EDITOR_PORT
+        ))
+        .arg("--disable-telemetry")
+        .arg("--disable-update-check")
+        .arg("--disable-workspace-trust")
+        .arg("--disable-getting-started-override")
+        .arg("--ignore-last-opened")
+        .arg("--app-name")
+        .arg("ghostex Code")
+        .arg("--user-data-dir")
+        .arg(&user_data_dir)
+        .arg("--extensions-dir")
+        .arg(&extensions_dir);
+
+    let started_at = Instant::now();
+    let child = command
+        .spawn()
+        .map_err(|_| "failed to start Source runtime".to_string())?;
+    let responsive =
+        source_code_server_wait_until_responsive(SOURCE_CODE_SERVER_STARTUP_GRACE_INTERVAL);
+    Ok(SourceCodeServerRuntimeStartOutput {
+        child,
+        started_at,
+        responsive,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_resolve_repo_root() -> Result<PathBuf, String> {
+    let configured_root = env::var("GHOSTEX_CODE_SERVER_ROOT")
+        .ok()
+        .or_else(|| env::var("ghostex_CODE_SERVER_ROOT").ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let candidates = if let Some(configured_root) = configured_root {
+        vec![PathBuf::from(configured_root)]
+    } else {
+        source_code_server_repo_root_candidates()
+    };
+    for candidate in candidates {
+        if candidate.join("out/node/entry.js").exists()
+            && source_code_server_validate_development_payload(&candidate).is_ok()
+        {
+            return Ok(candidate);
+        }
+    }
+    Err("code-server runtime is unavailable".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_repo_root_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    let mut append = |candidate: PathBuf| {
+        if !candidates.iter().any(|existing| existing == &candidate) {
+            candidates.push(candidate);
+        }
+    };
+    if let Ok(executable) = env::current_exe() {
+        if let Some(bundle_root) = find_app_bundle_root(&executable) {
+            let resources_dir = bundle_root.join("Contents/Resources");
+            append(resources_dir.join("Web/code-server"));
+            append(resources_dir.join("code-server"));
+        }
+    }
+    if let Ok(repo_root) = env::var("ghostex_REPO_ROOT") {
+        let repo_root = repo_root.trim();
+        if !repo_root.is_empty() {
+            append(PathBuf::from(repo_root).join("code-server"));
+        }
+    }
+    if let Ok(cwd) = env::current_dir() {
+        append(cwd.join("code-server"));
+    }
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if let Some(repo_root) = manifest_dir.parent() {
+        append(repo_root.join("code-server"));
+        append(repo_root.join("native/macos/ghostexHost/Web/code-server"));
+    }
+    candidates
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_validate_development_payload(repo_root: &Path) -> Result<(), String> {
+    if !repo_root.join("lib/vscode/package.json").exists() {
+        return Err("code-server VS Code payload is unavailable".to_string());
+    }
+    if !repo_root.join("lib/vscode/out/server-main.js").exists() {
+        return Err("code-server VS Code server output is unavailable".to_string());
+    }
+    if !repo_root
+        .join("lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/build/Release/vscode_fs.node")
+        .exists()
+    {
+        return Err("code-server Git extension native module is unavailable".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_runtime_storage() -> Result<(PathBuf, PathBuf), String> {
+    let storage = shared_settings::ghostex_home_root().join("code-server-runtime");
+    let user_data_dir = storage.join("user-data");
+    let extensions_dir = storage.join("extensions");
+    fs::create_dir_all(&user_data_dir)
+        .map_err(|_| "failed to prepare Source runtime storage".to_string())?;
+    fs::create_dir_all(&extensions_dir)
+        .map_err(|_| "failed to prepare Source runtime storage".to_string())?;
+    Ok((user_data_dir, extensions_dir))
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_should_seed_default_theme(
+    settings: &SourceCodeServerRuntimeSettings,
+) -> bool {
+    let Some(linked_dir) = settings.linked_vscode_user_config_dir() else {
+        return true;
+    };
+    !PathBuf::from(linked_dir).join("settings.json").exists()
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_ensure_default_theme(user_data_dir: &Path) -> Result<(), String> {
+    /*
+    CDXC:GPUISourceRuntime 2026-06-24-23:17:
+    When GPUI owns the code-server user-data profile, seed the same Dark 2026 default theme as macOS only if the profile has no settings file. Do not overwrite user-edited runtime settings or linked local VS Code settings.
+    */
+    let user_dir = user_data_dir.join("User");
+    let settings_path = user_dir.join("settings.json");
+    fs::create_dir_all(&user_dir)
+        .map_err(|_| "failed to prepare Source runtime settings".to_string())?;
+    if settings_path.exists() {
+        return Ok(());
+    }
+    fs::write(
+        settings_path,
+        "{\n  \"workbench.colorTheme\": \"Dark 2026\"\n}\n",
+    )
+    .map_err(|_| "failed to prepare Source runtime settings".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_resolve_node_path(repo_root: &Path) -> Result<PathBuf, String> {
+    let required_major = source_code_server_required_node_major(repo_root).unwrap_or(22);
+    if let Some(configured) = env::var("GHOSTEX_CODE_SERVER_NODE_PATH")
+        .ok()
+        .or_else(|| env::var("ghostex_CODE_SERVER_NODE_PATH").ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        let configured = PathBuf::from(configured);
+        if source_code_server_node_major(&configured) == Some(required_major) {
+            return Ok(configured);
+        }
+        return Err("configured Source Node runtime is incompatible".to_string());
+    }
+
+    for candidate in source_code_server_bundled_node_candidates(repo_root) {
+        if source_code_server_node_major(&candidate) == Some(required_major) {
+            return Ok(candidate);
+        }
+    }
+    if source_code_server_is_bundled_repo_root(repo_root) {
+        return Err("bundled Source Node runtime is unavailable".to_string());
+    }
+    for candidate in source_code_server_system_node_candidates(required_major) {
+        if source_code_server_node_major(&candidate) == Some(required_major) {
+            return Ok(candidate);
+        }
+    }
+    Err("Source Node runtime is unavailable".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_required_node_major(repo_root: &Path) -> Option<u64> {
+    let package_json = fs::read_to_string(repo_root.join("package.json")).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&package_json).ok()?;
+    let node_engine = value.get("engines")?.get("node")?.as_str()?;
+    source_code_server_first_integer(node_engine)
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_bundled_node_candidates(repo_root: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    let mut append = |candidate: PathBuf| {
+        if !candidates.iter().any(|existing| existing == &candidate) {
+            candidates.push(candidate);
+        }
+    };
+    append(repo_root.join("lib/node"));
+    if let Ok(executable) = env::current_exe() {
+        if let Some(bundle_root) = find_app_bundle_root(&executable) {
+            let resources_dir = bundle_root.join("Contents/Resources");
+            append(resources_dir.join("Web/code-server/lib/node"));
+            append(resources_dir.join("code-server/lib/node"));
+        }
+    }
+    if let Ok(cwd) = env::current_dir() {
+        append(cwd.join("native/macos/ghostexHost/Web/code-server/lib/node"));
+    }
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if let Some(repo_root) = manifest_dir.parent() {
+        append(repo_root.join("native/macos/ghostexHost/Web/code-server/lib/node"));
+    }
+    candidates
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_system_node_candidates(required_major: u64) -> Vec<PathBuf> {
+    let home = home_dir();
+    let mut candidates = Vec::new();
+    for directory in [
+        home.join(".local/node"),
+        home.join(".local/share/mise/installs/node"),
+        home.join(".asdf/installs/nodejs"),
+        home.join(".nvm/versions/node"),
+    ] {
+        candidates.extend(source_code_server_node_install_candidates(
+            &directory,
+            required_major,
+        ));
+    }
+    candidates.push(PathBuf::from(format!(
+        "/opt/homebrew/opt/node@{required_major}/bin/node"
+    )));
+    candidates.push(PathBuf::from(format!(
+        "/usr/local/opt/node@{required_major}/bin/node"
+    )));
+    if let Some(path_node) = source_code_server_resolve_command_path("node") {
+        candidates.push(path_node);
+    }
+    let mut seen = HashSet::new();
+    candidates
+        .into_iter()
+        .filter(|candidate| seen.insert(candidate.clone()))
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_node_install_candidates(
+    directory: &Path,
+    required_major: u64,
+) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    let mut candidates = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|entry| entry.is_dir())
+        .filter(|entry| {
+            let name = entry
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default();
+            name.starts_with(&format!("node-v{required_major}."))
+                || name.starts_with(&format!("v{required_major}."))
+                || name.starts_with(&format!("{required_major}."))
+        })
+        .map(|entry| entry.join("bin/node"))
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| right.cmp(left));
+    candidates
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_node_major(node_path: &Path) -> Option<u64> {
+    if !node_path.is_file() {
+        return None;
+    }
+    let output = Command::new(node_path)
+        .arg("-v")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let version = String::from_utf8(output.stdout).ok()?;
+    source_code_server_first_integer(version.trim())
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_first_integer(value: &str) -> Option<u64> {
+    let mut digits = String::new();
+    for character in value.chars() {
+        if character.is_ascii_digit() {
+            digits.push(character);
+            continue;
+        }
+        if !digits.is_empty() {
+            break;
+        }
+    }
+    digits.parse().ok()
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_resolve_command_path(command: &str) -> Option<PathBuf> {
+    let output = Command::new("/bin/zsh")
+        .arg("-lc")
+        .arg(format!("command -v {}", gpui_shell_quote(command)))
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    stdout
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_is_bundled_repo_root(repo_root: &Path) -> bool {
+    let Ok(executable) = env::current_exe() else {
+        return false;
+    };
+    let Some(bundle_root) = find_app_bundle_root(&executable) else {
+        return false;
+    };
+    let resources_dir = bundle_root.join("Contents/Resources");
+    let repo_root = repo_root
+        .canonicalize()
+        .unwrap_or_else(|_| repo_root.to_path_buf());
+    for bundled in [
+        resources_dir.join("Web/code-server"),
+        resources_dir.join("code-server"),
+    ] {
+        let bundled = bundled.canonicalize().unwrap_or(bundled);
+        if repo_root == bundled || repo_root.starts_with(&bundled) {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_runtime_environment(repo_root: &Path) -> HashMap<String, String> {
+    let mut environment: HashMap<String, String> = env::vars().collect();
+    environment.insert("VSCODE_IPC_HOOK_CLI".to_string(), String::new());
+    environment.remove("CODE_SERVER_PARENT_PID");
+    if source_code_server_is_bundled_runtime(repo_root) {
+        environment.remove("VSCODE_DEV");
+        environment.insert("NODE_ENV".to_string(), "production".to_string());
+    } else {
+        environment.insert("VSCODE_DEV".to_string(), "1".to_string());
+        environment.insert("NODE_ENV".to_string(), "development".to_string());
+        let path = [
+            gpui_path_string(&repo_root.join("node_modules/.bin")),
+            environment.get("PATH").cloned().unwrap_or_else(|| {
+                "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin".to_string()
+            }),
+        ]
+        .join(":");
+        environment.insert("PATH".to_string(), path);
+    }
+    environment
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_is_bundled_runtime(repo_root: &Path) -> bool {
+    repo_root.join("lib/node").is_file()
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_health_check() -> bool {
+    let Ok(address) = format!(
+        "{}:{}",
+        SOURCE_CODE_SERVER_EDITOR_HOST, SOURCE_CODE_SERVER_EDITOR_PORT
+    )
+    .parse::<std::net::SocketAddr>() else {
+        return false;
+    };
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_secs(1)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+    let request = format!(
+        "GET /healthz HTTP/1.1\r\nHost: {}:{}\r\nConnection: close\r\n\r\n",
+        SOURCE_CODE_SERVER_EDITOR_HOST, SOURCE_CODE_SERVER_EDITOR_PORT
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut response = String::new();
+    if stream.read_to_string(&mut response).is_err() {
+        return false;
+    }
+    response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200")
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_wait_until_responsive(timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if source_code_server_health_check() {
+            return true;
+        }
+        thread::sleep(SOURCE_CODE_SERVER_HEALTH_POLL_INTERVAL);
+    }
+    source_code_server_health_check()
+}
+
+#[cfg(target_os = "macos")]
+fn source_code_server_wait_until_not_responsive(timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if !source_code_server_health_check() {
+            return true;
+        }
+        thread::sleep(SOURCE_CODE_SERVER_HEALTH_POLL_INTERVAL);
+    }
+    !source_code_server_health_check()
 }
 
 fn kanban_workarea_runtime_url_from_project_snapshot(
@@ -56070,6 +62842,117 @@ fn gpui_sidebar_native_project_path_action_from_json(
     })
 }
 
+fn gpui_sidebar_command_action_from_json(text: &str) -> Result<GpuiTitlebarAction, ()> {
+    /*
+    CDXC:GPUICommandPane 2026-06-24-23:17:
+    Sidebar command-action payloads are fixed action metadata from the live gxserver HUD projection. Accept only command id, name, action type, and the one action target needed for that type; reject project paths, renderer cwd, env, stdout/stderr, terminal content, shell-state fields, generic IPC names, and mismatched command/url pairs before the existing action runner can create a Browser tab or command-pane launch payload.
+
+    CDXC:GPUICommandPane 2026-06-25-10:29:
+    `runMode:"debug"` is a terminal-only control bit from the shared sidebar click contract. It may select the visible debug workspace-terminal path, but it must not allow browser Actions, project paths, cwd/env, logs, or renderer-provided shell metadata to influence command-pane execution.
+    */
+    let value = serde_json::from_str::<serde_json::Value>(text).map_err(|_| ())?;
+    let object = value.as_object().ok_or(())?;
+    if object.keys().any(|key| {
+        ![
+            "version",
+            "type",
+            "actionType",
+            "commandId",
+            "name",
+            "playCompletionSound",
+            "runMode",
+            "command",
+            "url",
+        ]
+        .contains(&key.as_str())
+    }) {
+        return Err(());
+    }
+    if object.get("version").and_then(serde_json::Value::as_u64)
+        != Some(GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION)
+        || object.get("type").and_then(serde_json::Value::as_str)
+            != Some(GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE)
+    {
+        return Err(());
+    }
+    let command_id = gpui_trimmed_json_string_field(object, "commandId")
+        .filter(|value| value.chars().count() <= GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS)
+        .ok_or(())?
+        .to_string();
+    let name = object
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| value.chars().count() <= GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS)
+        .unwrap_or_default()
+        .to_string();
+    let command = object
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|command| gpui_trimmed_nonempty_str(Some(command)))
+        .map(str::to_string);
+    let url = object
+        .get("url")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|url| gpui_trimmed_nonempty_str(Some(url)))
+        .map(str::to_string);
+    let action_type = match object.get("actionType").and_then(serde_json::Value::as_str) {
+        Some("browser") if url.is_some() && command.is_none() => GpuiTitlebarActionType::Browser,
+        Some("terminal") if command.is_some() && url.is_none() => GpuiTitlebarActionType::Terminal,
+        _ => return Err(()),
+    };
+    let play_completion_sound = match object.get("playCompletionSound") {
+        None => action_type == GpuiTitlebarActionType::Terminal,
+        Some(value) if action_type == GpuiTitlebarActionType::Terminal => {
+            value.as_bool().ok_or(())?
+        }
+        Some(_) => return Err(()),
+    };
+    let run_mode = match object.get("runMode").and_then(serde_json::Value::as_str) {
+        None | Some("default") => GpuiTitlebarActionRunMode::Default,
+        Some("debug") if action_type == GpuiTitlebarActionType::Terminal => {
+            GpuiTitlebarActionRunMode::Debug
+        }
+        Some(_) => return Err(()),
+    };
+    Ok(GpuiTitlebarAction {
+        action_type,
+        command,
+        command_id,
+        name,
+        play_completion_sound,
+        run_mode,
+        url,
+    })
+}
+
+fn gpui_sidebar_command_run_end_from_json(text: &str) -> Result<String, ()> {
+    /*
+    CDXC:GPUICommandPane 2026-06-25-10:34:
+    Sidebar command-run-end payloads close the existing live Action tab by command id only. Keep the parser stricter than the launch bridge so closing a run cannot carry command text, URLs, project paths, cwd/env, run ids, status paths, terminal output, persisted shell state, or generic IPC fields.
+    */
+    let value = serde_json::from_str::<serde_json::Value>(text).map_err(|_| ())?;
+    let object = value.as_object().ok_or(())?;
+    if object
+        .keys()
+        .any(|key| !["version", "type", "commandId"].contains(&key.as_str()))
+    {
+        return Err(());
+    }
+    if object.get("version").and_then(serde_json::Value::as_u64)
+        != Some(GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION)
+        || object.get("type").and_then(serde_json::Value::as_str)
+            != Some(GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE)
+    {
+        return Err(());
+    }
+    let command_id = gpui_trimmed_json_string_field(object, "commandId")
+        .filter(|value| value.chars().count() <= GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS)
+        .ok_or(())?
+        .to_string();
+    Ok(command_id)
+}
+
 fn execute_gpui_sidebar_native_project_path_action(
     message: GpuiSidebarNativeProjectPathActionMessage,
 ) -> Result<GpuiSidebarNativeProjectPathActionResult, String> {
@@ -56352,7 +63235,8 @@ fn gpui_open_remote_sidebar_git_changed_file_in_ide(
     gpui_open_remote_path_in_editor(config, editor_target, remote_file_path.as_str())
 }
 
-fn gpui_remote_workspace_editor_target_from_default_settings() -> Result<GpuiWorkspaceEditorTarget, String> {
+fn gpui_remote_workspace_editor_target_from_default_settings()
+-> Result<GpuiWorkspaceEditorTarget, String> {
     let settings =
         shared_settings::shared_sidebar_settings_snapshot().agents_hub_external_editor_settings();
     match settings.default_editor_command() {
@@ -57424,10 +64308,7 @@ fn contract_string(
 
 fn gpui_gxserver_presentation_focus_state_from_sidebar_contract_json(
     text: &str,
-) -> Result<
-    GpuiGxserverPresentationFocusState,
-    GpuiGxserverPresentationFocusStateContractError,
-> {
+) -> Result<GpuiGxserverPresentationFocusState, GpuiGxserverPresentationFocusStateContractError> {
     let value = serde_json::from_str::<serde_json::Value>(text)
         .map_err(|_| GpuiGxserverPresentationFocusStateContractError::MalformedJson)?;
     gpui_gxserver_presentation_focus_state_from_sidebar_contract_value(&value)
@@ -57435,10 +64316,7 @@ fn gpui_gxserver_presentation_focus_state_from_sidebar_contract_json(
 
 fn gpui_gxserver_presentation_focus_state_from_sidebar_contract_value(
     value: &serde_json::Value,
-) -> Result<
-    GpuiGxserverPresentationFocusState,
-    GpuiGxserverPresentationFocusStateContractError,
-> {
+) -> Result<GpuiGxserverPresentationFocusState, GpuiGxserverPresentationFocusStateContractError> {
     let object = gpui_gxserver_focus_contract_object(value)?;
     reject_unexpected_gxserver_focus_contract_keys(
         object,
@@ -57556,7 +64434,9 @@ fn show_beta_features_from_settings() -> bool {
     shared_settings::shared_sidebar_settings_snapshot().show_beta_features()
 }
 
-fn sidebar_runtime_settings_snapshot_from_settings() -> cef::SidebarRuntimeSettingsSnapshot {
+fn sidebar_runtime_settings_snapshot_from_shared_settings(
+    settings: &shared_settings::SharedSidebarSettingsSnapshot,
+) -> cef::SidebarRuntimeSettingsSnapshot {
     /*
     CDXC:GPUIProjectSidebarBridge 2026-06-23-06:36:
     The sidebar CEF runtime settings handoff must use the same shared sidebar settings file and strict boolean interpretation as the Rust titlebar gate. Manage availability is still derived only from strict debuggingMode and showBetaFeatures booleans; missing, malformed, string-like truthy, or numeric truthy values must not open Manage.
@@ -57564,13 +64444,6 @@ fn sidebar_runtime_settings_snapshot_from_settings() -> cef::SidebarRuntimeSetti
     CDXC:GPUISettingsSidebarHandoff 2026-06-24-11:22:
     The GPUI sidebar runtime snapshot now also carries the saved shared Settings object as serialized first-party payload so the mounted SidebarApp can normalize real user preferences immediately on initial CEF install and after Settings saves. This is not a generic settings bus and must not write logs, persist another copy, or expose settings to Browser/workarea/modal CEF clients.
     */
-    let settings = shared_settings::shared_sidebar_settings_snapshot();
-    sidebar_runtime_settings_snapshot_from_shared_settings(&settings)
-}
-
-fn sidebar_runtime_settings_snapshot_from_shared_settings(
-    settings: &shared_settings::SharedSidebarSettingsSnapshot,
-) -> cef::SidebarRuntimeSettingsSnapshot {
     cef::SidebarRuntimeSettingsSnapshot {
         debugging_mode: settings.debugging_mode(),
         show_beta_features: settings.show_beta_features(),
@@ -57757,7 +64630,7 @@ mod tests {
     Slice 77 adds pure semantic-status evidence for GPUI Agents running-tab dots: Delayed Send wins over attention/working/idle, attention and working map to the source sidebar vocabulary colors, default placeholder tabs visibly exercise each running state, and shell-state persistence carries only enum/boolean metadata without terminal content or private titles.
 
     CDXC:GPUIWorkspaceParityTests 2026-06-22-16:40:
-    Slice 78 adds pure semantic-status evidence for GPUI command-pane tab dots: command idle remains blue, working/attention/delayed-send map to the native status vocabulary, default command placeholders stay modest, and shell-state persistence carries only enum/boolean metadata without command text, output, paths, deadlines, labels, tokens, or private titles.
+    Slice 78 adds pure semantic-status evidence for GPUI command-pane tab indicators, slice 327 makes idle render without an indicator, and slice 342 moves visible command status chrome into the native trailing slot: working/attention render as square fills, Delayed Send renders as clock chrome, and status hides under hover close chrome while preserving title reservation. Shell-state persistence carries only enum/boolean metadata without command text, output, paths, deadlines, labels, tokens, or private titles.
 
     CDXC:GPUIWorkspaceParityTests 2026-06-22-16:48:
     Slice 79 adds pure Browser tab chrome evidence: loaded tabs with live CEF surfaces stay Browser blue, restored loaded placeholders without a materialized surface become teal and suppress runtime favicon rendering, and address-only tabs remain neutral without borrowing stale favicon or page state.
@@ -58288,6 +65161,912 @@ mod tests {
             cef::SidebarBridgeEvent::ManageFileWorkareaOperationRequest(private_manage),
         ));
         assert!(manage_runtime.manage_file_workarea_operation_decision == prior_manage_decision);
+
+        assert!(!store_sidebar_workarea_bridge_event(
+            &mut source_runtime,
+            &mut browser_runtime,
+            &mut kanban_runtime,
+            &mut manage_runtime,
+            cef::SidebarBridgeEvent::SidebarCommandAction(
+                serde_json::json!({
+                    "version": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
+                    "type": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
+                    "actionType": "terminal",
+                    "commandId": "build",
+                    "name": "Build",
+                    "command": "npm run build",
+                })
+                .to_string(),
+            ),
+        ));
+        assert!(source_runtime.readiness_bridge == SourceWorkareaReadinessBridgeState::Loading);
+        assert!(
+            kanban_runtime.lifecycle_bridge
+                == ProjectScopedRealSurfaceLifecycleBridgeState::Mounting
+        );
+        assert!(manage_runtime.manage_file_workarea_operation_decision == prior_manage_decision);
+    }
+
+    /*
+    CDXC:GPUICommandPane 2026-06-24-23:17:
+    Sidebar command-action parser tests are pure source evidence for the GPUI command-pane bridge. They must not create windows, terminal surfaces, Browser tabs, logs, shell-state JSON, gxserver calls, app launches, or filesystem side effects.
+
+    CDXC:GPUICommandPane 2026-06-24-23:49:
+    Parser coverage includes the per-action completion-sound flag because GPUI command actions must mirror macOS sound behavior without accepting that terminal-only field on browser actions.
+
+    CDXC:GPUICommandPane 2026-06-25-10:29:
+    Parser coverage also pins `runMode:"debug"` as terminal-only. Debug runs are visible workspace terminals for inspection, so browser actions and unknown run modes must not enter the command-pane bridge.
+
+    CDXC:GPUICommandPane 2026-06-25-10:34:
+    Command-run-end coverage pins the close bridge to command ids only and keeps mapped-tab selection model-local. Tests must not create windows, terminal surfaces, CEF entities, gxserver calls, app launches, logs, or shell commands.
+
+    CDXC:GPUICommandPane 2026-06-25-11:42:
+    Unnamed Action coverage pins macOS title fallback parity. GPUI command-pane tabs and Action menu rows must derive visible titles from normalized command/URL text rather than substituting command ids before title-owned reuse runs.
+    */
+    #[test]
+    fn gpui_sidebar_command_action_parser_accepts_only_matching_action_target() {
+        let terminal = gpui_sidebar_command_action_from_json(
+            &serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
+                "actionType": "terminal",
+                "commandId": "build",
+                "name": "Build",
+                "command": "npm run build",
+                "playCompletionSound": false,
+                "runMode": "debug",
+            })
+            .to_string(),
+        )
+        .expect("terminal action should parse");
+        assert_eq!(terminal.action_type, GpuiTitlebarActionType::Terminal);
+        assert_eq!(terminal.command_id, "build");
+        assert_eq!(terminal.command.as_deref(), Some("npm run build"));
+        assert!(!terminal.play_completion_sound);
+        assert_eq!(terminal.run_mode, GpuiTitlebarActionRunMode::Debug);
+        assert_eq!(terminal.url, None);
+
+        let browser = gpui_sidebar_command_action_from_json(
+            &serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
+                "actionType": "browser",
+                "commandId": "docs",
+                "name": "Docs",
+                "url": "https://example.com/docs",
+            })
+            .to_string(),
+        )
+        .expect("browser action should parse");
+        assert_eq!(browser.action_type, GpuiTitlebarActionType::Browser);
+        assert_eq!(browser.command, None);
+        assert!(!browser.play_completion_sound);
+        assert_eq!(browser.run_mode, GpuiTitlebarActionRunMode::Default);
+        assert_eq!(browser.url.as_deref(), Some("https://example.com/docs"));
+
+        for rejected in [
+            serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
+                "actionType": "terminal",
+                "commandId": "build",
+                "name": "Build",
+                "command": "npm run build",
+                "url": "https://example.com",
+            }),
+            serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
+                "actionType": "browser",
+                "commandId": "docs",
+                "name": "Docs",
+                "command": "open docs",
+                "url": "https://example.com/docs",
+            }),
+            serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
+                "actionType": "terminal",
+                "commandId": "build",
+                "name": "Build",
+                "command": "npm run build",
+                "projectPath": "/Users/madda/private/project",
+            }),
+            serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
+                "actionType": "browser",
+                "commandId": "docs",
+                "name": "Docs",
+                "playCompletionSound": true,
+                "url": "https://example.com/docs",
+            }),
+            serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
+                "actionType": "browser",
+                "commandId": "docs",
+                "name": "Docs",
+                "runMode": "debug",
+                "url": "https://example.com/docs",
+            }),
+            serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
+                "actionType": "terminal",
+                "commandId": "build",
+                "name": "Build",
+                "command": "npm run build",
+                "runMode": "inspect",
+            }),
+        ] {
+            assert!(gpui_sidebar_command_action_from_json(&rejected.to_string()).is_err());
+        }
+    }
+
+    #[test]
+    fn gpui_command_action_titles_match_macos_fallbacks_for_unnamed_actions() {
+        let sidebar_action = gpui_sidebar_command_action_from_json(
+            &serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
+                "actionType": "terminal",
+                "commandId": "custom-test",
+                "name": "   ",
+                "command": " pnpm   test -- --watch --filter app ",
+            })
+            .to_string(),
+        )
+        .expect("unnamed terminal action should parse");
+        assert_eq!(sidebar_action.name, "");
+        assert_eq!(sidebar_action.menu_label(), "pnpm test -- --watch");
+        assert_eq!(sidebar_action.command_title(), "pnpm test -- --watch");
+
+        let actions = gpui_titlebar_actions_from_sidebar_command_buttons(&serde_json::json!([
+            {
+                "actionType": "terminal",
+                "command": " pnpm   test -- --watch --filter app ",
+                "commandId": "custom-test",
+                "name": "   ",
+                "playCompletionSound": true,
+            },
+            {
+                "actionType": "browser",
+                "commandId": "docs",
+                "name": "",
+                "url": " https://example.com/docs/reference ",
+            }
+        ]));
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0].name, "");
+        assert_eq!(actions[0].menu_label(), "pnpm test -- --watch");
+        assert_eq!(actions[0].command_title(), "pnpm test -- --watch");
+        assert_eq!(actions[1].name, "");
+        assert_eq!(actions[1].menu_label(), "https://example.com/");
+    }
+
+    #[test]
+    fn gpui_sidebar_command_run_end_parser_accepts_only_command_id() {
+        let accepted = gpui_sidebar_command_run_end_from_json(
+            &serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE,
+                "commandId": " build ",
+            })
+            .to_string(),
+        )
+        .expect("command-run-end should parse");
+        assert_eq!(accepted, "build");
+
+        for rejected in [
+            serde_json::json!({
+                "version": 2,
+                "type": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE,
+                "commandId": "build",
+            }),
+            serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION,
+                "type": "ghostex.gpui.sidebar.commandAction",
+                "commandId": "build",
+            }),
+            serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE,
+                "commandId": "   ",
+            }),
+            serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE,
+                "commandId": "build",
+                "command": "npm run build",
+            }),
+            serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE,
+                "commandId": "docs",
+                "url": "https://example.com/docs",
+            }),
+            serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE,
+                "commandId": "build",
+                "runId": "run-private",
+            }),
+            serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE,
+                "commandId": "build",
+                "projectPath": "/Users/madda/private/project",
+            }),
+            serde_json::json!({
+                "version": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION,
+                "type": GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE,
+                "commandId": "build",
+                "statusFilePath": "/tmp/ghostex-private.state",
+            }),
+        ] {
+            assert!(gpui_sidebar_command_run_end_from_json(&rejected.to_string()).is_err());
+        }
+    }
+
+    #[test]
+    fn gpui_command_action_process_command_uses_hidden_zsh_wrapper() {
+        let execution_text = gpui_command_action_execution_text("npm run build", "run-123");
+        assert!(execution_text.starts_with(' '));
+        assert!(execution_text.contains("__ghostex_command_pane_action() {"));
+        assert!(execution_text.contains("npm run build"));
+        assert!(execution_text.contains("commandRunId"));
+        assert!(execution_text.contains("commandExitCode"));
+        assert!(execution_text.contains("run-123"));
+        assert!(execution_text.contains("GHOSTEX_SESSION_STATE_FILE"));
+        assert!(execution_text.contains("exec /bin/zsh -l"));
+
+        let process_command = gpui_command_action_process_command(&execution_text);
+        assert!(process_command.starts_with("/bin/zsh -lic ' "));
+        assert!(process_command.contains("__ghostex_command_pane_action"));
+        assert!(!process_command.contains("\\r"));
+    }
+
+    #[test]
+    fn gpui_debug_command_action_initial_input_is_visible_atuin_ignored_command() {
+        let input = gpui_debug_command_action_initial_input("npm run build");
+        assert_eq!(input, " npm run build\r");
+        let already_ignored = gpui_debug_command_action_initial_input(" echo already");
+        assert_eq!(already_ignored, " echo already\r");
+    }
+
+    #[test]
+    fn gpui_sidebar_host_message_script_targets_typed_sidebar_callback() {
+        let message = serde_json::json!({
+            "commandId": "build",
+            "runId": "run-123",
+            "state": "running",
+            "type": "sidebarCommandRunStateChanged",
+        });
+        let script = gpui_sidebar_host_message_script(&message);
+        assert!(script.contains("window.ghostexGpui"));
+        assert!(script.contains("onSidebarHostMessage"));
+        assert!(script.contains("\"sidebarCommandRunStateChanged\""));
+        assert!(!script.contains("window.postMessage"));
+    }
+
+    #[test]
+    fn gpui_sidebar_command_pane_sessions_script_targets_typed_sidebar_callback() {
+        let sessions = serde_json::json!([
+            {
+                "commandId": "build",
+                "isActive": true,
+                "sessionId": "10",
+                "status": "running",
+                "title": "Build"
+            }
+        ]);
+        let script = gpui_sidebar_command_pane_sessions_script(&sessions);
+        assert!(script.contains("window.ghostexGpui"));
+        assert!(script.contains("commandPaneSessions"));
+        assert!(script.contains("onCommandPaneSessionsChanged"));
+        assert!(script.contains("\"sessionId\":\"10\""));
+        assert!(!script.contains("onSidebarHostMessage"));
+        assert!(!script.contains("window.postMessage"));
+    }
+
+    #[test]
+    fn command_action_completion_maps_exit_code_to_sidebar_state_and_sound() {
+        let success = CommandPaneActionRunCompletion {
+            command_id: "build".to_string(),
+            exit_code: 0,
+            play_completion_sound: true,
+            run_id: "run-success".to_string(),
+        };
+        assert_eq!(success.run_state(), GpuiSidebarCommandRunState::Success);
+        assert!(success.should_play_completion_sound());
+
+        let failure = CommandPaneActionRunCompletion {
+            command_id: "build".to_string(),
+            exit_code: 2,
+            play_completion_sound: false,
+            run_id: "run-failure".to_string(),
+        };
+        assert_eq!(failure.run_state(), GpuiSidebarCommandRunState::Error);
+        assert!(failure.should_play_completion_sound());
+    }
+
+    /*
+    CDXC:GPUICommandPane 2026-06-24-23:36:
+    Command Action reuse/status tests stay model-local. They may write a temporary synthetic status file to validate the parser, but they do not create GPUI windows, terminal surfaces, CEF entities, gxserver calls, app launches, app restarts, logs, or shell commands.
+    */
+    #[test]
+    fn command_pane_action_session_reuses_only_idle_matching_actions() {
+        let mut model = CommandPaneModel {
+            terminal_sessions: vec![
+                CommandTerminalSession::placeholder(CommandSessionId(10), "Build".to_string())
+                    .with_action_command_id("build".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(11), "Test".to_string())
+                    .with_activity(CommandTerminalActivity::Working)
+                    .with_action_command_id("test".to_string()),
+            ],
+            root: CommandPaneNode::Leaf(CommandPaneLeaf {
+                group_id: CommandPaneGroupId(7),
+                tab_group: CommandPaneTabGroup {
+                    tabs: vec![
+                        CommandPaneTab {
+                            session_id: CommandSessionId(10),
+                        },
+                        CommandPaneTab {
+                            session_id: CommandSessionId(11),
+                        },
+                    ],
+                    active_session: CommandSessionId(11),
+                },
+            }),
+            focused_group: CommandPaneGroupId(7),
+            mode: CommandPaneMode::Pinned,
+            last_expanded_mode: CommandPaneMode::Pinned,
+            height_ratio: command_pane_default_height_ratio(1_000.0),
+            resize_drag: None,
+            next_group_id: 8,
+            next_split_id: 1,
+            next_session_id: 12,
+        };
+
+        let reused =
+            model.select_or_create_action_session("build".to_string(), "Build".to_string());
+        assert_eq!(reused.kind, CommandPaneActionSessionSelectionKind::Reused);
+        assert_eq!(reused.session_id, CommandSessionId(10));
+        assert_eq!(
+            command_group_active_session_id(&model, CommandPaneGroupId(7)),
+            Some(10)
+        );
+
+        assert!(model.mark_action_session_run_started(
+            reused.session_id,
+            "build".to_string(),
+            "Build".to_string(),
+            "run-build".to_string(),
+            PathBuf::from("/tmp/ghostex-gpui-command-action-build.state"),
+            true,
+        ));
+        let created =
+            model.select_or_create_action_session("build".to_string(), "Build".to_string());
+        assert_eq!(created.kind, CommandPaneActionSessionSelectionKind::Created);
+        assert_eq!(created.session_id, CommandSessionId(12));
+        assert_eq!(
+            command_group_session_ids(&model, CommandPaneGroupId(7)),
+            vec![10, 11, 12]
+        );
+    }
+
+    #[test]
+    fn command_pane_action_session_reuses_idle_title_owned_restored_actions() {
+        let mut model = CommandPaneModel {
+            terminal_sessions: vec![
+                CommandTerminalSession::placeholder(CommandSessionId(20), "Build".to_string())
+                    .with_action_command_id("old-build".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(21), "Build".to_string())
+                    .with_activity(CommandTerminalActivity::Working)
+                    .with_action_command_id("build".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(22), "Deploy".to_string())
+                    .with_action_command_id("deploy".to_string()),
+            ],
+            root: CommandPaneNode::Leaf(CommandPaneLeaf {
+                group_id: CommandPaneGroupId(9),
+                tab_group: CommandPaneTabGroup {
+                    tabs: vec![
+                        CommandPaneTab {
+                            session_id: CommandSessionId(20),
+                        },
+                        CommandPaneTab {
+                            session_id: CommandSessionId(21),
+                        },
+                        CommandPaneTab {
+                            session_id: CommandSessionId(22),
+                        },
+                    ],
+                    active_session: CommandSessionId(22),
+                },
+            }),
+            focused_group: CommandPaneGroupId(9),
+            mode: CommandPaneMode::Pinned,
+            last_expanded_mode: CommandPaneMode::Pinned,
+            height_ratio: command_pane_default_height_ratio(1_000.0),
+            resize_drag: None,
+            next_group_id: 10,
+            next_split_id: 1,
+            next_session_id: 23,
+        };
+
+        let reused =
+            model.select_or_create_action_session("build".to_string(), "  BUILD  ".to_string());
+        assert_eq!(reused.kind, CommandPaneActionSessionSelectionKind::Reused);
+        assert_eq!(reused.session_id, CommandSessionId(20));
+        assert_eq!(
+            command_group_active_session_id(&model, CommandPaneGroupId(9)),
+            Some(20)
+        );
+
+        assert!(model.mark_action_session_run_started(
+            reused.session_id,
+            "build".to_string(),
+            "Build".to_string(),
+            "run-restored-title".to_string(),
+            PathBuf::from("/tmp/ghostex-gpui-command-action-restored-title.state"),
+            true,
+        ));
+        let claimed = model.session(CommandSessionId(20)).unwrap();
+        assert_eq!(claimed.action_command_id.as_deref(), Some("build"));
+        assert!(claimed.activity == CommandTerminalActivity::Working);
+
+        let created =
+            model.select_or_create_action_session("build".to_string(), "Build".to_string());
+        assert_eq!(created.kind, CommandPaneActionSessionSelectionKind::Created);
+        assert_eq!(created.session_id, CommandSessionId(23));
+        assert_eq!(
+            command_group_session_ids(&model, CommandPaneGroupId(9)),
+            vec![20, 21, 22, 23]
+        );
+    }
+
+    #[test]
+    fn command_pane_action_session_does_not_reuse_sleeping_actions() {
+        /*
+        CDXC:GPUICommandPaneActions 2026-06-25-16:22:
+        Action reuse tests must cover sleeping command tabs because native only reuses running idle command-pane terminals. A sleeping GPUI command tab has no mounted body, so selecting it for an Action run would mark a tab Working without any surface to execute the wrapper.
+        */
+        let mut model = CommandPaneModel {
+            terminal_sessions: vec![
+                CommandTerminalSession::placeholder(CommandSessionId(30), "Build".to_string())
+                    .with_action_command_id("build".to_string())
+                    .with_sleeping(true),
+                CommandTerminalSession::placeholder(CommandSessionId(31), "Build".to_string())
+                    .with_action_command_id("old-build".to_string())
+                    .with_sleeping(true),
+                CommandTerminalSession::placeholder(CommandSessionId(32), "Deploy".to_string())
+                    .with_action_command_id("deploy".to_string()),
+            ],
+            root: CommandPaneNode::Leaf(CommandPaneLeaf {
+                group_id: CommandPaneGroupId(11),
+                tab_group: CommandPaneTabGroup {
+                    tabs: vec![
+                        CommandPaneTab {
+                            session_id: CommandSessionId(30),
+                        },
+                        CommandPaneTab {
+                            session_id: CommandSessionId(31),
+                        },
+                        CommandPaneTab {
+                            session_id: CommandSessionId(32),
+                        },
+                    ],
+                    active_session: CommandSessionId(32),
+                },
+            }),
+            focused_group: CommandPaneGroupId(11),
+            mode: CommandPaneMode::Pinned,
+            last_expanded_mode: CommandPaneMode::Pinned,
+            height_ratio: command_pane_default_height_ratio(1_000.0),
+            resize_drag: None,
+            next_group_id: 12,
+            next_split_id: 1,
+            next_session_id: 33,
+        };
+
+        let created =
+            model.select_or_create_action_session("build".to_string(), "Build".to_string());
+        assert_eq!(created.kind, CommandPaneActionSessionSelectionKind::Created);
+        assert_eq!(created.session_id, CommandSessionId(33));
+        assert_eq!(
+            command_group_session_ids(&model, CommandPaneGroupId(11)),
+            vec![30, 31, 32, 33]
+        );
+        assert!(model.session(CommandSessionId(30)).unwrap().is_sleeping);
+        assert!(model.session(CommandSessionId(31)).unwrap().is_sleeping);
+        assert!(!model.session(CommandSessionId(33)).unwrap().is_sleeping);
+
+        assert!(model.mark_action_session_run_started(
+            CommandSessionId(31),
+            "build".to_string(),
+            "Build".to_string(),
+            "run-sleeping-defense".to_string(),
+            PathBuf::from("/tmp/ghostex-gpui-command-action-sleeping-defense.state"),
+            false,
+        ));
+        let awakened = model.session(CommandSessionId(31)).unwrap();
+        assert!(!awakened.is_sleeping);
+        assert!(awakened.activity == CommandTerminalActivity::Working);
+    }
+
+    #[test]
+    fn command_pane_sidebar_session_sources_are_sanitized_for_hud_indicators() {
+        let mut build = CommandTerminalSession::placeholder(
+            CommandSessionId(30),
+            "  Build\nAction  ".to_string(),
+        )
+        .with_activity(CommandTerminalActivity::Working)
+        .with_action_command_id("build".to_string());
+        build.action_run_id = Some("run-private".to_string());
+        build.action_status_file_path = Some(PathBuf::from(
+            "/Users/madda/private/ghostex-command-action.state",
+        ));
+        let close_after_done =
+            CommandTerminalSession::placeholder(CommandSessionId(31), "Deploy".to_string())
+                .with_activity(CommandTerminalActivity::Attention)
+                .with_close_after_done_armed(true);
+        let model = CommandPaneModel {
+            terminal_sessions: vec![
+                build,
+                close_after_done,
+                CommandTerminalSession::placeholder(CommandSessionId(32), "Idle".to_string())
+                    .with_sleeping(true),
+            ],
+            root: CommandPaneNode::Leaf(CommandPaneLeaf {
+                group_id: CommandPaneGroupId(12),
+                tab_group: CommandPaneTabGroup {
+                    tabs: vec![
+                        CommandPaneTab {
+                            session_id: CommandSessionId(30),
+                        },
+                        CommandPaneTab {
+                            session_id: CommandSessionId(31),
+                        },
+                        CommandPaneTab {
+                            session_id: CommandSessionId(32),
+                        },
+                    ],
+                    active_session: CommandSessionId(30),
+                },
+            }),
+            focused_group: CommandPaneGroupId(12),
+            mode: CommandPaneMode::Pinned,
+            last_expanded_mode: CommandPaneMode::Pinned,
+            height_ratio: command_pane_default_height_ratio(1_000.0),
+            resize_drag: None,
+            next_group_id: 13,
+            next_split_id: 1,
+            next_session_id: 33,
+        };
+
+        let now = UNIX_EPOCH;
+        let sources = model.sidebar_command_session_sources(
+            true,
+            &HashMap::from([(
+                CommandSessionId(30),
+                GpuiCommandDelayedSendTimer {
+                    deadline_at: now.checked_add(Duration::from_secs(125)).unwrap(),
+                    generation: 7,
+                },
+            )]),
+            &HashMap::from([(
+                CommandSessionId(31),
+                GpuiCommandCloseAfterDoneTimer {
+                    deadline_at: now.checked_add(Duration::from_secs(65)).unwrap(),
+                    generation: 8,
+                },
+            )]),
+            now,
+        );
+        let sessions = sources.as_array().expect("sources should be an array");
+        assert_eq!(sessions.len(), 3);
+        assert_eq!(sessions[0]["commandId"], "build");
+        assert_eq!(sessions[0]["isActive"], true);
+        assert_eq!(sessions[0]["sessionId"], "30");
+        assert_eq!(sessions[0]["status"], "running");
+        assert_eq!(sessions[0]["title"], "Build Action");
+        assert_eq!(sessions[0]["isSleeping"], false);
+        assert_eq!(
+            sessions[0]["delayedSendDeadlineAt"],
+            "1970-01-01T00:02:05.000Z"
+        );
+        assert_eq!(sessions[0]["delayedSendRemainingLabel"], "02:05");
+        assert_eq!(sessions[0]["delayedSendRemainingMs"], 125_000);
+        assert_eq!(sessions[1]["isActive"], false);
+        assert_eq!(sessions[1]["status"], "error");
+        assert_eq!(sessions[1]["closeAfterDone"], true);
+        assert_eq!(
+            sessions[1]["closeAfterDoneDeadlineAt"],
+            "1970-01-01T00:01:05.000Z"
+        );
+        assert_eq!(sessions[1]["closeAfterDoneRemainingLabel"], "01:05");
+        assert_eq!(sessions[1]["closeAfterDoneRemainingMs"], 65_000);
+        assert_eq!(sessions[2]["status"], "idle");
+        assert_eq!(sessions[2]["isSleeping"], true);
+
+        let text = sources.to_string();
+        assert!(!text.contains("run-private"));
+        assert!(!text.contains("status_file"));
+        assert!(!text.contains("ghostex-command-action"));
+        assert!(!text.contains("/Users/"));
+    }
+
+    #[test]
+    fn app_modal_command_session_indicators_match_command_id_then_title() {
+        let commands = serde_json::json!([
+            {
+                "actionType": "terminal",
+                "command": "npm run build",
+                "commandId": "build",
+                "name": "Build"
+            },
+            {
+                "actionType": "terminal",
+                "command": "12345678901234567890with-extra-command-text",
+                "commandId": "unnamed",
+                "name": ""
+            },
+            {
+                "actionType": "terminal",
+                "command": "npm run deploy",
+                "commandId": "deploy",
+                "name": "Deploy"
+            },
+            {
+                "actionType": "browser",
+                "commandId": "docs",
+                "name": "Docs",
+                "url": "https://example.invalid/docs"
+            }
+        ]);
+        let sessions = serde_json::json!([
+            {
+                "commandId": "old-build",
+                "delayedSendDeadlineAt": "2026-06-25T12:00:00.000Z",
+                "delayedSendRemainingLabel": "04:32",
+                "delayedSendRemainingMs": 272000,
+                "isActive": false,
+                "sessionId": "session-build",
+                "status": "idle",
+                "title": "  build  "
+            },
+            {
+                "commandId": "unnamed",
+                "isActive": true,
+                "sessionId": "session-unnamed",
+                "status": "running",
+                "title": "12345678901234567890"
+            },
+            {
+                "isActive": false,
+                "sessionId": "session-deploy-title-only",
+                "status": "idle",
+                "title": "Deploy"
+            },
+            {
+                "closeAfterDone": true,
+                "closeAfterDoneDeadlineAt": "2026-06-25T12:03:00.000Z",
+                "closeAfterDoneRemainingLabel": "03:00",
+                "closeAfterDoneRemainingMs": 180000,
+                "commandId": "deploy",
+                "isActive": false,
+                "sessionId": "session-deploy-exact",
+                "status": "error",
+                "title": "Deploy"
+            },
+            {
+                "commandId": "docs",
+                "isActive": true,
+                "sessionId": "session-docs",
+                "status": "running",
+                "title": "Docs"
+            }
+        ]);
+
+        assert_eq!(
+            gpui_sidebar_command_session_indicators_from_command_pane_sources(&commands, &sessions),
+            serde_json::json!([
+                {
+                    "commandId": "build",
+                    "delayedSendDeadlineAt": "2026-06-25T12:00:00.000Z",
+                    "delayedSendRemainingLabel": "04:32",
+                    "delayedSendRemainingMs": 272000,
+                    "isActive": false,
+                    "sessionId": "session-build",
+                    "status": "idle",
+                    "title": "build"
+                },
+                {
+                    "commandId": "unnamed",
+                    "isActive": true,
+                    "sessionId": "session-unnamed",
+                    "status": "running",
+                    "title": "12345678901234567890"
+                },
+                {
+                    "closeAfterDone": true,
+                    "closeAfterDoneDeadlineAt": "2026-06-25T12:03:00.000Z",
+                    "closeAfterDoneRemainingLabel": "03:00",
+                    "closeAfterDoneRemainingMs": 180000,
+                    "commandId": "deploy",
+                    "isActive": false,
+                    "sessionId": "session-deploy-exact",
+                    "status": "error",
+                    "title": "Deploy"
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn command_pane_action_session_slot_for_command_run_end_prefers_selected_then_active_run() {
+        let mut model = CommandPaneModel {
+            terminal_sessions: vec![
+                CommandTerminalSession::placeholder(CommandSessionId(10), "Build".to_string())
+                    .with_action_command_id("build".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(11), "Build".to_string())
+                    .with_action_command_id("build".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(12), "Shell".to_string()),
+            ],
+            root: CommandPaneNode::Leaf(CommandPaneLeaf {
+                group_id: CommandPaneGroupId(7),
+                tab_group: CommandPaneTabGroup {
+                    tabs: vec![
+                        CommandPaneTab {
+                            session_id: CommandSessionId(10),
+                        },
+                        CommandPaneTab {
+                            session_id: CommandSessionId(11),
+                        },
+                        CommandPaneTab {
+                            session_id: CommandSessionId(12),
+                        },
+                    ],
+                    active_session: CommandSessionId(10),
+                },
+            }),
+            focused_group: CommandPaneGroupId(7),
+            mode: CommandPaneMode::Pinned,
+            last_expanded_mode: CommandPaneMode::Pinned,
+            height_ratio: command_pane_default_height_ratio(1_000.0),
+            resize_drag: None,
+            next_group_id: 8,
+            next_split_id: 1,
+            next_session_id: 13,
+        };
+
+        assert!(model.mark_action_session_run_started(
+            CommandSessionId(11),
+            "build".to_string(),
+            "Build".to_string(),
+            "run-active".to_string(),
+            PathBuf::from("/tmp/ghostex-gpui-command-action-build.state"),
+            true,
+        ));
+        assert_eq!(
+            model.action_session_slot_for_command_id("build"),
+            Some((CommandPaneGroupId(7), CommandSessionId(10)))
+        );
+
+        model
+            .find_leaf_mut(CommandPaneGroupId(7))
+            .expect("test command leaf should exist")
+            .tab_group
+            .active_session = CommandSessionId(12);
+        assert_eq!(
+            model.action_session_slot_for_command_id("build"),
+            Some((CommandPaneGroupId(7), CommandSessionId(11)))
+        );
+        assert!(model.clear_action_run_for_session(CommandSessionId(11)));
+        let cleared = model.session(CommandSessionId(11)).unwrap();
+        assert_eq!(
+            cleared.action_command_id.as_deref(),
+            Some("build"),
+            "command id mapping should survive run metadata cleanup"
+        );
+        assert!(cleared.action_run_id.is_none());
+        assert!(cleared.action_status_file_path.is_none());
+        assert!(cleared.activity == CommandTerminalActivity::Idle);
+        assert_eq!(
+            model.action_session_slot_for_command_id("build"),
+            Some((CommandPaneGroupId(7), CommandSessionId(10)))
+        );
+    }
+
+    #[test]
+    fn command_action_status_file_refresh_marks_idle_without_persisting_private_fields() {
+        let mut model =
+            single_tab_command_model(CommandPaneGroupId(3), CommandSessionId(44), "Build");
+        let status_path = std::env::temp_dir().join(format!(
+            "ghostex-gpui-command-action-status-{}-{}.state",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        assert!(model.mark_action_session_run_started(
+            CommandSessionId(44),
+            "build".to_string(),
+            "Build".to_string(),
+            "run-private".to_string(),
+            status_path.clone(),
+            false,
+        ));
+        fs::write(
+            &status_path,
+            [
+                "status=idle",
+                "statusUpdatedAt=2026-06-24T19:17:00Z",
+                "commandRunId=run-private",
+                "commandExitCode=0",
+                "lastActivityAt=2026-06-24T19:17:00Z",
+                "privateCommand=npm run build --token SECRET",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let refresh = model.refresh_action_run_states_from_status_files();
+        assert!(refresh.changed);
+        assert_eq!(
+            refresh.completions,
+            vec![CommandPaneActionRunCompletion {
+                command_id: "build".to_string(),
+                exit_code: 0,
+                play_completion_sound: false,
+                run_id: "run-private".to_string(),
+            }]
+        );
+        let session = model.session(CommandSessionId(44)).unwrap();
+        assert!(session.activity == CommandTerminalActivity::Idle);
+        assert!(session.action_run_id.is_none());
+        assert!(session.action_status_file_path.is_none());
+
+        let persisted = shell_state_text(&command_pane_model_to_shell_state_json(&model));
+        let status_path_text = status_path.to_string_lossy().to_string();
+        assert_text_omits(
+            &persisted,
+            &[
+                "build",
+                "run-private",
+                status_path_text.as_str(),
+                "privateCommand",
+                "SECRET",
+                "commandRunId",
+                "playCompletionSound",
+            ],
+        );
+        let _ = fs::remove_file(status_path);
+    }
+
+    #[test]
+    fn gpui_titlebar_tips_browser_url_guard_allows_only_first_party_links() {
+        /*
+        CDXC:GPUTitlebarTips 2026-06-24-23:17:
+        Source-level coverage pins the GPUI info dropdown bridge to the two first-party links used by the macOS Tips panel. The gpui-component Popover may host the shared titlebar-host panel, but renderer messages must not open arbitrary URLs, native menus, AppKit/Swift dropdowns, external browser routes, or fake fallback targets.
+        */
+        assert_eq!(GHOSTEX_DOCS_URL, "https://ghostex.dev/docs");
+        assert_eq!(
+            GHOSTEX_CHANGELOG_URL,
+            "https://github.com/maddada/ghostex/releases"
+        );
+        assert!(gpui_titlebar_tips_browser_url_allowed(GHOSTEX_DOCS_URL));
+        assert!(gpui_titlebar_tips_browser_url_allowed(
+            GHOSTEX_CHANGELOG_URL
+        ));
+        assert!(!gpui_titlebar_tips_browser_url_allowed(
+            "https://example.com/docs"
+        ));
+        assert!(!gpui_titlebar_tips_browser_url_allowed(
+            "https://ghostex.dev/docs?redirect=https://example.com"
+        ));
     }
 
     #[test]
@@ -60334,6 +68113,7 @@ mod tests {
             ],
             root: CommandPaneNode::Split(CommandPaneSplit {
                 id: CommandPaneSplitId(4),
+                axis: WorkspaceSplitAxis::Horizontal,
                 ratio: 0.64,
                 first: Box::new(CommandPaneNode::Leaf(CommandPaneLeaf {
                     group_id: CommandPaneGroupId(7),
@@ -61187,6 +68967,10 @@ mod tests {
 
     #[test]
     fn command_terminal_tab_status_prioritizes_delayed_send_and_maps_command_colors() {
+        /*
+        CDXC:GPUICommandTabStatus 2026-06-25-13:18:
+        Command-tab status coverage follows native command chrome: idle keeps semantic state without a visible indicator, working/attention reserve and draw an 8px trailing square when not hovered, Delayed Send reserves the same slot but draws a 14px clock, and all visible status chrome hides while hover close chrome owns the trailing edge.
+        */
         assert!(
             command_terminal_tab_status(CommandTerminalActivity::Idle, false)
                 == CommandTerminalTabStatus::Idle
@@ -61218,7 +69002,7 @@ mod tests {
         );
         assert_eq!(
             command_terminal_tab_status_color(CommandTerminalTabStatus::Working),
-            0xff9f43
+            0xf59e0b
         );
         assert_eq!(
             command_terminal_tab_status_color(CommandTerminalTabStatus::Attention),
@@ -61226,18 +69010,58 @@ mod tests {
         );
         assert_eq!(
             command_terminal_tab_status_color(CommandTerminalTabStatus::DelayedSend),
-            0xffcf5a
+            0xf59e0b
         );
-        assert!(command_terminal_tab_status_inactive_opacity(CommandTerminalTabStatus::Idle) < 1.0);
+        assert!(!command_terminal_tab_status_has_indicator(
+            CommandTerminalTabStatus::Idle
+        ));
+        assert!(command_terminal_tab_status_has_indicator(
+            CommandTerminalTabStatus::Working
+        ));
+        assert!(command_terminal_tab_status_has_indicator(
+            CommandTerminalTabStatus::Attention
+        ));
+        assert!(command_terminal_tab_status_has_indicator(
+            CommandTerminalTabStatus::DelayedSend
+        ));
+        assert!(!command_terminal_tab_status_indicator_visible(
+            CommandTerminalTabStatus::Idle,
+            false
+        ));
+        assert!(command_terminal_tab_status_indicator_visible(
+            CommandTerminalTabStatus::Working,
+            false
+        ));
+        assert!(!command_terminal_tab_status_indicator_visible(
+            CommandTerminalTabStatus::Working,
+            true
+        ));
+        assert_eq!(
+            command_terminal_tab_status_title_trailing_reserved_width(
+                CommandTerminalTabStatus::Idle
+            ),
+            COMMAND_PANE_TAB_TITLE_TRAILING_PADDING
+        );
+        assert_eq!(
+            command_terminal_tab_status_title_trailing_reserved_width(
+                CommandTerminalTabStatus::Working
+            ),
+            COMMAND_PANE_TAB_STATUS_TITLE_RESERVED_WIDTH
+        );
+        assert_eq!(COMMAND_PANE_TAB_STATUS_INDICATOR_SIZE, 8.0);
+        assert_eq!(COMMAND_PANE_TAB_STATUS_INDICATOR_TRAILING_PADDING, 9.0);
+        assert_eq!(COMMAND_PANE_TAB_STATUS_TITLE_GAP, 4.0);
+        assert_eq!(COMMAND_PANE_TAB_DELAYED_SEND_ICON_SIZE, 14.0);
         assert!(
-            command_terminal_tab_status_inactive_opacity(CommandTerminalTabStatus::Working) < 1.0
+            command_terminal_tab_status_indicator_opacity(CommandTerminalTabStatus::Working) == 1.0
         );
         assert!(
-            command_terminal_tab_status_inactive_opacity(CommandTerminalTabStatus::Attention) < 1.0
+            command_terminal_tab_status_indicator_opacity(CommandTerminalTabStatus::Attention)
+                == 1.0
         );
         assert!(
-            command_terminal_tab_status_inactive_opacity(CommandTerminalTabStatus::DelayedSend)
-                < 1.0
+            command_terminal_tab_status_indicator_opacity(CommandTerminalTabStatus::DelayedSend)
+                == 0.96
         );
     }
 
@@ -61274,6 +69098,7 @@ mod tests {
             ],
             root: CommandPaneNode::Split(CommandPaneSplit {
                 id: CommandPaneSplitId(1),
+                axis: WorkspaceSplitAxis::Horizontal,
                 ratio: 0.5,
                 first: Box::new(CommandPaneNode::Leaf(CommandPaneLeaf {
                     group_id: CommandPaneGroupId(1),
@@ -61972,6 +69797,7 @@ mod tests {
             ],
             root: CommandPaneNode::Split(CommandPaneSplit {
                 id: CommandPaneSplitId(1),
+                axis: WorkspaceSplitAxis::Horizontal,
                 ratio: 0.5,
                 first: Box::new(CommandPaneNode::Leaf(CommandPaneLeaf {
                     group_id: CommandPaneGroupId(1),
@@ -68131,6 +75957,7 @@ mod tests {
             ],
             root: CommandPaneNode::Split(CommandPaneSplit {
                 id: CommandPaneSplitId(1),
+                axis: WorkspaceSplitAxis::Horizontal,
                 ratio: 0.5,
                 first: Box::new(CommandPaneNode::Leaf(CommandPaneLeaf {
                     group_id: CommandPaneGroupId(1),
@@ -68712,6 +76539,7 @@ mod tests {
             ],
             root: CommandPaneNode::Split(CommandPaneSplit {
                 id: CommandPaneSplitId(1),
+                axis: WorkspaceSplitAxis::Horizontal,
                 ratio: 0.5,
                 first: Box::new(CommandPaneNode::Leaf(CommandPaneLeaf {
                     group_id: CommandPaneGroupId(10),
@@ -69164,6 +76992,7 @@ mod tests {
             ],
             root: CommandPaneNode::Split(CommandPaneSplit {
                 id: CommandPaneSplitId(1),
+                axis: WorkspaceSplitAxis::Horizontal,
                 ratio: 0.5,
                 first: Box::new(CommandPaneNode::Leaf(CommandPaneLeaf {
                     group_id: CommandPaneGroupId(10),
@@ -69759,11 +77588,11 @@ mod tests {
         let agents_surface_owners = HashMap::from([(agents_slot_id, agents_surface)]);
         startup_fake_ghostty_state().lock().unwrap().process_exited = true;
 
-        assert!(consume_exited_command_terminal_ghostty_surfaces(
-            &mut command,
-            &command_surface_owners,
-        ));
+        let cleanup =
+            consume_exited_command_terminal_ghostty_surfaces(&mut command, &command_surface_owners);
 
+        assert!(cleanup.changed);
+        assert!(cleanup.completions.is_empty());
         assert!(command.session(CommandSessionId(101)).is_none());
         assert!(command.session(right_session_id).is_some());
         assert_eq!(
@@ -69791,6 +77620,192 @@ mod tests {
             startup_fake_ghostty_call_count("ghostty_surface_request_close"),
             0
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn command_exited_action_surface_posts_status_file_completion_before_cleanup() {
+        let _guard = startup_fake_ghostty_test_lock();
+        reset_startup_fake_ghostty_state();
+        let mut command =
+            single_tab_command_model(CommandPaneGroupId(20), CommandSessionId(201), "Build");
+        let slot_id = CommandTerminalBodyMountSlotId {
+            group_id: CommandPaneGroupId(20),
+            session_id: CommandSessionId(201),
+        };
+        let status_path = std::env::temp_dir().join(format!(
+            "ghostex-gpui-command-action-exit-idle-{}-{}.state",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        assert!(command.mark_action_session_run_started(
+            CommandSessionId(201),
+            "build".to_string(),
+            "Build".to_string(),
+            "run-exit-idle".to_string(),
+            status_path.clone(),
+            true,
+        ));
+        fs::write(
+            &status_path,
+            [
+                "status=idle",
+                "statusUpdatedAt=2026-06-25T07:11:00Z",
+                "commandRunId=run-exit-idle",
+                "commandExitCode=7",
+                "privateCommand=npm run build --token SECRET_PROCESS_EXIT",
+                "privatePath=/Users/madda/private/process-exit",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let ghostty_app = startup_fake_ghostty_app_owner().unwrap();
+        let surface = terminal_ghostty_surface::GhosttySurfaceOwner::new(
+            &ghostty_app,
+            slot_id,
+            command_terminal_runtime_session_id(slot_id),
+            &startup_surface_config_request_for_test(2.0),
+        )
+        .unwrap();
+        let command_surface_owners = HashMap::from([(slot_id, surface)]);
+        startup_fake_ghostty_state().lock().unwrap().process_exited = true;
+
+        let cleanup =
+            consume_exited_command_terminal_ghostty_surfaces(&mut command, &command_surface_owners);
+
+        assert!(cleanup.changed);
+        assert_eq!(
+            cleanup.completions,
+            vec![CommandPaneActionRunCompletion {
+                command_id: "build".to_string(),
+                exit_code: 7,
+                play_completion_sound: true,
+                run_id: "run-exit-idle".to_string(),
+            }]
+        );
+        assert_eq!(
+            cleanup.completions[0].run_state(),
+            GpuiSidebarCommandRunState::Error
+        );
+        assert!(cleanup.completions[0].should_play_completion_sound());
+        assert!(command.session(CommandSessionId(201)).is_none());
+        let cleanup_debug = format!("{cleanup:?}");
+        let status_path_text = status_path.to_string_lossy().to_string();
+        assert_text_omits(
+            &cleanup_debug,
+            &[
+                status_path_text.as_str(),
+                "privateCommand",
+                "SECRET_PROCESS_EXIT",
+                "/Users/madda/private/process-exit",
+            ],
+        );
+        assert_eq!(
+            startup_fake_ghostty_call_count("ghostty_surface_process_exited"),
+            1
+        );
+        assert_eq!(
+            startup_fake_ghostty_call_count("ghostty_surface_request_close"),
+            0
+        );
+        let _ = fs::remove_file(status_path);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn command_exited_action_surface_without_idle_status_reports_error_completion() {
+        let _guard = startup_fake_ghostty_test_lock();
+        reset_startup_fake_ghostty_state();
+        let mut command =
+            single_tab_command_model(CommandPaneGroupId(21), CommandSessionId(211), "Build");
+        let slot_id = CommandTerminalBodyMountSlotId {
+            group_id: CommandPaneGroupId(21),
+            session_id: CommandSessionId(211),
+        };
+        let status_path = std::env::temp_dir().join(format!(
+            "ghostex-gpui-command-action-exit-working-{}-{}.state",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        assert!(command.mark_action_session_run_started(
+            CommandSessionId(211),
+            "build".to_string(),
+            "Build".to_string(),
+            "run-exit-working".to_string(),
+            status_path.clone(),
+            false,
+        ));
+        fs::write(
+            &status_path,
+            [
+                "status=working",
+                "statusUpdatedAt=2026-06-25T07:11:00Z",
+                "commandRunId=run-exit-working",
+                "commandExitCode=0",
+                "privateCommand=npm test --token SECRET_WORKING_STATUS",
+                "privatePath=/Users/madda/private/working-status",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let ghostty_app = startup_fake_ghostty_app_owner().unwrap();
+        let surface = terminal_ghostty_surface::GhosttySurfaceOwner::new(
+            &ghostty_app,
+            slot_id,
+            command_terminal_runtime_session_id(slot_id),
+            &startup_surface_config_request_for_test(2.0),
+        )
+        .unwrap();
+        let command_surface_owners = HashMap::from([(slot_id, surface)]);
+        startup_fake_ghostty_state().lock().unwrap().process_exited = true;
+
+        let cleanup =
+            consume_exited_command_terminal_ghostty_surfaces(&mut command, &command_surface_owners);
+
+        assert!(cleanup.changed);
+        assert_eq!(
+            cleanup.completions,
+            vec![CommandPaneActionRunCompletion {
+                command_id: "build".to_string(),
+                exit_code: 1,
+                play_completion_sound: false,
+                run_id: "run-exit-working".to_string(),
+            }]
+        );
+        assert_eq!(
+            cleanup.completions[0].run_state(),
+            GpuiSidebarCommandRunState::Error
+        );
+        assert!(cleanup.completions[0].should_play_completion_sound());
+        assert!(command.session(CommandSessionId(211)).is_none());
+        let cleanup_debug = format!("{cleanup:?}");
+        let status_path_text = status_path.to_string_lossy().to_string();
+        assert_text_omits(
+            &cleanup_debug,
+            &[
+                status_path_text.as_str(),
+                "privateCommand",
+                "SECRET_WORKING_STATUS",
+                "/Users/madda/private/working-status",
+            ],
+        );
+        assert_eq!(
+            startup_fake_ghostty_call_count("ghostty_surface_process_exited"),
+            1
+        );
+        assert_eq!(
+            startup_fake_ghostty_call_count("ghostty_surface_request_close"),
+            0
+        );
+        let _ = fs::remove_file(status_path);
     }
 
     #[cfg(target_os = "macos")]
@@ -69867,11 +77882,11 @@ mod tests {
         ]);
         startup_fake_ghostty_state().lock().unwrap().process_exited = true;
 
-        assert!(!consume_exited_command_terminal_ghostty_surfaces(
-            &mut command,
-            &command_surface_owners,
-        ));
+        let cleanup =
+            consume_exited_command_terminal_ghostty_surfaces(&mut command, &command_surface_owners);
 
+        assert!(!cleanup.changed);
+        assert!(cleanup.completions.is_empty());
         assert!(command.session(CommandSessionId(101)).is_some());
         assert!(command.session(CommandSessionId(102)).is_some());
         assert_eq!(command_mount_slot_tuples(&command), vec![(10, 101)]);
@@ -73178,6 +81193,340 @@ mod tests {
     }
 
     #[test]
+    fn command_pane_default_starts_empty_and_first_open_creates_command_terminal() {
+        let mut model = CommandPaneModel::shell_default_with_default_height_px(1_000.0, 240.0);
+
+        assert!(!model.has_sessions());
+        assert!(!model.is_expanded());
+        assert_eq!(model.focused_group.0, 0);
+        assert_eq!(model.next_group_id, 1);
+        assert_eq!(model.next_session_id, 1);
+        assert_f32_close(model.height_ratio, 0.24);
+        assert!(matches!(
+            &model.root,
+            CommandPaneNode::Leaf(leaf)
+                if leaf.group_id.0 == 0 && leaf.tab_group.tabs.is_empty()
+        ));
+
+        let opened = model.ensure_session_for_open();
+        assert_eq!(
+            opened,
+            Some((CommandPaneGroupId(1), CommandSessionId(1), true))
+        );
+        assert!(model.has_sessions());
+        assert!(model.is_expanded());
+        assert_eq!(model.focused_group.0, 1);
+        assert_eq!(
+            model
+                .session(CommandSessionId(1))
+                .map(|session| session.title.as_str()),
+            Some(COMMAND_PANE_DEFAULT_SESSION_TITLE)
+        );
+        assert_eq!(
+            command_group_session_ids(&model, CommandPaneGroupId(1)),
+            vec![1]
+        );
+
+        let reopened = model.ensure_session_for_open();
+        assert_eq!(
+            reopened,
+            Some((CommandPaneGroupId(1), CommandSessionId(1), false))
+        );
+        assert_eq!(model.terminal_sessions.len(), 1);
+
+        let (split_group, split_session) = model.split_session_to_right_of_focused_group().unwrap();
+        assert_eq!(split_group.0, 2);
+        assert_eq!(split_session.0, 2);
+        assert_eq!(
+            model
+                .session(split_session)
+                .map(|session| session.title.as_str()),
+            Some(COMMAND_PANE_DEFAULT_SESSION_TITLE)
+        );
+        assert_eq!(
+            command_session_title_for_id(CommandSessionId(99)),
+            COMMAND_PANE_DEFAULT_SESSION_TITLE
+        );
+    }
+
+    #[test]
+    fn command_pane_focused_split_hotkeys_keep_native_horizontal_geometry() {
+        /*
+        CDXC:GPUIFocusedSplits 2026-06-25-16:05:
+        Focused command-pane split coverage must prove Cmd+D/Cmd+Shift+D match native horizontal-only command split placement. Test the model helper directly so the assertion stays independent of GPUI window input while still covering the persisted split axis contract.
+
+        CDXC:GPUICommandPaneSplits 2026-06-25-16:14:
+        Repeated untouched command splits should keep native's same-direction geometry: native flattens horizontal command split children and defaults them to equal widths, while GPUI emulates that with binary split ratios derived from visible command group counts.
+        */
+        let mut right = CommandPaneModel::shell_default(1_000.0);
+        assert_eq!(
+            right.split_session_adjacent_to_focused_group(FocusedTerminalSplitDirection::Right),
+            Some((CommandPaneGroupId(2), CommandSessionId(3)))
+        );
+        assert!(matches!(
+            right.split_axis(CommandPaneSplitId(1)),
+            Some(WorkspaceSplitAxis::Horizontal)
+        ));
+        assert_eq!(command_group_order_ids(&right), vec![1, 2]);
+        assert_eq!(
+            right.split_session_adjacent_to_focused_group(FocusedTerminalSplitDirection::Right),
+            Some((CommandPaneGroupId(3), CommandSessionId(4)))
+        );
+        assert_eq!(command_group_order_ids(&right), vec![1, 2, 3]);
+        assert_f32_close(right.split_ratio(CommandPaneSplitId(1)).unwrap(), 1.0 / 3.0);
+        assert_f32_close(right.split_ratio(CommandPaneSplitId(2)).unwrap(), 0.5);
+        let right_state = command_pane_model_to_shell_state_json(&right);
+        assert_eq!(right_state["root"]["axis"], serde_json::json!("horizontal"));
+        let restored_right = command_pane_model_from_shell_state(&right_state, 1_000.0).unwrap();
+        assert!(matches!(
+            restored_right.split_axis(CommandPaneSplitId(1)),
+            Some(WorkspaceSplitAxis::Horizontal)
+        ));
+        assert_f32_close(
+            restored_right.split_ratio(CommandPaneSplitId(1)).unwrap(),
+            1.0 / 3.0,
+        );
+
+        let mut down = CommandPaneModel::shell_default(1_000.0);
+        assert_eq!(
+            down.split_session_adjacent_to_focused_group(FocusedTerminalSplitDirection::Down),
+            Some((CommandPaneGroupId(2), CommandSessionId(3)))
+        );
+        assert!(matches!(
+            down.split_axis(CommandPaneSplitId(1)),
+            Some(WorkspaceSplitAxis::Horizontal)
+        ));
+        assert_eq!(command_group_order_ids(&down), vec![1, 2]);
+        let down_state = command_pane_model_to_shell_state_json(&down);
+        assert_eq!(down_state["root"]["axis"], serde_json::json!("horizontal"));
+        let restored_down = command_pane_model_from_shell_state(&down_state, 1_000.0).unwrap();
+        assert!(matches!(
+            restored_down.split_axis(CommandPaneSplitId(1)),
+            Some(WorkspaceSplitAxis::Horizontal)
+        ));
+
+        let mut restored_vertical_state = down_state.clone();
+        restored_vertical_state["root"]["axis"] = serde_json::json!("vertical");
+        let restored_vertical =
+            command_pane_model_from_shell_state(&restored_vertical_state, 1_000.0).unwrap();
+        assert!(matches!(
+            restored_vertical.split_axis(CommandPaneSplitId(1)),
+            Some(WorkspaceSplitAxis::Vertical)
+        ));
+
+        let mut legacy_state = down_state;
+        legacy_state["root"]
+            .as_object_mut()
+            .expect("command root split should be an object")
+            .remove("axis");
+        let restored_legacy = command_pane_model_from_shell_state(&legacy_state, 1_000.0).unwrap();
+        assert!(matches!(
+            restored_legacy.split_axis(CommandPaneSplitId(1)),
+            Some(WorkspaceSplitAxis::Horizontal)
+        ));
+    }
+
+    #[test]
+    fn command_pane_repeated_split_insertion_preserves_explicit_user_ratio() {
+        /*
+        CDXC:GPUICommandPaneSplits 2026-06-25-16:14:
+        Once the user has resized a command split, later same-axis command insertion must preserve that explicit ratio. This mirrors native's paneLayout ratio field instead of equalizing user-sized command panes back to default widths.
+        */
+        let mut hotkey_model = CommandPaneModel::shell_default(1_000.0);
+        assert_eq!(
+            hotkey_model
+                .split_session_adjacent_to_focused_group(FocusedTerminalSplitDirection::Right),
+            Some((CommandPaneGroupId(2), CommandSessionId(3)))
+        );
+        assert!(hotkey_model.set_split_ratio(CommandPaneSplitId(1), 0.6));
+        assert_eq!(
+            hotkey_model
+                .split_session_adjacent_to_focused_group(FocusedTerminalSplitDirection::Right),
+            Some((CommandPaneGroupId(3), CommandSessionId(4)))
+        );
+        assert_eq!(command_group_order_ids(&hotkey_model), vec![1, 2, 3]);
+        assert_f32_close(
+            hotkey_model.split_ratio(CommandPaneSplitId(1)).unwrap(),
+            0.6,
+        );
+        assert_f32_close(
+            hotkey_model.split_ratio(CommandPaneSplitId(2)).unwrap(),
+            0.5,
+        );
+
+        let mut first_child_hotkey_model = CommandPaneModel::shell_default(1_000.0);
+        assert_eq!(
+            first_child_hotkey_model
+                .split_session_adjacent_to_focused_group(FocusedTerminalSplitDirection::Right),
+            Some((CommandPaneGroupId(2), CommandSessionId(3)))
+        );
+        assert!(first_child_hotkey_model.set_split_ratio(CommandPaneSplitId(1), 0.6));
+        first_child_hotkey_model.focused_group = CommandPaneGroupId(1);
+        assert_eq!(
+            first_child_hotkey_model
+                .split_session_adjacent_to_focused_group(FocusedTerminalSplitDirection::Right),
+            Some((CommandPaneGroupId(3), CommandSessionId(4)))
+        );
+        assert_eq!(
+            command_group_order_ids(&first_child_hotkey_model),
+            vec![1, 3, 2]
+        );
+        assert_f32_close(
+            first_child_hotkey_model
+                .split_ratio(CommandPaneSplitId(1))
+                .unwrap(),
+            0.6,
+        );
+        assert_f32_close(
+            first_child_hotkey_model
+                .split_ratio(CommandPaneSplitId(2))
+                .unwrap(),
+            0.5,
+        );
+
+        let mut drop_model = CommandPaneModel::shell_default(1_000.0);
+        assert_eq!(
+            drop_model.add_placeholder_session_from_workspace_title(
+                CommandPaneGroupId(1),
+                "Dropped One".to_string(),
+                WorkspaceDropZone::Right,
+            ),
+            Some((CommandPaneGroupId(2), CommandSessionId(3)))
+        );
+        assert_eq!(
+            drop_model.add_placeholder_session_from_workspace_title(
+                CommandPaneGroupId(2),
+                "Dropped Two".to_string(),
+                WorkspaceDropZone::Right,
+            ),
+            Some((CommandPaneGroupId(3), CommandSessionId(4)))
+        );
+        assert_eq!(command_group_order_ids(&drop_model), vec![1, 2, 3]);
+        assert_f32_close(
+            drop_model.split_ratio(CommandPaneSplitId(1)).unwrap(),
+            1.0 / 3.0,
+        );
+        assert_f32_close(drop_model.split_ratio(CommandPaneSplitId(2)).unwrap(), 0.5);
+
+        let mut left_drop_model = CommandPaneModel::shell_default(1_000.0);
+        assert_eq!(
+            left_drop_model.add_placeholder_session_from_workspace_title(
+                CommandPaneGroupId(1),
+                "Right Side".to_string(),
+                WorkspaceDropZone::Right,
+            ),
+            Some((CommandPaneGroupId(2), CommandSessionId(3)))
+        );
+        assert!(left_drop_model.set_split_ratio(CommandPaneSplitId(1), 0.6));
+        assert_eq!(
+            left_drop_model.add_placeholder_session_from_workspace_title(
+                CommandPaneGroupId(1),
+                "Left Side".to_string(),
+                WorkspaceDropZone::Left,
+            ),
+            Some((CommandPaneGroupId(3), CommandSessionId(4)))
+        );
+        assert_eq!(command_group_order_ids(&left_drop_model), vec![3, 1, 2]);
+        assert_f32_close(
+            left_drop_model.split_ratio(CommandPaneSplitId(1)).unwrap(),
+            0.6,
+        );
+        assert_f32_close(
+            left_drop_model.split_ratio(CommandPaneSplitId(2)).unwrap(),
+            0.5,
+        );
+    }
+
+    #[test]
+    fn command_pane_hidden_open_resets_default_height_while_visible_open_preserves_resize() {
+        let mut model = CommandPaneModel::shell_default_with_default_height_px(1_000.0, 125.0);
+        model.height_ratio = 0.42;
+
+        assert_eq!(
+            model.open_with_default_height_px(1_000.0, 300.0),
+            Some((CommandPaneGroupId(1), CommandSessionId(1), true))
+        );
+        assert_f32_close(model.height_ratio, 0.3);
+
+        model.height_ratio = 0.44;
+        assert_eq!(
+            model.open_with_default_height_px(1_000.0, 500.0),
+            Some((CommandPaneGroupId(1), CommandSessionId(1), false))
+        );
+        assert_f32_close(model.height_ratio, 0.44);
+        assert_eq!(model.terminal_sessions.len(), 1);
+
+        model.collapse();
+        model.height_ratio = 0.55;
+        assert!(model.prepare_hidden_open_with_default_height_px(1_000.0, 250.0));
+        let selection =
+            model.select_or_create_action_session("build".to_string(), "Build".to_string());
+        assert_eq!(selection.group_id, CommandPaneGroupId(1));
+        assert_eq!(selection.session_id, CommandSessionId(2));
+        assert_f32_close(model.height_ratio, 0.25);
+        assert_eq!(
+            model
+                .session(CommandSessionId(2))
+                .map(|session| session.title.as_str()),
+            Some("Build")
+        );
+
+        model.height_ratio = 0.66;
+        assert!(!model.prepare_hidden_open_with_default_height_px(1_000.0, 400.0));
+        assert_f32_close(model.height_ratio, 0.66);
+
+        let mut empty_action_model =
+            CommandPaneModel::shell_default_with_default_height_px(1_000.0, 125.0);
+        empty_action_model.height_ratio = 0.5;
+        assert!(empty_action_model.prepare_hidden_open_with_default_height_px(1_000.0, 200.0));
+        let empty_action_selection = empty_action_model
+            .select_or_create_action_session("test".to_string(), "Test".to_string());
+        assert_eq!(empty_action_selection.group_id, CommandPaneGroupId(1));
+        assert_eq!(empty_action_selection.session_id, CommandSessionId(1));
+        assert_eq!(empty_action_model.focused_group, CommandPaneGroupId(1));
+        assert_f32_close(empty_action_model.height_ratio, 0.2);
+    }
+
+    #[test]
+    fn command_pane_collapsed_tab_selection_uses_hidden_open_height_rule() {
+        /*
+        CDXC:GPUICommandPane 2026-06-25-12:10:
+        Collapsed command-strip tab selection is an open-command-panel action, not only a tab-focus mutation. It must reset height from the current Workspace default while hidden and preserve the live resize after the pane is visible.
+        */
+        let mut model = CommandPaneModel::shell_default(1_000.0);
+        model.last_expanded_mode = CommandPaneMode::Floating;
+        model.mode = CommandPaneMode::Collapsed;
+        model.height_ratio = 0.72;
+
+        assert!(model.select_session_in_group_for_hidden_open(
+            CommandPaneGroupId(1),
+            CommandSessionId(2),
+            1_000.0,
+            220.0,
+        ));
+        assert!(matches!(model.mode, CommandPaneMode::Floating));
+        assert_f32_close(model.height_ratio, 0.22);
+        assert_eq!(
+            command_group_active_session_id(&model, CommandPaneGroupId(1)),
+            Some(2)
+        );
+
+        model.height_ratio = 0.41;
+        assert!(model.select_session_in_group_for_hidden_open(
+            CommandPaneGroupId(1),
+            CommandSessionId(1),
+            1_000.0,
+            300.0,
+        ));
+        assert!(matches!(model.mode, CommandPaneMode::Floating));
+        assert_f32_close(model.height_ratio, 0.41);
+        assert_eq!(
+            command_group_active_session_id(&model, CommandPaneGroupId(1)),
+            Some(1)
+        );
+    }
+
+    #[test]
     fn command_close_selects_neighbors_collapses_empty_branch_and_final_panel() {
         let mut model = CommandPaneModel::shell_default(1_000.0);
 
@@ -73220,6 +81569,921 @@ mod tests {
             CommandPaneNode::Leaf(leaf)
                 if leaf.group_id.0 == 0 && leaf.tab_group.tabs.is_empty()
         ));
+    }
+
+    #[test]
+    fn command_tab_close_scopes_stay_inside_clicked_command_group() {
+        let model = CommandPaneModel {
+            terminal_sessions: vec![
+                CommandTerminalSession::placeholder(CommandSessionId(101), "left".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(102), "middle".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(103), "right".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(201), "other one".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(202), "other two".to_string()),
+            ],
+            root: CommandPaneNode::Split(CommandPaneSplit {
+                id: CommandPaneSplitId(1),
+                axis: WorkspaceSplitAxis::Horizontal,
+                ratio: 0.5,
+                first: Box::new(CommandPaneNode::Leaf(CommandPaneLeaf {
+                    group_id: CommandPaneGroupId(10),
+                    tab_group: CommandPaneTabGroup {
+                        tabs: vec![
+                            CommandPaneTab {
+                                session_id: CommandSessionId(101),
+                            },
+                            CommandPaneTab {
+                                session_id: CommandSessionId(102),
+                            },
+                            CommandPaneTab {
+                                session_id: CommandSessionId(103),
+                            },
+                        ],
+                        active_session: CommandSessionId(102),
+                    },
+                })),
+                second: Box::new(CommandPaneNode::Leaf(CommandPaneLeaf {
+                    group_id: CommandPaneGroupId(20),
+                    tab_group: CommandPaneTabGroup {
+                        tabs: vec![
+                            CommandPaneTab {
+                                session_id: CommandSessionId(201),
+                            },
+                            CommandPaneTab {
+                                session_id: CommandSessionId(202),
+                            },
+                        ],
+                        active_session: CommandSessionId(201),
+                    },
+                })),
+            }),
+            focused_group: CommandPaneGroupId(10),
+            mode: CommandPaneMode::Pinned,
+            last_expanded_mode: CommandPaneMode::Pinned,
+            height_ratio: command_pane_default_height_ratio(1_000.0),
+            resize_drag: None,
+            next_group_id: 21,
+            next_split_id: 2,
+            next_session_id: 203,
+        };
+        let scoped_ids = |group_id: u64, session_id: u64, scope: CommandPaneTabCloseScope| {
+            model
+                .tab_session_ids_for_close_scope(
+                    CommandPaneGroupId(group_id),
+                    CommandSessionId(session_id),
+                    scope,
+                )
+                .into_iter()
+                .map(|session_id| session_id.0)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            scoped_ids(10, 102, CommandPaneTabCloseScope::Close),
+            vec![102]
+        );
+        assert_eq!(
+            scoped_ids(10, 102, CommandPaneTabCloseScope::CloseLeft),
+            vec![101]
+        );
+        assert_eq!(
+            scoped_ids(10, 102, CommandPaneTabCloseScope::CloseOthers),
+            vec![101, 103]
+        );
+        assert_eq!(
+            scoped_ids(10, 102, CommandPaneTabCloseScope::CloseRight),
+            vec![103]
+        );
+        assert_eq!(
+            scoped_ids(20, 202, CommandPaneTabCloseScope::CloseLeft),
+            vec![201]
+        );
+        assert!(scoped_ids(20, 102, CommandPaneTabCloseScope::CloseOthers).is_empty());
+        assert!(scoped_ids(99, 102, CommandPaneTabCloseScope::CloseOthers).is_empty());
+    }
+
+    #[test]
+    fn command_tab_close_scope_model_mutation_preserves_anchor_group() {
+        let mut model = CommandPaneModel {
+            terminal_sessions: vec![
+                CommandTerminalSession::placeholder(CommandSessionId(101), "left".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(102), "middle".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(103), "right".to_string()),
+            ],
+            root: CommandPaneNode::Leaf(CommandPaneLeaf {
+                group_id: CommandPaneGroupId(10),
+                tab_group: CommandPaneTabGroup {
+                    tabs: vec![
+                        CommandPaneTab {
+                            session_id: CommandSessionId(101),
+                        },
+                        CommandPaneTab {
+                            session_id: CommandSessionId(102),
+                        },
+                        CommandPaneTab {
+                            session_id: CommandSessionId(103),
+                        },
+                    ],
+                    active_session: CommandSessionId(102),
+                },
+            }),
+            focused_group: CommandPaneGroupId(10),
+            mode: CommandPaneMode::Pinned,
+            last_expanded_mode: CommandPaneMode::Pinned,
+            height_ratio: command_pane_default_height_ratio(1_000.0),
+            resize_drag: None,
+            next_group_id: 11,
+            next_split_id: 1,
+            next_session_id: 104,
+        };
+        let close_ids = model.tab_session_ids_for_close_scope(
+            CommandPaneGroupId(10),
+            CommandSessionId(102),
+            CommandPaneTabCloseScope::CloseOthers,
+        );
+        for close_session_id in close_ids {
+            assert!(model.close_session(CommandPaneGroupId(10), close_session_id));
+        }
+
+        assert_eq!(
+            command_group_session_ids(&model, CommandPaneGroupId(10)),
+            vec![102]
+        );
+        assert_eq!(
+            command_group_active_session_id(&model, CommandPaneGroupId(10)),
+            Some(102)
+        );
+        assert_eq!(model.focused_group.0, 10);
+        assert!(model.has_sessions());
+        assert!(model.is_expanded());
+    }
+
+    #[test]
+    fn command_tab_sleep_scope_model_mutation_preserves_anchor_group() {
+        let mut model = CommandPaneModel {
+            terminal_sessions: vec![
+                CommandTerminalSession::placeholder(CommandSessionId(101), "left".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(102), "middle".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(103), "right".to_string())
+                    .with_activity(CommandTerminalActivity::Working)
+                    .with_delayed_send_active(true),
+                CommandTerminalSession::placeholder(CommandSessionId(201), "other one".to_string()),
+                CommandTerminalSession::placeholder(CommandSessionId(202), "other two".to_string()),
+            ],
+            root: CommandPaneNode::Split(CommandPaneSplit {
+                id: CommandPaneSplitId(1),
+                axis: WorkspaceSplitAxis::Horizontal,
+                ratio: 0.5,
+                first: Box::new(CommandPaneNode::Leaf(CommandPaneLeaf {
+                    group_id: CommandPaneGroupId(10),
+                    tab_group: CommandPaneTabGroup {
+                        tabs: vec![
+                            CommandPaneTab {
+                                session_id: CommandSessionId(101),
+                            },
+                            CommandPaneTab {
+                                session_id: CommandSessionId(102),
+                            },
+                            CommandPaneTab {
+                                session_id: CommandSessionId(103),
+                            },
+                        ],
+                        active_session: CommandSessionId(102),
+                    },
+                })),
+                second: Box::new(CommandPaneNode::Leaf(CommandPaneLeaf {
+                    group_id: CommandPaneGroupId(20),
+                    tab_group: CommandPaneTabGroup {
+                        tabs: vec![
+                            CommandPaneTab {
+                                session_id: CommandSessionId(201),
+                            },
+                            CommandPaneTab {
+                                session_id: CommandSessionId(202),
+                            },
+                        ],
+                        active_session: CommandSessionId(201),
+                    },
+                })),
+            }),
+            focused_group: CommandPaneGroupId(10),
+            mode: CommandPaneMode::Pinned,
+            last_expanded_mode: CommandPaneMode::Pinned,
+            height_ratio: command_pane_default_height_ratio(1_000.0),
+            resize_drag: None,
+            next_group_id: 21,
+            next_split_id: 2,
+            next_session_id: 203,
+        };
+        let sleep_ids = model.tab_session_ids_for_sleep_scope(
+            CommandPaneGroupId(10),
+            CommandSessionId(102),
+            CommandPaneTabSleepScope::SleepRight,
+        );
+        assert_eq!(
+            sleep_ids
+                .iter()
+                .map(|session_id| session_id.0)
+                .collect::<Vec<_>>(),
+            vec![103]
+        );
+        for session_id in sleep_ids {
+            assert!(model.set_session_sleeping(session_id, true));
+        }
+        assert!(!model.session(CommandSessionId(101)).unwrap().is_sleeping);
+        assert!(!model.session(CommandSessionId(102)).unwrap().is_sleeping);
+        let right = model.session(CommandSessionId(103)).unwrap();
+        assert!(right.is_sleeping);
+        assert!(right.activity == CommandTerminalActivity::Idle);
+        assert!(right.delayed_send_active);
+        assert!(right.tab_status() == CommandTerminalTabStatus::Idle);
+        assert!(!model.session(CommandSessionId(201)).unwrap().is_sleeping);
+        assert!(!model.session(CommandSessionId(202)).unwrap().is_sleeping);
+
+        let sleep_ids = model.tab_session_ids_for_sleep_scope(
+            CommandPaneGroupId(10),
+            CommandSessionId(102),
+            CommandPaneTabSleepScope::SleepOthers,
+        );
+        assert_eq!(
+            sleep_ids
+                .iter()
+                .map(|session_id| session_id.0)
+                .collect::<Vec<_>>(),
+            vec![101, 103]
+        );
+        for session_id in sleep_ids {
+            model.set_session_sleeping(session_id, true);
+        }
+        assert!(model.session(CommandSessionId(101)).unwrap().is_sleeping);
+        assert!(!model.session(CommandSessionId(102)).unwrap().is_sleeping);
+        assert!(model.session(CommandSessionId(103)).unwrap().is_sleeping);
+        assert!(!model.session(CommandSessionId(201)).unwrap().is_sleeping);
+        assert!(!model.session(CommandSessionId(202)).unwrap().is_sleeping);
+        assert_eq!(
+            model.rendered_terminal_body_mount_slots(),
+            vec![
+                CommandTerminalBodyMountSlotId {
+                    group_id: CommandPaneGroupId(10),
+                    session_id: CommandSessionId(102),
+                },
+                CommandTerminalBodyMountSlotId {
+                    group_id: CommandPaneGroupId(20),
+                    session_id: CommandSessionId(201),
+                },
+            ]
+        );
+
+        assert!(model.set_session_sleeping(CommandSessionId(102), true));
+        assert_eq!(
+            model.rendered_terminal_body_mount_slots(),
+            vec![CommandTerminalBodyMountSlotId {
+                group_id: CommandPaneGroupId(20),
+                session_id: CommandSessionId(201),
+            }]
+        );
+        assert!(model.set_session_sleeping(CommandSessionId(102), false));
+        assert_eq!(
+            model.rendered_terminal_body_mount_slots(),
+            vec![
+                CommandTerminalBodyMountSlotId {
+                    group_id: CommandPaneGroupId(10),
+                    session_id: CommandSessionId(102),
+                },
+                CommandTerminalBodyMountSlotId {
+                    group_id: CommandPaneGroupId(20),
+                    session_id: CommandSessionId(201),
+                },
+            ]
+        );
+        assert!(
+            model
+                .tab_session_ids_for_sleep_scope(
+                    CommandPaneGroupId(20),
+                    CommandSessionId(102),
+                    CommandPaneTabSleepScope::SleepOthers,
+                )
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn command_tab_empty_scoped_menu_actions_resolve_to_noop_targets() {
+        /*
+        CDXC:GPUICommandTabContextMenu 2026-06-25-14:42:
+        Native AppKit leaves scoped Sleep/Close menu rows enabled even when a command tab has no left, right, or other sibling targets. GPUI keeps those rows enabled and relies on the clicked-group resolver returning an empty target list so selecting an empty scope is a no-op.
+        */
+        let model = CommandPaneModel {
+            terminal_sessions: vec![CommandTerminalSession::placeholder(
+                CommandSessionId(101),
+                "only".to_string(),
+            )],
+            root: CommandPaneNode::Leaf(CommandPaneLeaf {
+                group_id: CommandPaneGroupId(10),
+                tab_group: CommandPaneTabGroup {
+                    tabs: vec![CommandPaneTab {
+                        session_id: CommandSessionId(101),
+                    }],
+                    active_session: CommandSessionId(101),
+                },
+            }),
+            focused_group: CommandPaneGroupId(10),
+            mode: CommandPaneMode::Pinned,
+            last_expanded_mode: CommandPaneMode::Pinned,
+            height_ratio: command_pane_default_height_ratio(1_000.0),
+            resize_drag: None,
+            next_group_id: 11,
+            next_split_id: 1,
+            next_session_id: 102,
+        };
+
+        for scope in [
+            CommandPaneTabSleepScope::SleepRight,
+            CommandPaneTabSleepScope::SleepLeft,
+            CommandPaneTabSleepScope::SleepOthers,
+        ] {
+            assert!(
+                model
+                    .tab_session_ids_for_sleep_scope(
+                        CommandPaneGroupId(10),
+                        CommandSessionId(101),
+                        scope,
+                    )
+                    .is_empty()
+            );
+        }
+        for scope in [
+            CommandPaneTabCloseScope::CloseRight,
+            CommandPaneTabCloseScope::CloseLeft,
+            CommandPaneTabCloseScope::CloseOthers,
+        ] {
+            assert!(
+                model
+                    .tab_session_ids_for_close_scope(
+                        CommandPaneGroupId(10),
+                        CommandSessionId(101),
+                        scope,
+                    )
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn command_tab_context_menu_matches_native_tab_scoped_rows() {
+        /*
+        CDXC:GPUICommandTabContextMenu 2026-06-25-14:13:
+        Native command-tab right-click menus are tab-scoped even though command tabs receive panel actions for the fixed titlebar buttons. GPUI command-tab menus should expose scoped Close rows without Pin/Unpin or Minimize panel rows.
+
+        CDXC:GPUICommandTabContextMenu 2026-06-25-14:07:
+        Command-tab scoped close rows should mirror native tab-button menus: Close Right, Close Left, then Close Other Tabs. Keep the clicked-group close resolution unchanged while matching native labels and row order.
+
+        CDXC:GPUICommandTabContextMenu 2026-06-25-14:19:
+        Native tab context menus omit direct Close Tab. Keep single-tab close on hover/middle-click chrome and keep right-click close rows scoped to sibling groups.
+
+        CDXC:GPUICommandTabContextMenu 2026-06-25-14:22:
+        Native tab context menus omit Select Tab and Expand Commands Panel. Left-click tab activation remains the only command-tab selection/open path.
+
+        CDXC:GPUICommandTabSleep 2026-06-25-14:27:
+        Native command-tab menus show Sleep, Sleep Right, Sleep Left, and Sleep Other Tabs before the Close group for awake tabs. Sleeping clicked tabs omit only the redundant direct Sleep row.
+
+        CDXC:GPUICommandTabContextMenu 2026-06-25-14:42:
+        Scoped Sleep/Close rows stay visible and enabled like native AppKit rows; empty-scope safety belongs to the target resolver, not disabled menu chrome.
+        */
+        assert_eq!(
+            command_pane_tab_context_sleep_scope_label(CommandPaneTabSleepScope::Sleep),
+            "Sleep"
+        );
+        assert_eq!(
+            command_pane_tab_context_sleep_scope_label(CommandPaneTabSleepScope::SleepRight),
+            "Sleep Right"
+        );
+        assert_eq!(
+            command_pane_tab_context_sleep_scope_label(CommandPaneTabSleepScope::SleepLeft),
+            "Sleep Left"
+        );
+        assert_eq!(
+            command_pane_tab_context_sleep_scope_label(CommandPaneTabSleepScope::SleepOthers),
+            "Sleep Other Tabs"
+        );
+        assert_eq!(
+            command_pane_tab_context_sleep_order(false),
+            vec![
+                CommandPaneTabSleepScope::Sleep,
+                CommandPaneTabSleepScope::SleepRight,
+                CommandPaneTabSleepScope::SleepLeft,
+                CommandPaneTabSleepScope::SleepOthers,
+            ]
+        );
+        assert_eq!(
+            command_pane_tab_context_sleep_order(true),
+            vec![
+                CommandPaneTabSleepScope::SleepRight,
+                CommandPaneTabSleepScope::SleepLeft,
+                CommandPaneTabSleepScope::SleepOthers,
+            ]
+        );
+        assert_eq!(
+            command_pane_tab_context_close_scope_label(CommandPaneTabCloseScope::CloseRight),
+            "Close Right"
+        );
+        assert_eq!(
+            command_pane_tab_context_close_scope_label(CommandPaneTabCloseScope::CloseLeft),
+            "Close Left"
+        );
+        assert_eq!(
+            command_pane_tab_context_close_scope_label(CommandPaneTabCloseScope::CloseOthers),
+            "Close Other Tabs"
+        );
+        assert_eq!(
+            command_pane_tab_context_scoped_close_order(),
+            [
+                CommandPaneTabCloseScope::CloseRight,
+                CommandPaneTabCloseScope::CloseLeft,
+                CommandPaneTabCloseScope::CloseOthers,
+            ]
+        );
+        assert!(
+            !command_pane_tab_context_scoped_close_order()
+                .contains(&CommandPaneTabCloseScope::Close)
+        );
+    }
+
+    #[test]
+    fn command_pane_collapsed_strip_hides_panel_mode_controls() {
+        /*
+        CDXC:GPUICommandPaneControls 2026-06-25-12:05:
+        Collapsed command-strip fixed panel controls match macOS hidden command-panel chrome by proving Pin/Unpin panel mode mutation is expanded-titlebar-only.
+
+        CDXC:GPUICommandPaneControls 2026-06-25-12:13:
+        New Terminal is tab-run chrome, not part of the fixed command-pane action cluster. Keep creation inline while fixed controls remain panel-scoped.
+
+        CDXC:GPUICommandPaneControls 2026-06-25-12:26:
+        Expanded command panels have Pin/Unpin plus one Minimize chevron, while collapsed strips have only Expand. There is no separate expanded `x` panel-minimize control in native command chrome.
+
+        CDXC:GPUICommandPaneControls 2026-06-25-12:29:
+        Fixed command-panel action buttons stay square to the 26px command titlebar height, matching native command-panel button frames instead of floating smaller controls inside the bar.
+
+        CDXC:GPUICommandPaneControls 2026-06-25-12:32:
+        Minimized command panels start directly with command tab chrome inside native 4px/8px side margins. Do not reserve a synthetic leading "Command" label block.
+
+        CDXC:GPUICommandTabChrome 2026-06-25-13:11:
+        Command-tab close controls are native hover chrome: hidden until the owning tab is hovered, 20px wide/high, 4px from the trailing edge, flat-cornered, and absolutely positioned so title layout does not shift.
+
+        CDXC:GPUICommandTabClose 2026-06-25-14:01:
+        Command tab button-2 clicks belong to the clicked tab and close it on mouse-up through the same command close request path as the visible close affordance, without first selecting the tab or entering empty-titlebar behavior.
+
+        CDXC:GPUICommandTabClose 2026-06-25-14:04:
+        Hover Close is a native pending inline tab action: mouse-down only claims the visible close control, and mouse-up invokes the command close path if that control still owns the pointer.
+
+        CDXC:GPUICommandTabTypography 2026-06-25-13:25:
+        Command-tab title typography matches native command-role tabs: 11pt semibold text is stable across active and inactive command tabs, and inactive command labels are not dimmed like workspace tabs.
+
+        CDXC:GPUICommandTabSizing 2026-06-25-13:32:
+        Command tabs share one native responsive width policy in expanded and collapsed command chrome: equal-fit flex distribution clamps between 72px and 160px, while the tab-strip end drop target remains fixed instead of growing as another tab.
+
+        CDXC:GPUICommandTabOverflow 2026-06-25-13:30:
+        Command tab strips do not render a permanent decorative edge reveal. Native command overflow uses a conditional 30px Show Active Tab proxy only when the active tab is clipped below 60px visible, revealing with a 12px scroll margin.
+
+        CDXC:GPUICommandTabOverflow 2026-06-25-13:34:
+        Show Active Tab is real command-role button chrome: 30px wide, 11px chevron glyph, #0e0e0e stable background, #cfcfcf glyph tint, and a #2a2a2a inner border on the side facing the hidden active tab.
+
+        CDXC:GPUICommandTabScrolling 2026-06-25-13:45:
+        Command tab-strip wheels match native: direct horizontal wheel deltas move tabs directly, precise vertical trackpad deltas are not remapped into tab movement, and non-precision vertical wheel ticks are amplified by 18x with a 96px minimum.
+
+        CDXC:GPUICommandTabDoubleClick 2026-06-25-13:50:
+        Empty command tab chrome supports the native double-click New Terminal gesture through the explicit end-of-strip target. The target uses the 34px native preferred width and ignores single clicks so normal focus/drag behavior remains intact.
+
+        CDXC:GPUICommandTabDoubleClick 2026-06-25-13:58:
+        Empty command titlebar double-click handling belongs to expanded and collapsed command tabstrip backgrounds after real tabs and controls decline the hit, matching native `isEmptyTitleBarDoubleClickPoint` instead of limiting New Terminal creation to the fixed trailing target.
+
+        CDXC:GPUICommandPaneControls 2026-06-25-13:40:
+        Command-pane action buttons use native-equivalent symbol chrome: pin/pin-slash for Pin/Unpin Commands Panel and chevron up/down for Expand/Minimize Commands Panel. Do not expose raw fallback letters as the normal GPUI chrome.
+
+        CDXC:GPUICommandPaneControls 2026-06-25-13:54:
+        Inline command-tab New Terminal uses native tab-add plus chrome with a New Terminal tooltip, not the generic terminal symbol used by the separate `.newTerminal` titlebar action path.
+
+        CDXC:GPUICommandPaneControls 2026-06-25-13:47:
+        Command action button frames mirror native command titlebar layout: contiguous 26px flat buttons, 8px trailing inset only in expanded chrome, no inner collapsed inset, stable #0e0e0e button background, and #cfcfcf icon tint.
+
+        CDXC:GPUICommandTabChrome 2026-06-25-14:01:
+        Hover-only command-tab close chrome uses the same stable command icon-button background and #cfcfcf X symbol as native command tabs, not a lowercase text x or hover-only fill.
+
+        CDXC:GPUICommandTabSeparators 2026-06-25-14:17:
+        Command-tab separators are native per-tab chrome: a 1px white/10% trailing fill appears only before another command tab, while the final tab has no separator and tabs do not use the heavier panel border as a stand-in.
+
+        CDXC:GPUICommandTabBackground 2026-06-25-14:36:
+        Command-tab backgrounds use native AppKit pane-tab compositing: active is #050608 plus 13% white, inactive is #050608 plus 6% white, and hover does not change the tab fill.
+
+        CDXC:GPUICommandTabSleepVisuals 2026-06-25-14:39:
+        Inactive sleeping command tabs use the native parked-tab visual treatment: a 3.2% white overlay and 48% title alpha multiplier. Active sleeping tabs keep selected fill and title opacity.
+
+        CDXC:GPUICommandPaneControls 2026-06-25-14:44:
+        Inline command-tab New Terminal uses stable native tab-bar icon chrome in normal, hover, and active states, so the plus button has the same #0e0e0e background as fixed command action buttons before hover.
+
+        CDXC:GPUICommandPaneChrome 2026-06-25-13:19:
+        Command-pane chrome colors stay split by native role: black command titlebar background, #1e1e1e panel boundary separator, translucent command titlebar separators, dark inactive pane outlines, and neutral gray focused outlines.
+
+        CDXC:GPUICommandPaneResize 2026-06-25-13:19:
+        Command-panel resize chrome mirrors native resize rails: a 12px transparent panel rail, a 3px hover-line geometry, a white delayed hover affordance, and transparent normal-state split rails so pane borders remain the visible separation.
+        */
+        assert!(command_pane_panel_mode_controls_visible(true));
+        assert!(!command_pane_panel_mode_controls_visible(false));
+        assert_eq!(
+            command_pane_new_command_control_placement(),
+            CommandPaneNewCommandControlPlacement::InlineTabRun
+        );
+        assert_eq!(command_pane_tab_add_tooltip(), "New Terminal");
+        assert_eq!(command_pane_fixed_panel_control_count(true), 2);
+        assert_eq!(command_pane_fixed_panel_control_count(false), 1);
+        assert_eq!(
+            COMMAND_PANE_CONTROL_BUTTON_SIZE,
+            COMMAND_PANE_TAB_BAR_HEIGHT
+        );
+        assert_eq!(COMMAND_PANE_COLLAPSED_STRIP_LEFT_MARGIN, 4.0);
+        assert_eq!(COMMAND_PANE_COLLAPSED_STRIP_RIGHT_MARGIN, 8.0);
+        assert!(!command_pane_collapsed_strip_has_leading_label());
+        assert_eq!(COMMAND_PANE_RESIZE_RAIL_HEIGHT, 12.0);
+        assert_eq!(COMMAND_PANE_RESIZE_HOVER_LINE_HEIGHT, 3.0);
+        assert_eq!(COMMAND_PANE_RESIZE_HOVER_DELAY, SIDEBAR_DIVIDER_HOVER_DELAY);
+        assert_eq!(
+            COMMAND_PANE_RESIZE_HOVER_FADE_DURATION,
+            SIDEBAR_DIVIDER_HOVER_FADE_DURATION
+        );
+        assert_eq!(
+            command_pane_resize_rail_color(),
+            rgb(0x000000).opacity(0.0).into()
+        );
+        assert_eq!(
+            command_pane_resize_rail_line_color(),
+            rgb(0x000000).opacity(0.0).into()
+        );
+        assert_eq!(command_pane_resize_hover_line_color(), rgb(0xffffff).into());
+        assert_eq!(
+            command_pane_split_handle_color(),
+            rgb(0x000000).opacity(0.0).into()
+        );
+        assert_eq!(
+            command_pane_split_separator_color(),
+            rgb(0x000000).opacity(0.0).into()
+        );
+        assert_eq!(command_pane_chrome_color(), rgb(0x000000).into());
+        assert_eq!(command_pane_strip_color(), command_pane_chrome_color());
+        assert_eq!(command_pane_panel_separator_color(), rgb(0x1e1e1e).into());
+        assert_eq!(
+            command_pane_titlebar_separator_color(),
+            rgb(0x8a8a8a).opacity(0.24).into()
+        );
+        assert_eq!(command_pane_border_color(), rgb(0x111111).into());
+        assert_eq!(
+            command_pane_focused_border_color(),
+            rgb(0x737373).opacity(0.95).into()
+        );
+        assert_ne!(
+            command_pane_titlebar_separator_color(),
+            command_pane_border_color()
+        );
+        assert!(!command_pane_tab_close_visible(false));
+        assert!(command_pane_tab_close_visible(true));
+        assert_eq!(COMMAND_PANE_TAB_CLOSE_SIZE, 20.0);
+        assert_eq!(COMMAND_PANE_TAB_CLOSE_TRAILING_PADDING, 4.0);
+        assert_eq!(COMMAND_PANE_TAB_CLOSE_CORNER_RADIUS, 0.0);
+        assert_eq!(COMMAND_PANE_TAB_CLOSE_ICON_SIZE, 10.0);
+        assert!(!command_pane_tab_close_participates_in_flex_layout());
+        assert!(command_pane_tab_middle_click_closes_clicked_tab());
+        assert!(command_pane_tab_close_affordance_invokes_on_mouse_up());
+        assert_eq!(COMMAND_PANE_TAB_TITLE_FONT_SIZE, 11.0);
+        assert!(!command_pane_tab_title_style_depends_on_active_state());
+        assert!(!command_pane_tab_inactive_title_uses_dimmed_text());
+        assert_eq!(COMMAND_PANE_TAB_MIN_WIDTH, 72.0);
+        assert_eq!(COMMAND_PANE_TAB_MAX_WIDTH, 160.0);
+        assert!(command_pane_collapsed_and_expanded_tabs_share_width_policy());
+        assert_eq!(COMMAND_PANE_TAB_END_DROP_TARGET_WIDTH, 34.0);
+        assert_eq!(COMMAND_PANE_EMPTY_TITLEBAR_DOUBLE_CLICK_TARGET_WIDTH, 34.0);
+        assert_eq!(
+            COMMAND_PANE_EMPTY_TITLEBAR_DOUBLE_CLICK_TARGET_MIN_WIDTH,
+            24.0
+        );
+        assert!(!command_pane_tab_end_drop_target_participates_in_tab_width_distribution());
+        assert!(!command_pane_empty_titlebar_double_click_creates_new_terminal(1));
+        assert!(command_pane_empty_titlebar_double_click_creates_new_terminal(2));
+        assert!(command_pane_empty_tabstrip_background_owns_double_click_new_terminal());
+        assert_eq!(COMMAND_PANE_STICKY_ACTIVE_TAB_BUTTON_SIZE, 30.0);
+        assert_eq!(COMMAND_PANE_STICKY_ACTIVE_TAB_ICON_SIZE, 11.0);
+        assert_eq!(COMMAND_PANE_ACTIVE_TAB_REVEAL_SCROLL_MARGIN, 12.0);
+        assert_eq!(COMMAND_PANE_ACTIVE_TAB_REVEAL_MINIMUM_VISIBLE_WIDTH, 60.0);
+        assert_eq!(COMMAND_PANE_VERTICAL_WHEEL_TAB_SCROLL_MULTIPLIER, 18.0);
+        assert_eq!(
+            COMMAND_PANE_MINIMUM_DISCRETE_VERTICAL_WHEEL_TAB_SCROLL_DELTA,
+            96.0
+        );
+        assert!(!command_pane_tab_edge_reveal_visible_without_clipped_active_tab());
+        assert_eq!(command_pane_sticky_active_tab_tooltip(), "Show Active Tab");
+        assert_eq!(
+            command_pane_sticky_active_tab_button_color(),
+            command_pane_control_button_color()
+        );
+        assert_eq!(
+            command_pane_sticky_active_tab_icon_color(),
+            command_pane_control_text_color()
+        );
+        assert_eq!(
+            command_pane_sticky_active_tab_border_color(),
+            rgb(0x2a2a2a).into()
+        );
+        assert_eq!(
+            command_pane_sticky_active_tab_icon_path(CommandPaneStickyActiveTabEdge::Leading),
+            COMMAND_ICON_CHEVRON_LEFT
+        );
+        assert_eq!(
+            command_pane_sticky_active_tab_icon_path(CommandPaneStickyActiveTabEdge::Trailing),
+            COMMAND_ICON_CHEVRON_RIGHT
+        );
+        assert_eq!(COMMAND_PANE_CONTROL_ICON_SIZE, 14.0);
+        assert_eq!(command_pane_tab_add_icon_path(), COMMAND_ICON_PLUS);
+        assert_eq!(
+            command_pane_tab_add_background_color(),
+            command_pane_control_button_color()
+        );
+        assert_eq!(
+            command_pane_control_hover_color(),
+            command_pane_tab_add_background_color()
+        );
+        assert_eq!(
+            command_pane_panel_pin_label(CommandPaneMode::Pinned),
+            "Unpin Commands Panel"
+        );
+        assert_eq!(
+            command_pane_panel_pin_label(CommandPaneMode::Floating),
+            "Pin Commands Panel"
+        );
+        assert_eq!(
+            command_pane_panel_minimize_label(),
+            "Minimize Commands Panel"
+        );
+        assert_eq!(
+            command_pane_panel_pin_icon_path(CommandPaneMode::Floating),
+            COMMAND_ICON_PIN
+        );
+        assert_eq!(
+            command_pane_panel_pin_icon_path(CommandPaneMode::Pinned),
+            COMMAND_ICON_PIN_SLASH
+        );
+        assert_eq!(
+            command_pane_panel_visibility_icon_path(false),
+            COMMAND_ICON_CHEVRON_UP
+        );
+        assert_eq!(
+            command_pane_panel_visibility_icon_path(true),
+            COMMAND_ICON_CHEVRON_DOWN
+        );
+        assert_eq!(COMMAND_PANE_CONTROL_BUTTON_GAP, 0.0);
+        assert_eq!(COMMAND_PANE_CONTROL_CORNER_RADIUS, 0.0);
+        assert_eq!(
+            command_pane_control_trailing_padding(true),
+            COMMAND_PANE_CONTROL_EXPANDED_TRAILING_PADDING
+        );
+        assert_eq!(
+            command_pane_control_trailing_padding(false),
+            COMMAND_PANE_CONTROL_COLLAPSED_TRAILING_PADDING
+        );
+        assert_eq!(COMMAND_PANE_CONTROL_EXPANDED_TRAILING_PADDING, 8.0);
+        assert_eq!(COMMAND_PANE_CONTROL_COLLAPSED_TRAILING_PADDING, 0.0);
+        assert_eq!(command_pane_control_cluster_color(), rgb(0x0e0e0e).into());
+        assert_eq!(command_pane_control_button_color(), rgb(0x0e0e0e).into());
+        assert_eq!(command_pane_control_text_color(), rgb(0xcfcfcf).into());
+        assert_eq!(
+            command_pane_control_hover_color(),
+            command_pane_control_button_color()
+        );
+        assert_eq!(COMMAND_ICON_XMARK, command_pane_tab_close_icon_path());
+        assert_eq!(
+            command_pane_tab_close_background_color(),
+            command_pane_control_button_color()
+        );
+        assert_eq!(
+            command_pane_tab_close_icon_color(),
+            command_pane_control_text_color()
+        );
+        assert_eq!(COMMAND_PANE_TAB_SEPARATOR_WIDTH, 1.0);
+        assert!(command_pane_tab_separator_visible(true));
+        assert!(!command_pane_tab_separator_visible(false));
+        assert_eq!(
+            command_pane_tab_separator_color(),
+            rgb(0xffffff).opacity(0.10).into()
+        );
+        assert_ne!(
+            command_pane_tab_separator_color(),
+            command_pane_border_color()
+        );
+        assert_eq!(COMMAND_PANE_TAB_BACKGROUND_BASE_RED, 0x05);
+        assert_eq!(COMMAND_PANE_TAB_BACKGROUND_BASE_GREEN, 0x06);
+        assert_eq!(COMMAND_PANE_TAB_BACKGROUND_BASE_BLUE, 0x08);
+        assert_eq!(COMMAND_PANE_TAB_ACTIVE_OVERLAY_ALPHA, 0.13);
+        assert_eq!(COMMAND_PANE_TAB_INACTIVE_OVERLAY_ALPHA, 0.06);
+        assert_eq!(COMMAND_PANE_TAB_SLEEPING_INACTIVE_OVERLAY_ALPHA, 0.032);
+        assert_eq!(
+            COMMAND_PANE_TAB_TITLE_SLEEPING_INACTIVE_ALPHA_MULTIPLIER,
+            0.48
+        );
+        assert_eq!(
+            command_pane_tab_background_color(true, false),
+            rgb(0x262628).into()
+        );
+        assert_eq!(
+            command_pane_tab_background_color(false, false),
+            rgb(0x141517).into()
+        );
+        assert_eq!(
+            command_pane_tab_background_color(true, true),
+            command_pane_tab_background_color(true, false)
+        );
+        assert_eq!(
+            command_pane_tab_background_color(false, true),
+            rgb(0x0d0e10).into()
+        );
+        assert_eq!(
+            command_pane_tab_hover_background_color(true, true),
+            command_pane_tab_background_color(true, true)
+        );
+        assert_eq!(
+            command_pane_tab_hover_background_color(false, true),
+            command_pane_tab_background_color(false, true)
+        );
+        assert_eq!(
+            command_pane_tab_title_text_color(false, false),
+            rgb(0xf5f5f5).opacity(0.98).into()
+        );
+        assert_eq!(
+            command_pane_tab_title_text_color(true, true),
+            command_pane_tab_title_text_color(true, false)
+        );
+        assert_eq!(
+            command_pane_tab_title_text_color(false, true),
+            rgb(0xf5f5f5).opacity(0.98 * 0.48).into()
+        );
+    }
+
+    #[test]
+    fn command_pane_sticky_active_tab_proxy_matches_native_scroll_geometry() {
+        /*
+        CDXC:GPUICommandTabOverflow 2026-06-25-13:34:
+        Sticky active-tab visibility is proven with geometry instead of tab counts or fallback decoration: overflow must exist, the active tab must be clipped below 60px visible, the side must match the clipped edge, and click reveal centers then clamps the active tab.
+        */
+        fn tab_bounds(left: f32, width: f32) -> Bounds<Pixels> {
+            Bounds::new(
+                gpui::point(px(left), px(0.0)),
+                size(px(width), px(COMMAND_PANE_TAB_BAR_HEIGHT)),
+            )
+        }
+
+        let viewport = tab_bounds(0.0, 200.0);
+        let right_clipped_tab = tab_bounds(260.0, 72.0);
+        let left_clipped_tab = tab_bounds(0.0, 72.0);
+
+        assert_eq!(
+            command_pane_sticky_active_tab_edge(viewport, right_clipped_tab, px(0.0), px(500.0)),
+            Some(CommandPaneStickyActiveTabEdge::Trailing)
+        );
+        assert_eq!(
+            command_pane_sticky_active_tab_edge(viewport, left_clipped_tab, px(-30.0), px(500.0)),
+            Some(CommandPaneStickyActiveTabEdge::Leading)
+        );
+        assert_eq!(
+            command_pane_sticky_active_tab_edge(viewport, right_clipped_tab, px(-272.0), px(500.0)),
+            None
+        );
+        assert_eq!(
+            command_pane_sticky_active_tab_edge(viewport, right_clipped_tab, px(0.0), px(0.0)),
+            None
+        );
+        assert_eq!(
+            command_pane_sticky_active_tab_edge(
+                tab_bounds(0.0, 20.0),
+                right_clipped_tab,
+                px(0.0),
+                px(500.0)
+            ),
+            None
+        );
+        assert_eq!(
+            command_pane_centered_active_tab_scroll_offset_x(
+                viewport,
+                right_clipped_tab,
+                px(500.0)
+            ),
+            px(-196.0)
+        );
+        assert_eq!(
+            command_pane_centered_active_tab_scroll_offset_x(
+                viewport,
+                tab_bounds(10.0, 72.0),
+                px(500.0)
+            ),
+            px(0.0)
+        );
+        assert_eq!(
+            command_pane_centered_active_tab_scroll_offset_x(
+                viewport,
+                tab_bounds(660.0, 72.0),
+                px(500.0)
+            ),
+            px(-500.0)
+        );
+        assert_eq!(
+            command_pane_active_tab_reveal_scroll_offset_x(
+                viewport,
+                right_clipped_tab,
+                px(0.0),
+                px(500.0)
+            ),
+            Some(px(-144.0))
+        );
+        assert_eq!(
+            command_pane_active_tab_reveal_scroll_offset_x(
+                viewport,
+                left_clipped_tab,
+                px(-30.0),
+                px(500.0)
+            ),
+            Some(px(0.0))
+        );
+        assert_eq!(
+            command_pane_active_tab_reveal_scroll_offset_x(
+                viewport,
+                right_clipped_tab,
+                px(-272.0),
+                px(500.0)
+            ),
+            Some(px(-272.0))
+        );
+        assert_eq!(
+            command_pane_active_tab_reveal_scroll_offset_x(
+                viewport,
+                tab_bounds(660.0, 72.0),
+                px(0.0),
+                px(500.0)
+            ),
+            Some(px(-500.0))
+        );
+    }
+
+    #[test]
+    fn command_pane_tab_wheel_scroll_matches_native_delta_rules() {
+        /*
+        CDXC:GPUICommandTabScrolling 2026-06-25-13:45:
+        Native command tabs do not let precise vertical trackpad deltas become horizontal tab movement, but non-precision vertical wheel ticks become amplified horizontal movement with a 96px minimum. This keeps mouse-wheel tab navigation fast without hijacking trackpad vertical gestures.
+        */
+        assert_eq!(
+            command_pane_tab_wheel_scroll_delta_x(
+                ScrollDelta::Pixels(gpui::point(px(18.0), px(4.0))),
+                px(10.0),
+            ),
+            Some(px(18.0))
+        );
+        assert_eq!(
+            command_pane_tab_wheel_scroll_delta_x(
+                ScrollDelta::Pixels(gpui::point(px(0.0), px(40.0))),
+                px(10.0),
+            ),
+            None
+        );
+        assert_eq!(
+            command_pane_tab_wheel_scroll_delta_x(
+                ScrollDelta::Lines(gpui::point(0.0, 0.2)),
+                px(10.0)
+            ),
+            Some(px(96.0))
+        );
+        assert_eq!(
+            command_pane_tab_wheel_scroll_delta_x(
+                ScrollDelta::Lines(gpui::point(0.0, -0.2)),
+                px(10.0),
+            ),
+            Some(px(-96.0))
+        );
+        assert_eq!(
+            command_pane_tab_wheel_scroll_delta_x(
+                ScrollDelta::Lines(gpui::point(3.0, 1.0)),
+                px(10.0)
+            ),
+            Some(px(30.0))
+        );
+        assert_eq!(
+            command_pane_tab_wheel_scroll_delta_x(
+                ScrollDelta::Lines(gpui::point(0.0, 2.0)),
+                px(10.0)
+            ),
+            Some(px(360.0))
+        );
+        assert_eq!(
+            command_pane_clamped_tab_scroll_offset_x(px(-640.0), px(500.0)),
+            px(-500.0)
+        );
+        assert_eq!(
+            command_pane_clamped_tab_scroll_offset_x(px(12.0), px(500.0)),
+            px(0.0)
+        );
     }
 
     #[test]
@@ -74088,9 +83352,17 @@ mod tests {
                 )
                 .with_activity(CommandTerminalActivity::Working)
                 .with_delayed_send_active(true),
+                CommandTerminalSession::placeholder(
+                    CommandSessionId(33),
+                    "sleeping private command output".to_string(),
+                )
+                .with_activity(CommandTerminalActivity::Attention)
+                .with_delayed_send_active(true)
+                .with_sleeping(true),
             ],
             root: CommandPaneNode::Split(CommandPaneSplit {
                 id: CommandPaneSplitId(4),
+                axis: WorkspaceSplitAxis::Horizontal,
                 ratio: 0.64,
                 first: Box::new(CommandPaneNode::Leaf(CommandPaneLeaf {
                     group_id: CommandPaneGroupId(7),
@@ -74109,10 +83381,15 @@ mod tests {
                 second: Box::new(CommandPaneNode::Leaf(CommandPaneLeaf {
                     group_id: CommandPaneGroupId(8),
                     tab_group: CommandPaneTabGroup {
-                        tabs: vec![CommandPaneTab {
-                            session_id: CommandSessionId(32),
-                        }],
-                        active_session: CommandSessionId(32),
+                        tabs: vec![
+                            CommandPaneTab {
+                                session_id: CommandSessionId(32),
+                            },
+                            CommandPaneTab {
+                                session_id: CommandSessionId(33),
+                            },
+                        ],
+                        active_session: CommandSessionId(33),
                     },
                 })),
             }),
@@ -74123,13 +83400,14 @@ mod tests {
             resize_drag: None,
             next_group_id: 9,
             next_split_id: 5,
-            next_session_id: 33,
+            next_session_id: 34,
         };
 
         let persisted = shell_state_text(&command_pane_model_to_shell_state_json(&model));
         assert!(persisted.contains("\"activity\":\"working\""));
         assert!(persisted.contains("\"activity\":\"attention\""));
         assert!(persisted.contains("\"delayedSendActive\":true"));
+        assert!(persisted.contains("\"isSleeping\":true"));
         assert_text_omits(
             &persisted,
             &[
@@ -74138,6 +83416,7 @@ mod tests {
                 "/Users/madda/private",
                 "private command output",
                 "private failure",
+                "sleeping private",
                 "stdout",
                 "stderr",
                 "commandText",
@@ -74160,7 +83439,7 @@ mod tests {
         assert_eq!(restored.focused_group.0, 8);
         assert_eq!(restored.next_group_id, 9);
         assert_eq!(restored.next_split_id, 5);
-        assert_eq!(restored.next_session_id, 33);
+        assert_eq!(restored.next_session_id, 34);
         assert_eq!(command_group_order_ids(&restored), vec![7, 8]);
         assert_eq!(
             command_group_session_ids(&restored, CommandPaneGroupId(7)),
@@ -74168,7 +83447,7 @@ mod tests {
         );
         assert_eq!(
             command_group_session_ids(&restored, CommandPaneGroupId(8)),
-            vec![32]
+            vec![32, 33]
         );
 
         let CommandPaneNode::Split(split) = &restored.root else {
@@ -74192,7 +83471,7 @@ mod tests {
                 .tab_group
                 .active_session
                 .0,
-            32
+            33
         );
 
         for (
@@ -74200,34 +83479,47 @@ mod tests {
             expected_title,
             expected_activity,
             expected_delayed_send_active,
+            expected_is_sleeping,
             expected_tab_status,
         ) in [
             (
                 CommandSessionId(30),
-                "Command 30",
+                COMMAND_PANE_DEFAULT_SESSION_TITLE,
                 CommandTerminalActivity::Working,
+                false,
                 false,
                 CommandTerminalTabStatus::Working,
             ),
             (
                 CommandSessionId(31),
-                "Command 31",
+                COMMAND_PANE_DEFAULT_SESSION_TITLE,
                 CommandTerminalActivity::Attention,
+                false,
                 false,
                 CommandTerminalTabStatus::Attention,
             ),
             (
                 CommandSessionId(32),
-                "Command 32",
+                COMMAND_PANE_DEFAULT_SESSION_TITLE,
                 CommandTerminalActivity::Working,
                 true,
+                false,
                 CommandTerminalTabStatus::DelayedSend,
+            ),
+            (
+                CommandSessionId(33),
+                COMMAND_PANE_DEFAULT_SESSION_TITLE,
+                CommandTerminalActivity::Idle,
+                true,
+                true,
+                CommandTerminalTabStatus::Idle,
             ),
         ] {
             let session = restored.session(session_id).unwrap();
             assert_eq!(session.title, expected_title);
             assert!(session.activity == expected_activity);
             assert_eq!(session.delayed_send_active, expected_delayed_send_active);
+            assert_eq!(session.is_sleeping, expected_is_sleeping);
             assert!(session.tab_status() == expected_tab_status);
         }
     }
@@ -75643,6 +84935,91 @@ mod tests {
                 "127.0.0.1",
                 "folder=",
             ],
+        );
+    }
+
+    /*
+    CDXC:GPUISourceRuntime 2026-06-24-23:17:
+    Source runtime target tests prove only the explicit sidebar snapshot can authorize the GPUI code-server folder URL. The URL may exist as runtime memory for immediate CefSurface creation, but shell-state/readiness evidence must continue to omit paths, ids, localhost strings, and query payloads.
+    */
+    #[test]
+    fn source_code_server_runtime_target_uses_strict_snapshot_folder_url() {
+        let mut snapshot = gpui_project_snapshot_for_test(GpuiProjectContext::Project);
+        snapshot.active_project_id = Some(GpuiProjectId("private_project_id".to_string()));
+        snapshot.surface_ids.source_workarea_id = Some("source_private_surface".to_string());
+        snapshot.in_memory_project_path = Some(PathBuf::from("/Users/madda/My Project"));
+
+        let target = source_code_server_runtime_target_from_project_snapshot(&snapshot)
+            .expect("valid Source snapshot should authorize a runtime target");
+        assert_eq!(target.active_project_id.0, "private_project_id");
+        assert_eq!(target.source_workarea_id, "source_private_surface");
+        assert_eq!(
+            target.project_path,
+            PathBuf::from("/Users/madda/My Project")
+        );
+        assert_eq!(
+            target.runtime_url.clone().into_cef_url(),
+            "http://127.0.0.1:3775/?folder=%2FUsers%2Fmadda%2FMy+Project"
+        );
+
+        let runtime = SourceWorkareaRuntimeState::new();
+        let persisted = shell_state_text(&runtime.shell_state_privacy_boundary_json());
+        assert_text_omits(
+            &persisted,
+            &[
+                "private_project_id",
+                "source_private_surface",
+                "/Users/madda/My Project",
+                "127.0.0.1",
+                "folder=",
+            ],
+        );
+    }
+
+    #[test]
+    fn source_code_server_runtime_target_rejects_missing_snapshot_authority() {
+        let quick_snapshot = gpui_project_snapshot_for_test(GpuiProjectContext::QuickProjectless);
+        assert!(source_code_server_runtime_target_from_project_snapshot(&quick_snapshot).is_none());
+
+        let mut missing_path = gpui_project_snapshot_for_test(GpuiProjectContext::Project);
+        missing_path.active_project_id = Some(GpuiProjectId("private_project_id".to_string()));
+        missing_path.surface_ids.source_workarea_id = Some("source_private_surface".to_string());
+        assert!(source_code_server_runtime_target_from_project_snapshot(&missing_path).is_none());
+
+        let mut missing_source_id = missing_path.clone();
+        missing_source_id.in_memory_project_path = Some(PathBuf::from("/Users/madda/private"));
+        missing_source_id.surface_ids.source_workarea_id = None;
+        assert!(
+            source_code_server_runtime_target_from_project_snapshot(&missing_source_id).is_none()
+        );
+    }
+
+    #[test]
+    fn source_code_server_runtime_settings_match_shared_sidebar_defaults() {
+        let default_settings = SourceCodeServerRuntimeSettings::from_shared_settings(
+            &shared_settings_snapshot(serde_json::json!({})),
+        );
+        assert!(!default_settings.link_vscode_user_config);
+        assert!(!default_settings.use_vscode_insiders_user_config);
+        assert!(default_settings.linked_vscode_user_config_dir().is_none());
+        assert!(
+            default_settings
+                .vscode_user_config_dir
+                .ends_with("Library/Application Support/Code/User")
+        );
+
+        let linked_insiders = SourceCodeServerRuntimeSettings::from_shared_settings(
+            &shared_settings_snapshot(serde_json::json!({
+                "codeServerLinkVscodeUserConfig": true,
+                "codeServerUseVscodeInsidersUserConfig": true,
+            })),
+        );
+        assert!(linked_insiders.link_vscode_user_config);
+        assert!(linked_insiders.use_vscode_insiders_user_config);
+        assert!(
+            linked_insiders.linked_vscode_user_config_dir().is_some_and(
+                |path| path.ends_with("Library/Application Support/Code - Insiders/User")
+            )
         );
     }
 
@@ -82430,6 +91807,41 @@ mod tests {
     }
 
     #[test]
+    fn gpui_sidebar_duplicate_unnamed_action_command_title_is_rejected() {
+        let result = gpui_next_sidebar_command_metadata_state(
+            vec![GpuiStoredSidebarCommand {
+                action_type: "terminal",
+                close_terminal_on_exit: false,
+                command: Some("pnpm   test -- --watch --filter app".to_string()),
+                command_id: "custom-alpha".to_string(),
+                icon: None,
+                is_default: false,
+                name: "".to_string(),
+                play_completion_sound: true,
+                url: None,
+            }],
+            Vec::new(),
+            Vec::new(),
+            GpuiSidebarCommandMetadataWrite::Save {
+                action_type: "terminal",
+                active_project_id: "project-alpha".to_string(),
+                close_terminal_on_exit: false,
+                command: Some("pnpm test -- --watch --changed".to_string()),
+                command_id: Some("custom-beta".to_string()),
+                icon: None,
+                name: "   ".to_string(),
+                play_completion_sound: true,
+                url: None,
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(error) if error == GPUI_SIDEBAR_DUPLICATE_ACTION_TITLE_ERROR
+        ));
+    }
+
+    #[test]
     fn gpui_sidebar_order_sync_results_use_normalized_visible_ids() {
         let agent_command = json_object(serde_json::json!({
             "type": "syncSidebarAgentOrder",
@@ -83830,6 +93242,943 @@ mod tests {
     }
 
     #[test]
+    fn command_height_defaults_follow_shared_workspace_setting() {
+        let default_settings = shared_settings_snapshot(serde_json::json!({}));
+        assert_f32_close(
+            command_pane_default_height_px_from_shared_settings(&default_settings),
+            COMMAND_PANE_DEFAULT_HEIGHT_PX,
+        );
+
+        let malformed_settings = shared_settings_snapshot(serde_json::json!({
+            "commandsPanelDefaultHeightPx": "300",
+        }));
+        assert_f32_close(
+            command_pane_default_height_px_from_shared_settings(&malformed_settings),
+            COMMAND_PANE_DEFAULT_HEIGHT_PX,
+        );
+
+        let low_settings = shared_settings_snapshot(serde_json::json!({
+            "commandsPanelDefaultHeightPx": 12,
+        }));
+        assert_f32_close(
+            command_pane_default_height_px_from_shared_settings(&low_settings),
+            COMMAND_PANE_MIN_DEFAULT_HEIGHT_PX,
+        );
+
+        let high_settings = shared_settings_snapshot(serde_json::json!({
+            "commandsPanelDefaultHeightPx": 9999,
+        }));
+        assert_f32_close(
+            command_pane_default_height_px_from_shared_settings(&high_settings),
+            COMMAND_PANE_MAX_DEFAULT_HEIGHT_PX,
+        );
+
+        let custom_settings = shared_settings_snapshot(serde_json::json!({
+            "commandsPanelDefaultHeightPx": 300.6,
+        }));
+        assert_f32_close(
+            command_pane_default_height_px_from_shared_settings(&custom_settings),
+            301.0,
+        );
+        assert_f32_close(
+            command_pane_default_height_ratio_for_default_height_px(301.0, 1_000.0),
+            0.301,
+        );
+
+        let command =
+            CommandPaneModel::shell_default_from_shared_settings(1_000.0, &custom_settings);
+        assert_f32_close(command.height_ratio, 0.301);
+
+        let mut missing_height_state =
+            command_pane_model_to_shell_state_json(&CommandPaneModel::shell_default(1_000.0));
+        missing_height_state
+            .as_object_mut()
+            .unwrap()
+            .remove("heightRatio");
+        let restored_missing_height = command_pane_model_from_shell_state_with_default_height_px(
+            &missing_height_state,
+            1_000.0,
+            300.0,
+        )
+        .unwrap();
+        assert_f32_close(restored_missing_height.height_ratio, 0.3);
+
+        missing_height_state
+            .as_object_mut()
+            .unwrap()
+            .insert("heightRatio".to_string(), serde_json::json!(0.2));
+        let restored_explicit_height = command_pane_model_from_shell_state_with_default_height_px(
+            &missing_height_state,
+            1_000.0,
+            300.0,
+        )
+        .unwrap();
+        assert_f32_close(restored_explicit_height.height_ratio, 0.2);
+
+        let mut reset_command = CommandPaneModel::shell_default(1_000.0);
+        reset_command.height_ratio = 0.4;
+        reset_command.resize_drag = Some(CommandPaneResizeDragState {
+            start_y: 80.0,
+            start_height_ratio: 0.4,
+            start_content_height: 1_000.0,
+        });
+        reset_command.reset_height_from_shared_settings(1_000.0, &custom_settings);
+        assert_f32_close(reset_command.height_ratio, 0.301);
+        assert!(reset_command.resize_drag.is_none());
+    }
+
+    #[test]
+    fn command_tab_wake_policy_follows_shared_click_to_wake_setting() {
+        /*
+        CDXC:GPUICommandTabWake 2026-06-25-14:46:
+        GPUI command tab selection must share the macOS click-to-wake setting: missing or malformed settings keep the default placeholder-first wake flow, while strict false makes sleeping tab selection wake immediately.
+        */
+        let default_settings = shared_settings_snapshot(serde_json::json!({}));
+        assert!(
+            command_pane_click_to_wake_sleeping_sessions_from_shared_settings(&default_settings)
+        );
+
+        let enabled_settings = shared_settings_snapshot(serde_json::json!({
+            "clickToWakeSleepingSessions": true,
+        }));
+        assert!(
+            command_pane_click_to_wake_sleeping_sessions_from_shared_settings(&enabled_settings)
+        );
+
+        let disabled_settings = shared_settings_snapshot(serde_json::json!({
+            "clickToWakeSleepingSessions": false,
+        }));
+        assert!(
+            !command_pane_click_to_wake_sleeping_sessions_from_shared_settings(&disabled_settings)
+        );
+
+        let malformed_settings = shared_settings_snapshot(serde_json::json!({
+            "clickToWakeSleepingSessions": "false",
+        }));
+        assert!(
+            command_pane_click_to_wake_sleeping_sessions_from_shared_settings(&malformed_settings)
+        );
+    }
+
+    #[test]
+    fn command_sleeping_placeholder_wake_label_follows_click_to_wake_setting() {
+        /*
+        CDXC:GPUICommandSleepingPlaceholder 2026-06-25-14:49:
+        The sleeping command placeholder label is a click-to-wake affordance, not a mounting status. It appears only for selected sleeping command bodies while the shared setting keeps placeholder wake enabled.
+        */
+        assert_eq!(
+            command_pane_sleeping_placeholder_wake_label(true, true),
+            Some(COMMAND_PANE_SLEEPING_PLACEHOLDER_WAKE_LABEL)
+        );
+        assert!(command_pane_sleeping_placeholder_wake_label(true, false).is_none());
+        assert!(command_pane_sleeping_placeholder_wake_label(false, true).is_none());
+        assert_eq!(
+            command_pane_sleeping_placeholder_wake_label_color(),
+            rgb(0x8c8c8c).into()
+        );
+    }
+
+    #[test]
+    fn command_sleeping_placeholder_keyboard_wake_is_plain_alphanumeric_only() {
+        /*
+        CDXC:GPUICommandSleepingPlaceholder 2026-06-25-14:49:
+        Sleeping command placeholder key wake follows native AppKit's letter/number boundary. Shifted letters and shifted digit identity can wake, while punctuation, multi-character text, Option/Alt characters, Control shortcuts, and Cmd shortcuts stay inert.
+        */
+        assert!(command_pane_sleeping_placeholder_keystroke_requests_wake(
+            &terminal_text_input_keystroke(Some("a"), Modifiers::none())
+        ));
+        assert!(command_pane_sleeping_placeholder_keystroke_requests_wake(
+            &terminal_text_input_keystroke(
+                Some("A"),
+                Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+            )
+        ));
+        assert!(command_pane_sleeping_placeholder_keystroke_requests_wake(
+            &terminal_text_input_keystroke(Some("7"), Modifiers::none())
+        ));
+        assert!(command_pane_sleeping_placeholder_keystroke_requests_wake(
+            &Keystroke {
+                modifiers: Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+                key: "1".to_string(),
+                key_char: Some("!".to_string()),
+            }
+        ));
+
+        assert!(!command_pane_sleeping_placeholder_keystroke_requests_wake(
+            &terminal_text_input_keystroke(Some("-"), Modifiers::none())
+        ));
+        assert!(!command_pane_sleeping_placeholder_keystroke_requests_wake(
+            &terminal_text_input_keystroke(Some("ab"), Modifiers::none())
+        ));
+        assert!(!command_pane_sleeping_placeholder_keystroke_requests_wake(
+            &terminal_text_input_keystroke(
+                Some("a"),
+                Modifiers {
+                    control: true,
+                    ..Default::default()
+                },
+            )
+        ));
+        assert!(!command_pane_sleeping_placeholder_keystroke_requests_wake(
+            &terminal_text_input_keystroke(
+                Some("a"),
+                Modifiers {
+                    platform: true,
+                    ..Default::default()
+                },
+            )
+        ));
+        assert!(!command_pane_sleeping_placeholder_keystroke_requests_wake(
+            &terminal_text_input_keystroke(
+                Some("å"),
+                Modifiers {
+                    alt: true,
+                    ..Default::default()
+                },
+            )
+        ));
+    }
+
+    #[test]
+    fn focused_sleeping_command_placeholder_keyboard_wake_targets_active_tab_only() {
+        /*
+        CDXC:GPUICommandSleepingPlaceholder 2026-06-25-14:49:
+        Keyboard wake is allowed only for the focused command pane's active sleeping command tab. Running command tabs, other shell focus targets, and non-alphanumeric keys must not resolve a wake target.
+        */
+        let mut command =
+            single_tab_command_model(CommandPaneGroupId(10), CommandSessionId(101), "sleeping");
+        assert!(command.set_session_sleeping(CommandSessionId(101), true));
+        let wake_key = terminal_text_input_keystroke(Some("x"), Modifiers::none());
+        let punctuation_key = terminal_text_input_keystroke(Some("."), Modifiers::none());
+
+        assert_eq!(
+            focused_sleeping_command_placeholder_wake_target(
+                ShellFocusTarget::CommandPane,
+                &command,
+                &wake_key,
+            ),
+            Some((CommandPaneGroupId(10), CommandSessionId(101)))
+        );
+        assert!(
+            focused_sleeping_command_placeholder_wake_target(
+                ShellFocusTarget::AgentsPane(WorkspacePaneId(1)),
+                &command,
+                &wake_key,
+            )
+            .is_none()
+        );
+        assert!(
+            focused_sleeping_command_placeholder_wake_target(
+                ShellFocusTarget::CommandPane,
+                &command,
+                &punctuation_key,
+            )
+            .is_none()
+        );
+
+        assert!(command.set_session_sleeping(CommandSessionId(101), false));
+        assert!(
+            focused_sleeping_command_placeholder_wake_target(
+                ShellFocusTarget::CommandPane,
+                &command,
+                &wake_key,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn focused_command_pane_sleep_target_requires_visible_command_focus() {
+        /*
+        CDXC:GPUICommandFocusedSessionActions 2026-06-25-14:56:
+        Sleep Focused Session is a focused command-terminal action in GPUI command panes. It may resolve only the active command tab in an expanded command pane that owns shell focus, and it must skip already sleeping tabs so repeated hotkeys do not create extra lifecycle churn.
+        */
+        assert_eq!(SLEEP_FOCUSED_SESSION_DEFAULT_KEY, "alt-shift-s");
+        let mut command = single_tab_command_model(
+            CommandPaneGroupId(10),
+            CommandSessionId(101),
+            "PRIVATE_DELAYED_SEND_TITLE_SECRET",
+        );
+
+        assert_eq!(
+            focused_command_pane_sleep_target(ShellFocusTarget::CommandPane, &command),
+            Some((CommandPaneGroupId(10), CommandSessionId(101)))
+        );
+        assert!(
+            focused_command_pane_sleep_target(
+                ShellFocusTarget::AgentsPane(WorkspacePaneId(1)),
+                &command,
+            )
+            .is_none()
+        );
+
+        command.mode = CommandPaneMode::Collapsed;
+        assert!(
+            focused_command_pane_sleep_target(ShellFocusTarget::CommandPane, &command).is_none()
+        );
+
+        command.mode = CommandPaneMode::Pinned;
+        assert!(command.set_session_sleeping(CommandSessionId(101), true));
+        assert!(
+            focused_command_pane_sleep_target(ShellFocusTarget::CommandPane, &command).is_none()
+        );
+    }
+
+    #[test]
+    fn focused_command_pane_wake_target_requires_sleeping_command_focus() {
+        /*
+        CDXC:GPUICommandFocusedSessionActions 2026-06-25-15:01:
+        Wake Focused Session is command-palette and hotkey-bridge behavior for a focused sleeping command terminal. It should recognize only Sleep/Wake focused-session ids at the bridge boundary, and it should wake only the active sleeping command tab while the command pane is expanded and shell-focused.
+
+        CDXC:GPUICommandFocusedSessionActions 2026-06-25-15:05:
+        Close Focused Session is the command-palette sibling of Sleep/Wake for command-pane terminals. Recognize the bridge id but require command-pane shell focus before the close path can run.
+
+        CDXC:GPUICommandDelayedSend 2026-06-25-15:11:
+        Delayed Send is a focused-pane command-palette row, not a settings modal action. Recognize it at the same bridge boundary so the command pane can open the timer modal for the focused mounted command terminal.
+
+        CDXC:GPUICommandCloseAfterDone 2026-06-25-15:24:
+        Close After Done is another focused-pane command-palette row. Recognize it at the bridge boundary so GPUI can toggle the command tab's terminal-scoped watcher without falling through to app-modal routing.
+
+        CDXC:GPUICommandPaneRename 2026-06-25-16:33:
+        Rename Active Session should be recognized at the same focused-session bridge boundary so command-pane focus opens Rename Session instead of ignoring the shared hotkey id.
+        */
+        assert_eq!(
+            gpui_command_pane_focused_session_hotkey_action("renameActiveSession"),
+            Some(GpuiCommandPaneFocusedSessionHotkeyAction::Rename)
+        );
+        assert_eq!(
+            gpui_command_pane_focused_session_hotkey_action("delayedSend"),
+            Some(GpuiCommandPaneFocusedSessionHotkeyAction::DelayedSend)
+        );
+        assert_eq!(
+            gpui_command_pane_focused_session_hotkey_action("closeAfterDone"),
+            Some(GpuiCommandPaneFocusedSessionHotkeyAction::CloseAfterDone)
+        );
+        assert_eq!(
+            gpui_command_pane_focused_session_hotkey_action("sleepFocusedSession"),
+            Some(GpuiCommandPaneFocusedSessionHotkeyAction::Sleep)
+        );
+        assert_eq!(
+            gpui_command_pane_focused_session_hotkey_action("wakeFocusedSession"),
+            Some(GpuiCommandPaneFocusedSessionHotkeyAction::Wake)
+        );
+        assert_eq!(
+            gpui_command_pane_focused_session_hotkey_action("closeFocusedSession"),
+            Some(GpuiCommandPaneFocusedSessionHotkeyAction::Close)
+        );
+        assert_eq!(
+            gpui_command_pane_focused_session_hotkey_action("openSettings"),
+            None
+        );
+        assert!(gpui_command_pane_close_focused_hotkey_should_run(
+            ShellFocusTarget::CommandPane
+        ));
+        assert!(!gpui_command_pane_close_focused_hotkey_should_run(
+            ShellFocusTarget::AgentsPane(WorkspacePaneId(1))
+        ));
+
+        let mut command =
+            single_tab_command_model(CommandPaneGroupId(10), CommandSessionId(101), "focused");
+        assert!(
+            focused_command_pane_wake_target(ShellFocusTarget::CommandPane, &command).is_none()
+        );
+
+        assert!(command.set_session_sleeping(CommandSessionId(101), true));
+        assert_eq!(
+            focused_command_pane_wake_target(ShellFocusTarget::CommandPane, &command),
+            Some((CommandPaneGroupId(10), CommandSessionId(101)))
+        );
+        assert!(
+            focused_command_pane_wake_target(
+                ShellFocusTarget::AgentsPane(WorkspacePaneId(1)),
+                &command,
+            )
+            .is_none()
+        );
+
+        command.mode = CommandPaneMode::Collapsed;
+        assert!(
+            focused_command_pane_wake_target(ShellFocusTarget::CommandPane, &command).is_none()
+        );
+    }
+
+    #[test]
+    fn focused_command_pane_rename_target_requires_visible_command_focus() {
+        /*
+        CDXC:GPUICommandPaneRename 2026-06-25-16:33:
+        Rename Active Session in GPUI command panes should resolve only the active command tab while the expanded command pane owns shell focus. Hidden command strips and non-command focus must not open a rename modal for stale command state.
+        */
+        let mut command =
+            single_tab_command_model(CommandPaneGroupId(10), CommandSessionId(101), "focused");
+        assert_eq!(
+            focused_command_pane_rename_target(ShellFocusTarget::CommandPane, &command),
+            Some((CommandPaneGroupId(10), CommandSessionId(101)))
+        );
+        assert!(
+            focused_command_pane_rename_target(
+                ShellFocusTarget::AgentsPane(WorkspacePaneId(1)),
+                &command,
+            )
+            .is_none()
+        );
+        command.mode = CommandPaneMode::Collapsed;
+        assert!(
+            focused_command_pane_rename_target(ShellFocusTarget::CommandPane, &command).is_none()
+        );
+    }
+
+    #[test]
+    fn focused_command_pane_close_after_done_target_allows_sleeping_command_focus() {
+        /*
+        CDXC:GPUICommandCloseAfterDone 2026-06-25-16:52:
+        Close After Done is session-scoped in native command panes. GPUI should resolve the active command tab while the expanded command pane owns shell focus even when that tab is sleeping, so the command-palette row can arm or cancel persisted intent without waking the tab.
+        */
+        let mut command =
+            single_tab_command_model(CommandPaneGroupId(10), CommandSessionId(101), "focused");
+        assert_eq!(
+            focused_command_pane_close_after_done_target(ShellFocusTarget::CommandPane, &command),
+            Some((CommandPaneGroupId(10), CommandSessionId(101)))
+        );
+        assert!(
+            focused_command_pane_close_after_done_target(
+                ShellFocusTarget::AgentsPane(WorkspacePaneId(1)),
+                &command,
+            )
+            .is_none()
+        );
+
+        assert!(command.set_session_sleeping(CommandSessionId(101), true));
+        assert_eq!(
+            focused_command_pane_close_after_done_target(ShellFocusTarget::CommandPane, &command),
+            Some((CommandPaneGroupId(10), CommandSessionId(101)))
+        );
+        command.mode = CommandPaneMode::Collapsed;
+        assert!(
+            focused_command_pane_close_after_done_target(ShellFocusTarget::CommandPane, &command)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn focused_command_pane_delayed_send_target_requires_mounted_command_focus() {
+        /*
+        CDXC:GPUICommandDelayedSend 2026-06-25-15:11:
+        Focused Delayed Send can target only the expanded shell-focused command pane's active mounted command session. Collapsed panes, non-command focus, and sleeping command tabs must not open a timer against hidden or unmounted terminal state.
+        */
+        assert_eq!(
+            GpuiAppModalKind::from_modal_id("renameSession"),
+            Some(GpuiAppModalKind::RenameSession)
+        );
+        let rename_size = GpuiAppModalKind::RenameSession.window_size();
+        assert_eq!(
+            rename_size.width.as_f32(),
+            APP_MODAL_HOST_RENAME_SESSION_WINDOW_WIDTH,
+        );
+        assert_eq!(
+            rename_size.height.as_f32(),
+            APP_MODAL_HOST_RENAME_SESSION_WINDOW_HEIGHT,
+        );
+        assert!(GpuiAppModalKind::RenameSession.requires_sidebar_state());
+        assert_eq!(
+            GpuiAppModalKind::from_modal_id("delayedSend"),
+            Some(GpuiAppModalKind::DelayedSend)
+        );
+        let delayed_size = GpuiAppModalKind::DelayedSend.window_size();
+        assert_f32_close(
+            delayed_size.width.as_f32(),
+            APP_MODAL_HOST_DELAYED_SEND_WINDOW_WIDTH,
+        );
+        assert_f32_close(
+            delayed_size.height.as_f32(),
+            APP_MODAL_HOST_DELAYED_SEND_WINDOW_HEIGHT,
+        );
+
+        let mut command =
+            single_tab_command_model(CommandPaneGroupId(10), CommandSessionId(101), "focused");
+        assert_eq!(
+            focused_command_pane_delayed_send_target(ShellFocusTarget::CommandPane, &command),
+            Some((CommandPaneGroupId(10), CommandSessionId(101)))
+        );
+        assert_eq!(
+            command_pane_mounted_slot_for_session(&command, CommandSessionId(101)),
+            Some(CommandTerminalBodyMountSlotId {
+                group_id: CommandPaneGroupId(10),
+                session_id: CommandSessionId(101),
+            })
+        );
+        assert!(
+            focused_command_pane_delayed_send_target(
+                ShellFocusTarget::AgentsPane(WorkspacePaneId(1)),
+                &command,
+            )
+            .is_none()
+        );
+
+        command.mode = CommandPaneMode::Collapsed;
+        assert!(
+            focused_command_pane_delayed_send_target(ShellFocusTarget::CommandPane, &command)
+                .is_none()
+        );
+        assert!(command_pane_mounted_slot_for_session(&command, CommandSessionId(101)).is_none());
+
+        command.mode = CommandPaneMode::Pinned;
+        assert!(command.set_session_sleeping(CommandSessionId(101), true));
+        assert!(
+            focused_command_pane_delayed_send_target(ShellFocusTarget::CommandPane, &command)
+                .is_none()
+        );
+        assert!(command_pane_mounted_slot_for_session(&command, CommandSessionId(101)).is_none());
+    }
+
+    #[test]
+    fn command_delayed_send_validation_and_persistence_restores_live_timer_checkpoints() {
+        /*
+        CDXC:GPUICommandDelayedSend 2026-06-25-15:11:
+        GPUI command delayed-send validation mirrors the shared modal contract. Model-only command-pane serialization omits live timer details, while app-level persistence may snapshot the safe restart checkpoint for a real timer.
+
+        CDXC:GPUICommandDelayedSend 2026-06-25-15:42:
+        The command body Delayed Send badge uses the same mm:ss / hh:mm:ss countdown projection as the shared modal and tab timer, but it is generated only from a live runtime timer.
+
+        CDXC:GPUICommandDelayedSend 2026-06-25-15:46:
+        Manual Sleep preserves non-runtime Delayed Send intent on parked command tabs. Restored semantic delayed-send flags may survive sleeping shell state.
+
+        CDXC:GPUICommandDelayedSend 2026-06-25-16:41:
+        App-level delayed-send persistence mirrors macOS restart behavior by restoring from `delayedSendRemainingMs`; the checkpoint must not carry command text, title, terminal content, paths, runtime ids, or stdout/stderr.
+
+        CDXC:GPUICommandDelayedSend 2026-06-25-16:56:
+        Shell-state parsing may preserve a sleeping delayed-send placeholder, but applying a persisted timer restore is a startup wake reason so the resumed timer can submit Return through a live command tab.
+
+        CDXC:GPUICommandDelayedSend 2026-06-25-17:19:
+        Startup timer restore must also promote the restored command tab into the visible command-pane body when the panel was collapsed or the tab was inactive. GPUI has no hidden command body mount, so visibility is part of making the restored timer executable.
+        */
+        assert!(gpui_command_delayed_send_duration_from_millis(0).is_none());
+        assert!(gpui_command_delayed_send_duration_from_millis(59_000).is_none());
+        assert!(gpui_command_delayed_send_duration_from_millis(61_000).is_none());
+        assert!(
+            gpui_command_delayed_send_duration_from_millis(
+                COMMAND_PANE_DELAYED_SEND_MAX_DELAY_MS + 1
+            )
+            .is_none()
+        );
+        assert_eq!(
+            gpui_command_delayed_send_restore_duration(1),
+            Duration::from_millis(COMMAND_PANE_DELAYED_SEND_RESTORE_FIRE_GRACE_MS)
+        );
+        assert_eq!(
+            gpui_command_delayed_send_restore_duration(65_000),
+            Duration::from_millis(65_000)
+        );
+        assert_eq!(
+            COMMAND_PANE_DELAYED_SEND_PERSIST_INTERVAL,
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            gpui_command_delayed_send_duration_from_millis(60_000),
+            Some(Duration::from_secs(60))
+        );
+        assert_eq!(
+            gpui_command_delayed_send_duration_from_millis(2_147_460_000),
+            Some(Duration::from_millis(2_147_460_000))
+        );
+        assert_eq!(gpui_command_delayed_send_countdown_label(65_000), "01:05");
+        assert_eq!(
+            gpui_command_delayed_send_countdown_label(3_660_000),
+            "01:01:00"
+        );
+        assert_eq!(
+            gpui_command_delayed_send_duration_label(Duration::from_secs(3_660)),
+            "1h 1m"
+        );
+        assert_eq!(
+            gpui_command_session_id_from_modal_value(&serde_json::json!("101")),
+            Some(CommandSessionId(101))
+        );
+        assert!(gpui_command_session_id_from_modal_value(&serde_json::json!("")).is_none());
+        let now = SystemTime::UNIX_EPOCH
+            .checked_add(Duration::from_secs(120))
+            .unwrap();
+        let timer = GpuiCommandDelayedSendTimer {
+            deadline_at: now.checked_add(Duration::from_secs(65)).unwrap(),
+            generation: 7,
+        };
+        assert_eq!(
+            gpui_command_delayed_send_body_badge_label(Some(timer), now),
+            Some("01:05".to_string())
+        );
+        assert_eq!(gpui_command_delayed_send_body_badge_label(None, now), None);
+
+        let mut command =
+            single_tab_command_model(CommandPaneGroupId(10), CommandSessionId(101), "focused");
+        command
+            .session_mut(CommandSessionId(101))
+            .unwrap()
+            .set_delayed_send_active(true, true);
+        assert!(
+            command.session(CommandSessionId(101)).unwrap().tab_status()
+                == CommandTerminalTabStatus::DelayedSend
+        );
+        let persisted = shell_state_text(&command_pane_model_to_shell_state_json(&command));
+        assert!(persisted.contains("\"delayedSendActive\":false"));
+        assert!(!persisted.contains("\"delayedSendActive\":true"));
+        assert_text_omits(
+            &persisted,
+            &["delayedSendDeadlineAt", "delayedSendRemainingMs"],
+        );
+
+        let timer_persisted = shell_state_text(
+            &command_pane_model_to_shell_state_json_with_delayed_send_timers(
+                &command,
+                &HashMap::from([(CommandSessionId(101), timer)]),
+                now,
+            ),
+        );
+        assert!(timer_persisted.contains("\"delayedSendActive\":true"));
+        assert!(timer_persisted.contains("\"delayedSendDeadlineAt\":\"1970-01-01T00:03:05.000Z\""));
+        assert!(timer_persisted.contains("\"delayedSendRemainingMs\":65000"));
+        assert_text_omits(
+            &timer_persisted,
+            &[
+                "PRIVATE_DELAYED_SEND_TITLE_SECRET",
+                "commandText",
+                "stdout",
+                "stderr",
+                "terminal content",
+                "/Users/",
+                "runtimeSession",
+            ],
+        );
+        let decoded_timer_state: serde_json::Value =
+            serde_json::from_str(&timer_persisted).unwrap();
+        let restored_timer_command =
+            command_pane_model_from_shell_state(&decoded_timer_state, 1_000.0).unwrap();
+        assert_eq!(
+            command_delayed_send_restore_timers_from_shell_state(
+                &decoded_timer_state,
+                &restored_timer_command,
+            ),
+            vec![GpuiCommandDelayedSendRestoreTimer {
+                session_id: CommandSessionId(101),
+                remaining_ms: 65_000,
+            }]
+        );
+        assert!(
+            command_delayed_send_restore_timers_from_shell_state(
+                &serde_json::json!({
+                    "terminalSessions": [{
+                        "id": 101,
+                        "delayedSendActive": true,
+                        "delayedSendRemainingMs": 0,
+                    }]
+                }),
+                &restored_timer_command,
+            )
+            .is_empty()
+        );
+
+        command
+            .session_mut(CommandSessionId(101))
+            .unwrap()
+            .set_delayed_send_active(true, false);
+        let persisted = shell_state_text(&command_pane_model_to_shell_state_json(&command));
+        assert!(persisted.contains("\"delayedSendActive\":true"));
+
+        assert!(command.set_session_sleeping(CommandSessionId(101), true));
+        let persisted = shell_state_text(&command_pane_model_to_shell_state_json(&command));
+        assert!(persisted.contains("\"delayedSendActive\":true"));
+        let restored_sleeping = command_session_from_shell_state(&serde_json::json!({
+            "id": 202,
+            "delayedSendActive": true,
+            "isSleeping": true,
+        }))
+        .expect("sleeping delayed-send command session should restore");
+        assert!(restored_sleeping.delayed_send_active);
+        assert!(restored_sleeping.is_sleeping);
+
+        let mut restore_wake_command = CommandPaneModel::shell_default(1_000.0);
+        restore_wake_command.mode = CommandPaneMode::Collapsed;
+        restore_wake_command.last_expanded_mode = CommandPaneMode::Floating;
+        assert_eq!(
+            restore_wake_command.active_group_and_session_id(),
+            Some((CommandPaneGroupId(1), CommandSessionId(1)))
+        );
+        assert!(restore_wake_command.set_session_sleeping(CommandSessionId(2), true));
+        assert!(command_pane_apply_delayed_send_restore_intent(
+            &mut restore_wake_command,
+            CommandSessionId(2),
+        ));
+        let restored_timer_session = restore_wake_command
+            .session(CommandSessionId(2))
+            .expect("restored timer session should exist");
+        assert!(restored_timer_session.delayed_send_active);
+        assert!(restored_timer_session.delayed_send_timer_owned);
+        assert!(!restored_timer_session.is_sleeping);
+        assert!(restore_wake_command.is_expanded());
+        assert!(matches!(
+            restore_wake_command.mode,
+            CommandPaneMode::Floating
+        ));
+        assert_eq!(
+            restore_wake_command.active_group_and_session_id(),
+            Some((CommandPaneGroupId(1), CommandSessionId(2)))
+        );
+        assert_eq!(
+            command_pane_mounted_slot_for_session(&restore_wake_command, CommandSessionId(2)),
+            Some(CommandTerminalBodyMountSlotId {
+                group_id: CommandPaneGroupId(1),
+                session_id: CommandSessionId(2),
+            })
+        );
+        assert!(!command_pane_apply_delayed_send_restore_intent(
+            &mut restore_wake_command,
+            CommandSessionId(2),
+        ));
+        assert!(!command_pane_apply_delayed_send_restore_intent(
+            &mut restore_wake_command,
+            CommandSessionId(404),
+        ));
+    }
+
+    #[test]
+    fn command_startup_activity_restore_intents_wake_visible_command_body() {
+        /*
+        CDXC:GPUICommandStartupRestore 2026-06-25-17:25:
+        Command-pane startup activity restore should mirror native restoreActivity: parse raw Working/Attention hints even for sleeping rows, expand/select through normal visible layout so GPUI has a command body mount slot, clear Working after wake, and keep Attention visible.
+        */
+        let mut working_state =
+            command_pane_model_to_shell_state_json(&CommandPaneModel::shell_default(1_000.0));
+        let working_state_object = working_state.as_object_mut().unwrap();
+        working_state_object.insert("mode".to_string(), serde_json::json!("collapsed"));
+        working_state_object.insert(
+            "lastExpandedMode".to_string(),
+            serde_json::json!("floating"),
+        );
+        let sessions = working_state_object
+            .get_mut("terminalSessions")
+            .unwrap()
+            .as_array_mut()
+            .unwrap();
+        let working_session = sessions
+            .iter_mut()
+            .find(|value| value.get("id").and_then(serde_json::Value::as_u64) == Some(2))
+            .unwrap()
+            .as_object_mut()
+            .unwrap();
+        working_session.insert("activity".to_string(), serde_json::json!("working"));
+        working_session.insert("isSleeping".to_string(), serde_json::json!(true));
+
+        let mut restored_working =
+            command_pane_model_from_shell_state(&working_state, 1_000.0).unwrap();
+        assert!(
+            restored_working
+                .session(CommandSessionId(2))
+                .unwrap()
+                .is_sleeping
+        );
+        assert!(
+            restored_working
+                .session(CommandSessionId(2))
+                .unwrap()
+                .activity
+                == CommandTerminalActivity::Idle
+        );
+        let working_intents = command_startup_activity_restore_intents_from_shell_state(
+            &working_state,
+            &restored_working,
+        );
+        assert_eq!(
+            working_intents,
+            vec![GpuiCommandStartupActivityRestoreIntent {
+                session_id: CommandSessionId(2),
+                activity: CommandTerminalActivity::Working,
+            }]
+        );
+
+        assert!(command_pane_apply_startup_activity_restore_intents(
+            &mut restored_working,
+            &working_intents,
+        ));
+        assert!(restored_working.is_expanded());
+        assert!(matches!(restored_working.mode, CommandPaneMode::Floating));
+        assert_eq!(
+            restored_working.active_group_and_session_id(),
+            Some((CommandPaneGroupId(1), CommandSessionId(2)))
+        );
+        let working_session = restored_working
+            .session(CommandSessionId(2))
+            .expect("working restore target should survive shell-state parsing");
+        assert!(!working_session.is_sleeping);
+        assert!(working_session.activity == CommandTerminalActivity::Idle);
+        assert_eq!(
+            command_pane_mounted_slot_for_session(&restored_working, CommandSessionId(2)),
+            Some(CommandTerminalBodyMountSlotId {
+                group_id: CommandPaneGroupId(1),
+                session_id: CommandSessionId(2),
+            })
+        );
+        assert!(!command_pane_apply_startup_activity_restore_intents(
+            &mut restored_working,
+            &working_intents,
+        ));
+
+        let mut attention_restore = CommandPaneModel::shell_default(1_000.0);
+        attention_restore.mode = CommandPaneMode::Collapsed;
+        attention_restore.last_expanded_mode = CommandPaneMode::Floating;
+        assert!(attention_restore.set_session_sleeping(CommandSessionId(2), true));
+        let attention_intents = vec![GpuiCommandStartupActivityRestoreIntent {
+            session_id: CommandSessionId(2),
+            activity: CommandTerminalActivity::Attention,
+        }];
+        assert!(command_pane_apply_startup_activity_restore_intents(
+            &mut attention_restore,
+            &attention_intents,
+        ));
+        let attention_session = attention_restore
+            .session(CommandSessionId(2))
+            .expect("attention restore target should exist");
+        assert!(!attention_session.is_sleeping);
+        assert!(attention_session.activity == CommandTerminalActivity::Attention);
+        assert_eq!(
+            attention_restore.active_group_and_session_id(),
+            Some((CommandPaneGroupId(1), CommandSessionId(2)))
+        );
+        assert_eq!(
+            command_pane_mounted_slot_for_session(&attention_restore, CommandSessionId(2)),
+            Some(CommandTerminalBodyMountSlotId {
+                group_id: CommandPaneGroupId(1),
+                session_id: CommandSessionId(2),
+            })
+        );
+        assert!(!command_pane_apply_startup_activity_restore_intents(
+            &mut attention_restore,
+            &attention_intents,
+        ));
+    }
+
+    #[test]
+    fn command_close_after_done_marks_only_done_command_actions() {
+        /*
+        CDXC:GPUICommandCloseAfterDone 2026-06-25-15:24:
+        GPUI starts the Close After Done countdown only for terminal rows that are already done: Attention always qualifies, and Action-owned command tabs qualify once their live run is no longer Working. Generic idle command placeholders and sleeping tabs stay armed without a countdown.
+        */
+        let generic_idle =
+            CommandTerminalSession::placeholder(CommandSessionId(1), "Idle".to_string());
+        assert!(!gpui_command_close_after_done_session_marked_done(
+            &generic_idle
+        ));
+
+        let attention =
+            CommandTerminalSession::placeholder(CommandSessionId(2), "Attention".to_string())
+                .with_activity(CommandTerminalActivity::Attention);
+        assert!(gpui_command_close_after_done_session_marked_done(
+            &attention
+        ));
+
+        let action_idle =
+            CommandTerminalSession::placeholder(CommandSessionId(3), "Build".to_string())
+                .with_action_command_id("build".to_string());
+        assert!(gpui_command_close_after_done_session_marked_done(
+            &action_idle
+        ));
+
+        let action_working =
+            CommandTerminalSession::placeholder(CommandSessionId(4), "Build".to_string())
+                .with_activity(CommandTerminalActivity::Working)
+                .with_action_command_id("build".to_string());
+        assert!(!gpui_command_close_after_done_session_marked_done(
+            &action_working
+        ));
+
+        let mut action_run_clearing =
+            CommandTerminalSession::placeholder(CommandSessionId(5), "Build".to_string())
+                .with_action_command_id("build".to_string());
+        action_run_clearing.action_run_id = Some("run-private".to_string());
+        assert!(!gpui_command_close_after_done_session_marked_done(
+            &action_run_clearing
+        ));
+
+        let sleeping_attention =
+            CommandTerminalSession::placeholder(CommandSessionId(6), "Sleeping".to_string())
+                .with_activity(CommandTerminalActivity::Attention)
+                .with_sleeping(true);
+        assert!(!gpui_command_close_after_done_session_marked_done(
+            &sleeping_attention
+        ));
+    }
+
+    #[test]
+    fn command_close_after_done_persistence_keeps_only_armed_boolean() {
+        /*
+        CDXC:GPUICommandCloseAfterDone 2026-06-25-15:24:
+        Persisting command Close After Done stores only the user-facing armed boolean. Runtime deadlines, generations, action run ids, command ids, status-file paths, and sleeping-tab timers must not be serialized into shell state.
+
+        CDXC:GPUICommandCloseAfterDone 2026-06-25-15:46:
+        Sleeping command tabs keep Close After Done armed like native session records. The countdown remains runtime-only and resumes evaluation after wake instead of being cleared by the sleep mutation.
+        */
+        let mut command =
+            single_tab_command_model(CommandPaneGroupId(10), CommandSessionId(101), "focused");
+        let session = command.session_mut(CommandSessionId(101)).unwrap();
+        session.close_after_done_armed = true;
+        session.action_command_id = Some("build".to_string());
+        session.action_run_id = Some("run-private".to_string());
+        session.action_status_file_path = Some(PathBuf::from(
+            "/Users/madda/private/ghostex-command-action.state",
+        ));
+        let persisted = shell_state_text(&command_pane_model_to_shell_state_json(&command));
+        assert!(persisted.contains("\"closeAfterDone\":true"));
+        assert_text_omits(
+            &persisted,
+            &[
+                "build",
+                "run-private",
+                "ghostex-command-action",
+                "/Users/",
+                "deadline",
+                "generation",
+            ],
+        );
+
+        command
+            .session_mut(CommandSessionId(101))
+            .unwrap()
+            .close_after_done_armed = false;
+        let persisted = shell_state_text(&command_pane_model_to_shell_state_json(&command));
+        assert!(persisted.contains("\"closeAfterDone\":false"));
+
+        command
+            .session_mut(CommandSessionId(101))
+            .unwrap()
+            .close_after_done_armed = true;
+        assert!(command.set_session_sleeping(CommandSessionId(101), true));
+        let persisted = shell_state_text(&command_pane_model_to_shell_state_json(&command));
+        assert!(persisted.contains("\"closeAfterDone\":true"));
+
+        let restored = command_session_from_shell_state(&serde_json::json!({
+            "id": 202,
+            "activity": "idle",
+            "closeAfterDone": true,
+            "isSleeping": false,
+        }))
+        .expect("armed command session should restore");
+        assert!(restored.close_after_done_armed);
+
+        let restored_sleeping = command_session_from_shell_state(&serde_json::json!({
+            "id": 203,
+            "activity": "attention",
+            "closeAfterDone": true,
+            "isSleeping": true,
+        }))
+        .expect("sleeping command session should restore");
+        assert!(restored_sleeping.close_after_done_armed);
+        assert!(restored_sleeping.is_sleeping);
+    }
+
+    #[test]
     fn directional_spatial_focus_prefers_rendered_geometry_over_flat_order() {
         let current_target = SpatialFocusTarget::AgentsPane(WorkspacePaneId(2));
         let current_bounds = focus_test_bounds(100.0, 100.0, 40.0, 40.0);
@@ -83899,6 +94248,39 @@ mod tests {
             ),
             SpatialFocusTarget::AgentsPane(WorkspacePaneId(4)),
         );
+    }
+
+    #[test]
+    fn command_pane_rename_updates_live_title_without_persisting_user_title() {
+        /*
+        CDXC:GPUICommandPaneRename 2026-06-25-16:33:
+        Local command-pane rename is live tab chrome only. Persisted command shell state remains title-free so user-entered names do not become durable shell-layout metadata.
+        */
+        assert_eq!(
+            gpui_command_session_rename_title_from_modal_value(&serde_json::json!(
+                "  Build\n logs\tquickly  "
+            ))
+            .as_deref(),
+            Some("Build logs quickly")
+        );
+        assert!(
+            gpui_command_session_rename_title_from_modal_value(&serde_json::json!("   ")).is_none()
+        );
+
+        let mut command =
+            single_tab_command_model(CommandPaneGroupId(10), CommandSessionId(101), "focused");
+        assert!(command.rename_session(CommandSessionId(101), "Renamed Command".to_string()));
+        assert_eq!(
+            command
+                .session(CommandSessionId(101))
+                .map(|session| session.title.as_str()),
+            Some("Renamed Command")
+        );
+        assert!(!command.rename_session(CommandSessionId(101), "Renamed Command".to_string()));
+        assert!(!command.rename_session(CommandSessionId(404), "Missing".to_string()));
+
+        let persisted = shell_state_text(&command_pane_model_to_shell_state_json(&command));
+        assert!(!persisted.contains("Renamed Command"));
     }
 
     #[test]

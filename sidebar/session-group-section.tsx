@@ -27,10 +27,8 @@ import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from "@dn
 import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { useDroppable } from "@dnd-kit/react";
 import { useSortable } from "@dnd-kit/react/sortable";
-import { createPortal } from "react-dom";
 import {
   Fragment,
-  forwardRef,
   startTransition,
   useCallback,
   useLayoutEffect,
@@ -38,13 +36,11 @@ import {
   useEffectEvent,
   useRef,
   useState,
-  type ButtonHTMLAttributes,
   type CSSProperties,
-  type Ref,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { AppTooltip, SIDEBAR_TOOLTIP_DISMISS_EVENT } from "./app-tooltip";
+import { AppTooltip } from "./app-tooltip";
 import {
   getSidebarSessionLifecycleState,
   type SidebarTheme,
@@ -75,6 +71,7 @@ import type { WebviewApi } from "./webview-api";
 import { openAppModal } from "./app-modal-host-bridge";
 import {
   PROJECT_SESSION_LIST_COLLAPSED_CHANGED_EVENT,
+  getProjectSessionListBoundaryHeight,
   getProjectSessionListCollapsedHeight,
   getVisibleProjectSessionIds,
   readProjectSessionListCollapsedState,
@@ -89,6 +86,7 @@ import {
   readWorkspaceThemeColorHistory,
   writeWorkspaceThemeColorHistory,
 } from "./workspace-theme-color-history";
+import { SidebarFixedTooltipButton } from "./sidebar-fixed-tooltip-button";
 import {
   PRIMARY_AGENT_LAUNCHER_CHANGED_EVENT,
   readPrimaryAgentLauncherId,
@@ -103,8 +101,6 @@ const CONTEXT_MENU_ITEM_HEIGHT_PX = 34;
 const CONTEXT_MENU_VERTICAL_PADDING_PX = 12;
 const GROUP_CONTROL_MENU_MARGIN_PX = 12;
 const GROUP_AGENT_MENU_WIDTH_PX = 220;
-const PROJECT_HEADER_TOOLTIP_VIEWPORT_MARGIN_PX = 8;
-const PROJECT_HEADER_TOOLTIP_TRIGGER_OFFSET_PX = 8;
 /**
  * CDXC:ProjectReorder 2026-06-13-05:19:
  * macOS sidebar project-header reorder should require a slightly longer hold
@@ -275,220 +271,11 @@ type GroupContextMenuPosition = ContextMenuPosition & {
 
 type GroupControlMenu = "project-agent";
 
-type ProjectHeaderActionTooltipPosition = {
-  left: number;
-  maxWidth: number;
-  top: number;
-};
-
-type ProjectHeaderActionButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  tooltip: string;
-};
-
-function assignProjectHeaderActionRef(
-  ref: Ref<HTMLButtonElement> | undefined,
-  value: HTMLButtonElement | null,
-): void {
-  if (!ref) {
-    return;
-  }
-
-  if (typeof ref === "function") {
-    ref(value);
-    return;
-  }
-
-  ref.current = value;
-}
-
-const ProjectHeaderActionButton = forwardRef<
-  HTMLButtonElement,
-  ProjectHeaderActionButtonProps
->(function ProjectHeaderActionButton(
-  {
-    children,
-    className,
-    disabled,
-    onBlur,
-    onFocus,
-    onMouseEnter,
-    onMouseLeave,
-    tooltip,
-    ...buttonProps
-  },
-  forwardedRef,
-) {
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const tooltipRef = useRef<HTMLDivElement>(null);
-  const [isTooltipOpen, setIsTooltipOpen] = useState(false);
-  const [tooltipPosition, setTooltipPosition] =
-    useState<ProjectHeaderActionTooltipPosition>();
-
-  const setButtonRef = (button: HTMLButtonElement | null) => {
-    buttonRef.current = button;
-    assignProjectHeaderActionRef(forwardedRef, button);
-  };
-
-  const closeTooltip = () => {
-    setIsTooltipOpen(false);
-    setTooltipPosition(undefined);
-  };
-
-  const openTooltip = () => {
-    if (disabled || !tooltip) {
-      closeTooltip();
-      return;
-    }
-
-    setIsTooltipOpen(true);
-  };
-
-  useEffect(() => {
-    const handleSidebarTooltipDismiss = () => closeTooltip();
-    window.addEventListener(SIDEBAR_TOOLTIP_DISMISS_EVENT, handleSidebarTooltipDismiss);
-    return () => {
-      window.removeEventListener(SIDEBAR_TOOLTIP_DISMISS_EVENT, handleSidebarTooltipDismiss);
-    };
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!isTooltipOpen) {
-      return undefined;
-    }
-
-    const updateTooltipPosition = () => {
-      const button = buttonRef.current;
-      const tooltipElement = tooltipRef.current;
-      if (!button || !tooltipElement) {
-        return;
-      }
-
-      const buttonBounds = button.getBoundingClientRect();
-      const tooltipBounds = tooltipElement.getBoundingClientRect();
-      const maxWidth = Math.max(
-        0,
-        window.innerWidth - PROJECT_HEADER_TOOLTIP_VIEWPORT_MARGIN_PX * 2,
-      );
-      const width = Math.min(tooltipBounds.width, maxWidth);
-      const halfWidth = width / 2;
-      const centeredLeft = buttonBounds.left + buttonBounds.width / 2;
-      const left = Math.max(
-        PROJECT_HEADER_TOOLTIP_VIEWPORT_MARGIN_PX + halfWidth,
-        Math.min(
-          centeredLeft,
-          window.innerWidth - PROJECT_HEADER_TOOLTIP_VIEWPORT_MARGIN_PX - halfWidth,
-        ),
-      );
-      const belowTop = buttonBounds.bottom + PROJECT_HEADER_TOOLTIP_TRIGGER_OFFSET_PX;
-      const preferredTop = belowTop;
-      const top = Math.max(
-        PROJECT_HEADER_TOOLTIP_VIEWPORT_MARGIN_PX,
-        Math.min(
-          preferredTop,
-          window.innerHeight - PROJECT_HEADER_TOOLTIP_VIEWPORT_MARGIN_PX - tooltipBounds.height,
-        ),
-      );
-
-      setTooltipPosition((previousPosition) => {
-        if (
-          previousPosition?.left === left &&
-          previousPosition.maxWidth === maxWidth &&
-          previousPosition.top === top
-        ) {
-          return previousPosition;
-        }
-
-        return { left, maxWidth, top };
-      });
-    };
-
-    updateTooltipPosition();
-    window.addEventListener("resize", updateTooltipPosition);
-    window.addEventListener("scroll", updateTooltipPosition, true);
-
-    const resizeObserver =
-      typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(updateTooltipPosition);
-    if (buttonRef.current) {
-      resizeObserver?.observe(buttonRef.current);
-    }
-    if (tooltipRef.current) {
-      resizeObserver?.observe(tooltipRef.current);
-    }
-
-    return () => {
-      window.removeEventListener("resize", updateTooltipPosition);
-      window.removeEventListener("scroll", updateTooltipPosition, true);
-      resizeObserver?.disconnect();
-    };
-  }, [isTooltipOpen, tooltip]);
-
-  /*
-   * CDXC:ProjectHeaderTooltips 2026-05-29-20:29:
-   * Project-header action tooltips must paint above subsequent sticky project
-   * headers. Keep the actual header button in its layout slot, but portal the
-   * tooltip bubble to document.body and place it from the button rect so group
-   * and sticky-header stacking contexts cannot cover the label.
-   *
-   * CDXC:SidebarTooltips 2026-05-30-06:36:
-   * Sidebar action tooltips must share the square bordered surface and open
-   * below the hovered action. Keep the portal placement logic for native
-   * webview stacking, but stop flipping project-header action labels above the
-   * trigger when the sidebar has more room on top.
-   */
-  return (
-    <>
-      <button
-        {...buttonProps}
-        className={className}
-        disabled={disabled}
-        onBlur={(event) => {
-          onBlur?.(event);
-          closeTooltip();
-        }}
-        onFocus={(event) => {
-          onFocus?.(event);
-          openTooltip();
-        }}
-        onMouseEnter={(event) => {
-          onMouseEnter?.(event);
-          openTooltip();
-        }}
-        onMouseLeave={(event) => {
-          onMouseLeave?.(event);
-          closeTooltip();
-        }}
-        ref={setButtonRef}
-      >
-        {children}
-      </button>
-      {isTooltipOpen && tooltip
-        ? createPortal(
-            <div
-              className="project-header-action-tooltip-popup"
-              ref={tooltipRef}
-              role="tooltip"
-              style={
-                {
-                  "--project-header-action-tooltip-left": tooltipPosition
-                    ? `${tooltipPosition.left}px`
-                    : "50vw",
-                  "--project-header-action-tooltip-max-width": tooltipPosition
-                    ? `${tooltipPosition.maxWidth}px`
-                    : `calc(100vw - ${PROJECT_HEADER_TOOLTIP_VIEWPORT_MARGIN_PX * 2}px)`,
-                  "--project-header-action-tooltip-top": tooltipPosition
-                    ? `${tooltipPosition.top}px`
-                    : "0px",
-                } as CSSProperties
-              }
-            >
-              {tooltip}
-            </div>,
-            document.body,
-          )
-        : null}
-    </>
-  );
-});
+/**
+ * CDXC:ProjectHeaderTooltips 2026-06-25-15:48:
+ * Project-header action labels share SidebarFixedTooltipButton so project, section, and footer/sidebar hover actions all use one fixed popup that avoids sticky headers, scroll masks, and Recent Projects clipping.
+ */
+const ProjectHeaderActionButton = SidebarFixedTooltipButton;
 
 export function shouldTreatProjectAsEmptySessionGroup({
   hasProjectContext,
@@ -880,6 +667,13 @@ export function SessionGroupSection({
   );
   const [projectSessionListCollapsedHeight, setProjectSessionListCollapsedHeight] =
     useState<number>();
+  const [expandedProjectSessionListScrollHeight, setExpandedProjectSessionListScrollHeight] =
+    useState<number>();
+  const [expandedProjectSessionListScrollState, setExpandedProjectSessionListScrollState] =
+    useState({
+      bottom: false,
+      top: false,
+    });
   const { collapsibleStyle, contentRef } = useCollapsibleHeight<HTMLDivElement>();
   const menuRef = useRef<HTMLDivElement>(null);
   const controlMenuRef = useRef<HTMLDivElement>(null);
@@ -989,6 +783,14 @@ export function SessionGroupSection({
   const projectSessionListRenderedSessionIdsKey = renderedSessionIds.join("\u0000");
   const shouldClipProjectSessionList =
     shouldShowProjectSessionListToggle && isProjectSessionListCollapsed;
+  const shouldScrollExpandedProjectSessionList =
+    shouldShowProjectSessionListToggle && !isProjectSessionListCollapsed;
+  const projectSessionListScrollBoundaryIndex =
+    Math.min(projectSessionListCollapsedCount, orderedSessionIds.length) - 1;
+  const projectSessionListScrollBoundarySessionId =
+    projectSessionListScrollBoundaryIndex >= 0
+      ? orderedSessionIds[projectSessionListScrollBoundaryIndex]
+      : undefined;
 
   useLayoutEffect(() => {
     if (!shouldClipProjectSessionList) {
@@ -1031,6 +833,111 @@ export function SessionGroupSection({
     projectSessionListLastVisibleSessionId,
     projectSessionListRenderedSessionIdsKey,
     shouldClipProjectSessionList,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!shouldScrollExpandedProjectSessionList) {
+      setExpandedProjectSessionListScrollHeight(undefined);
+      return;
+    }
+
+    const element = contentRef.current;
+    if (!element) {
+      return;
+    }
+
+    let animationFrameId = 0;
+
+    const updateScrollHeight = () => {
+      setExpandedProjectSessionListScrollHeight(
+        getProjectSessionListBoundaryHeight({
+          boundarySessionId: projectSessionListScrollBoundarySessionId,
+          sessionListElement: element,
+        }),
+      );
+    };
+
+    const scheduleUpdate = () => {
+      window.cancelAnimationFrame(animationFrameId);
+      animationFrameId = window.requestAnimationFrame(updateScrollHeight);
+    };
+
+    updateScrollHeight();
+    const observer = new ResizeObserver(() => {
+      scheduleUpdate();
+    });
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(animationFrameId);
+    };
+  }, [
+    contentRef,
+    projectSessionListRenderedSessionIdsKey,
+    projectSessionListScrollBoundarySessionId,
+    shouldScrollExpandedProjectSessionList,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!shouldScrollExpandedProjectSessionList) {
+      setExpandedProjectSessionListScrollState((previous) =>
+        previous.top || previous.bottom ? { bottom: false, top: false } : previous,
+      );
+      return;
+    }
+
+    const element = sessionsShellRef.current;
+    if (!element) {
+      return;
+    }
+
+    let animationFrameId = 0;
+
+    /**
+     * CDXC:ProjectSessionLists 2026-06-25-12:20:
+     * Expanded project session lists reuse the sidebar's Codex-style scroll
+     * overflow, including measured top/bottom fade availability for webviews
+     * that do not run scroll-linked mask animations reliably.
+     */
+    const updateScrollState = () => {
+      const hasScrollableOverflow = element.scrollHeight > element.clientHeight + 1;
+      const top = hasScrollableOverflow && element.scrollTop > 1;
+      const bottom =
+        hasScrollableOverflow &&
+        element.scrollTop + element.clientHeight < element.scrollHeight - 1;
+
+      setExpandedProjectSessionListScrollState((previous) =>
+        previous.top === top && previous.bottom === bottom ? previous : { bottom, top },
+      );
+    };
+
+    const scheduleUpdate = () => {
+      window.cancelAnimationFrame(animationFrameId);
+      animationFrameId = window.requestAnimationFrame(updateScrollState);
+    };
+
+    updateScrollState();
+    element.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+
+    const observer = new ResizeObserver(scheduleUpdate);
+    observer.observe(element);
+    if (contentRef.current) {
+      observer.observe(contentRef.current);
+    }
+
+    return () => {
+      element.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      observer.disconnect();
+      window.cancelAnimationFrame(animationFrameId);
+    };
+  }, [
+    contentRef,
+    expandedProjectSessionListScrollHeight,
+    projectSessionListRenderedSessionIdsKey,
+    shouldScrollExpandedProjectSessionList,
   ]);
 
   useLayoutEffect(() => {
@@ -1230,10 +1137,18 @@ export function SessionGroupSection({
     ? ({ ...groupHeaderAnchorStyle, ...projectThemeStyle } as CSSProperties)
     : groupHeaderAnchorStyle;
   const sessionsShellStyle =
-    shouldClipProjectSessionList && projectSessionListCollapsedHeight !== undefined
+    (shouldClipProjectSessionList && projectSessionListCollapsedHeight !== undefined) ||
+    (shouldScrollExpandedProjectSessionList &&
+      expandedProjectSessionListScrollHeight !== undefined)
       ? ({
           ...(collapsibleStyle ?? {}),
-          "--sidebar-collapse-content-height": `${projectSessionListCollapsedHeight}px`,
+          ...(shouldClipProjectSessionList && projectSessionListCollapsedHeight !== undefined
+            ? { "--sidebar-collapse-content-height": `${projectSessionListCollapsedHeight}px` }
+            : {}),
+          ...(shouldScrollExpandedProjectSessionList &&
+          expandedProjectSessionListScrollHeight !== undefined
+            ? { "--project-session-list-scroll-height": `${expandedProjectSessionListScrollHeight}px` }
+            : {}),
         } as CSSProperties)
       : collapsibleStyle;
 
@@ -2393,9 +2308,22 @@ export function SessionGroupSection({
         ) : null}
         <div
           aria-hidden={isCollapsed}
-          className="group-sessions-shell sidebar-collapse-shell"
+          className={`group-sessions-shell sidebar-collapse-shell${
+            shouldScrollExpandedProjectSessionList ? " vertical-scroll-fade-mask" : ""
+          }`}
           data-collapsed={String(isCollapsed)}
           data-project-session-list-clipped={String(shouldClipProjectSessionList)}
+          data-project-session-list-scrollable={String(shouldScrollExpandedProjectSessionList)}
+          data-scroll-glow-bottom={
+            shouldScrollExpandedProjectSessionList
+              ? String(expandedProjectSessionListScrollState.bottom)
+              : undefined
+          }
+          data-scroll-glow-top={
+            shouldScrollExpandedProjectSessionList
+              ? String(expandedProjectSessionListScrollState.top)
+              : undefined
+          }
           ref={sessionsShellRef}
           style={sessionsShellStyle}
         >

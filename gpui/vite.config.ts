@@ -7,12 +7,19 @@ import { defineConfig, type Plugin } from "vite";
 const gpuiRoot = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = path.resolve(gpuiRoot, "..");
 const sidebarOutDir = path.resolve(gpuiRoot, "dist/sidebar");
-const cefHtmlEntries = ["index.html", "kanban.html", "manage.html", "modal-host.html"] as const;
+const cefHtmlEntries = [
+  "index.html",
+  "kanban.html",
+  "manage.html",
+  "modal-host.html",
+  "titlebar-host.html",
+] as const;
 const cefHtmlEntryScripts = {
   "index.html": path.resolve(gpuiRoot, "sidebar/phase1-main.tsx"),
   "kanban.html": path.resolve(gpuiRoot, "sidebar/phase1-kanban-main.tsx"),
   "manage.html": path.resolve(gpuiRoot, "sidebar/phase1-manage-main.tsx"),
   "modal-host.html": path.resolve(repoRoot, "native/sidebar/modal-host.tsx"),
+  "titlebar-host.html": path.resolve(repoRoot, "native/sidebar/titlebar-host.tsx"),
 } satisfies Record<(typeof cefHtmlEntries)[number], string>;
 
 function inlineCefHtmlAssets(): Plugin {
@@ -30,8 +37,11 @@ function inlineCefHtmlAssets(): Plugin {
        * CDXC:GPUITitlebarAppModalHost 2026-06-24-10:42:
        * The GPUI app-modal window loads the same React modal host entry as macOS through a first-party CEF HTML file. Keep modal-host.html in the inlined CEF entry set so Settings, Hotkeys, and Command Palette can open without WebKit, duplicated modal UI, temporary pages, or dev-server-only assets.
        *
+       * CDXC:GPUITitlebarTips 2026-06-24-23:17:
+       * The GPUI info dropdown loads the shared React titlebar-host Tips panel through a first-party CEF HTML entry. Keep titlebar-host.html in the same single-file inlining path as modal-host.html so the gpui-component Popover can show production Tips content without AppKit/Swift dropdowns, duplicate GPUI tips data, or dev-server-only module loading.
+       *
        * CDXC:GPUICefBundleInlining 2026-06-24-22:01:
-       * Inlining only Vite's entry chunks leaves `import "./chunk.js"` specifiers inside the HTML-root module, even though emitted chunks live under assets/. CEF then loads a blank file:// sidebar before React can mount. Keep Vite as the CSS/HTML producer, but replace each CEF entry script with a single esbuild browser bundle so sidebar, Kanban, Manage, and app-modal hosts do not depend on file-url module graph loading or relaxed Chromium switches.
+       * Inlining only Vite's entry chunks leaves `import "./chunk.js"` specifiers inside the HTML-root module, even though emitted chunks live under assets/. CEF then loads a blank file:// sidebar before React can mount. Keep Vite as the CSS/HTML producer, but replace each CEF entry script with a single esbuild browser bundle so sidebar, Kanban, Manage, app-modal, and titlebar-panel hosts do not depend on file-url module graph loading or relaxed Chromium switches.
        *
        * CDXC:GPUICefBundleInlining 2026-06-24-22:07:
        * Rebuild the final file from the source HTML instead of regex-editing Vite's transformed inline JavaScript. Generated React code can contain script-tag-shaped strings, so final HTML assembly must extract only emitted style tags from Vite output, then inject the esbuild single-file module into the original CEF wrapper.
@@ -195,6 +205,7 @@ export default defineConfig({
         kanban: path.resolve(gpuiRoot, "kanban.html"),
         manage: path.resolve(gpuiRoot, "manage.html"),
         modalHost: path.resolve(gpuiRoot, "modal-host.html"),
+        titlebarHost: path.resolve(gpuiRoot, "titlebar-host.html"),
       },
     },
   },

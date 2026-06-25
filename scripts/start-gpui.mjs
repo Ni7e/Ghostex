@@ -125,6 +125,10 @@ function pathExistsWithoutFollowingFinalSymlink(candidatePath) {
 }
 
 async function closeRunningGpuiBundle() {
+  /*
+  CDXC:GPUIStartCommand 2026-06-25-13:56:
+  The local GPUI rebuild command must fully close the exact dev bundle before replacing it. If AppleScript quit and SIGTERM leave a stale or slow GPUI process alive, escalate to SIGKILL and still verify the bundle has exited before building.
+  */
   let pids = findRunningGpuiBundlePids();
   if (pids.length === 0) {
     return;
@@ -147,7 +151,20 @@ async function closeRunningGpuiBundle() {
       // Process already exited.
     }
   }
-  if (!(await waitForGpuiBundleExit(8000))) {
+  if (await waitForGpuiBundleExit(8000)) {
+    return;
+  }
+
+  pids = findRunningGpuiBundlePids();
+  console.log(`Force closing ${appName} before rebuilding ${appPath}.`);
+  for (const pid of pids) {
+    try {
+      process.kill(Number(pid), "SIGKILL");
+    } catch {
+      // Process already exited.
+    }
+  }
+  if (!(await waitForGpuiBundleExit(2000))) {
     throw new Error(`${appName} did not exit, refusing to rebuild ${appPath} while it is still running.`);
   }
 }

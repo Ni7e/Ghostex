@@ -30,6 +30,8 @@ pub enum SidebarBridgeEvent {
     ProjectWorkareaReadiness(String),
     ManageFileWorkareaOperationRequest(String),
     NativeProjectPathAction(String),
+    SidebarCommandAction(String),
+    SidebarCommandRunEnd(String),
     GxserverPresentationFocusState(String),
 }
 

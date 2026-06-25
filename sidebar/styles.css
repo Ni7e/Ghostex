@@ -2167,10 +2167,24 @@ button,
 
 .ghostex-settings-shadcn .settings-sidebar-page-row {
   align-items: stretch;
+  border-radius: var(--settings-radius-control);
   display: grid;
   gap: 0.125rem;
   grid-template-columns: minmax(0, 1fr) auto;
   min-width: 0;
+}
+
+.ghostex-settings-shadcn .settings-sidebar-page-row:hover,
+.ghostex-settings-shadcn .settings-sidebar-page-row:focus-within,
+.ghostex-settings-shadcn .settings-sidebar-page-row:has(.settings-sidebar-tab-trigger[data-active]) {
+  /*
+   * CDXC:SettingsNavigation 2026-06-25-17:05:
+   * Expandable Settings sidebar page rows must highlight the full row,
+   * including the disclosure chevron, so active pages read as one button rather
+   * than a selected label beside an unselected icon target.
+   */
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 
 .ghostex-settings-shadcn .settings-sidebar-tab-trigger[data-slot="tabs-trigger"] {
@@ -2180,6 +2194,7 @@ button,
   color: var(--foreground) !important;
   font-size: 0.8125rem;
   font-weight: 500 !important;
+  gap: 0.5rem;
   height: auto;
   justify-content: flex-start !important;
   letter-spacing: 0;
@@ -2191,9 +2206,13 @@ button,
   width: 100%;
 }
 
+.ghostex-settings-shadcn .settings-sidebar-page-title {
+  min-width: 0;
+}
+
 .ghostex-settings-shadcn .settings-sidebar-tab-trigger[data-slot="tabs-trigger"]:hover,
 .ghostex-settings-shadcn .settings-sidebar-tab-trigger[data-slot="tabs-trigger"][data-active] {
-  background: var(--accent) !important;
+  background: transparent !important;
   color: var(--accent-foreground) !important;
 }
 
@@ -2205,6 +2224,12 @@ button,
   align-self: stretch;
   min-height: 2rem;
   width: 2rem;
+}
+
+.ghostex-settings-shadcn .settings-sidebar-page-disclosure:hover,
+.ghostex-settings-shadcn .settings-sidebar-page-disclosure:focus-visible {
+  background: transparent;
+  color: inherit;
 }
 
 .ghostex-settings-shadcn .settings-sidebar-subsection-list {

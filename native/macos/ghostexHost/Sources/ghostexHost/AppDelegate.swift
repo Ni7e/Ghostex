@@ -16448,6 +16448,16 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
   }
 
   private func title(for modal: String) -> String {
+    if isSettingsAppModal(modal) {
+      /*
+       CDXC:SettingsWindow 2026-06-25-17:05:
+       The unified Settings child window should own the visible title as
+       "Ghostex Settings" for every Settings-family entry point now that React
+       no longer duplicates a large Settings heading inside the content.
+       */
+      return "Ghostex Settings"
+    }
+
     switch modal {
     case "addRepository":
       return "Clone Repository"
@@ -16497,8 +16507,6 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       return "Rename Session"
     case "scratchPad":
       return "Scratch Pad"
-    case "settings":
-      return "Settings"
     case "t3BrowserAccess":
       return "Browser Access"
     case "t3ThreadId":

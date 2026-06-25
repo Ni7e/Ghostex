@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ghostex GPUI Titlebar Panel</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!--
+      CDXC:GPUITitlebarTips 2026-06-24-23:17:
+      GPUI titlebar dropdown panels reuse the production React titlebar host from native/sidebar/titlebar-host.tsx. Keep this CEF wrapper thin so the info dropdown renders the same Tips panel as macOS without AppKit/Swift windows, duplicated GPUI tips data, placeholder UI, or dev-server-only assets.
+    -->
+    <script>
+      /*
+       * CDXC:GPUITitlebarTips 2026-06-24-23:17:
+       * The shared titlebar-host panel calls the macOS ghostexNativeHost bridge
+       * to close child-window dropdowns. GPUI owns close through the
+       * gpui-component Popover, so this first-party CEF wrapper forwards only
+       * closeTitlebarDropdownPanel into the bounded ghostexAppModalHost bridge.
+       */
+      window.webkit = window.webkit || {};
+      window.webkit.messageHandlers = window.webkit.messageHandlers || {};
+      window.webkit.messageHandlers.ghostexNativeHost = {
+        postMessage(command) {
+          if (command && command.type === "closeTitlebarDropdownPanel") {
+            window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
+              type: "closeTitlebarDropdownPanel",
+            });
+          }
+        },
+      };
+    </script>
+    <script type="module" src="../native/sidebar/titlebar-host.tsx"></script>
+  </body>
+</html>

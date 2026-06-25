@@ -22,6 +22,10 @@ const sessionGroupStylesSource = readFileSync(
   new URL("./styles/groups.css", import.meta.url),
   "utf8",
 );
+const groupPanelStylesSource = readFileSync(
+  new URL("./styles/group-panels.css", import.meta.url),
+  "utf8",
+);
 
 const originalElement = globalThis.Element;
 const hadOriginalElement = "Element" in globalThis;
@@ -427,6 +431,39 @@ describe("getSidebarSessionGapContextMenuTarget", () => {
 });
 
 describe("reference sidebar group spacing styles", () => {
+  test("keeps expanded project session lists as bounded scroll surfaces", () => {
+    /*
+     * CDXC:ProjectSessionLists 2026-06-25-12:20:
+     * The Show more state should keep rendering all project sessions, but the
+     * expanded body must become a bounded inner scroll area using the same
+     * vertical overflow and fade-mask contract as the main sidebar viewport.
+     */
+    expect(sessionGroupSectionSource).toContain("shouldScrollExpandedProjectSessionList");
+    expect(sessionGroupSectionSource).toContain("getProjectSessionListBoundaryHeight");
+    expect(sessionGroupSectionSource).toContain(
+      'shouldScrollExpandedProjectSessionList ? " vertical-scroll-fade-mask" : ""',
+    );
+    expect(sessionGroupSectionSource).toContain(
+      "data-project-session-list-scrollable={String(shouldScrollExpandedProjectSessionList)}",
+    );
+
+    const scrollableRuleStart = groupPanelStylesSource.indexOf(
+      '.group-sessions-shell[data-project-session-list-scrollable="true"] {',
+    );
+    const scrollableRuleSource = groupPanelStylesSource.slice(
+      scrollableRuleStart,
+      scrollableRuleStart + 1300,
+    );
+
+    expect(scrollableRuleStart).toBeGreaterThan(-1);
+    expect(scrollableRuleSource).toContain("overflow-x: hidden;");
+    expect(scrollableRuleSource).toContain("overflow-y: auto;");
+    expect(scrollableRuleSource).toContain("overscroll-behavior: contain;");
+    expect(scrollableRuleSource).toContain("--edge-fade-distance:");
+    expect(scrollableRuleSource).toContain("--top-fade: var(--edge-fade-distance);");
+    expect(scrollableRuleSource).toContain("--bottom-fade: var(--edge-fade-distance);");
+  });
+
   test("uses row-owned padding instead of blank gaps between project headers and sessions", () => {
     /*
      * CDXC:ReferenceSidebar 2026-06-19-10:52:

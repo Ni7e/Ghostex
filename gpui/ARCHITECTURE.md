@@ -46,14 +46,16 @@ The core rule is that **GPUI owns layout boundaries**. CEF and terminal native c
 
 ### Titlebar
 
-**Technology:** GPUI/Rust + SVG assets + GPUI NativeMenu.
+**Technology:** GPUI/Rust + SVG assets + GPUI NativeMenu, plus a gpui-component Popover for the React-backed Tips panel.
 
 Main code:
 
 - `gpui/src/main.rs`
 - `gpui/assets/titlebar/*.svg`
+- `gpui/titlebar-host.html`
+- `native/sidebar/titlebar-host.tsx`
 
-The titlebar is pure GPUI. It renders the project label, sidebar toggle, workarea switcher, Open In, Resources, Keep Awake, actions, and Settings menus. Dropdowns use OS-owned `gpui_component::native_menu::NativeMenu` instead of React overlays.
+The titlebar is GPUI-owned. It renders the project label, sidebar toggle, workarea switcher, Open In, Resources, Keep Awake, actions, and Settings controls. Most compact menus use OS-owned `gpui_component::native_menu::NativeMenu`; the info/Tips glyph uses a controlled `gpui_component::popover::Popover` containing a CEF surface that loads the shared React titlebar-host Tips panel.
 
 ### Sidebar
 
@@ -113,13 +115,13 @@ CEF callbacks update runtime tab metadata such as address, page title, favicon U
 
 ### Source workarea
 
-**Technology:** GPUI placeholder/gated runtime path; intended runtime engine is CEF/code-server.
+**Technology:** GPUI CEF/code-server runtime path with placeholder loading/error states.
 
 Main code:
 
 - `gpui/src/main.rs`
 
-Source has strict readiness and mount-request contracts, but current runtime creation remains blocked until real code-server process, real runtime URL authority, CEF surface creation, and replacement permission exist. It does not synthesize localhost URLs or fallback code-server mounts.
+Source has strict readiness and mount-request contracts plus an app-owned shared code-server runtime owner. When the selected Source workarea is awake, GPUI launches the macOS-compatible `Web/code-server` runtime on `127.0.0.1:3775`, waits for `/healthz`, then creates the normal-layout Source `CefSurface` from the explicit sidebar project folder URL. It does not accept renderer-provided URLs or fallback mounts.
 
 ### Kanban workarea
 
@@ -204,12 +206,13 @@ Build pieces:
   - `kanban.html`
   - `manage.html`
   - `modal-host.html`
+  - `titlebar-host.html`
 - The app packager creates a macOS `.app` bundle with CEF frameworks, helper apps, sidebar resources, sounds, CLI resources, Web resources, and optional remote gxserver packages.
 
 ## Current caveats
 
 - The GPUI prototype is macOS-first. Non-macOS CEF paths are intentionally unsupported/stubbed for now.
-- Source is architected for CEF/code-server but does not yet start/mount a real Source runtime surface.
+- Source starts a shared code-server runtime lazily for awake Source mode and mounts a CEF surface after the local `/healthz` readiness gate passes.
 - Kanban and Manage can use bundled CEF entries when the current project gates allow them.
 - Browser content is real CEF/Chromium, while Browser chrome and tab/split state are GPUI-owned.
 - Terminal content is real GhosttyKit/libghostty for mounted running slots; non-running terminal states remain GPUI placeholders.

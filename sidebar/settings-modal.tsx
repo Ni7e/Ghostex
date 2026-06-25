@@ -92,14 +92,17 @@ import {
   IconChevronRight,
   IconCircleCheckFilled,
   IconCircleX,
+  IconCloud,
   IconCodeDots,
   IconDeviceDesktop,
   IconDownload,
   IconEye,
   IconEyeOff,
+  IconExternalLink,
   IconFolderOpen,
   IconGripVertical,
   IconInfoCircle,
+  IconKeyboard,
   IconMinus,
   IconPalette,
   IconPencil,
@@ -111,7 +114,6 @@ import {
   IconTerminal2,
   IconTools,
   IconTrash,
-  IconX,
 } from "@tabler/icons-react";
 import { COMPLETION_SOUND_OPTIONS, type CompletionSoundSetting } from "../shared/completion-sound";
 import { GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES } from "../shared/ghostty-config-actions";
@@ -468,6 +470,7 @@ type SettingsSidebarPageSection = {
 };
 
 type SettingsSidebarPage = {
+  icon: typeof IconSettings;
   id: SettingsModalTab;
   sections?: readonly SettingsSidebarPageSection[];
   title: string;
@@ -2073,9 +2076,15 @@ export function SettingsModal({
    * Settings no longer has a top tab bar. Keep top-level Settings pages in the
    * left sidebar and let section-rich pages expand there so navigation, section
    * jumps, search results, and the Show Advanced footer share one rail.
+   *
+   * CDXC:SettingsNavigation 2026-06-25-17:12:
+   * Top-level Settings categories need Tabler icons in the left sidebar, while
+   * nested section rows stay text-only so expandable sections do not read as
+   * separate main categories.
    */
   const settingsSidebarPages: SettingsSidebarPage[] = [
     {
+      icon: IconSettings,
       id: "settings",
       sections: visibleMainSettingsSectionNavigation.map((section) => ({
         active: activeTab === "settings" && activeMainSettingsSectionId === section.id,
@@ -2088,10 +2097,11 @@ export function SettingsModal({
       })),
       title: "General",
     },
-    { id: "integrations", title: "Integrations" },
-    { id: "remote", title: "Remote" },
-    { id: "projects", title: "Projects" },
+    { icon: IconTools, id: "integrations", title: "Integrations" },
+    { icon: IconCloud, id: "remote", title: "Remote" },
+    { icon: IconFolderOpen, id: "projects", title: "Projects" },
     {
+      icon: IconKeyboard,
       id: "hotkeys",
       sections: visibleHotkeySectionNavigation.map((section) => ({
         active: activeTab === "hotkeys" && activeHotkeySettingsSectionId === section.id,
@@ -2104,11 +2114,11 @@ export function SettingsModal({
       })),
       title: "Hotkeys",
     },
-    { id: "agents", title: "Agents" },
-    { id: "actions", title: "Actions" },
-    { id: "openTargets", title: "Open In" },
+    { icon: IconCodeDots, id: "agents", title: "Agents" },
+    { icon: IconPlayerPlay, id: "actions", title: "Actions" },
+    { icon: IconExternalLink, id: "openTargets", title: "Open In" },
     ...(showOSIntegrationSettingsTab
-      ? [{ id: "osIntegration" as const, title: "OS Integration" }]
+      ? [{ icon: IconDeviceDesktop, id: "osIntegration" as const, title: "OS Integration" }]
       : []),
   ];
 
@@ -2411,14 +2421,6 @@ export function SettingsModal({
         ref={dialogContentRef}
         showCloseButton={false}
       >
-        <button
-          aria-label="Close Settings"
-          className="ghostex-modal-icon-close"
-          onClick={closeSettingsModal}
-          type="button"
-        >
-          <IconX aria-hidden="true" />
-        </button>
         <TooltipProvider delayDuration={300}>
           <Tabs
             className="flex min-h-0 flex-1 flex-col"
@@ -2427,9 +2429,16 @@ export function SettingsModal({
             value={activeTab}
           >
           <DialogHeader className="ghostex-modal-heading-bar">
-            <div className="settings-modal-title-row">
+            {/*
+             * CDXC:SettingsWindow 2026-06-25-17:05:
+             * Native Settings windows already show "Ghostex Settings" in the
+             * AppKit titlebar. Do not duplicate a visible "Settings" heading in
+             * React; keep a hidden DialogTitle so the dialog remains named for
+             * accessibility while first-launch setup keeps its visible title.
+             */}
+            <div className={cn("settings-modal-title-row", !isFirstLaunchSetup && "sr-only")}>
               <DialogTitle className="ghostex-modal-heading-title">
-                {isFirstLaunchSetup ? "Get started" : "Settings"}
+                {isFirstLaunchSetup ? "Get started" : "Ghostex Settings"}
               </DialogTitle>
             </div>
             {isFirstLaunchSetup ? (
@@ -4174,6 +4183,7 @@ function SettingsSidebarNavigation({
         {pages.map((page) => {
           const hasSections = Boolean(page.sections?.length);
           const expanded = Boolean(expandedPages[page.id]);
+          const PageIcon = page.icon;
           return (
             <div className="settings-sidebar-page-group" key={page.id}>
               <div className="settings-sidebar-page-row">
@@ -4186,7 +4196,8 @@ function SettingsSidebarNavigation({
                   }}
                   value={page.id}
                 >
-                  {page.title}
+                  <PageIcon aria-hidden="true" data-icon="inline-start" />
+                  <span className="settings-sidebar-page-title truncate">{page.title}</span>
                 </TabsTrigger>
                 {hasSections ? (
                   <Button

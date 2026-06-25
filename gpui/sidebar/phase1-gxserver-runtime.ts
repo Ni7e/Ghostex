@@ -43,6 +43,7 @@ import {
   DEFAULT_TERMINAL_SESSION_TITLE,
   resolveSidebarTheme,
   type ExtensionToSidebarMessage,
+  type SidebarCommandSessionIndicator,
   type SidebarGroupsChangedMessage,
   type SidebarHudChangedMessage,
   type SidebarHudState,
@@ -67,6 +68,9 @@ import {
 } from "../../shared/sidebar-agents";
 import {
   createSidebarCommandButtons,
+  isSidebarCommandRunMode,
+  isSidebarCommandConfigured,
+  type SidebarCommandButton,
 } from "../../shared/sidebar-commands";
 import { getCompletionSoundLabel } from "../../shared/completion-sound";
 import { createAppToastRequest, type AppToastLevel } from "../../shared/app-toast-contract";
@@ -108,15 +112,30 @@ export type GpuiGxserverBootstrap = {
   visibleSessionIds?: readonly string[];
 };
 
+export type GpuiCommandPaneSessionSummary = {
+  commandId?: string;
+  isActive?: boolean;
+  sessionId: string;
+  status: SidebarCommandSessionIndicator["status"];
+  title?: string;
+};
+
 export type GhostexGpuiSidebarBridge = {
+  commandPaneSessions?: readonly GpuiCommandPaneSessionSummary[];
   gxserverBootstrap?: GpuiGxserverBootstrap;
+  onCommandPaneSessionsChanged?: (
+    sessions: readonly GpuiCommandPaneSessionSummary[],
+  ) => void;
   onGxserverBootstrapChanged?: (bootstrap: GpuiGxserverBootstrap) => void;
   onRuntimeSettingsChanged?: (
     runtimeSettings: GpuiSidebarRuntimeSettingsSnapshot,
   ) => void;
+  onSidebarHostMessage?: (message: ExtensionToSidebarMessage) => void;
   postActiveProjectContext?: (payload: string) => boolean;
   postGxserverPresentationFocusState?: (payload: string) => boolean;
   postNativeProjectPathAction?: (payload: string) => boolean;
+  postSidebarCommandAction?: (payload: string) => boolean;
+  postSidebarCommandRunEnd?: (payload: string) => boolean;
   runtimeSettings?: GpuiSidebarRuntimeSettings;
 };
 
@@ -198,6 +217,12 @@ const GPUI_DEFAULT_VISIBLE_COUNT = 1;
 const GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.nativeProjectPathAction";
+const GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.commandAction";
+const GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.commandRunEnd";
 const GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.gxserverPresentationFocusState";
@@ -469,6 +494,7 @@ class GpuiSidebarRuntime {
   private appUserData: GxserverAppUserData = createEmptyGpuiAppUserData();
   private bootstrapPollTimeoutId: number | undefined;
   private client: GpuiGxserverClient | undefined;
+  private commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
   private domainProjects: GxserverProjectDomainState[] = [];
   private focusedSessionId: string | undefined;
   private gxserverBootstrap: GpuiValidatedGxserverBootstrap | undefined;
@@ -509,6 +535,30 @@ class GpuiSidebarRuntime {
 
   private installGpuiBridgeCallbacks(): void {
     const gpuiBridge = (window.ghostexGpui = window.ghostexGpui ?? {});
+    gpuiBridge.onSidebarHostMessage = (message) => {
+      /*
+      CDXC:GPUICommandPane 2026-06-24-23:49:
+      Rust-owned command-pane Action lifecycle feedback enters the reused SidebarApp through the same local message source as gxserver presentation patches. Keep this callback typed to existing sidebar messages so GPUI can update button run-state without exposing generic IPC, command text, paths, terminal output, or persisted state to React.
+      */
+      this.messageSource.postMessage(message);
+    };
+    const applyCommandPaneSessions = (
+      sessions: readonly GpuiCommandPaneSessionSummary[] | undefined,
+    ) => {
+      /*
+      CDXC:GPUICommandPane 2026-06-25-10:50:
+      Rust owns GPUI command-pane session identity, activity, and active-tab state. The sidebar runtime only matches those sanitized summaries to the current gxserver HUD command buttons by command id first and normalized title second, mirroring macOS without exposing command text, cwd, output, status-file paths, or shell-state JSON to React.
+      */
+      const next = normalizeGpuiCommandPaneSessions(sessions);
+      gpuiBridge.commandPaneSessions = next;
+      if (hasSameGpuiCommandPaneSessions(this.commandPaneSessions, next)) {
+        return;
+      }
+      this.commandPaneSessions = next;
+      this.publishHudPatch();
+    };
+    gpuiBridge.onCommandPaneSessionsChanged = applyCommandPaneSessions;
+    applyCommandPaneSessions(gpuiBridge.commandPaneSessions);
     gpuiBridge.onRuntimeSettingsChanged = (runtimeSettings) => {
       const didChange = !hasSameGpuiRuntimeSettings(this.runtimeSettings, runtimeSettings);
       this.runtimeSettings = runtimeSettings;
@@ -756,6 +806,7 @@ class GpuiSidebarRuntime {
     const previousGroups = this.latestGroups;
     const groups = this.createSidebarGroups(presentation);
     this.latestHud = createGpuiSidebarHudState({
+      commandPaneSessions: this.commandPaneSessions,
       focusedSessionId: this.focusedSessionId,
       git: this.gitStateForHud(),
       groups,
@@ -808,6 +859,7 @@ class GpuiSidebarRuntime {
       ...this.createRemoteSidebarGroups(),
     ];
     this.latestHud = createGpuiSidebarHudState({
+      commandPaneSessions: this.commandPaneSessions,
       git: this.gitStateForHud(),
       groups: this.latestGroups,
       runtimeSettings: this.runtimeSettings,
@@ -833,6 +885,7 @@ class GpuiSidebarRuntime {
           ...this.createRemoteSidebarGroups(),
         ];
     this.latestHud = createGpuiSidebarHudState({
+      commandPaneSessions: this.commandPaneSessions,
       focusedSessionId: this.focusedSessionId,
       git: this.gitStateForHud(),
       groups,
@@ -955,6 +1008,7 @@ class GpuiSidebarRuntime {
 
   private publishHudPatch(): void {
     this.latestHud = createGpuiSidebarHudState({
+      commandPaneSessions: this.commandPaneSessions,
       focusedSessionId: this.focusedSessionId,
       git: this.gitStateForHud(),
       groups: this.latestGroups,
@@ -1117,7 +1171,7 @@ class GpuiSidebarRuntime {
     if (
       this.activeProjectId &&
       projectIds.has(this.activeProjectId) &&
-      !projectProjection.hiddenProjectIds.has(this.activeProjectId) &&
+      !projectProjection.hiddenProjectIds.has(this.activeProjectId)
     ) {
       if (projectProjection.chatProjectIds.has(this.activeProjectId)) {
         if (this.activeGroupId !== GPUI_GXSERVER_CHATS_GROUP_ID) {
@@ -1167,6 +1221,12 @@ class GpuiSidebarRuntime {
         return;
       case "runSidebarAgent":
         await this.createAgentSession(message.agentId, message.groupId);
+        return;
+      case "runSidebarCommand":
+        this.runSidebarCommand(message.commandId, message);
+        return;
+      case "endSidebarCommandRun":
+        this.endSidebarCommandRun(message.commandId, message);
         return;
       case "setSessionSleeping":
         await this.setSessionSleeping(message.sessionId, message.sleeping);
@@ -5867,6 +5927,84 @@ class GpuiSidebarRuntime {
     }
   }
 
+  private postSidebarCommandAction(
+    command: SidebarCommandButton,
+    originalMessage: SidebarToExtensionMessage,
+  ): boolean {
+    const bridge = window.ghostexGpui?.postSidebarCommandAction;
+    if (!bridge) {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+      return false;
+    }
+    const payload = JSON.stringify({
+      actionType: command.actionType,
+      commandId: command.commandId,
+      name: command.name,
+      /*
+      CDXC:GPUICommandPane 2026-06-25-10:29:
+      Shared command clicks may ask for `runMode:"debug"` after a close-on-exit terminal Action fails. Forward that mode only for terminal Actions so Rust can create the visible debug workspace terminal like macOS without allowing browser Actions or generic renderer fields to affect command-pane execution.
+      */
+      ...(command.actionType === "terminal" &&
+      "runMode" in originalMessage &&
+      isSidebarCommandRunMode(originalMessage.runMode)
+        ? { runMode: originalMessage.runMode }
+        : {}),
+      ...(command.actionType === "terminal"
+        ? { playCompletionSound: command.playCompletionSound }
+        : {}),
+      ...(command.actionType === "terminal" && command.command
+        ? { command: command.command }
+        : {}),
+      ...(command.actionType === "browser" && command.url ? { url: command.url } : {}),
+      type: GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
+      version: GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
+    });
+    try {
+      if (!bridge(payload)) {
+        this.handleUnsupportedSidebarMessage(originalMessage);
+        return false;
+      }
+      return true;
+    } catch {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+      return false;
+    }
+  }
+
+  private postSidebarCommandRunEnd(
+    commandId: string,
+    originalMessage: SidebarToExtensionMessage,
+  ): boolean {
+    const bridge = window.ghostexGpui?.postSidebarCommandRunEnd;
+    if (!bridge) {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+      return false;
+    }
+    const normalizedCommandId = commandId.trim();
+    if (!normalizedCommandId) {
+      return false;
+    }
+    const payload = JSON.stringify({
+      commandId: normalizedCommandId,
+      /*
+      CDXC:GPUICommandPane 2026-06-25-10:34:
+      `endSidebarCommandRun` is a separate fixed GPUI bridge from Action launch because it should carry only the command id needed to close the mapped command-pane run. Do not reuse the launch payload shape or send command text, URLs, project paths, run ids, status paths, renderer cwd/env, or terminal output.
+      */
+      type: GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE,
+      version: GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION,
+    });
+    try {
+      if (!bridge(payload)) {
+        this.handleUnsupportedSidebarMessage(originalMessage);
+        return false;
+      }
+      return true;
+    } catch {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+      return false;
+    }
+  }
+
   private focusProjectId(projectId: string): void {
     const normalizedProjectId = normalizeNonEmptyString(projectId);
     if (!normalizedProjectId) {
@@ -6010,6 +6148,52 @@ class GpuiSidebarRuntime {
     return agents.find(
       (agent) => agent.agentId === normalizedAgentId,
     );
+  }
+
+  private resolveSidebarCommand(commandId: string): SidebarCommandButton | undefined {
+    const normalizedCommandId = commandId.trim();
+    if (!normalizedCommandId) {
+      return undefined;
+    }
+    const commands = this.sidebarHud
+      ? ([...this.sidebarHud.commands] as SidebarCommandButton[])
+      : createSidebarCommandButtons([], [], []);
+    return commands.find(
+      (command) => command.commandId === normalizedCommandId,
+    );
+  }
+
+  private runSidebarCommand(
+    commandId: string,
+    originalMessage: SidebarToExtensionMessage,
+  ): void {
+    /*
+     * CDXC:GPUICommandPane 2026-06-24-23:17:
+     * The shared SidebarApp and command palette emit `runSidebarCommand` for
+     * project Actions. In GPUI, resolve the selected action only from the live
+     * gxserver HUD projection and hand it to Rust through a fixed command-action
+     * bridge so command text reaches only the app-owned command-pane launch
+     * boundary, not logs, fixture state, renderer execution, or path fallbacks.
+     */
+    const command = this.resolveSidebarCommand(commandId);
+    if (!command || !isSidebarCommandConfigured(command)) {
+      this.openAppModal("settings");
+      return;
+    }
+    if (this.postSidebarCommandAction(command, originalMessage)) {
+      return;
+    }
+    this.handleUnsupportedSidebarMessage(originalMessage);
+  }
+
+  private endSidebarCommandRun(
+    commandId: string,
+    originalMessage: SidebarToExtensionMessage,
+  ): void {
+    if (this.postSidebarCommandRunEnd(commandId, originalMessage)) {
+      return;
+    }
+    this.handleUnsupportedSidebarMessage(originalMessage);
   }
 
   private async mutateSidebarHudSettings(
@@ -6443,7 +6627,131 @@ function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): b
   return true;
 }
 
+const GPUI_COMMAND_PANE_SESSION_SUMMARY_LIMIT = 128;
+const GPUI_COMMAND_PANE_SESSION_STRING_MAX_LENGTH = 512;
+
+function normalizeGpuiCommandPaneSessions(
+  sessions: readonly GpuiCommandPaneSessionSummary[] | unknown,
+): GpuiCommandPaneSessionSummary[] {
+  if (!Array.isArray(sessions)) {
+    return [];
+  }
+  return sessions.slice(0, GPUI_COMMAND_PANE_SESSION_SUMMARY_LIMIT).flatMap((session) => {
+    if (!session || typeof session !== "object") {
+      return [];
+    }
+    const record = session as Partial<Record<keyof GpuiCommandPaneSessionSummary, unknown>>;
+    const sessionId = normalizeGpuiCommandPaneSessionString(record.sessionId);
+    const status = normalizeGpuiCommandPaneSessionStatus(record.status);
+    if (!sessionId || !status) {
+      return [];
+    }
+    const commandId = normalizeGpuiCommandPaneSessionString(record.commandId);
+    const title = normalizeGpuiCommandPaneSessionString(record.title);
+    return [
+      {
+        ...(commandId ? { commandId } : {}),
+        ...(record.isActive === true ? { isActive: true } : {}),
+        sessionId,
+        status,
+        ...(title ? { title } : {}),
+      },
+    ];
+  });
+}
+
+function normalizeGpuiCommandPaneSessionString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (
+    !normalized ||
+    normalized.length > GPUI_COMMAND_PANE_SESSION_STRING_MAX_LENGTH ||
+    /[\u0000-\u001F\u007F]/.test(normalized)
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function normalizeGpuiCommandPaneSessionStatus(
+  value: unknown,
+): SidebarCommandSessionIndicator["status"] | undefined {
+  return value === "idle" || value === "running" || value === "error" ? value : undefined;
+}
+
+function hasSameGpuiCommandPaneSessions(
+  current: readonly GpuiCommandPaneSessionSummary[],
+  next: readonly GpuiCommandPaneSessionSummary[],
+): boolean {
+  if (current.length !== next.length) {
+    return false;
+  }
+  return current.every((session, index) => {
+    const candidate = next[index];
+    return (
+      session.commandId === candidate?.commandId &&
+      session.isActive === candidate?.isActive &&
+      session.sessionId === candidate?.sessionId &&
+      session.status === candidate?.status &&
+      session.title === candidate?.title
+    );
+  });
+}
+
+export function createGpuiSidebarCommandSessionIndicators(
+  commands: readonly SidebarCommandButton[],
+  commandPaneSessions: readonly GpuiCommandPaneSessionSummary[],
+): SidebarCommandSessionIndicator[] {
+  return commands.flatMap((command) => {
+    if (command.actionType !== "terminal") {
+      return [];
+    }
+    const commandTitleKey = getGpuiSidebarCommandTitleKey(
+      getGpuiSidebarCommandSessionTitle(command),
+    );
+    if (!commandTitleKey) {
+      return [];
+    }
+    const mappedSession = commandPaneSessions.find(
+      (session) =>
+        session.commandId === command.commandId &&
+        getGpuiSidebarCommandTitleKey(session.title) === commandTitleKey,
+    );
+    const session =
+      mappedSession ??
+      commandPaneSessions.find(
+        (candidate) => getGpuiSidebarCommandTitleKey(candidate.title) === commandTitleKey,
+      );
+    if (!session) {
+      return [];
+    }
+    return [
+      {
+        commandId: command.commandId,
+        isActive: session.isActive === true,
+        sessionId: session.sessionId,
+        status: session.status,
+        ...(session.title ? { title: session.title } : {}),
+      },
+    ];
+  });
+}
+
+function getGpuiSidebarCommandSessionTitle(command: SidebarCommandButton): string {
+  const normalizedActionName = command.name.trim();
+  return normalizedActionName.length > 0
+    ? normalizedActionName
+    : (command.command ?? "").trim().slice(0, 20);
+}
+
+function getGpuiSidebarCommandTitleKey(value: string | undefined): string {
+  return normalizeGpuiCommandPaneSessionString(value)?.toLocaleLowerCase() ?? "";
+}
+
 function createGpuiSidebarHudState({
+  commandPaneSessions = [],
   domainProjects = [],
   focusedSessionId,
   git,
@@ -6454,6 +6762,7 @@ function createGpuiSidebarHudState({
   runtimeSettings,
   sidebarHud,
 }: {
+  commandPaneSessions?: readonly GpuiCommandPaneSessionSummary[];
   domainProjects?: readonly GxserverProjectDomainState[];
   focusedSessionId?: string;
   git?: SidebarGitState;
@@ -6487,7 +6796,10 @@ function createGpuiSidebarHudState({
     agentManagerZoomPercent: settings.agentManagerZoomPercent,
     agents,
     commands,
-    commandSessionIndicators: [],
+    commandSessionIndicators: createGpuiSidebarCommandSessionIndicators(
+      commands,
+      commandPaneSessions,
+    ),
     completionBellEnabled: settings.completionBellEnabled,
     completionSound: settings.completionSound,
     completionSoundLabel: getCompletionSoundLabel(settings.completionSound),

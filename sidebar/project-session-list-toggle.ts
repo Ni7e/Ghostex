@@ -68,28 +68,36 @@ export function getVisibleProjectSessionIds({
   return sessionIds.slice(0, normalizedCollapsedCount);
 }
 
-export function getProjectSessionListCollapsedHeight({
-  lastVisibleSessionId,
+export function getProjectSessionListBoundaryHeight({
+  boundarySessionId,
+  includeMoreToggle = false,
   sessionListElement,
 }: {
-  lastVisibleSessionId: string | undefined;
+  boundarySessionId: string | undefined;
+  includeMoreToggle?: boolean;
   sessionListElement: HTMLElement | null | undefined;
 }): number | undefined {
   if (!sessionListElement) {
     return undefined;
   }
 
-  if (!lastVisibleSessionId) {
+  if (!boundarySessionId) {
     return 0;
   }
 
   /**
    * CDXC:ProjectSessionLists 2026-06-12-23:53:
    * Show more and Show less should use the same measured max-height motion as project expand/collapse. Measure the bottom of the last user-visible session row so Show less can clip the still-mounted overflow rows smoothly instead of removing them before the collapse animation can run.
+   *
+   * CDXC:ProjectSessionLists 2026-06-25-12:20:
+   * Expanded Show more lists need a bounded inner scroll area, while collapsed
+   * Show more rows must keep the normal non-scroll list. Measure the boundary
+   * row from rendered DOM instead of assuming fixed row heights so density and
+   * session-card content continue to define the real scroll cap.
    */
   const sessionElement = Array.from(
     sessionListElement.querySelectorAll<HTMLElement>("[data-sidebar-session-id]"),
-  ).find((element) => element.dataset.sidebarSessionId === lastVisibleSessionId);
+  ).find((element) => element.dataset.sidebarSessionId === boundarySessionId);
   const rowElement = sessionElement?.closest<HTMLElement>(".session-frame") ?? sessionElement;
   if (!rowElement) {
     return undefined;
@@ -103,14 +111,30 @@ export function getProjectSessionListCollapsedHeight({
    * the last visible session. Include that row in the measured clipped height
    * so it stays visible as the bottom of the collapsed list.
    */
-  const moreToggleElement = sessionListElement.querySelector<HTMLElement>(
-    "[data-project-session-list-more-toggle='true']",
-  );
+  const moreToggleElement = includeMoreToggle
+    ? sessionListElement.querySelector<HTMLElement>(
+        "[data-project-session-list-more-toggle='true']",
+      )
+    : null;
   const clippedBottom = Math.max(
     rowBounds.bottom,
     moreToggleElement?.getBoundingClientRect().bottom ?? rowBounds.bottom,
   );
   return Math.max(0, Math.ceil(clippedBottom - listBounds.top));
+}
+
+export function getProjectSessionListCollapsedHeight({
+  lastVisibleSessionId,
+  sessionListElement,
+}: {
+  lastVisibleSessionId: string | undefined;
+  sessionListElement: HTMLElement | null | undefined;
+}): number | undefined {
+  return getProjectSessionListBoundaryHeight({
+    boundarySessionId: lastVisibleSessionId,
+    includeMoreToggle: true,
+    sessionListElement,
+  });
 }
 
 export function readProjectSessionListCollapsedState(

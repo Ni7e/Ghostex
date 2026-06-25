@@ -360,6 +360,41 @@
   overflow: hidden;
 }
 
+.group-sessions-shell[data-project-session-list-scrollable="true"] {
+  /*
+   * CDXC:ProjectSessionLists 2026-06-25-12:20:
+   * Keep the Show more / Show less interaction, but make the expanded project
+   * body a bounded inner scroll surface. Reuse the same overflow contract as
+   * the main sidebar project scroll viewport: hidden horizontal overflow,
+   * vertical auto scrolling, contained overscroll, and the shared Codex-style
+   * vertical fade mask.
+   */
+  --edge-fade-distance: calc(16px * var(--sidebar-density-scale));
+  max-height: var(
+    --project-session-list-scroll-height,
+    calc(var(--sidebar-collapse-content-height) + 4px)
+  );
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.group-sessions-shell[data-project-session-list-scrollable="true"][data-scroll-glow-top="true"] {
+  --top-fade: var(--edge-fade-distance);
+}
+
+.group-sessions-shell[data-project-session-list-scrollable="true"][data-scroll-glow-bottom="true"] {
+  --bottom-fade: var(--edge-fade-distance);
+}
+
+.group-sessions-shell[data-project-session-list-scrollable="true"][data-scroll-glow-top="false"] {
+  --top-fade: 0px !important;
+}
+
+.group-sessions-shell[data-project-session-list-scrollable="true"][data-scroll-glow-bottom="false"] {
+  --bottom-fade: 0px !important;
+}
+
 .sidebar-collapse-content {
   min-height: 0;
 }
@@ -1188,134 +1223,50 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
  * CDXC:Tooltips 2026-05-19-19:05:
  * Reference-sidebar hover icons and section-header action buttons cannot rely on
  * portaled Radix tooltips because the native sidebar webview mis-anchors them
- * against the trigger. Render the label with a local pseudo-element anchored to
- * the icon instead.
+ * against the trigger. Keep this path on Ghostex-owned tooltip positioning
+ * instead of the shared primitive.
  *
  * CDXC:SidebarTooltips 2026-05-30-06:36:
  * Sidebar action tooltips should all read as the same square bordered surface
  * and appear below their trigger rather than to the left. Align right-edge
  * action labels to the trigger's right edge so long labels extend inward inside
  * the narrow sidebar instead of clipping against the webview edge.
+ *
+ * CDXC:SidebarTooltips 2026-06-25-15:48:
+ * Sidebar action labels now render through SidebarFixedTooltipButton's fixed
+ * document-body popup instead of CSS pseudo-elements. Keep the trigger classes
+ * for hover-action layout, but suppress pseudo labels so scroll viewports,
+ * masks, and the Recent Projects footer cannot clip or duplicate tooltips.
  */
 .reference-sidebar-section-action.reference-sidebar-hover-action-tooltip {
   position: relative;
 }
 
-.group-header-actions .reference-sidebar-hover-action-tooltip {
-  /*
-   * CDXC:ProjectHeaderTooltips 2026-05-25-09:43:
-   * Project header action buttons reuse the local reference-sidebar tooltip
-   * surface so their labels stay anchored inside the native sidebar webview.
-   *
-   * CDXC:ProjectHeaderTooltips 2026-05-29-18:19:
-   * Project header action labels open below each button instead of to the left
-   * because the compact action cluster can sit near the sidebar's left edge.
-   * Align the first and trailing split-button labels inward so short labels do
-   * not clip against narrow webview edges.
-   */
-  position: relative;
-}
-
-.group-header-actions .reference-sidebar-hover-action-tooltip::after {
-  /*
-   * CDXC:ProjectHeaderTooltips 2026-05-29-20:29:
-   * Project-header actions use a fixed React portal for their tooltip labels so
-   * later sticky project headers cannot cover them. Suppress any remaining
-   * pseudo-tooltip fallback in the action cluster to avoid duplicate labels if a
-   * button still carries the legacy tooltip class.
-   */
+.reference-sidebar-hover-action-tooltip::after,
+.reference-sidebar-section-action.reference-sidebar-hover-action-tooltip::after {
   content: none;
   display: none;
 }
 
-.reference-sidebar-hover-action-tooltip::after,
-.reference-sidebar-section-action.reference-sidebar-hover-action-tooltip::after {
-  background: var(--ghostex-tooltip-background, rgba(24, 24, 24, 0.98));
-  border: 1px solid var(--ghostex-tooltip-border, rgba(255, 255, 255, 0.12));
-  border-radius: 0;
-  box-shadow: var(--ghostex-tooltip-shadow, 0 12px 30px rgba(0, 0, 0, 0.35));
-  color: var(--ghostex-tooltip-foreground, rgba(255, 255, 255, 0.78));
-  content: attr(data-tooltip);
-  font: var(--ghostex-tooltip-font, 500 12px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif);
-  opacity: 0;
-  padding: 6px 12px;
-  pointer-events: none;
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
-  transform: none;
-  transition:
-    opacity 120ms ease,
-    visibility 0s linear 120ms;
-  visibility: hidden;
-  white-space: nowrap;
-  z-index: var(--ghostex-tooltip-z-index, 1400);
-}
-
-.project-header-action-tooltip-popup {
+.sidebar-fixed-tooltip-popup {
   background: var(--ghostex-tooltip-background, rgba(24, 24, 24, 0.98));
   border: 1px solid var(--ghostex-tooltip-border, rgba(255, 255, 255, 0.12));
   border-radius: 0;
   box-shadow: var(--ghostex-tooltip-shadow, 0 12px 30px rgba(0, 0, 0, 0.35));
   color: var(--ghostex-tooltip-foreground, rgba(255, 255, 255, 0.78));
   font: var(--ghostex-tooltip-font, 500 12px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif);
-  left: var(--project-header-action-tooltip-left, 50vw);
-  max-width: min(90vw, var(--project-header-action-tooltip-max-width, calc(100vw - 16px)));
   opacity: 1;
   overflow-wrap: anywhere;
   padding: 6px 12px;
   pointer-events: none;
   position: fixed;
-  top: var(--project-header-action-tooltip-top, 0px);
-  transform: translateX(-50%);
   white-space: normal;
   width: max-content;
   z-index: var(--ghostex-tooltip-z-index, 1400);
-}
-
-.reference-sidebar-commands-pane-action.reference-sidebar-hover-action-tooltip::after {
-  /*
-   * CDXC:CommandsPane 2026-05-30-07:33:
-   * The Commands pane button is the sidebar exception to below-positioned tooltips. Keep this compact label to the left of the icon so it does not cover bottom drawer controls while the rest of the sidebar keeps below-trigger labels.
-   */
-  right: calc(100% + 8px);
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-@media (max-width: 179.98px) {
-  .reference-sidebar-previous-sessions-button.reference-sidebar-hover-action-tooltip::after {
-    /*
-     * CDXC:SidebarSearch 2026-05-29-18:27:
-     * At the minimum sidebar width, the full "Previous Sessions" tooltip clips
-     * against the webview edge. Keep the button's accessible label full-length,
-     * but shorten the visual hover label below 180px so the tooltip remains
-     * readable without changing the Search row layout.
-     */
-    content: "Prev. Sessions";
-  }
-}
-
-@media (max-width: 169.98px) {
-  .reference-sidebar-commands-pane-action.reference-sidebar-hover-action-tooltip::after {
-    /*
-     * CDXC:CommandsPane 2026-05-29-20:39:
-     * The Commands pane action sits at the narrow sidebar edge. Hide its visual tooltip below 170px instead of shortening it further so the bottom controls stay unclipped while the button keeps its accessible label.
-     */
-    content: none;
-    display: none;
-  }
-}
-
-.reference-sidebar-nav-item:hover .reference-sidebar-hover-action-tooltip:is(:hover, :focus-visible)::after,
-.reference-sidebar-hover-action-tooltip:focus-visible::after,
-.reference-sidebar-section-row:hover .reference-sidebar-hover-action-tooltip:is(:hover, :focus-visible)::after,
-.reference-sidebar-section-row:focus-within .reference-sidebar-hover-action-tooltip:focus-visible::after,
-.group-head:hover .group-header-actions .reference-sidebar-hover-action-tooltip:is(:hover, :focus-visible)::after,
-.group-head:focus-within .group-header-actions .reference-sidebar-hover-action-tooltip:focus-visible::after {
-  opacity: 1;
-  transition-delay: 0s;
-  visibility: visible;
+  left: var(--sidebar-fixed-tooltip-left, 0px);
+  max-width: min(90vw, var(--sidebar-fixed-tooltip-max-width, calc(100vw - 16px)));
+  top: var(--sidebar-fixed-tooltip-top, 0px);
+  transform: none;
 }
 
 /*
@@ -1328,7 +1279,7 @@ body[data-sidebar-tooltips-suppressed="true"] .reference-sidebar-hover-action-to
 body[data-sidebar-tooltips-suppressed="true"]
   .reference-sidebar-section-action.reference-sidebar-hover-action-tooltip::after,
 body[data-sidebar-tooltips-suppressed="true"] .session-local-tooltip-popup,
-body[data-sidebar-tooltips-suppressed="true"] .project-header-action-tooltip-popup,
+body[data-sidebar-tooltips-suppressed="true"] .sidebar-fixed-tooltip-popup,
 body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
   opacity: 0 !important;
   transition-delay: 0s !important;
