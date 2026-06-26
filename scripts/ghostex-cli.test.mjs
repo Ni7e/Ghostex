@@ -37,6 +37,7 @@ import {
   resolveGxserverCliLaunchFromRoot,
   resolveGxserverCliLaunchForPath,
   resolveGxserverServerTarget,
+  resolveGhostexHistoryLaunchFromRoot,
   resolveGhostexTuiLaunchFromRoot,
   resolveGhostexTui2LaunchFromRoot,
   resolveListedSessions,
@@ -174,11 +175,11 @@ describe("ghostex CLI Android remote-session contract", () => {
       const linkPath = path.join(tempDir, "ghostex-cli.mjs");
       await symlink(path.resolve("scripts/ghostex-cli.mjs"), linkPath);
       const helpResult = await execFileAsync(process.execPath, [linkPath, "help"]);
-      const shortHelpResult = await execFileAsync(process.execPath, [linkPath, "h"]);
+      const flagHelpResult = await execFileAsync(process.execPath, [linkPath, "--help"]);
 
       expect(helpResult.stdout).toContain("Usage:");
       expect(helpResult.stdout).toContain("sessions | s | ls [--ungrouped|-u] [--json]");
-      expect(shortHelpResult.stdout).toBe(helpResult.stdout);
+      expect(flagHelpResult.stdout).toBe(helpResult.stdout);
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }
@@ -269,6 +270,8 @@ describe("ghostex CLI Android remote-session contract", () => {
     expect(help).toContain("Direct attach stays available through attach/a/resume/r without opening the TUI");
     expect(help).toContain("find | f [zehn args...]");
     expect(help).toContain("gx find and gx f launch bundled zehn");
+    expect(help).toContain("history | h [ghostex-history args...]");
+    expect(help).toContain("gx history and gx h open the transcript viewer");
     expect(help).not.toContain("search | find");
     expect(help).toMatch(/^\s+ghostex$/m);
     expect(help).toMatch(/^\s+gx$/m);
@@ -487,6 +490,82 @@ printf 'rust-forwarded:%s\\n' "$1"
         command: zehnBin,
       });
       expect(usage()).not.toContain("search |");
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  test("documents and resolves the Ghostex transcript history TUI", async () => {
+    /*
+     * CDXC:AgentTranscriptHistory 2026-06-25-20:56:
+     * `gx history` and `gx h` should launch the new transcript viewer from the
+     * Ghostex CLI, with packaged binaries preferred and source Cargo fallback
+     * available for local checkouts.
+     */
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-history-"));
+    try {
+      const historyBin = path.join(tempDir, "bin", "ghostex-history");
+      await mkdir(path.dirname(historyBin), { recursive: true });
+      await writeFile(historyBin, "#!/bin/sh\n");
+
+      expect(usage()).toContain("history | h [ghostex-history args...]");
+      expect(resolveGhostexHistoryLaunchFromRoot(tempDir)).toMatchObject({
+        args: [],
+        command: historyBin,
+      });
+
+      const sourceRoot = path.join(tempDir, "source");
+      const manifestPath = path.join(sourceRoot, "ghostex-history", "Cargo.toml");
+      const staleDebugBin = path.join(sourceRoot, "ghostex-history", "target", "debug", "ghostex-history");
+      await mkdir(path.dirname(manifestPath), { recursive: true });
+      await writeFile(manifestPath, "[package]\nname = \"ghostex-history\"\n");
+      await mkdir(path.dirname(staleDebugBin), { recursive: true });
+      await writeFile(staleDebugBin, "#!/bin/sh\n");
+      expect(resolveGhostexHistoryLaunchFromRoot(sourceRoot)).toMatchObject({
+        args: ["run", "--quiet", "--manifest-path", manifestPath, "--"],
+        command: "cargo",
+      });
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  test("forwards gx h to the Ghostex transcript history command", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-history-forward-"));
+    const markerPath = path.join(tempDir, "argv.txt");
+    const historyBin = path.join(tempDir, "ghostex-history");
+    try {
+      await writeFile(
+        historyBin,
+        `#!/bin/sh
+printf '%s\\n' "$@" > ${JSON.stringify(markerPath)}
+printf 'history:%s\\n' "$1"
+`,
+      );
+      await chmod(historyBin, 0o755);
+
+      const result = await execFileAsync(process.execPath, [
+        path.resolve("scripts/ghostex-cli.mjs"),
+        "h",
+        "--accept-all",
+        "--list",
+        "--agent",
+        "codex",
+      ], {
+        env: {
+          ...process.env,
+          GHOSTEX_HISTORY_BIN: historyBin,
+        },
+      });
+
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("history:--accept-all");
+      expect((await readFile(markerPath, "utf8")).trim().split("\n")).toEqual([
+        "--accept-all",
+        "--list",
+        "--agent",
+        "codex",
+      ]);
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }

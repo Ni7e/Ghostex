@@ -648,6 +648,8 @@ type NativeHostCommand =
       paneOwnerSelectionChanged?: boolean;
       layout?: NativeTerminalLayout;
       paneGap?: number;
+      terminalPaneHorizontalPaddingPx?: number;
+      terminalPaneVerticalPaddingPx?: number;
       poppedOutSessionIds?: string[];
       sessionFaviconDataUrls?: Record<string, string>;
       sessionAgentIconDataUrls?: Record<string, string>;
@@ -5640,6 +5642,14 @@ function summarizeNativeFocusCommand(command: NativeHostCommand): Record<string,
     layoutLeafSessionIds:
       "layout" in command ? summarizeNativeLayoutLeafSessionIds(command.layout) : undefined,
     paneGap: "paneGap" in command ? command.paneGap : undefined,
+    terminalPaneHorizontalPaddingPx:
+      "terminalPaneHorizontalPaddingPx" in command
+        ? command.terminalPaneHorizontalPaddingPx
+        : undefined,
+    terminalPaneVerticalPaddingPx:
+      "terminalPaneVerticalPaddingPx" in command
+        ? command.terminalPaneVerticalPaddingPx
+        : undefined,
     sessionId: "sessionId" in command ? command.sessionId : undefined,
     textLength: "text" in command ? command.text.length : undefined,
     textPreview: "text" in command ? summarizeTerminalText(command.text) : undefined,
@@ -5649,15 +5659,19 @@ function summarizeNativeFocusCommand(command: NativeHostCommand): Record<string,
   };
 }
 
-function resolveNativeWorkspaceBackgroundColor(): string {
+function resolveNativeWorkspaceBackgroundColor(): string | undefined {
   /*
-   * CDXC:WorkspaceLayout 2026-06-15-17:01:
-   * The empty native workspace visible after the last terminal pane closes must
-   * be black for every user, regardless of Ghostty theme or persisted workspace
-   * color settings. Always send black to AppKit so the backing layer cannot
-   * diverge across machines.
+   * CDXC:TerminalPanePadding 2026-06-25-21:27:
+   * Terminal padding should expose the same color Ghostty uses for terminal
+   * background. When Settings still holds the default background value, omit a
+   * layout color so AppKit preserves the background read from the loaded Ghostty
+   * config at startup; explicit Settings colors still override that native
+   * default.
    */
-  return "#000000";
+  const configuredColor = settings.workspaceBackgroundColor.trim();
+  return configuredColor && configuredColor !== DEFAULT_ghostex_SETTINGS.workspaceBackgroundColor
+    ? configuredColor
+    : undefined;
 }
 
 function getNativeFocusCommandSidebarSessionId(command: NativeHostCommand): string | undefined {
@@ -44917,6 +44931,14 @@ function syncNativeLayout(
      * spacing between native panes.
      */
     paneGap: 0,
+    /*
+     * CDXC:TerminalPanePadding 2026-06-25-21:27:
+     * Terminal padding is a content inset inside AppKit terminal pane bodies,
+     * not a restored pane gap. Carry both axes through layout sync so every
+     * native terminal pane reserves the same background-colored inner space.
+     */
+    terminalPaneHorizontalPaddingPx: settings.terminalPaneHorizontalPaddingPx,
+    terminalPaneVerticalPaddingPx: settings.terminalPaneVerticalPaddingPx,
     poppedOutSessionIds,
     clickToWakeSleepingSessions: settings.clickToWakeSleepingSessions,
     sessionAgentIconDataUrls,

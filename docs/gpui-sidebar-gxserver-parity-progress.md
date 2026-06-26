@@ -428,10 +428,15 @@
 - Settings project rows and Git HUD refresh now treat chat/quick/recent rows as projectless, matching macOS behavior for disposable chat containers.
 - Did not run broad verification, app restart, or `bun run start`, per repository instruction.
 
+## GPUI Remote Recent Projects Open Folder Parity
+
+- Updated GPUI Recent Projects `Open Folder` for remote rows to match the macOS sidebar source of truth: the shared SidebarApp still emits `openRecentProjectInFinder`, the GPUI TypeScript bridge converts machine-scoped remote project ids into the fixed native action `copyRemoteProjectOpenFolderCommand`, and Rust resolves the remote gxserver project path immediately before copying a saved-machine SSH command that starts a login shell in that folder.
+- GPUI still does not open remote paths in local Finder or add a remote file-manager bridge. The supported remote Recent Projects folder action is command-copy parity, with sanitized toast text and no renderer-provided paths, hosts, tokens, or command snippets.
+
 ## Remaining Work
 
 - Local custom project IDE command shell compatibility is a policy non-goal in GPUI project-open actions. Supported custom default editor commands remain native-owned argv-style executable launches only; shell snippets, expansion/placeholders, relative executable paths, and `.app` bundle-directory command strings stay unsupported rather than being run through a shell.
-- Remote folder open/Finder remains a policy non-goal. GPUI must not open remote paths in local Finder, and there is no reviewed remote file-manager bridge in this slice.
+- Opening remote paths in local Finder or through a remote file-manager bridge remains a policy non-goal. Remote Recent Projects `Open Folder` is supported only as the reviewed saved-machine SSH command-copy action.
 - Remote editor support is limited to fixed native-owned openers: VS Code / Insiders Remote-SSH and Zed / Zeditor SSH URI. Cursor, Windsurf, VSCodium, Sublime, custom commands, and saved-machine identity-file-only editor opens remain unsupported until each has a deterministic native opener that does not shell Settings text or expose remote paths/URIs to React.
 - Visible PR-agent terminal workflows remain intentionally non-delete. Delete-after cleanup is supported only by direct/background gxserver PR creation, because visible agent terminals do not publish a trusted PR-created result to gxserver.
 - Scratch Pad and Pinned Prompts have gxserver persistence parity for the current shared UI. Future explicit delete or manual-ordering controls require new shared React messages before GPUI can implement those commands.

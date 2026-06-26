@@ -109,6 +109,8 @@ const COMMANDS = new Map([
   ["ls", sessionsCommand],
   ["find", zehnSearchCommand],
   ["f", zehnSearchCommand],
+  ["history", historyCommand],
+  ["h", historyCommand],
   ["android-check", androidCheckCommand],
   ["attach", attachSessionCommand],
   ["a", attachSessionCommand],
@@ -198,7 +200,6 @@ const COMMANDS = new Map([
   ["logs", logsCommand],
   ["bundle", bundleCommand],
   ["help", helpCommand],
-  ["h", helpCommand],
 ]);
 
 if (isDirectCliEntryPoint()) {
@@ -266,7 +267,20 @@ async function main() {
     throw new Error(`Unknown command: ${commandName}\n\n${usage()}`);
   }
   if (
-    !["agent-orchestration", "bd", "beads", "browser", "computer-use", "f", "find", "generate-title", "manage-beads", "server"].includes(commandName) &&
+    ![
+      "agent-orchestration",
+      "bd",
+      "beads",
+      "browser",
+      "computer-use",
+      "f",
+      "find",
+      "generate-title",
+      "h",
+      "history",
+      "manage-beads",
+      "server",
+    ].includes(commandName) &&
     (args.includes("-h") || args.includes("--help"))
   ) {
     helpCommand();
@@ -4037,7 +4051,98 @@ async function zehnSearchCommand(args) {
   });
 }
 
+async function historyCommand(args) {
+  /*
+   * CDXC:AgentTranscriptHistory 2026-06-25-20:56:
+   * Agent transcript browsing should be available from the public `gx` and
+   * `ghostex` CLIs, not only package-manager scripts. Forward all args to
+   * ghostex-history so --agent, --list, --home, and future transcript-viewer
+   * flags stay owned by the Rust TUI. The short alias is `h` because users need
+   * transcript history more often than a second help spelling; `help`, `-h`, and
+   * `--help` remain the help entry points.
+   *
+   * CDXC:AgentTranscriptHistory 2026-06-25-21:54:
+   * `gx h` can resume selected rows with Ctrl+R, so the Ghostex launcher must
+   * pass the same Accept All policy that `gx find` passes to Zehn. Explicit
+   * --accept-all/--no-accept-all flags remain user-owned overrides.
+   */
+  const launch = resolveGhostexHistoryLaunch();
+  const historyArgs = await resolveGhostexHistoryArgs(args);
+  await runInteractiveProcess(launch.command, [...launch.args, ...historyArgs], {
+    cwd: launch.cwd,
+    env: launch.env,
+  });
+}
+
+function resolveGhostexHistoryLaunch() {
+  const explicitBin = String(process.env.GHOSTEX_HISTORY_BIN ?? "").trim();
+  if (explicitBin) {
+    return { args: [], command: explicitBin, cwd: undefined, env: process.env };
+  }
+
+  const cliDir = path.dirname(fileURLToPath(import.meta.url));
+  const repoRoot = path.resolve(cliDir, "..");
+  const roots = uniquePaths([
+    ...ghostexBundledWebResourceRoots(cliDir),
+    repoRoot,
+    process.env.GHOSTEX_SOURCE_ROOT,
+    findGhostexSourceRoot(process.cwd()),
+  ]);
+  for (const root of roots) {
+    const launch = resolveGhostexHistoryLaunchFromRoot(root);
+    if (launch) {
+      return launch;
+    }
+  }
+
+  throw new Error(
+    "ghostex-history was not found. Build or reinstall Ghostex so Web/bin/ghostex-history is staged, run from a source checkout with ghostex-history/Cargo.toml, or set GHOSTEX_HISTORY_BIN.",
+  );
+}
+
+function resolveGhostexHistoryLaunchFromRoot(root) {
+  if (!root) {
+    return undefined;
+  }
+  const bundledBin = path.join(root, "bin", "ghostex-history");
+  if (fileExistsSync(bundledBin)) {
+    return { args: [], command: bundledBin, cwd: undefined, env: process.env };
+  }
+  const manifestPath = path.join(root, "ghostex-history", "Cargo.toml");
+  if (fileExistsSync(manifestPath)) {
+    /*
+     * CDXC:AgentTranscriptHistory 2026-06-25-21:46:
+     * Local `gx h` should reflect source edits immediately. Prefer Cargo over
+     * target/debug when a source manifest is present so a stale development
+     * binary cannot mask transcript UI fixes during verification.
+     */
+    return {
+      args: ["run", "--quiet", "--manifest-path", manifestPath, "--"],
+      command: "cargo",
+      cwd: undefined,
+      env: process.env,
+    };
+  }
+  const debugBin = path.join(root, "ghostex-history", "target", "debug", "ghostex-history");
+  const releaseBin = path.join(root, "ghostex-history", "target", "release", "ghostex-history");
+  if (fileExistsSync(releaseBin)) {
+    return { args: [], command: releaseBin, cwd: undefined, env: process.env };
+  }
+  if (fileExistsSync(debugBin)) {
+    return { args: [], command: debugBin, cwd: undefined, env: process.env };
+  }
+  return undefined;
+}
+
 async function resolveZehnSearchArgs(args) {
+  if (hasZehnAcceptAllOverride(args)) {
+    return args;
+  }
+  const result = await callGxserverRpc("/api/readAgentSettings", {}).catch(() => undefined);
+  return applyZehnAcceptAllArgs(args, result?.settings?.agentAcceptAllEnabled === true);
+}
+
+async function resolveGhostexHistoryArgs(args) {
   if (hasZehnAcceptAllOverride(args)) {
     return args;
   }
@@ -5805,6 +5910,7 @@ function usage() {
     formatHelpCommand("2 [--tui2-bin path]", "Launch the experimental upstream-Herdr Ghostex TUI"),
     formatHelpCommand("sessions | s | ls [--ungrouped|-u] [--json]", "List running terminal sessions"),
     formatHelpCommand("find | f [zehn args...]", "Search agent prompt history with bundled zehn"),
+    formatHelpCommand("history | h [ghostex-history args...]", "View local agent transcripts in the alt-screen history TUI"),
     formatHelpCommand("android-check [--json]", "Verify this Mac is ready for Ghostex Android"),
     formatHelpCommand("attach | a [selector]", "Attach to a provider session, or open the picker without a selector"),
     formatHelpCommand("resume | r [selector]", "Alias for attach"),
@@ -5932,7 +6038,7 @@ Selectors:
 
 Sessions:
   Running ghostex or gx with no subcommand opens the Ghostex terminal TUI.
-  gx find and gx f launch bundled zehn for prompt-history search; gx s remains sessions.
+  gx find and gx f launch bundled zehn for prompt-history search; gx history and gx h open the transcript viewer.
   The TUI shows the attached session, with a top switch button for project/session switching.
   The switcher lists Ghostex projects and sessions in macOS sidebar order and attaches through the existing zmx path.
   Direct attach stays available through attach/a/resume/r without opening the TUI.
@@ -5950,7 +6056,7 @@ Global flags:
   --token <token>       Bridge token; legacy remote one-shot only because argv can expose secrets
   --timeout <ms>        Bridge request timeout
   server --help         Show server command help
-  help | h              Show this help
+  help                  Show this help
   -h, --help            Show this help
 `;
 }
@@ -6241,6 +6347,7 @@ export {
   resolveGxserverCliLaunchFromRoot,
   resolveGxserverCliLaunchForPath,
   resolveGxserverServerTarget,
+  resolveGhostexHistoryLaunchFromRoot,
   resolveListedSessions,
   resolveGhostexTuiLaunchFromRoot,
   resolveGhostexTui2LaunchFromRoot,

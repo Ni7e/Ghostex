@@ -80,6 +80,9 @@ const MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 0.25;
 const MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 8;
 const MIN_GHOSTTY_SCROLLBACK_LIMIT_MB = 1;
 const MAX_GHOSTTY_SCROLLBACK_LIMIT_MB = 200;
+export const DEFAULT_TERMINAL_PANE_PADDING_PX = 0;
+export const MIN_TERMINAL_PANE_PADDING_PX = 0;
+export const MAX_TERMINAL_PANE_PADDING_PX = 64;
 export const MIN_COMMANDS_PANEL_DEFAULT_HEIGHT_PX = 40;
 export const MAX_COMMANDS_PANEL_DEFAULT_HEIGHT_PX = 600;
 export const DEFAULT_SIDEBAR_DEFAULT_WIDTH_PX = 235;
@@ -165,6 +168,16 @@ export function clampProjectSessionListCollapsedCount(value: number): number {
   return Math.min(
     MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
     Math.max(MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT, Math.round(value)),
+  );
+}
+
+export function clampTerminalPanePaddingPx(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_TERMINAL_PANE_PADDING_PX;
+  }
+  return Math.min(
+    MAX_TERMINAL_PANE_PADDING_PX,
+    Math.max(MIN_TERMINAL_PANE_PADDING_PX, Math.round(value)),
   );
 }
 
@@ -631,6 +644,15 @@ export type ghostexSettings = {
   terminalGhosttyTheme: string;
   terminalLetterSpacing: number;
   terminalLineHeight: number;
+  /**
+   * CDXC:TerminalPanePadding 2026-06-25-21:27:
+   * Terminal pane padding is app layout, not a Ghostty config key. Store
+   * separate horizontal and vertical pixel values so Settings can inset every
+   * native terminal surface while preserving the pane titlebar, borders,
+   * splitters, and Ghostty background color.
+   */
+  terminalPaneHorizontalPaddingPx: number;
+  terminalPaneVerticalPaddingPx: number;
   terminalMouseScrollMultiplierDiscrete: number;
   terminalMouseScrollMultiplierPrecision: number;
   tmuxMode: boolean;
@@ -1154,6 +1176,8 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   terminalGhosttyTheme: "GitHub Dark",
   terminalLetterSpacing: 0,
   terminalLineHeight: 1.2,
+  terminalPaneHorizontalPaddingPx: DEFAULT_TERMINAL_PANE_PADDING_PX,
+  terminalPaneVerticalPaddingPx: DEFAULT_TERMINAL_PANE_PADDING_PX,
   terminalMouseScrollMultiplierDiscrete: 1,
   terminalMouseScrollMultiplierPrecision: 1,
   /**
@@ -1978,6 +2002,27 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       0.8,
       2,
       DEFAULT_ghostex_SETTINGS.terminalLineHeight,
+    ),
+    /**
+     * CDXC:TerminalPanePadding 2026-06-25-21:27:
+     * Missing or legacy settings should keep terminals edge-to-edge. Explicit
+     * values are integer pixels clamped to the Settings slider range so native
+     * layout receives bounded insets without reintroducing the removed pane-gap
+     * spacing between adjacent panes.
+     */
+    terminalPaneHorizontalPaddingPx: clampTerminalPanePaddingPx(
+      readNumber(
+        source,
+        "terminalPaneHorizontalPaddingPx",
+        DEFAULT_ghostex_SETTINGS.terminalPaneHorizontalPaddingPx,
+      ),
+    ),
+    terminalPaneVerticalPaddingPx: clampTerminalPanePaddingPx(
+      readNumber(
+        source,
+        "terminalPaneVerticalPaddingPx",
+        DEFAULT_ghostex_SETTINGS.terminalPaneVerticalPaddingPx,
+      ),
     ),
     /**
      * CDXC:TerminalScrollSettings 2026-04-29-08:56

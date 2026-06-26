@@ -2707,6 +2707,8 @@ final class TerminalWorkspaceView: NSView {
   private var workspaceBackgroundColorValue: String?
   private let defaultWorkspaceBackgroundColor: NSColor
   private var paneGap = TerminalWorkspaceView.defaultPaneGap
+  private var terminalPaneHorizontalPaddingPx: CGFloat = 0
+  private var terminalPaneVerticalPaddingPx: CGFloat = 0
   private var sidebarSide: SidebarSide = .left
   private var programmaticFocusDepth = 0
   private var terminalLayout: NativeTerminalLayout?
@@ -7231,6 +7233,10 @@ final class TerminalWorkspaceView: NSView {
     let nextActiveProjectEditorId = command.activeProjectEditorId
     let nextPoppedOutSessionIds = Set(command.poppedOutSessionIds ?? []).intersection(nextActiveSessionIds)
     let nextPaneGap = Self.clampedPaneGap(command.paneGap)
+    let nextTerminalPaneHorizontalPaddingPx = Self.clampedTerminalPanePaddingPx(
+      command.terminalPaneHorizontalPaddingPx)
+    let nextTerminalPaneVerticalPaddingPx = Self.clampedTerminalPanePaddingPx(
+      command.terminalPaneVerticalPaddingPx)
     let nextLayout = command.layout
     let previousDelayedSendRemainingLabels = sessionDelayedSendRemainingLabels
     let shouldRelayout =
@@ -7240,6 +7246,8 @@ final class TerminalWorkspaceView: NSView {
           activeProjectEditorId: nextActiveProjectEditorId,
           layout: nextLayout,
           paneGap: nextPaneGap,
+          terminalPaneHorizontalPaddingPx: nextTerminalPaneHorizontalPaddingPx,
+          terminalPaneVerticalPaddingPx: nextTerminalPaneVerticalPaddingPx,
           poppedOutSessionIds: nextPoppedOutSessionIds
         )
         != nativeLayoutSignature(
@@ -7247,6 +7255,8 @@ final class TerminalWorkspaceView: NSView {
           activeProjectEditorId: activeProjectEditorId,
           layout: terminalLayout,
           paneGap: paneGap,
+          terminalPaneHorizontalPaddingPx: terminalPaneHorizontalPaddingPx,
+          terminalPaneVerticalPaddingPx: terminalPaneVerticalPaddingPx,
           poppedOutSessionIds: poppedOutSessionIds
         ))
     if shouldRelayout || activeProjectEditorId != nextActiveProjectEditorId || webPaneSessions[command.focusedSessionId ?? ""] != nil {
@@ -7270,6 +7280,8 @@ final class TerminalWorkspaceView: NSView {
     let previousActiveProjectEditorId = activeProjectEditorId
     let previousFirstPromptTitleGenerationSessionIds = firstPromptTitleGenerationSessionIds
     let previousPaneGap = paneGap
+    let previousTerminalPaneHorizontalPaddingPx = terminalPaneHorizontalPaddingPx
+    let previousTerminalPaneVerticalPaddingPx = terminalPaneVerticalPaddingPx
     let previousProjectEditorCompanionIsVisible = projectEditorCompanionIsVisible
     let previousProjectEditorCompanionPaneHidden = projectEditorCompanionPaneHidden
     let previousProjectEditorCompanionSessionId = projectEditorCompanionSessionId
@@ -7368,6 +7380,8 @@ final class TerminalWorkspaceView: NSView {
     focusedSessionId = passiveResponderFocusedSessionId ?? command.focusedSessionId
     terminalLayout = nextLayout
     paneGap = nextPaneGap
+    terminalPaneHorizontalPaddingPx = nextTerminalPaneHorizontalPaddingPx
+    terminalPaneVerticalPaddingPx = nextTerminalPaneVerticalPaddingPx
     if shouldRelayout
       || previousFocusedSessionId != focusedSessionId
       || previousCommandsPanelFocusedSessionId != commandsPanelFocusedSessionId
@@ -7393,6 +7407,12 @@ final class TerminalWorkspaceView: NSView {
      The terminal workspace background is user-configurable from Settings.
      Apply the chosen color directly to the AppKit backing layer so the
      pane surfaces use the user's color without depending on configurable gaps.
+
+     CDXC:TerminalPanePadding 2026-06-25-21:27:
+     Terminal padding exposes pane-container background around the Ghostty
+     surface. Use this same resolved terminal background color for containers
+     before layout frames are assigned, preserving Ghostty config colors when
+     layout sync does not send an explicit override.
     */
     applyWorkspaceBackgroundColor(command.backgroundColor)
     let isProjectEditorActive = activeProjectEditorId != nil
@@ -7567,6 +7587,10 @@ final class TerminalWorkspaceView: NSView {
         "paneOwnerSelectionApplied": didApplyPaneOwnerSelection,
         "paneOwnerSelectionChanged": command.paneOwnerSelectionChanged == true,
         "paneGap": Double(paneGap),
+        "terminalPanePaddingPx": [
+          "horizontal": Double(terminalPaneHorizontalPaddingPx),
+          "vertical": Double(terminalPaneVerticalPaddingPx),
+        ],
         "poppedOutSessionIds": Array(poppedOutSessionIds).sorted(),
         "responderAfterLayout": responderSnapshot(),
         "responderBefore": responderBefore,
@@ -7592,13 +7616,21 @@ final class TerminalWorkspaceView: NSView {
        */
       refreshZmxPersistenceTerminalsForSurfacedPanes(reason: "setActiveTerminalSet.projectEditorModeSwitch")
     }
-    if abs(previousPaneGap - paneGap) > 0.5 {
+    if abs(previousPaneGap - paneGap) > 0.5
+      || abs(previousTerminalPaneHorizontalPaddingPx - terminalPaneHorizontalPaddingPx) > 0.5
+      || abs(previousTerminalPaneVerticalPaddingPx - terminalPaneVerticalPaddingPx) > 0.5
+    {
       /*
        CDXC:ZmxPersistenceRefresh 2026-05-18-15:44:
        Pane-gap preference changes resize every surfaced workspace pane through layout sync instead of a drag handler.
        Schedule the trailing zmx refresh against surfaced pane owners only.
+
+       CDXC:TerminalPanePadding 2026-06-25-21:27:
+       Terminal pane padding changes the Ghostty surface frame in the same
+       layout-owned way, so zmx-backed panes need the same trailing resize
+       refresh after the inset settles.
        */
-      scheduleZmxPersistenceTerminalRefreshAfterResize(reason: "setActiveTerminalSet.paneGapChanged")
+      scheduleZmxPersistenceTerminalRefreshAfterResize(reason: "setActiveTerminalSet.terminalFrameInsetsChanged")
     }
     if previousCommandsPanelIsVisible != commandsPanelIsVisible
       || previousCommandsPanelActiveSessionIds.isEmpty != commandsPanelActiveSessionIds.isEmpty
@@ -14833,6 +14865,7 @@ final class TerminalWorkspaceView: NSView {
     let titleBarHeight = min(titleBarHeight(for: sessionId), max(rect.height, 0))
     mountTerminalPaneContainer(for: session)
     session.containerView.frame = rect
+    session.containerView.setBackgroundColor(terminalPaneBackgroundColor())
     session.containerView.isHidden = false
     let titleBarRect = CGRect(
       x: 0,
@@ -14848,11 +14881,17 @@ final class TerminalWorkspaceView: NSView {
     )
     /**
      CDXC:NativeTerminalResize 2026-05-02-17:19
-     Pane chrome and the terminal renderer must share the same body width.
-     Remove the previous whole-cell stepping here because it created visible
-     chrome/body width drift and did not resolve the prior terminal resize bug.
+     Whole-cell stepping created visible chrome/body width drift and did not
+     resolve the prior terminal resize bug, so pane chrome should still use the
+     exact AppKit pane body frame.
+
+     CDXC:TerminalPanePadding 2026-06-25-21:27:
+     Terminal pane padding is a content inset inside the pane body. Shrink only
+     the Ghostty scroll/surface frame so titlebars, borders, splitters, and tab
+     hit targets retain their normal layout ownership while the exposed inset
+     shows the same terminal background color.
      */
-    let terminalRect = availableTerminalRect
+    let terminalRect = terminalPaneContentRect(in: availableTerminalRect)
     session.titleBarView.frame = titleBarRect
     session.titleBarView.needsLayout = true
     session.titleBarView.layoutSubtreeIfNeeded()
@@ -14869,7 +14908,7 @@ final class TerminalWorkspaceView: NSView {
       updateTerminalBorder(for: sessionId)
       return
     }
-    session.scrollView.frame = availableTerminalRect
+    session.scrollView.frame = terminalRect
     session.scrollView.needsLayout = true
     session.scrollView.layoutSubtreeIfNeeded()
     session.searchBarView.frame = searchBarFrame(in: terminalRect)
@@ -17049,6 +17088,8 @@ final class TerminalWorkspaceView: NSView {
     activeProjectEditorId: String?,
     layout: NativeTerminalLayout?,
     paneGap: CGFloat,
+    terminalPaneHorizontalPaddingPx: CGFloat,
+    terminalPaneVerticalPaddingPx: CGFloat,
     poppedOutSessionIds: Set<String>
   ) -> String {
     [
@@ -17056,6 +17097,7 @@ final class TerminalWorkspaceView: NSView {
       "editor=\(activeProjectEditorId ?? "")",
       "gap=\(roundedSignature(paneGap * 100))",
       "layout=\(nativeLayoutNodeSignature(layout))",
+      "terminalPadding=\(roundedSignature(terminalPaneHorizontalPaddingPx)),\(roundedSignature(terminalPaneVerticalPaddingPx))",
       "popped=\(poppedOutSessionIds.sorted().joined(separator: ","))",
     ].joined(separator: "|")
   }
@@ -17188,13 +17230,38 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     /**
-     CDXC:NativeGpu 2026-05-08-16:45
+    CDXC:NativeGpu 2026-05-08-16:45
      Passive metadata sync can arrive without a visual workspace change.
      Reassign the AppKit backing-layer color only when the configured value
      changes so repeated status updates do not dirty the whole workspace layer.
      */
     workspaceBackgroundColorValue = nextValue
-    layer?.backgroundColor = workspaceBackgroundColor(value).cgColor
+    let color = workspaceBackgroundColor(value)
+    layer?.backgroundColor = color.cgColor
+    for session in sessions.values {
+      session.containerView.setBackgroundColor(color)
+    }
+  }
+
+  private func terminalPaneBackgroundColor() -> NSColor {
+    workspaceBackgroundColor(workspaceBackgroundColorValue)
+  }
+
+  private func terminalPaneContentRect(in availableTerminalRect: CGRect) -> CGRect {
+    /*
+     CDXC:TerminalPanePadding 2026-06-25-21:27:
+     Clamp native insets against the current pane body so extreme or stale
+     settings cannot collapse the Ghostty surface below one point. This keeps
+     padding a real layout inset instead of hiding the renderer behind an
+     overlay or fallback path.
+     */
+    let horizontalInset = min(
+      terminalPaneHorizontalPaddingPx,
+      max((availableTerminalRect.width - 1) / 2, 0))
+    let verticalInset = min(
+      terminalPaneVerticalPaddingPx,
+      max((availableTerminalRect.height - 1) / 2, 0))
+    return availableTerminalRect.insetBy(dx: horizontalInset, dy: verticalInset)
   }
 
   private func setHidden(_ hidden: Bool, for view: NSView) {
@@ -18531,6 +18598,13 @@ final class TerminalWorkspaceView: NSView {
       return defaultPaneGap
     }
     return CGFloat(min(48, max(0, value)))
+  }
+
+  private static func clampedTerminalPanePaddingPx(_ value: Double?) -> CGFloat {
+    guard let value, value.isFinite else {
+      return 0
+    }
+    return CGFloat(min(64, max(0, value.rounded())))
   }
 
   private func clampedCommandsPanelHeightRatio(_ value: Double?) -> CGFloat {
@@ -29395,6 +29469,16 @@ private final class TerminalPaneLeafContainerView: NSView {
 
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
     true
+  }
+
+  func setBackgroundColor(_ color: NSColor) {
+    /*
+     CDXC:TerminalPanePadding 2026-06-25-21:27:
+     The terminal pane container owns the background exposed by content padding.
+     This is paint on the existing leaf container, not an overlay, so strict
+     AppKit child-frame hit testing remains unchanged.
+     */
+    layer?.backgroundColor = color.cgColor
   }
 
   func resolvedTitleBarView() -> TerminalSessionTitleBarView? {

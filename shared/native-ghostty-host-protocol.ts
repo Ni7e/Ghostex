@@ -414,6 +414,14 @@ export type NativeGhosttyHostCommand =
       layout?: NativeTerminalLayout;
       paneGap?: number;
       /**
+       * CDXC:TerminalPanePadding 2026-06-25-21:27:
+       * AppKit owns terminal surface frames, so Settings sends terminal content
+       * padding through layout sync as geometry. These insets apply only inside
+       * terminal pane bodies and must not create spacing between sibling panes.
+       */
+      terminalPaneHorizontalPaddingPx?: number;
+      terminalPaneVerticalPaddingPx?: number;
+      /**
        * CDXC:PanePopOut 2026-05-11-09:35
        * Layout sync keeps popped-out sessions in the split/tab tree while
        * telling AppKit to render a placeholder in-app and move the live native

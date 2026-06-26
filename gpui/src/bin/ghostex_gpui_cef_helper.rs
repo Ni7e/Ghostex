@@ -12,8 +12,16 @@ const SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.activeProjectContext";
 const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.nativeProjectPathAction";
+const SIDEBAR_NATIVE_APP_SHOT_PROMPT_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.nativeAppShotPrompt";
 const SIDEBAR_GXSERVER_FOCUS_STATE_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.gxserverPresentationFocusState";
+const SIDEBAR_SESSION_FOCUS_DEBUG_LOG_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.sessionFocusDebugLog";
+const SIDEBAR_SESSION_STATUS_INDICATORS_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.sessionStatusIndicators";
+const SIDEBAR_PET_OVERLAY_STATE_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.petOverlayState";
 const SIDEBAR_PROJECT_CONTEXT_INSTALL_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.installActiveProjectContextBridge";
 const SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME: &str =
@@ -23,7 +31,11 @@ const SIDEBAR_GXSERVER_BOOTSTRAP_UPDATE_MESSAGE_NAME: &str =
 const SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE: &str = "ghostexGpui";
 const SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION: &str = "postActiveProjectContext";
 const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_JS_FUNCTION: &str = "postNativeProjectPathAction";
+const SIDEBAR_NATIVE_APP_SHOT_PROMPT_JS_FUNCTION: &str = "postNativeAppShotPromptToSession";
 const SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION: &str = "postGxserverPresentationFocusState";
+const SIDEBAR_SESSION_FOCUS_DEBUG_LOG_JS_FUNCTION: &str = "postSessionFocusDebugLog";
+const SIDEBAR_SESSION_STATUS_INDICATORS_JS_FUNCTION: &str = "postSessionStatusIndicators";
+const SIDEBAR_PET_OVERLAY_STATE_JS_FUNCTION: &str = "postPetOverlayState";
 const SIDEBAR_RUNTIME_SETTINGS_JS_OBJECT: &str = "runtimeSettings";
 const SIDEBAR_RUNTIME_SETTINGS_CHANGED_JS_CALLBACK: &str = "onRuntimeSettingsChanged";
 const SIDEBAR_RUNTIME_SETTINGS_DEBUGGING_MODE_JS_FIELD: &str = "debuggingMode";
@@ -61,7 +73,7 @@ struct SidebarBridgeFunctionSpec {
     process_message_name: &'static str,
 }
 
-const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 3] = [
+const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 7] = [
     SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION,
         process_message_name: SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME,
@@ -71,8 +83,24 @@ const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 3] = [
         process_message_name: SIDEBAR_NATIVE_PROJECT_PATH_ACTION_PROCESS_MESSAGE_NAME,
     },
     SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_NATIVE_APP_SHOT_PROMPT_JS_FUNCTION,
+        process_message_name: SIDEBAR_NATIVE_APP_SHOT_PROMPT_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION,
         process_message_name: SIDEBAR_GXSERVER_FOCUS_STATE_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_SESSION_FOCUS_DEBUG_LOG_JS_FUNCTION,
+        process_message_name: SIDEBAR_SESSION_FOCUS_DEBUG_LOG_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_SESSION_STATUS_INDICATORS_JS_FUNCTION,
+        process_message_name: SIDEBAR_SESSION_STATUS_INDICATORS_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_PET_OVERLAY_STATE_JS_FUNCTION,
+        process_message_name: SIDEBAR_PET_OVERLAY_STATE_PROCESS_MESSAGE_NAME,
     },
 ];
 
@@ -260,6 +288,9 @@ fn install_sidebar_project_context_v8_bridge(
 
     CDXC:GPUISidebarGit 2026-06-24-15:43:
     Existing-PR browser open and changed-file IDE open reuse this fixed sidebar-native bridge instead of adding renderer-owned URL/path launch APIs. The helper still forwards only one bounded string; Rust must parse the allowlisted action contract and re-query gxserver before any browser or editor side effect.
+
+    CDXC:GPUIStatusPetOverlay 2026-06-26-04:38:
+    The helper mirrors the main CEF bridge for status indicator and pet overlay state as fixed sidebar-only functions. These functions are not activation callbacks or a generic native bus; they forward only bounded presentation JSON for app-side parsing.
     */
     let Some(context) = context else {
         return;

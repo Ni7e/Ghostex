@@ -11,6 +11,8 @@ export type NativeLayoutSyncKeyInput = {
   layout?: NativeTerminalLayout;
   mountingSessionIds?: string[];
   paneGap?: number;
+  terminalPaneHorizontalPaddingPx?: number;
+  terminalPaneVerticalPaddingPx?: number;
 };
 
 export function createNativeLayoutSyncKey(input: NativeLayoutSyncKeyInput): string {
@@ -39,6 +41,8 @@ export function createNativeLayoutSyncKey(input: NativeLayoutSyncKeyInput): stri
       layout: normalizeNativeLayoutGeometry(input.layout),
       mountingSessionIds: input.mountingSessionIds,
       paneGap: input.paneGap,
+      terminalPaneHorizontalPaddingPx: input.terminalPaneHorizontalPaddingPx,
+      terminalPaneVerticalPaddingPx: input.terminalPaneVerticalPaddingPx,
     }),
   );
 }

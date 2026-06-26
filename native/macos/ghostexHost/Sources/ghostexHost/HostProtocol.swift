@@ -716,6 +716,14 @@ struct SetActiveTerminalSet: Decodable {
   let keepAwake: TitlebarKeepAwakeSettings?
   let gxserverDaemon: TitlebarGxserverDaemon?
   let paneGap: Double?
+  /**
+   CDXC:TerminalPanePadding 2026-06-25-21:27:
+   Terminal content padding is app-owned layout geometry. Decode both axes from
+   layout sync so AppKit can inset Ghostty surfaces inside their pane body
+   without changing splitters, titlebars, browser panes, or Ghostty config keys.
+   */
+  let terminalPaneHorizontalPaddingPx: Double?
+  let terminalPaneVerticalPaddingPx: Double?
   let petOverlayEnabled: Bool?
   /**
    CDXC:PanePopOut 2026-05-11-09:35

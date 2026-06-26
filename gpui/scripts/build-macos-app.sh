@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GPUI_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$GPUI_DIR/.." && pwd)"
 APP_NAME="GhostexGPUI"
+GPUI_BUNDLE_ID="com.madda.ghostex.gpui.phase1"
+GPUI_LID_SLEEP_HELPER_LABEL="$GPUI_BUNDLE_ID.LidSleepHelper"
 APP_PATH="$GPUI_DIR/build/macos/$APP_NAME.app"
 RUN_APP=0
 SOUND_SRC_DIR="$REPO_ROOT/media/sounds"
@@ -12,6 +14,8 @@ SOUND_DEST_DIR="$APP_PATH/Contents/Resources/sidebar/sounds"
 CLI_DIR="$APP_PATH/Contents/Resources/CLI"
 WEB_DIR="$APP_PATH/Contents/Resources/Web"
 WEB_SOURCE_DIR="$REPO_ROOT/native/macos/ghostexHost/Web"
+LID_SLEEP_HELPER_SOURCE_DIR="$REPO_ROOT/native/macos/ghostexHost/Sources"
+LID_SLEEP_HELPER_BUILD_DIR="$GPUI_DIR/build/macos-lid-sleep-helper"
 GHOSTEX_REMOTE_GXSERVER_LINUX_X64_DEFAULT_PACKAGE="$REPO_ROOT/build/remote-gxserver-linux/x64/package"
 GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_DEFAULT_PACKAGE="$REPO_ROOT/build/remote-gxserver-linux/arm64/package"
 GHOSTEX_REMOTE_GXSERVER_LINUX_X64_STAGED_PACKAGE="$WEB_SOURCE_DIR/gxserver-linux-x64"
@@ -155,6 +159,75 @@ validate_portless_admin_runtime_resources() {
 	fi
 }
 
+build_gpui_lid_sleep_helper() {
+	local helper_build_dir="$LID_SLEEP_HELPER_BUILD_DIR/$GHOSTEX_MACOS_ARCH"
+	local helper_binary="$helper_build_dir/$GPUI_LID_SLEEP_HELPER_LABEL"
+	local helper_info_plist="$helper_build_dir/Info.plist"
+	local swift_target="$GHOSTEX_MACOS_ARCH-apple-macos13.0"
+
+	# CDXC:GPUITitlebarKeepAwake 2026-06-26-00:09:
+	# Packaged GPUI closed-lid Keep Awake must ship the real Swift privileged helper under the GPUI helper label. Build from the native app's reviewed helper/protocol sources with an embedded helper bundle id so GPUI installs the same narrow XPC daemon instead of a stub or direct pmset path.
+	rm -rf "$helper_build_dir"
+	mkdir -p "$helper_build_dir"
+	cat >"$helper_info_plist" <<EOF_HELPER_PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>$GPUI_LID_SLEEP_HELPER_LABEL</string>
+	<key>CFBundleIdentifier</key>
+	<string>$GPUI_LID_SLEEP_HELPER_LABEL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$GPUI_LID_SLEEP_HELPER_LABEL</string>
+	<key>CFBundlePackageType</key>
+	<string>BNDL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+</dict>
+</plist>
+EOF_HELPER_PLIST
+	xcrun swiftc \
+		-target "$swift_target" \
+		-O \
+		-module-name GhostexLidSleepHelper \
+		-o "$helper_binary" \
+		"$LID_SLEEP_HELPER_SOURCE_DIR/Shared/GhostexLidSleepHelperProtocol.swift" \
+		"$LID_SLEEP_HELPER_SOURCE_DIR/GhostexLidSleepHelper/main.swift" \
+		-Xlinker -sectcreate \
+		-Xlinker __TEXT \
+		-Xlinker __info_plist \
+		-Xlinker "$helper_info_plist"
+	chmod 755 "$helper_binary"
+	if [[ ! -x "$helper_binary" ]]; then
+		echo "GPUI lid-sleep helper build did not produce an executable helper." >&2
+		exit 1
+	fi
+	printf '%s\n' "$helper_binary"
+}
+
+stage_gpui_lid_sleep_helper() {
+	local helper_source helper_dir helper_target
+
+	helper_source="$(build_gpui_lid_sleep_helper)"
+	helper_dir="$APP_PATH/Contents/Library/LaunchServices"
+	helper_target="$helper_dir/$GPUI_LID_SLEEP_HELPER_LABEL"
+	mkdir -p "$helper_dir"
+	install -m 0755 "$helper_source" "$helper_target"
+	if [[ ! -x "$helper_target" ]]; then
+		echo "Packaged GPUI lid-sleep helper is missing or not executable." >&2
+		exit 1
+	fi
+}
+
 validate_remote_gxserver_linux_package() {
 	local package_dir="$1"
 	local package_label="$2"
@@ -258,6 +331,22 @@ stage_remote_gxserver_linux_packages_if_available() {
 	stage_remote_gxserver_linux_package_if_available "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_PACKAGE" "gxserver-linux-arm64" "LINUX_ARM64" "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_DEFAULT_PACKAGE" "$GHOSTEX_REMOTE_GXSERVER_LINUX_ARM64_STAGED_PACKAGE"
 }
 
+prepare_gpui_app_bundle_path() {
+	if [[ ! -e "$APP_PATH" ]]; then
+		return
+	fi
+
+	# CDXC:GPUIPackaging 2026-06-26-05:23:
+	# Rebuilding GPUI must replace the app bundle even when the previous CEF framework leaves a partially removable directory tree. Move the old bundle off the canonical path first, then best-effort clean the stale bundle so packaging can create a fresh app without launching, restarting, or relying on in-place framework deletion.
+	local stale_app_path="$APP_PATH.stale.$$"
+	rm -rf "$stale_app_path"
+	mv "$APP_PATH" "$stale_app_path"
+	chmod -R u+w "$stale_app_path" 2>/dev/null || true
+	if ! rm -rf "$stale_app_path"; then
+		printf 'Warning: could not fully remove stale GPUI app bundle: %s\n' "$stale_app_path" >&2
+	fi
+}
+
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--run)
@@ -319,7 +408,7 @@ if [[ -z "$CEF_FRAMEWORK" || ! -d "$CEF_FRAMEWORK" ]]; then
 	exit 1
 fi
 
-rm -rf "$APP_PATH"
+prepare_gpui_app_bundle_path
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" "$APP_PATH/Contents/Frameworks"
 cp "$GPUI_DIR/target/release/ghostex-gpui" "$APP_PATH/Contents/MacOS/$APP_NAME"
 chmod 755 "$APP_PATH/Contents/MacOS/$APP_NAME"
@@ -367,7 +456,7 @@ cat >"$APP_PATH/Contents/Info.plist" <<EOF_PLIST
 	<key>CFBundleExecutable</key>
 	<string>$APP_NAME</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.madda.ghostex.gpui.phase1</string>
+	<string>$GPUI_BUNDLE_ID</string>
 	<!-- CDXC:GPUIOSIntegration 2026-06-24-13:15:
 	GPUI packaging must mirror the Swift app Launch Services declarations so Settings can report the packaged app as an available editor, script handler, and ghostex:// target.
 	Use LSHandlerRank Alternate here because app installation should only register GPUI as a candidate handler; explicit Settings actions own default-setting mutations.
@@ -469,7 +558,7 @@ for helper_name in "${helper_names[@]}"; do
 	<key>CFBundleExecutable</key>
 	<string>$helper_name</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.madda.ghostex.gpui.phase1.$(printf '%s' "$helper_name" | tr ' ()' '---')</string>
+	<string>$GPUI_BUNDLE_ID.$(printf '%s' "$helper_name" | tr ' ()' '---')</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -486,6 +575,8 @@ for helper_name in "${helper_names[@]}"; do
 </plist>
 EOF_HELPER
 done
+
+stage_gpui_lid_sleep_helper
 
 # CDXC:GPUIPhase1 2026-06-14-15:25:
 # The phase-1 shell now consumes Tauri's cef-rs CEF distribution instead of Ghostex's production CEF vendor tree. Build with a local CEF_PATH cache so cef-dll-sys downloads the version matching the Rust bindings, then package helper apps named after the GPUI executable because macOS CEF discovers helpers from the main bundle name.

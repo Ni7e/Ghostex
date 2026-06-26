@@ -2118,6 +2118,11 @@ button,
 }
 
 .ghostex-settings-shadcn .settings-section-sidebar {
+  /*
+   * CDXC:SettingsNavigation 2026-06-25-22:10:
+   * The macOS Settings sidebar container should sit 1px higher so its card
+   * aligns with the native Settings window content chrome.
+   */
   background: color-mix(in srgb, var(--app-modal-background) 78%, var(--muted) 22%);
   border: 1px solid var(--border);
   border-radius: var(--settings-radius-section);
@@ -2129,6 +2134,8 @@ button,
   min-height: 0;
   overflow: hidden;
   padding: 0.625rem 0.5rem;
+  position: relative;
+  top: -1px;
   width: 100%;
 }
 
@@ -2290,14 +2297,35 @@ button,
 }
 
 .ghostex-settings-shadcn .settings-sidebar-subsection-button {
-  color: var(--muted-foreground);
+  /*
+   * CDXC:SettingsNavigation 2026-06-25-17:58:
+   * Expanded subsection titles should sit 14px farther right than the base
+   * sidebar button inset so they read as nested items under icon-led main
+   * categories without moving the row highlight itself.
+   *
+   * CDXC:SettingsNavigation 2026-06-25-18:05:
+   * Subsection selection should be text-only: inactive labels stay dim, the
+   * active label brightens, and subsection rows do not use the main-category
+   * filled background treatment.
+   */
+  color: color-mix(in srgb, var(--muted-foreground) 72%, var(--background));
   font-size: 0.78125rem;
   min-height: 1.75rem;
+  padding-left: calc(0.625rem + 14px) !important;
 }
 
-.ghostex-settings-shadcn .settings-section-sidebar-button[data-active="true"] {
-  background: var(--accent);
-  color: var(--accent-foreground);
+.ghostex-settings-shadcn .settings-sidebar-subsection-button:hover,
+.ghostex-settings-shadcn .settings-sidebar-subsection-button:focus-visible {
+  background: transparent !important;
+  color: var(--muted-foreground);
+}
+
+.ghostex-settings-shadcn .settings-sidebar-subsection-button[data-active="true"],
+.ghostex-settings-shadcn .settings-sidebar-subsection-button[data-active="true"]:hover,
+.ghostex-settings-shadcn .settings-sidebar-subsection-button[data-active="true"]:focus-visible {
+  background: transparent !important;
+  color: var(--foreground);
+  font-weight: 500;
 }
 
 .ghostex-settings-shadcn .settings-section-anchor {

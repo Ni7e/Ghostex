@@ -1262,6 +1262,7 @@ validate_remote_gxserver_linux_package() {
 		"bin/zmx" \
 		"bin/zehn" \
 		"bin/bd" \
+		"bin/ghostex-tui" \
 		"code-server/lib/node" \
 		"portless/dist/cli.js"; do
 		if [[ ! -e "$package_dir/$required_path" ]]; then
@@ -1278,6 +1279,7 @@ validate_remote_gxserver_linux_package() {
 		"bin/zmx" \
 		"bin/zehn" \
 		"bin/bd" \
+		"bin/ghostex-tui" \
 		"code-server/lib/node"; do
 		file_output="$(file "$package_dir/$required_path")"
 		if [[ "$file_output" == *"Mach-O"* ]]; then

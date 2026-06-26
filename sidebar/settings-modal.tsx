@@ -1,6 +1,7 @@
 import { DragDropProvider, type DragDropEventHandlers } from "@dnd-kit/react";
 import { isSortableOperation, useSortable } from "@dnd-kit/react/sortable";
 import {
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -138,6 +139,7 @@ import {
   DEFAULT_ghostex_SETTINGS,
   DEFAULT_EDITOR_COMMAND_OPTIONS,
   MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
+  MAX_TERMINAL_PANE_PADDING_PX,
   MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   GHOSTTY_CONFIRM_CLOSE_SURFACE_OPTIONS,
   GHOSTTY_COPY_ON_SELECT_OPTIONS,
@@ -145,6 +147,7 @@ import {
   GHOSTTY_THEME_SETTING_OPTIONS,
   KEEP_AWAKE_DURATION_OPTIONS,
   MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
+  MIN_TERMINAL_PANE_PADDING_PX,
   MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   PROMPT_EDITOR_BACKEND_OPTIONS,
   type PromptEditorBackend,
@@ -595,6 +598,8 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "terminalFontWeight",
     "terminalLineHeight",
     "terminalLetterSpacing",
+    "terminalPaneHorizontalPaddingPx",
+    "terminalPaneVerticalPaddingPx",
     "terminalCursorStyle",
     "terminalCursorStyleBlink",
     "sessionPersistenceProvider",
@@ -1060,12 +1065,33 @@ export function SettingsModal({
       rememberedSettingsModalScrollTopByTab[activeTab] = viewport.scrollTop;
     }
   };
-  const focusSearchInput = () => {
-    if (isFirstLaunchSetup) {
-      return;
+  const shouldFocusSettingsSearchInput = useCallback((inputElement: HTMLInputElement): boolean => {
+    /*
+     * CDXC:SettingsSearch 2026-06-25-21:21:
+     * The visible Settings search field may prefill from deep links and
+     * printable-key capture, but it must never steal typing focus from an
+     * already-focused input, textarea, select, or contenteditable field,
+     * including Settings popover fields rendered through portals. Let search
+     * refocus itself while it is active and otherwise focus only when no
+     * editable control owns the user's text entry.
+     */
+    const activeElement = inputElement.ownerDocument.activeElement;
+    if (!activeElement || activeElement === inputElement) {
+      return true;
     }
-    searchInputRef.current?.focus({ preventScroll: true });
-  };
+    return !isEditableSettingsModalElement(activeElement);
+  }, []);
+  const focusSearchInput = useCallback((): boolean => {
+    if (isFirstLaunchSetup) {
+      return false;
+    }
+    const inputElement = searchInputRef.current;
+    if (!inputElement || !shouldFocusSettingsSearchInput(inputElement)) {
+      return false;
+    }
+    inputElement.focus({ preventScroll: true });
+    return true;
+  }, [isFirstLaunchSetup, shouldFocusSettingsSearchInput]);
   const handleSettingsModalScrollCapture = (event: ReactUIEvent<HTMLDivElement>) => {
     if (event.target instanceof HTMLElement && event.target.dataset.slot === "scroll-area-viewport") {
       rememberedSettingsModalScrollTopByTab[activeTab] = event.target.scrollTop;
@@ -1170,11 +1196,12 @@ export function SettingsModal({
      */
     setSettingsSearchQuery(nextQuery);
     const animationFrame = requestAnimationFrame(() => {
-      searchInputRef.current?.focus({ preventScroll: true });
-      searchInputRef.current?.select();
+      if (focusSearchInput()) {
+        searchInputRef.current?.select();
+      }
     });
     return () => cancelAnimationFrame(animationFrame);
-  }, [initialSearchQuery, initialTab, isFirstLaunchSetup, isOpen]);
+  }, [focusSearchInput, initialSearchQuery, initialTab, isFirstLaunchSetup, isOpen]);
 
   useEffect(() => {
     if (
@@ -1709,6 +1736,16 @@ export function SettingsModal({
         key: "terminalLetterSpacing",
         subtitle: "Adjust spacing between glyphs.",
         title: "Letter Spacing",
+      },
+      {
+        key: "terminalPaneHorizontalPaddingPx",
+        subtitle: "Add left and right inner padding inside every terminal pane.",
+        title: "Horizontal Padding",
+      },
+      {
+        key: "terminalPaneVerticalPaddingPx",
+        subtitle: "Add top and bottom inner padding inside every terminal pane.",
+        title: "Vertical Padding",
       },
       {
         key: "terminalCursorStyle",
@@ -2502,6 +2539,7 @@ export function SettingsModal({
                     placeholder="Search settings"
                     query={settingsSearchQuery}
                     setQuery={setSettingsSearchQuery}
+                    shouldFocusOnQueryChange={shouldFocusSettingsSearchInput}
                     spellCheck={false}
                     toolbarClassName="settings-modal-search-toolbar"
                   />
@@ -3058,6 +3096,45 @@ export function SettingsModal({
                   onChange={(value) => updateDraftDebounced("terminalLetterSpacing", value)}
                   step={0.1}
                   value={draft.terminalLetterSpacing}
+                />
+              ) : null}
+              {mainSettingVisible(settingsSearch.terminal, "terminalPaneHorizontalPaddingPx") ? (
+                /*
+                 * CDXC:TerminalPanePadding 2026-06-25-21:27:
+                 * Horizontal terminal padding is a native pane content inset,
+                 * not spacing between split panes. Keep the slider integer-pixel
+                 * based and default it to zero so existing terminal layouts stay
+                 * edge-to-edge until the user opts in.
+                 */
+                <SliderNumberField
+                  description="Add left and right inner padding inside every terminal pane."
+                  label="Horizontal Padding"
+                  {...getSettingModificationProps("terminalPaneHorizontalPaddingPx")}
+                  max={MAX_TERMINAL_PANE_PADDING_PX}
+                  min={MIN_TERMINAL_PANE_PADDING_PX}
+                  onCommit={(value) => updateDraft("terminalPaneHorizontalPaddingPx", value)}
+                  onChange={(value) => updateDraftDebounced("terminalPaneHorizontalPaddingPx", value)}
+                  step={1}
+                  value={draft.terminalPaneHorizontalPaddingPx}
+                />
+              ) : null}
+              {mainSettingVisible(settingsSearch.terminal, "terminalPaneVerticalPaddingPx") ? (
+                /*
+                 * CDXC:TerminalPanePadding 2026-06-25-21:27:
+                 * Vertical terminal padding uses the same native content inset as
+                 * horizontal padding while leaving pane titlebars, split dividers,
+                 * and terminal chrome in their existing frames.
+                 */
+                <SliderNumberField
+                  description="Add top and bottom inner padding inside every terminal pane."
+                  label="Vertical Padding"
+                  {...getSettingModificationProps("terminalPaneVerticalPaddingPx")}
+                  max={MAX_TERMINAL_PANE_PADDING_PX}
+                  min={MIN_TERMINAL_PANE_PADDING_PX}
+                  onCommit={(value) => updateDraft("terminalPaneVerticalPaddingPx", value)}
+                  onChange={(value) => updateDraftDebounced("terminalPaneVerticalPaddingPx", value)}
+                  step={1}
+                  value={draft.terminalPaneVerticalPaddingPx}
                 />
               ) : null}
               {mainSettingVisible(settingsSearch.terminal, "terminalCursorStyle") ? (

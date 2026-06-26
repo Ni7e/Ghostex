@@ -887,6 +887,7 @@ describe("native app modal window source", () => {
     expect(remoteGxserverClientSource).toContain("CLI/ghostex-cli.mjs");
     expect(remoteGxserverClientSource).toContain("$HOME/.local/bin/ghostex");
     expect(remoteGxserverClientSource).toContain("$HOME/.local/bin/gx");
+    expect(remoteGxserverClientSource).toContain("gxserver zmx zehn bd ghostex-tui");
     expect(remoteGxserverClientSource).toContain("if [ -f \"$package_link/bin/ghostex\" ]; then");
     expect(remoteGxserverClientSource).toContain("chmod 755 \"$package_link/bin/ghostex\"");
     expect(remoteGxserverClientSource).toContain('while [ -L "$SOURCE" ]; do');
@@ -914,12 +915,15 @@ describe("native app modal window source", () => {
     expect(buildGhostexHostSource).toContain("Linux packages must not ship Mach-O payloads");
     expect(buildGhostexHostSource).toContain("native Linux ELF payload");
     expect(buildGhostexHostSource).toContain("wrong Linux ELF architecture");
+    expect(buildGhostexHostSource).toContain("bin/ghostex-tui");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("Usage: node gxserver-rs/package-remote-linux.mjs");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("build/remote-gxserver-linux");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("bin/gxserver");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("bin/zmx");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("bin/zehn");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("bin/bd");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("bin/ghostex-tui");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("--tui-bin <path>");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("code-server/lib/node");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("portless/dist/cli.js");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("CLI/ghostex-cli.mjs");

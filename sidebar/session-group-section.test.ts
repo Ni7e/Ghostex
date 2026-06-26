@@ -431,6 +431,23 @@ describe("getSidebarSessionGapContextMenuTarget", () => {
 });
 
 describe("reference sidebar group spacing styles", () => {
+  test("does not force the project to the top when Show less is selected", () => {
+    /*
+     * CDXC:ProjectSessionLists 2026-06-25-22:28:
+     * The project session-list toggle should preserve the outer sidebar scroll
+     * viewport. A local Show less state change must not call scrollIntoView and
+     * snap the project header to the top of the sidebar.
+     */
+    const toggleStart = sessionGroupSectionSource.indexOf(
+      "const toggleProjectSessionListCollapsed = () => {",
+    );
+    const toggleSource = sessionGroupSectionSource.slice(toggleStart, toggleStart + 1200);
+
+    expect(toggleStart).toBeGreaterThan(-1);
+    expect(toggleSource).toContain("writeProjectSessionListCollapsedState(nextState);");
+    expect(toggleSource).not.toContain("scrollIntoView");
+  });
+
   test("keeps expanded project session lists as bounded scroll surfaces", () => {
     /*
      * CDXC:ProjectSessionLists 2026-06-25-12:20:

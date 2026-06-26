@@ -1452,19 +1452,14 @@ export function SessionGroupSection({
       } else {
         nextState[projectSessionListStorageId] = true;
       }
-      if (!wasCollapsed) {
-        /*
-         * CDXC:ProjectSessionLists 2026-06-13-20:03:
-         * Collapsing a long project list while its header is sticky can leave
-         * the new first visible session partially under the header. Re-align
-         * the existing project section after the height change so the header
-         * remains the top row and the session list starts below it.
-         */
-        const sectionElement = groupSectionRef.current;
-        window.requestAnimationFrame(() => {
-          sectionElement?.scrollIntoView({ block: "start", inline: "nearest" });
-        });
-      }
+      /*
+       * CDXC:ProjectSessionLists 2026-06-25-22:28:
+       * Show less is a local project-list state change and must not force the
+       * project header to the top of the outer sidebar scroll area. Expanded
+       * project lists now scroll internally, so toggling back to Show more can
+       * preserve the user's current sidebar viewport without programmatic
+       * outer-scroll alignment.
+       */
       writeProjectSessionListCollapsedState(nextState);
       return nextState;
     });

@@ -23,6 +23,7 @@ export type SidebarSessionSearchFieldProps = {
   query: string;
   shellClassName?: string;
   setQuery: (query: string) => void;
+  shouldFocusOnQueryChange?: (inputElement: HTMLInputElement) => boolean;
   spellCheck?: ComponentProps<"input">["spellCheck"];
   toolbarClassName?: string;
   trailingControl?: ReactNode;
@@ -42,6 +43,7 @@ export function SidebarSessionSearchField({
   query,
   shellClassName,
   setQuery,
+  shouldFocusOnQueryChange,
   spellCheck,
   toolbarClassName,
   trailingControl,
@@ -55,14 +57,18 @@ export function SidebarSessionSearchField({
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(query.length, query.length);
+      const inputElement = inputRef.current;
+      if (!inputElement || shouldFocusOnQueryChange?.(inputElement) === false) {
+        return;
+      }
+      inputElement.focus();
+      inputElement.setSelectionRange(query.length, query.length);
     }, 0);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [query.length]);
+  }, [inputRef, query.length, shouldFocusOnQueryChange]);
 
   return (
     <div
@@ -78,6 +84,10 @@ export function SidebarSessionSearchField({
        *
        * CDXC:SearchInputs 2026-06-13-15:59:
        * Some modal search rows own a real filter action at the right edge. Let callers replace the decorative idle Search icon with that button while preserving the shared clear-X behavior and input focus handling.
+       *
+       * CDXC:SettingsSearch 2026-06-25-21:21:
+       * Settings search keeps this shared query-change focus behavior only when
+       * the Settings modal says no editable field already owns typing focus.
        */}
       <div
         className={["session-search-input-shell", shellClassName].filter(Boolean).join(" ")}

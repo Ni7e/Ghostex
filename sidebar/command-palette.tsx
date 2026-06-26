@@ -69,6 +69,7 @@ import type {
 } from "../shared/session-grid-contract";
 import { BUILT_IN_WORKSPACE_OPEN_TARGETS } from "../shared/workspace-open-targets";
 import { openAppModal } from "./app-modal-host-bridge";
+import { getSidebarCommandRunModeForClick } from "./command-run-feedback";
 import { SidebarCommandIconGlyph } from "./sidebar-command-icon";
 import { formatSidebarHotkeyLabel } from "./hotkey-label";
 import { filterPreviousSessionsModalItems } from "./previous-session-search";
@@ -488,6 +489,7 @@ export function CommandPalette({
   const wasOpenRef = useRef(isOpen);
   const groupsById = useSidebarStore((state) => state.groupsById);
   const previousSessions = useSidebarStore((state) => state.previousSessions);
+  const commandRunStates = useSidebarStore((state) => state.commandRunStates);
   const sessionIdsByGroup = useSidebarStore((state) => state.sessionIdsByGroup);
   const sessionsById = useSidebarStore((state) => state.sessionsById);
   const workspaceGroupIds = useSidebarStore((state) => state.workspaceGroupIds);
@@ -902,9 +904,18 @@ export function CommandPalette({
     if (command.actionType === "browser") {
       onBrowserCommandRun?.();
     }
+    /*
+    CDXC:GPUICommandPane 2026-06-26-05:11:
+    Command Palette Action launches may read saved command metadata to derive the click runMode, including debug reruns for close-on-exit terminal Actions. The runSidebarCommand payload stays an authority selector: commandId plus non-default runMode only. Native and GPUI hosts resolve command text, URLs, close-on-exit, cwd/env, paths, output, and other launch details from trusted saved/HUD state.
+    */
+    const runMode = getSidebarCommandRunModeForClick(
+      command,
+      commandRunStates[command.commandId],
+    );
     onOpenChange(false);
     vscode.postMessage({
       commandId: command.commandId,
+      ...(runMode === "default" ? {} : { runMode }),
       type: "runSidebarCommand",
     });
   };

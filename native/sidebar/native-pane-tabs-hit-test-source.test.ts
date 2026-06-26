@@ -222,6 +222,11 @@ describe("native pane tab titlebar hit testing", () => {
      * Titlebar and content frames are strict siblings, while visual borders are
      * layers, so AppKit can dispatch normal child hits without full-frame overlay
      * views intercepting clicks.
+     *
+     * CDXC:TerminalPanePadding 2026-06-25-21:27:
+     * Terminal padding must remain normal layout: paint the existing pane
+     * container background and inset the Ghostty scroll view frame instead of
+     * adding transparent overlays or hit-test routing.
      */
     const containerIndex = terminalWorkspaceSource.indexOf("private final class TerminalPaneLeafContainerView");
     const containerSource = sourceSection(
@@ -248,13 +253,19 @@ describe("native pane tab titlebar hit testing", () => {
     expect(containerIndex).toBeGreaterThan(-1);
     expect(containerSource).not.toContain("override func hitTest(_ point: NSPoint) -> NSView?");
     expect(containerSource).toContain("func resolvedTitleBarView() -> TerminalSessionTitleBarView?");
+    expect(containerSource).toContain("func setBackgroundColor(_ color: NSColor)");
     expect(terminalWorkspaceSource).not.toContain("titleBarHitTestView");
+    expect(terminalWorkspaceSource).toContain("private func terminalPaneContentRect(in availableTerminalRect: CGRect) -> CGRect");
+    expect(terminalWorkspaceSource).toContain("terminalPaneHorizontalPaddingPx");
+    expect(terminalWorkspaceSource).toContain("terminalPaneVerticalPaddingPx");
     expect(mountTerminalSource.indexOf("mount(session.titleBarView, in: session.containerView)")).toBeLessThan(
       mountTerminalSource.indexOf("mount(session.scrollView, in: session.containerView)"),
     );
     expect(mountTerminalSource).toContain("installPaneBorderLayer(session.borderView, in: session.containerView)");
     expect(setFrameSource).toContain("session.titleBarView.frame = titleBarRect");
-    expect(setFrameSource).toContain("session.scrollView.frame = availableTerminalRect");
+    expect(setFrameSource).toContain("session.containerView.setBackgroundColor(terminalPaneBackgroundColor())");
+    expect(setFrameSource).toContain("let terminalRect = terminalPaneContentRect(in: availableTerminalRect)");
+    expect(setFrameSource).toContain("session.scrollView.frame = terminalRect");
     expect(setWebFrameSource).toContain("session.titleBarView.frame = titleBarRect");
     expect(setWebFrameSource).toContain("session.hostView.frame = contentRect");
   });

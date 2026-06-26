@@ -8,12 +8,15 @@ import {
   DEFAULT_EDITOR_COMMAND_OPTIONS,
   DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   DEFAULT_SIDEBAR_DEFAULT_WIDTH_PX,
+  DEFAULT_TERMINAL_PANE_PADDING_PX,
   GHOSTTY_THEME_SETTING_OPTIONS,
   KEEP_AWAKE_DURATION_OPTIONS,
   MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   MAX_SIDEBAR_DEFAULT_WIDTH_PX,
+  MAX_TERMINAL_PANE_PADDING_PX,
   MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   MIN_SIDEBAR_DEFAULT_WIDTH_PX,
+  MIN_TERMINAL_PANE_PADDING_PX,
   applySidebarSettingsPreset,
   getDefaultEditorCommandForSettings,
   getSidebarTitlebarBackgroundForDarkness,
@@ -1380,6 +1383,11 @@ describe("normalizeghostexSettings", () => {
      * Typography settings default to the requested Ghostex terminal profile:
      * JetBrains Mono, 13pt, wght=300, no cell-width adjustment, and a 20%
      * cell-height expansion.
+     *
+     * CDXC:TerminalPanePadding 2026-06-25-21:27:
+     * New terminal pane padding settings default to zero, persist as separate
+     * horizontal and vertical integer pixels, and clamp to the Settings slider
+     * range so native layout receives bounded content insets.
      */
     expect(normalizeghostexSettings({})).toMatchObject({
       terminalFontFamily: "JetBrains Mono",
@@ -1387,6 +1395,8 @@ describe("normalizeghostexSettings", () => {
       terminalFontWeight: 300,
       terminalLetterSpacing: 0,
       terminalLineHeight: 1.2,
+      terminalPaneHorizontalPaddingPx: DEFAULT_TERMINAL_PANE_PADDING_PX,
+      terminalPaneVerticalPaddingPx: DEFAULT_TERMINAL_PANE_PADDING_PX,
     });
     expect(
       normalizeghostexSettings({
@@ -1395,6 +1405,8 @@ describe("normalizeghostexSettings", () => {
         terminalFontWeight: 650,
         terminalLetterSpacing: 0.6,
         terminalLineHeight: 1.3,
+        terminalPaneHorizontalPaddingPx: 18,
+        terminalPaneVerticalPaddingPx: 9,
       }),
     ).toMatchObject({
       terminalFontFamily: "Hack",
@@ -1402,6 +1414,8 @@ describe("normalizeghostexSettings", () => {
       terminalFontWeight: 650,
       terminalLetterSpacing: 0.6,
       terminalLineHeight: 1.3,
+      terminalPaneHorizontalPaddingPx: 18,
+      terminalPaneVerticalPaddingPx: 9,
     });
     expect(
       normalizeghostexSettings({
@@ -1410,6 +1424,8 @@ describe("normalizeghostexSettings", () => {
         terminalFontWeight: 10,
         terminalLetterSpacing: 99,
         terminalLineHeight: -1,
+        terminalPaneHorizontalPaddingPx: 999,
+        terminalPaneVerticalPaddingPx: -12,
       }),
     ).toMatchObject({
       terminalFontFamily: "Consolas",
@@ -1417,6 +1433,8 @@ describe("normalizeghostexSettings", () => {
       terminalFontWeight: 100,
       terminalLetterSpacing: 8,
       terminalLineHeight: 0.8,
+      terminalPaneHorizontalPaddingPx: MAX_TERMINAL_PANE_PADDING_PX,
+      terminalPaneVerticalPaddingPx: MIN_TERMINAL_PANE_PADDING_PX,
     });
   });
 

@@ -437,6 +437,87 @@ describe("command palette source contracts", () => {
     );
   });
 
+  test("keeps command-palette Action launch messages authority-only", () => {
+    /*
+     * CDXC:GPUICommandPane 2026-06-26-05:11:
+     * Command Palette Action launches may use saved command metadata to pick
+     * debug runMode, but the runSidebarCommand message must not forward
+     * renderer-owned launch details such as close-on-exit.
+     */
+    const runProjectCommandStart = commandPaletteSource.indexOf("const runProjectCommand");
+    const runProjectCommandEnd = commandPaletteSource.indexOf(
+      "const focusCurrentSession",
+      runProjectCommandStart,
+    );
+    expect(runProjectCommandStart).toBeGreaterThanOrEqual(0);
+    expect(runProjectCommandEnd).toBeGreaterThan(runProjectCommandStart);
+    const runProjectCommandSource = commandPaletteSource.slice(
+      runProjectCommandStart,
+      runProjectCommandEnd,
+    );
+
+    expect(runProjectCommandSource).toContain("getSidebarCommandRunModeForClick(");
+    expect(runProjectCommandSource).toContain("commandRunStates[command.commandId]");
+    expect(runProjectCommandSource).toContain("commandId: command.commandId");
+    expect(runProjectCommandSource).toContain('...(runMode === "default" ? {} : { runMode })');
+    expect(runProjectCommandSource).toContain('type: "runSidebarCommand"');
+    expect(runProjectCommandSource).not.toContain(
+      "closeTerminalOnExit: command.closeTerminalOnExit",
+    );
+  });
+
+  test("keeps command-palette focused-pane hotkey messages authority-only", () => {
+    /*
+     * CDXC:GPUICommandPane 2026-06-26-05:34:
+     * Command Palette focused-pane commands are shared Ghostex hotkey actions.
+     * Selecting them may identify only the chosen action id and fixed
+     * runGhostexHotkeyAction message type; renderer-owned session ids, command
+     * text, cwd/env, paths, URLs, close-on-exit, output, logs, and launch
+     * metadata must stay out of the posted payload.
+     */
+    const paneActionIdsStart = commandPaletteSource.indexOf("const PANE_ACTION_COMMAND_IDS");
+    const paneActionIdsEnd = commandPaletteSource.indexOf(
+      "const COMMAND_PALETTE_PREVIOUS_SESSIONS_LIMIT",
+      paneActionIdsStart,
+    );
+    expect(paneActionIdsStart).toBeGreaterThanOrEqual(0);
+    expect(paneActionIdsEnd).toBeGreaterThan(paneActionIdsStart);
+    const paneActionIdsSource = commandPaletteSource.slice(paneActionIdsStart, paneActionIdsEnd);
+
+    const paneActionCommandsStart = commandPaletteSource.indexOf("const paneActionCommands");
+    const paneActionCommandsEnd = commandPaletteSource.indexOf(
+      "const projectCommands",
+      paneActionCommandsStart,
+    );
+    expect(paneActionCommandsStart).toBeGreaterThanOrEqual(0);
+    expect(paneActionCommandsEnd).toBeGreaterThan(paneActionCommandsStart);
+    const paneActionCommandsSource = commandPaletteSource.slice(
+      paneActionCommandsStart,
+      paneActionCommandsEnd,
+    );
+
+    const hotkeyMessageStart = commandPaletteSource.indexOf(
+      "vscode.postMessage({\n      actionId: command.definition.id",
+    );
+    const hotkeyMessageEnd = commandPaletteSource.indexOf(
+      "  };\n\n  const runProjectCommand",
+      hotkeyMessageStart,
+    );
+    expect(hotkeyMessageStart).toBeGreaterThanOrEqual(0);
+    expect(hotkeyMessageEnd).toBeGreaterThan(hotkeyMessageStart);
+    const hotkeyMessageSource = commandPaletteSource.slice(hotkeyMessageStart, hotkeyMessageEnd);
+
+    expect(paneActionIdsSource).toContain('"sleepFocusedSession"');
+    expect(paneActionIdsSource).toContain('"wakeFocusedSession"');
+    expect(paneActionIdsSource).toContain('"closeFocusedSession"');
+    expect(paneActionIdsSource).toContain('"closeAfterDone"');
+    expect(paneActionCommandsSource).toContain(".map(createBuiltInCommand)");
+    expect(hotkeyMessageSource.trim()).toBe(`vscode.postMessage({
+      actionId: command.definition.id,
+      type: "runGhostexHotkeyAction",
+    });`);
+  });
+
   test("exposes global app modals and main-window actions in command mode", () => {
     /*
      * CDXC:CommandPalette 2026-06-18-03:32:

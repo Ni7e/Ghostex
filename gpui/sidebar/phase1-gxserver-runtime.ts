@@ -28,6 +28,7 @@ import {
   reduceGxserverPresentationDelta,
   reorderPresentationProjectSessions,
 } from "../../shared/gxserver-presentation-cache";
+import { createDisplaySessionLayout } from "../../shared/active-sessions-sort";
 import {
   createGxserverPresentationProjectGroupId,
   createGxserverPresentationProjectSessionId,
@@ -56,6 +57,7 @@ import {
   type SidebarRemoteMachineStatusMessage,
   type SidebarRecentProject,
   type SidebarSessionGroup,
+  type SidebarSessionItem,
   type SidebarTheme,
   type SidebarToExtensionMessage,
 } from "../../shared/session-grid-contract";
@@ -127,15 +129,25 @@ export type GhostexGpuiSidebarBridge = {
     sessions: readonly GpuiCommandPaneSessionSummary[],
   ) => void;
   onGxserverBootstrapChanged?: (bootstrap: GpuiGxserverBootstrap) => void;
+  onNativeAppShotCaptured?: (payload: unknown) => void;
+  onNativeAppShotPromptResult?: (payload: unknown) => void;
   onRuntimeSettingsChanged?: (
     runtimeSettings: GpuiSidebarRuntimeSettingsSnapshot,
   ) => void;
   onSidebarHostMessage?: (message: ExtensionToSidebarMessage) => void;
+  onStatusPetActivation?: (payload: unknown) => void;
+  pendingNativeAppShotPromptResults?: unknown[];
+  pendingNativeAppShots?: unknown[];
+  pendingStatusPetActivations?: unknown[];
   postActiveProjectContext?: (payload: string) => boolean;
   postGxserverPresentationFocusState?: (payload: string) => boolean;
+  postNativeAppShotPromptToSession?: (payload: string) => boolean;
   postNativeProjectPathAction?: (payload: string) => boolean;
+  postPetOverlayState?: (payload: string) => boolean;
+  postSessionFocusDebugLog?: (payload: string) => boolean;
   postSidebarCommandAction?: (payload: string) => boolean;
   postSidebarCommandRunEnd?: (payload: string) => boolean;
+  postSessionStatusIndicators?: (payload: string) => boolean;
   runtimeSettings?: GpuiSidebarRuntimeSettings;
 };
 
@@ -208,6 +220,64 @@ type GpuiSidebarRemoteEvent =
   | GpuiSidebarRemoteGxserverResponseEvent
   | GpuiSidebarRemotePresentationEvent;
 
+type GpuiSessionStatusIndicatorStatus = "attention" | "working" | "available";
+
+type GpuiSessionStatusIndicatorCandidate = {
+  hasRunningZmxBacking: boolean;
+  lastInteractionAt?: string;
+  order: number;
+  projectId: string;
+  projectTitle: string;
+  sessionId: string;
+  status: GpuiSessionStatusIndicatorStatus;
+  title: string;
+};
+
+type GpuiSessionStatusIndicatorProject = {
+  projectId: string;
+  sessions: Array<{
+    lastActiveAt?: string;
+    sessionId: string;
+    sidebarOrder: number;
+    status: GpuiSessionStatusIndicatorStatus;
+    title: string;
+  }>;
+  title: string;
+};
+
+type GpuiSessionStatusIndicatorsPayload = {
+  attentionCount: number;
+  availableCount: number;
+  hideFloatingIndicators: boolean;
+  hideMenuBarIndicators: boolean;
+  projects: GpuiSessionStatusIndicatorProject[];
+  size: ghostexSettings["sessionStatusIndicatorSize"];
+  type: typeof GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE;
+  version: typeof GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION;
+  workingCount: number;
+};
+
+type GpuiPetOverlayStatePayload = {
+  activities: Array<{
+    id: string;
+    projectId: string;
+    state: GpuiSessionStatusIndicatorStatus;
+    title: string;
+  }>;
+  enabled: boolean;
+  selectedPetId: string;
+  statusItems: Array<{
+    count: number;
+    status: GpuiSessionStatusIndicatorStatus;
+  }>;
+  type: typeof GPUI_SIDEBAR_PET_OVERLAY_STATE_MESSAGE_TYPE;
+  version: typeof GPUI_SIDEBAR_PET_OVERLAY_STATE_MESSAGE_VERSION;
+};
+
+type GpuiStatusPetActivationPayload = {
+  sessionId: string;
+};
+
 const GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS = 20;
 const GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS = 250;
 const GPUI_SIDEBAR_DEFAULT_CLIENT_ID = "ghostex-gpui-sidebar";
@@ -226,8 +296,94 @@ const GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE =
 const GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.gxserverPresentationFocusState";
+const GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.sessionFocusDebugLog";
+const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.sessionStatusIndicators";
+const GPUI_SIDEBAR_PET_OVERLAY_STATE_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_PET_OVERLAY_STATE_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.petOverlayState";
+const GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.statusPetActivation";
+const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.nativeAppShotCaptured";
+const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.nativeAppShotPrompt";
+const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.nativeAppShotPromptResult";
 const GPUI_SIDEBAR_REMOTE_EVENT_NAME = "ghostex-gpui-sidebar-remote-event";
+const APP_SHOT_RECENT_TARGET_MS = 60_000;
+const APP_SHOT_PROMPT_INSERT_RESULT_TIMEOUT_MS = 2_000;
+const GPUI_STATUS_INDICATOR_MAX_CANDIDATES = 96;
+const GPUI_STATUS_INDICATOR_MAX_PROJECTS = 32;
+const GPUI_STATUS_INDICATOR_MAX_SESSIONS_PER_PROJECT = 16;
+const GPUI_STATUS_INDICATOR_ID_MAX_CHARS = 256;
+const GPUI_STATUS_INDICATOR_TITLE_MAX_CHARS = 120;
 const DEFAULT_GPUI_PROMPT_AGENT_ID = "codex";
+const GPUI_SIDEBAR_FOCUS_DEBUG_LOOP_WINDOW_MS = 1_500;
+const GPUI_SIDEBAR_FOCUS_DEBUG_LOOP_TRANSITION_MIN = 4;
+
+type GpuiSidebarFocusDebugLogLevel = "debug" | "info" | "warning" | "error";
+
+type GpuiSidebarFocusDebugLogDetails = Partial<{
+  activeGroupId: string;
+  activeGroupIdAfter: string;
+  activeGroupIdBefore: string;
+  activeProjectId: string;
+  activeProjectIdAfter: string;
+  activeProjectIdBefore: string;
+  activeProjectSessionCount: number;
+  bridgeAvailable: boolean;
+  bridgeSent: boolean;
+  debuggingMode: boolean;
+  didChange: boolean;
+  focusedSessionId: string;
+  focusedSessionIdAfter: string;
+  focusedSessionIdBefore: string;
+  groupCount: number;
+  groupId: string;
+  hasClient: boolean;
+  hasPresentation: boolean;
+  incomingRevision: number;
+  involvedSessionIds: string[];
+  isLocal: boolean;
+  isRemote: boolean;
+  latestGroupCount: number;
+  latestSessionCount: number;
+  presentationRevision: number;
+  projectVisibleSessionCount: number;
+  projectVisibleSessionIds: string[];
+  removedGroupCount: number;
+  removedSessionCount: number;
+  requestedSessionId: string;
+  resolvedProjectId: string;
+  resolvedSessionId: string;
+  revision: number;
+  sameFocusedSession: boolean;
+  sequence: number;
+  sessionCount: number;
+  sessionId: string;
+  transitionCount: number;
+  visibleSessionCount: number;
+  visibleSessionCountAfter: number;
+  visibleSessionCountBefore: number;
+  visibleSessionIds: string[];
+  visibleSessionIdsAfter: string[];
+  visibleSessionIdsBefore: string[];
+  windowMs: number;
+}>;
+
+type GpuiSidebarFocusDebugTransition = {
+  at: number;
+  sessionId: string;
+};
+
 const GPUI_BACKGROUND_COMMIT_MESSAGE_DEFAULT_AGENT_IDS = new Set([
   "claude",
   "codex",
@@ -247,6 +403,7 @@ type GpuiSidebarNativeProjectPathAction =
   | "openExistingPullRequestInBrowser"
   | "openSidebarGitChangedFileInIde"
   | "copyRemoteProjectPath"
+  | "copyRemoteProjectOpenFolderCommand"
   | "openRemoteWorkspaceProjectInIde"
   | "openRemoteWorkspaceProjectInVscode"
   | "openRemoteWorkspaceProjectInZed"
@@ -274,6 +431,12 @@ type GpuiPendingGitCommitRequest = {
   subject: string;
 };
 
+type GpuiPendingNativeAppShotPromptInsertion = {
+  resolve: (ok: boolean) => void;
+  sessionId: string;
+  timeoutId: number;
+};
+
 type GpuiTrustedGitReviewFileSelection = {
   explicit: boolean;
   filePaths: string[];
@@ -290,6 +453,16 @@ type GpuiGxserverCreatedSessionResult = {
     projectId?: string;
     sessionId?: string;
   };
+};
+
+type GpuiNativeAppShotCapture = {
+  appName: string;
+  bundleIdentifier?: string;
+  imagePath: string;
+  trigger?: string;
+  windowHeight?: number;
+  windowTitle?: string;
+  windowWidth?: number;
 };
 
 type GpuiWorktreeMetadata = {
@@ -407,13 +580,16 @@ CDXC:GPUISidebarGit 2026-06-24-16:45:
 Visible PR-agent sessions expose gxserver lifecycle/activity only, not a trusted PR-created result. Preserve visible PR sessions for non-delete-after workflows, but route every delete-after PR request through the direct/background gxserver PR result before removing the original validated worktree.
 
 CDXC:GPUIRemoteGit 2026-06-24-17:47:
-Remote GPUI Git/GitHub/worktree actions must route through the Rust-owned saved-machine gxserver tunnel with machine-scoped project ids, reviewed file paths, fixed endpoint action names, and id-scoped worktree/branch operations only. Native side effects stay explicit: terminal focus uses remote attach, PR browser opens and copy-path use Rust revalidation, while remote Finder remains unsupported and remote IDE opens require Rust-owned fixed editor support.
+Remote GPUI Git/GitHub/worktree actions must route through the Rust-owned saved-machine gxserver tunnel with machine-scoped project ids, reviewed file paths, fixed endpoint action names, and id-scoped worktree/branch operations only. Native side effects stay explicit: terminal focus uses remote attach, PR browser opens and copy-path use Rust revalidation, local Finder dereference remains unsupported for remote paths, and remote IDE opens require Rust-owned fixed editor support.
 
 CDXC:GPUIRemoteAttach 2026-06-24-19:06:
 Remote terminal focus and copy-attach commands may leave React only as fixed native action names plus machine-scoped remote presentation session ids. Rust owns saved-machine SSH details, gxserver attach/resume metadata, GPUI terminal launch payloads, and clipboard command construction so renderer state never carries tokens, hostnames, paths, or command text.
 
 CDXC:GPUIRemoteNativeActions 2026-06-24-19:25:
-Remote project copy-path, existing-PR browser open, and changed-file open intents may leave React only as fixed native action names plus machine-scoped project ids and review-approved relative file candidates. Rust must revalidate through the saved-machine gxserver tunnel before clipboard/browser/editor side effects; remote Finder stays unsupported because local Finder cannot dereference remote paths safely.
+Remote project copy-path, existing-PR browser open, Recent Projects Open Folder command-copy, and changed-file open intents may leave React only as fixed native action names plus machine-scoped project ids and review-approved relative file candidates. Rust must revalidate through the saved-machine gxserver tunnel before clipboard/browser/editor side effects; local Finder must never dereference remote paths, so Recent Projects Open Folder copies a saved-machine SSH command instead of opening Finder.
+
+CDXC:GPUIRecentProjects 2026-06-25-19:30:
+Remote Recent Projects Open Folder must follow the macOS sidebar source of truth by crossing the native bridge as `copyRemoteProjectOpenFolderCommand`, not by showing an unsupported GPUI toast or attempting local Finder. React may send only the machine-scoped project id; Rust owns path lookup, SSH command construction, clipboard write, and sanitized user feedback.
 
 CDXC:GPUIRemoteNativeActions 2026-06-24-20:26:
 Remote IDE project and changed-file opens are allowed only through Rust-owned fixed editor openers. React may request a fixed action for a machine-scoped project id, but it must never send remote paths, URI strings, SSH host/user/port/identity details, Settings custom commands, or editor command text.
@@ -497,12 +673,17 @@ class GpuiSidebarRuntime {
   private commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
   private domainProjects: GxserverProjectDomainState[] = [];
   private focusedSessionId: string | undefined;
+  private focusDebugSequence = 0;
+  private focusDebugTransitions: GpuiSidebarFocusDebugTransition[] = [];
   private gxserverBootstrap: GpuiValidatedGxserverBootstrap | undefined;
   private gitState: SidebarGitState = createDefaultSidebarGitState();
   private hasHydrated = false;
   private latestGroups: SidebarSessionGroup[] = [];
   private latestHud: SidebarHudState = createGpuiSidebarHudState();
+  private lastAppShotTargetAt = 0;
+  private lastAppShotTargetSessionId: string | undefined;
   private lastGitRefreshProjectId: string | undefined;
+  private pendingNativeAppShotPromptInsertions: GpuiPendingNativeAppShotPromptInsertion[] = [];
   private pendingGitCommitRequests = new Map<string, GpuiPendingGitCommitRequest>();
   private pendingRemoteGxserverRequests = new Map<string, GpuiPendingRemoteGxserverRequest>();
   private presentation: GxserverPresentationSnapshot | undefined;
@@ -559,6 +740,45 @@ class GpuiSidebarRuntime {
     };
     gpuiBridge.onCommandPaneSessionsChanged = applyCommandPaneSessions;
     applyCommandPaneSessions(gpuiBridge.commandPaneSessions);
+    gpuiBridge.onNativeAppShotCaptured = (payload) => {
+      void this.handleNativeAppShotCaptured(payload);
+    };
+    gpuiBridge.onNativeAppShotPromptResult = (payload) => {
+      this.handleNativeAppShotPromptResult(payload);
+    };
+    gpuiBridge.onStatusPetActivation = (payload) => {
+      this.handleGpuiStatusPetActivation(payload);
+    };
+    const pendingStatusPetActivations = Array.isArray(gpuiBridge.pendingStatusPetActivations)
+      ? gpuiBridge.pendingStatusPetActivations.splice(0)
+      : [];
+    if (pendingStatusPetActivations.length > 0) {
+      /*
+      CDXC:GPUIStatusPetOverlay 2026-06-26-05:07:
+      GPUI status clicks, and a later pet slice using the same fixed shape, can arrive before the runtime installs callbacks. Drain only first-party activation payloads carrying bounded session ids, then route through focusSession; do not persist payloads or expose paths, titles, commands, URLs, tokens, terminal text, or a generic native event bus.
+      */
+      for (const payload of pendingStatusPetActivations) {
+        this.handleGpuiStatusPetActivation(payload);
+      }
+    }
+    const pendingNativeAppShotPromptResults = Array.isArray(gpuiBridge.pendingNativeAppShotPromptResults)
+      ? gpuiBridge.pendingNativeAppShotPromptResults.splice(0)
+      : [];
+    for (const payload of pendingNativeAppShotPromptResults) {
+      this.handleNativeAppShotPromptResult(payload);
+    }
+    const pendingNativeAppShots = Array.isArray(gpuiBridge.pendingNativeAppShots)
+      ? gpuiBridge.pendingNativeAppShots.splice(0)
+      : [];
+    if (pendingNativeAppShots.length > 0) {
+      /*
+      CDXC:GPUIAppShots 2026-06-25-23:07:
+      Rust may deliver a native App Shot before the SidebarApp runtime finishes installing callbacks. Drain only the first-party queued capture payloads and keep them transient; do not persist app names, window titles, image paths, command text, terminal content, URLs, or diagnostics from this bridge.
+      */
+      for (const payload of pendingNativeAppShots) {
+        void this.handleNativeAppShotCaptured(payload);
+      }
+    }
     gpuiBridge.onRuntimeSettingsChanged = (runtimeSettings) => {
       const didChange = !hasSameGpuiRuntimeSettings(this.runtimeSettings, runtimeSettings);
       this.runtimeSettings = runtimeSettings;
@@ -566,11 +786,27 @@ class GpuiSidebarRuntime {
         return;
       }
       this.publishHudPatch();
+      this.postGpuiStatusPetState();
       this.postActiveProjectContext();
     };
     gpuiBridge.onGxserverBootstrapChanged = (bootstrap) => {
       this.applyGxserverBootstrapChanged(bootstrap);
     };
+  }
+
+  private handleGpuiStatusPetActivation(payload: unknown): void {
+    const activation = normalizeGpuiStatusPetActivation(payload);
+    if (!activation) {
+      return;
+    }
+    /*
+    CDXC:GPUIStatusPetOverlay 2026-06-26-05:07:
+    Visible GPUI status activation, and later pet activation, must re-enter the sidebar runtime's existing focusSession route. Keep this as a fixed callback with one bounded session id so local focus stays local, remote focus uses the reviewed remote native action path, and Rust never creates or wakes unrelated sessions for indicator clicks.
+    */
+    void this.focusSession(activation.sessionId, {
+      sessionId: activation.sessionId,
+      type: "focusSession",
+    });
   }
 
   private applyGxserverBootstrapChanged(bootstrap: GpuiGxserverBootstrap): void {
@@ -583,15 +819,273 @@ class GpuiSidebarRuntime {
       this.startFromBootstrap(bootstrap);
       return;
     }
+    /*
+    CDXC:GPUISidebarBootstrapReplay 2026-06-26-05:31:
+    Post-start same-transport bootstrap refreshes are Rust's replay channel for the sidebar bridge, not a new macOS-style focus command. Store the refreshed transport/focus hint snapshot but do not reapply `initialActiveProjectId`, focused session, or visible ids over live React focus; otherwise the active project can bounce between stale and current sidebar snapshots after a local click.
+    */
     this.gxserverBootstrap = validated;
-    if (!this.applyGxserverBootstrapPresentationState(validated)) {
+    const details: GpuiSidebarFocusDebugLogDetails = {
+      ...this.currentFocusDebugLogDetails(),
+    };
+    if (this.presentation) {
+      details.incomingRevision = this.presentation.revision;
+    }
+    this.postSessionFocusDebugLog("bootstrapRefreshStored", "debug", details);
+  }
+
+  private async handleNativeAppShotCaptured(payload: unknown): Promise<void> {
+    const appShot = normalizeGpuiNativeAppShotCapture(payload);
+    if (!appShot) {
+      this.postAppShotToast("warning", "App Shot Failed", {
+        description: "Could not read the native App Shot.",
+      });
       return;
     }
-    if (this.presentation) {
-      this.publishPresentation("patch");
-    } else {
-      this.publishRemotePresentationPatch();
+
+    const prompt = formatGpuiNativeAppShotPrompt(appShot);
+    const staged = await this.stageNativeAppShotInAgentSession(prompt);
+    if (!staged.ok) {
+      this.postAppShotToast("warning", "App Shot Failed", {
+        description: staged.description,
+      });
+      return;
     }
+
+    this.postAppShotToast("success", "App Shot Added", {
+      description: appShot.appName,
+    });
+  }
+
+  private async stageNativeAppShotInAgentSession(
+    prompt: string,
+  ): Promise<{ ok: true } | { description: string; ok: false }> {
+    /*
+    CDXC:GPUIAppShots 2026-06-25-23:28:
+    GPUI App Shots mirror macOS target order for local sessions: reuse the last successful local App Shot target for 60 seconds when it is still a live local agent row, otherwise use the focused/visible local agent row, and create a default prompt-agent session only when the exact local insert bridge declines. Keep command-pane, sleeping, stale, non-agent, and sidebar-only rows out of insertion.
+
+    CDXC:GPUIAppShots 2026-06-26-04:27:
+    Existing-session App Shot targeting now accepts live remote agent rows by their machine-scoped presentation session id, but only as an insertion request to Rust. React must not wake, materialize, or open remote attach tabs for App Shots; Rust may write only when that exact remote attach surface is already mounted.
+    */
+    const targetSession = this.resolveNativeAppShotTargetSession();
+    if (targetSession && await this.stageNativeAppShotInExistingAgentSession(targetSession, prompt)) {
+      return { ok: true };
+    }
+
+    if (!this.client) {
+      return {
+        description: "The local agent service is not ready.",
+        ok: false,
+      };
+    }
+    const project = this.activeDomainProject();
+    if (!project) {
+      return {
+        description: "Open a project before using App Shots.",
+        ok: false,
+      };
+    }
+    const agent = this.resolveDefaultPromptAgent();
+    if (!agent?.command?.trim()) {
+      return {
+        description: "Choose a configured default prompt agent before using App Shots.",
+        ok: false,
+      };
+    }
+
+    try {
+      const sessionId = await this.createAgentSessionForProject(project, agent, prompt);
+      this.rememberNativeAppShotTargetSessionId(sessionId);
+      return { ok: true };
+    } catch {
+      return {
+        description: "Could not stage the App Shot in an agent session.",
+        ok: false,
+      };
+    }
+  }
+
+  private async stageNativeAppShotInExistingAgentSession(
+    session: SidebarSessionItem,
+    prompt: string,
+  ): Promise<boolean> {
+    const sessionId = nativeAppShotPromptSessionIdForSidebarSession(session);
+    if (!sessionId) {
+      return false;
+    }
+    const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
+    if (remoteSession) {
+      this.setRemotePresentationSessionFocus(remoteSession);
+    } else {
+      const projectId = localGxserverProjectIdForSidebarSession(session, this.presentation);
+      if (projectId) {
+        this.setLocalPresentationSessionFocus(projectId, sessionId);
+      } else {
+        this.focusedSessionId = sessionId;
+        this.visibleSessionIds = new Set([sessionId]);
+        this.postGxserverPresentationFocusState();
+      }
+    }
+    const inserted = await this.postNativeAppShotPromptToSession(sessionId, prompt);
+    if (inserted) {
+      this.rememberNativeAppShotTargetSessionId(sessionId);
+    }
+    return inserted;
+  }
+
+  private resolveNativeAppShotTargetSession(): SidebarSessionItem | undefined {
+    const now = Date.now();
+    const recentTarget =
+      this.lastAppShotTargetSessionId &&
+      now - this.lastAppShotTargetAt <= APP_SHOT_RECENT_TARGET_MS
+        ? this.findNativeAppShotSessionByPresentationSessionId(this.lastAppShotTargetSessionId)
+        : undefined;
+    if (isNativeAppShotAgentSession(recentTarget)) {
+      return recentTarget;
+    }
+
+    const focusedSession =
+      this.focusedSessionId
+        ? this.findNativeAppShotSessionByPresentationSessionId(this.focusedSessionId)
+        : undefined;
+    if (isNativeAppShotAgentSession(focusedSession)) {
+      return focusedSession;
+    }
+
+    for (const sessionId of this.visibleSessionIds) {
+      const visibleSession = this.findNativeAppShotSessionByPresentationSessionId(sessionId);
+      if (visibleSession?.isVisible && isNativeAppShotAgentSession(visibleSession)) {
+        return visibleSession;
+      }
+    }
+    return undefined;
+  }
+
+  private findNativeAppShotSessionByPresentationSessionId(
+    sessionId: string,
+  ): SidebarSessionItem | undefined {
+    const normalizedSessionId = normalizeNonEmptyString(sessionId);
+    if (!normalizedSessionId) {
+      return undefined;
+    }
+    if (parseGpuiRemotePresentationSessionId(normalizedSessionId)) {
+      return this.findNativeAppShotSessionByRemotePresentationSessionId(normalizedSessionId);
+    }
+    return this.findNativeAppShotSessionByLocalGxserverSessionId(normalizedSessionId);
+  }
+
+  private findNativeAppShotSessionByLocalGxserverSessionId(
+    sessionId: string,
+  ): SidebarSessionItem | undefined {
+    const normalizedSessionId = normalizeNonEmptyString(sessionId);
+    if (!normalizedSessionId || parseGpuiRemotePresentationSessionId(normalizedSessionId)) {
+      return undefined;
+    }
+    for (const group of this.latestGroups) {
+      if (group.remoteMachineContext) {
+        continue;
+      }
+      const session = group.sessions.find(
+        (candidate) =>
+          localGxserverSessionIdForSidebarSession(candidate) === normalizedSessionId,
+      );
+      if (session) {
+        return session;
+      }
+    }
+    return undefined;
+  }
+
+  private findNativeAppShotSessionByRemotePresentationSessionId(
+    sessionId: string,
+  ): SidebarSessionItem | undefined {
+    const normalizedSessionId = normalizeNonEmptyString(sessionId);
+    if (!normalizedSessionId || !parseGpuiRemotePresentationSessionId(normalizedSessionId)) {
+      return undefined;
+    }
+    for (const group of this.latestGroups) {
+      if (!group.remoteMachineContext) {
+        continue;
+      }
+      const session = group.sessions.find(
+        (candidate) => candidate.sessionId === normalizedSessionId,
+      );
+      if (session) {
+        return session;
+      }
+    }
+    return undefined;
+  }
+
+  private async postNativeAppShotPromptToSession(
+    sessionId: string,
+    prompt: string,
+  ): Promise<boolean> {
+    const postPrompt = window.ghostexGpui?.postNativeAppShotPromptToSession;
+    if (typeof postPrompt !== "function") {
+      return false;
+    }
+    const payload = JSON.stringify({
+      prompt,
+      sessionId,
+      type: GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_TYPE,
+      version: GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_MESSAGE_VERSION,
+    });
+
+    return await new Promise<boolean>((resolve) => {
+      const pending: GpuiPendingNativeAppShotPromptInsertion = {
+        resolve,
+        sessionId,
+        timeoutId: 0,
+      };
+      pending.timeoutId = window.setTimeout(() => {
+        this.resolvePendingNativeAppShotPromptInsertion(pending, false);
+      }, APP_SHOT_PROMPT_INSERT_RESULT_TIMEOUT_MS);
+      this.pendingNativeAppShotPromptInsertions.push(pending);
+      let sent = false;
+      try {
+        sent = postPrompt(payload) === true;
+      } catch {
+        sent = false;
+      }
+      if (!sent) {
+        this.resolvePendingNativeAppShotPromptInsertion(pending, false);
+      }
+    });
+  }
+
+  private handleNativeAppShotPromptResult(payload: unknown): void {
+    const result = normalizeGpuiNativeAppShotPromptResult(payload);
+    if (!result) {
+      return;
+    }
+    const pending = this.pendingNativeAppShotPromptInsertions.find(
+      (candidate) => candidate.sessionId === result.sessionId,
+    );
+    if (!pending) {
+      return;
+    }
+    this.resolvePendingNativeAppShotPromptInsertion(pending, result.ok);
+  }
+
+  private resolvePendingNativeAppShotPromptInsertion(
+    pending: GpuiPendingNativeAppShotPromptInsertion,
+    ok: boolean,
+  ): void {
+    const index = this.pendingNativeAppShotPromptInsertions.indexOf(pending);
+    if (index >= 0) {
+      this.pendingNativeAppShotPromptInsertions.splice(index, 1);
+    }
+    window.clearTimeout(pending.timeoutId);
+    pending.resolve(ok);
+  }
+
+  private rememberNativeAppShotTargetSessionId(sessionId: string): void {
+    const normalizedSessionId = normalizeNonEmptyString(sessionId);
+    if (!normalizedSessionId) {
+      return;
+    }
+    this.lastAppShotTargetSessionId = normalizedSessionId;
+    this.lastAppShotTargetAt = Date.now();
   }
 
   private readonly handleGpuiSidebarRemoteEvent = (event: Event): void => {
@@ -702,6 +1196,10 @@ class GpuiSidebarRuntime {
   private applyGxserverBootstrapPresentationState(
     bootstrap: GpuiValidatedGxserverBootstrap,
   ): boolean {
+    const previousActiveProjectId = this.activeProjectId;
+    const previousActiveGroupId = this.activeGroupId;
+    const previousFocusedSessionId = this.focusedSessionId;
+    const previousVisibleSessionIds = [...this.visibleSessionIds];
     const nextFocusedSessionId = bootstrap.focusedSessionId;
     const nextVisibleSessionIds = new Set(bootstrap.visibleSessionIds ?? []);
     const nextActiveProjectId = bootstrap.initialActiveProjectId;
@@ -718,6 +1216,36 @@ class GpuiSidebarRuntime {
     this.activeGroupId = nextActiveGroupId;
     this.focusedSessionId = nextFocusedSessionId;
     this.visibleSessionIds = nextVisibleSessionIds;
+    const details: GpuiSidebarFocusDebugLogDetails = {
+      ...this.currentFocusDebugLogDetails(),
+      didChange,
+      visibleSessionCountAfter: this.visibleSessionIds.size,
+      visibleSessionCountBefore: previousVisibleSessionIds.length,
+      visibleSessionIdsAfter: [...this.visibleSessionIds],
+      visibleSessionIdsBefore: previousVisibleSessionIds,
+    };
+    if (nextActiveGroupId) {
+      details.activeGroupIdAfter = nextActiveGroupId;
+    }
+    if (previousActiveGroupId) {
+      details.activeGroupIdBefore = previousActiveGroupId;
+    }
+    if (nextActiveProjectId) {
+      details.activeProjectIdAfter = nextActiveProjectId;
+    }
+    if (previousActiveProjectId) {
+      details.activeProjectIdBefore = previousActiveProjectId;
+    }
+    if (nextFocusedSessionId) {
+      details.focusedSessionIdAfter = nextFocusedSessionId;
+    }
+    if (previousFocusedSessionId) {
+      details.focusedSessionIdBefore = previousFocusedSessionId;
+    }
+    this.postSessionFocusDebugLog("bootstrapFocusStateApplied", "debug", details);
+    if (nextFocusedSessionId && didChange) {
+      this.recordFocusDebugTransition(nextFocusedSessionId);
+    }
     return didChange;
   }
 
@@ -779,6 +1307,12 @@ class GpuiSidebarRuntime {
     snapshot: GxserverPresentationSnapshot,
     kind: GpuiSidebarRuntimeSnapshotKind,
   ): void {
+    this.postSessionFocusDebugLog("presentationSnapshot", "debug", {
+      ...this.currentFocusDebugLogDetails(),
+      incomingRevision: snapshot.revision,
+      sessionCount: snapshot.sessions.length,
+      groupCount: snapshot.projects.length,
+    });
     this.presentation = snapshot;
     this.publishPresentation(kind);
   }
@@ -793,6 +1327,12 @@ class GpuiSidebarRuntime {
       delta,
       gxserverRevision,
     );
+    this.postSessionFocusDebugLog("presentationDelta", "debug", {
+      ...this.currentFocusDebugLogDetails(),
+      incomingRevision: gxserverRevision,
+      removedGroupCount: delta.type === "groupRemoved" || delta.type === "projectRemoved" ? 1 : 0,
+      removedSessionCount: delta.type === "sessionRemoved" ? 1 : 0,
+    });
     this.publishPresentation("patch");
   }
 
@@ -839,8 +1379,13 @@ class GpuiSidebarRuntime {
       });
     }
     this.latestGroups = groups;
+    this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
+    this.postSessionFocusDebugLog("publishPresentation", "debug", {
+      ...this.currentFocusDebugLogDetails(),
+      revision: this.revision,
+    });
     this.refreshGitStateForActiveProjectIfNeeded();
   }
 
@@ -872,8 +1417,12 @@ class GpuiSidebarRuntime {
       this.createHydrateMessage(this.latestGroups, this.latestHud),
     );
     this.hasHydrated = true;
+    this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
+    this.postSessionFocusDebugLog("publishUnavailable", "debug", {
+      ...this.currentFocusDebugLogDetails(),
+    });
   }
 
   private publishRemotePresentationPatch(): void {
@@ -917,8 +1466,13 @@ class GpuiSidebarRuntime {
       });
     }
     this.latestGroups = groups;
+    this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
+    this.postSessionFocusDebugLog("publishRemotePresentationPatch", "debug", {
+      ...this.currentFocusDebugLogDetails(),
+      revision: this.revision,
+    });
   }
 
   private applyDomainProjectDelta(delta: GxserverPresentationDelta): void {
@@ -1059,6 +1613,10 @@ class GpuiSidebarRuntime {
   private postGxserverPresentationFocusState(): void {
     const postFocusState = window.ghostexGpui?.postGxserverPresentationFocusState;
     if (typeof postFocusState !== "function") {
+      this.postSessionFocusDebugLog("focusStateBridgeMissing", "debug", {
+        ...this.currentFocusDebugLogDetails(),
+        bridgeAvailable: false,
+      });
       return;
     }
     const payload = JSON.stringify({
@@ -1068,11 +1626,135 @@ class GpuiSidebarRuntime {
       visibleSessionIds: [...this.visibleSessionIds],
     });
     try {
-      postFocusState(payload);
+      const bridgeSent = postFocusState(payload);
+      this.postSessionFocusDebugLog("focusStateBridgePost", "debug", {
+        ...this.currentFocusDebugLogDetails(),
+        bridgeAvailable: true,
+        bridgeSent,
+      });
     } catch {
+      this.postSessionFocusDebugLog("focusStateBridgeRejected", "warning", {
+        ...this.currentFocusDebugLogDetails(),
+        bridgeAvailable: true,
+        bridgeSent: false,
+      });
       /*
       CDXC:GPUISidebarGxserverFocusState 2026-06-24-21:07:
       Focus-state publication is a sidebar-native synchronization hint for Rust bootstrap replay only. A missing or rejecting CEF bridge must not change gxserver data, create fallback focus ids, log renderer payloads, or block the visible SidebarApp state that React already owns.
+      */
+    }
+  }
+
+  private postSessionFocusDebugLog(
+    event: string,
+    level: GpuiSidebarFocusDebugLogLevel,
+    details: GpuiSidebarFocusDebugLogDetails = {},
+  ): void {
+    const postDebugLog = window.ghostexGpui?.postSessionFocusDebugLog;
+    if (typeof postDebugLog !== "function") {
+      return;
+    }
+    /*
+    CDXC:GPUISidebarFocusDebug 2026-06-26-04:55:
+    Focus diagnostics may include only enum event names, stable project/session/group ids, counts, booleans, and bounded id arrays. Rust still sanitizes at the support-log writer boundary; this sender type keeps React call sites from adding titles, paths, URLs, command text, terminal output, tokens, or raw payload strings.
+    */
+    const payload = JSON.stringify({
+      ...details,
+      debuggingMode: this.runtimeSettings?.debuggingMode === true,
+      event,
+      level,
+      sequence: ++this.focusDebugSequence,
+      type: GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_TYPE,
+      version: GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_VERSION,
+    });
+    try {
+      postDebugLog(payload);
+    } catch {
+      // CDXC:GPUISidebarFocusDebug 2026-06-26-04:55: Debug-log bridge failures must not recurse into logging or alter sidebar focus behavior.
+    }
+  }
+
+  private currentFocusDebugLogDetails(): GpuiSidebarFocusDebugLogDetails {
+    const details: GpuiSidebarFocusDebugLogDetails = {
+      hasClient: Boolean(this.client),
+      hasPresentation: Boolean(this.presentation),
+      latestGroupCount: this.latestGroups.length,
+      latestSessionCount: this.latestSidebarSessionCount(),
+      visibleSessionCount: this.visibleSessionIds.size,
+      visibleSessionIds: [...this.visibleSessionIds],
+    };
+    if (this.activeGroupId) {
+      details.activeGroupId = this.activeGroupId;
+    }
+    if (this.activeProjectId) {
+      details.activeProjectId = this.activeProjectId;
+    }
+    if (this.focusedSessionId) {
+      details.focusedSessionId = this.focusedSessionId;
+    }
+    if (this.presentation) {
+      details.presentationRevision = this.presentation.revision;
+      details.groupCount = this.presentation.projects.length;
+      details.sessionCount = this.presentation.sessions.length;
+    }
+    return details;
+  }
+
+  private latestSidebarSessionCount(): number {
+    return this.latestGroups.reduce((count, group) => count + group.sessions.length, 0);
+  }
+
+  private recordFocusDebugTransition(sessionId: string): void {
+    const normalizedSessionId = normalizeNonEmptyString(sessionId);
+    if (!normalizedSessionId) {
+      return;
+    }
+    const now = Date.now();
+    this.focusDebugTransitions = this.focusDebugTransitions.filter(
+      (transition) => now - transition.at <= GPUI_SIDEBAR_FOCUS_DEBUG_LOOP_WINDOW_MS,
+    );
+    const lastTransition = this.focusDebugTransitions[this.focusDebugTransitions.length - 1];
+    if (lastTransition?.sessionId === normalizedSessionId) {
+      return;
+    }
+    this.focusDebugTransitions.push({ at: now, sessionId: normalizedSessionId });
+
+    const involvedSessionIds = [...new Set(
+      this.focusDebugTransitions.map((transition) => transition.sessionId),
+    )];
+    const transitionCount = Math.max(0, this.focusDebugTransitions.length - 1);
+    if (
+      involvedSessionIds.length === 2 &&
+      transitionCount >= GPUI_SIDEBAR_FOCUS_DEBUG_LOOP_TRANSITION_MIN
+    ) {
+      const firstTransition = this.focusDebugTransitions[0];
+      this.postSessionFocusDebugLog("focusLoopSuspected", "warning", {
+        ...this.currentFocusDebugLogDetails(),
+        focusedSessionId: normalizedSessionId,
+        involvedSessionIds,
+        transitionCount,
+        windowMs: firstTransition ? now - firstTransition.at : 0,
+      });
+      this.focusDebugTransitions = this.focusDebugTransitions.slice(-2);
+    }
+  }
+
+  private postGpuiStatusPetState(): void {
+    const settings = createGpuiSidebarSettings(this.runtimeSettings);
+    const candidates = createGpuiSessionStatusIndicatorCandidatesFromSidebarGroups(this.latestGroups);
+    const statusPayload = createGpuiSessionStatusIndicatorsPayload(candidates, settings);
+    const petPayload = createGpuiPetOverlayStatePayload(candidates, settings);
+    /*
+    CDXC:GPUIStatusPetOverlay 2026-06-26-04:38:
+    GPUI status indicators and the pet overlay consume the same saved shared Settings object as SidebarApp hydrate. Publish only bounded counts, booleans, size, pet id, and sidebar-projected project/session ids/titles through fixed bridge functions; menu-bar NSStatusItem parity remains outside this GPUI-owned floating presentation path.
+    */
+    try {
+      window.ghostexGpui?.postSessionStatusIndicators?.(JSON.stringify(statusPayload));
+      window.ghostexGpui?.postPetOverlayState?.(JSON.stringify(petPayload));
+    } catch {
+      /*
+      CDXC:GPUIStatusPetOverlay 2026-06-26-04:38:
+      The status/pet bridge is presentation-only. If CEF has not installed the fixed functions or rejects a payload, keep SidebarApp state authoritative and avoid fallback UI state, raw JSON logging, project/path/title diagnostics, or invented native indicators.
       */
     }
   }
@@ -1204,10 +1886,20 @@ class GpuiSidebarRuntime {
         this.focusGroup(message.groupId, message);
         return;
       case "focusSession":
+        this.postSessionFocusDebugLog("sidebarFocusMessage", "debug", {
+          ...this.currentFocusDebugLogDetails(),
+          isRemote: Boolean(parseGpuiRemotePresentationSessionId(message.sessionId)),
+          requestedSessionId: message.sessionId,
+        });
         await this.focusSession(message.sessionId, message);
         return;
       case "focusSessionMode":
         if (parseGpuiRemotePresentationSessionId(message.sessionId)) {
+          this.postSessionFocusDebugLog("sidebarFocusModeMessage", "debug", {
+            ...this.currentFocusDebugLogDetails(),
+            isRemote: true,
+            requestedSessionId: message.sessionId,
+          });
           await this.focusSession(message.sessionId, message);
           return;
         }
@@ -1222,12 +1914,32 @@ class GpuiSidebarRuntime {
       case "runSidebarAgent":
         await this.createAgentSession(message.agentId, message.groupId);
         return;
-      case "runSidebarCommand":
-        this.runSidebarCommand(message.commandId, message);
+      case "runSidebarCommand": {
+        /*
+        CDXC:GPUICommandPane 2026-06-26-05:22:
+        Runtime command-pane messages can arrive from untyped CEF/renderer boundaries. Reject missing, non-string, or blank command ids before Action lookup so unsafe extra launch fields cannot make the selector path throw or reach the fixed command-action bridge.
+        */
+        const commandId = normalizeNonEmptyString(message.commandId);
+        if (!commandId) {
+          this.handleUnsupportedSidebarMessage(message);
+          return;
+        }
+        this.runSidebarCommand(commandId, message);
         return;
-      case "endSidebarCommandRun":
-        this.endSidebarCommandRun(message.commandId, message);
+      }
+      case "endSidebarCommandRun": {
+        /*
+        CDXC:GPUICommandPane 2026-06-26-05:22:
+        Closing a command-pane Action run is command-id-only. Validate the selector at the runtime boundary so malformed renderer messages with command text, URLs, paths, cwd/env, logs, or output are unsupported no-ops instead of crashing before the run-end bridge can decline them.
+        */
+        const commandId = normalizeNonEmptyString(message.commandId);
+        if (!commandId) {
+          this.handleUnsupportedSidebarMessage(message);
+          return;
+        }
+        this.endSidebarCommandRun(commandId, message);
         return;
+      }
       case "setSessionSleeping":
         await this.setSessionSleeping(message.sessionId, message.sleeping);
         return;
@@ -1348,11 +2060,16 @@ class GpuiSidebarRuntime {
         this.postNativeProjectPathAction("copyRecentProjectPath", message.projectId, message);
         return;
       case "openRecentProjectInFinder":
-        if (parseGpuiRemotePresentationProjectId(message.projectId)) {
-          this.postRemoteToast("warning", "Remote folder open unavailable", {
-            description: "GPUI does not open remote project paths in local Finder.",
-          });
-          return;
+        {
+          const remoteProject = parseGpuiRemotePresentationProjectId(message.projectId);
+          if (remoteProject) {
+            this.postRemoteProjectNativeAction(
+              "copyRemoteProjectOpenFolderCommand",
+              remoteProject,
+              message,
+            );
+            return;
+          }
         }
         this.postNativeProjectPathAction("openRecentProjectInFinder", message.projectId, message);
         return;
@@ -1502,28 +2219,62 @@ class GpuiSidebarRuntime {
     sessionId: string,
     originalMessage?: SidebarToExtensionMessage,
   ): Promise<void> {
+    const beforeDetails = this.currentFocusDebugLogDetails();
     const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
     if (remoteSession) {
+      this.postSessionFocusDebugLog("remoteFocusRequested", "debug", {
+        ...beforeDetails,
+        isRemote: true,
+        requestedSessionId: sessionId,
+        resolvedProjectId: remoteSession.projectId,
+        resolvedSessionId: remoteSession.sessionId,
+      });
       if (this.postRemoteSessionNativeAction(
         "openRemoteSessionTerminal",
         remoteSession,
         originalMessage ?? { sessionId, type: "focusSession" },
       )) {
         this.setRemotePresentationSessionFocus(remoteSession);
+        const appliedDetails: GpuiSidebarFocusDebugLogDetails = {
+          ...this.currentFocusDebugLogDetails(),
+          requestedSessionId: sessionId,
+          resolvedProjectId: remoteSession.projectId,
+          resolvedSessionId: remoteSession.sessionId,
+        };
+        if (beforeDetails.focusedSessionId) {
+          appliedDetails.focusedSessionIdBefore = beforeDetails.focusedSessionId;
+        }
+        this.postSessionFocusDebugLog("remoteFocusApplied", "debug", appliedDetails);
         this.publishRemotePresentationPatch();
       }
       return;
     }
     const reference = parseGxserverPresentationProjectSessionId(sessionId);
     if (!reference || !this.client) {
+      this.postSessionFocusDebugLog("localFocusRejected", "debug", {
+        ...beforeDetails,
+        hasClient: Boolean(this.client),
+        isLocal: Boolean(reference),
+        requestedSessionId: sessionId,
+      });
       return;
     }
+    /*
+    CDXC:GPUISidebarSessionFocus 2026-06-26-04:42:
+    Local GPUI sidebar clicks must match the macOS sidebar ownership model: the SidebarApp adapter applies local focus immediately and publishes the CEF bootstrap focus hint, but it must not call gxserver `/api/focusSession`. That endpoint is an external renderer-command route and can bounce focus when another renderer is the first open gxserver subscriber.
+    */
     this.setLocalPresentationSessionFocus(reference.projectId, reference.sessionId);
+    const appliedDetails: GpuiSidebarFocusDebugLogDetails = {
+      ...this.currentFocusDebugLogDetails(),
+      requestedSessionId: sessionId,
+      resolvedProjectId: reference.projectId,
+      resolvedSessionId: reference.sessionId,
+    };
+    if (beforeDetails.focusedSessionId) {
+      appliedDetails.focusedSessionIdBefore = beforeDetails.focusedSessionId;
+    }
+    this.postSessionFocusDebugLog("localFocusApplied", "debug", appliedDetails);
     this.publishPresentation("patch");
-    await this.client.rpc("/api/focusSession", {
-      projectId: reference.projectId,
-      sessionId: reference.sessionId,
-    });
   }
 
   private async createSession(groupId = this.activeGroupId): Promise<void> {
@@ -4918,6 +5669,26 @@ class GpuiSidebarRuntime {
     }
   }
 
+  private postAppShotToast(
+    level: AppToastLevel,
+    title: string,
+    options: {
+      description?: string;
+    } = {},
+  ): void {
+    try {
+      postAppModalHostMessage(
+        createAppToastRequest(level, title, options.description),
+        "AppModals:gpuiAppShotToast",
+      );
+    } catch {
+      /*
+      CDXC:GPUIAppShots 2026-06-25-23:07:
+      App Shots diagnostics must not depend on toast-host availability and must not log raw app names, window titles, image paths, project paths, command text, terminal content, URLs, or tokens when presentation is unavailable.
+      */
+    }
+  }
+
   private reconnectRemoteMachine(remoteMachineId: string, installApproved: boolean): void {
     try {
       postAppModalHostMessage(
@@ -5302,7 +6073,7 @@ class GpuiSidebarRuntime {
     agent: SidebarAgentButton,
     prompt: string,
     title = createAgentSessionDefaultTitle(agent.name),
-  ): Promise<void> {
+  ): Promise<string> {
     if (!this.client) {
       throw new Error("gxserver is unavailable.");
     }
@@ -5326,6 +6097,7 @@ class GpuiSidebarRuntime {
       throw new Error("Could not create an agent session in the worktree.");
     }
     this.setLocalPresentationSessionFocus(project.projectId, sessionId);
+    return sessionId;
   }
 
   private async createRemoteAgentSessionForProject(
@@ -5555,11 +6327,18 @@ class GpuiSidebarRuntime {
     }>("/api/restoreRecentProject", {
       projectId,
     });
+    /*
+    CDXC:GPUIRecentProjects 2026-06-25-19:22:
+    Local Recent Project restore must mirror macOS by treating `/api/restoreRecentProject` as the authoritative recent-row mutation, activating the restored local project id, and applying a fresh gxserver presentation so the normal group returns promptly without synthesized drawer rows.
+    */
     if (response.project) {
       this.upsertDomainProject(response.project);
     }
     this.recentProjects = [...response.recentProjects];
-    this.publishHudPatch();
+    this.focusProjectId(projectId);
+    await this.refreshDomainPresentationSnapshotFromClient("patch").catch(() => {
+      this.publishHudPatch();
+    });
   }
 
   private async removeRecentProject(projectId: string): Promise<void> {
@@ -5716,6 +6495,15 @@ class GpuiSidebarRuntime {
     });
     this.upsertDomainProject(response.project);
     this.recentProjects = [...response.recentProjects];
+    if (this.activeGroupId === groupId || this.activeProjectId === projectId) {
+      this.activeGroupId = undefined;
+      this.activeProjectId = undefined;
+    }
+    this.removeLocalPresentationProject(projectId);
+    if (this.presentation) {
+      this.publishPresentation("patch");
+      return;
+    }
     this.publishHudPatch();
   }
 
@@ -5874,6 +6662,7 @@ class GpuiSidebarRuntime {
     action: Extract<
       GpuiSidebarNativeProjectPathAction,
       | "copyRemoteProjectPath"
+      | "copyRemoteProjectOpenFolderCommand"
       | "openRemoteWorkspaceProjectInIde"
       | "openRemoteWorkspaceProjectInVscode"
       | "openRemoteWorkspaceProjectInZed"
@@ -5941,8 +6730,8 @@ class GpuiSidebarRuntime {
       commandId: command.commandId,
       name: command.name,
       /*
-      CDXC:GPUICommandPane 2026-06-25-10:29:
-      Shared command clicks may ask for `runMode:"debug"` after a close-on-exit terminal Action fails. Forward that mode only for terminal Actions so Rust can create the visible debug workspace terminal like macOS without allowing browser Actions or generic renderer fields to affect command-pane execution.
+      CDXC:GPUICommandPane 2026-06-26-05:11:
+      `runSidebarCommand` carries only the selected command id plus optional runMode. Forward runMode only for terminal Actions so Rust can create the visible debug workspace terminal like macOS while all other launch metadata stays resolved from the trusted HUD command.
       */
       ...(command.actionType === "terminal" &&
       "runMode" in originalMessage &&
@@ -5950,7 +6739,14 @@ class GpuiSidebarRuntime {
         ? { runMode: originalMessage.runMode }
         : {}),
       ...(command.actionType === "terminal"
-        ? { playCompletionSound: command.playCompletionSound }
+        ? {
+            /*
+            CDXC:GPUICommandPane 2026-06-26-05:11:
+            GPUI command-pane Action launches must match native `runNativeSidebarCommand`: default command-pane runtime forces terminal close-on-exit off even when trusted saved/HUD Action definitions preserve older close-on-exit metadata. Renderer `runSidebarCommand` messages cannot supply this field, and Browser Actions must continue omitting the terminal-only boolean.
+            */
+            closeTerminalOnExit: false,
+            playCompletionSound: command.playCompletionSound,
+          }
         : {}),
       ...(command.actionType === "terminal" && command.command
         ? { command: command.command }
@@ -6023,14 +6819,103 @@ class GpuiSidebarRuntime {
     if (!normalizedProjectId || !normalizedSessionId) {
       return;
     }
+    const previousActiveProjectId = this.activeProjectId;
+    const previousActiveGroupId = this.activeGroupId;
+    const previousFocusedSessionId = this.focusedSessionId;
+    const previousVisibleSessionIds = [...this.visibleSessionIds];
     this.activeProjectId = normalizedProjectId;
     this.activeGroupId = this.isGpuiPresentationChatProjectId(normalizedProjectId)
       ? GPUI_GXSERVER_CHATS_GROUP_ID
       : createGxserverPresentationProjectGroupId(normalizedProjectId);
     this.refreshSidebarHudFromClient();
     this.focusedSessionId = normalizedSessionId;
-    this.visibleSessionIds = new Set([normalizedSessionId]);
+    this.visibleSessionIds = this.nextVisibleSessionIdsForLocalFocus(
+      normalizedProjectId,
+      normalizedSessionId,
+    );
+    const didChange =
+      previousActiveProjectId !== this.activeProjectId ||
+      previousActiveGroupId !== this.activeGroupId ||
+      previousFocusedSessionId !== this.focusedSessionId ||
+      !sameStringSet(new Set(previousVisibleSessionIds), this.visibleSessionIds);
+    const details: GpuiSidebarFocusDebugLogDetails = {
+      ...this.currentFocusDebugLogDetails(),
+      didChange,
+      resolvedProjectId: normalizedProjectId,
+      resolvedSessionId: normalizedSessionId,
+      visibleSessionCountAfter: this.visibleSessionIds.size,
+      visibleSessionCountBefore: previousVisibleSessionIds.length,
+      visibleSessionIdsAfter: [...this.visibleSessionIds],
+      visibleSessionIdsBefore: previousVisibleSessionIds,
+    };
+    if (previousActiveProjectId) {
+      details.activeProjectIdBefore = previousActiveProjectId;
+    }
+    if (previousActiveGroupId) {
+      details.activeGroupIdBefore = previousActiveGroupId;
+    }
+    if (previousFocusedSessionId) {
+      details.focusedSessionIdBefore = previousFocusedSessionId;
+    }
+    if (this.activeProjectId) {
+      details.activeProjectIdAfter = this.activeProjectId;
+    }
+    if (this.activeGroupId) {
+      details.activeGroupIdAfter = this.activeGroupId;
+    }
+    if (this.focusedSessionId) {
+      details.focusedSessionIdAfter = this.focusedSessionId;
+    }
+    this.postSessionFocusDebugLog("localFocusStateSet", "debug", details);
+    this.recordFocusDebugTransition(normalizedSessionId);
     this.postGxserverPresentationFocusState();
+  }
+
+  private nextVisibleSessionIdsForLocalFocus(projectId: string, sessionId: string): Set<string> {
+    /*
+    CDXC:GPUISidebarSessionFocus 2026-06-26-04:42:
+    GPUI local session focus should follow the macOS sidebar rule that a click selects the target within the current visible workspace projection instead of replacing all visible ownership with a singleton. Preserve live local visible ids and remote ids, materialize the current project's projected visible row, then add the clicked session so last-activity resorting cannot make a second session steal focus back.
+    */
+    const liveLocalSessionIds = new Set(
+      (this.presentation?.sessions ?? []).map((session) => session.sessionId),
+    );
+    const nextVisibleSessionIds = new Set(
+      [...this.visibleSessionIds].filter((visibleSessionId) =>
+        parseGpuiRemotePresentationSessionId(visibleSessionId) ||
+        liveLocalSessionIds.has(visibleSessionId),
+      ),
+    );
+    const projectVisibleSessionIds = this.currentVisibleSessionIdsForLocalProject(projectId);
+    for (const visibleSessionId of projectVisibleSessionIds) {
+      nextVisibleSessionIds.add(visibleSessionId);
+    }
+    nextVisibleSessionIds.add(sessionId);
+    this.postSessionFocusDebugLog("localVisibleProjection", "debug", {
+      ...this.currentFocusDebugLogDetails(),
+      projectVisibleSessionCount: projectVisibleSessionIds.length,
+      projectVisibleSessionIds,
+      resolvedProjectId: projectId,
+      resolvedSessionId: sessionId,
+      visibleSessionCountBefore: this.visibleSessionIds.size,
+      visibleSessionIdsBefore: [...this.visibleSessionIds],
+      visibleSessionIdsAfter: [...nextVisibleSessionIds],
+      visibleSessionCountAfter: nextVisibleSessionIds.size,
+    });
+    return nextVisibleSessionIds;
+  }
+
+  private currentVisibleSessionIdsForLocalProject(projectId: string): string[] {
+    const presentation = this.presentation;
+    if (!presentation) {
+      return [];
+    }
+    const sessions =
+      createGxserverPresentationSessionsByProjectFromGroups({ presentation }).get(projectId) ?? [];
+    return sessions.flatMap((session, index) =>
+      this.visibleSessionIds.has(session.sessionId) || index === 0
+        ? [session.sessionId]
+        : [],
+    );
   }
 
   private isGpuiPresentationChatProjectId(projectId: string): boolean {
@@ -6051,10 +6936,33 @@ class GpuiSidebarRuntime {
     if (!machineId || !projectId || !sessionId) {
       return;
     }
+    const previousActiveGroupId = this.activeGroupId;
+    const previousFocusedSessionId = this.focusedSessionId;
+    const previousVisibleSessionIds = [...this.visibleSessionIds];
     const scopedSessionId = createGpuiRemotePresentationSessionId(machineId, projectId, sessionId);
-    this.activeGroupId = createGpuiRemotePresentationGroupId(machineId, projectId);
+    const scopedGroupId = createGpuiRemotePresentationGroupId(machineId, projectId);
+    this.activeGroupId = scopedGroupId;
     this.focusedSessionId = scopedSessionId;
     this.visibleSessionIds = new Set([scopedSessionId]);
+    const details: GpuiSidebarFocusDebugLogDetails = {
+      ...this.currentFocusDebugLogDetails(),
+      activeGroupIdAfter: scopedGroupId,
+      focusedSessionIdAfter: scopedSessionId,
+      resolvedProjectId: projectId,
+      resolvedSessionId: sessionId,
+      visibleSessionCountAfter: this.visibleSessionIds.size,
+      visibleSessionCountBefore: previousVisibleSessionIds.length,
+      visibleSessionIdsAfter: [...this.visibleSessionIds],
+      visibleSessionIdsBefore: previousVisibleSessionIds,
+    };
+    if (previousActiveGroupId) {
+      details.activeGroupIdBefore = previousActiveGroupId;
+    }
+    if (previousFocusedSessionId) {
+      details.focusedSessionIdBefore = previousFocusedSessionId;
+    }
+    this.postSessionFocusDebugLog("remoteFocusStateSet", "debug", details);
+    this.recordFocusDebugTransition(scopedSessionId);
     this.postGxserverPresentationFocusState();
   }
 
@@ -6168,12 +7076,13 @@ class GpuiSidebarRuntime {
     originalMessage: SidebarToExtensionMessage,
   ): void {
     /*
-     * CDXC:GPUICommandPane 2026-06-24-23:17:
-     * The shared SidebarApp and command palette emit `runSidebarCommand` for
-     * project Actions. In GPUI, resolve the selected action only from the live
-     * gxserver HUD projection and hand it to Rust through a fixed command-action
-     * bridge so command text reaches only the app-owned command-pane launch
-     * boundary, not logs, fixture state, renderer execution, or path fallbacks.
+     * CDXC:GPUICommandPane 2026-06-26-05:11:
+     * The shared SidebarApp and Command Palette emit `runSidebarCommand` as an
+     * Action-selection message: command id plus optional runMode. In GPUI,
+     * resolve the selected Action from the live gxserver HUD projection and hand
+     * trusted launch metadata to Rust through the fixed command-action bridge so
+     * command text, URLs, saved close-on-exit metadata, paths, output, and logs
+     * never come from the renderer message.
      */
     const command = this.resolveSidebarCommand(commandId);
     if (!command || !isSidebarCommandConfigured(command)) {
@@ -6271,6 +7180,24 @@ class GpuiSidebarRuntime {
     }
     this.domainProjects = [...domainProjects];
     this.recentProjects = [...recentProjects];
+    this.applyPresentationSnapshot(snapshot, kind);
+  }
+
+  private async refreshDomainPresentationSnapshotFromClient(
+    kind: GpuiSidebarRuntimeSnapshotKind,
+  ): Promise<void> {
+    const client = this.client;
+    if (!client) {
+      return;
+    }
+    const [snapshot, domainProjects] = await Promise.all([
+      client.fetchPresentationSnapshot(),
+      client.fetchProjectList(),
+    ]);
+    if (this.client !== client) {
+      return;
+    }
+    this.domainProjects = [...domainProjects];
     this.applyPresentationSnapshot(snapshot, kind);
   }
 
@@ -6389,6 +7316,25 @@ class GpuiSidebarRuntime {
       presentation.revision + 1,
     );
     this.publishPresentation("patch");
+  }
+
+  private removeLocalPresentationProject(projectId: string): void {
+    const presentation = this.presentation;
+    if (!presentation) {
+      return;
+    }
+    /*
+    CDXC:GPUIRecentProjects 2026-06-25-18:50:
+    Local close-to-recent must immediately mirror macOS by removing the parked project from normal GPUI sidebar groups while using gxserver's `/api/closeProjectToRecent` recent-project response as the only drawer source.
+    */
+    this.presentation = reduceGxserverPresentationDelta(
+      presentation,
+      {
+        projectId: projectId as GxserverProjectId,
+        type: "projectRemoved",
+      },
+      presentation.revision + 1,
+    );
   }
 
   private handleUnsupportedSidebarMessage(_message: SidebarToExtensionMessage): void {
@@ -6847,6 +7793,303 @@ function createGpuiSidebarSettings(
   };
 }
 
+export function createGpuiSessionStatusIndicatorCandidatesFromSidebarGroups(
+  groups: readonly SidebarSessionGroup[],
+): GpuiSessionStatusIndicatorCandidate[] {
+  /*
+  CDXC:GPUIStatusPetOverlay 2026-06-26-04:38:
+  GPUI derives status/pet candidates from the live gxserver SidebarApp groups because phase1-main mounts SidebarApp directly and never runs native-sidebar.tsx. Preserve the same project/session order semantics as macOS by reusing shared display layout, but keep the bridge payload bounded and route with ids only rather than paths, commands, terminal text, URLs, or daemon bodies.
+  */
+  const candidates: GpuiSessionStatusIndicatorCandidate[] = [];
+  let order = 0;
+  for (const group of groups) {
+    if (candidates.length >= GPUI_STATUS_INDICATOR_MAX_CANDIDATES) {
+      break;
+    }
+    const groupProjectId = group.projectContext?.editor.projectId;
+    const sessionsById = Object.fromEntries(
+      group.sessions.map((session) => [session.sessionId, session]),
+    );
+    const manualSessionIds = group.sessions.map((session) => session.sessionId);
+    const displayLayout = createDisplaySessionLayout({
+      sessionIdsByGroup: { [group.groupId]: manualSessionIds },
+      sessionsById,
+      sortMode: "lastActivity",
+      workspaceGroupIds: [group.groupId],
+    });
+    const visualSessionIds = displayLayout.sessionIdsByGroup[group.groupId] ?? manualSessionIds;
+    for (const sessionId of visualSessionIds) {
+      if (candidates.length >= GPUI_STATUS_INDICATOR_MAX_CANDIDATES) {
+        break;
+      }
+      const session = sessionsById[sessionId];
+      if (!session) {
+        continue;
+      }
+      const combinedReference = parseGxserverPresentationProjectSessionId(session.sessionId);
+      const candidateProjectId = groupProjectId ?? combinedReference?.projectId;
+      if (!candidateProjectId) {
+        continue;
+      }
+      candidates.push({
+        hasRunningZmxBacking: hasRunningZmxBackingForGpuiIdleIndicator(session),
+        lastInteractionAt: session.lastInteractionAt,
+        order,
+        projectId: candidateProjectId,
+        projectTitle: boundedGpuiStatusIndicatorTitle(
+          group.title || candidateProjectId,
+          candidateProjectId,
+        ),
+        sessionId: session.sessionId,
+        status: getGpuiSessionStatusIndicatorStatus(session),
+        title: getGpuiPetOverlaySessionTitle(session),
+      });
+      order += 1;
+    }
+  }
+  return candidates;
+}
+
+export function createGpuiSessionStatusIndicatorsPayload(
+  candidates: readonly GpuiSessionStatusIndicatorCandidate[],
+  settings: ghostexSettings,
+): GpuiSessionStatusIndicatorsPayload {
+  const counts = countGpuiSessionStatusIndicatorCandidates(candidates);
+  return {
+    attentionCount: counts.attention,
+    availableCount: counts.available,
+    hideFloatingIndicators: settings.hideFloatingSessionStatusIndicators,
+    hideMenuBarIndicators: settings.hideMenuBarSessionStatusIndicators,
+    projects: createGpuiSessionStatusIndicatorProjects(candidates),
+    size: settings.sessionStatusIndicatorSize,
+    type: GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE,
+    version: GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION,
+    workingCount: counts.working,
+  };
+}
+
+export function createGpuiPetOverlayStatePayload(
+  candidates: readonly GpuiSessionStatusIndicatorCandidate[],
+  settings: ghostexSettings,
+): GpuiPetOverlayStatePayload {
+  const actionableActivityCandidates = candidates.filter(
+    (candidate) => candidate.status === "attention" || candidate.status === "working",
+  );
+  const shownActivityCandidates =
+    actionableActivityCandidates.length > 0
+      ? [...actionableActivityCandidates].sort(compareGpuiPetOverlayActivityCandidates).slice(0, 3)
+      : [...candidates].sort(compareGpuiSessionStatusIndicatorCandidates).slice(0, 2);
+  return {
+    activities: shownActivityCandidates.map((candidate) => ({
+      id: candidate.sessionId,
+      projectId: candidate.projectId,
+      state: candidate.status,
+      title: candidate.title,
+    })),
+    enabled: settings.petOverlayEnabled,
+    selectedPetId: boundedGpuiStatusIndicatorTitle(settings.selectedPetId, "cat"),
+    statusItems: createGpuiPetOverlayStatusItems(candidates),
+    type: GPUI_SIDEBAR_PET_OVERLAY_STATE_MESSAGE_TYPE,
+    version: GPUI_SIDEBAR_PET_OVERLAY_STATE_MESSAGE_VERSION,
+  };
+}
+
+function createGpuiSessionStatusIndicatorProjects(
+  candidates: readonly GpuiSessionStatusIndicatorCandidate[],
+): GpuiSessionStatusIndicatorProject[] {
+  const projects: GpuiSessionStatusIndicatorProject[] = [];
+  const projectsById = new Map<string, GpuiSessionStatusIndicatorProject>();
+  for (const candidate of candidates) {
+    if (!shouldCountGpuiSessionStatusIndicatorCandidate(candidate)) {
+      continue;
+    }
+    let project = projectsById.get(candidate.projectId);
+    if (!project) {
+      if (projects.length >= GPUI_STATUS_INDICATOR_MAX_PROJECTS) {
+        continue;
+      }
+      project = {
+        projectId: candidate.projectId,
+        sessions: [],
+        title: candidate.projectTitle,
+      };
+      projectsById.set(candidate.projectId, project);
+      projects.push(project);
+    }
+    if (project.sessions.length >= GPUI_STATUS_INDICATOR_MAX_SESSIONS_PER_PROJECT) {
+      continue;
+    }
+    project.sessions.push({
+      lastActiveAt: candidate.lastInteractionAt,
+      sessionId: candidate.sessionId,
+      sidebarOrder: candidate.order,
+      status: candidate.status,
+      title: candidate.title,
+    });
+  }
+  return projects;
+}
+
+function countGpuiSessionStatusIndicatorCandidates(
+  candidates: readonly GpuiSessionStatusIndicatorCandidate[],
+): Record<GpuiSessionStatusIndicatorStatus, number> {
+  const counts = {
+    attention: 0,
+    available: 0,
+    working: 0,
+  };
+  for (const candidate of candidates) {
+    if (shouldCountGpuiSessionStatusIndicatorCandidate(candidate)) {
+      counts[candidate.status] += 1;
+    }
+  }
+  return counts;
+}
+
+function createGpuiPetOverlayStatusItems(
+  candidates: readonly GpuiSessionStatusIndicatorCandidate[],
+): Array<{ count: number; status: GpuiSessionStatusIndicatorStatus }> {
+  const counts = countGpuiSessionStatusIndicatorCandidates(candidates);
+  if (counts.attention > 0 || counts.working > 0) {
+    const items: Array<{ count: number; status: GpuiSessionStatusIndicatorStatus }> = [];
+    if (counts.attention > 0) {
+      items.push({ count: counts.attention, status: "attention" });
+    }
+    if (counts.working > 0) {
+      items.push({ count: counts.working, status: "working" });
+    }
+    return items;
+  }
+  return counts.available > 0 ? [{ count: counts.available, status: "available" }] : [];
+}
+
+function getGpuiSessionStatusIndicatorStatus(
+  session: SidebarSessionItem,
+): GpuiSessionStatusIndicatorStatus {
+  if (session.activity === "attention") {
+    return "attention";
+  }
+  if (session.activity === "working") {
+    return "working";
+  }
+  return "available";
+}
+
+function hasRunningZmxBackingForGpuiIdleIndicator(session: SidebarSessionItem): boolean {
+  if (session.sessionKind !== "terminal") {
+    return false;
+  }
+  if (session.sessionPersistenceProvider !== "zmx" || !normalizeNonEmptyString(session.sessionPersistenceName)) {
+    return false;
+  }
+  return (
+    session.providerSessionState === "exists" ||
+    session.nativePaneState === "mounted" ||
+    session.nativePaneState === "mounting" ||
+    session.isLive === true
+  );
+}
+
+function shouldCountGpuiSessionStatusIndicatorCandidate(
+  candidate: GpuiSessionStatusIndicatorCandidate,
+): boolean {
+  return candidate.status !== "available" || candidate.hasRunningZmxBacking;
+}
+
+function compareGpuiSessionStatusIndicatorCandidates(
+  left: GpuiSessionStatusIndicatorCandidate,
+  right: GpuiSessionStatusIndicatorCandidate,
+): number {
+  const timeDelta =
+    getGpuiIndicatorTimestamp(right.lastInteractionAt) -
+    getGpuiIndicatorTimestamp(left.lastInteractionAt);
+  if (timeDelta !== 0) {
+    return timeDelta;
+  }
+  return left.order - right.order;
+}
+
+function compareGpuiPetOverlayActivityCandidates(
+  left: GpuiSessionStatusIndicatorCandidate,
+  right: GpuiSessionStatusIndicatorCandidate,
+): number {
+  const statusDelta =
+    getGpuiPetOverlayActivityStatusPriority(right.status) -
+    getGpuiPetOverlayActivityStatusPriority(left.status);
+  if (statusDelta !== 0) {
+    return statusDelta;
+  }
+  return left.order - right.order;
+}
+
+function getGpuiPetOverlayActivityStatusPriority(
+  status: GpuiSessionStatusIndicatorStatus,
+): number {
+  switch (status) {
+    case "attention":
+      return 2;
+    case "working":
+      return 1;
+    case "available":
+      return 0;
+  }
+}
+
+function getGpuiIndicatorTimestamp(value: string | undefined): number {
+  if (!value) {
+    return 0;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function getGpuiPetOverlaySessionTitle(session: SidebarSessionItem): string {
+  const title =
+    session.displayTitle?.trim() ||
+    session.primaryTitle?.trim() ||
+    session.terminalTitle?.trim() ||
+    session.alias.trim() ||
+    session.sessionNumber?.trim();
+  return boundedGpuiStatusIndicatorTitle(title, "Untitled session");
+}
+
+function boundedGpuiStatusIndicatorTitle(value: string | undefined, fallback: string): string {
+  const normalized = normalizeNonEmptyString(value) ?? fallback;
+  return normalized.length > GPUI_STATUS_INDICATOR_TITLE_MAX_CHARS
+    ? normalized.slice(0, GPUI_STATUS_INDICATOR_TITLE_MAX_CHARS)
+    : normalized;
+}
+
+function normalizeGpuiStatusPetActivation(value: unknown): GpuiStatusPetActivationPayload | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => !["sessionId", "type", "version"].includes(key))) {
+    return undefined;
+  }
+  if (
+    record.type !== GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_VERSION
+  ) {
+    return undefined;
+  }
+  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
+  if (!sessionId || !gpuiStatusPetActivationSessionIdAllowed(sessionId)) {
+    return undefined;
+  }
+  return { sessionId };
+}
+
+function gpuiStatusPetActivationSessionIdAllowed(value: string): boolean {
+  return (
+    value.length <= GPUI_STATUS_INDICATOR_ID_MAX_CHARS &&
+    !value.includes("/") &&
+    !value.includes("\\") &&
+    !/[\u0000-\u001f\u007f]/u.test(value)
+  );
+}
+
 function createGpuiRecentProjects(
   recentProjects: readonly GxserverRecentProjectDomainState[],
   settings: ghostexSettings,
@@ -6972,11 +8215,11 @@ function compareGpuiRecentProjectsByClosedAt(
   left: SidebarRecentProject,
   right: SidebarRecentProject,
 ): number {
-  return (
-    gpuiRecentProjectClosedAtMillis(right) - gpuiRecentProjectClosedAtMillis(left) ||
-    right.title.localeCompare(left.title) ||
-    left.projectId.localeCompare(right.projectId)
-  );
+  /*
+  CDXC:GPUIRecentProjects 2026-06-25-19:22:
+  Native `compareRecentProjectsByClosedAt` only sorts parsed close time descending. The Recent Projects drawer contract does not include gxserver `updatedAt`, so GPUI must not invent title or id tie-breaks; stable sort preserves producer order for equal timestamps.
+  */
+  return gpuiRecentProjectClosedAtMillis(right) - gpuiRecentProjectClosedAtMillis(left);
 }
 
 function gpuiRecentProjectClosedAtMillis(project: SidebarRecentProject): number {
@@ -8057,6 +9300,191 @@ function hasSameGpuiRuntimeSettings(
     previous?.showBetaFeatures === next.showBetaFeatures &&
     previous?.settings === next.settings
   );
+}
+
+function normalizeGpuiNativeAppShotPromptResult(
+  value: unknown,
+): { ok: boolean; sessionId: string } | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.type !== GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_VERSION ||
+    typeof record.ok !== "boolean"
+  ) {
+    return undefined;
+  }
+  const sessionId = normalizeNonEmptyString(record.sessionId);
+  return sessionId
+    ? { ok: record.ok, sessionId }
+    : undefined;
+}
+
+function nativeAppShotPromptSessionIdForSidebarSession(
+  session: SidebarSessionItem | undefined,
+): string | undefined {
+  if (!session) {
+    return undefined;
+  }
+  const remoteSession = parseGpuiRemotePresentationSessionId(session.sessionId);
+  if (remoteSession) {
+    return createGpuiRemotePresentationSessionId(
+      remoteSession.machineId,
+      remoteSession.projectId,
+      remoteSession.sessionId,
+    );
+  }
+  return localGxserverSessionIdForSidebarSession(session);
+}
+
+function localGxserverSessionIdForSidebarSession(
+  session: SidebarSessionItem | undefined,
+): string | undefined {
+  if (!session || parseGpuiRemotePresentationSessionId(session.sessionId)) {
+    return undefined;
+  }
+  return (
+    parseGxserverPresentationProjectSessionId(session.sessionId)?.sessionId ??
+    normalizeNonEmptyString(session.sessionId)
+  );
+}
+
+function localGxserverProjectIdForSidebarSession(
+  session: SidebarSessionItem,
+  presentation: GxserverPresentationSnapshot | undefined,
+): string | undefined {
+  const scopedSession = parseGxserverPresentationProjectSessionId(session.sessionId);
+  if (scopedSession?.projectId) {
+    return scopedSession.projectId;
+  }
+  const sessionId = localGxserverSessionIdForSidebarSession(session);
+  return sessionId
+    ? presentation?.sessions.find((candidate) => candidate.sessionId === sessionId)?.projectId
+    : undefined;
+}
+
+function isNativeAppShotAgentSession(
+  session: SidebarSessionItem | undefined,
+): session is SidebarSessionItem {
+  if (!session) {
+    return false;
+  }
+  if (session.sessionKind !== "terminal" || session.isSleeping === true) {
+    return false;
+  }
+  if (session.lifecycleState === "sleeping" || session.isLive !== true) {
+    return false;
+  }
+  return Boolean(session.agentIcon);
+}
+
+function normalizeGpuiNativeAppShotCapture(value: unknown): GpuiNativeAppShotCapture | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.type !== GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_VERSION
+  ) {
+    return undefined;
+  }
+  const appName = normalizeGpuiNativeAppShotString(record.appName, 256);
+  const imagePath = normalizeGpuiNativeAppShotImagePath(record.imagePath);
+  if (!appName || !imagePath) {
+    return undefined;
+  }
+  const bundleIdentifier = normalizeGpuiNativeAppShotString(record.bundleIdentifier, 256);
+  const windowTitle = normalizeGpuiNativeAppShotString(record.windowTitle, 512);
+  const windowWidth = normalizeGpuiNativeAppShotDimension(record.windowWidth);
+  const windowHeight = normalizeGpuiNativeAppShotDimension(record.windowHeight);
+  const trigger = normalizeGpuiNativeAppShotTrigger(record.trigger);
+  const appShot: GpuiNativeAppShotCapture = {
+    appName,
+    imagePath,
+  };
+  if (bundleIdentifier) {
+    appShot.bundleIdentifier = bundleIdentifier;
+  }
+  if (windowTitle) {
+    appShot.windowTitle = windowTitle;
+  }
+  if (windowWidth) {
+    appShot.windowWidth = windowWidth;
+  }
+  if (windowHeight) {
+    appShot.windowHeight = windowHeight;
+  }
+  if (trigger) {
+    appShot.trigger = trigger;
+  }
+  return appShot;
+}
+
+function normalizeGpuiNativeAppShotImagePath(value: unknown): string | undefined {
+  const path = normalizeGpuiNativeAppShotString(value, 4096);
+  if (!path || !path.startsWith("~/.ghostex/i/")) {
+    return undefined;
+  }
+  return path;
+}
+
+function normalizeGpuiNativeAppShotString(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const text = value.trim();
+  if (!text || text.length > maxLength || /[\u0000-\u001f\u007f]/u.test(text)) {
+    return undefined;
+  }
+  return text;
+}
+
+function normalizeGpuiNativeAppShotDimension(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0 || value > 100_000) {
+    return undefined;
+  }
+  return value;
+}
+
+function normalizeGpuiNativeAppShotTrigger(value: unknown): string | undefined {
+  const trigger = normalizeGpuiNativeAppShotString(value, 80);
+  return trigger === "both-command" ||
+    trigger === "double-left-shift" ||
+    trigger === "double-left-option"
+    ? trigger
+    : undefined;
+}
+
+function formatGpuiNativeAppShotPrompt(appShot: GpuiNativeAppShotCapture): string {
+  const metadataLines = [`App: ${appShot.appName}`];
+  if (appShot.bundleIdentifier) {
+    metadataLines.push(`Bundle ID: ${appShot.bundleIdentifier}`);
+  }
+  if (appShot.windowTitle) {
+    metadataLines.push(`Window title: ${appShot.windowTitle}`);
+  }
+  if (appShot.windowWidth && appShot.windowHeight) {
+    metadataLines.push(`Window size: ${appShot.windowWidth} x ${appShot.windowHeight} px`);
+  }
+  /*
+  CDXC:GPUIAppShots 2026-06-25-23:07:
+  GPUI formats App Shot prompts like macOS using only native-supplied app/window metadata and the `~/.ghostex/i` display path. The prompt must not include OCR, Accessibility text, DOM text, terminal content, stdout/stderr, commands, URLs, or renderer-supplied file paths.
+  */
+  return [
+    `App shot from ${appShot.appName}.`,
+    "",
+    `[Image #1](${appShot.imagePath})`,
+    "",
+    "Metadata:",
+    "",
+    ...metadataLines,
+    "",
+    "Use this app shot as context for my next request.",
+    "",
+  ].join("\n");
 }
 
 function normalizeNonEmptyString(value: unknown): string | undefined {

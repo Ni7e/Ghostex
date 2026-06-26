@@ -498,7 +498,8 @@ final class RemoteGxserverClient {
       mv "$package_link" "$install_root/package.backup.\(releaseId)"
     fi
     ln -sfn "$release_dir" "$package_link"
-    for tool in gxserver zmx zehn bd; do
+    # CDXC:RemoteUbuntuTui 2026-06-25-19:33: Bare `ghostex` on Ubuntu launches the bundled TUI through the packaged CLI, so install must treat ghostex-tui as a first-class remote tool instead of leaving users with a post-install source-build error.
+    for tool in gxserver zmx zehn bd ghostex-tui; do
       if [ -f "$package_link/bin/$tool" ]; then
         chmod 755 "$package_link/bin/$tool" 2>/dev/null || true
         ln -sfn "$package_link/bin/$tool" "$HOME/.local/bin/$tool" 2>/dev/null || true

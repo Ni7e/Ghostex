@@ -63,6 +63,9 @@ Inputs can be overridden with:
   --node-bin <path>      use a prebuilt Linux Node binary instead of downloading Node
   --portless-dir <dir>   default: node_modules/portless
   --rust-target <triple> default: arch-specific Linux GNU target
+  --tui-root <dir>       default: tui
+  --tui-bin <path>       use a prebuilt Linux ghostex-tui binary instead of building TUI
+  --tui-zig-bin <path>   default: TUI_ZIG, ZMX_ZIG, ZIG, or zig
   --zig-target <triple>  default: arch-specific Linux musl target
   --zmx-zig-bin <path>   default: ZMX_ZIG, ZIG, or zig
   --zehn-zig-bin <path>  default: ZEHN_ZIG, ZIG, or zig
@@ -109,6 +112,9 @@ async function main() {
       packageVersion: options.packageVersion || await gxserverPackageVersion(),
       portlessDir: path.resolve(repoRoot, options.portlessDir || "node_modules/portless"),
       rustTarget: options.rustTarget || archConfig.rustTarget,
+      tuiBin: options.tuiBin ? path.resolve(repoRoot, options.tuiBin) : "",
+      tuiRoot: path.resolve(repoRoot, options.tuiRoot || "tui"),
+      tuiZigBin: options.tuiZigBin || process.env.TUI_ZIG || process.env.ZMX_ZIG || process.env.ZIG || "zig",
       zmxRoot: path.resolve(repoRoot, options.zmxRoot || "zmx"),
       zmxZigBin: options.zmxZigBin || process.env.ZMX_ZIG || process.env.ZIG || "zig",
       zehnRoot: path.resolve(repoRoot, options.zehnRoot || "zehn"),
@@ -119,9 +125,15 @@ async function main() {
     /*
      * CDXC:RemoteMachines 2026-06-23-10:07:
      * Ubuntu install must be a first-run package, not an on-host source build.
-     * Build gxserver-rs, zmx, zehn, bd, bundled Linux Node, Portless, and the
-     * Ghostex CLI into one package directory so the macOS app can upload it
-     * over SSH and start the same Rust control plane without PATH fallbacks.
+     * Build gxserver-rs, zmx, zehn, bd, ghostex-tui, bundled Linux Node,
+     * Portless, and the Ghostex CLI into one package directory so the macOS app
+     * can upload it over SSH and start the same Rust control plane without PATH
+     * fallbacks.
+     *
+     * CDXC:RemoteUbuntuTui 2026-06-25-19:33:
+     * Bare `ghostex` on Ubuntu is the documented terminal UI entry point, so the
+     * remote package must include `bin/ghostex-tui` instead of telling users to
+     * build from a source checkout or a Homebrew-only Zig path after install.
      */
     await buildPackage({ config, outputDir, workRoot });
     console.log(`Remote gxserver Linux ${arch} package written to ${outputDir}`);
@@ -194,12 +206,14 @@ async function buildPackage({ config, outputDir, workRoot }) {
     zigBin: config.zehnZigBin,
   });
   const bdBin = config.bdBin || await buildBeads(config, workRoot);
+  const tuiBin = config.tuiBin || await buildGhostexTui(config);
   const nodeBin = config.nodeBin || await prepareLinuxNode(config, workRoot);
 
   await copyExecutable(gxserverBin, path.join(binsDir, "gxserver"), "gxserver");
   await copyExecutable(zmxBin, path.join(binsDir, "zmx"), "zmx");
   await copyExecutable(zehnBin, path.join(binsDir, "zehn"), "zehn");
   await copyExecutable(bdBin, path.join(binsDir, "bd"), "bd");
+  await copyExecutable(tuiBin, path.join(binsDir, "ghostex-tui"), "ghostex-tui");
   await copyExecutable(nodeBin, path.join(stageDir, "code-server", "lib", "node"), "node");
 
   await copyPortlessPackage(config.portlessDir, path.join(stageDir, "portless"));
@@ -224,6 +238,29 @@ async function buildGxserver(config) {
     config.rustTarget,
   ], { cwd: repoRoot });
   return path.join(gxserverRoot, "target", config.rustTarget, "release", "gxserver");
+}
+
+async function buildGhostexTui(config) {
+  await assertDirectory(config.tuiRoot, "Ghostex TUI root");
+  await run("cargo", [
+    "build",
+    "--release",
+    "--bin",
+    "ghostex-tui",
+    "--manifest-path",
+    path.join(config.tuiRoot, "Cargo.toml"),
+    "--target",
+    config.rustTarget,
+  ], {
+    cwd: repoRoot,
+    env: {
+      /* CDXC:RemoteUbuntuTui 2026-06-25-19:33: Host shell compiler/linker flags can leak into Zig's build-runner link step during cross builds and fail before the Linux TUI archive is produced. Clear generic CPPFLAGS/LDFLAGS for this package-owned Cargo/Zig build while still passing the pinned Zig executable explicitly. */
+      CPPFLAGS: "",
+      LDFLAGS: "",
+      ZIG: config.tuiZigBin || "zig",
+    },
+  });
+  return path.join(config.tuiRoot, "target", config.rustTarget, "release", "ghostex-tui");
 }
 
 async function buildZigTool({ binName, root, target, workRoot, zigBin }) {
@@ -323,6 +360,7 @@ async function writePackageManifest(packageDir, version) {
       type: "module",
       bin: {
         gxserver: "./bin/gxserver",
+        "ghostex-tui": "./bin/ghostex-tui",
       },
       exports: {
         "./protocol": {
@@ -384,6 +422,7 @@ async function validateLinuxPackage(packageDir, config) {
     "bin/zmx",
     "bin/zehn",
     "bin/bd",
+    "bin/ghostex-tui",
     "code-server/lib/node",
     "portless/dist/cli.js",
     "CLI/ghostex-cli.mjs",
@@ -394,7 +433,7 @@ async function validateLinuxPackage(packageDir, config) {
   for (const relativePath of requiredFiles) {
     await assertFile(path.join(packageDir, relativePath), relativePath);
   }
-  for (const relativePath of ["bin/gxserver", "bin/zmx", "bin/zehn", "bin/bd", "code-server/lib/node"]) {
+  for (const relativePath of ["bin/gxserver", "bin/zmx", "bin/zehn", "bin/bd", "bin/ghostex-tui", "code-server/lib/node"]) {
     const fullPath = path.join(packageDir, relativePath);
     if (!await isElf(fullPath)) {
       throw new Error(`Linux remote package expected an ELF binary at ${relativePath}.`);

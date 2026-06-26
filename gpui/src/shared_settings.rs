@@ -25,7 +25,19 @@ pub const DEFAULT_DEFAULT_EDITOR_COMMAND: &str = "code";
 pub const DEFAULT_KEEP_AWAKE_DURATION_MINUTES: SharedKeepAwakeDurationMinutes =
     SharedKeepAwakeDurationMinutes::UntilTurnedOff;
 pub const DEFAULT_KEEP_AWAKE_ALLOW_DISPLAY_SLEEP: bool = false;
+pub const DEFAULT_KEEP_AWAKE_ACTIVATE_ON_EXTERNAL_DISPLAY: bool = false;
+pub const DEFAULT_KEEP_AWAKE_ACTIVATE_ON_LAUNCH: bool = false;
+pub const DEFAULT_KEEP_AWAKE_BATTERY_THRESHOLD_PERCENT: f64 = 20.0;
+pub const DEFAULT_KEEP_AWAKE_DEACTIVATE_BELOW_BATTERY_THRESHOLD: bool = false;
+pub const DEFAULT_KEEP_AWAKE_DEACTIVATE_ON_LOW_POWER_MODE: bool = false;
+pub const DEFAULT_KEEP_AWAKE_DEACTIVATE_ON_USER_SWITCH: bool = false;
+pub const DEFAULT_KEEP_AWAKE_PREVENT_LID_SLEEP: bool = false;
+pub const DEFAULT_KEEP_AWAKE_WHILE_WORKING_SESSIONS: bool = false;
 pub const DEFAULT_HIDE_KEEP_AWAKE_TITLEBAR_CONTROL: bool = false;
+pub const DEFAULT_APP_SHOTS_ENABLED: bool = false;
+pub const DEFAULT_APP_SHOTS_HOTKEY: SharedAppShotsHotkey = SharedAppShotsHotkey::BothCommand;
+const MIN_KEEP_AWAKE_BATTERY_THRESHOLD_PERCENT: f64 = 10.0;
+const MAX_KEEP_AWAKE_BATTERY_THRESHOLD_PERCENT: f64 = 90.0;
 const MAX_CUSTOM_DEFAULT_EDITOR_COMMAND_CHARS: usize = 240;
 const DEFAULT_TERMINAL_CURSOR_STYLE: &str = "bar";
 const DEFAULT_TERMINAL_FONT_FAMILY: &str = "JetBrains Mono";
@@ -229,6 +241,37 @@ impl SharedGxserverAgentSettings {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SharedAppShotsHotkey {
+    BothCommand,
+    DoubleLeftShift,
+    DoubleLeftOption,
+}
+
+impl SharedAppShotsHotkey {
+    pub fn from_settings_value(value: Option<&str>) -> Self {
+        match value {
+            Some("double-left-shift") => Self::DoubleLeftShift,
+            Some("double-left-option") => Self::DoubleLeftOption,
+            _ => DEFAULT_APP_SHOTS_HOTKEY,
+        }
+    }
+
+    pub fn native_code(self) -> i32 {
+        match self {
+            Self::BothCommand => 0,
+            Self::DoubleLeftShift => 1,
+            Self::DoubleLeftOption => 2,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SharedAppShotsSettings {
+    pub enabled: bool,
+    pub hotkey: SharedAppShotsHotkey,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SharedKeepAwakeDurationMinutes {
     UntilTurnedOff,
     TwoHours,
@@ -268,12 +311,20 @@ pub const KEEP_AWAKE_DURATION_OPTIONS: &[SharedKeepAwakeDurationMinutes] = &[
     SharedKeepAwakeDurationMinutes::FiveHours,
 ];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SharedKeepAwakeTitlebarSettings {
     pub feature_enabled: bool,
     pub hide_titlebar_control: bool,
+    pub activate_on_external_display: bool,
+    pub activate_on_launch: bool,
+    pub battery_threshold_percent: f64,
+    pub deactivate_below_battery_threshold: bool,
+    pub deactivate_on_low_power_mode: bool,
+    pub deactivate_on_user_switch: bool,
     pub default_duration_minutes: SharedKeepAwakeDurationMinutes,
     pub allow_display_sleep: bool,
+    pub prevent_lid_sleep: bool,
+    pub while_working_sessions: bool,
 }
 
 impl SharedKeepAwakeTitlebarSettings {
@@ -420,16 +471,51 @@ impl SharedSidebarSettingsSnapshot {
         /*
         CDXC:GPUITitlebarKeepAwake 2026-06-24-13:16:
         GPUI consumes only the shared Keep Awake fields needed for the titlebar runtime. Match the TypeScript Settings defaults exactly: beta is strict boolean true only, hide and allow-display-sleep are strict booleans with false defaults, and duration normalizes only to 0, 120, or 300 minutes with 0 as the default.
+
+        CDXC:GPUITitlebarKeepAwake 2026-06-25-23:49:
+        GPUI Keep Awake automation consumes the advanced shared Settings fields with the same strict boolean defaults and battery-threshold clamp as `ghostex-settings.ts`. Keep the parsed snapshot narrow and runtime-owned: renderer payloads do not supply commands, paths, shell text, probe output, or persisted Keep Awake state.
         */
         SharedKeepAwakeTitlebarSettings {
             feature_enabled: self.show_beta_features(),
             hide_titlebar_control: strict_bool_field(&self.object, "hideKeepAwakeTitlebarControl")
                 .unwrap_or(DEFAULT_HIDE_KEEP_AWAKE_TITLEBAR_CONTROL),
+            activate_on_external_display: strict_bool_field(
+                &self.object,
+                "keepAwakeActivateOnExternalDisplay",
+            )
+            .unwrap_or(DEFAULT_KEEP_AWAKE_ACTIVATE_ON_EXTERNAL_DISPLAY),
+            activate_on_launch: strict_bool_field(&self.object, "keepAwakeActivateOnLaunch")
+                .unwrap_or(DEFAULT_KEEP_AWAKE_ACTIVATE_ON_LAUNCH),
+            battery_threshold_percent: normalize_keep_awake_battery_threshold_percent(
+                self.object.get("keepAwakeBatteryThresholdPercent"),
+            ),
+            deactivate_below_battery_threshold: strict_bool_field(
+                &self.object,
+                "keepAwakeDeactivateBelowBatteryThreshold",
+            )
+            .unwrap_or(DEFAULT_KEEP_AWAKE_DEACTIVATE_BELOW_BATTERY_THRESHOLD),
+            deactivate_on_low_power_mode: strict_bool_field(
+                &self.object,
+                "keepAwakeDeactivateOnLowPowerMode",
+            )
+            .unwrap_or(DEFAULT_KEEP_AWAKE_DEACTIVATE_ON_LOW_POWER_MODE),
+            deactivate_on_user_switch: strict_bool_field(
+                &self.object,
+                "keepAwakeDeactivateOnUserSwitch",
+            )
+            .unwrap_or(DEFAULT_KEEP_AWAKE_DEACTIVATE_ON_USER_SWITCH),
             default_duration_minutes: normalize_keep_awake_duration_minutes(
                 self.object.get("keepAwakeDefaultDurationMinutes"),
             ),
             allow_display_sleep: strict_bool_field(&self.object, "keepAwakeAllowDisplaySleep")
                 .unwrap_or(DEFAULT_KEEP_AWAKE_ALLOW_DISPLAY_SLEEP),
+            prevent_lid_sleep: strict_bool_field(&self.object, "keepAwakePreventLidSleep")
+                .unwrap_or(DEFAULT_KEEP_AWAKE_PREVENT_LID_SLEEP),
+            while_working_sessions: strict_bool_field(
+                &self.object,
+                "keepAwakeWhileWorkingSessions",
+            )
+            .unwrap_or(DEFAULT_KEEP_AWAKE_WHILE_WORKING_SESSIONS),
         }
     }
 
@@ -445,6 +531,20 @@ impl SharedSidebarSettingsSnapshot {
                 self.object
                     .get("defaultPromptAgentId")
                     .and_then(Value::as_str),
+            ),
+        }
+    }
+
+    pub fn app_shots_settings(&self) -> SharedAppShotsSettings {
+        /*
+        CDXC:GPUIAppShots 2026-06-25-23:07:
+        GPUI App Shots is disabled unless the shared Settings toggle is explicitly true, and the native hotkey monitor must normalize unsupported saved values back to the macOS default `both-command`. Rust consumes only these two fields so screenshot capture and modifier handling stay native-owned while the React modal remains reused.
+        */
+        SharedAppShotsSettings {
+            enabled: strict_bool_field(&self.object, "appShotsEnabled")
+                .unwrap_or(DEFAULT_APP_SHOTS_ENABLED),
+            hotkey: SharedAppShotsHotkey::from_settings_value(
+                self.object.get("appShotsHotkey").and_then(Value::as_str),
             ),
         }
     }
@@ -1374,6 +1474,19 @@ fn normalize_keep_awake_duration_minutes(value: Option<&Value>) -> SharedKeepAwa
     }
 }
 
+fn normalize_keep_awake_battery_threshold_percent(value: Option<&Value>) -> f64 {
+    let Some(percent) = value
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite())
+    else {
+        return DEFAULT_KEEP_AWAKE_BATTERY_THRESHOLD_PERCENT;
+    };
+    percent.clamp(
+        MIN_KEEP_AWAKE_BATTERY_THRESHOLD_PERCENT,
+        MAX_KEEP_AWAKE_BATTERY_THRESHOLD_PERCENT,
+    )
+}
+
 fn json_value_to_bool(value: &Value) -> Option<bool> {
     match value {
         Value::Bool(value) => Some(*value),
@@ -1482,6 +1595,87 @@ mod tests {
         object.insert("terminalFontSize".to_string(), Value::from(16.5));
         let settings = SharedSidebarSettingsSnapshot::from_object(object);
         assert_eq!(settings.terminal_ghostty_surface_config().font_size(), 16.5);
+    }
+
+    #[test]
+    fn keep_awake_settings_parse_advanced_fields_with_shared_defaults() {
+        /*
+        CDXC:GPUITitlebarKeepAwake 2026-06-25-23:49:
+        Keep Awake Settings parity depends on Rust rejecting truthy non-boolean advanced fields and clamping only numeric battery thresholds, matching shared TypeScript normalization before automation can start or stop power assertions.
+        */
+        let defaults = SharedSidebarSettingsSnapshot::from_object(Map::new())
+            .keep_awake_titlebar_settings();
+        assert!(!defaults.activate_on_external_display);
+        assert!(!defaults.activate_on_launch);
+        assert_eq!(
+            defaults.battery_threshold_percent,
+            DEFAULT_KEEP_AWAKE_BATTERY_THRESHOLD_PERCENT
+        );
+        assert!(!defaults.deactivate_below_battery_threshold);
+        assert!(!defaults.deactivate_on_low_power_mode);
+        assert!(!defaults.deactivate_on_user_switch);
+        assert!(!defaults.prevent_lid_sleep);
+        assert!(!defaults.while_working_sessions);
+
+        let mut object = Map::new();
+        object.insert("showBetaFeatures".to_string(), Value::Bool(true));
+        object.insert(
+            "keepAwakeActivateOnExternalDisplay".to_string(),
+            Value::Bool(true),
+        );
+        object.insert("keepAwakeActivateOnLaunch".to_string(), Value::Bool(true));
+        object.insert(
+            "keepAwakeBatteryThresholdPercent".to_string(),
+            Value::from(2.0),
+        );
+        object.insert(
+            "keepAwakeDeactivateBelowBatteryThreshold".to_string(),
+            Value::Bool(true),
+        );
+        object.insert(
+            "keepAwakeDeactivateOnLowPowerMode".to_string(),
+            Value::Bool(true),
+        );
+        object.insert(
+            "keepAwakeDeactivateOnUserSwitch".to_string(),
+            Value::Bool(true),
+        );
+        object.insert("keepAwakePreventLidSleep".to_string(), Value::Bool(true));
+        object.insert(
+            "keepAwakeWhileWorkingSessions".to_string(),
+            Value::Bool(true),
+        );
+        let settings = SharedSidebarSettingsSnapshot::from_object(object)
+            .keep_awake_titlebar_settings();
+        assert!(settings.feature_enabled);
+        assert!(settings.activate_on_external_display);
+        assert!(settings.activate_on_launch);
+        assert_eq!(
+            settings.battery_threshold_percent,
+            MIN_KEEP_AWAKE_BATTERY_THRESHOLD_PERCENT
+        );
+        assert!(settings.deactivate_below_battery_threshold);
+        assert!(settings.deactivate_on_low_power_mode);
+        assert!(settings.deactivate_on_user_switch);
+        assert!(settings.prevent_lid_sleep);
+        assert!(settings.while_working_sessions);
+
+        let mut malformed = Map::new();
+        malformed.insert(
+            "keepAwakeActivateOnLaunch".to_string(),
+            Value::String("true".to_string()),
+        );
+        malformed.insert(
+            "keepAwakeBatteryThresholdPercent".to_string(),
+            Value::String("95".to_string()),
+        );
+        let settings = SharedSidebarSettingsSnapshot::from_object(malformed)
+            .keep_awake_titlebar_settings();
+        assert!(!settings.activate_on_launch);
+        assert_eq!(
+            settings.battery_threshold_percent,
+            DEFAULT_KEEP_AWAKE_BATTERY_THRESHOLD_PERCENT
+        );
     }
 
     #[test]

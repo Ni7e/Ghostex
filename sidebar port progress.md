@@ -1,0 +1,47 @@
+# GPUI Sidebar Recent Projects Parity Progress
+
+## Objective
+
+Track the GPUI sidebar Recent Projects parity port against the macOS/native source of truth. The source-level completion audit currently has no known remaining behavioral discrepancy after the latest fixes. This is not live completion: app restart, browser/manual UI verification, and the real saved remote clipboard side effect remain open by instruction.
+
+## Source-of-Truth Requirements
+
+- Recent Projects are explicit parked projects: `isRecentProject` with `recentClosedAt`; they are not inferred from empty or inactive projects.
+- Normal Projects lists and presentation groups exclude `isRecentProject` rows.
+- Recent Projects render as a separate bottom drawer labeled `Recent Projects`, with matching aria label, only when recent rows exist.
+- Sorting is newest closed first; invalid or missing timestamps count as `0`.
+- Search filters by title, path, and remote machine while preserving current order.
+- Local labels use the project title. Remote labels use `Project (Machine)`. Tooltips use `path` or `path (Machine)`.
+- No recent rows means no drawer. No search hits means `No projects match that search.`
+- Restore clears the query, closes the drawer, and posts `restoreRecentProject`; native clears recent flags, activates the project, wakes preserved sessions, and creates a default terminal only if needed.
+- Closing a normal project parks it into Recent Projects and selects the nearest non-recent project.
+- Recent row context menu routes by trusted project id: Copy Path, Open Folder, Remove Project.
+
+## Status Matrix
+
+| Area | Current source-level status | Verification |
+| --- | --- | --- |
+| Shared UI/macOS source | Complete at source level. A read-only GPT-5.5 xhigh auditor found no UI/source discrepancy; only narrow direct-coverage caveats remained, and those were covered by source evidence. | `bunx vitest run sidebar/recent-projects-ui-source.test.ts sidebar/recent-project-search.test.ts native/sidebar/recent-projects.test.ts native/sidebar/remote-recent-projects-source.test.ts` passed 4 files / 11 tests. |
+| GPUI TypeScript runtime | Complete at source level. A read-only GPT-5.5 xhigh auditor found no behavior discrepancy; Worker C filled evidence gaps for local Copy/Open native bridge payloads and unequal timestamp ordering, then cleanup fixed the equal-timestamp test to use Zebra before Alpha so alphabetical tie-breakers fail. | Final verifier found no issues. `bun run test gpui/sidebar/phase1-gxserver-runtime.test.ts` passed 13 tests. |
+| GPUI Project Settings metadata | Complete. Worker A fixed stale/direct id metadata writes to skip only explicit boolean `isRecentProject: true` rows while leaving false, missing, and non-boolean rows eligible. Recent-specific `/api/listRecentProjects` resolvers are unaffected. | Verifier found no issues. `(cd gpui && cargo test gpui_project_settings_projects)` passed 2 tests; `(cd gpui && cargo test gpui_project_settings_metadata_resolver)` passed 1 test; existing relevant Rust checks also passed. |
+| gxserver Sidebar HUD command scope | Complete. Worker B fixed `/api/readSidebarHud` command hydration/mutation scoping to skip explicit parked recent rows, use the first normal project when no active id exists, default commands for active recent ids, skip parked worktree owners, preserve false/missing/non-boolean rows, and leave agent normalization unchanged. | Verifier found no issues. `(cd gxserver-rs && cargo test sidebar_hud)` passed 8 tests. |
+| Earlier parity slices | Complete at source level: close-to-recent removal, local restore, native-matching ordering, remote Recent Project `Open Folder`, shared drawer UI/context menu/id-only authority, and normal-list/workspace recent exclusion. | Covered by the final focused checks, including the UI/native Vitest suite, GPUI runtime Vitest suite, GPUI Rust focused tests, gxserver Sidebar HUD tests, tracked-file diff-check, and no-index whitespace checks. |
+
+## Progress Entries
+
+- 2026-06-25: Shared React UI source-level coverage worker added `sidebar/recent-projects-ui-source.test.ts` for the drawer guard, labels, empty state, restore reset and id-only `restoreRecentProject` message, context-menu order `Copy Path`, `Open Folder`, separator, `Remove Project`, and id-only Copy/Open/Remove message authority. First verifier found assertion-quality issues; cleanup worker fixed semantic message assertions, explicit marker presence before order comparison, and whitespace-insensitive label checks. Final verifier found no issues.
+- 2026-06-25: A new read-only completion audit used GPT-5.5 xhigh auditors for shared UI/macOS source, GPUI TypeScript runtime, and the GPUI Rust/gxserver bridge.
+- 2026-06-25: Shared UI/macOS auditor found no UI/source discrepancy. It ran `bunx vitest run sidebar/recent-projects-ui-source.test.ts sidebar/recent-project-search.test.ts native/sidebar/recent-projects.test.ts native/sidebar/remote-recent-projects-source.test.ts`, which passed 4 files / 11 tests, and noted only narrow direct-coverage caveats covered by source evidence.
+- 2026-06-25: GPUI TypeScript runtime auditor found no behavior discrepancy but noted evidence gaps for local Copy/Open native bridge payloads and unequal timestamp ordering. Worker C updated only `gpui/sidebar/phase1-gxserver-runtime.test.ts` to add local Copy/Open id-only bridge payload coverage and unequal timestamp descending coverage; verifier found a tie-order test issue; cleanup worker fixed the equal-timestamp test to use Zebra before Alpha so alphabetical tie-breakers fail. Final verifier found no issues, and `bun run test gpui/sidebar/phase1-gxserver-runtime.test.ts` passed 13 tests.
+- 2026-06-25: GPUI Rust/gxserver auditor found two real remaining parity gaps: Project Settings metadata writes could target explicit parked recent rows through stale/direct ids, and `/api/readSidebarHud` command hydration/mutation scoping could borrow command metadata from parked recent rows when no active/owner project was normal.
+- 2026-06-25: Worker A updated only `gpui/src/main.rs`: Project Settings metadata resolution now skips only explicit boolean `isRecentProject: true` rows while false, missing, and non-boolean rows remain eligible, and recent-specific `/api/listRecentProjects` resolvers are unaffected. Verifier found no issues; `(cd gpui && cargo test gpui_project_settings_projects)` passed 2 tests, `(cd gpui && cargo test gpui_project_settings_metadata_resolver)` passed 1 test, and existing relevant Rust checks passed.
+- 2026-06-25: Worker B updated only `gxserver-rs/src/sidebar_hud.rs`: Sidebar HUD command selection/mutation scoping now skips explicit parked recent rows, uses the first normal project when no active id exists, falls back to default commands for active recent ids, skips parked worktree owners, preserves false/missing/non-boolean rows, and leaves agent normalization unchanged. Verifier found no issues, and `(cd gxserver-rs && cargo test sidebar_hud)` passed 8 tests.
+- 2026-06-25: Final focused checks passed in the main session: the 4-file UI/native Vitest suite (11 tests), `bun run test gpui/sidebar/phase1-gxserver-runtime.test.ts` (13 tests), `(cd gpui && cargo test gpui_project_settings_projects)`, `(cd gpui && cargo test gpui_project_settings_metadata_resolver)`, `(cd gpui && cargo test gpui_remote_recent_project_open_folder)`, `(cd gpui && cargo test gpui_gxserver_workspace_project_path)`, `(cd gxserver-rs && cargo test sidebar_hud)`, tracked-file `git diff --check`, and no-index whitespace checks for untracked `sidebar/recent-projects-ui-source.test.ts` and `sidebar port progress.md` with no diagnostics.
+- 2026-06-25: No `bun run start`, app restart, browser verification, manual UI verification, or real saved remote clipboard side effect was performed because the instruction forbids restarting unless asked.
+- 2026-06-25: Final independent read-only GPT-5.5 xhigh completion audit inspected current source across `native/sidebar`, `sidebar`, `shared`, `gpui/sidebar`, `gpui/src`, `gxserver-rs/src`, `docs`, and this progress log. It found no source-level Recent Projects parity gaps: explicit parked rows drive recents; normal lists exclude `isRecentProject === true`; shared drawer/search/context-menu commands are id-only; GPUI sorts by parsed `recentClosedAt` with stable equal-order behavior; gxserver owns close, restore, and remove; and Rust/native bridges resolve paths from trusted gxserver state rather than renderer paths. The only remaining missing evidence is live app/manual verification and the real saved-remote-machine clipboard side effect, because no `bun run start`, app restart, browser/manual UI verification, or real clipboard side-effect check was run per instruction. Focused checks were confirmed passing: GPUI runtime Vitest 13 tests; UI/native Recent Projects Vitest 4 files / 11 tests; GPUI Rust filters `gpui_project_settings_projects`, `gpui_project_settings_metadata_resolver`, `gpui_remote_recent_project_open_folder`, `gpui_gxserver_workspace_project_path`; gxserver `sidebar_hud` 8 tests; scoped diff-check; and no-index whitespace checks with no diagnostics.
+
+## Next Steps
+
+- Live app/manual UI verification remains open.
+- The real saved remote machine clipboard side effect remains unverified.
+- No remaining behavioral discrepancy is known from the source-level parity audit; the remaining risk is live/manual validation only.

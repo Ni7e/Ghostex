@@ -70,6 +70,12 @@ GPUI sidebar and app-modal clients consume normalized launcher/action HUD rows f
 
 CDXC:SidebarHudSettingsMutation 2026-06-24-20:54:
 Settings save/delete/order mutations for custom agents and actions are gxserver-owned. Accept only narrow semantic mutation payloads, resolve hidden built-in agents, deleted default actions, display order, icon allowlists, active-project command scoping, and worktree parent ownership here, then persist only normalized project metadata fields through the existing project store.
+
+CDXC:GPUIRecentProjects 2026-06-25-21:36:
+Sidebar HUD action commands must resolve from normal project rows only: explicit boolean isRecentProject true rows are parked Recent Projects metadata and cannot hydrate command buttons or own action mutations. False, missing, or non-boolean flags stay normal so older metadata remains eligible.
+
+CDXC:GPUIRecentProjects 2026-06-25-21:36:
+When an explicit active project ID resolves only to a parked recent row, the HUD must show default actions and action mutations must fail as no-normal-project behavior instead of borrowing parked commands. Worktree parent ownership also skips parked rows and falls back to the active normal project.
 */
 const DEFAULT_SIDEBAR_AGENTS: &[DefaultSidebarAgent] = &[
     DefaultSidebarAgent {
@@ -767,11 +773,9 @@ fn sidebar_agent_button_value(
 
 fn sidebar_command_buttons_from_projects(projects: &[Value], active_project_id: Option<&str>) -> Value {
     let active_project = if let Some(active_project_id) = active_project_id {
-        projects.iter().filter_map(Value::as_object).find(|project| {
-            trimmed_json_string_field(project, "projectId") == Some(active_project_id)
-        })
+        normal_project_by_id(projects, active_project_id)
     } else {
-        projects.first().and_then(Value::as_object)
+        first_normal_project(projects)
     };
     let Some(active_project) = active_project else {
         return sidebar_command_buttons_from_state(&[], &[], &[]);
@@ -784,11 +788,7 @@ fn sidebar_command_buttons_from_projects(projects: &[Value], active_project_id: 
         .and_then(Value::as_object)
         .and_then(|worktree| trimmed_json_string_field(worktree, "parentProjectId"))
         .unwrap_or(project_id);
-    let source_project = projects
-        .iter()
-        .filter_map(Value::as_object)
-        .find(|project| trimmed_json_string_field(project, "projectId") == Some(owner_project_id))
-        .unwrap_or(active_project);
+    let source_project = normal_project_by_id(projects, owner_project_id).unwrap_or(active_project);
     let stored_commands = normalized_stored_sidebar_commands(source_project.get("customCommands"));
     let stored_order = normalized_string_order(source_project.get("customCommandOrder"));
     let deleted_default_command_ids =
@@ -854,11 +854,8 @@ fn sidebar_command_scope<'a>(
 ) -> Result<SidebarCommandScope<'a>, DomainStateError> {
     let requested_active_project_id = optional_trimmed_param(params, "activeProjectId");
     let active_project = match requested_active_project_id.as_deref() {
-        Some(active_project_id) => projects
-            .iter()
-            .filter_map(Value::as_object)
-            .find(|project| trimmed_json_string_field(project, "projectId") == Some(active_project_id)),
-        None => projects.first().and_then(Value::as_object),
+        Some(active_project_id) => normal_project_by_id(projects, active_project_id),
+        None => first_normal_project(projects),
     }
     .ok_or_else(|| {
         DomainStateError::bad_request("No active project is available for sidebar action mutation.")
@@ -872,11 +869,7 @@ fn sidebar_command_scope<'a>(
         .and_then(Value::as_object)
         .and_then(|worktree| trimmed_json_string_field(worktree, "parentProjectId"))
         .unwrap_or(active_project_id);
-    let owner_project = projects
-        .iter()
-        .filter_map(Value::as_object)
-        .find(|project| trimmed_json_string_field(project, "projectId") == Some(owner_project_id))
-        .unwrap_or(active_project);
+    let owner_project = normal_project_by_id(projects, owner_project_id).unwrap_or(active_project);
     let owner_project_id =
         trimmed_json_string_field(owner_project, "projectId").ok_or_else(|| {
             DomainStateError::corrupt_state("Sidebar action owner project is missing a project ID.")
@@ -1277,6 +1270,33 @@ fn json_array_field_is_nonempty(object: &Map<String, Value>, key: &str) -> bool 
         .unwrap_or(false)
 }
 
+fn first_normal_project(projects: &[Value]) -> Option<&Map<String, Value>> {
+    projects
+        .iter()
+        .filter_map(Value::as_object)
+        .find(|project| !is_explicit_recent_project(project))
+}
+
+fn normal_project_by_id<'a>(
+    projects: &'a [Value],
+    project_id: &str,
+) -> Option<&'a Map<String, Value>> {
+    projects
+        .iter()
+        .filter_map(Value::as_object)
+        .find(|project| {
+            !is_explicit_recent_project(project)
+                && trimmed_json_string_field(project, "projectId") == Some(project_id)
+        })
+}
+
+fn is_explicit_recent_project(project: &Map<String, Value>) -> bool {
+    project
+        .get("isRecentProject")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
 fn trimmed_json_string_field<'a>(object: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
     trimmed_nonempty_str(object.get(key).and_then(Value::as_str))
 }
@@ -1462,9 +1482,18 @@ fn base36(mut value: u128) -> String {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{json, Value};
 
-    use super::read_sidebar_hud;
+    use super::{create_sidebar_hud_settings_mutation, read_sidebar_hud};
+
+    fn command_ids(hud: &Value) -> Vec<&str> {
+        hud.get("commands")
+            .and_then(|value| value.as_array())
+            .unwrap()
+            .iter()
+            .filter_map(|command| command.get("commandId").and_then(|value| value.as_str()))
+            .collect::<Vec<_>>()
+    }
 
     #[test]
     fn hides_hidden_default_agents_until_stored() {
@@ -1592,5 +1621,218 @@ mod tests {
             .filter_map(|command| command.get("commandId").and_then(|value| value.as_str()))
             .collect::<Vec<_>>();
         assert_eq!(command_ids, vec!["dev", "build", "test", "setup"]);
+    }
+
+    #[test]
+    fn skips_explicit_recent_project_for_no_active_command_source() {
+        let projects = vec![
+            json!({
+                "customCommands": [
+                    {
+                        "actionType": "terminal",
+                        "command": "cargo check",
+                        "commandId": "parked-check",
+                        "name": "Parked Check"
+                    }
+                ],
+                "customCommandOrder": ["parked-check"],
+                "isRecentProject": true,
+                "projectId": "Precent"
+            }),
+            json!({
+                "customCommands": [
+                    {
+                        "actionType": "terminal",
+                        "command": "cargo test",
+                        "commandId": "normal-test",
+                        "name": "Normal Test"
+                    }
+                ],
+                "customCommandOrder": ["normal-test"],
+                "projectId": "Pnormal"
+            }),
+        ];
+
+        let hud = read_sidebar_hud(&projects, None);
+        let command_ids = command_ids(&hud);
+        assert_eq!(command_ids.first().copied(), Some("normal-test"));
+        assert!(!command_ids.contains(&"parked-check"));
+    }
+
+    #[test]
+    fn explicit_active_recent_project_does_not_expose_custom_commands() {
+        let projects = vec![
+            json!({
+                "customCommands": [
+                    {
+                        "actionType": "terminal",
+                        "command": "cargo check",
+                        "commandId": "parked-check",
+                        "name": "Parked Check"
+                    }
+                ],
+                "customCommandOrder": ["parked-check"],
+                "isRecentProject": true,
+                "projectId": "Precent"
+            }),
+            json!({
+                "customCommands": [
+                    {
+                        "actionType": "terminal",
+                        "command": "cargo test",
+                        "commandId": "normal-test",
+                        "name": "Normal Test"
+                    }
+                ],
+                "customCommandOrder": ["normal-test"],
+                "projectId": "Pnormal"
+            }),
+        ];
+
+        let hud = read_sidebar_hud(&projects, Some("Precent"));
+        assert_eq!(command_ids(&hud), vec!["dev", "build", "test", "setup"]);
+    }
+
+    #[test]
+    fn non_true_recent_flags_remain_normal_command_sources() {
+        let projects = vec![
+            json!({
+                "customCommands": [
+                    {
+                        "actionType": "terminal",
+                        "command": "cargo check",
+                        "commandId": "false-flag-check",
+                        "name": "False Flag Check"
+                    }
+                ],
+                "customCommandOrder": ["false-flag-check"],
+                "isRecentProject": false,
+                "projectId": "Pfalse"
+            }),
+            json!({
+                "customCommands": [
+                    {
+                        "actionType": "terminal",
+                        "command": "cargo test",
+                        "commandId": "missing-flag-test",
+                        "name": "Missing Flag Test"
+                    }
+                ],
+                "customCommandOrder": ["missing-flag-test"],
+                "projectId": "Pmissing"
+            }),
+            json!({
+                "customCommands": [
+                    {
+                        "actionType": "terminal",
+                        "command": "cargo build",
+                        "commandId": "non-boolean-flag-build",
+                        "name": "Non Boolean Flag Build"
+                    }
+                ],
+                "customCommandOrder": ["non-boolean-flag-build"],
+                "isRecentProject": "true",
+                "projectId": "PnonBoolean"
+            }),
+        ];
+
+        let hud = read_sidebar_hud(&projects, None);
+        assert_eq!(command_ids(&hud).first().copied(), Some("false-flag-check"));
+
+        let hud = read_sidebar_hud(&projects, Some("Pmissing"));
+        assert_eq!(command_ids(&hud).first().copied(), Some("missing-flag-test"));
+
+        let hud = read_sidebar_hud(&projects, Some("PnonBoolean"));
+        assert_eq!(
+            command_ids(&hud).first().copied(),
+            Some("non-boolean-flag-build")
+        );
+    }
+
+    #[test]
+    fn worktree_owner_resolution_skips_explicit_recent_project_rows() {
+        let projects = vec![
+            json!({
+                "customCommands": [
+                    {
+                        "actionType": "terminal",
+                        "command": "cargo check",
+                        "commandId": "parked-parent-check",
+                        "name": "Parked Parent Check"
+                    }
+                ],
+                "customCommandOrder": ["parked-parent-check"],
+                "isRecentProject": true,
+                "projectId": "Pparent"
+            }),
+            json!({
+                "customCommands": [
+                    {
+                        "actionType": "terminal",
+                        "command": "cargo test",
+                        "commandId": "worktree-test",
+                        "name": "Worktree Test"
+                    }
+                ],
+                "customCommandOrder": ["worktree-test"],
+                "projectId": "Pworktree",
+                "worktree": { "parentProjectId": "Pparent" }
+            }),
+        ];
+
+        let hud = read_sidebar_hud(&projects, Some("Pworktree"));
+        let command_ids = command_ids(&hud);
+        assert_eq!(command_ids.first().copied(), Some("worktree-test"));
+        assert!(!command_ids.contains(&"parked-parent-check"));
+    }
+
+    #[test]
+    fn command_mutation_scope_skips_explicit_recent_project_rows() {
+        let projects = vec![
+            json!({
+                "customCommands": [
+                    {
+                        "actionType": "terminal",
+                        "command": "cargo check",
+                        "commandId": "parked-parent-check",
+                        "name": "Parked Parent Check"
+                    }
+                ],
+                "isRecentProject": true,
+                "projectId": "Pparent"
+            }),
+            json!({
+                "projectId": "Pworktree",
+                "worktree": { "parentProjectId": "Pparent" }
+            }),
+        ];
+        let params = json!({
+            "activeProjectId": "Pworktree",
+            "actionType": "terminal",
+            "command": "cargo test",
+            "name": "Workspace Verify",
+            "operation": "save",
+            "target": "command"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        let mutation = create_sidebar_hud_settings_mutation(&projects, &params).unwrap();
+        assert_eq!(mutation.updates.len(), 1);
+        assert_eq!(mutation.updates[0].project_id, "Pworktree");
+
+        let params = json!({
+            "activeProjectId": "Pparent",
+            "actionType": "terminal",
+            "command": "cargo test",
+            "name": "Workspace Verify",
+            "operation": "save",
+            "target": "command"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        assert!(create_sidebar_hud_settings_mutation(&projects, &params).is_err());
     }
 }

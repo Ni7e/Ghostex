@@ -122,6 +122,37 @@ describe("native layout sync key", () => {
     ).not.toBe(baseKey);
   });
 
+  test("tracks terminal pane padding as layout geometry", () => {
+    /*
+    CDXC:TerminalPanePadding 2026-06-25-21:27:
+    Padding changes the AppKit Ghostty content frame inside every terminal pane,
+    so the full layout sync key must change even though pane membership and
+    tab-owner selection remain unchanged.
+    */
+    const layout: NativeTerminalLayout = {
+      activeSessionId: "P3lv0:G5jjo",
+      kind: "tabs",
+      sessionIds: ["P3lv0:G5jjo"],
+    };
+    const baseKey = createNativeLayoutSyncKey({
+      activeSessionIds: ["P3lv0:G5jjo"],
+      layout,
+      paneGap: 0,
+      terminalPaneHorizontalPaddingPx: 0,
+      terminalPaneVerticalPaddingPx: 0,
+    });
+
+    expect(
+      createNativeLayoutSyncKey({
+        activeSessionIds: ["P3lv0:G5jjo"],
+        layout,
+        paneGap: 0,
+        terminalPaneHorizontalPaddingPx: 14,
+        terminalPaneVerticalPaddingPx: 6,
+      }),
+    ).not.toBe(baseKey);
+  });
+
   test("normalizes nested command-panel tab focus without changing tab membership", () => {
     const layout: NativeTerminalLayout = {
       children: [

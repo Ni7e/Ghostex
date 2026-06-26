@@ -30,9 +30,13 @@ pub enum SidebarBridgeEvent {
     ProjectWorkareaReadiness(String),
     ManageFileWorkareaOperationRequest(String),
     NativeProjectPathAction(String),
+    NativeAppShotPrompt(String),
     SidebarCommandAction(String),
     SidebarCommandRunEnd(String),
     GxserverPresentationFocusState(String),
+    SessionFocusDebugLog(String),
+    SessionStatusIndicators(String),
+    PetOverlayState(String),
 }
 
 pub type SidebarBridgeEventHandler = Rc<dyn Fn(SidebarBridgeEvent)>;

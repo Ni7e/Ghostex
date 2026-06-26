@@ -1893,10 +1893,13 @@ export type SidebarToExtensionMessage =
       groupIds: string[];
     }
   | {
+      /*
+      CDXC:GPUICommandPane 2026-06-26-05:11:
+      `runSidebarCommand` is a narrow Action selector: renderer messages may provide only the saved command id and optional run mode. Native and GPUI hosts must resolve command text, URLs, saved close-on-exit metadata, cwd/env, paths, output, and launch behavior from trusted command/HUD state.
+      */
       type: "runSidebarCommand";
       commandId: string;
       runMode?: SidebarCommandRunMode;
-      worktreePath?: string;
     }
   | {
       type: "endSidebarCommandRun";

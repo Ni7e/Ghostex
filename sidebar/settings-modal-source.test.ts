@@ -68,6 +68,18 @@ describe("settings modal source", () => {
      * CDXC:SettingsNavigation 2026-06-25-17:12:
      * Only top-level Settings categories should get Tabler icons; nested
      * expandable section rows remain text-only.
+     *
+     * CDXC:SettingsNavigation 2026-06-25-17:58:
+     * Expanded subsection titles should indent 14px farther than the base
+     * sidebar button text while keeping the full-row highlight intact.
+     *
+     * CDXC:SettingsNavigation 2026-06-25-18:05:
+     * Active subsection rows should not have a filled background; use dim
+     * inactive text and brighter active text to show section selection.
+     *
+     * CDXC:SettingsNavigation 2026-06-25-22:10:
+     * The macOS Settings sidebar container should sit 1px higher than the
+     * default grid alignment so it lines up with the native window chrome.
      */
     const settingsSidebar = sourceBetween(
       settingsModalSource,
@@ -103,6 +115,12 @@ describe("settings modal source", () => {
     expect(subsectionButton).toContain("{section.title}");
     expect(subsectionButton).not.toContain("data-icon");
 
+    const sidebarContainerStyles = sourceBetween(
+      sidebarStylesSource,
+      ".ghostex-settings-shadcn .settings-section-sidebar {",
+      ".ghostex-settings-shadcn .settings-sidebar-tabs-list[data-slot=\"tabs-list\"] {",
+    );
+    expect(sidebarContainerStyles).toContain("top: -1px;");
     const sidebarPageRowStyles = sourceBetween(
       sidebarStylesSource,
       ".ghostex-settings-shadcn .settings-sidebar-page-row {",
@@ -120,6 +138,21 @@ describe("settings modal source", () => {
     );
     expect(sidebarTriggerStyles).toContain("gap: 0.5rem;");
     expect(sidebarTriggerStyles).toContain(".settings-sidebar-page-title");
+    const sidebarSubsectionStyles = sourceBetween(
+      sidebarStylesSource,
+      ".ghostex-settings-shadcn .settings-sidebar-subsection-button {",
+      ".ghostex-settings-shadcn .settings-section-anchor {",
+    );
+    expect(sidebarSubsectionStyles).toContain(
+      "color: color-mix(in srgb, var(--muted-foreground) 72%, var(--background));",
+    );
+    expect(sidebarSubsectionStyles).toContain("padding-left: calc(0.625rem + 14px) !important;");
+    expect(sidebarSubsectionStyles).toContain(
+      ".settings-sidebar-subsection-button[data-active=\"true\"]",
+    );
+    expect(sidebarSubsectionStyles).toContain("background: transparent !important;");
+    expect(sidebarSubsectionStyles).toContain("color: var(--foreground);");
+    expect(sidebarSubsectionStyles).not.toContain("background: var(--accent);");
   });
 
   test("uses the native window title instead of duplicate Settings chrome", () => {
@@ -165,11 +198,31 @@ describe("settings modal source", () => {
      * Font Family and other Settings text fields must keep printable typing in
      * the focused input while immediate-save settings updates round-trip
      * through the native modal host.
+     *
+     * CDXC:SettingsSearch 2026-06-25-21:21:
+     * Settings search may prefill from deep links and printable-key capture,
+     * but automatic focus must not move from an already-focused Settings text
+     * field, including portal-rendered popover inputs, into the search field.
      */
     const keyCapture = sourceBetween(
       settingsModalSource,
       "const handleSettingsModalKeyDownCapture",
       "const setActiveTab",
+    );
+    const searchFocusPolicy = sourceBetween(
+      settingsModalSource,
+      "const shouldFocusSettingsSearchInput",
+      "const focusSearchInput",
+    );
+    const deepLinkSearchPrefill = sourceBetween(
+      settingsModalSource,
+      "setSettingsSearchQuery(nextQuery);",
+      "}, [focusSearchInput, initialSearchQuery, initialTab, isFirstLaunchSetup, isOpen]);",
+    );
+    const headerSearch = sourceBetween(
+      settingsModalSource,
+      '<div className="settings-modal-search-row">',
+      'toolbarClassName="settings-modal-search-toolbar"',
     );
     const textField = sourceBetween(
       settingsModalSource,
@@ -180,6 +233,10 @@ describe("settings modal source", () => {
     expect(keyCapture).toContain(
       "isEditableSettingsModalElement(event.currentTarget.ownerDocument.activeElement)",
     );
+    expect(searchFocusPolicy).toContain("isEditableSettingsModalElement(activeElement)");
+    expect(searchFocusPolicy).not.toContain("dialogContentRef.current?.contains(activeElement)");
+    expect(deepLinkSearchPrefill).toContain("if (focusSearchInput())");
+    expect(headerSearch).toContain("shouldFocusOnQueryChange={shouldFocusSettingsSearchInput}");
     expect(textField).toContain("const inputRef = useRef<HTMLInputElement>(null);");
     expect(textField).toContain("const [inputValue, setInputValue] = useState(value);");
     expect(textField).toContain("value={inputValue}");
@@ -347,6 +404,40 @@ describe("settings modal source", () => {
     expect(devServersSection).toContain("TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS");
     expect(devServersSection).not.toContain("TerminalDevServerBrowserTargetsField");
     expect(devServersSection).toContain("TerminalDevServerIgnoredPortsField");
+  });
+
+  test("keeps terminal pane padding sliders in Terminal settings", () => {
+    /*
+     * CDXC:TerminalPanePadding 2026-06-25-21:27:
+     * Inner terminal pane padding is a Terminal settings control with separate
+     * horizontal and vertical sliders. It should not be modeled as Workspace
+     * pane gap or Terminal Behavior because it changes AppKit terminal content
+     * frames, not split spacing or Ghostty config behavior.
+     */
+    const terminalSectionKeys = sourceBetween(
+      settingsModalSource,
+      "terminal: [",
+      "terminalBehavior: [",
+    );
+    const terminalSearch = sourceBetween(
+      settingsModalSource,
+      'terminal: getSettingsSectionSearch(settingsSearchQuery, "Terminal", [',
+      'terminalBehavior: getSettingsSectionSearch(settingsSearchQuery, "Terminal Behavior", [',
+    );
+    const terminalSection = sourceBetween(
+      settingsModalSource,
+      'title="Terminal"',
+      '{mainSectionVisible("terminalBehavior", settingsSearch.terminalBehavior) ? (',
+    );
+
+    expect(terminalSectionKeys).toContain("terminalPaneHorizontalPaddingPx");
+    expect(terminalSectionKeys).toContain("terminalPaneVerticalPaddingPx");
+    expect(terminalSearch).toContain("Horizontal Padding");
+    expect(terminalSearch).toContain("Vertical Padding");
+    expect(terminalSection).toContain("MAX_TERMINAL_PANE_PADDING_PX");
+    expect(terminalSection).toContain("MIN_TERMINAL_PANE_PADDING_PX");
+    expect(terminalSection).toContain('updateDraft("terminalPaneHorizontalPaddingPx"');
+    expect(terminalSection).toContain('updateDraft("terminalPaneVerticalPaddingPx"');
   });
 
   test("closes the custom tint picker dialog before final setting commits", () => {
