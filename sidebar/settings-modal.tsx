@@ -2452,7 +2452,19 @@ export function SettingsModal({
     applySettings(applySidebarSettingsPreset(pendingSettingsRef.current ?? draft, presetId));
   };
 
-  const resetSettings = () => applySettings(DEFAULT_ghostex_SETTINGS);
+  const resetSettings = () => {
+    /*
+     * CDXC:AppIconPicker 2026-06-26-23:42:
+     * Reset to defaults must update the runtime Dock/app-switcher icon as well
+     * as persisted settings. Post the default source id to native before writing
+     * defaults so the current app session does not keep showing a stale custom
+     * icon until restart.
+     */
+    pendingAppIconSourceIdRef.current = "";
+    setAppIconError(undefined);
+    vscode?.postMessage({ type: "setAppIcon", sourceId: "" });
+    applySettings(DEFAULT_ghostex_SETTINGS);
+  };
   const resetSetting = <Key extends keyof ghostexSettings>(key: Key) => {
     applySettings({
       ...(pendingSettingsRef.current ?? draft),
@@ -9202,10 +9214,14 @@ function AppIconPickerField({
   onSelect: (sourceId: string) => void;
   state: SidebarAppIconStateMessage | undefined;
 }) {
-  const icons: SidebarAppIconInfo[] = state?.icons ?? [];
+  const allIcons: SidebarAppIconInfo[] = state?.icons ?? [];
+  const defaultIcon = allIcons.find((icon) => icon.id === "");
+  const icons = allIcons.filter((icon) => icon.id !== "");
   const selectedId = state?.selectedId ?? "";
   const isDefaultSelected = selectedId === "";
-  const selectedIcon = icons.find((icon) => icon.id === selectedId);
+  const selectedIcon = isDefaultSelected
+    ? defaultIcon
+    : icons.find((icon) => icon.id === selectedId);
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -9243,6 +9259,7 @@ function AppIconPickerField({
           label="Default"
           onSelect={() => onSelect("")}
           selected={isDefaultSelected}
+          thumbnailDataUrl={defaultIcon?.thumbnailDataUrl || undefined}
         />
         {icons.map((icon) => (
           <AppIconPickerTile

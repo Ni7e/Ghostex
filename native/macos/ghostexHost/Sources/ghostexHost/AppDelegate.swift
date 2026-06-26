@@ -4919,6 +4919,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
    Read the persisted appIconSourceId (default "") from the shared native
    sidebar settings file. Used at launch so the Dock icon is correct before the
    window appears. Privacy: returns only the id; never logs paths or bytes.
+
+   CDXC:AppIconPicker 2026-06-26-23:42:
+   Treat persisted ids as untrusted settings data. Only a filename-only source id
+   may reach the launch-time apply path; invalid persisted values restore the
+   default bundle icon instead of being joined to the icons directory.
    */
   static func readPersistedAppIconSourceId() -> String {
     guard let data = try? Data(contentsOf: GhostexAppStorage.sharedSidebarSettingsURL),
@@ -4928,7 +4933,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     else {
       return ""
     }
-    return sourceId.trimmingCharacters(in: .whitespacesAndNewlines)
+    return AppIconImage.normalizedSourceId(sourceId) ?? ""
   }
 
   /**
@@ -4949,9 +4954,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       }
       return
     }
+    guard let normalizedSourceId = AppIconImage.normalizedSourceId(trimmed) else {
+      // CDXC:AppIconPicker 2026-06-26-23:42: Invalid source ids fall back before URL construction so persisted or bridged paths cannot escape ~/.ghostex/icons.
+      NSApp.applicationIconImage = nil
+      if NativeDebugLogging.isEnabled {
+        logger.info("AppIcon fell back to default; invalid source id hasSource=true ok=false")
+      }
+      return
+    }
     GhostexAppStorage.ensureAppIconDirectories()
     guard let image = AppIconImage.maskedDockImage(
-      sourceId: trimmed,
+      sourceId: normalizedSourceId,
       iconsDirectory: GhostexAppStorage.iconsDirectory,
       cacheDirectory: GhostexAppStorage.maskedIconCacheDirectory
     ) else {
@@ -13012,15 +13025,20 @@ final class ghostexRootView: NSView {
       emitAppIconState(ok: true, error: nil)
       return
     }
+    guard let normalizedSourceId = AppIconImage.normalizedSourceId(trimmed) else {
+      // CDXC:AppIconPicker 2026-06-26-23:42: Reject path-like bridge ids before building a file URL or applying the Dock icon.
+      emitAppIconState(ok: false, error: "iconUnavailable")
+      return
+    }
     GhostexAppStorage.ensureAppIconDirectories()
-    let url = GhostexAppStorage.iconsDirectory.appendingPathComponent(trimmed, isDirectory: false)
+    let url = GhostexAppStorage.iconsDirectory.appendingPathComponent(normalizedSourceId, isDirectory: false)
     guard AppIconImage.isValidSourcePNG(at: url) else {
       // CDXC:AppIconPicker 2026-06-25-21:50: An invalid/missing id is ignored and reported; selection stays on whatever was already applied so the Dock icon never breaks.
       emitAppIconState(ok: false, error: "iconUnavailable")
       return
     }
-    pendingAppIconSelectedId = trimmed
-    AppDelegate.applyAppIcon(sourceId: trimmed)
+    pendingAppIconSelectedId = normalizedSourceId
+    AppDelegate.applyAppIcon(sourceId: normalizedSourceId)
     emitAppIconState(ok: true, error: nil)
   }
 

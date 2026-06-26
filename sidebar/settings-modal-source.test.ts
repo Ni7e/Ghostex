@@ -498,9 +498,13 @@ describe("settings modal source", () => {
     expect(settingsModalSource).toContain("if (appIconState.ok) {");
     expect(settingsModalSource).toContain("commitAppIconSourceIdRef.current(confirmedSourceId);");
     expect(settingsModalSource).toContain('updateDraft("appIconSourceId", sourceId);');
+    expect(settingsModalSource).toContain('vscode?.postMessage({ type: "setAppIcon", sourceId: "" });');
 
-    // Reset selects the empty/default source id and the disclaimer is visible.
+    // Reset selects the empty/default source id, the native default descriptor is
+    // filtered out of the custom grid, and the disclaimer is visible.
     expect(settingsModalSource).toContain('const resetAppIcon = () => {');
+    expect(appIconField).toContain('const defaultIcon = allIcons.find((icon) => icon.id === "");');
+    expect(appIconField).toContain('const icons = allIcons.filter((icon) => icon.id !== "");');
     expect(appIconField).toContain("Choose File");
     expect(appIconField).toContain("Reveal in Finder");
     expect(appIconField).toContain("Reset to default");

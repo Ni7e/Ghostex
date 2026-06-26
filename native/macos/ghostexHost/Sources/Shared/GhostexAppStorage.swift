@@ -151,8 +151,14 @@ enum GhostexAppStorage {
     to fileNames: [String],
     selectedId: String
   ) -> [String] {
-    let trimmed = selectedId.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty, !fileNames.contains(trimmed) else {
+    /**
+     CDXC:AppIconPicker 2026-06-26-23:42:
+     The persisted selected id must pass the same filename-only validation as
+     runtime set/apply paths before joining it to ~/.ghostex/icons. Invalid
+     persisted values are treated as absent instead of scanning outside the
+     managed folder.
+     */
+    guard let trimmed = AppIconImage.normalizedSourceId(selectedId), !fileNames.contains(trimmed) else {
       return fileNames
     }
     let url = iconsDirectory.appendingPathComponent(trimmed, isDirectory: false)

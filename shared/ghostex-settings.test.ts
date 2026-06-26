@@ -307,6 +307,15 @@ describe("normalizeghostexSettings", () => {
     expect(normalizeghostexSettings({ appIconSourceId: "  panda.icns  " })).toMatchObject({
       appIconSourceId: "panda.icns",
     });
+    expect(normalizeghostexSettings({ appIconSourceId: "../panda.png" })).toMatchObject({
+      appIconSourceId: "",
+    });
+    expect(normalizeghostexSettings({ appIconSourceId: "icons\\panda.png" })).toMatchObject({
+      appIconSourceId: "",
+    });
+    expect(normalizeghostexSettings({ appIconSourceId: "a".repeat(256) })).toMatchObject({
+      appIconSourceId: "",
+    });
     expect(
       normalizeghostexSettings({ appIconSourceId: 42 as unknown as string }),
     ).toMatchObject({

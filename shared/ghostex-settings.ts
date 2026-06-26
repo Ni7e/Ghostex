@@ -2287,9 +2287,27 @@ function normalizeCustomDefaultEditorCommand(value: string | undefined): string 
   return (value ?? "").trim().slice(0, 240);
 }
 
-// CDXC:AppIconPicker 2026-06-25-21:50: Empty string means default icon; otherwise a bounded filename id.
+/*
+ * CDXC:AppIconPicker 2026-06-26-23:42:
+ * Empty string means default icon; otherwise the persisted id must remain a
+ * filename-only value that round-trips exactly after native confirms it. Reject
+ * invalid/path-like ids instead of slicing or otherwise rewriting them.
+ */
 function normalizeAppIconSourceId(value: string | undefined): string {
-  return (value ?? "").trim().slice(0, 240);
+  const normalized = (value ?? "").trim();
+  if (normalized.length === 0) {
+    return "";
+  }
+  if (normalized.length > 255) {
+    return "";
+  }
+  if (normalized === "." || normalized === "..") {
+    return "";
+  }
+  if (normalized.includes("/") || normalized.includes("\\") || normalized.includes("\0")) {
+    return "";
+  }
+  return normalized;
 }
 
 function normalizeDefaultPromptAgentId(value: string | undefined): string {

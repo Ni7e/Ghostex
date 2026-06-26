@@ -23,6 +23,27 @@ enum AppIconImage {
   static let superellipseExponent: CGFloat = 5.0
 
   /**
+   CDXC:AppIconPicker 2026-06-26-23:42:
+   App icon source ids are persisted and bridged as filenames only, never paths.
+   Validate at the image utility boundary before any URL is constructed so
+   launch restore, picker selection, folder scans, and cache generation cannot
+   traverse outside the managed icons directory.
+   */
+  static func normalizedSourceId(_ sourceId: String) -> String? {
+    let trimmed = sourceId.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed.count <= 255 else {
+      return nil
+    }
+    guard trimmed != ".", trimmed != ".." else {
+      return nil
+    }
+    guard !trimmed.contains("/"), !trimmed.contains("\\"), !trimmed.contains("\u{0}") else {
+      return nil
+    }
+    return trimmed
+  }
+
+  /**
    CDXC:AppIconPicker 2026-06-25-21:50:
    Validate a candidate PNG without decoding the full bitmap: enforce the file
    byte budget, confirm a real PNG via magic bytes plus UTType, and read the
@@ -96,13 +117,16 @@ enum AppIconImage {
     iconsDirectory: URL,
     cacheDirectory: URL
   ) -> CGImage? {
-    let sourceURL = iconsDirectory.appendingPathComponent(sourceId, isDirectory: false)
+    guard let normalizedSourceId = Self.normalizedSourceId(sourceId) else {
+      return nil
+    }
+    let sourceURL = iconsDirectory.appendingPathComponent(normalizedSourceId, isDirectory: false)
     guard isValidSourcePNG(at: sourceURL) else {
       return nil
     }
-    let mtime = contentModificationEpoch(of: sourceURL)
+    let sourceIdentity = contentModificationIdentity(of: sourceURL)
     let cacheURL = cacheDirectory.appendingPathComponent(
-      cacheFileName(sourceId: sourceId, mtimeEpoch: mtime), isDirectory: false)
+      cacheFileName(sourceId: normalizedSourceId, sourceIdentity: sourceIdentity), isDirectory: false)
 
     if isPNGMagicBytes(at: cacheURL),
       let cachedImage = cgImage(fromPNGFile: cacheURL)
@@ -160,10 +184,13 @@ enum AppIconImage {
     return "data:image/png;base64,\(data.base64EncodedString())"
   }
 
-  // CDXC:AppIconPicker 2026-06-25-21:50: Content-modification epoch (seconds) used to key the masked cache; 0 when unavailable so the cache simply regenerates.
-  static func contentModificationEpoch(of url: URL) -> Int {
+  // CDXC:AppIconPicker 2026-06-26-23:42: Cache identity uses sub-second mtime plus file size so quick same-name replacements do not reuse a stale masked icon.
+  static func contentModificationIdentity(of url: URL) -> String {
     let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
-    return Int((values?.contentModificationDate ?? Date(timeIntervalSince1970: 0)).timeIntervalSince1970)
+    let modifiedAt = values?.contentModificationDate ?? Date(timeIntervalSince1970: 0)
+    let modifiedNanoseconds = Int64((modifiedAt.timeIntervalSince1970 * 1_000_000_000).rounded())
+    let fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+    return "\(modifiedNanoseconds)-\(fileSize)"
   }
 
   // MARK: - Internal pipeline
@@ -314,14 +341,14 @@ enum AppIconImage {
     return CGImageSourceCreateImageAtIndex(source, 0, nil)
   }
 
-  // CDXC:AppIconPicker 2026-06-25-21:50: Cache file name binds source filename + mtime so an edited source is a clean cache miss. Source filename is sanitized to filesystem-safe characters.
-  private static func cacheFileName(sourceId: String, mtimeEpoch: Int) -> String {
+  // CDXC:AppIconPicker 2026-06-26-23:42: Cache file name binds source filename + sub-second source identity so edited sources are clean cache misses. Source filename is sanitized to filesystem-safe characters.
+  private static func cacheFileName(sourceId: String, sourceIdentity: String) -> String {
     let safe = sourceId.unicodeScalars.map { scalar -> Character in
       let isSafe =
         (scalar >= "A" && scalar <= "Z") || (scalar >= "a" && scalar <= "z")
         || (scalar >= "0" && scalar <= "9") || scalar == "-" || scalar == "_" || scalar == "."
       return isSafe ? Character(scalar) : "_"
     }
-    return "\(String(safe))-\(mtimeEpoch).masked.png"
+    return "\(String(safe))-\(sourceIdentity).masked.png"
   }
 }
