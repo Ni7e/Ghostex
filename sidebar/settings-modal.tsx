@@ -106,6 +106,8 @@ import {
   IconKeyboard,
   IconMinus,
   IconPalette,
+  // CDXC:AppIconPicker 2026-06-25-21:50: Placeholder glyph for the default-icon tile and missing thumbnails.
+  IconPhoto,
   IconPencil,
   IconPlayerPlay,
   IconPlus,
@@ -120,6 +122,9 @@ import { COMPLETION_SOUND_OPTIONS, type CompletionSoundSetting } from "../shared
 import { GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES } from "../shared/ghostty-config-actions";
 import {
   resolveSidebarTheme,
+  // CDXC:AppIconPicker 2026-06-25-21:50: App Icon picker consumes native state + per-icon info shapes.
+  type SidebarAppIconInfo,
+  type SidebarAppIconStateMessage,
   type SidebarAgentHookStatusMessage,
   type SidebarAgentHookStatusItem,
   type SidebarGhostexCliStatusMessage,
@@ -504,6 +509,8 @@ type MainSettingsSectionId =
   | "agents"
   | "sidebar"
   | "theming"
+  // CDXC:AppIconPicker 2026-06-25-21:50: App Icon is an appearance section that sits next to Theming.
+  | "appIcon"
   | "sidebarTags"
   | "statusIndicators"
   | "sessionCards"
@@ -549,6 +556,8 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "customSidebarTitlebarBackgroundDarknessPercent",
     "customSidebarTitlebarBackgroundTintColor",
   ],
+  // CDXC:AppIconPicker 2026-06-25-21:50: App Icon owns the persisted Dock icon source id selection.
+  appIcon: ["appIconSourceId"],
   sidebarTags: ["sidebarSessionTagListItems"],
   /*
    * CDXC:BrowserSettings 2026-05-22-09:18:
@@ -950,6 +959,8 @@ export type SettingsModalProps = {
   ghostexFolderStatsLoading?: boolean;
   osIntegrationStatus?: SidebarOSIntegrationStatusMessage;
   osIntegrationStatusLoading?: boolean;
+  // CDXC:AppIconPicker 2026-06-25-21:50: Native App Icon state arrives prop-driven via the modal-state relay.
+  appIconState?: SidebarAppIconStateMessage;
   portless?: SidebarPortlessState;
 };
 
@@ -998,6 +1009,8 @@ export function SettingsModal({
   ghostexFolderStatsLoading = false,
   osIntegrationStatus,
   osIntegrationStatusLoading = false,
+  // CDXC:AppIconPicker 2026-06-25-21:50: Prop-driven App Icon state replaces direct host-event listeners.
+  appIconState,
   portless,
 }: SettingsModalProps) {
   const isFirstLaunchSetup = presentation === "firstLaunchSetup";
@@ -1046,6 +1059,8 @@ export function SettingsModal({
   const agentsOnboardingSectionRef = useRef<HTMLDivElement>(null);
   const sidebarSectionRef = useRef<HTMLDivElement>(null);
   const themingSectionRef = useRef<HTMLDivElement>(null);
+  // CDXC:AppIconPicker 2026-06-25-21:50: Anchor ref so the App Icon section participates in Settings nav scrolling.
+  const appIconSectionRef = useRef<HTMLDivElement>(null);
   const sidebarTagsSectionRef = useRef<HTMLDivElement>(null);
   const soundsSectionRef = useRef<HTMLDivElement>(null);
   const storageSectionRef = useRef<HTMLDivElement>(null);
@@ -1057,6 +1072,17 @@ export function SettingsModal({
   const hotkeyProjectsSectionRef = useRef<HTMLDivElement>(null);
   const hotkeySessionSlotsSectionRef = useRef<HTMLDivElement>(null);
   const hasRequestedStorageStatsRef = useRef(false);
+  /**
+   * CDXC:AppIconPicker 2026-06-25-21:50:
+   * The App Icon picker is prop-driven: native pushes appIconState through the
+   * modal-state relay (mirroring osIntegrationStatus), so this component only
+   * holds the local error string and the in-flight pending selection. The
+   * pending source id lets confirm-before-persist write the user's selection on
+   * the next ok state instead of native's reported selectedId.
+   */
+  const [appIconError, setAppIconError] = useState<string | undefined>(undefined);
+  const pendingAppIconSourceIdRef = useRef<string | undefined>(undefined);
+  const hasRequestedAppIconsRef = useRef(false);
   const modalTheme = resolveSidebarTheme(draft.sidebarTheme, getSidebarThemeVariant(theme));
   const isModalDarkTheme = getSidebarThemeVariant(modalTheme) === "dark";
   const rememberActiveScrollPosition = () => {
@@ -1302,6 +1328,15 @@ export function SettingsModal({
    * want to choose, not only by the visible setting label.
    */
   const settingsSearch = {
+    // CDXC:AppIconPicker 2026-06-25-21:50: Make the App Icon section findable by Settings search.
+    appIcon: getSettingsSectionSearch(settingsSearchQuery, "App Icon", [
+      {
+        key: "appIconSourceId",
+        subtitle:
+          "Choose the macOS Dock and app-switcher icon. Changes the Dock & app-switcher icon only, not the Finder icon.",
+        title: "App Icon",
+      },
+    ]),
     browser: getSettingsSectionSearch(settingsSearchQuery, "Browser", [
       {
         key: "browserFeedbackTool",
@@ -1947,6 +1982,8 @@ export function SettingsModal({
   }> = [
     { id: "sidebar", ref: sidebarSectionRef, searchResult: settingsSearch.sidebar, title: "Sidebar" },
     { id: "theming", ref: themingSectionRef, searchResult: settingsSearch.theming, title: "Theming" },
+    // CDXC:AppIconPicker 2026-06-25-21:50: App Icon nav entry sits below Theming in the Settings sidebar.
+    { id: "appIcon", ref: appIconSectionRef, searchResult: settingsSearch.appIcon, title: "App Icon" },
     {
       id: "statusIndicators",
       ref: statusIndicatorsSectionRef,
@@ -2187,6 +2224,8 @@ export function SettingsModal({
 	      terminalScrolling: ghosttyScrollingSectionRef,
 	      terminalDevServers: terminalDevServersSectionRef,
 	      theming: themingSectionRef,
+	      // CDXC:AppIconPicker 2026-06-25-21:50: Allow titlebar/deep-link navigation to scroll to App Icon.
+	      appIcon: appIconSectionRef,
 	      workspace: workspaceSectionRef,
 	      agents: agentsOnboardingSectionRef,
 	    });
@@ -2283,6 +2322,63 @@ export function SettingsModal({
     ghostexFolderStatsLoading,
   ]);
 
+  /**
+   * CDXC:AppIconPicker 2026-06-25-21:50:
+   * Keep a stable ref to the latest persist closure so the host-event listener
+   * below can subscribe once per open without re-binding every render. The ref
+   * always reflects the current draft, so confirm-before-persist writes the
+   * native-confirmed source id on top of the freshest settings.
+   */
+  const commitAppIconSourceIdRef = useRef<(sourceId: string) => void>(() => {});
+
+  /**
+   * CDXC:AppIconPicker 2026-06-25-21:50:
+   * Request the current icon list once whenever the App Icon settings surface
+   * opens, mirroring the lazy native-data requests used elsewhere in Settings.
+   * Native answers through the appIconState prop (relayed via the modal host).
+   */
+  useEffect(() => {
+    if (!isOpen || activeTab !== "settings" || !vscode) {
+      hasRequestedAppIconsRef.current = false;
+      return;
+    }
+    if (hasRequestedAppIconsRef.current) {
+      return;
+    }
+    hasRequestedAppIconsRef.current = true;
+    vscode.postMessage({ type: "listAppIcons" });
+  }, [activeTab, isOpen, vscode]);
+
+  /**
+   * CDXC:AppIconPicker 2026-06-25-21:50:
+   * Confirm-before-persist is prop-driven: native relays appIconState into this
+   * component through the modal-state plumbing (exactly like osIntegrationStatus),
+   * so react to each new prop value. On an ok state, persist the in-flight
+   * pending selection (falling back to native's selectedId) and clear any error;
+   * on a failed state, drop the pending id and surface the error without writing
+   * appIconSourceId.
+   */
+  useEffect(() => {
+    if (!appIconState) {
+      return;
+    }
+    if (appIconState.ok) {
+      setAppIconError(undefined);
+      const pendingSourceId = pendingAppIconSourceIdRef.current;
+      const confirmedSourceId =
+        pendingSourceId !== undefined ? pendingSourceId : appIconState.selectedId;
+      pendingAppIconSourceIdRef.current = undefined;
+      commitAppIconSourceIdRef.current(confirmedSourceId);
+      return;
+    }
+    pendingAppIconSourceIdRef.current = undefined;
+    setAppIconError(
+      typeof appIconState.error === "string" && appIconState.error.trim()
+        ? appIconState.error.trim()
+        : "Could not update the app icon.",
+    );
+  }, [appIconState]);
+
   useEffect(() => {
     return () => {
       if (pendingTimeoutRef.current) {
@@ -2356,6 +2452,46 @@ export function SettingsModal({
   ) => {
     applySettingsDebounced({ ...(pendingSettingsRef.current ?? draft), [key]: value });
   };
+  /**
+   * CDXC:AppIconPicker 2026-06-25-21:50:
+   * Refresh the confirm-before-persist closure each render so the host-event
+   * listener writes appIconSourceId onto the current draft only after native
+   * confirms the icon swap with an ok: true state.
+   */
+  commitAppIconSourceIdRef.current = (sourceId: string) => {
+    if ((pendingSettingsRef.current ?? draft).appIconSourceId === sourceId) {
+      return;
+    }
+    updateDraft("appIconSourceId", sourceId);
+  };
+  /**
+   * CDXC:AppIconPicker 2026-06-25-21:50:
+   * Selecting, choosing a file, revealing the folder, and resetting all post the
+   * exact wire-contract messages to native. The selection messages record the
+   * pending source id and clear any prior error; the sidebar persists nothing
+   * until the matching ok: true appIconState arrives.
+   */
+  const selectAppIcon = (sourceId: string) => {
+    if (!vscode) {
+      return;
+    }
+    pendingAppIconSourceIdRef.current = sourceId;
+    setAppIconError(undefined);
+    vscode.postMessage({ type: "setAppIcon", sourceId });
+  };
+  const chooseAppIconFile = () => {
+    if (!vscode) {
+      return;
+    }
+    setAppIconError(undefined);
+    vscode.postMessage({ type: "pickAppIconFile" });
+  };
+  const revealAppIconsFolder = () => {
+    vscode?.postMessage({ type: "revealAppIconsFolder" });
+  };
+  const resetAppIcon = () => {
+    selectAppIcon("");
+  };
   const activeSidebarSettingsPresetId = getSidebarSettingsPresetId(
     pendingSettingsRef.current ?? draft,
   );
@@ -2363,7 +2499,19 @@ export function SettingsModal({
     applySettings(applySidebarSettingsPreset(pendingSettingsRef.current ?? draft, presetId));
   };
 
-  const resetSettings = () => applySettings(DEFAULT_ghostex_SETTINGS);
+  const resetSettings = () => {
+    /*
+     * CDXC:AppIconPicker 2026-06-26-23:42:
+     * Reset to defaults must update the runtime Dock/app-switcher icon as well
+     * as persisted settings. Post the default source id to native before writing
+     * defaults so the current app session does not keep showing a stale custom
+     * icon until restart.
+     */
+    pendingAppIconSourceIdRef.current = "";
+    setAppIconError(undefined);
+    vscode?.postMessage({ type: "setAppIcon", sourceId: "" });
+    applySettings(DEFAULT_ghostex_SETTINGS);
+  };
   const resetSetting = <Key extends keyof ghostexSettings>(key: Key) => {
     applySettings({
       ...(pendingSettingsRef.current ?? draft),
@@ -2789,6 +2937,34 @@ export function SettingsModal({
                   />
                 ) : null}
               </SettingsSection>
+            ) : null}
+
+            {/*
+             * CDXC:AppIconPicker 2026-06-25-21:50:
+             * App Icon swaps only the macOS Dock and app-switcher icon via native.
+             * The section shows the live native preview, a grid of the newest
+             * icons plus the selected one, a native file picker, a reveal action,
+             * and a reset, plus the required disclaimer. Persistence is
+             * confirm-before-persist: appIconSourceId is written only after native
+             * returns an ok appIconState (handled in the host-event listener).
+             */}
+            {mainSectionVisible("appIcon", settingsSearch.appIcon) ? (
+            <SettingsSection
+              description="Changes the Dock & app-switcher icon only — not the Finder icon."
+              sectionRef={appIconSectionRef}
+              title="App Icon"
+            >
+              {mainSettingVisible(settingsSearch.appIcon, "appIconSourceId") ? (
+              <AppIconPickerField
+                error={appIconError}
+                onChooseFile={chooseAppIconFile}
+                onResetToDefault={resetAppIcon}
+                onReveal={revealAppIconsFolder}
+                onSelect={selectAppIcon}
+                state={appIconState}
+              />
+              ) : null}
+            </SettingsSection>
             ) : null}
 
             {mainSectionVisible("statusIndicators", settingsSearch.statusIndicators) ? (
@@ -9099,6 +9275,177 @@ function PetPickerField({
         </div>
       </div>
     </SettingRow>
+  );
+}
+
+/**
+ * CDXC:AppIconPicker 2026-06-25-21:50:
+ * App Icon picker field. State is owned by the parent (driven by native
+ * appIconState events); this component only renders the live preview, the grid
+ * of native-provided icons (already trimmed to the newest 10 plus the selected
+ * one), the action buttons, an error notice, and the Dock-only disclaimer. The
+ * Default tile and Reset both select the empty source id. Selection posts to
+ * native; persistence happens upstream after native confirms.
+ */
+function AppIconPickerField({
+  error,
+  onChooseFile,
+  onResetToDefault,
+  onReveal,
+  onSelect,
+  state,
+}: {
+  error?: string;
+  onChooseFile: () => void;
+  onResetToDefault: () => void;
+  onReveal: () => void;
+  onSelect: (sourceId: string) => void;
+  state: SidebarAppIconStateMessage | undefined;
+}) {
+  const allIcons: SidebarAppIconInfo[] = state?.icons ?? [];
+  const defaultIcon = allIcons.find((icon) => icon.id === "");
+  const icons = allIcons.filter((icon) => icon.id !== "");
+  const selectedId = state?.selectedId ?? "";
+  const isDefaultSelected = selectedId === "";
+  const selectedIcon = isDefaultSelected
+    ? defaultIcon
+    : icons.find((icon) => icon.id === selectedId);
+
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-none border border-border bg-muted/30">
+          {selectedIcon ? (
+            <img
+              alt={selectedIcon.name}
+              className="size-full object-contain"
+              src={selectedIcon.thumbnailDataUrl}
+            />
+          ) : (
+            <IconPhoto aria-hidden="true" className="size-7 text-muted-foreground" />
+          )}
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="truncate text-sm">
+            {isDefaultSelected ? "Default app icon" : selectedIcon?.name ?? selectedId}
+          </div>
+          <div className="truncate text-xs text-muted-foreground">
+            {isDefaultSelected
+              ? "Using the bundled Ghostex icon."
+              : "Custom Dock & app-switcher icon."}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(64px,1fr))] gap-2">
+        {/*
+         * CDXC:AppIconPicker 2026-06-25-21:50:
+         * The first tile always restores the default bundled icon (empty source
+         * id), then the native-provided icons follow newest-first.
+         */}
+        <AppIconPickerTile
+          label="Default"
+          onSelect={() => onSelect("")}
+          selected={isDefaultSelected}
+          thumbnailDataUrl={defaultIcon?.thumbnailDataUrl || undefined}
+        />
+        {icons.map((icon) => (
+          <AppIconPickerTile
+            key={icon.id}
+            label={icon.name}
+            onSelect={() => onSelect(icon.id)}
+            selected={icon.selected || icon.id === selectedId}
+            thumbnailDataUrl={icon.thumbnailDataUrl}
+          />
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Button className="h-9 rounded-none px-3 text-sm" onClick={onChooseFile} type="button" variant="outline">
+          <IconDownload aria-hidden="true" data-icon="inline-start" />
+          Choose File…
+        </Button>
+        <Button className="h-9 rounded-none px-3 text-sm" onClick={onReveal} type="button" variant="outline">
+          <IconFolderOpen aria-hidden="true" data-icon="inline-start" />
+          Reveal in Finder
+        </Button>
+        <Button
+          className="h-9 rounded-none px-3 text-sm"
+          disabled={isDefaultSelected}
+          onClick={onResetToDefault}
+          type="button"
+          variant="outline"
+        >
+          <IconRefresh aria-hidden="true" data-icon="inline-start" />
+          Reset to default
+        </Button>
+      </div>
+
+      {error ? (
+        <div className="flex items-start gap-2 rounded-none border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          <IconAlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <span className="min-w-0">{error}</span>
+        </div>
+      ) : null}
+
+      {/*
+       * CDXC:AppIconPicker 2026-06-25-21:50:
+       * Required visible disclaimer so users know this only affects the Dock and
+       * app-switcher icon, not the Finder application icon.
+       */}
+      <p className="m-0 text-xs text-muted-foreground">
+        Changes the Dock &amp; app-switcher icon only — not the Finder icon.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * CDXC:AppIconPicker 2026-06-25-21:50:
+ * One selectable App Icon tile. The Default tile renders a placeholder glyph
+ * because native does not ship a thumbnail for the bundled icon.
+ */
+function AppIconPickerTile({
+  label,
+  onSelect,
+  selected,
+  thumbnailDataUrl,
+}: {
+  label: string;
+  onSelect: () => void;
+  selected: boolean;
+  thumbnailDataUrl?: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            aria-label={label}
+            aria-pressed={selected}
+            className={cn(
+              "relative flex aspect-square items-center justify-center overflow-hidden rounded-none border bg-muted/30",
+              selected ? "border-primary ring-2 ring-primary" : "border-border hover:border-primary/60",
+            )}
+            onClick={onSelect}
+            type="button"
+          >
+            {thumbnailDataUrl ? (
+              <img alt={label} className="size-full object-contain" src={thumbnailDataUrl} />
+            ) : (
+              <IconPhoto aria-hidden="true" className="size-6 text-muted-foreground" />
+            )}
+            {selected ? (
+              <IconCircleCheckFilled
+                aria-hidden="true"
+                className="absolute right-0.5 top-0.5 size-4 text-primary"
+              />
+            ) : null}
+          </button>
+        }
+      />
+      <TooltipContent sideOffset={6}>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 

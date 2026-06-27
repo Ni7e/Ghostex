@@ -605,6 +605,93 @@ describe("settings modal source", () => {
     expect(nativeSidebarSource).toContain("worktreeParentProjectId: worktree.parentProjectId");
   });
 
+  test("wires the App Icon picker to the native wire contract with prop-driven confirm-before-persist", () => {
+    /*
+     * CDXC:AppIconPicker 2026-06-25-21:50:
+     * The App Icon section must speak the exact native wire-contract messages,
+     * receive appIconState as a PROP relayed through the modal host (mirroring
+     * osIntegrationStatus, not direct host-event listeners), only persist
+     * appIconSourceId after an ok state (confirm-before-persist), and show the
+     * Dock-only disclaimer.
+     */
+    const settingsNavigation = sourceBetween(
+      settingsModalSource,
+      "const mainSettingsSectionNavigation",
+      "const hasVisibleMainSettings",
+    );
+    const appIconSearch = sourceBetween(
+      settingsModalSource,
+      'appIcon: getSettingsSectionSearch(settingsSearchQuery, "App Icon", [',
+      'browser: getSettingsSectionSearch(settingsSearchQuery, "Browser", [',
+    );
+    const appIconField = sourceBetween(
+      settingsModalSource,
+      "function AppIconPickerField",
+      "function AppIconPickerTile",
+    );
+
+    // Section is registered in the sidebar navigation as an appearance section.
+    expect(settingsNavigation).toContain('id: "appIcon"');
+    expect(appIconSearch).toContain("appIconSourceId");
+
+    // Exact outbound wire-contract messages (these sends stay direct).
+    expect(settingsModalSource).toContain('vscode.postMessage({ type: "listAppIcons" });');
+    expect(settingsModalSource).toContain('vscode.postMessage({ type: "setAppIcon", sourceId });');
+    expect(settingsModalSource).toContain('vscode.postMessage({ type: "pickAppIconFile" });');
+    expect(settingsModalSource).toContain('vscode?.postMessage({ type: "revealAppIconsFolder" });');
+
+    // Inbound appIconState is prop-driven (relayed via the modal host like
+    // osIntegrationStatus), NOT direct window host-event listeners.
+    expect(settingsModalSource).toContain("appIconState?: SidebarAppIconStateMessage;");
+    expect(settingsModalSource).toContain("}, [appIconState]);");
+    expect(settingsModalSource).not.toContain("handleAppIconHostEvent");
+    expect(settingsModalSource).not.toContain("isSidebarAppIconStateMessage");
+
+    // Confirm-before-persist: only an ok prop state writes appIconSourceId.
+    expect(settingsModalSource).toContain("if (appIconState.ok) {");
+    expect(settingsModalSource).toContain("commitAppIconSourceIdRef.current(confirmedSourceId);");
+    expect(settingsModalSource).toContain('updateDraft("appIconSourceId", sourceId);');
+    expect(settingsModalSource).toContain('vscode?.postMessage({ type: "setAppIcon", sourceId: "" });');
+
+    // Reset selects the empty/default source id, the native default descriptor is
+    // filtered out of the custom grid, and the disclaimer is visible.
+    expect(settingsModalSource).toContain('const resetAppIcon = () => {');
+    expect(appIconField).toContain('const defaultIcon = allIcons.find((icon) => icon.id === "");');
+    expect(appIconField).toContain('const icons = allIcons.filter((icon) => icon.id !== "");');
+    expect(appIconField).toContain("Choose File");
+    expect(appIconField).toContain("Reveal in Finder");
+    expect(appIconField).toContain("Reset to default");
+    expect(appIconField).toContain(
+      "Changes the Dock &amp; app-switcher icon only — not the Finder icon.",
+    );
+  });
+
+  test("relays appIconState through the modal host like osIntegrationStatus", () => {
+    /*
+     * CDXC:AppIconPicker 2026-06-25-21:50:
+     * SettingsModal renders in the modal-host child window, so the native
+     * appIconState host event must be relayed to the modal host through the same
+     * main-bus + sidebarState plumbing used by osIntegrationStatus, then exposed
+     * by useModalStateFromNative and passed to SettingsModal as a prop.
+     */
+    const modalHostSource = readFileSync(
+      new URL("../native/sidebar/modal-host.tsx", import.meta.url),
+      "utf8",
+    );
+
+    // native-sidebar.tsx: host-event handler + relay that posts to the bus and
+    // the modal host, reading the Swift event's DIRECT fields (no payloadJson).
+    expect(nativeSidebarSource).toContain('if (hostEvent.type === "appIconState") {');
+    expect(nativeSidebarSource).toContain("postAppIconState({");
+    expect(nativeSidebarSource).toContain("function postAppIconState(message: SidebarAppIconStateMessage)");
+    expect(nativeSidebarSource).toContain('postAppModalHost({ message, type: "sidebarState" });');
+
+    // modal-host.tsx: route the relayed message into modal state and pass it on.
+    expect(modalHostSource).toContain("isAppIconStateMessage(message.message)");
+    expect(modalHostSource).toContain("setAppIconState(message.message);");
+    expect(modalHostSource).toContain("appIconState={appIconState}");
+  });
+
   test("keeps the open project selector neutral", () => {
     /*
      * CDXC:ProjectSettings 2026-06-19-12:22:

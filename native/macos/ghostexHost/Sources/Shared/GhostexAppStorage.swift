@@ -67,6 +67,107 @@ enum GhostexAppStorage {
     sharedRootDirectory.appendingPathComponent("state", isDirectory: true)
   }
 
+  /**
+   CDXC:AppIconPicker 2026-06-25-21:50:
+   User-supplied app icons live in ~/.ghostex/icons (the shared home, so
+   ghostex-dev keeps its own ~/.ghostex-dev/icons). Masked 1024² squircle PNGs
+   are cached under a sibling cache directory keyed to source filename+mtime.
+   Both directories are created lazily, mirroring the ~/.ghostex state-dir
+   handling above.
+   */
+  static var iconsDirectory: URL {
+    sharedRootDirectory.appendingPathComponent("icons", isDirectory: true)
+  }
+
+  static var maskedIconCacheDirectory: URL {
+    sharedStateDirectory.appendingPathComponent("app-icon-cache", isDirectory: true)
+  }
+
+  // CDXC:AppIconPicker 2026-06-25-21:50: Create the icons and masked-cache directories on first run so the picker, file copy, Finder reveal, and cache writes all have a stable home. Best-effort; failures fall back to the default icon.
+  @discardableResult
+  static func ensureAppIconDirectories() -> Bool {
+    do {
+      try FileManager.default.createDirectory(
+        at: iconsDirectory, withIntermediateDirectories: true)
+      try FileManager.default.createDirectory(
+        at: maskedIconCacheDirectory, withIntermediateDirectories: true)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   CDXC:AppIconPicker 2026-06-25-21:50:
+   Folder scan for the sidebar picker. Enumerate *.png in ~/.ghostex/icons,
+   keep only files that pass the AppIconImage guardrails (PNG magic bytes,
+   <=5MB, header dims <=2048), sort by contentModificationDate descending with a
+   filename tiebreak, take the 10 most recent, then always include the selected
+   id if it is a valid file not already in that set. Returns just filenames; no
+   absolute paths leave this function.
+   */
+  static func scanAppIconFileNames(selectedId: String) -> [String] {
+    ensureAppIconDirectories()
+    let directory = iconsDirectory
+    guard let entries = try? FileManager.default.contentsOfDirectory(
+      at: directory,
+      includingPropertiesForKeys: [.contentModificationDateKey],
+      options: [.skipsHiddenFiles]
+    ) else {
+      return appendSelectedAppIconIfValid(to: [], selectedId: selectedId)
+    }
+
+    struct AppIconFileEntry {
+      let fileName: String
+      let modifiedAt: TimeInterval
+    }
+
+    let validEntries: [AppIconFileEntry] = entries.compactMap { url in
+      guard url.pathExtension.lowercased() == "png" else {
+        return nil
+      }
+      guard AppIconImage.isValidSourcePNG(at: url) else {
+        return nil
+      }
+      let modifiedAt =
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)?
+        .timeIntervalSince1970 ?? 0
+      return AppIconFileEntry(fileName: url.lastPathComponent, modifiedAt: modifiedAt)
+    }
+
+    let sorted = validEntries.sorted { lhs, rhs in
+      if lhs.modifiedAt != rhs.modifiedAt {
+        return lhs.modifiedAt > rhs.modifiedAt
+      }
+      return lhs.fileName < rhs.fileName
+    }
+
+    let topFileNames = sorted.prefix(10).map { $0.fileName }
+    return appendSelectedAppIconIfValid(to: Array(topFileNames), selectedId: selectedId)
+  }
+
+  // CDXC:AppIconPicker 2026-06-25-21:50: Always include the persisted selection so a selected-but-older icon never disappears from the list even when 10 newer icons exist. Ignores "" (default) and invalid/missing files.
+  private static func appendSelectedAppIconIfValid(
+    to fileNames: [String],
+    selectedId: String
+  ) -> [String] {
+    /**
+     CDXC:AppIconPicker 2026-06-26-23:42:
+     The persisted selected id must pass the same filename-only validation as
+     runtime set/apply paths before joining it to ~/.ghostex/icons. Invalid
+     persisted values are treated as absent instead of scanning outside the
+     managed folder.
+     */
+    guard let trimmed = AppIconImage.normalizedSourceId(selectedId), !fileNames.contains(trimmed) else {
+      return fileNames
+    }
+    let url = iconsDirectory.appendingPathComponent(trimmed, isDirectory: false)
+    guard AppIconImage.isValidSourcePNG(at: url) else {
+      return fileNames
+    }
+    return fileNames + [trimmed]
+  }
+
   static var logsDirectory: URL {
     diagnosticsRootDirectory.appendingPathComponent("logs", isDirectory: true)
   }

@@ -494,6 +494,13 @@ export type ghostexSettings = {
   codeServerLinkVscodeUserConfig: boolean;
   codeServerUseVscodeInsidersUserConfig: boolean;
   customDefaultEditorCommand: string;
+  /**
+   * CDXC:AppIconPicker 2026-06-25-21:50: Persisted id of the selected Dock /
+   * app-switcher icon. Empty string means the default bundled app icon. The
+   * value is a filename living in the native icons folder; native confirms the
+   * selection via an appIconState ok event before the sidebar persists it.
+   */
+  appIconSourceId: string;
   defaultEditorCommand: DefaultEditorCommand;
   hideProjectHeaderDiffStats: boolean;
   showProjectEditorDiffFileCount: boolean;
@@ -875,6 +882,8 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * commands for users who prefer a different editor.
    */
   customDefaultEditorCommand: "",
+  // CDXC:AppIconPicker 2026-06-25-21:50: New installs use the default bundled app icon (empty source id).
+  appIconSourceId: "",
   defaultEditorCommand: "code",
   /**
    * CDXC:ProjectDiffStats 2026-05-16-08:46:
@@ -1589,6 +1598,10 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
         "customDefaultEditorCommand",
         DEFAULT_ghostex_SETTINGS.customDefaultEditorCommand,
       ),
+    ),
+    // CDXC:AppIconPicker 2026-06-25-21:50: Coerce stored app icon source id to a trimmed string, defaulting to the bundled icon.
+    appIconSourceId: normalizeAppIconSourceId(
+      readString(source, "appIconSourceId", DEFAULT_ghostex_SETTINGS.appIconSourceId),
     ),
     /**
      * CDXC:ProjectDiffStats 2026-05-16-08:46:
@@ -2317,6 +2330,29 @@ function normalizeDefaultEditorCommand(value: string | undefined): DefaultEditor
 
 function normalizeCustomDefaultEditorCommand(value: string | undefined): string {
   return (value ?? "").trim().slice(0, 240);
+}
+
+/*
+ * CDXC:AppIconPicker 2026-06-26-23:42:
+ * Empty string means default icon; otherwise the persisted id must remain a
+ * filename-only value that round-trips exactly after native confirms it. Reject
+ * invalid/path-like ids instead of slicing or otherwise rewriting them.
+ */
+function normalizeAppIconSourceId(value: string | undefined): string {
+  const normalized = (value ?? "").trim();
+  if (normalized.length === 0) {
+    return "";
+  }
+  if (normalized.length > 255) {
+    return "";
+  }
+  if (normalized === "." || normalized === "..") {
+    return "";
+  }
+  if (normalized.includes("/") || normalized.includes("\\") || normalized.includes("\0")) {
+    return "";
+  }
+  return normalized;
 }
 
 function normalizeDefaultPromptAgentId(value: string | undefined): string {

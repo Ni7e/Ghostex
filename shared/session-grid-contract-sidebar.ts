@@ -881,6 +881,33 @@ export type SidebarNativeHotkeyMessage = {
   type: "nativeHotkey";
 };
 
+/**
+ * CDXC:AppIconPicker 2026-06-25-21:50:
+ * One available Dock/app-switcher icon as reported by native. thumbnailDataUrl
+ * is a self-contained data: URL so the picker grid renders without native file
+ * reads, and `selected` mirrors which entry native currently has applied.
+ */
+export type SidebarAppIconInfo = {
+  id: string;
+  name: string;
+  thumbnailDataUrl: string;
+  selected: boolean;
+};
+
+/**
+ * CDXC:AppIconPicker 2026-06-25-21:50:
+ * Native -> Settings App Icon state. Already trimmed by native to the newest 10
+ * icons plus the selected one. `ok: false` with `error` describes a failed list
+ * or swap; the sidebar persists appIconSourceId only when ok is true.
+ */
+export type SidebarAppIconStateMessage = {
+  error: string | null;
+  icons: SidebarAppIconInfo[];
+  ok: boolean;
+  selectedId: string;
+  type: "appIconState";
+};
+
 export type ExtensionToSidebarMessage =
   | SidebarHydrateMessage
   | SidebarSessionStateMessage
@@ -905,7 +932,9 @@ export type ExtensionToSidebarMessage =
   | SidebarShowSessionRenameModalMessage
   | SidebarShowT3ThreadIdModalMessage
   | SidebarPreviousSessionsResultMessage
-  | SidebarRemoteMachineStatusMessage;
+  | SidebarRemoteMachineStatusMessage
+  // CDXC:AppIconPicker 2026-06-25-21:50: Native pushes App Icon list/selection state into Settings.
+  | SidebarAppIconStateMessage;
 
 export type SidebarToExtensionMessage =
   | {
@@ -2082,6 +2111,28 @@ export type SidebarToExtensionMessage =
       requestId: string;
       type: "syncSidebarAgentOrder";
       agentIds: string[];
+    }
+  /**
+   * CDXC:AppIconPicker 2026-06-25-21:50:
+   * Settings -> App Icon talks to native through these four messages. Native
+   * owns the icons folder, file picking, and the live Dock/app-switcher icon;
+   * the sidebar only requests state and selections. sourceId is a filename in
+   * the icons folder, or "" to restore the default bundled icon. The sidebar
+   * waits for an ok appIconState event before persisting appIconSourceId
+   * (confirm-before-persist) so a failed native swap never sticks in settings.
+   */
+  | {
+      type: "listAppIcons";
+    }
+  | {
+      type: "setAppIcon";
+      sourceId: string;
+    }
+  | {
+      type: "pickAppIconFile";
+    }
+  | {
+      type: "revealAppIconsFolder";
     };
 
 export type SidebarHudSnapshot = Pick<

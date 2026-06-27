@@ -1077,6 +1077,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     MainActor.assumeIsolated {
       installMainMenu()
       /**
+       CDXC:AppIconPicker 2026-06-25-21:50:
+       Apply the persisted custom Dock icon before window creation so the Dock
+       and Cmd-Tab switcher show the chosen icon immediately at launch. This sets
+       only NSApp.applicationIconImage at runtime; the bundle/Finder icon is
+       never modified.
+       */
+      Self.applyAppIcon(sourceId: Self.readPersistedAppIconSourceId())
+      /**
        CDXC:NativeTerminals 2026-04-28-12:06
        Persistent helper mode was removed by request. Native terminals now
        always use the in-process embedded Ghostty SurfaceView backend from
@@ -3759,6 +3767,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       break
     case .pickWorkspaceIcon:
       break
+    // CDXC:AppIconPicker 2026-06-25-21:50: The WebSocket host-bridge path forwards app-icon picker commands to the root view, which owns the NSOpenPanel, ~/.ghostex/icons copies, Finder reveal, and the appIconState emit.
+    case .listAppIcons, .setAppIcon, .pickAppIconFile, .revealAppIconsFolder:
+      (window?.contentView as? ghostexRootView)?.handleAppIconHostCommand(command)
     case .showMessage(let command):
       showMessage(command)
     case .appendAgentDetectionDebugLog(let command):
@@ -4901,6 +4912,115 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
         }
       }
     }
+  }
+
+  /**
+   CDXC:AppIconPicker 2026-06-25-21:50:
+   Read the persisted appIconSourceId (default "") from the shared native
+   sidebar settings file. Used at launch so the Dock icon is correct before the
+   window appears. Privacy: returns only the id; never logs paths or bytes.
+
+   CDXC:AppIconPicker 2026-06-26-23:42:
+   Treat persisted ids as untrusted settings data. Only a filename-only source id
+   may reach the launch-time apply path; invalid persisted values restore the
+   default bundle icon instead of being joined to the icons directory.
+   */
+  static func readPersistedAppIconSourceId() -> String {
+    guard let data = try? Data(contentsOf: GhostexAppStorage.sharedSidebarSettingsURL),
+      let object = try? JSONSerialization.jsonObject(with: data),
+      let settings = object as? [String: Any],
+      let sourceId = settings["appIconSourceId"] as? String
+    else {
+      return ""
+    }
+    return AppIconImage.normalizedSourceId(sourceId) ?? ""
+  }
+
+  /**
+   CDXC:AppIconPicker 2026-06-25-21:50:
+   Apply the runtime Dock icon for a source id. "" resets NSApp to the bundle
+   icon (applicationIconImage = nil). A non-empty id loads, validates, and masks
+   the matching file in ~/.ghostex/icons through the self-validating cache; any
+   failure falls back to the default bundle icon. Only NSApp.applicationIconImage
+   changes here — the Finder/bundle icon is never touched. Logging is
+   privacy-safe (id presence and success boolean only).
+   */
+  @MainActor static func applyAppIcon(sourceId: String) {
+    let trimmed = sourceId.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty {
+      NSApp.applicationIconImage = nil
+      if NativeDebugLogging.isEnabled {
+        logger.info("AppIcon applied default bundle icon hasSource=false")
+      }
+      return
+    }
+    guard let normalizedSourceId = AppIconImage.normalizedSourceId(trimmed) else {
+      // CDXC:AppIconPicker 2026-06-26-23:42: Invalid source ids fall back before URL construction so persisted or bridged paths cannot escape ~/.ghostex/icons.
+      NSApp.applicationIconImage = nil
+      if NativeDebugLogging.isEnabled {
+        logger.info("AppIcon fell back to default; invalid source id hasSource=true ok=false")
+      }
+      return
+    }
+    GhostexAppStorage.ensureAppIconDirectories()
+    guard let image = AppIconImage.maskedDockImage(
+      sourceId: normalizedSourceId,
+      iconsDirectory: GhostexAppStorage.iconsDirectory,
+      cacheDirectory: GhostexAppStorage.maskedIconCacheDirectory
+    ) else {
+      // CDXC:AppIconPicker 2026-06-25-21:50: Invalid/missing source falls back to the default bundle icon instead of leaving a stale custom icon.
+      NSApp.applicationIconImage = nil
+      if NativeDebugLogging.isEnabled {
+        logger.info("AppIcon fell back to default; masked image unavailable hasSource=true ok=false")
+      }
+      return
+    }
+    NSApp.applicationIconImage = image
+    if NativeDebugLogging.isEnabled {
+      logger.info("AppIcon applied custom icon hasSource=true ok=true")
+    }
+  }
+
+  // CDXC:AppIconPicker 2026-06-25-21:50: Human-friendly picker label derived from the icon filename (extension stripped, separators spaced). No path is exposed.
+  static func appIconDisplayName(forFileName fileName: String) -> String {
+    let base = (fileName as NSString).deletingPathExtension
+    let spaced = base
+      .replacingOccurrences(of: "-", with: " ")
+      .replacingOccurrences(of: "_", with: " ")
+      .trimmingCharacters(in: .whitespaces)
+    return spaced.isEmpty ? fileName : spaced
+  }
+
+  // CDXC:AppIconPicker 2026-06-25-21:50: Sanitize a chosen file's base name to filesystem-safe characters before copying into ~/.ghostex/icons.
+  static func sanitizedAppIconFileName(_ rawName: String) -> String {
+    let cleaned = rawName.unicodeScalars.map { scalar -> Character in
+      let isSafe =
+        (scalar >= "A" && scalar <= "Z") || (scalar >= "a" && scalar <= "z")
+        || (scalar >= "0" && scalar <= "9") || scalar == "-" || scalar == "_"
+      return isSafe ? Character(scalar) : "-"
+    }
+    let collapsed = String(cleaned).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    return collapsed.isEmpty ? "app-icon" : collapsed
+  }
+
+  // CDXC:AppIconPicker 2026-06-25-21:50: Thumbnail data URL for the always-present "Default" row. Uses the immutable bundle icon (never NSApp.applicationIconImage, which may already hold a custom runtime icon) so the picker shows the true default. Returns "" if rendering fails; the sidebar treats an empty data URL as no preview.
+  @MainActor static func defaultAppIconThumbnailDataURL() -> String {
+    let bundleIcon = NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
+    let target = NSSize(width: 128, height: 128)
+    let output = NSImage(size: target)
+    output.lockFocus()
+    NSColor.clear.setFill()
+    NSRect(origin: .zero, size: target).fill()
+    bundleIcon.draw(
+      in: NSRect(origin: .zero, size: target), from: .zero, operation: .sourceOver, fraction: 1.0)
+    output.unlockFocus()
+    guard let tiff = output.tiffRepresentation,
+      let bitmap = NSBitmapImageRep(data: tiff),
+      let png = bitmap.representation(using: .png, properties: [:])
+    else {
+      return ""
+    }
+    return "data:image/png;base64,\(png.base64EncodedString())"
   }
 
   private static func javascriptStringLiteral(_ value: String) -> String? {
@@ -6300,6 +6420,8 @@ final class ghostexRootView: NSView {
   private let setGxserverAlwaysStartFromTitlebar: (Bool) -> Void
   private let sendHostEvent: (HostEvent) -> Void
   private let nativeSettingsStore = NativeSettingsStore()
+  // CDXC:AppIconPicker 2026-06-25-21:50: In-memory override of the selected app-icon source id, set immediately after a setAppIcon/pick so the emitted appIconState reflects the new selection before React persists appIconSourceId. nil means defer to the persisted settings value.
+  private var pendingAppIconSelectedId: String?
   private var activeAppModalKind: String?
   private var appModalPresentationPending = false
   private var activeNativeAppModalKind: String?
@@ -9486,6 +9608,15 @@ final class ghostexRootView: NSView {
       presentWorkspaceFolderPicker()
     case .pickWorkspaceIcon(let command):
       presentWorkspaceIconPicker(command)
+    // CDXC:AppIconPicker 2026-06-25-21:50: Route the WKWebView sidebar app-icon picker commands to their native handlers in this view.
+    case .listAppIcons:
+      handleListAppIcons()
+    case .setAppIcon(let command):
+      handleSetAppIcon(command)
+    case .pickAppIconFile:
+      handlePickAppIconFile()
+    case .revealAppIconsFolder:
+      handleRevealAppIconsFolder()
     case .showMessage(let command):
       showMessage(command)
     case .appendAgentDetectionDebugLog(let command):
@@ -12820,6 +12951,166 @@ final class ghostexRootView: NSView {
         window.__ghostex_NATIVE_WORKSPACE_BAR__?.setProjectIcon(icon.projectId, icon.iconDataUrl);
       })();
       """)
+  }
+
+  /**
+   CDXC:AppIconPicker 2026-06-25-21:50:
+   App-icon picker command handlers live alongside the workspace icon picker
+   because they share the native NSOpenPanel/Finder pattern and the postHostEvent
+   sidebar bus. The selected source id is read from the React-persisted settings
+   (default ""), overridden in-memory after a setAppIcon/pick so the immediately
+   emitted appIconState reflects the new selection before React persists it.
+   */
+  private func currentAppIconSelectedId() -> String {
+    if let pendingAppIconSelectedId {
+      return pendingAppIconSelectedId
+    }
+    return AppDelegate.readPersistedAppIconSourceId()
+  }
+
+  // CDXC:AppIconPicker 2026-06-25-21:50: Build and push the appIconState host event: ensure dirs, scan the folder (10 most-recent valid PNGs plus the selected id), and attach masked squircle thumbnail data URLs. Mirrors how requestOSIntegrationStatus pushes status via postHostEvent.
+  private func emitAppIconState(ok: Bool, error: String?) {
+    GhostexAppStorage.ensureAppIconDirectories()
+    let selectedId = currentAppIconSelectedId()
+    let fileNames = GhostexAppStorage.scanAppIconFileNames(selectedId: selectedId)
+
+    var icons: [AppIconDescriptor] = []
+    // CDXC:AppIconPicker 2026-06-25-21:50: The default/bundle icon is always offered first as id "".
+    icons.append(AppIconDescriptor(
+      id: "",
+      name: "Default",
+      thumbnailDataUrl: AppDelegate.defaultAppIconThumbnailDataURL(),
+      selected: selectedId.isEmpty))
+
+    for fileName in fileNames {
+      let url = GhostexAppStorage.iconsDirectory.appendingPathComponent(fileName, isDirectory: false)
+      guard let thumbnail = AppIconImage.maskedThumbnailDataURL(forValidatedSource: url) else {
+        continue
+      }
+      icons.append(AppIconDescriptor(
+        id: fileName,
+        name: AppDelegate.appIconDisplayName(forFileName: fileName),
+        thumbnailDataUrl: thumbnail,
+        selected: fileName == selectedId))
+    }
+
+    postHostEvent(.appIconState(ok: ok, error: error, selectedId: selectedId, icons: icons))
+  }
+
+  // CDXC:AppIconPicker 2026-06-25-21:50: Internal forwarder so the WebSocket host-bridge path (AppDelegate.handle) can reach the same app-icon handlers as the WKWebView sidebar path without exposing each private method.
+  func handleAppIconHostCommand(_ command: HostCommand) {
+    switch command {
+    case .listAppIcons:
+      handleListAppIcons()
+    case .setAppIcon(let setCommand):
+      handleSetAppIcon(setCommand)
+    case .pickAppIconFile:
+      handlePickAppIconFile()
+    case .revealAppIconsFolder:
+      handleRevealAppIconsFolder()
+    default:
+      break
+    }
+  }
+
+  private func handleListAppIcons() {
+    emitAppIconState(ok: true, error: nil)
+  }
+
+  private func handleSetAppIcon(_ command: SetAppIcon) {
+    let trimmed = command.sourceId.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty {
+      pendingAppIconSelectedId = ""
+      AppDelegate.applyAppIcon(sourceId: "")
+      emitAppIconState(ok: true, error: nil)
+      return
+    }
+    guard let normalizedSourceId = AppIconImage.normalizedSourceId(trimmed) else {
+      // CDXC:AppIconPicker 2026-06-26-23:42: Reject path-like bridge ids before building a file URL or applying the Dock icon.
+      emitAppIconState(ok: false, error: "iconUnavailable")
+      return
+    }
+    GhostexAppStorage.ensureAppIconDirectories()
+    let url = GhostexAppStorage.iconsDirectory.appendingPathComponent(normalizedSourceId, isDirectory: false)
+    guard AppIconImage.isValidSourcePNG(at: url) else {
+      // CDXC:AppIconPicker 2026-06-25-21:50: An invalid/missing id is ignored and reported; selection stays on whatever was already applied so the Dock icon never breaks.
+      emitAppIconState(ok: false, error: "iconUnavailable")
+      return
+    }
+    pendingAppIconSelectedId = normalizedSourceId
+    AppDelegate.applyAppIcon(sourceId: normalizedSourceId)
+    emitAppIconState(ok: true, error: nil)
+  }
+
+  // CDXC:AppIconPicker 2026-06-25-21:50: NSOpenPanel for a PNG, mirroring presentWorkspaceIconPicker/setWorkspaceIcon. On pick, validate then copy into ~/.ghostex/icons, select it, apply the Dock icon, and emit state.
+  private func handlePickAppIconFile() {
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = false
+    panel.canChooseFiles = true
+    panel.allowsMultipleSelection = false
+    panel.allowedContentTypes = [.png]
+    panel.prompt = "Choose Icon"
+    panel.message = "Choose a PNG icon for the Ghostex app."
+
+    let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+      guard let self else {
+        return
+      }
+      guard response == .OK, let url = panel.url else {
+        return
+      }
+      guard AppIconImage.isValidSourcePNG(at: url) else {
+        // CDXC:AppIconPicker 2026-06-25-21:50: Reject non-PNG, oversized (>2048px), or >5MB picks before copying anything into the icons folder.
+        self.showMessage(ShowMessage(
+          level: .error,
+          message: "That image cannot be used. Pick a PNG up to 2048px and 5MB."))
+        self.emitAppIconState(ok: false, error: "invalidPick")
+        return
+      }
+      guard let copiedFileName = self.copyPickedAppIcon(from: url) else {
+        self.showMessage(ShowMessage(level: .error, message: "Could not save the chosen app icon."))
+        self.emitAppIconState(ok: false, error: "copyFailed")
+        return
+      }
+      self.pendingAppIconSelectedId = copiedFileName
+      AppDelegate.applyAppIcon(sourceId: copiedFileName)
+      self.emitAppIconState(ok: true, error: nil)
+    }
+
+    if let window {
+      panel.beginSheetModal(for: window, completionHandler: completion)
+    } else {
+      completion(panel.runModal())
+    }
+  }
+
+  // CDXC:AppIconPicker 2026-06-25-21:50: Copy a validated picked PNG into ~/.ghostex/icons with a unique, sanitized name. Returns the destination filename (the new source id) or nil on failure. No absolute paths are logged.
+  private func copyPickedAppIcon(from sourceURL: URL) -> String? {
+    GhostexAppStorage.ensureAppIconDirectories()
+    let baseName = AppDelegate.sanitizedAppIconFileName(sourceURL.deletingPathExtension().lastPathComponent)
+    let manager = FileManager.default
+    var candidate = "\(baseName).png"
+    var destinationURL = GhostexAppStorage.iconsDirectory.appendingPathComponent(
+      candidate, isDirectory: false)
+    var suffix = 1
+    while manager.fileExists(atPath: destinationURL.path) {
+      candidate = "\(baseName)-\(suffix).png"
+      destinationURL = GhostexAppStorage.iconsDirectory.appendingPathComponent(
+        candidate, isDirectory: false)
+      suffix += 1
+    }
+    do {
+      try manager.copyItem(at: sourceURL, to: destinationURL)
+      return candidate
+    } catch {
+      return nil
+    }
+  }
+
+  // CDXC:AppIconPicker 2026-06-25-21:50: Reveal ~/.ghostex/icons in Finder, mirroring openWorkspaceInFinder. Creates the folder first so the reveal never fails on first run.
+  private func handleRevealAppIconsFolder() {
+    GhostexAppStorage.ensureAppIconDirectories()
+    NSWorkspace.shared.open(GhostexAppStorage.iconsDirectory)
   }
 
   private func openExternalUrl(_ command: OpenExternalUrl) {
