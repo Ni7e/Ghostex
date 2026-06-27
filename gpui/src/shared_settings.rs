@@ -52,6 +52,7 @@ const DEFAULT_TERMINAL_COPY_ON_SELECT: &str = "false";
 const DEFAULT_TERMINAL_CONFIRM_CLOSE_SURFACE: &str = "true";
 const DEFAULT_TERMINAL_CLIPBOARD_TRIM_TRAILING_SPACES: bool = true;
 const DEFAULT_TERMINAL_CLIPBOARD_PASTE_PROTECTION: bool = true;
+const DEFAULT_TERMINAL_PASTE_PREVIEWABLE_IMAGES: bool = true;
 const DEFAULT_TERMINAL_MOUSE_HIDE_WHILE_TYPING: bool = false;
 const DEFAULT_TERMINAL_SCROLLBAR: &str = "system";
 const DEFAULT_TERMINAL_MOUSE_SCROLL_MULTIPLIER_DISCRETE: f64 = 1.0;
@@ -170,10 +171,10 @@ static SHARED_SIDEBAR_SETTINGS_SERVICE: OnceLock<Mutex<SharedSidebarSettingsServ
 
 /*
 CDXC:GPUISettingsService 2026-06-24-10:50:
-GPUI must read and persist the same shared sidebar settings JSON as the macOS sidebar: `GHOSTEX_HOME/state/native-sidebar-settings.json` when `GHOSTEX_HOME` is set, otherwise the existing GPUI shared root under the user's `.ghostex` home. Keep this module as the single GPUI path/read/write contract so Settings UI parity handles `updateSettings` without introducing a second settings store.
+GPUI must read and persist the same shared sidebar settings JSON as the macOS sidebar: `GHOSTEX_HOME/state/native-sidebar-settings.json` when `GHOSTEX_HOME` is set, otherwise the existing GPUI shared root under the user's `.ghostex` home. Keep this module as the single GPUI path/read/write contract so Settings UI parity handles `updateSettings` and `sidebarSide` without introducing a second settings store.
 
 CDXC:GPUISettingsService 2026-06-24-10:50:
-Rust should parse only the GPUI runtime fields it consumes today: debuggingMode, showBetaFeatures, browserFeedbackTool, sidebarDefaultWidthPx, project-editor auto-sleep fields, Agents Hub default-editor command fields, and the supported embedded Ghostty surface font-size field. The raw JSON object is preserved for whole-object writes, but this service intentionally does not duplicate the full TypeScript `ghostexSettings` schema.
+Rust should parse only the GPUI runtime fields it consumes today: debuggingMode, showBetaFeatures, browserFeedbackTool, sidebarDefaultWidthPx, sidebarSide, project-editor auto-sleep fields, Agents Hub default-editor command fields, and the supported embedded Ghostty surface font-size field. The raw JSON object is preserved for whole-object writes, but this service intentionally does not duplicate the full TypeScript `ghostexSettings` schema.
 
 CDXC:GPUISettingsService 2026-06-24-10:50:
 GPUI `updateSettings` handling needs a production write path: accept only JSON object payloads, create the shared state directory, write through an adjacent temp file then rename, skip byte-identical writes, and maintain a monotonic in-memory revision/hash/snapshot signal without logging paths, project names, URLs, commands, environment values, tokens, stdout/stderr, or user-owned content.
@@ -181,8 +182,14 @@ GPUI `updateSettings` handling needs a production write path: accept only JSON o
 CDXC:GPUISettingsService 2026-06-24-11:14:
 The real React app-modal host now saves through GPUI, so the service exposes immutable snapshot object reads and a central object write entrypoint. Keep validation at this boundary: only object-shaped Settings payloads may persist, and callers must use the returned snapshot for post-save hydration instead of re-reading the settings file ad hoc.
 
-CDXC:GPUITerminalSettings 2026-06-24-11:27:
-GPUI-owned embedded Ghostty surfaces may consume shared Settings directly only for FFI fields that already exist on `ghostty_surface_config_s` and are safe for the surface request boundary. Today that means the normalized `terminalFontSize` number mapped to `font_size`; font family, themes, scrollback, clipboard behavior, command/cwd/env, terminal content, paths, URLs, tokens, and raw settings payloads stay out of this GPUI FFI parse layer until a direct safe runtime path exists.
+CDXC:GPUITerminalSettings 2026-06-27-10:10:
+The GPUI surface FFI contract only accepts `terminalFontSize` through `ghostty_surface_config_s`; normalize it into `font_size` and keep every other terminal Settings key out of the surface request.
+
+CDXC:GPUITerminalSettings 2026-06-27-10:10:
+Font family, theme, cursor, scrollback, clipboard, and mouse settings are Ghostty config-file-backed for future or recreated surfaces. `terminalPastePreviewableImages` is runtime-only and must not be included in config-file change detection or config writes.
+
+CDXC:GPUITerminalSettings 2026-06-27-10:22:
+GPUI image paste preview is runtime-only app behavior and defaults on for parity with `ghostex-settings.ts`. Snapshot access must accept only strict JSON booleans for `terminalPastePreviewableImages`, with missing or malformed values resolving to true.
 
 CDXC:GPUISettingsGxserverAgentPolicy 2026-06-24-11:39:
 GPUI Settings matches macOS for gxserver-owned agent launch policy: `agentAcceptAllEnabled` and `defaultPromptAgentId` remain in shared Settings only as a synchronous render cache. Parse them with the same default/normalization semantics as the TypeScript settings schema so GPUI can compare saves and reconcile gxserver canonical responses without duplicating the full settings model.
@@ -199,6 +206,42 @@ pub enum SharedSettingsAutoSleepTarget {
     CodeEditor,
     Browser,
     ProjectEditor,
+}
+
+/*
+CDXC:GPUISettingsSidebarSide 2026-06-26-23:35:
+GPUI sidebar layout must use the same persisted `sidebarSide` value as macOS and SidebarApp `moveSidebar`: only `left` and `right` are accepted, and missing or malformed values render as left.
+
+CDXC:GPUISettingsSidebarSide 2026-06-26-23:35:
+Keep sidebar side in the shared native-sidebar settings object instead of creating a GPUI-only store. Writer helpers must update only `sidebarSide` through the shared object write path so unrelated Settings fields survive native side changes.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SharedSidebarSide {
+    Left,
+    Right,
+}
+
+impl SharedSidebarSide {
+    pub fn from_settings_value(value: Option<&str>) -> Self {
+        match value {
+            Some("right") => Self::Right,
+            _ => Self::Left,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+
+    pub fn write_to_settings_object(self, object: &mut Map<String, Value>) {
+        object.insert(
+            "sidebarSide".to_string(),
+            Value::String(self.as_str().to_string()),
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -586,6 +629,12 @@ impl SharedSidebarSettingsSnapshot {
             .and_then(json_value_to_f32)
     }
 
+    pub fn sidebar_side(&self) -> SharedSidebarSide {
+        SharedSidebarSide::from_settings_value(
+            self.object.get("sidebarSide").and_then(Value::as_str),
+        )
+    }
+
     pub fn terminal_ghostty_surface_config(&self) -> SharedTerminalGhosttySurfaceConfig {
         SharedTerminalGhosttySurfaceConfig {
             font_size: normalize_terminal_font_size(
@@ -594,6 +643,11 @@ impl SharedSidebarSettingsSnapshot {
                     .and_then(json_number_value_to_f32),
             ),
         }
+    }
+
+    pub fn terminal_paste_previewable_images(&self) -> bool {
+        strict_bool_field(&self.object, "terminalPastePreviewableImages")
+            .unwrap_or(DEFAULT_TERMINAL_PASTE_PREVIEWABLE_IMAGES)
     }
 
     pub fn auto_sleep_duration(&self, target: SharedSettingsAutoSleepTarget) -> Option<Duration> {
@@ -959,6 +1013,15 @@ impl SharedSidebarSettingsService {
         })
     }
 
+    pub fn write_sidebar_side(
+        &mut self,
+        side: SharedSidebarSide,
+    ) -> Result<SharedSidebarSettingsWriteResult, SharedSidebarSettingsWriteError> {
+        let mut object = self.read_snapshot().object().clone();
+        side.write_to_settings_object(&mut object);
+        self.write_json_object(object)
+    }
+
     fn apply_observed_settings(
         &mut self,
         object: Map<String, Value>,
@@ -1011,6 +1074,16 @@ pub fn write_shared_sidebar_settings_object(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     service.write_json_object(object)
+}
+
+#[allow(dead_code)]
+pub fn write_shared_sidebar_side(
+    side: SharedSidebarSide,
+) -> Result<SharedSidebarSettingsWriteResult, SharedSidebarSettingsWriteError> {
+    let mut service = shared_sidebar_settings_service()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    service.write_sidebar_side(side)
 }
 
 fn shared_sidebar_settings_service() -> &'static Mutex<SharedSidebarSettingsService> {
@@ -1508,399 +1581,4 @@ fn json_value_to_f32(value: &Value) -> Option<f32> {
 fn json_number_value_to_f32(value: &Value) -> Option<f32> {
     let number = value.as_f64()?;
     number.is_finite().then_some(number as f32)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::ffi::OsString;
-
-    #[test]
-    fn path_contract_prefers_ghostex_home_then_existing_gpui_home_root() {
-        let ghostex_home = OsString::from("/tmp/ghostex-home");
-        let home = OsString::from("/tmp/home");
-
-        assert_eq!(
-            ghostex_home_root_from_env(Some(ghostex_home), Some(home.clone())),
-            PathBuf::from("/tmp/ghostex-home")
-        );
-        assert_eq!(
-            ghostex_home_root_from_env(None, Some(home)),
-            PathBuf::from("/tmp/home/.ghostex")
-        );
-        assert_eq!(
-            shared_sidebar_settings_path_from_root(Path::new("/tmp/ghostex-home")),
-            PathBuf::from("/tmp/ghostex-home/state/native-sidebar-settings.json")
-        );
-    }
-
-    #[test]
-    fn write_payload_rejects_non_objects_and_skips_byte_identical_writes() {
-        let root = std::env::temp_dir().join(format!(
-            "ghostex-gpui-shared-settings-test-{}-{}",
-            process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or(0)
-        ));
-        let path = root.join("state/native-sidebar-settings.json");
-        let mut service = SharedSidebarSettingsService::new(path.clone());
-
-        assert!(matches!(
-            service.write_json_object_payload("[]"),
-            Err(SharedSidebarSettingsWriteError::ExpectedObject)
-        ));
-
-        let first = service
-            .write_json_object_payload(
-                r#"{"debuggingMode":true,"showBetaFeatures":true,"browserFeedbackTool":"react-grab"}"#,
-            )
-            .expect("object payload should write");
-        assert_eq!(first.status, SharedSidebarSettingsWriteStatus::Changed);
-        assert!(first.snapshot.debugging_mode());
-        assert!(first.snapshot.show_beta_features());
-        assert_eq!(first.snapshot.browser_feedback_tool(), Some("react-grab"));
-
-        let second = service
-            .write_json_object_payload(
-                r#"{"debuggingMode":true,"showBetaFeatures":true,"browserFeedbackTool":"react-grab"}"#,
-            )
-            .expect("identical object payload should parse");
-        assert_eq!(second.status, SharedSidebarSettingsWriteStatus::Unchanged);
-        assert_eq!(second.snapshot.revision(), first.snapshot.revision());
-
-        let persisted = fs::read_to_string(path).expect("settings should persist");
-        assert!(persisted.contains("\"debuggingMode\": true"));
-
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn terminal_ghostty_surface_config_normalizes_font_size_only() {
-        assert_eq!(
-            normalize_terminal_font_size(None),
-            DEFAULT_TERMINAL_FONT_SIZE
-        );
-        assert_eq!(
-            normalize_terminal_font_size(Some(4.0)),
-            MIN_TERMINAL_FONT_SIZE
-        );
-        assert_eq!(
-            normalize_terminal_font_size(Some(40.0)),
-            MAX_TERMINAL_FONT_SIZE
-        );
-
-        let mut object = Map::new();
-        object.insert("terminalFontSize".to_string(), Value::from(16.5));
-        let settings = SharedSidebarSettingsSnapshot::from_object(object);
-        assert_eq!(settings.terminal_ghostty_surface_config().font_size(), 16.5);
-    }
-
-    #[test]
-    fn keep_awake_settings_parse_advanced_fields_with_shared_defaults() {
-        /*
-        CDXC:GPUITitlebarKeepAwake 2026-06-25-23:49:
-        Keep Awake Settings parity depends on Rust rejecting truthy non-boolean advanced fields and clamping only numeric battery thresholds, matching shared TypeScript normalization before automation can start or stop power assertions.
-        */
-        let defaults = SharedSidebarSettingsSnapshot::from_object(Map::new())
-            .keep_awake_titlebar_settings();
-        assert!(!defaults.activate_on_external_display);
-        assert!(!defaults.activate_on_launch);
-        assert_eq!(
-            defaults.battery_threshold_percent,
-            DEFAULT_KEEP_AWAKE_BATTERY_THRESHOLD_PERCENT
-        );
-        assert!(!defaults.deactivate_below_battery_threshold);
-        assert!(!defaults.deactivate_on_low_power_mode);
-        assert!(!defaults.deactivate_on_user_switch);
-        assert!(!defaults.prevent_lid_sleep);
-        assert!(!defaults.while_working_sessions);
-
-        let mut object = Map::new();
-        object.insert("showBetaFeatures".to_string(), Value::Bool(true));
-        object.insert(
-            "keepAwakeActivateOnExternalDisplay".to_string(),
-            Value::Bool(true),
-        );
-        object.insert("keepAwakeActivateOnLaunch".to_string(), Value::Bool(true));
-        object.insert(
-            "keepAwakeBatteryThresholdPercent".to_string(),
-            Value::from(2.0),
-        );
-        object.insert(
-            "keepAwakeDeactivateBelowBatteryThreshold".to_string(),
-            Value::Bool(true),
-        );
-        object.insert(
-            "keepAwakeDeactivateOnLowPowerMode".to_string(),
-            Value::Bool(true),
-        );
-        object.insert(
-            "keepAwakeDeactivateOnUserSwitch".to_string(),
-            Value::Bool(true),
-        );
-        object.insert("keepAwakePreventLidSleep".to_string(), Value::Bool(true));
-        object.insert(
-            "keepAwakeWhileWorkingSessions".to_string(),
-            Value::Bool(true),
-        );
-        let settings = SharedSidebarSettingsSnapshot::from_object(object)
-            .keep_awake_titlebar_settings();
-        assert!(settings.feature_enabled);
-        assert!(settings.activate_on_external_display);
-        assert!(settings.activate_on_launch);
-        assert_eq!(
-            settings.battery_threshold_percent,
-            MIN_KEEP_AWAKE_BATTERY_THRESHOLD_PERCENT
-        );
-        assert!(settings.deactivate_below_battery_threshold);
-        assert!(settings.deactivate_on_low_power_mode);
-        assert!(settings.deactivate_on_user_switch);
-        assert!(settings.prevent_lid_sleep);
-        assert!(settings.while_working_sessions);
-
-        let mut malformed = Map::new();
-        malformed.insert(
-            "keepAwakeActivateOnLaunch".to_string(),
-            Value::String("true".to_string()),
-        );
-        malformed.insert(
-            "keepAwakeBatteryThresholdPercent".to_string(),
-            Value::String("95".to_string()),
-        );
-        let settings = SharedSidebarSettingsSnapshot::from_object(malformed)
-            .keep_awake_titlebar_settings();
-        assert!(!settings.activate_on_launch);
-        assert_eq!(
-            settings.battery_threshold_percent,
-            DEFAULT_KEEP_AWAKE_BATTERY_THRESHOLD_PERCENT
-        );
-    }
-
-    #[test]
-    fn ghostty_config_path_prefers_existing_application_support_configs_then_default() {
-        let root = std::env::temp_dir().join(format!(
-            "ghostex-gpui-ghostty-config-path-test-{}-{}",
-            process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or(0)
-        ));
-        let home = root.join("home");
-        let ghostty_config_ghostty = home
-            .join("Library/Application Support/Ghostty")
-            .join("config.ghostty");
-        fs::create_dir_all(ghostty_config_ghostty.parent().unwrap()).unwrap();
-        fs::write(&ghostty_config_ghostty, "").unwrap();
-
-        assert_eq!(
-            selected_ghostty_config_path_from_home(Some(home.clone().into_os_string())).unwrap(),
-            ghostty_config_ghostty
-        );
-
-        let ghostty_org_config_ghostty = home
-            .join("Library/Application Support/com.ghostty.org")
-            .join("config.ghostty");
-        fs::create_dir_all(ghostty_org_config_ghostty.parent().unwrap()).unwrap();
-        fs::write(&ghostty_org_config_ghostty, "").unwrap();
-        assert_eq!(
-            selected_ghostty_config_path_from_home(Some(home.clone().into_os_string())).unwrap(),
-            ghostty_org_config_ghostty
-        );
-
-        let empty_home = root.join("empty-home");
-        assert_eq!(
-            selected_ghostty_config_path_from_home(Some(empty_home.clone().into_os_string()))
-                .unwrap(),
-            empty_home.join(GHOSTTY_CONFIG_DEFAULT_RELATIVE_PATH)
-        );
-        assert_eq!(selected_ghostty_config_path_from_home(None), None);
-
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn ghostty_config_action_merge_preserves_unrelated_keybinds_and_palette_entries() {
-        let merged = merge_ghostty_config_lines(
-            &[
-                "keybind = cmd+t=new_tab",
-                "keybind = super+e=previous_value",
-                "palette = 1=#ff0000",
-                "palette = 6=#old",
-                "theme = Dracula",
-                "font-size = 18",
-                "window-padding-x = 4",
-            ]
-            .join("\n"),
-            GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES,
-        );
-
-        assert!(merged.contains("keybind = cmd+t=new_tab"));
-        assert!(merged.contains("palette = 1=#ff0000"));
-        assert!(merged.contains("window-padding-x = 4"));
-        assert!(merged.contains("# Applied by Ghostex:"));
-        assert!(merged.contains("theme = GitHub Dark"));
-        assert!(!merged.contains("previous_value"));
-        assert!(!merged.contains("palette = 6=#old"));
-
-        assert_eq!(
-            merge_ghostty_config_lines(
-                &["theme = Dracula", "font-size = 18", "window-padding-x = 4"].join("\n"),
-                &[],
-            ),
-            "window-padding-x = 4\n"
-        );
-    }
-
-    #[test]
-    fn ghostty_terminal_config_merge_formats_managed_settings_and_preserves_user_lines() {
-        let mut object = Map::new();
-        object.insert(
-            "terminalFontFamily".to_string(),
-            Value::String("JetBrains Mono".to_string()),
-        );
-        object.insert("terminalFontSize".to_string(), Value::from(13.0));
-        object.insert("terminalFontWeight".to_string(), Value::from(650.0));
-        object.insert("terminalLineHeight".to_string(), Value::from(1.1));
-        object.insert("terminalLetterSpacing".to_string(), Value::from(0.5));
-        object.insert(
-            "terminalGhosttyTheme".to_string(),
-            Value::String("GitHub Dark Default".to_string()),
-        );
-        object.insert(
-            "terminalConfirmCloseSurface".to_string(),
-            Value::String("always".to_string()),
-        );
-        object.insert(
-            "terminalCopyOnSelect".to_string(),
-            Value::String("clipboard".to_string()),
-        );
-        object.insert("terminalCursorStyleBlink".to_string(), Value::Bool(false));
-        object.insert(
-            "terminalClipboardPasteProtection".to_string(),
-            Value::Bool(false),
-        );
-        object.insert(
-            "terminalClipboardTrimTrailingSpaces".to_string(),
-            Value::Bool(false),
-        );
-        object.insert(
-            "terminalMouseHideWhileTyping".to_string(),
-            Value::Bool(true),
-        );
-        object.insert(
-            "terminalMouseScrollMultiplierDiscrete".to_string(),
-            Value::from(4.0),
-        );
-        object.insert(
-            "terminalMouseScrollMultiplierPrecision".to_string(),
-            Value::from(0.75),
-        );
-        object.insert("terminalScrollbackLimitMb".to_string(), Value::from(25.0));
-        object.insert(
-            "terminalScrollbar".to_string(),
-            Value::String("never".to_string()),
-        );
-        let values = SharedGhosttyTerminalConfigValues::from_settings_object(&object);
-        let merged = merge_ghostty_terminal_settings(
-            &[
-                "font-family = Old",
-                "font-variation = wdth=110,wght=500",
-                "font-variation = ital=1",
-                "theme = Dracula",
-                "keybind = cmd+t=new_tab",
-                "keybind = super+e=previous_value",
-                "palette = 1=#ff0000",
-                "palette = 6=#old",
-                "window-padding-x = 4",
-            ]
-            .join("\n"),
-            &values,
-        );
-
-        assert!(merged.contains("font-family = \"JetBrains Mono\""));
-        assert!(merged.contains("font-size = 13"));
-        assert!(merged.contains("adjust-cell-height = 10%"));
-        assert!(merged.contains("adjust-cell-width = 0.5"));
-        assert!(merged.contains("scrollback-limit = 25000000"));
-        assert!(merged.contains("cursor-style-blink = false"));
-        assert!(merged.contains("copy-on-select = clipboard"));
-        assert!(merged.contains("confirm-close-surface = always"));
-        assert!(merged.contains("scrollbar = never"));
-        assert!(merged.contains("mouse-scroll-multiplier = precision:0.75,discrete:4"));
-        assert!(merged.contains("font-variation = ital=1"));
-        assert!(merged.contains("font-variation = wght=650"));
-        assert!(merged.contains("theme = \"GitHub Dark Default\""));
-        assert!(merged.contains("keybind = cmd+t=new_tab"));
-        assert!(merged.contains("palette = 1=#ff0000"));
-        assert!(merged.contains("window-padding-x = 4"));
-        assert!(!merged.contains("font-family = Old"));
-        assert!(!merged.contains("wght=500"));
-        assert!(!merged.contains("previous_value"));
-        assert!(!merged.contains("palette = 6=#old"));
-    }
-
-    #[test]
-    fn ghostty_terminal_config_change_detection_ignores_runtime_only_image_paste() {
-        let previous = Map::new();
-        let mut runtime_only = Map::new();
-        runtime_only.insert(
-            "terminalPastePreviewableImages".to_string(),
-            Value::Bool(false),
-        );
-        assert!(!ghostty_terminal_config_backed_settings_changed(
-            &previous,
-            &runtime_only
-        ));
-
-        let mut next = Map::new();
-        next.insert("terminalFontSize".to_string(), Value::from(16.0));
-        assert!(ghostty_terminal_config_backed_settings_changed(
-            &previous, &next
-        ));
-    }
-
-    #[test]
-    fn gxserver_agent_settings_use_shared_defaults_and_normalize_default_agent_id() {
-        let settings = SharedSidebarSettingsSnapshot::from_object(Map::new());
-        assert_eq!(
-            settings.gxserver_agent_settings(),
-            SharedGxserverAgentSettings::new(
-                DEFAULT_AGENT_ACCEPT_ALL_ENABLED,
-                DEFAULT_PROMPT_AGENT_ID,
-            )
-        );
-
-        let mut object = Map::new();
-        object.insert("agentAcceptAllEnabled".to_string(), Value::Bool(false));
-        object.insert(
-            "defaultPromptAgentId".to_string(),
-            Value::String(" claude ".to_string()),
-        );
-        let settings = SharedSidebarSettingsSnapshot::from_object(object);
-        assert_eq!(
-            settings.gxserver_agent_settings(),
-            SharedGxserverAgentSettings::new(false, "claude")
-        );
-
-        let mut malformed = Map::new();
-        malformed.insert(
-            "agentAcceptAllEnabled".to_string(),
-            Value::String("false".to_string()),
-        );
-        malformed.insert(
-            "defaultPromptAgentId".to_string(),
-            Value::String("".to_string()),
-        );
-        let settings = SharedSidebarSettingsSnapshot::from_object(malformed);
-        assert_eq!(
-            settings.gxserver_agent_settings(),
-            SharedGxserverAgentSettings::new(
-                DEFAULT_AGENT_ACCEPT_ALL_ENABLED,
-                DEFAULT_PROMPT_AGENT_ID,
-            )
-        );
-    }
 }

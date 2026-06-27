@@ -88,6 +88,7 @@ export type FirstLaunchSetupModalProps = {
   onInstallCuaDriver?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
+  onInstallMoveCodexSessionSkill?: () => void;
   onOpenAccessibilityPreferences?: () => void;
   onOpenScreenRecordingPreferences?: () => void;
   onRequestAgentHookStatus?: (agentIds?: readonly string[]) => void;
@@ -596,6 +597,11 @@ type FirstLaunchHookStatusGroup = {
  * Generated title skills should submit the staged rename through Ghostex's
  * native Enter bridge so macOS matches the Delayed Send key path.
  *
+ * CDXC:CodexSessionMove 2026-06-26-13:24:
+ * The first-launch bundled-skills page should install `$ghostex-move-codex-session`
+ * with the other app-shipped skills so agents can explain the fork-into-folder
+ * Codex workflow without users manually adding a local skill.
+ *
  * CDXC:FirstLaunchWelcome 2026-05-27-05:04:
  * First launch should start with a candid product welcome before setup tasks.
  * The page explains Ghostex as an intuitive Agent Development Environment that
@@ -668,6 +674,7 @@ export function FirstLaunchSetupModal({
   onInstallComputerUseSkill,
   onInstallCuaDriver,
   onInstallGenerateTitleSkill,
+  onInstallMoveCodexSessionSkill,
   onOpenAccessibilityPreferences,
   onOpenScreenRecordingPreferences,
   onRequestAgentHookStatus,
@@ -727,6 +734,9 @@ export function FirstLaunchSetupModal({
           }
           if (ghostexCliStatus.generateTitleSkillInstalled !== true) {
             onInstallGenerateTitleSkill?.();
+          }
+          if (ghostexCliStatus.moveCodexSessionSkillInstalled !== true) {
+            onInstallMoveCodexSessionSkill?.();
           }
         }
       : undefined;
@@ -818,6 +828,7 @@ export function FirstLaunchSetupModal({
               onInstallBrowserControl={onInstallBrowserControl}
               onInstallComputerUseSkill={onInstallComputerUseSkill}
               onInstallGenerateTitleSkill={onInstallGenerateTitleSkill}
+              onInstallMoveCodexSessionSkill={onInstallMoveCodexSessionSkill}
             />
           ) : (
             <FirstLaunchGuidePageView
@@ -1449,6 +1460,7 @@ function FirstLaunchSkillsPage({
   onInstallBrowserControl,
   onInstallComputerUseSkill,
   onInstallGenerateTitleSkill,
+  onInstallMoveCodexSessionSkill,
 }: {
   ghostexCliStatus?: SidebarGhostexCliStatusMessage;
   ghostexCliStatusLoading: boolean;
@@ -1456,6 +1468,7 @@ function FirstLaunchSkillsPage({
   onInstallBrowserControl?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
+  onInstallMoveCodexSessionSkill?: () => void;
 }) {
   return (
     <section className="first-launch-setup-guide-page" aria-labelledby="first-launch-skills-title">
@@ -1482,6 +1495,7 @@ function FirstLaunchSkillsPage({
           browserUse: onInstallBrowserControl,
           computerUse: onInstallComputerUseSkill,
           generateTitle: onInstallGenerateTitleSkill,
+          moveCodexSession: onInstallMoveCodexSessionSkill,
         }}
         showHeader={false}
       />
@@ -1869,7 +1883,8 @@ function areFirstLaunchBundledSkillsInstalled(
     ghostexCliStatus?.browserSkillInstalled === true &&
     ghostexCliStatus.computerUseSkillInstalled === true &&
     ghostexCliStatus.agentOrchestrationSkillInstalled === true &&
-    ghostexCliStatus.generateTitleSkillInstalled === true
+    ghostexCliStatus.generateTitleSkillInstalled === true &&
+    ghostexCliStatus.moveCodexSessionSkillInstalled === true
   );
 }
 

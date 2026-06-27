@@ -690,6 +690,13 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
   beta: ["showBetaFeatures"],
 };
 
+/**
+ * CDXC:SidebarSessionRename 2026-06-26-06:27:
+ * The double-click rename setting title must disclose that enabling it makes single-click session selection respond a bit slower because the card waits for a possible second click before treating the gesture as normal selection.
+ */
+const RENAME_SESSION_ON_DOUBLE_CLICK_SETTING_TITLE =
+  "Double-click session cards to rename (Makes clicking on a session respond a bit slower so we can detect the double click)";
+
 /*
  * CDXC:SettingsAdvanced 2026-06-16-01:35:
  * The first Settings page should default to everyday controls and hide precision tuning, support/debug toggles, context-menu utilities, and provider-specific terminal options until users enable Show Advanced. Search still exposes matching advanced controls so discoverability is not tied to browsing mode.
@@ -938,6 +945,7 @@ export type SettingsModalProps = {
   onInstallGenerateTitleSkill?: () => void;
   onInstallGte?: () => void;
   onInstallGhostexCli?: () => void;
+  onInstallMoveCodexSessionSkill?: () => void;
   onPlayCompletionSound?: (sound: CompletionSoundSetting) => void;
   onRequestMacOSNotificationPermission?: () => void;
   onInstallAgentHooks?: () => void;
@@ -988,6 +996,7 @@ export function SettingsModal({
   onInstallGenerateTitleSkill,
   onInstallGte,
   onInstallGhostexCli,
+  onInstallMoveCodexSessionSkill,
   onPlayCompletionSound,
   onRequestMacOSNotificationPermission,
   onInstallAgentHooks,
@@ -1647,7 +1656,7 @@ export function SettingsModal({
       {
         key: "renameSessionOnDoubleClick",
         subtitle: "Rename sessions directly from their cards.",
-        title: "Double-click session cards to rename",
+        title: RENAME_SESSION_ON_DOUBLE_CLICK_SETTING_TITLE,
       },
     ]),
     theming: getSettingsSectionSearch(settingsSearchQuery, "Theming", [
@@ -2847,7 +2856,7 @@ export function SettingsModal({
               <ToggleField
                 checked={draft.renameSessionOnDoubleClick}
                 description="Rename sessions directly from their cards."
-                label="Double-click session cards to rename"
+                label={RENAME_SESSION_ON_DOUBLE_CLICK_SETTING_TITLE}
                 {...getSettingModificationProps("renameSessionOnDoubleClick")}
                 onChange={(checked) => updateDraft("renameSessionOnDoubleClick", checked)}
               />
@@ -4289,6 +4298,7 @@ export function SettingsModal({
               onInstallCuaDriver={onInstallCuaDriver}
               onInstallGenerateTitleSkill={onInstallGenerateTitleSkill}
               onInstallGhostexCli={onInstallGhostexCli}
+              onInstallMoveCodexSessionSkill={onInstallMoveCodexSessionSkill}
               onUninstallAgentHooks={onUninstallAgentHooks}
               onUninstallBundledAgentSkills={onUninstallBundledAgentSkills}
               onOpenAccessibilityPreferences={onOpenAccessibilityPreferences}
@@ -6323,7 +6333,8 @@ function hasInstalledBundledAgentSkills(
     ghostexCliStatus?.agentOrchestrationSkillInstalled === true ||
     ghostexCliStatus?.browserSkillInstalled === true ||
     ghostexCliStatus?.computerUseSkillInstalled === true ||
-    ghostexCliStatus?.generateTitleSkillInstalled === true
+    ghostexCliStatus?.generateTitleSkillInstalled === true ||
+    ghostexCliStatus?.moveCodexSessionSkillInstalled === true
   );
 }
 
@@ -6343,6 +6354,7 @@ function IntegrationsSettingsTab({
   onInstallCuaDriver,
   onInstallGenerateTitleSkill,
   onInstallGhostexCli,
+  onInstallMoveCodexSessionSkill,
   onUninstallAgentHooks,
   onUninstallBundledAgentSkills,
   onOpenAccessibilityPreferences,
@@ -6365,6 +6377,7 @@ function IntegrationsSettingsTab({
   onInstallCuaDriver?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
+  onInstallMoveCodexSessionSkill?: () => void;
   onUninstallAgentHooks?: () => void;
   onUninstallBundledAgentSkills?: () => void;
   onOpenAccessibilityPreferences?: () => void;
@@ -6508,6 +6521,7 @@ function IntegrationsSettingsTab({
               browserUse: onInstallBrowserControl,
               computerUse: onInstallComputerUseSkill,
               generateTitle: onInstallGenerateTitleSkill,
+              moveCodexSession: onInstallMoveCodexSessionSkill,
             }}
             onRefreshStatus={onRequestGhostexCliStatus}
           />

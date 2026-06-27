@@ -22,6 +22,8 @@ const commandPaletteSource = readFileSync(
   new URL("./command-palette.tsx", import.meta.url),
   "utf8",
 );
+const gpuiMainSource = readFileSync(new URL("../gpui/src/main.rs", import.meta.url), "utf8");
+const sidebarAppSource = readFileSync(new URL("./sidebar-app.tsx", import.meta.url), "utf8");
 const commandPaletteSearchSource = readFileSync(
   new URL("./command-palette-session-search.ts", import.meta.url),
   "utf8",
@@ -439,10 +441,10 @@ describe("command palette source contracts", () => {
 
   test("keeps command-palette Action launch messages authority-only", () => {
     /*
-     * CDXC:GPUICommandPane 2026-06-26-05:11:
+     * CDXC:GPUICommandPane 2026-06-27-07:54:
      * Command Palette Action launches may use saved command metadata to pick
-     * debug runMode, but the runSidebarCommand message must not forward
-     * renderer-owned launch details such as close-on-exit.
+     * debug runMode, but the `runSidebarCommand` message must remain exactly
+     * selector-shaped: command id, optional non-default runMode, and type.
      */
     const runProjectCommandStart = commandPaletteSource.indexOf("const runProjectCommand");
     const runProjectCommandEnd = commandPaletteSource.indexOf(
@@ -455,15 +457,22 @@ describe("command palette source contracts", () => {
       runProjectCommandStart,
       runProjectCommandEnd,
     );
+    const postMessageStart = runProjectCommandSource.indexOf("vscode.postMessage({");
+    const postMessageEnd = runProjectCommandSource.indexOf("});", postMessageStart);
+    expect(postMessageStart).toBeGreaterThanOrEqual(0);
+    expect(postMessageEnd).toBeGreaterThan(postMessageStart);
+    const postMessageSource = runProjectCommandSource.slice(
+      postMessageStart,
+      postMessageEnd + "});".length,
+    );
 
     expect(runProjectCommandSource).toContain("getSidebarCommandRunModeForClick(");
     expect(runProjectCommandSource).toContain("commandRunStates[command.commandId]");
-    expect(runProjectCommandSource).toContain("commandId: command.commandId");
-    expect(runProjectCommandSource).toContain('...(runMode === "default" ? {} : { runMode })');
-    expect(runProjectCommandSource).toContain('type: "runSidebarCommand"');
-    expect(runProjectCommandSource).not.toContain(
-      "closeTerminalOnExit: command.closeTerminalOnExit",
-    );
+    expect(postMessageSource.trim()).toBe(`vscode.postMessage({
+      commandId: command.commandId,
+      ...(runMode === "default" ? {} : { runMode }),
+      type: "runSidebarCommand",
+    });`);
   });
 
   test("keeps command-palette focused-pane hotkey messages authority-only", () => {
@@ -516,6 +525,327 @@ describe("command palette source contracts", () => {
       actionId: command.definition.id,
       type: "runGhostexHotkeyAction",
     });`);
+  });
+
+  test("keeps sidebar native hotkey bounce and forwarding authority-only", () => {
+    /*
+     * CDXC:HotkeyRouting 2026-06-26-23:04:
+     * Sidebar DOM hotkey dispatch must delegate Rename Active Session, Open
+     * Commands Panel, Start Action slots, Focus Previous/Next Group,
+     * Directional Focus, and Split Sideways/Downwards to the same native-owned
+     * runGhostexHotkeyAction bridge used by command-palette selection. The
+     * payload may identify only the action id and message type; native resolves
+     * authority state without renderer session ids, titles, paths, command text,
+     * URLs, or launch metadata.
+     *
+     * CDXC:HotkeyRouting 2026-06-26-23:20:
+     * GPUI can safely bounce numbered Focus Session slot hotkeys to SidebarApp
+     * because the renderer owns rendered slot order. Native-owned forwarding
+     * remains authority-only for other actions, with the payload limited to
+     * action id and bridge type.
+     *
+     * CDXC:GPUIProjectHotkeys 2026-06-26-23:42:
+     * GPUI project slot hotkeys use a separate host message so SidebarApp can
+     * resolve rendered Projects row order locally. That message must not call
+     * runGhostexHotkeyAction, while SidebarApp DOM jumpToProject actions stay
+     * in the ordinary native-forwarding branch.
+     *
+     * CDXC:HotkeyRouting 2026-06-26-23:58:
+     * setViewMode is native-owned when present in the shared action union.
+     * Source coverage verifies SidebarApp forwards the action kind without
+     * inventing concrete hotkey ids or handling View Mode locally.
+     */
+    const contractMessageStart = sessionGridContractSource.indexOf(
+      "export type SidebarGpuiProjectSlotHotkeyMessage",
+    );
+    const contractMessageEnd = sessionGridContractSource.indexOf(
+      "export type ExtensionToSidebarMessage",
+      contractMessageStart,
+    );
+    expect(contractMessageStart).toBeGreaterThanOrEqual(0);
+    expect(contractMessageEnd).toBeGreaterThan(contractMessageStart);
+    const contractMessageSource = sessionGridContractSource.slice(
+      contractMessageStart,
+      contractMessageEnd,
+    );
+    const extensionMessageStart = sessionGridContractSource.indexOf(
+      "export type ExtensionToSidebarMessage",
+    );
+    const extensionMessageEnd = sessionGridContractSource.indexOf(
+      "export type SidebarToExtensionMessage",
+      extensionMessageStart,
+    );
+    expect(extensionMessageStart).toBeGreaterThanOrEqual(0);
+    expect(extensionMessageEnd).toBeGreaterThan(extensionMessageStart);
+    const extensionMessageSource = sessionGridContractSource.slice(
+      extensionMessageStart,
+      extensionMessageEnd,
+    );
+
+    const handleWindowMessageStart = sidebarAppSource.indexOf(
+      "const handleWindowMessage = useEffectEvent",
+    );
+    const handleWindowMessageEnd = sidebarAppSource.indexOf(
+      '    if (event.data.type === "playCompletionSound")',
+      handleWindowMessageStart,
+    );
+    expect(handleWindowMessageStart).toBeGreaterThanOrEqual(0);
+    expect(handleWindowMessageEnd).toBeGreaterThan(handleWindowMessageStart);
+    const handleWindowMessageSource = sidebarAppSource.slice(
+      handleWindowMessageStart,
+      handleWindowMessageEnd,
+    );
+
+    const runHotkeyStart = sidebarAppSource.indexOf(
+      "const runGhostexHotkeyAction = useEffectEvent",
+    );
+    const runHotkeyEnd = sidebarAppSource.indexOf("  });\n  useLayoutEffect", runHotkeyStart);
+    expect(runHotkeyStart).toBeGreaterThanOrEqual(0);
+    expect(runHotkeyEnd).toBeGreaterThan(runHotkeyStart);
+    const runHotkeySource = sidebarAppSource.slice(runHotkeyStart, runHotkeyEnd);
+
+    const gpuiProjectSlotResolverStart = sidebarAppSource.indexOf(
+      "const resolveGpuiProjectSlotHotkey = useEffectEvent",
+    );
+    const gpuiProjectSlotResolverEnd = sidebarAppSource.indexOf(
+      "  });\n  useEffect(() => {\n    const handleProjectJumpEvent",
+      gpuiProjectSlotResolverStart,
+    );
+    expect(gpuiProjectSlotResolverStart).toBeGreaterThanOrEqual(0);
+    expect(gpuiProjectSlotResolverEnd).toBeGreaterThan(gpuiProjectSlotResolverStart);
+    const gpuiProjectSlotResolverSource = sidebarAppSource.slice(
+      gpuiProjectSlotResolverStart,
+      gpuiProjectSlotResolverEnd,
+    );
+
+    const gpuiProjectMessageStart = handleWindowMessageSource.indexOf(
+      'event.data.type === "gpuiProjectSlotHotkey"',
+    );
+    const nativeHotkeyMessageStart = handleWindowMessageSource.indexOf(
+      'event.data.type === "nativeHotkey"',
+    );
+    expect(gpuiProjectMessageStart).toBeGreaterThanOrEqual(0);
+    expect(nativeHotkeyMessageStart).toBeGreaterThan(gpuiProjectMessageStart);
+    const forwardingBranchStart = runHotkeySource.indexOf(
+      'action.kind === "focusAdjacentGroup"',
+    );
+    const localSessionSlotBranchStart = runHotkeySource.indexOf(
+      'action.kind === "focusSessionSlot"',
+    );
+    const createSessionBranchStart = runHotkeySource.indexOf(
+      'action.kind === "createSession"',
+      localSessionSlotBranchStart,
+    );
+    const hotkeyMessageStart = runHotkeySource.indexOf(
+      'vscode.postMessage({ actionId: action.id, type: "runGhostexHotkeyAction" });',
+      forwardingBranchStart,
+    );
+    expect(localSessionSlotBranchStart).toBeGreaterThanOrEqual(0);
+    expect(createSessionBranchStart).toBeGreaterThan(localSessionSlotBranchStart);
+    expect(forwardingBranchStart).toBeGreaterThanOrEqual(0);
+    expect(forwardingBranchStart).toBeGreaterThan(localSessionSlotBranchStart);
+    expect(hotkeyMessageStart).toBeGreaterThan(forwardingBranchStart);
+    const localHandledSource = runHotkeySource.slice(0, forwardingBranchStart);
+    const localSessionSlotBranchSource = runHotkeySource.slice(
+      localSessionSlotBranchStart,
+      createSessionBranchStart,
+    );
+    const forwardingBranchSource = runHotkeySource.slice(
+      forwardingBranchStart,
+      hotkeyMessageStart,
+    );
+    const hotkeyMessageEnd = runHotkeySource.indexOf("\n    }", hotkeyMessageStart);
+    expect(hotkeyMessageEnd).toBeGreaterThan(hotkeyMessageStart);
+    const hotkeyMessageSource = runHotkeySource.slice(hotkeyMessageStart, hotkeyMessageEnd);
+
+    expect(contractMessageSource).toContain('type: "gpuiProjectSlotHotkey";');
+    expect(contractMessageSource).toContain("slotNumber: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;");
+    expect(extensionMessageSource).toContain("| SidebarNativeHotkeyMessage");
+    expect(extensionMessageSource).toContain("| SidebarGpuiProjectSlotHotkeyMessage");
+    expect(handleWindowMessageSource).toContain(`if (event.data.type === "gpuiProjectSlotHotkey") {
+      resolveGpuiProjectSlotHotkey(event.data.slotNumber);
+      return;
+    }`);
+    expect(handleWindowMessageSource).toContain(`if (event.data.type === "nativeHotkey") {
+      runGhostexHotkeyAction(event.data.actionId);
+      return;
+    }`);
+    expect(gpuiProjectSlotResolverSource).toContain("Number.isInteger(slotNumber)");
+    expect(gpuiProjectSlotResolverSource).toContain(
+      "displayedReferenceProjectGroupIds[ slotNumber - 1 ]",
+    );
+    expect(gpuiProjectSlotResolverSource).toContain(
+      "groupsById[ groupId ]?.projectContext?.editor.projectId",
+    );
+    expect(gpuiProjectSlotResolverSource).toContain("handleSidebarProjectJump({");
+    expect(gpuiProjectSlotResolverSource).toContain(
+      "expandCollapsedProject: settings.expandCollapsedProjectsOnJump",
+    );
+    expect(gpuiProjectSlotResolverSource).toContain(
+      "showLessAfterExpand: settings.showLessForExpandedProjectJumps",
+    );
+    expect(gpuiProjectSlotResolverSource).toContain("revealFocusedSession: true");
+    expect(gpuiProjectSlotResolverSource).toContain(
+      "displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []",
+    );
+    expect(gpuiProjectSlotResolverSource).toContain(
+      "sessionsById[ sessionId ]?.isFocused === true",
+    );
+    expect(gpuiProjectSlotResolverSource).toContain(
+      "focusSidebarSessionFromNavigation(groupId, targetSessionId);",
+    );
+    expect(gpuiProjectSlotResolverSource).toContain(`vscode.postMessage({
+      sessionId: targetSessionId,
+      type: "focusSession",
+    });`);
+    expect(gpuiProjectSlotResolverSource).not.toContain('type: "focusGroup"');
+    expect(gpuiProjectSlotResolverSource).not.toContain("runGhostexHotkeyAction");
+    expect(localSessionSlotBranchSource).toContain('action.kind === "focusSessionSlot"');
+    expect(localSessionSlotBranchSource).toContain(
+      'dismissAppModalForSidebarNavigation("SettingsDismissal:focusSessionHotkey");',
+    );
+    expect(localSessionSlotBranchSource).toContain("focusSidebarSessionSlot(action.slotNumber);");
+    expect(localSessionSlotBranchSource).toContain("return;");
+    expect(localSessionSlotBranchSource).not.toContain("vscode.postMessage");
+    expect(forwardingBranchSource).toContain('action.kind === "focusAdjacentGroup"');
+    expect(forwardingBranchSource).toContain('action.kind === "focusDirection"');
+    expect(forwardingBranchSource).toContain('action.kind === "focusedPaneAction"');
+    expect(forwardingBranchSource).toContain('action.kind === "jumpToProject"');
+    expect(forwardingBranchSource).toContain('action.kind === "openCommandsPanel"');
+    expect(forwardingBranchSource).toContain('action.kind === "renameActiveSession"');
+    expect(forwardingBranchSource).toContain('action.kind === "runActionSlot"');
+    expect(forwardingBranchSource).toContain('action.kind === "setViewMode"');
+    expect(forwardingBranchSource).toContain('action.kind === "splitFocusedPane"');
+    expect(forwardingBranchSource).toContain('action.kind === "switchWorkareaView"');
+    expect(localHandledSource).not.toContain('action.kind === "setViewMode"');
+    expect(forwardingBranchSource).not.toContain('action.kind === "focusSessionSlot"');
+    expect(hotkeyMessageSource.trim()).toBe(
+      'vscode.postMessage({ actionId: action.id, type: "runGhostexHotkeyAction" });',
+    );
+  });
+
+  test("routes GPUI Open Commands Panel through open/focus instead of modal or toggle fallback", () => {
+    /*
+     * CDXC:GPUICommandPalette 2026-06-27-08:11:
+     * The shared Open Commands Panel command-palette row must stay an authority-only `runGhostexHotkeyAction` selector while GPUI routes `openCommandsPanel` to the command-pane open/focus path. This route must not collapse an already-visible command pane, must not carry renderer session/focus/path fields, and must not disturb the Settings app-modal hotkey route.
+     */
+    const runBuiltInCommandStart = commandPaletteSource.indexOf("const runBuiltInCommand");
+    const runBuiltInCommandEnd = commandPaletteSource.indexOf(
+      "  const runProjectCommand",
+      runBuiltInCommandStart,
+    );
+    expect(runBuiltInCommandStart).toBeGreaterThanOrEqual(0);
+    expect(runBuiltInCommandEnd).toBeGreaterThan(runBuiltInCommandStart);
+    const runBuiltInCommandSource = commandPaletteSource.slice(
+      runBuiltInCommandStart,
+      runBuiltInCommandEnd,
+    );
+    const builtInHotkeyMessageStart = runBuiltInCommandSource.indexOf(
+      "vscode.postMessage({\n      actionId: command.definition.id",
+    );
+    const builtInHotkeyMessageEnd = runBuiltInCommandSource.indexOf(
+      "  };\n",
+      builtInHotkeyMessageStart,
+    );
+    expect(builtInHotkeyMessageStart).toBeGreaterThanOrEqual(0);
+    expect(builtInHotkeyMessageEnd).toBeGreaterThan(builtInHotkeyMessageStart);
+    const builtInHotkeyMessageSource = runBuiltInCommandSource.slice(
+      builtInHotkeyMessageStart,
+      builtInHotkeyMessageEnd,
+    );
+
+    const focusedPaneMapperStart = gpuiMainSource.indexOf(
+      "fn gpui_focused_pane_hotkey_action",
+    );
+    const focusedPaneMapperEnd = gpuiMainSource.indexOf(
+      "fn gpui_command_palette_switch_workarea_hotkey_mode",
+      focusedPaneMapperStart,
+    );
+    expect(focusedPaneMapperStart).toBeGreaterThanOrEqual(0);
+    expect(focusedPaneMapperEnd).toBeGreaterThan(focusedPaneMapperStart);
+    const focusedPaneMapperSource = gpuiMainSource.slice(
+      focusedPaneMapperStart,
+      focusedPaneMapperEnd,
+    );
+
+    const gpuiHotkeyBranchStart = gpuiMainSource.indexOf('"runGhostexHotkeyAction" => {');
+    const gpuiHotkeyBranchEnd = gpuiMainSource.indexOf(
+      '"refreshDaemonSessions" => {',
+      gpuiHotkeyBranchStart,
+    );
+    expect(gpuiHotkeyBranchStart).toBeGreaterThanOrEqual(0);
+    expect(gpuiHotkeyBranchEnd).toBeGreaterThan(gpuiHotkeyBranchStart);
+    const gpuiHotkeyBranchSource = gpuiMainSource.slice(
+      gpuiHotkeyBranchStart,
+      gpuiHotkeyBranchEnd,
+    );
+    const openCommandsRouteStart = gpuiHotkeyBranchSource.indexOf(
+      "Some(GpuiFocusedPaneHotkeyAction::OpenCommandsPanel)",
+    );
+    const openBrowserRouteStart = gpuiHotkeyBranchSource.indexOf(
+      "Some(GpuiFocusedPaneHotkeyAction::OpenBrowserPane)",
+      openCommandsRouteStart,
+    );
+    const modalFallbackStart = gpuiHotkeyBranchSource.indexOf(
+      "gpui_app_modal_kind_for_hotkey_action_id",
+      openCommandsRouteStart,
+    );
+    expect(openCommandsRouteStart).toBeGreaterThanOrEqual(0);
+    expect(openBrowserRouteStart).toBeGreaterThan(openCommandsRouteStart);
+    expect(modalFallbackStart).toBeGreaterThan(openCommandsRouteStart);
+    const openCommandsRouteSource = gpuiHotkeyBranchSource.slice(
+      openCommandsRouteStart,
+      openBrowserRouteStart,
+    );
+
+    const paletteOpenStart = gpuiMainSource.indexOf("fn open_command_pane_from_command_palette");
+    const paletteOpenEnd = gpuiMainSource.indexOf(
+      "    fn handle_command_pane_control_action",
+      paletteOpenStart,
+    );
+    expect(paletteOpenStart).toBeGreaterThanOrEqual(0);
+    expect(paletteOpenEnd).toBeGreaterThan(paletteOpenStart);
+    const paletteOpenSource = gpuiMainSource.slice(paletteOpenStart, paletteOpenEnd);
+
+    const appModalMapperStart = gpuiMainSource.indexOf(
+      "fn gpui_app_modal_kind_for_hotkey_action_id",
+    );
+    const appModalMapperEnd = gpuiMainSource.indexOf(
+      "enum GpuiKeepAwakeRuntimeSource",
+      appModalMapperStart,
+    );
+    expect(appModalMapperStart).toBeGreaterThanOrEqual(0);
+    expect(appModalMapperEnd).toBeGreaterThan(appModalMapperStart);
+    const appModalMapperSource = gpuiMainSource.slice(appModalMapperStart, appModalMapperEnd);
+
+    expect(runBuiltInCommandSource).toContain('type: "runGhostexHotkeyAction"');
+    expect(builtInHotkeyMessageSource.trim()).toBe(`vscode.postMessage({
+      actionId: command.definition.id,
+      type: "runGhostexHotkeyAction",
+    });`);
+    expect(builtInHotkeyMessageSource).not.toContain("sessionId");
+    expect(builtInHotkeyMessageSource).not.toContain("focusedSessionId");
+    expect(builtInHotkeyMessageSource).not.toContain("projectId");
+    expect(builtInHotkeyMessageSource).not.toContain("path");
+    expect(focusedPaneMapperSource).toContain(
+      '"openCommandsPanel" => Some(GpuiFocusedPaneHotkeyAction::OpenCommandsPanel)',
+    );
+    expect(openCommandsRouteSource).toContain("self.open_command_pane_from_command_palette(window, cx);");
+    expect(openCommandsRouteSource).toContain("return;");
+    expect(openCommandsRouteSource).not.toContain("open_gpui_app_modal_window");
+    expect(openCommandsRouteSource).not.toContain("toggle_command_pane_from_keyboard");
+    expect(paletteOpenSource).toContain("command_pane_palette_open_decision");
+    expect(paletteOpenSource).toContain("CommandPanePaletteOpenDecision::OpenAndFocus");
+    expect(paletteOpenSource).toContain("CommandPanePaletteOpenDecision::FocusVisible");
+    expect(paletteOpenSource).toContain("self.open_command_pane_from_shared_settings(window)");
+    expect(paletteOpenSource).toContain("self.focus_command_pane();");
+    expect(paletteOpenSource).toContain("self.persist_shell_layout_state();");
+    expect(paletteOpenSource).toContain("self.refresh_sidebar_command_pane_sessions_if_changed(cx);");
+    expect(paletteOpenSource).not.toContain("toggle_command_pane_from_keyboard");
+    expect(appModalMapperSource).toContain(
+      '"openSettings" => Some(GpuiAppModalKind::Settings)',
+    );
+    expect(appModalMapperSource).not.toContain('"openCommandsPanel"');
   });
 
   test("exposes global app modals and main-window actions in command mode", () => {

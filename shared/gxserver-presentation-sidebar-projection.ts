@@ -41,6 +41,7 @@ export type GxserverPresentationCloseAfterDoneProjection = {
 
 export type GxserverPresentationSidebarProjectOverlay = {
   editor?: NonNullable<SidebarSessionGroup["projectContext"]>["editor"];
+  iconDataUrl?: string;
   isChatProject?: boolean;
   isQuickProject?: boolean;
   orderIndex?: number;
@@ -292,6 +293,7 @@ export function createGxserverPresentationSidebarGroup({
   const projectContext = {
     canRemoveProject,
     editor: projectOverlay?.editor ?? createIdleGxserverPresentationProjectEditorState(project.projectId),
+    iconDataUrl: projectOverlay?.iconDataUrl,
     path: projectOverlay?.path || project.path || "",
     theme: projectOverlay?.theme,
     themeColor: projectOverlay?.themeColor,

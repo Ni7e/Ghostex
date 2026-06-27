@@ -131,8 +131,25 @@ Bring the GPUI app titlebar and related modal UI/UX to production parity with th
 - High-level technical approach: reused the gxserver/sidebar-projected command button contract for action definitions; browser actions switch/wake the GPUI Browser and load the saved URL through the existing Browser CEF path; terminal actions create a command-pane tab and attach the saved command through the explicit command-terminal launch-payload source for that exact command slot.
 - Privacy/layout behavior: no persistent logs, OS browser opens, shell-outs from the titlebar, React overlays, hidden hit regions, synthetic routing, fake run-state success, command-text notifications, or durable command/URL persistence were added.
 - Exact files touched: `gpui/src/main.rs` and `gpui/TITLEBAR_APP_MODAL_PARITY_PROGRESS.md`.
-- Remaining gaps: GPUI still lacks command-pane run-state feedback/reuse/write-into-existing-terminal authority, so terminal titlebar actions create a fresh command-pane run instead of claiming idle reuse or success/error state.
+<!--
+CDXC:GPUITitlebarActions 2026-06-27-09:10:
+Workspace parity slices 489, 507, and 510 superseded Worker 12's terminal Action limitation by adding Action run id/status-file lifecycle, mounted idle Action reuse/write into the exact command surface, and stale command-pane HUD filtering.
+-->
+- Superseded gap: the command-pane Action reuse/run-state/write-into-existing-terminal limitation recorded in Worker 12 is no longer a remaining titlebar gap because later workspace parity slices 489, 507, and 510 delivered the needed Action lifecycle, mounted idle-surface reuse/write, and stale HUD filtering behavior.
+- Runtime validation caveat: end-to-end GPUI titlebar Actions menu/run/HUD behavior still has not been validated in this ledger because this slice did not run build, test, app, or browser verification.
 - Verification: no verification commands were run; no build, test, format, typecheck, app launch/restart, browser automation, or `bun run start` command was run.
+
+### 2026-06-27-09:26 Task Slice - Titlebar Action Debug Rerun Parity
+
+<!--
+CDXC:GPUITitlebarActions 2026-06-27-09:26:
+GPUI's Rust-owned titlebar Actions button now mirrors the shared command-palette click rule for close-on-exit terminal Actions. Use only process-local sanitized run feedback to decide Debug reruns, and keep sidebar bridge `runMode` payloads authoritative so renderer selectors cannot be reinterpreted by stale titlebar state.
+-->
+
+- User-facing behavior delivered: after a close-on-exit terminal Action fails and has no active run, rerunning it from the GPUI titlebar Actions button, menu row, or positional Action hotkey opens the Debug Action path instead of starting another hidden command-pane run. Active/running, successful, browser, and normal terminal Actions still run in Default mode.
+- High-level technical approach: added a process-local sanitized Action run-feedback mirror in Rust, updated it from the existing sidebar run-state dispatch/clear boundary, and routed only titlebar/menu/index click sources through a titlebar-specific run-mode resolver before the shared action runner.
+- Privacy/layout behavior: stored only command ids, active run ids, and coarse run state; no command text, URLs, cwd/env, paths, status-file paths, terminal output, logs, shell-state data, overlays, hit-test routing, or app restarts were added.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; focused Rust tests for `titlebar_action_click_run_mode_tracks_sanitized_feedback_without_payload_override`, `gpui_sidebar_command_action_parser_accepts_only_matching_action_target`, and the broader `command_` filter passed. No app launch/restart, browser automation, or `bun run start` was run.
 
 ### 2026-06-24-14:30 Worker 13 - Visible Resources Titlebar Route
 

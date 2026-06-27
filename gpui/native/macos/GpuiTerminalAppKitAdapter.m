@@ -1,6 +1,9 @@
 #import <AppKit/AppKit.h>
 #import <Carbon/Carbon.h>
 #import <QuartzCore/QuartzCore.h>
+#if __has_include(<UniformTypeIdentifiers/UniformTypeIdentifiers.h>)
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#endif
 #import <stdint.h>
 #import <stdbool.h>
 
@@ -33,6 +36,10 @@ extern int GhostexGpuiTerminalHandleNativeKeyEvent(
   const char* text,
   uint32_t unshiftedCodepoint,
   int composing);
+extern int GhostexGpuiTerminalInsertDroppedText(void* nativeView, const char* bytes, uintptr_t len);
+extern int GhostexGpuiTerminalInsertCommittedText(void* nativeView, const char* bytes, uintptr_t len);
+extern int GhostexGpuiTerminalSetPreeditText(void* nativeView, const char* bytes, uintptr_t len);
+extern int GhostexGpuiTerminalGetImePoint(void* nativeView, double* x, double* y, double* width, double* height);
 
 /*
  CDXC:GPUTerminalAppKitAdapter 2026-06-22-20:58:
@@ -46,6 +53,12 @@ extern int GhostexGpuiTerminalHandleNativeKeyEvent(
 
  CDXC:GPUITerminalNativeKeyBridge 2026-06-24-20:58:
  The GPUI host view is the exact AppKit responder for mounted Ghostty terminals because GPUI key events do not expose the native macOS keycode required for Return, Backspace, arrows, modifiers, and bindings. Forward only synchronous key primitives from this child view to Rust; do not add root/window routing, transparent overlays, hit-test overrides, command text logging, terminal-content capture, or persistent state.
+
+ CDXC:GPUITerminalFileDrop 2026-06-27-03:32:
+ Direct terminal file and image drops for Agents and command-pane terminals must use the real mounted host view as the drag destination and insert only transient formatted text through Rust. Keep this path free of overlays, hit-test routing, persistent logging, and file persistence so drag/drop matches native Swift terminal pane behavior.
+
+ CDXC:GPUITerminalIME 2026-06-27-03:46:
+ Agents and command-pane Ghostty host views must use AppKit NSTextInputClient for printable, Space, dead-key, and CJK composition while command/control shortcuts remain raw only when no marked text exists. Keep marked text and per-key committed text runtime-only, route committed/preedit bytes and candidate geometry synchronously through the exact host-view Rust callbacks, and do not add overlays, hit-test routing, Escape sidebands during composition, logs, persistence, command-text storage, terminal content capture, or focused-surface fallback.
  */
 static int GhostexGpuiTerminalGhosttyMods(NSEventModifierFlags flags) {
   int mods = GhostexGpuiGhosttyModsNone;
@@ -154,10 +167,245 @@ static const char* GhostexGpuiTerminalKeyTextCString(NSString* text) {
   return value;
 }
 
-@interface GhostexGpuiTerminalHostView : NSView
+static BOOL GhostexGpuiTerminalShouldBypassTextInput(NSEvent* event, BOOL hasMarkedText) {
+  if (hasMarkedText) {
+    return NO;
+  }
+
+  NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+  return (flags & NSEventModifierFlagCommand) != 0 || (flags & NSEventModifierFlagControl) != 0;
+}
+
+static NSEvent* GhostexGpuiTerminalTranslatedTextInputEvent(
+  NSEvent* event,
+  NSEventModifierFlags translationFlags) {
+  if (translationFlags == event.modifierFlags) {
+    return event;
+  }
+
+  NSEvent* translatedEvent = [NSEvent keyEventWithType:event.type
+                                             location:event.locationInWindow
+                                        modifierFlags:translationFlags
+                                            timestamp:event.timestamp
+                                         windowNumber:event.windowNumber
+                                              context:nil
+                                           characters:[event charactersByApplyingModifiers:translationFlags] ?: @""
+                          charactersIgnoringModifiers:event.charactersIgnoringModifiers ?: @""
+                                            isARepeat:event.isARepeat
+                                              keyCode:event.keyCode];
+  return translatedEvent ?: event;
+}
+
+static int GhostexGpuiTerminalConsumedTextInputMods(NSEventModifierFlags flags) {
+  return GhostexGpuiTerminalGhosttyMods(flags & ~(NSEventModifierFlagControl | NSEventModifierFlagCommand));
+}
+
+static BOOL GhostexGpuiTerminalShouldSuppressComposingControlInput(NSString* text, BOOL composing) {
+  if (!composing || text.length == 0) {
+    return NO;
+  }
+
+  if (text.length == 1) {
+    return [text characterAtIndex:0] < 0x20;
+  }
+
+  return NO;
+}
+
+static NSString* GhostexGpuiTerminalTextInputString(id string) {
+  if ([string isKindOfClass:[NSString class]]) {
+    return (NSString*)string;
+  }
+  if ([string isKindOfClass:[NSAttributedString class]]) {
+    return [(NSAttributedString*)string string] ?: @"";
+  }
+  return @"";
+}
+
+static NSPasteboardType GhostexGpuiTerminalFileURLPasteboardType(void) {
+  return NSPasteboardTypeFileURL;
+}
+
+static NSPasteboardType GhostexGpuiTerminalLegacyFilenamesPasteboardType(void) {
+  return (NSPasteboardType)@"NSFilenamesPboardType";
+}
+
+static NSArray<NSString*>* GhostexGpuiTerminalRegisteredDragTypes(void) {
+  return @[
+    GhostexGpuiTerminalFileURLPasteboardType(),
+    NSPasteboardTypeString,
+    GhostexGpuiTerminalLegacyFilenamesPasteboardType(),
+  ];
+}
+
+static BOOL GhostexGpuiTerminalAppendUniquePath(NSMutableArray<NSString*>* paths, NSMutableSet<NSString*>* seen, NSString* path) {
+  if (path.length == 0 || [seen containsObject:path]) {
+    return NO;
+  }
+  [paths addObject:path];
+  [seen addObject:path];
+  return YES;
+}
+
+static NSArray<NSString*>* GhostexGpuiTerminalStringDroppedPaths(NSString* value) {
+  if (value.length == 0) {
+    return @[];
+  }
+
+  NSMutableArray<NSString*>* paths = [NSMutableArray array];
+  NSArray<NSString*>* candidates = [value componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+  NSFileManager* fileManager = [NSFileManager defaultManager];
+
+  for (NSString* candidate in candidates) {
+    NSString* trimmed = [candidate stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    if (trimmed.length == 0) {
+      continue;
+    }
+
+    if ([trimmed hasPrefix:@"file://"]) {
+      NSURL* url = [NSURL URLWithString:trimmed];
+      if (url.isFileURL) {
+        [paths addObject:url.path];
+        continue;
+      }
+      return @[];
+    }
+
+    if ([trimmed hasPrefix:@"/"] && [fileManager fileExistsAtPath:trimmed]) {
+      [paths addObject:trimmed];
+      continue;
+    }
+
+    return @[];
+  }
+
+  return paths;
+}
+
+static NSArray<NSString*>* GhostexGpuiTerminalDroppedPaths(NSPasteboard* pasteboard) {
+  NSMutableArray<NSString*>* paths = [NSMutableArray array];
+  NSMutableSet<NSString*>* seen = [NSMutableSet set];
+
+  NSArray* urlObjects = [pasteboard readObjectsForClasses:@[[NSURL class]] options:nil];
+  for (id object in urlObjects) {
+    if (![object isKindOfClass:[NSURL class]]) {
+      continue;
+    }
+    NSURL* url = (NSURL*)object;
+    if (url.isFileURL) {
+      GhostexGpuiTerminalAppendUniquePath(paths, seen, url.path);
+    }
+  }
+
+  for (NSPasteboardItem* item in pasteboard.pasteboardItems ?: @[]) {
+    NSString* fileURLString = [item stringForType:GhostexGpuiTerminalFileURLPasteboardType()];
+    if (fileURLString.length == 0) {
+      fileURLString = [item stringForType:(NSPasteboardType)@"public.file-url"];
+    }
+    NSURL* url = fileURLString.length > 0 ? [NSURL URLWithString:fileURLString] : nil;
+    if (url.isFileURL) {
+      GhostexGpuiTerminalAppendUniquePath(paths, seen, url.path);
+    }
+  }
+
+  id filenames = [pasteboard propertyListForType:GhostexGpuiTerminalLegacyFilenamesPasteboardType()];
+  if ([filenames isKindOfClass:[NSArray class]]) {
+    for (id value in (NSArray*)filenames) {
+      if ([value isKindOfClass:[NSString class]]) {
+        GhostexGpuiTerminalAppendUniquePath(paths, seen, (NSString*)value);
+      }
+    }
+  }
+
+  if (paths.count > 0) {
+    return paths;
+  }
+
+  NSArray<NSString*>* stringPaths = GhostexGpuiTerminalStringDroppedPaths([pasteboard stringForType:NSPasteboardTypeString]);
+  for (NSString* path in stringPaths) {
+    GhostexGpuiTerminalAppendUniquePath(paths, seen, path);
+  }
+  return paths;
+}
+
+static NSSet<NSString*>* GhostexGpuiTerminalImageExtensions(void) {
+  static NSSet<NSString*>* extensions = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    extensions = [NSSet setWithArray:@[
+      @"avif",
+      @"gif",
+      @"heic",
+      @"heif",
+      @"jpg",
+      @"jpeg",
+      @"png",
+      @"svg",
+      @"tif",
+      @"tiff",
+      @"webp",
+    ]];
+  });
+  return extensions;
+}
+
+static BOOL GhostexGpuiTerminalIsImageFilePath(NSString* path) {
+  if (path.length == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+    return NO;
+  }
+
+  NSString* fileExtension = path.pathExtension.lowercaseString;
+  if ([GhostexGpuiTerminalImageExtensions() containsObject:fileExtension]) {
+    return YES;
+  }
+
+#if __has_include(<UniformTypeIdentifiers/UniformTypeIdentifiers.h>)
+  if (@available(macOS 11.0, *)) {
+    UTType* type = [UTType typeWithFilenameExtension:fileExtension];
+    if ([type conformsToType:UTTypeImage]) {
+      return YES;
+    }
+  }
+#endif
+
+  return NO;
+}
+
+static NSString* GhostexGpuiTerminalDropInsertionText(NSArray<NSString*>* paths) {
+  NSMutableArray<NSString*>* entries = [NSMutableArray arrayWithCapacity:paths.count];
+  NSUInteger imageNumber = 1;
+
+  for (NSString* path in paths) {
+    if (GhostexGpuiTerminalIsImageFilePath(path)) {
+      [entries addObject:[NSString stringWithFormat:@"[Image #%lu](%@)", (unsigned long)imageNumber, path]];
+      imageNumber += 1;
+    } else {
+      [entries addObject:path];
+    }
+  }
+
+  return [entries componentsJoinedByString:@" "];
+}
+
+@interface GhostexGpuiTerminalHostView : NSView <NSTextInputClient> {
+  NSString* _markedText;
+  NSRange _markedTextRange;
+  NSRange _selectedTextRange;
+  NSMutableArray<NSString*>* _keyTextAccumulator;
+}
 @end
 
 @implementation GhostexGpuiTerminalHostView
+
+- (instancetype)initWithFrame:(NSRect)frame {
+  self = [super initWithFrame:frame];
+  if (self) {
+    _markedText = @"";
+    _markedTextRange = NSMakeRange(NSNotFound, 0);
+    _selectedTextRange = NSMakeRange(0, 0);
+  }
+  return self;
+}
 
 - (BOOL)acceptsFirstResponder {
   return YES;
@@ -172,30 +420,165 @@ static const char* GhostexGpuiTerminalKeyTextCString(NSString* text) {
   return YES;
 }
 
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
+  return GhostexGpuiTerminalDroppedPaths(sender.draggingPasteboard).count > 0 ? NSDragOperationCopy : NSDragOperationNone;
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender {
+  return GhostexGpuiTerminalDroppedPaths(sender.draggingPasteboard).count > 0 ? NSDragOperationCopy : NSDragOperationNone;
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+  NSArray<NSString*>* paths = GhostexGpuiTerminalDroppedPaths(sender.draggingPasteboard);
+  if (paths.count == 0) {
+    return NO;
+  }
+
+  NSString* insertionText = GhostexGpuiTerminalDropInsertionText(paths);
+  NSData* data = [insertionText dataUsingEncoding:NSUTF8StringEncoding];
+  if (data.length == 0) {
+    return NO;
+  }
+
+  NSWindow* window = self.window;
+  if (window) {
+    [window makeFirstResponder:self];
+  }
+
+  return GhostexGpuiTerminalInsertDroppedText((__bridge void*)self, data.bytes, (uintptr_t)data.length) != 0;
+}
+
+- (BOOL)sendKeyEvent:(NSEvent*)event
+              action:(int)action
+         includeText:(BOOL)includeText
+           composing:(BOOL)composing
+        consumedMods:(int)consumedMods
+                text:(NSString*)text {
+  const char* textValue = includeText ? GhostexGpuiTerminalKeyTextCString(text) : NULL;
+  return GhostexGpuiTerminalHandleNativeKeyEvent(
+           (__bridge void*)self,
+           action,
+           GhostexGpuiTerminalGhosttyMods(event.modifierFlags),
+           consumedMods,
+           (uint32_t)event.keyCode,
+           textValue,
+           GhostexGpuiTerminalUnshiftedCodepoint(event),
+           composing ? 1 : 0) != 0;
+}
+
+- (BOOL)insertCommittedText:(NSString*)text {
+  if (text.length == 0) {
+    return NO;
+  }
+
+  NSData* data = [text dataUsingEncoding:NSUTF8StringEncoding];
+  if (data.length == 0) {
+    return NO;
+  }
+
+  return GhostexGpuiTerminalInsertCommittedText((__bridge void*)self, data.bytes, (uintptr_t)data.length) != 0;
+}
+
+- (BOOL)setPreeditText:(NSString*)text {
+  if (text.length == 0) {
+    return GhostexGpuiTerminalSetPreeditText((__bridge void*)self, NULL, 0) != 0;
+  }
+
+  NSData* data = [text dataUsingEncoding:NSUTF8StringEncoding];
+  if (data.length == 0) {
+    return NO;
+  }
+
+  return GhostexGpuiTerminalSetPreeditText((__bridge void*)self, data.bytes, (uintptr_t)data.length) != 0;
+}
+
+- (void)syncPreeditClearIfNeeded:(BOOL)clearIfNeeded {
+  if ([self hasMarkedText] && _markedText.length > 0) {
+    [self setPreeditText:_markedText];
+  } else if (clearIfNeeded) {
+    [self setPreeditText:@""];
+  }
+}
+
+- (NSRange)clampedMarkedTextRange:(NSRange)range {
+  if (range.location == NSNotFound) {
+    return NSMakeRange(0, 0);
+  }
+
+  NSUInteger length = _markedText.length;
+  NSUInteger location = MIN(range.location, length);
+  return NSMakeRange(location, MIN(range.length, length - location));
+}
+
+- (NSRange)intersectionOfRange:(NSRange)range withMarkedRangeFound:(BOOL*)found {
+  if (range.location == NSNotFound || _markedTextRange.location == NSNotFound) {
+    if (found) {
+      *found = NO;
+    }
+    return NSMakeRange(NSNotFound, 0);
+  }
+
+  NSUInteger start = MAX(range.location, _markedTextRange.location);
+  NSUInteger end = MIN(NSMaxRange(range), NSMaxRange(_markedTextRange));
+  if (start > end) {
+    if (found) {
+      *found = NO;
+    }
+    return NSMakeRange(NSNotFound, 0);
+  }
+
+  if (found) {
+    *found = YES;
+  }
+  return NSMakeRange(start, end - start);
+}
+
 - (void)keyDown:(NSEvent*)event {
   int mods = GhostexGpuiTerminalGhosttyMods(event.modifierFlags);
   int translatedMods = GhostexGpuiTerminalNativeViewKeyTranslationMods((__bridge void*)self, mods);
   NSEventModifierFlags translationFlags =
     GhostexGpuiTerminalTranslatedModifierFlags(event.modifierFlags, translatedMods);
-  NSString* text = GhostexGpuiTerminalCharactersForEvent(event, translationFlags);
-  int consumedMods = GhostexGpuiTerminalGhosttyMods(
-    translationFlags & ~(NSEventModifierFlagControl | NSEventModifierFlagCommand));
+  int consumedMods = GhostexGpuiTerminalConsumedTextInputMods(translationFlags);
   int action = event.isARepeat ? GhostexGpuiGhosttyActionRepeat : GhostexGpuiGhosttyActionPress;
-  const char* textValue = GhostexGpuiTerminalKeyTextCString(text);
 
-  if (GhostexGpuiTerminalHandleNativeKeyEvent(
-        (__bridge void*)self,
-        action,
-        mods,
-        consumedMods,
-        (uint32_t)event.keyCode,
-        textValue,
-        GhostexGpuiTerminalUnshiftedCodepoint(event),
-        0) != 0) {
+  if (GhostexGpuiTerminalShouldBypassTextInput(event, [self hasMarkedText])) {
+    if ([self sendKeyEvent:event action:action includeText:NO composing:NO consumedMods:consumedMods text:nil]) {
+      return;
+    }
+
+    [super keyDown:event];
     return;
   }
 
-  [super keyDown:event];
+  BOOL markedTextBefore = [self hasMarkedText];
+  NSEvent* translationEvent = GhostexGpuiTerminalTranslatedTextInputEvent(event, translationFlags);
+  _keyTextAccumulator = [NSMutableArray array];
+  [self interpretKeyEvents:@[translationEvent]];
+  NSArray<NSString*>* accumulatedText = [_keyTextAccumulator copy];
+  _keyTextAccumulator = nil;
+  [self syncPreeditClearIfNeeded:markedTextBefore];
+
+  BOOL composing = [self hasMarkedText] || markedTextBefore;
+  if (accumulatedText.count > 0) {
+    for (NSString* text in accumulatedText) {
+      if (GhostexGpuiTerminalShouldSuppressComposingControlInput(text, composing)) {
+        continue;
+      }
+      if (markedTextBefore) {
+        [self insertCommittedText:text];
+      } else {
+        [self sendKeyEvent:event action:action includeText:YES composing:NO consumedMods:consumedMods text:text];
+      }
+    }
+    return;
+  }
+
+  if (GhostexGpuiTerminalShouldSuppressComposingControlInput(event.characters, composing)) {
+    return;
+  }
+
+  NSString* text = GhostexGpuiTerminalCharactersForEvent(translationEvent, translationEvent.modifierFlags);
+  [self sendKeyEvent:event action:action includeText:!composing composing:composing consumedMods:consumedMods text:text];
 }
 
 - (void)keyUp:(NSEvent*)event {
@@ -216,6 +599,10 @@ static const char* GhostexGpuiTerminalKeyTextCString(NSString* text) {
 }
 
 - (void)flagsChanged:(NSEvent*)event {
+  if ([self hasMarkedText]) {
+    return;
+  }
+
   int mod = GhostexGpuiGhosttyModsNone;
   switch (event.keyCode) {
     case 0x39:
@@ -283,6 +670,113 @@ static const char* GhostexGpuiTerminalKeyTextCString(NSString* text) {
   [super flagsChanged:event];
 }
 
+- (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
+  (void)replacementRange;
+  NSString* text = GhostexGpuiTerminalTextInputString(string);
+  [self unmarkText];
+  if (text.length == 0) {
+    return;
+  }
+
+  if (_keyTextAccumulator) {
+    [_keyTextAccumulator addObject:text];
+    return;
+  }
+
+  [self insertCommittedText:text];
+}
+
+- (void)setMarkedText:(id)string selectedRange:(NSRange)selectedRange replacementRange:(NSRange)replacementRange {
+  (void)replacementRange;
+  _markedText = GhostexGpuiTerminalTextInputString(string);
+  _markedTextRange = _markedText.length == 0 ? NSMakeRange(NSNotFound, 0) : NSMakeRange(0, _markedText.length);
+  _selectedTextRange = [self clampedMarkedTextRange:selectedRange];
+  if (!_keyTextAccumulator) {
+    [self syncPreeditClearIfNeeded:YES];
+  }
+}
+
+- (void)unmarkText {
+  if (![self hasMarkedText]) {
+    return;
+  }
+
+  _markedText = @"";
+  _markedTextRange = NSMakeRange(NSNotFound, 0);
+  _selectedTextRange = NSMakeRange(0, 0);
+  [self syncPreeditClearIfNeeded:YES];
+}
+
+- (BOOL)hasMarkedText {
+  return _markedTextRange.location != NSNotFound;
+}
+
+- (NSRange)markedRange {
+  return _markedTextRange;
+}
+
+- (NSRange)selectedRange {
+  return _selectedTextRange;
+}
+
+- (NSArray<NSAttributedStringKey>*)validAttributesForMarkedText {
+  return @[];
+}
+
+- (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
+  if (![self hasMarkedText]) {
+    if (actualRange) {
+      *actualRange = NSMakeRange(0, 0);
+    }
+    return range.location == 0 && range.length == 0 ? [[NSAttributedString alloc] initWithString:@""] : nil;
+  }
+
+  BOOL found = NO;
+  NSRange safeRange = [self intersectionOfRange:range withMarkedRangeFound:&found];
+  if (!found) {
+    return nil;
+  }
+
+  if (actualRange) {
+    *actualRange = safeRange;
+  }
+  return [[NSAttributedString alloc] initWithString:[_markedText substringWithRange:safeRange]];
+}
+
+- (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
+  if (actualRange) {
+    *actualRange = [self hasMarkedText] ? [self clampedMarkedTextRange:range] : NSMakeRange(0, 0);
+  }
+
+  double x = 0.0;
+  double y = 0.0;
+  double width = 0.0;
+  double height = 0.0;
+  if (GhostexGpuiTerminalGetImePoint((__bridge void*)self, &x, &y, &width, &height) != 0) {
+    NSPoint viewPoint = NSMakePoint((CGFloat)x, NSHeight(self.bounds) - (CGFloat)y);
+    NSPoint windowPoint = [self convertPoint:viewPoint toView:nil];
+    NSPoint screenPoint = self.window ? [self.window convertPointToScreen:windowPoint] : windowPoint;
+    return NSMakeRect(screenPoint.x, screenPoint.y - (CGFloat)height, (CGFloat)width, (CGFloat)height);
+  }
+
+  NSRect localRect = NSMakeRect(NSMinX(self.bounds), NSMinY(self.bounds), 1, 1);
+  NSRect windowRect = [self convertRect:localRect toView:nil];
+  return self.window ? [self.window convertRectToScreen:windowRect] : windowRect;
+}
+
+- (NSUInteger)characterIndexForPoint:(NSPoint)point {
+  (void)point;
+  return NSNotFound;
+}
+
+- (void)doCommandBySelector:(SEL)selector {
+  if (_keyTextAccumulator) {
+    return;
+  }
+
+  [super doCommandBySelector:selector];
+}
+
 @end
 
 static NSRect GhostexGpuiTerminalFrameInParent(
@@ -318,6 +812,7 @@ void* GhostexGpuiTerminalCreateHostNativeView(
     y,
     width,
     height)];
+  [hostView registerForDraggedTypes:GhostexGpuiTerminalRegisteredDragTypes()];
   hostView.hidden = YES;
   hostView.wantsLayer = YES;
   hostView.layer.backgroundColor = [NSColor blackColor].CGColor;

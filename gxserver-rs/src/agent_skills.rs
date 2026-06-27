@@ -18,11 +18,16 @@ use tokio::{
 use crate::{domain::DomainStateError, paths::GxserverPaths};
 
 pub const GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
+    /*
+    CDXC:CodexSessionMove 2026-06-26-13:47:
+    Ghostex ships `$ghostex-move-codex-session` as an app-bundled skill, so gxserver must accept it in the same install/status allow-list as the existing first-launch skills.
+    */
     "ghostex-browser-use",
     "ghostex-computer-use",
     "ghostex-agent-orchestration",
     "ghostex-generate-title",
     "ghostex-manage-beads",
+    "ghostex-move-codex-session",
 ];
 
 pub const GHOSTEX_SKILLS_CLI_AGENT_IDS: &[&str] = &[

@@ -1,5 +1,7 @@
 import { Excalidraw } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
+import { StateEffect, StateField, RangeSetBuilder, type Extension } from "@codemirror/state";
+import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import type {
   AppState,
@@ -11,15 +13,16 @@ import {
   IconCheck,
   IconCopy,
   IconEdit,
-  IconEye,
   IconFile,
   IconFileText,
+  IconFileTypeHtml,
   IconFolder,
   IconFolderOpen,
   IconLayoutSidebarLeftCollapse,
+  IconMarkdown,
   IconLayoutSidebarRightCollapse,
+  IconLayoutSidebarRightExpand,
   IconMenu2,
-  IconMessageCircle,
   IconMessagePlus,
   IconPhoto,
   IconRefresh,
@@ -29,22 +32,21 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import {
-  Fragment,
-  cloneElement,
-  isValidElement,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
-  type RefObject,
-  type ReactElement,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { createEditor as createMeoEditor } from "./meo/editor";
+import { applyThemeSettings as applyMeoThemeSettings } from "./meo/helpers/theme";
+import "./meo/styles.css";
 
 type ManageFileEntry = {
   depth: number;
@@ -82,8 +84,6 @@ type ManageFilesBridgeResponse = {
   requestId: string;
   rootName?: string;
 };
-
-type ManageAnnotationMode = "select" | "redline" | "comment";
 
 type ManageAnnotationType = "comment" | "redline";
 
@@ -127,12 +127,63 @@ type ManageSelectionAnchor = {
 };
 
 type ManageCapturedSelection = {
-  anchor?: ManageSelectionAnchor;
-  source: "editor" | "preview";
+  anchor: ManageSelectionAnchor;
   text: string;
 };
 
+type ManageCommentDraft = {
+  anchor: ManageSelectionAnchor;
+  attachmentError: string;
+  attachments: ManageAnnotationImage[];
+  note: string;
+  quote: string;
+};
+
 type ManageSidebarSide = "left" | "right";
+
+type ManageArtifactKind = "excalidraw" | "html" | "markdown";
+
+type ManageMarkdownAlertKind = "caution" | "important" | "note" | "tip" | "warning";
+
+type ManageMarkdownBlock = {
+  alertKind?: ManageMarkdownAlertKind;
+  checked?: boolean;
+  content: string;
+  directiveKind?: string;
+  id: string;
+  language?: string;
+  level?: number;
+  order: number;
+  ordered?: boolean;
+  orderedIndex?: number;
+  orderedStart?: number;
+  startLine: number;
+  type: "blockquote" | "code" | "directive" | "heading" | "hr" | "html" | "list-item" | "paragraph" | "table";
+};
+
+type ManageMeoEditor = {
+  destroy: () => void;
+  focus: () => void;
+  getText: () => string;
+  refreshLayout?: () => void;
+  setText: (text: string) => void;
+  view: EditorView;
+};
+
+type ManageMeoSelectionState = {
+  anchorBottomY?: number;
+  anchorX?: number;
+  anchorY?: number;
+  from?: number;
+  to?: number;
+  visible?: boolean;
+};
+
+type ManageMeoAnnotationDecoration = {
+  from: number;
+  to: number;
+  type: ManageAnnotationType;
+};
 
 type ManageWebKitWindow = Window & {
   webkit?: {
@@ -155,17 +206,90 @@ type ExcalidrawFileData = {
 
 const MANAGE_FILES_RESPONSE_EVENT = "ghostex-manage-files-response";
 const MANAGE_BRIDGE_TIMEOUT_MS = 15_000;
+const MANAGE_ARTIFACT_ROOT_PATH = "artifacts";
 const MANAGE_SELECTION_MAX_LENGTH = 700;
 const MANAGE_ANNOTATIONS_SIDECAR_PATH = ".ghostex/manage-annotations.json";
 const MANAGE_ANNOTATION_SCHEMA_VERSION = 1;
 const MANAGE_ANNOTATION_IMAGE_MAX_BYTES = 512 * 1024;
 const MANAGE_ANNOTATION_MAX_IMAGES = 4;
+const MANAGE_SIDEBAR_DEFAULT_WIDTH = 292;
+const MANAGE_SIDEBAR_MIN_WIDTH = 230;
+const MANAGE_SIDEBAR_MAX_WIDTH = 560;
 const MANAGE_SIDEBAR_SIDE_STORAGE_KEY = "ghostex.manage.sidebarSide";
+const MANAGE_SIDEBAR_WIDTH_STORAGE_KEY = "ghostex.manage.sidebarWidth";
+const MANAGE_EXCALIDRAW_CANVAS_BACKGROUND = "#101112";
+const MANAGE_EXCALIDRAW_CANVAS_THEME: AppState["theme"] = "light";
 const MANAGE_QUICK_LABELS: ManageQuickLabel[] = [
   { id: "clarify", text: "Clarify" },
   { id: "needs-tests", text: "Needs tests" },
   { id: "looks-good", text: "Looks good" },
 ];
+const MANAGE_MEO_THEME = {
+  backgroundColor: "#101112",
+  colors: {
+    base01: "#e5e7eb",
+    base02: "#8b949e",
+    base03: "#30363d",
+    base04: "#f87171",
+    base05: "#7dd3fc",
+    base06: "#67e8f9",
+    base07: "#fde68a",
+    base08: "#c084fc",
+    base09: "#86efac",
+  },
+  fonts: {
+    liveFont: "",
+    sourceFont: "",
+    liveFontWeight: "450",
+    sourceFontWeight: "450",
+    liveFontSize: 14,
+    sourceFontSize: 14,
+    h1FontSize: 1.5,
+    h1FontWeight: "720",
+    h2FontSize: 1.35,
+    h2FontWeight: "700",
+    h3FontSize: 1.18,
+    h3FontWeight: "700",
+    h4FontSize: 1.08,
+    h4FontWeight: "680",
+    h5FontSize: 1,
+    h5FontWeight: "660",
+    h6FontSize: 0.94,
+    h6FontWeight: "650",
+    liveLineHeight: 1.55,
+    sourceLineHeight: 1.55,
+  },
+  id: "ghostex-manage-meo",
+  name: "Ghostex Manage Meo",
+  syntaxTokens: {},
+};
+const manageMeoAnnotationEffect = StateEffect.define<ManageMeoAnnotationDecoration[]>();
+const manageMeoCommentMark = Decoration.mark({
+  attributes: { "data-type": "comment" },
+  class: "annotation-highlight manage-annotation-highlight comment",
+});
+const manageMeoRedlineMark = Decoration.mark({
+  attributes: { "data-type": "redline" },
+  class: "annotation-highlight manage-annotation-highlight deletion",
+});
+
+const manageMeoAnnotationField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(value, transaction) {
+    let nextValue = value.map(transaction.changes);
+    for (const effect of transaction.effects) {
+      if (effect.is(manageMeoAnnotationEffect)) {
+        nextValue = buildManageMeoAnnotationDecorations(effect.value);
+      }
+    }
+    return nextValue;
+  },
+  provide(field) {
+    return EditorView.decorations.from(field);
+  },
+});
 
 /*
  * CDXC:ManageEditing 2026-06-20-06:14:
@@ -183,14 +307,41 @@ const MANAGE_QUICK_LABELS: ManageQuickLabel[] = [
  * CDXC:ManageAnnotationAttachments 2026-06-20-06:35:
  * Annotation images are user-provided feedback artifacts. Keep them local to the annotation sidecar as bounded data URLs, render compact thumbnails, and include attachment references in copied Markdown only when the user explicitly copies feedback.
  *
+ * CDXC:ManageAnnotations 2026-06-26-23:35:
+ * Markdown artifacts should use a rendered-document review shape with floating selection actions, an anchored comment popover, and a side annotation timeline. Do not show Manage's old Edit/Split/Preview tabs or fixed bottom annotation composer for Markdown files.
+ *
+ * CDXC:ManageMarkdownRendering 2026-06-26-23:35:
+ * Manage Markdown rendering should use a local block parser and consistent visual scale for headings, lists, blockquotes, code, tables, alerts, directives, and raw HTML blocks instead of a generic Markdown preview.
+ *
+ * CDXC:ManageMarkdownEditing 2026-06-27-12:40:
+ * Markdown artifacts must be editable and richly rendered in one surface, matching Meo's live Markdown editor instead of a split edit/preview or review-only view.
+ * Mount Meo's copied CodeMirror live editor for Markdown files while keeping Ghostex annotations in the same Manage workarea.
+ *
+ * CDXC:ManageMarkdownAnnotations 2026-06-27-12:40:
+ * Users need to edit Markdown text and annotate selections at the same time.
+ * Feed Meo editor selections into the existing annotation toolbar and render sidecar comments/redlines as CodeMirror decorations so annotation review remains visible during editing.
+ *
+ * CDXC:ManageMarkdownHeader 2026-06-27-13:01:
+ * Markdown artifacts need a single top row: show the project-relative file path in the header, remove the separate path/status row, move Comment/Copy controls into the header, and expose a collapsible annotation rail with the active annotation count.
+ * Annotation cards must size to their own content instead of stretching to fill the rail.
+ *
  * CDXC:ManageDrawings 2026-06-20-06:14:
  * .excalidraw files should open as editable drawings instead of raw JSON. Use the upstream Excalidraw component for canvas behavior, serialize full scene JSON through the normal Manage save bridge, and keep invalid drawings editable as source text so users can repair them.
+ *
+ * CDXC:ManageDrawings 2026-06-26-23:53:
+ * The Manage Excalidraw canvas must display selected background colors literally. Keep Excalidraw in light theme because its dark theme applies an inversion filter that makes white render dark and #000000 render white.
  *
  * CDXC:ManageEditing 2026-06-21-18:00:
  * The macOS Manage editor header should not show an explicit Save button. Keep edited/saved status visible in metadata while retaining the existing bridge-backed save behavior through the keyboard shortcut and editor flows.
  *
  * CDXC:ManageSidebar 2026-06-20-17:15:
  * Manage's file-sidebar refresh control is an overflow menu with Refresh and Switch sidebar side actions. A separate adjacent icon hides the file sidebar, and the editor area provides a small restore affordance so hiding is reversible.
+ *
+ * CDXC:ManageArtifacts 2026-06-26-13:59:
+ * Manage is an artifacts-focused project surface. Keep first-class sidebar actions for new Markdown, HTML, and Excalidraw files, create them under the active project's artifacts/ directory, and immediately open the created file in the Manage preview/editor.
+ *
+ * CDXC:ManageSidebar 2026-06-26-23:14:
+ * The Manage file sidebar needs a visible resizer so users can widen the artifacts tree on either sidebar side without overlapping the preview/editor. Persist the width locally and clamp it to the current workarea so the preview keeps usable space.
  */
 function ManageApp() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -213,7 +364,10 @@ function ManageApp() {
   const [annotationPersistenceState, setAnnotationPersistenceState] =
     useState<"idle" | "loading" | "ready" | "saving" | "saved" | "error">("idle");
   const [sidebarSide, setSidebarSide] = useState<ManageSidebarSide>(() => readStoredManageSidebarSide());
+  const [sidebarWidth, setSidebarWidth] = useState(() => readStoredManageSidebarWidth());
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [creatingArtifactKind, setCreatingArtifactKind] = useState<ManageArtifactKind>();
+  const shellRef = useRef<HTMLElement | null>(null);
   const annotationsLoadedRef = useRef(false);
   const annotationsSaveTimerRef = useRef<number | undefined>(undefined);
   const lastPersistedAnnotationsRef = useRef("");
@@ -299,6 +453,19 @@ function ManageApp() {
   }, [sidebarSide]);
 
   useEffect(() => {
+    window.localStorage.setItem(MANAGE_SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(sidebarWidth)));
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const containerWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
+      setSidebarWidth((currentWidth) => clampManageSidebarWidth(currentWidth, containerWidth));
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
     let isCancelled = false;
     annotationsLoadedRef.current = false;
     setAnnotationPersistenceState("loading");
@@ -375,6 +542,73 @@ function ManageApp() {
     setSidebarHidden(false);
     setSidebarSide((current) => (current === "left" ? "right" : "left"));
   }, []);
+
+  const updateSidebarWidthFromClientX = useCallback(
+    (clientX: number) => {
+      const shellRect = shellRef.current?.getBoundingClientRect();
+      if (!shellRect) {
+        return;
+      }
+      const nextWidth = sidebarSide === "right" ? shellRect.right - clientX : clientX - shellRect.left;
+      setSidebarWidth(clampManageSidebarWidth(nextWidth, shellRect.width));
+    },
+    [sidebarSide],
+  );
+
+  const resizeSidebarBy = useCallback((delta: number) => {
+    const containerWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
+    setSidebarWidth((currentWidth) => clampManageSidebarWidth(currentWidth + delta, containerWidth));
+  }, []);
+
+  const handleSidebarResizePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (sidebarHidden) {
+        return;
+      }
+      event.preventDefault();
+      updateSidebarWidthFromClientX(event.clientX);
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        updateSidebarWidthFromClientX(moveEvent.clientX);
+      };
+      const handlePointerUp = () => {
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", handlePointerUp);
+        window.removeEventListener("pointercancel", handlePointerUp);
+      };
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp);
+      window.addEventListener("pointercancel", handlePointerUp);
+    },
+    [sidebarHidden, updateSidebarWidthFromClientX],
+  );
+
+  const handleSidebarResizeKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      const direction = sidebarSide === "right" ? -1 : 1;
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        resizeSidebarBy(-12 * direction);
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        resizeSidebarBy(12 * direction);
+        return;
+      }
+      if (event.key === "Home") {
+        event.preventDefault();
+        const containerWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
+        setSidebarWidth(clampManageSidebarWidth(MANAGE_SIDEBAR_MIN_WIDTH, containerWidth));
+        return;
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        const containerWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
+        setSidebarWidth(clampManageSidebarWidth(MANAGE_SIDEBAR_MAX_WIDTH, containerWidth));
+      }
+    },
+    [resizeSidebarBy, sidebarSide],
+  );
 
   useEffect(
     () => () => {
@@ -453,6 +687,57 @@ function ManageApp() {
     }
   }, [draftContent, preview, projectEditorId, projectId, saveState, selectedPath]);
 
+  const createArtifactFile = useCallback(
+    async (kind: ManageArtifactKind) => {
+      if (creatingArtifactKind) {
+        return;
+      }
+      const path = createUniqueArtifactPath(entries, kind);
+      const content = createInitialArtifactContent(kind);
+      setCreatingArtifactKind(kind);
+      setSaveState("saving");
+      setError(undefined);
+      try {
+        const response = await requestManageFiles({
+          action: "save",
+          content,
+          path,
+          projectEditorId,
+          projectId,
+        });
+        if (response.error) {
+          throw new Error(response.error);
+        }
+        const createdFile = response.file;
+        if (!createdFile) {
+          throw new Error("Manage did not return created file metadata.");
+        }
+        selectedPathRef.current = createdFile.path;
+        setSelectedPath(createdFile.path);
+        setPreview(createdFile);
+        const nextContent = createdFile.content ?? content;
+        setDraftContent(nextContent);
+        setLastSavedContent(nextContent);
+        setPreviewState("ready");
+        setSaveState("saved");
+        if (saveResetTimerRef.current !== undefined) {
+          window.clearTimeout(saveResetTimerRef.current);
+        }
+        saveResetTimerRef.current = window.setTimeout(() => {
+          setSaveState("idle");
+          saveResetTimerRef.current = undefined;
+        }, 1_600);
+        await refreshFiles();
+      } catch (createError) {
+        setSaveState("error");
+        setError(createError instanceof Error ? createError.message : "Could not create artifact.");
+      } finally {
+        setCreatingArtifactKind(undefined);
+      }
+    },
+    [creatingArtifactKind, entries, projectEditorId, projectId, refreshFiles],
+  );
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "s") {
@@ -501,7 +786,13 @@ function ManageApp() {
   );
 
   return (
-    <main className="manage-shell" data-sidebar-hidden={String(sidebarHidden)} data-sidebar-side={sidebarSide}>
+    <main
+      className="manage-shell"
+      data-sidebar-hidden={String(sidebarHidden)}
+      data-sidebar-side={sidebarSide}
+      ref={shellRef}
+      style={{ "--manage-sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+    >
       {!sidebarHidden ? (
         <aside className="manage-sidebar">
           <div className="manage-sidebar-header">
@@ -517,6 +808,10 @@ function ManageApp() {
               sidebarSide={sidebarSide}
             />
           </div>
+          <ManageArtifactCreateButtons
+            creatingKind={creatingArtifactKind}
+            onCreate={(kind) => void createArtifactFile(kind)}
+          />
           <label className="manage-search">
             <IconSearch aria-hidden="true" size={15} stroke={1.8} />
             <input
@@ -566,6 +861,21 @@ function ManageApp() {
           )}
         </button>
       )}
+      {!sidebarHidden ? (
+        <div
+          aria-label="Resize file sidebar"
+          aria-orientation="vertical"
+          aria-valuemax={MANAGE_SIDEBAR_MAX_WIDTH}
+          aria-valuemin={MANAGE_SIDEBAR_MIN_WIDTH}
+          aria-valuenow={Math.round(sidebarWidth)}
+          className="manage-sidebar-resizer"
+          onKeyDown={handleSidebarResizeKeyDown}
+          onPointerDown={handleSidebarResizePointerDown}
+          role="separator"
+          tabIndex={0}
+          title="Resize file sidebar"
+        />
+      ) : null}
       <section className="manage-preview">
         <ManagePreview
           annotations={annotationsForSelectedPath}
@@ -582,6 +892,50 @@ function ManageApp() {
         />
       </section>
     </main>
+  );
+}
+
+function ManageArtifactCreateButtons({
+  creatingKind,
+  onCreate,
+}: {
+  creatingKind?: ManageArtifactKind;
+  onCreate: (kind: ManageArtifactKind) => void;
+}) {
+  const isCreating = Boolean(creatingKind);
+  return (
+    <div className="manage-artifact-create" aria-label="Create artifact">
+      <button
+        className="manage-artifact-create-button"
+        disabled={isCreating}
+        onClick={() => onCreate("markdown")}
+        title="New Markdown artifact"
+        type="button"
+      >
+        <IconMarkdown aria-hidden="true" size={15} stroke={1.85} />
+        <span>{creatingKind === "markdown" ? "..." : "MD"}</span>
+      </button>
+      <button
+        className="manage-artifact-create-button"
+        disabled={isCreating}
+        onClick={() => onCreate("html")}
+        title="New HTML artifact"
+        type="button"
+      >
+        <IconFileTypeHtml aria-hidden="true" size={15} stroke={1.85} />
+        <span>{creatingKind === "html" ? "..." : "HTML"}</span>
+      </button>
+      <button
+        className="manage-artifact-create-button"
+        disabled={isCreating}
+        onClick={() => onCreate("excalidraw")}
+        title="New Excalidraw artifact"
+        type="button"
+      >
+        <IconEdit aria-hidden="true" size={15} stroke={1.85} />
+        <span>{creatingKind === "excalidraw" ? "..." : "Draw"}</span>
+      </button>
+    </div>
   );
 }
 
@@ -742,24 +1096,17 @@ function ManagePreview({
   saveState: "idle" | "saving" | "saved" | "error";
   selectedPath?: string;
 }) {
-  const [markdownMode, setMarkdownMode] = useState<"edit" | "preview" | "split">("split");
-  const [annotationMode, setAnnotationMode] = useState<ManageAnnotationMode>("select");
   const [selection, setSelection] = useState<ManageCapturedSelection>();
-  const [annotationNote, setAnnotationNote] = useState("");
-  const [annotationAttachments, setAnnotationAttachments] = useState<ManageAnnotationImage[]>([]);
-  const [attachmentError, setAttachmentError] = useState("");
+  const [commentDraft, setCommentDraft] = useState<ManageCommentDraft>();
   const [feedbackCopyState, setFeedbackCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [markdownAnnotationsCollapsed, setMarkdownAnnotationsCollapsed] = useState(false);
   const selectedPathRef = useRef<string | undefined>(selectedPath);
-  const annotationNoteRef = useRef<HTMLTextAreaElement | null>(null);
-  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (selectedPathRef.current !== selectedPath) {
       selectedPathRef.current = selectedPath;
       setSelection(undefined);
-      setAnnotationNote("");
-      setAnnotationAttachments([]);
-      setAttachmentError("");
+      setCommentDraft(undefined);
       setFeedbackCopyState("idle");
     }
   }, [selectedPath]);
@@ -786,97 +1133,112 @@ function ManagePreview({
       if (type === "comment" && !normalizedQuote && !normalizedNote && attachments.length === 0) {
         return;
       }
-    const nextAnnotation: ManageAnnotation = {
+      const nextAnnotation: ManageAnnotation = {
         attachments,
-      createdAt: new Date().toISOString(),
-      id: `manage-annotation-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        createdAt: new Date().toISOString(),
+        id: `manage-annotation-${Date.now()}-${Math.random().toString(16).slice(2)}`,
         labelId,
         note: normalizedNote,
         quote: normalizedQuote,
         scope: normalizedQuote ? "selection" : "global",
         type,
-    };
-    onAnnotationsChange((current) => [...current, nextAnnotation]);
-    setAnnotationNote("");
-      setAnnotationAttachments([]);
-      setAttachmentError("");
-      if (type === "redline" || normalizedQuote) {
-        setSelection(undefined);
-      }
+      };
+      onAnnotationsChange((current) => [...current, nextAnnotation]);
+      setSelection(undefined);
+      setCommentDraft(undefined);
     },
     [onAnnotationsChange],
   );
 
-  const captureSelectedText = useCallback(
-    (capturedSelection: ManageCapturedSelection) => {
-      const normalized = normalizeAnnotationQuote(capturedSelection.text);
-      if (!normalized) {
-        return;
-      }
-      const nextSelection = {
-        ...capturedSelection,
-        text: normalized,
-      };
-      if (annotationMode === "redline") {
-        addAnnotation({
-          quote: normalized,
-          type: "redline",
-        });
-        return;
-      }
-      setSelection(nextSelection);
-      if (annotationMode === "comment") {
-        window.requestAnimationFrame(() => annotationNoteRef.current?.focus());
-      }
+  const captureSelectedText = useCallback((capturedSelection: ManageCapturedSelection) => {
+    const normalized = normalizeAnnotationQuote(capturedSelection.text);
+    if (!normalized) {
+      return;
+    }
+    setCommentDraft(undefined);
+    setSelection({
+      anchor: capturedSelection.anchor,
+      text: normalized,
+    });
+  }, []);
+
+  const clearSelectedText = useCallback(() => {
+    setSelection(undefined);
+  }, []);
+
+  const openCommentDraft = useCallback(
+    (quote: string, anchor: ManageSelectionAnchor, initialNote = "") => {
+      setSelection(undefined);
+      setCommentDraft({
+        anchor,
+        attachmentError: "",
+        attachments: [],
+        note: initialNote,
+        quote: normalizeAnnotationQuote(quote),
+      });
     },
-    [addAnnotation, annotationMode],
+    [],
   );
 
-  const selectedText = selection?.text ?? "";
-
-  const addDraftComment = useCallback(() => {
-    addAnnotation({
-      attachments: annotationAttachments,
-      note: annotationNote,
-      quote: selectedText,
-      type: "comment",
-    });
-  }, [addAnnotation, annotationAttachments, annotationNote, selectedText]);
-
   const addSelectedRedline = useCallback(() => {
+    if (!selection) {
+      return;
+    }
     addAnnotation({
-      quote: selectedText,
+      quote: selection.text,
       type: "redline",
     });
-  }, [addAnnotation, selectedText]);
+  }, [addAnnotation, selection]);
 
   const addQuickLabel = useCallback(
     (label: ManageQuickLabel) => {
       addAnnotation({
         labelId: label.id,
         note: label.text,
-        quote: selectedText,
+        quote: selection?.text ?? commentDraft?.quote ?? "",
         type: "comment",
       });
     },
-    [addAnnotation, selectedText],
+    [addAnnotation, commentDraft?.quote, selection?.text],
   );
 
-  const addAttachmentFiles = useCallback(
-    (files: FileList | File[]) => {
-      const nextFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
-      if (nextFiles.length === 0) {
-        return;
+  const submitCommentDraft = useCallback(() => {
+    if (!commentDraft) {
+      return;
+    }
+    addAnnotation({
+      attachments: commentDraft.attachments,
+      note: commentDraft.note,
+      quote: commentDraft.quote,
+      type: "comment",
+    });
+  }, [addAnnotation, commentDraft]);
+
+  const updateCommentDraftNote = useCallback((note: string) => {
+    setCommentDraft((current) => (current ? { ...current, note } : current));
+  }, []);
+
+  const addAttachmentFiles = useCallback((files: FileList | File[]) => {
+    const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length === 0) {
+      return;
+    }
+    setCommentDraft((current) => {
+      if (!current) {
+        return current;
       }
-      const availableSlots = Math.max(0, MANAGE_ANNOTATION_MAX_IMAGES - annotationAttachments.length);
+      const availableSlots = Math.max(0, MANAGE_ANNOTATION_MAX_IMAGES - current.attachments.length);
       if (availableSlots === 0) {
-        setAttachmentError(`Use ${MANAGE_ANNOTATION_MAX_IMAGES} images or fewer per annotation.`);
-        return;
+        return {
+          ...current,
+          attachmentError: `Use ${MANAGE_ANNOTATION_MAX_IMAGES} images or fewer per annotation.`,
+        };
       }
-      setAttachmentError("");
-      for (const file of nextFiles.slice(0, availableSlots)) {
+      let attachmentError =
+        imageFiles.length > availableSlots ? `Use ${MANAGE_ANNOTATION_MAX_IMAGES} images or fewer per annotation.` : "";
+      for (const file of imageFiles.slice(0, availableSlots)) {
         if (file.size > MANAGE_ANNOTATION_IMAGE_MAX_BYTES) {
-          setAttachmentError("Images must be 512 KB or smaller.");
+          attachmentError = "Images must be 512 KB or smaller.";
           continue;
         }
         const reader = new FileReader();
@@ -885,28 +1247,49 @@ function ManagePreview({
           if (!dataUrl) {
             return;
           }
-          setAnnotationAttachments((current) => [
-            ...current,
-            {
-              dataUrl,
-              id: `manage-annotation-image-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-              mimeType: file.type,
-              name: normalizeAttachmentName(file.name),
-              size: file.size,
-            },
-          ]);
+          setCommentDraft((latest) => {
+            if (!latest || latest.attachments.length >= MANAGE_ANNOTATION_MAX_IMAGES) {
+              return latest;
+            }
+            return {
+              ...latest,
+              attachmentError: "",
+              attachments: [
+                ...latest.attachments,
+                {
+                  dataUrl,
+                  id: `manage-annotation-image-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                  mimeType: file.type,
+                  name: normalizeAttachmentName(file.name),
+                  size: file.size,
+                },
+              ],
+            };
+          });
         };
         reader.onerror = () => {
-          setAttachmentError("Could not read image attachment.");
+          setCommentDraft((latest) =>
+            latest ? { ...latest, attachmentError: "Could not read image attachment." } : latest,
+          );
         };
         reader.readAsDataURL(file);
       }
-    },
-    [annotationAttachments.length],
-  );
+      return {
+        ...current,
+        attachmentError,
+      };
+    });
+  }, []);
 
   const removeDraftAttachment = useCallback((attachmentId: string) => {
-    setAnnotationAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId));
+    setCommentDraft((current) =>
+      current
+        ? {
+            ...current,
+            attachments: current.attachments.filter((attachment) => attachment.id !== attachmentId),
+          }
+        : current,
+    );
   }, []);
 
   const copyFeedback = useCallback(async () => {
@@ -923,10 +1306,36 @@ function ManagePreview({
     }
   }, [annotations, selectedPath]);
 
-  useEffect(() => {
+  const copySelectedText = useCallback(async () => {
     if (!selection) {
       return;
     }
+    try {
+      await writeTextToClipboard(selection.text);
+    } catch {
+      // Selection copy is opportunistic; the main feedback export reports copy failures.
+    }
+  }, [selection]);
+
+  const openCommentForSelection = useCallback(() => {
+    if (!selection) {
+      return;
+    }
+    openCommentDraft(selection.text, selection.anchor);
+  }, [openCommentDraft, selection]);
+
+  const openGlobalComment = useCallback(
+    (anchor: ManageSelectionAnchor) => {
+      openCommentDraft("", anchor);
+    },
+    [openCommentDraft],
+  );
+
+  useEffect(() => {
+    if (!selection || commentDraft) {
+      return;
+    }
+    const activeSelection = selection;
     function handleAnnotationShortcut(event: KeyboardEvent) {
       if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey || isEditableEventTarget(event.target)) {
         return;
@@ -937,15 +1346,14 @@ function ManagePreview({
         setSelection(undefined);
         return;
       }
-      if (key === "r") {
+      if (key === "backspace" || key === "d" || key === "delete") {
         event.preventDefault();
         addSelectedRedline();
         return;
       }
       if (key === "c") {
         event.preventDefault();
-        setAnnotationMode("comment");
-        annotationNoteRef.current?.focus();
+        openCommentForSelection();
         return;
       }
       if (/^[1-3]$/u.test(key)) {
@@ -954,11 +1362,16 @@ function ManagePreview({
         if (label) {
           addQuickLabel(label);
         }
+        return;
+      }
+      if (event.key.length === 1) {
+        event.preventDefault();
+        openCommentDraft(activeSelection.text, activeSelection.anchor, event.key);
       }
     }
     window.addEventListener("keydown", handleAnnotationShortcut);
     return () => window.removeEventListener("keydown", handleAnnotationShortcut);
-  }, [addQuickLabel, addSelectedRedline, selection]);
+  }, [addQuickLabel, addSelectedRedline, commentDraft, openCommentDraft, openCommentForSelection, selection]);
 
   const removeAnnotation = useCallback(
     (annotationId: string) => {
@@ -985,11 +1398,11 @@ function ManagePreview({
   const language = languageLabelForPath(preview.path);
   const isMarkdown = isMarkdownPath(preview.path);
   const isDrawing = isExcalidrawPath(preview.path);
-  const canEdit = preview.kind === "text";
-  const showMarkdownControls = canEdit && isMarkdown;
+  const previewTitle = isMarkdown ? preview.path : preview.name;
+  const annotationPersistenceTitle = annotationPersistenceLabel(annotationPersistenceState);
 
   return (
-    <div className="manage-preview-content">
+    <div className="manage-preview-content" data-kind={isMarkdown ? "markdown" : isDrawing ? "drawing" : "text"}>
       <header className="manage-preview-header">
         <div className="manage-preview-title">
           {isDrawing ? (
@@ -997,42 +1410,62 @@ function ManagePreview({
           ) : (
             <IconFileText aria-hidden="true" size={17} stroke={1.85} />
           )}
-          <span>{preview.name}</span>
+          <span>{previewTitle}</span>
         </div>
         <div className="manage-preview-meta">
           <span>{language}</span>
           {preview.size !== undefined ? <span>{formatFileSize(preview.size)}</span> : null}
           {isDirty ? <span>Edited</span> : saveState === "saved" ? <span>Saved</span> : null}
         </div>
-        {showMarkdownControls ? (
-          <div className="manage-segmented" aria-label="Markdown view">
+        {isMarkdown ? (
+          <div className="manage-preview-header-actions">
             <button
-              aria-pressed={markdownMode === "edit"}
-              onClick={() => setMarkdownMode("edit")}
+              aria-label="Add global comment"
+              onClick={(event) =>
+                openGlobalComment(
+                  selectionAnchorFromRect(event.currentTarget.getBoundingClientRect()) ?? defaultManageSelectionAnchor(),
+                )
+              }
+              title="Add global comment"
               type="button"
             >
-              <IconEdit aria-hidden="true" size={14} />
-              Edit
+              <IconMessagePlus aria-hidden="true" size={14} />
+              <span>Comment</span>
             </button>
             <button
-              aria-pressed={markdownMode === "split"}
-              onClick={() => setMarkdownMode("split")}
+              aria-label="Copy feedback"
+              disabled={annotations.length === 0}
+              onClick={() => void copyFeedback()}
+              title="Copy feedback"
               type="button"
             >
-              Split
+              {feedbackCopyState === "copied" ? (
+                <IconCheck aria-hidden="true" size={14} />
+              ) : (
+                <IconCopy aria-hidden="true" size={14} />
+              )}
+              <span>{feedbackCopyState === "copied" ? "Copied" : "Copy"}</span>
             </button>
             <button
-              aria-pressed={markdownMode === "preview"}
-              onClick={() => setMarkdownMode("preview")}
+              aria-controls="manage-markdown-annotation-rail"
+              aria-expanded={!markdownAnnotationsCollapsed}
+              aria-label={markdownAnnotationsCollapsed ? "Show annotations" : "Hide annotations"}
+              className="manage-annotation-rail-toggle"
+              onClick={() => setMarkdownAnnotationsCollapsed((current) => !current)}
+              title={`${markdownAnnotationsCollapsed ? "Show" : "Hide"} annotations (${annotations.length}) · ${annotationPersistenceTitle}`}
               type="button"
             >
-              <IconEye aria-hidden="true" size={14} />
-              Preview
+              {markdownAnnotationsCollapsed ? (
+                <IconLayoutSidebarRightExpand aria-hidden="true" size={14} />
+              ) : (
+                <IconLayoutSidebarRightCollapse aria-hidden="true" size={14} />
+              )}
+              <span className="manage-count-badge">{annotations.length}</span>
             </button>
           </div>
         ) : null}
       </header>
-      <div className="manage-preview-path">{preview.path}</div>
+      {!isMarkdown ? <div className="manage-preview-path">{preview.path}</div> : null}
       {preview.kind === "unsupported" ? (
         <ManagePreviewMessage
           icon={<IconAlertTriangle aria-hidden="true" size={21} />}
@@ -1046,75 +1479,43 @@ function ManagePreview({
           onChange={onDraftContentChange}
         />
       ) : isMarkdown ? (
-        <div className="manage-markdown-workspace" data-mode={markdownMode}>
-          {markdownMode !== "preview" ? (
-            <ManageTextEditor
-              content={draftContent}
-              language={language}
-              onChange={onDraftContentChange}
-              onSelectionCapture={captureSelectedText}
-            />
-          ) : null}
-          {markdownMode !== "edit" ? (
-            <MarkdownReviewPane
-              annotations={annotations}
-              content={draftContent}
-              onSelectionCapture={captureSelectedText}
-            />
-          ) : null}
-          {selection?.anchor ? (
-            <ManageSelectionToolbar
+        <>
+          <ManageMarkdownReviewViewer
+            annotations={annotations}
+            annotationsCollapsed={markdownAnnotationsCollapsed}
+            content={draftContent}
+            documentKey={preview.path}
+            onContentChange={onDraftContentChange}
+            onRemoveAnnotation={removeAnnotation}
+            onSelectionClear={clearSelectedText}
+            onSelectionCapture={captureSelectedText}
+          />
+          {selection ? (
+            <ManageAnnotationToolbar
               anchor={selection.anchor}
-              onComment={() => {
-                setAnnotationMode("comment");
-                window.requestAnimationFrame(() => annotationNoteRef.current?.focus());
-              }}
+              onComment={openCommentForSelection}
+              onCopy={() => void copySelectedText()}
               onDismiss={() => setSelection(undefined)}
               onQuickLabel={addQuickLabel}
               onRedline={addSelectedRedline}
             />
           ) : null}
-          <ManageAnnotationPanel
-            annotationAttachments={annotationAttachments}
-            annotationMode={annotationMode}
-            annotationNote={annotationNote}
-            annotationPersistenceState={annotationPersistenceState}
-            annotations={annotations}
-            attachmentError={attachmentError}
-            feedbackCopyState={feedbackCopyState}
-            inputRef={annotationNoteRef}
-            onAddComment={addDraftComment}
-            onAddRedline={addSelectedRedline}
-            onAnnotationNoteChange={setAnnotationNote}
-            onAnnotationModeChange={setAnnotationMode}
-            onCopyFeedback={() => void copyFeedback()}
-            onOpenAttachmentPicker={() => attachmentInputRef.current?.click()}
-            onQuickLabel={addQuickLabel}
-            onRemoveAnnotation={removeAnnotation}
-            onRemoveDraftAttachment={removeDraftAttachment}
-            selectedText={selectedText}
-          />
-          <input
-            accept="image/*"
-            aria-label="Annotation image attachments"
-            className="manage-hidden-file-input"
-            multiple
-            onChange={(event) => {
-              if (event.currentTarget.files) {
-                addAttachmentFiles(event.currentTarget.files);
-              }
-              event.currentTarget.value = "";
-            }}
-            ref={attachmentInputRef}
-            type="file"
-          />
-        </div>
+          {commentDraft ? (
+            <ManageCommentPopover
+              draft={commentDraft}
+              onAddAttachmentFiles={addAttachmentFiles}
+              onCancel={() => setCommentDraft(undefined)}
+              onDraftNoteChange={updateCommentDraftNote}
+              onRemoveDraftAttachment={removeDraftAttachment}
+              onSubmit={submitCommentDraft}
+            />
+          ) : null}
+        </>
       ) : (
         <ManageTextEditor
           content={draftContent}
           language={language}
           onChange={onDraftContentChange}
-          onSelectionCapture={() => undefined}
         />
       )}
     </div>
@@ -1125,217 +1526,316 @@ function ManageTextEditor({
   content,
   language,
   onChange,
-  onSelectionCapture,
 }: {
   content: string;
   language: string;
   onChange: (content: string) => void;
-  onSelectionCapture: (selection: ManageCapturedSelection) => void;
 }) {
   return (
     <textarea
       aria-label={`${language} editor`}
       className="manage-text-editor"
       onChange={(event) => onChange(event.currentTarget.value)}
-      onSelect={(event) => {
-        const input = event.currentTarget;
-        if (input.selectionEnd > input.selectionStart) {
-          onSelectionCapture({
-            anchor: selectionAnchorFromRect(input.getBoundingClientRect()),
-            source: "editor",
-            text: input.value.slice(input.selectionStart, input.selectionEnd),
-          });
-        }
-      }}
       spellCheck={false}
       value={content}
     />
   );
 }
 
-function MarkdownReviewPane({
+function ManageMarkdownReviewViewer({
   annotations,
+  annotationsCollapsed,
   content,
+  documentKey,
+  onContentChange,
+  onRemoveAnnotation,
+  onSelectionClear,
   onSelectionCapture,
 }: {
   annotations: ManageAnnotation[];
+  annotationsCollapsed: boolean;
   content: string;
+  documentKey: string;
+  onContentChange: (content: string) => void;
+  onRemoveAnnotation: (annotationId: string) => void;
+  onSelectionClear: () => void;
   onSelectionCapture: (selection: ManageCapturedSelection) => void;
 }) {
-  const markdownComponents = useMemo(
-    () => ({
-      blockquote: ({ children }: { children?: ReactNode }) => (
-        <blockquote>{annotateMarkdownChildren(children, annotations)}</blockquote>
-      ),
-      h1: ({ children }: { children?: ReactNode }) => <h1>{annotateMarkdownChildren(children, annotations)}</h1>,
-      h2: ({ children }: { children?: ReactNode }) => <h2>{annotateMarkdownChildren(children, annotations)}</h2>,
-      h3: ({ children }: { children?: ReactNode }) => <h3>{annotateMarkdownChildren(children, annotations)}</h3>,
-      h4: ({ children }: { children?: ReactNode }) => <h4>{annotateMarkdownChildren(children, annotations)}</h4>,
-      li: ({ children }: { children?: ReactNode }) => <li>{annotateMarkdownChildren(children, annotations)}</li>,
-      p: ({ children }: { children?: ReactNode }) => <p>{annotateMarkdownChildren(children, annotations)}</p>,
-      td: ({ children }: { children?: ReactNode }) => <td>{annotateMarkdownChildren(children, annotations)}</td>,
-      th: ({ children }: { children?: ReactNode }) => <th>{annotateMarkdownChildren(children, annotations)}</th>,
-    }),
-    [annotations],
-  );
+  const editorHostRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<ManageMeoEditor | null>(null);
+  const latestContentRef = useRef(content);
+  const annotationsRef = useRef(annotations);
+  const onContentChangeRef = useRef(onContentChange);
+  const onSelectionClearRef = useRef(onSelectionClear);
+  const onSelectionCaptureRef = useRef(onSelectionCapture);
+
+  useEffect(() => {
+    annotationsRef.current = annotations;
+  }, [annotations]);
+
+  useEffect(() => {
+    onContentChangeRef.current = onContentChange;
+  }, [onContentChange]);
+
+  useEffect(() => {
+    onSelectionClearRef.current = onSelectionClear;
+  }, [onSelectionClear]);
+
+  useEffect(() => {
+    onSelectionCaptureRef.current = onSelectionCapture;
+  }, [onSelectionCapture]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || content === latestContentRef.current) {
+      return;
+    }
+    latestContentRef.current = content;
+    editor.setText(content);
+    editor.refreshLayout?.();
+  }, [content]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    editor.view.dispatch({
+      effects: manageMeoAnnotationEffect.of(createManageMeoAnnotationDecorations(editor.getText(), annotations)),
+    });
+  }, [annotations, content]);
+
+  useEffect(() => {
+    const host = editorHostRef.current;
+    if (!host) {
+      return;
+    }
+    latestContentRef.current = content;
+    host.replaceChildren();
+    applyManageMeoTheme();
+    let mountedEditor: ManageMeoEditor | null = null;
+    const editor = createMeoEditor({
+      externalExtensions: [manageMeoAnnotationField] satisfies Extension[],
+      initialGitGutter: false,
+      initialLineNumbers: true,
+      initialMode: "live",
+      initialVimKeybindings: [],
+      parent: host,
+      text: content,
+      onApplyChanges: (nextContent: string) => {
+        latestContentRef.current = nextContent;
+        onContentChangeRef.current(nextContent);
+        mountedEditor?.view.dispatch({
+          effects: manageMeoAnnotationEffect.of(createManageMeoAnnotationDecorations(nextContent, annotationsRef.current)),
+        });
+      },
+      onOpenLink: (href: string) => {
+        const safeHref = sanitizeManageHref(href);
+        if (safeHref) {
+          window.open(safeHref, "_blank", "noopener,noreferrer");
+        }
+      },
+      onSelectionChange: (state: ManageMeoSelectionState) => {
+        const selection = normalizeManageMeoSelection(state, mountedEditor);
+        if (selection) {
+          onSelectionCaptureRef.current(selection);
+          return;
+        }
+        /*
+         * CDXC:ManageMarkdownAnnotations 2026-06-27-12:40:
+         * Meo reports hidden selection states after the user clicks away or collapses the range.
+         * Clear Manage's floating annotation toolbar then, so annotation actions follow the live editor selection instead of a stale previous quote.
+         */
+        onSelectionClearRef.current();
+      },
+    }) as ManageMeoEditor;
+    mountedEditor = editor;
+    editorRef.current = editor;
+    editor.view.dispatch({
+      effects: manageMeoAnnotationEffect.of(createManageMeoAnnotationDecorations(content, annotationsRef.current)),
+    });
+    window.requestAnimationFrame(() => editor.refreshLayout?.());
+    return () => {
+      editor.destroy();
+      if (editorRef.current === editor) {
+        editorRef.current = null;
+      }
+    };
+  }, [documentKey]);
+
   return (
     <div
-      className="manage-markdown-preview"
-      onMouseUp={() => {
-        const domSelection = window.getSelection();
-        const range = domSelection && domSelection.rangeCount > 0 ? domSelection.getRangeAt(0) : undefined;
-        onSelectionCapture({
-          anchor: selectionAnchorFromRect(range?.getBoundingClientRect()),
-          source: "preview",
-          text: domSelection?.toString() ?? "",
-        });
-      }}
+      className="manage-markdown-review manage-markdown-meo-review"
+      data-annotations-collapsed={String(annotationsCollapsed)}
     >
-      <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
-        {content}
-      </ReactMarkdown>
+      <section className="manage-markdown-review-main">
+        <div className="manage-meo-markdown-editor editor-root">
+          <div className="editor-wrapper" data-outline-position="right">
+            <div className="editor-host" ref={editorHostRef} />
+          </div>
+        </div>
+      </section>
+      {annotationsCollapsed ? null : (
+        <ManageAnnotationTimeline annotations={annotations} onRemoveAnnotation={onRemoveAnnotation} />
+      )}
     </div>
   );
 }
 
-function ManageAnnotationPanel({
-  annotationAttachments,
-  annotationMode,
-  annotationNote,
-  annotationPersistenceState,
-  annotations,
-  attachmentError,
-  feedbackCopyState,
-  inputRef,
-  onAddComment,
-  onAddRedline,
-  onAnnotationNoteChange,
-  onAnnotationModeChange,
-  onCopyFeedback,
-  onOpenAttachmentPicker,
+function ManageAnnotationToolbar({
+  anchor,
+  onComment,
+  onCopy,
+  onDismiss,
   onQuickLabel,
-  onRemoveAnnotation,
-  onRemoveDraftAttachment,
-  selectedText,
+  onRedline,
 }: {
-  annotationAttachments: ManageAnnotationImage[];
-  annotationMode: ManageAnnotationMode;
-  annotationNote: string;
-  annotationPersistenceState: "idle" | "loading" | "ready" | "saving" | "saved" | "error";
-  annotations: ManageAnnotation[];
-  attachmentError: string;
-  feedbackCopyState: "idle" | "copied" | "error";
-  inputRef: RefObject<HTMLTextAreaElement | null>;
-  onAddComment: () => void;
-  onAddRedline: () => void;
-  onAnnotationNoteChange: (note: string) => void;
-  onAnnotationModeChange: (mode: ManageAnnotationMode) => void;
-  onCopyFeedback: () => void;
-  onOpenAttachmentPicker: () => void;
+  anchor: ManageSelectionAnchor;
+  onComment: () => void;
+  onCopy: () => void;
+  onDismiss: () => void;
   onQuickLabel: (label: ManageQuickLabel) => void;
-  onRemoveAnnotation: (annotationId: string) => void;
-  onRemoveDraftAttachment: (attachmentId: string) => void;
-  selectedText: string;
+  onRedline: () => void;
 }) {
-  const canAddComment = Boolean(annotationNote.trim()) || annotationAttachments.length > 0;
-  const persistenceLabel = annotationPersistenceLabel(annotationPersistenceState);
-  return (
-    <aside className="manage-annotations" aria-label="Annotations">
-      <header className="manage-annotations-header">
-        <div className="manage-annotations-title">
-          <IconMessageCircle aria-hidden="true" size={15} />
-          <span>{annotations.length} annotations</span>
-        </div>
-        <span className="manage-annotation-persistence" data-state={annotationPersistenceState}>
-          {persistenceLabel}
-        </span>
-      </header>
-      <div className="manage-annotation-mode-row" aria-label="Annotation mode">
-        {(["select", "redline", "comment"] as const).map((mode) => (
-          <button
-            aria-pressed={annotationMode === mode}
-            key={mode}
-            onClick={() => onAnnotationModeChange(mode)}
-            type="button"
-          >
-            {annotationModeLabel(mode)}
-          </button>
-        ))}
+  return createPortal(
+    <div
+      className="manage-markdown-selection-toolbar"
+      style={{
+        left: anchor.left,
+        top: Math.max(8, anchor.top - 46),
+      }}
+    >
+      <button onClick={onCopy} title="Copy selection" type="button">
+        <IconCopy aria-hidden="true" size={14} />
+        Copy
+      </button>
+      <button onClick={onRedline} title="Mark as deletion" type="button">
+        <IconTrash aria-hidden="true" size={14} />
+        Delete
+      </button>
+      <button onClick={onComment} title="Comment on selection" type="button">
+        <IconMessagePlus aria-hidden="true" size={14} />
+        Comment
+      </button>
+      {MANAGE_QUICK_LABELS.map((label) => (
+        <button key={label.id} onClick={() => onQuickLabel(label)} title={label.text} type="button">
+          <IconTag aria-hidden="true" size={13} />
+          {label.text}
+        </button>
+      ))}
+      <button aria-label="Dismiss annotation toolbar" onClick={onDismiss} type="button">
+        <IconX aria-hidden="true" size={14} />
+      </button>
+    </div>,
+    document.body,
+  );
+}
+
+function ManageCommentPopover({
+  draft,
+  onAddAttachmentFiles,
+  onCancel,
+  onDraftNoteChange,
+  onRemoveDraftAttachment,
+  onSubmit,
+}: {
+  draft: ManageCommentDraft;
+  onAddAttachmentFiles: (files: FileList | File[]) => void;
+  onCancel: () => void;
+  onDraftNoteChange: (note: string) => void;
+  onRemoveDraftAttachment: (attachmentId: string) => void;
+  onSubmit: () => void;
+}) {
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const canSubmit = Boolean(draft.note.trim()) || draft.attachments.length > 0;
+  return createPortal(
+    <div className="manage-comment-popover" style={commentPopoverStyle(draft.anchor)}>
+      <div className="manage-comment-popover-quote" data-empty={String(!draft.quote)}>
+        {draft.quote || "Global comment"}
       </div>
-      <div className="manage-annotation-composer">
-        <div className="manage-selected-quote" data-empty={String(!selectedText)}>
-          {selectedText || "Global comment"}
-        </div>
-        <div className="manage-quick-labels" aria-label="Quick labels">
-          {MANAGE_QUICK_LABELS.map((label) => (
-            <button
-              key={label.id}
-              onClick={() => onQuickLabel(label)}
-              type="button"
-            >
-              <IconTag aria-hidden="true" size={13} />
-              {label.text}
-            </button>
+      <textarea
+        aria-label="Annotation note"
+        autoFocus
+        onChange={(event) => onDraftNoteChange(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel();
+            return;
+          }
+          if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && canSubmit) {
+            event.preventDefault();
+            onSubmit();
+          }
+        }}
+        placeholder={draft.quote ? "Add a comment" : "Add a global comment"}
+        value={draft.note}
+      />
+      {draft.attachments.length > 0 ? (
+        <div className="manage-attachment-strip">
+          {draft.attachments.map((attachment) => (
+            <figure className="manage-attachment-chip" key={attachment.id}>
+              <img alt="" src={attachment.dataUrl} />
+              <figcaption>{attachment.name}</figcaption>
+              <button
+                aria-label={`Remove ${attachment.name}`}
+                onClick={() => onRemoveDraftAttachment(attachment.id)}
+                type="button"
+              >
+                <IconX aria-hidden="true" size={12} />
+              </button>
+            </figure>
           ))}
         </div>
-        <textarea
-          aria-label="Annotation note"
-          onChange={(event) => onAnnotationNoteChange(event.currentTarget.value)}
-          placeholder={selectedText ? "Add a comment" : "Add a global comment"}
-          ref={inputRef}
-          value={annotationNote}
-        />
-        {annotationAttachments.length > 0 ? (
-          <div className="manage-attachment-strip">
-            {annotationAttachments.map((attachment) => (
-              <figure className="manage-attachment-chip" key={attachment.id}>
-                <img alt="" src={attachment.dataUrl} />
-                <figcaption>{attachment.name}</figcaption>
-                <button
-                  aria-label={`Remove ${attachment.name}`}
-                  onClick={() => onRemoveDraftAttachment(attachment.id)}
-                  type="button"
-                >
-                  <IconX aria-hidden="true" size={12} />
-                </button>
-              </figure>
-            ))}
-          </div>
-        ) : null}
-        {attachmentError ? <div className="manage-attachment-error">{attachmentError}</div> : null}
-        <div className="manage-annotation-actions">
-          <button
-            className="manage-annotation-secondary"
-            disabled={!selectedText}
-            onClick={onAddRedline}
-            type="button"
-          >
-            <IconTrash aria-hidden="true" size={14} />
-            Redline
-          </button>
-          <button
-            className="manage-annotation-secondary"
-            onClick={onOpenAttachmentPicker}
-            type="button"
-          >
-            <IconPhoto aria-hidden="true" size={14} />
-            Image
-          </button>
-          <button
-            className="manage-annotation-add"
-            disabled={!canAddComment}
-            onClick={onAddComment}
-            type="button"
-          >
-            <IconMessagePlus aria-hidden="true" size={14} />
-            {selectedText ? "Comment" : "Global"}
-          </button>
-        </div>
+      ) : null}
+      {draft.attachmentError ? <div className="manage-attachment-error">{draft.attachmentError}</div> : null}
+      <div className="manage-comment-popover-actions">
+        <button onClick={() => attachmentInputRef.current?.click()} type="button">
+          <IconPhoto aria-hidden="true" size={14} />
+          Image
+        </button>
+        <button onClick={onCancel} type="button">
+          Cancel
+        </button>
+        <button disabled={!canSubmit} onClick={onSubmit} type="button">
+          <IconMessagePlus aria-hidden="true" size={14} />
+          Comment
+        </button>
       </div>
-      <div className="manage-annotation-list">
-        {annotations.length === 0 ? (
-          <div className="manage-annotation-empty">No annotations</div>
-        ) : null}
+      <input
+        accept="image/*"
+        aria-label="Annotation image attachments"
+        className="manage-hidden-file-input"
+        multiple
+        onChange={(event) => {
+          if (event.currentTarget.files) {
+            onAddAttachmentFiles(event.currentTarget.files);
+          }
+          event.currentTarget.value = "";
+        }}
+        ref={attachmentInputRef}
+        type="file"
+      />
+    </div>,
+    document.body,
+  );
+}
+
+function ManageAnnotationTimeline({
+  annotations,
+  onRemoveAnnotation,
+}: {
+  annotations: ManageAnnotation[];
+  onRemoveAnnotation: (annotationId: string) => void;
+}) {
+  return (
+    <aside className="manage-markdown-annotation-rail" aria-label="Annotations" id="manage-markdown-annotation-rail">
+      <header>
+        <span>Annotations</span>
+        {annotations.length > 0 ? <span className="manage-count-badge">{annotations.length}</span> : null}
+      </header>
+      <div className="manage-markdown-annotation-list">
+        {annotations.length === 0 ? <div className="manage-annotation-empty">No annotations</div> : null}
         {annotations.map((annotation) => (
           <article className="manage-annotation-card" data-type={annotation.type} key={annotation.id}>
             <div className="manage-annotation-card-header">
@@ -1364,59 +1864,158 @@ function ManageAnnotationPanel({
           </article>
         ))}
       </div>
-      <footer className="manage-annotations-footer">
-        <button disabled={annotations.length === 0} onClick={onCopyFeedback} type="button">
-          {feedbackCopyState === "copied" ? (
-            <IconCheck aria-hidden="true" size={14} />
-          ) : (
-            <IconCopy aria-hidden="true" size={14} />
-          )}
-          {feedbackCopyState === "copied" ? "Copied" : "Copy feedback"}
-        </button>
-      </footer>
     </aside>
   );
 }
 
-function ManageSelectionToolbar({
-  anchor,
-  onComment,
-  onDismiss,
-  onQuickLabel,
-  onRedline,
+function ManageMarkdownBlockRenderer({
+  annotations,
+  block,
+  orderedIndex,
 }: {
-  anchor: ManageSelectionAnchor;
-  onComment: () => void;
-  onDismiss: () => void;
-  onQuickLabel: (label: ManageQuickLabel) => void;
-  onRedline: () => void;
+  annotations: ManageAnnotation[];
+  block: ManageMarkdownBlock;
+  orderedIndex?: number;
 }) {
+  switch (block.type) {
+    case "heading": {
+      const HeadingTag = `h${Math.min(Math.max(block.level ?? 1, 1), 6)}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+      return (
+        <HeadingTag data-block-id={block.id} data-block-type="heading">
+          {renderManageInlineMarkdown(block.content, annotations)}
+        </HeadingTag>
+      );
+    }
+    case "blockquote": {
+      if (block.alertKind) {
+        return (
+          <div className="manage-md-alert" data-kind={block.alertKind} data-block-id={block.id}>
+            <div className="manage-md-alert-title">{block.alertKind}</div>
+            {block.content.split(/\n\n+/u).map((paragraph, index) => (
+              <p key={index}>{renderManageInlineMarkdown(paragraph, annotations)}</p>
+            ))}
+          </div>
+        );
+      }
+      return (
+        <blockquote data-block-id={block.id}>
+          {block.content.split(/\n\n+/u).map((paragraph, index) => (
+            <p key={index}>{renderManageInlineMarkdown(paragraph, annotations)}</p>
+          ))}
+        </blockquote>
+      );
+    }
+    case "list-item":
+      return (
+        <div
+          className="manage-md-list-item"
+          data-block-id={block.id}
+          style={{ "--manage-md-list-level": block.level ?? 0 } as CSSProperties}
+        >
+          <span className="manage-md-list-marker">
+            {block.checked !== undefined ? (
+              <input checked={block.checked} readOnly tabIndex={-1} type="checkbox" />
+            ) : block.ordered ? (
+              `${orderedIndex ?? block.orderedStart ?? 1}.`
+            ) : (
+              "*"
+            )}
+          </span>
+          <span className={block.checked ? "manage-md-list-text is-checked" : "manage-md-list-text"}>
+            {renderManageInlineMarkdown(block.content, annotations)}
+          </span>
+        </div>
+      );
+    case "code":
+      return <ManageMarkdownCodeBlock block={block} />;
+    case "table":
+      return <ManageMarkdownTable block={block} annotations={annotations} />;
+    case "hr":
+      return <hr data-block-id={block.id} />;
+    case "html":
+      return <ManageMarkdownHtmlBlock block={block} />;
+    case "directive":
+      return (
+        <div className="manage-md-directive" data-kind={block.directiveKind ?? "note"} data-block-id={block.id}>
+          {block.content.split(/\n\n+/u).map((paragraph, index) => (
+            <p key={index}>{renderManageInlineMarkdown(paragraph, annotations)}</p>
+          ))}
+        </div>
+      );
+    case "paragraph":
+    default:
+      return (
+        <p data-block-id={block.id}>
+          {renderManageInlineMarkdown(block.content, annotations)}
+        </p>
+      );
+  }
+}
+
+function ManageMarkdownCodeBlock({ block }: { block: ManageMarkdownBlock }) {
+  const [copied, setCopied] = useState(false);
+  const copyCode = useCallback(async () => {
+    try {
+      await writeTextToClipboard(block.content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1_600);
+    } catch {
+      setCopied(false);
+    }
+  }, [block.content]);
+  return (
+    <div className="manage-md-code-block" data-block-id={block.id}>
+      <button aria-label="Copy code" onClick={() => void copyCode()} type="button">
+        {copied ? <IconCheck aria-hidden="true" size={14} /> : <IconCopy aria-hidden="true" size={14} />}
+      </button>
+      <pre>
+        <code className={block.language ? `language-${block.language}` : undefined}>{block.content}</code>
+      </pre>
+    </div>
+  );
+}
+
+function ManageMarkdownTable({
+  annotations,
+  block,
+}: {
+  annotations: ManageAnnotation[];
+  block: ManageMarkdownBlock;
+}) {
+  const { headers, rows } = parseManageMarkdownTableContent(block.content);
+  return (
+    <div className="manage-md-table-wrap" data-block-id={block.id}>
+      <table>
+        <thead>
+          <tr>
+            {headers.map((header, index) => (
+              <th key={index}>{renderManageInlineMarkdown(header, annotations)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {row.map((cell, cellIndex) => (
+                <td key={cellIndex}>{renderManageInlineMarkdown(cell, annotations)}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ManageMarkdownHtmlBlock({ block }: { block: ManageMarkdownBlock }) {
+  const sanitized = useMemo(() => sanitizeManageBlockHtml(block.content), [block.content]);
   return (
     <div
-      className="manage-selection-toolbar"
-      style={{
-        left: anchor.left,
-        top: Math.max(8, anchor.top - 42),
-      }}
-    >
-      <button onClick={onRedline} type="button">
-        <IconTrash aria-hidden="true" size={14} />
-        Redline
-      </button>
-      <button onClick={onComment} type="button">
-        <IconMessagePlus aria-hidden="true" size={14} />
-        Comment
-      </button>
-      {MANAGE_QUICK_LABELS.map((label) => (
-        <button key={label.id} onClick={() => onQuickLabel(label)} type="button">
-          <IconTag aria-hidden="true" size={13} />
-          {label.text}
-        </button>
-      ))}
-      <button aria-label="Dismiss annotation toolbar" onClick={onDismiss} type="button">
-        <IconX aria-hidden="true" size={14} />
-      </button>
-    </div>
+      className="manage-md-html-block"
+      data-block-id={block.id}
+      data-block-type="html"
+      dangerouslySetInnerHTML={{ __html: sanitized }}
+    />
   );
 }
 
@@ -1444,7 +2043,7 @@ function ManageExcalidrawEditor({
     }
   }, [content]);
 
-  if (!parsed.ok) {
+  if (parsed.ok === false) {
     return (
       <div className="manage-drawing-source">
         <ManagePreviewMessage
@@ -1478,8 +2077,9 @@ function ManageExcalidrawEditor({
         initialData={{
           appState: {
             collaborators: new Map(),
-            viewBackgroundColor: "#101112",
+            viewBackgroundColor: MANAGE_EXCALIDRAW_CANVAS_BACKGROUND,
             ...data.appState,
+            theme: MANAGE_EXCALIDRAW_CANVAS_THEME,
           },
           elements: data.elements ?? [],
           files: data.files ?? {},
@@ -1513,7 +2113,7 @@ function ManageExcalidrawEditor({
           setParseError(undefined);
           onChange(nextContent);
         }}
-        theme="dark"
+        theme={MANAGE_EXCALIDRAW_CANVAS_THEME}
       />
     </div>
   );
@@ -1568,6 +2168,55 @@ function requestManageFiles(
   });
 }
 
+function createUniqueArtifactPath(entries: ManageFileEntry[], kind: ManageArtifactKind): string {
+  const occupiedPaths = new Set(entries.map((entry) => entry.path.toLocaleLowerCase()));
+  const { extension, stem } = artifactNameParts(kind);
+  for (let index = 1; index < 10_000; index += 1) {
+    const suffix = index === 1 ? "" : `-${index}`;
+    const path = `${MANAGE_ARTIFACT_ROOT_PATH}/${stem}${suffix}.${extension}`;
+    if (!occupiedPaths.has(path.toLocaleLowerCase())) {
+      return path;
+    }
+  }
+  return `${MANAGE_ARTIFACT_ROOT_PATH}/${stem}-${Date.now()}.${extension}`;
+}
+
+function artifactNameParts(kind: ManageArtifactKind): { extension: string; stem: string } {
+  switch (kind) {
+    case "excalidraw":
+      return { extension: "excalidraw", stem: "drawing" };
+    case "html":
+      return { extension: "html", stem: "page" };
+    case "markdown":
+      return { extension: "md", stem: "note" };
+  }
+}
+
+function createInitialArtifactContent(kind: ManageArtifactKind): string {
+  switch (kind) {
+    case "excalidraw":
+      return `${JSON.stringify(createEmptyExcalidrawFile(), null, 2)}\n`;
+    case "html":
+      return [
+        "<!doctype html>",
+        '<html lang="en">',
+        "<head>",
+        '  <meta charset="utf-8">',
+        "  <title>Untitled</title>",
+        "</head>",
+        "<body>",
+        "  <main>",
+        "    <h1>Untitled</h1>",
+        "  </main>",
+        "</body>",
+        "</html>",
+        "",
+      ].join("\n");
+    case "markdown":
+      return "# Untitled\n\n";
+  }
+}
+
 function formatFileSize(size: number): string {
   if (size < 1024) {
     return `${size} B`;
@@ -1613,8 +2262,14 @@ function languageLabelForPath(path: string): string {
 }
 
 function fileIconForPath(path: string) {
-  if (isMarkdownPath(path) || isExcalidrawPath(path)) {
-    return IconFileText;
+  if (isMarkdownPath(path)) {
+    return IconMarkdown;
+  }
+  if (isHtmlPath(path)) {
+    return IconFileTypeHtml;
+  }
+  if (isExcalidrawPath(path)) {
+    return IconEdit;
   }
   return IconFile;
 }
@@ -1627,15 +2282,8 @@ function isExcalidrawPath(path: string): boolean {
   return /\.excalidraw$/iu.test(path);
 }
 
-function annotationModeLabel(mode: ManageAnnotationMode): string {
-  switch (mode) {
-    case "comment":
-      return "Comment";
-    case "redline":
-      return "Redline";
-    case "select":
-      return "Select";
-  }
+function isHtmlPath(path: string): boolean {
+  return /\.html?$/iu.test(path);
 }
 
 function annotationPersistenceLabel(state: "idle" | "loading" | "ready" | "saving" | "saved" | "error"): string {
@@ -1683,8 +2331,633 @@ function selectionAnchorFromRect(rect: DOMRect | undefined): ManageSelectionAnch
   return { left, top };
 }
 
+function selectionAnchorFromRange(range: Range): ManageSelectionAnchor | undefined {
+  const visibleRect = Array.from(range.getClientRects()).find((rect) => rect.width > 0 && rect.height > 0);
+  return selectionAnchorFromRect(visibleRect ?? range.getBoundingClientRect());
+}
+
+function selectionBelongsToElement(selection: Selection, element: HTMLElement): boolean {
+  const anchorNode = selection.anchorNode;
+  const focusNode = selection.focusNode;
+  return Boolean(
+    anchorNode &&
+      focusNode &&
+      element.contains(anchorNode.nodeType === Node.ELEMENT_NODE ? anchorNode : anchorNode.parentElement) &&
+      element.contains(focusNode.nodeType === Node.ELEMENT_NODE ? focusNode : focusNode.parentElement),
+  );
+}
+
+function defaultManageSelectionAnchor(): ManageSelectionAnchor {
+  return {
+    left: Math.min(Math.max(window.innerWidth / 2, 12), window.innerWidth - 12),
+    top: Math.min(Math.max(72, 12), window.innerHeight - 12),
+  };
+}
+
+function applyManageMeoTheme(): void {
+  const rootStyle = document.documentElement.style;
+  rootStyle.setProperty(
+    "--vscode-editor-font-family",
+    'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  );
+  rootStyle.setProperty("--vscode-editor-font-size", "14px");
+  rootStyle.setProperty("--vscode-editor-font-weight", "450");
+  rootStyle.setProperty("--vscode-editor-background", "#101112");
+  rootStyle.setProperty("--vscode-editor-foreground", "#e5e7eb");
+  rootStyle.setProperty("--vscode-sideBar-background", "#17191c");
+  rootStyle.setProperty("--vscode-panel-border", "rgba(255, 255, 255, 0.10)");
+  rootStyle.setProperty("--vscode-editor-selectionBackground", "rgba(125, 211, 252, 0.28)");
+  rootStyle.setProperty("--vscode-editorWidget-background", "#17191c");
+  applyMeoThemeSettings(MANAGE_MEO_THEME);
+}
+
+function createManageMeoAnnotationDecorations(
+  text: string,
+  annotations: readonly ManageAnnotation[],
+): ManageMeoAnnotationDecoration[] {
+  const decorations: ManageMeoAnnotationDecoration[] = [];
+  for (const annotation of annotations) {
+    if (annotation.scope !== "selection") {
+      continue;
+    }
+    const quote = normalizeAnnotationQuote(annotation.quote);
+    if (!quote) {
+      continue;
+    }
+    let fromIndex = 0;
+    while (fromIndex < text.length) {
+      const matchIndex = text.indexOf(quote, fromIndex);
+      if (matchIndex < 0) {
+        break;
+      }
+      decorations.push({
+        from: matchIndex,
+        to: matchIndex + quote.length,
+        type: annotation.type,
+      });
+      fromIndex = matchIndex + quote.length;
+    }
+  }
+  return decorations;
+}
+
+function buildManageMeoAnnotationDecorations(decorations: readonly ManageMeoAnnotationDecoration[]): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  const orderedDecorations = decorations
+    .filter((decoration) => decoration.from >= 0 && decoration.to > decoration.from)
+    .sort((left, right) => left.from - right.from || left.to - right.to);
+  for (const decoration of orderedDecorations) {
+    builder.add(decoration.from, decoration.to, decoration.type === "redline" ? manageMeoRedlineMark : manageMeoCommentMark);
+  }
+  return builder.finish();
+}
+
+function normalizeManageMeoSelection(
+  state: ManageMeoSelectionState | undefined,
+  editor: ManageMeoEditor | null,
+): ManageCapturedSelection | undefined {
+  if (!state?.visible || !editor || typeof state.from !== "number" || typeof state.to !== "number") {
+    return undefined;
+  }
+  const documentLength = editor.view.state.doc.length;
+  const from = Math.max(0, Math.min(Math.floor(state.from), documentLength));
+  const to = Math.max(from, Math.min(Math.floor(state.to), documentLength));
+  const text = editor.view.state.doc.sliceString(from, to);
+  if (!normalizeAnnotationQuote(text)) {
+    return undefined;
+  }
+  const left = Math.min(Math.max(state.anchorX ?? window.innerWidth / 2, 12), window.innerWidth - 12);
+  const top = Math.min(Math.max(state.anchorY ?? state.anchorBottomY ?? 72, 12), window.innerHeight - 12);
+  return {
+    anchor: { left, top },
+    text,
+  };
+}
+
+function commentPopoverStyle(anchor: ManageSelectionAnchor): CSSProperties {
+  const width = Math.min(360, Math.max(280, window.innerWidth - 24));
+  const left = Math.min(Math.max(anchor.left - width / 2, 12), window.innerWidth - width - 12);
+  const maxTop = Math.max(12, window.innerHeight - 260);
+  const top = Math.min(Math.max(anchor.top + 12, 12), maxTop);
+  return {
+    left,
+    top,
+    width,
+  };
+}
+
 function readStoredManageSidebarSide(): ManageSidebarSide {
   return window.localStorage.getItem(MANAGE_SIDEBAR_SIDE_STORAGE_KEY) === "right" ? "right" : "left";
+}
+
+function readStoredManageSidebarWidth(): number {
+  const parsedWidth = Number(window.localStorage.getItem(MANAGE_SIDEBAR_WIDTH_STORAGE_KEY));
+  return clampManageSidebarWidth(
+    Number.isFinite(parsedWidth) && parsedWidth > 0 ? parsedWidth : MANAGE_SIDEBAR_DEFAULT_WIDTH,
+    window.innerWidth,
+  );
+}
+
+function clampManageSidebarWidth(width: number, containerWidth: number): number {
+  const maxForContainer = Math.max(
+    MANAGE_SIDEBAR_MIN_WIDTH,
+    Math.min(MANAGE_SIDEBAR_MAX_WIDTH, Math.floor(containerWidth * 0.46)),
+  );
+  return Math.min(Math.max(Math.round(width), MANAGE_SIDEBAR_MIN_WIDTH), maxForContainer);
+}
+
+const MANAGE_MARKDOWN_HTML_BLOCK_TAGS = new Set([
+  "article",
+  "aside",
+  "blockquote",
+  "details",
+  "div",
+  "figure",
+  "footer",
+  "form",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "header",
+  "hr",
+  "main",
+  "nav",
+  "ol",
+  "p",
+  "pre",
+  "section",
+  "table",
+  "ul",
+]);
+
+function parseManageMarkdownToBlocks(markdown: string): ManageMarkdownBlock[] {
+  const body = extractManageMarkdownBody(markdown);
+  const lines = body.split("\n");
+  const blocks: ManageMarkdownBlock[] = [];
+  let index = 0;
+  let order = 0;
+
+  const pushBlock = (
+    type: ManageMarkdownBlock["type"],
+    content: string,
+    startLine: number,
+    extra: Partial<ManageMarkdownBlock> = {},
+  ) => {
+    blocks.push({
+      content,
+      id: `manage-md-block-${order}-${startLine}`,
+      order,
+      startLine,
+      type,
+      ...extra,
+    });
+    order += 1;
+  };
+
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+    const startLine = index + 1;
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/u);
+    if (heading) {
+      pushBlock("heading", heading[2] ?? "", startLine, { level: heading[1]?.length ?? 1 });
+      index += 1;
+      continue;
+    }
+
+    if (/^\s{0,3}(?:([-*_])(?:\s*\1){2,})\s*$/u.test(line)) {
+      pushBlock("hr", "", startLine);
+      index += 1;
+      continue;
+    }
+
+    const directive = line.match(/^\s*:::\s*([A-Za-z][\w-]*)\s*$/u);
+    if (directive) {
+      const contentLines: string[] = [];
+      index += 1;
+      while (index < lines.length && !/^\s*:::\s*$/u.test(lines[index] ?? "")) {
+        contentLines.push(lines[index] ?? "");
+        index += 1;
+      }
+      if (index < lines.length) {
+        index += 1;
+      }
+      pushBlock("directive", contentLines.join("\n").trim(), startLine, {
+        directiveKind: directive[1]?.toLocaleLowerCase(),
+      });
+      continue;
+    }
+
+    const fence = line.match(/^\s{0,3}(`{3,}|~{3,})(.*)$/u);
+    if (fence) {
+      const marker = fence[1] ?? "```";
+      const markerChar = marker[0] ?? "`";
+      const markerLength = marker.length;
+      const language = (fence[2] ?? "").trim().split(/\s+/u)[0] ?? "";
+      const contentLines: string[] = [];
+      index += 1;
+      while (index < lines.length) {
+        const close = (lines[index] ?? "").match(/^\s{0,3}(`{3,}|~{3,})\s*$/u);
+        if (close && close[1]?.[0] === markerChar && close[1].length >= markerLength) {
+          index += 1;
+          break;
+        }
+        contentLines.push(lines[index] ?? "");
+        index += 1;
+      }
+      pushBlock("code", contentLines.join("\n"), startLine, { language });
+      continue;
+    }
+
+    if (/^\s{0,3}>\s?/u.test(line)) {
+      const quoteLines: string[] = [];
+      while (index < lines.length && /^\s{0,3}>\s?/u.test(lines[index] ?? "")) {
+        quoteLines.push((lines[index] ?? "").replace(/^\s{0,3}>\s?/u, ""));
+        index += 1;
+      }
+      const alert = quoteLines[0]?.trim().match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$/iu);
+      if (alert) {
+        pushBlock("blockquote", quoteLines.slice(1).join("\n").trim(), startLine, {
+          alertKind: alert[1]?.toLocaleLowerCase() as ManageMarkdownAlertKind,
+        });
+      } else {
+        pushBlock("blockquote", quoteLines.join("\n").trim(), startLine);
+      }
+      continue;
+    }
+
+    if (isManageMarkdownTableStart(lines, index)) {
+      const tableLines = [line, lines[index + 1] ?? ""];
+      index += 2;
+      while (index < lines.length && lineHasUnescapedPipe(lines[index] ?? "")) {
+        tableLines.push(lines[index] ?? "");
+        index += 1;
+      }
+      pushBlock("table", tableLines.join("\n"), startLine);
+      continue;
+    }
+
+    const list = line.match(/^(\s*)([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?(.*)$/u);
+    if (list) {
+      const marker = list[2] ?? "-";
+      const checkbox = list[3];
+      const contentLines = [list[4] ?? ""];
+      const indentLength = expandManageMarkdownIndent(list[1] ?? "").length;
+      index += 1;
+      while (index < lines.length) {
+        const nextLine = lines[index] ?? "";
+        if (!nextLine.trim() || isManageMarkdownBlockStart(lines, index)) {
+          break;
+        }
+        if (expandManageMarkdownIndent(nextLine).length > indentLength) {
+          contentLines.push(nextLine.trim());
+          index += 1;
+          continue;
+        }
+        break;
+      }
+      const orderedStartMatch = marker.match(/^(\d+)/u);
+      pushBlock("list-item", contentLines.join("\n").trim(), startLine, {
+        checked: checkbox ? /\[[xX]\]/u.test(checkbox) : undefined,
+        level: Math.floor(indentLength / 2),
+        ordered: Boolean(orderedStartMatch),
+        orderedStart: orderedStartMatch ? Number(orderedStartMatch[1]) : undefined,
+      });
+      continue;
+    }
+
+    const htmlTag = line.match(/^\s{0,3}<([A-Za-z][\w-]*)(?:\s|>|\/>)/u)?.[1]?.toLocaleLowerCase();
+    if (htmlTag && MANAGE_MARKDOWN_HTML_BLOCK_TAGS.has(htmlTag)) {
+      const htmlLines = [line];
+      index += 1;
+      if (!line.includes(`</${htmlTag}>`) && !/\/>\s*$/u.test(line)) {
+        while (index < lines.length) {
+          const nextLine = lines[index] ?? "";
+          if (!nextLine.trim()) {
+            break;
+          }
+          htmlLines.push(nextLine);
+          index += 1;
+          if (nextLine.includes(`</${htmlTag}>`)) {
+            break;
+          }
+        }
+      }
+      pushBlock("html", htmlLines.join("\n"), startLine);
+      continue;
+    }
+
+    const paragraphLines = [line.trim()];
+    index += 1;
+    while (index < lines.length && lines[index]?.trim() && !isManageMarkdownBlockStart(lines, index)) {
+      paragraphLines.push((lines[index] ?? "").trim());
+      index += 1;
+    }
+    pushBlock("paragraph", paragraphLines.join(" "), startLine);
+  }
+
+  return blocks;
+}
+
+function extractManageMarkdownBody(markdown: string): string {
+  const normalized = markdown.replace(/\r\n?/gu, "\n");
+  const frontmatter = normalized.match(/^---[ \t]*\n[\s\S]*?\n---[ \t]*(?:\n|$)/u);
+  return frontmatter ? normalized.slice(frontmatter[0].length) : normalized;
+}
+
+function isManageMarkdownBlockStart(lines: string[], index: number): boolean {
+  const line = lines[index] ?? "";
+  if (!line.trim()) {
+    return false;
+  }
+  return (
+    /^(#{1,6})\s+/u.test(line) ||
+    /^\s{0,3}(?:([-*_])(?:\s*\1){2,})\s*$/u.test(line) ||
+    /^\s*:::\s*([A-Za-z][\w-]*)\s*$/u.test(line) ||
+    /^\s{0,3}(`{3,}|~{3,})/u.test(line) ||
+    /^\s{0,3}>\s?/u.test(line) ||
+    /^(\s*)([-*+]|\d+[.)])\s+/u.test(line) ||
+    isManageMarkdownTableStart(lines, index) ||
+    Boolean(line.match(/^\s{0,3}<([A-Za-z][\w-]*)(?:\s|>|\/>)/u)?.[1])
+  );
+}
+
+function isManageMarkdownTableStart(lines: string[], index: number): boolean {
+  const line = lines[index] ?? "";
+  const divider = lines[index + 1] ?? "";
+  return lineHasUnescapedPipe(line) && isManageMarkdownTableDivider(divider);
+}
+
+function isManageMarkdownTableDivider(line: string): boolean {
+  return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/u.test(line);
+}
+
+function lineHasUnescapedPipe(line: string): boolean {
+  return /(^|[^\\])\|/u.test(line);
+}
+
+function expandManageMarkdownIndent(value: string): string {
+  return value.replace(/\t/gu, "    ");
+}
+
+function computeManageOrderedListIndices(blocks: ManageMarkdownBlock[]): Map<string, number> {
+  const indices = new Map<string, number>();
+  const counters = new Map<number, number>();
+  for (const block of blocks) {
+    if (block.type !== "list-item") {
+      counters.clear();
+      continue;
+    }
+    const level = block.level ?? 0;
+    for (const counterLevel of Array.from(counters.keys())) {
+      if (counterLevel > level) {
+        counters.delete(counterLevel);
+      }
+    }
+    if (!block.ordered) {
+      counters.delete(level);
+      continue;
+    }
+    const nextIndex = counters.has(level) ? (counters.get(level) ?? 0) + 1 : block.orderedStart ?? 1;
+    counters.set(level, nextIndex);
+    indices.set(block.id, nextIndex);
+  }
+  return indices;
+}
+
+function parseManageMarkdownTableContent(content: string): { headers: string[]; rows: string[][] } {
+  const lines = content.split("\n").filter((line) => line.trim());
+  const parseRow = (line: string): string[] =>
+    line
+      .replace(/^\s*\|/u, "")
+      .replace(/\|\s*$/u, "")
+      .split(/(?<!\\)\|/u)
+      .map((cell) => cell.trim().replace(/\\\|/gu, "|"));
+  const headers = lines[0] ? parseRow(lines[0]) : [];
+  const rows = lines.slice(2).map(parseRow);
+  return { headers, rows };
+}
+
+function renderManageInlineMarkdown(text: string, annotations: ManageAnnotation[]): ReactNode {
+  return renderManageAnnotatedInline(
+    text,
+    annotations.filter((annotation) => annotation.scope === "selection" && Boolean(annotation.quote)),
+  );
+}
+
+function renderManageAnnotatedInline(text: string, annotations: ManageAnnotation[]): ReactNode {
+  const annotation = annotations.find((candidate) => text.includes(candidate.quote));
+  if (!annotation) {
+    return renderManageInlineTokens(text);
+  }
+  const index = text.indexOf(annotation.quote);
+  const before = text.slice(0, index);
+  const match = text.slice(index, index + annotation.quote.length);
+  const after = text.slice(index + annotation.quote.length);
+  const remaining = annotations.filter((candidate) => candidate.id !== annotation.id);
+  return (
+    <>
+      {renderManageAnnotatedInline(before, remaining)}
+      <mark
+        className={`annotation-highlight manage-annotation-highlight ${annotation.type === "redline" ? "deletion" : "comment"}`}
+        data-type={annotation.type}
+      >
+        {renderManageInlineTokens(match)}
+      </mark>
+      {renderManageAnnotatedInline(after, remaining)}
+    </>
+  );
+}
+
+function renderManageInlineTokens(text: string): ReactNode {
+  const nodes: ReactNode[] = [];
+  let index = 0;
+  while (index < text.length) {
+    if (text.startsWith("`", index)) {
+      const end = text.indexOf("`", index + 1);
+      if (end > index) {
+        nodes.push(
+          <code className="manage-md-inline-code" key={`code-${index}`}>
+            {text.slice(index + 1, end)}
+          </code>,
+        );
+        index = end + 1;
+        continue;
+      }
+    }
+    if (text.startsWith("![", index)) {
+      const image = parseManageMarkdownImageToken(text, index);
+      if (image) {
+        nodes.push(image.node);
+        index = image.nextIndex;
+        continue;
+      }
+    }
+    if (text.startsWith("[", index)) {
+      const link = parseManageMarkdownLinkToken(text, index);
+      if (link) {
+        nodes.push(link.node);
+        index = link.nextIndex;
+        continue;
+      }
+    }
+    const strongMarker = text.startsWith("**", index) ? "**" : text.startsWith("__", index) ? "__" : "";
+    if (strongMarker) {
+      const end = text.indexOf(strongMarker, index + 2);
+      if (end > index + 2) {
+        nodes.push(<strong key={`strong-${index}`}>{renderManageInlineTokens(text.slice(index + 2, end))}</strong>);
+        index = end + 2;
+        continue;
+      }
+    }
+    if (text.startsWith("~~", index)) {
+      const end = text.indexOf("~~", index + 2);
+      if (end > index + 2) {
+        nodes.push(<del key={`del-${index}`}>{renderManageInlineTokens(text.slice(index + 2, end))}</del>);
+        index = end + 2;
+        continue;
+      }
+    }
+    const emphasisMarker = text[index] === "*" || text[index] === "_" ? text[index] : "";
+    if (emphasisMarker && !text.startsWith(`${emphasisMarker}${emphasisMarker}`, index)) {
+      const end = text.indexOf(emphasisMarker, index + 1);
+      if (end > index + 1) {
+        nodes.push(<em key={`em-${index}`}>{renderManageInlineTokens(text.slice(index + 1, end))}</em>);
+        index = end + 1;
+        continue;
+      }
+    }
+
+    const nextSpecial = findNextManageInlineSpecial(text, index + 1);
+    nodes.push(...renderManagePlainInlineText(text.slice(index, nextSpecial), `text-${index}`));
+    index = nextSpecial;
+  }
+  return nodes;
+}
+
+function parseManageMarkdownLinkToken(text: string, index: number): { nextIndex: number; node: ReactNode } | undefined {
+  const labelEnd = text.indexOf("]", index + 1);
+  if (labelEnd <= index + 1 || text[labelEnd + 1] !== "(") {
+    return undefined;
+  }
+  const hrefEnd = text.indexOf(")", labelEnd + 2);
+  if (hrefEnd <= labelEnd + 2) {
+    return undefined;
+  }
+  const href = sanitizeManageHref(text.slice(labelEnd + 2, hrefEnd).trim());
+  const label = text.slice(index + 1, labelEnd);
+  if (!href) {
+    return {
+      nextIndex: hrefEnd + 1,
+      node: <span key={`link-${index}`}>{renderManageInlineTokens(label)}</span>,
+    };
+  }
+  return {
+    nextIndex: hrefEnd + 1,
+    node: (
+      <a href={href} key={`link-${index}`} rel="noreferrer" target={href.startsWith("#") ? undefined : "_blank"}>
+        {renderManageInlineTokens(label)}
+      </a>
+    ),
+  };
+}
+
+function parseManageMarkdownImageToken(text: string, index: number): { nextIndex: number; node: ReactNode } | undefined {
+  const altEnd = text.indexOf("]", index + 2);
+  if (altEnd <= index + 2 || text[altEnd + 1] !== "(") {
+    return undefined;
+  }
+  const srcEnd = text.indexOf(")", altEnd + 2);
+  if (srcEnd <= altEnd + 2) {
+    return undefined;
+  }
+  const alt = text.slice(index + 2, altEnd);
+  const src = sanitizeManageImageSrc(text.slice(altEnd + 2, srcEnd).trim());
+  return {
+    nextIndex: srcEnd + 1,
+    node: src ? <img alt={alt} className="manage-md-inline-image" key={`image-${index}`} src={src} /> : alt,
+  };
+}
+
+function renderManagePlainInlineText(text: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const urlPattern = /(https?:\/\/[^\s<)]+)/giu;
+  let lastIndex = 0;
+  for (const match of text.matchAll(urlPattern)) {
+    const url = match[0];
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      nodes.push(text.slice(lastIndex, index));
+    }
+    nodes.push(
+      <a href={url} key={`${keyPrefix}-url-${index}`} rel="noreferrer" target="_blank">
+        {url}
+      </a>,
+    );
+    lastIndex = index + url.length;
+  }
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+  return nodes;
+}
+
+function findNextManageInlineSpecial(text: string, start: number): number {
+  const candidates = ["`", "![", "[", "**", "__", "~~", "*", "_"]
+    .map((marker) => text.indexOf(marker, start))
+    .filter((candidate) => candidate >= 0);
+  return candidates.length > 0 ? Math.min(...candidates) : text.length;
+}
+
+function sanitizeManageHref(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed || /^(?:javascript|data|vbscript|file):/iu.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function sanitizeManageImageSrc(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed || /^(?:javascript|vbscript|file):/iu.test(trimmed)) {
+    return undefined;
+  }
+  if (/^data:/iu.test(trimmed) && !/^data:image\//iu.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function sanitizeManageBlockHtml(html: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  template.content.querySelectorAll("script, style, iframe, object, embed, link, meta").forEach((element) => {
+    element.remove();
+  });
+  template.content.querySelectorAll("*").forEach((element) => {
+    for (const attribute of Array.from(element.attributes)) {
+      const name = attribute.name.toLocaleLowerCase();
+      if (name.startsWith("on") || name === "style") {
+        element.removeAttribute(attribute.name);
+        continue;
+      }
+      if ((name === "href" || name === "src") && !sanitizeManageHref(attribute.value)) {
+        element.removeAttribute(attribute.name);
+      }
+    }
+    if (element instanceof HTMLAnchorElement && element.href && !element.href.startsWith("#")) {
+      element.target = "_blank";
+      element.rel = "noreferrer";
+    }
+  });
+  return template.innerHTML;
 }
 
 function normalizeAttachmentName(name: string): string {
@@ -1882,40 +3155,6 @@ function isEditableEventTarget(target: EventTarget | null): boolean {
   return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
-function annotateMarkdownChildren(children: ReactNode, annotations: ManageAnnotation[]): ReactNode {
-  if (typeof children === "string") {
-    return annotateText(children, annotations);
-  }
-  if (Array.isArray(children)) {
-    return children.map((child, index) => (
-      <Fragment key={index}>{annotateMarkdownChildren(child, annotations)}</Fragment>
-    ));
-  }
-  if (isValidElement(children)) {
-    const child = children as ReactElement<{ children?: ReactNode }>;
-    return cloneElement(child, undefined, annotateMarkdownChildren(child.props.children, annotations));
-  }
-  return children;
-}
-
-function annotateText(text: string, annotations: ManageAnnotation[]): ReactNode {
-  const matchingAnnotations = annotations.filter((annotation) => annotation.quote && text.includes(annotation.quote));
-  if (matchingAnnotations.length === 0) {
-    return text;
-  }
-  const annotation = matchingAnnotations[0]!;
-  const [before, ...rest] = text.split(annotation.quote);
-  return (
-    <>
-      {before}
-      <mark className="manage-annotation-highlight" data-type={annotation.type}>
-        {annotation.quote}
-      </mark>
-      {annotateText(rest.join(annotation.quote), annotations.filter((candidate) => candidate.id !== annotation.id))}
-    </>
-  );
-}
-
 function parseExcalidrawFile(content: string): { data: ExcalidrawFileData; ok: true } | { error: string; ok: false } {
   const trimmed = content.trim();
   if (!trimmed) {
@@ -1954,7 +3193,8 @@ function parseExcalidrawFile(content: string): { data: ExcalidrawFileData; ok: t
 function createEmptyExcalidrawFile(): ExcalidrawFileData {
   return {
     appState: {
-      viewBackgroundColor: "#101112",
+      theme: MANAGE_EXCALIDRAW_CANVAS_THEME,
+      viewBackgroundColor: MANAGE_EXCALIDRAW_CANVAS_BACKGROUND,
     },
     elements: [],
     files: {},
@@ -2075,7 +3315,7 @@ styleElement.textContent = `
   .manage-shell {
     background: var(--manage-bg);
     display: grid;
-    grid-template-columns: minmax(230px, 292px) minmax(0, 1fr);
+    grid-template-columns: var(--manage-sidebar-width, 292px) 7px minmax(0, 1fr);
     height: 100%;
     min-height: 0;
     position: relative;
@@ -2083,26 +3323,58 @@ styleElement.textContent = `
   }
 
   .manage-shell[data-sidebar-side="right"] {
-    grid-template-columns: minmax(0, 1fr) minmax(230px, 292px);
+    grid-template-columns: minmax(0, 1fr) 7px var(--manage-sidebar-width, 292px);
   }
 
   .manage-shell[data-sidebar-hidden="true"] {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .manage-shell[data-sidebar-hidden="true"] .manage-preview {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
   .manage-sidebar {
     background: var(--manage-panel);
-    border-right: 1px solid var(--manage-border);
     display: flex;
     flex-direction: column;
+    grid-column: 1;
+    grid-row: 1;
     min-height: 0;
     min-width: 0;
   }
 
   .manage-shell[data-sidebar-side="right"] .manage-sidebar {
-    border-left: 1px solid var(--manage-border);
-    border-right: 0;
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .manage-sidebar-resizer {
+    background: var(--manage-panel);
+    cursor: ew-resize;
     grid-column: 2;
+    grid-row: 1;
+    min-width: 7px;
+    outline: none;
+    position: relative;
+    touch-action: none;
+  }
+
+  .manage-sidebar-resizer::before {
+    background: var(--manage-border-strong);
+    content: "";
+    inset: 0 3px;
+    position: absolute;
+  }
+
+  .manage-sidebar-resizer:hover::before,
+  .manage-sidebar-resizer:focus-visible::before {
+    background: rgba(125, 211, 252, 0.7);
+  }
+
+  .manage-preview {
+    grid-column: 3;
     grid-row: 1;
   }
 
@@ -2144,6 +3416,50 @@ styleElement.textContent = `
     flex: 0 0 auto;
     gap: 4px;
     position: relative;
+  }
+
+  .manage-artifact-create {
+    border-bottom: 1px solid var(--manage-border);
+    display: grid;
+    gap: 6px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 8px 10px;
+  }
+
+  .manage-artifact-create-button {
+    align-items: center;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--manage-border);
+    color: rgba(248, 250, 252, 0.78);
+    display: inline-flex;
+    font-size: 11px;
+    font-weight: 720;
+    gap: 5px;
+    height: 30px;
+    justify-content: center;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0 7px;
+    white-space: nowrap;
+  }
+
+  .manage-artifact-create-button:hover,
+  .manage-artifact-create-button:focus-visible {
+    background: rgba(125, 211, 252, 0.1);
+    border-color: rgba(125, 211, 252, 0.38);
+    color: var(--manage-text);
+    outline: none;
+  }
+
+  .manage-artifact-create-button:disabled {
+    color: var(--manage-subtle);
+    cursor: wait;
+  }
+
+  .manage-artifact-create-button span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .manage-icon-button {
@@ -2384,6 +3700,10 @@ styleElement.textContent = `
     min-height: 0;
   }
 
+  .manage-preview-content[data-kind="markdown"] {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
   .manage-preview-header {
     align-items: center;
     border-bottom: 1px solid var(--manage-border);
@@ -2420,32 +3740,12 @@ styleElement.textContent = `
     gap: 10px;
   }
 
-  .manage-segmented {
+  .manage-preview-header-actions {
     align-items: center;
-    background: rgba(255, 255, 255, 0.045);
-    border: 1px solid var(--manage-border);
-    display: flex;
-    flex: 0 0 auto;
-    height: 30px;
-    padding: 2px;
-  }
-
-  .manage-segmented button {
-    align-items: center;
-    background: transparent;
-    border: 0;
-    color: var(--manage-muted);
     display: inline-flex;
-    font-size: 11px;
-    font-weight: 700;
-    gap: 5px;
-    height: 24px;
-    padding: 0 8px;
-  }
-
-  .manage-segmented button[aria-pressed="true"] {
-    background: rgba(255, 255, 255, 0.11);
-    color: var(--manage-text);
+    flex: 0 0 auto;
+    gap: 6px;
+    min-width: 0;
   }
 
   .manage-preview-path {
@@ -2478,97 +3778,345 @@ styleElement.textContent = `
     width: 100%;
   }
 
-  .manage-markdown-workspace {
+  .manage-markdown-review {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 286px;
+    grid-template-columns: minmax(0, 1fr) 288px;
     min-height: 0;
     overflow: hidden;
   }
 
-  .manage-markdown-workspace[data-mode="edit"] {
-    grid-template-columns: minmax(0, 1fr) 286px;
+  .manage-markdown-review[data-annotations-collapsed="true"] {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .manage-markdown-workspace[data-mode="preview"] {
-    grid-template-columns: minmax(0, 1fr) 286px;
+  .manage-markdown-meo-review {
+    background: var(--manage-bg);
   }
 
-  .manage-markdown-preview {
+  .manage-markdown-review-main {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .manage-preview-header-actions button,
+  .manage-comment-popover-actions button,
+  .manage-markdown-selection-toolbar button {
+    align-items: center;
+    border-radius: 6px;
+    display: inline-flex;
+    font-size: 11px;
+    font-weight: 750;
+    gap: 5px;
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .manage-preview-header-actions button,
+  .manage-comment-popover-actions button {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--manage-border);
+    color: var(--manage-muted);
+    height: 28px;
+    padding: 0 8px;
+  }
+
+  .manage-preview-header-actions button:not(:disabled):hover,
+  .manage-preview-header-actions button:not(:disabled):focus-visible,
+  .manage-comment-popover-actions button:not(:disabled):hover,
+  .manage-comment-popover-actions button:not(:disabled):focus-visible {
+    background: rgba(125, 211, 252, 0.12);
+    border-color: rgba(125, 211, 252, 0.32);
+    color: var(--manage-text);
+    outline: none;
+  }
+
+  .manage-preview-header-actions button:disabled,
+  .manage-comment-popover-actions button:disabled {
+    color: var(--manage-subtle);
+  }
+
+  .manage-preview-header-actions .manage-annotation-rail-toggle {
+    padding: 0 7px;
+  }
+
+  .manage-preview-header-actions .manage-count-badge {
+    height: 16px;
+    min-width: 16px;
+    padding: 0 4px;
+  }
+
+  .manage-meo-markdown-editor {
+    background: #101112;
     color: rgba(248, 250, 252, 0.9);
-    font-size: 13px;
-    line-height: 1.6;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .manage-meo-markdown-editor .editor-wrapper,
+  .manage-meo-markdown-editor .editor-host,
+  .manage-meo-markdown-editor .cm-editor {
+    min-height: 0;
+    min-width: 0;
+  }
+
+  .manage-meo-markdown-editor .cm-editor {
+    background: #101112;
+    height: 100%;
+  }
+
+  .manage-meo-markdown-editor .cm-scroller {
+    scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+  }
+
+  .manage-markdown-document {
+    color: rgba(248, 250, 252, 0.9);
+    font-size: 15px;
+    line-height: 1.625;
     min-height: 0;
     overflow: auto;
-    padding: 15px 20px 28px;
+    padding: 24px 32px 48px;
   }
 
-  .manage-markdown-preview > :first-child {
+  .manage-markdown-document > :first-child {
     margin-top: 0;
   }
 
-  .manage-markdown-preview h1,
-  .manage-markdown-preview h2,
-  .manage-markdown-preview h3,
-  .manage-markdown-preview h4 {
+  .manage-markdown-document h1,
+  .manage-markdown-document h2,
+  .manage-markdown-document h3,
+  .manage-markdown-document h4,
+  .manage-markdown-document h5,
+  .manage-markdown-document h6 {
     color: var(--manage-text);
+    letter-spacing: 0;
     line-height: 1.22;
-    margin: 1.2em 0 0.5em;
   }
 
-  .manage-markdown-preview h1 {
+  .manage-markdown-document h1 {
     font-size: 24px;
+    font-weight: 750;
+    margin: 24px 0 16px;
   }
 
-  .manage-markdown-preview h2 {
-    font-size: 19px;
+  .manage-markdown-document h2 {
+    color: rgba(248, 250, 252, 0.9);
+    font-size: 20px;
+    font-weight: 700;
+    margin: 32px 0 12px;
   }
 
-  .manage-markdown-preview h3 {
+  .manage-markdown-document h3 {
+    color: rgba(248, 250, 252, 0.82);
     font-size: 16px;
+    font-weight: 700;
+    margin: 24px 0 8px;
   }
 
-  .manage-markdown-preview p,
-  .manage-markdown-preview ul,
-  .manage-markdown-preview ol,
-  .manage-markdown-preview blockquote,
-  .manage-markdown-preview pre,
-  .manage-markdown-preview table {
-    margin: 0.8em 0;
+  .manage-markdown-document h4,
+  .manage-markdown-document h5,
+  .manage-markdown-document h6 {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 18px 0 8px;
   }
 
-  .manage-markdown-preview code,
-  .manage-markdown-preview pre {
+  .manage-markdown-document p {
+    margin: 0 0 16px;
+  }
+
+  .manage-markdown-document a {
+    color: var(--manage-accent);
+    text-decoration: none;
+  }
+
+  .manage-markdown-document a:hover,
+  .manage-markdown-document a:focus-visible {
+    text-decoration: underline;
+  }
+
+  .manage-markdown-document blockquote {
+    border-left: 2px solid rgba(125, 211, 252, 0.48);
+    color: var(--manage-muted);
+    font-style: italic;
+    margin: 16px 0;
+    padding-left: 16px;
+  }
+
+  .manage-markdown-document blockquote p:last-child,
+  .manage-md-alert p:last-child,
+  .manage-md-directive p:last-child {
+    margin-bottom: 0;
+  }
+
+  .manage-md-empty {
+    color: var(--manage-subtle);
+  }
+
+  .manage-md-inline-code {
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    color: rgba(248, 250, 252, 0.92);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.9em;
+    padding: 1px 4px;
+  }
+
+  .manage-md-inline-image {
+    border: 1px solid var(--manage-border);
+    display: block;
+    margin: 12px 0;
+    max-width: 100%;
+  }
+
+  .manage-md-list-item {
+    align-items: flex-start;
+    display: flex;
+    gap: 12px;
+    margin: 6px 0 6px calc(var(--manage-md-list-level, 0) * 20px);
+  }
+
+  .manage-md-list-marker {
+    color: var(--manage-muted);
+    flex: 0 0 22px;
+    font-size: 13px;
+    line-height: 1.625;
+    text-align: right;
+  }
+
+  .manage-md-list-marker input {
+    height: 13px;
+    margin: 4px 0 0;
+    width: 13px;
+  }
+
+  .manage-md-list-text {
+    color: rgba(248, 250, 252, 0.9);
+    min-width: 0;
+  }
+
+  .manage-md-list-text.is-checked {
+    color: var(--manage-muted);
+    text-decoration: line-through;
+  }
+
+  .manage-md-code-block {
+    margin: 20px 0;
+    position: relative;
+  }
+
+  .manage-md-code-block button {
+    align-items: center;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--manage-border);
+    color: var(--manage-muted);
+    display: inline-flex;
+    height: 28px;
+    justify-content: center;
+    opacity: 0;
+    padding: 0;
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    transition: opacity 120ms ease;
+    width: 28px;
+  }
+
+  .manage-md-code-block:hover button,
+  .manage-md-code-block button:focus-visible {
+    opacity: 1;
+  }
+
+  .manage-md-code-block pre {
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 8px;
+    color: rgba(248, 250, 252, 0.88);
+    font-size: 13px;
+    line-height: 1.6;
+    margin: 0;
+    overflow-x: auto;
+    padding: 16px;
+  }
+
+  .manage-md-code-block code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   }
 
-  .manage-markdown-preview pre {
-    background: rgba(255, 255, 255, 0.045);
-    border: 1px solid var(--manage-border);
-    overflow: auto;
-    padding: 10px 12px;
+  .manage-md-table-wrap {
+    margin: 16px 0;
+    overflow-x: auto;
   }
 
-  .manage-markdown-preview table {
+  .manage-md-table-wrap table {
     border-collapse: collapse;
-    width: 100%;
+    min-width: 100%;
   }
 
-  .manage-markdown-preview th,
-  .manage-markdown-preview td {
-    border: 1px solid var(--manage-border);
-    padding: 6px 8px;
+  .manage-md-table-wrap th,
+  .manage-md-table-wrap td {
+    border-bottom: 1px solid var(--manage-border);
+    font-size: 14px;
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
   }
 
+  .manage-md-table-wrap th {
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(248, 250, 252, 0.9);
+    font-weight: 700;
+  }
+
+  .manage-md-table-wrap td {
+    color: rgba(248, 250, 252, 0.8);
+  }
+
+  .manage-md-alert,
+  .manage-md-directive {
+    border: 1px solid rgba(125, 211, 252, 0.26);
+    border-left: 3px solid rgba(125, 211, 252, 0.72);
+    margin: 16px 0;
+    padding: 12px 14px;
+  }
+
+  .manage-md-alert-title {
+    color: var(--manage-accent);
+    font-size: 11px;
+    font-weight: 780;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+
+  .manage-md-alert[data-kind="warning"],
+  .manage-md-alert[data-kind="caution"] {
+    border-color: rgba(253, 230, 138, 0.3);
+    border-left-color: rgba(253, 230, 138, 0.72);
+  }
+
+  .manage-md-html-block {
+    color: rgba(248, 250, 252, 0.9);
+    font-size: 15px;
+    line-height: 1.625;
+    margin: 16px 0;
+  }
+
+  .annotation-highlight,
   .manage-annotation-highlight {
     background: rgba(253, 230, 138, 0.28);
     color: inherit;
     padding: 0 2px;
   }
 
+  .annotation-highlight.comment,
   .manage-annotation-highlight[data-type="comment"] {
     background: rgba(125, 211, 252, 0.22);
   }
 
+  .annotation-highlight.deletion,
   .manage-annotation-highlight[data-type="redline"] {
     background: rgba(253, 164, 175, 0.22);
     text-decoration: line-through;
@@ -2576,189 +4124,35 @@ styleElement.textContent = `
     text-decoration-thickness: 2px;
   }
 
-  .manage-annotations {
+  .manage-markdown-annotation-rail {
     background: var(--manage-panel);
     border-left: 1px solid var(--manage-border);
     display: grid;
-    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
     min-height: 0;
     overflow: hidden;
   }
 
-  .manage-annotations-header {
+  .manage-markdown-annotation-rail header {
     align-items: center;
     border-bottom: 1px solid var(--manage-border);
     color: var(--manage-muted);
     display: flex;
     font-size: 12px;
     font-weight: 750;
-    gap: 7px;
     justify-content: space-between;
-    min-height: 38px;
+    min-height: 40px;
     padding: 0 12px;
   }
 
-  .manage-annotations-title {
-    align-items: center;
-    display: flex;
-    gap: 7px;
-    min-width: 0;
-  }
-
-  .manage-annotation-persistence {
-    color: var(--manage-subtle);
-    font-size: 10px;
-    font-weight: 720;
-  }
-
-  .manage-annotation-persistence[data-state="error"] {
-    color: var(--manage-red);
-  }
-
-  .manage-annotation-persistence[data-state="saved"],
-  .manage-annotation-persistence[data-state="saving"] {
-    color: var(--manage-accent);
-  }
-
-  .manage-annotation-mode-row {
-    border-bottom: 1px solid var(--manage-border);
-    display: grid;
-    gap: 5px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    padding: 8px 10px;
-  }
-
-  .manage-annotation-mode-row button,
-  .manage-quick-labels button,
-  .manage-annotation-secondary,
-  .manage-annotation-add,
-  .manage-selection-toolbar button,
-  .manage-annotations-footer button {
-    align-items: center;
-    border-radius: 6px;
-    display: inline-flex;
-    justify-content: center;
-  }
-
-  .manage-annotation-mode-row button {
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid var(--manage-border);
-    color: var(--manage-muted);
-    font-size: 11px;
-    font-weight: 750;
-    height: 28px;
-  }
-
-  .manage-annotation-mode-row button[aria-pressed="true"] {
-    background: rgba(125, 211, 252, 0.14);
-    border-color: rgba(125, 211, 252, 0.34);
-    color: var(--manage-text);
-  }
-
-  .manage-annotation-composer {
-    border-bottom: 1px solid var(--manage-border);
+  .manage-markdown-annotation-list {
+    align-content: start;
     display: grid;
     gap: 8px;
-    padding: 10px;
-  }
-
-  .manage-selected-quote {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--manage-border);
-    color: var(--manage-muted);
-    font-size: 11px;
-    line-height: 1.35;
-    max-height: 64px;
-    min-height: 34px;
+    grid-auto-rows: max-content;
+    min-height: 0;
     overflow: auto;
-    padding: 7px;
-  }
-
-  .manage-selected-quote[data-empty="true"] {
-    border-style: dashed;
-  }
-
-  .manage-quick-labels {
-    display: grid;
-    gap: 5px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .manage-quick-labels button {
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid var(--manage-border);
-    color: var(--manage-muted);
-    font-size: 11px;
-    font-weight: 750;
-    gap: 4px;
-    height: 28px;
-    min-width: 0;
-    padding: 0 6px;
-  }
-
-  .manage-quick-labels button:hover,
-  .manage-quick-labels button:focus-visible {
-    background: rgba(253, 230, 138, 0.1);
-    border-color: rgba(253, 230, 138, 0.28);
-    color: var(--manage-text);
-    outline: none;
-  }
-
-  .manage-annotation-composer textarea {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--manage-border);
-    color: var(--manage-text);
-    font-size: 12px;
-    height: 64px;
-    outline: 0;
-    padding: 8px;
-    resize: none;
-  }
-
-  .manage-annotation-composer textarea:focus {
-    border-color: rgba(125, 211, 252, 0.5);
-  }
-
-  .manage-annotation-actions {
-    display: grid;
-    gap: 6px;
-    grid-template-columns: minmax(0, 0.95fr) minmax(0, 0.8fr) minmax(0, 1fr);
-  }
-
-  .manage-annotation-secondary,
-  .manage-annotation-add {
-    border: 1px solid var(--manage-border);
-    font-size: 11px;
-    font-weight: 750;
-    gap: 5px;
-    height: 30px;
-    padding: 0 7px;
-  }
-
-  .manage-annotation-secondary {
-    background: rgba(255, 255, 255, 0.035);
-    color: var(--manage-muted);
-  }
-
-  .manage-annotation-secondary:hover,
-  .manage-annotation-secondary:focus-visible {
-    background: rgba(255, 255, 255, 0.065);
-    color: var(--manage-text);
-    outline: none;
-  }
-
-  .manage-annotation-add {
-    background: rgba(125, 211, 252, 0.12);
-    border-color: rgba(125, 211, 252, 0.3);
-    color: var(--manage-text);
-  }
-
-  .manage-annotation-secondary:disabled,
-  .manage-annotation-add:disabled,
-  .manage-annotations-footer button:disabled {
-    background: rgba(255, 255, 255, 0.035);
-    border-color: var(--manage-border);
-    color: var(--manage-subtle);
+    padding: 10px;
   }
 
   .manage-attachment-strip {
@@ -2817,14 +4211,6 @@ styleElement.textContent = `
     line-height: 1.35;
   }
 
-  .manage-annotation-list {
-    display: grid;
-    gap: 8px;
-    min-height: 0;
-    overflow: auto;
-    padding: 10px;
-  }
-
   .manage-annotation-empty {
     color: var(--manage-subtle);
     font-size: 12px;
@@ -2832,10 +4218,12 @@ styleElement.textContent = `
   }
 
   .manage-annotation-card {
+    align-self: start;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--manage-border);
     display: grid;
     gap: 7px;
+    height: max-content;
     padding: 9px;
   }
 
@@ -2892,31 +4280,7 @@ styleElement.textContent = `
     text-decoration: none;
   }
 
-  .manage-annotations-footer {
-    border-top: 1px solid var(--manage-border);
-    padding: 8px 10px;
-  }
-
-  .manage-annotations-footer button {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--manage-border);
-    color: var(--manage-muted);
-    font-size: 11px;
-    font-weight: 750;
-    gap: 6px;
-    height: 30px;
-    width: 100%;
-  }
-
-  .manage-annotations-footer button:not(:disabled):hover,
-  .manage-annotations-footer button:not(:disabled):focus-visible {
-    background: rgba(125, 211, 252, 0.12);
-    border-color: rgba(125, 211, 252, 0.3);
-    color: var(--manage-text);
-    outline: none;
-  }
-
-  .manage-selection-toolbar {
+  .manage-markdown-selection-toolbar {
     align-items: center;
     background: var(--manage-panel-raised);
     border: 1px solid var(--manage-border-strong);
@@ -2931,23 +4295,71 @@ styleElement.textContent = `
     z-index: 10;
   }
 
-  .manage-selection-toolbar button {
+  .manage-markdown-selection-toolbar button {
     background: transparent;
     border: 0;
     color: var(--manage-muted);
-    font-size: 11px;
-    font-weight: 750;
-    gap: 4px;
     height: 28px;
     padding: 0 7px;
     white-space: nowrap;
   }
 
-  .manage-selection-toolbar button:hover,
-  .manage-selection-toolbar button:focus-visible {
+  .manage-markdown-selection-toolbar button:hover,
+  .manage-markdown-selection-toolbar button:focus-visible {
     background: rgba(255, 255, 255, 0.07);
     color: var(--manage-text);
     outline: none;
+  }
+
+  .manage-comment-popover {
+    background: var(--manage-panel-raised);
+    border: 1px solid var(--manage-border-strong);
+    box-shadow: 0 18px 52px rgba(0, 0, 0, 0.38);
+    display: grid;
+    gap: 8px;
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+    padding: 10px;
+    position: fixed;
+    z-index: 40;
+  }
+
+  .manage-comment-popover-quote {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--manage-border);
+    color: var(--manage-muted);
+    font-size: 11px;
+    line-height: 1.35;
+    max-height: 70px;
+    min-height: 32px;
+    overflow: auto;
+    padding: 7px;
+  }
+
+  .manage-comment-popover-quote[data-empty="true"] {
+    border-style: dashed;
+  }
+
+  .manage-comment-popover textarea {
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid var(--manage-border);
+    color: var(--manage-text);
+    font-size: 12px;
+    height: 88px;
+    line-height: 1.45;
+    outline: 0;
+    padding: 8px;
+    resize: vertical;
+  }
+
+  .manage-comment-popover textarea:focus {
+    border-color: rgba(125, 211, 252, 0.52);
+  }
+
+  .manage-comment-popover-actions {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1fr);
   }
 
   .manage-hidden-file-input {
@@ -3014,22 +4426,39 @@ styleElement.textContent = `
       padding: 8px 14px;
     }
 
-    .manage-preview-meta,
-    .manage-segmented {
+    .manage-preview-meta {
       align-self: stretch;
     }
 
-    .manage-markdown-workspace,
-    .manage-markdown-workspace[data-mode="edit"],
-    .manage-markdown-workspace[data-mode="preview"] {
-      grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: minmax(0, 1fr) minmax(220px, 36%);
+    .manage-preview-content[data-kind="markdown"] .manage-preview-header {
+      align-items: center;
+      flex-direction: row;
+      gap: 8px;
+      min-height: 48px;
+      padding: 0 10px 0 14px;
     }
 
-    .manage-annotations {
-      border-left: 0;
-      border-top: 1px solid var(--manage-border);
-      min-height: 0;
+    .manage-preview-content[data-kind="markdown"] .manage-preview-meta {
+      align-self: auto;
+    }
+
+    .manage-preview-content[data-kind="markdown"] .manage-preview-header-actions button span:not(.manage-count-badge) {
+      display: none;
+    }
+
+    .manage-markdown-review {
+      grid-template-columns: minmax(0, 1fr);
+      position: relative;
+    }
+
+    .manage-markdown-annotation-rail {
+      bottom: 12px;
+      box-shadow: 0 18px 52px rgba(0, 0, 0, 0.34);
+      position: absolute;
+      right: 12px;
+      top: 54px;
+      width: min(288px, calc(100% - 24px));
+      z-index: 3;
     }
   }
 
@@ -3040,7 +4469,7 @@ styleElement.textContent = `
 
     .manage-preview-path,
     .manage-text-editor,
-    .manage-markdown-preview {
+    .manage-markdown-document {
       padding-left: 14px;
       padding-right: 14px;
     }

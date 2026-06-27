@@ -18,7 +18,9 @@ import {
   type GxserverProjectId,
   type GxserverProjectWorktreeListResult,
   type GxserverRecentProjectDomainState,
+  type GxserverRendererCommand,
   type GxserverSessionId,
+  type GxserverSessionTransitionResult,
   type GxserverSidebarHudResponse,
   type GxserverSidebarHudSettingsMutationParams,
   type GxserverSidebarHudSettingsMutationResult,
@@ -34,6 +36,7 @@ import {
   createGxserverPresentationProjectSessionId,
   createGxserverPresentationSidebarGroup,
   createGxserverPresentationSidebarGroups,
+  createGxserverPresentationSidebarSessionKey,
   createGxserverPresentationSessionsByProjectFromGroups,
   parseGxserverPresentationProjectGroupId,
   parseGxserverPresentationProjectSessionId,
@@ -103,6 +106,7 @@ import {
   type GpuiSidebarRuntimeSettings,
   type GpuiSidebarRuntimeSettingsSnapshot,
 } from "./phase1-active-project-context";
+import { runGpuiSidebarBulkSleepPaced } from "./phase1-bulk-sleep-pacing";
 
 export type GpuiGxserverBootstrap = {
   authToken?: string;
@@ -116,7 +120,19 @@ export type GpuiGxserverBootstrap = {
 
 export type GpuiCommandPaneSessionSummary = {
   commandId?: string;
+  closeAfterDone?: boolean;
+  closeAfterDoneDeadlineAt?: string;
+  closeAfterDoneRemainingLabel?: string;
+  closeAfterDoneRemainingMs?: number;
+  delayedSendDeadlineAt?: string;
+  delayedSendRemainingLabel?: string;
+  delayedSendRemainingMs?: number;
   isActive?: boolean;
+  /*
+  CDXC:GPUISidebarAutoSleep 2026-06-27-06:54:
+  Rust forwards this true-only bit for native-shaped external `G...` command-panel split pane owners so GPUI Auto Sleep can protect every active command leaf while keeping `isActive` scoped to HUD/responder focus. Rust shell internals may still use numeric ids, but those ids must not cross this TypeScript bridge as command-pane owners.
+  */
+  isPaneOwner?: true;
   sessionId: string;
   status: SidebarCommandSessionIndicator["status"];
   title?: string;
@@ -129,6 +145,8 @@ export type GhostexGpuiSidebarBridge = {
     sessions: readonly GpuiCommandPaneSessionSummary[],
   ) => void;
   onGxserverBootstrapChanged?: (bootstrap: GpuiGxserverBootstrap) => void;
+  onMenuBarProjectActivation?: (payload: unknown) => void;
+  onMenuBarSessionActivation?: (payload: unknown) => void;
   onNativeAppShotCaptured?: (payload: unknown) => void;
   onNativeAppShotPromptResult?: (payload: unknown) => void;
   onRuntimeSettingsChanged?: (
@@ -136,11 +154,18 @@ export type GhostexGpuiSidebarBridge = {
   ) => void;
   onSidebarHostMessage?: (message: ExtensionToSidebarMessage) => void;
   onStatusPetActivation?: (payload: unknown) => void;
+  onWorkspaceTabSessionSelected?: (payload: unknown) => void;
+  onWorkspaceTerminalLifecycleRequest?: (payload: unknown) => void;
+  pendingMenuBarProjectActivations?: unknown[];
+  pendingMenuBarSessionActivations?: unknown[];
   pendingNativeAppShotPromptResults?: unknown[];
   pendingNativeAppShots?: unknown[];
   pendingStatusPetActivations?: unknown[];
+  pendingWorkspaceTabSessionSelections?: unknown[];
+  pendingWorkspaceTerminalLifecycleRequests?: unknown[];
   postActiveProjectContext?: (payload: string) => boolean;
   postGxserverPresentationFocusState?: (payload: string) => boolean;
+  postGhostexHotkeyAction?: (payload: string) => boolean;
   postNativeAppShotPromptToSession?: (payload: string) => boolean;
   postNativeProjectPathAction?: (payload: string) => boolean;
   postPetOverlayState?: (payload: string) => boolean;
@@ -148,6 +173,9 @@ export type GhostexGpuiSidebarBridge = {
   postSidebarCommandAction?: (payload: string) => boolean;
   postSidebarCommandRunEnd?: (payload: string) => boolean;
   postSessionStatusIndicators?: (payload: string) => boolean;
+  postWorkspaceTerminalFocus?: (payload: string) => boolean;
+  postWorkspaceTerminalLifecycleResult?: (payload: string) => boolean;
+  postWorkspaceTerminalRenameCommand?: (payload: string) => boolean;
   runtimeSettings?: GpuiSidebarRuntimeSettings;
 };
 
@@ -158,6 +186,16 @@ declare global {
 }
 
 type GpuiSidebarRuntimeSnapshotKind = "hydrate" | "patch";
+
+type GpuiWorkspaceTerminalLifecycleRequest = {
+  action: "close" | "sleep" | "wake";
+  projectId: string;
+  replacementProjectId?: string;
+  replacementSessionId?: string;
+  requestId: number;
+  sessionId: string;
+  skipReplacementFallback: boolean;
+};
 
 type GpuiValidatedGxserverBootstrap = {
   authToken: string;
@@ -224,6 +262,7 @@ type GpuiSessionStatusIndicatorStatus = "attention" | "working" | "available";
 
 type GpuiSessionStatusIndicatorCandidate = {
   hasRunningZmxBacking: boolean;
+  iconDataUrl?: string;
   lastInteractionAt?: string;
   order: number;
   projectId: string;
@@ -234,6 +273,7 @@ type GpuiSessionStatusIndicatorCandidate = {
 };
 
 type GpuiSessionStatusIndicatorProject = {
+  iconDataUrl?: string;
   projectId: string;
   sessions: Array<{
     lastActiveAt?: string;
@@ -278,8 +318,32 @@ type GpuiStatusPetActivationPayload = {
   sessionId: string;
 };
 
+type GpuiMenuBarProjectActivationPayload = {
+  projectId: string;
+};
+
+type GpuiMenuBarSessionActivationPayload = {
+  projectId: string;
+  sessionId: string;
+};
+
+type GpuiWorkspaceTabSessionSelectionPayload = {
+  localWasSleeping?: true;
+  projectId: string;
+  sessionId: string;
+};
+
+type GpuiRendererCommandResolvedSession = {
+  projectId: string;
+  sessionId: string;
+  sidebarSessionId: string;
+};
+
 const GPUI_SIDEBAR_BOOTSTRAP_RETRY_DELAY_MS = 20;
 const GPUI_SIDEBAR_BOOTSTRAP_MAX_ATTEMPTS = 250;
+const GPUI_AUTO_SLEEP_MONITOR_INTERVAL_MS = 60 * 1000;
+const GPUI_AUTO_SLEEP_MINUTE_MS = 60 * 1000;
+const GPUI_WORKSPACE_TERMINAL_LIFECYCLE_BRIDGE_RETRY_DELAY_MS = 25;
 const GPUI_SIDEBAR_DEFAULT_CLIENT_ID = "ghostex-gpui-sidebar";
 const GPUI_GXSERVER_UNAVAILABLE_GROUP_ID = "gxserver-unavailable";
 const GPUI_GXSERVER_CHATS_GROUP_ID = "combined-chats";
@@ -293,9 +357,22 @@ const GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE =
 const GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.commandRunEnd";
+const GPUI_SIDEBAR_COMMAND_SELECTOR_MESSAGE_KEYS = new Set(["commandId", "runMode", "type"]);
 const GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.gxserverPresentationFocusState";
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.workspaceTerminalFocus";
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.workspaceTerminalRenameCommand";
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.workspaceTerminalLifecycleRequest";
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.workspaceTerminalLifecycleResult";
 const GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.sessionFocusDebugLog";
@@ -308,6 +385,15 @@ const GPUI_SIDEBAR_PET_OVERLAY_STATE_MESSAGE_TYPE =
 const GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.statusPetActivation";
+const GPUI_SIDEBAR_MENU_BAR_PROJECT_ACTIVATION_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_MENU_BAR_PROJECT_ACTIVATION_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.menuBarProjectActivation";
+const GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.menuBarSessionActivation";
+const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.workspaceTabSessionSelected";
 const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_NATIVE_APP_SHOT_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.nativeAppShotCaptured";
@@ -325,6 +411,8 @@ const GPUI_STATUS_INDICATOR_MAX_PROJECTS = 32;
 const GPUI_STATUS_INDICATOR_MAX_SESSIONS_PER_PROJECT = 16;
 const GPUI_STATUS_INDICATOR_ID_MAX_CHARS = 256;
 const GPUI_STATUS_INDICATOR_TITLE_MAX_CHARS = 120;
+const GPUI_RENDERER_COMMAND_RENAME_TITLE_MAX_CHARS = 120;
+const GPUI_RENDERER_COMMAND_RENAME_TITLE_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const DEFAULT_GPUI_PROMPT_AGENT_ID = "codex";
 const GPUI_SIDEBAR_FOCUS_DEBUG_LOOP_WINDOW_MS = 1_500;
 const GPUI_SIDEBAR_FOCUS_DEBUG_LOOP_TRANSITION_MIN = 4;
@@ -668,6 +756,8 @@ class GpuiSidebarRuntime {
   private activeGroupId: string | undefined;
   private activeProjectId: string | undefined;
   private appUserData: GxserverAppUserData = createEmptyGpuiAppUserData();
+  private autoSleepMonitorIntervalId: number | undefined;
+  private autoSleepMonitorRunning = false;
   private bootstrapPollTimeoutId: number | undefined;
   private client: GpuiGxserverClient | undefined;
   private commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
@@ -680,6 +770,7 @@ class GpuiSidebarRuntime {
   private hasHydrated = false;
   private latestGroups: SidebarSessionGroup[] = [];
   private latestHud: SidebarHudState = createGpuiSidebarHudState();
+  private localFirstHiddenPresentationSessionKeys = new Set<string>();
   private lastAppShotTargetAt = 0;
   private lastAppShotTargetSessionId: string | undefined;
   private lastGitRefreshProjectId: string | undefined;
@@ -702,9 +793,11 @@ class GpuiSidebarRuntime {
   private revision = 0;
   private runtimeSettings: GpuiSidebarRuntimeSettings | undefined;
   private sidebarHud: GxserverSidebarHudResponse | undefined;
+  private sleepingLocalSidebarSessionIds = new Set<string>();
   private subscription: GpuiPresentationSubscription | undefined;
   private trustedExistingWorktreeList: GpuiTrustedExistingWorktreeList | undefined;
   private visibleSessionIds = new Set<string>();
+  private workspaceTerminalLifecycleBridgeRetryId: number | undefined;
 
   start(): void {
     this.installGpuiBridgeCallbacks();
@@ -712,6 +805,7 @@ class GpuiSidebarRuntime {
     window.addEventListener(GPUI_SIDEBAR_REMOTE_EVENT_NAME, this.handleGpuiSidebarRemoteEvent);
     this.publishUnavailable("bootstrap-pending");
     this.tryStartFromInstalledBootstrap(0);
+    this.startGpuiAutoSleepMonitor();
   }
 
   private installGpuiBridgeCallbacks(): void {
@@ -723,12 +817,22 @@ class GpuiSidebarRuntime {
       */
       this.messageSource.postMessage(message);
     };
+    gpuiBridge.onWorkspaceTerminalLifecycleRequest = (payload) => {
+      /*
+      CDXC:GPUIWorkspaceLifecycle 2026-06-26-07:25:
+      GPUI native workspace tab Close/Sleep must follow macOS ownership: Rust owns the local pane/tab chrome, while the sidebar runtime performs the gxserver lifecycle transition first and reports only request success back through a fixed result bridge. Payloads are bounded ids plus action/request enums only; no titles, paths, commands, terminal text, URLs, tokens, or daemon bodies cross this callback.
+
+      CDXC:GPUIWorkspaceLifecycle 2026-06-26-05:23:
+      The callback may be installed before CEF exposes `postWorkspaceTerminalLifecycleResult`. Queue normalized requests until that result bridge exists so gxserver lifecycle commits cannot be lost between React focus and Rust acknowledgement.
+      */
+      this.handleOrQueueWorkspaceTerminalLifecycleRequest(payload);
+    };
     const applyCommandPaneSessions = (
       sessions: readonly GpuiCommandPaneSessionSummary[] | undefined,
     ) => {
       /*
       CDXC:GPUICommandPane 2026-06-25-10:50:
-      Rust owns GPUI command-pane session identity, activity, and active-tab state. The sidebar runtime only matches those sanitized summaries to the current gxserver HUD command buttons by command id first and normalized title second, mirroring macOS without exposing command text, cwd, output, status-file paths, or shell-state JSON to React.
+      Rust owns GPUI command-pane session identity, activity, and active-tab state. The external bridge uses native-shaped `G...` local command-pane ids even though Rust internal shell state may still use numeric ids; the sidebar runtime only matches those sanitized summaries to current gxserver HUD command buttons by command id first and normalized title second, mirroring macOS without exposing command text, cwd, output, status-file paths, or shell-state JSON to React.
       */
       const next = normalizeGpuiCommandPaneSessions(sessions);
       gpuiBridge.commandPaneSessions = next;
@@ -749,6 +853,15 @@ class GpuiSidebarRuntime {
     gpuiBridge.onStatusPetActivation = (payload) => {
       this.handleGpuiStatusPetActivation(payload);
     };
+    gpuiBridge.onMenuBarProjectActivation = (payload) => {
+      this.handleGpuiMenuBarProjectActivation(payload);
+    };
+    gpuiBridge.onMenuBarSessionActivation = (payload) => {
+      void this.handleGpuiMenuBarSessionActivation(payload);
+    };
+    gpuiBridge.onWorkspaceTabSessionSelected = (payload) => {
+      this.handleGpuiWorkspaceTabSessionSelected(payload);
+    };
     const pendingStatusPetActivations = Array.isArray(gpuiBridge.pendingStatusPetActivations)
       ? gpuiBridge.pendingStatusPetActivations.splice(0)
       : [];
@@ -761,6 +874,50 @@ class GpuiSidebarRuntime {
         this.handleGpuiStatusPetActivation(payload);
       }
     }
+    const pendingMenuBarProjectActivations = Array.isArray(gpuiBridge.pendingMenuBarProjectActivations)
+      ? gpuiBridge.pendingMenuBarProjectActivations.splice(0)
+      : [];
+    if (pendingMenuBarProjectActivations.length > 0) {
+      /*
+      CDXC:GPUIMenuBarStatusItem 2026-06-26-06:05:
+      GPUI menu-bar project clicks can arrive before the SidebarApp runtime installs callbacks. Drain only fixed first-party project activation payloads carrying one bounded project id, then route through focusProjectId; do not persist payloads or expose paths, titles, commands, URLs, tokens, terminal text, or a generic native event bus.
+      */
+      for (const payload of pendingMenuBarProjectActivations) {
+        this.handleGpuiMenuBarProjectActivation(payload);
+      }
+    }
+    const pendingMenuBarSessionActivations = Array.isArray(gpuiBridge.pendingMenuBarSessionActivations)
+      ? gpuiBridge.pendingMenuBarSessionActivations.splice(0)
+      : [];
+    if (pendingMenuBarSessionActivations.length > 0) {
+      /*
+      CDXC:GPUIMenuBarStatusItem 2026-06-26-06:05:
+      GPUI menu-bar session clicks use a fixed first-party payload with bounded project/session ids. Drain queued clicks into the existing focusSession path so local clicks still use WorkspaceTerminalFocus and remote-shaped ids stay within reviewed focus routing.
+      */
+      for (const payload of pendingMenuBarSessionActivations) {
+        void this.handleGpuiMenuBarSessionActivation(payload);
+      }
+    }
+    const pendingWorkspaceTabSessionSelections = Array.isArray(
+        gpuiBridge.pendingWorkspaceTabSessionSelections,
+      )
+      ? gpuiBridge.pendingWorkspaceTabSessionSelections.splice(0)
+      : [];
+    if (pendingWorkspaceTabSessionSelections.length > 0) {
+      /*
+      CDXC:GPUIWorkspaceSessionFocus 2026-06-26-08:01:
+      Workspace tab clicks originate from Rust after the local tab is already selected. Drain them into sidebar focus only so startup-time delivery cannot re-enter the Rust workspace materialization bridge or create a focus loop.
+      */
+      for (const payload of pendingWorkspaceTabSessionSelections) {
+        this.handleGpuiWorkspaceTabSessionSelected(payload);
+      }
+    }
+    const pendingWorkspaceTerminalLifecycleRequests = Array.isArray(
+        gpuiBridge.pendingWorkspaceTerminalLifecycleRequests,
+      )
+      ? gpuiBridge.pendingWorkspaceTerminalLifecycleRequests.splice(0)
+      : [];
+    this.drainPendingWorkspaceTerminalLifecycleRequests(pendingWorkspaceTerminalLifecycleRequests);
     const pendingNativeAppShotPromptResults = Array.isArray(gpuiBridge.pendingNativeAppShotPromptResults)
       ? gpuiBridge.pendingNativeAppShotPromptResults.splice(0)
       : [];
@@ -788,10 +945,61 @@ class GpuiSidebarRuntime {
       this.publishHudPatch();
       this.postGpuiStatusPetState();
       this.postActiveProjectContext();
+      void this.runGpuiAutoSleepMonitor("settings-change");
     };
     gpuiBridge.onGxserverBootstrapChanged = (bootstrap) => {
       this.applyGxserverBootstrapChanged(bootstrap);
     };
+  }
+
+  private startGpuiAutoSleepMonitor(): void {
+    if (this.autoSleepMonitorIntervalId !== undefined) {
+      return;
+    }
+    /*
+    CDXC:GPUISidebarAutoSleep 2026-06-27-01:24:
+    GPUI owns only the SidebarApp/gxserver runtime policy loop for agent terminal Auto Sleep. Run a small idempotent monitor from the runtime lifecycle, use the normalized shared settings snapshot, and route every sleep through the existing gxserver session lifecycle path instead of adding Browser, project-editor, native-pane, or renderer-local sleep behavior.
+    */
+    this.autoSleepMonitorIntervalId = window.setInterval(() => {
+      void this.runGpuiAutoSleepMonitor("interval");
+    }, GPUI_AUTO_SLEEP_MONITOR_INTERVAL_MS);
+    void this.runGpuiAutoSleepMonitor("startup");
+  }
+
+  private async runGpuiAutoSleepMonitor(
+    _source: "interval" | "settings-change" | "startup",
+  ): Promise<void> {
+    if (this.autoSleepMonitorRunning) {
+      return;
+    }
+    const settings = createGpuiSidebarSettings(this.runtimeSettings);
+    if (!settings.autoSleepAgentSessionsEnabled || !this.presentation) {
+      return;
+    }
+    const sessionIdsToSleep = createGpuiAutoSleepAgentSessionIds({
+      activeProjectId: this.activeProjectId,
+      commandPaneSessions: this.commandPaneSessions,
+      focusedSessionId: this.focusedSessionId,
+      groups: this.latestGroups,
+      nowMs: Date.now(),
+      presentation: this.presentation,
+      settings,
+    });
+    if (sessionIdsToSleep.length === 0) {
+      return;
+    }
+    this.autoSleepMonitorRunning = true;
+    try {
+      /*
+      CDXC:GPUISidebarAutoSleep 2026-06-27-02:05:
+      Auto Sleep must match native bulk sleep pacing: eligible agent sessions sleep one at a time with a 350 ms gap so gxserver and terminal teardown are not hit concurrently. Use the shared aggregate-count helper and ignore its private-data-free result because monitor progress is already reflected by gxserver presentation updates.
+      */
+      await runGpuiSidebarBulkSleepPaced(sessionIdsToSleep, async (sessionId) => {
+        await this.setSessionSleeping(sessionId, true);
+      });
+    } finally {
+      this.autoSleepMonitorRunning = false;
+    }
   }
 
   private handleGpuiStatusPetActivation(payload: unknown): void {
@@ -807,6 +1015,73 @@ class GpuiSidebarRuntime {
       sessionId: activation.sessionId,
       type: "focusSession",
     });
+  }
+
+  private handleGpuiMenuBarProjectActivation(payload: unknown): void {
+    const activation = normalizeGpuiMenuBarProjectActivation(payload);
+    if (!activation) {
+      return;
+    }
+    /*
+    CDXC:GPUIMenuBarStatusItem 2026-06-26-06:05:
+    Running Agents project rows should behave like focusing the matching sidebar project group. Reuse local focusProjectId or the remote group projection plus the normal presentation publish instead of creating a native-only project switch path, and accept only the bounded project id from Rust.
+    */
+    const remoteProject = parseGpuiRemotePresentationProjectId(activation.projectId);
+    if (remoteProject) {
+      this.activeGroupId = createGpuiRemotePresentationGroupId(
+        remoteProject.machineId,
+        remoteProject.projectId,
+      );
+      this.publishRemotePresentationPatch();
+      return;
+    }
+    this.focusProjectId(activation.projectId);
+    this.publishPresentation("patch");
+  }
+
+  private async handleGpuiMenuBarSessionActivation(payload: unknown): Promise<void> {
+    const activation = normalizeGpuiMenuBarSessionActivation(payload);
+    if (!activation) {
+      return;
+    }
+    /*
+    CDXC:GPUIMenuBarStatusItem 2026-06-26-06:05:
+    Running Agents session rows should behave like sidebar session-card clicks. Normalize raw local gxserver ids into the existing project-scoped presentation id when needed, then reuse focusSession so local clicks update presentation focus and post WorkspaceTerminalFocus back to Rust for terminal selection/materialization.
+    */
+    const sessionId = gpuiMenuBarStatusSessionFocusRoutingId(
+      activation.projectId,
+      activation.sessionId,
+    );
+    await this.focusSession(sessionId, {
+      sessionId,
+      type: "focusSession",
+    });
+  }
+
+  private handleGpuiWorkspaceTabSessionSelected(payload: unknown): void {
+    const selection = normalizeGpuiWorkspaceTabSessionSelection(payload);
+    if (!selection) {
+      return;
+    }
+    /*
+    CDXC:GPUIWorkspaceSessionFocus 2026-06-26-08:01:
+    A GPUI workspace tab click has already selected the native tab in Rust. Match macOS `paneTabSelected` by updating the sidebar's local presentation focus and publishing only the sidebar patch; do not post `workspaceTerminalFocus` back to Rust or call gxserver `/api/focusSession`.
+
+    CDXC:GPUIWorkspaceSessionFocus 2026-06-27-00:33:
+    MacOS reconciles stale native sleeping pane tabs when gxserver presentation already reports the canonical P/G session running. Preserve the one-way tab-selection path for ordinary clicks, but if Rust marks the selected mapped tab as locally sleeping and the current presentation row is running, post one bounded WorkspaceTerminalFocus so Rust reuses and attaches that existing tab instead of leaving an inert sleeping placeholder.
+    */
+    const shouldReconcileRunningPresentation =
+      selection.localWasSleeping === true &&
+      this.presentation?.sessions.some((session) =>
+        session.projectId === selection.projectId &&
+        session.sessionId === selection.sessionId &&
+        session.lifecycleState === "running"
+      ) === true;
+    this.setLocalPresentationSessionFocus(selection.projectId, selection.sessionId);
+    if (shouldReconcileRunningPresentation) {
+      this.postLocalWorkspaceTerminalFocus(selection.projectId, selection.sessionId);
+    }
+    this.publishPresentation("patch");
   }
 
   private applyGxserverBootstrapChanged(bootstrap: GpuiGxserverBootstrap): void {
@@ -918,7 +1193,7 @@ class GpuiSidebarRuntime {
     } else {
       const projectId = localGxserverProjectIdForSidebarSession(session, this.presentation);
       if (projectId) {
-        this.setLocalPresentationSessionFocus(projectId, sessionId);
+        this.focusLocalWorkspaceSession(projectId, sessionId);
       } else {
         this.focusedSessionId = sessionId;
         this.visibleSessionIds = new Set([sessionId]);
@@ -1265,10 +1540,203 @@ class GpuiSidebarRuntime {
       onError: () => {
         this.recoverPresentationStream(clientId);
       },
+      onRendererCommand: (command) => this.handleGxserverRendererCommand(command),
       onSnapshot: (snapshot) => {
         this.applyPresentationSnapshot(snapshot, this.hasHydrated ? "patch" : "hydrate");
       },
     });
+  }
+
+  private async handleGxserverRendererCommand(
+    command: GxserverRendererCommand,
+  ): Promise<Record<string, unknown>> {
+    switch (command.action) {
+      case "focusSession": {
+        const resolvedSession = this.resolveGxserverRendererCommandSession(command.payload);
+        if (!resolvedSession) {
+          throw new Error("No matching session was found.");
+        }
+        await this.focusSession(resolvedSession.sidebarSessionId, {
+          sessionId: resolvedSession.sidebarSessionId,
+          type: "focusSession",
+        });
+        return {
+          ok: true,
+          session: {
+            ghostexId: resolvedSession.sidebarSessionId,
+            projectId: resolvedSession.projectId,
+            sessionId: resolvedSession.sessionId,
+          },
+        };
+      }
+      case "renameCommand": {
+        const resolvedSession = this.resolveGxserverRendererCommandSession(command.payload);
+        if (!resolvedSession) {
+          throw new Error("No matching session was found.");
+        }
+        const title = normalizeGpuiRendererCommandRenameTitle(command.payload);
+        if (!title) {
+          throw new Error("Invalid renderer command title.");
+        }
+        this.postLocalWorkspaceTerminalRenameCommand(
+          resolvedSession.projectId,
+          resolvedSession.sessionId,
+          title,
+        );
+        return {
+          accepted: true,
+          action: "renameCommand",
+          ok: true,
+          session: {
+            ghostexId: resolvedSession.sidebarSessionId,
+            projectId: resolvedSession.projectId,
+            sessionId: resolvedSession.sessionId,
+          },
+        };
+      }
+      case "runCommand":
+        return this.runGxserverRendererCommandButton(
+          readGpuiRecordString(command.payload, "commandId"),
+          command,
+        );
+      case "clickButton": {
+        const kind = readGpuiRecordString(command.payload, "kind")?.trim();
+        if (kind !== "command") {
+          throw new Error("Unsupported renderer command.");
+        }
+        return this.runGxserverRendererCommandButton(
+          readGpuiRecordString(command.payload, "id"),
+          command,
+        );
+      }
+      default:
+        throw new Error("Unsupported renderer command.");
+    }
+  }
+
+  private runGxserverRendererCommandButton(
+    rawCommandId: string | undefined,
+    rendererCommand: GxserverRendererCommand,
+  ): Record<string, unknown> {
+    /*
+    CDXC:GxserverRendererCommands 2026-06-27-05:51:
+    gxserver `runCommand` and `clickButton(kind:"command")` must launch the same trusted project Action button as native. Treat renderer payloads as selectors only; command text, URLs, close-on-exit normalization, completion-sound preference, cwd/env, paths, output, and logs must come from the live HUD command and fixed Rust command-action bridge.
+    */
+    const commandId = normalizeNonEmptyString(rawCommandId)?.trim();
+    if (!commandId) {
+      throw new Error("Unsupported renderer command.");
+    }
+    const command = this.resolveSidebarCommand(commandId);
+    if (!command || !isSidebarCommandConfigured(command)) {
+      throw new Error("Unsupported renderer command.");
+    }
+    const selectionMessage: Extract<SidebarToExtensionMessage, { type: "runSidebarCommand" }> = {
+      commandId,
+      type: "runSidebarCommand",
+    };
+    if (!this.postSidebarCommandAction(command, selectionMessage)) {
+      throw new Error("Renderer command bridge unavailable.");
+    }
+    return {
+      accepted: true,
+      action: rendererCommand.action,
+      ok: true,
+    };
+  }
+
+  private resolveGxserverRendererCommandSession(
+    payload: Record<string, unknown>,
+  ): GpuiRendererCommandResolvedSession | undefined {
+    /*
+    CDXC:GxserverRendererCommands 2026-06-27-02:05:
+    gxserver renderer commands can target local sessions with raw project/session ids in `sessionTarget`, while the reused GPUI SidebarApp renders combined `combined-session:<project>:<session>` ids. Resolve those raw ids to the same combined sidebar id before invoking runtime focus logic, and keep the command result bounded to ids/status rather than paths, titles, command text, URLs, tokens, terminal output, or renderer payload echoes.
+    */
+    const target = readGpuiRendererCommandSessionTarget(payload);
+    const globalReference = parseGpuiRendererCommandGlobalSessionRef(
+      readGpuiRecordString(target, "globalRef") ?? readGpuiRecordString(payload, "globalRef"),
+    );
+    const projectId =
+      readGpuiRecordString(target, "projectId")?.trim() ||
+      readGpuiRecordString(payload, "projectId")?.trim() ||
+      globalReference?.projectId;
+    const sessionId =
+      readGpuiRecordString(target, "sessionId")?.trim() ||
+      readGpuiRecordString(payload, "sessionId")?.trim() ||
+      globalReference?.sessionId;
+    if (!sessionId) {
+      return undefined;
+    }
+    const scopedSession = parseGxserverPresentationProjectSessionId(sessionId);
+    if (scopedSession) {
+      if (projectId && scopedSession.projectId !== projectId) {
+        return undefined;
+      }
+      if (
+        !this.hasGpuiRendererCommandLocalSession(
+          scopedSession.projectId,
+          scopedSession.sessionId,
+        )
+      ) {
+        return undefined;
+      }
+      return {
+        projectId: scopedSession.projectId,
+        sessionId: scopedSession.sessionId,
+        sidebarSessionId: sessionId,
+      };
+    }
+    if (!projectId) {
+      return undefined;
+    }
+    if (!this.hasGpuiRendererCommandLocalSession(projectId, sessionId)) {
+      return undefined;
+    }
+    return {
+      projectId,
+      sessionId,
+      sidebarSessionId: createGxserverPresentationProjectSessionId(projectId, sessionId),
+    };
+  }
+
+  private hasGpuiRendererCommandLocalSession(projectId: string, sessionId: string): boolean {
+    if (
+      this.presentation?.sessions.some((session) =>
+        session.projectId === projectId && session.sessionId === sessionId
+      )
+    ) {
+      return true;
+    }
+    return this.latestGroups.some((group) =>
+      group.sessions.some((session) => {
+        const reference = parseGxserverPresentationProjectSessionId(session.sessionId);
+        return reference?.projectId === projectId && reference.sessionId === sessionId;
+      })
+    );
+  }
+
+  private postLocalWorkspaceTerminalRenameCommand(
+    projectId: string,
+    sessionId: string,
+    title: string,
+  ): void {
+    /*
+    CDXC:GxserverRendererCommands 2026-06-27-02:27:
+    GPUI `renameCommand` is accepted when TypeScript resolves gxserver's raw sessionTarget to the local workspace session and posts one fixed fire-and-forget Rust bridge payload. Keep the result and errors id-only, and pass the normalized title only through `postWorkspaceTerminalRenameCommand` so logs/results do not expose user title text, command text, paths, URLs, tokens, or terminal output.
+    */
+    const postRename = window.ghostexGpui?.postWorkspaceTerminalRenameCommand;
+    if (typeof postRename !== "function") {
+      throw new Error("Renderer command bridge unavailable.");
+    }
+    const bridgeSent = postRename(JSON.stringify({
+      version: GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION,
+      type: GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE,
+      projectId,
+      sessionId,
+      title,
+    }));
+    if (!bridgeSent) {
+      throw new Error("Renderer command bridge unavailable.");
+    }
   }
 
   private recoverPresentationStream(clientId: string): void {
@@ -1315,6 +1783,9 @@ class GpuiSidebarRuntime {
     });
     this.presentation = snapshot;
     this.publishPresentation(kind);
+    if (kind === "hydrate") {
+      void this.runGpuiAutoSleepMonitor("startup");
+    }
   }
 
   private applyPresentationDelta(delta: GxserverPresentationDelta, gxserverRevision: number): void {
@@ -1345,7 +1816,23 @@ class GpuiSidebarRuntime {
 
     const previousGroups = this.latestGroups;
     const groups = this.createSidebarGroups(presentation);
+    /*
+    CDXC:GPUIWorkspaceSessionFocus 2026-06-26-23:24:
+    Sidebar session-card wake decisions should use the lifecycle state that was just rendered from gxserver presentation. Cache only bounded local project/session routing ids for sleeping rows before emitting hydrate/patch so a same-tick click cannot miss the sleeping state and fall through to plain focus.
+    */
+    this.sleepingLocalSidebarSessionIds = new Set(
+      groups.flatMap((group) =>
+        group.sessions.flatMap((session) => {
+          const reference = parseGxserverPresentationProjectSessionId(session.sessionId);
+          return reference &&
+            (session.lifecycleState === "sleeping" || session.isSleeping === true)
+            ? [createGxserverPresentationProjectSessionId(reference.projectId, reference.sessionId)]
+            : [];
+        }),
+      ),
+    );
     this.latestHud = createGpuiSidebarHudState({
+      activeProjectId: this.activeProjectId,
       commandPaneSessions: this.commandPaneSessions,
       focusedSessionId: this.focusedSessionId,
       git: this.gitStateForHud(),
@@ -1404,6 +1891,7 @@ class GpuiSidebarRuntime {
       ...this.createRemoteSidebarGroups(),
     ];
     this.latestHud = createGpuiSidebarHudState({
+      activeProjectId: this.activeProjectId,
       commandPaneSessions: this.commandPaneSessions,
       git: this.gitStateForHud(),
       groups: this.latestGroups,
@@ -1434,6 +1922,7 @@ class GpuiSidebarRuntime {
           ...this.createRemoteSidebarGroups(),
         ];
     this.latestHud = createGpuiSidebarHudState({
+      activeProjectId: this.activeProjectId,
       commandPaneSessions: this.commandPaneSessions,
       focusedSessionId: this.focusedSessionId,
       git: this.gitStateForHud(),
@@ -1562,6 +2051,7 @@ class GpuiSidebarRuntime {
 
   private publishHudPatch(): void {
     this.latestHud = createGpuiSidebarHudState({
+      activeProjectId: this.activeProjectId,
       commandPaneSessions: this.commandPaneSessions,
       focusedSessionId: this.focusedSessionId,
       git: this.gitStateForHud(),
@@ -1785,6 +2275,7 @@ class GpuiSidebarRuntime {
       chatProjectIds: projectProjection.chatProjectIds,
       focusedSessionId: this.focusedSessionId,
       hiddenProjectIds: projectProjection.hiddenProjectIds,
+      hiddenSessionKeys: this.localFirstHiddenPresentationSessionKeys,
       presentation,
       projectOverlays: projectProjection.projectOverlays,
       resolveAgentIcon: resolveGpuiSidebarAgentIcon,
@@ -1927,6 +2418,10 @@ class GpuiSidebarRuntime {
         this.runSidebarCommand(commandId, message);
         return;
       }
+      case "runGhostexHotkeyAction": {
+        this.postGhostexHotkeyAction(message);
+        return;
+      }
       case "endSidebarCommandRun": {
         /*
         CDXC:GPUICommandPane 2026-06-26-05:22:
@@ -1944,9 +2439,7 @@ class GpuiSidebarRuntime {
         await this.setSessionSleeping(message.sessionId, message.sleeping);
         return;
       case "setSessionsSleeping":
-        await Promise.all(message.sessionIds.map((sessionId) =>
-          this.setSessionSleeping(sessionId, message.sleeping),
-        ));
+        await this.setSessionsSleeping(message.sessionIds, message.sleeping);
         return;
       case "setGroupSleeping":
         await this.setGroupSleeping(message.groupId, message.sleeping);
@@ -2259,11 +2752,29 @@ class GpuiSidebarRuntime {
       });
       return;
     }
+    if (this.isSleepingLocalPresentationSession(reference.projectId, reference.sessionId)) {
+      /*
+      CDXC:GPUIWorkspaceSessionFocus 2026-06-26-23:24:
+      Sleeping local session-card clicks must match macOS session activation by committing gxserver `/api/wakeSession` before the Rust workspace materializes the terminal. A plain focus bridge can select the tab but leaves gxserver sleeping, so route this branch through the same Wake path as the sidebar sleep toggle.
+      */
+      await this.setSessionSleeping(sessionId, false);
+      const appliedDetails: GpuiSidebarFocusDebugLogDetails = {
+        ...this.currentFocusDebugLogDetails(),
+        requestedSessionId: sessionId,
+        resolvedProjectId: reference.projectId,
+        resolvedSessionId: reference.sessionId,
+      };
+      if (beforeDetails.focusedSessionId) {
+        appliedDetails.focusedSessionIdBefore = beforeDetails.focusedSessionId;
+      }
+      this.postSessionFocusDebugLog("localFocusApplied", "debug", appliedDetails);
+      return;
+    }
     /*
     CDXC:GPUISidebarSessionFocus 2026-06-26-04:42:
     Local GPUI sidebar clicks must match the macOS sidebar ownership model: the SidebarApp adapter applies local focus immediately and publishes the CEF bootstrap focus hint, but it must not call gxserver `/api/focusSession`. That endpoint is an external renderer-command route and can bounce focus when another renderer is the first open gxserver subscriber.
     */
-    this.setLocalPresentationSessionFocus(reference.projectId, reference.sessionId);
+    this.focusLocalWorkspaceSession(reference.projectId, reference.sessionId);
     const appliedDetails: GpuiSidebarFocusDebugLogDetails = {
       ...this.currentFocusDebugLogDetails(),
       requestedSessionId: sessionId,
@@ -2275,6 +2786,52 @@ class GpuiSidebarRuntime {
     }
     this.postSessionFocusDebugLog("localFocusApplied", "debug", appliedDetails);
     this.publishPresentation("patch");
+  }
+
+  private focusLocalWorkspaceSession(projectId: string, sessionId: string): void {
+    /*
+    CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:18:
+    Any successful local GPUI activation that makes a gxserver workspace session current must update both the reused SidebarApp presentation focus and the real GPUI Agents workspace. This matches macOS create, fork, restore, App Shot, and session-click behavior instead of requiring a second sidebar click to show the newly focused terminal.
+    */
+    const normalizedProjectId = normalizeNonEmptyString(projectId);
+    const normalizedSessionId = normalizeNonEmptyString(sessionId);
+    if (!normalizedProjectId || !normalizedSessionId) {
+      return;
+    }
+    this.setLocalPresentationSessionFocus(normalizedProjectId, normalizedSessionId);
+    this.postLocalWorkspaceTerminalFocus(normalizedProjectId, normalizedSessionId);
+  }
+
+  private postLocalWorkspaceTerminalFocus(projectId: string, sessionId: string): void {
+    /*
+    CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:08:
+    Local GPUI session-card clicks must drive the real Agents workspace the way macOS does: after React updates gxserver presentation focus, send only bounded project/session ids to Rust so Rust can select or materialize the corresponding terminal tab from gxserver attach metadata. Do not pass labels, titles, commands, paths, terminal content, or daemon responses through the renderer bridge.
+    */
+    const postFocus = window.ghostexGpui?.postWorkspaceTerminalFocus;
+    if (typeof postFocus !== "function") {
+      this.postSessionFocusDebugLog("workspaceTerminalFocusBridgeMissing", "debug", {
+        ...this.currentFocusDebugLogDetails(),
+        resolvedProjectId: projectId,
+        resolvedSessionId: sessionId,
+      });
+      return;
+    }
+    const payload = JSON.stringify({
+      projectId,
+      sessionId,
+      type: GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_TYPE,
+      version: GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_VERSION,
+    });
+    const bridgeSent = postFocus(payload);
+    this.postSessionFocusDebugLog(
+      bridgeSent ? "workspaceTerminalFocusBridgePost" : "workspaceTerminalFocusBridgeRejected",
+      bridgeSent ? "debug" : "warning",
+      {
+        ...this.currentFocusDebugLogDetails(),
+        resolvedProjectId: projectId,
+        resolvedSessionId: sessionId,
+      },
+    );
   }
 
   private async createSession(groupId = this.activeGroupId): Promise<void> {
@@ -2319,7 +2876,7 @@ class GpuiSidebarRuntime {
     const createdProjectId = normalizeNonEmptyString(response.session?.projectId) ?? projectId;
     const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
     if (createdProjectId && createdSessionId) {
-      this.setLocalPresentationSessionFocus(createdProjectId, createdSessionId);
+      this.focusLocalWorkspaceSession(createdProjectId, createdSessionId);
     }
   }
 
@@ -2378,7 +2935,7 @@ class GpuiSidebarRuntime {
     });
     const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
     if (createdSessionId) {
-      this.setLocalPresentationSessionFocus(
+      this.focusLocalWorkspaceSession(
         normalizeNonEmptyString(response.session?.projectId) ?? projectId,
         createdSessionId,
       );
@@ -2398,7 +2955,11 @@ class GpuiSidebarRuntime {
             session.sessionId,
           ),
         );
-      await Promise.all(sessionIds.map((sessionId) => this.setSessionSleeping(sessionId, sleeping)));
+      /*
+      CDXC:GPUISidebarBulkSleep 2026-06-27-02:05:
+      Group sleep shares the same native-parity pacing as explicit multi-select sleep, while Wake remains concurrent because restoring sessions does not need terminal teardown throttling.
+      */
+      await this.setSessionsSleeping(sessionIds, sleeping);
       return;
     }
     const projectId = parseGxserverPresentationProjectGroupId(groupId);
@@ -2408,7 +2969,28 @@ class GpuiSidebarRuntime {
     const sessionIds = this.presentation.sessions
       .filter((session) => session.projectId === projectId)
       .map((session) => createGxserverPresentationProjectSessionId(projectId, session.sessionId));
-    await Promise.all(sessionIds.map((sessionId) => this.setSessionSleeping(sessionId, sleeping)));
+    /*
+    CDXC:GPUISidebarBulkSleep 2026-06-27-02:05:
+    Local project group sleep uses the shared private-data-free pacing helper through setSessionsSleeping, preserving the existing per-session focus replacement behavior inside setSessionSleeping.
+    */
+    await this.setSessionsSleeping(sessionIds, sleeping);
+  }
+
+  private async setSessionsSleeping(
+    sessionIds: readonly string[],
+    sleeping: boolean,
+  ): Promise<void> {
+    if (!sleeping) {
+      await Promise.all(sessionIds.map((sessionId) => this.setSessionSleeping(sessionId, false)));
+      return;
+    }
+    /*
+    CDXC:GPUISidebarBulkSleep 2026-06-27-02:05:
+    GPUI sleep bulk actions must mirror native pacing by starting one sleep request at a time with a 350 ms interval. Use the shared aggregate-count helper so per-operation failures continue without exposing ids, titles, paths, commands, URLs, or user text.
+    */
+    await runGpuiSidebarBulkSleepPaced(sessionIds, async (sessionId) => {
+      await this.setSessionSleeping(sessionId, true);
+    });
   }
 
   private async setSessionSleeping(sessionId: string, sleeping: boolean): Promise<void> {
@@ -2429,14 +3011,33 @@ class GpuiSidebarRuntime {
     if (!reference || !this.client) {
       return;
     }
+    const replacementFocusSessionId = sleeping
+      ? this.resolveLocalProjectListTransitionFocusTarget(reference.projectId, reference.sessionId)
+      : undefined;
     await this.client.rpc(sleeping ? "/api/sleepSession" : "/api/wakeSession", {
       projectId: reference.projectId,
       reason: "gpui-sidebar",
       sessionId: reference.sessionId,
     });
+    if (sleeping) {
+      this.patchPresentationSession(reference.projectId, reference.sessionId, {
+        lifecycleState: "sleeping",
+      });
+      if (replacementFocusSessionId) {
+        this.focusLocalWorkspaceSession(reference.projectId, replacementFocusSessionId);
+        this.publishPresentation("patch");
+      }
+      return;
+    }
+    /*
+    CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:34:
+    A local sidebar Wake action is also a workspace activation in the macOS app: the row becomes running and the corresponding workspace terminal is selected/restored through the same focus path as a direct session click. GPUI must use the local focus bridge here, not gxserver `/api/focusSession`.
+    */
     this.patchPresentationSession(reference.projectId, reference.sessionId, {
-      lifecycleState: sleeping ? "sleeping" : "running",
+      lifecycleState: "running",
     });
+    this.focusLocalWorkspaceSession(reference.projectId, reference.sessionId);
+    this.publishPresentation("patch");
   }
 
   private async transitionSession(
@@ -2460,19 +3061,313 @@ class GpuiSidebarRuntime {
     if (!reference || !this.client) {
       return;
     }
-    await this.client.rpc("/api/transitionSession", {
+    const replacementFocusSessionId = this.resolveLocalProjectListTransitionFocusTarget(
+      reference.projectId,
+      reference.sessionId,
+    );
+    if (action === "close") {
+      this.removePresentationSession(reference.projectId, reference.sessionId);
+      if (replacementFocusSessionId) {
+        this.focusLocalWorkspaceSession(reference.projectId, replacementFocusSessionId);
+        this.publishPresentation("patch");
+      }
+      await this.client.rpc<GxserverSessionTransitionResult>("/api/transitionSession", {
+        action,
+        projectId: reference.projectId,
+        reason: "gpui-sidebar",
+        sessionId: reference.sessionId,
+      }).catch(() => undefined);
+      return;
+    }
+    const result = await this.client.rpc<GxserverSessionTransitionResult>("/api/transitionSession", {
       action,
       projectId: reference.projectId,
       reason: "gpui-sidebar",
       sessionId: reference.sessionId,
     });
-    if (action === "close") {
-      this.removePresentationSession(reference.projectId, reference.sessionId);
-    } else {
-      this.patchPresentationSession(reference.projectId, reference.sessionId, {
-        lifecycleState: "sleeping",
-      });
+    if (!shouldApplyGpuiLocalWorkspaceTransition(result, action)) {
+      return;
     }
+    this.patchPresentationSession(reference.projectId, reference.sessionId, {
+      lifecycleState: "sleeping",
+    });
+    if (replacementFocusSessionId) {
+      this.focusLocalWorkspaceSession(reference.projectId, replacementFocusSessionId);
+      this.publishPresentation("patch");
+    }
+  }
+
+  private async transitionWorkspaceTerminalLifecycleClose(
+    request: GpuiWorkspaceTerminalLifecycleRequest,
+    fallbackReplacementSessionId: string | undefined,
+  ): Promise<boolean> {
+    /*
+    CDXC:GPUIWorkspaceLifecycle 2026-06-26-23:59:
+    Rust-origin mapped Agents close matches macOS local-first behavior: hide/remove the SidebarApp row and focus the Rust-provided or project-list replacement locally, then attempt gxserver `/api/transitionSession` best-effort. Provider transition failure must not keep a retryable Ghostty close-confirm prompt or block the native tab close.
+    */
+    this.removePresentationSession(request.projectId, request.sessionId);
+    const replacementProjectId = request.replacementProjectId ?? request.projectId;
+    const replacementSessionId = request.replacementSessionId ?? fallbackReplacementSessionId;
+    if (replacementSessionId) {
+      this.focusLocalWorkspaceSession(replacementProjectId, replacementSessionId);
+      this.publishPresentation("patch");
+    }
+    await this.client.rpc<GxserverSessionTransitionResult>("/api/transitionSession", {
+      action: request.action,
+      projectId: request.projectId,
+      reason: "closeTerminal",
+      sessionId: request.sessionId,
+    }).catch(() => undefined);
+    return true;
+  }
+
+  private workspaceTerminalLifecycleResultBridgeReady(): boolean {
+    return typeof window.ghostexGpui?.postWorkspaceTerminalLifecycleResult === "function";
+  }
+
+  private handleOrQueueWorkspaceTerminalLifecycleRequest(payload: unknown): void {
+    const request = normalizeGpuiWorkspaceTerminalLifecycleRequest(payload);
+    if (!request) {
+      return;
+    }
+    if (!this.workspaceTerminalLifecycleResultBridgeReady()) {
+      this.queuePendingWorkspaceTerminalLifecycleRequest(request);
+      return;
+    }
+    void this.handleNormalizedWorkspaceTerminalLifecycleRequest(request);
+  }
+
+  private queuePendingWorkspaceTerminalLifecycleRequest(
+    request: GpuiWorkspaceTerminalLifecycleRequest,
+  ): void {
+    const gpuiBridge = (window.ghostexGpui = window.ghostexGpui ?? {});
+    const pending = Array.isArray(gpuiBridge.pendingWorkspaceTerminalLifecycleRequests)
+      ? gpuiBridge.pendingWorkspaceTerminalLifecycleRequests
+      : [];
+    pending.push(request);
+    gpuiBridge.pendingWorkspaceTerminalLifecycleRequests = pending;
+    this.scheduleWorkspaceTerminalLifecycleBridgeRetry();
+  }
+
+  private scheduleWorkspaceTerminalLifecycleBridgeRetry(): void {
+    if (this.workspaceTerminalLifecycleBridgeRetryId !== undefined) {
+      return;
+    }
+    this.workspaceTerminalLifecycleBridgeRetryId = window.setTimeout(() => {
+      this.workspaceTerminalLifecycleBridgeRetryId = undefined;
+      this.drainPendingWorkspaceTerminalLifecycleRequests();
+    }, GPUI_WORKSPACE_TERMINAL_LIFECYCLE_BRIDGE_RETRY_DELAY_MS);
+  }
+
+  private drainPendingWorkspaceTerminalLifecycleRequests(
+    queuedRequests?: readonly unknown[],
+  ): void {
+    const gpuiBridge = (window.ghostexGpui = window.ghostexGpui ?? {});
+    const pending = [
+      ...(queuedRequests ?? []),
+      ...(Array.isArray(gpuiBridge.pendingWorkspaceTerminalLifecycleRequests)
+        ? gpuiBridge.pendingWorkspaceTerminalLifecycleRequests.splice(0)
+        : []),
+    ];
+    if (pending.length === 0) {
+      return;
+    }
+    if (!this.workspaceTerminalLifecycleResultBridgeReady()) {
+      for (const payload of pending) {
+        const request = normalizeQueuedGpuiWorkspaceTerminalLifecycleRequest(payload);
+        if (request) {
+          this.queuePendingWorkspaceTerminalLifecycleRequest(request);
+        }
+      }
+      return;
+    }
+    for (const payload of pending) {
+      const request = normalizeQueuedGpuiWorkspaceTerminalLifecycleRequest(payload);
+      if (request) {
+        void this.handleNormalizedWorkspaceTerminalLifecycleRequest(request);
+      }
+    }
+  }
+
+  private async handleNormalizedWorkspaceTerminalLifecycleRequest(
+    request: GpuiWorkspaceTerminalLifecycleRequest,
+  ): Promise<void> {
+    let ok = false;
+    try {
+      ok = await this.applyWorkspaceTerminalLifecycleRequest(request);
+    } catch {
+      ok = false;
+    }
+    this.postWorkspaceTerminalLifecycleResult(request.requestId, ok);
+  }
+
+  private async applyWorkspaceTerminalLifecycleRequest(
+    request: GpuiWorkspaceTerminalLifecycleRequest,
+  ): Promise<boolean> {
+    if (!this.client) {
+      return false;
+    }
+    if (request.action === "wake") {
+      /*
+      CDXC:GPUIWorkspaceLifecycle 2026-06-26-23:24:
+      Rust-origin mapped sleeping placeholder activation must mirror macOS wake ownership: SidebarApp/gxserver commits `/api/wakeSession`, the sidebar marks the row running, and only the result ack lets Rust move the native tab into Mounting. Do not post WorkspaceTerminalFocus from this branch or the wake request would re-enter Rust before its pending lifecycle mutation applies.
+      */
+      await this.client.rpc("/api/wakeSession", {
+        projectId: request.projectId,
+        reason: "gpui-sidebar",
+        sessionId: request.sessionId,
+      });
+      this.patchPresentationSession(request.projectId, request.sessionId, {
+        lifecycleState: "running",
+      });
+      this.setLocalPresentationSessionFocus(request.projectId, request.sessionId);
+      this.publishPresentation("patch");
+      return true;
+    }
+    const fallbackReplacementSessionId =
+      request.replacementSessionId === undefined && !request.skipReplacementFallback
+        ? this.resolveLocalProjectListTransitionFocusTarget(request.projectId, request.sessionId)
+        : undefined;
+    if (request.action === "close") {
+      return this.transitionWorkspaceTerminalLifecycleClose(request, fallbackReplacementSessionId);
+    }
+    const result = await this.client.rpc<GxserverSessionTransitionResult>("/api/transitionSession", {
+      action: request.action,
+      projectId: request.projectId,
+      reason: "sleepSession",
+      sessionId: request.sessionId,
+    });
+    if (!shouldApplyGpuiLocalWorkspaceTransition(result, request.action)) {
+      return false;
+    }
+    this.patchPresentationSession(request.projectId, request.sessionId, {
+      lifecycleState: "sleeping",
+    });
+    const replacementProjectId = request.replacementProjectId ?? request.projectId;
+    const replacementSessionId = request.replacementSessionId ?? fallbackReplacementSessionId;
+    if (replacementSessionId) {
+      this.focusLocalWorkspaceSession(replacementProjectId, replacementSessionId);
+      this.publishPresentation("patch");
+    }
+    return true;
+  }
+
+  private postWorkspaceTerminalLifecycleResult(requestId: number, ok: boolean): void {
+    const postResult = window.ghostexGpui?.postWorkspaceTerminalLifecycleResult;
+    if (typeof postResult !== "function") {
+      return;
+    }
+    const payload = JSON.stringify({
+      ok,
+      requestId,
+      type: GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_TYPE,
+      version: GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_VERSION,
+    });
+    postResult(payload);
+  }
+
+  private resolveLocalProjectListTransitionFocusTarget(
+    projectId: string,
+    removedSessionId: string,
+  ): string | undefined {
+    /*
+    CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:34:
+    Sidebar-origin local close/sleep must follow the macOS project-list focus rule: background transitions do not steal focus, while closing or sleeping the focused session selects the next running row from the same displayed local project order and routes it through the workspace focus bridge.
+    */
+    const normalizedProjectId = normalizeNonEmptyString(projectId);
+    const normalizedRemovedSessionId = normalizeNonEmptyString(removedSessionId);
+    if (
+      !normalizedProjectId ||
+      !normalizedRemovedSessionId ||
+      this.focusedSessionId !== normalizedRemovedSessionId
+    ) {
+      this.postSessionFocusDebugLog("localTransitionFocusTargetSkipped", "debug", {
+        ...this.currentFocusDebugLogDetails(),
+        isRemovedSessionFocused: this.focusedSessionId === normalizedRemovedSessionId,
+        resolvedProjectId: normalizedProjectId,
+        resolvedSessionId: normalizedRemovedSessionId,
+      });
+      return undefined;
+    }
+    const orderedSessionIds = this.localProjectTransitionSessionIds(
+      normalizedProjectId,
+      normalizedRemovedSessionId,
+    );
+    const removedIndex = orderedSessionIds.indexOf(normalizedRemovedSessionId);
+    const candidates = removedIndex >= 0
+      ? [...orderedSessionIds.slice(removedIndex + 1), ...orderedSessionIds.slice(0, removedIndex)]
+      : orderedSessionIds;
+    const replacementSessionId = candidates.find((candidateSessionId) =>
+      candidateSessionId !== normalizedRemovedSessionId &&
+      this.isRunningLocalPresentationSession(normalizedProjectId, candidateSessionId),
+    );
+    this.postSessionFocusDebugLog("localTransitionFocusTargetResolved", "debug", {
+      ...this.currentFocusDebugLogDetails(),
+      candidateCount: candidates.length,
+      orderedSessionCount: orderedSessionIds.length,
+      replacementSessionId,
+      resolvedProjectId: normalizedProjectId,
+      resolvedSessionId: normalizedRemovedSessionId,
+    });
+    return replacementSessionId;
+  }
+
+  private localProjectTransitionSessionIds(projectId: string, removedSessionId: string): string[] {
+    const orderedSessionIds: string[] = [];
+    const addSessionId = (sessionId: string | undefined): void => {
+      const normalizedSessionId = normalizeNonEmptyString(sessionId);
+      if (!normalizedSessionId || orderedSessionIds.includes(normalizedSessionId)) {
+        return;
+      }
+      orderedSessionIds.push(normalizedSessionId);
+    };
+    for (const group of this.latestGroups) {
+      for (const session of group.sessions) {
+        if (parseGpuiRemotePresentationSessionId(session.sessionId)) {
+          continue;
+        }
+        const reference = parseGxserverPresentationProjectSessionId(session.sessionId);
+        if (reference?.projectId === projectId) {
+          addSessionId(reference.sessionId);
+        }
+      }
+    }
+    for (const session of this.presentation?.sessions ?? []) {
+      if (session.projectId === projectId) {
+        addSessionId(session.sessionId);
+      }
+    }
+    addSessionId(removedSessionId);
+    return orderedSessionIds;
+  }
+
+  private isRunningLocalPresentationSession(projectId: string, sessionId: string): boolean {
+    return this.presentation?.sessions.some((session) =>
+      session.projectId === projectId &&
+      session.sessionId === sessionId &&
+      session.lifecycleState === "running",
+    ) ?? false;
+  }
+
+  private isSleepingLocalPresentationSession(projectId: string, sessionId: string): boolean {
+    const presentationSleeping = this.presentation?.sessions.some((session) =>
+      session.projectId === projectId &&
+      session.sessionId === sessionId &&
+      session.lifecycleState === "sleeping",
+    ) ?? false;
+    if (presentationSleeping) {
+      return true;
+    }
+    const sidebarSessionId = createGxserverPresentationProjectSessionId(projectId, sessionId);
+    if (this.sleepingLocalSidebarSessionIds.has(sidebarSessionId)) {
+      return true;
+    }
+    return this.latestGroups.some((group) =>
+      group.sessions.some((session) =>
+        session.sessionId === sidebarSessionId &&
+        (session.lifecycleState === "sleeping" || session.isSleeping === true),
+      ),
+    );
   }
 
   private async forkSession(sessionId: string): Promise<void> {
@@ -2517,7 +3412,7 @@ class GpuiSidebarRuntime {
       reason: "gpui-sidebar",
       sessionId: reference.sessionId,
     });
-    this.setLocalPresentationSessionFocus(
+    this.focusLocalWorkspaceSession(
       response.session.projectId ?? reference.projectId,
       response.session.sessionId,
     );
@@ -2689,7 +3584,7 @@ class GpuiSidebarRuntime {
       });
       const restoredSessionId = normalizeNonEmptyString(response.session?.sessionId);
       if (restoredSessionId) {
-        this.setLocalPresentationSessionFocus(
+        this.focusLocalWorkspaceSession(
           normalizeNonEmptyString(response.session?.projectId) ?? reference.projectId,
           restoredSessionId,
         );
@@ -6096,7 +6991,7 @@ class GpuiSidebarRuntime {
     if (!sessionId) {
       throw new Error("Could not create an agent session in the worktree.");
     }
-    this.setLocalPresentationSessionFocus(project.projectId, sessionId);
+    this.focusLocalWorkspaceSession(project.projectId, sessionId);
     return sessionId;
   }
 
@@ -6718,11 +7613,11 @@ class GpuiSidebarRuntime {
 
   private postSidebarCommandAction(
     command: SidebarCommandButton,
-    originalMessage: SidebarToExtensionMessage,
+    selectionMessage: Extract<SidebarToExtensionMessage, { type: "runSidebarCommand" }>,
   ): boolean {
     const bridge = window.ghostexGpui?.postSidebarCommandAction;
     if (!bridge) {
-      this.handleUnsupportedSidebarMessage(originalMessage);
+      this.handleUnsupportedSidebarMessage(selectionMessage);
       return false;
     }
     const payload = JSON.stringify({
@@ -6730,18 +7625,18 @@ class GpuiSidebarRuntime {
       commandId: command.commandId,
       name: command.name,
       /*
-      CDXC:GPUICommandPane 2026-06-26-05:11:
-      `runSidebarCommand` carries only the selected command id plus optional runMode. Forward runMode only for terminal Actions so Rust can create the visible debug workspace terminal like macOS while all other launch metadata stays resolved from the trusted HUD command.
+      CDXC:GPUICommandPane 2026-06-27-07:54:
+      `runSidebarCommand` reaches the launch bridge only after GPUI rebuilds it as a selector-shaped object. Forward an own, validated runMode only for terminal Actions so Rust can create the visible debug workspace terminal like macOS while all other launch metadata stays resolved from the trusted HUD command.
       */
       ...(command.actionType === "terminal" &&
-      "runMode" in originalMessage &&
-      isSidebarCommandRunMode(originalMessage.runMode)
-        ? { runMode: originalMessage.runMode }
+      selectionMessage.runMode &&
+      isSidebarCommandRunMode(selectionMessage.runMode)
+        ? { runMode: selectionMessage.runMode }
         : {}),
       ...(command.actionType === "terminal"
         ? {
             /*
-            CDXC:GPUICommandPane 2026-06-26-05:11:
+            CDXC:GPUICommandPane 2026-06-27-07:54:
             GPUI command-pane Action launches must match native `runNativeSidebarCommand`: default command-pane runtime forces terminal close-on-exit off even when trusted saved/HUD Action definitions preserve older close-on-exit metadata. Renderer `runSidebarCommand` messages cannot supply this field, and Browser Actions must continue omitting the terminal-only boolean.
             */
             closeTerminalOnExit: false,
@@ -6754,6 +7649,42 @@ class GpuiSidebarRuntime {
       ...(command.actionType === "browser" && command.url ? { url: command.url } : {}),
       type: GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_TYPE,
       version: GPUI_SIDEBAR_COMMAND_ACTION_MESSAGE_VERSION,
+    });
+    try {
+      if (!bridge(payload)) {
+        this.handleUnsupportedSidebarMessage(selectionMessage);
+        return false;
+      }
+      return true;
+    } catch {
+      this.handleUnsupportedSidebarMessage(selectionMessage);
+      return false;
+    }
+  }
+
+  private postGhostexHotkeyAction(
+    originalMessage: Extract<SidebarToExtensionMessage, { type: "runGhostexHotkeyAction" }>,
+  ): boolean {
+    const bridge = window.ghostexGpui?.postGhostexHotkeyAction;
+    if (!bridge) {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+      return false;
+    }
+    /*
+    CDXC:GPUICommandPalette 2026-06-27-08:11:
+    Shared SidebarApp and Command Palette hotkey rows emit `runGhostexHotkeyAction` through the reused GPUI runtime, not directly to Rust. Forward only the fixed action-id selector so Open Commands Panel, focused-pane routes, Settings, and modal hotkeys share Rust's native dispatcher without renderer-owned session ids, paths, command text, URLs, or launch metadata.
+    */
+    if (
+      Object.keys(originalMessage).some((key) => key !== "type" && key !== "actionId") ||
+      typeof originalMessage.actionId !== "string" ||
+      originalMessage.actionId.trim() === ""
+    ) {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+      return false;
+    }
+    const payload = JSON.stringify({
+      actionId: originalMessage.actionId,
+      type: "runGhostexHotkeyAction",
     });
     try {
       if (!bridge(payload)) {
@@ -6783,8 +7714,8 @@ class GpuiSidebarRuntime {
     const payload = JSON.stringify({
       commandId: normalizedCommandId,
       /*
-      CDXC:GPUICommandPane 2026-06-25-10:34:
-      `endSidebarCommandRun` is a separate fixed GPUI bridge from Action launch because it should carry only the command id needed to close the mapped command-pane run. Do not reuse the launch payload shape or send command text, URLs, project paths, run ids, status paths, renderer cwd/env, or terminal output.
+      CDXC:GPUICommandPane 2026-06-27-05:59:
+      `endSidebarCommandRun` is a separate fixed GPUI bridge from Action launch because Rust only needs the selected command id to close the mapped command-pane run. Rebuild the payload here so renderer command text, URLs, close-on-exit flags, cwd/env, paths, logs, output, status-file paths, and run ids never cross the run-end bridge.
       */
       type: GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_TYPE,
       version: GPUI_SIDEBAR_COMMAND_RUN_END_MESSAGE_VERSION,
@@ -7071,6 +8002,38 @@ class GpuiSidebarRuntime {
     );
   }
 
+  private createSidebarCommandSelectionMessage(
+    commandId: string,
+    originalMessage: SidebarToExtensionMessage,
+  ): Extract<SidebarToExtensionMessage, { type: "runSidebarCommand" }> | undefined {
+    /*
+    CDXC:GPUICommandPane 2026-06-27-07:54:
+    The GPUI SidebarApp/Command Palette Action launch boundary accepts only selector-shaped `runSidebarCommand` objects: type, command id, and an own optional runMode. Renderer-supplied command text, URLs, cwd/env, paths, output, logs, run ids, and status fields are unsupported instead of being stripped into a launch.
+    */
+    if (
+      Object.keys(originalMessage).some((key) =>
+        !GPUI_SIDEBAR_COMMAND_SELECTOR_MESSAGE_KEYS.has(key)
+      )
+    ) {
+      return undefined;
+    }
+    if (!Object.prototype.hasOwnProperty.call(originalMessage, "runMode")) {
+      return {
+        commandId,
+        type: "runSidebarCommand",
+      };
+    }
+    const runMode = (originalMessage as { runMode?: unknown }).runMode;
+    if (!isSidebarCommandRunMode(runMode)) {
+      return undefined;
+    }
+    return {
+      commandId,
+      runMode,
+      type: "runSidebarCommand",
+    };
+  }
+
   private runSidebarCommand(
     commandId: string,
     originalMessage: SidebarToExtensionMessage,
@@ -7083,16 +8046,31 @@ class GpuiSidebarRuntime {
      * trusted launch metadata to Rust through the fixed command-action bridge so
      * command text, URLs, saved close-on-exit metadata, paths, output, and logs
      * never come from the renderer message.
+     *
+     * CDXC:GPUICommandPane 2026-06-27-06:37:
+     * Match native sidebar dispatch for stale Action selectors: an unknown command id is an unsupported no-op, while an existing but unconfigured Action still opens Settings so the user can supply the missing command or URL.
+     *
+     * CDXC:GPUICommandPane 2026-06-27-07:54:
+     * Treat selector shape as part of the Action contract before looking up the HUD command. Extra launch/run-state fields are unsupported no-ops, not sanitized launches, while valid configured-but-empty selectors still reach Settings like macOS.
      */
+    const selectionMessage = this.createSidebarCommandSelectionMessage(commandId, originalMessage);
+    if (!selectionMessage) {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+      return;
+    }
     const command = this.resolveSidebarCommand(commandId);
-    if (!command || !isSidebarCommandConfigured(command)) {
+    if (!command) {
+      this.handleUnsupportedSidebarMessage(originalMessage);
+      return;
+    }
+    if (!isSidebarCommandConfigured(command)) {
       this.openAppModal("settings");
       return;
     }
-    if (this.postSidebarCommandAction(command, originalMessage)) {
+    if (this.postSidebarCommandAction(command, selectionMessage)) {
       return;
     }
-    this.handleUnsupportedSidebarMessage(originalMessage);
+    this.handleUnsupportedSidebarMessage(selectionMessage);
   }
 
   private endSidebarCommandRun(
@@ -7302,6 +8280,7 @@ class GpuiSidebarRuntime {
   }
 
   private removePresentationSession(projectId: string, sessionId: string): void {
+    this.hideLocalPresentationSession(projectId, sessionId);
     const presentation = this.presentation;
     if (!presentation) {
       return;
@@ -7316,6 +8295,16 @@ class GpuiSidebarRuntime {
       presentation.revision + 1,
     );
     this.publishPresentation("patch");
+  }
+
+  private hideLocalPresentationSession(projectId: string, sessionId: string): void {
+    /*
+    CDXC:GPUIWorkspaceLifecycle 2026-06-26-23:59:
+    GPUI native tab close must match macOS local-first sidebar removal. Keep a runtime-only hidden-session overlay so future gxserver hydrates cannot reinsert a locally closed mapped Agents row while the backend transition catches up or fails best-effort. Store only project/session ids.
+    */
+    this.localFirstHiddenPresentationSessionKeys.add(
+      createGxserverPresentationSidebarSessionKey(projectId, sessionId),
+    );
   }
 
   private removeLocalPresentationProject(projectId: string): void {
@@ -7344,6 +8333,10 @@ class GpuiSidebarRuntime {
     */
   }
 }
+
+type GpuiRendererCommandHandler = (
+  command: GxserverRendererCommand,
+) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
 
 class GpuiGxserverClient {
   constructor(private readonly bootstrap: GpuiValidatedGxserverBootstrap) {}
@@ -7434,6 +8427,7 @@ class GpuiGxserverClient {
     onClose,
     onDelta,
     onError,
+    onRendererCommand,
     onSnapshot,
   }: {
     clientId: string;
@@ -7441,6 +8435,7 @@ class GpuiGxserverClient {
     onClose: () => void;
     onDelta: (delta: GxserverPresentationDelta, revision: number) => void;
     onError: () => void;
+    onRendererCommand?: GpuiRendererCommandHandler;
     onSnapshot: (snapshot: GxserverPresentationSnapshot) => void;
   }): GpuiPresentationSubscription {
     const url = new URL(`${this.bootstrap.baseUrl}/api/events`);
@@ -7454,6 +8449,7 @@ class GpuiGxserverClient {
       socket.send(JSON.stringify({
         clientId,
         lastRevision,
+        ...(onRendererCommand ? { rendererCommands: true } : {}),
         type: "subscribePresentation",
       }));
     });
@@ -7472,6 +8468,14 @@ class GpuiGxserverClient {
         isPresentationDelta(message.delta)
       ) {
         onDelta(message.delta, message.revision);
+        return;
+      }
+      if (
+        message.type === "rendererCommand" &&
+        onRendererCommand &&
+        isGpuiRendererCommand(message.command)
+      ) {
+        void handleGpuiRendererCommand(socket, message.command, onRendererCommand);
       }
     });
     socket.addEventListener("error", () => {
@@ -7575,6 +8579,10 @@ function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): b
 
 const GPUI_COMMAND_PANE_SESSION_SUMMARY_LIMIT = 128;
 const GPUI_COMMAND_PANE_SESSION_STRING_MAX_LENGTH = 512;
+const GPUI_COMMAND_PANE_TIMER_DEADLINE_MAX_LENGTH = 64;
+const GPUI_COMMAND_PANE_TIMER_LABEL_MAX_LENGTH = 32;
+const GPUI_COMMAND_PANE_TIMER_REMAINING_MS_MAX = 2_147_483_647;
+const GPUI_GXSERVER_LOCAL_COMMAND_PANE_SESSION_ID_PATTERN = /^G[0-9][0-9A-Za-z_-]*$/u;
 
 function normalizeGpuiCommandPaneSessions(
   sessions: readonly GpuiCommandPaneSessionSummary[] | unknown,
@@ -7589,15 +8597,45 @@ function normalizeGpuiCommandPaneSessions(
     const record = session as Partial<Record<keyof GpuiCommandPaneSessionSummary, unknown>>;
     const sessionId = normalizeGpuiCommandPaneSessionString(record.sessionId);
     const status = normalizeGpuiCommandPaneSessionStatus(record.status);
-    if (!sessionId || !status) {
+    if (!sessionId || !status || !isGpuiGxserverLocalCommandPaneSessionId(sessionId)) {
       return [];
     }
     const commandId = normalizeGpuiCommandPaneSessionString(record.commandId);
     const title = normalizeGpuiCommandPaneSessionString(record.title);
+    const delayedSendDeadlineAt = normalizeGpuiCommandPaneTimerDeadlineAt(
+      record.delayedSendDeadlineAt,
+    );
+    const delayedSendRemainingLabel = normalizeGpuiCommandPaneTimerRemainingLabel(
+      record.delayedSendRemainingLabel,
+    );
+    const delayedSendRemainingMs = normalizeGpuiCommandPaneTimerRemainingMs(
+      record.delayedSendRemainingMs,
+    );
+    const closeAfterDoneDeadlineAt = normalizeGpuiCommandPaneTimerDeadlineAt(
+      record.closeAfterDoneDeadlineAt,
+    );
+    const closeAfterDoneRemainingLabel = normalizeGpuiCommandPaneTimerRemainingLabel(
+      record.closeAfterDoneRemainingLabel,
+    );
+    const closeAfterDoneRemainingMs = normalizeGpuiCommandPaneTimerRemainingMs(
+      record.closeAfterDoneRemainingMs,
+    );
     return [
       {
         ...(commandId ? { commandId } : {}),
+        /*
+        CDXC:GPUICommandPaneTimers 2026-06-27-02:05:
+        Native Rust emits command-pane timer summaries with only Delayed Send and Close After Done display fields. Keep the TypeScript bridge at the same privacy boundary by normalizing and forwarding just bounded timer strings, non-negative remaining milliseconds, and a true-only Close After Done flag; never pass command text, cwd/env, URLs, paths, output, run ids, status-file paths, tokens, or unknown native fields into the Sidebar HUD.
+        */
+        ...(record.closeAfterDone === true ? { closeAfterDone: true } : {}),
+        ...(closeAfterDoneDeadlineAt ? { closeAfterDoneDeadlineAt } : {}),
+        ...(closeAfterDoneRemainingLabel ? { closeAfterDoneRemainingLabel } : {}),
+        ...(closeAfterDoneRemainingMs !== undefined ? { closeAfterDoneRemainingMs } : {}),
+        ...(delayedSendDeadlineAt ? { delayedSendDeadlineAt } : {}),
+        ...(delayedSendRemainingLabel ? { delayedSendRemainingLabel } : {}),
+        ...(delayedSendRemainingMs !== undefined ? { delayedSendRemainingMs } : {}),
         ...(record.isActive === true ? { isActive: true } : {}),
+        ...(record.isPaneOwner === true ? { isPaneOwner: true } : {}),
         sessionId,
         status,
         ...(title ? { title } : {}),
@@ -7621,10 +8659,61 @@ function normalizeGpuiCommandPaneSessionString(value: unknown): string | undefin
   return normalized;
 }
 
+function normalizeGpuiCommandPaneTimerDeadlineAt(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  if (
+    !normalized ||
+    normalized.length > GPUI_COMMAND_PANE_TIMER_DEADLINE_MAX_LENGTH ||
+    /[\u0000-\u001F\u007F]/.test(normalized) ||
+    !/^\d{4}-\d{2}-\d{2}T/u.test(normalized) ||
+    Number.isNaN(Date.parse(normalized))
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function normalizeGpuiCommandPaneTimerRemainingLabel(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (
+    !normalized ||
+    normalized.length > GPUI_COMMAND_PANE_TIMER_LABEL_MAX_LENGTH ||
+    /[\u0000-\u001F\u007F]/.test(normalized) ||
+    !/^[0-9dhms: .+-]+$/iu.test(normalized)
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function normalizeGpuiCommandPaneTimerRemainingMs(value: unknown): number | undefined {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > GPUI_COMMAND_PANE_TIMER_REMAINING_MS_MAX
+  ) {
+    return undefined;
+  }
+  return Math.ceil(value);
+}
+
 function normalizeGpuiCommandPaneSessionStatus(
   value: unknown,
 ): SidebarCommandSessionIndicator["status"] | undefined {
-  return value === "idle" || value === "running" || value === "error" ? value : undefined;
+  return isValidGpuiCommandPaneSessionStatus(value) ? value : undefined;
+}
+
+function isValidGpuiCommandPaneSessionStatus(
+  value: unknown,
+): value is SidebarCommandSessionIndicator["status"] {
+  return value === "idle" || value === "running" || value === "error";
 }
 
 function hasSameGpuiCommandPaneSessions(
@@ -7638,7 +8727,15 @@ function hasSameGpuiCommandPaneSessions(
     const candidate = next[index];
     return (
       session.commandId === candidate?.commandId &&
+      session.closeAfterDone === candidate?.closeAfterDone &&
+      session.closeAfterDoneDeadlineAt === candidate?.closeAfterDoneDeadlineAt &&
+      session.closeAfterDoneRemainingLabel === candidate?.closeAfterDoneRemainingLabel &&
+      session.closeAfterDoneRemainingMs === candidate?.closeAfterDoneRemainingMs &&
+      session.delayedSendDeadlineAt === candidate?.delayedSendDeadlineAt &&
+      session.delayedSendRemainingLabel === candidate?.delayedSendRemainingLabel &&
+      session.delayedSendRemainingMs === candidate?.delayedSendRemainingMs &&
       session.isActive === candidate?.isActive &&
+      session.isPaneOwner === candidate?.isPaneOwner &&
       session.sessionId === candidate?.sessionId &&
       session.status === candidate?.status &&
       session.title === candidate?.title
@@ -7646,10 +8743,62 @@ function hasSameGpuiCommandPaneSessions(
   });
 }
 
+function isGpuiGxserverLocalCommandPaneSessionId(sessionId: unknown): sessionId is string {
+  /*
+  CDXC:GPUICommandPane 2026-06-27-01:37:
+  GPUI command-pane summaries are live local tab state for gxserver-backed native-shaped `G...` command sessions only. Rust shell internals may still carry numeric ids, so drop raw numeric strings, lowercase `g...`, malformed strings, and non-string rows at the bridge boundary before stale native-local command tabs can drive HUD indicators, active-tab state, timer projection, or auto-sleep protection.
+  */
+  return typeof sessionId === "string" &&
+    GPUI_GXSERVER_LOCAL_COMMAND_PANE_SESSION_ID_PATTERN.test(sessionId);
+}
+
+type GpuiSidebarCommandSessionIndicatorScope = {
+  activeProjectId?: string;
+  presentation?: GxserverPresentationSnapshot;
+};
+
+function filterGpuiGxserverLocalCommandPaneSessions(
+  commandPaneSessions: readonly GpuiCommandPaneSessionSummary[],
+  scope: GpuiSidebarCommandSessionIndicatorScope = {},
+): GpuiCommandPaneSessionSummary[] {
+  /*
+  CDXC:GPUICommandPane 2026-06-27-08:32:
+  Command-pane ownership consumers require both an external native-shaped local `G...` id and a valid Sidebar HUD status. Reuse this filter for HUD indicators and Auto Sleep owner protection so malformed native rows, including `isPaneOwner:true` rows with invalid status, cannot keep sessions awake.
+
+  CDXC:GPUICommandPane 2026-06-27-08:45:
+  Native presentation cleanup removes stale command-panel rows after authoritative gxserver snapshots and explicit removal deltas. When the live HUD is built with an active project and presentation, require the command-pane summary id to still exist in that active project so deleted local `G...` tabs cannot keep Action indicators, timers, or active states visible.
+  */
+  const presentedSessionIds = scope.activeProjectId && scope.presentation
+    ? new Set<string>(
+        scope.presentation.sessions.flatMap((session) =>
+          session.projectId === scope.activeProjectId ? [session.sessionId] : []
+        ),
+      )
+    : undefined;
+  return commandPaneSessions.filter((session) => {
+    if (
+      !isGpuiGxserverLocalCommandPaneSessionId(session.sessionId) ||
+      !isValidGpuiCommandPaneSessionStatus(session.status)
+    ) {
+      return false;
+    }
+    return presentedSessionIds ? presentedSessionIds.has(session.sessionId) : true;
+  });
+}
+
 export function createGpuiSidebarCommandSessionIndicators(
   commands: readonly SidebarCommandButton[],
   commandPaneSessions: readonly GpuiCommandPaneSessionSummary[],
+  scope: GpuiSidebarCommandSessionIndicatorScope = {},
 ): SidebarCommandSessionIndicator[] {
+  /*
+  CDXC:GPUICommandPane 2026-06-27-06:30:
+  Command-session HUD status is owned by Rust's sanitized command-pane summary. The TypeScript bridge may forward only external native-shaped local `G...` command-pane rows whose status is already a Sidebar HUD status; internal Rust numeric shell ids and malformed bridge rows must not match HUD Actions or infer status from renderer activity, command text, paths, URLs, output, logs, titles, status files, or other private fields.
+
+  CDXC:GPUICommandPane 2026-06-27-08:45:
+  Keep the exported helper backward-compatible for direct two-argument tests and callers. Live HUD construction passes the optional active-project presentation scope so stale command-pane summaries are pruned against the full current presentation, not against whichever ids happen to appear in a non-removal delta.
+  */
+  const localCommandPaneSessions = filterGpuiGxserverLocalCommandPaneSessions(commandPaneSessions, scope);
   return commands.flatMap((command) => {
     if (command.actionType !== "terminal") {
       return [];
@@ -7660,14 +8809,14 @@ export function createGpuiSidebarCommandSessionIndicators(
     if (!commandTitleKey) {
       return [];
     }
-    const mappedSession = commandPaneSessions.find(
+    const mappedSession = localCommandPaneSessions.find(
       (session) =>
         session.commandId === command.commandId &&
         getGpuiSidebarCommandTitleKey(session.title) === commandTitleKey,
     );
     const session =
       mappedSession ??
-      commandPaneSessions.find(
+      localCommandPaneSessions.find(
         (candidate) => getGpuiSidebarCommandTitleKey(candidate.title) === commandTitleKey,
       );
     if (!session) {
@@ -7676,6 +8825,25 @@ export function createGpuiSidebarCommandSessionIndicators(
     return [
       {
         commandId: command.commandId,
+        ...(session.closeAfterDone === true ? { closeAfterDone: true } : {}),
+        ...(session.closeAfterDoneDeadlineAt ? {
+          closeAfterDoneDeadlineAt: session.closeAfterDoneDeadlineAt,
+        } : {}),
+        ...(session.closeAfterDoneRemainingLabel ? {
+          closeAfterDoneRemainingLabel: session.closeAfterDoneRemainingLabel,
+        } : {}),
+        ...(session.closeAfterDoneRemainingMs !== undefined ? {
+          closeAfterDoneRemainingMs: session.closeAfterDoneRemainingMs,
+        } : {}),
+        ...(session.delayedSendDeadlineAt ? {
+          delayedSendDeadlineAt: session.delayedSendDeadlineAt,
+        } : {}),
+        ...(session.delayedSendRemainingLabel ? {
+          delayedSendRemainingLabel: session.delayedSendRemainingLabel,
+        } : {}),
+        ...(session.delayedSendRemainingMs !== undefined ? {
+          delayedSendRemainingMs: session.delayedSendRemainingMs,
+        } : {}),
         isActive: session.isActive === true,
         sessionId: session.sessionId,
         status: session.status,
@@ -7697,6 +8865,7 @@ function getGpuiSidebarCommandTitleKey(value: string | undefined): string {
 }
 
 function createGpuiSidebarHudState({
+  activeProjectId,
   commandPaneSessions = [],
   domainProjects = [],
   focusedSessionId,
@@ -7708,6 +8877,7 @@ function createGpuiSidebarHudState({
   runtimeSettings,
   sidebarHud,
 }: {
+  activeProjectId?: string;
   commandPaneSessions?: readonly GpuiCommandPaneSessionSummary[];
   domainProjects?: readonly GxserverProjectDomainState[];
   focusedSessionId?: string;
@@ -7745,6 +8915,7 @@ function createGpuiSidebarHudState({
     commandSessionIndicators: createGpuiSidebarCommandSessionIndicators(
       commands,
       commandPaneSessions,
+      { activeProjectId, presentation },
     ),
     completionBellEnabled: settings.completionBellEnabled,
     completionSound: settings.completionSound,
@@ -7793,12 +8964,221 @@ function createGpuiSidebarSettings(
   };
 }
 
+export function createGpuiAutoSleepAgentSessionIds({
+  activeProjectId,
+  commandPaneSessions = [],
+  focusedSessionId,
+  groups = [],
+  nowMs,
+  presentation,
+  settings,
+}: {
+  activeProjectId?: string;
+  commandPaneSessions?: readonly GpuiCommandPaneSessionSummary[];
+  focusedSessionId?: string;
+  groups?: readonly SidebarSessionGroup[];
+  nowMs: number;
+  presentation: GxserverPresentationSnapshot;
+  settings: Pick<
+    ghostexSettings,
+    "autoSleepAgentIdleMinutes" | "autoSleepAgentSessionsEnabled"
+  >;
+}): string[] {
+  /*
+  CDXC:GPUISidebarAutoSleep 2026-06-27-01:24:
+  GPUI Agent Auto Sleep must choose only local gxserver presentation agent terminals after protecting selected/visible sidebar owners, focused sessions, active command-pane owners, and popped-out rows. Return bounded project/session routing ids for the existing setSessionSleeping path; do not inspect Browser/project-editor surfaces, titles, paths, commands, terminal output, URLs, tokens, or remote-machine rows.
+  */
+  if (!settings.autoSleepAgentSessionsEnabled) {
+    return [];
+  }
+  const protectedProjectSessionKeys = collectGpuiAutoSleepProtectedProjectSessionKeys({
+    activeProjectId,
+    commandPaneSessions,
+    focusedSessionId,
+    groups,
+    presentation,
+  });
+  return presentation.sessions.flatMap((session) =>
+    shouldAutoSleepGpuiPresentationAgentSession({
+      nowMs,
+      protectedProjectSessionKeys,
+      session,
+      settings,
+    })
+      ? [createGxserverPresentationProjectSessionId(session.projectId, session.sessionId)]
+      : [],
+  );
+}
+
+export function collectGpuiAutoSleepProtectedProjectSessionKeys({
+  activeProjectId,
+  commandPaneSessions = [],
+  focusedSessionId,
+  groups = [],
+  presentation,
+}: {
+  activeProjectId?: string;
+  commandPaneSessions?: readonly GpuiCommandPaneSessionSummary[];
+  focusedSessionId?: string;
+  groups?: readonly SidebarSessionGroup[];
+  presentation: GxserverPresentationSnapshot;
+}): Set<string> {
+  const protectedProjectSessionKeys = new Set<string>();
+  for (const group of groups) {
+    if (group.remoteMachineContext) {
+      continue;
+    }
+    let hasProjectedOwner = false;
+    for (const session of group.sessions) {
+      if (session.isFocused === true || session.isVisible === true) {
+        addGpuiAutoSleepProtectedSessionId(
+          protectedProjectSessionKeys,
+          presentation,
+          session.sessionId,
+          group.projectContext?.editor.projectId,
+        );
+        hasProjectedOwner = true;
+      }
+      if (session.isPoppedOut === true) {
+        addGpuiAutoSleepProtectedSessionId(
+          protectedProjectSessionKeys,
+          presentation,
+          session.sessionId,
+          group.projectContext?.editor.projectId,
+        );
+      }
+    }
+    if (!hasProjectedOwner && group.sessions[0]) {
+      addGpuiAutoSleepProtectedSessionId(
+        protectedProjectSessionKeys,
+        presentation,
+        group.sessions[0].sessionId,
+        group.projectContext?.editor.projectId,
+      );
+    }
+  }
+  addGpuiAutoSleepProtectedSessionId(
+    protectedProjectSessionKeys,
+    presentation,
+    focusedSessionId,
+  );
+  /*
+  CDXC:GPUISidebarAutoSleep 2026-06-27-06:54:
+  Native Auto Sleep protects the active owner of every visible command-panel split leaf from the command-pane layout, not the HUD-focused tab. GPUI Rust sends that split ownership as sanitized `isPaneOwner:true` on external native-shaped `G...` ids; TypeScript protects only that field after the same local id and valid-status filtering used by command indicators, so internal numeric Rust ids, stale legacy rows, collapsed HUD focus, and malformed statuses cannot keep sessions awake.
+
+  CDXC:GPUISidebarAutoSleep 2026-06-27-07:28:
+  Native command-panel layout is scoped to the active project, so a GPUI command-pane owner summary must protect only the active project's matching external `G...` session. Do not treat a bare command-pane id as globally owned across projects because that can keep unrelated same-id agent sessions awake.
+  */
+  const localCommandPaneSessions = filterGpuiGxserverLocalCommandPaneSessions(commandPaneSessions);
+  for (const commandPaneSession of localCommandPaneSessions) {
+    if (commandPaneSession.isPaneOwner === true) {
+      addGpuiAutoSleepProtectedSessionId(
+        protectedProjectSessionKeys,
+        presentation,
+        commandPaneSession.sessionId,
+        activeProjectId,
+      );
+    }
+  }
+  return protectedProjectSessionKeys;
+}
+
+function shouldAutoSleepGpuiPresentationAgentSession({
+  nowMs,
+  protectedProjectSessionKeys,
+  session,
+  settings,
+}: {
+  nowMs: number;
+  protectedProjectSessionKeys: ReadonlySet<string>;
+  session: GxserverPresentationSession;
+  settings: Pick<
+    ghostexSettings,
+    "autoSleepAgentIdleMinutes" | "autoSleepAgentSessionsEnabled"
+  >;
+}): boolean {
+  if (session.lifecycleState !== "running" || session.activity !== "idle") {
+    return false;
+  }
+  if (session.actions.sleep !== true || !isGpuiAutoSleepAgentTerminalSession(session)) {
+    return false;
+  }
+  if (
+    protectedProjectSessionKeys.has(
+      gpuiAutoSleepProjectSessionKey(session.projectId, session.sessionId),
+    )
+  ) {
+    return false;
+  }
+  const lastActivityMs = gpuiAutoSleepLastActivityMs(session);
+  if (lastActivityMs === undefined) {
+    return false;
+  }
+  return nowMs - lastActivityMs >= settings.autoSleepAgentIdleMinutes * GPUI_AUTO_SLEEP_MINUTE_MS;
+}
+
+function isGpuiAutoSleepAgentTerminalSession(session: GxserverPresentationSession): boolean {
+  if (session.kind === "t3") {
+    return false;
+  }
+  if (session.surface !== "workspace" && session.surface !== "commands") {
+    return false;
+  }
+  if (session.kind === "agent") {
+    return true;
+  }
+  return Boolean(
+    normalizeNonEmptyString(session.agentId) ||
+      normalizeNonEmptyString(session.agentName) ||
+      normalizeNonEmptyString(session.agentSessionId) ||
+      normalizeNonEmptyString(session.agentSessionPath),
+  );
+}
+
+function gpuiAutoSleepLastActivityMs(session: GxserverPresentationSession): number | undefined {
+  const timestamp = session.lastActiveAt ?? session.updatedAt;
+  const timestampMs = Date.parse(timestamp);
+  return Number.isFinite(timestampMs) ? timestampMs : undefined;
+}
+
+function addGpuiAutoSleepProtectedSessionId(
+  protectedProjectSessionKeys: Set<string>,
+  presentation: GxserverPresentationSnapshot,
+  sessionId: string | undefined,
+  projectIdHint?: string,
+): void {
+  const normalizedSessionId = normalizeNonEmptyString(sessionId)?.trim();
+  if (!normalizedSessionId || parseGpuiRemotePresentationSessionId(normalizedSessionId)) {
+    return;
+  }
+  const scopedReference = parseGxserverPresentationProjectSessionId(normalizedSessionId);
+  if (scopedReference) {
+    protectedProjectSessionKeys.add(
+      gpuiAutoSleepProjectSessionKey(scopedReference.projectId, scopedReference.sessionId),
+    );
+    return;
+  }
+  const matchingSessions = presentation.sessions.filter((session) =>
+    session.sessionId === normalizedSessionId &&
+    (!projectIdHint || session.projectId === projectIdHint)
+  );
+  for (const session of matchingSessions) {
+    protectedProjectSessionKeys.add(
+      gpuiAutoSleepProjectSessionKey(session.projectId, session.sessionId),
+    );
+  }
+}
+
+function gpuiAutoSleepProjectSessionKey(projectId: string, sessionId: string): string {
+  return `${projectId}\u0000${sessionId}`;
+}
+
 export function createGpuiSessionStatusIndicatorCandidatesFromSidebarGroups(
   groups: readonly SidebarSessionGroup[],
 ): GpuiSessionStatusIndicatorCandidate[] {
   /*
   CDXC:GPUIStatusPetOverlay 2026-06-26-04:38:
-  GPUI derives status/pet candidates from the live gxserver SidebarApp groups because phase1-main mounts SidebarApp directly and never runs native-sidebar.tsx. Preserve the same project/session order semantics as macOS by reusing shared display layout, but keep the bridge payload bounded and route with ids only rather than paths, commands, terminal text, URLs, or daemon bodies.
+  GPUI derives status/pet candidates from the live gxserver SidebarApp groups because phase1-main mounts SidebarApp directly and never runs native-sidebar.tsx. Preserve the same project/session order semantics as macOS by reusing shared display layout, but keep the bridge payload bounded and route with ids only rather than paths, commands, terminal text, external URLs, or daemon bodies. Project icon parity may carry only an already-normalized image data URL for notification attachments.
   */
   const candidates: GpuiSessionStatusIndicatorCandidate[] = [];
   let order = 0;
@@ -7807,6 +9187,7 @@ export function createGpuiSessionStatusIndicatorCandidatesFromSidebarGroups(
       break;
     }
     const groupProjectId = group.projectContext?.editor.projectId;
+    const groupIconDataUrl = normalizeWorkspaceProjectIconDataUrl(group.projectContext?.iconDataUrl);
     const sessionsById = Object.fromEntries(
       group.sessions.map((session) => [session.sessionId, session]),
     );
@@ -7833,6 +9214,7 @@ export function createGpuiSessionStatusIndicatorCandidatesFromSidebarGroups(
       }
       candidates.push({
         hasRunningZmxBacking: hasRunningZmxBackingForGpuiIdleIndicator(session),
+        ...(groupIconDataUrl ? { iconDataUrl: groupIconDataUrl } : {}),
         lastInteractionAt: session.lastInteractionAt,
         order,
         projectId: candidateProjectId,
@@ -7909,6 +9291,7 @@ function createGpuiSessionStatusIndicatorProjects(
         continue;
       }
       project = {
+        ...(candidate.iconDataUrl ? { iconDataUrl: candidate.iconDataUrl } : {}),
         projectId: candidate.projectId,
         sessions: [],
         title: candidate.projectTitle,
@@ -8081,6 +9464,346 @@ function normalizeGpuiStatusPetActivation(value: unknown): GpuiStatusPetActivati
   return { sessionId };
 }
 
+function normalizeGpuiMenuBarProjectActivation(
+  value: unknown,
+): GpuiMenuBarProjectActivationPayload | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => !["projectId", "type", "version"].includes(key))) {
+    return undefined;
+  }
+  if (
+    record.type !== GPUI_SIDEBAR_MENU_BAR_PROJECT_ACTIVATION_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_MENU_BAR_PROJECT_ACTIVATION_MESSAGE_VERSION
+  ) {
+    return undefined;
+  }
+  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
+  if (!projectId || !gpuiStatusPetActivationSessionIdAllowed(projectId)) {
+    return undefined;
+  }
+  return { projectId };
+}
+
+function normalizeGpuiMenuBarSessionActivation(
+  value: unknown,
+): GpuiMenuBarSessionActivationPayload | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => !["projectId", "sessionId", "type", "version"].includes(key))) {
+    return undefined;
+  }
+  if (
+    record.type !== GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_VERSION
+  ) {
+    return undefined;
+  }
+  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
+  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
+  if (
+    !projectId ||
+    !sessionId ||
+    !gpuiStatusPetActivationSessionIdAllowed(projectId) ||
+    !gpuiStatusPetActivationSessionIdAllowed(sessionId)
+  ) {
+    return undefined;
+  }
+  return { projectId, sessionId };
+}
+
+function normalizeGpuiWorkspaceTabSessionSelection(
+  value: unknown,
+): GpuiWorkspaceTabSessionSelectionPayload | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some((key) =>
+      !["localWasSleeping", "projectId", "sessionId", "type", "version"].includes(key)
+    )
+  ) {
+    return undefined;
+  }
+  if (
+    record.type !== GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_WORKSPACE_TAB_SESSION_SELECTED_MESSAGE_VERSION
+  ) {
+    return undefined;
+  }
+  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
+  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
+  if (
+    !projectId ||
+    !sessionId ||
+    !gpuiStatusPetActivationSessionIdAllowed(projectId) ||
+    !gpuiStatusPetActivationSessionIdAllowed(sessionId)
+  ) {
+    return undefined;
+  }
+  if (record.localWasSleeping !== undefined && record.localWasSleeping !== true) {
+    return undefined;
+  }
+  return {
+    ...(record.localWasSleeping === true ? { localWasSleeping: true } : {}),
+    projectId,
+    sessionId,
+  };
+}
+
+function normalizeQueuedGpuiWorkspaceTerminalLifecycleRequest(
+  value: unknown,
+): GpuiWorkspaceTerminalLifecycleRequest | undefined {
+  /*
+  CDXC:GPUIWorkspaceLifecycle 2026-06-26-05:23:
+  Lifecycle retries may contain either the raw fixed bridge payload queued before React started or the runtime's already-normalized id-only request queued while the CEF result bridge was missing. Accept only those two bounded shapes so retries do not reintroduce paths, commands, terminal text, URLs, tokens, or generic IPC fields.
+  */
+  return normalizeGpuiWorkspaceTerminalLifecycleRequest(value) ??
+    normalizeGpuiWorkspaceTerminalLifecycleQueuedRequest(value);
+}
+
+function normalizeGpuiWorkspaceTerminalLifecycleQueuedRequest(
+  value: unknown,
+): GpuiWorkspaceTerminalLifecycleRequest | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some((key) =>
+      ![
+        "action",
+        "projectId",
+        "replacementProjectId",
+        "replacementSessionId",
+        "requestId",
+        "sessionId",
+        "skipReplacementFallback",
+      ].includes(key)
+    )
+  ) {
+    return undefined;
+  }
+  if (
+    typeof record.requestId !== "number" ||
+    !Number.isSafeInteger(record.requestId) ||
+    record.requestId <= 0
+  ) {
+    return undefined;
+  }
+  const action = record.action === "close" || record.action === "sleep" || record.action === "wake"
+    ? record.action
+    : undefined;
+  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
+  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
+  const replacementProjectId = normalizeNonEmptyString(record.replacementProjectId)?.trim();
+  const replacementSessionId = normalizeNonEmptyString(record.replacementSessionId)?.trim();
+  if (
+    !action ||
+    !projectId ||
+    !sessionId ||
+    (record.skipReplacementFallback !== true &&
+      record.skipReplacementFallback !== false) ||
+    !gpuiLocalWorkspaceLifecycleProjectIdAllowed(projectId) ||
+    !gpuiLocalWorkspaceLifecycleSessionIdAllowed(sessionId)
+  ) {
+    return undefined;
+  }
+  if ((replacementProjectId && !replacementSessionId) || (!replacementProjectId && replacementSessionId)) {
+    return undefined;
+  }
+  if (record.skipReplacementFallback === true && replacementProjectId && replacementSessionId) {
+    return undefined;
+  }
+  if (
+    replacementProjectId &&
+    replacementSessionId &&
+    (!gpuiLocalWorkspaceLifecycleProjectIdAllowed(replacementProjectId) ||
+      !gpuiLocalWorkspaceLifecycleSessionIdAllowed(replacementSessionId))
+  ) {
+    return undefined;
+  }
+  return {
+    action,
+    projectId,
+    ...(replacementProjectId && replacementSessionId
+      ? { replacementProjectId, replacementSessionId }
+      : {}),
+    requestId: record.requestId,
+    sessionId,
+    skipReplacementFallback: record.skipReplacementFallback,
+  };
+}
+
+function normalizeGpuiWorkspaceTerminalLifecycleRequest(
+  value: unknown,
+): GpuiWorkspaceTerminalLifecycleRequest | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some((key) =>
+      ![
+        "action",
+        "projectId",
+        "replacementProjectId",
+        "replacementSessionId",
+        "requestId",
+        "sessionId",
+        "skipReplacementFallback",
+        "type",
+        "version",
+      ].includes(key)
+    )
+  ) {
+    return undefined;
+  }
+  if (
+    record.type !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_VERSION ||
+    typeof record.requestId !== "number" ||
+    !Number.isSafeInteger(record.requestId) ||
+    record.requestId <= 0
+  ) {
+    return undefined;
+  }
+  const action = record.action === "close" || record.action === "sleep" || record.action === "wake"
+    ? record.action
+    : undefined;
+  if (!action) {
+    return undefined;
+  }
+  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
+  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
+  const replacementProjectId = normalizeNonEmptyString(record.replacementProjectId)?.trim();
+  const replacementSessionId = normalizeNonEmptyString(record.replacementSessionId)?.trim();
+  const skipReplacementFallback =
+    record.skipReplacementFallback === undefined
+      ? false
+      : record.skipReplacementFallback === true;
+  if (
+    !projectId ||
+    !sessionId ||
+    !gpuiLocalWorkspaceLifecycleProjectIdAllowed(projectId) ||
+    !gpuiLocalWorkspaceLifecycleSessionIdAllowed(sessionId)
+  ) {
+    return undefined;
+  }
+  if (record.skipReplacementFallback !== undefined && record.skipReplacementFallback !== true) {
+    return undefined;
+  }
+  if ((replacementProjectId && !replacementSessionId) || (!replacementProjectId && replacementSessionId)) {
+    return undefined;
+  }
+  if (skipReplacementFallback && replacementProjectId && replacementSessionId) {
+    return undefined;
+  }
+  if (
+    replacementProjectId &&
+    replacementSessionId &&
+    (!gpuiLocalWorkspaceLifecycleProjectIdAllowed(replacementProjectId) ||
+      !gpuiLocalWorkspaceLifecycleSessionIdAllowed(replacementSessionId))
+  ) {
+    return undefined;
+  }
+  return {
+    action,
+    projectId,
+    ...(replacementProjectId && replacementSessionId
+      ? { replacementProjectId, replacementSessionId }
+      : {}),
+    requestId: record.requestId,
+    sessionId,
+    skipReplacementFallback,
+  };
+}
+
+function didGpuiGxserverProviderTransitionCommit(result: GxserverSessionTransitionResult): boolean {
+  /*
+  CDXC:GPUIWorkspaceLifecycle 2026-06-26-08:01:
+  GPUI sleep must match macOS gxserver lifecycle ownership: `/api/transitionSession` resolving is not proof that zmx stopped. Only publish local sleep state after the returned session lifecycle matches the action, provider lifecycle is `missing`, and the optional kill result did not explicitly fail.
+  */
+  if (!isObjectRecord(result) || !isObjectRecord(result.session)) {
+    return false;
+  }
+  const providerState = result.session.providerState;
+  if (!isObjectRecord(providerState)) {
+    return false;
+  }
+  const expectedLifecycleState = result.action === "sleep" ? "sleeping" : "stopped";
+  const killSucceeded = readGpuiTransitionKillSucceeded(
+    isObjectRecord(result.transition) ? result.transition : undefined,
+  );
+  return (
+    result.session.lifecycleState === expectedLifecycleState &&
+    providerState.lifecycleState === "missing" &&
+    killSucceeded !== false
+  );
+}
+
+function shouldApplyGpuiLocalWorkspaceTransition(
+  result: GxserverSessionTransitionResult,
+  action: "close" | "sleep",
+): boolean {
+  /*
+  CDXC:GPUIWorkspaceLifecycle 2026-06-26-23:44:
+  macOS close and sleep intentionally diverge after gxserver handles a provider transition. Close removes the local pane/sidebar row once `/api/transitionSession` returns a valid close result, even when provider kill did not commit; sleep must stay strict so GPUI does not show a cold sleeping placeholder while the zmx runtime is still live.
+  */
+  if (!isObjectRecord(result) || result.action !== action || !isObjectRecord(result.session)) {
+    return false;
+  }
+  return action === "close" || didGpuiGxserverProviderTransitionCommit(result);
+}
+
+function readGpuiTransitionKillSucceeded(transition: Record<string, unknown> | undefined): boolean | undefined {
+  const kill = transition?.kill;
+  if (!isObjectRecord(kill)) {
+    return undefined;
+  }
+  return typeof kill.killed === "boolean" ? kill.killed : undefined;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function gpuiLocalWorkspaceLifecycleProjectIdAllowed(value: string): boolean {
+  return /^P[0-9][a-z0-9]{0,30}$/u.test(value);
+}
+
+function gpuiLocalWorkspaceLifecycleSessionIdAllowed(value: string): boolean {
+  return (
+    gpuiStatusPetActivationSessionIdAllowed(value) &&
+    !value.includes(":") &&
+    !parseGpuiRemotePresentationSessionId(value) &&
+    !parseGxserverPresentationProjectSessionId(value)
+  );
+}
+
+function gpuiMenuBarStatusSessionFocusRoutingId(projectId: string, sessionId: string): string {
+  if (
+    parseGpuiRemotePresentationSessionId(sessionId) ||
+    parseGxserverPresentationProjectSessionId(sessionId)
+  ) {
+    return sessionId;
+  }
+  const remoteProject = parseGpuiRemotePresentationProjectId(projectId);
+  if (remoteProject) {
+    return createGpuiRemotePresentationSessionId(
+      remoteProject.machineId,
+      remoteProject.projectId,
+      sessionId,
+    );
+  }
+  return createGxserverPresentationProjectSessionId(projectId, sessionId);
+}
+
 function gpuiStatusPetActivationSessionIdAllowed(value: string): boolean {
   return (
     value.length <= GPUI_STATUS_INDICATOR_ID_MAX_CHARS &&
@@ -8248,12 +9971,16 @@ function createGpuiPresentationProjectProjectionMetadata({
   for (const project of domainProjects) {
     const isChatProject = isGpuiPresentationChatDomainProject(project);
     const isQuickProject = isGpuiPresentationQuickDomainProject(project);
+    const iconDataUrl = gpuiPresentationProjectIconDataUrl(project);
     if (project.isRecentProject === true) {
       hiddenProjectIds.add(project.projectId);
     }
     if (isChatProject || isQuickProject) {
       chatProjectIds.add(project.projectId);
+    }
+    if (isChatProject || isQuickProject || iconDataUrl) {
       projectOverlays.push({
+        ...(iconDataUrl ? { iconDataUrl } : {}),
         isChatProject,
         isQuickProject,
         projectId: project.projectId,
@@ -8278,6 +10005,24 @@ function createGpuiPresentationProjectProjectionMetadata({
     hiddenProjectIds,
     projectOverlays,
   };
+}
+
+function gpuiPresentationProjectIconDataUrl(
+  project: GxserverProjectDomainState,
+): string | undefined {
+  /*
+  CDXC:GPUISettingsNotifications 2026-06-26-07:22:
+  Session-attention icon parity must source images only from gxserver project identity metadata already normalized for workspace project appearance. Do not infer icons from project paths, URLs, titles, sessions, browser favicons, logs, command output, or renderer-local state.
+  */
+  const identityIcon = project.identityIcon;
+  if (!identityIcon) {
+    return undefined;
+  }
+  const icon = normalizeWorkspaceProjectIcon(identityIcon.icon);
+  if (icon?.kind === "image") {
+    return icon.dataUrl;
+  }
+  return normalizeWorkspaceProjectIconDataUrl(identityIcon.iconDataUrl);
 }
 
 function isGpuiPresentationChatDomainProject(
@@ -9517,6 +11262,100 @@ function parseObject(value: unknown): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
+}
+
+async function handleGpuiRendererCommand(
+  socket: WebSocket,
+  command: GxserverRendererCommand,
+  handler: GpuiRendererCommandHandler,
+): Promise<void> {
+  try {
+    const result = await handler(command);
+    socket.send(JSON.stringify({
+      commandId: command.commandId,
+      ok: true,
+      result: isObjectRecord(result) ? result : { ok: true },
+      type: "rendererCommandResult",
+    }));
+  } catch (error) {
+    socket.send(JSON.stringify({
+      commandId: command.commandId,
+      error: safeGpuiRendererCommandErrorMessage(error),
+      ok: false,
+      type: "rendererCommandResult",
+    }));
+  }
+}
+
+function isGpuiRendererCommand(value: unknown): value is GxserverRendererCommand {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.action === "string" &&
+    typeof value.commandId === "string" &&
+    isObjectRecord(value.payload)
+  );
+}
+
+function safeGpuiRendererCommandErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return "Renderer command failed.";
+  }
+  if (
+    error.message === "Invalid renderer command title." ||
+    error.message === "No matching session was found." ||
+    error.message === "Renderer command bridge unavailable." ||
+    error.message === "Unsupported renderer command."
+  ) {
+    return error.message;
+  }
+  return "Renderer command failed.";
+}
+
+function normalizeGpuiRendererCommandRenameTitle(
+  payload: Record<string, unknown>,
+): string | undefined {
+  const rawTitle = readGpuiRecordString(payload, "title");
+  if (
+    rawTitle === undefined ||
+    GPUI_RENDERER_COMMAND_RENAME_TITLE_CONTROL_PATTERN.test(rawTitle)
+  ) {
+    return undefined;
+  }
+  const title = rawTitle.trim();
+  if (!title || title.length > GPUI_RENDERER_COMMAND_RENAME_TITLE_MAX_CHARS) {
+    return undefined;
+  }
+  return title;
+}
+
+function readGpuiRendererCommandSessionTarget(
+  payload: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const target = payload.sessionTarget;
+  return isObjectRecord(target) && !Array.isArray(target) ? target : undefined;
+}
+
+function readGpuiRecordString(
+  record: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  const value = record?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function parseGpuiRendererCommandGlobalSessionRef(
+  globalRef: string | undefined,
+): { projectId: string; sessionId: string } | undefined {
+  const parts = globalRef?.trim().split(":");
+  if (parts?.length !== 3 || !parts[1] || !parts[2]) {
+    return undefined;
+  }
+  return {
+    projectId: parts[1],
+    sessionId: parts[2],
+  };
 }
 
 function isPresentationSnapshot(value: unknown): value is GxserverPresentationSnapshot {

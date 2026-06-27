@@ -1302,6 +1302,11 @@ export function SidebarApp({
       return;
     }
 
+    if (event.data.type === "gpuiProjectSlotHotkey") {
+      resolveGpuiProjectSlotHotkey(event.data.slotNumber);
+      return;
+    }
+
     if (event.data.type === "nativeHotkey") {
       runGhostexHotkeyAction(event.data.actionId);
       return;
@@ -2206,6 +2211,41 @@ export function SidebarApp({
     }
     requestFocusedSessionReveal();
   });
+  const resolveGpuiProjectSlotHotkey = useEffectEvent((slotNumber: number) => {
+    if (!Number.isInteger(slotNumber) || slotNumber < 1 || slotNumber > 9) {
+      return;
+    }
+
+    const groupId = displayedReferenceProjectGroupIds[ slotNumber - 1 ];
+    const projectId = groupId ? groupsById[ groupId ]?.projectContext?.editor.projectId : undefined;
+    if (!groupId || !projectId) {
+      return;
+    }
+
+    /*
+     * CDXC:GPUIProjectHotkeys 2026-06-26-23:42:
+     * GPUI project slot messages resolve locally in SidebarApp because SidebarApp owns rendered Projects row order. Use displayedReferenceProjectGroupIds so slots match visible Projects rows while excluding Quick chats and remote machine projects, then focus the group's currently focused or first displayed session through the existing WorkspaceTerminalFocus bridge; GPUI has no focusGroup host bridge to materialize command panes.
+     */
+    handleSidebarProjectJump({
+      expandCollapsedProject: settings.expandCollapsedProjectsOnJump,
+      groupId,
+      projectId,
+      revealFocusedSession: true,
+      showLessAfterExpand: settings.showLessForExpandedProjectJumps,
+    });
+    const groupSessionIds = displayedWorkspaceSessionIdsByGroup[ groupId ] ?? [];
+    const targetSessionId =
+      groupSessionIds.find((sessionId) => sessionsById[ sessionId ]?.isFocused === true) ??
+      groupSessionIds[ 0 ];
+    if (!targetSessionId) {
+      return;
+    }
+    focusSidebarSessionFromNavigation(groupId, targetSessionId);
+    vscode.postMessage({
+      sessionId: targetSessionId,
+      type: "focusSession",
+    });
+  });
   useEffect(() => {
     const handleProjectJumpEvent = (event: Event) => {
       const detail = readSidebarProjectJumpEventDetail(event);
@@ -2323,9 +2363,30 @@ export function SidebarApp({
       return;
     }
 
+    /*
+     * CDXC:HotkeyRouting 2026-06-26-23:04:
+     * Rename Active Session, Open Commands Panel, Start Action slots, and
+     * Focus Previous/Next Group, Directional Focus, and Split Sideways/Downwards
+     * are native-owned hotkey actions when dispatched through the shared
+     * SidebarApp bridge. Forward only the action id and runGhostexHotkeyAction
+     * type so native runNativeHotkeyAction resolves authority state without
+     * renderer-owned private data payloads such as session ids, titles, paths,
+     * command text, or URLs.
+     *
+     * CDXC:HotkeyRouting 2026-06-26-23:58:
+     * View Mode switching is native-owned; SidebarApp forwards setViewMode
+     * through the same action-id-only bridge so renderer state stays private.
+     */
     if (
+      action.kind === "focusAdjacentGroup" ||
+      action.kind === "focusDirection" ||
       action.kind === "focusedPaneAction" ||
       action.kind === "jumpToProject" ||
+      action.kind === "openCommandsPanel" ||
+      action.kind === "renameActiveSession" ||
+      action.kind === "runActionSlot" ||
+      action.kind === "setViewMode" ||
+      action.kind === "splitFocusedPane" ||
       action.kind === "switchWorkareaView"
     ) {
       vscode.postMessage({ actionId: action.id, type: "runGhostexHotkeyAction" });

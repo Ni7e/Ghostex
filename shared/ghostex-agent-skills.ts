@@ -2,7 +2,8 @@ export type BundledGhostexAgentSkillId =
   | "browserUse"
   | "computerUse"
   | "agentOrchestration"
-  | "generateTitle";
+  | "generateTitle"
+  | "moveCodexSession";
 
 export type BundledGhostexAgentSkill = {
   command: string;
@@ -18,6 +19,10 @@ export type BundledGhostexAgentSkill = {
  * first launch and Settings. Keep the product copy and install commands in one
  * shared catalog so onboarding, settings, and status checks describe the same
  * four bundled skills without hiding them behind CLI installation.
+ *
+ * CDXC:CodexSessionMove 2026-06-26-13:24:
+ * Bundle the Codex session-move guidance as its own installable skill so first
+ * launch and Settings can install it with the app's other agent-facing skills.
  */
 export const BUNDLED_GHOSTEX_AGENT_SKILLS: readonly BundledGhostexAgentSkill[] = [
   {
@@ -51,5 +56,13 @@ export const BUNDLED_GHOSTEX_AGENT_SKILLS: readonly BundledGhostexAgentSkill[] =
     id: "generateTitle",
     name: "Ghostex Generate Title",
     skillName: "ghostex-generate-title",
+  },
+  {
+    command: "ghostex move-codex-session install-skill",
+    description:
+      "Teaches agents how to fork a Codex conversation into another folder with the correct session id, target root, and optional full-access mode.",
+    id: "moveCodexSession",
+    name: "Ghostex Move Codex Session",
+    skillName: "ghostex-move-codex-session",
   },
 ];

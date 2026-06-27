@@ -913,14 +913,14 @@ Hard constraints:
 
 ### 2026-06-22-16:40 Task slice 78
 
-- Added semantic placeholder status metadata for GPUI command-pane terminal sessions: `idle`, `working`, and `attention` activity plus a `delayedSendActive` boolean. Delayed Send takes priority over attention, working, and idle; attention and working remain the safe command/sidebar activity vocabulary.
+- Added semantic placeholder status metadata for GPUI command-pane terminal sessions: `idle`, `working`, and `attention` activity plus a `delayedSendActive` boolean. Delayed Send takes priority over attention, working, and idle; attention and working remain the safe command/sidebar activity vocabulary for non-Action/restored command tabs after slice 489 adds live Action status-file lifecycle evidence.
 - Rendered command-pane tab dots from semantic command status instead of active/inactive only: idle keeps the command-specific blue, working uses orange, attention uses `#95d7f6`, and delayed-send uses yellow, with inactive dots subdued while preserving their semantic hue. Command drag previews carry the same semantic dot as the source command tab.
-- Seeded the default command pane modestly with one idle blue command tab and one working command tab, keeping command terminal bodies as black placeholders and avoiding real command process/status hooks.
+- Seeded the default command pane modestly with one idle blue command tab and one working command tab, keeping command terminal bodies as black placeholders and avoiding Action run ids/status-file hooks in pure model fixtures.
 - Persisted only safe enum/boolean command status metadata through the GPUI shell-state command pane model; command text, stdout/stderr, terminal content, delayed-send deadlines/countdown labels, paths, tokens, and private titles remain omitted/regenerated.
 - Added pure regression coverage for command status priority/color mapping, default command seed status coverage, and command shell-state round-trip/privacy boundaries for the new metadata.
 - Files touched: `gpui/src/main.rs`, `gpui/WORKSPACE_PARITY_PROGRESS.md`.
 - Commands run from repo root: `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml` (passed); `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml` (passed, 52 `src/main.rs` tests and 0 helper-bin tests); `RUSTUP_TOOLCHAIN=1.95.0 cargo check --manifest-path gpui/Cargo.toml` (passed); `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md` (passed); no-index whitespace check for untracked `gpui/WORKSPACE_PARITY_PROGRESS.md` with `diff_code` (passed).
-- Remaining gaps for later slices: behavior is covered by pure Rust model/helper tests only, not in a running GPUI app by instruction; status remains placeholder shell metadata with no real command process/status hook, delayed-send deadline/label storage, libghostty terminal surface, Source/Kanban/Manage real surfaces, app launch/restart, or visual validation.
+- Remaining gaps for later slices: behavior is covered by pure Rust model/helper tests only, not in a running GPUI app by instruction; slice 489 later adds Action run-id/status-file lifecycle evidence, while non-Action/restored command status remains safe shell metadata and delayed-send deadline/label storage, libghostty terminal surface validation, Source/Kanban/Manage real surfaces, app launch/restart, or visual validation remain outside this early slice.
 
 ### 2026-06-22-16:54 Task slice 79
 
@@ -2372,12 +2372,12 @@ Hard constraints:
 - Updated the Phase 3 handoff so lifecycle work is no longer presented as wholly pending: process-local Agents runtime sessions, separation from shell `TerminalSessionId` values and mount slots, explicit startup launch payload boundaries, startup geometry/launch plans/hidden startup host/surface state, ready handoff into Running maps, retryable Failed placeholders without fallback success, mounted Running Agents close/process-exit cleanup, and shell-state privacy boundaries are documented as source-side status only.
 - Kept Phase 3 blockers explicit: the real launch payload source/product contract, close-confirm UI/ABI, runtime clipboard handoff, physical-key/binding identity, wake/materialize scope, popped-out/reattach runtime behavior, and running-app validation remain unresolved or deferred.
 - Updated the Phase 4 handoff so command runtime work is documented as source-side status: separate command host/native view/Ghostty pipeline, command-scoped body bounds, focus mirroring, command-only close request/confirmed close/process-exit cleanup, final-close collapse through the command model, command input boundaries, and Agents/startup map isolation.
-- Kept Phase 4 blockers explicit: command launch payload policy, command status sources, runtime clipboard, physical-key/binding behavior, cross-surface runtime transfer decisions, and running-app validation remain pending.
+- Kept Phase 4 blockers explicit for this early docs slice: command launch payload policy, command status sources, runtime clipboard, physical-key/binding behavior, cross-surface runtime transfer decisions, and running-app validation remained pending then. Slices 488 and 489 later add current Action/plain-cwd launch producers plus Action run-id/status-file lifecycle evidence.
 - Reconciled the Phase 10 Terminal/Agents and Command pane runtime rows to mention the Phase 3/4 source-side lifecycle/runtime status and remaining blockers without claiming app verification or parity signoff.
 - Files touched: `docs/gpui-workspace-area-missing-parity-phases.md`, `docs/gpui-workspace-area-parity-requirements.md`, `gpui/WORKSPACE_PARITY_PROGRESS.md`.
 - Read-only command categories used: shared instruction read, touched-file status reads, scoped docs/progress reads, and targeted phase/status searches. Raw command arguments were not copied into this durable entry.
 - Verification skipped by explicit user instruction: no formatting, tests, cargo check, typecheck, `bun test`, `git diff --check`, whitespace checks, `bun run start`, app launch/restart, browser/visual automation, or equivalent validation/app commands were run.
-- Remaining gaps: this was documentation/progress reconciliation only. Phase 3/4 remain unaccepted until the real launch payload and command status contracts, close-confirm UI/ABI, runtime clipboard handoff, physical-key/binding identity, and running-app evidence outside the current no-validation agent workflow are resolved; broader Source/Kanban/Manage, Browser, and Phase 9 blockers remain unchanged.
+- Remaining gaps: this was documentation/progress reconciliation only. At slice 204, Phase 3/4 remained unaccepted until real launch payload and command status contracts, close-confirm UI/ABI, runtime clipboard handoff, physical-key/binding identity, and running-app evidence outside the current no-validation agent workflow were resolved; slices 488 and 489 later add the current Action/plain-cwd command launch producers plus Action status-file lifecycle evidence while preserving user/runtime validation and generalized non-Action status caveats.
 
 ### 2026-06-23-15:37 Task slice 205
 
@@ -2437,14 +2437,14 @@ Hard constraints:
 ### 2026-06-23-15:58 Task slice 210
 
 - Reconciled Phase 4 Command Terminal Runtime handoff around command launch and status source boundaries.
-- Documented that command terminal surfaces are source-represented through a command-only host/native view/Ghostty pipeline with command-scoped body bounds, while the Ghostty launch request stays intentionally empty because no command launch payload policy/source exists yet.
-- Documented that idle/working/attention/delayed-send command status is shell enum/boolean metadata for tab chrome and persistence only, not real process status and not a source for command text, cwd/env, stdout/stderr, terminal content, delayed-send deadlines, or launch data.
-- Reconciled the Phase 10 Command pane runtime row so it names explicit launch payload, real command process/status source, close-confirm UI/ABI, runtime clipboard, physical-key identity, cross-surface runtime transfer, and external running-evidence blockers without claiming app verification.
+- Documented that command terminal surfaces are source-represented through a command-only host/native view/Ghostty pipeline with command-scoped body bounds. Slices 488 and 489 later supersede the early empty-launch/status-source gaps with current Action/plain-cwd launch producers plus Action run-id/status-file lifecycle evidence.
+- Documented that non-Action/restored idle/working/attention/delayed-send command status is shell enum/boolean metadata for tab chrome and persistence only, not a source for command text, cwd/env, stdout/stderr, terminal content, delayed-send deadlines, or launch data.
+- Reconciled the Phase 10 Command pane runtime row so it named explicit launch payload, command process/status source, close-confirm UI/ABI, runtime clipboard, physical-key identity, cross-surface runtime transfer, and external running-evidence blockers without claiming app verification; later slices fill the Action launch/status portions while preserving validation caveats.
 - Files touched: `docs/gpui-workspace-area-missing-parity-phases.md`, `docs/gpui-workspace-area-parity-requirements.md`, `gpui/WORKSPACE_PARITY_PROGRESS.md`.
 - Source inspected without edits: `gpui/src/main.rs` comments and source evidence around command host sync, command tab status metadata, and shell-state privacy were already current.
 - Read-only command categories used: shared instruction read, touched-file status read, timestamp capture, targeted GPUI source/doc/progress searches, and focused source/doc/progress snippet reads. Raw command arguments were not copied into this durable entry.
 - Verification skipped by persistent user instruction: no formatting, tests, checks, typecheck, cargo check, whitespace checks, app launch/restart, browser/visual automation, or equivalent validation/app commands were run.
-- Remaining gaps: this was documentation/progress reconciliation only. Phase 4 still needs an explicit command launch payload contract/policy/source, real command process/status source, command close-confirm UI/ABI acceptance or proof, runtime clipboard handoff, physical-key identity contract, cross-surface runtime transfer decision, external running evidence, and eventual validation outside the current no-validation agent workflow before acceptance.
+- Remaining gaps: this was documentation/progress reconciliation only. At slice 210 Phase 4 still needed explicit command launch and process/status sources; slices 488 and 489 later add the Action/plain-cwd launch source plus Action run-id/status-file lifecycle evidence, while user/runtime validation, non-Action/generalized status, close-confirm UI/ABI acceptance or proof, runtime clipboard handoff, physical-key identity contract, cross-surface runtime transfer decision, external running evidence, and eventual validation remain outside that early no-validation workflow.
 
 ### 2026-06-23-16:02 Task slice 211
 
@@ -2519,15 +2519,15 @@ Hard constraints:
 
 ### 2026-06-23-16:46 Task slice 217
 
-- Added a source-only Phase 4 command launch payload boundary in `gpui/src/main.rs`. `CommandTerminalLaunchPayloadSource` is runtime-only, empty in production, and keyed by exact `CommandTerminalBodyMountSlotId` plus the derived command runtime id.
-- Wired command Ghostty config-request preparation to consult that boundary. Empty production source keeps current command requests payload-less; exact future explicit payloads may attach only after Ghostty launch-payload validation; invalid explicit payloads suppress/prune the config request instead of inferring launch data.
-- Kept the boundary inert: no real command process/status source was implemented, no command text/cwd/env/initial input/wait policy/delayed-send deadline is inferred, and titles, status labels, project/workspace data, paths, stdout/stderr, terminal content, helper detection, runtime ids, Ghostty handles, and raw payload values are not logged or persisted.
+- Added a source-only Phase 4 command launch payload boundary in `gpui/src/main.rs`. `CommandTerminalLaunchPayloadSource` is runtime-only and keyed by exact `CommandTerminalBodyMountSlotId` plus the derived command runtime id; slice 488 later adds current explicit terminal Action and plain command-terminal project cwd producers on that same boundary.
+- Wired command Ghostty config-request preparation to consult that boundary. Requests without exact explicit payloads stay payload-less; current terminal Action and plain command-terminal project cwd payloads may attach only after Ghostty launch-payload validation; invalid explicit payloads suppress/prune the config request instead of inferring launch data.
+- Kept the launch boundary privacy-preserving: slice 217 did not implement command process/status source behavior, no command text/cwd/env/initial input/wait policy/delayed-send deadline is inferred from shell metadata, and titles, status labels, project/workspace data, paths, stdout/stderr, terminal content, helper detection, runtime ids, Ghostty handles, and raw payload values are not logged or persisted. Slice 489 later adds Action run-id/status-file lifecycle evidence through a separate status path.
 - Added focused pure source assertions for empty-source behavior, exact-key attachment, stale slot/runtime mismatch, invalid payload pruning without raw leakage, and command shell-state JSON omitting source/helper names plus private payload samples.
-- Updated Phase 4 and Phase 10 docs to record that this slice adds only the explicit source boundary. The remaining launch blocker is now the real product contract/policy/producer plus real command process/status behavior, not a fallback parser.
+- Updated Phase 4 and Phase 10 docs to record that this slice adds only the explicit source boundary. After slices 488 and 489, the remaining launch/status caveats are user/runtime validation, any new launch payload families beyond terminal Action and plain command-terminal project cwd producers, and generalized non-Action status behavior, not a fallback parser.
 - Files touched: `gpui/src/main.rs`, `docs/gpui-workspace-area-parity-requirements.md`, `docs/gpui-workspace-area-missing-parity-phases.md`, `gpui/WORKSPACE_PARITY_PROGRESS.md`.
 - Source evidence inspected: shared instructions, existing Agents startup payload-source pattern, command mount slot/runtime id helpers, command host/native view/Ghostty config-request path, command shell-state serializer, existing startup payload-source tests, Phase 4 docs, and recent progress entries.
 - Verification skipped by explicit user instruction: no formatting, tests, checks, typecheck, cargo check/test/fmt, whitespace checks, app launch/restart, browser/visual automation, `bun run start`, or equivalent validation/app commands were run.
-- Remaining gaps: no validation commands were run, so compile/test/runtime risk remains. Phase 4 still needs the real command launch payload product contract/policy/producer, a real command process/status source, command close-confirm UI/ABI acceptance or proof, runtime clipboard handoff, physical-key identity contract, cross-surface runtime transfer decision, privacy proof, and external running evidence outside the current no-validation agent workflow.
+- Remaining gaps: no validation commands were run for slice 217, so compile/test/runtime risk remained there. After slices 488 and 489, Phase 4 still needs user/runtime validation for existing launch/status producers, any new launch payload families, generalized non-Action status source decisions, command close-confirm UI/ABI acceptance or proof, runtime clipboard handoff, physical-key identity contract, cross-surface runtime transfer decision, privacy proof, and external running evidence outside that no-validation workflow.
 
 ### 2026-06-23-16:54 Task slice 218
 
@@ -3465,7 +3465,7 @@ Slice 283 is docs-only active Phase 1/2/4 acceptance wording cleanup. Phase 1 br
 - Updated only `docs/gpui-workspace-area-missing-parity-phases.md` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
 - Reclassified stale active Phase 1 acceptance wording so project/sidebar bridge contracts are accepted source-ledger state while runtime/visual/app validation and real runtime surface work remain user-side or future explicit CEF-only work.
 - Reclassified Phase 2 terminal wording so terminal source/runtime evidence is accepted as working for this pass while runtime proof remains user-side and privacy/no-persistence constraints remain intact.
-- Reclassified Phase 4 command-terminal wording so command terminal source evidence remains separate from Agents and accepted for source-ledger purposes, while real command launch payload/status decisions, cross-surface runtime transfer, and runtime checks remain future product or user-side work.
+- Reclassified Phase 4 command-terminal wording so command terminal source evidence remains separate from Agents and accepted for source-ledger purposes; slices 488 and 489 later supersede the old launch/status gap with current terminal Action/plain-cwd launch producers and Action status-file lifecycle evidence, while cross-surface runtime transfer and runtime checks remain future product or user-side work.
 - No validation/app/check commands were run due to user instruction: no formatting, tests, checks, typecheck, cargo check/test/fmt, whitespace checks, markdown whitespace checks, `git diff --check`, app launch/restart, browser/visual automation, `bun run start`, or equivalent validation/app commands were run.
 
 ### 2026-06-24-08:07 Task slice 284
@@ -3616,15 +3616,15 @@ Slice 293 is docs/progress wording cleanup for Phase 8 Browser small-slice and a
 
 <!--
 CDXC:GPUIWorkspaceParityDocsAlignment 2026-06-24-08:40:
-Slice 294 is docs/progress wording cleanup for Phase 3 terminal lifecycle and Phase 4 command terminal source-ledger labels. Terminal and command terminal source/runtime evidence remains accepted for this pass; runtime proof remains user-side, validation/app/check commands remain outside this workflow, and command launch payload plus real command status work remains future explicit product work.
+Slice 294 is docs/progress wording cleanup for Phase 3 terminal lifecycle and Phase 4 command terminal source-ledger labels. Terminal and command terminal source/runtime evidence remains accepted for this pass; runtime proof remains user-side, validation/app/check commands remain outside this workflow, slice 488 supersedes the old command-launch producer gap with exact-slot Action/plain-cwd producers, and slice 489 supersedes the old Action status gap with run ids, status-file polling, completion feedback, and exit cleanup.
 -->
 
 - Updated only `docs/gpui-workspace-area-missing-parity-phases.md` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
 - Reworded Phase 3 `Source-represented lifecycle slices` to `Accepted source-represented terminal lifecycle evidence` and changed the bullet labels from implementation-style work items to accepted evidence labels for shell/runtime identity, startup placeholder metadata handoff, close-confirm teardown, and placeholder activation/restored-materialization/parked-owner wake-reattach/retry evidence.
-- Reworded Phase 4 `Accepted source-represented command-runtime slices` to `Accepted source-represented command terminal evidence` and changed the bullet labels from queued command implementation items to accepted evidence labels for command-body terminal mount evidence, the command config boundary with future launch/status decisions, semantic status metadata, and teardown/final-close collapse.
-- Preserved the source-status details for startup geometry and launch plans, hidden startup host/surface ownership, metadata readiness/failure snapshots, ready handoff, restored materialization, parked-owner wake/reattach, close-confirm UI/ABI/exact removal, privacy boundaries, no validation/app proof, user-side runtime proof, accepted command terminal evidence, empty production command launch payload source, and future command launch/status product decisions.
+- Reworded Phase 4 `Accepted source-represented command-runtime slices` to `Accepted source-represented command terminal evidence` and changed the bullet labels from queued command implementation items to accepted evidence labels for command-body terminal mount evidence, the command config boundary with explicit launch producers and Action status-file lifecycle limits, semantic restored status metadata, and teardown/final-close collapse.
+- Preserved the source-status details for startup geometry and launch plans, hidden startup host/surface ownership, metadata readiness/failure snapshots, ready handoff, restored materialization, parked-owner wake/reattach, close-confirm UI/ABI/exact removal, privacy boundaries, no validation/app proof, user-side runtime proof, accepted command terminal evidence, exact-slot one-shot command launch payload source, current terminal Action/plain-cwd producers, current Action status-file lifecycle, and future generalized non-Action status product decisions.
 - No validation/app/check commands were run due to user instruction: no formatting, tests, checks, typecheck, cargo check/test/fmt, whitespace checks, markdown whitespace checks, `git diff --check`, app launch/restart, browser/visual automation, `bun run start`, or equivalent validation/app commands were run.
-- Remaining state: terminal and command source-ledger evidence remains accepted for this pass; runtime proof remains user-side; real command launch payload product contract/policy/producer and real command process/status source remain future explicit product work.
+- Remaining state: terminal and command source-ledger evidence remains accepted for this pass; runtime proof remains user-side; slices 488 and 489 supply the current exact-slot terminal Action/plain-cwd command launch producers plus Action run-id/status-file lifecycle evidence, while user/runtime validation, any new launch payload families, and generalized non-Action status source decisions remain future explicit product work.
 
 ### 2026-06-24-08:39 Task slice 295
 
@@ -3857,12 +3857,12 @@ Slice 311 is a source-only Phase 3 terminal lifecycle handoff wording fix. Termi
 
 <!--
 CDXC:GPUICommandTerminalRuntime 2026-06-24-09:29:
-Slice 312 is a source-only Phase 4 command terminal handoff wording fix. Terminal and command terminal are accepted as working for this pass, so Phase 4 preserves explicit future command launch/status product decisions, exact clipboard handoff limits, physical-key product acceptance, and shell-only cross-surface transfer caveats without queuing command terminal runtime proof/checks; Source/Browser/Kanban/Manage runtime checks remain user-side.
+Slice 312 is a source-only Phase 4 command terminal handoff wording fix. Terminal and command terminal are accepted as working for this pass, so Phase 4 preserves exact-slot command launch producer limits, Action status-file lifecycle limits, future generalized non-Action status product decisions, exact clipboard handoff limits, physical-key product acceptance, and shell-only cross-surface transfer caveats without queuing command terminal runtime proof/checks; Source/Browser/Kanban/Manage runtime checks remain user-side.
 -->
 
 - Updated only `docs/gpui-workspace-area-missing-parity-phases.md` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
 - Reworded the active Phase 4 command terminal handoff block so it no longer lists command close-confirm, running command-pane clipboard handoff, pinned/floating/collapsed/F12/tab/split/final-close behavior, or command/Agents isolation as active runtime proof/check work for this continuation.
-- Preserved the Phase 4 technical caveats: future command launch payload policy/source and real command process/status remain explicit product decisions; GhosttyKit ABI/source evidence is accepted; clipboard handoff remains limited to exact still-mounted command owners, standard clipboard, explicit-string reads, runtime-text-only writes, no stale-owner use, and no private payload/logging/persistence; physical-key behavior remains accepted without native physical-key forwarding; cross-surface transfer remains shell-only unless future explicit product contracts are added.
+- Preserved the Phase 4 technical caveats: exact-slot terminal Action/plain-cwd command launch payload producers are current after slice 488, Action status-file lifecycle evidence is current after slice 489, while user/runtime validation, any new launch payload families, and generalized non-Action command status remain explicit product decisions; GhosttyKit ABI/source evidence is accepted; clipboard handoff remains limited to exact still-mounted command owners, standard clipboard, explicit-string reads, runtime-text-only writes, no stale-owner use, and no private payload/logging/persistence; physical-key behavior remains accepted without native physical-key forwarding; cross-surface transfer remains shell-only unless future explicit product contracts are added.
 - No validation/app/check commands were run due to user instruction: no formatting, tests, checks, typecheck, cargo check/test/fmt, whitespace checks, markdown whitespace checks, `git diff --check`, app launch/restart, browser/visual automation, `bun run start`, or equivalent validation/app commands were run.
 - Remaining state: no current Phase 4 command terminal handoff wording mismatch remains; terminal and command terminal remain accepted as working/source-ledger state for this pass; runtime Source/Browser/Kanban/Manage checks remain user-side and future web-pane runtime work remains CEF-only with WKWebView/WebKit/non-CEF paths rejected.
 
@@ -3885,7 +3885,7 @@ CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-10:12:
 Slice 314 starts the permanent app-level Source/Kanban/Manage CEF runtime-surface wiring. GPUI now owns typed CefSurface storage for those slots and render/visibility helpers, but creation still requires a caller-provided real runtime URL value and existing replacement gates; absent URL authority keeps the placeholders without fake pages, WKWebView/WebKit, hidden mounts, fallback URLs, validation, app launch/restart, or visual automation.
 -->
 
-- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Updated `gpui/src/main.rs`, `gpui/src/terminal_ghostty_surface.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
 - Added app-owned Source/Kanban/Manage runtime CEF surface storage keyed by `ProjectWorkareaCefSurfaceSlotKey`, plus a real-runtime-URL wrapper that rejects blank, whitespace-mutated, non-navigable, and raw app-resource-label values instead of synthesizing URLs.
 - Added helpers to create an owned `CefSurface` only from a real runtime URL at the visible replacement edge, prune stale owned workarea surfaces when gates disappear, show/hide existing surfaces through the normal active-mode visibility pass, and render the owned normal-layout CEF child before falling back to placeholders.
 - Reworded the active gate/render comments and progress constraints so real CEF runtime surfaces are the implementation target, CEF is the only web-pane engine, and current placeholders mean real URL/process/file-bridge authority is absent rather than a temporary page or WebKit fallback path.
@@ -5669,3 +5669,1122 @@ Slice 440 validates command-pane Action selectors at the GPUI runtime boundary. 
 - Added exact pending-click cancellation for command-tab left `mouse_up_out`, preserving unrelated pending tokens while preventing stale same-tab selection or double-click Focus after the original gesture ended outside the tab.
 - Added runtime command-id normalization before `runSidebarCommand` and `endSidebarCommandRun` dispatch, so malformed command-pane Action messages become unsupported no-ops instead of throwing through downstream `.trim()` calls or forwarding unsafe renderer fields.
 - Verification: `git diff --check -- gpui/src/main.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.tsx sidebar/command-palette.test.ts shared/session-grid-contract-sidebar.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed before this ledger append. Focused tests passed: `cargo test --bin ghostex-gpui command_tab_` from `gpui/` with 26 tests, and `bunx vitest run gpui/sidebar/phase1-gxserver-runtime.test.ts` with 19 tests. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-06:11 Task slice 441
+
+<!--
+CDXC:GPUICommandClose 2026-06-26-06:11:
+Slice 441 aligns GPUI Cmd-W routing with native command-panel responder ownership. Live expanded awake command focus closes the focused command tab, live expanded sleeping placeholders intentionally consume Cmd-W without closing, and stale or collapsed command focus falls through to the active workspace or Browser close path instead of swallowing the shortcut.
+
+CDXC:GPUICommandPalette 2026-06-26-06:11:
+Focused-pane command-palette hotkeys remain authority-only actions. The renderer may post only the selected action id and fixed runGhostexHotkeyAction type; session ids, command text, cwd/env, paths, URLs, close-on-exit, output, logs, and launch metadata stay out of this bridge.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Banach owned Rust Cmd-W command-pane close/fallthrough behavior, while Gauss owned command-palette focused-pane hotkey authority coverage. In the coordinator workspace, `sidebar/command-palette.test.ts` already contains the authority-only source assertion and is clean relative to HEAD, so this ledger records that coverage as verified current-tree evidence rather than a dirty file change.
+- Added a three-way command-pane close decision: close a live awake focused command tab through the shared command-tab close helper, preserve the native no-op intercept for live sleeping command placeholders, and let stale/collapsed command focus continue into the existing active Agents or Browser close path.
+- Preserved `focused_command_pane_close_target` as an awake-command-only target resolver, so command-palette Close Focused Session still ignores sleeping placeholders while Cmd-W can separately consume sleeping command focus without deleting the placeholder.
+- Verification: `cargo test --bin ghostex-gpui focused_command_pane -- --nocapture` from `gpui/` passed with 8 tests, including stale-focus and close-decision coverage; cargo emitted existing dead-code warnings only. `bun run test -- sidebar/command-palette.test.ts` passed with 13 tests. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-06:23 Task slice 442
+
+<!--
+CDXC:GPUICommandPaneTabs 2026-06-26-06:23:
+Slice 442 aligns direct GPUI command-tab close with native command titlebar close. A single direct close must first select the clicked command session so native right-then-left neighbor selection is resolved from the close target, while scoped Close Left, Close Right, and Close Others stay non-focusing because their native menu rows do not focus the clicked terminal first.
+
+CDXC:GPUICommandPaneActions 2026-06-26-06:23:
+Slice 442 proves command Action status stamps keep macOS parity by writing only safe completion fields through a session-state-derived, process-unique `.command.tmp` path before atomically moving it into place. Shared fixed temp paths are forbidden because concurrent command/status writers can clobber the idle stamp that drives completion sound.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Halley owned direct GPUI command-tab close behavior and Rust close-neighbor regressions, while Archimedes owned command Action status-stamp proof and Rust status-script coverage.
+- Added a direct tab-close helper that selects the clicked command session before removal, so closing an inactive middle tab selects the right neighbor, closing an inactive last tab selects the left neighbor, and split-group focus plus active-slot metadata remain coherent with the native command panel.
+- Preserved scoped command-tab close behavior by keeping Close Left, Close Right, and Close Others on the existing non-focusing close path.
+- Added status-stamp coverage proving the generated command Action script writes safe completion fields, uses a process-unique temp path derived from the session-state file, and commits through an atomic move instead of a shared fixed temp file.
+- Verification: focused coordinator tests passed from `gpui/`: `cargo test --bin ghostex-gpui command_direct_tab_close --quiet` with 4 tests, `cargo test --bin ghostex-gpui gpui_command_action_status_stamp_writes_safe_fields_with_process_unique_tmp_path --quiet` with 1 test, and `cargo test --bin ghostex-gpui command_tab_close_scopes_stay_inside_clicked_command_group --quiet` with 1 test; cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-06:31 Task slice 443
+
+<!--
+CDXC:GPUICommandPaneActions 2026-06-26-06:31:
+Slice 443 proves command-pane Action run-start parity with native `setNativeSidebarCommandPaneTitle`: a restored idle Action tab reused by normalized title must become the selected live Action tab, rewrite its visible title and command id to the current Action, clear stale Delayed Send chrome, mark Working, attach run metadata, and avoid allocating a duplicate tab.
+
+CDXC:GPUICommandTerminalProcessExit 2026-06-26-06:31:
+Slice 443 tightens command-pane Action process-exit parity with native terminal-exit cleanup. An exited Action command surface must remove only the exact command tab, emit safe completion metadata from the matching idle status file or error fallback, and leave stale Delayed Send and Close After Done runtime timer cleanup to the existing command-model prune paths without touching sibling command tabs.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Hegel owned Action reuse/run-start model coverage, while Turing owned mounted command Action process-exit/status cleanup coverage.
+- Added a run-start regression proving a title-owned restored Action tab is reused, selected, retitled to the current Action, remapped to the current command id, marked Working, stripped of stale Delayed Send state, and reused without advancing the next command-session id.
+- Tightened process-exit coverage so an exited Action tab posts only safe completion metadata, removes the exact tab, resolves the right-then-left survivor in its command group, prunes stale Delayed Send and Close After Done runtime entries for the removed tab, and preserves sibling timer intent.
+- Verification: focused coordinator tests passed from `gpui/`: `cargo test --bin ghostex-gpui command_pane_action_run_start_updates_reused_restored_title_owned_tab --quiet`, `cargo test --bin ghostex-gpui command_exited_action_surface_posts_status_file_completion_before_cleanup --quiet`, and `cargo test --bin ghostex-gpui command_pane_action_session_reuses_idle_title_owned_restored_actions --quiet`; cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-06:43 Task slice 444
+
+<!--
+CDXC:GPUICommandPaneDragDrop 2026-06-26-06:43:
+Slice 444 proves native command-panel same-session side-drop parity in GPUI. A command tab dragged to the left or right edge of its own command owner must split out beside the remaining sibling group, reject single-tab self side drops before id allocation, preserve peer command groups, and select/focus the new dragged split owner.
+
+CDXC:GPUICommandFocusMode 2026-06-26-06:43:
+Slice 444 proves command Focus stays tied to visible command ownership during drag/drop. Same-owner command selection and tab-strip reorder preserve Focus, while a left/right side-drop that creates a new command owner clears Focus so the dragged tab remains visible and selected.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Confucius owned same-session command body side-drop model coverage, while Anscombe owned command Focus-mode interaction coverage for same-owner reorder versus side-drop split ownership.
+- Added model-level documentation for the native same-session body side-drop anchor rule and Focus ownership rule in the command drag/drop path.
+- Hardened drag/drop coverage so single-tab self side drops no-op without advancing ids, same-group left and right side drops split the dragged tab into a new focused command group, source sibling order and active tab follow native right-then-left removal behavior, peer command groups remain unchanged, and rendered command mount slots include the newly split owner.
+- Hardened Focus coverage so same-group command selection and tab-strip reorder preserve Focus, while left/right side drops out of the focused command owner clear Focus and render the dragged split owner immediately.
+- Verification: focused coordinator tests passed with `RUSTUP_TOOLCHAIN=1.95.0`: `cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_focus_mode_preserves_same_group_selection_and_reorder -- --nocapture`, `cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_drag_drop_semantics_and_drop_zones_stay_command_scoped -- --nocapture`, and `cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_same_group_tab_strip_reorder_uses_native_adjusted_index_and_noops -- --nocapture`; cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-06:53 Task slice 445
+
+<!--
+CDXC:GPUICommandPalette 2026-06-26-06:53:
+Slice 445 aligns focused-pane Browser-open parity with the native command terminal titlebar branch. `openBrowserPane` stays a recognized command-palette id, but live CommandPane shell focus must no-op at execution time because native command terminals default-return Browser titlebar actions; Agents, Browser, and project-editor focus still open and focus Browser.
+
+CDXC:GPUIFocusedCommandHotkeys 2026-06-26-06:53:
+Slice 445 aligns focused command-pane create/split hotkeys with native `commandsPanel.isVisible` source-session routing. Cmd+T, Cmd+D, and Cmd+Shift+D may allocate command placeholders only from an expanded visible command pane with a live focused source tab; collapsed, stale, or non-command focus must not open hidden command tabs or hidden command split groups.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Ramanujan owned focused-pane Browser-open execution gating and mapper coverage, while James owned focused command-pane Cmd+T/Cmd+D visibility/source gating and model coverage. The coordinator reviewed both patches and integrated the shared `gpui/src/main.rs` changes without touching unrelated dirty sidebar files.
+- Added a focused-pane Browser-open predicate so `runGhostexHotkeyAction("openBrowserPane")` still maps through the focused-pane bridge but returns immediately while CommandPane owns shell focus, matching native command terminal titlebar no-op behavior.
+- Added a shared focused command-pane create/split source gate that requires CommandPane focus, expanded visible command panel state, and a live focused command session before command placeholder creation or command splits can allocate.
+- Added focused model tests proving collapsed command focus, stale focused groups, and non-command focus no-op without advancing command ids, while expanded command-pane focus still adds a focused command tab and keeps split geometry horizontal.
+- Verification: focused coordinator tests passed with `RUSTUP_TOOLCHAIN=1.95.0`: `cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui focused_pane_hotkey_mapper_routes_supported_command_palette_actions -- --nocapture`, `cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_focused_new_tab_hotkey_requires_expanded_command_source -- --nocapture`, `cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_focused_split_hotkey_requires_expanded_command_source -- --nocapture`, and `cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_focused_split_hotkeys_keep_native_horizontal_geometry -- --nocapture`; cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-07:04 Task slice 446
+
+<!--
+CDXC:GPUIFocusedPaneRotation 2026-06-26-07:04:
+Slice 446 aligns GPUI `rotatePanesClockwise` with the native focused-pane dispatcher. The action must be recognized by the shared command-palette hotkey bridge, default-return for live CommandPane focus like native command terminal titlebar actions, no-op for Browser and project-editor focus, and rotate only an active Agents workspace pane.
+
+CDXC:GPUIAgentsRotatePanes 2026-06-26-07:04:
+Slice 446 adds the Agents workspace rotate model used by the focused-pane route. Rotation is a pure split-tree transform that swaps horizontal/vertical axes recursively, reverses vertical branches while inverting their ratios, preserves pane ids, tab order, active tabs, focused pane, and terminal presentation rows, clears Focus mode so the rotated tree is visible, and leaves command-pane state untouched.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Hooke owned the pure `WorkspaceModel` rotation helper and model tests, while Raman owned the focused-pane enum/mapping/execution route. The coordinator integrated both patches, routed the app method through the pure route helper, removed an unused test-only accessor, and kept unrelated dirty sidebar files untouched.
+- Added `WorkspaceModel::rotate_panes_clockwise()` and a recursive split-tree rotation helper matching the native grouped-session workspace rotation rule for axis swaps, vertical branch reversal, and ratio inversion.
+- Added focused-pane bridge support for `rotatePanesClockwise`, with CommandPane, Browser, and project-editor focus no-oping and only active Agents-pane focus mutating the Agents workspace.
+- Added focused model coverage for nested split rotation, vertical ratio inversion, single-leaf no-op, terminal presentation/focused-pane preservation, command-pane independence, and command-palette route policy.
+- Verification: focused coordinator tests passed with `RUSTUP_TOOLCHAIN=1.95.0`: `cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui agents_rotate -- --nocapture` and `cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui focused_pane_hotkey_mapper_routes_supported_command_palette_actions -- --nocapture`; `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md` also passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-07:10 Task slice 447
+
+<!--
+CDXC:GPUICommandPaneHotkeyBridge 2026-06-26-07:10:
+Slice 447 aligns Rename Active Session hotkey dispatch between the native command palette and the sidebar DOM bridge. `renameActiveSession` must use the shared native-owned `runGhostexHotkeyAction` authority path with only action id and message type in the renderer payload, so native resolves the focused session without leaking renderer session ids, titles, paths, command text, URLs, or launch metadata.
+-->
+
+- Updated `sidebar/sidebar-app.tsx`, `sidebar/command-palette.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated the non-overlapping TypeScript bridge slice to Singer while the coordinator owned verification and ledger integration.
+- Added `renameActiveSession` to the sidebar hotkey forwarding branch so keyboard hotkeys reach the same native-owned bridge that command-palette selection already used.
+- Added a source-contract regression proving the sidebar forwarding branch includes Rename Active Session and posts exactly `{ actionId: action.id, type: "runGhostexHotkeyAction" }`.
+- Verification: `./node_modules/.bin/vitest run sidebar/command-palette.test.ts` passed with 14 tests. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-07:21 Task slice 448
+
+<!--
+CDXC:GPUICommandPalette 2026-06-26-07:21:
+Slice 448 aligns the command-palette Open Commands Panel row with macOS DOM dispatch. The shared `runGhostexHotkeyAction("openCommandsPanel")` route must open hidden command panels through shared default height, focus already-visible panels, acknowledge only the live focused Attention command tab, reveal the active command tab, persist shell layout, refresh sidebar command sessions, and never collapse an already-focused visible command pane like the F12 toggle does.
+
+CDXC:HotkeyRouting 2026-06-26-07:21:
+Sidebar DOM hotkey dispatch must forward Open Commands Panel through the native-owned authority bridge with only action id and message type, matching command-palette selection and avoiding renderer-owned session ids, titles, paths, command text, URLs, or launch metadata.
+-->
+
+- Updated `gpui/src/main.rs`, `sidebar/sidebar-app.tsx`, `sidebar/command-palette.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Aquinas owned the GPUI Rust command-palette open/focus route and model tests, while Jason owned the sidebar bridge and source-contract test. The coordinator reviewed both patches and ran combined verification.
+- Added GPUI handling for `runGhostexHotkeyAction("openCommandsPanel")`, distinct from the F12 toggle path: hidden panels open/focus, visible panels focus, visible command-focus stays expanded, and repeated opens do not allocate duplicate command tabs.
+- Added sidebar bridge forwarding for `openCommandsPanel` so generic SidebarApp DOM hotkey dispatch reaches the same native-owned route as command-palette selection.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_palette_open -- --nocapture` passed with 4 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui focused_pane_hotkey_mapper_routes_supported_command_palette_actions -- --nocapture` passed with 1 test, `./node_modules/.bin/vitest run sidebar/command-palette.test.ts` passed with 14 tests, and `git diff --check -- gpui/src/main.rs sidebar/sidebar-app.tsx sidebar/command-palette.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-07:29 Task slice 449
+
+<!--
+CDXC:GPUICommandPalette 2026-06-26-07:29:
+Slice 449 aligns ordinary command-palette hotkey rows that are not modal commands. `createSession` must use the same Cmd+T shell helper as focused-pane dispatch so command-pane focus respects the visible command-source gate, while app focus creates normal terminal placeholders before modal routing can no-op the shared row.
+
+CDXC:GPUIWorkareaHotkeys 2026-06-26-07:29:
+Shared command-palette workarea rows must translate only the existing Option+1..5 action ids to GPUI titlebar modes and then execute through the same titlebar availability/focus helper. Unsupported project-jump ids remain unmapped until their GPUI model behavior exists.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Kierkegaard owned `createSession` command-palette routing through the existing focused Cmd+T helper, while Popper owned the workarea switch mapper for `switchAgentsView`, `switchSourceView`, `switchGitHubView`, `switchKanbanView`, and `switchManageView`. The coordinator integrated both patches and kept unrelated dirty files untouched.
+- Added command-palette dispatch for `createSession` before app-modal fallback so it reuses `add_terminal_placeholder_tab_from_hotkey(cx)` instead of becoming a no-op row in GPUI.
+- Added a shared workarea action-id mapper so command-palette rows for Agents, Source, GitHub/Browser, Kanban, and Manage reuse `switch_workarea_from_hotkey(...)` with the same titlebar guardrails as direct hotkeys.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_create_session -- --nocapture` passed with 2 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_switch_workarea -- --nocapture` passed with 3 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui focused_pane_hotkey_mapper_routes_supported_command_palette_actions -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_palette_open -- --nocapture` passed with 4 tests, `./node_modules/.bin/vitest run sidebar/command-palette.test.ts --reporter=dot` passed with 14 tests, and `git diff --check -- gpui/src/main.rs sidebar/sidebar-app.tsx sidebar/command-palette.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-07:36 Task slice 450
+
+<!--
+CDXC:GPUICommandPalette 2026-06-26-07:36:
+Slice 450 aligns command-palette focus-navigation rows with GPUI keyboard routes. `focusPreviousSession` and `focusNextSession` must call the same focused-tab cycling helper as direct tab-cycle hotkeys, while `focusUp`, `focusRight`, `focusDown`, and `focusLeft` must call the same workspace directional-focus helper as Cmd-Opt-Arrow.
+
+CDXC:GPUICommandPalette 2026-06-26-07:36:
+Numbered session-slot and project-jump command-palette rows remain intentionally unmapped in GPUI until the host owns real sidebar row/project slot-order models. Do not add fallback focus behavior that guesses from shell ids or current project state.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Franklin owned the tab-cycle action-id mapper and tests for `focusPreviousSession`/`focusNextSession`, while Cicero owned the directional-focus action-id mapper and tests for `focusUp`/`focusRight`/`focusDown`/`focusLeft`. The coordinator integrated both through the shared `runGhostexHotkeyAction` handler.
+- Added command-palette dispatch for previous/next tab rows so GPUI reuses `cycle_focused_tab(reverse, window, cx)` across command-pane, Agents, and Browser focus.
+- Added command-palette dispatch for directional focus rows so GPUI reuses `focus_workspace_direction(...)` across Agents, Browser, Source, Kanban, Manage, and expanded command-pane focus candidates.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_tab_cycle -- --nocapture` passed with 2 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_directional_focus -- --nocapture` passed with 2 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_create_session -- --nocapture` passed with 2 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_switch_workarea -- --nocapture` passed with 3 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_palette_open -- --nocapture` passed with 4 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui focused_pane_hotkey_mapper_routes_supported_command_palette_actions -- --nocapture` passed with 1 test, and `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md sidebar/sidebar-app.tsx sidebar/command-palette.test.ts` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-07:39 Task slice 451
+
+<!--
+CDXC:GPUICommandPalette 2026-06-26-07:39:
+Slice 451 aligns the two shared command-palette open hotkeys. `openCommandPalette` keeps the command-mode `>` initial query, while `openSessionSearchPalette` opens the same modal with an empty initial query so current and previous sessions are searched immediately.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added `openSessionSearchPalette` to GPUI `runGhostexHotkeyAction` app-modal routing and used a pure initial-query mapper so command mode and session-search mode stay distinct.
+- Added focused coverage proving `openCommandPalette` maps to `>` and `openSessionSearchPalette` maps to an empty query while unrelated action ids do not mutate modal payloads.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_initial_query -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_tab_cycle -- --nocapture` passed with 2 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_directional_focus -- --nocapture` passed with 2 tests, and `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md sidebar/sidebar-app.tsx sidebar/command-palette.test.ts` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-10:04 Task slice 452
+
+<!--
+CDXC:GPUICommandPalette 2026-06-26-10:04:
+Slice 452 aligns shared Start Action 1-5 command-palette rows with GPUI titlebar Actions. `runActionSlot1..5` must execute the same configured positional action slots as the titlebar menu and action hotkeys, while renderer/native bridge payloads remain authority-only and never include command text, URLs, paths, session ids, or launch metadata.
+-->
+
+- Updated `gpui/src/main.rs`, `sidebar/sidebar-app.tsx`, `sidebar/command-palette.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Attempted the requested parallel implementation split first: Worker A owned the GPUI Rust mapper/dispatch and Worker B owned the sidebar bridge/test slice, but both subagents failed immediately on usage limits before making edits. The coordinator implemented the same non-overlapping slices locally.
+- Added a GPUI mapper for `runActionSlot1..5` to zero-based titlebar action indices and routed those ids through `run_gpui_titlebar_action_index(...)` before modal fallback.
+- Added sidebar DOM forwarding for `runActionSlot` so generic SidebarApp hotkey dispatch reaches native-owned `runGhostexHotkeyAction` with only `{ actionId, type }`.
+- Added focused Rust coverage for action-slot mapper boundaries and updated the sidebar source-contract test to prove Start Action slots preserve the authority-only forwarding payload.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_action_slot -- --nocapture` passed with 2 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_switch_workarea -- --nocapture` passed with 3 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_tab_cycle -- --nocapture` passed with 2 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_initial_query -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui focused_pane_hotkey_mapper_routes_supported_command_palette_actions -- --nocapture` passed with 1 test, `./node_modules/.bin/vitest run sidebar/command-palette.test.ts` passed with 14 tests, and `git diff --check -- gpui/src/main.rs sidebar/sidebar-app.tsx sidebar/command-palette.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-10:04 Task slice 453
+
+<!--
+CDXC:GPUISidebarCollapse 2026-06-26-10:04:
+Slice 453 aligns the shared `toggleSidebarCollapsed` command-palette row and default Cmd+B shortcut with GPUI shell chrome. Collapse must remove the sidebar CEF child and divider as normal layout siblings while preserving the expanded `sidebar_width`, canceling stale divider interaction state, and avoiding overlap, hidden hit regions, zero-width persistence, or fallback sidebar movement.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- The subagent quota was already exhausted by the failed slice-452 split, so the coordinator implemented this single-file GPUI slice locally.
+- Added `ToggleGpuiSidebarCollapsed` with the default `cmd-b` binding and routed `runGhostexHotkeyAction("toggleSidebarCollapsed")` through the same shell method.
+- Made the visible GPUI titlebar sidebar button toggle the same collapsed state.
+- Hid the sidebar CEF child and resize divider by omitting those body-row siblings while collapsed, leaving `sidebar_width` intact for restore.
+- Added focused pure coverage for sidebar collapse state transition and chrome visibility.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui sidebar_collapse -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_action_slot -- --nocapture` passed with 2 tests, and `git diff --check -- gpui/src/main.rs sidebar/sidebar-app.tsx sidebar/command-palette.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-23:04 Task slice 454
+
+<!--
+CDXC:GPUICommandPalette 2026-06-26-23:04:
+Slice 454 aligns shared Focus Previous Group and Focus Next Group command-palette rows with GPUI render-order focus. `focusPreviousGroup` and `focusNextGroup` must route through the same previous/next group traversal shape as native `focusAdjacentGroup`, scoped to Agents-pane and command-pane focus, without guessing numbered group slots, project jumps, Browser/project-editor targets, or fallback shell ids.
+-->
+
+- Updated `gpui/src/main.rs`, `sidebar/sidebar-app.tsx`, `sidebar/command-palette.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Hubble owned the GPUI Rust mapper/dispatch/tests, while Ampere owned the SidebarApp bridge and source-contract test. The coordinator reviewed the combined diff and ran focused verification.
+- Added an exact GPUI mapper for `focusPreviousGroup` and `focusNextGroup`, dispatching those ids through the existing render-order workspace focus helper before modal fallback.
+- Kept adjacent-group execution scoped to Agents-pane and command-pane focus so shared palette rows do not become project-editor or Browser cross-surface jumps.
+- Added sidebar DOM forwarding for `focusAdjacentGroup` actions with the existing authority-only `{ actionId, type }` payload.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_adjacent_group -- --nocapture` passed with 3 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_tab_cycle -- --nocapture` passed with 2 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_directional_focus -- --nocapture` passed with 2 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_action_slot -- --nocapture` passed with 2 tests, `./node_modules/.bin/vitest run sidebar/command-palette.test.ts` passed with 14 tests, and `git diff --check -- gpui/src/main.rs sidebar/sidebar-app.tsx sidebar/command-palette.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-23:14 Task slice 455
+
+<!--
+CDXC:GPUICommandPalette 2026-06-26-23:14:
+Slice 455 makes GPUI app-modal hotkey routing an explicit allowlist after shell, pane, sidebar, focus, and action-slot routes have had first chance to handle `runGhostexHotkeyAction`. Settings, Hotkeys, command search, session search, and legacy sidebar modal ids remain mapped, while non-modal hotkeys such as sidebar movement, focus, split, action-slot, and adjacent-group rows must not be swallowed by modal fallback.
+
+CDXC:HotkeyRouting 2026-06-26-23:14:
+SidebarApp DOM hotkey dispatch must forward Directional Focus and Split Sideways/Downwards through the same native-owned authority bridge as command-palette selection. The renderer payload stays limited to action id plus `runGhostexHotkeyAction`, so native resolves direction, split axis, focus, session, project, and command authority without renderer-owned private data.
+-->
+
+- Updated `gpui/src/main.rs`, `sidebar/sidebar-app.tsx`, `sidebar/command-palette.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Planck owned the GPUI Rust modal allowlist helper and focused tests, while Pascal owned the SidebarApp hotkey bridge and source-contract test. The coordinator reviewed the combined diff and ran verification.
+- Added `gpui_app_modal_kind_for_hotkey_action_id(...)` and replaced the inline GPUI modal fallback match so modal ids are explicit and non-modal hotkeys cannot be masked by fallback routing.
+- Preserved command-palette command/search initial-query behavior while keeping Settings and Hotkeys free of command-palette query overrides.
+- Added SidebarApp forwarding for `focusDirection` and `splitFocusedPane`, preserving the authority-only `{ actionId, type: "runGhostexHotkeyAction" }` payload.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_app_modal -- --nocapture` passed with 3 tests, `./node_modules/.bin/vitest run sidebar/command-palette.test.ts` passed with 14 tests, and `git diff --check -- gpui/src/main.rs sidebar/sidebar-app.tsx sidebar/command-palette.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-23:20 Task slice 456
+
+<!--
+CDXC:GPUICommandPalette 2026-06-26-23:20:
+Slice 456 aligns numbered Focus Session Slot command-palette rows in GPUI without giving Rust a fake sidebar ordering model. `focusSessionSlot1..9` must bounce to SidebarApp as typed `nativeHotkey` messages so the renderer resolves the currently rendered session slot, while previous/next session, malformed slot ids, and project-jump ids stay on their separate native-owned routes.
+-->
+
+- Updated `gpui/src/main.rs`, `sidebar/command-palette.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Mencius owned the GPUI Rust mapper/dispatch/tests for numbered session slots, while Descartes owned the SidebarApp source-contract coverage that proves nativeHotkey bounces are local slot handling and not native forwarding. The coordinator reviewed both patches together.
+- Added an exact GPUI mapper for `focusSessionSlot1` through `focusSessionSlot9` and routed those ids through the existing SidebarApp host bridge as `{ type: "nativeHotkey", actionId }`.
+- Kept `focusPreviousSession` and `focusNextSession` on GPUI tab-cycle routing, excluded project-jump ids to avoid a SidebarApp-to-native loop, and rejected malformed slot ids instead of guessing from shell ids or visible session snapshots.
+- Added sidebar source-contract coverage proving `nativeHotkey` host events call `runGhostexHotkeyAction(...)`, numbered slot actions are handled locally before the native-forwarding branch, and the forwarding payload remains authority-only for other native-owned actions.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_sidebar_slot -- --nocapture` passed with 2 tests, `./node_modules/.bin/vitest run sidebar/command-palette.test.ts` passed with 14 tests, and `git diff --check -- gpui/src/main.rs sidebar/command-palette.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-23:35 Task slice 457
+
+<!--
+CDXC:GPUISidebarSide 2026-06-26-23:35:
+Slice 457 aligns GPUI Move Sidebar behavior with macOS shared Settings and normal layout ownership. The shared `moveSidebar` command-palette row must flip `sidebarSide`, persist it through the same native-sidebar settings object, render expanded left as sidebar/divider/workspace and expanded right as workspace/divider/sidebar, remove sidebar chrome while collapsed without mutating width, and reverse right-side divider drag math without overlays or hit-test routing.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/src/shared_settings.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Herschel owned the typed shared Settings support for `sidebarSide`, while Arendt owned the GPUI shell model, layout ordering, divider math, and `moveSidebar` hotkey route. The coordinator integrated the main-file writer with the typed shared Settings helper and removed the temporary raw-object write path.
+- Added `SharedSidebarSide`, snapshot normalization, and a shared writer that updates only `sidebarSide` while preserving unrelated Settings fields.
+- Added GPUI sidebar side state sourced from shared Settings at startup, plus `runGhostexHotkeyAction("moveSidebar")` handling before app-modal fallback.
+- Updated GPUI body-row layout so expanded right-side placement uses non-overlapping workspace/divider/sidebar siblings, and updated divider line placement, hit bounds, and drag delta sign for right-side sidebars.
+- Kept sidebar collapse independent from side placement: collapsed mode still removes sidebar/divider siblings and preserves the expanded `sidebar_width`.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui sidebar_side -- --nocapture` passed with 6 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui shared_sidebar_side -- --nocapture` passed with 3 tests, `./node_modules/.bin/vitest run sidebar/command-palette.test.ts` passed with 14 tests, and `git diff --check -- gpui/src/main.rs gpui/src/shared_settings.rs sidebar/sidebar-app.tsx sidebar/command-palette.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-23:52 Task slice 458
+
+<!--
+CDXC:GPUIProjectHotkeys 2026-06-26-23:52:
+Slice 458 aligns Jump to Project command-palette rows in GPUI without adding a Rust project-order model. `jumpToProject1..9` must send a dedicated SidebarApp project-slot host message so React resolves visible local Projects row order, while `nativeHotkey` remains reserved for session-slot bounce and cannot reflect project jumps back into GPUI; after resolution, GPUI must receive the existing bounded WorkspaceTerminalFocus session bridge rather than an unsupported focusGroup message.
+-->
+
+- Updated `gpui/src/main.rs`, `shared/session-grid-contract-sidebar.ts`, `sidebar/sidebar-app.tsx`, `sidebar/command-palette.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Nietzsche owned the GPUI Rust mapper/dispatch/tests for `jumpToProject1..9`, while Bacon owned the shared SidebarApp contract, local project-slot resolver, and source-contract coverage. The coordinator integrated both patches and corrected the final GPUI bridge target from group focus to session focus.
+- Added an exact GPUI mapper for `jumpToProject1` through `jumpToProject9` and routed those rows through `{ type: "gpuiProjectSlotHotkey", slotNumber }` instead of the `nativeHotkey` bounce path.
+- Added a typed `gpuiProjectSlotHotkey` SidebarApp host message carrying only a 1-based slot number, so host traffic does not expose project names, paths, URLs, session ids, command text, or metadata.
+- Resolved project slots in SidebarApp from `displayedReferenceProjectGroupIds`, excluding Quick chats and remote machine projects, expanded/revealed the target project according to the existing project-jump settings, then focused the target project's currently focused or first displayed session via the existing `focusSession` bridge.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_project_slot -- --nocapture` passed with 2 tests and `./node_modules/.bin/vitest run sidebar/command-palette.test.ts` passed with 14 tests. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-26-23:59 Task slice 459
+
+<!--
+CDXC:HotkeyRouting 2026-06-26-23:59:
+Slice 459 keeps SidebarApp's native-owned hotkey forwarding exhaustive for the existing shared action union without inventing View Mode hotkey ids. `setViewMode` is forwarded only as an action-id bridge when present, while GPUI Rust must not implement a speculative view-mode route because the current shared hotkey definitions contain no concrete grid/horizontal/vertical action ids.
+-->
+
+- Updated `sidebar/sidebar-app.tsx`, `sidebar/command-palette.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping slices: Avicenna owned the proposed GPUI Rust route but made no edits after confirming `setViewMode` has no concrete shared action ids in `shared/ghostex-hotkeys.ts`; Hume owned SidebarApp forwarding and source-contract coverage.
+- Added `setViewMode` to SidebarApp's authority-only native hotkey forwarding branch, preserving the existing `{ actionId, type: "runGhostexHotkeyAction" }` payload boundary.
+- Added source-contract coverage proving `setViewMode` is not handled locally in SidebarApp and is included only in the native-owned forwarding branch.
+- Kept GPUI Rust unchanged for View Mode because adding mapper ids or split-tree behavior without shared command ids would be speculative and would violate the no-fallback rule.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_project_slot -- --nocapture` passed with 2 tests and `./node_modules/.bin/vitest run sidebar/command-palette.test.ts` passed with 14 tests. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-00:07 Task slice 460
+
+<!--
+CDXC:GPUICommandPane 2026-06-27-00:07:
+Slice 460 fixes Delayed Send body-badge rendering in the GPUI command pane. The badge must derive from the exact current command body geometry, hide when body width is <= 48 or body height is <= 32, center and clamp with native insets, and remain paint-only/non-interactive inside the normal command body so private command data stays within the command-pane boundary and no overlay, hit-test routing, fallback geometry, or guessed layout is introduced.
+-->
+
+- Scope stayed limited to GPUI command-pane rendering; the exact current command body geometry is the badge source of truth rather than cached, estimated, or fallback bounds.
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Epicurus owned the GPUI Delayed Send body-badge rendering and focused Rust coverage, while Copernicus owned the parity-ledger slice. The coordinator reviewed the source diff and integrated the final verification result.
+- Replaced the flex-centered Delayed Send body badge with paint-only canvas chrome that receives the exact command body bounds during prepaint, derives the native badge frame from the shaped countdown label width, and paints inside that same body rectangle.
+- Kept native badge visibility and placement rules exact: hide when body width is <= 48 or body height is <= 32, center the badge, and clamp it with the native horizontal and vertical body insets during resize.
+- Added a countdown-label safety guard so the paint path accepts generated `mm:ss` or bounded `hh:mm:ss` labels only, preventing command text, titles, paths, URLs, and terminal content from being painted through this helper.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_delayed_send -- --nocapture` passed with 2 tests, and `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-00:22 Task slice 461
+
+<!--
+CDXC:GPUICommandSleepingPlaceholder 2026-06-27-00:22:
+Slice 461 aligns GPUI sleeping command body wake-label rendering with native AppKit geometry. The sleeping command body wake label must derive from exact current command body geometry, constrain to body width minus 8 and body height minus 16, center and char-wrap the label, hide when body constraints are non-positive, and remain paint-only/non-interactive inside the command body while preserving existing mouse/key wake behavior and avoiding overlays, hit-test routing, fallback geometry, logging, persistence, command text, paths, URLs, or terminal content.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Parfit owned GPUI Rust rendering/helpers/tests for the sleeping wake label, while Hypatia owned the parity-ledger entry. The coordinator reviewed the combined source and ledger changes and ran final verification.
+- Replaced the flex-centered sleeping wake label overlay with paint-only canvas chrome that receives the exact command body bounds during prepaint and paints inside that same body rectangle without owning input.
+- Added native-style label geometry helpers: hide when body-derived limits are non-positive, constrain width to body width minus 8 and height to body height minus 16, apply the fixed wake-label privacy guard, char-wrap by measured character fit, clamp the measured label frame, and center it in the body.
+- Preserved existing command-body mouse wake and focused alphanumeric key wake behavior; the rendering change does not add overlays, hit-test routing, fallback geometry, logging, persistence, command text, paths, URLs, or terminal content.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_sleeping_placeholder -- --nocapture` passed with 4 tests, and `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-00:40 Task slice 462
+
+<!--
+CDXC:GPUITitlebarKeepAwake 2026-06-27-00:40:
+Slice 462 aligns GPUI titlebar keep-awake automation with native `createTitlebarKeepAwakeSessionState`. Non-sleeping command sessions with projected/runtime Delayed Send timer intent must count as a power-hold input, while sleeping or parked semantic Delayed Send sessions stay out of the hold and all privacy boundaries remain intact: no command text, paths, titles beyond safe labels, status files, logs, terminal output, or private content are read, written, logged, or persisted for this keep-awake decision.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Euclid owned the GPUI Rust keep-awake delayed-send helper and focused tests, while Lovelace owned the parity-ledger slice. The coordinator reviewed the timer projection semantics and tightened the wording so GPUI's timer-owned state is documented as the native remaining-time projection equivalent.
+- Changed automatic Keep Awake to derive Delayed Send hold state from live command-pane flat-tab sessions with non-sleeping timer-owned Delayed Send state, instead of raw timer-map presence.
+- Sleeping Delayed Send sessions and parked non-runtime semantic Delayed Send flags do not create a keep-awake hold until a real runtime timer is active again, preserving existing sleep and restore semantics.
+- The keep-awake projection must use only safe session state such as lifecycle/sleeping state and delayed-send activity. It must not inspect or persist command text, workspace paths, terminal titles beyond existing safe labels, status-file paths, logs, stdout/stderr, terminal output, URLs, tokens, or private content.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui keep_awake -- --nocapture` passed with 7 tests. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-01:05 Task slice 463
+
+<!--
+CDXC:GPUITitlebarKeepAwake 2026-06-27-01:05:
+Slice 463 guards GPUI titlebar keep-awake semantics for Agents tab chrome. Semantic Agents delayed_send_active dots are privacy-safe shell metadata only and must not become a power-hold input, because GPUI has no Agents-side runtime Delayed Send timer projection. Command timer-owned Delayed Send remains the keep-awake input.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Ptolemy owned the Rust keep-awake guard/regression, while McClintock owned the parity-ledger entry. The coordinator reviewed the helper semantics and kept the guard scoped to runtime timer projection rather than semantic tab status.
+- Documented that semantic Agents `delayed_send_active` tab chrome is not a titlebar Keep Awake power-hold input in GPUI.
+- Kept command timer-owned Delayed Send as the GPUI keep-awake input, because that state represents the runtime timer projection while semantic Agents dots expose only privacy-safe shell metadata.
+- Added a focused Rust regression proving a Running Agents tab with semantic `delayed_send_active` does not create a Delayed Send power hold, while Working-session holds still count only Working activity and command delayed-send holds require timer ownership.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui keep_awake -- --nocapture` passed with 8 tests. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-01:25 Task slice 464
+
+<!--
+CDXC:GPUICommandTerminalLaunchPayload 2026-06-27-01:25:
+Slice 464 aligns GPUI plain command-pane terminal creation with macOS `createCommandTerminal`. Plain command terminals created from Open Commands Panel/F12 first-open, command tab plus/double-click, Cmd+T, and command split hotkeys must pass the active project path as a process-local command-terminal launch payload `working_directory`, only for the exact target slot, without title parsing, command text, terminal content, stdout/stderr, persisted paths/logs, or fallback cwd inference. Action command payloads remain separate because they already carry their own command payload.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Aligned GPUI plain command-pane terminal creation with macOS `createCommandTerminal` by attaching the active project path as the process-local command-terminal launch payload `working_directory`.
+- Scoped the payload to exact-slot creation from Open Commands Panel/F12 first-open, command tab plus/double-click, Cmd+T, and command split hotkeys, while leaving action command payloads on their existing separate command-payload path.
+- Preserved privacy and no-fallback boundaries: no title parsing, command text, terminal content, stdout/stderr, persisted paths/logs, or fallback cwd inference.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_launch_payload -- --nocapture` passed with 4 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_new_terminal -- --nocapture` passed with 5 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_f12 -- --nocapture` passed with 4 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_focused_split_hotkey -- --nocapture` passed with 2 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_default_starts_empty -- --nocapture` passed with 1 test, and `git diff --check -- gpui/src/main.rs gpui/src/terminal_ghostty_surface.rs gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-01:45 Task slice 465
+
+<!--
+CDXC:GPUICommandPaneActions 2026-06-27-01:45:
+Slice 465 aligns GPUI default terminal Actions with native `runNativeSidebarCommand` / `createCommandTerminal(..., { focusAfterCreate: false })`. Running a titlebar/sidebar terminal Action must open or select the Action command tab and post running state while preserving the user's current shell or typing focus instead of stealing focus into the command pane. Debug Actions remain intentionally different and still create and focus a visible Agents workspace terminal. The focus decision must use only existing action lifecycle state, must not inspect command text, terminal content, paths, stdout/stderr, logs, status files beyond existing action lifecycle, or persisted shell JSON, and must not synthesize fallback focus.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Documented the GPUI default terminal Action focus contract: titlebar/sidebar terminal Actions should open or select the Action command tab and post running state while leaving the current shell or typing focus unchanged.
+- Preserved the Debug Action exception because native behavior still creates and focuses a visible Agents workspace terminal for debug runs.
+- Captured the privacy and no-fallback boundary: focus preservation must not depend on command text, terminal content, paths, stdout/stderr, logs, status files beyond existing action lifecycle, persisted shell JSON, or synthesized fallback focus.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_action -- --nocapture` passed with 7 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_launch_payload -- --nocapture` passed with 4 tests, and `git diff --check -- gpui/src/main.rs gpui/src/terminal_ghostty_surface.rs gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-02:05 Task slice 466
+
+<!--
+CDXC:GPUICommandPaneActions 2026-06-27-02:05:
+Slice 466 aligns GPUI Action run-start publishing with native `runNativeSidebarCommand`. After an Action command tab is selected or created, marked Working, and sidebar run-state feedback is posted, GPUI must immediately refresh the sanitized `commandPaneSessions` bridge so SidebarApp sees the running Action tab without waiting for the status poller. This refresh must preserve default Action focus parity and must not carry command text, cwd/env, run ids, status-file paths, terminal output, project paths, logs, persisted shell data, tokens, or fallback-derived content.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated the Rust implementation slice to Hubble while the coordinator owned integration and verification; Hubble's write scope was limited to `gpui/src/main.rs`.
+- Added the immediate sanitized sidebar-session refresh after Action run-state dispatch in `open_gpui_command_action_terminal`, while preserving the previous default Action focus policy that leaves current shell focus unchanged.
+- Added model-level coverage proving Action run-start changes only the safe sidebar command-session summary fields immediately and omits private command text, run id, status path, cwd/env, terminal output, project paths, logs, and persisted shell-state fields.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_action -- --nocapture` passed with 8 tests. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-02:05 Task slice 467
+
+<!--
+CDXC:GPUICommandPaneTimers 2026-06-27-02:05:
+Slice 467 carries GPUI command-pane Delayed Send and Close After Done projection through the SidebarApp command-session bridge. Rust already emits safe command-pane timer summaries; the TypeScript bridge and shared HUD contract must preserve only bounded deadline strings, countdown labels, remaining milliseconds, and a true-only Close After Done flag so command indicators can match native timer chrome without forwarding command text, cwd/env, URLs, paths, terminal output, run ids, status-file paths, tokens, unknown fields, or private content.
+-->
+
+- Updated `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, `shared/session-grid-contract-sidebar.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated the TypeScript/shared-contract implementation slice to Turing while the coordinator owned integration and tightened the remaining-ms bound to the native Delayed Send maximum envelope.
+- Extended `SidebarCommandSessionIndicator` and `GpuiCommandPaneSessionSummary` with optional Delayed Send and Close After Done fields that match existing session-card timer names.
+- Normalized and forwarded only safe timer projection fields through `normalizeGpuiCommandPaneSessions`, updated equality so countdown changes publish HUD updates, and kept browser commands and unknown/private fields out of command indicators.
+- Verification: `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts` passed with 38 tests. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-01:31 Task slice 468
+
+<!--
+CDXC:GPUISidebarAutoSleep 2026-06-27-01:31:
+Slice 468 adds GPUI SidebarApp/gxserver agent Auto Sleep parity for command-pane-adjacent runtime ownership. The GPUI runtime may sleep only local gxserver presentation agent terminals that are running, idle, sleepable, and older than the saved agent idle threshold after protecting focused/visible projected owners, active command-pane owners, and popped-out rows. The policy must route through existing gxserver sleep lifecycle calls and must not inspect or log paths, command text, terminal output, titles, URLs, tokens, Browser/project-editor surfaces, or private content.
+-->
+
+- Updated `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Parfit owned the TypeScript runtime monitor/helper, Galileo owned focused runtime tests, and the coordinator reviewed/integrated the shared behavior.
+- Added a GPUI auto-sleep monitor that starts with the sidebar runtime, re-evaluates after runtime settings changes and hydrate, normalizes shared Settings, and sends sleep requests through the existing `setSessionSleeping` gxserver path.
+- Added pure helper coverage for candidate selection and owner protection using only project/session ids, presentation lifecycle/activity, focused/visible state, active command-pane summaries, and bounded settings values.
+- Preserved scope: this slice covers local agent terminal auto-sleep only. It does not add Browser/project-editor auto-sleep behavior or infer pane ownership from paths, labels, titles, commands, terminal text, URLs, or filesystem state.
+- Verification: `bunx vitest run gpui/sidebar/phase1-gxserver-runtime.test.ts` passed with 41 tests, and `git diff --check -- gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts` passed. `bun run typecheck` still fails in unrelated existing native/sidebar and story files (`native/sidebar/gxserver-client.ts`, `native/sidebar/native-sidebar.tsx`, `sidebar/first-launch-setup-modal.stories.tsx`, `sidebar/settings-modal.stories.tsx`, `sidebar/sidebar-app.tsx`) with no GPUI runtime/test errors reported. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-01:42 Task slice 469
+
+<!--
+CDXC:GPUICommandPane 2026-06-27-01:42:
+Slice 469 tightens GPUI command-pane local-state parity at the live bridge boundary. Runtime command summaries may preserve timer and tab fields only for gxserver-backed `G...` command tabs; legacy non-G command rows must be dropped before they can win Action indicator matching, protect auto-sleep, or forward stale timer/private state.
+
+CDXC:GPUICommandCloseAfterDone 2026-06-27-01:42:
+Slice 469 also aligns Close After Done with native sleep semantics. An armed command tab may preserve user intent while sleeping or no longer Done, but any runtime three-minute countdown must be pruned immediately and restarted only after a later awake Done refresh; the timer must not spend time while the tab is parked.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Archimedes owned the GPUI Rust Close After Done runtime/timer behavior, while Ohm owned the TypeScript command-pane bridge filter and vitest coverage. The coordinator reviewed both patches and owned the ledger plus final verification.
+- Added a GPUI Close After Done timer eligibility helper so runtime deadlines remain only for live, armed, awake, Done command tabs. Sleeping, Working, unarmed, and orphan command sessions keep or clear only the appropriate model state while active countdowns are pruned.
+- Tightened command-pane summary normalization so non-`G...` legacy command rows are rejected before indicator matching, HUD timer projection, and auto-sleep protection; valid `G...` rows still preserve sanitized command id, title, active state, status, and timer fields.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_close_after_done -- --nocapture` passed with 5 tests, `bunx vitest run gpui/sidebar/phase1-gxserver-runtime.test.ts native/sidebar/native-command-panel-local-state.test.ts` passed with 44 tests, and `git diff --check -- gpui/src/main.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-01:58 Task slice 470
+
+<!--
+CDXC:GPUICommandTabContextMenu 2026-06-27-01:58:
+Slice 470 aligns GPUI command-tab right-click menus with the native command-panel action payload. Native command-panel sessions publish only panel actions, so Swift primary tab filtering yields no Rename Session, Delayed Send, Close After Done, Fork, Reload, or Pop Out primary block for command tabs; GPUI must omit those rows, keep eligible Focus before Sleep without an extra primary separator, and preserve scoped Sleep/Close rows plus the separate focused command-palette/sidebar/modal action routes.
+-->
+
+- Updated `gpui/src/main.rs`, `native/sidebar/native-pane-tabs-overflow-menu-source.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Leibniz owned the GPUI Rust menu/model/test changes, while Popper owned native source-test coverage proving command-panel payloads are panel-only. The coordinator integrated both, corrected the native no-primary separator parity, and ran final verification.
+- Removed Rename Session, Delayed Send, and Close After Done from GPUI command-tab right-click primary rows. Focus remains available for eligible split command owners and now sits directly above Sleep when no native primary action block exists.
+- Kept Fork, Reload, and Pop Out absent because GPUI still has no real command-session clone, live embedded reload, or popped-out command-owner transfer path.
+- Added native source-test coverage that command-panel titlebar actions are only Pin/Unpin plus Minimize while visible, Expand while hidden, and that workspace tab context menus remain the source of per-session actions and their primary separator.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_tab_context -- --nocapture` passed with 2 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_tab_runtime_actions -- --nocapture` passed with 1 test, `bunx vitest run native/sidebar/native-pane-tabs-overflow-menu-source.test.ts` passed with 2 tests, and `git diff --check -- gpui/src/main.rs native/sidebar/native-pane-tabs-overflow-menu-source.test.ts` passed. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-02:05 Task slice 471
+
+<!--
+CDXC:GPUICommandFocusRestore 2026-06-27-02:05:
+Slice 471 pins source-backed command-panel focus restoration parity. Final command-tab close must leave the Commands panel collapsed and empty, invalidate command-pane shell focus, and restore only a valid non-command target for the active Source, Browser, Kanban, or Manage mode; invalid remembered CommandPane or cross-mode Agents focus falls back to that active mode instead of switching the workspace to Agents.
+
+CDXC:GPUICommandFocusedSessionActions 2026-06-27-02:05:
+Slice 471 also pins native command-pane live-focus hotkey routing in GPUI helper coverage. Focused command actions require an expanded command pane with a current focused command session, reject collapsed, stale, and non-command focus, keep sleeping command placeholders out of focused close/sleep while allowing wake, and preserve native horizontal command split geometry for both focused split directions.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping Rust regression slices: Ampere owned final command-tab close/focus restoration coverage, while Jason owned focused command-pane hotkey helper coverage. The coordinator reviewed both patches and ran combined verification.
+- Added pure GPUI coverage for native `local-first-close-source.test.ts` requirements: closing the final command tab empties/collapses the command pane, clears command focus ownership, and restores Source/Browser/Kanban/Manage focus without falling back to Agents.
+- Added pure GPUI coverage for native `native-hotkey-source.test.ts` command-pane live-focus routing: focused close/sleep/wake helpers require live expanded command focus, sleeping placeholders intercept close/sleep but can wake, and command splits stay horizontal for both focused split directions.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_final_tab_close_clears_focus_and_restores_active_mode_focus -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_focused_session_helpers_match_native_live_focus_routing -- --nocapture` passed with 1 test, and `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_tab_context -- --nocapture` passed with 2 tests. Cargo emitted existing dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-02:05 Task slice 472
+
+<!--
+CDXC:GPUIBulkSleep 2026-06-27-02:05:
+Slice 472 aligns GPUI SidebarApp bulk sleep with native `native-sidebar-bulk-sleep-source.test.ts` pacing. Multi-session sleep, group sleep, and Auto Sleep must start gxserver sleep requests one target at a time with the native 350 ms interval, continue after per-session failures, and expose only aggregate counts so pacing state cannot leak session ids, titles, paths, commands, URLs, terminal output, tokens, or user text.
+-->
+
+- Updated `gpui/sidebar/phase1-bulk-sleep-pacing.ts`, `gpui/sidebar/phase1-bulk-sleep-pacing.test.ts`, `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping TypeScript slices: Epicurus owned the reusable bulk-sleep pacing helper and its focused test, while Averroes owned GPUI runtime call-site integration and focused runtime tests. The coordinator reconciled the duplicate local loop into the shared helper and updated the older auto-sleep protection test for paced timing.
+- Added `runGpuiSidebarBulkSleepPaced` with the native 350 ms interval, sequential operation execution, failure continuation, and private-data-free aggregate result counts.
+- Routed `setSessionsSleeping(..., true)`, local and remote `setGroupSleeping(..., true)`, and the GPUI agent Auto Sleep monitor through the paced helper. Wake paths remain concurrent because native pacing is for provider shutdown/sleep, not restore.
+- Verification: `bunx vitest run gpui/sidebar/phase1-bulk-sleep-pacing.test.ts` passed with 1 test, `bunx vitest run gpui/sidebar/phase1-gxserver-runtime.test.ts -t "paces setSessionsSleeping|paces auto-sleep"` passed with 2 focused tests, `bunx vitest run gpui/sidebar/phase1-gxserver-runtime.test.ts` passed with 43 tests, and `git diff --check -- gpui/sidebar/phase1-bulk-sleep-pacing.ts gpui/sidebar/phase1-bulk-sleep-pacing.test.ts gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-02:27 Task slice 473
+
+<!--
+CDXC:GxserverRendererCommands 2026-06-27-02:27:
+Slice 473 aligns GPUI SidebarApp renderer-command routing with native raw target resolution. gxserver CLI renderer commands may send raw `{ projectId, sessionId }` in `sessionTarget`, while GPUI renders combined presentation ids; the runtime must opt into renderer commands, resolve raw local targets to combined ids, focus through the existing local SidebarApp/Agents bridge, and reply with only bounded ids/status.
+
+CDXC:GPUITitlebarFocusExit 2026-06-27-02:27:
+Slice 473 also aligns the GPUI titlebar Exit focus affordance with native titlebar focus-exit styling. The control appears only while Agents pane Focus mode is active, uses active mode-tab chrome, and clears only Agents focus mode through the existing workspace model route.
+-->
+
+- Updated `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, `gpui/src/main.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: McClintock owned the TypeScript gxserver renderer-command runtime/test path, while Zeno owned the Rust titlebar focus-exit path. The coordinator reviewed both patches and reran focused plus shared verification.
+- Added GPUI presentation WebSocket renderer-command opt-in and result replies, with `focusSession` support that resolves raw local `sessionTarget` values to combined sidebar session ids before calling the existing local focus bridge. Result payloads omit renderer-supplied paths, commands, URLs, tokens, and alternate target fields.
+- Added the GPUI titlebar `Exit focus` control for active Agents Focus mode using active-tab styling; activation clears Agents focus mode and restores the focused Agents pane route without touching command-pane focus or project-editor state.
+- Verification: `bunx vitest run gpui/sidebar/phase1-gxserver-runtime.test.ts --testNamePattern "resolves raw gxserver renderer command session targets"` passed with 1 focused test, `bunx vitest run gpui/sidebar/phase1-gxserver-runtime.test.ts` passed with 44 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui titlebar_exit_focus_control_uses_active_tab_chrome_only_for_agents_focus_mode -- --nocapture` passed with 1 test, and `git diff --check -- gpui/src/main.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-02:45 Task slice 474
+
+<!--
+CDXC:GxserverRendererCommands 2026-06-27-02:45:
+Slice 474 completes GPUI gxserver renderer-command rename parity with native CLI routing. `renameCommand` must resolve raw local `{ projectId, sessionId }` targets to the exact GPUI workspace session, post one fixed Rust bridge payload, parse only version/type/raw ids/title, write `/rename <title>` into the already-mounted mapped Agents Ghostty surface, and submit with a real Return key. It must not attach, wake, create, type into focused fallback terminals, echo titles in renderer results, or accept paths, commands, URLs, tokens, terminal output, raw renderer envelopes, remote ids, combined ids, or private fields.
+-->
+
+- Updated `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, `gpui/src/main.rs`, `gpui/src/cef/macos.rs`, `gpui/src/cef/unsupported.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Kuhn owned the TypeScript renderer-command `renameCommand` runtime/test path, while Sartre owned the Rust/CEF bridge, parser, mapped-target resolver, and mounted Agents terminal delivery path. The coordinator reviewed both patches and ran final verification.
+- Added `renameCommand` handling to the GPUI renderer-command subscription path. The runtime resolves gxserver raw `sessionTarget` values to local presentation sessions, normalizes a bounded no-control title, posts `postWorkspaceTerminalRenameCommand`, and replies with only ids/status.
+- Added the fixed CEF bridge function and Rust parser for `ghostex.gpui.sidebar.workspaceTerminalRenameCommand`, rejecting extra/private fields and alternate target shapes before any terminal surface is consulted.
+- Routed accepted rename commands to the existing mapped local Agents session only, selected that tab, verified the mounted Ghostty surface owns the exact slot, sent `/rename <title>`, and submitted through Ghostty's Return-key path with no fallback attach, wake, creation, or current-focus typing.
+- Verification: `bunx vitest run gpui/sidebar/phase1-gxserver-runtime.test.ts --testNamePattern "renderer command"` passed with 2 focused tests, `bunx vitest run gpui/sidebar/phase1-gxserver-runtime.test.ts` passed with 45 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui workspace_terminal_rename_command -- --nocapture` passed with 2 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui sidebar_bridge_allowlist_maps_only_fixed_functions_to_private_messages -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui titlebar_exit_focus_control_uses_active_tab_chrome_only_for_agents_focus_mode -- --nocapture` passed with 1 test, and `git diff --check -- gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts gpui/src/main.rs gpui/src/cef/macos.rs gpui/src/cef/unsupported.rs gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-02:58 Task slice 475
+
+<!--
+CDXC:GPUIFocusedClose 2026-06-27-02:58:
+Slice 475 aligns GPUI focused-close routing with native `native-hotkey-source.test.ts` command-pane ownership. Focused command tabs close before active-surface fallback, sleeping command placeholders intercept focused close without mutating the workspace, project-editor companions hide only for the matching active mode, project-editor main surfaces no-op, and stale or collapsed command focus falls through to the active Agents or Browser close policy only.
+
+CDXC:GPUIProjectEditorCompanion 2026-06-27-02:58:
+Slice 475 also aligns project-editor companion restore with native `project-editor-companion-retarget-source.test.ts`. Re-expanding a project-editor companion after command-pane collapse must wake and focus the rendered companion session for the active project-editor mode, preserve command-pane state, and avoid fallback to Agents or the main project-editor surface.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping Rust slices: Banach owned focused-close decision routing and helper coverage, while Chandrasekhar owned project-editor companion restore state and coverage. The coordinator reviewed both patches, normalized the CDXC timestamps, and reran focused verification.
+- Added a pure focused-surface close decision helper so command-pane ownership, sleeping placeholder interception, project-editor companion hiding, project-editor main-surface no-ops, Agents active-tab close, and Browser active-tab close stay testable without driving the GPUI event loop.
+- Added a project-editor companion shell-state restore helper so collapse/restore from command-pane focus targets the rendered companion for Source, Kanban, and Manage without mutating command-pane shell state or falling back to Agents.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui focused_close_routes_command_companion_and_project_editor_surface_noops -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui focused_command_pane_close_decision_splits_close_noop_and_fallthrough -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui project_editor_companion_restore -- --nocapture` passed with 1 test, and `git diff --check -- gpui/src/main.rs` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-03:03 Task slice 476
+
+<!--
+CDXC:GPUICommandPaneFocus 2026-06-27-03:03:
+Slice 476 pins GPUI command-pane border focus to the native `native-command-panel-focus-source.test.ts` first-responder repaint rule. Programmatic command-terminal focus must make command-pane shell focus plus the focused command group the only source of focused border chrome; selected command groups without command shell focus keep inactive pinned or floating border treatment.
+
+CDXC:GPUICommandPaneActions 2026-06-27-03:03:
+Slice 476 also pins command-pane Action completion feedback to native `session-attention-event-source.test.ts`. Command completions use Action completion sound semantics, not session-attention bell semantics: successful Actions play only when the saved per-action flag is true, failed Actions play regardless, and status-file or exit-cleanup completion records omit command text, paths, output, URLs, env, titles, secrets, and status-file paths.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping Rust slices: Feynman owned command-pane first-responder border helper/coverage, while Rawls owned command Action completion-sound and private-record coverage. The coordinator reviewed both patches and reran focused verification.
+- Added `command_pane_group_has_first_responder_border(...)` so focused-border ownership is explicit and testable apart from selected tab state, then added focused coverage that Browser/project-editor shell focus cannot leave command groups painted as focused.
+- Added focused completion coverage proving quiet successful Action completion when `playCompletionSound` is false, audible successful completion when true, audible failure regardless of the flag, and private-data-free debug records for both status-file refresh and exited-surface cleanup paths.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui native_command_panel_focus_source_repaints_command_border_after_programmatic_focus -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_action_completion_sound_semantics_and_records_stay_private -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_action_completion_maps_exit_code_to_sidebar_state_and_sound -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_collapsed_strip_hides_panel_mode_controls -- --nocapture` passed with 1 test, and `git diff --check -- gpui/src/main.rs` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-03:16 Task slice 477
+
+<!--
+CDXC:GPUICommandPaneResize 2026-06-27-03:16:
+Slice 477 aligns GPUI command-pane resize hover cleanup with native `native-pane-tabs-hit-test-source.test.ts` cursor release behavior. Top command-panel rail and command split rails must clear runtime hover/cursor chrome when resize ownership ends, when double-click reset runs, or when the command pane hides, while layout persistence stays tied only to actual height, ratio, or consumed-drag state changes.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping Rust slices: Volta owned the top command-panel rail reset/end plus F12/minimize hide routes, while Dirac owned command split handle reset/end routes. The coordinator added the shared runtime hover clear helper first, reviewed both patches, and reran focused verification.
+- Added `clear_command_resize_hover_state_fields(...)` and the app-level `clear_command_resize_hover_state()` wrapper so delayed hover timers are invalidated and visible resize hover chrome is removed without mutating persisted command-pane shell layout.
+- Routed top rail double-click reset, top rail drag finish, split handle double-click reset, split drag finish, F12 collapse, and command-panel minimize through the runtime hover clear path. Drag finish still persists shell layout only when a drag state is consumed; reset paths preserve their existing layout persistence rules.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_panel_rail_clear_resets_resize_hover_without_layout_state -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_split_reset_clears_resize_hover_even_when_ratio_is_default -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui split_ratios_clamp_reset_and_missing_ids_noop_for_placeholder_layouts -- --nocapture` passed with 1 test, and `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_height_and_project_companion_resets_clamp_to_layout_bounds -- --nocapture` passed with 1 test. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-03:26 Task slice 478
+
+<!--
+CDXC:GPUICommandPaneResize 2026-06-27-03:26:
+Slice 478 completes GPUI command-pane resize hover cleanup for final-tab removal parity. Direct tab close, scoped close, command Action close, confirmed Ghostty close, and process-exit cleanup can hide the command panel without passing through explicit resize/end/minimize handlers, so each successful model mutation must clear runtime resize hover chrome only after the command pane becomes empty and must preserve hover state while any command session remains visible.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping Rust slices: Fermat owned user/direct close routes (`clear_or_close_sidebar_command_run_state`, direct tab close, and scoped tab close), while James owned mounted runtime close routes (`confirm_pending_command_terminal_close`, confirmed Ghostty close sync, and process-exit cleanup). The coordinator added the shared hidden-pane helper first, reviewed both patches, resolved the exact test filters, and reran focused verification.
+- Added `clear_command_resize_hover_state_fields_if_command_pane_hidden(...)` plus the app wrapper so close paths can invalidate hover/cursor chrome after final-session removal without touching persisted layout state or active hover while other command sessions remain.
+- Routed direct command tab close, scoped command tab close, command Action close, confirmed mounted Ghostty close, and mounted process-exit cleanup through the hidden-pane hover cleanup path after successful command model mutation.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_final_direct_tab_close_clears_resize_hover_when_pane_hides -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_non_final_direct_tab_close_preserves_resize_hover -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_scoped_tab_close_preserves_resize_hover_while_sessions_remain -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_action_close_clears_resize_hover_after_final_session_removal -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ghostty_confirmed_close_clears_resize_hover_when_final_session_removed -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_exited_surface_keeps_resize_hover_when_sessions_remain -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_exited_surface_clears_resize_hover_when_final_session_removed -- --nocapture` passed with 1 test, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_final_tab_close_clears_focus_and_restores_active_mode_focus -- --nocapture` passed with 1 test, and `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-03:35 Task slice 479
+
+<!--
+CDXC:GPUITerminalFileDrop 2026-06-27-03:35:
+Slice 479 aligns GPUI mounted terminal host views, including command-pane terminals, with native terminal file-drop behavior. Real AppKit host views accept file URL, legacy filename, and private string path drops, format image paths as Markdown image references, insert transient text into the exact registered Ghostty surface, and do not add overlays, hit-test routing, focused-surface fallback, logs, persistence, or terminal-content capture.
+-->
+
+- Updated `gpui/native/macos/GpuiTerminalAppKitAdapter.m`, `gpui/src/terminal_ghostty_surface.rs`, `gpui/src/main.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Aquinas owned the Objective-C AppKit terminal host-view drag/drop destination, while Hume owned the Rust Ghostty surface registry dispatch and FFI callback. The coordinator reviewed both patches, tightened the Objective-C callback success contract, normalized CDXC timestamps, and reran focused verification.
+- Registered `GhostexGpuiTerminalHostView` directly for dropped file URLs, string paths, and legacy filename pasteboard data. Drops resolve to filesystem paths, image files format as `[Image #N](path)` with image-only numbering, non-images stay raw paths, and entries are joined with single spaces before insertion.
+- Added `send_native_dropped_text_for_view(...)` plus `GhostexGpuiTerminalInsertDroppedText(...)` so dropped text is borrowed only for the synchronous call and delivered only to the mounted Ghostty surface registered for that exact AppKit host view.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui native_key_target_registry_dispatches_dropped_text_only_to_registered_host_view -- --nocapture` passed with 1 test, `clang -fsyntax-only -fobjc-arc -x objective-c -fmodules -framework AppKit -framework QuartzCore gpui/native/macos/GpuiTerminalAppKitAdapter.m` passed with only syntax-only unused linker-input warnings, and `git diff --check -- gpui/native/macos/GpuiTerminalAppKitAdapter.m gpui/src/terminal_ghostty_surface.rs gpui/src/main.rs` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-03:47 Task slice 480
+
+<!--
+CDXC:GPUITerminalIME 2026-06-27-03:47:
+Slice 480 aligns GPUI mounted terminal host views, including command-pane terminals, with native terminal IME routing. Printable keys, Space, dead keys, and CJK composition go through AppKit `NSTextInputClient`; command/control shortcuts stay on the raw Ghostty key path only when no marked text exists; committed text, preedit, and candidate geometry route through the exact registered host-view surface without overlays, hit-test routing, focused-surface fallback, logs, persistence, command-text storage, or terminal-content capture.
+-->
+
+- Updated `gpui/native/macos/GpuiTerminalAppKitAdapter.m`, `gpui/src/terminal_ghostty_surface.rs`, `gpui/src/main.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices: Avicenna owned the Objective-C `NSTextInputClient` host-view behavior, while Huygens owned Rust exact-view committed text/preedit callbacks and coverage. The coordinator added exact-view IME-point geometry so candidate windows use Ghostty cursor geometry instead of host-view fallback placement.
+- Added runtime-only marked-text state and per-key committed-text accumulation to `GhostexGpuiTerminalHostView`, routing printable input through `interpretKeyEvents` while preserving raw key dispatch for command/control shortcuts and interpreted control keys.
+- Added `GhostexGpuiTerminalInsertCommittedText`, `GhostexGpuiTerminalSetPreeditText`, and `GhostexGpuiTerminalGetImePoint`, all resolved through the existing native host-view registry so Agents and command-pane terminals receive IME data only for their exact mounted Ghostty surface.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui native_key_target_registry_dispatches -- --nocapture` passed with 3 tests, `clang -fsyntax-only -fobjc-arc -x objective-c -fmodules -framework AppKit -framework QuartzCore gpui/native/macos/GpuiTerminalAppKitAdapter.m` passed with only syntax-only unused linker-input warnings, and `git diff --check -- gpui/native/macos/GpuiTerminalAppKitAdapter.m gpui/src/terminal_ghostty_surface.rs gpui/src/main.rs` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-04:10 Task slice 481
+
+<!--
+CDXC:GPUICommandTerminalClipboard 2026-06-27-04:10:
+Slice 481 adds coordinator-facing app-level regression evidence for mounted command-terminal runtime clipboard handoff. Command drains must re-authorize only exact still-mounted owners from the command surface map, avoid focused-shell fallback as requester identity, read standard clipboard data through explicit string entries only, and write only runtime-provided text.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md` only; `gpui/src/terminal_ghostty_surface.rs` was left untouched for the other worker.
+- Added a pure mounted-slot authorization helper and routed the command runtime clipboard drain through it so stale snapshot keys are filtered against the current command Ghostty surface map before any app-thread clipboard read/write closure can execute.
+- Added focused source-only coverage proving stale command owner keys are skipped, a focused command slot is not added as requester fallback, clipboard reads use explicit string entries instead of path synthesis, and runtime writes wrap only the runtime-provided text in a string `ClipboardItem`.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_runtime_clipboard_handoff_authorizes_only_still_mounted_slots_and_runtime_text -- --nocapture` passed with 1 test. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-04:25 Task slice 482
+
+<!--
+CDXC:GPUITerminalClipboard 2026-06-27-04:25:
+Slice 482 wires the low-level GPUI Ghostty runtime clipboard callbacks to the existing owner-local app-thread drain. Clipboard and close callbacks accept only registered surface userdata tokens with mounted surfaces; app-level runtime userdata, stale pointers, selection clipboard requests, null read state, missing `text/plain` writes, focused-surface inference, logs, persistence, and raw clipboard retention stay rejected.
+
+CDXC:GPUITerminalClipboard 2026-06-27-04:25:
+Runtime read confirmation must match the native Ghostex host: initial read completions are unconfirmed so Ghostty paste protection can request confirmation, and `confirm_read_clipboard_cb` synchronously completes the same borrowed content pointer as confirmed without storing or inspecting it. Standard `text/plain` writes are accepted from the surface callback path and drained on the app thread as runtime-provided text only.
+-->
+
+- Updated `gpui/src/terminal_ghostty_surface.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated the low-level terminal runtime callback slice to Halley while Darwin owned the separate app-level command drain helper in slice 481. The coordinator reviewed both patches, tightened close callbacks to use the same registered-token validation, and corrected read-confirm semantics against the native Ghostex callback implementation.
+- Added a registered surface-token registry around `GhosttySurfaceCloseToken` so read, confirm-read, write, and close callbacks validate `SurfaceUD` before casting. Startup-to-running handoff and parked-owner rekey keep the same token with the Ghostty surface, preserving owner-local queues without recreating processes.
+- Added callback coverage proving app-level runtime userdata and unmounted surface tokens are rejected, standard read callbacks enqueue only mounted owners, selection clipboard stays unsupported, confirm callbacks borrow and confirm the original content pointer, standard `text/plain` writes enqueue even when Ghostty marks them confirmable, non-text writes are ignored, denied drains complete reads as empty and unconfirmed, and debug state does not retain sample clipboard content.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui clipboard_ -- --nocapture` passed with 11 tests, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui surface_owner_request_close_calls_ffi_once_and_records_callbacks_in_memory -- --nocapture` passed with 1 test, and `git diff --check -- gpui/src/terminal_ghostty_surface.rs gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md` passed before this ledger append. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-04:35 Task slice 483
+
+<!--
+CDXC:GPUICommandPaneFocus 2026-06-27-04:35:
+Slice 483 aligns GPUI command-pane group border widths with native `native-pane-focused-border-source.test.ts`. Focused first-responder command groups use the thinner 1px border, inactive visible command groups use the native 2px command border, and pinned inactive groups keep that inactive width with transparent color so hidden-border chrome remains stable without touching workspace pane borders.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated the scoped render/helper/test implementation to Bacon with ownership limited to `gpui/src/main.rs`; the coordinator reviewed the exact helper/render diff and owned the ledger plus final verification.
+- Added command-pane-only border width constants and a `command_pane_group_border_width(...)` helper tied to the existing first-responder border predicate, then applied `.border_1()` only for the focused command group and `.border_2()` for inactive command groups.
+- Extended the command-pane chrome/focus coverage so focused command groups assert the native 1px width while inactive, unfocused, and pinned-hidden command groups assert the native 2px inactive width.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui native_command_panel_focus_source_repaints_command_border_after_programmatic_focus -- --nocapture` passed with 1 test, and `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_tab_context_menu_matches_native_tab_scoped_rows -- --nocapture` passed with 1 test. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-04:15 Task slice 484
+
+<!--
+CDXC:GPUICommandPaneRestore 2026-06-27-04:15:
+Slice 484 aligns GPUI command-pane shell restore with native `native-command-panel-local-state.ts` layout repair. Restored command leaves must drop stale tab ids, keep the first occurrence of duplicate tab ids, normalize stale active tabs to the first valid tab, and prune split children that normalize to no valid tabs so one stale command-panel branch cannot discard a still-valid sibling.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated the root-leaf normalization implementation to Linnaeus with ownership limited to `gpui/src/main.rs`; the coordinator reviewed that patch and added the adjacent split-child prune/collapse behavior from the native normalizer.
+- Changed command-pane shell parsing so leaf tab ids are filtered against stored command sessions and deduped before validation, orphan stored command-session rows remain omitted on serialization, and restored splits with one invalid child collapse to the surviving command group.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_restore_normalizes_duplicate_and_stale_root_leaf_tabs -- --nocapture` passed with 1 test, and `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_restore_prunes_empty_split_children_after_stale_tab_filtering -- --nocapture` passed with 1 test. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-04:30 Task slice 485
+
+<!--
+CDXC:GPUICommandTerminalSurface 2026-06-27-04:30:
+Slice 485 makes command-pane body ownership explicit for native pending-surface parity. A selected non-sleeping command tab, including one whose AppKit/Ghostty surface is still being created, owns a blank command body mount slot; selected sleeping tabs, collapsed panels, stale groups, missing sessions, and inactive tabs must not borrow that slot or receive focused terminal input.
+
+CDXC:GPUICommandTabWake 2026-06-27-04:30:
+Slice 485 also makes sleeping command-tab selection and wake policy explicit. Default click-to-wake selects a sleeping tab without waking it so the visible body placeholder owns the later alphanumeric wake affordance; strict `clickToWakeSleepingSessions:false` is the only tab-selection path that wakes immediately, and stale ids must not fall back to focused command state.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping Rust slices: Dalton owned command body mount-slot eligibility/render coverage, while Kierkegaard owned sleeping command-tab selection and wake-target coverage. The coordinator reviewed both patches, normalized CDXC timestamps, formatted Rust, and ran final verification.
+- Added `CommandPaneModel::terminal_body_mount_slot_for_leaf(...)` and reused it from both rendered command mount-slot enumeration and command body render calculation so selected non-sleeping owners behave like native pending placeholders while sleeping/collapsed/stale owners remain placeholders.
+- Added `command_pane_sleeping_tab_selection_wake_target(...)` and routed command tab selection through it so the click-to-wake setting drives the only eager wake case without focused-group fallback.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_terminal_mount_slots_include_only_expanded_visible_active_sessions -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_sleeping -- --nocapture` passed with 5 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_tab_wake_policy -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui focused_sleeping_command_placeholder -- --nocapture` passed with 1 test; and `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui focused_command_pane_wake_target_requires_sleeping_command_focus -- --nocapture` passed with 1 test. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-04:41 Task slice 486
+
+<!--
+CDXC:GPUICommandPaneActions 2026-06-27-04:41:
+Slice 486 aligns newly-created non-reused GPUI terminal Actions with native command-panel insertion. A single command owner still receives the Action as a selected tab, while an existing split gets a new selected rightmost command owner; stale command focus must not redirect Action creation into the first live command group, and Cmd+T/New Terminal keeps the focused-group insertion rule.
+
+CDXC:GPUICommandTerminalSurface 2026-06-27-04:41:
+Slice 486 tightens command body ownership around native visible owner semantics. The command body renderer, keyboard wake target, and Ghostty mount-slot reconciliation must all resolve through the stored selected tab only, so sleeping selected tabs own visible placeholders, non-sleeping selected tabs own mount slots, and stale active ids or missing sessions cannot borrow inactive siblings.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated actual parallel implementation slices to command-pane worker sessions `G14ah` and `G201k`: `G14ah` owned visible body-owner/mount-slot/render/wake semantics, while `G201k` owned Action-specific insertion helpers and focused Action/New Terminal model coverage. The coordinator reviewed the merged patches, checked for late duplicate edits, and ran final verification.
+- Added `CommandPaneVisibleBodyOwner` plus `CommandPaneModel::visible_command_body_owner_for_leaf(...)`, then routed command mount-slot enumeration, command body rendering, and focused sleeping-placeholder keyboard wake through that same strict owner so stale active-session fallback stays out of visible body and Ghostty ownership.
+- Split newly-created Action tab placement from New Terminal placement by adding `insert_created_action_tab_for_untargeted_creation(...)`: empty layouts still create the first owner, single-owner layouts append as a tab, and split layouts wrap the existing command root with a new rightmost selected Action owner while preserving existing groups and selections.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml command_pane_action_session` passed with 7 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml command_terminal_mount_slots_include_only_expanded_visible_active_sessions` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml command_pane_new_terminal` passed with 5 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-04:47 Task slice 487
+
+<!--
+CDXC:GPUICommandTerminalLaunchPayloadSource 2026-06-27-04:47:
+Slice 487 makes GPUI command-terminal launch payloads one-shot like native startup input. Action commands and plain command cwd payloads must be consumed at Ghostty config preparation for the exact command body slot/runtime key, so a later native-view remount cannot replay stale command text, cwd, env, initial input, or wait policy.
+
+CDXC:GPUICommandTerminalLaunchPayloadSource 2026-06-27-04:47:
+Invalid explicit launch payloads are also drained at the writer boundary and prune the request without fallback. Failed conversion must not leave private payload data queued for another remount attempt or replace it with inferred launch data from titles, shell state, paths, logs, stdout/stderr, terminal content, or helper detection.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Created command-pane worker sessions `G4trn` and `G3lzr` with non-overlapping production/test ownership; the coordinator reconciled the final patch, stopped the workers before duplicate overlapping edits, and owned final verification.
+- Replaced the immutable command launch-payload lookup with `CommandTerminalLaunchPayloadSource::take_payload_for_mount_slot(...)`, draining the exact slot/runtime key before Ghostty launch-payload conversion so both valid and invalid explicit payloads are one-shot.
+- Reworked command terminal host config-request collection into an explicit loop that passes the launch-payload source mutably, keeps invalid payload pruning behavior, and avoids falling back to inferred startup data.
+- Extended focused tests so exact Action payloads attach once and remount cleanly defaults, stale slot/runtime keys remain absent, plain command cwd payloads drain after the exact slot consumes them, and invalid payload conversion consumes the stored payload without leaking private sample values.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml command_launch_payload_source` passed with 4 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml plain_command_terminal_project_launch_payload` passed with 2 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-04:59 Task slice 488
+
+<!--
+CDXC:GPUICommandTerminalLaunchPayloadSource 2026-06-27-04:59:
+Slice 488 updates command-terminal handoff wording after explicit launch producers landed. Terminal Actions and plain command-terminal project cwd now produce runtime-only launch payloads consumed exactly once by the matching command body slot/runtime key; docs must not describe command launch payloads as future-only.
+
+CDXC:GPUICommandTerminalLaunchPayloadSource 2026-06-27-04:59:
+Remaining command-terminal caveats are user/runtime validation, non-Action/generalized command status product decisions, and the privacy boundary: no title/status/path/project inference, no fallback launch data, no replay after invalid conversion or remount, and no persistence/logging of command text, cwd/env, stdout/stderr, terminal content, status-file paths, or private payloads.
+-->
+
+- Updated `gpui/src/main.rs`, `docs/gpui-workspace-area-missing-parity-phases.md`, `docs/gpui-workspace-area-parity-requirements.md`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Refreshed command launch-payload source comments and added a combined regression proving terminal Action payloads, plain project-cwd payloads, and metadata-only command slots stay separated by exact command body slot/runtime key.
+- Reworded the Phase 4 command-terminal handoff and active parity requirements so terminal Actions and plain command-terminal project cwd are current explicit launch payload producers with exact-slot one-shot Ghostty config consumption, not purely future work.
+- Preserved the remaining limits: user/runtime validation is still outside this docs slice, non-Action/generalized command status remains a future product decision, and launch data must not be inferred from titles, shell status, delayed-send metadata, paths, logs, stdout/stderr, terminal content, project names, or helper detection.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml command_launch_payload_source` passed with 5 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml plain_command_terminal_project_launch_payload` passed with 2 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/src/main.rs docs/gpui-workspace-area-missing-parity-phases.md docs/gpui-workspace-area-parity-requirements.md gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-05:07 Task slice 489
+
+<!--
+CDXC:GPUICommandPaneActions 2026-06-27-05:07:
+Slice 489 updates the command-status handoff after Action status plumbing is current source evidence. GPUI Action tabs own live run ids, env-provided session-state files, status-file stamping/polling, run-start Working, idle completion, completion feedback, and exit cleanup; docs must not describe Action status as future-only.
+
+CDXC:GPUICommandPaneActions 2026-06-27-05:07:
+Non-Action/restored command status remains safe enum/boolean metadata, and command status must not be inferred from shell titles, command text, cwd/env, stdout/stderr, terminal content, paths, logs, status-file paths, or shell JSON. Runtime validation and any generalized non-Action status product work remain outside this slice.
+-->
+
+- Updated `gpui/src/main.rs`, `docs/gpui-workspace-area-missing-parity-phases.md`, `docs/gpui-workspace-area-parity-requirements.md`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Refreshed command-status comments so Action-owned tabs are described as current run-id/status-file lifecycle participants while non-Action/restored command status stays safe enum/boolean metadata.
+- Added a focused Rust regression proving a matching `status=working` file keeps the Action tab Working, emits no completion, retains live run ownership in memory, and keeps command ids, run ids, status-file paths, and private status-file keys out of shell-state persistence.
+- Reworded active Phase 4 docs and older current-state progress bullets so Action status-file lifecycle is current evidence, while user/runtime validation and generalized non-Action status remain caveats.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml command_action_status_file_refresh` passed with 3 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/src/main.rs docs/gpui-workspace-area-missing-parity-phases.md docs/gpui-workspace-area-parity-requirements.md gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-05:24 Docs parity wording audit
+
+<!--
+CDXC:GPUIWorkspaceParityDocsAlignment 2026-06-27-05:24:
+After slices 488 and 489, progress wording must not leave current command launch producers or Action status-file lifecycle described as future-only. Historical wording may name the old gap only when it also points to the later terminal Action/plain-cwd launch producers and current Action run-id/status-file lifecycle evidence.
+-->
+
+- Updated `gpui/WORKSPACE_PARITY_PROGRESS.md` only.
+- Reworded stale slice 204 and 283 progress bullets so they no longer leave command launch payload/status decisions as future-only after slices 488 and 489; active Phase 4 docs already preserved accepted pinned/floating/collapsed, F12, tab/split, final-close, close-confirm, clipboard, physical-key, and source-ledger behavior as accepted rather than reopened work.
+
+### 2026-06-27-05:30 Task slice 490
+
+<!--
+CDXC:GPUICommandPaneActions 2026-06-27-05:30:
+Slice 490 aligns focused-pane command-palette handling for runtime-dependent command-session actions with native command-panel titlebar behavior. `forkSession`, `reloadSession`, and `popOutPane` are recognized and consumed as explicit GPUI runtime no-ops for command sessions, preserving parity without adding fake fork, reload, or pop-out runtime support.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Recorded the coordinator patch that routes `forkSession`, `reloadSession`, and `popOutPane` through focused-pane command-palette handling as supported consumed no-ops for command sessions instead of leaving them unrecognized or falling through to unrelated routes.
+- Verification: coordinator validation passed `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui focused_pane_hotkey_mapper_routes_supported_command_palette_actions -- --nocapture` and `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_palette_app_modal_mapper_rejects_non_modal_hotkey_ids -- --nocapture`; cargo emitted existing warnings only. The progress-only worker also ran `git diff --check -- gpui/WORKSPACE_PARITY_PROGRESS.md` after the ledger append. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-05:43 Task slice 491
+
+<!--
+CDXC:GPUICommandTabKeyboardParity 2026-06-27-05:43:
+Slice 491 fixes the broad command-regression fixture for directional focus parity. Orphan stored command sessions must not fabricate rendered command groups or become keyboard focus targets; the orphan-only coverage now starts from the empty production command-pane constructor instead of the seeded test sample.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Fixed `command_groups_join_directional_focus_only_when_expanded_with_sessions` so its orphan stored-session case exercises a command pane with stored session metadata but no rendered command group, preserving the native rule that directional focus joins only live expanded command groups.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_groups_join_directional_focus_only_when_expanded_with_sessions -- --nocapture` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ -- --nocapture` passed with 207 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_ -- --nocapture` passed with 58 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_tab_ -- --nocapture` passed with 26 tests; `bunx vitest run sidebar/command-palette.test.ts gpui/sidebar/phase1-gxserver-runtime.test.ts` passed with 59 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md docs/gpui-workspace-area-missing-parity-phases.md docs/gpui-workspace-area-parity-requirements.md gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-05:53 Task slice 492
+
+<!--
+CDXC:GPUICommandDelayedSend 2026-06-27-05:53:
+Slice 492 tightens command Delayed Send runtime timer pruning after the broad command filter exposed another stale-membership edge. A timer is live only when its session id still has both a command-group tab reference and a stored command session row; stale root tab ids whose stored rows disappeared must prune without falling back to another command terminal.
+
+CDXC:GxserverRendererCommands 2026-06-27-05:53:
+Slice 492 also aligns GPUI gxserver renderer command-button actions with native CLI behavior. `runCommand` and `clickButton(kind:"command")` are selector-only requests that must resolve the saved HUD Action and use the existing Rust command-action bridge; renderer-owned command text, URLs, close-on-exit flags, cwd/env, paths, output, logs, tokens, and private payloads must not enter bridge payloads or renderer results.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to `G1u3b` for Rust command-pane delayed-send pruning and `G9181` for the TypeScript gxserver renderer command bridge. The coordinator reviewed both hunks, interrupted the bridge worker before duplicate integration work, and ran final scoped verification.
+- Changed `command_delayed_send_stale_runtime_timer_session_ids` so stale tab references without stored command-session rows are pruned like orphan stored rows, matching the live command-tab membership required by modal submissions and restore checkpoints.
+- Added GPUI renderer-command support for `runCommand` and `clickButton(kind:"command")` by resolving the command id against the trusted HUD command list and posting through the existing command-action bridge. The result stays bounded to `{ ok, accepted, action }`; launch metadata remains sourced from saved command definitions and Rust.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_delayed_send_validation_and_persistence_restores_live_timer_checkpoints -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ -- --nocapture` passed with 207 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed with 60 tests; and `git diff --check -- gpui/src/main.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md docs/gpui-workspace-area-missing-parity-phases.md docs/gpui-workspace-area-parity-requirements.md` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-06:06 Task slice 493
+
+<!--
+CDXC:GPUICommandPaneActions 2026-06-27-06:06:
+Slice 493 aligns GPUI command-run-end ownership with native's single current command-button mapping. Starting a newer same-command Action invalidates older tabs' command id ownership while preserving their local run id/status-file poller state, so stale selected tabs cannot receive `endSidebarCommandRun` cleanup and old idle stamps clear only local Working state.
+
+CDXC:GPUICommandPane 2026-06-27-06:06:
+Slice 493 also pins the TypeScript run-end bridge as command-id-only. Valid `endSidebarCommandRun` messages may carry unsafe renderer fields, but the Rust bridge payload must contain only version, fixed message type, and trimmed command id; command text, URLs, close-on-exit flags, cwd/env, paths, logs, output, status-file paths, run ids, tokens, and private payloads must not cross.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to Erdos the 2nd for Rust command Action ownership and Hypatia the 2nd for the TypeScript run-end bridge regression. The coordinator reviewed both patches, formatted Rust, and ran final verification.
+- Changed command Action run-start ownership so a newer run for the same command id clears `action_command_id` from older tabs without clearing their run id, status-file path, activity, or title. Run-end lookup now ignores those superseded tabs even if selected, while status-file refresh can still clear their local Working state without posting stale command-button completion feedback.
+- Added a bridge regression proving `endSidebarCommandRun` rebuilds the Rust payload from the trimmed command id only and drops unsafe renderer-owned launch/status/private fields.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ -- --nocapture` passed with 208 tests; `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed with 61 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed after formatting the worker hunk; and `git diff --check -- gpui/src/main.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md docs/gpui-workspace-area-missing-parity-phases.md docs/gpui-workspace-area-parity-requirements.md sidebar/command-palette.test.ts` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-06:10 Task slice 494
+
+<!--
+CDXC:GPUICommandPaneActions 2026-06-27-06:10:
+Slice 494 matches native `runNativeSidebarCommand` stale mapped-session cleanup for terminal Actions. If the existing mapped same-command GPUI tab is sleeping or orphaned, prune it before creating the replacement Action tab; keep running non-idle tabs alive, continue reusing idle running tabs, and leave title-only restored candidates for other command ids parked.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added `CommandPaneModel::prune_stale_existing_action_sessions_before_new_run(...)` and called it only after reuse fails and before allocating a new Action tab, matching native's `closeStaleCommandSession` behavior for no-longer-running exact command mappings.
+- Tightened the sleeping Action regression so the exact same-command sleeping tab is pruned, the unrelated title-match sleeping tab remains parked, and the fresh Action tab is runnable.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_action_session -- --nocapture` passed with 7 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ -- --nocapture` passed with 208 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md docs/gpui-workspace-area-missing-parity-phases.md docs/gpui-workspace-area-parity-requirements.md gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-06:21 Task slice 495
+
+<!--
+CDXC:GPUICommandPaneActions 2026-06-27-06:21:
+Slice 495 mirrors native Settings Action deletion cleanup. Deleting a saved Action clears the current command-to-session mapping before closing the mapped command tab, so mounted close-confirm survivors cannot keep command-button feedback, status-file polling, completion sound ownership, timers, or HUD command-session mapping for a deleted Action.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Added a model-level deleted-Action ownership handoff that resolves only the current mapped command tab, strips Action run/status/private ownership, and leaves unrelated Action tabs and title-only rows untouched.
+- Routed GPUI `deleteSidebarCommand` handling through local command-tab cleanup before sending the gxserver metadata mutation, reusing the existing command close, timer clearing, persistence, keep-awake, and sidebar projection refresh paths.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_deleted_action_takes_current_mapping_and_clears_private_run_state -- --nocapture` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_action_session -- --nocapture` passed with 7 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ -- --nocapture` passed with 209 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md docs/gpui-workspace-area-missing-parity-phases.md docs/gpui-workspace-area-parity-requirements.md gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-06:30 Task slice 496
+
+<!--
+CDXC:GPUICommandSessionHud 2026-06-27-06:30:
+Slice 496 aligns GPUI command-session HUD indicator status with native lifecycle semantics. Awake local command tabs export running, sleeping tabs export idle, and Action Attention no longer becomes HUD error; command-button success/error feedback remains separate from command-session indicator status.
+
+CDXC:GPUICommandPane 2026-06-27-06:30:
+The TypeScript bridge may forward command-session status only from sanitized local `G...` command-pane summaries whose status is already a valid Sidebar HUD status. It must not infer status from renderer activity, command text, paths, URLs, output, logs, titles, status files, or private status-adjacent fields.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to Raman the 2nd for Rust command-session HUD status projection and Cicero the 2nd for TypeScript bridge/test hardening. The coordinator reviewed both patches, fixed one stale Rust expectation, and ran final verification.
+- Changed GPUI command-pane session summaries so HUD `status` is lifecycle-style: awake local command tabs report `running`, sleeping command tabs report `idle`, and Attention stays tab/action chrome instead of becoming a HUD `error`.
+- Hardened the TS bridge to match only local `G...` command-pane rows with valid sanitized statuses, while dropping invalid status rows, non-G legacy rows, and private status-adjacent fields before HUD output.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_sidebar_session_sources_are_sanitized_for_hud_indicators -- --nocapture` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ -- --nocapture` passed with 209 tests; `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed with 61 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/src/main.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md docs/gpui-workspace-area-missing-parity-phases.md docs/gpui-workspace-area-parity-requirements.md sidebar/command-palette.test.ts` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-06:41 Task slice 497
+
+<!--
+CDXC:GPUICommandPaneActions 2026-06-27-06:41:
+Slice 497 mirrors native endSidebarCommandRun ownership cleanup. Ending a SidebarApp command run clears Action ownership and timers before requesting the mapped command tab close, so mounted close-confirm survivors cannot remain the current command id owner, keep private run/status-file state alive, or continue projecting HUD command-session mapping.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Generalized the mapped Action cleanup helper so command deletion and `endSidebarCommandRun` share native-style command-to-session ownership removal before terminal close.
+- Changed `close_gpui_sidebar_command_run` to strip Action ownership, clear delayed-send and close-after-done timers, dispatch the run-state-cleared event, and refresh keep-awake/sidebar projections before requesting a mounted command-tab close.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_action_close_takes_current_mapping_and_clears_private_run_state` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_` passed with 209 tests; `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed with 61 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/src/main.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md docs/gpui-workspace-area-missing-parity-phases.md docs/gpui-workspace-area-parity-requirements.md sidebar/command-palette.test.ts` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-06:43 Task slice 498
+
+<!--
+CDXC:GPUICommandPaneActions 2026-06-27-06:43:
+Slice 498 aligns two focused command-pane Action dispatch edges with native. Focused-pane Delayed Send over a command terminal is a native command-panel titlebar no-op, so GPUI consumes the hotkey/palette id without opening the timer modal; explicit clicked-tab and direct session-id Delayed Send routes remain available. Stale `runSidebarCommand` selectors also no-op like native, while existing unconfigured Actions still open Settings for repair.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to Russell the 2nd for Rust focused command-pane Delayed Send routing and Aristotle the 2nd for TypeScript `runSidebarCommand` stale-selector handling. The coordinator reviewed both patches and ran combined verification.
+- Changed focused command-pane `delayedSend` routing from a command-session modal action to a consumed focused-pane runtime no-op, matching native `handleNativeTerminalTitleBarAction` command-surface default behavior while preserving clicked command-tab and validated app-modal Delayed Send paths.
+- Changed GPUI `runSidebarCommand` handling so valid-shaped but stale command ids no-op instead of opening Settings, while saved but unconfigured terminal/browser Actions still open Settings like native.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui focused_pane_hotkey_mapper_routes_supported_command_palette_actions` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_` passed with 208 tests; `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed with 62 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/src/main.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md docs/gpui-workspace-area-missing-parity-phases.md docs/gpui-workspace-area-parity-requirements.md sidebar/command-palette.test.ts` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-06:51 Task slice 499
+
+<!--
+CDXC:GPUISidebarAutoSleep 2026-06-27-06:51:
+Slice 499 aligns GPUI Agent Auto Sleep command-pane owner protection with the sanitized local command-session boundary used by HUD projection. Only active local `G...` command-pane summaries with valid HUD statuses can keep an idle agent awake; stale legacy rows may still be slept and must not carry timer, command text, path, URL, output, token, or private status fields into policy ownership.
+-->
+
+- Updated `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to Harvey the 2nd for Rust command-pane parity review and Poincare the 2nd for TypeScript runtime/palette parity. The Rust worker found no safe source-backed mismatch to edit; the TypeScript worker implemented the auto-sleep owner-boundary fix, and the coordinator reviewed and verified the integrated patch.
+- Changed GPUI auto-sleep protection so active command-pane summaries are filtered through the same local `G...` session id and valid-status checks used by command-session HUD projection before they can protect a presentation session from sleeping.
+- Added a regression proving a stale active non-`G...` command-pane summary that matches an old presentation session id no longer protects that idle session, while the live local `G...` command-pane owner remains protected and sleep requests stay id-only.
+- Verification: `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed with 62 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_` passed with 208 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md sidebar/command-palette.test.ts sidebar/command-palette.tsx docs/gpui-workspace-area-missing-parity-phases.md docs/gpui-workspace-area-parity-requirements.md` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-06:59 Task slice 500
+
+<!--
+CDXC:GPUISidebarAutoSleep 2026-06-27-06:59:
+Slice 500 completes command-pane split-owner Auto Sleep parity. Native protects the selected owner of every visible command-panel split leaf, while HUD `isActive` remains first-responder focus; GPUI now exports a true-only sanitized `isPaneOwner` bit for those command-pane body owners and protects it only after local `G...` id and valid-status filtering.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to Bernoulli the 2nd for the Rust command-session summary export and Mencius the 2nd for the TypeScript runtime/test policy. The coordinator reviewed both patches, tightened the Rust bridge field to true-only, and ran combined verification.
+- Added Rust `isPaneOwner:true` projection for expanded command-pane split leaf owners without changing `isActive`, so unfocused split siblings can be protected from Auto Sleep without becoming HUD-active command sessions.
+- Updated the TypeScript bridge to normalize, compare, and use `isPaneOwner` for command-pane Auto Sleep protection while leaving HUD command-session indicators unchanged and still dropping stale non-`G...` or invalid-status rows.
+- Added regressions proving two split owners are exported/protected, only the responder-exact tab remains `isActive`, non-owner command-pane rows can sleep, and legacy command-pane rows still cannot protect sessions.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_sidebar_session_sources_are_sanitized_for_hud_indicators` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_` passed with 208 tests; `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed with 62 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/src/main.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md sidebar/command-palette.test.ts sidebar/command-palette.tsx docs/gpui-workspace-area-missing-parity-phases.md docs/gpui-workspace-area-parity-requirements.md` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-07:01 Task slice 501
+
+<!--
+CDXC:GPUISidebarAutoSleep 2026-06-27-07:01:
+Slice 501 removes the old HUD-focus fallback from GPUI command-pane Auto Sleep protection. Native protects visible command-panel pane-layout owners, not responder-focused tab metadata, so a local command-pane row with `isActive:true` but no `isPaneOwner:true` remains eligible to sleep.
+-->
+
+- Updated `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Changed command-pane Auto Sleep protection to use only sanitized `isPaneOwner:true` after local `G...` id and valid-status filtering, instead of also protecting HUD `isActive`.
+- Extended the auto-sleep regression so an active-only local command-pane row sleeps in presentation order, while true pane owners stay protected and stale legacy rows still cannot protect sessions.
+- Verification: `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed with 62 tests; and `git diff --check -- gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-07:14 Task slice 502
+
+<!--
+CDXC:GPUICommandPaneBridge 2026-06-27-07:14:
+Slice 502 aligns the Rust-to-SidebarApp command-pane bridge with native external command-session identity. Rust-owned command tabs keep numeric internal shell ids, but every SidebarApp/app-modal boundary must use `G{u64}` so the TypeScript bridge can reject legacy raw numeric, lowercase, malformed, or non-string rows before HUD matching and Auto Sleep policy.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to Kepler the 2nd for the Rust command-session external-id bridge and Wegener the 2nd for TypeScript bridge/test hardening. The coordinator reviewed both patches and kept Rust direct callback parsing scoped to Rust-generated `G{u64}` ids while preserving the broader native-shaped TypeScript `G...` acceptance boundary for sanitized SidebarApp summaries.
+- Changed Rust command-pane summaries and Rename/Delayed Send modal messages to emit `G...` command-session ids externally, and changed app-modal/direct command parsing to reject legacy numeric strings, lowercase ids, zero ids, malformed ids, stale tabs, missing ids, and numeric JSON values.
+- Hardened the TypeScript command-pane summary gate so raw numeric strings, lowercase ids, malformed ids, non-string ids, and invalid statuses are dropped before terminal Action HUD matching or command-pane Auto Sleep protection, even if they carry `isActive:true`, `isPaneOwner:true`, timer fields, or private renderer/status markers.
+- Verification: `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed with 62 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_` passed with 208 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --quiet --manifest-path gpui/Cargo.toml --bin ghostex-gpui app_modal_command_return_focus` passed with 6 tests; and `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-07:20 Task slice 503
+
+<!--
+CDXC:GPUICommandPaneFocusRestore 2026-06-27-07:20:
+Slice 503 investigated the command-pane focus-restore edge from `native/sidebar/local-first-close-source.test.ts`: native can restore a browser pane that lives inside the Agents workspace, but current GPUI `BrowserSurface` is the separate Browser workarea surface and is hidden outside Browser mode.
+
+CDXC:GPUICommandPaneFocusRestore 2026-06-27-07:23:
+Do not accept `BrowserSurface` as Agents-mode command-collapse focus until GPUI has an explicit rendered Browser-pane workspace target. A simple focus-enum restore would leave keyboard focus on an invisible Browser workarea surface instead of the visible Agents workspace.
+-->
+
+- Updated `gpui/WORKSPACE_PARITY_PROGRESS.md` only.
+- Investigated the native focus-restore edge where Commands hide from Agents restores a browser pane before terminal-only memory.
+- Left GPUI behavior unchanged because `BrowserSurface` currently renders only in Browser workarea mode; accepting it under Agents would create invisible shell focus rather than native-equivalent browser-pane focus.
+- No implementation or test files were changed in this turn, and no test pass is claimed for this ledger-only update.
+
+### 2026-06-27-07:28 Task slice 504
+
+<!--
+CDXC:GPUISidebarAutoSleep 2026-06-27-07:28:
+Slice 504 scopes GPUI command-pane Auto Sleep owner protection to the active project. Native command-panel layout is project-local, so a sanitized `G...` command-pane `isPaneOwner:true` row must protect only the active project's matching session and must not keep unrelated same-id sessions in other projects awake.
+-->
+
+- Updated `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping work to Ramanujan the 2nd for Rust command-pane parity review and Mendel the 2nd for TypeScript command-pane bridge implementation. The Rust worker found no safe bounded `gpui/src/main.rs` patch; the TypeScript worker implemented the active-project Auto Sleep owner scope.
+- Threaded `activeProjectId` into the GPUI Auto Sleep candidate selection and used it when protecting command-pane `isPaneOwner:true` summaries, so duplicate external `G...` ids in other projects remain eligible to sleep.
+- Extended the Auto Sleep regression with two projects sharing `G9commandPaneSplitOwner`, proving only the active project's command-pane owner is protected while the same id in the other project can sleep.
+- Verification: `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed with 62 tests; `git diff --check -- gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed before the ledger append. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-07:37 Task slice 505
+
+<!--
+CDXC:GPUICommandPaneVerification 2026-06-27-07:37:
+Slice 505 verifies two native-backed command-pane parity areas before reopening implementation: selected sleeping/mounting command placeholders already own visible command bodies without fallback, and the TypeScript command Action/HUD/Auto Sleep bridge already keeps command-pane completions on the Action path while filtering command surfaces out of sidebar attention/status groups.
+-->
+
+- Updated `gpui/WORKSPACE_PARITY_PROGRESS.md` only.
+- Delegated non-overlapping verification/implementation slices to `G5gxd` for `gpui/src/main.rs` command-pane sleeping/mounting placeholder lifecycle and `G2ei8` for `gpui/sidebar/phase1-gxserver-runtime.ts` plus `gpui/sidebar/phase1-gxserver-runtime.test.ts` command Action/HUD/Auto Sleep bridge policy. Both workers were authorized to patch only inside their owned files if a concrete native-backed mismatch was found; neither found a safe mismatch to edit.
+- Rust verification matched `native/sidebar/native-pending-terminal-owner-source.test.ts` and `native/sidebar/native-pane-tabs-sleeping-placeholder-source.test.ts` against the current GPUI command body owner, mount-slot, sleeping placeholder, and keyboard-wake helpers. The next Rust candidate is runtime Ghostty command host teardown/reattach across those mount-slot transitions, not the model owner rules themselves.
+- TypeScript verification matched `native/sidebar/session-attention-event-source.test.ts`, `native/sidebar/auto-sleep-source.test.ts`, and `native/sidebar/native-command-panel-local-state.test.ts` against current command-pane summary normalization, command-session HUD projection, Action run-end bridge, shared surface:`commands` sidebar-group filtering, and active-project Auto Sleep owner protection.
+- Worker verification: `bunx vitest run gpui/sidebar/phase1-gxserver-runtime.test.ts` passed with 48 tests; `bunx vitest run native/sidebar/session-attention-event-source.test.ts native/sidebar/auto-sleep-source.test.ts native/sidebar/native-command-panel-local-state.test.ts` passed with 9 tests. Coordinator verification passed `bunx vitest run gpui/sidebar/phase1-gxserver-runtime.test.ts native/sidebar/session-attention-event-source.test.ts native/sidebar/auto-sleep-source.test.ts native/sidebar/native-command-panel-local-state.test.ts --reporter=dot` with 57 tests, plus `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_sleeping -- --nocapture`, `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_terminal_mount_slots_include_only_expanded_visible_active_sessions -- --nocapture`, and `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui focused_sleeping_command_placeholder_keyboard_wake_targets_active_tab_only -- --nocapture`; cargo emitted existing warnings only.
+
+### 2026-06-27-07:42 Task slice 506
+
+<!--
+CDXC:GPUICommandTerminalParkedOwnerReattach 2026-06-27-07:42:
+Slice 506 aligns GPUI command-terminal Sleep/Wake ownership with the native command panel and the existing Agents parked-owner path. A sleeping command tab parks the exact command AppKit host and Ghostty surface owner before host detach, then wakes by moving those same owners back to the current command body slot without freeing/recreating Ghostty, retargeting across command groups/sessions, persisting runtime state, logging private command data, or falling back to titles/focus/launch-payload replay.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/src/terminal_native_view.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to `G7wb8` for command parked-owner helper/test behavior and `G5s3j` for command surface-detach plumbing. The coordinator integrated the overlapping results, stopped both workers, removed the duplicate command-specific rekey helper, and kept Commands on the shared typed native-host rekey path used by Agents.
+- Added process-local command parked-owner state keyed by the derived runtime id and exact `CommandTerminalBodyMountSlotId`. Sleep-driven `HideAndDetach` now parks only when the command tab is sleeping and the existing host/surface identities match; close, collapse, stale groups, focus filtering, missing owners, and collisions still take the normal detach/drop path.
+- Added wake reattach planning before command host reconciliation creates a replacement surface. Reattach requires the same group/session slot, matching runtime id, current command body bounds, no mounted host/surface/config-request collision, and a non-sleeping current tab; rejected plans leave the owner parked or pruned without fallback owners.
+- Generalized the app-owned native-host rekey helpers over the mount-slot id and added a test-only visibility guard for sentinel native handles so parked-owner unit tests can prove owner transfer without sending Objective-C show/hide to fake pointers. Production AppKit visibility behavior remains unchanged.
+- Added focused Rust regressions proving command Sleep parks the same host/surface without `ghostty_surface_free` or host destruction, Wake reattaches those same owners with updated bounds, and stale runtime/group/session or mounted-map collisions reject without duplicate Ghostty surfaces.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_terminal_parked_owner -- --nocapture` passed with 2 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ -- --nocapture` passed with 210 tests. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-08:03 Task slice 507
+
+<!--
+CDXC:GPUICommandPaneActions 2026-06-27-08:03:
+Slice 507 closes the mounted-reuse command Action execution gap against native `runNativeSidebarCommand`. Mounted idle Action reuse writes a staged wrapper to the exact current command surface and submits Return without startup payloads, while created or unmounted Action tabs receive an exact-slot launch payload for first mount. `runSidebarCommand` remains a selector-only bridge, so renderer-owned command text, cwd/env, paths, URLs, output, run ids, status paths, and close flags cannot be sanitized into trusted Action launches.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, `sidebar/command-palette.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to `G8qao` for Rust command Action runtime routing and `G0ucz` for the TypeScript Action selector bridge. The coordinator integrated both slices, stopped the worker panes once they continued editing during handoff, and completed verification from the main session.
+- Changed mounted default Action reuse to stage the private wrapper script under the existing temp-script convention, send only the short source/remove command into the exact current command Ghostty surface, and submit through the real Return-key helper. Created tabs and reused tabs without a mounted current surface still insert exact-slot launch payloads; failed mounted writes do not become hidden future launch payloads for that live shell.
+- Hardened GPUI `runSidebarCommand` so only selector-shaped objects with `type`, `commandId`, and optional validated `runMode` can reach the command-action bridge. Unknown/stale selectors remain no-ops, configured-empty Actions still open Settings, terminal defaults still force `closeTerminalOnExit:false`, Browser Actions omit terminal-only fields, and Command Palette source coverage pins the exact selector payload it emits.
+- Verification: `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed with 63 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui gpui_command_action_mounted_reuse_stages_script_without_launch_payload_fallback -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ -- --nocapture` passed with 211 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/src/main.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed before the ledger append. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-08:22 Task slice 508
+
+<!--
+CDXC:GPUICommandPalette 2026-06-27-08:22:
+Slice 508 wires shared command-palette `runGhostexHotkeyAction` rows through the GPUI sidebar runtime and CEF bridge as selector-only authority. Open Commands Panel must reach the existing Rust hotkey dispatcher as an open/focus route, not a modal fallback or F12 collapse toggle, and the bridge must reject renderer-owned sessions, paths, commands, URLs, launch metadata, cwd/env, raw payloads, and versioned command-action shapes.
+
+CDXC:GPUICommandPaneFocusRestore 2026-06-27-08:22:
+This slice also pins the hidden Commands restore edge from native Source/Browser/Kanban/Manage behavior. When project-editor companion focus is hidden, stale command focus or wrong-mode Agents focus must fall back to the active project-editor surface/companion target instead of switching to Agents; native Agents-mode Browser-pane restore remains blocked until GPUI has a rendered Browser-pane workspace focus target.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/src/cef/macos.rs`, `gpui/src/bin/ghostex_gpui_cef_helper.rs`, `gpui/src/cef/unsupported.rs`, `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, `sidebar/command-palette.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to `G9jbz` for Rust command-pane focus restore coverage and `G3vcs` for TypeScript command-palette route coverage. The coordinator slept both workers after completion, then integrated the runtime and CEF bridge that production needed for the TypeScript route to actually reach Rust.
+- Added `postGhostexHotkeyAction` to the GPUI sidebar runtime bridge and both CEF renderer allowlists, plus a typed `GhostexHotkeyAction` event and strict Rust parser. The parser accepts only `type:"runGhostexHotkeyAction"` with a bounded non-empty `actionId`, then feeds the existing Rust `runGhostexHotkeyAction` dispatcher so Settings, focused-pane actions, workarea switches, and Open Commands Panel keep the centralized hotkey behavior.
+- Added TypeScript regressions proving Open Commands Panel stays an authority-only `actionId` selector, rejects unsafe renderer fields, routes through the GPUI open/focus command-pane path, and leaves Settings on the app-modal allowlist. Added Rust coverage for the parser, CEF bridge tables, helper bridge table, and project-editor active-mode restore fallback when Commands hides with hidden companion/stale focus.
+- Verification: `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts` passed with 65 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui gpui_sidebar_ghostex_hotkey_action_parser_accepts_only_action_id -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui sidebar_bridge_allowlist_maps_only_fixed_functions_to_private_messages -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui-cef-helper helper_sidebar_bridge_allowlist_exposes_workspace_and_workarea_parity_functions -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_restore_keeps_active_project_editor_mode_when_companion_hidden -- --nocapture` passed with 1 test; and `git diff --check -- gpui/src/main.rs gpui/src/cef/macos.rs gpui/src/bin/ghostex_gpui_cef_helper.rs gpui/src/cef/unsupported.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts sidebar/command-palette.test.ts gpui/WORKSPACE_PARITY_PROGRESS.md` passed before the ledger append. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-08:42 Task slice 509
+
+<!--
+CDXC:GPUICommandPaneLayout 2026-06-27-08:42:
+Slice 509 makes the GPUI command-pane workspace reservation rules explicit against native TerminalWorkspaceView: no command sessions render only the main workspace, pinned reserves the full command-panel height, floating overlays the expanded panel while reserving only the plain collapsed strip footprint, and collapsed renders only the interactive collapsed strip.
+
+CDXC:GPUISidebarAutoSleep 2026-06-27-08:42:
+Command-pane pane-owner protection must share the HUD summary validity boundary. A malformed native-shaped `G...` command-pane row with `isPaneOwner:true` but invalid status remains eligible for Auto Sleep instead of keeping an old agent session awake.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to `G31ij` for Rust command-pane layout planning and `G79vo` for TypeScript command-pane summary filtering. The coordinator slept both worker panes after integrating their scoped edits.
+- Added a pure Rust command-pane workspace layout plan that preserves existing rendering IDs while making the native reservation modes testable. The renderer now consumes the plan for no-session, pinned, floating, and collapsed workspace composition, and the bottom-reservation renderer receives the planned strip height for both floating plain chrome and collapsed interactive strip.
+- Deduplicated TypeScript command-pane summary filtering into one helper shared by HUD indicators and Auto Sleep owner protection. Added a direct Auto Sleep regression proving an invalid-status `isPaneOwner:true` command-pane owner does not protect that session, while a valid pane owner still does.
+- Verification: `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts` passed with 51 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_workspace_layout_plan_matches_native_reservation_modes -- --nocapture` passed with 1 test; and `git diff --check -- gpui/src/main.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts` passed before the ledger append. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-08:53 Task slice 510
+
+<!--
+CDXC:GPUICommandPane 2026-06-27-08:53:
+Slice 510 extends native stale gxserver local-session cleanup to GPUI command-pane HUD projection. Command-pane `G...` summaries may drive the active project's Action indicators only while gxserver presentation still contains that session for the active project; authoritative snapshots and explicit removal deltas remove stale indicators without using command text, paths, titles, URLs, output, status files, or fallback inference.
+
+CDXC:GPUICommandSessionHud 2026-06-27-08:53:
+App-modal command-session hydration shares the same external boundary: legacy numeric, lowercase, malformed, non-string, and invalid-status command-pane rows are filtered before commandId/title matching so stale rows cannot shadow a valid canonical `G{u64}` row.
+-->
+
+- Updated `gpui/sidebar/phase1-gxserver-runtime.ts`, `gpui/sidebar/phase1-gxserver-runtime.test.ts`, `gpui/src/main.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to `G5now` for TypeScript presentation-aware HUD filtering and `G2zlq` for Rust app-modal HUD source filtering. The Rust worker landed the helper/test patch; the coordinator interrupted both workers before late overlapping edits, integrated the TS runtime/test change, and completed verification.
+- Scoped live Sidebar HUD command indicators to the active project's gxserver presentation when that presentation is available. Direct helper calls remain backward-compatible, while runtime HUD builds now pass `activeProjectId` and presentation so deleted command sessions stop projecting Action status, timers, and active state.
+- Added a websocket presentation regression proving non-removal session deltas keep command-pane HUD indicators and explicit `sessionRemoved` deltas drop them. The existing command timer/HUD test now bootstraps matching presentation rows so timer projection also exercises the stale-presentation gate.
+- Hardened the Rust app-modal command indicator helper so only canonical external `G{u64}` rows with valid HUD status participate in commandId/title matching. The focused Rust test proves stale legacy rows, invalid statuses, browser commands, and private/raw fields stay out of the emitted indicators.
+- Verification: `bun run test -- gpui/sidebar/phase1-gxserver-runtime.test.ts` passed with 52 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui app_modal_command_session_indicators_reject_invalid_sources_before_matching -- --nocapture` passed with 1 test; and `git diff --check -- gpui/src/main.rs gpui/sidebar/phase1-gxserver-runtime.ts gpui/sidebar/phase1-gxserver-runtime.test.ts` passed before the ledger append. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-09:05 Task slice 511
+
+<!--
+CDXC:GPUICommandTerminalParkedOwnerReattach 2026-06-27-09:05:
+Slice 511 extends command parked-owner parity from Sleep/Wake to native command-panel owner selection and collapse. Command HideAndDetach now parks exact host/Ghostty owners whenever the session still belongs to its command group, so inactive tabs, collapsed command panels, and Focus-hidden command tabs can reattach without freeing or recreating Ghostty, while close/removal/stale-group/session and mounted-owner collisions still drop.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to `G3doa` for command parked-owner policy helpers and `G30qx` for focused Rust regressions. The workers did not land a usable scoped diff before the coordinator integrated the behavior and test, and both panes were slept to avoid edit races during integration.
+- Changed command terminal parked-owner eligibility from sleeping-only to same command-group membership with a live session, matching native command-panel owner selection semantics where geometry visibility and owner retention are separate decisions.
+- Updated command HideAndDetach parking to keep the exact mounted command AppKit host and Ghostty surface when an inactive tab or collapsed/Focus-hidden command group detaches for layout ownership reasons, while preserving existing rejection for missing sessions, stale group ownership, runtime-id mismatch, missing mounted owners, and target collisions.
+- Added a macOS Rust regression proving tab selection parks without `ghostty_surface_free` or host destruction, reselecting reattaches the same host/surface with updated bounds, collapsing parks again, and expanding reattaches again without creating a second Ghostty surface.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_terminal_parked_owner_survives_owner_selection_and_collapse_without_recreate -- --nocapture` passed with 1 test; and `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_terminal_parked_owner -- --nocapture` passed with 3 tests. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-09:13 Task slice 512
+
+<!--
+CDXC:GPUICommandTerminalParkedOwnerReattach 2026-06-27-09:13:
+Slice 512 pins the close/removal half of command parked-owner parity. Parked command owners survive owner-selection and collapse detaches only while the command session remains in the group; a real session close/removal must prune and drop the parked host/surface before any later reattach plan can reuse it.
+
+CDXC:GPUITitlebarActions 2026-06-27-09:13:
+Slice 512 also updates the titlebar Actions parity ledger because workspace slices 489, 507, and 510 superseded the older Worker 12 note about missing command Action run-state/reuse/write-into-existing-terminal behavior.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/TITLEBAR_APP_MODAL_PARITY_PROGRESS.md`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated non-overlapping implementation slices to `G0sfu` for the Rust close/removal parked-owner regression and `G6u3g` for the titlebar Actions ledger cleanup. The Rust worker landed the focused test, the docs worker landed the scoped ledger update, and the coordinator slept both panes before formatting and verification.
+- Added a macOS Rust regression proving a parked inactive command tab is pruned after `CommandPaneModel::close_session` removes that exact command session. The test asserts the parked-owner map is empty, mounted host/surface maps stay empty, no reattach plan is produced, and the original Ghostty surface/native host are freed once rather than retained or recreated.
+- Updated the titlebar app-modal parity ledger to mark Worker 12's terminal Action run-state/reuse/write-into-existing-terminal limitation as superseded by later workspace parity slices, while retaining the caveat that end-to-end titlebar Actions behavior still needs runtime validation outside this slice.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_terminal_parked_owner_prunes_removed_command_session_before_reattach -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_terminal_parked_owner -- --nocapture` passed with 4 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ -- --nocapture` passed with 216 tests; and `git diff --check -- gpui/src/main.rs gpui/TITLEBAR_APP_MODAL_PARITY_PROGRESS.md gpui/WORKSPACE_PARITY_PROGRESS.md` passed before the ledger verification update. Cargo emitted existing warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-09:26 Task slice 513
+
+<!--
+CDXC:GPUITitlebarActions 2026-06-27-09:26:
+Slice 513 gives GPUI's native Rust titlebar Actions button the same click-time Debug rerun rule as the shared command palette. Close-on-exit terminal Actions rerun in Debug only after sanitized local run feedback says the previous run ended in error and no active run remains; sidebar bridge payloads with explicit `runMode` remain authoritative and bypass the titlebar-click resolver.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/TITLEBAR_APP_MODAL_PARITY_PROGRESS.md`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Delegated parallel implementation slices to `G0bze` for the Rust titlebar Action runtime state/review and `G4fim` for focused tests/ledger. The coordinator integrated the runtime patch, normalized Worker B's test coverage to the real helper surface, and kept the sidebar bridge direct path separate from titlebar/menu/index click resolution.
+- Added a process-local `sidebar_command_run_feedback_states` map keyed only by command id with active run ids plus coarse running/success/error state. The dispatch/clear methods update that sanitized mirror alongside the existing sidebar host messages without storing command text, URLs, cwd/env, paths, status-file paths, terminal output, logs, or shell-state data.
+- Routed titlebar left-click, right-click menu Action rows, and positional Action hotkeys through a titlebar-specific resolver before the shared runner. The resolver promotes only failed, inactive close-on-exit terminal Actions to Debug; normal terminal Actions, browser Actions, active/running feedback, success feedback, and missing feedback stay Default. Sidebar command-action payloads still call the shared runner directly so parsed `runMode:"debug"` and `runMode:"default"` stay authoritative.
+- Added focused Rust regression coverage for the sanitized titlebar feedback rule and explicit sidebar debug/default payload parsing.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui titlebar_action_click_run_mode_tracks_sanitized_feedback_without_payload_override -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui gpui_sidebar_command_action_parser_accepts_only_matching_action_target -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ -- --nocapture` passed with 216 tests; `git diff --check -- gpui/src/main.rs gpui/TITLEBAR_APP_MODAL_PARITY_PROGRESS.md gpui/WORKSPACE_PARITY_PROGRESS.md` passed. Cargo emitted existing native/dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-09:42 Task slice 514
+
+<!--
+CDXC:GPUICommandPaneFocusRestore 2026-06-27-09:42:
+Slice 514 integrates Browser-pane command restore parity. Command-pane collapse must restore the exact Browser workarea pane remembered before Commands took focus, reject stale pane ids, and keep legacy BrowserSurface shell state valid for older persisted layouts.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Coordinated parallel implementation slices: Worker A owned shell focus/runtime Browser-pane routing, Worker B owned pure regression coverage and ledger updates, and the coordinator resolved the runtime helper compatibility conflict before verification.
+- Added focused pure Rust coverage beside the command-pane restore tests for a Browser split where pane 2 owns the active Browser tab. The staged regression expects `previousNonCommandFocus: BrowserPane(2)` to survive command-pane shell-state restore and command-pane collapse restore as the exact Browser pane.
+- Added stale-id and compatibility assertions so `BrowserPane(99)` falls back through validation to the current valid Browser pane, while legacy `BrowserSurface` shell focus and previous focus continue restoring as valid Browser-mode state.
+- Updated the existing hidden-companion command-pane restore comment to remove the obsolete statement that GPUI cannot represent Browser pane focus; the remaining caveat is now limited to Agents-mode browser sessions because `WorkspaceModel` still models terminal sessions only.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_pane_restore_keeps_browser_pane_previous_focus_and_legacy_surface -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ -- --nocapture` passed with 217 tests; cargo emitted existing native/dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-09:57 Task slice 515
+
+<!--
+CDXC:GPUICommandAppModalSize 2026-06-27-09:57:
+Slice 515 locks GPUI command-pane compact app modals to native child-window sizing. Delayed Send must open fixed at 472x336 and Rename Session fixed at 570x480; the generic resizable app-modal minimum remains 520x360 only for ordinary resizable modals such as Settings.
+-->
+
+- Updated `gpui/src/main.rs` and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Coordinated parallel investigation/implementation panes: Worker A owned runtime modal policy evidence, Worker B owned focused regression coverage, and the coordinator integrated the runtime helper patch after stopping further overlapping edits in the dirty worktree.
+- Added modal-specific GPUI app-modal policy helpers so Delayed Send and Rename Session report non-resizable fixed content size with minimum size equal to their native window footprint.
+- Routed `open_gpui_app_modal_window` through the modal policy instead of hard-coding `is_resizable: true` and `520x360` for every app modal, fixing the Delayed Send clamp above its native 472x336 footprint.
+- Added focused Rust regression coverage proving Delayed Send and Rename Session stay fixed-size while Settings remains resizable with the generic minimum.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui app_modal_window_policy_matches_native_command_pane_modals -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ -- --nocapture` passed with 218 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo fmt --manifest-path gpui/Cargo.toml --check` passed; and `git diff --check -- gpui/src/main.rs gpui/WORKSPACE_PARITY_PROGRESS.md` passed before this ledger append. Cargo emitted existing native/dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-10:14 Task slice 516
+
+<!--
+CDXC:GPUICommandTerminalSettings 2026-06-27-10:14:
+Slice 516 pins command-terminal Ghostty settings parity to the current GhosttyKit boundary. Command-pane Ghostty surface requests apply the shared `terminalFontSize` as the only direct `ghostty_surface_config_s` field, while font family, theme, cursor, scrollback, clipboard, paste-preview, and mouse settings remain config-file-backed or runtime-only without fake live reload fallbacks.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/src/shared_settings.rs`, `gpui/src/terminal_ghostty_surface.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Coordinated parallel implementation panes: `G2m7l` owned the shared Settings contract/tests, `G70ez` owned the terminal-surface FFI request boundary, and the coordinator owned command-pane integration coverage plus final verification. Worker B landed the terminal-surface comment/test patch and focused test; Worker A landed the shared-settings comment/assertion patch after interruption, and the coordinator killed both panes before final formatting/testing to avoid edit races.
+- Documented the supported/deferred settings boundary in the shared Settings parser, the command-pane mapper, and the Ghostty surface request builder: `terminalFontSize` flows into prepared/recreated surface requests, config-file-backed settings stay in the bounded Ghostty config writer, and `terminalPastePreviewableImages` remains runtime-only.
+- Strengthened shared-settings tests so surface config ignores font family/theme/cursor/scrollback/clipboard/mouse/paste-preview keys except for normalized font size, while Ghostty config-file merging visibly writes cursor, scrollback, clipboard, copy-on-select, mouse, theme, font, and scrollbar settings and removes stale managed values.
+- Strengthened terminal-surface tests so both builder and setter updates change only the FFI `font_size` while leaving launch-payload pointers/counts empty. Added a command-pane regression proving command terminal surface requests map shared settings to font size only and do not leak config-file-backed values through launch/debug state.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 rustfmt --edition 2024 gpui/src/main.rs gpui/src/shared_settings.rs gpui/src/terminal_ghostty_surface.rs` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui terminal_config -- --nocapture` passed with 3 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_terminal_surface_config -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui terminal_ghostty_surface_config_reads_only_normalized_font_size -- --nocapture` passed with 1 test; `RUSTUP_TOOLCHAIN=1.95.0 cargo test --manifest-path gpui/Cargo.toml --bin ghostex-gpui command_ -- --nocapture` passed with 219 tests; `RUSTUP_TOOLCHAIN=1.95.0 rustfmt --edition 2024 --check gpui/src/main.rs gpui/src/shared_settings.rs gpui/src/terminal_ghostty_surface.rs` passed; and `git diff --check -- gpui/src/main.rs gpui/src/shared_settings.rs gpui/src/terminal_ghostty_surface.rs gpui/WORKSPACE_PARITY_PROGRESS.md` passed before this ledger append. Cargo emitted existing native/dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.
+
+### 2026-06-27-10:31 Task slice 517
+
+<!--
+CDXC:GPUITerminalImagePaste 2026-06-27-10:31:
+Slice 517 integrates GPUI terminal paste-preview parity for command-pane and Agents Ghostty surfaces. Direct paste and runtime clipboard reads must honor the shared `terminalPastePreviewableImages` setting: disabled preserves explicit-string-only behavior, enabled converts only validated local image file references or raw clipboard image bytes into numbered Markdown references without logging clipboard content or synthesizing non-image paths.
+-->
+
+- Updated `gpui/src/main.rs`, `gpui/src/shared_settings.rs`, and `gpui/WORKSPACE_PARITY_PROGRESS.md`.
+- Coordinated two initially scoped panes (`G7tl9` for the shared Settings accessor and `G4aqc` for helper/test exploration). The coordinator completed runtime integration, formatting, verification, and pane cleanup after stopping further overlapping helper edits.
+- Added `SharedSidebarSettingsSnapshot::terminal_paste_previewable_images()` with strict boolean parsing and default-on behavior for the runtime-only image paste setting.
+- Extended terminal clipboard normalization so preview-enabled paste converts external image file paths, string file paths, `file://` image references, and raw `ClipboardEntry::Image` bytes into numbered `[Image #N](path)` Markdown while preserving disabled preview as explicit-string-only and avoiding `ClipboardItem::text` path synthesis.
+- Wired direct focused terminal paste plus Agents and command-pane Ghostty runtime clipboard reads through the preview-aware helper, still targeting only exact focused/mounted surfaces or owner-authorized runtime requests.
+- Verification: `RUSTUP_TOOLCHAIN=1.95.0 rustfmt --edition 2024 gpui/src/main.rs gpui/src/shared_settings.rs` passed; `RUSTUP_TOOLCHAIN=1.95.0 cargo test terminal_clipboard` from `gpui/` passed with 7 tests; `RUSTUP_TOOLCHAIN=1.95.0 cargo test terminal_paste_previewable_images` from `gpui/` passed with 3 tests; and `RUSTUP_TOOLCHAIN=1.95.0 cargo test command_runtime_clipboard_handoff` from `gpui/` passed with 1 test. Cargo emitted existing native/dead-code warnings only. No app launch/restart, browser automation, or `bun run start` was run.

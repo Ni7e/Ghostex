@@ -76,6 +76,7 @@ bundled_cli_skill_assets=(
 	ghostex-agent-orchestration
 	ghostex-generate-title
 	ghostex-manage-beads
+	ghostex-move-codex-session
 )
 
 validate_completion_sound_assets() {
@@ -422,6 +423,7 @@ done
 
 # CDXC:GPUISettingsCliInstall 2026-06-24-12:56:
 # GPUI Settings CLI repair may only link public wrappers to app-owned bundled resources. Stage the Node CLI module, public ghostex/gx launchers, and bundled Ghostex skills under Contents/Resources/CLI so packaged repairs and fixed `ghostex ... install-skill` actions do not depend on a source checkout.
+# CDXC:CodexSessionMove 2026-06-26-13:47: The GPUI app bundle must carry `$ghostex-move-codex-session` with the other CLI skills so `ghostex move-codex-session install-skill` works from installed builds.
 rm -rf "$CLI_DIR"
 mkdir -p "$CLI_DIR/skills"
 install -m 0644 "$REPO_ROOT/scripts/ghostex-cli.mjs" "$CLI_DIR/ghostex-cli.mjs"

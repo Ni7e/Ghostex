@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     ffi::{CStr, CString, c_char, c_int, c_void},
     fmt,
     mem::{self, ManuallyDrop},
@@ -45,7 +45,10 @@ CDXC:GPUITerminalGhosttyClose 2026-06-23-04:49:
 Running Ghostty close parity must ask the embedded surface to close and wait for the runtime close callback before shell-tab removal. Each surface owner passes a process-memory close token as surface userdata, keeps the AppKit NSView available only through `platform.macos.nsview`, and records only confirmation-needed or confirmed-close state without logging, persistence, runtime ids, raw paths, command text, environment, stdout/stderr, tty names, process ids, or terminal content.
 
 CDXC:GPUICommandTerminalSurface 2026-06-23-05:03:
-Running Ghostty surface ownership is generic over a typed body mount slot so command-pane terminals can use the same App-owned NSView and GhosttyKit surface pipeline without entering Agents workspace/startup maps. Command owners use command group/session ids, empty launch requests for now, no title/status/path parsing, no logs, no persistence, and no input routing changes.
+Running Ghostty surface ownership is generic over a typed body mount slot so command-pane terminals can use the same App-owned NSView and GhosttyKit surface pipeline without entering Agents workspace/startup maps. Command owners use command group/session ids, explicit launch-payload sources only, no title/status/path parsing, no logs, no persistence, and no input routing changes.
+
+CDXC:GPUICommandTerminalLaunchPayload 2026-06-27-01:25:
+Plain command terminals may carry only the active project cwd supplied by the app's exact-slot command launch source, while Action terminals may carry their separate command payload. The Ghostty surface owner must remain ignorant of titles, shell state, terminal content, fallback cwd inference, and persisted project paths.
 
 CDXC:GPUITerminalProcessExit 2026-06-23-05:30:
 Mounted Running Agents and command terminals need a runtime-only process-exited query that returns only a redacted boolean. Callers that only need exit state must not use the richer metadata snapshot because that would unnecessarily cross the tty/pid FFI boundary and increase the chance of exposing raw terminal/process details.
@@ -67,6 +70,12 @@ Slice 237 binds GhosttyKit's real `ghostty_surface_needs_confirm_quit` query so 
 
 CDXC:GPUITerminalNativeKeyBridge 2026-06-24-20:58:
 Mounted GPUI terminal host NSViews own native AppKit key events because GPUI's root `KeyDownEvent` drops the macOS native keycode Ghostty needs for Return, Backspace, arrows, modifiers, and bindings. Register only the exact host-view to Ghostty-surface pairing while a real surface is mounted, keep the registry runtime-only, and never store typed text beyond the synchronous FFI call.
+
+CDXC:GPUITerminalFileDropInsertion 2026-06-27-03:34:
+Terminal file drops are transient text insertion to the exact mounted AppKit host view registered for native key forwarding. Dispatch the borrowed bytes only through that matched Ghostty surface, reject null, unregistered, or empty input, and do not add focused-surface fallback routing, logging, persistence, overlays, or hit-test routing.
+
+CDXC:GPUITerminalNativeImeBridge 2026-06-27-03:46:
+AppKit IME committed text, marked preedit text, and candidate-window geometry must route only through the exact mounted terminal host view registered for Ghostty native input, including command-pane terminals. Borrow callback bytes only for the synchronous Ghostty call, reject empty committed text, allow empty preedit to clear via the null/zero Ghostty convention, and do not store raw IME text or fall back to focused surfaces.
 */
 
 #[cfg(target_os = "macos")]
@@ -136,6 +145,75 @@ pub(crate) fn send_native_key_event_for_view(
         return false;
     };
     unsafe { (target.functions.surface_key)(target.surface as *mut c_void, event) }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn send_native_dropped_text_for_view(native_view: *mut c_void, bytes: &[u8]) -> bool {
+    send_native_surface_text_for_view(native_view, bytes)
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn send_native_committed_text_for_view(native_view: *mut c_void, bytes: &[u8]) -> bool {
+    send_native_surface_text_for_view(native_view, bytes)
+}
+
+#[cfg(target_os = "macos")]
+fn send_native_surface_text_for_view(native_view: *mut c_void, bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+    let Some(target) = native_key_target_for_view(native_view) else {
+        return false;
+    };
+    unsafe {
+        (target.functions.surface_text)(
+            target.surface as *mut c_void,
+            bytes.as_ptr() as *const c_char,
+            bytes.len(),
+        );
+    }
+    true
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn set_native_preedit_text_for_view(native_view: *mut c_void, bytes: &[u8]) -> bool {
+    let Some(target) = native_key_target_for_view(native_view) else {
+        return false;
+    };
+    unsafe {
+        (target.functions.surface_preedit)(
+            target.surface as *mut c_void,
+            ghostty_surface_preedit_ptr(bytes),
+            bytes.len(),
+        );
+    }
+    true
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn native_ime_point_for_view(
+    native_view: *mut c_void,
+) -> Option<GhosttySurfaceImePoint> {
+    let target = native_key_target_for_view(native_view)?;
+    let mut x = 0.0;
+    let mut y = 0.0;
+    let mut width = 0.0;
+    let mut height = 0.0;
+    unsafe {
+        (target.functions.surface_ime_point)(
+            target.surface as *mut c_void,
+            &mut x,
+            &mut y,
+            &mut width,
+            &mut height,
+        );
+    }
+    Some(GhosttySurfaceImePoint {
+        x,
+        y,
+        width,
+        height,
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -863,8 +941,8 @@ impl GhosttySurfaceConfigRequest {
 
     fn apply_base_to_ffi_config(&self, config: &mut ffi::ghostty_surface_config_s) {
         /*
-        CDXC:GPUITerminalSettings 2026-06-24-11:27:
-        Embedded Ghostty surface requests keep typography settings separate from launch payload privacy fields. A `font_size` of 0.0 remains the unmanaged Ghostty default for generic callers, while GPUI-owned request builders attach the shared Settings `terminalFontSize` value before creating Agents, command, or startup surfaces; live surface reload is not claimed here.
+        CDXC:GPUITerminalSettings 2026-06-27-10:10:
+        Embedded Ghostty surface requests can carry only the GhosttyKit-supported live/recreate FFI typography field, `font_size`; config-file-backed settings such as font family, theme, cursor, scrollback, clipboard, and mouse are intentionally not represented in `ghostty_surface_config_s`. A `font_size` of 0.0 remains the unmanaged Ghostty default for generic callers, while GPUI-owned request builders attach the shared Settings `terminalFontSize` value before creating Agents, command, or startup surfaces; live surface reload is not claimed here.
         */
         let nsview = self.nsview.as_ptr();
 
@@ -1171,11 +1249,11 @@ impl Drop for GhosttyAppOwner {
 }
 
 /*
-CDXC:GPUITerminalClipboard 2026-06-23-12:11:
-Ghostty runtime clipboard callbacks must never touch GPUI App clipboard APIs directly. The Ghostty runtime config passes app-level callback userdata plus opaque request state but no surface identity, while completion requires a concrete `ghostty_surface_t`; binding requests to whichever GPUI surface is focused during a later drain could complete a non-focused terminal's clipboard request through the wrong surface. Keep these callbacks installed but disabled until Ghostty or GPUI exposes a surface-scoped app-thread clipboard handoff; selection clipboard also stays unsupported because GPUI exposes no cross-platform selection path here.
+CDXC:GPUITerminalClipboard 2026-06-27-04:10:
+Ghostty runtime clipboard callbacks must never touch GPUI App clipboard APIs directly. Embedded Ghostty passes surface userdata to clipboard callbacks, so GPUI may accept only registered surface close tokens with mounted surfaces, enqueue owner-local standard-clipboard operations, and let the app-thread drain perform explicit clipboard access for the exact Agents or command surface owner.
 
-CDXC:GPUITerminalClipboard 2026-06-23-14:23:
-Runtime clipboard stays blocked until a surface-scoped app-thread handoff proves the exact mounted surface that originated the Ghostty request. App-level userdata, non-null request state, or "some terminal is focused" are not requester identity and must not authorize GPUI clipboard reads or writes.
+CDXC:GPUITerminalClipboard 2026-06-27-04:10:
+The low-level Ghostty clipboard path is surface-scoped only. Runtime app userdata, null request state, selection clipboard requests, missing `text/plain` write payloads, or focused-surface inference must not authorize clipboard access. Initial reads complete as unconfirmed, confirm callbacks borrow the original content pointer only for synchronous completion, and callbacks must not log, persist, or retain raw clipboard diagnostics beyond the owner-local queue.
 */
 const GHOSTTY_RUNTIME_SUPPORTS_SELECTION_CLIPBOARD: bool = false;
 const GHOSTTY_RUNTIME_CLIPBOARD_TEXT_PLAIN_MIME: &[u8] = b"text/plain";
@@ -1215,35 +1293,64 @@ unsafe extern "C" fn ghostty_runtime_action_cb(
 }
 
 /*
-CDXC:GPUITerminalClipboard 2026-06-23-12:11:
-Runtime callbacks intentionally return false or ignore pointer payloads. Do not cast app-level runtime userdata to a surface close token, synthesize a focused-surface fallback, store raw clipboard bytes in runtime state, or log/persist clipboard data from this FFI path.
-
-CDXC:GPUITerminalClipboard 2026-06-23-14:23:
-These callbacks must stay no-op/false gates even when userdata resembles a ready app state or a surface token. Regression coverage asserts that callback invocations do not enqueue owner-local operations, read or write GPUI clipboard closures, complete requests, or retain raw clipboard payloads.
+CDXC:GPUITerminalClipboard 2026-06-27-04:10:
+Ghostty's embedded runtime calls clipboard callbacks with `SurfaceUD`, while wakeup/action still use app-level runtime userdata. Validate the pointer against registered surface tokens before casting, enqueue only standard reads and explicit `text/plain` standard writes, complete initial reads as unconfirmed so Ghostty paste protection can ask back through `confirm_read_clipboard_cb`, and mirror native Ghostex by confirming the borrowed callback content synchronously without storing or logging it.
 */
 unsafe extern "C" fn ghostty_runtime_read_clipboard_cb(
-    _userdata: *mut c_void,
-    _clipboard: ffi::ghostty_clipboard_e,
-    _state: *mut c_void,
+    userdata: *mut c_void,
+    clipboard: ffi::ghostty_clipboard_e,
+    state: *mut c_void,
 ) -> bool {
-    false
+    if clipboard != ffi::GHOSTTY_CLIPBOARD_STANDARD || state.is_null() {
+        return false;
+    }
+    let Some(token) = registered_surface_close_token_from_userdata(userdata) else {
+        return false;
+    };
+    unsafe { token.as_ref().enqueue_runtime_clipboard_read(state) }
 }
 
 unsafe extern "C" fn ghostty_runtime_confirm_read_clipboard_cb(
-    _userdata: *mut c_void,
-    _content: *const c_char,
-    _state: *mut c_void,
-    _request: ffi::ghostty_clipboard_request_e,
+    userdata: *mut c_void,
+    content: *const c_char,
+    state: *mut c_void,
+    request: ffi::ghostty_clipboard_request_e,
 ) {
+    if content.is_null()
+        || state.is_null()
+        || !runtime_clipboard_confirm_read_request_supported(request)
+    {
+        return;
+    }
+    let Some(token) = registered_surface_close_token_from_userdata(userdata) else {
+        return;
+    };
+    unsafe {
+        token
+            .as_ref()
+            .complete_runtime_clipboard_request(content, state, true);
+    }
 }
 
 unsafe extern "C" fn ghostty_runtime_write_clipboard_cb(
-    _userdata: *mut c_void,
-    _clipboard: ffi::ghostty_clipboard_e,
-    _content: *const ffi::ghostty_clipboard_content_s,
-    _len: usize,
+    userdata: *mut c_void,
+    clipboard: ffi::ghostty_clipboard_e,
+    content: *const ffi::ghostty_clipboard_content_s,
+    len: usize,
     _confirm: bool,
 ) {
+    if clipboard != ffi::GHOSTTY_CLIPBOARD_STANDARD {
+        return;
+    }
+    let Some(token) = registered_surface_close_token_from_userdata(userdata) else {
+        return;
+    };
+    let Some(text) = (unsafe { runtime_clipboard_text_plain_content(content, len) }) else {
+        return;
+    };
+    unsafe {
+        token.as_ref().enqueue_runtime_clipboard_write(text);
+    }
 }
 
 const GHOSTTY_SURFACE_CLOSE_STATE_NONE: u8 = 0;
@@ -1251,8 +1358,8 @@ const GHOSTTY_SURFACE_CLOSE_STATE_CONFIRMATION_NEEDED: u8 = 1;
 const GHOSTTY_SURFACE_CLOSE_STATE_CONFIRMED: u8 = 2;
 
 /*
-CDXC:GPUITerminalClipboard 2026-06-23-14:23:
-Owner-local clipboard operations are denial/drain scaffolding only. A denied drain must complete pending reads with empty data and drop writes without invoking clipboard closures; an allowed drain must not be wired to focused-surface fallback routing unless a future surface-scoped requester identity is explicit.
+CDXC:GPUITerminalClipboard 2026-06-27-04:10:
+Owner-local clipboard operations are the only bridge from Ghostty callbacks to GPUI clipboard APIs. A denied drain completes pending reads with empty data and drops writes without invoking clipboard closures; an allowed drain may read/write only for the exact mounted owner that holds this token, never through focus, app-level userdata, logs, persistence, or selection clipboard routing.
 */
 enum GhosttyRuntimeClipboardOperation {
     ReadStandard { state: *mut c_void },
@@ -1268,6 +1375,12 @@ struct GhosttySurfaceCloseToken {
 }
 
 impl GhosttySurfaceCloseToken {
+    fn boxed(functions: GhosttyKitFunctionTable) -> Box<Self> {
+        let token = Box::new(Self::new(functions));
+        token.register_surface_userdata();
+        token
+    }
+
     fn new(functions: GhosttyKitFunctionTable) -> Self {
         Self {
             close_state: AtomicU8::new(GHOSTTY_SURFACE_CLOSE_STATE_NONE),
@@ -1279,6 +1392,22 @@ impl GhosttySurfaceCloseToken {
 
     fn as_userdata(&self) -> *mut c_void {
         self as *const GhosttySurfaceCloseToken as *mut c_void
+    }
+
+    fn userdata_key(&self) -> usize {
+        self.as_userdata() as usize
+    }
+
+    fn register_surface_userdata(&self) {
+        if let Ok(mut tokens) = ghostty_surface_close_token_registry().lock() {
+            tokens.insert(self.userdata_key());
+        }
+    }
+
+    fn unregister_surface_userdata(&self) {
+        if let Ok(mut tokens) = ghostty_surface_close_token_registry().lock() {
+            tokens.remove(&self.userdata_key());
+        }
     }
 
     fn set_surface(&self, surface: ffi::ghostty_surface_t) {
@@ -1355,7 +1484,7 @@ impl GhosttySurfaceCloseToken {
                 self.complete_runtime_clipboard_request(
                     empty_runtime_clipboard_c_string(),
                     state,
-                    true,
+                    false,
                 );
             }
         }
@@ -1373,7 +1502,7 @@ impl GhosttySurfaceCloseToken {
         let data = text
             .as_ref()
             .map_or_else(empty_runtime_clipboard_c_string, |text| text.as_ptr());
-        self.complete_runtime_clipboard_request(data, state, true);
+        self.complete_runtime_clipboard_request(data, state, false);
     }
 
     fn complete_runtime_clipboard_request(
@@ -1431,8 +1560,37 @@ impl GhosttySurfaceCloseToken {
     }
 }
 
+impl Drop for GhosttySurfaceCloseToken {
+    fn drop(&mut self) {
+        self.unregister_surface_userdata();
+    }
+}
+
+fn ghostty_surface_close_token_registry() -> &'static Mutex<HashSet<usize>> {
+    static TOKENS: OnceLock<Mutex<HashSet<usize>>> = OnceLock::new();
+    TOKENS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn registered_surface_close_token_from_userdata(
+    userdata: *mut c_void,
+) -> Option<NonNull<GhosttySurfaceCloseToken>> {
+    let token = NonNull::new(userdata as *mut GhosttySurfaceCloseToken)?;
+    let is_registered = ghostty_surface_close_token_registry()
+        .lock()
+        .map(|tokens| tokens.contains(&(userdata as usize)))
+        .unwrap_or(false);
+    if is_registered { Some(token) } else { None }
+}
+
 fn empty_runtime_clipboard_c_string() -> *const c_char {
     GHOSTTY_RUNTIME_EMPTY_CLIPBOARD_C_STRING.as_ptr().cast()
+}
+
+fn runtime_clipboard_confirm_read_request_supported(
+    request: ffi::ghostty_clipboard_request_e,
+) -> bool {
+    request == ffi::GHOSTTY_CLIPBOARD_REQUEST_PASTE
+        || request == ffi::GHOSTTY_CLIPBOARD_REQUEST_OSC_52_READ
 }
 
 unsafe fn runtime_clipboard_text_plain_content(
@@ -1466,7 +1624,11 @@ unsafe extern "C" fn ghostty_runtime_close_surface_cb(
     userdata: *mut c_void,
     confirmation_needed: bool,
 ) {
-    let Some(token) = NonNull::new(userdata as *mut GhosttySurfaceCloseToken) else {
+    /*
+    CDXC:GPUITerminalGhosttyClose 2026-06-27-04:25:
+    Ghostty close callbacks use the same surface userdata channel as clipboard callbacks. Validate the pointer against registered surface tokens before mutating owner-local close state so app-level runtime userdata and stale pointers cannot be treated as terminal owners.
+    */
+    let Some(token) = registered_surface_close_token_from_userdata(userdata) else {
         return;
     };
     unsafe {
@@ -1645,7 +1807,7 @@ where
         runtime_session_id: AgentsTerminalRuntimeSessionId,
         request: &GhosttySurfaceConfigRequest,
     ) -> Result<Self, GhosttySurfaceRuntimeError> {
-        let close_token = Box::new(GhosttySurfaceCloseToken::new(app.functions));
+        let close_token = GhosttySurfaceCloseToken::boxed(app.functions);
         let (surface, functions) =
             create_ghostty_surface_from_request(app, request, close_token.as_userdata())?;
         close_token.set_surface(surface.as_ptr());
@@ -1949,7 +2111,7 @@ impl StartupGhosttySurfaceOwner {
         runtime_session_id: AgentsTerminalRuntimeSessionId,
         request: &GhosttySurfaceConfigRequest,
     ) -> Result<Self, GhosttySurfaceRuntimeError> {
-        let close_token = Box::new(GhosttySurfaceCloseToken::new(app.functions));
+        let close_token = GhosttySurfaceCloseToken::boxed(app.functions);
         let (surface, functions) =
             create_ghostty_surface_from_request(app, request, close_token.as_userdata())?;
         close_token.set_surface(surface.as_ptr());
@@ -1999,8 +2161,8 @@ impl StartupGhosttySurfaceOwner {
         CDXC:GPUITerminalGhosttyClose 2026-06-23-04:49:
         The surface userdata is the owner-held close token, so Ready handoff must move that token with the raw Ghostty surface. Replacing it would leave the embedded close callback pointing at stale process memory.
 
-        CDXC:GPUITerminalClipboard 2026-06-23-12:11:
-        The surface userdata may carry future surface-scoped runtime clipboard scaffold in addition to close state, so Ready handoff must still move the token with the Ghostty surface. Current runtime clipboard callbacks remain disabled because app-level callback userdata does not prove which surface requested clipboard access.
+        CDXC:GPUITerminalClipboard 2026-06-27-04:10:
+        The surface userdata carries the registered close/clipboard token, so Ready handoff must move that token with the Ghostty surface. Clipboard callbacks can then keep enqueueing owner-local operations for the promoted Running owner without recreating the process, using focus, or falling back to app-level runtime userdata.
         */
         let startup_owner = ManuallyDrop::new(self);
         let close_token = unsafe { ptr::read(&startup_owner.close_token) };
@@ -2069,1675 +2231,4 @@ fn create_ghostty_surface_from_request(
     let surface =
         NonNull::new(surface).ok_or(GhosttySurfaceRuntimeError::SurfaceCreateReturnedNull)?;
     Ok((surface, functions))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::{
-        ffi::{CStr, CString},
-        slice,
-        sync::Mutex,
-    };
-
-    const FAKE_CONFIG: usize = 0x1000;
-    const FAKE_APP: usize = 0x2000;
-    const FAKE_SURFACE: usize = 0x3000;
-    const FAKE_NSVIEW: usize = 0x4000;
-    const TEST_LAUNCH_WORKING_DIRECTORY: &str = "runtime-working-directory";
-    const TEST_LAUNCH_COMMAND: &str = "runtime-command";
-    const TEST_LAUNCH_INITIAL_INPUT: &str = "runtime-initial-input";
-    const TEST_LAUNCH_ENV_KEY_A: &str = "RUNTIME_ENV_A";
-    const TEST_LAUNCH_ENV_VALUE_A: &str = "runtime-value-a";
-    const TEST_LAUNCH_ENV_KEY_B: &str = "RUNTIME_ENV_B";
-    const TEST_LAUNCH_ENV_VALUE_B: &str = "runtime-value-b";
-    const TEST_TTY_NAME: &str = "/dev/ttys127-private";
-    const TEST_FOREGROUND_PROCESS_ID: u64 = 424_242;
-
-    #[derive(Default, Debug, PartialEq)]
-    struct FakeGhosttyState {
-        calls: Vec<&'static str>,
-        next_init_result: c_int,
-        config_new_returns_null: bool,
-        app_new_returns_null: bool,
-        surface_new_returns_null: bool,
-        last_runtime_userdata: usize,
-        last_surface_config: Option<CapturedSurfaceConfig>,
-        last_launch_inspection: Option<CapturedLaunchInspection>,
-        last_content_scale: Option<(f64, f64)>,
-        last_size: Option<(u32, u32)>,
-        last_app_focus: Option<bool>,
-        last_surface_focus: Option<bool>,
-        app_focus_calls: Vec<bool>,
-        surface_focus_calls: Vec<bool>,
-        needs_confirm_quit: bool,
-        process_exited: bool,
-        foreground_pid: u64,
-        tty_name: Option<&'static str>,
-        tty_string_free_count: usize,
-        surface_request_close_count: usize,
-        surface_complete_clipboard_request_count: usize,
-        last_completed_clipboard_data_present: Option<bool>,
-        last_completed_clipboard_data_empty: Option<bool>,
-        last_completed_clipboard_state_present: Option<bool>,
-        last_completed_clipboard_confirmed: Option<bool>,
-        key_translation_mods_return: ffi::ghostty_input_mods_e,
-        key_event_return: bool,
-        key_binding_return: bool,
-        key_binding_flags_return: ffi::ghostty_binding_flags_e,
-        last_key_translation_mods: Option<ffi::ghostty_input_mods_e>,
-        last_key_action: Option<ffi::ghostty_input_action_e>,
-        last_key_mods: Option<ffi::ghostty_input_mods_e>,
-        last_key_text_present: Option<bool>,
-        last_key_composing: Option<bool>,
-        surface_key_count: usize,
-        surface_key_is_binding_count: usize,
-        last_text_len: Option<usize>,
-        last_text_ptr_present: Option<bool>,
-        surface_text_count: usize,
-        last_preedit_len: Option<usize>,
-        last_preedit_ptr_present: Option<bool>,
-        surface_preedit_count: usize,
-        mouse_captured_return: bool,
-        mouse_button_return: bool,
-        last_mouse_button: Option<(
-            ffi::ghostty_input_mouse_state_e,
-            ffi::ghostty_input_mouse_button_e,
-            ffi::ghostty_input_mods_e,
-        )>,
-        last_mouse_pos: Option<(f64, f64, ffi::ghostty_input_mods_e)>,
-        last_mouse_scroll: Option<(f64, f64, ffi::ghostty_input_scroll_mods_t)>,
-        last_mouse_pressure: Option<(u32, f64)>,
-        ime_point_return: (f64, f64, f64, f64),
-    }
-
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    struct CapturedSurfaceConfig {
-        platform_tag: ffi::ghostty_platform_e,
-        nsview: usize,
-        userdata: usize,
-        scale_factor: f64,
-        font_size: f32,
-        working_directory: usize,
-        command: usize,
-        env_vars: usize,
-        env_var_count: usize,
-        initial_input: usize,
-        wait_after_command: bool,
-        context: ffi::ghostty_surface_context_e,
-    }
-
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    struct CapturedLaunchInspection {
-        working_directory_present: bool,
-        working_directory_matches_expected: bool,
-        command_present: bool,
-        command_matches_expected: bool,
-        env_vars_present: bool,
-        env_var_count: usize,
-        env_vars_match_expected: bool,
-        initial_input_present: bool,
-        initial_input_matches_expected: bool,
-        wait_after_command: bool,
-    }
-
-    static FAKE_GHOSTTY_STATE: OnceLock<Mutex<FakeGhosttyState>> = OnceLock::new();
-    static FAKE_GHOSTTY_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn fake_state() -> &'static Mutex<FakeGhosttyState> {
-        FAKE_GHOSTTY_STATE.get_or_init(|| Mutex::new(FakeGhosttyState::default()))
-    }
-
-    fn fake_test_lock() -> std::sync::MutexGuard<'static, ()> {
-        FAKE_GHOSTTY_TEST_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap()
-    }
-
-    fn reset_fake_state() {
-        *fake_state().lock().unwrap() = FakeGhosttyState::default();
-    }
-
-    fn fake_functions() -> GhosttyKitFunctionTable {
-        GhosttyKitFunctionTable {
-            init: fake_ghostty_init,
-            config_new: fake_ghostty_config_new,
-            config_free: fake_ghostty_config_free,
-            config_load_default_files: fake_ghostty_config_load_default_files,
-            config_finalize: fake_ghostty_config_finalize,
-            app_new: fake_ghostty_app_new,
-            app_free: fake_ghostty_app_free,
-            app_tick: fake_ghostty_app_tick,
-            app_set_focus: fake_ghostty_app_set_focus,
-            string_free: fake_ghostty_string_free,
-            surface_config_new: fake_ghostty_surface_config_new,
-            surface_new: fake_ghostty_surface_new,
-            surface_free: fake_ghostty_surface_free,
-            surface_set_content_scale: fake_ghostty_surface_set_content_scale,
-            surface_set_size: fake_ghostty_surface_set_size,
-            surface_set_focus: fake_ghostty_surface_set_focus,
-            surface_size: fake_ghostty_surface_size,
-            surface_needs_confirm_quit: fake_ghostty_surface_needs_confirm_quit,
-            surface_process_exited: fake_ghostty_surface_process_exited,
-            surface_foreground_pid: fake_ghostty_surface_foreground_pid,
-            surface_tty_name: fake_ghostty_surface_tty_name,
-            surface_key_translation_mods: fake_ghostty_surface_key_translation_mods,
-            surface_key: fake_ghostty_surface_key,
-            surface_key_is_binding: fake_ghostty_surface_key_is_binding,
-            surface_text: fake_ghostty_surface_text,
-            surface_preedit: fake_ghostty_surface_preedit,
-            surface_mouse_captured: fake_ghostty_surface_mouse_captured,
-            surface_mouse_button: fake_ghostty_surface_mouse_button,
-            surface_mouse_pos: fake_ghostty_surface_mouse_pos,
-            surface_mouse_scroll: fake_ghostty_surface_mouse_scroll,
-            surface_mouse_pressure: fake_ghostty_surface_mouse_pressure,
-            surface_ime_point: fake_ghostty_surface_ime_point,
-            surface_request_close: fake_ghostty_surface_request_close,
-            surface_complete_clipboard_request: fake_ghostty_surface_complete_clipboard_request,
-        }
-    }
-
-    unsafe fn fake_ghostty_init(_argc: usize, _argv: *mut *mut c_char) -> c_int {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_init");
-        state.next_init_result
-    }
-
-    unsafe fn fake_ghostty_config_new() -> ffi::ghostty_config_t {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_config_new");
-        if state.config_new_returns_null {
-            ptr::null_mut()
-        } else {
-            FAKE_CONFIG as *mut c_void
-        }
-    }
-
-    unsafe fn fake_ghostty_config_free(_config: ffi::ghostty_config_t) {
-        fake_state()
-            .lock()
-            .unwrap()
-            .calls
-            .push("ghostty_config_free");
-    }
-
-    unsafe fn fake_ghostty_config_load_default_files(_config: ffi::ghostty_config_t) {
-        fake_state()
-            .lock()
-            .unwrap()
-            .calls
-            .push("ghostty_config_load_default_files");
-    }
-
-    unsafe fn fake_ghostty_config_finalize(_config: ffi::ghostty_config_t) {
-        fake_state()
-            .lock()
-            .unwrap()
-            .calls
-            .push("ghostty_config_finalize");
-    }
-
-    unsafe fn fake_ghostty_app_new(
-        runtime_config: *const ffi::ghostty_runtime_config_s,
-        _config: ffi::ghostty_config_t,
-    ) -> ffi::ghostty_app_t {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_app_new");
-        let runtime_config = unsafe { runtime_config.as_ref().unwrap() };
-        state.last_runtime_userdata = runtime_config.userdata as usize;
-        if state.app_new_returns_null {
-            ptr::null_mut()
-        } else {
-            FAKE_APP as *mut c_void
-        }
-    }
-
-    unsafe fn fake_ghostty_app_free(_app: ffi::ghostty_app_t) {
-        fake_state().lock().unwrap().calls.push("ghostty_app_free");
-    }
-
-    unsafe fn fake_ghostty_app_tick(_app: ffi::ghostty_app_t) {
-        fake_state().lock().unwrap().calls.push("ghostty_app_tick");
-    }
-
-    unsafe fn fake_ghostty_app_set_focus(_app: ffi::ghostty_app_t, focused: bool) {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_app_set_focus");
-        state.last_app_focus = Some(focused);
-        state.app_focus_calls.push(focused);
-    }
-
-    unsafe fn fake_ghostty_string_free(_value: ffi::ghostty_string_s) {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_string_free");
-        state.tty_string_free_count += 1;
-    }
-
-    unsafe fn fake_ghostty_surface_config_new() -> ffi::ghostty_surface_config_s {
-        fake_state()
-            .lock()
-            .unwrap()
-            .calls
-            .push("ghostty_surface_config_new");
-        empty_ffi_surface_config()
-    }
-
-    unsafe fn fake_ghostty_surface_new(
-        _app: ffi::ghostty_app_t,
-        config: *const ffi::ghostty_surface_config_s,
-    ) -> ffi::ghostty_surface_t {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_new");
-        let config = unsafe { *config };
-        state.last_launch_inspection = Some(unsafe { inspect_launch_config_for_test(&config) });
-        state.last_surface_config = Some(CapturedSurfaceConfig {
-            platform_tag: config.platform_tag,
-            nsview: unsafe { config.platform.macos }.nsview as usize,
-            userdata: config.userdata as usize,
-            scale_factor: config.scale_factor,
-            font_size: config.font_size,
-            working_directory: config.working_directory as usize,
-            command: config.command as usize,
-            env_vars: config.env_vars as usize,
-            env_var_count: config.env_var_count,
-            initial_input: config.initial_input as usize,
-            wait_after_command: config.wait_after_command,
-            context: config.context,
-        });
-        if state.surface_new_returns_null {
-            ptr::null_mut()
-        } else {
-            FAKE_SURFACE as *mut c_void
-        }
-    }
-
-    unsafe fn inspect_launch_config_for_test(
-        config: &ffi::ghostty_surface_config_s,
-    ) -> CapturedLaunchInspection {
-        let env_vars_match_expected = if config.env_vars.is_null() {
-            config.env_var_count == 0
-        } else {
-            let env_vars = unsafe { slice::from_raw_parts(config.env_vars, config.env_var_count) };
-            env_vars.len() == 2
-                && unsafe { c_string_matches(env_vars[0].key, TEST_LAUNCH_ENV_KEY_A) }
-                && unsafe { c_string_matches(env_vars[0].value, TEST_LAUNCH_ENV_VALUE_A) }
-                && unsafe { c_string_matches(env_vars[1].key, TEST_LAUNCH_ENV_KEY_B) }
-                && unsafe { c_string_matches(env_vars[1].value, TEST_LAUNCH_ENV_VALUE_B) }
-        };
-
-        CapturedLaunchInspection {
-            working_directory_present: !config.working_directory.is_null(),
-            working_directory_matches_expected: unsafe {
-                c_string_matches(config.working_directory, TEST_LAUNCH_WORKING_DIRECTORY)
-            },
-            command_present: !config.command.is_null(),
-            command_matches_expected: unsafe {
-                c_string_matches(config.command, TEST_LAUNCH_COMMAND)
-            },
-            env_vars_present: !config.env_vars.is_null(),
-            env_var_count: config.env_var_count,
-            env_vars_match_expected,
-            initial_input_present: !config.initial_input.is_null(),
-            initial_input_matches_expected: unsafe {
-                c_string_matches(config.initial_input, TEST_LAUNCH_INITIAL_INPUT)
-            },
-            wait_after_command: config.wait_after_command,
-        }
-    }
-
-    unsafe fn c_string_matches(pointer: *const c_char, expected: &str) -> bool {
-        !pointer.is_null() && unsafe { CStr::from_ptr(pointer) }.to_bytes() == expected.as_bytes()
-    }
-
-    unsafe fn fake_ghostty_surface_free(_surface: ffi::ghostty_surface_t) {
-        fake_state()
-            .lock()
-            .unwrap()
-            .calls
-            .push("ghostty_surface_free");
-    }
-
-    unsafe fn fake_ghostty_surface_set_content_scale(
-        _surface: ffi::ghostty_surface_t,
-        x: f64,
-        y: f64,
-    ) {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_set_content_scale");
-        state.last_content_scale = Some((x, y));
-    }
-
-    unsafe fn fake_ghostty_surface_set_size(
-        _surface: ffi::ghostty_surface_t,
-        width: u32,
-        height: u32,
-    ) {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_set_size");
-        state.last_size = Some((width, height));
-    }
-
-    unsafe fn fake_ghostty_surface_set_focus(_surface: ffi::ghostty_surface_t, focused: bool) {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_set_focus");
-        state.last_surface_focus = Some(focused);
-        state.surface_focus_calls.push(focused);
-    }
-
-    unsafe fn fake_ghostty_surface_size(
-        _surface: ffi::ghostty_surface_t,
-    ) -> ffi::ghostty_surface_size_s {
-        fake_state()
-            .lock()
-            .unwrap()
-            .calls
-            .push("ghostty_surface_size");
-        ffi::ghostty_surface_size_s {
-            columns: 80,
-            rows: 24,
-            width_px: 640,
-            height_px: 384,
-            cell_width_px: 8,
-            cell_height_px: 16,
-        }
-    }
-
-    unsafe fn fake_ghostty_surface_process_exited(_surface: ffi::ghostty_surface_t) -> bool {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_process_exited");
-        state.process_exited
-    }
-
-    unsafe fn fake_ghostty_surface_needs_confirm_quit(_surface: ffi::ghostty_surface_t) -> bool {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_needs_confirm_quit");
-        state.needs_confirm_quit
-    }
-
-    unsafe fn fake_ghostty_surface_foreground_pid(_surface: ffi::ghostty_surface_t) -> u64 {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_foreground_pid");
-        state.foreground_pid
-    }
-
-    unsafe fn fake_ghostty_surface_tty_name(
-        _surface: ffi::ghostty_surface_t,
-    ) -> ffi::ghostty_string_s {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_tty_name");
-        state
-            .tty_name
-            .map(|tty_name| ffi::ghostty_string_s {
-                ptr: tty_name.as_ptr() as *const c_char,
-                len: tty_name.len(),
-                sentinel: true,
-            })
-            .unwrap_or(ffi::ghostty_string_s {
-                ptr: ptr::null(),
-                len: 0,
-                sentinel: false,
-            })
-    }
-
-    unsafe fn fake_ghostty_surface_key_translation_mods(
-        _surface: ffi::ghostty_surface_t,
-        mods: ffi::ghostty_input_mods_e,
-    ) -> ffi::ghostty_input_mods_e {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_key_translation_mods");
-        state.last_key_translation_mods = Some(mods);
-        state.key_translation_mods_return
-    }
-
-    unsafe fn fake_ghostty_surface_key(
-        _surface: ffi::ghostty_surface_t,
-        event: ffi::ghostty_input_key_s,
-    ) -> bool {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_key");
-        state.surface_key_count += 1;
-        state.last_key_action = Some(event.action);
-        state.last_key_mods = Some(event.mods);
-        state.last_key_text_present = Some(!event.text.is_null());
-        state.last_key_composing = Some(event.composing);
-        state.key_event_return
-    }
-
-    unsafe fn fake_ghostty_surface_key_is_binding(
-        _surface: ffi::ghostty_surface_t,
-        event: ffi::ghostty_input_key_s,
-        flags: *mut ffi::ghostty_binding_flags_e,
-    ) -> bool {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_key_is_binding");
-        state.surface_key_is_binding_count += 1;
-        state.last_key_action = Some(event.action);
-        state.last_key_mods = Some(event.mods);
-        state.last_key_text_present = Some(!event.text.is_null());
-        state.last_key_composing = Some(event.composing);
-        if !flags.is_null() {
-            unsafe {
-                *flags = state.key_binding_flags_return;
-            }
-        }
-        state.key_binding_return
-    }
-
-    unsafe fn fake_ghostty_surface_text(
-        _surface: ffi::ghostty_surface_t,
-        ptr: *const c_char,
-        len: usize,
-    ) {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_text");
-        state.surface_text_count += 1;
-        state.last_text_len = Some(len);
-        state.last_text_ptr_present = Some(!ptr.is_null());
-    }
-
-    unsafe fn fake_ghostty_surface_preedit(
-        _surface: ffi::ghostty_surface_t,
-        ptr: *const c_char,
-        len: usize,
-    ) {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_preedit");
-        state.surface_preedit_count += 1;
-        state.last_preedit_len = Some(len);
-        state.last_preedit_ptr_present = Some(!ptr.is_null());
-    }
-
-    unsafe fn fake_ghostty_surface_mouse_captured(_surface: ffi::ghostty_surface_t) -> bool {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_mouse_captured");
-        state.mouse_captured_return
-    }
-
-    unsafe fn fake_ghostty_surface_mouse_button(
-        _surface: ffi::ghostty_surface_t,
-        action: ffi::ghostty_input_mouse_state_e,
-        button: ffi::ghostty_input_mouse_button_e,
-        mods: ffi::ghostty_input_mods_e,
-    ) -> bool {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_mouse_button");
-        state.last_mouse_button = Some((action, button, mods));
-        state.mouse_button_return
-    }
-
-    unsafe fn fake_ghostty_surface_mouse_pos(
-        _surface: ffi::ghostty_surface_t,
-        x: f64,
-        y: f64,
-        mods: ffi::ghostty_input_mods_e,
-    ) {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_mouse_pos");
-        state.last_mouse_pos = Some((x, y, mods));
-    }
-
-    unsafe fn fake_ghostty_surface_mouse_scroll(
-        _surface: ffi::ghostty_surface_t,
-        x: f64,
-        y: f64,
-        scroll_mods: ffi::ghostty_input_scroll_mods_t,
-    ) {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_mouse_scroll");
-        state.last_mouse_scroll = Some((x, y, scroll_mods));
-    }
-
-    unsafe fn fake_ghostty_surface_mouse_pressure(
-        _surface: ffi::ghostty_surface_t,
-        stage: u32,
-        pressure: f64,
-    ) {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_mouse_pressure");
-        state.last_mouse_pressure = Some((stage, pressure));
-    }
-
-    unsafe fn fake_ghostty_surface_ime_point(
-        _surface: ffi::ghostty_surface_t,
-        x: *mut f64,
-        y: *mut f64,
-        width: *mut f64,
-        height: *mut f64,
-    ) {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_ime_point");
-        let (next_x, next_y, next_width, next_height) = state.ime_point_return;
-        unsafe {
-            *x = next_x;
-            *y = next_y;
-            *width = next_width;
-            *height = next_height;
-        }
-    }
-
-    unsafe fn fake_ghostty_surface_request_close(_surface: ffi::ghostty_surface_t) {
-        let mut state = fake_state().lock().unwrap();
-        state.calls.push("ghostty_surface_request_close");
-        state.surface_request_close_count += 1;
-    }
-
-    unsafe fn fake_ghostty_surface_complete_clipboard_request(
-        _surface: ffi::ghostty_surface_t,
-        data: *const c_char,
-        request_state: *mut c_void,
-        confirmed: bool,
-    ) {
-        let mut state = fake_state().lock().unwrap();
-        state
-            .calls
-            .push("ghostty_surface_complete_clipboard_request");
-        state.surface_complete_clipboard_request_count += 1;
-        state.last_completed_clipboard_data_present = Some(!data.is_null());
-        state.last_completed_clipboard_data_empty = if data.is_null() {
-            None
-        } else {
-            Some(unsafe { CStr::from_ptr(data) }.to_bytes().is_empty())
-        };
-        state.last_completed_clipboard_state_present = Some(!request_state.is_null());
-        state.last_completed_clipboard_confirmed = Some(confirmed);
-    }
-
-    fn test_nsview_pointer() -> NonNull<c_void> {
-        NonNull::new(FAKE_NSVIEW as *mut c_void).expect("test pointer must be non-null")
-    }
-
-    fn test_nsview_handle() -> GhosttySurfaceNsViewHandle {
-        unsafe { GhosttySurfaceNsViewHandle::from_existing_nsview(test_nsview_pointer()) }
-    }
-
-    fn test_bounds(width: f32, height: f32) -> Bounds<Pixels> {
-        Bounds::from_corners(
-            gpui::point(gpui::px(0.0), gpui::px(0.0)),
-            gpui::point(gpui::px(width), gpui::px(height)),
-        )
-    }
-
-    fn test_slot() -> AgentsTerminalBodyMountSlotId {
-        AgentsTerminalBodyMountSlotId {
-            pane_id: crate::WorkspacePaneId(10),
-            session_id: crate::TerminalSessionId(101),
-        }
-    }
-
-    fn test_startup_slot() -> AgentsTerminalStartupBodySlotId {
-        AgentsTerminalStartupBodySlotId {
-            pane_id: crate::WorkspacePaneId(20),
-            session_id: crate::TerminalSessionId(201),
-        }
-    }
-
-    fn test_runtime_session_id() -> AgentsTerminalRuntimeSessionId {
-        AgentsTerminalRuntimeSessionId(9001)
-    }
-
-    fn test_launch_payload(wait_after_command: bool) -> GhosttySurfaceLaunchPayload {
-        GhosttySurfaceLaunchPayload::try_new(
-            Some(TEST_LAUNCH_WORKING_DIRECTORY.to_string()),
-            Some(TEST_LAUNCH_COMMAND.to_string()),
-            vec![
-                (
-                    TEST_LAUNCH_ENV_KEY_A.to_string(),
-                    TEST_LAUNCH_ENV_VALUE_A.to_string(),
-                ),
-                (
-                    TEST_LAUNCH_ENV_KEY_B.to_string(),
-                    TEST_LAUNCH_ENV_VALUE_B.to_string(),
-                ),
-            ],
-            Some(TEST_LAUNCH_INITIAL_INPUT.to_string()),
-            wait_after_command,
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn valid_request_builds_expected_window_config_fields() {
-        let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0).unwrap();
-
-        let config = request.to_ffi_config();
-
-        assert_eq!(config.platform_tag, ffi::GHOSTTY_PLATFORM_MACOS);
-        assert_eq!(
-            unsafe { config.platform.macos }.nsview,
-            test_nsview_pointer().as_ptr()
-        );
-        assert_eq!(config.userdata, test_nsview_pointer().as_ptr());
-        assert_eq!(config.scale_factor, 2.0);
-        assert_eq!(config.font_size, 0.0);
-        assert_eq!(config.context, ffi::GHOSTTY_SURFACE_CONTEXT_WINDOW);
-    }
-
-    #[test]
-    fn terminal_config_sets_ffi_font_size_without_launch_payload_fields() {
-        let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0)
-            .unwrap()
-            .with_terminal_config(GhosttySurfaceTerminalConfig::with_font_size(16.5));
-
-        let config = request.to_ffi_config();
-
-        assert_eq!(config.font_size, 16.5);
-        assert!(config.working_directory.is_null());
-        assert!(config.command.is_null());
-        assert!(config.env_vars.is_null());
-        assert_eq!(config.env_var_count, 0);
-        assert!(config.initial_input.is_null());
-    }
-
-    #[test]
-    fn invalid_scale_factor_is_rejected_before_config_building() {
-        for scale_factor in [f64::NEG_INFINITY, -1.0, -0.0, 0.0, f64::NAN, f64::INFINITY] {
-            let error = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), scale_factor)
-                .expect_err("invalid scale factor should not build a request");
-
-            assert!(matches!(
-                error,
-                GhosttySurfaceConfigRequestError::InvalidScaleFactor(actual)
-                    if actual == scale_factor || actual.is_nan()
-            ));
-        }
-    }
-
-    #[test]
-    fn default_request_keeps_launch_and_privacy_fields_empty() {
-        let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 1.5).unwrap();
-        let config = request.to_ffi_config();
-
-        assert!(config.write_pty_cb.is_none());
-        assert!(config.working_directory.is_null());
-        assert!(config.command.is_null());
-        assert!(config.env_vars.is_null());
-        assert_eq!(config.env_var_count, 0);
-        assert!(config.initial_input.is_null());
-        assert!(!config.wait_after_command);
-        assert_eq!(config.font_size, 0.0);
-        assert_eq!(config.context, ffi::GHOSTTY_SURFACE_CONTEXT_WINDOW);
-
-        let prepared_config = request.prepare_ffi_config(empty_ffi_surface_config());
-        let config = prepared_config.config();
-        assert!(config.working_directory.is_null());
-        assert!(config.command.is_null());
-        assert!(config.env_vars.is_null());
-        assert_eq!(config.env_var_count, 0);
-        assert!(config.initial_input.is_null());
-        assert!(!config.wait_after_command);
-    }
-
-    #[test]
-    fn launch_payload_populates_scoped_config_fields_env_vars_and_wait_flag() {
-        let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 1.75)
-            .unwrap()
-            .with_launch_payload(test_launch_payload(true));
-
-        let prepared_config = request.prepare_ffi_config(empty_ffi_surface_config());
-        let config = prepared_config.config();
-
-        assert_eq!(config.scale_factor, 1.75);
-        assert!(!config.working_directory.is_null());
-        assert!(!config.command.is_null());
-        assert!(!config.initial_input.is_null());
-        assert!(!config.env_vars.is_null());
-        assert_eq!(config.env_var_count, 2);
-        assert!(config.wait_after_command);
-
-        let launch = unsafe { inspect_launch_config_for_test(config) };
-        assert!(launch.working_directory_present);
-        assert!(launch.working_directory_matches_expected);
-        assert!(launch.command_present);
-        assert!(launch.command_matches_expected);
-        assert!(launch.env_vars_present);
-        assert_eq!(launch.env_var_count, 2);
-        assert!(launch.env_vars_match_expected);
-        assert!(launch.initial_input_present);
-        assert!(launch.initial_input_matches_expected);
-        assert!(launch.wait_after_command);
-    }
-
-    #[test]
-    fn launch_payload_rejects_interior_nul_for_each_field_category() {
-        for (result, expected_field) in [
-            (
-                GhosttySurfaceLaunchPayload::try_new(
-                    Some("bad\0cwd".to_string()),
-                    None,
-                    Vec::new(),
-                    None,
-                    false,
-                ),
-                GhosttySurfaceLaunchPayloadField::WorkingDirectory,
-            ),
-            (
-                GhosttySurfaceLaunchPayload::try_new(
-                    None,
-                    Some("bad\0command".to_string()),
-                    Vec::new(),
-                    None,
-                    false,
-                ),
-                GhosttySurfaceLaunchPayloadField::Command,
-            ),
-            (
-                GhosttySurfaceLaunchPayload::try_new(
-                    None,
-                    None,
-                    vec![("bad\0key".to_string(), "value".to_string())],
-                    None,
-                    false,
-                ),
-                GhosttySurfaceLaunchPayloadField::EnvVarKey,
-            ),
-            (
-                GhosttySurfaceLaunchPayload::try_new(
-                    None,
-                    None,
-                    vec![("key".to_string(), "bad\0value".to_string())],
-                    None,
-                    false,
-                ),
-                GhosttySurfaceLaunchPayloadField::EnvVarValue,
-            ),
-            (
-                GhosttySurfaceLaunchPayload::try_new(
-                    None,
-                    None,
-                    Vec::new(),
-                    Some("bad\0input".to_string()),
-                    false,
-                ),
-                GhosttySurfaceLaunchPayloadField::InitialInput,
-            ),
-        ] {
-            let error = result.expect_err("interior NUL should reject launch payload");
-            assert!(matches!(
-                error,
-                GhosttySurfaceConfigRequestError::LaunchPayloadContainsInteriorNul { field }
-                    if field == expected_field
-            ));
-        }
-    }
-
-    #[test]
-    fn launch_payload_debug_redacts_raw_runtime_values() {
-        let payload = GhosttySurfaceLaunchPayload::try_new(
-            Some("raw-cwd-secret".to_string()),
-            Some("raw-command-secret".to_string()),
-            vec![(
-                "RAW_SECRET_ENV_KEY".to_string(),
-                "raw-secret-env-value".to_string(),
-            )],
-            Some("raw-initial-input-secret".to_string()),
-            true,
-        )
-        .unwrap();
-        let payload_debug = format!("{payload:?}");
-
-        for raw_value in [
-            "raw-cwd-secret",
-            "raw-command-secret",
-            "RAW_SECRET_ENV_KEY",
-            "raw-secret-env-value",
-            "raw-initial-input-secret",
-        ] {
-            assert!(!payload_debug.contains(raw_value));
-        }
-
-        let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0)
-            .unwrap()
-            .with_launch_payload(payload);
-        let request_debug = format!("{request:?}");
-
-        for raw_value in [
-            "raw-cwd-secret",
-            "raw-command-secret",
-            "RAW_SECRET_ENV_KEY",
-            "raw-secret-env-value",
-            "raw-initial-input-secret",
-        ] {
-            assert!(!request_debug.contains(raw_value));
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn real_terminal_native_view_handle_can_seed_request_without_appkit_or_ffi_calls() {
-        let native_view = unsafe {
-            RealTerminalNativeViewHandle::from_existing_native_view(test_nsview_pointer())
-        };
-
-        let config = GhosttySurfaceConfigRequest::try_from_terminal_native_view(native_view, 2.5)
-            .unwrap()
-            .to_ffi_config();
-
-        assert_eq!(
-            unsafe { config.platform.macos }.nsview,
-            test_nsview_pointer().as_ptr()
-        );
-        assert_eq!(config.userdata, test_nsview_pointer().as_ptr());
-        assert_eq!(config.scale_factor, 2.5);
-    }
-
-    #[test]
-    fn config_owner_loads_finalizes_and_frees_real_handle() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-
-        {
-            let owner = GhosttyConfigOwner::load_default_finalized_with_functions(fake_functions())
-                .unwrap();
-            assert_eq!(owner.as_raw(), FAKE_CONFIG as *mut c_void);
-            assert_eq!(
-                fake_state().lock().unwrap().calls,
-                vec![
-                    "ghostty_config_new",
-                    "ghostty_config_load_default_files",
-                    "ghostty_config_finalize"
-                ]
-            );
-        }
-
-        assert_eq!(
-            fake_state().lock().unwrap().calls,
-            vec![
-                "ghostty_config_new",
-                "ghostty_config_load_default_files",
-                "ghostty_config_finalize",
-                "ghostty_config_free"
-            ]
-        );
-    }
-
-    #[test]
-    fn runtime_config_disables_selection_clipboard_and_installs_clipboard_callbacks() {
-        let state = GhosttyRuntimeCallbackState::new();
-        let config = runtime_config_for_state(&state);
-
-        assert_eq!(
-            config.userdata,
-            &state as *const GhosttyRuntimeCallbackState as *mut c_void
-        );
-        assert_eq!(
-            config.supports_selection_clipboard,
-            GHOSTTY_RUNTIME_SUPPORTS_SELECTION_CLIPBOARD
-        );
-        assert!(!config.supports_selection_clipboard);
-        assert!(config.read_clipboard_cb.is_some());
-        assert!(config.confirm_read_clipboard_cb.is_some());
-        assert!(config.write_clipboard_cb.is_some());
-    }
-
-    #[test]
-    fn clipboard_runtime_callbacks_stay_disabled_for_app_and_surface_userdata() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-
-        let runtime_state = GhosttyRuntimeCallbackState::new();
-        runtime_state.mark_app_ready(FAKE_APP as *mut c_void);
-        let runtime_userdata = &runtime_state as *const GhosttyRuntimeCallbackState as *mut c_void;
-        let surface_token = GhosttySurfaceCloseToken::new(fake_functions());
-        surface_token.set_surface(FAKE_SURFACE as *mut c_void);
-        let request_state = 0xABCDusize as *mut c_void;
-        let private_confirm =
-            CString::new("private clipboard confirm content must stay local").unwrap();
-        let mime = CString::new("text/plain").unwrap();
-        let private_write =
-            CString::new("private clipboard write content must stay local").unwrap();
-        let content = [ffi::ghostty_clipboard_content_s {
-            mime: mime.as_ptr(),
-            data: private_write.as_ptr(),
-        }];
-
-        unsafe {
-            assert!(!ghostty_runtime_read_clipboard_cb(
-                runtime_userdata,
-                ffi::GHOSTTY_CLIPBOARD_STANDARD,
-                request_state
-            ));
-            assert!(!ghostty_runtime_read_clipboard_cb(
-                surface_token.as_userdata(),
-                ffi::GHOSTTY_CLIPBOARD_STANDARD,
-                request_state
-            ));
-            assert!(!ghostty_runtime_read_clipboard_cb(
-                runtime_userdata,
-                ffi::GHOSTTY_CLIPBOARD_SELECTION,
-                request_state
-            ));
-            ghostty_runtime_confirm_read_clipboard_cb(
-                runtime_userdata,
-                private_confirm.as_ptr(),
-                request_state,
-                ffi::GHOSTTY_CLIPBOARD_REQUEST_PASTE,
-            );
-            ghostty_runtime_write_clipboard_cb(
-                runtime_userdata,
-                ffi::GHOSTTY_CLIPBOARD_STANDARD,
-                content.as_ptr(),
-                content.len(),
-                false,
-            );
-        }
-
-        surface_token.drain_runtime_clipboard_operations(
-            true,
-            || panic!("disabled runtime callback must not enqueue clipboard reads"),
-            |_| panic!("disabled runtime callback must not enqueue clipboard writes"),
-        );
-
-        let state = fake_state().lock().unwrap();
-        assert_eq!(*state, FakeGhosttyState::default());
-    }
-
-    /*
-    CDXC:GPUITerminalClipboard 2026-06-23-14:23:
-    Clipboard drain coverage is source-only and owner-local. It proves denied runtime reads complete as empty and writes disappear without clipboard closures, while avoiding GPUI App clipboard APIs, focused-surface routing, logs, persistence, app launch, or raw clipboard storage.
-    */
-    #[test]
-    fn clipboard_owner_local_drain_denies_reads_and_drops_writes_without_clipboard_closures() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-
-        let app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
-        {
-            let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0).unwrap();
-            let surface =
-                GhosttySurfaceOwner::new(&app, test_slot(), test_runtime_session_id(), &request)
-                    .unwrap();
-            fake_state().lock().unwrap().calls.clear();
-
-            let request_state = 0xBCDEusize as *mut c_void;
-            assert!(
-                surface
-                    .close_token
-                    .enqueue_runtime_clipboard_read(request_state)
-            );
-            surface
-                .close_token
-                .enqueue_runtime_clipboard_write("blocked synthetic clipboard write".to_string());
-
-            surface.drain_runtime_clipboard_requests(
-                false,
-                || panic!("denied runtime clipboard read must not touch GPUI clipboard"),
-                |_| panic!("denied runtime clipboard write must not touch GPUI clipboard"),
-            );
-
-            let state = fake_state().lock().unwrap();
-            assert_eq!(state.surface_complete_clipboard_request_count, 1);
-            assert_eq!(state.last_completed_clipboard_data_present, Some(true));
-            assert_eq!(state.last_completed_clipboard_data_empty, Some(true));
-            assert_eq!(state.last_completed_clipboard_state_present, Some(true));
-            assert_eq!(state.last_completed_clipboard_confirmed, Some(true));
-            assert_eq!(
-                state.calls,
-                vec!["ghostty_surface_complete_clipboard_request"]
-            );
-            drop(state);
-        }
-        drop(app);
-    }
-
-    #[test]
-    fn clipboard_abi_constants_match_expected_upstream_values() {
-        assert_eq!(ffi::GHOSTTY_CLIPBOARD_STANDARD, 0);
-        assert_eq!(ffi::GHOSTTY_CLIPBOARD_SELECTION, 1);
-        assert_eq!(ffi::GHOSTTY_CLIPBOARD_REQUEST_PASTE, 0);
-        assert_eq!(ffi::GHOSTTY_CLIPBOARD_REQUEST_OSC_52_READ, 1);
-        assert_eq!(ffi::GHOSTTY_CLIPBOARD_REQUEST_OSC_52_WRITE, 2);
-    }
-
-    #[test]
-    fn app_owner_initializes_config_creates_ticks_focuses_and_frees() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-
-        {
-            let mut app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
-            assert_eq!(app.as_raw(), FAKE_APP as *mut c_void);
-            assert!(!app.wakeup_requested());
-            unsafe {
-                (app.runtime_config.wakeup_cb.unwrap())(app.runtime_config.userdata);
-            }
-            assert!(app.wakeup_requested());
-            app.tick_if_woken();
-            app.tick();
-            app.set_focus(true);
-        }
-
-        let state = fake_state().lock().unwrap();
-        assert_eq!(
-            state.calls,
-            vec![
-                "ghostty_init",
-                "ghostty_config_new",
-                "ghostty_config_load_default_files",
-                "ghostty_config_finalize",
-                "ghostty_app_new",
-                "ghostty_app_tick",
-                "ghostty_app_tick",
-                "ghostty_app_set_focus",
-                "ghostty_app_free",
-                "ghostty_config_free"
-            ]
-        );
-        assert_eq!(state.last_app_focus, Some(true));
-        assert_eq!(state.app_focus_calls, vec![true]);
-        assert_ne!(state.last_runtime_userdata, 0);
-    }
-
-    #[test]
-    fn app_owner_focus_calls_only_on_state_changes() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-
-        {
-            let mut app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
-            app.set_focus(false);
-            app.set_focus(false);
-            app.set_focus(true);
-            app.set_focus(true);
-            app.set_focus(false);
-        }
-
-        let state = fake_state().lock().unwrap();
-        assert_eq!(state.app_focus_calls, vec![false, true, false]);
-        assert_eq!(
-            state
-                .calls
-                .iter()
-                .filter(|call| **call == "ghostty_app_set_focus")
-                .count(),
-            3
-        );
-    }
-
-    #[test]
-    fn app_owner_errors_do_not_leave_owned_handles_to_free() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-        fake_state().lock().unwrap().config_new_returns_null = true;
-
-        let error = match GhosttyAppOwner::new_with_functions(fake_functions()) {
-            Ok(_) => panic!("null config should prevent app owner creation"),
-            Err(error) => error,
-        };
-
-        assert_eq!(error, GhosttySurfaceRuntimeError::ConfigCreateReturnedNull);
-        assert_eq!(
-            fake_state().lock().unwrap().calls,
-            vec!["ghostty_init", "ghostty_config_new"]
-        );
-    }
-
-    #[test]
-    fn surface_owner_creates_from_request_updates_size_reads_size_focuses_and_frees() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-
-        let app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
-        {
-            let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0).unwrap();
-            let mut surface =
-                GhosttySurfaceOwner::new(&app, test_slot(), test_runtime_session_id(), &request)
-                    .unwrap();
-            assert!(surface.mount_slot_id() == test_slot());
-            assert!(surface.runtime_session_id() == test_runtime_session_id());
-            surface
-                .update_content_scale_and_size(test_bounds(10.5, 20.75), 2.0)
-                .unwrap();
-            surface
-                .update_content_scale_and_size(test_bounds(10.5, 20.75), 2.0)
-                .unwrap();
-            surface.set_focus(true);
-            let size = surface.surface_size();
-            assert_eq!(size.columns, 80);
-        }
-        drop(app);
-
-        let state = fake_state().lock().unwrap();
-        let config = state.last_surface_config.unwrap();
-        assert_eq!(config.platform_tag, ffi::GHOSTTY_PLATFORM_MACOS);
-        assert_eq!(config.nsview, FAKE_NSVIEW);
-        assert_ne!(config.userdata, 0);
-        assert_ne!(config.userdata, FAKE_NSVIEW);
-        assert_eq!(config.scale_factor, 2.0);
-        assert_eq!(config.font_size, 0.0);
-        assert_eq!(config.command, 0);
-        assert_eq!(config.working_directory, 0);
-        assert_eq!(config.env_vars, 0);
-        assert_eq!(config.env_var_count, 0);
-        assert_eq!(config.initial_input, 0);
-        assert!(!config.wait_after_command);
-        assert_eq!(config.context, ffi::GHOSTTY_SURFACE_CONTEXT_WINDOW);
-        assert_eq!(state.last_content_scale, Some((2.0, 2.0)));
-        assert_eq!(state.last_size, Some((21, 41)));
-        assert_eq!(state.last_surface_focus, Some(true));
-        assert_eq!(state.surface_focus_calls, vec![true]);
-        assert_eq!(
-            state.calls,
-            vec![
-                "ghostty_init",
-                "ghostty_config_new",
-                "ghostty_config_load_default_files",
-                "ghostty_config_finalize",
-                "ghostty_app_new",
-                "ghostty_surface_config_new",
-                "ghostty_surface_new",
-                "ghostty_surface_set_content_scale",
-                "ghostty_surface_set_size",
-                "ghostty_surface_set_focus",
-                "ghostty_surface_size",
-                "ghostty_surface_free",
-                "ghostty_app_free",
-                "ghostty_config_free"
-            ]
-        );
-    }
-
-    #[test]
-    fn surface_owner_request_close_calls_ffi_once_and_records_callbacks_in_memory() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-        fake_state().lock().unwrap().needs_confirm_quit = true;
-
-        let app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
-        {
-            let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0).unwrap();
-            let mut surface =
-                GhosttySurfaceOwner::new(&app, test_slot(), test_runtime_session_id(), &request)
-                    .unwrap();
-
-            assert!(surface.needs_confirm_quit());
-            assert!(surface.request_close());
-            assert!(!surface.request_close());
-            surface.simulate_runtime_close_callback_for_test(true);
-            assert!(surface.confirmation_needed_close_pending_for_test());
-            assert!(surface.consume_confirmation_needed_close_requested());
-            assert!(!surface.consume_confirmation_needed_close_requested());
-            assert!(!surface.confirmation_needed_close_pending_for_test());
-            assert!(!surface.consume_confirmed_close_requested());
-            surface.simulate_runtime_close_callback_for_test(false);
-            assert!(surface.consume_confirmed_close_requested());
-            assert!(!surface.consume_confirmed_close_requested());
-        }
-        drop(app);
-
-        let state = fake_state().lock().unwrap();
-        assert_eq!(state.surface_request_close_count, 1);
-        assert_eq!(
-            state
-                .calls
-                .iter()
-                .filter(|call| **call == "ghostty_surface_needs_confirm_quit")
-                .count(),
-            1
-        );
-        assert_eq!(
-            state
-                .calls
-                .iter()
-                .filter(|call| **call == "ghostty_surface_request_close")
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn surface_owner_text_and_preedit_wrappers_pass_lengths_without_storing_raw_text() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-
-        let app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
-        {
-            let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0).unwrap();
-            let surface =
-                GhosttySurfaceOwner::new(&app, test_slot(), test_runtime_session_id(), &request)
-                    .unwrap();
-            fake_state().lock().unwrap().calls.clear();
-
-            let private_text = b"private terminal input should not be stored";
-            let private_preedit = b"private preedit text should not be stored";
-            surface.send_text_bytes(private_text);
-            surface.set_preedit_bytes(private_preedit);
-            surface.send_text_bytes(b"");
-            surface.set_preedit_bytes(b"");
-
-            let state = fake_state().lock().unwrap();
-            assert_eq!(state.surface_text_count, 2);
-            assert_eq!(state.last_text_len, Some(0));
-            assert_eq!(state.last_text_ptr_present, Some(true));
-            assert_eq!(state.surface_preedit_count, 2);
-            assert_eq!(state.last_preedit_len, Some(0));
-            assert_eq!(state.last_preedit_ptr_present, Some(false));
-            assert_eq!(
-                state.calls,
-                vec![
-                    "ghostty_surface_text",
-                    "ghostty_surface_preedit",
-                    "ghostty_surface_text",
-                    "ghostty_surface_preedit"
-                ]
-            );
-        }
-        drop(app);
-    }
-
-    #[test]
-    fn surface_owner_key_wrappers_call_expected_input_abi_slots() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-        {
-            let mut state = fake_state().lock().unwrap();
-            state.key_translation_mods_return = 0x24;
-            state.key_event_return = true;
-            state.key_binding_return = true;
-            state.key_binding_flags_return = 0x09;
-        }
-
-        let app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
-        {
-            let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0).unwrap();
-            let surface =
-                GhosttySurfaceOwner::new(&app, test_slot(), test_runtime_session_id(), &request)
-                    .unwrap();
-            fake_state().lock().unwrap().calls.clear();
-
-            let event = ffi::ghostty_input_key_s {
-                action: 1,
-                mods: 2,
-                consumed_mods: 0,
-                keycode: 42,
-                text: ptr::null(),
-                unshifted_codepoint: 65,
-                composing: false,
-            };
-
-            assert_eq!(surface.key_translation_mods(0x12), 0x24);
-            assert!(surface.send_key(event));
-            let binding = surface.key_is_binding(event);
-            assert!(binding.binding());
-            assert_eq!(binding.flags(), 0x09);
-
-            let state = fake_state().lock().unwrap();
-            assert_eq!(state.last_key_translation_mods, Some(0x12));
-            assert_eq!(state.surface_key_count, 1);
-            assert_eq!(state.surface_key_is_binding_count, 1);
-            assert_eq!(state.last_key_action, Some(1));
-            assert_eq!(state.last_key_mods, Some(2));
-            assert_eq!(state.last_key_text_present, Some(false));
-            assert_eq!(state.last_key_composing, Some(false));
-            assert_eq!(
-                state.calls,
-                vec![
-                    "ghostty_surface_key_translation_mods",
-                    "ghostty_surface_key",
-                    "ghostty_surface_key_is_binding"
-                ]
-            );
-        }
-        drop(app);
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn native_key_target_registry_dispatches_only_registered_host_view() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-        {
-            let mut state = fake_state().lock().unwrap();
-            state.key_translation_mods_return = 0x24;
-            state.key_event_return = true;
-        }
-        let native_view = unsafe {
-            RealTerminalNativeViewHandle::from_existing_native_view(test_nsview_pointer())
-        };
-        unregister_native_key_target(native_view);
-
-        let app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
-        {
-            let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0).unwrap();
-            let surface =
-                GhosttySurfaceOwner::new(&app, test_slot(), test_runtime_session_id(), &request)
-                    .unwrap();
-            fake_state().lock().unwrap().calls.clear();
-            register_native_key_target(native_view, &surface);
-
-            let private_text = CString::new("private key text").unwrap();
-            let event = ffi::ghostty_input_key_s {
-                action: 1,
-                mods: 2,
-                consumed_mods: 0,
-                keycode: 36,
-                text: private_text.as_ptr(),
-                unshifted_codepoint: 13,
-                composing: false,
-            };
-
-            assert_eq!(
-                native_key_translation_mods_for_view(native_view.as_ptr(), 0x12),
-                0x24
-            );
-            assert!(send_native_key_event_for_view(native_view.as_ptr(), event));
-
-            let state = fake_state().lock().unwrap();
-            assert_eq!(state.last_key_translation_mods, Some(0x12));
-            assert_eq!(state.surface_key_count, 1);
-            assert_eq!(state.last_key_action, Some(1));
-            assert_eq!(state.last_key_mods, Some(2));
-            assert_eq!(state.last_key_text_present, Some(true));
-            assert_eq!(
-                state.calls,
-                vec![
-                    "ghostty_surface_key_translation_mods",
-                    "ghostty_surface_key"
-                ]
-            );
-            drop(state);
-
-            unregister_native_key_target(native_view);
-            fake_state().lock().unwrap().calls.clear();
-            assert_eq!(
-                native_key_translation_mods_for_view(native_view.as_ptr(), 0x55),
-                0x55
-            );
-            assert!(!send_native_key_event_for_view(native_view.as_ptr(), event));
-            assert!(fake_state().lock().unwrap().calls.is_empty());
-        }
-        drop(app);
-    }
-
-    #[test]
-    fn surface_owner_mouse_and_ime_wrappers_call_expected_input_abi_slots() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-        {
-            let mut state = fake_state().lock().unwrap();
-            state.mouse_captured_return = true;
-            state.mouse_button_return = true;
-            state.ime_point_return = (1.25, 2.5, 3.75, 4.0);
-        }
-
-        let app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
-        {
-            let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0).unwrap();
-            let surface =
-                GhosttySurfaceOwner::new(&app, test_slot(), test_runtime_session_id(), &request)
-                    .unwrap();
-            fake_state().lock().unwrap().calls.clear();
-
-            assert!(surface.mouse_captured());
-            assert!(surface.mouse_button(1, 2, 3));
-            surface.mouse_pos(10.5, 20.25, 4);
-            surface.mouse_scroll(-1.5, 2.25, 5);
-            surface.mouse_pressure(6, 0.75);
-            assert_eq!(
-                surface.ime_point(),
-                GhosttySurfaceImePoint {
-                    x: 1.25,
-                    y: 2.5,
-                    width: 3.75,
-                    height: 4.0,
-                }
-            );
-
-            let state = fake_state().lock().unwrap();
-            assert_eq!(state.last_mouse_button, Some((1, 2, 3)));
-            assert_eq!(state.last_mouse_pos, Some((10.5, 20.25, 4)));
-            assert_eq!(state.last_mouse_scroll, Some((-1.5, 2.25, 5)));
-            assert_eq!(state.last_mouse_pressure, Some((6, 0.75)));
-            assert_eq!(
-                state.calls,
-                vec![
-                    "ghostty_surface_mouse_captured",
-                    "ghostty_surface_mouse_button",
-                    "ghostty_surface_mouse_pos",
-                    "ghostty_surface_mouse_scroll",
-                    "ghostty_surface_mouse_pressure",
-                    "ghostty_surface_ime_point"
-                ]
-            );
-        }
-        drop(app);
-    }
-
-    #[test]
-    fn surface_owner_creates_from_launch_request_with_scoped_pointer_lifetimes() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-
-        let app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
-        {
-            let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0)
-                .unwrap()
-                .with_launch_payload(test_launch_payload(true));
-            let surface =
-                GhosttySurfaceOwner::new(&app, test_slot(), test_runtime_session_id(), &request)
-                    .unwrap();
-            assert!(surface.mount_slot_id() == test_slot());
-            assert!(surface.runtime_session_id() == test_runtime_session_id());
-        }
-        drop(app);
-
-        let state = fake_state().lock().unwrap();
-        let config = state.last_surface_config.unwrap();
-        assert_ne!(config.working_directory, 0);
-        assert_ne!(config.command, 0);
-        assert_ne!(config.initial_input, 0);
-        assert_ne!(config.env_vars, 0);
-        assert_eq!(config.env_var_count, 2);
-        assert!(config.wait_after_command);
-
-        let launch = state.last_launch_inspection.unwrap();
-        assert!(launch.working_directory_present);
-        assert!(launch.working_directory_matches_expected);
-        assert!(launch.command_present);
-        assert!(launch.command_matches_expected);
-        assert!(launch.initial_input_present);
-        assert!(launch.initial_input_matches_expected);
-        assert!(launch.env_vars_present);
-        assert_eq!(launch.env_var_count, 2);
-        assert!(launch.env_vars_match_expected);
-        assert!(launch.wait_after_command);
-        assert_eq!(
-            state.calls,
-            vec![
-                "ghostty_init",
-                "ghostty_config_new",
-                "ghostty_config_load_default_files",
-                "ghostty_config_finalize",
-                "ghostty_app_new",
-                "ghostty_surface_config_new",
-                "ghostty_surface_new",
-                "ghostty_surface_free",
-                "ghostty_app_free",
-                "ghostty_config_free"
-            ]
-        );
-    }
-
-    #[test]
-    fn startup_surface_owner_uses_startup_slot_updates_exact_size_and_never_focuses() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-
-        let app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
-        {
-            let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.25).unwrap();
-            let mut surface = StartupGhosttySurfaceOwner::new(
-                &app,
-                test_startup_slot(),
-                test_runtime_session_id(),
-                &request,
-            )
-            .unwrap();
-            assert!(surface.startup_body_slot_id() == test_startup_slot());
-            assert!(surface.runtime_session_id() == test_runtime_session_id());
-            surface
-                .update_content_scale_and_size(test_bounds(10.5, 20.75), 2.25)
-                .unwrap();
-            surface
-                .update_content_scale_and_size(test_bounds(10.5, 20.75), 2.25)
-                .unwrap();
-        }
-        drop(app);
-
-        let state = fake_state().lock().unwrap();
-        let config = state.last_surface_config.unwrap();
-        assert_eq!(config.platform_tag, ffi::GHOSTTY_PLATFORM_MACOS);
-        assert_eq!(config.nsview, FAKE_NSVIEW);
-        assert_ne!(config.userdata, 0);
-        assert_ne!(config.userdata, FAKE_NSVIEW);
-        assert_eq!(config.scale_factor, 2.25);
-        assert_eq!(config.command, 0);
-        assert_eq!(config.working_directory, 0);
-        assert_eq!(config.env_vars, 0);
-        assert_eq!(config.env_var_count, 0);
-        assert_eq!(config.initial_input, 0);
-        assert!(!config.wait_after_command);
-        assert_eq!(state.last_content_scale, Some((2.25, 2.25)));
-        assert_eq!(state.last_size, Some((23, 46)));
-        assert!(state.app_focus_calls.is_empty());
-        assert!(state.surface_focus_calls.is_empty());
-        assert_eq!(
-            state.calls,
-            vec![
-                "ghostty_init",
-                "ghostty_config_new",
-                "ghostty_config_load_default_files",
-                "ghostty_config_finalize",
-                "ghostty_app_new",
-                "ghostty_surface_config_new",
-                "ghostty_surface_new",
-                "ghostty_surface_set_content_scale",
-                "ghostty_surface_set_size",
-                "ghostty_surface_free",
-                "ghostty_app_free",
-                "ghostty_config_free"
-            ]
-        );
-    }
-
-    #[test]
-    fn startup_surface_metadata_snapshot_redacts_raw_tty_and_pid_presence() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-        {
-            let mut state = fake_state().lock().unwrap();
-            state.process_exited = true;
-            state.foreground_pid = TEST_FOREGROUND_PROCESS_ID;
-            state.tty_name = Some(TEST_TTY_NAME);
-        }
-
-        let app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
-        let snapshot = {
-            let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0).unwrap();
-            let surface = StartupGhosttySurfaceOwner::new(
-                &app,
-                test_startup_slot(),
-                test_runtime_session_id(),
-                &request,
-            )
-            .unwrap();
-            surface.metadata_snapshot()
-        };
-        drop(app);
-
-        assert!(snapshot.process_exited());
-        assert!(snapshot.foreground_process_id_present());
-        assert!(snapshot.tty_name_present());
-        assert!(!snapshot.indicates_ready_metadata());
-
-        let snapshot_debug = format!("{snapshot:?}");
-        assert!(snapshot_debug.contains("process_exited: true"));
-        assert!(snapshot_debug.contains("foreground_process_id_present: true"));
-        assert!(snapshot_debug.contains("tty_name_present: true"));
-        let raw_pid = TEST_FOREGROUND_PROCESS_ID.to_string();
-        for raw_value in [TEST_TTY_NAME, raw_pid.as_str()] {
-            assert!(
-                !snapshot_debug.contains(raw_value),
-                "metadata snapshot debug must not expose {raw_value}"
-            );
-        }
-
-        let state = fake_state().lock().unwrap();
-        assert_eq!(state.tty_string_free_count, 1);
-        assert_eq!(
-            state
-                .calls
-                .iter()
-                .filter(|call| {
-                    matches!(
-                        **call,
-                        "ghostty_surface_process_exited"
-                            | "ghostty_surface_foreground_pid"
-                            | "ghostty_surface_tty_name"
-                            | "ghostty_string_free"
-                    )
-                })
-                .copied()
-                .collect::<Vec<_>>(),
-            vec![
-                "ghostty_surface_process_exited",
-                "ghostty_surface_foreground_pid",
-                "ghostty_surface_tty_name",
-                "ghostty_string_free"
-            ]
-        );
-    }
-
-    #[test]
-    fn surface_owner_focus_calls_only_on_state_changes() {
-        let _guard = fake_test_lock();
-        reset_fake_state();
-
-        let app = GhosttyAppOwner::new_with_functions(fake_functions()).unwrap();
-        {
-            let request = GhosttySurfaceConfigRequest::try_new(test_nsview_handle(), 2.0).unwrap();
-            let mut surface =
-                GhosttySurfaceOwner::new(&app, test_slot(), test_runtime_session_id(), &request)
-                    .unwrap();
-            surface.set_focus(false);
-            surface.set_focus(false);
-            surface.set_focus(true);
-            surface.set_focus(true);
-            surface.set_focus(false);
-        }
-        drop(app);
-
-        let state = fake_state().lock().unwrap();
-        assert_eq!(state.surface_focus_calls, vec![false, true, false]);
-        assert_eq!(
-            state
-                .calls
-                .iter()
-                .filter(|call| **call == "ghostty_surface_set_focus")
-                .count(),
-            3
-        );
-    }
-
-    #[test]
-    fn surface_pixel_size_rejects_invalid_runtime_bounds_without_ffi() {
-        let error = GhosttySurfacePixelSize::from_gpui_bounds(test_bounds(f32::NAN, 20.0), 2.0)
-            .expect_err("invalid bounds should not produce a pixel size");
-
-        assert!(matches!(
-            error,
-            GhosttySurfaceRuntimeError::InvalidBounds {
-                field: GhosttySurfaceBoundsField::Width,
-                value
-            } if value.is_nan()
-        ));
-
-        assert_eq!(
-            GhosttySurfacePixelSize::from_gpui_bounds(test_bounds(0.0, 0.0), 2.0).unwrap(),
-            GhosttySurfacePixelSize {
-                width: 1,
-                height: 1
-            }
-        );
-    }
 }

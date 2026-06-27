@@ -35,7 +35,10 @@ fn main() {
         manifest_dir.join("native/macos/GpuiTerminalAppKitAdapter.m");
     let gpui_settings_notifications = manifest_dir.join("native/macos/GpuiSettingsNotifications.m");
     let gpui_app_shots = manifest_dir.join("native/macos/GpuiAppShots.m");
+    let gpui_accessibility_display_options =
+        manifest_dir.join("native/macos/GpuiAccessibilityDisplayOptions.m");
     let gpui_lid_sleep_helper_client = manifest_dir.join("native/macos/GpuiLidSleepHelperClient.m");
+    let gpui_menu_bar_status_item = manifest_dir.join("native/macos/GpuiMenuBarStatusItem.m");
 
     println!("cargo:rerun-if-changed={}", gpui_hooks.display());
     println!(
@@ -49,7 +52,15 @@ fn main() {
     println!("cargo:rerun-if-changed={}", gpui_app_shots.display());
     println!(
         "cargo:rerun-if-changed={}",
+        gpui_accessibility_display_options.display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
         gpui_lid_sleep_helper_client.display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        gpui_menu_bar_status_item.display()
     );
 
     /*
@@ -88,12 +99,31 @@ fn main() {
         .compile("ghostex_gpui_app_shots");
 
     /*
+    CDXC:GPUIStatusPetOverlay 2026-06-26-07:31:
+    Compile the GPUI accessibility display-options shim separately because Pet Overlay Reduce Motion is a read-only macOS runtime source. It must not share renderer IPC, hidden views, logging, paths, settings JSON, or notification payloads with unrelated settings bridges.
+    */
+    gpui_macos_objc_build()
+        .file(gpui_accessibility_display_options)
+        .compile("ghostex_gpui_accessibility_display_options");
+
+    /*
     CDXC:GPUITitlebarKeepAwake 2026-06-26-00:09:
     Compile the GPUI lid-sleep helper client as its own macOS shim. Rust owns only start/heartbeat/disable decisions; this Objective-C boundary mirrors the Swift XPC installer/client and returns generic status without exposing helper paths, signing text, installer output, or privileged command details.
     */
     gpui_macos_objc_build()
         .file(gpui_lid_sleep_helper_client)
         .compile("ghostex_gpui_lid_sleep_helper_client");
+
+    /*
+    CDXC:GPUIMenuBarStatusItem 2026-06-26-05:42:
+    Compile the GPUI menu-bar status item as its own AppKit shim so badge rendering stays outside CEF, renderer IPC, terminal host views, hidden hit regions, broad event routing, logging, paths, URLs, command text, and terminal content.
+
+    CDXC:GPUIMenuBarStatusItem 2026-06-26-06:05:
+    The same shim now owns the native Running Agents dropdown fed by Rust-owned sanitized rows, while CEF/sidebar routing still owns project/session focus callbacks.
+    */
+    gpui_macos_objc_build()
+        .file(gpui_menu_bar_status_item)
+        .compile("ghostex_gpui_menu_bar_status_item");
 
     /*
     CDXC:GPUIGhosttyKitAdapter 2026-06-22-22:29:

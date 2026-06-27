@@ -7376,6 +7376,40 @@ async function installNativeGenerateTitleSkill(showSuccessMessage = true): Promi
   return false;
 }
 
+async function installNativeMoveCodexSessionSkill(showSuccessMessage = true): Promise<boolean> {
+  /**
+   * CDXC:CodexSessionMove 2026-06-26-13:24:
+   * First launch and Settings should install `$ghostex-move-codex-session`
+   * through the same app-bundled skill pipeline as the other Ghostex agent
+   * skills, so the installed guidance matches the shipped CLI namespace.
+   */
+  const result = await runNativeProcess(
+    "/bin/zsh",
+    [
+      "-lc",
+      [
+        "if command -v ghostex >/dev/null 2>&1; then GHOSTEX=$(command -v ghostex);",
+        "else echo 'Ghostex CLI was not found on PATH.' >&2; exit 127; fi;",
+        '"$GHOSTEX" move-codex-session install-skill',
+      ].join(" "),
+    ],
+    { timeoutMs: 2 * 60_000 },
+  );
+  if (result.exitCode === 0) {
+    if (showSuccessMessage) {
+      showAppToast("success", "Ghostex Move Codex Session installed.");
+    }
+    await requestNativeGhostexCliStatus();
+    return true;
+  }
+  showNativeMessage(
+    "error",
+    `Ghostex Move Codex Session install failed: ${(result.stderr || result.stdout || "install-skill failed").trim()}`,
+  );
+  await requestNativeGhostexCliStatus();
+  return false;
+}
+
 async function uninstallNativeBundledAgentSkills(): Promise<void> {
   /**
    * CDXC:AgentSkills 2026-06-18-02:54:
@@ -21216,6 +21250,8 @@ const agentOrchestrationSkillPath = path.join(home, "agents", "skills", "ghostex
 const agentOrchestrationSkillInstalled = isFile(agentOrchestrationSkillPath);
 const generateTitleSkillPath = path.join(home, "agents", "skills", "ghostex-generate-title", "SKILL.md");
 const generateTitleSkillInstalled = isFile(generateTitleSkillPath);
+const moveCodexSessionSkillPath = path.join(home, "agents", "skills", "ghostex-move-codex-session", "SKILL.md");
+const moveCodexSessionSkillInstalled = isFile(moveCodexSessionSkillPath);
 const webResourceDir = String(process.env.GHOSTEX_WEB_RESOURCE_DIR || "");
 function readJsonFile(filePath) {
   if (!filePath) {
@@ -21301,6 +21337,7 @@ if (ghostexUsable) {
   detail += computerUseSkillInstalled ? " Ghostex Computer Use skill is installed for agents." : " Ghostex Computer Use skill is not installed yet.";
   detail += agentOrchestrationSkillInstalled ? " Ghostex Agent Orchestration skill is installed for agents." : " Ghostex Agent Orchestration skill is not installed yet.";
   detail += generateTitleSkillInstalled ? " Ghostex Generate Title skill is installed for agents." : " Ghostex Generate Title skill is not installed yet.";
+  detail += moveCodexSessionSkillInstalled ? " Ghostex Move Codex Session skill is installed for agents." : " Ghostex Move Codex Session skill is not installed yet.";
 }
 detail += desktopControlInstalled ? " Desktop Control is installed." : " Desktop Control is not installed yet.";
 if (cuaDriverPermissionDetail) {
@@ -21319,6 +21356,8 @@ console.log(JSON.stringify({
   agentOrchestrationSkillPath: agentOrchestrationSkillInstalled ? agentOrchestrationSkillPath : null,
   generateTitleSkillInstalled,
   generateTitleSkillPath: generateTitleSkillInstalled ? generateTitleSkillPath : null,
+  moveCodexSessionSkillInstalled,
+  moveCodexSessionSkillPath: moveCodexSessionSkillInstalled ? moveCodexSessionSkillPath : null,
   cuaAppInstalled,
   cuaDriverAccessibilityPermissionGranted,
   cuaDriverInstalled,
@@ -43030,6 +43069,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "installGenerateTitleSkill":
       void installNativeGenerateTitleSkill();
+      return;
+    case "installMoveCodexSessionSkill":
+      void installNativeMoveCodexSessionSkill();
       return;
     case "uninstallBundledAgentSkills":
       void uninstallNativeBundledAgentSkills();

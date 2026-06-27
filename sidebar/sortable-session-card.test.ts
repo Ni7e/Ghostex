@@ -7,6 +7,8 @@ import {
   getSessionTagSubmenuSections,
   resolveSessionCardSessionIdsBelow,
   runSidebarBulkContextMenuActionInBackground,
+  shouldFocusSidebarSessionOnPointerDown,
+  shouldRenameSidebarSessionOnDoubleClick,
 } from "./sortable-session-card";
 
 describe("getSessionCardAccessibleLabel", () => {
@@ -146,6 +148,103 @@ describe("resolveSessionCardSessionIdsBelow", () => {
         sessionIdsBelow: ["rerendered-session"],
       }),
     ).toEqual(["snapshot-session"]);
+  });
+});
+
+describe("shouldFocusSidebarSessionOnPointerDown", () => {
+  const baseInput = {
+    altKey: false,
+    button: 0,
+    ctrlKey: false,
+    isPrimary: true,
+    isProjectSessionListMoreRow: false,
+    isProjectSessionListOverflowRow: false,
+    metaKey: false,
+    renameSessionOnDoubleClick: false,
+    shiftKey: false,
+  };
+
+  test("uses immediate pointer-down focus when double-click rename is disabled", () => {
+    expect(shouldFocusSidebarSessionOnPointerDown(baseInput)).toBe(true);
+  });
+
+  test("waits for click semantics when double-click rename is enabled", () => {
+    expect(
+      shouldFocusSidebarSessionOnPointerDown({
+        ...baseInput,
+        renameSessionOnDoubleClick: true,
+      }),
+    ).toBe(false);
+  });
+
+  test("keeps modified and non-primary pointer actions out of immediate focus", () => {
+    expect(shouldFocusSidebarSessionOnPointerDown({ ...baseInput, metaKey: true })).toBe(false);
+    expect(shouldFocusSidebarSessionOnPointerDown({ ...baseInput, ctrlKey: true })).toBe(false);
+    expect(shouldFocusSidebarSessionOnPointerDown({ ...baseInput, altKey: true })).toBe(false);
+    expect(shouldFocusSidebarSessionOnPointerDown({ ...baseInput, shiftKey: true })).toBe(false);
+    expect(shouldFocusSidebarSessionOnPointerDown({ ...baseInput, button: 1 })).toBe(false);
+    expect(shouldFocusSidebarSessionOnPointerDown({ ...baseInput, isPrimary: false })).toBe(false);
+    expect(
+      shouldFocusSidebarSessionOnPointerDown({
+        ...baseInput,
+        isInteractiveDescendant: true,
+      }),
+    ).toBe(false);
+  });
+
+  test("does not immediate-focus placeholder rows", () => {
+    expect(
+      shouldFocusSidebarSessionOnPointerDown({
+        ...baseInput,
+        isProjectSessionListMoreRow: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldFocusSidebarSessionOnPointerDown({
+        ...baseInput,
+        isProjectSessionListOverflowRow: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldRenameSidebarSessionOnDoubleClick", () => {
+  const baseInput = {
+    isBrowserSession: false,
+    isProjectSessionListMoreRow: false,
+    isProjectSessionListOverflowRow: false,
+    renameSessionOnDoubleClick: true,
+  };
+
+  test("reserves session-card double-click for explicit rename", () => {
+    expect(shouldRenameSidebarSessionOnDoubleClick(baseInput)).toBe(true);
+    expect(
+      shouldRenameSidebarSessionOnDoubleClick({
+        ...baseInput,
+        renameSessionOnDoubleClick: false,
+      }),
+    ).toBe(false);
+  });
+
+  test("does not rename browser or placeholder rows on double-click", () => {
+    expect(
+      shouldRenameSidebarSessionOnDoubleClick({
+        ...baseInput,
+        isBrowserSession: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRenameSidebarSessionOnDoubleClick({
+        ...baseInput,
+        isProjectSessionListMoreRow: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRenameSidebarSessionOnDoubleClick({
+        ...baseInput,
+        isProjectSessionListOverflowRow: true,
+      }),
+    ).toBe(false);
   });
 });
 

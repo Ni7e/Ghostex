@@ -702,7 +702,15 @@ private final class MenuBarSessionStatusIndicatorTarget: NSObject {
 
   @objc func clicked(_ sender: NSStatusBarButton) {
     let event = NSApp.currentEvent
-    guard event?.type == .leftMouseUp || event == nil else {
+    /*
+     CDXC:MenuBarStatusIndicator 2026-06-26-06:21:
+     The status button itself is registered for leftMouseUp, so the click hook
+     should not require NSApp.currentEvent to still be leftMouseUp by the time
+     AppKit dispatches the action. Some menu-bar clicks can arrive with a
+     different current event and must still open the dropdown; only explicit
+     secondary clicks and Control-clicks remain inert.
+     */
+    if event?.type == .rightMouseDown || event?.type == .rightMouseUp {
       return
     }
     if event?.modifierFlags.contains(.control) == true {

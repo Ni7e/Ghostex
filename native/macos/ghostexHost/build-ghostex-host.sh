@@ -1741,10 +1741,11 @@ chmod 755 "$CLI_DIR/ghostex" "$CLI_DIR/gx"
 # continue shipping the skill used by `ghostex browser install-skill`.
 # CDXC:ComputerAgentControl 2026-05-27-06:58: Bundle the public
 # `$ghostex-browser-use`, `$ghostex-computer-use`,
-# `$ghostex-agent-orchestration`, `$ghostex-generate-title`, and
-# `$ghostex-manage-beads` skills so first-launch, Settings, and CLI installers
-# can install Ghostex-named agent wrappers without relying on a source checkout,
-# raw zmx, or the lower-level `$cua-driver` skill name.
+# `$ghostex-agent-orchestration`, `$ghostex-generate-title`,
+# `$ghostex-manage-beads`, and `$ghostex-move-codex-session` skills so
+# first-launch, Settings, and CLI installers can install Ghostex-named agent
+# wrappers without relying on a source checkout, raw zmx, or the lower-level
+# `$cua-driver` skill name.
 # CDXC:AgentSkills 2026-06-19-09:13: Keep the publishable Ghostex runtime
 # skills at repo-root skills/ so GitHub installs can target the repository root
 # package shape. Continue bundling a copy beside the app CLI so installed builds
@@ -1755,6 +1756,9 @@ chmod 755 "$CLI_DIR/ghostex" "$CLI_DIR/gx"
 # CDXC:ProjectBoardBeads 2026-06-04-03:32: Bundle `$ghostex-manage-beads` with
 # the app CLI resources so agents can install project-board bead workflow
 # guidance from the same released Ghostex build that provides the other skills.
+# CDXC:CodexSessionMove 2026-06-26-13:47: Bundle `$ghostex-move-codex-session`
+# beside the app CLI so installed Ghostex builds can teach agents to fork a
+# Codex session into another folder with `codex fork --yolo -C`.
 mkdir -p "$CLI_DIR/skills"
 # CDXC:LocalStart 2026-06-15-02:34: Local starts can rerun after the generated CLI skill folders already exist. Merge each bundled skill into its destination instead of copying the source directory onto an existing directory path, which makes `bun run start` idempotent without deleting generated output.
 copy_cli_skill() {
@@ -1767,6 +1771,7 @@ copy_cli_skill "ghostex-computer-use"
 copy_cli_skill "ghostex-agent-orchestration"
 copy_cli_skill "ghostex-generate-title"
 copy_cli_skill "ghostex-manage-beads"
+copy_cli_skill "ghostex-move-codex-session"
 # CDXC:ZmxPersistence 2026-05-20-09:57: zmx pane refresh is now a zmx IPC feature, so Ghostex must bundle the pinned submodule binary instead of depending on whichever zmx happens to be on PATH. Build the submodule for the requested macOS architecture and copy it into app resources where TerminalWorkspaceView can launch it directly.
 if [[ ! -f "$ZMX_ROOT/build.zig" ]]; then
 	cat >&2 <<EOF

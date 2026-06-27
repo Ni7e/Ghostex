@@ -38,6 +38,7 @@ import {
   type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -86,7 +87,19 @@ const SESSION_CARD_DRAG_HOLD_TOLERANCE_PX = 12;
 const TOUCH_SESSION_CARD_DRAG_HOLD_DELAY_MS = 130;
 const TOUCH_SESSION_CARD_DRAG_HOLD_TOLERANCE_PX = 12;
 const COMPLETION_FLASH_DURATION_MS = 3_000;
+const SESSION_CARD_IMMEDIATE_FOCUS_CLICK_SUPPRESSION_MS = 1_500;
 const SLEEP_BELOW_DEBUG_EVENT_PREFIX = "sleepBelow";
+const SESSION_CARD_POINTER_FOCUS_BLOCKING_SELECTOR = [
+  "button",
+  "input",
+  "select",
+  "textarea",
+  "a",
+  "[role='button']",
+  "[role='menu']",
+  "[role='menuitem']",
+  "[data-session-card-pointer-focus-blocking='true']",
+].join(", ");
 const DND_SESSION_CARD_AX_ATTRIBUTES = [
   "aria-describedby",
   "aria-disabled",
@@ -228,6 +241,87 @@ type SleepBelowDebugDetailsInput = {
   targetCount: number;
   visibleBelowCount: number;
 };
+
+export type SidebarSessionPointerDownFocusInput = {
+  altKey: boolean;
+  button: number;
+  ctrlKey: boolean;
+  isInteractiveDescendant?: boolean;
+  isPrimary?: boolean;
+  isProjectSessionListMoreRow: boolean;
+  isProjectSessionListOverflowRow: boolean;
+  metaKey: boolean;
+  renameSessionOnDoubleClick: boolean;
+  shiftKey: boolean;
+};
+
+export function shouldFocusSidebarSessionOnPointerDown(
+  input: SidebarSessionPointerDownFocusInput,
+): boolean {
+  /*
+   * CDXC:SidebarSessionFocus 2026-06-26-06:25:
+   * When Double-click session cards to rename is off, normal sidebar session
+   * selection should start from the primary pointer-down so users do not wait
+   * for a possible second click. Keep modified clicks, auxiliary buttons,
+   * overflow placeholders, and Show more rows on their existing click-specific
+   * behavior.
+   */
+  return (
+    !input.renameSessionOnDoubleClick &&
+    !input.isProjectSessionListOverflowRow &&
+    !input.isProjectSessionListMoreRow &&
+    input.button === 0 &&
+    input.metaKey === false &&
+    input.ctrlKey === false &&
+    input.altKey === false &&
+    input.shiftKey === false &&
+    input.isInteractiveDescendant !== true &&
+    (input.isPrimary ?? true)
+  );
+}
+
+function isSessionCardPointerFocusBlockedByDescendant({
+  currentTarget,
+  target,
+}: {
+  currentTarget: HTMLElement;
+  target: EventTarget | null;
+}): boolean {
+  const targetNode = target instanceof Node ? target : undefined;
+  const targetElement =
+    targetNode instanceof Element ? targetNode : (targetNode?.parentElement ?? undefined);
+  if (!targetElement || !currentTarget.contains(targetElement)) {
+    return false;
+  }
+
+  const blockingElement = targetElement.closest(SESSION_CARD_POINTER_FOCUS_BLOCKING_SELECTOR);
+  return Boolean(blockingElement && blockingElement !== currentTarget);
+}
+
+export function shouldRenameSidebarSessionOnDoubleClick({
+  isBrowserSession,
+  isProjectSessionListMoreRow,
+  isProjectSessionListOverflowRow,
+  renameSessionOnDoubleClick,
+}: {
+  isBrowserSession: boolean;
+  isProjectSessionListMoreRow: boolean;
+  isProjectSessionListOverflowRow: boolean;
+  renameSessionOnDoubleClick: boolean;
+}): boolean {
+  /*
+   * CDXC:SidebarSessionRename 2026-06-26-06:25:
+   * Session-card double-click is reserved for the explicit rename preference.
+   * It must not enter workspace focus mode; Focus stays available as the
+   * context-menu command for users who want to zoom a pane tab group.
+   */
+  return (
+    renameSessionOnDoubleClick &&
+    !isBrowserSession &&
+    !isProjectSessionListOverflowRow &&
+    !isProjectSessionListMoreRow
+  );
+}
 
 export function createSleepBelowDebugDetails(
   input: SleepBelowDebugDetailsInput,
@@ -446,6 +540,7 @@ export function SortableSessionCard({
     hideSessionAgentIconUntilHover,
     hideBrowserFaviconUntilHover,
     browserFeedbackTool,
+    renameSessionOnDoubleClick,
     showCloseButton,
     showDebugSessionNumbers,
     showLastActiveTime,
@@ -473,6 +568,8 @@ export function SortableSessionCard({
         DEFAULT_ghostex_SETTINGS.hideBrowserFaviconUntilHover,
       browserFeedbackTool:
         state.hud.settings?.browserFeedbackTool ?? DEFAULT_ghostex_SETTINGS.browserFeedbackTool,
+      renameSessionOnDoubleClick:
+        state.hud.settings?.renameSessionOnDoubleClick ?? state.hud.renameSessionOnDoubleClick,
       showCloseButton: state.hud.showCloseButtonOnSessionCards,
       showDebugSessionNumbers: state.hud.debuggingMode,
       showLastActiveTime:
@@ -514,6 +611,9 @@ export function SortableSessionCard({
   const sessionCardRef = useRef<HTMLElement | null>(null);
   const debugInstanceIdRef = useRef(createSidebarDebugInstanceId());
   const lastAgentIconRenderDebugKeyRef = useRef<string | undefined>(undefined);
+  const immediateFocusClickSuppressionRef = useRef<
+    { sessionId: string; timeoutId: number } | undefined
+  >(undefined);
   const isBrowserSession = session?.sessionKind === "browser" || session?.kind === "browser";
   const isT3Session = session?.sessionKind === "t3";
   const canTagSession = !isProjectSessionListMoreRow && !isBrowserSession;
@@ -697,6 +797,14 @@ export function SortableSessionCard({
     setContextMenuPosition(undefined);
     setTagSubmenuPosition(undefined);
   }, [session.alias, session.sessionId]);
+
+  useEffect(() => {
+    return () => {
+      if (immediateFocusClickSuppressionRef.current) {
+        window.clearTimeout(immediateFocusClickSuppressionRef.current.timeoutId);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const targets: Array<{ attributes: readonly string[]; element: HTMLElement }> = [];
@@ -1054,10 +1162,14 @@ export function SortableSessionCard({
     setContextMenuPosition(undefined);
     /**
      * CDXC:SessionFocusMode 2026-05-23-09:28:
-     * Double-click and context-menu Focus should zoom the clicked session's
-     * pane tab group rather than rename the session. Route through the
-     * controller so it can switch to Agents mode and later restore the prior
-     * Code/Browser/Project/Manage surface on unfocus.
+     * Context-menu Focus should zoom the clicked session's pane tab group. Route
+     * through the controller so it can switch to Agents mode and later restore
+     * the prior Code/Browser/Project/Manage surface on unfocus.
+     *
+     * CDXC:SessionFocusMode 2026-06-26-06:25:
+     * Sidebar session double-click no longer enters focus mode. Keep this
+     * command behind the explicit Focus menu item so row double-click remains
+     * available for rename when that preference is enabled.
      */
     vscode.postMessage({
       sessionId: session.sessionId,
@@ -1763,7 +1875,10 @@ export function SortableSessionCard({
   const contextMenuDividerCount = Math.max(0, contextMenuSections.length - 1);
 
   const requestFocusSession = (
-    event?: ReactKeyboardEvent<HTMLElement> | ReactMouseEvent<HTMLElement>,
+    event?:
+      | ReactKeyboardEvent<HTMLElement>
+      | ReactMouseEvent<HTMLElement>
+      | ReactPointerEvent<HTMLElement>,
   ) => {
     const shouldAcknowledgeAttention = session.activity === "attention";
     /**
@@ -1804,6 +1919,33 @@ export function SortableSessionCard({
     if (!session.isFocused) {
       onFocusRequested?.(groupId, session.sessionId);
     }
+  };
+
+  const rememberImmediateFocusClickSuppression = () => {
+    if (immediateFocusClickSuppressionRef.current) {
+      window.clearTimeout(immediateFocusClickSuppressionRef.current.timeoutId);
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      if (immediateFocusClickSuppressionRef.current?.sessionId === session.sessionId) {
+        immediateFocusClickSuppressionRef.current = undefined;
+      }
+    }, SESSION_CARD_IMMEDIATE_FOCUS_CLICK_SUPPRESSION_MS);
+
+    immediateFocusClickSuppressionRef.current = {
+      sessionId: session.sessionId,
+      timeoutId,
+    };
+  };
+
+  const consumeImmediateFocusClickSuppression = () => {
+    if (immediateFocusClickSuppressionRef.current?.sessionId !== session.sessionId) {
+      return false;
+    }
+
+    window.clearTimeout(immediateFocusClickSuppressionRef.current.timeoutId);
+    immediateFocusClickSuppressionRef.current = undefined;
+    return true;
   };
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
@@ -1938,6 +2080,27 @@ export function SortableSessionCard({
                 pointerId: event.pointerId,
                 pointerType: event.pointerType,
               });
+
+              if (
+                shouldFocusSidebarSessionOnPointerDown({
+                  altKey: event.altKey,
+                  button: event.button,
+                  ctrlKey: event.ctrlKey,
+                  isInteractiveDescendant: isSessionCardPointerFocusBlockedByDescendant({
+                    currentTarget: event.currentTarget,
+                    target: event.target,
+                  }),
+                  isPrimary: event.isPrimary,
+                  isProjectSessionListMoreRow,
+                  isProjectSessionListOverflowRow,
+                  metaKey: event.metaKey,
+                  renameSessionOnDoubleClick,
+                  shiftKey: event.shiftKey,
+                })
+              ) {
+                rememberImmediateFocusClickSuppression();
+                requestFocusSession(event);
+              }
             }}
             onPointerUp={(event) => {
               postSessionDragDebugLog("session.pointerUp", {
@@ -1984,15 +2147,26 @@ export function SortableSessionCard({
                 return;
               }
 
+              if (consumeImmediateFocusClickSuppression()) {
+                return;
+              }
+
               requestFocusSession(event);
             }}
             onDoubleClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              if (isProjectSessionListOverflowRow || isProjectSessionListMoreRow) {
+              if (
+                !shouldRenameSidebarSessionOnDoubleClick({
+                  isBrowserSession,
+                  isProjectSessionListMoreRow,
+                  isProjectSessionListOverflowRow,
+                  renameSessionOnDoubleClick,
+                })
+              ) {
                 return;
               }
-              requestFocusMode();
+              requestRename();
             }}
             onContextMenu={(event: ReactMouseEvent<HTMLElement>) => {
               event.preventDefault();

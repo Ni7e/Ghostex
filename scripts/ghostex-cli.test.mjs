@@ -22,6 +22,7 @@ import {
   groupSessionsPreservingSidebarOrder,
   isFailedCliResult,
   manageBeadsUsage,
+  moveCodexSessionUsage,
   moveSessionPickerSelection,
   parseArgs,
   parseCreateSession,
@@ -1199,6 +1200,7 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
     ["agent-orchestration", "ghostex-agent-orchestration"],
     ["generate-title", "ghostex-generate-title"],
     ["manage-beads", "ghostex-manage-beads"],
+    ["move-codex-session", "ghostex-move-codex-session"],
   ])("delegates %s install-skill to gxserver agent-skills", async (namespace, skillName) => {
     /*
      * CDXC:AgentSkills 2026-06-19-08:25:
@@ -1329,6 +1331,20 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
     expect(help).toContain("gx bd list/show/comments");
     expect(help).toContain("codex-thread:$CODEX_THREAD_ID");
     expect(help).toContain("Ghostex and Codex ids");
+  });
+
+  test("documents Ghostex Move Codex Session under gx move-codex-session help", async () => {
+    const help = moveCodexSessionUsage();
+    const cliHelpResult = await execFileAsync(process.execPath, [
+      path.resolve("scripts/ghostex-cli.mjs"),
+      "move-codex-session",
+      "--help",
+    ]);
+
+    expect(cliHelpResult.stdout).toBe(`${help}\n`);
+    expect(help).toContain("gx move-codex-session install-skill");
+    expect(help).toContain("$ghostex-move-codex-session");
+    expect(help).toContain("codex fork --yolo -C <folder-path> <SESSION_ID>");
   });
 
   test("resolves bundled Beads from app and source-staged resources", async () => {

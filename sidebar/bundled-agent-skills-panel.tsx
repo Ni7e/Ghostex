@@ -43,6 +43,7 @@ const BUNDLED_AGENT_SKILL_ICONS: Record<
   browserUse: IconBrowser,
   computerUse: IconDeviceDesktop,
   generateTitle: IconPencil,
+  moveCodexSession: IconGitPullRequest,
 };
 
 /**
@@ -174,5 +175,7 @@ function isBundledGhostexAgentSkillInstalled(
       return status?.agentOrchestrationSkillInstalled === true;
     case "generateTitle":
       return status?.generateTitleSkillInstalled === true;
+    case "moveCodexSession":
+      return status?.moveCodexSessionSkillInstalled === true;
   }
 }

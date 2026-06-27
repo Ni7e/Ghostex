@@ -63,14 +63,21 @@ const SIDEBAR_NATIVE_APP_SHOT_PROMPT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.nativeAppShotPrompt";
 const SIDEBAR_COMMAND_ACTION_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.commandAction";
 const SIDEBAR_COMMAND_RUN_END_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.commandRunEnd";
+const SIDEBAR_GHOSTEX_HOTKEY_ACTION_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.ghostexHotkeyAction";
 const SIDEBAR_GXSERVER_FOCUS_STATE_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.gxserverPresentationFocusState";
+const SIDEBAR_WORKSPACE_TERMINAL_FOCUS_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.workspaceTerminalFocus";
+const SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.workspaceTerminalRenameCommand";
+const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.workspaceTerminalLifecycleResult";
 const SIDEBAR_SESSION_FOCUS_DEBUG_LOG_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.sessionFocusDebugLog";
 const SIDEBAR_SESSION_STATUS_INDICATORS_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.sessionStatusIndicators";
-const SIDEBAR_PET_OVERLAY_STATE_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.petOverlayState";
+const SIDEBAR_PET_OVERLAY_STATE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.petOverlayState";
 const SIDEBAR_PROJECT_CONTEXT_INSTALL_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.installActiveProjectContextBridge";
 const SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME: &str =
@@ -88,7 +95,13 @@ const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_JS_FUNCTION: &str = "postNativeProjectP
 const SIDEBAR_NATIVE_APP_SHOT_PROMPT_JS_FUNCTION: &str = "postNativeAppShotPromptToSession";
 const SIDEBAR_COMMAND_ACTION_JS_FUNCTION: &str = "postSidebarCommandAction";
 const SIDEBAR_COMMAND_RUN_END_JS_FUNCTION: &str = "postSidebarCommandRunEnd";
+const SIDEBAR_GHOSTEX_HOTKEY_ACTION_JS_FUNCTION: &str = "postGhostexHotkeyAction";
 const SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION: &str = "postGxserverPresentationFocusState";
+const SIDEBAR_WORKSPACE_TERMINAL_FOCUS_JS_FUNCTION: &str = "postWorkspaceTerminalFocus";
+const SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_JS_FUNCTION: &str =
+    "postWorkspaceTerminalRenameCommand";
+const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_JS_FUNCTION: &str =
+    "postWorkspaceTerminalLifecycleResult";
 const SIDEBAR_SESSION_FOCUS_DEBUG_LOG_JS_FUNCTION: &str = "postSessionFocusDebugLog";
 const SIDEBAR_SESSION_STATUS_INDICATORS_JS_FUNCTION: &str = "postSessionStatusIndicators";
 const SIDEBAR_PET_OVERLAY_STATE_JS_FUNCTION: &str = "postPetOverlayState";
@@ -161,7 +174,11 @@ enum SidebarBridgeEventKind {
     NativeAppShotPrompt,
     SidebarCommandAction,
     SidebarCommandRunEnd,
+    GhostexHotkeyAction,
     GxserverPresentationFocusState,
+    WorkspaceTerminalFocus,
+    WorkspaceTerminalRenameCommand,
+    WorkspaceTerminalLifecycleResult,
     SessionFocusDebugLog,
     SessionStatusIndicators,
     PetOverlayState,
@@ -174,7 +191,7 @@ struct SidebarBridgeFunctionSpec {
     event_kind: SidebarBridgeEventKind,
 }
 
-const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 13] = [
+const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 17] = [
     SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION,
         process_message_name: SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME,
@@ -221,9 +238,29 @@ const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 13] = [
         event_kind: SidebarBridgeEventKind::SidebarCommandRunEnd,
     },
     SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_GHOSTEX_HOTKEY_ACTION_JS_FUNCTION,
+        process_message_name: SIDEBAR_GHOSTEX_HOTKEY_ACTION_PROCESS_MESSAGE_NAME,
+        event_kind: SidebarBridgeEventKind::GhostexHotkeyAction,
+    },
+    SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION,
         process_message_name: SIDEBAR_GXSERVER_FOCUS_STATE_PROCESS_MESSAGE_NAME,
         event_kind: SidebarBridgeEventKind::GxserverPresentationFocusState,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_WORKSPACE_TERMINAL_FOCUS_JS_FUNCTION,
+        process_message_name: SIDEBAR_WORKSPACE_TERMINAL_FOCUS_PROCESS_MESSAGE_NAME,
+        event_kind: SidebarBridgeEventKind::WorkspaceTerminalFocus,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_JS_FUNCTION,
+        process_message_name: SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_PROCESS_MESSAGE_NAME,
+        event_kind: SidebarBridgeEventKind::WorkspaceTerminalRenameCommand,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_JS_FUNCTION,
+        process_message_name: SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_PROCESS_MESSAGE_NAME,
+        event_kind: SidebarBridgeEventKind::WorkspaceTerminalLifecycleResult,
     },
     SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_SESSION_FOCUS_DEBUG_LOG_JS_FUNCTION,
@@ -363,7 +400,11 @@ pub enum SidebarBridgeEvent {
     NativeAppShotPrompt(String),
     SidebarCommandAction(String),
     SidebarCommandRunEnd(String),
+    GhostexHotkeyAction(String),
     GxserverPresentationFocusState(String),
+    WorkspaceTerminalFocus(String),
+    WorkspaceTerminalRenameCommand(String),
+    WorkspaceTerminalLifecycleResult(String),
     SessionFocusDebugLog(String),
     SessionStatusIndicators(String),
     PetOverlayState(String),
@@ -402,8 +443,16 @@ impl SidebarBridgeEventKind {
             Self::NativeAppShotPrompt => SidebarBridgeEvent::NativeAppShotPrompt(payload),
             Self::SidebarCommandAction => SidebarBridgeEvent::SidebarCommandAction(payload),
             Self::SidebarCommandRunEnd => SidebarBridgeEvent::SidebarCommandRunEnd(payload),
+            Self::GhostexHotkeyAction => SidebarBridgeEvent::GhostexHotkeyAction(payload),
             Self::GxserverPresentationFocusState => {
                 SidebarBridgeEvent::GxserverPresentationFocusState(payload)
+            }
+            Self::WorkspaceTerminalFocus => SidebarBridgeEvent::WorkspaceTerminalFocus(payload),
+            Self::WorkspaceTerminalRenameCommand => {
+                SidebarBridgeEvent::WorkspaceTerminalRenameCommand(payload)
+            }
+            Self::WorkspaceTerminalLifecycleResult => {
+                SidebarBridgeEvent::WorkspaceTerminalLifecycleResult(payload)
             }
             Self::SessionFocusDebugLog => SidebarBridgeEvent::SessionFocusDebugLog(payload),
             Self::SessionStatusIndicators => SidebarBridgeEvent::SessionStatusIndicators(payload),
@@ -1032,7 +1081,7 @@ fn install_sidebar_project_context_v8_bridge(
 ) {
     /*
     CDXC:GPUIProjectSidebarBridge 2026-06-23-18:29:
-    The renderer-side sidebar bridge exposes only fixed typed string-payload functions for active-project context, Source readiness, Browser readiness, project-workarea readiness, Manage operation requests, sidebar-native side-effect requests, gxserver focus-state hints, and the sanitized session-focus debug log, plus `window.ghostexGpui.runtimeSettings` with strict debuggingMode/showBetaFeatures booleans and the saved shared Settings object. It does not expose generic message names, event buses, filesystem/project detection, trusted file paths, URL/title inspection, arbitrary logging, persistence, or fallback project inference.
+    The renderer-side sidebar bridge exposes only fixed typed string-payload functions for active-project context, Source readiness, Browser readiness, project-workarea readiness, Manage operation requests, sidebar-native side-effect requests, gxserver focus-state hints, workspace terminal focus and rename requests, and the sanitized session-focus debug log, plus `window.ghostexGpui.runtimeSettings` with strict debuggingMode/showBetaFeatures booleans and the saved shared Settings object. It does not expose generic message names, event buses, filesystem/project detection, trusted file paths, URL/title inspection, arbitrary logging, persistence, or fallback project inference.
 
     CDXC:GPUIProjectSidebarBridge 2026-06-23-06:57:
     After initial install, runtime settings refresh uses a second private browser-to-renderer CEF message that can replace the sidebar runtimeSettings object and notify the page through `window.ghostexGpui.onRuntimeSettingsChanged(settings)`. This keeps ordinary Browser tabs out of the sidebar bridge and avoids a generic event/settings bus.
@@ -1045,6 +1094,12 @@ fn install_sidebar_project_context_v8_bridge(
 
     CDXC:GPUISidebarGxserverFocusState 2026-06-24-21:07:
     The focus-state bridge is a fixed sidebar-only string payload used to return React-owned gxserver presentation session ids to Rust for bootstrap replay. It must remain separate from native path actions and must not carry paths, titles, command text, terminal contents, tokens, daemon response bodies, or renderer-derived labels.
+
+    CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:08:
+    The workspace terminal focus bridge is fixed-function and sidebar-only. It may carry only the gxserver project/session ids React already focused so Rust can select or materialize the matching Agents tab from gxserver attach metadata; it must not accept labels, commands, paths, terminal contents, daemon responses, or generic terminal IPC.
+
+    CDXC:GPUIWorkspaceRenameCommand 2026-06-27-02:27:
+    Workspace terminal rename parity adds one fixed sidebar-only bridge function for the already-trimmed rename title plus gxserver project/session ids. CEF still exposes no generic terminal-text sender, command bus, cwd/path authority, logging path, renderer-selected target surface, or fallback terminal IPC.
 
     CDXC:GPUISidebarFocusDebug 2026-06-26-04:55:
     The focus-debug bridge is a separate fixed sidebar-only diagnostic path for focus bounce investigation. Rust must sanitize at the support-log writer boundary and Debugging Mode must gate routine events, while warning-level loop events may persist without raw names, paths, URLs, commands, tokens, titles, or terminal data.
@@ -2505,207 +2560,4 @@ pub extern "C" fn GhostexGpuiCEFMarkNativeViewFocused(native_view: *mut c_void) 
 #[unsafe(no_mangle)]
 pub extern "C" fn GhostexGpuiCEFClearActiveNativeView() {
     clear_active_native_view();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /*
-    CDXC:GPUIProjectSidebarBridge 2026-06-23-18:29:
-    Sidebar bridge tests are source-only privacy and scope evidence. They prove the CEF renderer namespace is a fixed allowlist of typed one-string entry points and that bridge installation is gated by the sidebar handler, without adding Browser-page exposure, generic event names, logging, persistence, validation, or app launch.
-
-    CDXC:GPUISidebarProjectPathActions 2026-06-24-14:18:
-    The native project path action is included in the same allowlist evidence because it is a fixed sidebar-only one-string bridge whose app-side parser accepts project ids for path actions and only a relative file candidate for the changed-file Git action, never renderer absolute paths.
-
-    CDXC:GPUISidebarGit 2026-06-24-15:43:
-    The same allowlisted bridge may carry existing-PR open and changed-file open requests, but CEF tests should continue proving only fixed function/message routing; Rust owns URL and file-candidate validation through gxserver.
-
-    CDXC:GPUISidebarGxserverFocusState 2026-06-24-21:07:
-    Gxserver focus-state publication is included as an allowlisted bridge function because Rust needs the real presentation session ids React receives from gxserver create/focus/fork/restore flows. The payload is still one bounded string and is parsed by Rust before it can update bootstrap state.
-
-    CDXC:GPUICommandPane 2026-06-24-23:17:
-    Sidebar command actions are included as an allowlisted bridge function so `runSidebarCommand` reaches the same GPUI app action path as titlebar Actions. The test proves only fixed function/message routing; Rust owns strict payload parsing and command-pane launch boundaries.
-
-    CDXC:GPUICommandPane 2026-06-25-10:34:
-    `endSidebarCommandRun` has its own allowlisted bridge function because closing a mapped command-pane run needs only a command id. Keep it separate from Action launch payloads so renderer code cannot reuse the launch bridge to smuggle command text, URLs, project paths, cwd/env, status paths, run ids, or terminal output.
-
-    CDXC:GPUICommandPane 2026-06-26-00:05:
-    Close-on-exit parity adds only a terminal Action boolean to the existing command-action JSON. The CEF allowlist must stay one fixed launch bridge plus one fixed run-end bridge, with no new function names for command text, paths, env, logs, stdout, stderr, terminal content, or browser-only close flags.
-
-    CDXC:GPUIAppShots 2026-06-25-23:28:
-    App Shot prompt insertion is included as a fixed sidebar bridge function so React can request one exact local or already-mounted remote-session prompt write and Rust can decline stale, command-pane, sleeping, sidebar-only, or unmounted targets without exposing generic terminal text IPC.
-
-    CDXC:GPUIStatusPetOverlay 2026-06-26-04:38:
-    Status indicator and pet overlay sync join the fixed sidebar allowlist as presentation-state functions only. The test must keep them separate from generic IPC, activation callbacks, menu-bar status-item bridges, paths, URLs, command text, terminal content, logs, and persistence.
-
-    CDXC:GPUISidebarFocusDebug 2026-06-26-04:55:
-    GPUI sidebar focus-loop diagnosis uses one fixed debug-log bridge function so React can report bounded enum/id/count evidence to Rust's sanitized support logger. This bridge must not become generic logging IPC and must not carry paths, titles, command text, terminal content, URLs, tokens, stdout/stderr, or renderer-owned free-form strings.
-    */
-    #[test]
-    fn sidebar_bridge_allowlist_maps_only_fixed_functions_to_private_messages() {
-        assert_eq!(SIDEBAR_BRIDGE_FUNCTION_SPECS.len(), 13);
-        assert_eq!(SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS, 32 * 1024);
-
-        for (function_name, process_message_name, event_kind) in [
-            (
-                SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION,
-                SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME,
-                SidebarBridgeEventKind::ActiveProjectContext,
-            ),
-            (
-                SIDEBAR_SOURCE_WORKAREA_READINESS_JS_FUNCTION,
-                SIDEBAR_SOURCE_WORKAREA_READINESS_PROCESS_MESSAGE_NAME,
-                SidebarBridgeEventKind::SourceWorkareaReadiness,
-            ),
-            (
-                SIDEBAR_BROWSER_WORKAREA_READINESS_JS_FUNCTION,
-                SIDEBAR_BROWSER_WORKAREA_READINESS_PROCESS_MESSAGE_NAME,
-                SidebarBridgeEventKind::BrowserWorkareaReadiness,
-            ),
-            (
-                SIDEBAR_PROJECT_WORKAREA_READINESS_JS_FUNCTION,
-                SIDEBAR_PROJECT_WORKAREA_READINESS_PROCESS_MESSAGE_NAME,
-                SidebarBridgeEventKind::ProjectWorkareaReadiness,
-            ),
-            (
-                SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_JS_FUNCTION,
-                SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_PROCESS_MESSAGE_NAME,
-                SidebarBridgeEventKind::ManageFileWorkareaOperationRequest,
-            ),
-            (
-                SIDEBAR_NATIVE_PROJECT_PATH_ACTION_JS_FUNCTION,
-                SIDEBAR_NATIVE_PROJECT_PATH_ACTION_PROCESS_MESSAGE_NAME,
-                SidebarBridgeEventKind::NativeProjectPathAction,
-            ),
-            (
-                SIDEBAR_NATIVE_APP_SHOT_PROMPT_JS_FUNCTION,
-                SIDEBAR_NATIVE_APP_SHOT_PROMPT_PROCESS_MESSAGE_NAME,
-                SidebarBridgeEventKind::NativeAppShotPrompt,
-            ),
-            (
-                SIDEBAR_COMMAND_ACTION_JS_FUNCTION,
-                SIDEBAR_COMMAND_ACTION_PROCESS_MESSAGE_NAME,
-                SidebarBridgeEventKind::SidebarCommandAction,
-            ),
-            (
-                SIDEBAR_COMMAND_RUN_END_JS_FUNCTION,
-                SIDEBAR_COMMAND_RUN_END_PROCESS_MESSAGE_NAME,
-                SidebarBridgeEventKind::SidebarCommandRunEnd,
-            ),
-            (
-                SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION,
-                SIDEBAR_GXSERVER_FOCUS_STATE_PROCESS_MESSAGE_NAME,
-                SidebarBridgeEventKind::GxserverPresentationFocusState,
-            ),
-            (
-                SIDEBAR_SESSION_FOCUS_DEBUG_LOG_JS_FUNCTION,
-                SIDEBAR_SESSION_FOCUS_DEBUG_LOG_PROCESS_MESSAGE_NAME,
-                SidebarBridgeEventKind::SessionFocusDebugLog,
-            ),
-            (
-                SIDEBAR_SESSION_STATUS_INDICATORS_JS_FUNCTION,
-                SIDEBAR_SESSION_STATUS_INDICATORS_PROCESS_MESSAGE_NAME,
-                SidebarBridgeEventKind::SessionStatusIndicators,
-            ),
-            (
-                SIDEBAR_PET_OVERLAY_STATE_JS_FUNCTION,
-                SIDEBAR_PET_OVERLAY_STATE_PROCESS_MESSAGE_NAME,
-                SidebarBridgeEventKind::PetOverlayState,
-            ),
-        ] {
-            let spec = sidebar_bridge_function_spec_for_js_function(function_name)
-                .expect("function should be allowlisted");
-            assert_eq!(spec.process_message_name, process_message_name);
-            assert_eq!(spec.event_kind, event_kind);
-            assert_eq!(
-                sidebar_bridge_event_kind_for_process_message(process_message_name),
-                Some(event_kind)
-            );
-        }
-
-        for unexpected in [
-            "",
-            "postMessage",
-            "send",
-            "emit",
-            "postTerminalText",
-            "postSidebarCommandActionWithCommandText",
-            "postSidebarCommandActionCloseTerminalOnExit",
-            "postSessionFocusDebugLogWithDetails",
-            "postSessionFocusDebugLogRaw",
-            "postStatusIndicatorEvent",
-            "postPetOverlayActivityClicked",
-            "postMenuBarStatusItemState",
-            "postWorkareaEvent",
-            "ghostex.gpui.projectWorkarea.readiness",
-            "ghostex.gpui.manageFileWorkarea.operationRequest",
-            "ghostex.gpui.sidebar.commandAction.closeTerminalOnExit",
-        ] {
-            assert!(sidebar_bridge_function_spec_for_js_function(unexpected).is_none());
-            assert!(sidebar_bridge_event_kind_for_process_message(unexpected).is_none());
-        }
-    }
-
-    #[test]
-    fn sidebar_bridge_events_are_typed_and_installed_only_with_sidebar_handler() {
-        assert!(!sidebar_bridge_installed_for_handler(false));
-        assert!(sidebar_bridge_installed_for_handler(true));
-
-        assert_eq!(
-            SidebarBridgeEventKind::ActiveProjectContext.with_payload("active".to_string()),
-            SidebarBridgeEvent::ActiveProjectContext("active".to_string())
-        );
-        assert_eq!(
-            SidebarBridgeEventKind::SourceWorkareaReadiness.with_payload("source".to_string()),
-            SidebarBridgeEvent::SourceWorkareaReadiness("source".to_string())
-        );
-        assert_eq!(
-            SidebarBridgeEventKind::BrowserWorkareaReadiness.with_payload("browser".to_string()),
-            SidebarBridgeEvent::BrowserWorkareaReadiness("browser".to_string())
-        );
-        assert_eq!(
-            SidebarBridgeEventKind::ProjectWorkareaReadiness.with_payload("project".to_string()),
-            SidebarBridgeEvent::ProjectWorkareaReadiness("project".to_string())
-        );
-        assert_eq!(
-            SidebarBridgeEventKind::ManageFileWorkareaOperationRequest
-                .with_payload("manage".to_string()),
-            SidebarBridgeEvent::ManageFileWorkareaOperationRequest("manage".to_string())
-        );
-        assert_eq!(
-            SidebarBridgeEventKind::NativeProjectPathAction.with_payload("native".to_string()),
-            SidebarBridgeEvent::NativeProjectPathAction("native".to_string())
-        );
-        assert_eq!(
-            SidebarBridgeEventKind::NativeAppShotPrompt.with_payload("app-shot".to_string()),
-            SidebarBridgeEvent::NativeAppShotPrompt("app-shot".to_string())
-        );
-        assert_eq!(
-            SidebarBridgeEventKind::SidebarCommandAction.with_payload("command".to_string()),
-            SidebarBridgeEvent::SidebarCommandAction("command".to_string())
-        );
-        assert_eq!(
-            SidebarBridgeEventKind::SidebarCommandRunEnd.with_payload("command-end".to_string()),
-            SidebarBridgeEvent::SidebarCommandRunEnd("command-end".to_string())
-        );
-        assert_eq!(
-            SidebarBridgeEventKind::GxserverPresentationFocusState
-                .with_payload("focus".to_string()),
-            SidebarBridgeEvent::GxserverPresentationFocusState("focus".to_string())
-        );
-        assert_eq!(
-            SidebarBridgeEventKind::SessionFocusDebugLog.with_payload("debug".to_string()),
-            SidebarBridgeEvent::SessionFocusDebugLog("debug".to_string())
-        );
-        assert_eq!(
-            SidebarBridgeEventKind::SessionStatusIndicators
-                .with_payload("status".to_string()),
-            SidebarBridgeEvent::SessionStatusIndicators("status".to_string())
-        );
-        assert_eq!(
-            SidebarBridgeEventKind::PetOverlayState.with_payload("pet".to_string()),
-            SidebarBridgeEvent::PetOverlayState("pet".to_string())
-        );
-    }
 }

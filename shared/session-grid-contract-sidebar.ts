@@ -140,6 +140,11 @@ export type SidebarGhostexCliStatusMessage = {
    * Agent Orchestration, and Generate Title instead of only exposing the skills
    * that also have standalone guide pages.
    *
+   * CDXC:CodexSessionMove 2026-06-26-13:24:
+   * The Codex session-move skill is part of the bundled skills setup surface,
+   * so the status payload must carry its installed state and path like the
+   * other app-shipped skills.
+   *
    * CDXC:CuaPermissions 2026-05-29-06:00:
    * The Cua Permissions row must report Cua Driver's own macOS privacy grants,
    * not Ghostex's Accessibility grant. Carry both Accessibility and Screen
@@ -163,6 +168,8 @@ export type SidebarGhostexCliStatusMessage = {
   agentOrchestrationSkillPath?: string;
   generateTitleSkillInstalled: boolean;
   generateTitleSkillPath?: string;
+  moveCodexSessionSkillInstalled: boolean;
+  moveCodexSessionSkillPath?: string;
   cuaDriverAccessibilityPermissionGranted?: boolean;
   cuaAppInstalled: boolean;
   cuaDriverInstalled: boolean;
@@ -428,6 +435,11 @@ export type SidebarSessionGroup = {
   layoutVisibleCount: VisibleSessionCount;
   projectContext?: {
     canRemoveProject: boolean;
+    /**
+     * CDXC:GPUISettingsNotifications 2026-06-26-07:22:
+     * GPUI session-attention notifications need the same project icon attachment source as the macOS host. Carry only the already-normalized project image data URL on project context so status bridges can attach icons without paths, URLs, file probes, command text, terminal output, or generic renderer IPC.
+     */
+    iconDataUrl?: string;
     path: string;
     /**
      * CDXC:EditorPanes 2026-05-06-14:21
@@ -515,6 +527,17 @@ export type SidebarRecentProject = {
 
 export type SidebarCommandSessionIndicator = {
   commandId: string;
+  /**
+   * CDXC:GPUICommandPaneTimers 2026-06-27-02:05:
+   * Command-session HUD indicators need the same safe timer projection as sidebar session cards so GPUI command panes can show Delayed Send and Close After Done parity without carrying command text, cwd/env, paths, URLs, output, run ids, status-file paths, tokens, or unknown native fields.
+   */
+  closeAfterDone?: boolean;
+  closeAfterDoneDeadlineAt?: string;
+  closeAfterDoneRemainingLabel?: string;
+  closeAfterDoneRemainingMs?: number;
+  delayedSendDeadlineAt?: string;
+  delayedSendRemainingLabel?: string;
+  delayedSendRemainingMs?: number;
   isActive?: boolean;
   sessionId: string;
   status: "idle" | "running" | "error";
@@ -908,10 +931,20 @@ export type SidebarAppIconStateMessage = {
   type: "appIconState";
 };
 
+export type SidebarGpuiProjectSlotHotkeyMessage = {
+  /**
+   * CDXC:GPUIProjectHotkeys 2026-06-26-23:42:
+   * GPUI project slot hotkeys resolve locally in SidebarApp because SidebarApp owns the rendered Projects row order. Carry only the 1-based slot number so host payloads do not expose paths, titles, session ids, command text, URLs, or project metadata.
+   */
+  slotNumber: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+  type: "gpuiProjectSlotHotkey";
+};
+
 export type ExtensionToSidebarMessage =
   | SidebarHydrateMessage
   | SidebarSessionStateMessage
   | SidebarNativeHotkeyMessage
+  | SidebarGpuiProjectSlotHotkeyMessage
   | AgentsHubCatalogMessage
   | AgentsHubFileContentMessage
   | SidebarSessionPresentationChangedMessage
@@ -1004,6 +1037,7 @@ export type SidebarToExtensionMessage =
         | "installComputerUseSkill"
         | "installAgentOrchestrationSkill"
         | "installGenerateTitleSkill"
+        | "installMoveCodexSessionSkill"
         | "uninstallBundledAgentSkills"
         | "installCuaDriver";
     }

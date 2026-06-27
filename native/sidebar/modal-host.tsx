@@ -2733,6 +2733,10 @@ function AppModalHost() {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: "installGenerateTitleSkill" });
         }}
+        onInstallMoveCodexSessionSkill={() => {
+          setGhostexCliStatusLoading(true);
+          vscode.postMessage({ type: "installMoveCodexSessionSkill" });
+        }}
         onInstallCuaDriver={() => {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: "installCuaDriver" });
@@ -2859,6 +2863,10 @@ function AppModalHost() {
         onInstallGenerateTitleSkill={() => {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: "installGenerateTitleSkill" });
+        }}
+        onInstallMoveCodexSessionSkill={() => {
+          setGhostexCliStatusLoading(true);
+          vscode.postMessage({ type: "installMoveCodexSessionSkill" });
         }}
         onInstallCuaDriver={() => {
           setGhostexCliStatusLoading(true);

@@ -739,13 +739,14 @@ export const SessionCardActions: Story = {
       },
     );
 
-    await step("rename a session with a double click", async () => {
+    await step("ignore session double-click focus mode when rename is disabled", async () => {
       resetSidebarStoryMessages();
 
       const sessionCard = await findSessionCard();
       await userEvent.dblClick(sessionCard);
 
       await expectNoMessage({ type: "promptRenameSession" });
+      await expectNoMessage({ type: "focusSessionMode" });
     });
 
     await step("show rename in the session context menu", async () => {
@@ -871,12 +872,17 @@ export const SessionCardDoubleClickRenameEnabled: Story = {
     await waitForReadyMessage();
     resetSidebarStoryMessages();
 
-    await step("rename a session with a double click when enabled", async () => {
+    await step("open rename with a double click when enabled", async () => {
       const sessionCard = await findSessionCard();
       await userEvent.dblClick(sessionCard);
 
       await expectNoMessage({ type: "promptRenameSession" });
       await expectNoMessage({ type: "renameSession" });
+      await expectNoMessage({ type: "focusSessionMode" });
+      await expect(await body.findByText("Rename Session")).toBeVisible();
+
+      await userEvent.click(await body.findByRole("button", { name: "Close" }));
+      await waitFor(() => expect(body.queryByText("Rename Session")).toBeNull());
     });
 
     await step("keep browser double clicks ignored when rename is enabled", async () => {
@@ -891,6 +897,7 @@ export const SessionCardDoubleClickRenameEnabled: Story = {
 
       await expectNoMessage({ type: "promptRenameSession" });
       await expectNoMessage({ type: "renameSession" });
+      await expectNoMessage({ type: "focusSessionMode" });
     });
   },
 };

@@ -38,6 +38,7 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: 2.6.3
+# CDXC:NativeMacTestingPolicy 2026-06-27-12:06: Native macOS app tests are intentionally absent while product behavior is still moving. Lock native behavior down with tests later, and keep test suites for other Ghostex projects intact.
 targets:
   ghostex:
     type: application

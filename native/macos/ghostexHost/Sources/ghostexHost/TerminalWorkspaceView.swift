@@ -10646,7 +10646,7 @@ final class TerminalWorkspaceView: NSView {
           error: nil,
           file: nil,
           requestId: request.requestId,
-          rootName: rootURL.lastPathComponent)
+          rootName: manageArtifactsRelativePath)
       case "read":
         return ManageFilesBridgeResponse(
           action: request.action,
@@ -10654,7 +10654,7 @@ final class TerminalWorkspaceView: NSView {
           error: nil,
           file: try manageProjectFilePreview(rootURL: rootURL, path: request.path),
           requestId: request.requestId,
-          rootName: rootURL.lastPathComponent)
+          rootName: manageArtifactsRelativePath)
       case "save":
         return ManageFilesBridgeResponse(
           action: request.action,
@@ -10662,7 +10662,7 @@ final class TerminalWorkspaceView: NSView {
           error: nil,
           file: try manageSaveProjectFile(rootURL: rootURL, path: request.path, content: request.content),
           requestId: request.requestId,
-          rootName: rootURL.lastPathComponent)
+          rootName: manageArtifactsRelativePath)
       default:
         throw ManageFilesBridgeError.invalidRequest("Unsupported Manage file action.")
       }
@@ -10681,6 +10681,8 @@ final class TerminalWorkspaceView: NSView {
   private nonisolated static let manageFileListMaxDepth = 8
   private nonisolated static let manageFilePreviewMaxBytes = 2_000_000
   private nonisolated static let manageFileSaveMaxBytes = 2_000_000
+  private nonisolated static let manageArtifactsRelativePath = "artifacts"
+  private nonisolated static let manageAnnotationsSidecarRelativePath = ".ghostex/manage-annotations.json"
   private nonisolated static let manageIgnoredDirectoryNames: Set<String> = [
     ".cache",
     ".git",
@@ -10765,6 +10767,31 @@ final class TerminalWorkspaceView: NSView {
     return candidatePath == rootPath || candidatePath.hasPrefix("\(rootPath)/")
   }
 
+  private nonisolated static func manageProjectArtifactsURL(rootURL: URL) throws -> URL? {
+    let artifactsURL = rootURL.appendingPathComponent(manageArtifactsRelativePath, isDirectory: true)
+      .standardizedFileURL
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: artifactsURL.path, isDirectory: &isDirectory) else {
+      return nil
+    }
+    guard isDirectory.boolValue else {
+      throw ManageFilesBridgeError.invalidRequest("Project artifacts path is not a folder.")
+    }
+    let resolvedArtifactsURL = artifactsURL.resolvingSymlinksInPath()
+    guard manageURLIsInsideProjectRoot(resolvedArtifactsURL, rootURL: rootURL) else {
+      throw ManageFilesBridgeError.invalidRequest("Project artifacts path must stay inside the project.")
+    }
+    return resolvedArtifactsURL
+  }
+
+  private nonisolated static func manageValidateAccessibleRelativePath(_ relativePath: String) throws {
+    guard relativePath == manageAnnotationsSidecarRelativePath
+      || relativePath.hasPrefix("\(manageArtifactsRelativePath)/")
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Manage files must be inside project artifacts.")
+    }
+  }
+
   private nonisolated static func manageProjectFileEntries(rootURL: URL) throws -> [ManageFileEntry] {
     /*
      CDXC:Manage 2026-06-20-04:36:
@@ -10772,13 +10799,19 @@ final class TerminalWorkspaceView: NSView {
 
      CDXC:ManageFileListing 2026-06-20-06:52:
      Direct children of each directory must be appended before recursive descendants so root-level files, including .excalidraw drawings, cannot be pushed past the entry cap by a large nested tree.
+
+     CDXC:ManageArtifacts 2026-06-26-13:59:
+     The Manage sidebar should show only folders and files from the active project's artifacts/ directory. Keep returned paths project-relative as artifacts/... while starting the visible tree at artifacts/ so clicking Markdown, HTML, and Excalidraw files opens the same stable path that other Manage metadata uses.
      */
+    guard let artifactsURL = try manageProjectArtifactsURL(rootURL: rootURL) else {
+      return []
+    }
     var entries: [ManageFileEntry] = []
     try manageAppendProjectFileEntries(
       entries: &entries,
       rootURL: rootURL,
-      directoryURL: rootURL,
-      relativeDirectoryPath: "",
+      directoryURL: artifactsURL,
+      relativeDirectoryPath: manageArtifactsRelativePath,
       depth: 0)
     return entries
   }
@@ -10872,6 +10905,7 @@ final class TerminalWorkspaceView: NSView {
     guard !target.relativePath.isEmpty else {
       throw ManageFilesBridgeError.invalidRequest("Select a project file to preview.")
     }
+    try manageValidateAccessibleRelativePath(target.relativePath)
     let keys: Set<URLResourceKey> = [
       .contentModificationDateKey,
       .fileSizeKey,
@@ -10944,6 +10978,7 @@ final class TerminalWorkspaceView: NSView {
     guard !target.relativePath.isEmpty else {
       throw ManageFilesBridgeError.invalidRequest("Select a project file to save.")
     }
+    try manageValidateAccessibleRelativePath(target.relativePath)
     let parentURL = target.url.deletingLastPathComponent()
       .standardizedFileURL
       .resolvingSymlinksInPath()

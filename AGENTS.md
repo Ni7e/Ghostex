@@ -1,6 +1,6 @@
 # Rules for Agents working in this Repository
 
-## Repository Search Routing
+### Repository Search Routing
 
 This repository contains Ghostex app code plus large imported/vendored terminal code. Start searches in the smallest app-owned area that matches the task, and only expand after the first pass doesn't find what you need.
 
@@ -32,7 +32,18 @@ rg -n "pattern" native src sidebar shared scripts gxserver \
   -g '!dist/**' -g '!build/**' -g '!out/**' -g '!.git/**'
 ```
 
-## IMPORTANT Logging Rules
+### Don't write any test for the swift code in the macOS app
+
+This project is being replaced by the ./gpui project in the future, so these tests aren't helpful.
+No testing code here for now.
+
+### Don't write any test for the code in the gpui app
+
+Things are in a lot of flux in the ./gpui project
+We will write tests later to lock down working parts of it.
+No testing code here for now.
+
+### IMPORTANT Logging Rules
 
 Logs may be requested from users for debugging, so persistent logs must be safe for users to zip and send.
 
@@ -50,7 +61,7 @@ Logs may be requested from users for debugging, so persistent logs must be safe 
 
 7. When adding or changing persistent logging, add or update tests proving raw names, paths, URLs, command text, and secrets do not appear in written log output.
 
-## CDX_LOG comments:
+### CDX_LOG comments:
    - Whenever you're working on a codebase. I want you to add comments describing the date of the change (must be in this format yyyy-MM-dd-hh:mm) and describing the requirements or the change in requirements that made you implement certain functionality.
    - I want you to write CDXC:Area-of-product in front of all your comments so they can be grepped.
    - Most of this should be written as jsdocs but you can add short comments around for the important variables and more complex parts of the codebase.
@@ -72,7 +83,7 @@ Logs may be requested from users for debugging, so persistent logs must be safe 
    */
    ```
 
-## Never generate fallbacks when the right solution is to actually correct the behavior itself to fix the issue. Fallbacks should be used in rare cases only because they add complexity and hide issues and introduce useless logic.
+### Never generate fallbacks when the right solution is to actually correct the behavior itself to fix the issue. Fallbacks should be used in rare cases only because they add complexity and hide issues and introduce useless logic.
 
 Example of adding bad fallback code:
 
@@ -83,7 +94,7 @@ Example of what you should do instead:
 We should make it not fall back but instead just do the right thing from the start.
 Yes. The clean fix is to stop generating local font sources at all when the current webview environment can't use the local-fonts capability. I'm wiring that check into the Restty font-source helper so Ghostty starts in the correct mode instead of trying-and-failing first.
 
-## Native layout and hit-testing discipline
+### Native layout and hit-testing discipline
 
 Ghostex native UI should be built with strict normal layout ownership: lay out interactive AppKit, WKWebView, CEF, Ghostty, sidebar, titlebar, pane, and divider regions as non-overlapping sibling or child frames wherever possible. Do not solve click, drag, hover, or focus bugs by stacking transparent views, extending webviews under native chrome, adding broad parent/window hit-test routing, or creating hidden overlap between interactive regions.
 
@@ -93,11 +104,11 @@ Before adding any `hitTest` override, NSWindow pre-dispatch mouse routing, synth
 
 Native child windows are the accepted pattern for app modals, dropdowns, command palette, rename, Resources, Tips & Tricks, and similar overlay surfaces. Those windows own their own frames and input, so they should not be replaced with main-window transparent webview overlays or root-level hit-test shields.
 
-## Running and refreshing the app
+### Running and refreshing the app
 
 - The Ghostex app does not have hot reload. After frontend or native-sidebar changes, run `bun run start` again to refresh the running app before verifying UI behavior with Browser, Chrome, Cua Driver, or manual testing.
 
-## Project board beads workflow
+### Project board beads workflow
 
 When working from a Ghostex Project board ticket, move the bead through the project swimlanes with `bd` instead of leaving it in `open`/Todo:
 
@@ -115,7 +126,7 @@ After each turn where you made progress on the bead, add a comment so humans can
 
 The Project board "Start work" action copies a prompt that includes these commands and the comment guidance.
 
-## Destructive git/file operations safety rule
+### Destructive git/file operations safety rule
 
 Never interpret "revert your changes" or "revert what you did" as permission to reset, restore, clean, delete, or otherwise discard the whole worktree. Other agents and the user may have unrelated uncommitted or untracked work in the same repo.
 
@@ -129,6 +140,6 @@ Before running any destructive command, including but not limited to `git restor
 If the user asks to revert only the agent's changes, use surgical reversal: inspect diffs, identify the exact hunks/files you changed, and revert only those. When uncertain, stop and ask. Never use broad restore/clean commands as a shortcut.
 
 
-## Rules for running commands
+### Rules for running commands
 
 - Never run "bun run start" or any command that would restart the app unless I ask you to.

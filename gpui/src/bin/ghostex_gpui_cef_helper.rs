@@ -10,18 +10,33 @@ use std::os::raw::c_int;
 
 const SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.activeProjectContext";
+const SIDEBAR_SOURCE_WORKAREA_READINESS_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.sourceWorkareaReadiness";
+const SIDEBAR_BROWSER_WORKAREA_READINESS_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.browserWorkareaReadiness";
+const SIDEBAR_PROJECT_WORKAREA_READINESS_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.projectWorkareaReadiness";
+const SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.manageFileWorkareaOperationRequest";
 const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.nativeProjectPathAction";
 const SIDEBAR_NATIVE_APP_SHOT_PROMPT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.nativeAppShotPrompt";
+const SIDEBAR_COMMAND_ACTION_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.commandAction";
+const SIDEBAR_COMMAND_RUN_END_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.commandRunEnd";
+const SIDEBAR_GHOSTEX_HOTKEY_ACTION_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.ghostexHotkeyAction";
 const SIDEBAR_GXSERVER_FOCUS_STATE_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.gxserverPresentationFocusState";
+const SIDEBAR_WORKSPACE_TERMINAL_FOCUS_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.workspaceTerminalFocus";
+const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.sidebar.workspaceTerminalLifecycleResult";
 const SIDEBAR_SESSION_FOCUS_DEBUG_LOG_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.sessionFocusDebugLog";
 const SIDEBAR_SESSION_STATUS_INDICATORS_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.sessionStatusIndicators";
-const SIDEBAR_PET_OVERLAY_STATE_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.petOverlayState";
+const SIDEBAR_PET_OVERLAY_STATE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.petOverlayState";
 const SIDEBAR_PROJECT_CONTEXT_INSTALL_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.installActiveProjectContextBridge";
 const SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME: &str =
@@ -30,9 +45,20 @@ const SIDEBAR_GXSERVER_BOOTSTRAP_UPDATE_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.gxserverBootstrapChanged";
 const SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE: &str = "ghostexGpui";
 const SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION: &str = "postActiveProjectContext";
+const SIDEBAR_SOURCE_WORKAREA_READINESS_JS_FUNCTION: &str = "postSourceWorkareaReadiness";
+const SIDEBAR_BROWSER_WORKAREA_READINESS_JS_FUNCTION: &str = "postBrowserWorkareaReadiness";
+const SIDEBAR_PROJECT_WORKAREA_READINESS_JS_FUNCTION: &str = "postProjectWorkareaReadiness";
+const SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_JS_FUNCTION: &str =
+    "postManageFileWorkareaOperationRequest";
 const SIDEBAR_NATIVE_PROJECT_PATH_ACTION_JS_FUNCTION: &str = "postNativeProjectPathAction";
 const SIDEBAR_NATIVE_APP_SHOT_PROMPT_JS_FUNCTION: &str = "postNativeAppShotPromptToSession";
+const SIDEBAR_COMMAND_ACTION_JS_FUNCTION: &str = "postSidebarCommandAction";
+const SIDEBAR_COMMAND_RUN_END_JS_FUNCTION: &str = "postSidebarCommandRunEnd";
+const SIDEBAR_GHOSTEX_HOTKEY_ACTION_JS_FUNCTION: &str = "postGhostexHotkeyAction";
 const SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION: &str = "postGxserverPresentationFocusState";
+const SIDEBAR_WORKSPACE_TERMINAL_FOCUS_JS_FUNCTION: &str = "postWorkspaceTerminalFocus";
+const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_JS_FUNCTION: &str =
+    "postWorkspaceTerminalLifecycleResult";
 const SIDEBAR_SESSION_FOCUS_DEBUG_LOG_JS_FUNCTION: &str = "postSessionFocusDebugLog";
 const SIDEBAR_SESSION_STATUS_INDICATORS_JS_FUNCTION: &str = "postSessionStatusIndicators";
 const SIDEBAR_PET_OVERLAY_STATE_JS_FUNCTION: &str = "postPetOverlayState";
@@ -73,10 +99,33 @@ struct SidebarBridgeFunctionSpec {
     process_message_name: &'static str,
 }
 
-const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 7] = [
+/*
+CDXC:GPUISidebarBridge 2026-06-26-05:23:
+The helper renderer must expose the same sidebar post-function allowlist as the main macOS CEF renderer. Workspace focus/lifecycle parity depends on both renderers accepting the fixed id-only bridge calls, and adjacent workarea/command bridges should not silently disappear in helper-based CEF runs.
+
+CDXC:GPUICommandPalette 2026-06-27-08:17:
+Command-palette hotkey selectors are another fixed sidebar bridge call. Helper-based CEF runs must expose `postGhostexHotkeyAction` with the same private process message as the main renderer so Open Commands Panel and focused-pane routes do not depend on which renderer installed the bridge.
+*/
+const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 16] = [
     SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION,
         process_message_name: SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_SOURCE_WORKAREA_READINESS_JS_FUNCTION,
+        process_message_name: SIDEBAR_SOURCE_WORKAREA_READINESS_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_BROWSER_WORKAREA_READINESS_JS_FUNCTION,
+        process_message_name: SIDEBAR_BROWSER_WORKAREA_READINESS_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_PROJECT_WORKAREA_READINESS_JS_FUNCTION,
+        process_message_name: SIDEBAR_PROJECT_WORKAREA_READINESS_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_JS_FUNCTION,
+        process_message_name: SIDEBAR_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_PROCESS_MESSAGE_NAME,
     },
     SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_NATIVE_PROJECT_PATH_ACTION_JS_FUNCTION,
@@ -87,8 +136,28 @@ const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 7] = [
         process_message_name: SIDEBAR_NATIVE_APP_SHOT_PROMPT_PROCESS_MESSAGE_NAME,
     },
     SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_COMMAND_ACTION_JS_FUNCTION,
+        process_message_name: SIDEBAR_COMMAND_ACTION_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_COMMAND_RUN_END_JS_FUNCTION,
+        process_message_name: SIDEBAR_COMMAND_RUN_END_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_GHOSTEX_HOTKEY_ACTION_JS_FUNCTION,
+        process_message_name: SIDEBAR_GHOSTEX_HOTKEY_ACTION_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION,
         process_message_name: SIDEBAR_GXSERVER_FOCUS_STATE_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_WORKSPACE_TERMINAL_FOCUS_JS_FUNCTION,
+        process_message_name: SIDEBAR_WORKSPACE_TERMINAL_FOCUS_PROCESS_MESSAGE_NAME,
+    },
+    SidebarBridgeFunctionSpec {
+        js_function_name: SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_JS_FUNCTION,
+        process_message_name: SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_PROCESS_MESSAGE_NAME,
     },
     SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_SESSION_FOCUS_DEBUG_LOG_JS_FUNCTION,
@@ -288,6 +357,9 @@ fn install_sidebar_project_context_v8_bridge(
 
     CDXC:GPUISidebarGit 2026-06-24-15:43:
     Existing-PR browser open and changed-file IDE open reuse this fixed sidebar-native bridge instead of adding renderer-owned URL/path launch APIs. The helper still forwards only one bounded string; Rust must parse the allowlisted action contract and re-query gxserver before any browser or editor side effect.
+
+    CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:08:
+    Workspace terminal focus is a fixed sidebar-only bridge function carrying one bounded project/session id JSON payload. The helper must not add renderer-provided commands, cwd, paths, titles, terminal text, logs, or generic native IPC for local attach behavior.
 
     CDXC:GPUIStatusPetOverlay 2026-06-26-04:38:
     The helper mirrors the main CEF bridge for status indicator and pet overlay state as fixed sidebar-only functions. These functions are not activation callbacks or a generic native bus; they forward only bounded presentation JSON for app-side parsing.

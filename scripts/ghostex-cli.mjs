@@ -67,6 +67,7 @@ const GHOSTEX_COMPUTER_USE_SKILL_NAME = "ghostex-computer-use";
 const GHOSTEX_AGENT_ORCHESTRATION_SKILL_NAME = "ghostex-agent-orchestration";
 const GHOSTEX_GENERATE_TITLE_SKILL_NAME = "ghostex-generate-title";
 const GHOSTEX_MANAGE_BEADS_SKILL_NAME = "ghostex-manage-beads";
+const GHOSTEX_MOVE_CODEX_SESSION_SKILL_NAME = "ghostex-move-codex-session";
 const QUICK_TERMINALS_PROJECT_NAME = "Quick Terminals";
 const CLI_POSIX_SHELL_NAMES = new Set(["ash", "bash", "dash", "ksh", "mksh", "sh", "zsh"]);
 const CLI_LOGIN_COMMAND_SHELL_NAMES = new Set(["bash", "zsh"]);
@@ -192,6 +193,8 @@ const COMMANDS = new Map([
   ["install-generate-title-skill", installGenerateTitleSkillCommand],
   ["manage-beads", manageBeadsCommand],
   ["install-manage-beads-skill", installManageBeadsSkillCommand],
+  ["move-codex-session", moveCodexSessionCommand],
+  ["install-move-codex-session-skill", installMoveCodexSessionSkillCommand],
   ["toggle-sidebar", bridgeAction("toggleSidebarCollapsed")],
   ["move-sidebar", bridgeAction("moveSidebar")],
   ["assert-card", bridgeAction("assertSidebarCard", parseAssertCard, { assertOk: true })],
@@ -279,6 +282,7 @@ async function main() {
       "h",
       "history",
       "manage-beads",
+      "move-codex-session",
       "server",
     ].includes(commandName) &&
     (args.includes("-h") || args.includes("--help"))
@@ -550,6 +554,47 @@ async function installGenerateTitleSkillCommand(args) {
     command: "ghostex rename-command --session-id \"${GHOSTEX_GLOBAL_SESSION_REF:-${GHOSTEX_SESSION_ID:-${ZMX_SESSION:-}}}\" --title \"<title>\"",
     envVars: ["GHOSTEX_GENERATE_TITLE_SKILL_SOURCE"],
     skillName: GHOSTEX_GENERATE_TITLE_SKILL_NAME,
+  });
+}
+
+async function moveCodexSessionCommand(args) {
+  const [subcommand = "help", ...rest] = args;
+  if (rest.includes("-h") || rest.includes("--help")) {
+    console.log(moveCodexSessionUsage());
+    return;
+  }
+  switch (subcommand) {
+    case "help":
+    case "-h":
+    case "--help":
+      console.log(moveCodexSessionUsage());
+      return;
+    case "install-skill":
+      await installMoveCodexSessionSkillCommand(rest);
+      return;
+    default:
+      throw new Error(`Unknown move-codex-session command: ${subcommand}\n\n${moveCodexSessionUsage()}`);
+  }
+}
+
+async function installMoveCodexSessionSkillCommand(args) {
+  /**
+   * CDXC:CodexSessionMove 2026-06-26-13:18:
+   * Users ask how to move a live Codex conversation into another project
+   * folder. Bundle `$ghostex-move-codex-session` so agents can give the
+   * supported `/status` plus `codex fork --yolo -C <folder-path> <SESSION_ID>`
+   * workflow instead of inventing an in-place `/cd` command.
+   *
+   * CDXC:CodexSessionMove 2026-06-26-13:24:
+   * Users want moving to create a separate Codex session with full-access mode
+   * available by default. Install/help text should point at `codex fork`
+   * rather than `codex resume`.
+   */
+  await installGhostexAgentSkill({
+    args,
+    command: "codex fork --yolo -C <target-folder> <SESSION_ID>",
+    envVars: ["GHOSTEX_MOVE_CODEX_SESSION_SKILL_SOURCE"],
+    skillName: GHOSTEX_MOVE_CODEX_SESSION_SKILL_NAME,
   });
 }
 
@@ -5978,6 +6023,7 @@ function usage() {
     formatHelpCommand("agent-orchestration --help", "Show Ghostex Agent Orchestration skill setup"),
     formatHelpCommand("generate-title --help", "Show Ghostex Generate Title skill setup"),
     formatHelpCommand("manage-beads --help", "Show Ghostex Manage Beads skill setup"),
+    formatHelpCommand("move-codex-session --help", "Show Ghostex Move Codex Session skill setup"),
     formatHelpCommand("toggle-sidebar", "Collapse or expand the sidebar"),
     formatHelpCommand("move-sidebar", "Move the sidebar"),
   ].join("\n");
@@ -6258,6 +6304,32 @@ Boundary:
 `;
 }
 
+function moveCodexSessionUsage() {
+  /**
+   * CDXC:CodexSessionMove 2026-06-26-13:18:
+   * Help documents installation because the installed skill owns the concise
+   * user-facing steps for moving a saved Codex session to another working root.
+   */
+  return `Ghostex Move Codex Session - install the agent skill for moving Codex sessions between folders
+
+Usage:
+  gx move-codex-session --help
+  gx move-codex-session install-skill [--json]
+
+Agent skill:
+  Use $ghostex-move-codex-session when a user asks how to move or fork the
+  current Codex CLI conversation into another folder.
+
+What the skill teaches:
+  Run /status in the current Codex session, copy the session id, then create a
+  separate fork in the target folder with codex fork --yolo -C <folder-path> <SESSION_ID>.
+
+Fallback:
+  Use codex fork --all --last --yolo -C <folder-path> only when the user does
+  not want to copy the session id.
+`;
+}
+
 function agentOrchestrationUsage() {
   /**
    * CDXC:AgentOrchestration 2026-05-27-07:15:
@@ -6332,6 +6404,7 @@ export {
   groupSessionsPreservingSidebarOrder,
   isFailedCliResult,
   manageBeadsUsage,
+  moveCodexSessionUsage,
   moveSessionPickerSelection,
   parseArgs,
   parseCreateSession,

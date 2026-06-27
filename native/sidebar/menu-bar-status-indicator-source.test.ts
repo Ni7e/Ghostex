@@ -66,6 +66,11 @@ describe("menu bar status indicator source", () => {
      * Opening the dropdown from the menu bar should not activate Ghostex. The
      * session-card padding should be symmetric and the Restart/Quit hover
      * background should be darker than session-row hover.
+     *
+     * CDXC:MenuBarStatusIndicator 2026-06-26-06:21:
+     * The status button action is already registered for leftMouseUp, so the
+     * click target should not drop a valid menu-bar action just because
+     * NSApp.currentEvent is no longer leftMouseUp during AppKit dispatch.
      */
     const setupSource = sourceBetween(
       statusIndicatorSource,
@@ -82,12 +87,13 @@ describe("menu bar status indicator source", () => {
       "private final class MenuBarSessionStatusPanelController: NSObject {",
       "private final class MenuBarStatusProjectButton: NSControl {",
     );
-
     expect(statusIndicatorSource).toContain("CDXC:MenuBarStatusIndicator 2026-06-22-13:52:");
+    expect(statusIndicatorSource).toContain("CDXC:MenuBarStatusIndicator 2026-06-26-06:21:");
     expect(setupSource).toContain("_ = button.sendAction(on: [.leftMouseUp])");
     expect(setupSource).not.toContain("rightMouseDown");
     expect(setupSource).not.toContain("button.menu =");
-    expect(targetSource).toContain("guard event?.type == .leftMouseUp || event == nil else");
+    expect(targetSource).not.toContain("guard event?.type == .leftMouseUp || event == nil else");
+    expect(targetSource).toContain("event?.type == .rightMouseDown || event?.type == .rightMouseUp");
     expect(targetSource).toContain("if event?.modifierFlags.contains(.control) == true");
     expect(targetSource).toContain("panelController.show(from: sender)");
     expect(panelSource).toContain("private static let panelWidth: CGFloat = 370");
