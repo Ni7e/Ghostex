@@ -506,6 +506,42 @@ impl SharedSidebarSettingsSnapshot {
         strict_bool_field(&self.object, "debuggingMode") == Some(true)
     }
 
+    pub fn diagnostic_logging_scenario_enabled(&self, scenario_id: &str) -> bool {
+        /*
+        CDXC:DiagnosticsSettings 2026-06-27-22:07:
+        GPUI routine support logs use the shared diagnosticLogging.scenarios
+        allowlist instead of broad debuggingMode. Parse only exact scenario ids,
+        strict enabled booleans, and optional ISO expiresAt strings so expired
+        repro logging cannot keep writing noisy JSONL files.
+        */
+        let Some(scenarios) = self
+            .object
+            .get("diagnosticLogging")
+            .and_then(Value::as_object)
+            .and_then(|object| object.get("scenarios"))
+            .and_then(Value::as_object)
+        else {
+            return false;
+        };
+        let Some(state) = scenarios.get(scenario_id) else {
+            return false;
+        };
+        if state.as_bool() == Some(true) {
+            return true;
+        }
+        let Some(state_object) = state.as_object() else {
+            return false;
+        };
+        if state_object.get("enabled").and_then(Value::as_bool) != Some(true) {
+            return false;
+        }
+        let Some(expires_at) = state_object.get("expiresAt").and_then(Value::as_str) else {
+            return true;
+        };
+        shared_settings_iso8601_utc_millis_like(expires_at)
+            && expires_at > shared_settings_iso8601_utc(SystemTime::now()).as_str()
+    }
+
     pub fn show_beta_features(&self) -> bool {
         strict_bool_field(&self.object, "showBetaFeatures") == Some(true)
     }
@@ -1523,6 +1559,51 @@ fn hash_bytes(bytes: &[u8]) -> u64 {
     let mut hasher = DefaultHasher::new();
     hasher.write(bytes);
     hasher.finish()
+}
+
+fn shared_settings_iso8601_utc(time: SystemTime) -> String {
+    let duration = time.duration_since(UNIX_EPOCH).unwrap_or_default();
+    let total_seconds = duration.as_secs() as i64;
+    let days = total_seconds.div_euclid(86_400);
+    let seconds_of_day = total_seconds.rem_euclid(86_400);
+    let (year, month, day) = shared_settings_civil_from_days(days);
+    let hour = seconds_of_day / 3_600;
+    let minute = (seconds_of_day % 3_600) / 60;
+    let second = seconds_of_day % 60;
+    format!(
+        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{:03}Z",
+        duration.subsec_millis()
+    )
+}
+
+fn shared_settings_civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 }.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096).div_euclid(365);
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2).div_euclid(153);
+    let day = doy - (153 * mp + 2).div_euclid(5) + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if month <= 2 { 1 } else { 0 };
+    (year, month, day)
+}
+
+fn shared_settings_iso8601_utc_millis_like(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 24
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b'T'
+        && bytes[13] == b':'
+        && bytes[16] == b':'
+        && bytes[19] == b'.'
+        && bytes[23] == b'Z'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7 | 10 | 13 | 16 | 19 | 23) || byte.is_ascii_digit())
 }
 
 fn strict_bool_field(object: &Map<String, Value>, key: &str) -> Option<bool> {

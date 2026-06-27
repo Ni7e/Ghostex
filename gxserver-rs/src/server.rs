@@ -94,8 +94,8 @@ use crate::{
         create_source_build_identity, is_build_identity_reusable, remove_runtime_metadata,
         write_runtime_metadata,
     },
-    sidebar_hud::{create_sidebar_hud_settings_mutation, read_sidebar_hud},
     session_status::agent_activity_stale_projection_delay_ms,
+    sidebar_hud::{create_sidebar_hud_settings_mutation, read_sidebar_hud},
     storage::{
         create_gxserver_migration_status, initialize_gxserver_storage, open_gxserver_database,
     },
@@ -1081,10 +1081,7 @@ async fn route_http(
                         Value::Array(item_ids.into_iter().map(Value::String).collect()),
                     );
                 }
-                result.insert(
-                    "projects".to_string(),
-                    Value::Array(updated_projects),
-                );
+                result.insert("projects".to_string(), Value::Array(updated_projects));
                 Ok(Value::Object(result))
             },
         ),
@@ -2177,7 +2174,9 @@ async fn generate_first_prompt_session_title(
     let mut child = Command::new(&shell.executable);
     child.args(shell.interactive_script_args(&shell_command));
     child.current_dir(cwd.unwrap_or_else(|| state.paths.home_dir.to_str().unwrap_or(".")));
-    child.envs(internal_prompt_generation_environment(&state.paths.home_dir));
+    child.envs(internal_prompt_generation_environment(
+        &state.paths.home_dir,
+    ));
     child.stdout(std::process::Stdio::piped());
     child.stderr(std::process::Stdio::piped());
     let output = tokio::time::timeout(
@@ -2672,9 +2671,9 @@ async fn generate_commit_message_for_project(
             message: format!("SQLite gxserver state error: {error}"),
         })?;
         let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
-        let project = repository
-            .get_project(&project_id)?
-            .ok_or_else(|| DomainStateError::not_found(format!("Project {project_id} does not exist.")))?;
+        let project = repository.get_project(&project_id)?.ok_or_else(|| {
+            DomainStateError::not_found(format!("Project {project_id} does not exist."))
+        })?;
         let project_path = project
             .get("path")
             .and_then(Value::as_str)
@@ -2693,17 +2692,10 @@ async fn generate_commit_message_for_project(
         (project, project_path, projects, settings)
     };
 
-    let status = run_commit_message_generation_git_action(
-        &projects,
-        &project_id,
-        "statusPorcelainZ",
-        None,
-    )
-    .await?;
-    ensure_commit_message_generation_git_success(
-        &status,
-        "Could not inspect selected changes.",
-    )?;
+    let status =
+        run_commit_message_generation_git_action(&projects, &project_id, "statusPorcelainZ", None)
+            .await?;
+    ensure_commit_message_generation_git_success(&status, "Could not inspect selected changes.")?;
     ensure_commit_message_generation_paths_are_currently_changed(
         &file_paths,
         typed_result_stdout_raw(&status),
@@ -2757,8 +2749,7 @@ async fn generate_commit_message_for_project(
         &staged_summary,
         &staged_patch,
     );
-    let stdout =
-        run_commit_message_generation_agent(state, &project_path, &agent, &prompt).await?;
+    let stdout = run_commit_message_generation_agent(state, &project_path, &agent, &prompt).await?;
     parse_gxserver_generated_commit_message(&stdout, &agent.name)
 }
 
@@ -2785,7 +2776,9 @@ fn read_commit_message_generation_file_paths(
             .as_str()
             .map(str::trim)
             .filter(|path| !path.is_empty())
-            .ok_or_else(|| DomainStateError::bad_request("filePaths must contain relative paths."))?;
+            .ok_or_else(|| {
+                DomainStateError::bad_request("filePaths must contain relative paths.")
+            })?;
         if text.contains('\0')
             || Path::new(text).is_absolute()
             || text.split(['/', '\\']).any(|part| part == "..")
@@ -3040,7 +3033,9 @@ async fn run_commit_message_generation_agent(
     child
         .args(shell.interactive_script_args(&shell_command))
         .current_dir(cwd)
-        .envs(internal_prompt_generation_environment(&state.paths.home_dir))
+        .envs(internal_prompt_generation_environment(
+            &state.paths.home_dir,
+        ))
         .kill_on_drop(true)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -3106,12 +3101,16 @@ fn parse_gxserver_generated_commit_message(
     stdout: &str,
     agent_name: &str,
 ) -> std::result::Result<Value, DomainStateError> {
-    let start = stdout.find('{').ok_or_else(|| DomainStateError::bad_request(format!(
-        "{agent_name} did not return a commit message JSON object."
-    )))?;
-    let end = stdout.rfind('}').ok_or_else(|| DomainStateError::bad_request(format!(
-        "{agent_name} did not return a commit message JSON object."
-    )))?;
+    let start = stdout.find('{').ok_or_else(|| {
+        DomainStateError::bad_request(format!(
+            "{agent_name} did not return a commit message JSON object."
+        ))
+    })?;
+    let end = stdout.rfind('}').ok_or_else(|| {
+        DomainStateError::bad_request(format!(
+            "{agent_name} did not return a commit message JSON object."
+        ))
+    })?;
     if end < start {
         return Err(DomainStateError::bad_request(format!(
             "{agent_name} did not return a commit message JSON object."
@@ -3310,7 +3309,10 @@ async fn create_project_worktree_for_project(
     let mut create_params = Map::new();
     create_params.insert("baseRef".to_string(), Value::String(base_ref));
     create_params.insert("branch".to_string(), Value::String(target.branch.clone()));
-    create_params.insert("worktreePath".to_string(), Value::String(target.path.clone()));
+    create_params.insert(
+        "worktreePath".to_string(),
+        Value::String(target.path.clone()),
+    );
     let create = run_project_worktree_action(
         &context.projects,
         "create",
@@ -3358,12 +3360,8 @@ async fn open_project_worktree_for_project(
                 "Selected worktree is no longer in the current gxserver worktree list.",
             )
         })?;
-    let project = register_project_worktree_path(
-        state,
-        &selected.path,
-        &selected.name,
-        "projectAdded",
-    )?;
+    let project =
+        register_project_worktree_path(state, &selected.path, &selected.name, "projectAdded")?;
     prepare_registered_worktree_project(state, &project, &context.source_project_id).await?;
     Ok(json!({ "project": project }))
 }
@@ -3373,13 +3371,12 @@ async fn merge_worktree_into_main_for_project(
     params: &Map<String, Value>,
 ) -> std::result::Result<Value, ProjectWorktreeOperationError> {
     let plan = prepare_project_worktree_merge_plan(state, params)?;
-    let branch =
-        resolve_current_project_worktree_branch_name(&plan.projects, &plan.worktree_path)
-            .await?
-            .or(plan.worktree_branch)
-            .ok_or_else(|| {
-                DomainStateError::bad_request("Create and checkout a branch before merging.")
-            })?;
+    let branch = resolve_current_project_worktree_branch_name(&plan.projects, &plan.worktree_path)
+        .await?
+        .or(plan.worktree_branch)
+        .ok_or_else(|| {
+            DomainStateError::bad_request("Create and checkout a branch before merging.")
+        })?;
 
     let mut main_params = Map::new();
     main_params.insert("ref".to_string(), Value::String("main".to_string()));
@@ -3412,9 +3409,13 @@ async fn merge_worktree_into_main_for_project(
 
     let mut checkout_params = Map::new();
     checkout_params.insert("branch".to_string(), Value::String("main".to_string()));
-    let checkout =
-        run_project_git_action(&plan.projects, "checkout", &plan.parent_path, checkout_params)
-            .await?;
+    let checkout = run_project_git_action(
+        &plan.projects,
+        "checkout",
+        &plan.parent_path,
+        checkout_params,
+    )
+    .await?;
     if exit_code(&checkout) != 0 {
         return Err(TypedOperationError {
             code: "badRequest",
@@ -3465,9 +3466,13 @@ async fn checkout_project_new_branch_for_commit(
         }
         let mut checkout_params = Map::new();
         checkout_params.insert("branch".to_string(), Value::String(branch));
-        let checkout =
-            run_project_git_action(&projects, "checkoutNewBranch", &project_path, checkout_params)
-                .await?;
+        let checkout = run_project_git_action(
+            &projects,
+            "checkoutNewBranch",
+            &project_path,
+            checkout_params,
+        )
+        .await?;
         if exit_code(&checkout) == 0 {
             return Ok(json!({ "checkedOut": true }));
         }
@@ -3493,10 +3498,14 @@ fn resolve_project_worktree_operation_context(
     })?;
     let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
     let projects = repository.list_projects()?;
-    let source_project = repository
-        .get_project(&project_id)?
-        .ok_or_else(|| DomainStateError::not_found(format!("Project {project_id} does not exist.")))?;
-    if source_project.get("isRecentProject").and_then(Value::as_bool) == Some(true) {
+    let source_project = repository.get_project(&project_id)?.ok_or_else(|| {
+        DomainStateError::not_found(format!("Project {project_id} does not exist."))
+    })?;
+    if source_project
+        .get("isRecentProject")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
         return Err(DomainStateError::bad_request(
             "Restore the project before using worktree actions.",
         )
@@ -3615,9 +3624,13 @@ async fn project_worktree_options(
 async fn project_worktree_base_branches(
     context: &ProjectWorktreeOperationContext,
 ) -> std::result::Result<Value, ProjectWorktreeOperationError> {
-    let result =
-        run_project_git_action(&context.projects, "listBranches", &context.parent_path, Map::new())
-            .await?;
+    let result = run_project_git_action(
+        &context.projects,
+        "listBranches",
+        &context.parent_path,
+        Map::new(),
+    )
+    .await?;
     if exit_code(&result) != 0 {
         return Err(TypedOperationError {
             code: "badRequest",
@@ -3666,12 +3679,20 @@ async fn resolve_unique_project_worktree_target(
         );
         let mut path_params = Map::new();
         path_params.insert("worktreePath".to_string(), Value::String(path.clone()));
-        let branch_check =
-            run_project_git_action(&context.projects, "verifyRef", &context.source_path, branch_params)
-                .await?;
-        let path_check =
-            run_project_worktree_action(&context.projects, "pathExists", &context.source_path, path_params)
-                .await?;
+        let branch_check = run_project_git_action(
+            &context.projects,
+            "verifyRef",
+            &context.source_path,
+            branch_params,
+        )
+        .await?;
+        let path_check = run_project_worktree_action(
+            &context.projects,
+            "pathExists",
+            &context.source_path,
+            path_params,
+        )
+        .await?;
         if exit_code(&branch_check) != 0
             && exit_code(&path_check) != 0
             && !registered_paths.contains(&normalized_path)
@@ -3713,9 +3734,13 @@ async fn prepare_registered_worktree_project(
 ) -> std::result::Result<(), ProjectWorktreeOperationError> {
     let project_id = value_text(project, "projectId")?;
     let projects = list_domain_projects(state)?;
-    let hooks =
-        run_project_worktree_action_by_project_id(&projects, "ensureBeadsHooks", &project_id, Map::new())
-            .await?;
+    let hooks = run_project_worktree_action_by_project_id(
+        &projects,
+        "ensureBeadsHooks",
+        &project_id,
+        Map::new(),
+    )
+    .await?;
     if exit_code(&hooks) != 0 {
         return Err(TypedOperationError {
             code: "badRequest",
@@ -3727,7 +3752,9 @@ async fn prepare_registered_worktree_project(
     }
     let setup_project = projects
         .iter()
-        .find(|candidate| candidate.get("projectId").and_then(Value::as_str) == Some(setup_project_id))
+        .find(|candidate| {
+            candidate.get("projectId").and_then(Value::as_str) == Some(setup_project_id)
+        })
         .cloned();
     if setup_project
         .as_ref()
@@ -3751,8 +3778,9 @@ async fn prepare_registered_worktree_project(
         "setupCommandProjectId".to_string(),
         Value::String(setup_project_id.to_string()),
     );
-    let setup = dispatch_typed_operation_endpoint("/api/runProjectSetupCommand", &setup_params, projects)
-        .await?;
+    let setup =
+        dispatch_typed_operation_endpoint("/api/runProjectSetupCommand", &setup_params, projects)
+            .await?;
     if exit_code(&setup) != 0 {
         return Err(TypedOperationError {
             code: "badRequest",
@@ -3784,9 +3812,9 @@ fn prepare_project_worktree_merge_plan(
     })?;
     let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
     let projects = repository.list_projects()?;
-    let worktree_project = repository
-        .get_project(&project_id)?
-        .ok_or_else(|| DomainStateError::not_found(format!("Project {project_id} does not exist.")))?;
+    let worktree_project = repository.get_project(&project_id)?.ok_or_else(|| {
+        DomainStateError::not_found(format!("Project {project_id} does not exist."))
+    })?;
     let worktree = normalize_worktree_metadata(worktree_project.get("worktree"))
         .ok_or_else(|| DomainStateError::bad_request("Project is not a worktree."))?;
     let parent_project = resolve_worktree_parent_project(&projects, &worktree)?;
@@ -3834,7 +3862,9 @@ fn resolve_registered_project_path(
     let project = projects
         .iter()
         .find(|candidate| candidate.get("projectId").and_then(Value::as_str) == Some(project_id))
-        .ok_or_else(|| DomainStateError::not_found(format!("Project {project_id} does not exist.")))?;
+        .ok_or_else(|| {
+            DomainStateError::not_found(format!("Project {project_id} does not exist."))
+        })?;
     let path = project_required_path(project, "Project")?;
     let path = normalize_existing_directory_path(
         Some(&Value::String(path)),
@@ -3894,7 +3924,10 @@ async fn run_project_worktree_action_by_project_id(
     mut extra_params: Map<String, Value>,
 ) -> std::result::Result<Value, ProjectWorktreeOperationError> {
     extra_params.insert("action".to_string(), Value::String(action.to_string()));
-    extra_params.insert("projectId".to_string(), Value::String(project_id.to_string()));
+    extra_params.insert(
+        "projectId".to_string(),
+        Value::String(project_id.to_string()),
+    );
     dispatch_typed_operation_endpoint("/api/runWorktreeAction", &extra_params, projects.to_vec())
         .await
         .map_err(Into::into)
@@ -3969,7 +4002,10 @@ fn path_file_name_for_project(path: &str) -> String {
         .to_string()
 }
 
-fn project_required_path(project: &Value, label: &str) -> std::result::Result<String, DomainStateError> {
+fn project_required_path(
+    project: &Value,
+    label: &str,
+) -> std::result::Result<String, DomainStateError> {
     project
         .get("path")
         .and_then(Value::as_str)
@@ -3979,7 +4015,9 @@ fn project_required_path(project: &Value, label: &str) -> std::result::Result<St
         .ok_or_else(|| DomainStateError::bad_request(format!("{label} has no filesystem path.")))
 }
 
-fn normalize_project_worktree_key(input: Option<&Value>) -> std::result::Result<String, DomainStateError> {
+fn normalize_project_worktree_key(
+    input: Option<&Value>,
+) -> std::result::Result<String, DomainStateError> {
     let value = input
         .and_then(Value::as_str)
         .map(str::trim)
@@ -4006,7 +4044,9 @@ fn normalize_project_worktree_git_ref(
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| DomainStateError::bad_request(format!("{field} must be a non-empty string.")))?;
+        .ok_or_else(|| {
+            DomainStateError::bad_request(format!("{field} must be a non-empty string."))
+        })?;
     if value.len() <= 200 && is_allowed_project_git_ref(value) {
         Ok(value.to_string())
     } else {

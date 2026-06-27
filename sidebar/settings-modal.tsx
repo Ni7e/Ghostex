@@ -146,6 +146,7 @@ import {
   MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
   MAX_TERMINAL_PANE_PADDING_PX,
   MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
+  DIAGNOSTIC_LOGGING_SCENARIOS,
   GHOSTTY_CONFIRM_CLOSE_SURFACE_OPTIONS,
   GHOSTTY_COPY_ON_SELECT_OPTIONS,
   GHOSTTY_SCROLLBAR_OPTIONS,
@@ -157,12 +158,12 @@ import {
   PROMPT_EDITOR_BACKEND_OPTIONS,
   type PromptEditorBackend,
   SESSION_PERSISTENCE_PROVIDER_OPTIONS,
-  SESSION_STATUS_INDICATOR_SIZE_OPTIONS,
   SESSION_TITLE_GENERATION_AGENT_OPTIONS,
   SIDEBAR_SETTINGS_PRESETS,
   SIDEBAR_SIDE_OPTIONS,
   TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS,
   applySidebarSettingsPreset,
+  areDiagnosticLoggingSettingsEqual,
   getSessionTitleGenerationCommandPreview,
   getSidebarSettingsPresetId,
   MAX_COMMANDS_PANEL_DEFAULT_HEIGHT_PX,
@@ -173,10 +174,13 @@ import {
   normalizeTerminalDevServerIgnoredPortRules,
   normalizeghostexSettings,
   normalizeRemoteMachineSettings,
+  setDiagnosticLoggingScenario,
   type BrowserFeedbackTool,
   type AppShotsHotkey,
   type AutoSleepIdleMinutes,
   type DefaultEditorCommand,
+  type DiagnosticLoggingScenarioId,
+  type DiagnosticLoggingSettings,
   type GhosttyConfirmCloseSurface,
   type GhosttyCopyOnSelect,
   type GhosttyScrollbar,
@@ -184,7 +188,6 @@ import {
   type PortlessProtocol,
   type RemoteMachineSettings,
   type SessionPersistenceProvider,
-  type SessionStatusIndicatorSize,
   type SessionTitleGenerationAgent,
   type SidebarSettingsPresetId,
   type SidebarSide,
@@ -567,12 +570,15 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
   browser: ["browserFeedbackTool"],
   /*
    * CDXC:StatusIndicators 2026-05-20-12:00:
-   * Status Indicators groups desktop session badges and the optional sidebar pet
-   * overlay because both surfaces communicate session state at a glance.
+   * Status Indicators groups session presence surfaces that communicate status
+   * at a glance.
+   *
+   * CDXC:StatusIndicators 2026-06-27-20:11:
+   * The desktop floating session badge surface was removed from macOS and GPUI.
+   * Keep the menu bar indicator and floating pet settings in this section, but
+   * do not expose the removed floating badge toggle or size selector.
    */
   statusIndicators: [
-    "hideFloatingSessionStatusIndicators",
-    "sessionStatusIndicatorSize",
     "hideMenuBarSessionStatusIndicators",
     "petOverlayEnabled",
     "selectedPetId",
@@ -596,6 +602,7 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
    */
   debugging: [
     "debuggingMode",
+    "diagnosticLogging",
     "showSessionCommandCopyActions",
     "showSessionDetailsCopyAction",
   ],
@@ -692,10 +699,29 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
 
 /**
  * CDXC:SidebarSessionRename 2026-06-26-06:27:
- * The double-click rename setting title must disclose that enabling it makes single-click session selection respond a bit slower because the card waits for a possible second click before treating the gesture as normal selection.
+ * The double-click rename setting must disclose that enabling it makes single-click session selection respond a bit slower because the card waits for a possible second click before treating the gesture as normal selection.
+ *
+ * CDXC:SidebarSessionRename 2026-06-28-02:24:
+ * The click-delay disclosure should render as a Settings row subtitle below the primary label instead of being embedded in parentheses in the label text, so the control title stays scannable while the tradeoff remains visible.
  */
-const RENAME_SESSION_ON_DOUBLE_CLICK_SETTING_TITLE =
-  "Double-click session cards to rename (Makes clicking on a session respond a bit slower so we can detect the double click)";
+const RENAME_SESSION_ON_DOUBLE_CLICK_SETTING_LABEL = "Double-click session cards to rename";
+const RENAME_SESSION_ON_DOUBLE_CLICK_SETTING_SUBTITLE =
+  "Makes clicking on a session respond a bit slower so we can detect the double click";
+
+type DiagnosticLoggingDurationValue = "off" | "15m" | "1h" | "always";
+
+const DIAGNOSTIC_LOGGING_DURATION_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: DiagnosticLoggingDurationValue;
+}> = [
+  { label: "Off", value: "off" },
+  { label: "15 min", value: "15m" },
+  { label: "1 hour", value: "1h" },
+  { label: "Always", value: "always" },
+];
+
+const DEFAULT_DIAGNOSTIC_LOGGING_ENABLE_DURATION: DiagnosticLoggingDurationValue = "1h";
+const DIAGNOSTIC_LOGGING_GROUPS: readonly ["macOS", "GPUI"] = ["macOS", "GPUI"];
 
 /*
  * CDXC:SettingsAdvanced 2026-06-16-01:35:
@@ -730,7 +756,6 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "sidebarDefaultWidthPx",
   "projectSessionListCollapsedCount",
   "createSessionOnSidebarDoubleClick",
-  "hideFloatingSessionStatusIndicators",
   "hideSessionAgentIconUntilHover",
   "hideBrowserFaviconUntilHover",
   "showCloseButtonOnSessionCards",
@@ -790,6 +815,7 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "ghostexFolderStats",
   "showBetaFeatures",
   "debuggingMode",
+  "diagnosticLogging",
   "showSessionCommandCopyActions",
   "showSessionDetailsCopyAction",
 ]);
@@ -1567,26 +1593,12 @@ export function SettingsModal({
        * CDXC:StatusIndicators 2026-05-20-12:00:
        * hide* settings stay persisted as hide flags, but Settings presents them
        * as Show toggles so ON means the indicator surface is visible.
+       *
+       * CDXC:StatusIndicators 2026-06-27-20:11:
+       * The removed floating session badge and its size selector must not appear
+       * in macOS or GPUI Settings. This section now keeps only the menu bar
+       * session indicator and floating pet controls.
        */
-      {
-        key: "hideFloatingSessionStatusIndicators",
-        subtitle: "Show the desktop floating session status badges.",
-        title: "Show Floating Session Indicators",
-      },
-      /*
-       * CDXC:StatusIndicators 2026-06-14-19:36:
-       * The floating indicator size selector belongs directly below the Show Floating Session Indicators toggle and should not be searchable or rendered while that desktop badge surface is disabled.
-       */
-      ...(!draft.hideFloatingSessionStatusIndicators
-        ? [
-            {
-              key: "sessionStatusIndicatorSize",
-              options: SESSION_STATUS_INDICATOR_SIZE_OPTIONS,
-              subtitle: "Scale the floating session status indicator.",
-              title: "Floating Session Indicator Size",
-            },
-          ]
-        : []),
       {
         key: "hideMenuBarSessionStatusIndicators",
         subtitle: "Show the menu bar session status badges.",
@@ -1655,8 +1667,8 @@ export function SettingsModal({
       },
       {
         key: "renameSessionOnDoubleClick",
-        subtitle: "Rename sessions directly from their cards.",
-        title: RENAME_SESSION_ON_DOUBLE_CLICK_SETTING_TITLE,
+        subtitle: RENAME_SESSION_ON_DOUBLE_CLICK_SETTING_SUBTITLE,
+        title: RENAME_SESSION_ON_DOUBLE_CLICK_SETTING_LABEL,
       },
     ]),
     theming: getSettingsSectionSearch(settingsSearchQuery, "Theming", [
@@ -1961,15 +1973,29 @@ export function SettingsModal({
     debugging: getSettingsSectionSearch(settingsSearchQuery, "Debugging", [
       /*
        * CDXC:DiagnosticsSettings 2026-06-06-07:09:
-       * Debugging Mode is both diagnostic disk logging and debug UI exposure. The setting label and searchable subtitle must warn that detailed app logs can affect performance so users disable it after a repro.
+       * Debugging Mode previously combined diagnostic disk logging and debug UI exposure. Scenario-specific logging now owns disk writes so broad Debugging Mode can remain a UI/debug-control gate without turning on every persistent log.
        *
        * CDXC:DebuggingSettings 2026-06-15-21:34:
        * The Debugging section owns support and diagnostic toggles at the bottom of Settings, including command copy actions and Copy details, so users can find debug-only context-menu features together.
+       *
+       * CDXC:DiagnosticsSettings 2026-06-27-22:07:
+       * Disk logging needs exact scenario controls. Search should match both
+       * the scenario labels and their support-bundle file names so a user can
+       * enable only the requested repro log without browsing every Debugging row.
        */
       {
         key: "debuggingMode",
-        subtitle: "Show debugging controls and write detailed app diagnostics to disk. This can affect performance, so turn it off when you do not need it.",
-        title: "Debug logging and UI",
+        subtitle: "Show debug-only UI controls without enabling routine disk logging.",
+        title: "Show debug UI controls",
+      },
+      {
+        key: "diagnosticLogging",
+        options: DIAGNOSTIC_LOGGING_SCENARIOS.flatMap((scenario) => [
+          { label: scenario.label, value: scenario.id },
+          ...scenario.logFiles.map((logFile) => ({ label: logFile, value: logFile })),
+        ]),
+        subtitle: "Enable exact macOS and GPUI repro logging scenarios. Warnings, errors, and crashes remain captured when scenarios are off.",
+        title: "Diagnostic disk logging scenarios",
       },
       {
         key: "showSessionCommandCopyActions",
@@ -2455,6 +2481,19 @@ export function SettingsModal({
   const updateDraft = <Key extends keyof ghostexSettings>(key: Key, value: ghostexSettings[Key]) => {
     applySettings({ ...(pendingSettingsRef.current ?? draft), [key]: value });
   };
+  const updateDiagnosticLoggingScenario = (
+    scenarioId: DiagnosticLoggingScenarioId,
+    duration: DiagnosticLoggingDurationValue,
+  ) => {
+    updateDraft(
+      "diagnosticLogging",
+      setDiagnosticLoggingScenario(
+        (pendingSettingsRef.current ?? draft).diagnosticLogging,
+        scenarioId,
+        getDiagnosticLoggingScenarioStateForDuration(duration),
+      ),
+    );
+  };
   const updateDraftDebounced = <Key extends keyof ghostexSettings>(
     key: Key,
     value: ghostexSettings[Key],
@@ -2856,7 +2895,8 @@ export function SettingsModal({
               <ToggleField
                 checked={draft.renameSessionOnDoubleClick}
                 description="Rename sessions directly from their cards."
-                label={RENAME_SESSION_ON_DOUBLE_CLICK_SETTING_TITLE}
+                label={RENAME_SESSION_ON_DOUBLE_CLICK_SETTING_LABEL}
+                subtitle={RENAME_SESSION_ON_DOUBLE_CLICK_SETTING_SUBTITLE}
                 {...getSettingModificationProps("renameSessionOnDoubleClick")}
                 onChange={(checked) => updateDraft("renameSessionOnDoubleClick", checked)}
               />
@@ -2978,33 +3018,6 @@ export function SettingsModal({
 
             {mainSectionVisible("statusIndicators", settingsSearch.statusIndicators) ? (
             <SettingsSection sectionRef={statusIndicatorsSectionRef} title="Status Indicators">
-              {mainSettingVisible(
-                settingsSearch.statusIndicators,
-                "hideFloatingSessionStatusIndicators",
-              ) ? (
-              <ToggleField
-                checked={!draft.hideFloatingSessionStatusIndicators}
-                description="Show the desktop floating session status badges."
-                label="Show Floating Session Indicators"
-                {...getSettingModificationProps("hideFloatingSessionStatusIndicators")}
-                onChange={(checked) =>
-                  updateDraft("hideFloatingSessionStatusIndicators", !checked)
-                }
-              />
-              ) : null}
-              {!draft.hideFloatingSessionStatusIndicators &&
-              mainSettingVisible(settingsSearch.statusIndicators, "sessionStatusIndicatorSize") ? (
-              <SelectField
-                description="Scale the floating session status indicator."
-                label="Floating Session Indicator Size"
-                {...getSettingModificationProps("sessionStatusIndicatorSize")}
-                onChange={(value) =>
-                  updateDraft("sessionStatusIndicatorSize", value as SessionStatusIndicatorSize)
-                }
-                options={SESSION_STATUS_INDICATOR_SIZE_OPTIONS}
-                value={draft.sessionStatusIndicatorSize}
-              />
-              ) : null}
               {mainSettingVisible(
                 settingsSearch.statusIndicators,
                 "hideMenuBarSessionStatusIndicators",
@@ -4186,10 +4199,28 @@ export function SettingsModal({
                 {mainSettingVisible(settingsSearch.debugging, "debuggingMode") ? (
                   <ToggleField
                     checked={draft.debuggingMode}
-                    description="Shows debugging controls and writes detailed app diagnostics to disk. This can affect performance, so turn it off when you do not need it."
-                    label="Debug logging and UI"
+                    description="Shows debug-only UI controls. Routine diagnostic disk logging is controlled by the scenario list below."
+                    label="Show debug UI controls"
                     {...getSettingModificationProps("debuggingMode")}
                     onChange={(checked) => updateDraft("debuggingMode", checked)}
+                  />
+                ) : null}
+                {mainSettingVisible(settingsSearch.debugging, "diagnosticLogging") ? (
+                  <DiagnosticLoggingSettingsField
+                    isModified={
+                      !areDiagnosticLoggingSettingsEqual(
+                        draft.diagnosticLogging,
+                        DEFAULT_ghostex_SETTINGS.diagnosticLogging,
+                      )
+                    }
+                    onChange={updateDiagnosticLoggingScenario}
+                    onResetToDefault={() =>
+                      updateDraft(
+                        "diagnosticLogging",
+                        DEFAULT_ghostex_SETTINGS.diagnosticLogging,
+                      )
+                    }
+                    value={draft.diagnosticLogging}
                   />
                 ) : null}
                 {mainSettingVisible(settingsSearch.debugging, "showSessionCommandCopyActions") ? (
@@ -9997,6 +10028,7 @@ function ToggleField({
   label,
   onChange,
   onResetToDefault,
+  subtitle,
 }: {
   advanced?: boolean;
   checked: boolean;
@@ -10004,6 +10036,7 @@ function ToggleField({
   disabled?: boolean;
   label: string;
   onChange: (checked: boolean) => void;
+  subtitle?: string;
 } & SettingModificationProps) {
   const id = useId();
   return (
@@ -10014,10 +10047,150 @@ function ToggleField({
       isModified={isModified}
       label={label}
       onResetToDefault={onResetToDefault}
+      subtitle={subtitle}
     >
       <Switch checked={checked} disabled={disabled} id={id} onCheckedChange={onChange} />
     </SettingRow>
   );
+}
+
+function DiagnosticLoggingSettingsField({
+  isModified,
+  onChange,
+  onResetToDefault,
+  value,
+}: {
+  isModified?: boolean;
+  onChange: (
+    scenarioId: DiagnosticLoggingScenarioId,
+    duration: DiagnosticLoggingDurationValue,
+  ) => void;
+  onResetToDefault?: () => void;
+  value: DiagnosticLoggingSettings;
+}) {
+  const idBase = useId();
+  return (
+    <SettingRow
+      description="Failures, warnings, and crashes still write when scenarios are off. Enable only the repro area you need for routine debug logs."
+      htmlFor={`${idBase}-native-terminal-focus`}
+      isModified={isModified}
+      label="Diagnostic disk logging scenarios"
+      onResetToDefault={onResetToDefault}
+    >
+      <div className="grid gap-4">
+        {DIAGNOSTIC_LOGGING_GROUPS.map((group) => {
+          const scenarios = DIAGNOSTIC_LOGGING_SCENARIOS.filter(
+            (scenario) => scenario.group === group,
+          );
+          return (
+            <div className="grid gap-2" key={group}>
+              <div className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                {group}
+              </div>
+              <div className="grid gap-2">
+                {scenarios.map((scenario) => {
+                  const scenarioId = scenario.id as DiagnosticLoggingScenarioId;
+                  const duration = getDiagnosticLoggingScenarioDuration(value, scenarioId);
+                  const checked = duration !== "off";
+                  const switchId = `${idBase}-${scenario.id.replaceAll(".", "-")}`;
+                  return (
+                    <div
+                      className="grid gap-2 border-t border-border/70 pt-2 first:border-t-0 first:pt-0"
+                      key={scenario.id}
+                    >
+                      <div className="flex min-w-0 items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <FieldLabel className="text-sm" htmlFor={switchId}>
+                            {scenario.label}
+                          </FieldLabel>
+                          <div className="mt-0.5 break-words text-xs text-muted-foreground">
+                            {scenario.logFiles.join(", ")}
+                          </div>
+                        </div>
+                        <Switch
+                          checked={checked}
+                          id={switchId}
+                          onCheckedChange={(nextChecked) =>
+                            onChange(
+                              scenarioId,
+                              nextChecked ? DEFAULT_DIAGNOSTIC_LOGGING_ENABLE_DURATION : "off",
+                            )
+                          }
+                        />
+                      </div>
+                      {checked ? (
+                        <SettingsSelect
+                          onValueChange={(nextValue) =>
+                            onChange(scenarioId, nextValue as DiagnosticLoggingDurationValue)
+                          }
+                          value={duration}
+                        >
+                          <SelectTrigger className="h-8 w-full sm:w-36">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SettingsSelectContent>
+                            {DIAGNOSTIC_LOGGING_DURATION_OPTIONS.filter(
+                              (option) => option.value !== "off",
+                            ).map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SettingsSelectContent>
+                        </SettingsSelect>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </SettingRow>
+  );
+}
+
+function getDiagnosticLoggingScenarioDuration(
+  value: DiagnosticLoggingSettings,
+  scenarioId: DiagnosticLoggingScenarioId,
+  now: Date = new Date(),
+): DiagnosticLoggingDurationValue {
+  const scenario = value.scenarios[scenarioId];
+  if (!scenario?.enabled) {
+    return "off";
+  }
+  if (!scenario.expiresAt) {
+    return "always";
+  }
+  const expiresAtMs = Date.parse(scenario.expiresAt);
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= now.getTime()) {
+    return "off";
+  }
+  const remainingMs = expiresAtMs - now.getTime();
+  return remainingMs <= 30 * 60 * 1000 ? "15m" : "1h";
+}
+
+function getDiagnosticLoggingScenarioStateForDuration(
+  duration: DiagnosticLoggingDurationValue,
+  now: Date = new Date(),
+) {
+  switch (duration) {
+    case "15m":
+      return {
+        enabled: true,
+        expiresAt: new Date(now.getTime() + 15 * 60 * 1000).toISOString(),
+      };
+    case "1h":
+      return {
+        enabled: true,
+        expiresAt: new Date(now.getTime() + 60 * 60 * 1000).toISOString(),
+      };
+    case "always":
+      return { enabled: true };
+    case "off":
+      return undefined;
+  }
 }
 
 function SidebarTagListSettingsField({
@@ -10293,6 +10466,7 @@ function SettingRow({
   isModified,
   label,
   onResetToDefault,
+  subtitle,
 }: {
   advanced?: boolean;
   children: ReactNode;
@@ -10301,6 +10475,7 @@ function SettingRow({
   isModified?: boolean;
   label: string;
   onResetToDefault?: () => void;
+  subtitle?: string;
 }) {
   return (
     <Field className="settings-row gap-2.5" orientation="vertical">
@@ -10317,6 +10492,9 @@ function SettingRow({
             {description ? <SettingDescriptionTooltip description={description} label={label} /> : null}
           </span>
         </FieldTitle>
+        {subtitle ? (
+          <FieldDescription className="settings-row-subtitle">{subtitle}</FieldDescription>
+        ) : null}
         {description ? (
           <FieldDescription className="sr-only">{description}</FieldDescription>
         ) : null}

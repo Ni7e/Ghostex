@@ -15,16 +15,16 @@ enum NativePaneReorderReproLog {
    Bottom-edge terminal selection can still be misclassified as pane reordering.
    Keep this issue in a dedicated shared logs file so repro timestamps can be
    isolated from normal focus, sidebar, T3, and browser diagnostics. Honor the
-   same Settings debugging-mode gate as tab diagnostics so routine pane use does
-   not write persistent logs.
+   native.pane.reorder scenario so routine pane use does not write persistent
+   logs.
 
    CDXC:GxserverLogs 2026-06-15-20:39:
-   Pane reorder and pane-tab diagnostics are intentionally available while
-   Debugging Mode is enabled, but long debug sessions must still stay bounded in
+   Pane reorder and pane-tab diagnostics are intentionally available while their
+   scenarios are enabled, but long debug sessions must still stay bounded in
    support bundles. Rotate at the shared 25 MB/three-file limit before appends.
-   */
+  */
   static func append(event: String, details: [String: Any] = [:]) {
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativePaneReorder) else {
       return
     }
     let logsDirectory = GhostexAppStorage.sharedRootDirectory.appendingPathComponent(
@@ -95,8 +95,8 @@ enum NativePaneTabDragReproLog {
    CDXC:PaneTabs 2026-05-11-08:33
    Native pane-tab click and drag failures need a feature-specific diagnostics
    file that covers the window monitor, title-bar hit testing, tab button mouse
-   handlers, and host-event sends. Gate the file behind Settings debugging mode
-   so normal tab use never writes persistent logs.
+   handlers, and host-event sends. Gate the file behind the native.pane.tabs
+   scenario so normal tab use never writes persistent logs.
 
    CDXC:PaneTabs 2026-05-15-09:37
    Pane-tab height regressions need the same log stream as click and drag
@@ -105,12 +105,12 @@ enum NativePaneTabDragReproLog {
    title bars repeatedly during one visible resize.
 
    CDXC:GxserverLogs 2026-06-15-20:39:
-   native-pane-tabs-debug can be high-volume while Debugging Mode is enabled.
+   native-pane-tabs-debug can be high-volume while the native.pane.tabs scenario is enabled.
    Keep the diagnostics, but rotate the file at the same support-bundle limit
    as other native debug logs.
-   */
+  */
   static func append(event: String, details: [String: Any] = [:]) {
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativePaneTabs) else {
       return
     }
     let logsDirectory = GhostexAppStorage.sharedRootDirectory.appendingPathComponent(
@@ -121,7 +121,7 @@ enum NativePaneTabDragReproLog {
     payload["event"] = event
     /*
      CDXC:PaneTabs 2026-06-16-12:22:
-     Pane-tab, resize-rail, and sidebar-divider diagnostics can fire from cursor rect resets, mouse drags, and relayout loops while Debugging Mode is left on. Sample those repeated event names in the shared writer and include suppressed counts on the next emitted line so long repros stay readable.
+     Pane-tab, resize-rail, and sidebar-divider diagnostics can fire from cursor rect resets, mouse drags, and relayout loops while the native.pane.tabs scenario is left on. Sample those repeated event names in the shared writer and include suppressed counts on the next emitted line so long repros stay readable.
      */
     if !shouldWriteSampledLogEvent(
       event: event,

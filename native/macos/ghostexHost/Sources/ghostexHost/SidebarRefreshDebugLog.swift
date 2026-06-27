@@ -36,17 +36,19 @@ enum SidebarRefreshDebugLog {
    CDXC:SidebarRefreshDiagnostics 2026-05-11-12:32
    Unexpected sidebar refresh repros need a dedicated app-storage log that
    records native action boundaries and React sidebar lifecycle events. Honor
-   Settings Debugging Mode here as the final gate so no persistent sidebar
-   refresh diagnostics are written during normal app use.
+   the native.sidebar.refresh scenario here as the final routine gate so no
+   persistent sidebar refresh diagnostics are written during normal app use.
 
    CDXC:SidebarRefreshDiagnostics 2026-06-06-07:09:
-   Routine sidebar refresh diagnostics stay Debugging Mode only, but
-   warning/error/failure-like refresh events should persist in normal mode so
-   support can diagnose crashes and failed refreshes without enabling broad
-   disk logging first.
+   Routine sidebar refresh diagnostics require the native.sidebar.refresh
+   scenario, but warning/error/failure-like refresh events should persist in
+   normal mode so support can diagnose crashes and failed refreshes without
+   enabling broad disk logging first.
    */
   static func append(event: String, details: String?) {
-    guard isNativePersistentLogImportantDiagnostic(event) || NativeDebugLogging.isEnabled else {
+    guard isNativePersistentLogImportantDiagnostic(event) ||
+      NativeDiagnosticLogging.isScenarioEnabled(.nativeSidebarRefresh)
+    else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory
@@ -57,7 +59,7 @@ enum SidebarRefreshDebugLog {
     ]
     /*
      CDXC:SidebarRefreshDiagnostics 2026-06-16-12:22:
-     Sidebar refresh logs must stay useful when Debugging Mode is left on. Sample message/render/presentation-delta events at the Swift writer boundary, including the prefixed `sidebar.refresh.*` names used by the React sidebar, so every caller shares the same support-bundle line cap behavior.
+     Sidebar refresh logs must stay useful when the native.sidebar.refresh scenario is left on. Sample message/render/presentation-delta events at the Swift writer boundary, including the prefixed `sidebar.refresh.*` names used by the React sidebar, so every caller shares the same support-bundle line cap behavior.
      */
     if !isNativePersistentLogImportantDiagnostic(event),
       !shouldWriteSampledLogEvent(

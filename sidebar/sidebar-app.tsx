@@ -159,6 +159,7 @@ import {
   DEFAULT_ghostex_SETTINGS,
   getSidebarTitlebarForegroundForBackground,
   getSidebarTitlebarGradientColors,
+  isDiagnosticLoggingScenarioEnabled,
   type RemoteMachineSettings,
 } from "../shared/ghostex-settings";
 import {
@@ -901,6 +902,14 @@ export function SidebarApp({
   }, [ hasGxserverUnavailablePlaceholder ]);
 
   const effectiveSettings = settings ?? DEFAULT_ghostex_SETTINGS;
+  const sidebarRefreshDiagnosticLoggingEnabled = isDiagnosticLoggingScenarioEnabled(
+    effectiveSettings.diagnosticLogging,
+    "native.sidebar.refresh",
+  );
+  const sidebarCollapseDiagnosticLoggingEnabled = isDiagnosticLoggingScenarioEnabled(
+    effectiveSettings.diagnosticLogging,
+    "native.sidebar.collapse",
+  );
   const sidebarSessionTagListItems = useMemo(
     () => normalizeSidebarSessionTagListItems(effectiveSettings.sidebarSessionTagListItems),
     [ effectiveSettings.sidebarSessionTagListItems ],
@@ -970,7 +979,7 @@ export function SidebarApp({
        * payload privacy-safe by recording counts, booleans, revisions, elapsed
        * timings, and hashed group identifiers instead of project names or paths.
        */
-      if (!(options.enabled ?? debuggingMode)) {
+      if (!(options.enabled ?? sidebarCollapseDiagnosticLoggingEnabled)) {
         return;
       }
 
@@ -1022,8 +1031,12 @@ export function SidebarApp({
 
   const postSidebarRefreshLifecycleLog = useEffectEvent(
     (event: string, details: Record<string, unknown>) => {
+      const currentSettings = useSidebarStore.getState().hud.settings ?? DEFAULT_ghostex_SETTINGS;
       postSidebarRefreshDebugLog(
-        useSidebarStore.getState().hud.debuggingMode,
+        isDiagnosticLoggingScenarioEnabled(
+          currentSettings.diagnosticLogging,
+          "native.sidebar.refresh",
+        ),
         vscode,
         event,
         details,
@@ -1482,7 +1495,16 @@ export function SidebarApp({
       stale: event.data.revision < revision,
       startupInteractionBlocked: isStartupInteractionBlocked,
     });
-    postSidebarRefreshDebugLog(event.data.hud.debuggingMode, vscode, "messageReceived", {
+    const messageSettings = event.data.hud.settings ?? effectiveSettings;
+    const messageSidebarRefreshDiagnosticLoggingEnabled = isDiagnosticLoggingScenarioEnabled(
+      messageSettings.diagnosticLogging,
+      "native.sidebar.refresh",
+    );
+    const messageSidebarCollapseDiagnosticLoggingEnabled = isDiagnosticLoggingScenarioEnabled(
+      messageSettings.diagnosticLogging,
+      "native.sidebar.collapse",
+    );
+    postSidebarRefreshDebugLog(messageSidebarRefreshDiagnosticLoggingEnabled, vscode, "messageReceived", {
       ...summarizeSidebarRefreshMessage(event.data, revision),
       hasHydrateBeforeMessage: hasAppliedHydrateRef.current,
       instanceId: refreshDebugInstanceIdRef.current,
@@ -1495,7 +1517,7 @@ export function SidebarApp({
       event.data.revision < revision ? "stale" : "fresh",
     ].join(":");
     const shouldLogSidebarCollapseHydrateMessage =
-      event.data.hud.debuggingMode &&
+      messageSidebarCollapseDiagnosticLoggingEnabled &&
       getSidebarStartupElapsedMs(sidebarStartupStartedAtRef.current) <=
       SIDEBAR_STARTUP_REPRO_WINDOW_MS &&
       (collapseStateHydrateLogCountRef.current < 8 ||
@@ -1526,9 +1548,12 @@ export function SidebarApp({
         { enabled: true },
       );
     }
-    if (event.data.hud.debuggingMode && !didLogRefreshInstanceObservedRef.current) {
+    if (
+      messageSidebarRefreshDiagnosticLoggingEnabled &&
+      !didLogRefreshInstanceObservedRef.current
+    ) {
       didLogRefreshInstanceObservedRef.current = true;
-      postSidebarRefreshDebugLog(event.data.hud.debuggingMode, vscode, "appInstanceObserved", {
+      postSidebarRefreshDebugLog(messageSidebarRefreshDiagnosticLoggingEnabled, vscode, "appInstanceObserved", {
         elapsedMs: getSidebarStartupElapsedMs(sidebarStartupStartedAtRef.current),
         instanceId: refreshDebugInstanceIdRef.current,
         messageType: event.data.type,
@@ -1567,7 +1592,7 @@ export function SidebarApp({
     }
 
     applySidebarMessage(event.data);
-    postSidebarRefreshDebugLog(event.data.hud.debuggingMode, vscode, "messageApplied", {
+    postSidebarRefreshDebugLog(messageSidebarRefreshDiagnosticLoggingEnabled, vscode, "messageApplied", {
       ...summarizeSidebarRefreshMessage(event.data, revision),
       hasHydrateAfterApply: hasAppliedHydrateRef.current,
       instanceId: refreshDebugInstanceIdRef.current,
@@ -1647,7 +1672,10 @@ export function SidebarApp({
   }, []);
 
   useEffect(() => {
-    if (!debuggingMode || didLogInitialUiCollapseStateReadRef.current) {
+    if (
+      !sidebarCollapseDiagnosticLoggingEnabled ||
+      didLogInitialUiCollapseStateReadRef.current
+    ) {
       return;
     }
 
@@ -1661,9 +1689,9 @@ export function SidebarApp({
     });
   }, [
     collapsedGroupsById,
-    debuggingMode,
     groupOrder,
     initialUiCollapseStateRead,
+    sidebarCollapseDiagnosticLoggingEnabled,
     sessionsById,
     workspaceGroupIds,
   ]);
@@ -1686,23 +1714,23 @@ export function SidebarApp({
 
     lastSidebarStartupRenderStateKeyRef.current = renderStateKey;
     postSidebarStartupReproLog("renderState", renderState);
-    postSidebarRefreshDebugLog(debuggingMode, vscode, "renderStateChanged", {
+    postSidebarRefreshDebugLog(sidebarRefreshDiagnosticLoggingEnabled, vscode, "renderStateChanged", {
       ...renderState,
       instanceId: refreshDebugInstanceIdRef.current,
     });
     if (hasAppliedHydrateRef.current && renderState.sessionCount === 0) {
       postSidebarStartupReproLog("emptyStateAfterHydrate", renderState);
-      postSidebarRefreshDebugLog(debuggingMode, vscode, "emptyStateAfterHydrate", {
+      postSidebarRefreshDebugLog(sidebarRefreshDiagnosticLoggingEnabled, vscode, "emptyStateAfterHydrate", {
         ...renderState,
         instanceId: refreshDebugInstanceIdRef.current,
       });
     }
   }, [
-    debuggingMode,
     groupOrder,
     isStartupInteractionBlocked,
     postSidebarStartupReproLog,
     revision,
+    sidebarRefreshDiagnosticLoggingEnabled,
     sessionsById,
     vscode,
     workspaceGroupIds,
@@ -2225,13 +2253,13 @@ export function SidebarApp({
     /*
      * CDXC:GPUIProjectHotkeys 2026-06-26-23:42:
      * GPUI project slot messages resolve locally in SidebarApp because SidebarApp owns rendered Projects row order. Use displayedReferenceProjectGroupIds so slots match visible Projects rows while excluding Quick chats and remote machine projects, then focus the group's currently focused or first displayed session through the existing WorkspaceTerminalFocus bridge; GPUI has no focusGroup host bridge to materialize command panes.
-     */
+    */
     handleSidebarProjectJump({
-      expandCollapsedProject: settings.expandCollapsedProjectsOnJump,
+      expandCollapsedProject: effectiveSettings.expandCollapsedProjectsOnJump,
       groupId,
       projectId,
       revealFocusedSession: true,
-      showLessAfterExpand: settings.showLessForExpandedProjectJumps,
+      showLessAfterExpand: effectiveSettings.showLessForExpandedProjectJumps,
     });
     const groupSessionIds = displayedWorkspaceSessionIdsByGroup[ groupId ] ?? [];
     const targetSessionId =
@@ -2591,7 +2619,7 @@ export function SidebarApp({
 
     /*
      * CDXC:SidebarWakeScrollDiagnostics 2026-06-16-02:20:
-     * Wake-scroll repros need to prove whether the sidebar jumped because focus-following issued scrollIntoView or because the focused row moved in the displayed order. Log only session IDs, row indexes, sort mode, and geometry metrics while Debugging Mode is enabled.
+     * Wake-scroll repros need to prove whether the sidebar jumped because focus-following issued scrollIntoView or because the focused row moved in the displayed order. Log only session IDs, row indexes, sort mode, and geometry metrics while the native.sidebar.refresh scenario is enabled.
      *
      * CDXC:SidebarSessionClose 2026-06-21-18:02:
      * Closing the focused terminal session should retarget native focus without reveal-scrolling the sidebar. Consume the one-shot close marker before scrollIntoViewIfNeeded so the user's list position stays stable after close.

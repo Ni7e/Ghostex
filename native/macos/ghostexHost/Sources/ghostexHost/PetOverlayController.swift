@@ -168,9 +168,10 @@ final class PetOverlayController: NSObject, WKNavigationDelegate, WKScriptMessag
       }
       /**
        CDXC:PetOverlay 2026-05-21-02:19:
-       The collapsed pet badge is the floating status indicator in pet form.
-       Route badge clicks through the same native status callback so aggregate
-       attention, working, and available selection stays identical.
+       The collapsed pet badge uses the aggregate session-status route that
+       previously powered the floating indicator. Route badge clicks through
+       the same native status callback so attention, working, and available
+       selection stays identical after the standalone floating badge is removed.
        */
       onStatusClick(status)
     case "dragStart":

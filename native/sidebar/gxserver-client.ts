@@ -32,6 +32,7 @@ import {
   type GxserverSavePinnedPromptParams,
   type GxserverSessionProviderProbeResponse,
   type GxserverProjectDomainState,
+  type GxserverRecentProjectDomainState,
   type GxserverRemoveSessionParams,
   type GxserverRendererCommand,
   type GxserverRpcErrorResponse,
@@ -72,6 +73,7 @@ export type NativeSidebarGxserverStartupSnapshot = {
   health: GxserverServerHealthResponse;
   presentation?: GxserverPresentationSnapshot;
   projects: GxserverProjectDomainState[];
+  recentProjects: GxserverRecentProjectDomainState[];
 };
 
 export type NativeGxserverHttpMethod = "GET" | "POST";
@@ -254,10 +256,17 @@ export function createNativeSidebarGxserverClient(
 
   async function fetchStartupSnapshot(): Promise<NativeSidebarGxserverStartupSnapshot> {
     const health = await fetchHealth();
-    const [agentSettingsResult, appUserData, { projects }, { snapshot }] = await Promise.all([
+    const [
+      agentSettingsResult,
+      appUserData,
+      { projects },
+      { recentProjects },
+      { snapshot },
+    ] = await Promise.all([
       rpc<GxserverReadAgentSettingsResult>("/api/readAgentSettings"),
       rpc<GxserverAppUserData>("/api/readAppUserData"),
       rpc<{ projects: GxserverProjectDomainState[] }>("/api/listProjects"),
+      rpc<{ recentProjects: GxserverRecentProjectDomainState[] }>("/api/listRecentProjects"),
       rpc<{ snapshot: GxserverPresentationSnapshot }>("/api/readPresentationSnapshot"),
     ]);
     /*
@@ -271,6 +280,7 @@ export function createNativeSidebarGxserverClient(
       health,
       presentation: snapshot,
       projects,
+      recentProjects,
     };
   }
 
@@ -289,7 +299,11 @@ export function createNativeSidebarGxserverClient(
   }
 
   async function savePinnedPrompt(params: GxserverSavePinnedPromptParams): Promise<GxserverAppUserData> {
-    return rpc<GxserverAppUserData>("/api/savePinnedPrompt", params as Record<string, unknown>);
+    return rpc<GxserverAppUserData>("/api/savePinnedPrompt", {
+      content: params.content,
+      promptId: params.promptId,
+      title: params.title,
+    });
   }
 
   async function updateAgentSettings(
@@ -597,6 +611,47 @@ export function createNativeSidebarGxserverClient(
     return project;
   }
 
+  async function listRecentProjects(): Promise<GxserverRecentProjectDomainState[]> {
+    /*
+    CDXC:RecentProjects 2026-06-27-19:37:
+    The native sidebar reads local Recent Projects from gxserver, matching GPUI. WK project storage remains only a pane/layout cache, so close/restore/remove callers must consume the daemon-returned recent list instead of trusting `ghostex-native-projects`.
+    */
+    const { recentProjects } = await rpc<{
+      recentProjects: GxserverRecentProjectDomainState[];
+    }>("/api/listRecentProjects");
+    return recentProjects;
+  }
+
+  async function closeProjectToRecent(projectId: string): Promise<{
+    project: GxserverProjectDomainState;
+    recentProjects: GxserverRecentProjectDomainState[];
+  }> {
+    return rpc<{
+      project: GxserverProjectDomainState;
+      recentProjects: GxserverRecentProjectDomainState[];
+    }>("/api/closeProjectToRecent", { projectId });
+  }
+
+  async function restoreRecentProject(projectId: string): Promise<{
+    project: GxserverProjectDomainState;
+    recentProjects: GxserverRecentProjectDomainState[];
+  }> {
+    return rpc<{
+      project: GxserverProjectDomainState;
+      recentProjects: GxserverRecentProjectDomainState[];
+    }>("/api/restoreRecentProject", { projectId });
+  }
+
+  async function removeRecentProject(projectId: string): Promise<{
+    project: GxserverProjectDomainState;
+    recentProjects: GxserverRecentProjectDomainState[];
+  }> {
+    return rpc<{
+      project: GxserverProjectDomainState;
+      recentProjects: GxserverRecentProjectDomainState[];
+    }>("/api/removeRecentProject", { projectId });
+  }
+
   async function deleteWorktreeProject(
     params: GxserverDeleteWorktreeProjectParams,
   ): Promise<GxserverDeleteWorktreeProjectResult> {
@@ -662,9 +717,12 @@ export function createNativeSidebarGxserverClient(
     fetchWakeSessionMetadata,
     getCurrentStatus,
     probeSessionProvider,
+    closeProjectToRecent,
     listPreviousSessions,
+    listRecentProjects,
     readAppUserData,
     removeProject,
+    removeRecentProject,
     removeSession,
     resolveGitRootForPath,
     readAgentHookStatus,
@@ -677,6 +735,7 @@ export function createNativeSidebarGxserverClient(
     startSessionProvider,
     subscribePresentation,
     transitionSessionSync,
+    restoreRecentProject,
     updateAgentSettings,
     updateSessionLifecycle,
     savePinnedPrompt,
@@ -1003,6 +1062,10 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "stop automatic session title generation";
     case "/api/readPresentationSnapshot":
       return "load the session list";
+    case "/api/readSidebarHud":
+      return "load sidebar state";
+    case "/api/mutateSidebarHudSettings":
+      return "save sidebar settings";
     case "/api/searchSessions":
     case "/api/listPreviousSessions":
       return "load previous sessions";
@@ -1043,12 +1106,24 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "load projects";
     case "/api/listRecentProjects":
       return "load recent projects";
+    case "/api/closeProjectToRecent":
+      return "close the project to recent projects";
     case "/api/restoreRecentProject":
       return "restore the recent project";
     case "/api/removeRecentProject":
       return "remove the recent project";
     case "/api/readProjectStatus":
       return "load project status";
+    case "/api/listProjectWorktrees":
+      return "load project worktrees";
+    case "/api/createProjectWorktree":
+      return "create the project worktree";
+    case "/api/openProjectWorktree":
+      return "open the project worktree";
+    case "/api/mergeWorktreeIntoMain":
+      return "merge the project worktree";
+    case "/api/checkoutProjectNewBranch":
+      return "check out the project branch";
     case "/api/removeProject":
       return "remove the project";
     case "/api/deleteWorktreeProject":
@@ -1061,6 +1136,8 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "run the Git action";
     case "/api/generateCommitMessage":
       return "generate the commit message";
+    case "/api/createPullRequest":
+      return "create the pull request";
     case "/api/runGitHubAction":
       return "run the GitHub action";
     case "/api/runWorktreeAction":

@@ -293,13 +293,7 @@ impl<'a> DomainRepository<'a> {
                   title = excluded.title,
                   updatedAt = excluded.updatedAt
                 "#,
-                params![
-                    prompt_id,
-                    content,
-                    normalized_title,
-                    created_at,
-                    timestamp
-                ],
+                params![prompt_id, content, normalized_title, created_at, timestamp],
             )
             .map_err(sql_error)?;
         read_app_user_data_state(self.db)
@@ -347,7 +341,10 @@ impl<'a> DomainRepository<'a> {
             ));
         }
         let mut params = Map::new();
-        params.insert("projectId".to_string(), Value::String(project_id.to_string()));
+        params.insert(
+            "projectId".to_string(),
+            Value::String(project_id.to_string()),
+        );
         params.insert("isRecentProject".to_string(), Value::Bool(true));
         params.insert("recentClosedAt".to_string(), Value::String(now_iso()));
         self.update_project(&params)
@@ -361,7 +358,10 @@ impl<'a> DomainRepository<'a> {
             return Ok(current);
         }
         let mut params = Map::new();
-        params.insert("projectId".to_string(), Value::String(project_id.to_string()));
+        params.insert(
+            "projectId".to_string(),
+            Value::String(project_id.to_string()),
+        );
         params.insert("isRecentProject".to_string(), Value::Bool(false));
         params.insert("recentClosedAt".to_string(), Value::Null);
         self.update_project(&params)
@@ -1030,10 +1030,7 @@ fn read_app_user_data_state(db: &Connection) -> DomainResult<Value> {
     }))
 }
 
-fn required_string_param<'a>(
-    params: &'a Map<String, Value>,
-    key: &str,
-) -> DomainResult<&'a str> {
+fn required_string_param<'a>(params: &'a Map<String, Value>, key: &str) -> DomainResult<&'a str> {
     params
         .get(key)
         .and_then(Value::as_str)
@@ -2073,7 +2070,11 @@ fn recent_project_from_project(project: &Value, session_count: usize) -> DomainR
         optional_string(object, "recentClosedAt"),
     );
     if let Some(identity_icon) = object.get("identityIcon").and_then(Value::as_object) {
-        insert_optional_value(&mut recent_project, "icon", identity_icon.get("icon").cloned());
+        insert_optional_value(
+            &mut recent_project,
+            "icon",
+            identity_icon.get("icon").cloned(),
+        );
         insert_optional_string(
             &mut recent_project,
             "iconDataUrl",

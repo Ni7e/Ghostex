@@ -85,8 +85,10 @@ import { resolveSidebarTheme, type SidebarTheme } from "../../shared/session-gri
 import {
   getSidebarTitlebarGradientColors,
   getSidebarTitlebarForegroundForBackground,
+  isDiagnosticLoggingScenarioEnabled,
   KEEP_AWAKE_DURATION_OPTIONS,
   normalizeghostexSettings,
+  type DiagnosticLoggingSettings,
   type KeepAwakeDurationMinutes,
   type SidebarSide,
   type SessionPersistenceProvider,
@@ -275,6 +277,7 @@ type TitlebarProjectState = {
   ghostexCliStatus?: SidebarGhostexCliStatusMessage;
   portless?: SidebarPortlessState;
   debuggingMode: boolean;
+  diagnosticLogging: DiagnosticLoggingSettings;
   showBetaFeatures: boolean;
   diffStats: SidebarProjectDiffStats;
   editorIsOpen: boolean;
@@ -732,12 +735,16 @@ const TITLEBAR_PERSISTENCE_OFF_NOTICE: TitlebarNotice = {
 
 /**
  * CDXC:DiagnosticsSettings 2026-06-06-07:09:
- * Debugging Mode intentionally writes detailed diagnostics to disk and can
- * affect app performance. Surface a non-dismissable Tips & Tricks notice while
- * it is enabled so users turn it off after reproducing an issue.
+ * Debugging Mode previously wrote detailed diagnostics to disk and could affect
+ * performance.
+ *
+ * CDXC:DiagnosticsSettings 2026-06-27-22:07:
+ * Debugging Mode now exposes debug UI only. Keep the notice, but point users to
+ * scenario-specific disk logging so turning on debug controls does not imply
+ * every routine support log is active.
  */
 const TITLEBAR_DEBUGGING_MODE_NOTICE: TitlebarNotice = {
-  body: "Ghostex is writing detailed diagnostics to disk. Turn Debug logging and UI off when you are not actively debugging to reduce CPU and disk use.",
+  body: "Ghostex is showing debug UI controls. Routine disk logging is controlled by Diagnostic disk logging scenarios in Settings.",
   icon: "warning",
   id: "debugging-mode-enabled",
   settingsTarget: "debuggingMode",
@@ -1052,7 +1059,7 @@ function closeAppModalFromTitlebarNavigation(area: string): void {
 }
 
 function appendTitlebarActionCrashDebugLog(
-  debuggingMode: boolean,
+  diagnosticLogging: DiagnosticLoggingSettings,
   event: string,
   details?: unknown,
 ): void {
@@ -1065,10 +1072,10 @@ function appendTitlebarActionCrashDebugLog(
    *
    * CDXC:GxserverLogs 2026-06-15-20:39:
    * actionCrashTrace is a breadcrumb namespace, not severity. Keep the first
-   * titlebar hop only while Debugging Mode is enabled so routine action clicks
-   * do not persist as normal-mode crash warnings.
+   * titlebar hop only while the native.terminal.focus scenario is enabled so
+   * routine action clicks do not persist as normal-mode crash warnings.
    */
-  if (!debuggingMode) {
+  if (!isDiagnosticLoggingScenarioEnabled(diagnosticLogging, "native.terminal.focus")) {
     return;
   }
   postNative({
@@ -1079,7 +1086,7 @@ function appendTitlebarActionCrashDebugLog(
 }
 
 function appendTitlebarModeSwitchDebugLog(
-  debuggingMode: boolean,
+  diagnosticLogging: DiagnosticLoggingSettings,
   event: string,
   details: Record<string, unknown> = {},
 ): void {
@@ -1087,10 +1094,15 @@ function appendTitlebarModeSwitchDebugLog(
    * CDXC:ModeSwitcherDiagnostics 2026-06-15-00:21:
    * Agents, Source, Browser, Kanban, and Manage titlebar clicks need the same first-hop
    * timing breadcrumbs. Send only enum-like mode state, booleans, safe ids,
-   * and monotonic timestamps while Settings Debugging Mode is enabled; never
+   * and monotonic timestamps while the native.mode.switcher scenario is enabled; never
    * include project names, paths, URLs, titles, commands, or user text.
+   *
+   * CDXC:DiagnosticsSettings 2026-06-27-22:07:
+   * First-hop titlebar mode-switch breadcrumbs must follow the same exact
+   * scenario allowlist as the native writer so Debugging Mode can show debug UI
+   * without enabling routine persistent logs.
    */
-  if (!debuggingMode) {
+  if (!isDiagnosticLoggingScenarioEnabled(diagnosticLogging, "native.mode.switcher")) {
     return;
   }
   postNative({
@@ -3126,7 +3138,7 @@ function App() {
     }
     closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarAction");
     appendTitlebarActionCrashDebugLog(
-      projectState.debuggingMode,
+      projectState.diagnosticLogging,
       "nativeSidebar.actionCrashTrace.titlebarClick",
       {
         actionType: command.actionType,
@@ -3765,13 +3777,16 @@ function App() {
   const openAgentsMode = () => {
     closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarAgentsMode");
     appendTitlebarModeSwitchDebugLog(
-      projectState.debuggingMode,
+      projectState.diagnosticLogging,
       "titlebarModeSwitch.titlebarClickStart",
       titlebarModeSwitchLogDetails({ optimisticMode, projectState, targetMode: "agents" }),
     );
     setOptimisticMode("agents");
     postNative({ type: "openAgentsModeFromTitlebar" });
-    appendTitlebarModeSwitchDebugLog(projectState.debuggingMode, "titlebarModeSwitch.titlebarClickPostedNative", {
+    appendTitlebarModeSwitchDebugLog(
+      projectState.diagnosticLogging,
+      "titlebarModeSwitch.titlebarClickPostedNative",
+      {
       projectId: projectState.projectId ?? "none",
       targetMode: "agents",
     });
@@ -3780,13 +3795,16 @@ function App() {
   const openCodeMode = () => {
     closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarSourceMode");
     appendTitlebarModeSwitchDebugLog(
-      projectState.debuggingMode,
+      projectState.diagnosticLogging,
       "titlebarModeSwitch.titlebarClickStart",
       titlebarModeSwitchLogDetails({ optimisticMode, projectState, targetMode: "code" }),
     );
     setOptimisticMode("code");
     postNative({ type: "openActiveProjectEditorFromTitlebar" });
-    appendTitlebarModeSwitchDebugLog(projectState.debuggingMode, "titlebarModeSwitch.titlebarClickPostedNative", {
+    appendTitlebarModeSwitchDebugLog(
+      projectState.diagnosticLogging,
+      "titlebarModeSwitch.titlebarClickPostedNative",
+      {
       projectId: projectState.projectId ?? "none",
       targetMode: "code",
     });
@@ -3830,13 +3848,16 @@ function App() {
     }
     closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarBrowserMode");
     appendTitlebarModeSwitchDebugLog(
-      projectState.debuggingMode,
+      projectState.diagnosticLogging,
       "titlebarModeSwitch.titlebarClickStart",
       titlebarModeSwitchLogDetails({ optimisticMode, projectState, targetMode: "git" }),
     );
     setOptimisticMode("git");
     postNative({ type: "openGitHubProjectFromTitlebar" });
-    appendTitlebarModeSwitchDebugLog(projectState.debuggingMode, "titlebarModeSwitch.titlebarClickPostedNative", {
+    appendTitlebarModeSwitchDebugLog(
+      projectState.diagnosticLogging,
+      "titlebarModeSwitch.titlebarClickPostedNative",
+      {
       projectId: projectState.projectId ?? "none",
       targetMode: "git",
     });
@@ -3848,13 +3869,16 @@ function App() {
     }
     closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarKanbanMode");
     appendTitlebarModeSwitchDebugLog(
-      projectState.debuggingMode,
+      projectState.diagnosticLogging,
       "titlebarModeSwitch.titlebarClickStart",
       titlebarModeSwitchLogDetails({ optimisticMode, projectState, targetMode: "tasks" }),
     );
     setOptimisticMode("tasks");
     postNative({ type: "openTasksPlaceholderFromTitlebar" });
-    appendTitlebarModeSwitchDebugLog(projectState.debuggingMode, "titlebarModeSwitch.titlebarClickPostedNative", {
+    appendTitlebarModeSwitchDebugLog(
+      projectState.diagnosticLogging,
+      "titlebarModeSwitch.titlebarClickPostedNative",
+      {
       projectId: projectState.projectId ?? "none",
       targetMode: "tasks",
     });
@@ -3866,20 +3890,26 @@ function App() {
     }
     closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarManageMode");
     appendTitlebarModeSwitchDebugLog(
-      projectState.debuggingMode,
+      projectState.diagnosticLogging,
       "titlebarModeSwitch.titlebarClickStart",
       titlebarModeSwitchLogDetails({ optimisticMode, projectState, targetMode: "manage" }),
     );
     setOptimisticMode("manage");
     postNative({ type: "openManageFromTitlebar" });
-    appendTitlebarModeSwitchDebugLog(projectState.debuggingMode, "titlebarModeSwitch.titlebarClickPostedNative", {
+    appendTitlebarModeSwitchDebugLog(
+      projectState.diagnosticLogging,
+      "titlebarModeSwitch.titlebarClickPostedNative",
+      {
       projectId: projectState.projectId ?? "none",
       targetMode: "manage",
     });
   };
 
   const toggleProjectEditorCompanion = () => {
-    appendTitlebarModeSwitchDebugLog(projectState.debuggingMode, "titlebarModeSwitch.companionToggle.dispatch", {
+    appendTitlebarModeSwitchDebugLog(
+      projectState.diagnosticLogging,
+      "titlebarModeSwitch.companionToggle.dispatch",
+      {
       activeMode,
       editorIsOpen: projectState.editorIsOpen,
       nextProjectEditorCompanionPaneHidden: projectState.projectEditorCompanionPaneHidden !== true,
@@ -5211,6 +5241,10 @@ function mergeTitlebarProjectState(
     ghostexCliStatus: state.ghostexCliStatus ?? current.ghostexCliStatus,
     portless: state.portless ?? current.portless,
     debuggingMode: state.debuggingMode ?? current.debuggingMode,
+    diagnosticLogging:
+      state.diagnosticLogging === undefined
+        ? current.diagnosticLogging
+        : normalizeghostexSettings({ diagnosticLogging: state.diagnosticLogging }).diagnosticLogging,
     showBetaFeatures: state.showBetaFeatures ?? current.showBetaFeatures,
     diffStats: state.diffStats ?? current.diffStats,
     git: resolveTitlebarGitStateForMerge(current.git, state.git, projectIdentity),
@@ -5445,6 +5479,7 @@ function createInitialProjectState(bootstrap: Record<string, unknown>): Titlebar
     browserTabs: [],
     codeEditorProjectIds: [],
     debuggingMode: settings.debuggingMode,
+    diagnosticLogging: settings.diagnosticLogging,
     showBetaFeatures: settings.showBetaFeatures,
     diffStats: createDefaultSidebarProjectDiffStats(false),
     editorIsOpen: false,

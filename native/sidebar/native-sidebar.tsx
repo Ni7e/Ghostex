@@ -298,9 +298,11 @@ import {
   DEFAULT_ghostex_SETTINGS,
   getDefaultEditorCommandForSettings,
   getSidebarTitlebarForegroundForBackground,
+  isDiagnosticLoggingScenarioEnabled,
   normalizeghostexSettings,
   type SessionTitleGenerationAgent,
   type SidebarSide,
+  type DiagnosticLoggingScenarioId,
   type ghostexSettings,
 } from "../../shared/ghostex-settings";
 import { createAgentsHubExternalEditorCommand } from "../../shared/agents-hub-editor-command";
@@ -377,6 +379,7 @@ import type {
   GxserverProjectDirectoryBrowseResult,
   GxserverProjectDomainState,
   GxserverProjectId,
+  GxserverRecentProjectDomainState,
   GxserverRepositoryCloneJobStatus,
   GxserverRepositoryClonePreviewResult,
   GxserverSessionDomainState,
@@ -498,6 +501,17 @@ type NativeHostCommand =
   | { sessionId: string; type: "closeWebPane" }
   | { sessionId: string; type: "focusTerminal" }
   | {
+      /*
+       * CDXC:SidebarSessionFocus 2026-06-27-22:54:
+       * Mounted terminal sidebar switches use one native command so Swift can
+       * update tab ownership, move AppKit focus, and repaint the focused border
+       * after first responder is confirmed. Splitting this into focus plus
+       * owner repaint creates a visible active-border flash.
+       */
+      sessionId: string;
+      type: "focusMountedTerminalSession";
+    }
+  | {
       /**
        * CDXC:ProjectEditorCompanion 2026-06-13-22:39:
        * Sidebar clicks in Source, Browser, and Kanban retarget the companion pane through one native command. Native owns hiding the previous rendered companion surface, focusing the requested session, and rejecting delayed synthetic clicks that would hit a stale session.
@@ -576,6 +590,17 @@ type NativeHostCommand =
       type: "checkPersistenceSession";
     }
   | {
+      /*
+       * CDXC:SidebarSessionFocus 2026-06-27-22:54:
+       * This owner-only command remains for compatibility and targeted
+       * diagnostics. The normal mounted sidebar switch path uses
+       * focusMountedTerminalSession so native owner selection and AppKit focus
+       * repaint in one phase.
+       */
+      sessionId: string;
+      type: "setFocusedTerminalOwner";
+    }
+  | {
 	      activeSessionIds: string[];
       commandsPanelActiveSessionIds?: string[];
       commandsPanelFocusedSessionId?: string;
@@ -600,6 +625,7 @@ type NativeHostCommand =
       attentionSessionIds?: string[];
       backgroundColor?: string;
       debuggingMode?: boolean;
+      diagnosticLoggingJson?: string;
       /**
        * CDXC:BetaFeatures 2026-06-16-13:08:
        * Native browser toolbars are AppKit-owned, so layout sync carries the
@@ -748,31 +774,27 @@ type NativeHostCommand =
       type: "setSessionPaneChrome";
     }
 	  | {
-	      /**
-	       * CDXC:SessionStatusIndicators 2026-05-05-19:47
-       * The AppKit floating circles receive only aggregate counts. Sidebar
-       * state remains authoritative for which session should be opened when a
-       * circle is clicked, avoiding duplicate native-side session selection.
+      /**
+       * CDXC:SessionStatusIndicators 2026-05-05-19:47:
+       * Native session status receives only aggregate counts and bounded
+       * menu-bar project/session ids. Sidebar state remains authoritative for
+       * selecting sessions, avoiding duplicate native-side session selection.
+       *
+       * CDXC:SessionStatusIndicators 2026-06-27-20:11:
+       * The macOS desktop floating session badge was removed. Keep publishing
+       * this status message for the menu bar indicator and pet-derived counts,
+       * but do not send floating visibility or floating size fields.
        */
       attentionCount: number;
       availableCount: number;
       /**
        * CDXC:SessionStatusIndicators 2026-05-09-17:30
-       * Floating and menu bar indicator visibility are independent settings:
-       * floating badges are hidden by default, menu bar badges are shown by
-       * default, and both surfaces still share one count and click target model.
+       * The menu bar indicator remains independently controlled and keeps
+       * sharing the same count and click target model as sidebar-derived status.
        */
-      hideFloatingIndicators: boolean;
       hideMenuBarIndicators: boolean;
       projects?: NativeSessionStatusIndicatorProject[];
       workingCount: number;
-      /**
-       * CDXC:SessionStatusIndicators 2026-05-07-18:20
-       * The native AppKit indicator receives the persisted named size with the
-       * counts message so each sidebar publish resizes the floating chrome from
-       * the same authoritative settings snapshot.
-       */
-      size: ghostexSettings["sessionStatusIndicatorSize"];
       type: "setSessionStatusIndicators";
     }
   | {
@@ -1669,6 +1691,8 @@ const CODE_SERVER_EDITOR_ORIGIN = "http://127.0.0.1:3775";
  * Browser tabs created by Ghostex should never intentionally open about:blank because CEF can leave that page looking stuck in a loading state. When a project has no GitHub remote URL for the Browser new-tab destination, open Google instead.
  */
 const DEFAULT_PROJECT_BROWSER_URL = "https://www.google.com/";
+const projectBrowserSeedUrlByProjectId = new Map<string, string>();
+const pendingProjectBrowserSeedUrlByProjectId = new Map<string, Promise<string>>();
 const PROJECT_EDITOR_OPEN_TIMEOUT_MS = 10 * 1000;
 const AUTO_SLEEP_MONITOR_INTERVAL_MS = 60 * 1000;
 const AUTO_SLEEP_MINUTE_MS = 60 * 1000;
@@ -2212,6 +2236,9 @@ let nextNativeLayoutFocusRequestId = 0;
 let pendingNativeLayoutFocusRequest:
   | { reason: string; requestId: number; sessionId: string }
   | undefined;
+let pendingDeferredSidebarFocusPublishTimeout: number | undefined;
+let pendingDeferredSidebarFocusPublishRequiresNativeLayoutSync = false;
+let pendingTitlebarModeSwitchPublishTimeout: number | undefined;
 const startupRestoredTerminalFocusTarget = {
   projectId: activeProjectId,
   sessionId: activeSnapshot().focusedSessionId,
@@ -3085,7 +3112,7 @@ function recordSidebarCardFocusTrace(details: unknown): void {
   /**
    * CDXC:SidebarSessionFocus 2026-05-15-20:01:
    * Session-card focus repros need a persistent bridge boundary while
-   * Debugging Mode is enabled. Force only this low-volume card-click breadcrumb
+   * native.terminal.focus is enabled. Force only this low-volume card-click breadcrumb
    * so later native paneLayout logs can be correlated to the exact sidebar
    * card, group, pointer position, and local focus decision that initiated the
    * focus request.
@@ -3238,7 +3265,7 @@ function postNative(command: NativeHostCommand): void {
      * CDXC:NativeTerminalStartupFocus 2026-05-11-12:31
      * Startup focus drift can depend on command ordering across create,
      * layout, and explicit focus messages. Persist the actual native command
-     * boundary under the focus-trace allowlist while Debugging Mode is enabled
+     * boundary under the focus-trace allowlist while native.terminal.focus is enabled
      * so a repro minute shows which pane the sidebar asked native to focus.
      *
      * CDXC:PreviousSessions 2026-05-17-03:18:
@@ -3853,6 +3880,9 @@ function applyGxserverPresentationDelta(delta: GxserverPresentationDelta, revisi
           `presentationDelta:${delta.type}`,
         )
       : undefined;
+  if (delta.type === "projectRemoved" || delta.type === "projectUpdated") {
+    refreshGxserverRecentProjects(`presentationDelta:${delta.type}`);
+  }
   if ("session" in delta) {
     const session =
       nextPresentation.sessions.find(
@@ -5176,11 +5206,7 @@ function postAppIconState(message: SidebarAppIconStateMessage): void {
 }
 
 function appendSessionTitleDebugLog(event: string, details?: unknown): void {
-  const isImportantDiagnostic = shouldPersistNativeSidebarDiagnostic(event);
-  if (!isImportantDiagnostic && !isNativeSidebarDebugLoggingEnabled()) {
-    return;
-  }
-  if (!isImportantDiagnostic) {
+  if (!shouldPostNativeSidebarDiagnosticLog("native.session.title", event)) {
     return;
   }
   postNative({
@@ -5209,10 +5235,10 @@ function appendSessionTitleRenameTraceDebugLog(event: string, details?: unknown)
   /**
    * CDXC:SidebarRenameDiagnostics 2026-05-16-07:23:
    * Manual rename breadcrumbs are regular diagnostics, even when they help
-   * explain a failed repro. Persist them only while Settings Debugging Mode is
-   * enabled so normal rename use does not write non-error logs.
+   * explain a failed repro. Persist them only while the native.session.title
+   * scenario is enabled so normal rename use does not write non-error logs.
    */
-  if (!isNativeSidebarDebugLoggingEnabled()) {
+  if (!shouldPostNativeSidebarDiagnosticLog("native.session.title", event)) {
     return;
   }
   postNative({
@@ -5226,15 +5252,11 @@ function appendAgentDetectionDebugLog(event: string, details?: unknown): void {
   /**
    * CDXC:AgentDetection 2026-05-08-16:41
    * Native diagnostics should preserve actionable failures, not routine
-   * activity/title/projection churn. Keep normal debug logs behind the settings
-   * switch and drop non-error events before they cross the WebKit bridge so
+   * activity/title/projection churn. Keep normal debug logs behind the
+   * native.agent.detection scenario and drop non-error events before they cross the WebKit bridge so
    * long-running sidebar sessions cannot create multi-GB app logs.
    */
-  const isImportantDiagnostic = shouldPersistNativeSidebarDiagnostic(event);
-  if (!isImportantDiagnostic && !isNativeSidebarDebugLoggingEnabled()) {
-    return;
-  }
-  if (!isImportantDiagnostic) {
+  if (!shouldPostNativeSidebarDiagnosticLog("native.agent.detection", event)) {
     return;
   }
   postNative({
@@ -5257,19 +5279,20 @@ function appendTerminalFocusDebugLog(
    *
    * CDXC:PaneLayoutDiagnostics 2026-05-11-12:19
    * User-reproduced tab creation bugs need low-volume paneLayout traces while
-   * Debugging Mode is enabled. Forced entries may bypass the noisy-event filter
-   * for a focused repro, but they still respect the app-wide debug-mode gate.
+   * native.terminal.focus scenario is enabled. Forced entries may bypass the noisy-event filter
+   * for a focused repro, but they still respect the app-wide scenario gate.
    *
    * CDXC:Diagnostics 2026-06-06-07:09:
    * Normal mode may persist warning/error/failure-like diagnostics, but routine
-   * forced focus breadcrumbs must wait for Debugging Mode so repro logging does
-   * not become a performance issue during everyday sidebar use.
+   * forced focus breadcrumbs must wait for the native.terminal.focus scenario
+   * so repro logging does not become a performance issue during everyday sidebar use.
    */
   const isImportantDiagnostic = shouldPersistNativeSidebarDiagnostic(event);
-  if (!isImportantDiagnostic && !isNativeSidebarDebugLoggingEnabled()) {
-    return;
-  }
-  if (!isImportantDiagnostic && !options.force) {
+  const isScenarioEnabled = isDiagnosticLoggingScenarioEnabled(
+    settings.diagnosticLogging,
+    "native.terminal.focus",
+  );
+  if (!isImportantDiagnostic && !isScenarioEnabled) {
     return;
   }
   window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
@@ -5290,18 +5313,19 @@ function appendLayoutLayeringDebugLog(
    * Layout and layering bugs need a clean repro file separate from terminal
    * focus noise. Send paneLayout synthesis, native hit-test routing, and
    * browser/editor overlap breadcrumbs through a dedicated native log command
-   * while preserving the same Debugging Mode gate as ordinary diagnostics.
+   * while preserving the same native.layout.layering scenario gate as ordinary diagnostics.
    *
    * CDXC:Diagnostics 2026-06-06-07:09:
    * Failure-like layout/layering events can persist in normal mode, but routine
-   * forced pane-layout traces are Debugging Mode diagnostics so they cannot
+   * forced pane-layout traces are scenario-enabled diagnostics so they cannot
    * spam disk when users are not actively reproducing an issue.
    */
   const isImportantDiagnostic = shouldPersistNativeSidebarDiagnostic(event);
-  if (!isImportantDiagnostic && !isNativeSidebarDebugLoggingEnabled()) {
-    return;
-  }
-  if (!isImportantDiagnostic && !options.force) {
+  const isScenarioEnabled = isDiagnosticLoggingScenarioEnabled(
+    settings.diagnosticLogging,
+    "native.layout.layering",
+  );
+  if (!isImportantDiagnostic && !isScenarioEnabled) {
     return;
   }
   postNative({
@@ -5316,14 +5340,14 @@ function appendZmxPersistenceFocusReproLog(event: string, details?: unknown): vo
   /**
    * CDXC:ZmxPersistenceDiagnostics 2026-05-18-08:52:
    * Intermittent broken text after clicking zmx-backed sidebar sessions must
-   * be diagnosable from a session id and minute while Debugging Mode is enabled.
+   * be diagnosable from a session id and minute while native.terminal.focus is enabled.
    * Force only this zmx focus breadcrumb chain into the native terminal-focus
    * log; keep the payload metadata-only.
    *
    * CDXC:Diagnostics 2026-06-15-18:39:
    * Forced repro breadcrumbs are not normal-mode warnings. Route through the
-   * shared helper so Debugging Mode off avoids the native bridge unless the
-   * event name is failure-classified.
+   * shared helper so scenario-off normal mode avoids the native bridge unless
+   * the event name is failure-classified.
    */
   appendTerminalFocusDebugLog(event, details, { force: true });
 }
@@ -5338,8 +5362,8 @@ function appendRestoreResumeInputDiagnosticLog(event: string, details?: unknown)
    * an agent CLI prompt.
    *
    * CDXC:Diagnostics 2026-06-15-18:39:
-   * Restore-input breadcrumbs are Debugging Mode diagnostics unless the event is
-   * failure-classified.
+   * Restore-input breadcrumbs are native.terminal.focus diagnostics unless the
+   * event is failure-classified.
    */
   appendTerminalFocusDebugLog(event, details, { force: true });
 }
@@ -5356,8 +5380,8 @@ function appendActionCrashTraceDebugLog(event: string, details?: unknown): void 
    * CDXC:GxserverLogs 2026-06-15-20:39:
    * The historical actionCrashTrace event prefix is a breadcrumb label, not a
    * severity. Route it through the shared terminal-focus gate so ordinary
-   * titlebar action phases require Debugging Mode while real error/failed
-   * phases can still persist as normal-mode diagnostics.
+   * titlebar action phases require native.terminal.focus while real
+   * error/failed phases can still persist as normal-mode diagnostics.
    */
   appendTerminalFocusDebugLog(event, details, { force: true });
 }
@@ -5371,10 +5395,10 @@ function appendModeSwitcherDebugLog(
    * CDXC:ModeSwitcherDiagnostics 2026-06-15-00:21:
    * View-switch lag repros need timing across titlebar, sidebar routing,
    * project-surface wake, native layout sync, and AppKit settle. Keep routine
-   * breadcrumbs behind Settings Debugging Mode, and send only safe ids,
+   * breadcrumbs behind native.mode.switcher, and send only safe ids,
    * enum-like modes/statuses, counts, booleans, hashes, and elapsed timings.
    */
-  if (!isNativeSidebarDebugLoggingEnabled()) {
+  if (!shouldPostNativeSidebarDiagnosticLog("native.mode.switcher", event)) {
     return;
   }
   postNative({
@@ -5429,10 +5453,7 @@ function readAgentColorEnvironmentSnapshot(
 }
 
 function appendRestoreDebugLog(event: string, details?: unknown): void {
-  if (!isNativeSidebarDebugLoggingEnabled()) {
-    return;
-  }
-  if (!shouldPersistNativeSidebarDiagnostic(event)) {
+  if (!shouldPostNativeSidebarDiagnosticLog("native.workspace.restore", event)) {
     return;
   }
   postNative({
@@ -5446,18 +5467,22 @@ function appendSidebarRefreshDebugLog(event: string, details?: unknown): void {
   /**
    * CDXC:SidebarRefreshDiagnostics 2026-05-11-12:32
    * User repros for unexpected sidebar refreshes need a dedicated native log
-   * file keyed to the Settings debugging switch. Persist only explicit React
+   * file keyed to the native.sidebar.refresh scenario. Persist only explicit React
    * lifecycle, hydrate, publish, and requested create/close boundaries so the
    * log shows whether the sidebar remounted or merely received a new snapshot.
    *
    * CDXC:SidebarRefreshDiagnostics 2026-06-06-07:09:
    * Presentation streams can emit many no-op deltas while title spinners run.
    * Persist failure-like refresh diagnostics immediately, but sample routine
-   * message/render/delta breadcrumbs in Debugging Mode so the debug log remains
+   * message/render/delta breadcrumbs in native.sidebar.refresh so the debug log remains
    * useful without turning WebKit logging into a CPU and disk hotspot.
    */
   const isImportantDiagnostic = shouldPersistNativeSidebarDiagnostic(event);
-  if (!isImportantDiagnostic && !isNativeSidebarDebugLoggingEnabled()) {
+  const isScenarioEnabled = isDiagnosticLoggingScenarioEnabled(
+    settings.diagnosticLogging,
+    "native.sidebar.refresh",
+  );
+  if (!isImportantDiagnostic && !isScenarioEnabled) {
     return;
   }
   if (!isImportantDiagnostic && !shouldPersistSidebarRefreshDebugLog(event)) {
@@ -5475,7 +5500,7 @@ const SIDEBAR_WAKE_SCROLL_DEBUG_EVENT_PREFIX = "repro.sidebarWakeScroll.";
 function appendSidebarWakeScrollDebugLog(event: string, details?: unknown): void {
   /*
    * CDXC:SidebarWakeScrollDiagnostics 2026-06-16-02:20:
-   * Session wake-scroll repros need one persistent chain from sidebar card click through native focus/publish and the React scrollIntoView decision. Keep this in the existing sidebar refresh log, gated by Debugging Mode, and log only stable ids, indexes, booleans, enum states, and geometry summaries.
+   * Session wake-scroll repros need one persistent chain from sidebar card click through native focus/publish and the React scrollIntoView decision. Keep this in the existing sidebar refresh log, gated by native.sidebar.refresh, and log only stable ids, indexes, booleans, enum states, and geometry summaries.
    */
   appendSidebarRefreshDebugLog(
     event.startsWith(SIDEBAR_WAKE_SCROLL_DEBUG_EVENT_PREFIX)
@@ -5490,10 +5515,10 @@ function appendSidebarCollapseStateDebugLog(event: string, details?: unknown): v
    * CDXC:SidebarCollapseDiagnostics 2026-06-02-23:52:
    * Sidebar section/project disclosure-state repros need their own support log
    * so localStorage read/write and hydrate timing can be inspected without
-   * mixing with broad refresh diagnostics. Persist only while Debugging Mode is
-   * enabled and rely on the sidebar webview to send privacy-safe summaries.
+   * mixing with broad refresh diagnostics. Persist only while
+   * native.sidebar.collapse is enabled and rely on the sidebar webview to send privacy-safe summaries.
    */
-  if (!isNativeSidebarDebugLoggingEnabled()) {
+  if (!shouldPostNativeSidebarDiagnosticLog("native.sidebar.collapse", event)) {
     return;
   }
   postNative({
@@ -5507,7 +5532,7 @@ function appendPinnedSessionReorderDebugLog(event: string, details?: unknown): v
   /**
    * CDXC:PinnedSessions 2026-05-28-15:33:
    * Pinned-session reorder repros need low-volume persistent breadcrumbs while
-   * Debugging Mode is enabled, because the bug happens during one drag and can
+   * native.terminal.focus is enabled, because the bug happens during one drag and can
    * be missed by console-only sidebarDebugLog output.
    *
    * CDXC:Diagnostics 2026-06-15-18:39:
@@ -5520,11 +5545,11 @@ function appendProjectBoardDebugLog(event: string, details?: unknown): void {
   /**
    * CDXC:ProjectBoardDiagnostics 2026-05-28-12:32:
    * Project-page create/start diagnostics are low-volume user-action
-   * breadcrumbs. Keep them behind Settings Debugging Mode in React before they
+   * breadcrumbs. Keep them behind native.project.board in React before they
    * cross the native bridge, and let Swift enforce the same gate before writing
    * the dedicated project-board log file.
    */
-  if (!isNativeSidebarDebugLoggingEnabled()) {
+  if (!shouldPostNativeSidebarDiagnosticLog("native.project.board", event)) {
     return;
   }
   postNative({
@@ -5540,13 +5565,14 @@ function shouldPersistNativeSidebarDiagnostic(event: string): boolean {
   Normal mode persistent logs are for actual warnings, errors, failures,
   crashes, timeouts, and malformed payloads. Focus traces, hotkey repro phases,
   pane-layout breadcrumbs, and missing-session probes are recoverable UI
-  diagnostics that should write only when Debugging Mode explicitly enables
-  them.
+  diagnostics that should write only when a diagnostic scenario explicitly
+  enables them.
 
   CDXC:GxserverLogs 2026-06-15-20:39:
   actionCrashTrace is a legacy breadcrumb namespace. Do not let the word crash
   in that namespace make routine click/run phases look like important warnings;
-  only the actual failed/error phases should persist without Debugging Mode.
+  only the actual failed/error phases should persist without a diagnostic
+  scenario.
   */
   const normalizedEvent = event.toLowerCase();
   if (
@@ -5630,6 +5656,22 @@ function shouldSampleSidebarRefreshDebugLog(event: string, intervalMs: number): 
   return true;
 }
 
+function shouldPostNativeSidebarDiagnosticLog(
+  scenarioId: DiagnosticLoggingScenarioId,
+  event: string,
+): boolean {
+  /*
+  CDXC:DiagnosticsSettings 2026-06-27-22:07:
+  React-side diagnostic bridges must use the same scenario allowlist as native
+  writers. Warnings/errors still cross the bridge, while routine breadcrumbs
+  require the exact scenario instead of broad Debugging Mode.
+  */
+  return (
+    shouldPersistNativeSidebarDiagnostic(event) ||
+    isDiagnosticLoggingScenarioEnabled(settings.diagnosticLogging, scenarioId)
+  );
+}
+
 function isNativeSidebarDebugLoggingEnabled(): boolean {
   /**
    * CDXC:Diagnostics 2026-05-16-07:23:
@@ -5645,10 +5687,12 @@ function isTerminalFocusDebugCommand(command: NativeHostCommand): boolean {
     command.type === "createTerminal" ||
     command.type === "createWebPane" ||
     command.type === "focusTerminal" ||
+    command.type === "focusMountedTerminalSession" ||
     command.type === "focusProjectEditorCompanionSession" ||
     command.type === "retargetProjectEditorCompanionSession" ||
     command.type === "focusWebPane" ||
     command.type === "sendTerminalEnter" ||
+    command.type === "setFocusedTerminalOwner" ||
     command.type === "setActiveTerminalSet" ||
     command.type === "setTerminalLayout" ||
     command.type === "setTerminalVisibility" ||
@@ -5883,6 +5927,27 @@ function postNativeFocusTerminalForCurrentIntent(
   postNative({ sessionId: nativeSessionId, type: "focusTerminal" });
 }
 
+function postNativeFocusMountedTerminalForCurrentIntent(
+  nativeSessionId: string,
+  intent: NativeSidebarFocusIntent | undefined,
+  reason: string,
+): void {
+  if (!isNativeSidebarFocusIntentCurrent(intent)) {
+    appendTerminalFocusDebugLog("nativeFocusTrace.sidebarFocusIntentStaleSkipped", {
+      latestProjectId: latestNativeSidebarFocusIntent?.projectId,
+      latestRequestId: latestNativeSidebarFocusIntent?.requestId,
+      latestSessionId: latestNativeSidebarFocusIntent?.sessionId,
+      nativeSessionId,
+      projectId: intent?.projectId,
+      reason,
+      requestId: intent?.requestId,
+      sessionId: intent?.sessionId,
+    });
+    return;
+  }
+  postNative({ sessionId: nativeSessionId, type: "focusMountedTerminalSession" });
+}
+
 function postNativeFocusProjectEditorCompanionForCurrentIntent(
   nativeSessionId: string,
   intent: NativeSidebarFocusIntent | undefined,
@@ -5949,7 +6014,7 @@ function appendStartupPaneLayoutDebugLog(event: string, details?: unknown): void
   /**
    * CDXC:StartupPaneDiagnostics 2026-05-16-09:14:
    * A restart can incorrectly surface every parked tab as its own split pane.
-   * Persist two low-volume startup breadcrumbs while Debugging Mode is enabled:
+   * Persist two low-volume startup breadcrumbs while native.layout.layering is enabled:
    * the restored project snapshot and the first native layout synthesis.
    *
    * CDXC:Diagnostics 2026-06-15-18:39:
@@ -5963,7 +6028,7 @@ function appendPreviousSessionRestoreTraceDebugLog(event: string, details?: unkn
   /**
    * CDXC:PreviousSessions 2026-05-17-03:18:
    * The zmx previous-session restore repro can hide the terminal pane while
-   * Debugging Mode is enabled.
+   * native.terminal.focus is enabled.
    * Force only this click-scoped restore breadcrumb chain so the next repro shows the archived record, provider choice, sidebar workspace mutation, and native create/layout handoff without broadening routine terminal logging.
    *
    * CDXC:Diagnostics 2026-06-15-18:39:
@@ -9267,6 +9332,87 @@ function syncSidebarSharedProjectCacheFromGxserverProjects(
   };
 }
 
+function applyGxserverRecentProjects(
+  recentProjects: readonly GxserverRecentProjectDomainState[],
+  reason: string,
+): void {
+  const snapshot = gxserverStartupSnapshot;
+  if (!snapshot) {
+    return;
+  }
+  const recentProjectIds = new Set(
+    recentProjects
+      .map((project) => textValue(project.projectId))
+      .filter((projectId): projectId is string => projectId !== undefined),
+  );
+  const nextDomainProjects = snapshot.projects.map((project) => {
+    const isRecentProject = recentProjectIds.has(project.projectId);
+    if (project.isRecentProject === isRecentProject) {
+      return project;
+    }
+    const recentProject = recentProjects.find(
+      (candidate) => candidate.projectId === project.projectId,
+    );
+    return {
+      ...project,
+      isRecentProject,
+      recentClosedAt: isRecentProject ? recentProject?.recentClosedAt : undefined,
+    };
+  });
+  gxserverStartupSnapshot = {
+    ...snapshot,
+    projects: nextDomainProjects,
+    recentProjects: [...recentProjects],
+  };
+  /*
+  CDXC:RecentProjects 2026-06-27-19:37:
+  `/api/listRecentProjects` is the drawer source for local projects in both
+  macOS and GPUI. Mirror that list into the local pane cache only to keep
+  restore/layout code consistent; do not promote WK `ghostex-native-projects`
+  back to ownership.
+  */
+  const recentProjectById = new Map<string, GxserverRecentProjectDomainState>(
+    recentProjects.map((project) => [String(project.projectId), project]),
+  );
+  let didChangeLocalProjects = false;
+  projects = projects.map((project) => {
+    const recentProject = recentProjectById.get(project.projectId);
+    const nextIsRecentProject = recentProject !== undefined;
+    const nextRecentClosedAt = recentProject?.recentClosedAt;
+    if (
+      project.isRecentProject === nextIsRecentProject &&
+      project.recentClosedAt === nextRecentClosedAt
+    ) {
+      return project;
+    }
+    didChangeLocalProjects = true;
+    return {
+      ...project,
+      isRecentProject: nextIsRecentProject,
+      recentClosedAt: nextRecentClosedAt,
+    };
+  });
+  if (didChangeLocalProjects) {
+    writeStoredProjects(`gxserverRecentProjects:${reason}`);
+  }
+}
+
+function refreshGxserverRecentProjects(reason: string): void {
+  void gxserverClient
+    .listRecentProjects()
+    .then((recentProjects) => {
+      applyGxserverRecentProjects(recentProjects, reason);
+      publish();
+    })
+    .catch((error) => {
+      appendSidebarRefreshDebugLog("nativeSidebar.gxserver.recentProjects.refreshFailed", {
+        errorType: error instanceof Error ? error.name : typeof error,
+        hasMessage: (error instanceof Error ? error.message : String(error)).length > 0,
+        reason,
+      });
+    });
+}
+
 function clearLegacyGlobalCommandsStorage(): void {
   for (const storageKey of LEGACY_COMMANDS_STORAGE_KEYS) {
     localStorage.removeItem(storageKey);
@@ -9409,6 +9555,20 @@ function restoreProjectMetadataFromGxserver(
   */
   if (gxserverProject.name && nextProject.name !== gxserverProject.name) {
     nextProject = { ...nextProject, name: gxserverProject.name };
+  }
+  if (
+    nextProject.isRecentProject !== gxserverProject.isRecentProject ||
+    nextProject.recentClosedAt !== gxserverProject.recentClosedAt
+  ) {
+    /*
+    CDXC:RecentProjects 2026-06-27-19:37:
+    Local Recent Projects are shared gxserver project state. The WK project cache may keep pane layout, but `isRecentProject` and `recentClosedAt` must be replaced from gxserver snapshots/update responses so macOS and GPUI do not split the main Projects list from the Recent Projects drawer.
+    */
+    nextProject = {
+      ...nextProject,
+      isRecentProject: gxserverProject.isRecentProject === true,
+      recentClosedAt: gxserverProject.recentClosedAt,
+    };
   }
   if (nextProject.beadsDisplayKey !== beadsDisplayKey) {
     nextProject = { ...nextProject, beadsDisplayKey };
@@ -10004,7 +10164,31 @@ function applyGxserverProjectUpdateResponse(
     snapshot.projects,
     updatedProject,
   );
-  if (snapshot.presentation) {
+  if (snapshot.presentation && updatedProject.isRecentProject === true) {
+    /*
+    CDXC:RecentProjects 2026-06-27-19:37:
+    A project update response can be the authoritative close-to-recent result.
+    Parked gxserver projects remain in the domain cache but must be removed
+    from active presentation groups; otherwise native can reinsert the row that
+    GPUI and gxserver already moved to the Recent Projects drawer.
+    */
+    gxserverStartupSnapshot = {
+      ...snapshot,
+      presentation: {
+        ...snapshot.presentation,
+        groups: snapshot.presentation.groups.filter(
+          (group) => group.projectId !== updatedProject.projectId,
+        ),
+        projects: snapshot.presentation.projects.filter(
+          (project) => project.projectId !== updatedProject.projectId,
+        ),
+        sessions: snapshot.presentation.sessions.filter(
+          (session) => session.projectId !== updatedProject.projectId,
+        ),
+      },
+      projects: nextProjects,
+    };
+  } else if (snapshot.presentation) {
     const presentationProject = createPresentationProjectFromGxserverProject(updatedProject);
     gxserverStartupSnapshot = {
       ...snapshot,
@@ -10179,6 +10363,11 @@ function readStoredProjects(): { activeProjectId: string; projects: NativeProjec
     /**
      * CDXC:RecentProjects 2026-05-14-08:08:
      * Startup must preserve each stored project's explicit Recent Projects status. Projects with zero sessions should stay in the main Combined project list unless the user closed that project into Recent Projects.
+     *
+     * CDXC:RecentProjects 2026-06-27-19:37:
+     * This read is only the pre-gxserver pane/layout bootstrap. Once the daemon
+     * snapshot arrives, gxserver replaces these local recent flags and supplies
+     * the Recent Projects drawer rows.
      */
     const activeProjectId = resolveStartupActiveProjectId(
       projects,
@@ -10536,7 +10725,10 @@ function writeStoredProjects(reason: string): void {
   persistLocalProjectsSnapshot(activeProjectId, projects, reason);
   /*
   CDXC:GxserverPresentation 2026-06-02-12:29:
-  gxserver owns shared project/session presentation after the hard cutover. Native writes update only the WK local project snapshot used for macOS pane layout, local-only Quick/browser/file panes, recent flags, and immediate local-first UI; they must not publish a shared project/session tree back to native-sidebar-projects.json.
+  gxserver owns shared project/session presentation after the hard cutover. Native writes update only the WK local project snapshot used for macOS pane layout, local-only Quick/browser/file panes, and immediate local-first UI; they must not publish a shared project/session tree back to native-sidebar-projects.json.
+
+  CDXC:RecentProjects 2026-06-27-19:37:
+  Local Recent Projects are gxserver-owned. WK storage may mirror `isRecentProject` for pane restore, but close/restore/remove and drawer hydration must use gxserver APIs instead of treating this snapshot as the durable source.
   */
   void reason;
 }
@@ -10685,7 +10877,7 @@ function createLocalPersistableProjectsSnapshot(
 ): NativeProject[] {
   /*
   CDXC:ProjectSidebarOwnership 2026-06-02-12:39:
-  WK `ghostex-native-projects` is a macOS-local pane/layout cache, not a shared project/session store. Persist local pane placement, local-only Quick/browser/file/T3 panes, recents, and editor chrome, but strip gxserver-owned terminal metadata from canonical G sessions at the writer boundary so restart cannot rehydrate titles, provider state, lifecycle, activity, pinned/favorite flags, or agent metadata from the old native-owned project tree.
+  WK `ghostex-native-projects` is a macOS-local pane/layout cache, not a shared project/session store. Persist local pane placement, local-only Quick/browser/file/T3 panes, gxserver-mirrored recent flags, and editor chrome, but strip gxserver-owned terminal metadata from canonical G sessions at the writer boundary so restart cannot rehydrate titles, provider state, lifecycle, activity, pinned/favorite flags, or agent metadata from the old native-owned project tree.
 
   CDXC:SessionLifecycle 2026-06-02-14:52:
   G-session sleep/running state is gxserver-owned lifecycle data. The local pane/layout snapshot may remember where a tab was placed, but it must not persist `isSleeping` for gxserver-backed terminal sessions because that lets old WK storage override gxserver presentation on restart.
@@ -17632,40 +17824,76 @@ function createSidebarRecentProjects(): SidebarRecentProject[] {
    * count so restoring a closed project with sessions does not imply a blank
    * terminal will be created.
    *
-   * CDXC:ProjectSidebarOwnership 2026-06-02-13:41:
-   * Recent Projects is a macOS-local parking overlay, not a canonical inventory.
-   * Once gxserver is available, only expose parked rows that still correspond
-   * to a gxserver domain or presentation project so stale pre-cutover local
-   * project records cannot reappear as restorable shared projects.
+   * CDXC:RecentProjects 2026-06-27-19:37:
+   * Local Recent Projects are now gxserver-owned. When gxserver is available,
+   * render local drawer rows only from `/api/listRecentProjects`; the WK
+   * project array may provide macOS pane layout during restore, but it is no
+   * longer the durable source for which local projects are parked.
    *
    * CDXC:RemoteRecentProjects 2026-06-24-10:36:
    * Remote Close Project parks the machine-scoped presentation row in the same
    * drawer as local closed projects. Keep remote rows as scoped project ids and
    * include the machine name so React can label duplicate project names.
    */
-  const localRecentProjects = projects
-    .filter(
-      (project) =>
-        project.isChat !== true &&
-        !isRemoteAttachCarrierProject(project) &&
-        project.isRecentProject === true &&
-        isNativeProjectKnownToGxserverInventory(project),
-    )
-    .sort(compareRecentProjectsByClosedAt)
-    .map((project) => ({
-      icon: project.icon ?? normalizeLegacyWorkspaceProjectIcon(project),
-      iconDataUrl: project.iconDataUrl,
-      path: project.path,
-      projectId: project.projectId,
-      recentClosedAt: project.recentClosedAt,
-      sessionCount: countRecentProjectSessions(project),
-      theme: project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
-      themeColor: project.themeColor,
-      title: project.name,
-    }));
+  const localRecentProjects = gxserverStartupSnapshot
+    ? createSidebarGxserverRecentProjects(gxserverStartupSnapshot.recentProjects)
+    : projects
+      .filter(
+        (project) =>
+          project.isChat !== true &&
+          !isRemoteAttachCarrierProject(project) &&
+          project.isRecentProject === true &&
+          isNativeProjectKnownToGxserverInventory(project),
+      )
+      .sort(compareRecentProjectsByClosedAt)
+      .map((project) => ({
+        icon: project.icon ?? normalizeLegacyWorkspaceProjectIcon(project),
+        iconDataUrl: project.iconDataUrl,
+        path: project.path,
+        projectId: project.projectId,
+        recentClosedAt: project.recentClosedAt,
+        sessionCount: countRecentProjectSessions(project),
+        theme: project.theme ?? resolveSidebarTheme(settings.sidebarTheme, "dark"),
+        themeColor: project.themeColor,
+        title: project.name,
+      }));
   return [...localRecentProjects, ...createSidebarRemoteRecentProjects()].sort(
     compareRecentProjectsByClosedAt,
   );
+}
+
+function createSidebarGxserverRecentProjects(
+  recentProjects: readonly GxserverRecentProjectDomainState[],
+): SidebarRecentProject[] {
+  return recentProjects.flatMap((project) => {
+    const projectId = textValue(project.projectId);
+    const path = textValue(project.path);
+    const title = textValue(project.title);
+    if (!projectId || !path || !title) {
+      return [];
+    }
+    const localProject = projects.find((candidate) => candidate.projectId === projectId);
+    return [
+      {
+        icon: normalizeWorkspaceProjectIcon(project.icon) ??
+          localProject?.icon ??
+          (localProject ? normalizeLegacyWorkspaceProjectIcon(localProject) : undefined),
+        iconDataUrl: normalizeWorkspaceProjectIconDataUrl(project.iconDataUrl) ??
+          localProject?.iconDataUrl,
+        path,
+        projectId,
+        recentClosedAt: textValue(project.recentClosedAt),
+        sessionCount: Number.isFinite(project.sessionCount)
+          ? Math.max(0, Math.floor(project.sessionCount))
+          : 0,
+        theme: normalizeWorkspaceProjectTheme(project.theme) ??
+          localProject?.theme ??
+          resolveSidebarTheme(settings.sidebarTheme, "dark"),
+        themeColor: normalizeWorkspaceThemeColor(project.themeColor) ?? localProject?.themeColor,
+        title,
+      },
+    ];
+  });
 }
 
 function createSidebarRemoteRecentProjects(): SidebarRecentProject[] {
@@ -19315,6 +19543,7 @@ function handleAgentManagerXSessionCommand(rawData: unknown): void {
 
 type PublishOptions = {
   nativeLayoutBeforeSidebarHydrate?: boolean;
+  skipNativeLayoutSync?: boolean;
 };
 
 type PublishContext = {
@@ -19350,7 +19579,10 @@ function finishPublishContext(context: PublishContext, options: PublishOptions =
   postAppModalHost({ message: sidebarMessage, type: "sidebarState" });
   maybeOpenPortlessSetupPrompt(sidebarMessage.hud.portless);
   syncNativeT3RuntimeSessionState(sidebarMessage);
-  if (options.nativeLayoutBeforeSidebarHydrate !== true) {
+  if (
+    options.skipNativeLayoutSync !== true &&
+    options.nativeLayoutBeforeSidebarHydrate !== true
+  ) {
     syncNativeLayoutForPublish();
   }
   syncNativeSessionStatusIndicators(sidebarMessage);
@@ -19359,7 +19591,10 @@ function finishPublishContext(context: PublishContext, options: PublishOptions =
 
 function publish(options: PublishOptions = {}): void {
   const context = preparePublishContext();
-  if (options.nativeLayoutBeforeSidebarHydrate === true) {
+  if (
+    options.nativeLayoutBeforeSidebarHydrate === true &&
+    options.skipNativeLayoutSync !== true
+  ) {
     /*
      * CDXC:SidebarSessionFocus 2026-06-08-09:31:
      * Sidebar terminal switching must surface the native pane before the synchronous React sidebar hydrate. The freshly built sidebarMessage already contains the projected pane chrome syncNativeLayout needs, so focus-triggered publishes can post setActiveTerminalSet first and let the sidebar UI reconcile later in the same turn.
@@ -19561,8 +19796,122 @@ function haveSameStringArray(left: readonly string[], right: readonly string[]):
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function publishSidebarFocusUpdate(): void {
+function publishSidebarFocusUpdate(options: { skipNativeLayoutSync?: boolean } = {}): void {
+  if (options.skipNativeLayoutSync === true) {
+    publish({ skipNativeLayoutSync: true });
+    return;
+  }
   publish({ nativeLayoutBeforeSidebarHydrate: true });
+}
+
+function publishSidebarFocusUpdateAfterNativeFocus(
+  options: { skipNativeLayoutSync?: boolean } = {},
+): void {
+  /*
+   * CDXC:SidebarSessionFocus 2026-06-27-20:28:
+   * Switching to an already-mounted workspace terminal should feel instant.
+   * Post the explicit native focus command first, then coalesce the sidebar
+   * hydrate behind the click so full layout derivation and optional native sync
+   * cannot block AppKit from revealing and focusing the selected pane.
+   *
+   * CDXC:SidebarSessionFocus 2026-06-27-20:28:
+   * Coalescing must preserve the strongest pending sync requirement. If one
+   * fast focus click acknowledged an attention state, a later plain focus click
+   * may replace the timer but must not downgrade that pending native chrome
+   * update into a sidebar-only hydrate.
+   */
+  pendingDeferredSidebarFocusPublishRequiresNativeLayoutSync =
+    pendingDeferredSidebarFocusPublishRequiresNativeLayoutSync ||
+    options.skipNativeLayoutSync !== true;
+  if (pendingDeferredSidebarFocusPublishTimeout !== undefined) {
+    window.clearTimeout(pendingDeferredSidebarFocusPublishTimeout);
+  }
+  pendingDeferredSidebarFocusPublishTimeout = window.setTimeout(() => {
+    const shouldSkipNativeLayoutSync =
+      !pendingDeferredSidebarFocusPublishRequiresNativeLayoutSync;
+    pendingDeferredSidebarFocusPublishTimeout = undefined;
+    pendingDeferredSidebarFocusPublishRequiresNativeLayoutSync = false;
+    publishSidebarFocusUpdate({ skipNativeLayoutSync: shouldSkipNativeLayoutSync });
+  }, 0);
+}
+
+function publishTitlebarModeSwitchAfterNativeFocus(): void {
+  /*
+   * CDXC:ModeSwitcher 2026-06-28-01:44:
+   * Titlebar Source, Browser, Project, and Manage clicks should post their native create/focus commands before the heavier sidebar hydrate work.
+   * Defer only the publish turn, still running native layout sync before the hydrate, so the visible right-panel switch is immediate while titlebar/sidebar state catches up from the same authoritative project-editor state.
+   */
+  if (pendingTitlebarModeSwitchPublishTimeout !== undefined) {
+    window.clearTimeout(pendingTitlebarModeSwitchPublishTimeout);
+  }
+  pendingTitlebarModeSwitchPublishTimeout = window.setTimeout(() => {
+    pendingTitlebarModeSwitchPublishTimeout = undefined;
+    publish({ nativeLayoutBeforeSidebarHydrate: true });
+  }, 0);
+}
+
+function updateLastPublishedSidebarFocusCache(focusedSessionId: string): void {
+  /*
+   * CDXC:SidebarSessionFocus 2026-06-27-21:08:
+   * The mounted-terminal fast path intentionally skips the full sidebar hydrate
+   * after local React focus. Keep the host's last published snapshot aligned
+   * with the focused row so later sidebar patch messages do not revive an old
+   * isFocused flag from the cached pre-click hydrate.
+   */
+  if (!lastPublishedSidebarMessage) {
+    return;
+  }
+  const focusedSidebarSessionIds = new Set([
+    focusedSessionId,
+    projectScopedSidebarSessionId(activeProjectId, focusedSessionId),
+  ]);
+  let didChange = false;
+  let focusedSessionTitle = lastPublishedSidebarMessage.hud.focusedSessionTitle;
+  const nextGroups = lastPublishedSidebarMessage.groups.map((group) => {
+    let didChangeGroup = false;
+    const nextSessions = group.sessions.map((session) => {
+      const isFocused = focusedSidebarSessionIds.has(session.sessionId);
+      if (isFocused) {
+        focusedSessionTitle =
+          session.displayTitle ??
+          session.primaryTitle ??
+          session.terminalTitle ??
+          session.alias ??
+          focusedSessionTitle;
+      }
+      if (session.isFocused === isFocused) {
+        return session;
+      }
+      didChange = true;
+      didChangeGroup = true;
+      return {
+        ...session,
+        isFocused,
+        isVisible: isFocused ? true : session.isVisible,
+      };
+    });
+    if (!didChangeGroup) {
+      return group;
+    }
+    return {
+      ...group,
+      sessions: nextSessions,
+    };
+  });
+  if (!didChange && focusedSessionTitle === lastPublishedSidebarMessage.hud.focusedSessionTitle) {
+    return;
+  }
+  lastPublishedSidebarMessage = {
+    ...lastPublishedSidebarMessage,
+    groups: didChange ? nextGroups : lastPublishedSidebarMessage.groups,
+    hud:
+      focusedSessionTitle === lastPublishedSidebarMessage.hud.focusedSessionTitle
+        ? lastPublishedSidebarMessage.hud
+        : {
+            ...lastPublishedSidebarMessage.hud,
+            focusedSessionTitle,
+          },
+  };
 }
 
 function ensureActiveWorkspaceVirtualPaneTabs(reason: string): boolean {
@@ -20325,11 +20674,9 @@ function syncNativeSessionStatusIndicators(sidebarMessage?: SidebarHydrateMessag
   postNative({
     attentionCount: counts.attention,
     availableCount: counts.available,
-    hideFloatingIndicators: settings.hideFloatingSessionStatusIndicators,
     hideMenuBarIndicators: settings.hideMenuBarSessionStatusIndicators,
     projects: createNativeSessionStatusIndicatorModalProjects(sidebarMessage),
     workingCount: counts.working,
-    size: settings.sessionStatusIndicatorSize,
     type: "setSessionStatusIndicators",
   });
 }
@@ -20400,9 +20747,9 @@ function syncNativePetOverlayState(sidebarMessage?: SidebarHydrateMessage): void
    * to a background project.
    * CDXC:PetOverlay 2026-05-21-02:19:
    * Pet session cards must keep the same project/group/session order as the app
-   * sidebar. The collapsed pet state reuses the floating status-indicator
-   * aggregate counts and click targets so hiding cards changes presentation,
-   * not routing behavior.
+   * sidebar. The collapsed pet state reuses aggregate session-status counts and
+   * click targets, so removing the standalone floating badge changes only that
+   * retired surface, not pet routing behavior.
    * CDXC:PetOverlay 2026-05-21-02:19:
    * When no done/attention or in-progress/working sessions exist, expanded pet
    * cards still need useful shortcuts. Show the two most recently active open
@@ -21111,6 +21458,7 @@ async function requestNativeGhostexCliStatus(): Promise<void> {
       computerUseSkillInstalled: false,
       agentOrchestrationSkillInstalled: false,
       generateTitleSkillInstalled: false,
+      moveCodexSessionSkillInstalled: false,
       cuaAppInstalled: false,
       cuaDriverInstalled: false,
       gxBlockedByExistingCommand: false,
@@ -21134,6 +21482,7 @@ async function requestNativeGhostexCliStatus(): Promise<void> {
       computerUseSkillInstalled: false,
       agentOrchestrationSkillInstalled: false,
       generateTitleSkillInstalled: false,
+      moveCodexSessionSkillInstalled: false,
       cuaAppInstalled: false,
       cuaDriverInstalled: false,
       gxBlockedByExistingCommand: false,
@@ -25844,7 +26193,10 @@ function closeTerminal(
   });
 }
 
-function focusTerminal(sessionId: string): void {
+function focusTerminal(
+  sessionId: string,
+  options: { forceNativeLayoutSync?: boolean } = {},
+): void {
   const reference = resolveSidebarSessionReference(sessionId);
   if (isQuickFileEditorSidebarReference(reference)) {
     focusQuickFileEditorProject(reference.project);
@@ -25853,10 +26205,16 @@ function focusTerminal(sessionId: string): void {
   const focusIntent = beginNativeSidebarFocusIntent(reference, "focusTerminal");
   const sidebarCardFocusTrace = getRecentSidebarCardFocusTrace(reference.sessionId);
   const forceSidebarCardFocusTrace = sidebarCardFocusTrace !== undefined;
-  const focusTargetBefore = summarizeSidebarSessionFocusTarget(
-    reference.project,
-    reference.sessionId,
-  );
+  let focusTargetBefore: ReturnType<typeof summarizeSidebarSessionFocusTarget> | undefined;
+  const summarizeFocusTargetBefore = () => {
+    if (focusTargetBefore === undefined) {
+      focusTargetBefore = summarizeSidebarSessionFocusTarget(
+        reference.project,
+        reference.sessionId,
+      );
+    }
+    return focusTargetBefore;
+  };
   const shouldKeepProjectEditorOpen = shouldKeepProjectEditorOpenForSessionFocus(
     reference.project.projectId,
   );
@@ -25870,30 +26228,22 @@ function focusTerminal(sessionId: string): void {
     );
   }
   const terminalState = terminalStateById.get(reference.sessionId);
-  if (sessionRecord?.kind === "terminal" || sessionRecord?.kind === "browser") {
-    persistNativeSessionLifecycleTimestamps(reference.project.projectId, reference.sessionId, {
-      lastAccessedAt: new Date().toISOString(),
-    });
-  }
+  const shouldPersistNativeSessionAccessTimestamp =
+    sessionRecord?.kind === "terminal" || sessionRecord?.kind === "browser";
+  const nativeSessionAccessedAt = new Date().toISOString();
   const wasSleepingTerminal = sessionRecord?.kind === "terminal" && sessionRecord.isSleeping === true;
-  appendSidebarWakeScrollDebugLog("nativeFocusStart", {
-    focusTraceRequestId: sidebarCardFocusTrace?.requestId,
-    hadRecentSidebarCardFocusTrace: sidebarCardFocusTrace !== undefined,
-    hadNativeTerminalStateBefore: terminalState !== undefined,
-    requestedSessionId: sessionId,
-    resolvedProjectId: reference.project.projectId,
-    resolvedSessionId: reference.sessionId,
-    shouldKeepProjectEditorOpen,
-    wasSleepingTerminal,
-    ...summarizeSidebarWakeScrollNativeState(reference.project, reference.sessionId),
-  });
   const sessionPersistenceProvider =
     terminalState?.sessionPersistenceProvider ??
     (sessionRecord?.kind === "terminal" ? sessionRecord.sessionPersistenceProvider : undefined);
   const sessionPersistenceName =
     terminalState?.sessionPersistenceName ??
     (sessionRecord?.kind === "terminal" ? sessionRecord.sessionPersistenceName : undefined);
-  if (sessionPersistenceProvider === "zmx") {
+  const isZmxPersistenceSession = sessionPersistenceProvider === "zmx";
+  const isCommandPanelFocusTarget = commandPanelContainsSession(
+    reference.project,
+    reference.sessionId,
+  );
+  if (isZmxPersistenceSession) {
     /*
      * CDXC:ZmxPersistenceRecovery 2026-05-21-07:37:
      * Clicking an old zmx-backed sidebar card can focus a Ghostty surface whose
@@ -25910,11 +26260,41 @@ function focusTerminal(sessionId: string): void {
       sessionPersistenceName,
       startedAt: Date.now(),
     });
+  }
+  const canUseImmediateWorkspaceTerminalFocus =
+    options.forceNativeLayoutSync !== true &&
+    activeProjectId === reference.project.projectId &&
+    sessionRecord?.kind === "terminal" &&
+    terminalState !== undefined &&
+    !wasSleepingTerminal &&
+    !shouldKeepProjectEditorOpen &&
+    !isCommandPanelFocusTarget &&
+    projectEditorSurfaceByProjectId.get(reference.project.projectId)?.isOpen !== true &&
+    isCurrentWorkspaceNativeFocusTarget(activeSnapshot(), reference.sessionId);
+  if (shouldPersistNativeSessionAccessTimestamp && !canUseImmediateWorkspaceTerminalFocus) {
+    persistNativeSessionLifecycleTimestamps(reference.project.projectId, reference.sessionId, {
+      lastAccessedAt: nativeSessionAccessedAt,
+    });
+  }
+  if (!canUseImmediateWorkspaceTerminalFocus) {
+    appendSidebarWakeScrollDebugLog("nativeFocusStart", {
+      focusTraceRequestId: sidebarCardFocusTrace?.requestId,
+      hadRecentSidebarCardFocusTrace: sidebarCardFocusTrace !== undefined,
+      hadNativeTerminalStateBefore: terminalState !== undefined,
+      requestedSessionId: sessionId,
+      resolvedProjectId: reference.project.projectId,
+      resolvedSessionId: reference.sessionId,
+      shouldKeepProjectEditorOpen,
+      wasSleepingTerminal,
+      ...summarizeSidebarWakeScrollNativeState(reference.project, reference.sessionId),
+    });
+  }
+  if (isZmxPersistenceSession && !canUseImmediateWorkspaceTerminalFocus) {
     appendZmxPersistenceFocusReproLog("nativeSidebar.zmxPersistenceFocus.requested", {
       activeProjectId,
       activeSnapshotFocusedSessionId: activeSnapshot().focusedSessionId,
-      commandPanelContainsSession: commandPanelContainsSession(reference.project, reference.sessionId),
-      focusTargetBefore,
+      commandPanelContainsSession: isCommandPanelFocusTarget,
+      focusTargetBefore: summarizeFocusTargetBefore(),
       hasNativeTerminalState: terminalState !== undefined,
       nativeSessionId: nativeSessionIdForProjectSidebarSession(
         reference.project.projectId,
@@ -25931,22 +26311,25 @@ function focusTerminal(sessionId: string): void {
       visibleSessionIdsBefore: activeSnapshot().visibleSessionIds,
     });
   }
-  appendTerminalFocusDebugLog("nativeFocusTrace.sidebarFocusTerminalStart", {
-    activeProjectId,
-    activeSnapshotFocusedSessionId: activeSnapshot().focusedSessionId,
-    commandPanelContainsSession: commandPanelContainsSession(reference.project, reference.sessionId),
-    focusTargetBefore,
-    projectEditorIsOpen:
-      projectEditorSurfaceByProjectId.get(reference.project.projectId)?.isOpen === true,
-    requestedSessionId: sessionId,
-    resolvedProjectId: reference.project.projectId,
-    resolvedSessionId: reference.sessionId,
-    sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
-  }, { force: forceSidebarCardFocusTrace });
+  if (!canUseImmediateWorkspaceTerminalFocus) {
+    appendTerminalFocusDebugLog("nativeFocusTrace.sidebarFocusTerminalStart", {
+      activeProjectId,
+      activeSnapshotFocusedSessionId: activeSnapshot().focusedSessionId,
+      commandPanelContainsSession: isCommandPanelFocusTarget,
+      focusTargetBefore: summarizeFocusTargetBefore(),
+      projectEditorIsOpen:
+        projectEditorSurfaceByProjectId.get(reference.project.projectId)?.isOpen === true,
+      forceNativeLayoutSync: options.forceNativeLayoutSync === true,
+      requestedSessionId: sessionId,
+      resolvedProjectId: reference.project.projectId,
+      resolvedSessionId: reference.sessionId,
+      sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
+    }, { force: forceSidebarCardFocusTrace });
+  }
   if (activeProjectId !== reference.project.projectId) {
     focusProject(reference.project.projectId);
   }
-  if (commandPanelContainsSession(reference.project, reference.sessionId)) {
+  if (isCommandPanelFocusTarget) {
     updateProjectCommandsPanel(reference.project.projectId, (panel) => ({
       ...panel,
       activeSessionId: reference.sessionId,
@@ -26018,6 +26401,85 @@ function focusTerminal(sessionId: string): void {
       ? focusSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot
       : focusSidebarSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot,
   );
+  const shouldUseImmediateWorkspaceTerminalFocus =
+    canUseImmediateWorkspaceTerminalFocus && !shouldRestoreProjectModeAfterFocus;
+  if (!shouldKeepProjectEditorOpen && !shouldUseImmediateWorkspaceTerminalFocus) {
+    queueNativeLayoutFocusRequest(reference.sessionId, "focusTerminal");
+  }
+  if (shouldRestoreProjectModeAfterFocus) {
+    restoreProjectModeAfterSessionFocus(reference.project.projectId);
+  }
+  const nativeFocusSessionId = nativeSessionIdForProjectSidebarSession(
+    reference.project.projectId,
+    reference.sessionId,
+  );
+  if (shouldUseImmediateWorkspaceTerminalFocus) {
+    /*
+     * CDXC:SidebarSessionFocus 2026-06-27-22:54:
+     * A mounted workspace terminal already known to the current native layout
+     * can switch through one combined native focus command. Do not queue a
+     * layout focus request for the same click; that makes setActiveTerminalSet
+     * run the focus/border/zmx path again and delays the visible switch.
+     */
+    postNativeFocusMountedTerminalForCurrentIntent(
+      nativeFocusSessionId,
+      focusIntent,
+      "focus-mounted-terminal-direct-fast",
+    );
+    if (shouldPersistNativeSessionAccessTimestamp) {
+      persistNativeSessionLifecycleTimestamps(reference.project.projectId, reference.sessionId, {
+        lastAccessedAt: nativeSessionAccessedAt,
+      });
+    }
+    const didAcknowledgeAttention = acknowledgeNativeTerminalAttention(
+      reference.sessionId,
+      "sidebar-focus",
+    );
+    const focusTargetAfter = summarizeSidebarSessionFocusTarget(activeProject(), reference.sessionId);
+    appendSidebarWakeScrollDebugLog("nativeFocusDirectTerminalFastPath", {
+      didAcknowledgeAttention,
+      focusTraceRequestId: sidebarCardFocusTrace?.requestId,
+      requestedSessionId: sessionId,
+      resolvedProjectId: reference.project.projectId,
+      resolvedSessionId: reference.sessionId,
+      skippedNativeLayoutFocusRequest: true,
+      ...summarizeSidebarWakeScrollNativeState(activeProject(), reference.sessionId),
+    });
+    appendTerminalFocusDebugLog("nativeFocusTrace.sidebarFocusTerminalPostState", {
+      activeProjectId,
+      focusTargetAfter,
+      focusedSessionId: activeSnapshot().focusedSessionId,
+      isProjectEditorCompanionPath: false,
+      nativeSessionId: nativeFocusSessionId,
+      requestedSessionId: sessionId,
+      resolvedSessionId: reference.sessionId,
+      sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
+      sessionKind: sessionRecord?.kind,
+      visibleSessionIds: activeSnapshot().visibleSessionIds,
+    }, { force: forceSidebarCardFocusTrace });
+    if (isZmxPersistenceSession) {
+      appendZmxPersistenceFocusReproLog("nativeSidebar.zmxPersistenceFocus.afterFastNativeFocus", {
+        activeProjectId,
+        focusedSessionId: activeSnapshot().focusedSessionId,
+        focusTargetAfter,
+        nativeSessionId: nativeFocusSessionId,
+        resolvedProjectId: reference.project.projectId,
+        resolvedSessionId: reference.sessionId,
+        sessionPersistenceName,
+        sessionPersistenceProvider,
+      });
+    }
+    /*
+     * CDXC:SidebarSessionFocus 2026-06-27-21:08:
+     * A mounted terminal focus click already updated React local focus and the
+     * combined native focus command updates Swift's selected tab owner. Do not
+     * run the deferred publish here: rebuilding a 130-session hydrate and
+     * posting setActiveTerminalSet is the laggy work this path is meant to
+     * avoid.
+     */
+    updateLastPublishedSidebarFocusCache(reference.sessionId);
+    return;
+  }
   const focusTargetAfter = summarizeSidebarSessionFocusTarget(activeProject(), reference.sessionId);
   appendSidebarWakeScrollDebugLog("nativeFocusStateUpdated", {
     focusTraceRequestId: sidebarCardFocusTrace?.requestId,
@@ -26030,12 +26492,6 @@ function focusTerminal(sessionId: string): void {
     wasSleepingTerminal,
     ...summarizeSidebarWakeScrollNativeState(activeProject(), reference.sessionId),
   });
-  if (!shouldKeepProjectEditorOpen) {
-    queueNativeLayoutFocusRequest(reference.sessionId, "focusTerminal");
-  }
-  if (shouldRestoreProjectModeAfterFocus) {
-    restoreProjectModeAfterSessionFocus(reference.project.projectId);
-  }
   /**
    * CDXC:SidebarSessionFocus 2026-05-15-20:01:
    * A session card must activate the existing paneLayout owner for that
@@ -37422,56 +37878,83 @@ function removeGxserverProjectById(projectId: string, reason: string): void {
 }
 
 function closeProjectToRecent(projectId: string): void {
+  void closeProjectToRecentWithGxserver(projectId);
+}
+
+async function closeProjectToRecentWithGxserver(projectId: string): Promise<void> {
   const projectIndex = projects.findIndex((project) => project.projectId === projectId);
-  if (projectIndex < 0) {
+  const project = projects[projectIndex];
+  if (projectIndex < 0 && !findGxserverPresentationProject(projectId)) {
     return;
   }
-  const project = projects[projectIndex]!;
-  if (quickKindForProject(project) === "editor") {
+  if (project && quickKindForProject(project) === "editor") {
     removeProject(projectId);
     return;
   }
-  if (project.isChat === true) {
+  if (project?.isChat === true) {
+    return;
+  }
+  let response: Awaited<ReturnType<typeof gxserverClient.closeProjectToRecent>>;
+  try {
+    response = await gxserverClient.closeProjectToRecent(projectId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendSidebarRefreshDebugLog("nativeSidebar.gxserver.recentProjects.closeFailed", {
+      errorType: error instanceof Error ? error.name : typeof error,
+      hasMessage: message.length > 0,
+      projectId,
+    });
+    showAppToast("error", "Could not close project", message);
     return;
   }
   hideGxserverPresentationProjectLocally(projectId, "closeProjectToRecent");
-  disposeProjectEditorSurface(project.projectId);
+  if (project) {
+    disposeProjectEditorSurface(project.projectId);
 
-  /**
-   * CDXC:RecentProjects 2026-05-04-14:25
-   * Closing a Combined project parks it in Recent Projects instead of deleting
-   * sessions. All native surfaces are torn down and records are marked
-   * sleeping so restoring can bring back the saved split/group state.
-   */
-  for (const group of project.workspace.groups) {
-    for (const session of group.snapshot.sessions) {
-      disposeNativeRecentProjectSessionSurface(project, session);
+    /**
+     * CDXC:RecentProjects 2026-05-04-14:25
+     * Closing a Combined project parks it in Recent Projects instead of deleting
+     * sessions. All native surfaces are torn down and records are marked
+     * sleeping so restoring can bring back the saved split/group state.
+     *
+     * CDXC:RecentProjects 2026-06-27-19:37:
+     * The park decision and close timestamp now come from gxserver. Native only
+     * mirrors the returned state into the WK pane/layout cache after the daemon
+     * accepts `/api/closeProjectToRecent`.
+     */
+    for (const group of project.workspace.groups) {
+      for (const session of group.snapshot.sessions) {
+        disposeNativeRecentProjectSessionSurface(project, session);
+      }
     }
+
+    const nextProjects = projects.map((candidate) =>
+      candidate.projectId === projectId
+        ? {
+            ...candidate,
+            isRecentProject: true,
+            recentClosedAt: response.project.recentClosedAt,
+            workspace: setProjectSessionsSleeping(candidate.workspace, true),
+          }
+        : candidate,
+    );
+    projects = nextProjects;
+
+    const didCloseActiveProject = activeProjectId === projectId;
+    if (didCloseActiveProject) {
+      const nextVisibleProject = findNearestVisibleProjectAfterClose(projectIndex, projectId);
+      if (nextVisibleProject) {
+        activeProjectId = nextVisibleProject.projectId;
+        loadActiveProjectCommands();
+        void refreshGitState();
+      }
+    }
+
+    writeStoredProjects("closeProjectToRecent");
   }
 
-  const nextProjects = projects.map((candidate) =>
-    candidate.projectId === projectId
-      ? {
-          ...candidate,
-          isRecentProject: true,
-          recentClosedAt: new Date().toISOString(),
-          workspace: setProjectSessionsSleeping(candidate.workspace, true),
-        }
-      : candidate,
-  );
-  projects = nextProjects;
-
-  const didCloseActiveProject = activeProjectId === projectId;
-  if (didCloseActiveProject) {
-    const nextVisibleProject = findNearestVisibleProjectAfterClose(projectIndex, projectId);
-    if (nextVisibleProject) {
-      activeProjectId = nextVisibleProject.projectId;
-      loadActiveProjectCommands();
-      void refreshGitState();
-    }
-  }
-
-  writeStoredProjects("closeProjectToRecent");
+  applyGxserverProjectUpdateResponse(response.project, "closeProjectToRecent");
+  applyGxserverRecentProjects(response.recentProjects, "closeProjectToRecent");
   publish();
 }
 
@@ -37479,13 +37962,39 @@ function restoreRecentProject(projectId: string): void {
   if (restoreRemoteRecentProject(projectId)) {
     return;
   }
-  const project = findProject(projectId);
-  if (!project || project.isRecentProject !== true) {
+  void restoreRecentProjectWithGxserver(projectId);
+}
+
+async function restoreRecentProjectWithGxserver(projectId: string): Promise<void> {
+  const previousRecentProject = findRecentProjectForContextMenu(projectId);
+  let response: Awaited<ReturnType<typeof gxserverClient.restoreRecentProject>>;
+  try {
+    response = await gxserverClient.restoreRecentProject(projectId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendSidebarRefreshDebugLog("nativeSidebar.gxserver.recentProjects.restoreFailed", {
+      errorType: error instanceof Error ? error.name : typeof error,
+      hasMessage: message.length > 0,
+      projectId,
+    });
+    showAppToast("error", "Could not restore project", message);
     return;
   }
+  applyGxserverProjectUpdateResponse(response.project, "restoreRecentProject");
+  applyGxserverRecentProjects(response.recentProjects, "restoreRecentProject");
   showGxserverPresentationProjectLocally(projectId);
 
-  const sessionCount = countRecentProjectSessions(project);
+  const project =
+    findProject(projectId) ??
+    materializeNativeProjectFromGxserverProject(response.project, "restoreRecentProject");
+  if (!project) {
+    publish();
+    return;
+  }
+  const sessionCount = Math.max(
+    countRecentProjectSessions(project),
+    previousRecentProject?.sessionCount ?? 0,
+  );
   const didSwitchProject = activeProjectId !== projectId;
   projects = projects.map((candidate) =>
     candidate.projectId === projectId
@@ -37517,15 +38026,140 @@ function restoreRecentProject(projectId: string): void {
   publish();
 }
 
-function findRecentProjectForContextMenu(projectId: string): NativeProject | undefined {
+type NativeRecentProjectActionContext = {
+  path: string;
+  projectId: string;
+  sessionCount?: number;
+};
+
+function findRecentProjectForContextMenu(projectId: string): NativeRecentProjectActionContext | undefined {
   /**
    * CDXC:RecentProjects 2026-05-27-07:04:
    * Recent Projects context-menu actions are only valid for parked projects.
    * Resolve the current native project record by id at action time so copy,
    * Finder, and removal commands cannot act on stale client path text.
+   *
+   * CDXC:RecentProjects 2026-06-27-19:37:
+   * When gxserver is available, resolve context actions from the authoritative
+   * `/api/listRecentProjects` cache. The native project row may be absent when
+   * GPUI closed the project, and it may be stale when old WK storage still has
+   * pre-backfill recent flags.
    */
+  const gxserverRecentProject = gxserverStartupSnapshot?.recentProjects.find(
+    (project) => project.projectId === projectId,
+  );
+  if (gxserverRecentProject) {
+    return {
+      path: gxserverRecentProject.path,
+      projectId: gxserverRecentProject.projectId,
+      sessionCount: gxserverRecentProject.sessionCount,
+    };
+  }
+  if (gxserverStartupSnapshot) {
+    return undefined;
+  }
   const project = findProject(projectId);
-  return project?.isRecentProject === true ? project : undefined;
+  return project?.isRecentProject === true
+    ? {
+        path: project.path,
+        projectId: project.projectId,
+        sessionCount: countRecentProjectSessions(project),
+      }
+    : undefined;
+}
+
+function materializeNativeProjectFromGxserverProject(
+  gxserverProject: GxserverProjectDomainState,
+  reason: string,
+): NativeProject | undefined {
+  const existingProject = findProject(gxserverProject.projectId);
+  if (existingProject) {
+    return existingProject;
+  }
+  const projectPath = textValue(gxserverProject.path);
+  if (!projectPath) {
+    appendSidebarRefreshDebugLog("nativeSidebar.gxserver.recentProjects.materializeSkipped", {
+      hasPath: false,
+      projectId: gxserverProject.projectId,
+      reason,
+    });
+    return undefined;
+  }
+  const nativeProject: NativeProject = {
+    commandsPanel: createProjectCommandsPanelState(),
+    name: gxserverProject.name || projectNameFromPath(projectPath),
+    path: projectPath,
+    projectId: gxserverProject.projectId,
+    theme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
+    worktree: normalizeNativeProjectWorktreeMetadata(gxserverProject.worktree),
+    workspace: createDefaultGroupedSessionWorkspaceSnapshot(),
+  };
+  projects = orderNativeProjectsForSidebar([...projects, nativeProject]);
+  ensureProjectCommandsState(resolveNativeProjectCommandsOwnerId(nativeProject.projectId));
+  writeProjectCommandsStore();
+  writeStoredProjects(reason);
+  return nativeProject;
+}
+
+function removeRecentProject(projectId: string): void {
+  if (parseRemotePresentationProjectId(projectId)) {
+    void removeRemoteRecentProject(projectId);
+    return;
+  }
+  void removeRecentProjectWithGxserver(projectId);
+}
+
+async function removeRecentProjectWithGxserver(projectId: string): Promise<void> {
+  let response: Awaited<ReturnType<typeof gxserverClient.removeRecentProject>>;
+  try {
+    response = await gxserverClient.removeRecentProject(projectId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendSidebarRefreshDebugLog("nativeSidebar.gxserver.recentProjects.removeFailed", {
+      errorType: error instanceof Error ? error.name : typeof error,
+      hasMessage: message.length > 0,
+      projectId,
+    });
+    showAppToast("error", "Could not remove recent project", message);
+    return;
+  }
+  removeRecentProjectFromLocalCache(projectId);
+  if (gxserverStartupSnapshot) {
+    gxserverStartupSnapshot = {
+      ...gxserverStartupSnapshot,
+      projects: gxserverStartupSnapshot.projects.filter(
+        (project) => project.projectId !== projectId,
+      ),
+      recentProjects: [...response.recentProjects],
+    };
+  }
+  applyGxserverRecentProjects(response.recentProjects, "removeRecentProject");
+  publish();
+}
+
+function removeRecentProjectFromLocalCache(projectId: string): void {
+  const projectIndex = projects.findIndex((project) => project.projectId === projectId);
+  if (projectIndex < 0) {
+    return;
+  }
+  const project = projects[projectIndex]!;
+  disposeProjectEditorSurface(project.projectId);
+  for (const group of project.workspace.groups) {
+    for (const session of group.snapshot.sessions) {
+      disposeNativeRecentProjectSessionSurface(project, session);
+    }
+  }
+  projects = projects.filter((candidate) => candidate.projectId !== projectId);
+  removeProjectCommandsState(projectId);
+  if (activeProjectId === projectId) {
+    activeProjectId =
+      projects[Math.min(projectIndex, projects.length - 1)]?.projectId ??
+      projects[0]?.projectId ??
+      activeProjectId;
+    loadActiveProjectCommands();
+    void refreshGitState();
+  }
+  writeStoredProjects("removeRecentProject");
 }
 
 function restoreRemoteRecentProject(projectId: string): boolean {
@@ -37793,6 +38427,7 @@ function createProjectBoardConversationState(
     activeSessionId: activeProjectId === project.projectId ? activeSnapshot().focusedSessionId : undefined,
     agents: createProjectBoardAgentOptions(),
     debuggingMode: settings.debuggingMode,
+    diagnosticLogging: settings.diagnosticLogging,
     defaultAgentId: resolveProjectBoardDefaultAgentId(),
     focusedTerminalSessionId: sessionOptions.find((session) => session.isFocused)?.sessionId,
     links: activeLinks.map<ProjectBoardConversationLinkView>((link) => {
@@ -39043,6 +39678,20 @@ function failAutomationRunForTerminalError(sidebarSessionId: string, message: st
 }
 
 async function handleProjectBoardRequest(request: ProjectBoardBridgeRequest): Promise<void> {
+  if (request.action === "showToast") {
+    /*
+    CDXC:ProjectBoardLocalFirst 2026-06-27-18:02:
+    Background Kanban saves need a native app-toast path that does not depend on resolving the current project first.
+    Show the toast from the Project Board bridge request itself so a failed detached save can notify the user after its modal has already closed.
+    */
+    showAppToast(
+      projectBoardToastLevel(request.toastLevel),
+      request.toastTitle?.trim() || "Project Board update failed",
+      request.toastDescription?.trim() || undefined,
+    );
+    postProjectBoardResponse(request);
+    return;
+  }
   if (request.remoteMachineId?.trim()) {
     await handleRemoteProjectBoardRequest(request);
     return;
@@ -39093,6 +39742,18 @@ async function handleProjectBoardRequest(request: ProjectBoardBridgeRequest): Pr
       undefined,
       error instanceof Error ? error.message : "Project board conversation action failed.",
     );
+  }
+}
+
+function projectBoardToastLevel(level: AppToastLevel | undefined): AppToastLevel {
+  switch (level) {
+    case "error":
+    case "info":
+    case "success":
+    case "warning":
+      return level;
+    default:
+      return "error";
   }
 }
 
@@ -39208,6 +39869,7 @@ function createRemoteProjectBoardConversationState(
   return {
     agents: createProjectBoardAgentOptions(),
     debuggingMode: settings.debuggingMode,
+    diagnosticLogging: settings.diagnosticLogging,
     defaultAgentId: resolveProjectBoardDefaultAgentId(),
     links: activeLinks.map<ProjectBoardConversationLinkView>((link) => {
       const session = sessionById.get(link.ghostexSessionId);
@@ -40827,7 +41489,7 @@ function openProjectEditorForGroup(groupId: string): void {
     });
     postNative({ projectId: surfaceState.nativeEditorId, type: "focusProjectEditorPane" });
     void refreshProjectDiffStats(project.projectId);
-    publish();
+    publishTitlebarModeSwitchAfterNativeFocus();
     appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarOpenForGroupExistingDone", {
       elapsedMs: performance.now() - startedAtMs,
       nativeEditorId: surfaceState.nativeEditorId,
@@ -40876,7 +41538,7 @@ function openProjectEditorForGroup(groupId: string): void {
     projectId: project.projectId,
   });
   void refreshProjectDiffStats(project.projectId);
-  publish();
+  publishTitlebarModeSwitchAfterNativeFocus();
   appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarOpenForGroupDone", {
     elapsedMs: performance.now() - startedAtMs,
     nativeEditorId: createNativeProjectEditorId(project.projectId, "code"),
@@ -40958,11 +41620,20 @@ function openAgentsModeFromTitlebar(): void {
    *
    * CDXC:CommandsPanel 2026-06-16-08:19:
    * Agents mode is the explicit place to restore the last focused workspace terminal after Source/Browser/Kanban or Commands-panel interactions. Resolve that terminal before deactivating the project-editor surface so the layout focus request targets the terminal the user last used.
+   *
+   * CDXC:ModeSwitcher 2026-06-28-01:44:
+   * Source-to-Agents and other project-editor-to-Agents clicks must not reuse
+   * the mounted-terminal fast path before native receives activeProjectEditorId
+   * nil. Force one native layout sync only when the project editor was open;
+   * ordinary Agents session switches keep the instant mounted-terminal path.
    */
   const focusSessionId = agentsModeFocusSessionIdForProject(project);
+  const shouldForceAgentsNativeLayoutSync = surfaceState?.isOpen === true;
   activateWorkspaceSurfaceForProject(project.projectId);
   if (focusSessionId) {
-    focusTerminal(createCombinedProjectSessionId(project.projectId, focusSessionId));
+    focusTerminal(createCombinedProjectSessionId(project.projectId, focusSessionId), {
+      forceNativeLayoutSync: shouldForceAgentsNativeLayoutSync,
+    });
     appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarAgentsHandlerDone", {
       elapsedMs: performance.now() - startedAtMs,
       focusRequestQueued: true,
@@ -41074,7 +41745,7 @@ function openProjectGitEditorSurface(project: NativeProject, seedUrl: string, ne
       targetMode: "git",
     });
     postNative({ projectId: surfaceState.nativeEditorId, type: "focusProjectEditorPane" });
-    publish();
+    publishTitlebarModeSwitchAfterNativeFocus();
     appendModeSwitcherDebugLog("titlebarModeSwitch.browserSurfaceExistingDone", {
       elapsedMs: performance.now() - startedAtMs,
       nativeEditorId: surfaceState.nativeEditorId,
@@ -41191,7 +41862,7 @@ function openProjectGitEditorSurface(project: NativeProject, seedUrl: string, ne
   postNative({ projectId: nativeEditorId, type: "focusProjectEditorPane" });
   stopCodeServerRuntimeIfEveryEditorSleeping();
   void refreshProjectDiffStats(project.projectId);
-  publish();
+  publishTitlebarModeSwitchAfterNativeFocus();
   appendModeSwitcherDebugLog("titlebarModeSwitch.browserSurfaceDone", {
     elapsedMs: performance.now() - startedAtMs,
     nativeEditorId,
@@ -41244,7 +41915,7 @@ function openProjectTasksEditorSurface(project: NativeProject, tasksUrl: string)
       targetMode: "tasks",
     });
     postNative({ projectId: surfaceState.nativeEditorId, type: "focusProjectEditorPane" });
-    publish();
+    publishTitlebarModeSwitchAfterNativeFocus();
     appendModeSwitcherDebugLog("titlebarModeSwitch.tasksSurfaceExistingDone", {
       elapsedMs: performance.now() - startedAtMs,
       nativeEditorId: surfaceState.nativeEditorId,
@@ -41310,7 +41981,7 @@ function openProjectTasksEditorSurface(project: NativeProject, tasksUrl: string)
   postNative({ projectId: nativeEditorId, type: "focusProjectEditorPane" });
   stopCodeServerRuntimeIfEveryEditorSleeping();
   void refreshProjectDiffStats(project.projectId);
-  publish();
+  publishTitlebarModeSwitchAfterNativeFocus();
   appendModeSwitcherDebugLog("titlebarModeSwitch.tasksSurfaceDone", {
     elapsedMs: performance.now() - startedAtMs,
     nativeEditorId,
@@ -41363,7 +42034,7 @@ function openProjectManageEditorSurface(project: NativeProject, manageUrl: strin
       targetMode: "manage",
     });
     postNative({ projectId: surfaceState.nativeEditorId, type: "focusProjectEditorPane" });
-    publish();
+    publishTitlebarModeSwitchAfterNativeFocus();
     appendModeSwitcherDebugLog("titlebarModeSwitch.manageSurfaceExistingDone", {
       elapsedMs: performance.now() - startedAtMs,
       nativeEditorId: surfaceState.nativeEditorId,
@@ -41420,7 +42091,7 @@ function openProjectManageEditorSurface(project: NativeProject, manageUrl: strin
   setProjectEditorPersistedOpen(project.projectId, true, "openManage");
   stopCodeServerRuntimeIfEveryEditorSleeping();
   void refreshProjectDiffStats(project.projectId);
-  publish();
+  publishTitlebarModeSwitchAfterNativeFocus();
   appendModeSwitcherDebugLog("titlebarModeSwitch.manageSurfaceDone", {
     elapsedMs: performance.now() - startedAtMs,
     nativeEditorId,
@@ -41458,13 +42129,26 @@ async function openGitHubProjectFromTitlebar(): Promise<void> {
     ? projectBrowserActiveUrlFromState(rememberedBrowserState)
     : undefined;
   if (rememberedBrowserState && (rememberedUrl || projectBrowserStateHasRestorableTabs(rememberedBrowserState))) {
-    const browserSeedUrl = await resolveProjectBrowserSeedUrl(project);
+    const cachedBrowserSeedUrl = cachedProjectBrowserSeedUrl(project);
+    if (!cachedBrowserSeedUrl) {
+      const browserSeedUrl = await resolveProjectBrowserSeedUrl(project);
+      appendModeSwitcherDebugLog("titlebarModeSwitch.browserHandlerUsingRememberedTab", {
+        elapsedMs: performance.now() - startedAtMs,
+        projectId: project.projectId,
+        seedCached: false,
+        targetMode: "git",
+      });
+      openProjectGitEditorSurface(project, rememberedUrl ?? browserSeedUrl, browserSeedUrl);
+      return;
+    }
     appendModeSwitcherDebugLog("titlebarModeSwitch.browserHandlerUsingRememberedTab", {
       elapsedMs: performance.now() - startedAtMs,
       projectId: project.projectId,
+      seedCached: true,
       targetMode: "git",
     });
-    openProjectGitEditorSurface(project, rememberedUrl ?? browserSeedUrl, browserSeedUrl);
+    openProjectGitEditorSurface(project, rememberedUrl ?? cachedBrowserSeedUrl, cachedBrowserSeedUrl);
+    refreshProjectBrowserSeedUrlForFutureTabs(project, "remembered-browser-titlebar");
     return;
   }
   appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedResolveStart", {
@@ -41487,7 +42171,57 @@ async function openGitHubProjectFromTitlebar(): Promise<void> {
   });
 }
 
+function cachedProjectBrowserSeedUrl(project: NativeProject): string | undefined {
+  /*
+   * CDXC:ProjectBrowserTabs 2026-06-28-01:44:
+   * Reopening an existing Browser tab group should not repeat git remote probes
+   * once the new-tab seed has already been resolved. Use only a real cached
+   * seed for the fast path; otherwise keep the existing first-resolution wait
+   * so the initial Browser tab and future + tab preserve GitHub/default behavior.
+   */
+  return projectBrowserSeedUrlByProjectId.get(project.projectId);
+}
+
+function refreshProjectBrowserSeedUrlForFutureTabs(project: NativeProject, reason: string): void {
+  const pendingSeedUrl =
+    pendingProjectBrowserSeedUrlByProjectId.get(project.projectId) ??
+    resolveProjectBrowserSeedUrlUncached(project).then((seedUrl) => {
+      projectBrowserSeedUrlByProjectId.set(project.projectId, seedUrl);
+      return seedUrl;
+    }).finally(() => {
+      pendingProjectBrowserSeedUrlByProjectId.delete(project.projectId);
+    });
+  pendingProjectBrowserSeedUrlByProjectId.set(project.projectId, pendingSeedUrl);
+  void pendingSeedUrl.then((seedUrl) => {
+    appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedRefreshDone", {
+      projectId: project.projectId,
+      reason,
+      seedKind: seedUrl === DEFAULT_PROJECT_BROWSER_URL ? "default" : "githubRemote",
+      targetMode: "git",
+    });
+  });
+}
+
 async function resolveProjectBrowserSeedUrl(project: NativeProject): Promise<string> {
+  const cachedSeedUrl = projectBrowserSeedUrlByProjectId.get(project.projectId);
+  if (cachedSeedUrl) {
+    return cachedSeedUrl;
+  }
+  const pendingSeedUrl = pendingProjectBrowserSeedUrlByProjectId.get(project.projectId);
+  if (pendingSeedUrl) {
+    return pendingSeedUrl;
+  }
+  const pendingResolve = resolveProjectBrowserSeedUrlUncached(project).then((seedUrl) => {
+    projectBrowserSeedUrlByProjectId.set(project.projectId, seedUrl);
+    return seedUrl;
+  }).finally(() => {
+    pendingProjectBrowserSeedUrlByProjectId.delete(project.projectId);
+  });
+  pendingProjectBrowserSeedUrlByProjectId.set(project.projectId, pendingResolve);
+  return pendingResolve;
+}
+
+async function resolveProjectBrowserSeedUrlUncached(project: NativeProject): Promise<string> {
   const startedAtMs = performance.now();
   try {
     appendModeSwitcherDebugLog("titlebarModeSwitch.browserSeedRepoCheckStart", {
@@ -43441,14 +44175,7 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     }
     case "removeRecentProject": {
-      if (parseRemotePresentationProjectId(message.projectId)) {
-        void removeRemoteRecentProject(message.projectId);
-        return;
-      }
-      const project = findRecentProjectForContextMenu(message.projectId);
-      if (project) {
-        removeProject(project.projectId);
-      }
+      removeRecentProject(message.projectId);
       return;
     }
     case "openWorkspaceProjectInFinderForGroup": {
@@ -44971,6 +45698,14 @@ function syncNativeLayout(
     activeProjectEditorStatus: currentProjectEditor.status,
     appTitle: nativeAppTitleForProject(currentProject),
     debuggingMode: settings.debuggingMode,
+    /*
+    CDXC:DiagnosticsSettings 2026-06-27-22:07:
+    The titlebar WKWebView is isolated from the sidebar Settings object but owns
+    first-hop mode-switch breadcrumbs. Send normalized diagnosticLogging as JSON
+    text through Swift so the titlebar can gate those logs by native.mode.switcher
+    without broad Debugging Mode.
+    */
+    diagnosticLoggingJson: JSON.stringify(settings.diagnosticLogging),
     showBetaFeatures: settings.showBetaFeatures,
     activeProjectId: currentProject.projectId,
     activeProjectIconDataUrl: resolveWorkspaceProjectIconDataUrl(currentProject),

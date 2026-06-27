@@ -16,11 +16,13 @@ enum NativeBrowserImportDebugLog {
   private static var didCreateLogsDirectory = false
 
   /**
-   CDXC:BrowserImportDiagnostics 2026-06-13-06:59:
-   Chromium cookie import failures must be diagnosable after a user repro without persisting cookie names, domains, values, profile names, URLs, or filesystem paths. Write aggregate SQLite, keychain, decrypt, and CEF handoff diagnostics into a dedicated support-bundle log; keep routine entries behind Settings Debugging Mode while warning/error/failure-like import events persist in normal mode.
+  CDXC:BrowserImportDiagnostics 2026-06-13-06:59:
+  Chromium cookie import failures must be diagnosable after a user repro without persisting cookie names, domains, values, profile names, URLs, or filesystem paths. Write aggregate SQLite, keychain, decrypt, and CEF handoff diagnostics into a dedicated support-bundle log; keep routine entries behind the native.browser.import scenario while warning/error/failure-like import events persist in normal mode.
    */
   static func append(event: String, details: [String: Any] = [:]) {
-    guard isNativePersistentLogImportantDiagnostic(event) || NativeDebugLogging.isEnabled else {
+    guard isNativePersistentLogImportantDiagnostic(event) ||
+      NativeDiagnosticLogging.isScenarioEnabled(.nativeBrowserImport)
+    else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory

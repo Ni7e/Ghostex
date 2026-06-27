@@ -329,8 +329,10 @@ fn sidebar_agent_save_mutation(
         .map(str::to_string);
     let accept_all_mode = sidebar_agent_accept_all_mode_update(params)?;
     let (stored_agents, stored_order) = sidebar_agent_state_from_projects(projects);
-    let current_agent_ids =
-        sidebar_button_ids(&sidebar_agent_buttons_from_state(&stored_agents, &stored_order), "agentId");
+    let current_agent_ids = sidebar_button_ids(
+        &sidebar_agent_buttons_from_state(&stored_agents, &stored_order),
+        "agentId",
+    );
     let selected_default_agent_id = requested_icon
         .as_deref()
         .and_then(default_sidebar_agent_by_icon)
@@ -363,7 +365,11 @@ fn sidebar_agent_save_mutation(
         command,
         hidden: false,
         icon: requested_icon
-            .or_else(|| previous_agent.and_then(|agent| agent.icon.as_ref()).cloned())
+            .or_else(|| {
+                previous_agent
+                    .and_then(|agent| agent.icon.as_ref())
+                    .cloned()
+            })
             .or_else(|| default_agent.map(|agent| agent.icon.to_string())),
         name,
     };
@@ -444,11 +450,17 @@ fn sidebar_agent_order_mutation(
 ) -> Result<SidebarHudSettingsMutation, DomainStateError> {
     let agent_ids = normalized_string_order(params.get("agentIds"));
     let (stored_agents, stored_order) = sidebar_agent_state_from_projects(projects);
-    let current_agent_ids =
-        sidebar_button_ids(&sidebar_agent_buttons_from_state(&stored_agents, &stored_order), "agentId");
+    let current_agent_ids = sidebar_button_ids(
+        &sidebar_agent_buttons_from_state(&stored_agents, &stored_order),
+        "agentId",
+    );
     let mut next_order = agent_ids
         .into_iter()
-        .filter(|agent_id| current_agent_ids.iter().any(|candidate| candidate == agent_id))
+        .filter(|agent_id| {
+            current_agent_ids
+                .iter()
+                .any(|candidate| candidate == agent_id)
+        })
         .collect::<Vec<_>>();
     for agent_id in current_agent_ids {
         if !next_order.iter().any(|candidate| candidate == &agent_id) {
@@ -459,7 +471,8 @@ fn sidebar_agent_order_mutation(
         &sidebar_agent_buttons_from_state(&stored_agents, &next_order),
         "agentId",
     );
-    let mut mutation = sidebar_agent_projects_mutation(projects, stored_agents, next_order, params)?;
+    let mut mutation =
+        sidebar_agent_projects_mutation(projects, stored_agents, next_order, params)?;
     mutation.item_ids = Some(item_ids);
     Ok(mutation)
 }
@@ -478,7 +491,10 @@ fn sidebar_agent_projects_mutation(
             continue;
         };
         let mut update = Map::new();
-        update.insert("projectId".to_string(), Value::String(project_id.to_string()));
+        update.insert(
+            "projectId".to_string(),
+            Value::String(project_id.to_string()),
+        );
         update.insert("customAgents".to_string(), custom_agents.clone());
         update.insert("customAgentOrder".to_string(), custom_agent_order.clone());
         updates.push(SidebarHudProjectMutation {
@@ -549,8 +565,8 @@ fn sidebar_command_save_mutation(
         ),
         "commandId",
     );
-    let command_id =
-        optional_trimmed_param(params, "commandId").unwrap_or_else(create_custom_sidebar_command_id);
+    let command_id = optional_trimmed_param(params, "commandId")
+        .unwrap_or_else(create_custom_sidebar_command_id);
     let next_command = StoredSidebarCommand {
         action_type,
         close_terminal_on_exit: action_type == "terminal"
@@ -558,7 +574,9 @@ fn sidebar_command_save_mutation(
                 .get("closeTerminalOnExit")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
-        command: (action_type == "terminal").then_some(command_text).flatten(),
+        command: (action_type == "terminal")
+            .then_some(command_text)
+            .flatten(),
         command_id: command_id.clone(),
         icon,
         is_default: is_default_sidebar_command_id(&command_id),
@@ -646,7 +664,11 @@ fn sidebar_command_order_mutation(
     );
     let mut next_order = normalized_string_order(params.get("commandIds"))
         .into_iter()
-        .filter(|command_id| current_command_ids.iter().any(|candidate| candidate == command_id))
+        .filter(|command_id| {
+            current_command_ids
+                .iter()
+                .any(|candidate| candidate == command_id)
+        })
         .collect::<Vec<_>>();
     for command_id in current_command_ids {
         if !next_order.iter().any(|candidate| candidate == &command_id) {
@@ -679,8 +701,9 @@ fn sidebar_agent_state_from_projects(projects: &[Value]) -> (Vec<StoredSidebarAg
             || json_array_field_is_nonempty(project, "customAgentOrder"))
         .then_some(project)
     });
-    let stored_agents =
-        normalized_stored_sidebar_agents(source_project.and_then(|project| project.get("customAgents")));
+    let stored_agents = normalized_stored_sidebar_agents(
+        source_project.and_then(|project| project.get("customAgents")),
+    );
     let stored_order =
         normalized_string_order(source_project.and_then(|project| project.get("customAgentOrder")));
     (stored_agents, stored_order)
@@ -771,7 +794,10 @@ fn sidebar_agent_button_value(
     Value::Object(button)
 }
 
-fn sidebar_command_buttons_from_projects(projects: &[Value], active_project_id: Option<&str>) -> Value {
+fn sidebar_command_buttons_from_projects(
+    projects: &[Value],
+    active_project_id: Option<&str>,
+) -> Value {
     let active_project = if let Some(active_project_id) = active_project_id {
         normal_project_by_id(projects, active_project_id)
     } else {
@@ -884,7 +910,9 @@ fn sidebar_command_scope<'a>(
 fn sidebar_command_state(project: &Map<String, Value>) -> SidebarCommandState {
     SidebarCommandState {
         commands: normalized_stored_sidebar_commands(project.get("customCommands")),
-        deleted_default_command_ids: normalized_string_order(project.get("deletedDefaultCommandIds")),
+        deleted_default_command_ids: normalized_string_order(
+            project.get("deletedDefaultCommandIds"),
+        ),
         order: normalized_string_order(project.get("customCommandOrder")),
     }
 }
@@ -922,7 +950,10 @@ fn sidebar_command_project_mutation(
 
 fn default_sidebar_command_button_value(command: &DefaultSidebarCommand) -> Value {
     let mut button = Map::new();
-    button.insert("actionType".to_string(), Value::String("terminal".to_string()));
+    button.insert(
+        "actionType".to_string(),
+        Value::String("terminal".to_string()),
+    );
     button.insert("closeTerminalOnExit".to_string(), Value::Bool(false));
     button.insert(
         "commandId".to_string(),
@@ -1125,7 +1156,11 @@ fn normalized_string_order_from_values(items: &[Value]) -> Vec<String> {
     order
 }
 
-fn order_json_buttons(buttons: Vec<(String, Value)>, stored_order: &[String], id_key: &str) -> Value {
+fn order_json_buttons(
+    buttons: Vec<(String, Value)>,
+    stored_order: &[String],
+    id_key: &str,
+) -> Value {
     let mut ordered_buttons = Vec::new();
     let mut used_ids = HashSet::new();
     for item_id in stored_order {
@@ -1322,7 +1357,9 @@ fn default_sidebar_agent_by_icon(icon: &str) -> Option<&'static DefaultSidebarAg
     if icon == "browser" {
         return None;
     }
-    DEFAULT_SIDEBAR_AGENTS.iter().find(|agent| agent.icon == icon)
+    DEFAULT_SIDEBAR_AGENTS
+        .iter()
+        .find(|agent| agent.icon == icon)
 }
 
 fn is_sidebar_agent_visible(agents: &[StoredSidebarAgent], agent_id: &str) -> bool {
@@ -1459,11 +1496,7 @@ fn generated_sidebar_metadata_suffix() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
-    format!(
-        "{}-{}",
-        base36(nanos),
-        base36(std::process::id() as u128)
-    )
+    format!("{}-{}", base36(nanos), base36(std::process::id() as u128))
 }
 
 fn base36(mut value: u128) -> String {
@@ -1498,7 +1531,10 @@ mod tests {
     #[test]
     fn hides_hidden_default_agents_until_stored() {
         let hud = read_sidebar_hud(&[], None);
-        let agents = hud.get("agents").and_then(|value| value.as_array()).unwrap();
+        let agents = hud
+            .get("agents")
+            .and_then(|value| value.as_array())
+            .unwrap();
         assert!(agents
             .iter()
             .all(|agent| agent.get("agentId").and_then(|value| value.as_str()) != Some("rovodev")));
@@ -1518,7 +1554,10 @@ mod tests {
             })],
             None,
         );
-        let agents = hud.get("agents").and_then(|value| value.as_array()).unwrap();
+        let agents = hud
+            .get("agents")
+            .and_then(|value| value.as_array())
+            .unwrap();
         assert_eq!(
             agents
                 .first()
@@ -1562,7 +1601,10 @@ mod tests {
             })],
             None,
         );
-        let commands = hud.get("commands").and_then(|value| value.as_array()).unwrap();
+        let commands = hud
+            .get("commands")
+            .and_then(|value| value.as_array())
+            .unwrap();
         let command_ids = commands
             .iter()
             .filter_map(|command| command.get("commandId").and_then(|value| value.as_str()))
@@ -1740,7 +1782,10 @@ mod tests {
         assert_eq!(command_ids(&hud).first().copied(), Some("false-flag-check"));
 
         let hud = read_sidebar_hud(&projects, Some("Pmissing"));
-        assert_eq!(command_ids(&hud).first().copied(), Some("missing-flag-test"));
+        assert_eq!(
+            command_ids(&hud).first().copied(),
+            Some("missing-flag-test")
+        );
 
         let hud = read_sidebar_hud(&projects, Some("PnonBoolean"));
         assert_eq!(

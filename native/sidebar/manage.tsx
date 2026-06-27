@@ -11,6 +11,7 @@ import type {
 import {
   IconAlertTriangle,
   IconCheck,
+  IconCircleCheck,
   IconCopy,
   IconEdit,
   IconFile,
@@ -18,17 +19,17 @@ import {
   IconFileTypeHtml,
   IconFolder,
   IconFolderOpen,
+  IconHelpCircle,
   IconLayoutSidebarLeftCollapse,
   IconMarkdown,
   IconLayoutSidebarRightCollapse,
-  IconLayoutSidebarRightExpand,
   IconMenu2,
   IconMessagePlus,
+  IconMessages,
   IconPhoto,
   IconRefresh,
   IconSearch,
-  IconTag,
-  IconTrash,
+  IconTestPipe,
   IconX,
 } from "@tabler/icons-react";
 import {
@@ -92,6 +93,7 @@ type ManageAnnotationScope = "global" | "selection";
 type ManageQuickLabelId = "clarify" | "needs-tests" | "looks-good";
 
 type ManageQuickLabel = {
+  color: string;
   id: ManageQuickLabelId;
   text: string;
 };
@@ -181,8 +183,31 @@ type ManageMeoSelectionState = {
 
 type ManageMeoAnnotationDecoration = {
   from: number;
+  labelId?: ManageQuickLabelId;
   to: number;
   type: ManageAnnotationType;
+};
+
+type ManageAgentationRoot = {
+  render: (node: unknown) => void;
+  unmount: () => void;
+};
+
+type ManageAgentationState = {
+  activated?: boolean;
+  canceled: boolean;
+  container: HTMLElement | null;
+  lastError?: {
+    message: string;
+    name?: string;
+  };
+  promise?: Promise<void>;
+  root: ManageAgentationRoot | null;
+  unmount: () => void;
+};
+
+type ManageAgentationWindow = Window & {
+  __GHOSTEX_AGENTATION__?: ManageAgentationState;
 };
 
 type ManageWebKitWindow = Window & {
@@ -212,17 +237,42 @@ const MANAGE_ANNOTATIONS_SIDECAR_PATH = ".ghostex/manage-annotations.json";
 const MANAGE_ANNOTATION_SCHEMA_VERSION = 1;
 const MANAGE_ANNOTATION_IMAGE_MAX_BYTES = 512 * 1024;
 const MANAGE_ANNOTATION_MAX_IMAGES = 4;
+/*
+ * CDXC:ManageAutosave 2026-06-28-02:36:
+ * Markdown and Excalidraw edits should persist automatically shortly after the user stops changing content because those artifact surfaces do not expose a visible Save button. Debounce saves for one second so normal typing and drawing gestures coalesce into a single bridge write.
+ */
+const MANAGE_CONTENT_AUTOSAVE_DELAY_MS = 1_000;
 const MANAGE_SIDEBAR_DEFAULT_WIDTH = 292;
 const MANAGE_SIDEBAR_MIN_WIDTH = 230;
 const MANAGE_SIDEBAR_MAX_WIDTH = 560;
 const MANAGE_SIDEBAR_SIDE_STORAGE_KEY = "ghostex.manage.sidebarSide";
 const MANAGE_SIDEBAR_WIDTH_STORAGE_KEY = "ghostex.manage.sidebarWidth";
-const MANAGE_EXCALIDRAW_CANVAS_BACKGROUND = "#101112";
-const MANAGE_EXCALIDRAW_CANVAS_THEME: AppState["theme"] = "light";
+/*
+ * CDXC:ManageDrawings 2026-06-28-02:29:
+ * Newly created Excalidraw artifacts should start with a #121212 canvas background so the default scene matches the dark Manage workarea. Existing drawings keep their saved viewBackgroundColor because file appState still overrides this default during hydration.
+ */
+const MANAGE_EXCALIDRAW_CANVAS_BACKGROUND = "#121212";
+/*
+ * CDXC:ManageDrawings 2026-06-28-01:43:
+ * Manage should keep Excalidraw in dark mode so drawings match the macOS app's dark workarea instead of reopening through Excalidraw's light scheme. Apply the theme at the editor boundary so existing files and newly created artifacts render dark.
+ */
+const MANAGE_EXCALIDRAW_CANVAS_THEME: AppState["theme"] = "dark";
+const MANAGE_COMMENT_ANNOTATION_COLOR = "#e2b340";
+const MANAGE_REDLINE_ANNOTATION_COLOR = "#fda4af";
+const MANAGE_DISMISS_TOOLBAR_COLOR = "#f87171";
+const MANAGE_SELECTION_TOOLBAR_EDGE_MARGIN = 18;
+const MANAGE_SELECTION_TOOLBAR_WIDTH_ESTIMATE = 190;
+const MANAGE_AGENTATION_VERSION = "3.0.2";
+const MANAGE_AGENTATION_REACT_VERSION = "18.2.0";
+const MANAGE_AGENTATION_PACKAGE_URL =
+  `https://esm.sh/agentation@${MANAGE_AGENTATION_VERSION}?bundle&deps=react@${MANAGE_AGENTATION_REACT_VERSION},react-dom@${MANAGE_AGENTATION_REACT_VERSION}`;
+const MANAGE_AGENTATION_REACT_URL = `https://esm.sh/react@${MANAGE_AGENTATION_REACT_VERSION}`;
+const MANAGE_AGENTATION_REACT_DOM_CLIENT_URL =
+  `https://esm.sh/react-dom@${MANAGE_AGENTATION_REACT_VERSION}/client?deps=react@${MANAGE_AGENTATION_REACT_VERSION}`;
 const MANAGE_QUICK_LABELS: ManageQuickLabel[] = [
-  { id: "clarify", text: "Clarify" },
-  { id: "needs-tests", text: "Needs tests" },
-  { id: "looks-good", text: "Looks good" },
+  { color: "#a78bfa", id: "clarify", text: "Clarify" },
+  { color: "#f59e0b", id: "needs-tests", text: "Needs tests" },
+  { color: "#86efac", id: "looks-good", text: "Looks good" },
 ];
 const MANAGE_MEO_THEME = {
   backgroundColor: "#101112",
@@ -264,14 +314,6 @@ const MANAGE_MEO_THEME = {
   syntaxTokens: {},
 };
 const manageMeoAnnotationEffect = StateEffect.define<ManageMeoAnnotationDecoration[]>();
-const manageMeoCommentMark = Decoration.mark({
-  attributes: { "data-type": "comment" },
-  class: "annotation-highlight manage-annotation-highlight comment",
-});
-const manageMeoRedlineMark = Decoration.mark({
-  attributes: { "data-type": "redline" },
-  class: "annotation-highlight manage-annotation-highlight deletion",
-});
 
 const manageMeoAnnotationField = StateField.define<DecorationSet>({
   create() {
@@ -325,11 +367,44 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * Markdown artifacts need a single top row: show the project-relative file path in the header, remove the separate path/status row, move Comment/Copy controls into the header, and expose a collapsible annotation rail with the active annotation count.
  * Annotation cards must size to their own content instead of stretching to fill the rail.
  *
+ * CDXC:ManageArtifactHeader 2026-06-28-00:13:
+ * HTML and Excalidraw artifacts need the same compact header cleanup as Markdown: show the project-relative artifact path in the title, keep type/size/edit state in that one row, and remove the separate path row.
+ *
+ * CDXC:ManageHtmlRendering 2026-06-28-01:25:
+ * HTML artifacts in Manage should render as page DOM instead of source text.
+ * Render sanitized body content into the Manage document, not an iframe, so the native Project Editor Agentation injector can inspect and annotate the actual HTML elements while scripts, event handlers, and script-like URLs stay passive.
+ *
+ * CDXC:ManageHtmlAgentation 2026-06-28-01:46:
+ * Rendered HTML artifacts need their own Agentation launch control because Manage hides the native browser toolbar that normally exposes feedback tools.
+ *
+ * CDXC:ManageHtmlAgentation 2026-06-28-02:29:
+ * The control is named Annotate, behaves as a toggle, and defaults on for HTML artifacts.
+ * When enabled, Manage mounts the Agentation React component directly into the same rendered HTML document and auto-enters feedback mode; when disabled, Manage unmounts it so no annotation overlay remains.
+ *
+ * CDXC:ManageMarkdownSelectionToolbar 2026-06-27-22:41:
+ * The floating Markdown selection toolbar should be icon-only: remove Copy/Delete, keep Comment plus quick labels and Dismiss, show hover tooltips, and color each annotation action to match the highlight it writes into the selected text.
+ * Plain comments use #e2b340 so the comment icon and unlabeled comment highlight stay visually paired.
+ *
+ * CDXC:ManageMarkdownSelectionToolbar 2026-06-28-01:49:
+ * The floating selection toolbar should stay visually inset from the Manage window edge even when the selected text starts at the first column.
+ * Clamp the centered toolbar by its real compact width so it does not sit flush against the left side.
+ *
+ * CDXC:ManageMarkdownEditing 2026-06-28-01:49:
+ * Markdown editing should keep the line-number gutter tight in Manage.
+ * Scope the gutter width and content padding overrides to Manage's Meo wrapper so the gap between line numbers and text is minimal without changing the shared Meo editor.
+ *
+ * CDXC:ManageAnnotationComposer 2026-06-28-01:49:
+ * The anchored comment composer should feel like a compact dark panel: show only the note textarea, close from a top-right X, keep image upload as a plain action button, and submit with a green Submit button instead of a Cancel/Comment action row.
+ *
+ * CDXC:ManageMarkdownAnnotations 2026-06-27-22:52:
+ * The annotation list should open as a top-row dropdown instead of occupying a persistent sidebar.
+ * Keep cards compact, color their background from the annotation type or quick-label color, avoid repeating quick-label text as body copy, and show the remove X only while hovering or focusing the card.
+ *
  * CDXC:ManageDrawings 2026-06-20-06:14:
  * .excalidraw files should open as editable drawings instead of raw JSON. Use the upstream Excalidraw component for canvas behavior, serialize full scene JSON through the normal Manage save bridge, and keep invalid drawings editable as source text so users can repair them.
  *
- * CDXC:ManageDrawings 2026-06-26-23:53:
- * The Manage Excalidraw canvas must display selected background colors literally. Keep Excalidraw in light theme because its dark theme applies an inversion filter that makes white render dark and #000000 render white.
+ * CDXC:ManageDrawings 2026-06-28-01:43:
+ * The Manage Excalidraw canvas should use Excalidraw's dark scheme so the drawing surface is dark in the macOS Manage view. This intentionally prioritizes app dark-mode consistency over the previous light-theme literal color behavior.
  *
  * CDXC:ManageEditing 2026-06-21-18:00:
  * The macOS Manage editor header should not show an explicit Save button. Keep edited/saved status visible in metadata while retaining the existing bridge-backed save behavior through the keyboard shortcut and editor flows.
@@ -359,6 +434,7 @@ function ManageApp() {
   const [previewState, setPreviewState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const saveResetTimerRef = useRef<number | undefined>(undefined);
+  const contentAutosaveTimerRef = useRef<number | undefined>(undefined);
   const [error, setError] = useState<string>();
   const [annotationsByPath, setAnnotationsByPath] = useState<Record<string, ManageAnnotation[]>>({});
   const [annotationPersistenceState, setAnnotationPersistenceState] =
@@ -615,6 +691,9 @@ function ManageApp() {
       if (saveResetTimerRef.current !== undefined) {
         window.clearTimeout(saveResetTimerRef.current);
       }
+      if (contentAutosaveTimerRef.current !== undefined) {
+        window.clearTimeout(contentAutosaveTimerRef.current);
+      }
       if (annotationsSaveTimerRef.current !== undefined) {
         window.clearTimeout(annotationsSaveTimerRef.current);
       }
@@ -636,8 +715,8 @@ function ManageApp() {
   const isEditablePreview = preview?.kind === "text";
   const isDirty = isEditablePreview && draftContent !== lastSavedContent;
 
-  const saveFile = useCallback(async () => {
-    if (!selectedPath || !preview || preview.kind !== "text" || saveState === "saving") {
+  const saveContentSnapshot = useCallback(async ({ content, path }: { content: string; path: string }) => {
+    if (saveState === "saving") {
       return;
     }
     if (saveResetTimerRef.current !== undefined) {
@@ -649,8 +728,8 @@ function ManageApp() {
     try {
       const response = await requestManageFiles({
         action: "save",
-        content: draftContent,
-        path: selectedPath,
+        content,
+        path,
         projectEditorId,
         projectId,
       });
@@ -661,10 +740,16 @@ function ManageApp() {
       if (!savedFile) {
         throw new Error("Manage did not return saved file metadata.");
       }
-      setPreview(savedFile);
-      const savedContent = savedFile.content ?? draftContent;
-      setDraftContent(savedContent);
-      setLastSavedContent(savedContent);
+      const savedContent = savedFile.content ?? content;
+      /*
+       * CDXC:ManageAutosave 2026-06-28-02:36:
+       * Autosave may finish after another Markdown keystroke or Excalidraw gesture. Update file metadata and the saved baseline, but only replace editor content when the user has not changed the snapshot that was sent to native.
+       */
+      if (selectedPathRef.current === savedFile.path) {
+        setPreview(savedFile);
+        setDraftContent((currentContent) => (currentContent === content ? savedContent : currentContent));
+        setLastSavedContent(savedContent);
+      }
       setEntries((currentEntries) =>
         currentEntries.map((entry) =>
           entry.path === savedFile.path
@@ -676,16 +761,56 @@ function ManageApp() {
             : entry,
         ),
       );
-      setSaveState("saved");
-      saveResetTimerRef.current = window.setTimeout(() => {
-        setSaveState("idle");
-        saveResetTimerRef.current = undefined;
-      }, 1_600);
+      if (selectedPathRef.current === savedFile.path) {
+        setSaveState("saved");
+        saveResetTimerRef.current = window.setTimeout(() => {
+          setSaveState("idle");
+          saveResetTimerRef.current = undefined;
+        }, 1_600);
+      }
     } catch (saveError) {
-      setSaveState("error");
-      setError(saveError instanceof Error ? saveError.message : "Could not save file.");
+      if (selectedPathRef.current === path) {
+        setSaveState("error");
+        setError(saveError instanceof Error ? saveError.message : "Could not save file.");
+      }
     }
-  }, [draftContent, preview, projectEditorId, projectId, saveState, selectedPath]);
+  }, [projectEditorId, projectId, saveState]);
+
+  const saveFile = useCallback(async () => {
+    if (!selectedPath || !preview || preview.kind !== "text") {
+      return;
+    }
+    await saveContentSnapshot({ content: draftContent, path: selectedPath });
+  }, [draftContent, preview, saveContentSnapshot, selectedPath]);
+
+  useEffect(() => {
+    if (contentAutosaveTimerRef.current !== undefined) {
+      window.clearTimeout(contentAutosaveTimerRef.current);
+      contentAutosaveTimerRef.current = undefined;
+    }
+    if (
+      !selectedPath ||
+      !preview ||
+      preview.kind !== "text" ||
+      !isDirty ||
+      saveState === "saving" ||
+      !shouldAutosaveManageFile(selectedPath)
+    ) {
+      return;
+    }
+    const pathToSave = selectedPath;
+    const contentToSave = draftContent;
+    contentAutosaveTimerRef.current = window.setTimeout(() => {
+      contentAutosaveTimerRef.current = undefined;
+      void saveContentSnapshot({ content: contentToSave, path: pathToSave });
+    }, MANAGE_CONTENT_AUTOSAVE_DELAY_MS);
+    return () => {
+      if (contentAutosaveTimerRef.current !== undefined) {
+        window.clearTimeout(contentAutosaveTimerRef.current);
+        contentAutosaveTimerRef.current = undefined;
+      }
+    };
+  }, [draftContent, isDirty, preview, saveContentSnapshot, saveState, selectedPath]);
 
   const createArtifactFile = useCallback(
     async (kind: ManageArtifactKind) => {
@@ -1099,8 +1224,31 @@ function ManagePreview({
   const [selection, setSelection] = useState<ManageCapturedSelection>();
   const [commentDraft, setCommentDraft] = useState<ManageCommentDraft>();
   const [feedbackCopyState, setFeedbackCopyState] = useState<"idle" | "copied" | "error">("idle");
-  const [markdownAnnotationsCollapsed, setMarkdownAnnotationsCollapsed] = useState(false);
+  const [annotationsDropdownOpen, setAnnotationsDropdownOpen] = useState(false);
+  const [htmlAnnotationEnabled, setHtmlAnnotationEnabled] = useState(true);
+  const annotationsDropdownRef = useRef<HTMLDivElement | null>(null);
   const selectedPathRef = useRef<string | undefined>(selectedPath);
+  const currentPreviewPath = preview?.path ?? "";
+  const shouldMountHtmlAnnotation =
+    Boolean(selectedPath) &&
+    previewState === "ready" &&
+    preview?.kind === "text" &&
+    isHtmlPath(currentPreviewPath) &&
+    htmlAnnotationEnabled;
+
+  useEffect(() => {
+    if (!shouldMountHtmlAnnotation) {
+      disableManageAgentation();
+      return;
+    }
+    void ensureManageAgentationInjected().catch((agentationError) => {
+      console.warn("[Ghostex Manage Agentation] injection failed", {
+        message: agentationError instanceof Error ? agentationError.message : String(agentationError),
+      });
+    });
+  }, [currentPreviewPath, shouldMountHtmlAnnotation]);
+
+  useEffect(() => () => disableManageAgentation(), []);
 
   useEffect(() => {
     if (selectedPathRef.current !== selectedPath) {
@@ -1108,8 +1256,33 @@ function ManagePreview({
       setSelection(undefined);
       setCommentDraft(undefined);
       setFeedbackCopyState("idle");
+      setAnnotationsDropdownOpen(false);
     }
   }, [selectedPath]);
+
+  useEffect(() => {
+    if (!annotationsDropdownOpen) {
+      return;
+    }
+    function handlePointerDown(event: PointerEvent) {
+      const dropdownElement = annotationsDropdownRef.current;
+      if (!dropdownElement || !event.target || dropdownElement.contains(event.target as Node)) {
+        return;
+      }
+      setAnnotationsDropdownOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setAnnotationsDropdownOpen(false);
+      }
+    }
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [annotationsDropdownOpen]);
 
   const addAnnotation = useCallback(
     ({
@@ -1194,7 +1367,7 @@ function ManagePreview({
     (label: ManageQuickLabel) => {
       addAnnotation({
         labelId: label.id,
-        note: label.text,
+        note: "",
         quote: selection?.text ?? commentDraft?.quote ?? "",
         type: "comment",
       });
@@ -1306,17 +1479,6 @@ function ManagePreview({
     }
   }, [annotations, selectedPath]);
 
-  const copySelectedText = useCallback(async () => {
-    if (!selection) {
-      return;
-    }
-    try {
-      await writeTextToClipboard(selection.text);
-    } catch {
-      // Selection copy is opportunistic; the main feedback export reports copy failures.
-    }
-  }, [selection]);
-
   const openCommentForSelection = useCallback(() => {
     if (!selection) {
       return;
@@ -1398,11 +1560,17 @@ function ManagePreview({
   const language = languageLabelForPath(preview.path);
   const isMarkdown = isMarkdownPath(preview.path);
   const isDrawing = isExcalidrawPath(preview.path);
-  const previewTitle = isMarkdown ? preview.path : preview.name;
+  const isHtml = isHtmlPath(preview.path);
+  const usesCompactArtifactHeader = isMarkdown || isDrawing || isHtml;
+  const previewTitle = usesCompactArtifactHeader ? preview.path : preview.name;
   const annotationPersistenceTitle = annotationPersistenceLabel(annotationPersistenceState);
 
   return (
-    <div className="manage-preview-content" data-kind={isMarkdown ? "markdown" : isDrawing ? "drawing" : "text"}>
+    <div
+      className="manage-preview-content"
+      data-compact-header={String(usesCompactArtifactHeader)}
+      data-kind={isMarkdown ? "markdown" : isDrawing ? "drawing" : isHtml ? "html" : "text"}
+    >
       <header className="manage-preview-header">
         <div className="manage-preview-title">
           {isDrawing ? (
@@ -1446,26 +1614,42 @@ function ManagePreview({
               )}
               <span>{feedbackCopyState === "copied" ? "Copied" : "Copy"}</span>
             </button>
+            <div className="manage-annotation-dropdown-shell" ref={annotationsDropdownRef}>
+              <button
+                aria-controls="manage-markdown-annotation-dropdown"
+                aria-expanded={annotationsDropdownOpen}
+                aria-haspopup="dialog"
+                aria-label="Show annotations"
+                className="manage-annotation-dropdown-trigger"
+                onClick={() => setAnnotationsDropdownOpen((current) => !current)}
+                title={`Annotations (${annotations.length}) · ${annotationPersistenceTitle}`}
+                type="button"
+              >
+                <IconMessages aria-hidden="true" size={14} />
+                <span className="manage-count-badge">{annotations.length}</span>
+              </button>
+              {annotationsDropdownOpen ? (
+                <ManageAnnotationDropdown annotations={annotations} onRemoveAnnotation={removeAnnotation} />
+              ) : null}
+            </div>
+          </div>
+        ) : isHtml ? (
+          <div className="manage-preview-header-actions">
             <button
-              aria-controls="manage-markdown-annotation-rail"
-              aria-expanded={!markdownAnnotationsCollapsed}
-              aria-label={markdownAnnotationsCollapsed ? "Show annotations" : "Hide annotations"}
-              className="manage-annotation-rail-toggle"
-              onClick={() => setMarkdownAnnotationsCollapsed((current) => !current)}
-              title={`${markdownAnnotationsCollapsed ? "Show" : "Hide"} annotations (${annotations.length}) · ${annotationPersistenceTitle}`}
+              aria-label="Toggle annotations"
+              aria-pressed={htmlAnnotationEnabled}
+              className="manage-annotation-toggle"
+              onClick={() => setHtmlAnnotationEnabled((current) => !current)}
+              title={htmlAnnotationEnabled ? "Disable annotations" : "Enable annotations"}
               type="button"
             >
-              {markdownAnnotationsCollapsed ? (
-                <IconLayoutSidebarRightExpand aria-hidden="true" size={14} />
-              ) : (
-                <IconLayoutSidebarRightCollapse aria-hidden="true" size={14} />
-              )}
-              <span className="manage-count-badge">{annotations.length}</span>
+              <IconMessagePlus aria-hidden="true" size={14} />
+              <span>Annotate</span>
             </button>
           </div>
         ) : null}
       </header>
-      {!isMarkdown ? <div className="manage-preview-path">{preview.path}</div> : null}
+      {!usesCompactArtifactHeader ? <div className="manage-preview-path">{preview.path}</div> : null}
       {preview.kind === "unsupported" ? (
         <ManagePreviewMessage
           icon={<IconAlertTriangle aria-hidden="true" size={21} />}
@@ -1478,15 +1662,15 @@ function ManagePreview({
           key={preview.path}
           onChange={onDraftContentChange}
         />
+      ) : isHtml ? (
+        <ManageHtmlRenderViewer content={draftContent} documentKey={preview.path} />
       ) : isMarkdown ? (
         <>
           <ManageMarkdownReviewViewer
             annotations={annotations}
-            annotationsCollapsed={markdownAnnotationsCollapsed}
             content={draftContent}
             documentKey={preview.path}
             onContentChange={onDraftContentChange}
-            onRemoveAnnotation={removeAnnotation}
             onSelectionClear={clearSelectedText}
             onSelectionCapture={captureSelectedText}
           />
@@ -1494,10 +1678,8 @@ function ManagePreview({
             <ManageAnnotationToolbar
               anchor={selection.anchor}
               onComment={openCommentForSelection}
-              onCopy={() => void copySelectedText()}
               onDismiss={() => setSelection(undefined)}
               onQuickLabel={addQuickLabel}
-              onRedline={addSelectedRedline}
             />
           ) : null}
           {commentDraft ? (
@@ -1519,6 +1701,27 @@ function ManagePreview({
         />
       )}
     </div>
+  );
+}
+
+function ManageHtmlRenderViewer({
+  content,
+  documentKey,
+}: {
+  content: string;
+  documentKey: string;
+}) {
+  const renderedHtml = useMemo(() => sanitizeManageHtmlDocument(content), [content]);
+
+  return (
+    <div
+      aria-label="Rendered HTML artifact"
+      className="manage-html-render-view"
+      data-agentation-html-root="true"
+      data-document-key={documentKey}
+      dangerouslySetInnerHTML={{ __html: renderedHtml }}
+      role="document"
+    />
   );
 }
 
@@ -1544,20 +1747,16 @@ function ManageTextEditor({
 
 function ManageMarkdownReviewViewer({
   annotations,
-  annotationsCollapsed,
   content,
   documentKey,
   onContentChange,
-  onRemoveAnnotation,
   onSelectionClear,
   onSelectionCapture,
 }: {
   annotations: ManageAnnotation[];
-  annotationsCollapsed: boolean;
   content: string;
   documentKey: string;
   onContentChange: (content: string) => void;
-  onRemoveAnnotation: (annotationId: string) => void;
   onSelectionClear: () => void;
   onSelectionCapture: (selection: ManageCapturedSelection) => void;
 }) {
@@ -1664,10 +1863,7 @@ function ManageMarkdownReviewViewer({
   }, [documentKey]);
 
   return (
-    <div
-      className="manage-markdown-review manage-markdown-meo-review"
-      data-annotations-collapsed={String(annotationsCollapsed)}
-    >
+    <div className="manage-markdown-review manage-markdown-meo-review">
       <section className="manage-markdown-review-main">
         <div className="manage-meo-markdown-editor editor-root">
           <div className="editor-wrapper" data-outline-position="right">
@@ -1675,9 +1871,6 @@ function ManageMarkdownReviewViewer({
           </div>
         </div>
       </section>
-      {annotationsCollapsed ? null : (
-        <ManageAnnotationTimeline annotations={annotations} onRemoveAnnotation={onRemoveAnnotation} />
-      )}
     </div>
   );
 }
@@ -1685,46 +1878,51 @@ function ManageMarkdownReviewViewer({
 function ManageAnnotationToolbar({
   anchor,
   onComment,
-  onCopy,
   onDismiss,
   onQuickLabel,
-  onRedline,
 }: {
   anchor: ManageSelectionAnchor;
   onComment: () => void;
-  onCopy: () => void;
   onDismiss: () => void;
   onQuickLabel: (label: ManageQuickLabel) => void;
-  onRedline: () => void;
 }) {
   return createPortal(
     <div
       className="manage-markdown-selection-toolbar"
       style={{
-        left: anchor.left,
+        left: clampManageSelectionToolbarLeft(anchor.left),
         top: Math.max(8, anchor.top - 46),
       }}
     >
-      <button onClick={onCopy} title="Copy selection" type="button">
-        <IconCopy aria-hidden="true" size={14} />
-        Copy
-      </button>
-      <button onClick={onRedline} title="Mark as deletion" type="button">
-        <IconTrash aria-hidden="true" size={14} />
-        Delete
-      </button>
-      <button onClick={onComment} title="Comment on selection" type="button">
-        <IconMessagePlus aria-hidden="true" size={14} />
-        Comment
+      <button
+        aria-label="Comment"
+        data-tooltip="Comment"
+        onClick={onComment}
+        style={manageToolbarActionStyle(MANAGE_COMMENT_ANNOTATION_COLOR)}
+        type="button"
+      >
+        <IconMessagePlus aria-hidden="true" size={15} />
       </button>
       {MANAGE_QUICK_LABELS.map((label) => (
-        <button key={label.id} onClick={() => onQuickLabel(label)} title={label.text} type="button">
-          <IconTag aria-hidden="true" size={13} />
-          {label.text}
+        <button
+          aria-label={label.text}
+          data-tooltip={label.text}
+          key={label.id}
+          onClick={() => onQuickLabel(label)}
+          style={manageToolbarActionStyle(label.color)}
+          type="button"
+        >
+          {renderManageQuickLabelIcon(label.id)}
         </button>
       ))}
-      <button aria-label="Dismiss annotation toolbar" onClick={onDismiss} type="button">
-        <IconX aria-hidden="true" size={14} />
+      <button
+        aria-label="Dismiss"
+        data-tooltip="Dismiss"
+        onClick={onDismiss}
+        style={manageToolbarActionStyle(MANAGE_DISMISS_TOOLBAR_COLOR)}
+        type="button"
+      >
+        <IconX aria-hidden="true" size={15} />
       </button>
     </div>,
     document.body,
@@ -1750,9 +1948,15 @@ function ManageCommentPopover({
   const canSubmit = Boolean(draft.note.trim()) || draft.attachments.length > 0;
   return createPortal(
     <div className="manage-comment-popover" style={commentPopoverStyle(draft.anchor)}>
-      <div className="manage-comment-popover-quote" data-empty={String(!draft.quote)}>
-        {draft.quote || "Global comment"}
-      </div>
+      <button
+        aria-label="Close comment composer"
+        className="manage-comment-popover-close manage-icon-button"
+        onClick={onCancel}
+        title="Close"
+        type="button"
+      >
+        <IconX aria-hidden="true" size={14} />
+      </button>
       <textarea
         aria-label="Annotation note"
         autoFocus
@@ -1790,16 +1994,22 @@ function ManageCommentPopover({
       ) : null}
       {draft.attachmentError ? <div className="manage-attachment-error">{draft.attachmentError}</div> : null}
       <div className="manage-comment-popover-actions">
-        <button onClick={() => attachmentInputRef.current?.click()} type="button">
+        <button
+          className="manage-comment-popover-image-button"
+          onClick={() => attachmentInputRef.current?.click()}
+          type="button"
+        >
           <IconPhoto aria-hidden="true" size={14} />
           Image
         </button>
-        <button onClick={onCancel} type="button">
-          Cancel
-        </button>
-        <button disabled={!canSubmit} onClick={onSubmit} type="button">
+        <button
+          className="manage-comment-popover-submit"
+          disabled={!canSubmit}
+          onClick={onSubmit}
+          type="button"
+        >
           <IconMessagePlus aria-hidden="true" size={14} />
-          Comment
+          Submit
         </button>
       </div>
       <input
@@ -1821,7 +2031,7 @@ function ManageCommentPopover({
   );
 }
 
-function ManageAnnotationTimeline({
+function ManageAnnotationDropdown({
   annotations,
   onRemoveAnnotation,
 }: {
@@ -1829,42 +2039,57 @@ function ManageAnnotationTimeline({
   onRemoveAnnotation: (annotationId: string) => void;
 }) {
   return (
-    <aside className="manage-markdown-annotation-rail" aria-label="Annotations" id="manage-markdown-annotation-rail">
+    <div
+      aria-label="Annotations"
+      className="manage-annotation-dropdown"
+      id="manage-markdown-annotation-dropdown"
+      role="dialog"
+    >
       <header>
         <span>Annotations</span>
-        {annotations.length > 0 ? <span className="manage-count-badge">{annotations.length}</span> : null}
+        <span className="manage-count-badge">{annotations.length}</span>
       </header>
-      <div className="manage-markdown-annotation-list">
+      <div className="manage-annotation-dropdown-list">
         {annotations.length === 0 ? <div className="manage-annotation-empty">No annotations</div> : null}
-        {annotations.map((annotation) => (
-          <article className="manage-annotation-card" data-type={annotation.type} key={annotation.id}>
-            <div className="manage-annotation-card-header">
-              <span>{annotationTypeLabel(annotation)}</span>
-              <button
-                aria-label="Remove annotation"
-                className="manage-icon-button"
-                onClick={() => onRemoveAnnotation(annotation.id)}
-                type="button"
-              >
-                <IconTrash aria-hidden="true" size={14} />
-              </button>
-            </div>
-            {annotation.scope === "selection" ? <blockquote>{annotation.quote}</blockquote> : null}
-            {annotation.note ? <p>{annotation.note}</p> : null}
-            {annotation.attachments.length > 0 ? (
-              <div className="manage-annotation-attachments">
-                {annotation.attachments.map((attachment) => (
-                  <a href={attachment.dataUrl} key={attachment.id} rel="noreferrer" target="_blank">
-                    <img alt="" src={attachment.dataUrl} />
-                    <span>{attachment.name}</span>
-                  </a>
-                ))}
+        {annotations.map((annotation) => {
+          const note = annotationDisplayNote(annotation);
+          return (
+            <article
+              className="manage-annotation-card"
+              data-label-id={annotation.labelId}
+              data-type={annotation.type}
+              key={annotation.id}
+              style={{ "--manage-annotation-color": manageAnnotationColor(annotation) } as CSSProperties}
+            >
+              <div className="manage-annotation-card-header">
+                <span>{annotationTypeLabel(annotation)}</span>
+                <button
+                  aria-label="Remove annotation"
+                  className="manage-annotation-remove-button manage-icon-button"
+                  onClick={() => onRemoveAnnotation(annotation.id)}
+                  title="Remove annotation"
+                  type="button"
+                >
+                  <IconX aria-hidden="true" size={14} />
+                </button>
               </div>
-            ) : null}
-          </article>
-        ))}
+              {annotation.scope === "selection" ? <blockquote>{annotation.quote}</blockquote> : null}
+              {note ? <p>{note}</p> : null}
+              {annotation.attachments.length > 0 ? (
+                <div className="manage-annotation-attachments">
+                  {annotation.attachments.map((attachment) => (
+                    <a href={attachment.dataUrl} key={attachment.id} rel="noreferrer" target="_blank">
+                      <img alt="" src={attachment.dataUrl} />
+                      <span>{attachment.name}</span>
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -2168,6 +2393,134 @@ function requestManageFiles(
   });
 }
 
+function ensureManageAgentationInjected(): Promise<void> {
+  const agentationWindow = window as ManageAgentationWindow;
+  const existing = agentationWindow.__GHOSTEX_AGENTATION__;
+  if (existing?.root && existing.container?.isConnected) {
+    scheduleManageAgentationAutoActivate(existing);
+    return Promise.resolve();
+  }
+  if (existing?.promise) {
+    return existing.promise;
+  }
+
+  const state: ManageAgentationState = {
+    canceled: false,
+    container: null,
+    root: null,
+    unmount() {
+      this.canceled = true;
+      if (this.root) {
+        this.root.unmount();
+      }
+      if (this.container?.parentNode) {
+        this.container.parentNode.removeChild(this.container);
+      }
+      delete agentationWindow.__GHOSTEX_AGENTATION__;
+    },
+  };
+  agentationWindow.__GHOSTEX_AGENTATION__ = state;
+
+  state.promise = mountManageAgentation(state).catch((error) => {
+    state.lastError = {
+      message: error instanceof Error ? error.message : String(error),
+      name: error instanceof Error ? error.name : undefined,
+    };
+    state.unmount();
+    throw error;
+  });
+  return state.promise;
+}
+
+function disableManageAgentation(): void {
+  const agentationWindow = window as ManageAgentationWindow;
+  const existing = agentationWindow.__GHOSTEX_AGENTATION__;
+  if (existing) {
+    existing.unmount();
+    return;
+  }
+  document.getElementById("ghostex-agentation-root")?.remove();
+}
+
+async function mountManageAgentation(state: ManageAgentationState): Promise<void> {
+  if (!document.body && document.readyState === "loading") {
+    await new Promise<void>((resolve) => {
+      window.addEventListener("DOMContentLoaded", () => resolve(), { once: true });
+    });
+  }
+
+  const [reactModule, reactDomClientModule, agentationModule] = await Promise.all([
+    importManageAgentationModule(MANAGE_AGENTATION_REACT_URL),
+    importManageAgentationModule(MANAGE_AGENTATION_REACT_DOM_CLIENT_URL),
+    importManageAgentationModule(MANAGE_AGENTATION_PACKAGE_URL),
+  ]);
+  if (state.canceled) {
+    return;
+  }
+
+  const React = (reactModule.default ?? reactModule) as {
+    createElement?: (component: unknown, props?: unknown) => unknown;
+  };
+  const ReactDOMClient = reactDomClientModule as {
+    createRoot?: (container: Element) => ManageAgentationRoot;
+  };
+  const Agentation = agentationModule.Agentation;
+  if (!React.createElement || !ReactDOMClient.createRoot || !Agentation) {
+    throw new Error("Agentation modules did not expose the expected React mounting API.");
+  }
+
+  const container = document.createElement("div");
+  container.id = "ghostex-agentation-root";
+  container.setAttribute("data-agentation-root", "true");
+  (document.body || document.documentElement).appendChild(container);
+  state.container = container;
+  state.root = ReactDOMClient.createRoot(container);
+  state.root.render(React.createElement(Agentation));
+  scheduleManageAgentationAutoActivate(state);
+}
+
+function importManageAgentationModule(url: string): Promise<Record<string, unknown>> {
+  return (new Function("url", "return import(url);") as (url: string) => Promise<Record<string, unknown>>)(url);
+}
+
+function scheduleManageAgentationAutoActivate(state: ManageAgentationState): void {
+  const run = () => activateManageAgentationFeedbackMode(state, 0);
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(run));
+    return;
+  }
+  window.setTimeout(run, 0);
+}
+
+function activateManageAgentationFeedbackMode(state: ManageAgentationState, attempt: number): void {
+  if (state.canceled) {
+    return;
+  }
+  const startButton = findManageAgentationStartButton(state);
+  if (startButton && typeof startButton.click === "function") {
+    startButton.click();
+    state.activated = true;
+    return;
+  }
+  if (attempt < 20) {
+    window.setTimeout(() => activateManageAgentationFeedbackMode(state, attempt + 1), 50);
+  }
+}
+
+function findManageAgentationStartButton(state: ManageAgentationState): HTMLElement | undefined {
+  const root = state.container || document.getElementById("ghostex-agentation-root");
+  return (
+    (document.querySelector('[data-agentation-toolbar] [title="Start feedback mode"][role="button"]') as HTMLElement | null) ??
+    (document.querySelector('[data-agentation-toolbar][title="Start feedback mode"][role="button"]') as HTMLElement | null) ??
+    (document.querySelector('[title="Start feedback mode"][role="button"]') as HTMLElement | null) ??
+    (root?.querySelector('[title="Start feedback mode"][role="button"]') as HTMLElement | null) ??
+    (document.querySelector('[data-agentation-toolbar][title="Start feedback mode"]') as HTMLElement | null) ??
+    (document.querySelector('[title="Start feedback mode"]') as HTMLElement | null) ??
+    (root?.querySelector('[title="Start feedback mode"]') as HTMLElement | null) ??
+    undefined
+  );
+}
+
 function createUniqueArtifactPath(entries: ManageFileEntry[], kind: ManageArtifactKind): string {
   const occupiedPaths = new Set(entries.map((entry) => entry.path.toLocaleLowerCase()));
   const { extension, stem } = artifactNameParts(kind);
@@ -2282,6 +2635,10 @@ function isExcalidrawPath(path: string): boolean {
   return /\.excalidraw$/iu.test(path);
 }
 
+function shouldAutosaveManageFile(path: string): boolean {
+  return isMarkdownPath(path) || isExcalidrawPath(path);
+}
+
 function isHtmlPath(path: string): boolean {
   return /\.html?$/iu.test(path);
 }
@@ -2303,19 +2660,58 @@ function annotationPersistenceLabel(state: "idle" | "loading" | "ready" | "savin
 }
 
 function annotationTypeLabel(annotation: ManageAnnotation): string {
-  if (annotation.scope === "global") {
-    return annotation.labelId ? `Global · ${quickLabelText(annotation.labelId)}` : "Global";
+  if (annotation.type === "redline") {
+    return "Redline";
   }
-  switch (annotation.type) {
-    case "comment":
-      return annotation.labelId ? `Comment · ${quickLabelText(annotation.labelId)}` : "Comment";
-    case "redline":
-      return "Redline";
+  if (annotation.labelId) {
+    return quickLabelText(annotation.labelId);
   }
+  return annotation.scope === "global" ? "Global comment" : "Comment";
+}
+
+function annotationDisplayNote(annotation: ManageAnnotation): string {
+  const note = annotation.note.trim();
+  if (!note) {
+    return "";
+  }
+  return annotation.labelId && note === quickLabelText(annotation.labelId) ? "" : note;
 }
 
 function quickLabelText(labelId: ManageQuickLabelId): string {
   return MANAGE_QUICK_LABELS.find((label) => label.id === labelId)?.text ?? labelId;
+}
+
+function quickLabelColor(labelId: ManageQuickLabelId | undefined): string {
+  return MANAGE_QUICK_LABELS.find((label) => label.id === labelId)?.color ?? MANAGE_COMMENT_ANNOTATION_COLOR;
+}
+
+function manageAnnotationColor(annotation: Pick<ManageAnnotation, "labelId" | "type">): string {
+  return annotation.type === "redline" ? MANAGE_REDLINE_ANNOTATION_COLOR : quickLabelColor(annotation.labelId);
+}
+
+function manageToolbarActionStyle(color: string): CSSProperties {
+  return { "--manage-toolbar-action-color": color } as CSSProperties;
+}
+
+function clampManageSelectionToolbarLeft(left: number): number {
+  const halfToolbarWidth = Math.min(
+    MANAGE_SELECTION_TOOLBAR_WIDTH_ESTIMATE / 2,
+    Math.max(0, window.innerWidth / 2 - MANAGE_SELECTION_TOOLBAR_EDGE_MARGIN),
+  );
+  const minLeft = MANAGE_SELECTION_TOOLBAR_EDGE_MARGIN + halfToolbarWidth;
+  const maxLeft = Math.max(minLeft, window.innerWidth - MANAGE_SELECTION_TOOLBAR_EDGE_MARGIN - halfToolbarWidth);
+  return Math.min(Math.max(left, minLeft), maxLeft);
+}
+
+function renderManageQuickLabelIcon(labelId: ManageQuickLabelId): ReactNode {
+  switch (labelId) {
+    case "clarify":
+      return <IconHelpCircle aria-hidden="true" size={15} />;
+    case "needs-tests":
+      return <IconTestPipe aria-hidden="true" size={15} />;
+    case "looks-good":
+      return <IconCircleCheck aria-hidden="true" size={15} />;
+  }
 }
 
 function normalizeAnnotationQuote(text: string): string {
@@ -2392,6 +2788,7 @@ function createManageMeoAnnotationDecorations(
       }
       decorations.push({
         from: matchIndex,
+        labelId: annotation.labelId,
         to: matchIndex + quote.length,
         type: annotation.type,
       });
@@ -2407,7 +2804,18 @@ function buildManageMeoAnnotationDecorations(decorations: readonly ManageMeoAnno
     .filter((decoration) => decoration.from >= 0 && decoration.to > decoration.from)
     .sort((left, right) => left.from - right.from || left.to - right.to);
   for (const decoration of orderedDecorations) {
-    builder.add(decoration.from, decoration.to, decoration.type === "redline" ? manageMeoRedlineMark : manageMeoCommentMark);
+    builder.add(
+      decoration.from,
+      decoration.to,
+      Decoration.mark({
+        attributes: {
+          "data-type": decoration.type,
+          ...(decoration.labelId ? { "data-label-id": decoration.labelId } : {}),
+          style: `--manage-annotation-color: ${manageAnnotationColor(decoration)};`,
+        },
+        class: `annotation-highlight manage-annotation-highlight ${decoration.type === "redline" ? "deletion" : "comment"}`,
+      }),
+    );
   }
   return builder.finish();
 }
@@ -2767,7 +3175,9 @@ function renderManageAnnotatedInline(text: string, annotations: ManageAnnotation
       {renderManageAnnotatedInline(before, remaining)}
       <mark
         className={`annotation-highlight manage-annotation-highlight ${annotation.type === "redline" ? "deletion" : "comment"}`}
+        data-label-id={annotation.labelId}
         data-type={annotation.type}
+        style={{ "--manage-annotation-color": manageAnnotationColor(annotation) } as CSSProperties}
       >
         {renderManageInlineTokens(match)}
       </mark>
@@ -2958,6 +3368,34 @@ function sanitizeManageBlockHtml(html: string): string {
     }
   });
   return template.innerHTML;
+}
+
+function sanitizeManageHtmlDocument(html: string): string {
+  const documentValue = new DOMParser().parseFromString(html, "text/html");
+  documentValue.querySelectorAll("script, style, iframe, object, embed, link, meta, base").forEach((element) => {
+    element.remove();
+  });
+  documentValue.querySelectorAll("*").forEach((element) => {
+    for (const attribute of Array.from(element.attributes)) {
+      const name = attribute.name.toLocaleLowerCase();
+      const value = attribute.value.trim();
+      if (name.startsWith("on") || name === "srcdoc") {
+        element.removeAttribute(attribute.name);
+        continue;
+      }
+      if (
+        (name === "href" || name === "src" || name === "xlink:href" || name === "action" || name === "formaction") &&
+        /^(?:javascript|vbscript|data:text\/html)/iu.test(value)
+      ) {
+        element.removeAttribute(attribute.name);
+      }
+    }
+    if (element instanceof HTMLAnchorElement && element.href && !element.href.startsWith("#")) {
+      element.target = "_blank";
+      element.rel = "noreferrer";
+    }
+  });
+  return documentValue.body.innerHTML;
 }
 
 function normalizeAttachmentName(name: string): string {
@@ -3700,7 +4138,7 @@ styleElement.textContent = `
     min-height: 0;
   }
 
-  .manage-preview-content[data-kind="markdown"] {
+  .manage-preview-content[data-compact-header="true"] {
     grid-template-rows: auto minmax(0, 1fr);
   }
 
@@ -3748,6 +4186,11 @@ styleElement.textContent = `
     min-width: 0;
   }
 
+  .manage-annotation-dropdown-shell {
+    display: inline-flex;
+    position: relative;
+  }
+
   .manage-preview-path {
     border-bottom: 1px solid rgba(255, 255, 255, 0.055);
     color: var(--manage-subtle);
@@ -3778,15 +4221,41 @@ styleElement.textContent = `
     width: 100%;
   }
 
-  .manage-markdown-review {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 288px;
+  .manage-html-render-view {
+    background: #ffffff;
+    color: #111827;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    font-size: 16px;
+    height: 100%;
+    line-height: 1.5;
     min-height: 0;
-    overflow: hidden;
+    min-width: 0;
+    overflow: auto;
+    padding: 24px 28px 48px;
+    scrollbar-color: rgba(15, 23, 42, 0.28) transparent;
+    width: 100%;
   }
 
-  .manage-markdown-review[data-annotations-collapsed="true"] {
+  .manage-html-render-view :where(*) {
+    max-width: 100%;
+  }
+
+  .manage-html-render-view :where(img, video, canvas, svg) {
+    height: auto;
+    max-width: 100%;
+  }
+
+  .manage-html-render-view :where(table) {
+    border-collapse: collapse;
+    display: block;
+    overflow-x: auto;
+  }
+
+  .manage-markdown-review {
+    display: grid;
     grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
   }
 
   .manage-markdown-meo-review {
@@ -3837,7 +4306,13 @@ styleElement.textContent = `
     color: var(--manage-subtle);
   }
 
-  .manage-preview-header-actions .manage-annotation-rail-toggle {
+  .manage-preview-header-actions .manage-annotation-toggle[aria-pressed="true"] {
+    background: rgba(125, 211, 252, 0.16);
+    border-color: rgba(125, 211, 252, 0.36);
+    color: var(--manage-text);
+  }
+
+  .manage-preview-header-actions .manage-annotation-dropdown-trigger {
     padding: 0 7px;
   }
 
@@ -3869,6 +4344,34 @@ styleElement.textContent = `
 
   .manage-meo-markdown-editor .cm-scroller {
     scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+  }
+
+  .manage-meo-markdown-editor .cm-gutters {
+    max-width: 44px;
+    min-width: 44px;
+  }
+
+  .manage-meo-markdown-editor .cm-gutter.meo-md-fold-gutter {
+    max-width: 16px;
+    min-width: 16px;
+    width: 16px;
+  }
+
+  .manage-meo-markdown-editor .cm-gutter.cm-lineNumbers,
+  .manage-meo-markdown-editor .cm-lineNumbers .cm-gutterElement {
+    max-width: 28px;
+    min-width: 28px;
+    width: 28px;
+  }
+
+  .manage-meo-markdown-editor .cm-lineNumbers .cm-gutterElement {
+    padding: 0 4px 0 0;
+  }
+
+  .manage-meo-markdown-editor .cm-content {
+    margin-left: 0;
+    margin-right: 0;
+    padding-right: 12px;
   }
 
   .manage-markdown-document {
@@ -4106,34 +4609,57 @@ styleElement.textContent = `
 
   .annotation-highlight,
   .manage-annotation-highlight {
-    background: rgba(253, 230, 138, 0.28);
+    --manage-annotation-color: ${MANAGE_COMMENT_ANNOTATION_COLOR};
+    background: color-mix(in srgb, var(--manage-annotation-color) 28%, transparent);
     color: inherit;
     padding: 0 2px;
   }
 
   .annotation-highlight.comment,
   .manage-annotation-highlight[data-type="comment"] {
-    background: rgba(125, 211, 252, 0.22);
+    --manage-annotation-color: ${MANAGE_COMMENT_ANNOTATION_COLOR};
+  }
+
+  .annotation-highlight[data-label-id="clarify"],
+  .manage-annotation-highlight[data-label-id="clarify"] {
+    --manage-annotation-color: ${quickLabelColor("clarify")};
+  }
+
+  .annotation-highlight[data-label-id="needs-tests"],
+  .manage-annotation-highlight[data-label-id="needs-tests"] {
+    --manage-annotation-color: ${quickLabelColor("needs-tests")};
+  }
+
+  .annotation-highlight[data-label-id="looks-good"],
+  .manage-annotation-highlight[data-label-id="looks-good"] {
+    --manage-annotation-color: ${quickLabelColor("looks-good")};
   }
 
   .annotation-highlight.deletion,
   .manage-annotation-highlight[data-type="redline"] {
-    background: rgba(253, 164, 175, 0.22);
+    --manage-annotation-color: ${MANAGE_REDLINE_ANNOTATION_COLOR};
     text-decoration: line-through;
-    text-decoration-color: rgba(253, 164, 175, 0.8);
+    text-decoration-color: color-mix(in srgb, var(--manage-annotation-color) 82%, transparent);
     text-decoration-thickness: 2px;
   }
 
-  .manage-markdown-annotation-rail {
-    background: var(--manage-panel);
-    border-left: 1px solid var(--manage-border);
+  .manage-annotation-dropdown {
+    background: color-mix(in srgb, var(--manage-panel-raised) 94%, #000 6%);
+    border: 1px solid var(--manage-border-strong);
+    box-shadow: 0 18px 52px rgba(0, 0, 0, 0.36);
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
+    max-height: min(520px, calc(100vh - 76px));
     min-height: 0;
     overflow: hidden;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    width: min(360px, calc(100vw - 28px));
+    z-index: 30;
   }
 
-  .manage-markdown-annotation-rail header {
+  .manage-annotation-dropdown header {
     align-items: center;
     border-bottom: 1px solid var(--manage-border);
     color: var(--manage-muted);
@@ -4145,7 +4671,7 @@ styleElement.textContent = `
     padding: 0 12px;
   }
 
-  .manage-markdown-annotation-list {
+  .manage-annotation-dropdown-list {
     align-content: start;
     display: grid;
     gap: 8px;
@@ -4218,17 +4744,26 @@ styleElement.textContent = `
   }
 
   .manage-annotation-card {
+    --manage-annotation-color: ${MANAGE_COMMENT_ANNOTATION_COLOR};
     align-self: start;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--manage-border);
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--manage-annotation-color) 16%, transparent) 0,
+        color-mix(in srgb, var(--manage-annotation-color) 7%, transparent) 42%,
+        rgba(255, 255, 255, 0.032) 100%
+      ),
+      color-mix(in srgb, var(--manage-panel) 90%, var(--manage-annotation-color) 10%);
+    border: 1px solid color-mix(in srgb, var(--manage-annotation-color) 38%, var(--manage-border));
     display: grid;
     gap: 7px;
     height: max-content;
+    min-width: 0;
     padding: 9px;
   }
 
   .manage-annotation-card[data-type="redline"] {
-    border-color: rgba(253, 164, 175, 0.3);
+    border-color: color-mix(in srgb, var(--manage-annotation-color) 42%, var(--manage-border));
   }
 
   .manage-annotation-card-header {
@@ -4240,9 +4775,28 @@ styleElement.textContent = `
     justify-content: space-between;
   }
 
+  .manage-annotation-card-header span {
+    color: color-mix(in srgb, var(--manage-annotation-color) 72%, var(--manage-text));
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .manage-annotation-remove-button {
+    color: color-mix(in srgb, var(--manage-annotation-color) 48%, var(--manage-muted));
+    opacity: 0;
+    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+  }
+
+  .manage-annotation-card:hover .manage-annotation-remove-button,
+  .manage-annotation-card:focus-within .manage-annotation-remove-button {
+    opacity: 1;
+  }
+
   .manage-annotation-card blockquote {
-    border-left: 2px solid rgba(253, 230, 138, 0.52);
-    color: rgba(248, 250, 252, 0.82);
+    border-left: 2px solid color-mix(in srgb, var(--manage-annotation-color) 62%, transparent);
+    color: rgba(248, 250, 252, 0.86);
     font-size: 12px;
     line-height: 1.45;
     margin: 0;
@@ -4252,14 +4806,13 @@ styleElement.textContent = `
   }
 
   .manage-annotation-card[data-type="redline"] blockquote {
-    border-left-color: rgba(253, 164, 175, 0.58);
     text-decoration: line-through;
-    text-decoration-color: rgba(253, 164, 175, 0.8);
+    text-decoration-color: color-mix(in srgb, var(--manage-annotation-color) 82%, transparent);
     text-decoration-thickness: 2px;
   }
 
   .manage-annotation-card p {
-    color: var(--manage-muted);
+    color: color-mix(in srgb, var(--manage-text) 72%, var(--manage-muted));
     font-size: 12px;
     line-height: 1.45;
     margin: 0;
@@ -4287,79 +4840,167 @@ styleElement.textContent = `
     border-radius: 8px;
     box-shadow: 0 14px 40px rgba(0, 0, 0, 0.34);
     display: flex;
-    gap: 4px;
-    max-width: calc(100vw - 24px);
-    padding: 4px;
+    gap: 5px;
+    max-width: calc(100vw - 36px);
+    overflow: visible;
+    padding: 5px;
     position: fixed;
     transform: translateX(-50%);
     z-index: 10;
   }
 
   .manage-markdown-selection-toolbar button {
+    --manage-toolbar-action-color: var(--manage-muted);
+    align-items: center;
     background: transparent;
     border: 0;
-    color: var(--manage-muted);
-    height: 28px;
-    padding: 0 7px;
-    white-space: nowrap;
+    border-radius: 6px;
+    color: var(--manage-toolbar-action-color);
+    display: inline-flex;
+    height: 30px;
+    justify-content: center;
+    padding: 0;
+    position: relative;
+    width: 30px;
+  }
+
+  .manage-markdown-selection-toolbar button svg {
+    color: currentColor;
   }
 
   .manage-markdown-selection-toolbar button:hover,
   .manage-markdown-selection-toolbar button:focus-visible {
-    background: rgba(255, 255, 255, 0.07);
-    color: var(--manage-text);
+    background: color-mix(in srgb, var(--manage-toolbar-action-color) 16%, transparent);
+    color: var(--manage-toolbar-action-color);
     outline: none;
   }
 
+  .manage-markdown-selection-toolbar button::before,
+  .manage-markdown-selection-toolbar button::after {
+    left: 50%;
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+    transition:
+      opacity 120ms ease,
+      transform 120ms ease;
+    z-index: 2;
+  }
+
+  .manage-markdown-selection-toolbar button::before {
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid color-mix(in srgb, var(--manage-panel-raised) 92%, #000 8%);
+    content: "";
+    top: -7px;
+    transform: translate(-50%, 4px);
+  }
+
+  .manage-markdown-selection-toolbar button::after {
+    background: color-mix(in srgb, var(--manage-panel-raised) 92%, #000 8%);
+    border: 1px solid color-mix(in srgb, var(--manage-toolbar-action-color) 42%, var(--manage-border-strong));
+    color: var(--manage-text);
+    content: attr(data-tooltip);
+    font-size: 11px;
+    font-weight: 720;
+    line-height: 1;
+    padding: 6px 8px;
+    top: -33px;
+    transform: translate(-50%, 4px);
+    white-space: nowrap;
+  }
+
+  .manage-markdown-selection-toolbar button:hover::before,
+  .manage-markdown-selection-toolbar button:hover::after,
+  .manage-markdown-selection-toolbar button:focus-visible::before,
+  .manage-markdown-selection-toolbar button:focus-visible::after {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
   .manage-comment-popover {
-    background: var(--manage-panel-raised);
-    border: 1px solid var(--manage-border-strong);
-    box-shadow: 0 18px 52px rgba(0, 0, 0, 0.38);
+    background: color-mix(in srgb, var(--manage-panel-raised) 76%, #000 24%);
+    border: 1px solid color-mix(in srgb, var(--manage-border-strong) 74%, #000 26%);
+    border-radius: 10px;
+    box-shadow: 0 20px 54px rgba(0, 0, 0, 0.44);
     display: grid;
-    gap: 8px;
+    gap: 10px;
     max-height: calc(100vh - 24px);
     overflow: auto;
-    padding: 10px;
+    padding: 34px 12px 12px;
     position: fixed;
     z-index: 40;
   }
 
-  .manage-comment-popover-quote {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--manage-border);
+  .manage-comment-popover-close {
     color: var(--manage-muted);
-    font-size: 11px;
-    line-height: 1.35;
-    max-height: 70px;
-    min-height: 32px;
-    overflow: auto;
-    padding: 7px;
+    height: 24px;
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    width: 24px;
   }
 
-  .manage-comment-popover-quote[data-empty="true"] {
-    border-style: dashed;
+  .manage-comment-popover-close:hover,
+  .manage-comment-popover-close:focus-visible {
+    background: rgba(255, 255, 255, 0.075);
+    color: var(--manage-text);
+    outline: none;
   }
 
   .manage-comment-popover textarea {
-    background: rgba(255, 255, 255, 0.045);
-    border: 1px solid var(--manage-border);
+    background: color-mix(in srgb, var(--manage-panel) 72%, #000 28%);
+    border: 1px solid var(--manage-border-strong);
+    border-radius: 8px;
     color: var(--manage-text);
     font-size: 12px;
-    height: 88px;
+    height: 116px;
     line-height: 1.45;
     outline: 0;
-    padding: 8px;
+    padding: 10px;
     resize: vertical;
   }
 
   .manage-comment-popover textarea:focus {
-    border-color: rgba(125, 211, 252, 0.52);
+    border-color: rgba(125, 211, 252, 0.46);
+    box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.16);
   }
 
   .manage-comment-popover-actions {
-    display: grid;
-    gap: 6px;
-    grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1fr);
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .manage-comment-popover-actions button {
+    border-radius: 7px;
+    color: var(--manage-text);
+    height: 30px;
+    padding: 0 11px;
+  }
+
+  .manage-comment-popover-actions .manage-comment-popover-image-button {
+    background: rgba(255, 255, 255, 0.055);
+    border-color: var(--manage-border-strong);
+  }
+
+  .manage-comment-popover-actions .manage-comment-popover-submit {
+    background: rgba(34, 197, 94, 0.18);
+    border-color: rgba(74, 222, 128, 0.48);
+    color: #bbf7d0;
+  }
+
+  .manage-comment-popover-actions .manage-comment-popover-submit:not(:disabled):hover,
+  .manage-comment-popover-actions .manage-comment-popover-submit:not(:disabled):focus-visible {
+    background: rgba(34, 197, 94, 0.26);
+    border-color: rgba(74, 222, 128, 0.66);
+    color: #dcfce7;
+  }
+
+  .manage-comment-popover-actions .manage-comment-popover-submit:disabled {
+    background: rgba(34, 197, 94, 0.08);
+    border-color: rgba(74, 222, 128, 0.2);
+    color: rgba(187, 247, 208, 0.42);
   }
 
   .manage-hidden-file-input {
@@ -4430,7 +5071,7 @@ styleElement.textContent = `
       align-self: stretch;
     }
 
-    .manage-preview-content[data-kind="markdown"] .manage-preview-header {
+    .manage-preview-content[data-compact-header="true"] .manage-preview-header {
       align-items: center;
       flex-direction: row;
       gap: 8px;
@@ -4438,7 +5079,7 @@ styleElement.textContent = `
       padding: 0 10px 0 14px;
     }
 
-    .manage-preview-content[data-kind="markdown"] .manage-preview-meta {
+    .manage-preview-content[data-compact-header="true"] .manage-preview-meta {
       align-self: auto;
     }
 
@@ -4448,17 +5089,6 @@ styleElement.textContent = `
 
     .manage-markdown-review {
       grid-template-columns: minmax(0, 1fr);
-      position: relative;
-    }
-
-    .manage-markdown-annotation-rail {
-      bottom: 12px;
-      box-shadow: 0 18px 52px rgba(0, 0, 0, 0.34);
-      position: absolute;
-      right: 12px;
-      top: 54px;
-      width: min(288px, calc(100% - 24px));
-      z-index: 3;
     }
   }
 

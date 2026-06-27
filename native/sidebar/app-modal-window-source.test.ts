@@ -17,6 +17,11 @@ const remoteGxserverLinuxPackageScriptSource = readFileSync(
   new URL("../../gxserver-rs/package-remote-linux.mjs", import.meta.url),
   "utf8",
 );
+const gpuiMainSource = readFileSync(new URL("../../gpui/src/main.rs", import.meta.url), "utf8");
+const gpuiCefMacosSource = readFileSync(
+  new URL("../../gpui/src/cef/macos.rs", import.meta.url),
+  "utf8",
+);
 const modalStylesSource = readFileSync(
   new URL("../../sidebar/styles/modals.css", import.meta.url),
   "utf8",
@@ -594,6 +599,9 @@ describe("native app modal window source", () => {
 
     CDXC:SettingsModalDiagnostics 2026-06-20-06:03:
     Diagnostics must cover native WebView load, host-ready dispatch, React open handling, React renderability, presented dispatch, and final AppKit visibility so blank Settings reports can be placed on one lifecycle timeline.
+
+    CDXC:GPUISettingsModalDiagnostics 2026-06-27-20:31:
+    GPUI Settings blank-window recovery must add CEF lifecycle diagnostics and one ready-timeout recreate while keeping the persistent app-modal log writer sanitized to fixed booleans, numbers, and enums.
     */
     const settingsWindowLogger = sourceBetween(
       appDelegateSource,
@@ -685,6 +693,67 @@ describe("native app modal window source", () => {
       "[activeModal, activeModalRequestId, floatingPromptEditor?.requestId, isActiveModalRenderable]",
     );
     expect(reactPresentedEffect).not.toContain("revision,\n");
+
+    const gpuiReadyTimeout = sourceBetween(
+      gpuiMainSource,
+      "fn schedule_gpui_app_modal_ready_timeout(",
+      "fn clear_lost_gpui_app_modal_window_handle",
+    );
+    expect(gpuiMainSource).toContain("const APP_MODAL_HOST_READY_TIMEOUT: Duration = Duration::from_secs(3);");
+    expect(gpuiReadyTimeout).toContain("window.ready.timeout");
+    expect(gpuiReadyTimeout).toContain("window.ready.timeout.retry");
+    expect(gpuiReadyTimeout).toContain("window.ready.timeout.final");
+    expect(gpuiReadyTimeout).toContain("self.open_gpui_app_modal_window_inner(");
+    expect(gpuiReadyTimeout).toContain("self.remove_gpui_app_modal_window_without_focus_restore(cx);");
+    expect(gpuiReadyTimeout).not.toContain("projectName");
+    expect(gpuiReadyTimeout).not.toContain("projectPath");
+    expect(gpuiReadyTimeout).not.toContain("initialSearchQuery");
+    expect(gpuiReadyTimeout).not.toContain("settings:");
+
+    const gpuiLifecycleReceiver = sourceBetween(
+      gpuiMainSource,
+      "fn receive_app_modal_host_bridge_event(",
+      "fn finish_gpui_remote_machine_password_save",
+    );
+    expect(gpuiLifecycleReceiver).toContain("cef::AppModalHostBridgeEvent::Lifecycle(event)");
+    expect(gpuiLifecycleReceiver).toContain("event.kind.log_event_name()");
+    expect(gpuiLifecycleReceiver).toContain("isMainFrame");
+    expect(gpuiLifecycleReceiver).toContain("httpStatusCode");
+    expect(gpuiLifecycleReceiver).toContain("errorCode");
+    expect(gpuiLifecycleReceiver).not.toContain("frame_url");
+    expect(gpuiLifecycleReceiver).not.toContain("pageTitle");
+    expect(gpuiLifecycleReceiver).not.toContain("projectPath");
+
+    const gpuiLogBoolKeys = sourceBetween(
+      gpuiMainSource,
+      "const GPUI_APP_MODAL_DEBUG_BOOL_KEYS",
+      "const GPUI_APP_MODAL_DEBUG_NUMBER_KEYS",
+    );
+    const gpuiLogNumberKeys = sourceBetween(
+      gpuiMainSource,
+      "const GPUI_APP_MODAL_DEBUG_NUMBER_KEYS",
+      "const GPUI_APP_MODAL_DEBUG_ENUM_KEYS",
+    );
+    expect(gpuiLogBoolKeys).toContain('"isMainFrame"');
+    expect(gpuiLogBoolKeys).toContain('"retryUsed"');
+    expect(gpuiLogNumberKeys).toContain('"httpStatusCode"');
+    expect(gpuiLogNumberKeys).toContain('"errorCode"');
+    expect(gpuiLogBoolKeys).not.toContain("url");
+    expect(gpuiLogBoolKeys).not.toContain("path");
+    expect(gpuiLogNumberKeys).not.toContain("url");
+    expect(gpuiLogNumberKeys).not.toContain("path");
+
+    expect(gpuiCefMacosSource).toContain("pub enum AppModalHostBridgeSurface");
+    expect(gpuiCefMacosSource).toContain("APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY");
+    expect(gpuiCefMacosSource).toContain("APP_MODAL_HOST_LIFECYCLE_PROCESS_MESSAGE_NAME");
+    expect(gpuiCefMacosSource).toContain("GhostexGpuiAppModalHostLoadHandler");
+    expect(gpuiCefMacosSource).toContain("fn on_load_start(");
+    expect(gpuiCefMacosSource).toContain("fn on_load_end(");
+    expect(gpuiCefMacosSource).toContain("fn on_load_error(");
+    expect(gpuiCefMacosSource).toContain("AppModalHostLifecycleEventKind::BridgePostMessageCalled");
+    expect(gpuiCefMacosSource).toContain("app_modal_host_bridge_surface_from_extra_info(extra_info)");
+    expect(gpuiCefMacosSource).not.toContain("failed_url.map");
+    expect(gpuiCefMacosSource).not.toContain("error_text.map");
   });
 
   test("keeps remote gxserver install approval state renderable", () => {

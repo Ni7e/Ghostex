@@ -2053,6 +2053,14 @@ html:has(body.app-modal-host-native-window-body) {
   max-width: min(350px, calc(100vw - 32px));
 }
 
+.settings-row-subtitle {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0;
+  max-width: 100%;
+}
+
 .command-config-field {
   display: grid;
   gap: 6px;

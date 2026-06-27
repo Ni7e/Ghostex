@@ -14,15 +14,20 @@ enum PromptEditorDebugLog {
   private static var didCreateLogsDirectory = false
 
   /**
-   CDXC:PromptEditor 2026-05-19-11:20:
-   Prompt-editor caret and click failures need a dedicated app-storage log file
-   gated by Settings debugging mode. Record Monaco init, native child-window
-   frame state, modal-host visibility, and prewarm timing so repros can be
-   correlated by timestamp without mixing into agent-detection or terminal-focus
-   logs.
+  CDXC:PromptEditor 2026-05-19-11:20:
+  Prompt-editor caret and click failures need a dedicated app-storage log file
+  gated by the native.prompt.editor scenario. Record Monaco init, native child-window
+  frame state, modal-host visibility, and prewarm timing so repros can be
+  correlated by timestamp without mixing into agent-detection or terminal-focus
+  logs.
+
+  CDXC:DiagnosticsSettings 2026-06-27-22:07:
+  Prompt-editor routine breadcrumbs now require the native.prompt.editor
+  scenario instead of broad Debugging Mode, while the writer still sanitizes
+  payloads at the file boundary.
    */
   static func append(event: String, details: [String: Any] = [:]) {
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativePromptEditor) else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory

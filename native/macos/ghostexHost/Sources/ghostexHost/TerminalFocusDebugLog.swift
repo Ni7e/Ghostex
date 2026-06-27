@@ -50,12 +50,13 @@ enum TerminalFocusDebugLog {
    CDXC:NativeTerminalFocus 2026-05-08-16:41
    Split Ghostty focus debugging must land in a completely separate
    app storage logs file. These native entries record AppKit first-responder
-   state only when debugging mode is enabled, with routine focus/layout/hotkey
-   events suppressed so normal terminal use cannot generate oversized logs.
+   state only when the native.terminal.focus scenario is enabled, with routine
+   focus/layout/hotkey events suppressed so normal terminal use cannot generate
+   oversized logs.
 
    CDXC:StartupPaneDiagnostics 2026-05-16-09:14:
    Startup pane-layout diagnostics must be available even when a restart-time
-   tab/split restore bug happens before Debugging Mode is enabled. Use the
+   tab/split restore bug happens before the native.terminal.focus scenario is enabled. Use the
    nativePaneLayoutStartup prefix for those one-shot breadcrumbs while keeping
    the existing forced-repro and Settings-controlled logging paths intact.
    */
@@ -70,8 +71,8 @@ enum TerminalFocusDebugLog {
      CDXC:Diagnostics 2026-06-06-07:09:
      Forced native diagnostics are still regular logging unless the event is
      warning/error/failure-like. Do not write routine forced/startup entries
-     when Debugging Mode is off, so normal app use only persists warnings,
-     errors, exceptions, and crashes.
+     when the terminal-focus scenario is off, so normal app use only persists
+     warnings, errors, exceptions, and crashes.
 
      CDXC:TerminalImagePaste 2026-06-11-19:12:
      Terminal file/image drag-drop support and its forced normal-mode diagnostic
@@ -80,13 +81,16 @@ enum TerminalFocusDebugLog {
 
      CDXC:Diagnostics 2026-06-15-18:39:
      Normal app use must not persist stale repro breadcrumbs such as hotkey
-     navigation traces or routine missing-session focus probes. Debugging Mode
-     can still write targeted forced traces, but Debugging Mode off writes only
-     warning/error/failure-class events.
+     navigation traces or routine missing-session focus probes. The
+     native.terminal.focus scenario can still write targeted forced traces, but
+     scenario-off normal mode writes only warning/error/failure-class events.
      */
     let isStartupPaneLayoutEvent = event.hasPrefix("nativePaneLayoutStartup.")
     let isImportantDiagnostic = isNativePersistentLogImportantDiagnostic(event)
-    guard isImportantDiagnostic || (NativeDebugLogging.isEnabled && (force || isStartupPaneLayoutEvent || !noisyEvents.contains(event))) else {
+    guard isImportantDiagnostic ||
+      (NativeDiagnosticLogging.isScenarioEnabled(.nativeTerminalFocus) &&
+        (force || isStartupPaneLayoutEvent || !noisyEvents.contains(event)))
+    else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory
@@ -96,7 +100,7 @@ enum TerminalFocusDebugLog {
     payload["event"] = event
     /*
      CDXC:NativeTerminalFocus 2026-06-16-12:22:
-     Debugging Mode can stay on during normal terminal work, so keydown, text-input, activation-boundary, and zmx viewport probes must not write one support-bundle line per user input. Sample those high-volume events at the writer boundary and carry a suppressed count on the next emitted line so support still sees burst size without megabyte-scale logs.
+     The native.terminal.focus scenario can stay on during normal terminal work, so keydown, text-input, activation-boundary, and zmx viewport probes must not write one support-bundle line per user input. Sample those high-volume events at the writer boundary and carry a suppressed count on the next emitted line so support still sees burst size without megabyte-scale logs.
      */
     if !isImportantDiagnostic,
       !shouldWriteSampledLogEvent(

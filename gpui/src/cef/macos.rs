@@ -2,9 +2,9 @@ use anyhow::{Context as _, Result};
 use cef::rc::Rc as _;
 use cef::{
     App, BrowserProcessHandler, BrowserSettings, CefString, Client, CommandLine, DictionaryValue,
-    DisplayHandler, Frame, ImplApp, ImplBrowser as _, ImplBrowserHost as _,
-    ImplBrowserProcessHandler, ImplClient, ImplCommandLine as _, ImplDisplayHandler,
-    ImplFrame as _, ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler,
+    DisplayHandler, Errorcode, Frame, ImplApp, ImplBrowser as _, ImplBrowserHost as _,
+    ImplBrowserProcessHandler, ImplClient, ImplCommandLine as _, ImplDictionaryValue as _,
+    ImplDisplayHandler, ImplFrame as _, ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler,
     ImplProcessMessage as _, ImplRenderProcessHandler, ImplV8Context as _, ImplV8Handler,
     ImplV8Value as _, LifeSpanHandler, LoadHandler, PopupFeatures, ProcessId, ProcessMessage,
     RenderProcessHandler, V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo,
@@ -136,6 +136,11 @@ const PROJECT_WORKAREA_PROJECT_BOARD_IMAGE_REQUEST_JS_FUNCTION: &str =
     "postProjectBoardImageRequest";
 const PROJECT_WORKAREA_MANAGE_FILES_REQUEST_JS_FUNCTION: &str = "postManageFilesRequest";
 const APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.appModalHost.message";
+const APP_MODAL_HOST_LIFECYCLE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.appModalHost.lifecycle";
+const APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY: &str = "ghostexGpuiAppModalHostSurface";
+const APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW: &str = "nativeWindow";
+const APP_MODAL_HOST_BRIDGE_SURFACE_SIDEBAR: &str = "sidebar";
+const APP_MODAL_HOST_BRIDGE_SURFACE_TITLEBAR: &str = "titlebar";
 const APP_MODAL_HOST_SURFACE_JS_FIELD: &str = "__ghostex_APP_MODAL_HOST_SURFACE__";
 const APP_MODAL_HOST_ID_JS_FIELD: &str = "__ghostex_APP_MODAL_HOST_ID__";
 const APP_MODAL_HOST_SURFACE_VALUE: &str = "nativeWindow";
@@ -161,6 +166,13 @@ const SIDEBAR_GXSERVER_BOOTSTRAP_ARGUMENT_COUNT_WITHOUT_VISIBLE_IDS: usize = 8;
 const SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS: usize = 32 * 1024;
 const PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS: usize = 3 * 1024 * 1024;
 const APP_MODAL_HOST_BRIDGE_PAYLOAD_MAX_CHARS: usize = 1024 * 1024;
+const APP_MODAL_HOST_LIFECYCLE_ARGUMENT_COUNT: usize = 5;
+const APP_MODAL_HOST_LIFECYCLE_KIND_ARGUMENT_INDEX: usize = 0;
+const APP_MODAL_HOST_LIFECYCLE_SURFACE_ARGUMENT_INDEX: usize = 1;
+const APP_MODAL_HOST_LIFECYCLE_IS_MAIN_FRAME_ARGUMENT_INDEX: usize = 2;
+const APP_MODAL_HOST_LIFECYCLE_HTTP_STATUS_ARGUMENT_INDEX: usize = 3;
+const APP_MODAL_HOST_LIFECYCLE_ERROR_CODE_ARGUMENT_INDEX: usize = 4;
+const APP_MODAL_HOST_LIFECYCLE_NO_NUMBER: c_int = -1;
 const BROWSER_APP_OWNED_SCRIPT_URL: &str = "ghostex://gpui/browser-feedback";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -317,6 +329,91 @@ const PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS: [ProjectWorkareaBridgeFunctionSpec
     },
 ];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppModalHostBridgeSurface {
+    NativeWindow,
+    Sidebar,
+    Titlebar,
+}
+
+impl AppModalHostBridgeSurface {
+    fn extra_info_value(self) -> &'static str {
+        match self {
+            Self::NativeWindow => APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW,
+            Self::Sidebar => APP_MODAL_HOST_BRIDGE_SURFACE_SIDEBAR,
+            Self::Titlebar => APP_MODAL_HOST_BRIDGE_SURFACE_TITLEBAR,
+        }
+    }
+
+    pub fn log_value(self) -> &'static str {
+        self.extra_info_value()
+    }
+
+    fn from_extra_info_value(value: &str) -> Option<Self> {
+        match value {
+            APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW => Some(Self::NativeWindow),
+            APP_MODAL_HOST_BRIDGE_SURFACE_SIDEBAR => Some(Self::Sidebar),
+            APP_MODAL_HOST_BRIDGE_SURFACE_TITLEBAR => Some(Self::Titlebar),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppModalHostLifecycleEventKind {
+    LoadStart,
+    LoadEnd,
+    LoadError,
+    ContextCreated,
+    BridgeInstalled,
+    BridgePostMessageCalled,
+}
+
+impl AppModalHostLifecycleEventKind {
+    fn message_value(self) -> &'static str {
+        match self {
+            Self::LoadStart => "loadStart",
+            Self::LoadEnd => "loadEnd",
+            Self::LoadError => "loadError",
+            Self::ContextCreated => "contextCreated",
+            Self::BridgeInstalled => "bridgeInstalled",
+            Self::BridgePostMessageCalled => "bridgePostMessageCalled",
+        }
+    }
+
+    pub fn log_event_name(self) -> &'static str {
+        match self {
+            Self::LoadStart => "cef.load.start",
+            Self::LoadEnd => "cef.load.end",
+            Self::LoadError => "cef.load.error",
+            Self::ContextCreated => "cef.context.created",
+            Self::BridgeInstalled => "cef.bridge.installed",
+            Self::BridgePostMessageCalled => "cef.bridge.postMessage.called",
+        }
+    }
+
+    fn from_message_value(value: &str) -> Option<Self> {
+        match value {
+            "loadStart" => Some(Self::LoadStart),
+            "loadEnd" => Some(Self::LoadEnd),
+            "loadError" => Some(Self::LoadError),
+            "contextCreated" => Some(Self::ContextCreated),
+            "bridgeInstalled" => Some(Self::BridgeInstalled),
+            "bridgePostMessageCalled" => Some(Self::BridgePostMessageCalled),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppModalHostLifecycleEvent {
+    pub kind: AppModalHostLifecycleEventKind,
+    pub surface: Option<AppModalHostBridgeSurface>,
+    pub is_main_frame: bool,
+    pub http_status_code: Option<c_int>,
+    pub error_code: Option<c_int>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BrowserPopupDispatchPolicy {
     DispatchShellOpen,
@@ -369,10 +466,83 @@ fn is_gpui_sidebar_frame_url(url: &str) -> bool {
     is_gpui_first_party_cef_entry_url(url, "index.html")
 }
 
+fn app_modal_host_bridge_surface_for_frame_url(url: &str) -> Option<AppModalHostBridgeSurface> {
+    if is_app_modal_host_frame_url(url) {
+        Some(AppModalHostBridgeSurface::NativeWindow)
+    } else if is_gpui_titlebar_host_frame_url(url) {
+        Some(AppModalHostBridgeSurface::Titlebar)
+    } else if is_gpui_sidebar_frame_url(url) {
+        Some(AppModalHostBridgeSurface::Sidebar)
+    } else {
+        None
+    }
+}
+
+fn app_modal_host_bridge_extra_info(surface: AppModalHostBridgeSurface) -> Option<DictionaryValue> {
+    let dictionary = cef::dictionary_value_create()?;
+    let key = CefString::from(APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY);
+    let value = CefString::from(surface.extra_info_value());
+    if dictionary.set_string(Some(&key), Some(&value)) == 0 {
+        return None;
+    }
+    Some(dictionary)
+}
+
+fn app_modal_host_bridge_surface_from_extra_info(
+    extra_info: Option<&mut DictionaryValue>,
+) -> Option<AppModalHostBridgeSurface> {
+    let extra_info = extra_info?;
+    let key = CefString::from(APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY);
+    if extra_info.get_type(Some(&key)) != ValueType::STRING {
+        return None;
+    }
+    let surface = CefString::from(&extra_info.string(Some(&key))).to_string();
+    AppModalHostBridgeSurface::from_extra_info_value(surface.as_str())
+}
+
+fn remember_app_modal_host_bridge_surface_for_browser(
+    browser: Option<&mut cef::Browser>,
+    surface: AppModalHostBridgeSurface,
+) {
+    let Some(browser) = browser else {
+        return;
+    };
+    APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID.with(|surfaces| {
+        surfaces.borrow_mut().insert(browser.identifier(), surface);
+    });
+}
+
+fn forget_app_modal_host_bridge_surface_for_browser(browser: Option<&mut cef::Browser>) {
+    let Some(browser) = browser else {
+        return;
+    };
+    APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID.with(|surfaces| {
+        surfaces.borrow_mut().remove(&browser.identifier());
+    });
+}
+
+fn app_modal_host_bridge_surface_for_browser_id(
+    browser_id: c_int,
+) -> Option<AppModalHostBridgeSurface> {
+    APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID
+        .with(|surfaces| surfaces.borrow().get(&browser_id).copied())
+}
+
+fn app_modal_host_bridge_surface_for_frame(frame: &Frame) -> Option<AppModalHostBridgeSurface> {
+    frame
+        .browser()
+        .and_then(|browser| app_modal_host_bridge_surface_for_browser_id(browser.identifier()))
+        .or_else(|| {
+            let frame_url = CefString::from(&frame.url()).to_string();
+            app_modal_host_bridge_surface_for_frame_url(&frame_url)
+        })
+}
+
 thread_local! {
     static CEF_BROWSERS_BY_NATIVE_VIEW: RefCell<HashMap<usize, cef::Browser>> = RefCell::new(HashMap::new());
     static CEF_REQUEST_CONTEXTS_BY_PROFILE: RefCell<HashMap<String, cef::RequestContext>> = RefCell::new(HashMap::new());
     static ACTIVE_CEF_NATIVE_VIEW: Cell<Option<usize>> = const { Cell::new(None) };
+    static APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID: RefCell<HashMap<c_int, AppModalHostBridgeSurface>> = RefCell::new(HashMap::new());
 }
 
 pub fn prepare_application() {
@@ -425,6 +595,7 @@ pub type ProjectWorkareaBridgeEventHandler = StdRc<dyn Fn(ProjectWorkareaBridgeE
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AppModalHostBridgeEvent {
     Message(String),
+    Lifecycle(AppModalHostLifecycleEvent),
 }
 
 pub type AppModalHostBridgeEventHandler = StdRc<dyn Fn(AppModalHostBridgeEvent)>;
@@ -730,13 +901,30 @@ wrap_client! {
                 project_workarea_bridge_event_kind_for_process_message(&message_name);
             let is_app_modal_host_message =
                 message_name == APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME;
+            let is_app_modal_host_lifecycle_message =
+                message_name == APP_MODAL_HOST_LIFECYCLE_PROCESS_MESSAGE_NAME;
             if sidebar_event_kind.is_none()
                 && project_workarea_event_kind.is_none()
                 && !is_app_modal_host_message
+                && !is_app_modal_host_lifecycle_message
             {
                 return 0;
             }
             if frame.map(|frame| frame.is_main() == 0).unwrap_or(true) {
+                return 1;
+            }
+
+            if is_app_modal_host_lifecycle_message {
+                let Some(handler) = self.app_modal_host_bridge_event_handler.clone() else {
+                    return 0;
+                };
+                /*
+                CDXC:GPUIAppModalDiagnostics 2026-06-27-20:31:
+                Blank GPUI app-modal windows need first-party CEF lifecycle breadcrumbs before the React modal host can post `ready`. Forward only fixed enum-like lifecycle fields from tagged sidebar/titlebar/native modal surfaces; do not forward or log renderer URLs, titles, page text, command content, file paths, or generic IPC names.
+                */
+                if let Some(event) = app_modal_host_lifecycle_event_from_process_message(message) {
+                    handler(AppModalHostBridgeEvent::Lifecycle(event));
+                }
                 return 1;
             }
 
@@ -866,13 +1054,102 @@ wrap_load_handler! {
     }
 }
 
+wrap_load_handler! {
+    struct GhostexGpuiAppModalHostLoadHandler {
+        surface: AppModalHostBridgeSurface,
+    }
+
+    impl LoadHandler {
+        fn on_load_start(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            frame: Option<&mut Frame>,
+            _transition_type: cef::TransitionType,
+        ) {
+            let Some(frame) = frame else {
+                return;
+            };
+            /*
+            CDXC:GPUIAppModalDiagnostics 2026-06-27-20:31:
+            The native Settings/Hotkeys app-modal host must expose whether CEF reached the first-party modal page before React posts `ready`. Emit only lifecycle enum/state fields from the tagged surface so support logs can diagnose blank windows without raw URL, path, title, text, or command data.
+            */
+            let is_main_frame = frame.is_main() != 0;
+            let _ = send_app_modal_host_lifecycle_process_message(
+                frame,
+                AppModalHostLifecycleEventKind::LoadStart,
+                Some(self.surface),
+                is_main_frame,
+                None,
+                None,
+            );
+        }
+
+        fn on_load_end(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            frame: Option<&mut Frame>,
+            http_status_code: c_int,
+        ) {
+            let Some(frame) = frame else {
+                return;
+            };
+            let is_main_frame = frame.is_main() != 0;
+            let _ = send_app_modal_host_lifecycle_process_message(
+                frame,
+                AppModalHostLifecycleEventKind::LoadEnd,
+                Some(self.surface),
+                is_main_frame,
+                Some(http_status_code),
+                None,
+            );
+        }
+
+        fn on_load_error(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            frame: Option<&mut Frame>,
+            _error_code: Errorcode,
+            _error_text: Option<&CefString>,
+            _failed_url: Option<&CefString>,
+        ) {
+            let Some(frame) = frame else {
+                return;
+            };
+            let is_main_frame = frame.is_main() != 0;
+            let _ = send_app_modal_host_lifecycle_process_message(
+                frame,
+                AppModalHostLifecycleEventKind::LoadError,
+                Some(self.surface),
+                is_main_frame,
+                None,
+                None,
+            );
+        }
+    }
+}
+
 wrap_render_process_handler! {
     struct GhostexGpuiRenderProcessHandler;
 
     impl RenderProcessHandler {
+        fn on_browser_created(
+            &self,
+            browser: Option<&mut cef::Browser>,
+            extra_info: Option<&mut DictionaryValue>,
+        ) {
+            let Some(surface) = app_modal_host_bridge_surface_from_extra_info(extra_info) else {
+                return;
+            };
+            remember_app_modal_host_bridge_surface_for_browser(browser, surface);
+        }
+
+        fn on_browser_destroyed(&self, browser: Option<&mut cef::Browser>) {
+            forget_app_modal_host_bridge_surface_for_browser(browser);
+        }
+
         fn on_context_created(
             &self,
-            _browser: Option<&mut cef::Browser>,
+            browser: Option<&mut cef::Browser>,
             frame: Option<&mut Frame>,
             context: Option<&mut cef::V8Context>,
         ) {
@@ -883,17 +1160,43 @@ wrap_render_process_handler! {
                 return;
             }
             let frame_url = CefString::from(&frame.url()).to_string();
-            let is_modal_host = is_app_modal_host_frame_url(&frame_url);
-            let is_titlebar_host = is_gpui_titlebar_host_frame_url(&frame_url);
-            let is_sidebar = is_gpui_sidebar_frame_url(&frame_url);
-            if !is_modal_host && !is_titlebar_host && !is_sidebar {
+            let browser_surface = browser
+                .as_ref()
+                .and_then(|browser| app_modal_host_bridge_surface_for_browser_id(browser.identifier()));
+            let surface = browser_surface
+                .or_else(|| app_modal_host_bridge_surface_for_frame_url(&frame_url));
+            let Some(surface) = surface else {
                 return;
-            }
+            };
+            let expose_native_window_identity =
+                surface == AppModalHostBridgeSurface::NativeWindow;
+            let Some(context) = context else {
+                return;
+            };
             /*
             CDXC:GPUITitlebarAppModalHost 2026-06-24-11:09:
             Install the CEF-compatible `window.webkit.messageHandlers.ghostexAppModalHost` shim at V8 context creation for only bundled modal-host.html, titlebar-host.html, and sidebar index.html entries. The shared React modal host posts `ready` during mount, the titlebar Tips panel posts sidebarCommand header actions, and the shared sidebar can emit Settings/Hotkeys/Command Palette opens after hydration, so waiting for load-end would race real presentation. Only modal-host.html receives the native-window identity fields; Browser tabs, project workareas, arbitrary pages, raw URLs, titles, logs, persistence, and generic IPC do not receive this bridge.
+
+            CDXC:GPUIAppModalDiagnostics 2026-06-27-20:31:
+            CEF bridge installation must prefer the app-owned surface role passed through `extra_info`, with URL matching only as compatibility for packaged first-party entries. This prevents blank modal debugging from widening bridge access to arbitrary Browser/workarea content while still logging fixed lifecycle state before React posts `ready`.
             */
-            install_app_modal_host_v8_bridge(context, is_modal_host);
+            let _ = send_app_modal_host_lifecycle_process_message(
+                frame,
+                AppModalHostLifecycleEventKind::ContextCreated,
+                Some(surface),
+                true,
+                None,
+                None,
+            );
+            install_app_modal_host_v8_bridge(Some(context), expose_native_window_identity);
+            let _ = send_app_modal_host_lifecycle_process_message(
+                frame,
+                AppModalHostLifecycleEventKind::BridgeInstalled,
+                Some(surface),
+                true,
+                None,
+                None,
+            );
         }
 
         fn on_process_message_received(
@@ -1020,6 +1323,9 @@ wrap_v8_handler! {
             if name.as_deref() != Some(WEBKIT_POST_MESSAGE_JS_FUNCTION) {
                 return 0;
             }
+            let _ = send_app_modal_host_lifecycle_process_message_from_current_context(
+                AppModalHostLifecycleEventKind::BridgePostMessageCalled,
+            );
 
             let payload = arguments
                 .and_then(|arguments| arguments.first())
@@ -1937,6 +2243,101 @@ fn send_app_modal_host_bridge_process_message(payload: &str) -> bool {
     true
 }
 
+fn send_app_modal_host_lifecycle_process_message(
+    frame: &Frame,
+    kind: AppModalHostLifecycleEventKind,
+    surface: Option<AppModalHostBridgeSurface>,
+    is_main_frame: bool,
+    http_status_code: Option<c_int>,
+    error_code: Option<c_int>,
+) -> bool {
+    let mut message = match cef::process_message_create(Some(&CefString::from(
+        APP_MODAL_HOST_LIFECYCLE_PROCESS_MESSAGE_NAME,
+    ))) {
+        Some(message) => message,
+        None => return false,
+    };
+    let Some(arguments) = message.argument_list() else {
+        return false;
+    };
+    arguments.set_size(APP_MODAL_HOST_LIFECYCLE_ARGUMENT_COUNT);
+    arguments.set_string(
+        APP_MODAL_HOST_LIFECYCLE_KIND_ARGUMENT_INDEX,
+        Some(&CefString::from(kind.message_value())),
+    );
+    arguments.set_string(
+        APP_MODAL_HOST_LIFECYCLE_SURFACE_ARGUMENT_INDEX,
+        Some(&CefString::from(
+            surface
+                .map(AppModalHostBridgeSurface::extra_info_value)
+                .unwrap_or(""),
+        )),
+    );
+    arguments.set_bool(
+        APP_MODAL_HOST_LIFECYCLE_IS_MAIN_FRAME_ARGUMENT_INDEX,
+        bool_to_cef_int(is_main_frame),
+    );
+    arguments.set_int(
+        APP_MODAL_HOST_LIFECYCLE_HTTP_STATUS_ARGUMENT_INDEX,
+        http_status_code.unwrap_or(APP_MODAL_HOST_LIFECYCLE_NO_NUMBER),
+    );
+    arguments.set_int(
+        APP_MODAL_HOST_LIFECYCLE_ERROR_CODE_ARGUMENT_INDEX,
+        error_code.unwrap_or(APP_MODAL_HOST_LIFECYCLE_NO_NUMBER),
+    );
+    frame.send_process_message(ProcessId::BROWSER, Some(&mut message));
+    true
+}
+
+fn send_app_modal_host_lifecycle_process_message_from_current_context(
+    kind: AppModalHostLifecycleEventKind,
+) -> bool {
+    let Some(context) = cef::v8_context_get_current_context() else {
+        return false;
+    };
+    let Some(frame) = context.frame() else {
+        return false;
+    };
+    let surface = app_modal_host_bridge_surface_for_frame(&frame);
+    send_app_modal_host_lifecycle_process_message(
+        &frame,
+        kind,
+        surface,
+        frame.is_main() != 0,
+        None,
+        None,
+    )
+}
+
+fn app_modal_host_lifecycle_event_from_process_message(
+    message: &ProcessMessage,
+) -> Option<AppModalHostLifecycleEvent> {
+    let arguments = message.argument_list()?;
+    if arguments.size() != APP_MODAL_HOST_LIFECYCLE_ARGUMENT_COUNT {
+        return None;
+    }
+    if arguments.get_type(APP_MODAL_HOST_LIFECYCLE_KIND_ARGUMENT_INDEX) != ValueType::STRING
+        || arguments.get_type(APP_MODAL_HOST_LIFECYCLE_SURFACE_ARGUMENT_INDEX) != ValueType::STRING
+    {
+        return None;
+    }
+    let kind = CefString::from(&arguments.string(APP_MODAL_HOST_LIFECYCLE_KIND_ARGUMENT_INDEX))
+        .to_string();
+    let surface =
+        CefString::from(&arguments.string(APP_MODAL_HOST_LIFECYCLE_SURFACE_ARGUMENT_INDEX))
+            .to_string();
+    let http_status_code = arguments.int(APP_MODAL_HOST_LIFECYCLE_HTTP_STATUS_ARGUMENT_INDEX);
+    let error_code = arguments.int(APP_MODAL_HOST_LIFECYCLE_ERROR_CODE_ARGUMENT_INDEX);
+    Some(AppModalHostLifecycleEvent {
+        kind: AppModalHostLifecycleEventKind::from_message_value(kind.as_str())?,
+        surface: AppModalHostBridgeSurface::from_extra_info_value(surface.as_str()),
+        is_main_frame: arguments.bool(APP_MODAL_HOST_LIFECYCLE_IS_MAIN_FRAME_ARGUMENT_INDEX) != 0,
+        http_status_code: (http_status_code != APP_MODAL_HOST_LIFECYCLE_NO_NUMBER)
+            .then_some(http_status_code),
+        error_code: (error_code != APP_MODAL_HOST_LIFECYCLE_NO_NUMBER).then_some(error_code),
+    })
+}
+
 fn set_v8_bool_return(retval: Option<&mut Option<V8Value>>, value: bool) {
     if let Some(retval) = retval {
         *retval = cef::v8_value_create_bool(if value { 1 } else { 0 });
@@ -2078,6 +2479,7 @@ impl CefBrowser {
         sidebar_gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
         sidebar_bridge_event_handler: Option<SidebarBridgeEventHandler>,
         project_workarea_bridge_event_handler: Option<ProjectWorkareaBridgeEventHandler>,
+        app_modal_host_bridge_surface: Option<AppModalHostBridgeSurface>,
         app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
     ) -> Self {
         let initial_bounds = cef::Rect {
@@ -2098,6 +2500,8 @@ impl CefBrowser {
                 ))
             } else if project_workarea_bridge_event_handler.is_some() {
                 Some(GhostexGpuiProjectWorkareaBridgeLoadHandler::new())
+            } else if let Some(surface) = app_modal_host_bridge_surface {
+                Some(GhostexGpuiAppModalHostLoadHandler::new(surface))
             } else {
                 None
             };
@@ -2105,6 +2509,7 @@ impl CefBrowser {
             || page_metadata_handler.is_some()
             || sidebar_bridge_event_handler.is_some()
             || project_workarea_bridge_event_handler.is_some()
+            || app_modal_host_bridge_surface.is_some()
             || app_modal_host_bridge_event_handler.is_some()
         {
             Some(GhostexGpuiCefClient::new(
@@ -2118,6 +2523,8 @@ impl CefBrowser {
         } else {
             None
         };
+        let mut app_modal_host_bridge_extra_info =
+            app_modal_host_bridge_surface.and_then(app_modal_host_bridge_extra_info);
         let mut request_context = cef_request_context_for_profile(profile)
             .expect("failed to create GPUI CEF request context");
         let browser = cef::browser_host_create_browser_sync(
@@ -2125,7 +2532,7 @@ impl CefBrowser {
             client.as_mut(),
             Some(&url),
             Some(&browser_settings),
-            None,
+            app_modal_host_bridge_extra_info.as_mut(),
             Some(&mut request_context),
         )
         .expect("failed to create cef-rs child browser");

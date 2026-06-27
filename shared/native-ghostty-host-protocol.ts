@@ -191,6 +191,27 @@ export type NativeGhosttyHostCommand =
       type: "focusTerminal";
     }
   | {
+      /*
+       * CDXC:SidebarSessionFocus 2026-06-27-22:54:
+       * Mounted terminal sidebar switches use one bridge command so native
+       * selected-tab ownership and AppKit focus cannot repaint in separate
+       * phases.
+       */
+      sessionId: string;
+      type: "focusMountedTerminalSession";
+    }
+  | {
+      /*
+       * CDXC:SidebarSessionFocus 2026-06-27-22:54:
+       * This owner-only bridge command remains for compatibility and targeted
+       * diagnostics. Normal mounted sidebar switching uses
+       * focusMountedTerminalSession so owner selection and focus repaint happen
+       * together.
+       */
+      sessionId: string;
+      type: "setFocusedTerminalOwner";
+    }
+  | {
       sessionId: string;
       type: "focusWebPane";
     }
@@ -367,6 +388,7 @@ export type NativeGhosttyHostCommand =
       attentionSessionIds?: string[];
       backgroundColor?: string;
       debuggingMode?: boolean;
+      diagnosticLoggingJson?: string;
       /**
        * CDXC:BetaFeatures 2026-06-16-13:08:
        * Native AppKit browser chrome is outside the React settings tree. Carry

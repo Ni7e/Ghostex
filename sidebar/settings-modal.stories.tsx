@@ -96,6 +96,7 @@ function SettingsModalStory({
     gxBlockedByExistingCommand: false,
     gxUsable: false,
     installed: true,
+    moveCodexSessionSkillInstalled: false,
     type: "ghostexCliStatus",
   });
 

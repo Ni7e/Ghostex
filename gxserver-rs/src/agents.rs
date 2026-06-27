@@ -347,10 +347,7 @@ pub(crate) fn create_agent_session_params_for_project(
         .get("command")
         .and_then(Value::as_str)
         .is_some_and(|value| !value.trim().is_empty());
-    if params
-        .get("requireLaunchCommand")
-        .and_then(Value::as_bool)
-        == Some(true)
+    if params.get("requireLaunchCommand").and_then(Value::as_bool) == Some(true)
         && !has_launch_command
     {
         /*
@@ -452,7 +449,9 @@ pub(crate) fn create_agent_session_params_for_project(
 
 fn create_agent_session_default_title(agent_name: Option<&str>, agent_id: Option<&str>) -> String {
     let title_name = normalize_agent_session_title_name(agent_name)
-        .or_else(|| default_agent_session_title_name(agent_id.unwrap_or_default()).map(str::to_string))
+        .or_else(|| {
+            default_agent_session_title_name(agent_id.unwrap_or_default()).map(str::to_string)
+        })
         .or_else(|| normalize_agent_session_title_name(agent_id));
     title_name
         .map(|name| format!("{name} Session"))

@@ -244,9 +244,7 @@ fn project_presentation_git_config(project: &Value) -> Option<Value> {
     if let Some(confirm_commit) = source.get("confirmCommit").and_then(Value::as_bool) {
         output.insert("confirmCommit".to_string(), Value::Bool(confirm_commit));
     }
-    if let Some(generate_commit_body) =
-        source.get("generateCommitBody").and_then(Value::as_bool)
-    {
+    if let Some(generate_commit_body) = source.get("generateCommitBody").and_then(Value::as_bool) {
         output.insert(
             "generateCommitBody".to_string(),
             Value::Bool(generate_commit_body),

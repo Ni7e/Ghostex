@@ -450,6 +450,11 @@ enum NativeDebugLogging {
    Regular non-error console, OSLog, and persistent diagnostic logging must run
    only while Settings Debugging Mode is enabled. Error logs remain outside this
    gate so actual failures are still captured when the app is not in debug mode.
+
+   CDXC:DiagnosticsSettings 2026-06-27-22:07:
+   Debugging Mode remains a debug-UI and legacy console/OSLog gate. New routine
+   persistent support logs must use NativeDiagnosticLogging scenarios so users
+   can enable one repro area without turning on every noisy file writer.
    */
   static var isEnabled: Bool {
     let now = ProcessInfo.processInfo.systemUptime
@@ -470,5 +475,88 @@ enum NativeDebugLogging {
     cachedIsEnabled = value
     cachedIsEnabledReadAt = now
     return value
+  }
+}
+
+enum NativeDiagnosticLoggingScenario: String {
+  case nativeAgentDetection = "native.agent.detection"
+  case nativeAppModal = "native.app.modal"
+  case nativeBrowserImport = "native.browser.import"
+  case nativeGhosttyConfig = "native.ghostty.config"
+  case nativeHostLifecycle = "native.host.lifecycle"
+  case nativeLayoutLayering = "native.layout.layering"
+  case nativeModeSwitcher = "native.mode.switcher"
+  case nativePaneReorder = "native.pane.reorder"
+  case nativePaneTabs = "native.pane.tabs"
+  case nativeProjectBoard = "native.project.board"
+  case nativePromptEditor = "native.prompt.editor"
+  case nativeSessionTitle = "native.session.title"
+  case nativeSidebarCollapse = "native.sidebar.collapse"
+  case nativeSidebarRefresh = "native.sidebar.refresh"
+  case nativeT3CodePane = "native.t3.codePane"
+  case nativeTerminalFocus = "native.terminal.focus"
+  case nativeWorkspaceDock = "native.workspace.dock"
+  case nativeWorkspaceRestore = "native.workspace.restore"
+}
+
+enum NativeDiagnosticLogging {
+  private static let cacheInterval: TimeInterval = 0.25
+  private static let isoFormatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+  }()
+  private static var cachedSettings: [String: Any]?
+  private static var cachedSettingsReadAt: TimeInterval = 0
+
+  /*
+   CDXC:DiagnosticsSettings 2026-06-27-22:07:
+   Routine native disk logs are controlled by exact diagnostic scenario ids in
+   shared Settings instead of broad Debugging Mode. Keep warnings/errors routed
+   through each writer's important-diagnostic check, but require the matching
+   scenario for debug/info breadcrumbs and honor expiresAt at the native writer
+   boundary so stale UI state cannot keep logs noisy.
+   */
+  static func isScenarioEnabled(_ scenario: NativeDiagnosticLoggingScenario) -> Bool {
+    guard let diagnosticLogging = cachedSettingsObject()["diagnosticLogging"] as? [String: Any],
+      let scenarios = diagnosticLogging["scenarios"] as? [String: Any],
+      let scenarioState = scenarios[scenario.rawValue]
+    else {
+      return false
+    }
+    if let enabled = scenarioState as? Bool {
+      return enabled
+    }
+    guard let state = scenarioState as? [String: Any],
+      state["enabled"] as? Bool == true
+    else {
+      return false
+    }
+    guard let expiresAt = state["expiresAt"] as? String, !expiresAt.isEmpty else {
+      return true
+    }
+    guard let expiryDate = isoFormatter.date(from: expiresAt) else {
+      return false
+    }
+    return expiryDate.timeIntervalSinceNow > 0
+  }
+
+  private static func cachedSettingsObject() -> [String: Any] {
+    let now = ProcessInfo.processInfo.systemUptime
+    if let cachedSettings, now - cachedSettingsReadAt < cacheInterval {
+      return cachedSettings
+    }
+    let settings: [String: Any]
+    if let data = try? Data(contentsOf: GhostexAppStorage.sharedSidebarSettingsURL),
+      let object = try? JSONSerialization.jsonObject(with: data),
+      let dictionary = object as? [String: Any]
+    {
+      settings = dictionary
+    } else {
+      settings = [:]
+    }
+    cachedSettings = settings
+    cachedSettingsReadAt = now
+    return settings
   }
 }

@@ -288,10 +288,8 @@ type GpuiSessionStatusIndicatorProject = {
 type GpuiSessionStatusIndicatorsPayload = {
   attentionCount: number;
   availableCount: number;
-  hideFloatingIndicators: boolean;
   hideMenuBarIndicators: boolean;
   projects: GpuiSessionStatusIndicatorProject[];
-  size: ghostexSettings["sessionStatusIndicatorSize"];
   type: typeof GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE;
   version: typeof GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION;
   workingCount: number;
@@ -614,6 +612,8 @@ const GPUI_GIT_RELEASE_ONLY_PROMPT = `Please release this app using the usual re
 
 ${GPUI_GIT_RELEASE_STEPS_PROMPT}`;
 
+const GPUI_REMOTE_RECENT_PROJECTS_STORAGE_KEY = "ghostex-gpui-remote-recent-projects";
+
 function createEmptyGpuiAppUserData(): GxserverAppUserData {
   return {
     pinnedPrompts: [],
@@ -802,6 +802,7 @@ class GpuiSidebarRuntime {
   start(): void {
     this.installGpuiBridgeCallbacks();
     this.runtimeSettings = currentGpuiRuntimeSettings();
+    this.remoteRecentProjectsByMachineId = readStoredGpuiRemoteRecentProjects();
     window.addEventListener(GPUI_SIDEBAR_REMOTE_EVENT_NAME, this.handleGpuiSidebarRemoteEvent);
     this.publishUnavailable("bootstrap-pending");
     this.tryStartFromInstalledBootstrap(0);
@@ -1376,7 +1377,6 @@ class GpuiSidebarRuntime {
         remoteEvent.state === "installApprovalRequired"
       ) {
         this.remotePresentations.delete(remoteEvent.machineId);
-        this.remoteRecentProjectsByMachineId.delete(remoteEvent.machineId);
         this.dropRemotePresentationSessionFocus(remoteEvent.machineId);
         this.publishRemotePresentationPatch();
       }
@@ -1391,7 +1391,6 @@ class GpuiSidebarRuntime {
     if (remoteEvent.payload.type === "presentationSnapshot") {
       this.remotePresentations.set(remoteEvent.remoteMachineId, remoteEvent.payload.snapshot);
       this.publishRemotePresentationPatch();
-      void this.refreshRemoteRecentProjectsFromGxserver(remoteEvent.remoteMachineId);
       return;
     }
 
@@ -1408,9 +1407,6 @@ class GpuiSidebarRuntime {
       ),
     );
     this.publishRemotePresentationPatch();
-    if (remoteEvent.payload.delta.type === "projectRemoved" || "domainProject" in remoteEvent.payload.delta) {
-      void this.refreshRemoteRecentProjectsFromGxserver(remoteEvent.remoteMachineId);
-    }
   };
 
   private tryStartFromInstalledBootstrap(attempt: number): void {
@@ -1842,6 +1838,7 @@ class GpuiSidebarRuntime {
       domainProjects: this.domainProjects,
       recentProjects: this.recentProjects,
       remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
+      remotePresentationsByMachineId: this.remotePresentations,
       sidebarHud: this.sidebarHud,
     });
 
@@ -1899,6 +1896,7 @@ class GpuiSidebarRuntime {
       domainProjects: this.domainProjects,
       recentProjects: this.recentProjects,
       remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
+      remotePresentationsByMachineId: this.remotePresentations,
       sidebarHud: this.sidebarHud,
     });
     this.messageSource.postMessage(
@@ -1932,6 +1930,7 @@ class GpuiSidebarRuntime {
       domainProjects: this.domainProjects,
       recentProjects: this.recentProjects,
       remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
+      remotePresentationsByMachineId: this.remotePresentations,
       sidebarHud: this.sidebarHud,
     });
     if (!this.hasHydrated) {
@@ -2005,6 +2004,10 @@ class GpuiSidebarRuntime {
           return;
         }
         this.recentProjects = [...recentProjects];
+        if (this.presentation) {
+          this.publishPresentation("patch");
+          return;
+        }
         this.publishHudPatch();
       })
       .catch(() => undefined);
@@ -2034,21 +2037,6 @@ class GpuiSidebarRuntime {
       });
   }
 
-  private async refreshRemoteRecentProjectsFromGxserver(remoteMachineId: string): Promise<void> {
-    try {
-      const response = await this.requestRemoteGxserver<{
-        recentProjects?: GxserverRecentProjectDomainState[];
-      }>(remoteMachineId, "/api/listRecentProjects", {});
-      this.remoteRecentProjectsByMachineId.set(
-        remoteMachineId,
-        Array.isArray(response.recentProjects) ? [...response.recentProjects] : [],
-      );
-      this.publishHudPatch();
-    } catch {
-      // CDXC:GPUIRemoteProjects 2026-06-24-18:22: Remote recent-project refresh is best-effort after presentation changes; failures keep existing rows rather than fabricating Recent Projects from presentation titles or paths.
-    }
-  }
-
   private publishHudPatch(): void {
     this.latestHud = createGpuiSidebarHudState({
       activeProjectId: this.activeProjectId,
@@ -2061,6 +2049,7 @@ class GpuiSidebarRuntime {
       domainProjects: this.domainProjects,
       recentProjects: this.recentProjects,
       remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
+      remotePresentationsByMachineId: this.remotePresentations,
       sidebarHud: this.sidebarHud,
     });
     if (!this.hasHydrated) {
@@ -2236,7 +2225,12 @@ class GpuiSidebarRuntime {
     const petPayload = createGpuiPetOverlayStatePayload(candidates, settings);
     /*
     CDXC:GPUIStatusPetOverlay 2026-06-26-04:38:
-    GPUI status indicators and the pet overlay consume the same saved shared Settings object as SidebarApp hydrate. Publish only bounded counts, booleans, size, pet id, and sidebar-projected project/session ids/titles through fixed bridge functions; menu-bar NSStatusItem parity remains outside this GPUI-owned floating presentation path.
+    GPUI status indicators and the pet overlay consume the same saved shared Settings object as SidebarApp hydrate. Publish only bounded counts, booleans, pet id, and sidebar-projected project/session ids/titles through fixed bridge functions.
+
+    CDXC:GPUIStatusPetOverlay 2026-06-27-20:11:
+    The standalone GPUI floating session indicator was removed. Keep posting
+    status counts/projects for the menu bar and pet badge surfaces, but do not
+    include floating visibility or floating size settings in the status payload.
     */
     try {
       window.ghostexGpui?.postSessionStatusIndicators?.(JSON.stringify(statusPayload));
@@ -2268,6 +2262,7 @@ class GpuiSidebarRuntime {
     const projectProjection = createGpuiPresentationProjectProjectionMetadata({
       domainProjects: this.domainProjects,
       presentation,
+      recentProjects: this.recentProjects,
     });
     this.ensureActiveProject(presentation, projectProjection);
     const groups = createGxserverPresentationSidebarGroups({
@@ -2317,6 +2312,7 @@ class GpuiSidebarRuntime {
       activeGroupId: this.activeGroupId,
       focusedSessionId: this.focusedSessionId,
       presentationsByMachineId: this.remotePresentations,
+      remoteRecentProjectsByMachineId: this.remoteRecentProjectsByMachineId,
       resolveAgentIcon: resolveGpuiSidebarAgentIcon,
       settings,
       visibleSessionIds: this.visibleSessionIds,
@@ -2328,16 +2324,27 @@ class GpuiSidebarRuntime {
     projectProjection: GpuiPresentationProjectProjectionMetadata,
   ): void {
     const projectIds = new Set(presentation.projects.map((project) => project.projectId));
-    if (!this.activeProjectId && this.focusedSessionId) {
+    if (this.focusedSessionId) {
+      /*
+      CDXC:GPUIWorkspaceSessionFocus 2026-06-27-13:22:
+      Re-clicking a local session in the GPUI sidebar must keep behaving like the macOS app: the focused terminal owns the active project. Bootstrap can replay a stale initial project beside the current focused session, so resolve the session from the fresh presentation snapshot before rendering groups.
+      */
       const focusedProjectId = presentation.sessions.find(
         (session) => session.sessionId === this.focusedSessionId,
       )?.projectId;
-      if (focusedProjectId && projectIds.has(focusedProjectId)) {
-        this.activeProjectId = focusedProjectId;
-        this.activeGroupId = projectProjection.chatProjectIds.has(focusedProjectId)
+      if (
+        focusedProjectId &&
+        projectIds.has(focusedProjectId) &&
+        !projectProjection.hiddenProjectIds.has(focusedProjectId)
+      ) {
+        const focusedGroupId = projectProjection.chatProjectIds.has(focusedProjectId)
           ? GPUI_GXSERVER_CHATS_GROUP_ID
           : createGxserverPresentationProjectGroupId(focusedProjectId);
-        this.refreshSidebarHudFromClient();
+        if (this.activeProjectId !== focusedProjectId || this.activeGroupId !== focusedGroupId) {
+          this.activeProjectId = focusedProjectId;
+          this.activeGroupId = focusedGroupId;
+          this.refreshSidebarHudFromClient();
+        }
         return;
       }
     }
@@ -7262,81 +7269,68 @@ class GpuiSidebarRuntime {
     groupId: string,
   ): Promise<void> {
     /*
-    CDXC:GPUIRemoteProjects 2026-06-24-18:22:
-    Remote project Close must park the project through the owning remote gxserver `/api/closeProjectToRecent` endpoint. GPUI sends only the selected machine id and gxserver project id, then displays gxserver's recent list; it never creates local fake recent rows from project labels, paths, or session counts.
+    CDXC:GPUIRemoteProjects 2026-06-27-19:37:
+    Remote Recent Projects are client-app state, not local Mac gxserver state
+    and not the remote daemon's shared project state. GPUI parks a
+    machine-scoped row in its own CEF storage so macOS and GPUI can connect to
+    and organize the same remote machine independently.
     */
-    try {
-      const response = await this.requestRemoteGxserver<{
-        recentProjects?: GxserverRecentProjectDomainState[];
-      }>(remoteScope.machineId, "/api/closeProjectToRecent", {
-        projectId: remoteScope.projectId,
-      });
-      this.removeRemotePresentationProject(remoteScope.machineId, remoteScope.projectId);
-      if (this.activeGroupId === groupId) {
-        this.activeGroupId = undefined;
-      }
-      this.remoteRecentProjectsByMachineId.set(
-        remoteScope.machineId,
-        Array.isArray(response.recentProjects) ? [...response.recentProjects] : [],
-      );
-      this.publishRemotePresentationPatch();
-    } catch {
-      this.postRemoteToast("warning", "Remote project close failed", {
-        description: "The remote gxserver could not close that project.",
-      });
+    const presentation = this.remotePresentations.get(remoteScope.machineId);
+    const recentProject: GxserverRecentProjectDomainState = {
+      path: remoteScope.project.path ?? "",
+      projectId: remoteScope.projectId as GxserverProjectId,
+      recentClosedAt: new Date().toISOString(),
+      sessionCount: presentation
+        ? countGpuiRemotePresentationProjectSessions(presentation, remoteScope.projectId)
+        : 0,
+      title: remoteScope.project.title,
+    };
+    const previousProjects = this.remoteRecentProjectsByMachineId.get(remoteScope.machineId) ?? [];
+    this.remoteRecentProjectsByMachineId.set(
+      remoteScope.machineId,
+      orderGpuiRecentProjects([
+        recentProject,
+        ...previousProjects.filter((project) => project.projectId !== remoteScope.projectId),
+      ]),
+    );
+    writeStoredGpuiRemoteRecentProjects(this.remoteRecentProjectsByMachineId);
+    if (this.activeGroupId === groupId) {
+      this.activeGroupId = undefined;
     }
+    this.publishRemotePresentationPatch();
   }
 
   private async restoreRemoteRecentProject(
     remoteReference: GpuiRemoteProjectReference,
   ): Promise<void> {
-    try {
-      const response = await this.requestRemoteGxserver<{
-        project?: GxserverPresentationProject;
-        recentProjects?: GxserverRecentProjectDomainState[];
-      }>(remoteReference.machineId, "/api/restoreRecentProject", {
-        projectId: remoteReference.projectId,
-      });
-      if (response.project) {
-        this.upsertRemotePresentationProject(remoteReference.machineId, response.project);
-      }
-      this.remoteRecentProjectsByMachineId.set(
-        remoteReference.machineId,
-        Array.isArray(response.recentProjects) ? [...response.recentProjects] : [],
-      );
-      this.activeGroupId = createGpuiRemotePresentationGroupId(
-        remoteReference.machineId,
-        remoteReference.projectId,
-      );
-      await this.refreshRemotePresentationFromGxserver(remoteReference.machineId).catch(() => undefined);
-      this.publishRemotePresentationPatch();
-    } catch {
-      this.postRemoteToast("warning", "Remote project restore failed", {
-        description: "Reconnect the remote machine before restoring that project.",
-      });
+    this.remoteRecentProjectsByMachineId.set(
+      remoteReference.machineId,
+      (this.remoteRecentProjectsByMachineId.get(remoteReference.machineId) ?? []).filter(
+        (project) => project.projectId !== remoteReference.projectId,
+      ),
+    );
+    writeStoredGpuiRemoteRecentProjects(this.remoteRecentProjectsByMachineId);
+    this.activeGroupId = createGpuiRemotePresentationGroupId(
+      remoteReference.machineId,
+      remoteReference.projectId,
+    );
+    if (!this.remotePresentations.has(remoteReference.machineId)) {
+      this.reconnectRemoteMachine(remoteReference.machineId, false);
     }
+    this.publishRemotePresentationPatch();
   }
 
   private async removeRemoteRecentProject(
     remoteReference: GpuiRemoteProjectReference,
   ): Promise<void> {
-    try {
-      const response = await this.requestRemoteGxserver<{
-        recentProjects?: GxserverRecentProjectDomainState[];
-      }>(remoteReference.machineId, "/api/removeRecentProject", {
-        projectId: remoteReference.projectId,
-      });
-      this.remoteRecentProjectsByMachineId.set(
-        remoteReference.machineId,
-        Array.isArray(response.recentProjects) ? [...response.recentProjects] : [],
-      );
-      this.removeRemotePresentationProject(remoteReference.machineId, remoteReference.projectId);
-      this.publishRemotePresentationPatch();
-    } catch {
-      this.postRemoteToast("warning", "Remote project removal failed", {
-        description: "The remote gxserver could not remove that recent project.",
-      });
-    }
+    this.remoteRecentProjectsByMachineId.set(
+      remoteReference.machineId,
+      (this.remoteRecentProjectsByMachineId.get(remoteReference.machineId) ?? []).filter(
+        (project) => project.projectId !== remoteReference.projectId,
+      ),
+    );
+    writeStoredGpuiRemoteRecentProjects(this.remoteRecentProjectsByMachineId);
+    this.publishRemotePresentationPatch();
   }
 
   private async removeRemoteProject(remoteReference: GpuiRemoteProjectReference): Promise<void> {
@@ -7351,6 +7345,7 @@ class GpuiSidebarRuntime {
           (project) => project.projectId !== remoteReference.projectId,
         ),
       );
+      writeStoredGpuiRemoteRecentProjects(this.remoteRecentProjectsByMachineId);
       this.publishRemotePresentationPatch();
     } catch {
       this.postRemoteToast("warning", "Remote project removal failed", {
@@ -8874,6 +8869,7 @@ function createGpuiSidebarHudState({
   presentation,
   recentProjects = [],
   remoteRecentProjectsByMachineId,
+  remotePresentationsByMachineId,
   runtimeSettings,
   sidebarHud,
 }: {
@@ -8886,6 +8882,7 @@ function createGpuiSidebarHudState({
   presentation?: GxserverPresentationSnapshot;
   recentProjects?: readonly GxserverRecentProjectDomainState[];
   remoteRecentProjectsByMachineId?: ReadonlyMap<string, readonly GxserverRecentProjectDomainState[]>;
+  remotePresentationsByMachineId?: ReadonlyMap<string, GxserverPresentationSnapshot>;
   runtimeSettings?: GpuiSidebarRuntimeSettings;
   sidebarHud?: GxserverSidebarHudResponse;
 } = {}): SidebarHudState {
@@ -8936,7 +8933,11 @@ function createGpuiSidebarHudState({
     */
     recentProjects: [
       ...createGpuiRecentProjects(recentProjects, settings),
-      ...createGpuiRemoteRecentProjects(remoteRecentProjectsByMachineId, settings),
+      ...createGpuiRemoteRecentProjects(
+        remoteRecentProjectsByMachineId,
+        remotePresentationsByMachineId,
+        settings,
+      ),
     ].sort(compareGpuiRecentProjectsByClosedAt),
     settings,
     createSessionOnSidebarDoubleClick: settings.createSessionOnSidebarDoubleClick,
@@ -9240,10 +9241,8 @@ export function createGpuiSessionStatusIndicatorsPayload(
   return {
     attentionCount: counts.attention,
     availableCount: counts.available,
-    hideFloatingIndicators: settings.hideFloatingSessionStatusIndicators,
     hideMenuBarIndicators: settings.hideMenuBarSessionStatusIndicators,
     projects: createGpuiSessionStatusIndicatorProjects(candidates),
-    size: settings.sessionStatusIndicatorSize,
     type: GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE,
     version: GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION,
     workingCount: counts.working,
@@ -9855,11 +9854,15 @@ function createGpuiRecentProjects(
 
 function createGpuiRemoteRecentProjects(
   recentProjectsByMachineId: ReadonlyMap<string, readonly GxserverRecentProjectDomainState[]> | undefined,
+  presentationsByMachineId: ReadonlyMap<string, GxserverPresentationSnapshot> | undefined,
   settings: ghostexSettings,
 ): SidebarRecentProject[] {
   /*
-  CDXC:GPUIRemoteProjects 2026-06-24-18:22:
-  Remote Recent Projects come from each connected remote gxserver's explicit recent-project endpoint. Keep ids machine-scoped and include only the saved machine label for disambiguation; do not fabricate rows from active presentation groups or cache local close timestamps.
+  CDXC:GPUIRemoteProjects 2026-06-27-19:37:
+  Remote Recent Projects are GPUI-client-local parking rows. Keep ids
+  machine-scoped and reconcile display fields from a live remote presentation
+  when connected, but do not call the remote daemon's recent endpoints or share
+  the parked state with the macOS app.
   */
   if (!recentProjectsByMachineId) {
     return [];
@@ -9872,10 +9875,19 @@ function createGpuiRemoteRecentProjects(
     if (!machine) {
       return [];
     }
+    const presentation = presentationsByMachineId?.get(machineId);
     return recentProjects.flatMap((project) => {
       const projectId = typeof project.projectId === "string" ? project.projectId.trim() : "";
-      const title = typeof project.title === "string" ? project.title.trim() : "";
-      const path = normalizeGpuiProjectPath(project.path);
+      const presentationProject = presentation?.projects.find(
+        (candidate) => candidate.projectId === projectId,
+      );
+      if (presentation && !presentationProject) {
+        return [];
+      }
+      const title =
+        presentationProject?.title.trim() ||
+        (typeof project.title === "string" ? project.title.trim() : "");
+      const path = normalizeGpuiProjectPath(presentationProject?.path ?? project.path);
       if (!projectId || !title || !path) {
         return [];
       }
@@ -9898,15 +9910,153 @@ function createGpuiRemoteRecentProjects(
           projectId: createGpuiRemotePresentationProjectId(machineId, projectId),
           remoteMachineId: machineId,
           remoteMachineName: machine.name || "Remote",
-          sessionCount: Number.isFinite(project.sessionCount)
-            ? Math.max(0, Math.floor(project.sessionCount))
-            : 0,
+          sessionCount: presentation
+            ? countGpuiRemotePresentationProjectSessions(presentation, projectId)
+            : Number.isFinite(project.sessionCount)
+              ? Math.max(0, Math.floor(project.sessionCount))
+              : 0,
           theme,
           title,
         },
       ];
     });
   });
+}
+
+function readStoredGpuiRemoteRecentProjects(): Map<string, GxserverRecentProjectDomainState[]> {
+  try {
+    return groupGpuiRemoteRecentProjectsByMachine(
+      normalizeStoredGpuiRemoteRecentProjects(
+        JSON.parse(localStorage.getItem(GPUI_REMOTE_RECENT_PROJECTS_STORAGE_KEY) ?? "[]"),
+      ),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+function writeStoredGpuiRemoteRecentProjects(
+  projectsByMachineId: ReadonlyMap<string, readonly GxserverRecentProjectDomainState[]>,
+): void {
+  try {
+    const rows = [...projectsByMachineId.entries()].flatMap(([machineId, projects]) =>
+      projects.flatMap((project) => {
+        const projectId = typeof project.projectId === "string" ? project.projectId.trim() : "";
+        const title = typeof project.title === "string" ? project.title.trim() : "";
+        const path = typeof project.path === "string" ? project.path.trim() : "";
+        if (!machineId.trim() || !projectId || !title) {
+          return [];
+        }
+        return [
+          {
+            machineId: machineId.trim(),
+            path,
+            projectId,
+            recentClosedAt: typeof project.recentClosedAt === "string" ? project.recentClosedAt : undefined,
+            sessionCount: Number.isFinite(project.sessionCount)
+              ? Math.max(0, Math.floor(project.sessionCount))
+              : 0,
+            title,
+          },
+        ];
+      }),
+    );
+    /*
+    CDXC:GPUIRemoteProjects 2026-06-27-19:37:
+    GPUI remote recent rows are app-client state. Persist only machine id,
+    remote project id, title/path needed for the disconnected drawer, timestamp,
+    and count; do not persist tokens, SSH hosts, usernames, command text,
+    terminal output, or local gxserver project rows.
+    */
+    localStorage.setItem(GPUI_REMOTE_RECENT_PROJECTS_STORAGE_KEY, JSON.stringify(rows));
+  } catch {
+    // CEF storage may be unavailable in tests or early bootstrap; the in-memory rows still drive this session.
+  }
+}
+
+function normalizeStoredGpuiRemoteRecentProjects(
+  value: unknown,
+): Array<{ machineId: string; project: GxserverRecentProjectDomainState }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object") {
+      return [];
+    }
+    const record = candidate as Record<string, unknown>;
+    const machineId = normalizeNonEmptyString(record.machineId);
+    const projectId = normalizeNonEmptyString(record.projectId);
+    const title = normalizeNonEmptyString(record.title);
+    if (!machineId || !projectId || !title) {
+      return [];
+    }
+    const path = typeof record.path === "string" ? record.path.trim() : "";
+    const recentClosedAt =
+      typeof record.recentClosedAt === "string" &&
+      record.recentClosedAt.trim().length > 0 &&
+      Number.isFinite(Date.parse(record.recentClosedAt))
+        ? record.recentClosedAt.trim()
+        : undefined;
+    const sessionCount = Number(record.sessionCount);
+    return [
+      {
+        machineId,
+        project: {
+          path,
+          projectId: projectId as GxserverProjectId,
+          ...(recentClosedAt ? { recentClosedAt } : {}),
+          sessionCount: Number.isFinite(sessionCount) && sessionCount > 0
+            ? Math.floor(sessionCount)
+            : 0,
+          title,
+        },
+      },
+    ];
+  });
+}
+
+/*
+CDXC:GPUIRemoteProjects 2026-06-27-21:59:
+The GPUI start build runs through Vite/Rolldown, whose transformer accepts readonly array shorthand and ReadonlyArray<T> but rejects `readonly Array<T>`. Keep this helper input in ReadonlyArray<T> form so Remote Recent Projects packaging does not break local GPUI startup.
+*/
+function groupGpuiRemoteRecentProjectsByMachine(
+  rows: ReadonlyArray<{ machineId: string; project: GxserverRecentProjectDomainState }>,
+): Map<string, GxserverRecentProjectDomainState[]> {
+  const projectsByMachineId = new Map<string, GxserverRecentProjectDomainState[]>();
+  for (const row of rows) {
+    projectsByMachineId.set(
+      row.machineId,
+      orderGpuiRecentProjects([
+        row.project,
+        ...(projectsByMachineId.get(row.machineId) ?? []).filter(
+          (project) => project.projectId !== row.project.projectId,
+        ),
+      ]),
+    );
+  }
+  return projectsByMachineId;
+}
+
+function orderGpuiRecentProjects(
+  projects: readonly GxserverRecentProjectDomainState[],
+): GxserverRecentProjectDomainState[] {
+  return [...projects].sort(
+    (left, right) =>
+      Date.parse(right.recentClosedAt ?? "") - Date.parse(left.recentClosedAt ?? ""),
+  );
+}
+
+function countGpuiRemotePresentationProjectSessions(
+  presentation: GxserverPresentationSnapshot,
+  projectId: string,
+): number {
+  return presentation.sessions.filter(
+    (session) =>
+      session.projectId === projectId &&
+      session.visibleInSidebarByDefault === true &&
+      session.surface !== "commands",
+  ).length;
 }
 
 function normalizeGpuiSidebarTheme(value: unknown): SidebarTheme | undefined {
@@ -9959,12 +10109,22 @@ type GpuiPresentationProjectProjectionMetadata = {
 function createGpuiPresentationProjectProjectionMetadata({
   domainProjects,
   presentation,
+  recentProjects,
 }: {
   domainProjects: readonly GxserverProjectDomainState[];
   presentation: GxserverPresentationSnapshot;
+  recentProjects?: readonly GxserverRecentProjectDomainState[];
 }): GpuiPresentationProjectProjectionMetadata {
   const chatProjectIds = new Set<string>();
-  const hiddenProjectIds = new Set<string>();
+  /*
+  CDXC:GPUIRecentProjects 2026-06-27-19:37:
+  GPUI must match the macOS sidebar split: parked Recent Projects belong only in the React Recent Projects drawer, never in the main Projects list. Hide ids from both the domain project flag and the authoritative `/api/listRecentProjects` endpoint so presentation snapshots cannot briefly resurrect parked projects as normal groups.
+  */
+  const hiddenProjectIds = new Set(
+    (recentProjects ?? [])
+      .map((project) => typeof project.projectId === "string" ? project.projectId.trim() : "")
+      .filter((projectId) => projectId.length > 0),
+  );
   const projectOverlays: GxserverPresentationSidebarProjectOverlay[] = [];
   const domainProjectIds = new Set(domainProjects.map((project) => project.projectId));
 
@@ -10681,6 +10841,7 @@ function createGpuiRemotePresentationSidebarGroups({
   activeGroupId,
   focusedSessionId,
   presentationsByMachineId,
+  remoteRecentProjectsByMachineId,
   resolveAgentIcon,
   settings,
   visibleSessionIds,
@@ -10688,6 +10849,7 @@ function createGpuiRemotePresentationSidebarGroups({
   activeGroupId?: string;
   focusedSessionId?: string;
   presentationsByMachineId: ReadonlyMap<string, GxserverPresentationSnapshot>;
+  remoteRecentProjectsByMachineId?: ReadonlyMap<string, readonly GxserverRecentProjectDomainState[]>;
   resolveAgentIcon: (agentName: string | undefined) => SidebarAgentButton["icon"];
   settings: ghostexSettings;
   visibleSessionIds?: ReadonlySet<string>;
@@ -10712,6 +10874,9 @@ function createGpuiRemotePresentationSidebarGroups({
       if (!project) {
         return [];
       }
+      if (isGpuiRemoteProjectClosedToRecent(machine.id, project.projectId, remoteRecentProjectsByMachineId)) {
+        return [];
+      }
       return [
         createGpuiRemotePresentationSidebarGroup({
           activeGroupId,
@@ -10727,6 +10892,20 @@ function createGpuiRemotePresentationSidebarGroups({
       ];
     });
   });
+}
+
+function isGpuiRemoteProjectClosedToRecent(
+  machineId: string,
+  projectId: string,
+  recentProjectsByMachineId: ReadonlyMap<string, readonly GxserverRecentProjectDomainState[]> | undefined,
+): boolean {
+  /*
+  CDXC:GPUIRemoteProjects 2026-06-27-19:37:
+  Connected remote presentation projects render under their saved-machine sections, while client-parked remote projects render only as machine-scoped rows in Recent Projects. Filter the remote machine projection with GPUI's app-local recent list instead of mutating the remote gxserver project state.
+  */
+  return (recentProjectsByMachineId?.get(machineId) ?? []).some(
+    (project) => project.projectId === projectId,
+  );
 }
 
 function createGpuiRemotePresentationSidebarGroup({

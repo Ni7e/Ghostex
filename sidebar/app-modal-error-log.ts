@@ -1,6 +1,7 @@
 type AppModalErrorLogPayload = {
   area: string;
   message: string;
+  name?: string;
   stack?: string;
   type: "logError";
 };
@@ -33,6 +34,11 @@ export function logAppModalError(area: string, error: unknown): void {
   const payload: AppModalErrorLogPayload = {
     area,
     message: describeErrorMessage(error),
+    /*
+     * CDXC:GPUISettingsModalDiagnostics 2026-06-27-17:25:
+     * GPUI persists app-modal errors through a sanitized writer so blank Settings repros can identify the error class without storing raw messages or stacks that may contain paths, URLs, commands, tokens, or user content.
+     */
+    name: error instanceof Error ? error.name : undefined,
     stack: error instanceof Error ? error.stack : undefined,
     type: "logError",
   };

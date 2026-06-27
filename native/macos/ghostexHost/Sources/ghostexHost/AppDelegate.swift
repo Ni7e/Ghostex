@@ -1598,7 +1598,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
   }
 
   private static func appendGhosttyConfigLog(_ message: String) {
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativeGhosttyConfig) else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory
@@ -1618,16 +1618,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
 
      CDXC:SessionTitleSync 2026-05-08-09:09
      Forced session-title entries record Codex title-generation failures even
-     when debugging mode is disabled. Those failures must persist to the
+     when the native.session.title scenario is disabled. Those failures must persist to the
      session-title log instead of interrupting the user with a native alert.
 
      CDXC:Diagnostics 2026-06-06-07:09:
      The force flag is not a normal-mode logging override for routine
      breadcrumbs. Persist warning/error/failure-like session-title events with
-     Debugging Mode off, and keep all other session-title diagnostics behind the
-     settings toggle.
+     the native.session.title scenario off, and keep all other session-title
+     diagnostics behind that scenario toggle.
      */
-    guard isNativePersistentLogImportantDiagnostic(event) || NativeDebugLogging.isEnabled else {
+    guard isNativePersistentLogImportantDiagnostic(event) ||
+      NativeDiagnosticLogging.isScenarioEnabled(.nativeSessionTitle)
+    else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory
@@ -1643,7 +1645,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
      title events, detector output, and sidebar projection can be correlated
      without mixing them with session rename diagnostics.
      */
-    guard isNativePersistentLogImportantDiagnostic(event) || NativeDebugLogging.isEnabled else {
+    guard isNativePersistentLogImportantDiagnostic(event) ||
+      NativeDiagnosticLogging.isScenarioEnabled(.nativeAgentDetection)
+    else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory
@@ -1735,7 +1739,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
      CDXC:WorkspaceRestore 2026-06-02-15:27:
      The native sidebar owns current-window layout restore while gxserver owns shared project/session persistence. Write restore diagnostics into a dedicated app storage logs file so local layout cache, localStorage persistence, and native terminal recreation can be traced independently from session-title logs.
      */
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativeWorkspaceRestore) else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory
@@ -1753,11 +1757,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     /**
      CDXC:SidebarCollapseDiagnostics 2026-06-02-23:52:
      Sidebar disclosure-state restart repros need a dedicated log under the
-     shared support-bundle logs directory. Keep writes behind Debugging Mode and
+     shared support-bundle logs directory. Keep writes behind the native.sidebar.collapse scenario and
      persist only the already-sanitized webview summary so project names, paths,
      and raw localStorage payloads never reach disk.
      */
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativeSidebarCollapse) else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory
@@ -1773,8 +1777,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
      Project-page create/start diagnostics need their own app-storage log file
      so Beads creation, title generation, agent launch, and worktree setup
      breadcrumbs can be inspected without mixing them into terminal-focus or
-     session-title logs. These are regular diagnostics, so Settings Debugging
-     Mode is the final gate before any file write.
+     session-title logs. These are regular diagnostics, so native.project.board
+     is the final scenario gate before any file write.
 
      CDXC:ProjectBoardDiagnostics 2026-06-21-03:56:
      Kanban empty-title failures can happen inside the native prompt-agent
@@ -1783,7 +1787,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
      process metadata in the same project-board support log without adding a
      second diagnostic file.
      */
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativeProjectBoard) else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory
@@ -1799,7 +1803,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
      app storage logs because this UI is rendered from the native sidebar webview,
      not the older Electrobun mainview dock.
      */
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativeWorkspaceDock) else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory
@@ -1825,6 +1829,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       label: "app modal error")
   }
 
+  fileprivate static func appendAppModalDebugLog(event: String, details: String?) {
+    /*
+     CDXC:SettingsModalDiagnostics 2026-06-27-22:07:
+     Routine native child-window and Settings modal lifecycle diagnostics are
+     controlled by the native.app.modal scenario instead of sharing
+     agent-detection logging. Modal host errors still use app-modal-errors.log
+     outside this routine scenario gate.
+     */
+    guard isNativePersistentLogImportantDiagnostic(event) ||
+      NativeDiagnosticLogging.isScenarioEnabled(.nativeAppModal)
+    else {
+      return
+    }
+    let logsDirectory = GhostexAppStorage.logsDirectory
+    let logURL = logsDirectory.appendingPathComponent("app-modal-debug.log")
+    let message = details.map { "\(event) \($0)" } ?? event
+    appendLogLine(message, to: logURL, logsDirectory: logsDirectory, label: "app modal debug")
+  }
+
   fileprivate static func appendNativeHostLifecycleLog(_ message: String) {
     /**
      CDXC:CrashDiagnostics 2026-04-27-17:38
@@ -1832,7 +1855,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
      survive outside WebKit and JS logs so close-button, last-window, and
      termination paths can be separated from renderer crashes.
      */
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativeHostLifecycle) else {
       return
     }
     guard let message = sampledNativeHostLifecycleMessage(message) else {
@@ -2690,9 +2713,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       onActivationRequest: { [weak self] reason in
         self?.recordNativeActivationRequest(reason: reason)
       },
-      onClick: { [weak self] status in
-        self?.handleSessionStatusIndicatorClick(status)
-      },
       onProjectClick: { [weak self] projectId in
         self?.handleSessionStatusIndicatorProjectClick(projectId)
       },
@@ -2718,9 +2738,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
         Task { @MainActor in
           /**
            CDXC:PetOverlay 2026-05-21-02:19:
-           Collapsed pet status badges must behave exactly like the floating
-           status indicator badges: raise Ghostex, record the native activation,
-           and let the sidebar choose the matching aggregate session target.
+           Collapsed pet status badges must keep the aggregate session-status
+           routing that the removed floating indicator used: raise Ghostex,
+           record the native activation, and let the sidebar choose the matching
+           aggregate session target.
            */
           self?.recordNativeActivationRequest(
             reason: "petOverlayStatusIndicatorClick.\(status.rawValue)")
@@ -2857,9 +2878,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
      Clicking a status indicator badge should raise ghostex and ask the sidebar to
      choose the live matching session. Keep click routing on the typed native
      host event bus so AppKit chrome and webview/sidebar state stay decoupled.
-     CDXC:SessionStatusIndicators 2026-05-09-17:30
-     Floating and menu bar badges intentionally share this event so visibility
-     settings do not fork #95d7f6 attention or orange working navigation behavior.
+
+     CDXC:SessionStatusIndicators 2026-06-27-20:11:
+     The standalone floating badge no longer emits this event. Keep the handler
+     for collapsed pet status badges, which still need the aggregate attention,
+     working, and available session-selection behavior.
      */
     let event = HostEvent.sessionStatusIndicatorClicked(status: status)
     window?.makeKeyAndOrderFront(nil)
@@ -3687,6 +3710,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       workspaceView?.closeWebPane(sessionId: command.sessionId)
     case .focusTerminal(let command):
       workspaceView?.focusTerminal(sessionId: command.sessionId)
+    case .focusMountedTerminalSession(let command):
+      workspaceView?.focusMountedTerminalSession(
+        sessionId: command.sessionId,
+        reason: "nativeHostCommand")
+    case .setFocusedTerminalOwner(let command):
+      workspaceView?.setFocusedTerminalOwner(command)
     case .focusProjectEditorCompanionSession(let command):
       workspaceView?.focusProjectEditorCompanionSession(sessionId: command.sessionId)
     case .retargetProjectEditorCompanionSession(let command):
@@ -8537,6 +8566,20 @@ final class ghostexRootView: NSView {
     if let debuggingMode = command.debuggingMode {
       payload["debuggingMode"] = debuggingMode
     }
+    if let diagnosticLoggingJson = command.diagnosticLoggingJson,
+      let data = diagnosticLoggingJson.data(using: .utf8),
+      let object = try? JSONSerialization.jsonObject(with: data),
+      let diagnosticLogging = object as? [String: Any]
+    {
+      /*
+       CDXC:DiagnosticsSettings 2026-06-27-22:07:
+       The isolated titlebar receives only normalized diagnosticLogging copied
+       from Settings by the sidebar. Parse JSON here so the titlebar can gate
+       mode-switch logs by native.mode.switcher without reading shared settings
+       itself or relying on broad Debugging Mode.
+       */
+      payload["diagnosticLogging"] = diagnosticLogging
+    }
     if let showBetaFeatures = command.showBetaFeatures {
       /**
        CDXC:TitlebarManage 2026-06-20-17:13:
@@ -9501,6 +9544,12 @@ final class ghostexRootView: NSView {
       workspaceView.closeWebPane(sessionId: command.sessionId)
     case .focusTerminal(let command):
       focusWorkspaceSessionAfterSidebarActivation(sessionId: command.sessionId, kind: .terminal)
+    case .focusMountedTerminalSession(let command):
+      focusWorkspaceSessionAfterSidebarActivation(
+        sessionId: command.sessionId,
+        kind: .mountedTerminal)
+    case .setFocusedTerminalOwner(let command):
+      workspaceView.setFocusedTerminalOwner(command)
     case .focusProjectEditorCompanionSession(let command):
       focusWorkspaceSessionAfterSidebarActivation(
         sessionId: command.sessionId,
@@ -9857,12 +9906,15 @@ final class ghostexRootView: NSView {
   }
 
   private enum SidebarWorkspaceFocusKind {
+    case mountedTerminal
     case projectEditorCompanion
     case terminal
     case webPane
 
     var debugName: String {
       switch self {
+      case .mountedTerminal:
+        return "mountedTerminal"
       case .projectEditorCompanion:
         return "projectEditorCompanion"
       case .terminal:
@@ -9976,6 +10028,10 @@ final class ghostexRootView: NSView {
           "workspaceSnapshotBeforeDispatch": self.workspaceView.activationDebugSnapshot(),
         ])
       switch kind {
+      case .mountedTerminal:
+        self.workspaceView.focusMountedTerminalSession(
+          sessionId: sessionId,
+          reason: "sidebarFocusCommand")
       case .projectEditorCompanion:
         self.workspaceView.focusProjectEditorCompanionSession(
           sessionId: sessionId,
@@ -9985,14 +10041,29 @@ final class ghostexRootView: NSView {
       case .webPane:
         self.workspaceView.focusWebPane(sessionId: sessionId, reason: "sidebarFocusCommand")
       }
-      let immediateReinforceResult = self.workspaceView.reinforceSidebarWorkspaceFocus(
-        sessionId: sessionId,
-        reason: "sidebarFocusCommand.immediate.\(kind.debugName)")
+      /*
+       CDXC:SidebarSessionFocus 2026-06-27-21:08:
+       Direct sidebar focus should not pay the reinforcement cost when the
+       target session already owns first responder. Keep the repair available
+       for WebKit/sidebar responder steals, but skip it on the successful fast
+       path so mounted-session switching settles immediately.
+       */
+      let shouldReinforceImmediately =
+        !self.workspaceView.isWorkspaceFocusOwnedBySession(sessionId)
+      let immediateReinforceResult: Bool
+      if shouldReinforceImmediately {
+        immediateReinforceResult = self.workspaceView.reinforceSidebarWorkspaceFocus(
+          sessionId: sessionId,
+          reason: "sidebarFocusCommand.immediate.\(kind.debugName)")
+      } else {
+        immediateReinforceResult = false
+      }
       TerminalFocusDebugLog.append(
         event: "nativeFocusTrace.sidebarFocusCommandDispatched",
         details: [
           "focusRequestId": focusRequestId,
           "immediateReinforceResult": immediateReinforceResult,
+          "immediateReinforceSkipped": !shouldReinforceImmediately,
           "kind": kind.debugName,
           "responderAfterDispatch": self.responderSnapshot(),
           "sessionId": sessionId,
@@ -10056,6 +10127,17 @@ final class ghostexRootView: NSView {
             "latestFocusRequestId": self.sidebarWorkspaceFocusRequestId,
             "sessionId": sessionId,
             "skipReason": "staleFocusRequest",
+          ])
+        return
+      }
+      guard !self.workspaceView.isWorkspaceFocusOwnedBySession(sessionId) else {
+        TerminalFocusDebugLog.append(
+          event: "nativeFocusTrace.sidebarFocusReinforcementSkipped",
+          details: [
+            "focusRequestId": focusRequestId,
+            "kind": kind.debugName,
+            "sessionId": sessionId,
+            "skipReason": "targetAlreadyOwnsFocus",
           ])
         return
       }
@@ -16412,11 +16494,11 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     /*
      CDXC:SettingsModalDiagnostics 2026-06-20-05:38:
      Settings blank-window reports need native child-window delivery milestones without persisting settings values, paths, project names, titles, URLs, command text, or user content.
-     Record only modal ids, message types, request ids, booleans, and timings while Debugging Mode gates app-modal diagnostics.
+     Record only modal ids, message types, request ids, booleans, and timings while the native.app.modal scenario gates app-modal diagnostics.
 
      CDXC:SettingsModalDiagnostics 2026-06-20-06:03:
      Blank Settings repros must distinguish native window creation, WKWebView load, host-ready dispatch, React presentation, and final AppKit visibility.
-     Keep these lifecycle breadcrumbs under the same Debugging Mode gate as other app-modal diagnostics.
+     Keep these lifecycle breadcrumbs under the same native.app.modal scenario gate as other app-modal diagnostics.
      */
     guard isSettingsAppModal(loadedModal)
       || isSettingsAppModal(currentModal)
@@ -16438,7 +16520,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
     } else {
       detailsString = "{\"serializationFailed\":true,\"source\":\"nativeWindow\"}"
     }
-    AppDelegate.appendAgentDetectionDebugLog(
+    AppDelegate.appendAppModalDebugLog(
       event: "nativeBridge.appModal.\(event)",
       details: detailsString
     )

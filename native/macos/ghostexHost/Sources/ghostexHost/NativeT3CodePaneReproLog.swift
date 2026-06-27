@@ -46,19 +46,22 @@ enum NativeT3CodePaneReproLog {
    CDXC:T3Code 2026-05-08-16:41
    Native T3 Code blank-pane repros need a dedicated log file separate from
    terminal focus and sidebar lifecycle logs. Capture runtime launch, WKWebView
-   navigation, HTTP response, and injected page diagnostics when debugging mode
-   is enabled, while dropping layout/resize breadcrumbs that can fire every
-   frame during normal sidebar resizing.
+   navigation, HTTP response, and injected page diagnostics when the
+   native.t3.codePane scenario is enabled, while dropping layout/resize
+   breadcrumbs that can fire every frame during normal sidebar resizing.
 
    CDXC:T3Code 2026-06-06-07:09:
    T3/code-pane repro diagnostics can run for long sessions and previously had
-   no file rotation. Keep routine entries behind Debugging Mode, allow only
-   important warning/error/failure-like events in normal mode, and rotate this
-   support log at 25 MB with three retained files.
-   */
+   no file rotation. Keep routine entries behind the native.t3.codePane
+   scenario, allow only important warning/error/failure-like events in normal
+   mode, and rotate this support log at 25 MB with three retained files.
+  */
   static func append(_ event: String, _ details: [String: Any] = [:]) {
     let isImportantDiagnostic = isNativePersistentLogImportantDiagnostic(event)
-    guard isImportantDiagnostic || (NativeDebugLogging.isEnabled && !noisyEvents.contains(event)) else {
+    guard isImportantDiagnostic ||
+      (NativeDiagnosticLogging.isScenarioEnabled(.nativeT3CodePane) &&
+        !noisyEvents.contains(event))
+    else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory
@@ -68,7 +71,7 @@ enum NativeT3CodePaneReproLog {
     payload["event"] = event
     /*
      CDXC:T3Code 2026-06-16-12:22:
-     Source CEF drag probes, console forwarding, and companion sync diagnostics are useful during repros but can repeat for every drag/mouse/layout tick. Sample these routine Debugging Mode events in the writer and include suppressed counts so support can see burst volume without 25 MB rotations per session.
+     Source CEF drag probes, console forwarding, and companion sync diagnostics are useful during repros but can repeat for every drag/mouse/layout tick. Sample these routine scenario-enabled events in the writer and include suppressed counts so support can see burst volume without 25 MB rotations per session.
      */
     if !isImportantDiagnostic,
       !shouldWriteSampledLogEvent(

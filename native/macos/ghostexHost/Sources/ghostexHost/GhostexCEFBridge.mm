@@ -262,9 +262,37 @@ static bool GhostexCEFNativeDebugLoggingEnabled(void) {
     NSError* error = nil;
     id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
     if (!error && [json isKindOfClass:[NSDictionary class]]) {
-      id value = [(NSDictionary*)json objectForKey:@"debuggingMode"];
-      if ([value respondsToSelector:@selector(boolValue)]) {
-        isEnabled = [value boolValue];
+      /*
+       CDXC:DiagnosticsSettings 2026-06-27-22:07:
+       CEF/T3 routine diagnostics and CEF verbose log severity follow the same
+       scenario allowlist as Swift T3 Code logging. Do not use broad
+       Debugging Mode here, because enabling debug UI should not make Chromium
+       write noisy support logs.
+       */
+      NSDictionary* diagnosticLogging = [(NSDictionary*)json objectForKey:@"diagnosticLogging"];
+      NSDictionary* scenarios = [diagnosticLogging isKindOfClass:[NSDictionary class]]
+        ? [diagnosticLogging objectForKey:@"scenarios"]
+        : nil;
+      id scenario = [scenarios isKindOfClass:[NSDictionary class]]
+        ? [scenarios objectForKey:@"native.t3.codePane"]
+        : nil;
+      if ([scenario isKindOfClass:[NSNumber class]]) {
+        isEnabled = [scenario boolValue];
+      } else if ([scenario isKindOfClass:[NSDictionary class]]) {
+        NSDictionary* state = (NSDictionary*)scenario;
+        id enabled = [state objectForKey:@"enabled"];
+        isEnabled = [enabled isKindOfClass:[NSNumber class]] && [enabled boolValue];
+        NSString* expiresAt = [state objectForKey:@"expiresAt"];
+        if (isEnabled && [expiresAt isKindOfClass:[NSString class]] && [expiresAt length] > 0) {
+          static NSISO8601DateFormatter* formatter = nil;
+          static dispatch_once_t onceToken;
+          dispatch_once(&onceToken, ^{
+            formatter = [[NSISO8601DateFormatter alloc] init];
+            formatter.formatOptions = NSISO8601DateFormatWithInternetDateTime | NSISO8601DateFormatWithFractionalSeconds;
+          });
+          NSDate* expiryDate = [formatter dateFromString:expiresAt];
+          isEnabled = expiryDate && [expiryDate timeIntervalSinceNow] > 0;
+        }
       }
     }
   }

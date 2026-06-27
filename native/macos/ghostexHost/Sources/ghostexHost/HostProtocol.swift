@@ -7,6 +7,8 @@ enum HostCommand: Decodable {
   case closeTerminal(SessionCommand)
   case closeWebPane(SessionCommand)
   case focusTerminal(SessionCommand)
+  case focusMountedTerminalSession(FocusMountedTerminalSession)
+  case setFocusedTerminalOwner(SetFocusedTerminalOwner)
   case focusProjectEditorCompanionSession(SessionCommand)
   case retargetProjectEditorCompanionSession(SessionCommand)
   case focusWebPane(SessionCommand)
@@ -124,6 +126,8 @@ enum HostCommand: Decodable {
     case closeTerminal
     case closeWebPane
     case focusTerminal
+    case focusMountedTerminalSession
+    case setFocusedTerminalOwner
     case focusProjectEditorCompanionSession
     case retargetProjectEditorCompanionSession
     case focusWebPane
@@ -246,6 +250,10 @@ enum HostCommand: Decodable {
       self = .closeWebPane(try SessionCommand(from: decoder))
     case .focusTerminal:
       self = .focusTerminal(try SessionCommand(from: decoder))
+    case .focusMountedTerminalSession:
+      self = .focusMountedTerminalSession(try FocusMountedTerminalSession(from: decoder))
+    case .setFocusedTerminalOwner:
+      self = .setFocusedTerminalOwner(try SetFocusedTerminalOwner(from: decoder))
     case .focusProjectEditorCompanionSession:
       self = .focusProjectEditorCompanionSession(try SessionCommand(from: decoder))
     case .retargetProjectEditorCompanionSession:
@@ -516,6 +524,27 @@ struct SessionCommand: Decodable {
   let sessionId: String
 }
 
+struct SetFocusedTerminalOwner: Decodable {
+  /**
+   CDXC:SidebarSessionFocus 2026-06-27-22:54:
+   The owner-only command remains available for compatibility and diagnostics.
+   It carries only the selected native session id and must not reuse
+   SessionCommand, whose optional close/sleep fields belong to lifecycle
+   commands and are irrelevant to focus ownership.
+   */
+  let sessionId: String
+}
+
+struct FocusMountedTerminalSession: Decodable {
+  /**
+   CDXC:SidebarSessionFocus 2026-06-27-22:54:
+   Mounted sidebar terminal switches carry only the native session id into one
+   combined native command. Native then updates tab ownership and AppKit focus
+   as one operation so focused-border chrome is not repainted between phases.
+   */
+  let sessionId: String
+}
+
 struct ProjectBoardResponse: Decodable {
   let payloadJson: String
   let projectId: String?
@@ -700,6 +729,7 @@ struct SetActiveTerminalSet: Decodable {
   let commandsPanelMode: String?
   let clickToWakeSleepingSessions: Bool?
   let debuggingMode: Bool?
+  let diagnosticLoggingJson: String?
   /**
    CDXC:BetaFeatures 2026-06-16-13:08:
    React Settings owns the persisted beta gate, but AppKit owns browser address
@@ -1082,10 +1112,8 @@ struct SetSessionStatusIndicators: Decodable {
   let attentionCount: Int
   let workingCount: Int
   let availableCount: Int
-  let hideFloatingIndicators: Bool
   let hideMenuBarIndicators: Bool
   let projects: [SessionStatusIndicatorProject]?
-  let size: NativeSessionStatusIndicatorSize
 }
 
 struct SessionStatusIndicatorProject: Decodable {

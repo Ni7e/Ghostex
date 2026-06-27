@@ -32,23 +32,26 @@ enum NativeLayoutLayeringDebugLog {
    CDXC:WorkspaceLayeringDiagnostics 2026-05-28-04:36:
    Browser/editor pane click-through bugs need layout synthesis, AppKit
    hit-test, and visible-surface ordering in one log that is separate from
-   terminal focus diagnostics. Keep ordinary entries behind Debugging Mode, and
-   use the shared important-diagnostic classifier for normal-mode failures.
+   terminal focus diagnostics. Keep ordinary entries behind the
+   native.layout.layering scenario, and use the shared important-diagnostic
+   classifier for normal-mode failures.
 
    CDXC:WorkspaceLayeringDiagnostics 2026-06-06-07:09:
    Layout/layering diagnostics were able to grow into hundreds of MB. Enforce
    the app-wide normal-mode logging rule at the writer: only important
-   warning/error/failure-like events persist with Debugging Mode off, and all
+   warning/error/failure-like events persist with the scenario off, and all
    writes rotate at 25 MB with three retained files.
 
    CDXC:Diagnostics 2026-06-15-18:39:
    Forced layout/startup breadcrumbs are useful during active debugging but are
-   not normal-mode warnings by themselves. They must wait for Debugging Mode
-   unless the event name is failure-classified.
+   not normal-mode warnings by themselves. They must wait for the
+   native.layout.layering scenario unless the event name is failure-classified.
    */
   static func append(event: String, details: [String: Any] = [:], force: Bool = false) {
     let isImportantDiagnostic = isNativePersistentLogImportantDiagnostic(event)
-    guard isImportantDiagnostic || NativeDebugLogging.isEnabled else {
+    guard isImportantDiagnostic ||
+      NativeDiagnosticLogging.isScenarioEnabled(.nativeLayoutLayering)
+    else {
       return
     }
     let logsDirectory = GhostexAppStorage.logsDirectory
@@ -58,7 +61,7 @@ enum NativeLayoutLayeringDebugLog {
     payload["event"] = event
     /*
      CDXC:WorkspaceLayeringDiagnostics 2026-06-16-12:22:
-     Layout and hit-test investigations need transition evidence, not one line for every repeated focus, active-layout, or pane-selection tick. Sample known high-volume Debugging Mode events at the writer boundary and preserve burst size as `suppressedSinceLastWrite`.
+     Layout and hit-test investigations need transition evidence, not one line for every repeated focus, active-layout, or pane-selection tick. Sample known high-volume scenario-enabled events at the writer boundary and preserve burst size as `suppressedSinceLastWrite`.
      */
     if !isImportantDiagnostic,
       !shouldWriteSampledLogEvent(

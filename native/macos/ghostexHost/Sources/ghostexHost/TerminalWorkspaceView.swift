@@ -1136,13 +1136,13 @@ private func nativeLogGtePromptEditor(_ event: String, details: [String: String]
   /**
    CDXC:Diagnostics 2026-05-16-07:23:
   Gte prompt-editor breadcrumbs are persistent regular diagnostics. Do not
-  create or append gte-prompt-editor.log unless Settings Debugging Mode is
-  enabled.
+  create or append gte-prompt-editor.log unless the native.prompt.editor
+  scenario is enabled.
 
    CDXC:DiagnosticsPrivacy 2026-05-31-00:31:
    The prompt-editor log is part of the support bundle users zip and send. Route payloads through NativeLogPrivacy before serialization so editor commands, shim paths, and user shell paths do not persist as plain text.
    */
-  guard NativeDebugLogging.isEnabled else {
+  guard NativeDiagnosticLogging.isScenarioEnabled(.nativePromptEditor) else {
     return
   }
   let url = nativeGtePromptEditorLogURL()
@@ -1267,7 +1267,8 @@ private func nativeApplyGtePromptEditingEnvironment(_ environment: inout [String
   environment["GHOSTEX_PROMPT_EDITOR_BACKEND"] = promptEditorBackend
   environment["GHOSTEX_PROMPT_EDITOR_CLIENT"] = "macos-app"
   environment["GHOSTEX_ZMX_BIN"] = nativeBundledZmxExecutablePath() ?? ""
-  environment["GHOSTEX_DEBUGGING_MODE"] = NativeDebugLogging.isEnabled ? "1" : "0"
+  environment["GHOSTEX_DEBUGGING_MODE"] =
+    NativeDiagnosticLogging.isScenarioEnabled(.nativePromptEditor) ? "1" : "0"
   environment["GHOSTEX_GTE_PROMPT_EDITOR_LOG"] = nativeGtePromptEditorLogURL().path
   if let appVariant = ProcessInfo.processInfo.environment["GHOSTEX_APP_VARIANT"], !appVariant.isEmpty {
     environment["GHOSTEX_APP_VARIANT"] = appVariant
@@ -2415,6 +2416,12 @@ final class TerminalWorkspaceView: NSView {
     let rightSeparatorFrame: CGRect
     let resizeHandleFrame: CGRect
     let sessionId: String
+  }
+
+  private struct ProjectEditorCompanionSurfaceSnapshot {
+    let frame: CGRect?
+    let isVisible: Bool
+    let sessionId: String?
   }
 
   private struct ProjectEditorFocusOwnerState {
@@ -5482,6 +5489,7 @@ final class TerminalWorkspaceView: NSView {
       updateAllTerminalBorders()
       return
     }
+    let previousProjectEditorCompanionSurface = projectEditorCompanionSurfaceSnapshot()
     markProjectEditorFocusOwner(
       projectEditorId: projectId,
       event: "firstResponder",
@@ -5509,8 +5517,11 @@ final class TerminalWorkspaceView: NSView {
     syncProjectEditorTabBars()
     layoutProjectEditorPane(session, in: companionLayout?.editorFrame ?? bounds)
     orderProjectEditorPaneToFront(session)
+    let didChangeProjectEditorCompanionSurface = projectEditorCompanionSurfaceChanged(
+      from: previousProjectEditorCompanionSurface,
+      to: companionLayout)
     syncProjectEditorCompanionPane(layout: companionLayout)
-    if didSwitchProjectEditor {
+    if didSwitchProjectEditor && didChangeProjectEditorCompanionSurface {
       /*
        CDXC:ZmxPersistenceRefresh 2026-05-18-15:03:
        Switching from Agents into Code, Browser, Project, or Manage mode surfaces the current companion terminal without always taking the ordinary terminal-focus path.
@@ -6391,19 +6402,30 @@ final class TerminalWorkspaceView: NSView {
     let isCommandPanelSession = commandsPanelActiveSessionIds.contains(sessionId)
     let previousFocusedTerminalSessionId =
       isCommandPanelSession ? commandsPanelFocusedSessionId : focusedSessionId
+    let hadActiveProjectEditor = !isCommandPanelSession && activeProjectEditorId != nil
     if !isCommandPanelSession,
       activateProjectEditorCompanionPane(sessionId: sessionId, focus: true, reason: reason)
     {
       return
     }
     if !isCommandPanelSession {
-      let hadActiveProjectEditor = activeProjectEditorId != nil
       activeProjectEditorId = nil
       if hadActiveProjectEditor {
         needsLayout = true
         layoutSubtreeIfNeeded()
       }
     }
+    let shouldUseNarrowSidebarFocusBorderUpdate =
+      reason == "sidebarFocusCommand" && !isCommandPanelSession && !hadActiveProjectEditor
+    /*
+     CDXC:SidebarSessionFocus 2026-06-27-22:54:
+     Sidebar-mounted terminal switches should keep the old focused border
+     visible until AppKit accepts the new terminal as first responder. Repaint
+     only after the responder is confirmed and the new border can be marked
+     settled, otherwise the settlement gate briefly paints no active border.
+     */
+    let shouldDeferSidebarFocusBorderUpdateUntilResponder =
+      shouldUseNarrowSidebarFocusBorderUpdate
     if isCommandPanelSession {
       /**
        CDXC:CommandsPanel 2026-05-14-09:31:
@@ -6420,7 +6442,15 @@ final class TerminalWorkspaceView: NSView {
     }
     orderTerminalPaneViewsToFront(sessions[sessionId])
     invalidateFocusedPaneBorderSettlement(reason: "focusTerminal.\(reason)")
-    updateAllTerminalBorders()
+    if !shouldDeferSidebarFocusBorderUpdateUntilResponder {
+      if shouldUseNarrowSidebarFocusBorderUpdate {
+        updateTerminalBordersForFocusTransition(
+          previousSessionId: previousFocusedTerminalSessionId,
+          nextSessionId: sessionId)
+      } else {
+        updateAllTerminalBorders()
+      }
+    }
     if shouldRevealActivePaneTabOnFocus(reason: reason) {
       revealActivePaneTab(for: sessionId, reason: "focusTerminal.\(reason)")
     }
@@ -6432,6 +6462,7 @@ final class TerminalWorkspaceView: NSView {
     let makeFirstResponderResult = targetWindow?.makeFirstResponder(view) ?? false
     programmaticFocusDepth -= 1
     let didApplyFirstResponder = makeFirstResponderResult || targetWindow?.firstResponder === view
+    var didSettleFocusedBorderImmediately = false
     if didApplyFirstResponder {
       rememberTerminalFirstResponderSessionId(sessionId)
       clearProjectEditorFocusOwner(reason: "focusTerminal.\(reason)")
@@ -6445,7 +6476,17 @@ final class TerminalWorkspaceView: NSView {
        succeeds so the border appears only when typing really reaches this
        terminal.
        */
-      updateAllTerminalBorders()
+      if shouldUseNarrowSidebarFocusBorderUpdate {
+        didSettleFocusedBorderImmediately =
+          settleFocusedPaneBorderImmediatelyIfGeometryReady(
+            for: sessionId,
+            reason: "focusTerminal.\(reason)")
+        updateTerminalBordersForFocusTransition(
+          previousSessionId: previousFocusedTerminalSessionId,
+          nextSessionId: sessionId)
+      } else {
+        updateAllTerminalBorders()
+      }
     }
     let responderAfter = responderSnapshot()
     logFocusSurfaceState(
@@ -6453,6 +6494,8 @@ final class TerminalWorkspaceView: NSView {
       reason: reason,
       details: [
         "didChangeFocus": didChangeFocus,
+        "didSettleFocusedBorderImmediately": didSettleFocusedBorderImmediately,
+        "deferredSidebarFocusBorderUpdate": shouldDeferSidebarFocusBorderUpdateUntilResponder,
         "makeFirstResponderResult": makeFirstResponderResult,
         "requestedSessionId": sessionId,
         "targetWindowNumber": targetWindow?.windowNumber ?? 0,
@@ -6461,7 +6504,9 @@ final class TerminalWorkspaceView: NSView {
       event: "nativeWorkspace.focusTerminal.completed",
       details: [
         "activeSessionIds": Array(activeSessionIds).sorted(),
+        "deferredSidebarFocusBorderUpdate": shouldDeferSidebarFocusBorderUpdateUntilResponder,
         "didChangeFocus": didChangeFocus,
+        "didSettleFocusedBorderImmediately": didSettleFocusedBorderImmediately,
         "makeFirstResponderResult": makeFirstResponderResult,
         "reason": reason,
         "requestedSessionId": sessionId,
@@ -6474,10 +6519,14 @@ final class TerminalWorkspaceView: NSView {
     /*
      CDXC:ZmxPersistenceRefresh 2026-06-05-21:27:
      Sidebar session-button and terminal-content clicks should repair a zmx session that another client resized, but a normal click inside an already-correct pane must not repaint the terminal because the repaint scrolls the Ghostty view to the visible bottom. Use zmx's conditional grid-size refresh for click-originated requests.
+
+     CDXC:SidebarSessionFocus 2026-06-27-21:08:
+     Mounted sidebar session switches must not spawn a zmx viewport check on
+     every click. Resize, surface-change, terminal-content, and attention-pane
+     paths still repair stale zmx geometry; plain tab selection keeps focus
+     instant and leaves the terminal buffer untouched.
      */
-    if reason == "sidebarFocusCommand" || reason == "nativeTerminalContentMouseDown"
-      || reason == "nativeAttentionPaneMouseDown"
-    {
+    if reason == "nativeTerminalContentMouseDown" || reason == "nativeAttentionPaneMouseDown" {
       refreshZmxPersistenceTerminalIfNeeded(
         sessionId: sessionId,
         reason: "focusTerminal.\(reason)",
@@ -6915,7 +6964,7 @@ final class TerminalWorkspaceView: NSView {
   }
 
   func windowKeyDownDispatch(_ event: NSEvent) {
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativeTerminalFocus) else {
       return
     }
     guard focusedSessionId != nil || currentResponderSessionId() != nil else {
@@ -6940,7 +6989,7 @@ final class TerminalWorkspaceView: NSView {
     event: NSEvent,
     phase: String
   ) {
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativeTerminalFocus) else {
       return
     }
     var payload = keyboardRouteDebugPayload(surfaceSessionId: surfaceView.ghostexSessionId, event: event)
@@ -6982,7 +7031,7 @@ final class TerminalWorkspaceView: NSView {
     text: Any,
     replacementRange: NSRange
   ) {
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativeTerminalFocus) else {
       return
     }
     var payload = keyboardRouteDebugPayload(surfaceSessionId: surfaceView.ghostexSessionId)
@@ -7222,6 +7271,117 @@ final class TerminalWorkspaceView: NSView {
     updateTerminalBorder(for: sessionId)
   }
 
+  @discardableResult
+  func focusMountedTerminalSession(
+    sessionId rawSessionId: String,
+    reason: String = "explicitFocusMountedTerminalSessionCommand"
+  ) -> Bool {
+    let sessionId = ghostexNativeFocusSessionId(from: rawSessionId) ?? rawSessionId
+    /*
+     CDXC:SidebarSessionFocus 2026-06-27-22:54:
+     Mounted sidebar terminal switches must change selected tab ownership and
+     AppKit first responder as one native operation. Apply the owner silently,
+     then let focusTerminal perform the only border repaint after first
+     responder is confirmed.
+     */
+    guard applyFocusedTerminalOwner(
+      sessionId: sessionId,
+      reason: "focusMountedTerminalSession",
+      logEventPrefix: "nativeWorkspace.focusMountedTerminalSession.owner",
+      repaintBorders: false,
+      revealTab: false)
+    else {
+      return false
+    }
+    focusTerminal(sessionId: sessionId, reason: reason)
+    return true
+  }
+
+  @discardableResult
+  func setFocusedTerminalOwner(_ command: SetFocusedTerminalOwner) -> Bool {
+    applyFocusedTerminalOwner(
+      sessionId: command.sessionId,
+      reason: "setFocusedTerminalOwner",
+      logEventPrefix: "nativeWorkspace.setFocusedTerminalOwner",
+      repaintBorders: true,
+      revealTab: true)
+  }
+
+  @discardableResult
+  private func applyFocusedTerminalOwner(
+    sessionId rawSessionId: String,
+    reason: String,
+    logEventPrefix: String,
+    repaintBorders: Bool,
+    revealTab: Bool
+  ) -> Bool {
+    let sessionId = ghostexNativeFocusSessionId(from: rawSessionId) ?? rawSessionId
+    guard activeProjectEditorId == nil else {
+      TerminalFocusDebugLog.append(
+        event: "\(logEventPrefix).skipped",
+        details: [
+          "activeProjectEditorId": nullableString(activeProjectEditorId),
+          "reason": "projectEditorActive",
+          "requestedSessionId": sessionId,
+        ])
+      return false
+    }
+    guard activeSessionIds.contains(sessionId), sessions[sessionId] != nil else {
+      TerminalFocusDebugLog.append(
+        event: "\(logEventPrefix).skipped",
+        details: [
+          "activeSessionIds": Array(activeSessionIds).sorted(),
+          "knownSessionIds": Array(sessions.keys).sorted(),
+          "reason": "sessionNotMountedWorkspaceTerminal",
+          "requestedSessionId": sessionId,
+        ])
+      return false
+    }
+    /*
+     CDXC:SidebarSessionFocus 2026-06-27-22:54:
+     Mounted sidebar terminal switches update stored tab ownership through this
+     helper instead of setActiveTerminalSet so a plain click does not rebuild
+     all pane chrome, run titlebar sync, or trigger zmx refresh. The combined
+     focus command uses the helper without repainting; the compatibility
+     owner-only command can still request an immediate narrow repaint.
+     */
+    let previousFocusedSessionId = focusedSessionId
+    focusedSessionId = sessionId
+    let ownerSelectionResult = terminalLayout.map {
+      layoutSelectingPaneOwner(sessionId: sessionId, in: $0)
+    }
+    if let ownerSelectionResult, ownerSelectionResult.containsSession {
+      terminalLayout = ownerSelectionResult.layout
+    }
+    let didApplyPaneOwnerSelection =
+      ownerSelectionResult?.containsSession == true
+        ? applyPaneOwnerSelectionFromCurrentLayout(reason: reason)
+        : false
+    if repaintBorders {
+      invalidateFocusedPaneBorderSettlement(reason: reason)
+      updateTerminalBordersForFocusTransition(
+        previousSessionId: previousFocusedSessionId,
+        nextSessionId: sessionId)
+    }
+    if revealTab {
+      revealActivePaneTab(for: sessionId, reason: reason)
+    }
+    TerminalFocusDebugLog.append(
+      event: "\(logEventPrefix).applied",
+      details: [
+        "didApplyPaneOwnerSelection": didApplyPaneOwnerSelection,
+        "didChangeStoredLayoutOwner": ownerSelectionResult?.changed == true,
+        "foundSessionInStoredLayout": ownerSelectionResult?.containsSession == true,
+        "previousFocusedSessionId": nullableString(previousFocusedSessionId),
+        "reason": reason,
+        "repaintBorders": repaintBorders,
+        "revealTab": revealTab,
+        "requestedSessionId": sessionId,
+        "responder": responderSnapshot(),
+      ])
+    return true
+  }
+
   func setActiveTerminalSet(
     _ command: SetActiveTerminalSet,
     suppressExplicitFocus: Bool = false
@@ -7285,6 +7445,7 @@ final class TerminalWorkspaceView: NSView {
     let previousProjectEditorCompanionIsVisible = projectEditorCompanionIsVisible
     let previousProjectEditorCompanionPaneHidden = projectEditorCompanionPaneHidden
     let previousProjectEditorCompanionSessionId = projectEditorCompanionSessionId
+    let previousProjectEditorCompanionSurface = projectEditorCompanionSurfaceSnapshot()
     let previousSessionFocusModeAvailableSessionIds = sessionFocusModeAvailableSessionIds
     let previousSessionTitleBarActions = sessionTitleBarActions
     let previousSessionTitles = sessionTitles
@@ -7609,12 +7770,20 @@ final class TerminalWorkspaceView: NSView {
       ])
     }
     if previousActiveProjectEditorId != activeProjectEditorId {
+      let shouldRefreshForProjectEditorModeSwitch =
+        previousActiveProjectEditorId == nil
+          || activeProjectEditorId == nil
+          || projectEditorCompanionSurfaceChanged(
+            from: previousProjectEditorCompanionSurface,
+            to: projectEditorCompanionLayout(in: bounds))
       /*
        CDXC:ZmxPersistenceRefresh 2026-05-18-15:03:
        Sidebar mode switches between Agents and Code/Browser/Project/Manage can reveal a zmx terminal set through layout state rather than direct terminal focus.
        Refresh every surfaced zmx terminal after the active project-editor id is applied so both directions repair persisted terminal text.
        */
-      refreshZmxPersistenceTerminalsForSurfacedPanes(reason: "setActiveTerminalSet.projectEditorModeSwitch")
+      if shouldRefreshForProjectEditorModeSwitch {
+        refreshZmxPersistenceTerminalsForSurfacedPanes(reason: "setActiveTerminalSet.projectEditorModeSwitch")
+      }
     }
     if abs(previousPaneGap - paneGap) > 0.5
       || abs(previousTerminalPaneHorizontalPaddingPx - terminalPaneHorizontalPaddingPx) > 0.5
@@ -8417,7 +8586,7 @@ final class TerminalWorkspaceView: NSView {
     reason: String,
     handles: [(kind: String, view: TerminalWorkspacePaneResizeHandleView)]
   ) {
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativePaneTabs) else {
       return
     }
     let signature = handles.map { entry -> String in
@@ -9351,10 +9520,15 @@ final class TerminalWorkspaceView: NSView {
       hideProjectEditorCompanionChrome()
       return
     }
-    moveRenderedProjectEditorCompanionSurfaceOffscreen(except: layout.sessionId)
+    let isCompanionSurfaceSettled = isProjectEditorCompanionSurfaceSettled(layout)
+    if projectEditorCompanionRenderedSessionId != layout.sessionId {
+      moveRenderedProjectEditorCompanionSurfaceOffscreen(except: layout.sessionId)
+    }
     syncProjectEditorCompanionTitleBarControls(activeSessionId: layout.sessionId)
     setPaneTabs([], activeSessionId: layout.sessionId, on: layout.sessionId)
-    setFrame(layout.contentFrame, for: layout.sessionId, webPaneMode: .projectEditorCompanion)
+    if !isCompanionSurfaceSettled {
+      setFrame(layout.contentFrame, for: layout.sessionId, webPaneMode: .projectEditorCompanion)
+    }
     projectEditorCompanionRenderedSessionId = layout.sessionId
 
     syncProjectEditorCompanionRightSeparator(frame: layout.rightSeparatorFrame)
@@ -9366,6 +9540,84 @@ final class TerminalWorkspaceView: NSView {
     addSubview(projectEditorCompanionResizeHandleView, positioned: .above, relativeTo: nil)
     window?.invalidateCursorRects(for: projectEditorCompanionResizeHandleView)
     orderResizeHandlesToFront(reason: "syncProjectEditorCompanionPane")
+  }
+
+  private func projectEditorCompanionSurfaceSnapshot() -> ProjectEditorCompanionSurfaceSnapshot {
+    guard let sessionId = projectEditorCompanionRenderedSessionId else {
+      return ProjectEditorCompanionSurfaceSnapshot(frame: nil, isVisible: false, sessionId: nil)
+    }
+    return ProjectEditorCompanionSurfaceSnapshot(
+      frame: projectEditorCompanionContainerFrame(for: sessionId),
+      isVisible: isProjectEditorCompanionSurfaceVisible(sessionId),
+      sessionId: sessionId)
+  }
+
+  private func projectEditorCompanionSurfaceChanged(
+    from previousSnapshot: ProjectEditorCompanionSurfaceSnapshot,
+    to layout: ProjectEditorCompanionLayout?
+  ) -> Bool {
+    /*
+     CDXC:ModeSwitcher 2026-06-28-02:14:
+     Titlebar switches between Source, Browser, Kanban, and Manage must leave the left companion terminal visually static when its session and frame are unchanged. Treat companion frame sync and zmx viewport refresh as no-ops in that case because reapplying the same Ghostty/zmx viewport can visibly adjust terminal text even without a width change.
+     */
+    guard let layout else {
+      return previousSnapshot.isVisible
+    }
+    guard
+      previousSnapshot.sessionId == layout.sessionId,
+      previousSnapshot.isVisible,
+      let previousFrame = previousSnapshot.frame,
+      rectsMatch(previousFrame, layout.contentFrame)
+    else {
+      return true
+    }
+    return false
+  }
+
+  private func isProjectEditorCompanionSurfaceSettled(_ layout: ProjectEditorCompanionLayout) -> Bool {
+    guard
+      projectEditorCompanionRenderedSessionId == layout.sessionId,
+      let session = sessions[layout.sessionId],
+      isProjectEditorCompanionSurfaceVisible(layout.sessionId),
+      rectsMatch(session.containerView.frame, layout.contentFrame)
+    else {
+      return false
+    }
+    let titleBarHeight = min(titleBarHeight(for: layout.sessionId), max(layout.contentFrame.height, 0))
+    let titleBarRect = CGRect(
+      x: 0,
+      y: layout.contentFrame.height - titleBarHeight,
+      width: layout.contentFrame.width,
+      height: titleBarHeight)
+    let availableTerminalRect = CGRect(
+      x: 0,
+      y: 0,
+      width: layout.contentFrame.width,
+      height: max(layout.contentFrame.height - titleBarHeight, 1))
+    let terminalRect = terminalPaneContentRect(in: availableTerminalRect)
+    return rectsMatch(session.titleBarView.frame, titleBarRect)
+      && rectsMatch(session.scrollView.frame, terminalRect)
+  }
+
+  private func projectEditorCompanionContainerFrame(for sessionId: String) -> CGRect? {
+    projectEditorCompanionContainerView(for: sessionId)?.frame
+  }
+
+  private func isProjectEditorCompanionSurfaceVisible(_ sessionId: String) -> Bool {
+    guard let containerView = projectEditorCompanionContainerView(for: sessionId) else {
+      return false
+    }
+    return containerView.superview === self && !containerView.isHidden
+  }
+
+  private func projectEditorCompanionContainerView(for sessionId: String) -> TerminalPaneLeafContainerView? {
+    if let session = sessions[sessionId] {
+      return session.containerView
+    }
+    if let session = webPaneSessions[sessionId] {
+      return session.containerView
+    }
+    return nil
   }
 
   private func moveRenderedProjectEditorCompanionSurfaceOffscreen(
@@ -9821,17 +10073,33 @@ final class TerminalWorkspaceView: NSView {
      because command terminals float above the editor and keep their own
      interactive titlebar. Do not let the editor layout branch clear an
      in-flight command-tab drag before mouse-up can commit the split/drop.
+
+     CDXC:ModeSwitcher 2026-06-28-02:14:
+     Switching Source, Browser, Kanban, and Manage changes the right project
+     editor surface only. Keep the current companion session mounted while
+     hiding ordinary split panes so the left terminal does not disappear,
+     remount, or reflow when its width did not change.
      */
     if paneHeaderDrag.map({ commandsPanelActiveSessionIds.contains($0.sourceSessionId) }) != true {
       resetPaneHeaderInteractionState()
     }
+    let retainedCompanionSessionId =
+      projectEditorCompanionIsVisible && !projectEditorCompanionPaneHidden
+        ? projectEditorCompanionSessionId
+        : nil
     for session in sessions.values {
       if commandsPanelActiveSessionIds.contains(session.sessionId) {
+        continue
+      }
+      if let retainedCompanionSessionId, session.sessionId == retainedCompanionSessionId {
         continue
       }
       moveOffscreen(session.containerView)
     }
     for session in webPaneSessions.values {
+      if let retainedCompanionSessionId, session.sessionId == retainedCompanionSessionId {
+        continue
+      }
       moveOffscreen(session.containerView)
     }
     hidePaneResizeHandleViews()
@@ -10281,7 +10549,7 @@ final class TerminalWorkspaceView: NSView {
     _ event: String,
     details: [String: Any]
   ) {
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativeProjectBoard) else {
       return
     }
     let sanitizedPayload = NativeLogPrivacy.sanitizePayload(details)
@@ -11781,6 +12049,48 @@ final class TerminalWorkspaceView: NSView {
         didApply: &didApply)
     }
     return didApply
+  }
+
+  private func layoutSelectingPaneOwner(
+    sessionId: String,
+    in node: NativeTerminalLayout
+  ) -> (layout: NativeTerminalLayout, containsSession: Bool, changed: Bool) {
+    /*
+     CDXC:SidebarSessionFocus 2026-06-27-21:08:
+     Fast sidebar focus must change only the stored active tab owner for the
+     tab group containing the clicked mounted terminal. Preserve split geometry
+     and sibling tab order so the next real layout sync starts from the same
+     topology without replaying setActiveTerminalSet on the hot path.
+     */
+    switch node {
+    case .leaf(let nodeSessionId):
+      return (node, nodeSessionId == sessionId, false)
+    case .tabs(let activeSessionId, let sessionIds):
+      guard sessionIds.contains(sessionId) else {
+        return (node, false, false)
+      }
+      guard activeSessionId != sessionId else {
+        return (node, true, false)
+      }
+      return (.tabs(activeSessionId: sessionId, sessionIds: sessionIds), true, true)
+    case .split(let direction, let ratio, let children):
+      var containsSession = false
+      var changed = false
+      let nextChildren = children.map { child in
+        let childResult = layoutSelectingPaneOwner(sessionId: sessionId, in: child)
+        containsSession = containsSession || childResult.containsSession
+        changed = changed || childResult.changed
+        return childResult.layout
+      }
+      guard changed else {
+        return (node, containsSession, false)
+      }
+      return (
+        .split(direction: direction, ratio: ratio, children: nextChildren),
+        containsSession,
+        true
+      )
+    }
   }
 
   private func applyPaneOwnerSelection(
@@ -17353,6 +17663,32 @@ final class TerminalWorkspaceView: NSView {
     }
   }
 
+  private func updateTerminalBordersForFocusTransition(
+    previousSessionId: String?,
+    nextSessionId: String
+  ) {
+    /*
+     CDXC:SidebarSessionFocus 2026-06-27-20:28:
+     Mounted sidebar terminal switches change focus chrome for the old and new
+     pane owners only. Avoid repainting every terminal, web pane, and sleeping
+     placeholder on that hot path so large workspaces do not make session
+     switching wait on unrelated pane chrome.
+     */
+    cancelIneligibleFocusedPaneBorderSettlements()
+    if let previousSessionId, previousSessionId != nextSessionId {
+      updateTerminalOrPlaceholderBorder(for: previousSessionId)
+    }
+    updateTerminalOrPlaceholderBorder(for: nextSessionId)
+  }
+
+  private func updateTerminalOrPlaceholderBorder(for sessionId: String) {
+    if sleepingPanePlaceholderSessions[sessionId] != nil {
+      updateSleepingPanePlaceholderBorder(for: sessionId)
+    } else {
+      updateTerminalBorder(for: sessionId)
+    }
+  }
+
   private func updateSleepingPanePlaceholderBorder(for sessionId: String) {
     guard let session = sleepingPanePlaceholderSessions[sessionId] else {
       return
@@ -17484,6 +17820,28 @@ final class TerminalWorkspaceView: NSView {
     focusedPaneBorderSettledSessionIds.removeAll()
     scheduledFocusedPaneBorderSettlementSessionIds.removeAll()
     focusedPaneBorderSettlementGeneration &+= 1
+  }
+
+  private func settleFocusedPaneBorderImmediatelyIfGeometryReady(
+    for sessionId: String,
+    reason _: String
+  ) -> Bool {
+    /*
+     CDXC:SidebarSessionFocus 2026-06-27-22:54:
+     Mounted sidebar session switches reuse existing pane geometry. Once AppKit
+     first responder points at the new terminal, mark that border settled before
+     repainting so the active outline moves directly from old pane to new pane
+     instead of disappearing until the async settlement pass runs.
+     */
+    guard isFocusedPaneBorderEligible(for: sessionId),
+      isFocusedPaneBorderGeometrySettled(for: sessionId)
+    else {
+      return false
+    }
+    scheduledFocusedPaneBorderSettlementSessionIds.removeAll()
+    focusedPaneBorderSettledSessionIds = [sessionId]
+    focusedPaneBorderSettlementGeneration &+= 1
+    return true
   }
 
   private func cancelIneligibleFocusedPaneBorderSettlements() {
@@ -17717,6 +18075,22 @@ final class TerminalWorkspaceView: NSView {
     return !isViewHiddenFromWindow(targetView) && !targetView.bounds.isEmpty
   }
 
+  func isWorkspaceFocusOwnedBySession(_ rawSessionId: String) -> Bool {
+    /*
+     CDXC:SidebarSessionFocus 2026-06-27-21:08:
+     Sidebar focus reinforcement is a repair for WebKit stealing first
+     responder after a row click. Let AppDelegate skip that repair when the
+     selected workspace surface already owns AppKit focus so successful
+     switches settle immediately.
+     */
+    let sessionId = ghostexNativeFocusSessionId(from: rawSessionId) ?? rawSessionId
+    let focusTarget = workspaceFocusTarget(sessionId: sessionId)
+    guard focusTarget.isExpectedSelection, let targetView = focusTarget.view else {
+      return false
+    }
+    return responder(targetView.window?.firstResponder, isInside: targetView)
+  }
+
   @discardableResult
   func reinforceWorkspaceFocus(
     sessionId rawSessionId: String,
@@ -17941,7 +18315,7 @@ final class TerminalWorkspaceView: NSView {
     reason: String,
     details: [String: Any] = [:]
   ) {
-    guard NativeDebugLogging.isEnabled else {
+    guard NativeDiagnosticLogging.isScenarioEnabled(.nativeTerminalFocus) else {
       return
     }
     let surfaceFocusIds = focusedSurfaceSessionIds()
@@ -17950,7 +18324,7 @@ final class TerminalWorkspaceView: NSView {
      CDXC:NativeTerminalStartupFocus 2026-05-11-12:31
      Startup focus repros need one snapshot that compares the sidebar-selected
      pane, AppKit first responder, and Ghostty's per-surface focused flag. Log
-     this only through Debugging Mode so normal terminal startup remains quiet.
+     this only through the native.terminal.focus scenario so normal terminal startup remains quiet.
     */
     payload["activeSessionIds"] = Array(activeSessionIds).sorted()
     payload["focusedSessionId"] = nullableString(focusedSessionId)

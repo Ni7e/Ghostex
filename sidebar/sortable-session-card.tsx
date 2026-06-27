@@ -2098,6 +2098,17 @@ export function SortableSessionCard({
                   shiftKey: event.shiftKey,
                 })
               ) {
+                /*
+                 * CDXC:SidebarSessionFocus 2026-06-27-21:08:
+                 * Simple session-row clicks focus on pointer-down and suppress
+                 * the follow-up click. Prevent the default pointer focus only
+                 * on that same path so WKWebView does not retake first
+                 * responder after native has focused the terminal; the event
+                 * still propagates to drag sensors, while modified clicks,
+                 * context menus, rename double-clicks, and child buttons keep
+                 * their existing behavior.
+                 */
+                event.preventDefault();
                 rememberImmediateFocusClickSuppression();
                 requestFocusSession(event);
               }

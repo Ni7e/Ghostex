@@ -6,7 +6,10 @@
  * polluting comments/labels with app-routing metadata.
  */
 
+import type { AppToastLevel } from "./app-toast-contract";
 import type { SidebarAgentIcon } from "./sidebar-agents";
+
+import type { DiagnosticLoggingSettings } from "./ghostex-settings";
 
 export type BeadConversationLinkStatus = "active" | "archived";
 
@@ -65,6 +68,7 @@ export type ProjectBoardConversationState = {
   activeSessionId?: string;
   agents: ProjectBoardAgentOption[];
   debuggingMode?: boolean;
+  diagnosticLogging?: DiagnosticLoggingSettings;
   defaultAgentId?: string;
   focusedTerminalSessionId?: string;
   links: ProjectBoardConversationLinkView[];
@@ -89,6 +93,7 @@ export type ProjectBoardBridgeAction =
   | "getState"
   | "jumpToConversation"
   | "projectEditorFocusOwnerChanged"
+  | "showToast"
   | "startWork"
   | "unlinkConversation";
 
@@ -109,6 +114,9 @@ export type ProjectBoardBridgeRequest = {
   sessionId?: string;
   startLocation?: ProjectBoardStartLocation;
   ticketTitle?: string;
+  toastDescription?: string;
+  toastLevel?: AppToastLevel;
+  toastTitle?: string;
 };
 
 export type ProjectBoardBridgeResponse<TPayload = ProjectBoardConversationState> = {

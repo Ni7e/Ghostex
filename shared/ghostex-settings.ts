@@ -76,6 +76,169 @@ export type RemoteMachineSettings = {
   sshPort?: number;
   sshUser?: string;
 };
+export type DiagnosticLoggingScenarioId =
+  (typeof DIAGNOSTIC_LOGGING_SCENARIOS)[number]["id"];
+export type DiagnosticLoggingScenarioState = {
+  enabled: boolean;
+  expiresAt?: string;
+};
+export type DiagnosticLoggingSettings = {
+  scenarios: Partial<Record<DiagnosticLoggingScenarioId, DiagnosticLoggingScenarioState>>;
+  version: 1;
+};
+export type DiagnosticLoggingScenarioGroup = "macOS" | "GPUI";
+export type DiagnosticLoggingScenarioDefinition = {
+  description: string;
+  group: DiagnosticLoggingScenarioGroup;
+  id: string;
+  label: string;
+  logFiles: readonly string[];
+};
+export const DIAGNOSTIC_LOGGING_SCENARIOS = [
+  {
+    description: "AppKit focus, first responder, key/input routing, and terminal focus repair breadcrumbs.",
+    group: "macOS",
+    id: "native.terminal.focus",
+    label: "Terminal focus and input routing",
+    logFiles: ["native-terminal-focus-debug.log"],
+  },
+  {
+    description: "Sidebar hydration, gxserver presentation, React refresh, and sidebar lifecycle breadcrumbs.",
+    group: "macOS",
+    id: "native.sidebar.refresh",
+    label: "Sidebar refresh and hydration",
+    logFiles: ["sidebar-refresh-debug.log"],
+  },
+  {
+    description: "Sidebar disclosure-state localStorage, hydrate timing, and collapse-state repro breadcrumbs.",
+    group: "macOS",
+    id: "native.sidebar.collapse",
+    label: "Sidebar collapse state",
+    logFiles: ["sidebar-collapse-state-debug.log"],
+  },
+  {
+    description: "Pane-tab buttons, resize rails, sidebar divider, and related AppKit geometry diagnostics.",
+    group: "macOS",
+    id: "native.pane.tabs",
+    label: "Pane tabs, resize rails, and sidebar divider",
+    logFiles: ["native-pane-tabs-debug.log"],
+  },
+  {
+    description: "Pane reorder repro breadcrumbs for tab/split ownership investigations.",
+    group: "macOS",
+    id: "native.pane.reorder",
+    label: "Pane reorder repros",
+    logFiles: ["native-pane-reorder-repro.log"],
+  },
+  {
+    description: "Browser/editor layering, hit-testing, active pane, and visible-surface ordering diagnostics.",
+    group: "macOS",
+    id: "native.layout.layering",
+    label: "Layout, layering, and hit testing",
+    logFiles: ["native-layout-layering-debug.log"],
+  },
+  {
+    description: "Titlebar mode switching, route handoff, project-surface wake, and AppKit settle timings.",
+    group: "macOS",
+    id: "native.mode.switcher",
+    label: "Mode switcher and titlebar routing",
+    logFiles: ["native-mode-switcher-debug.log"],
+  },
+  {
+    description: "Session-title synchronization, first-prompt rename, and title-generation diagnostics.",
+    group: "macOS",
+    id: "native.session.title",
+    label: "Session titles and auto-rename",
+    logFiles: ["session-title-sync-debug.log"],
+  },
+  {
+    description: "Agent detection, semantic activity, completion sound, and attention-notification diagnostics.",
+    group: "macOS",
+    id: "native.agent.detection",
+    label: "Agent detection and activity",
+    logFiles: ["agent-detection-debug.log"],
+  },
+  {
+    description: "Workspace restore, startup layout cache, provider-state refresh, and previous-session diagnostics.",
+    group: "macOS",
+    id: "native.workspace.restore",
+    label: "Workspace restore and startup",
+    logFiles: ["workspace-restore-debug.log"],
+  },
+  {
+    description: "Workspace dock/rail status indicator diagnostics and titlebar resource projection breadcrumbs.",
+    group: "macOS",
+    id: "native.workspace.dock",
+    label: "Workspace dock indicator",
+    logFiles: ["workspace-dock-indicator-debug.log"],
+  },
+  {
+    description: "Native host lifecycle, activation, window close, and termination breadcrumbs.",
+    group: "macOS",
+    id: "native.host.lifecycle",
+    label: "Native host lifecycle",
+    logFiles: ["native-host-lifecycle.log"],
+  },
+  {
+    description: "Project board create/start, title generation, Beads, and worktree setup breadcrumbs.",
+    group: "macOS",
+    id: "native.project.board",
+    label: "Project board actions",
+    logFiles: ["project-board-debug.log"],
+  },
+  {
+    description: "Ghostty config startup and managed terminal configuration diagnostics.",
+    group: "macOS",
+    id: "native.ghostty.config",
+    label: "Ghostty config startup",
+    logFiles: ["native-ghostty-config.log"],
+  },
+  {
+    description: "Prompt editor window, Monaco/GTE initialization, prewarm, and native child-window diagnostics.",
+    group: "macOS",
+    id: "native.prompt.editor",
+    label: "Prompt editor",
+    logFiles: ["native-prompt-editor-debug.log"],
+  },
+  {
+    description: "T3 Code panes, CEF geometry, browser/editor console forwarding, and source drag diagnostics.",
+    group: "macOS",
+    id: "native.t3.codePane",
+    label: "T3 Code and CEF panes",
+    logFiles: ["native-t3-code-pane-repro.log"],
+  },
+  {
+    description: "Browser profile import, Chromium cookie/keychain/decrypt, and CEF handoff diagnostics.",
+    group: "macOS",
+    id: "native.browser.import",
+    label: "Browser import",
+    logFiles: ["native-browser-import-debug.log"],
+  },
+  {
+    description: "Native child-window modal lifecycle, Settings host readiness, and app-modal diagnostics.",
+    group: "macOS",
+    id: "native.app.modal",
+    label: "App modals and Settings windows",
+    logFiles: ["app-modal-debug.log", "app-modal-errors.log"],
+  },
+  {
+    description: "GPUI sidebar focus ownership and rapid session-bounce diagnostics.",
+    group: "GPUI",
+    id: "gpui.sidebar.focus",
+    label: "GPUI sidebar focus and bouncing",
+    logFiles: ["gpui-sidebar-focus-debug.jsonl"],
+  },
+  {
+    description: "GPUI app-modal host lifecycle, Settings hydration, renderer checkpoints, and modal errors.",
+    group: "GPUI",
+    id: "gpui.app.modal",
+    label: "GPUI app modals and Settings",
+    logFiles: ["gpui-app-modal-debug.jsonl"],
+  },
+] as const satisfies readonly DiagnosticLoggingScenarioDefinition[];
+const DIAGNOSTIC_LOGGING_SCENARIO_IDS = new Set<string>(
+  DIAGNOSTIC_LOGGING_SCENARIOS.map((scenario) => scenario.id),
+);
 const MIN_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 0.25;
 const MAX_GHOSTTY_MOUSE_SCROLL_MULTIPLIER = 8;
 const MIN_GHOSTTY_SCROLLBACK_LIMIT_MB = 1;
@@ -509,6 +672,14 @@ export type ghostexSettings = {
   completionSound: CompletionSoundSetting;
   createSessionOnSidebarDoubleClick: boolean;
   debuggingMode: boolean;
+  /**
+   * CDXC:DiagnosticsSettings 2026-06-27-22:07:
+   * Debugging Mode no longer acts as the broad disk-logging switch. Routine
+   * persistent diagnostics are controlled by explicit scenario ids so users can
+   * enable one repro area, such as GPUI app modals or macOS terminal focus,
+   * without turning on every noisy log writer.
+   */
+  diagnosticLogging: DiagnosticLoggingSettings;
   renameSessionOnDoubleClick: boolean;
   hideSessionAgentIconUntilHover: boolean;
   hideBrowserFaviconUntilHover: boolean;
@@ -753,7 +924,12 @@ export type SidebarSettingsPresetSettings = Pick<ghostexSettings, SidebarSetting
  * Recommended should keep the sidebar quieter by hiding session-card Last Active timestamps while preserving the rest of the detailed status chrome.
  *
  * CDXC:SessionStatusIndicators 2026-06-15-14:00:
- * Sidebar presets must not control the macOS floating status indicator. Keep the floating badge setting under Status Indicators so switching sidebar chrome cannot enable or disable that desktop surface.
+ * Sidebar presets did not control the legacy macOS floating status indicator.
+ *
+ * CDXC:SessionStatusIndicators 2026-06-27-20:11:
+ * The standalone floating status indicator was removed from macOS and GPUI.
+ * Presets now tune only sidebar density and the menu-bar indicator; legacy
+ * floating keys are normalized separately for old settings files only.
  *
  * CDXC:SidebarSettingsPresets 2026-06-23-08:20:
  * Every sidebar preset must show session-card close buttons on hover. Presets may still tune density, icons, timestamps, project stats, and menu-bar indicators, but they should not remove the primary per-session close affordance.
@@ -921,6 +1097,10 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   completionSound: DEFAULT_COMPLETION_SOUND,
   createSessionOnSidebarDoubleClick: false,
   debuggingMode: false,
+  diagnosticLogging: {
+    scenarios: {},
+    version: 1,
+  },
   renameSessionOnDoubleClick: false,
   /**
    * CDXC:SidebarSessions 2026-05-16-08:46:
@@ -1048,10 +1228,15 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * Floating session indicators previously started hidden for new installs, while the menu bar session indicator stayed visible unless that separate setting changed.
    *
    * CDXC:SessionStatusIndicators 2026-06-15-14:00:
-   * Sidebar presets must not provide the floating indicator value. Store the first-run default here so applying a sidebar preset preserves whatever the user chose for the macOS floating badge.
+   * Sidebar presets did not provide the legacy floating indicator value.
    *
    * CDXC:SessionStatusIndicators 2026-06-16-09:20:
-   * Show Floating Session Indicators should be on by default, even though the toggle remains an Advanced Settings row. Missing settings should therefore show the desktop badge unless an existing user value explicitly hides it.
+   * The legacy floating indicator defaulted on before the surface was removed.
+   *
+   * CDXC:SessionStatusIndicators 2026-06-27-20:11:
+   * The floating badge surface and Settings rows were removed from macOS and
+   * GPUI. Keep this legacy key normalized so existing settings JSON remains
+   * readable, but no current native or GPUI presentation should consume it.
    */
   hideFloatingSessionStatusIndicators: false,
   hideMenuBarSessionStatusIndicators:
@@ -1060,10 +1245,13 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   selectedPetId: DEFAULT_PET_ID,
   /**
    * CDXC:SessionStatusIndicators 2026-05-07-18:20
-   * The AppKit floating session indicator defaults to Medium, which is half of
-   * the approved X-Large visual size. Persist the named size now so Settings
-   * can later tune the same scalable drawing metrics without changing native
-   * command shape again.
+   * The legacy AppKit floating session indicator size was persisted as a named
+   * value rather than raw pixels.
+   *
+   * CDXC:SessionStatusIndicators 2026-06-27-20:11:
+   * Floating size is retained only as a legacy normalized value after removing
+   * the floating badge from macOS and GPUI. Do not expose it in Settings or
+   * send it through native/GPUI status payloads.
    */
   sessionStatusIndicatorSize: "medium",
   /**
@@ -1443,6 +1631,49 @@ export const GHOSTTY_THEME_SETTING_OPTIONS: ReadonlyArray<{
   ...GHOSTTY_THEME_OPTIONS.map((theme) => ({ label: theme, value: theme })),
 ];
 
+export function isDiagnosticLoggingScenarioEnabled(
+  diagnosticLogging: DiagnosticLoggingSettings | undefined,
+  scenarioId: DiagnosticLoggingScenarioId,
+  now: Date = new Date(),
+): boolean {
+  const scenario = diagnosticLogging?.scenarios[scenarioId];
+  if (!scenario?.enabled) {
+    return false;
+  }
+  if (!scenario.expiresAt) {
+    return true;
+  }
+  const expiresAtMs = Date.parse(scenario.expiresAt);
+  return Number.isFinite(expiresAtMs) && expiresAtMs > now.getTime();
+}
+
+export function setDiagnosticLoggingScenario(
+  diagnosticLogging: DiagnosticLoggingSettings,
+  scenarioId: DiagnosticLoggingScenarioId,
+  state: DiagnosticLoggingScenarioState | undefined,
+): DiagnosticLoggingSettings {
+  const scenarios = { ...diagnosticLogging.scenarios };
+  if (state?.enabled) {
+    scenarios[scenarioId] = normalizeDiagnosticLoggingScenarioState(state) ?? {
+      enabled: true,
+    };
+  } else {
+    delete scenarios[scenarioId];
+  }
+  return normalizeDiagnosticLoggingSettings({
+    scenarios,
+    version: 1,
+  });
+}
+
+export function areDiagnosticLoggingSettingsEqual(
+  lhs: DiagnosticLoggingSettings,
+  rhs: DiagnosticLoggingSettings,
+): boolean {
+  return JSON.stringify(normalizeDiagnosticLoggingSettings(lhs)) ===
+    JSON.stringify(normalizeDiagnosticLoggingSettings(rhs));
+}
+
 export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
   const source = isRecord(candidate) ? candidate : {};
   const promptEditorBackend = normalizePromptEditorBackend(source);
@@ -1643,6 +1874,7 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       DEFAULT_ghostex_SETTINGS.createSessionOnSidebarDoubleClick,
     ),
     debuggingMode: readBoolean(source, "debuggingMode", DEFAULT_ghostex_SETTINGS.debuggingMode),
+    diagnosticLogging: normalizeDiagnosticLoggingSettings(source.diagnosticLogging),
     renameSessionOnDoubleClick: readBoolean(
       source,
       "renameSessionOnDoubleClick",
@@ -1894,6 +2126,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
      * Indicator size is a named UX preference, not raw pixels. Normalize to
      * supported sizes so the native AppKit renderer can apply deterministic
      * scale factors while preserving Medium as the first-install default.
+     *
+     * CDXC:SessionStatusIndicators 2026-06-27-20:11:
+     * After removing standalone floating session indicators from macOS and
+     * GPUI, this normalizer is compatibility-only for existing settings JSON.
+     * Do not use the value for menu bar or floating pet presentation.
      */
     sessionStatusIndicatorSize: normalizeSessionStatusIndicatorSize(
       readString(
@@ -2643,6 +2880,57 @@ function clampNumber(value: number, min: number, max: number, fallback: number):
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export function normalizeDiagnosticLoggingSettings(
+  candidate: unknown,
+): DiagnosticLoggingSettings {
+  const source = isRecord(candidate) ? candidate : {};
+  const scenariosSource = isRecord(source.scenarios) ? source.scenarios : {};
+  const scenarios: DiagnosticLoggingSettings["scenarios"] = {};
+  for (const [scenarioId, rawState] of Object.entries(scenariosSource)) {
+    if (!DIAGNOSTIC_LOGGING_SCENARIO_IDS.has(scenarioId)) {
+      continue;
+    }
+    const state = normalizeDiagnosticLoggingScenarioState(rawState);
+    if (state?.enabled) {
+      scenarios[scenarioId as DiagnosticLoggingScenarioId] = state;
+    }
+  }
+  return {
+    scenarios,
+    version: 1,
+  };
+}
+
+function normalizeDiagnosticLoggingScenarioState(
+  candidate: unknown,
+): DiagnosticLoggingScenarioState | undefined {
+  if (candidate === true) {
+    return { enabled: true };
+  }
+  if (!isRecord(candidate)) {
+    return undefined;
+  }
+  if (candidate.enabled !== true) {
+    return undefined;
+  }
+  const expiresAt =
+    typeof candidate.expiresAt === "string" && isValidDiagnosticLoggingExpiry(candidate.expiresAt)
+      ? candidate.expiresAt
+      : undefined;
+  return expiresAt ? { enabled: true, expiresAt } : { enabled: true };
+}
+
+function isValidDiagnosticLoggingExpiry(value: string): boolean {
+  /*
+   * CDXC:DiagnosticsSettings 2026-06-27-22:07:
+   * Time-limited logging scenarios persist as ISO timestamps produced by
+   * Date.toISOString. Normalize only parseable absolute times so native Swift
+   * and GPUI can evaluate expiry without accepting arbitrary strings into the
+   * support-logging contract.
+   */
+  return Number.isFinite(Date.parse(value));
 }
 
 function readBoolean(

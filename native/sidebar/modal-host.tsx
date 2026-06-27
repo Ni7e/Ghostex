@@ -59,6 +59,11 @@ import {
 } from "../../sidebar/app-modal-error-log";
 import { postAppModalHostMessage } from "../../sidebar/app-modal-host-bridge";
 import { useSidebarStore } from "../../sidebar/sidebar-store";
+import {
+  DEFAULT_ghostex_SETTINGS,
+  isDiagnosticLoggingScenarioEnabled,
+  type DiagnosticLoggingScenarioId,
+} from "../../shared/ghostex-settings";
 import { trimPromptEditorTrailingSpaces } from "../../shared/prompt-editor-text";
 import type { WebviewApi } from "../../sidebar/webview-api";
 import "../../sidebar/styles.css";
@@ -449,8 +454,17 @@ function redactAppModalDebugMessage(message: unknown): unknown {
   return message;
 }
 
+function isDiagnosticLoggingEnabledForScenario(scenarioId: DiagnosticLoggingScenarioId): boolean {
+  const settings = useSidebarStore.getState().hud.settings ?? DEFAULT_ghostex_SETTINGS;
+  return isDiagnosticLoggingScenarioEnabled(settings.diagnosticLogging, scenarioId);
+}
+
 function isAppModalDebugLoggingEnabled(): boolean {
-  return useSidebarStore.getState().hud.debuggingMode;
+  return isDiagnosticLoggingEnabledForScenario("native.app.modal");
+}
+
+function isPromptEditorDebugLoggingEnabled(): boolean {
+  return isDiagnosticLoggingEnabledForScenario("native.prompt.editor");
 }
 
 function postSettingsModalDebugLog(
@@ -470,7 +484,8 @@ function postSettingsModalDebugLog(
    * CDXC:SettingsModalDiagnostics 2026-06-20-06:03:
    * Blank Settings repros need enough checkpoints to separate native WebView
    * loading from React open handling, Settings hydration, renderability, and
-   * `presented` dispatch. Keep all checkpoints behind Debugging Mode.
+   * `presented` dispatch. Keep all checkpoints behind the native.app.modal
+   * scenario.
    */
   postAppModalHostMessage(
     {
@@ -488,7 +503,7 @@ function postSettingsModalDebugLog(
 /**
  * CDXC:PromptEditor 2026-05-19-11:20:
  * Prompt-editor repro logs must land in ~/.ghostex/logs/native-prompt-editor-debug.log
- * only while Settings debugging mode is enabled. Native owns the file; React posts
+ * only while the native.prompt.editor scenario is enabled. Native owns the file; React posts
  * structured events across the modal-host bridge so Monaco state, native
  * child-window frame changes, and focus can be correlated on one timeline.
  */
@@ -496,7 +511,7 @@ function appendPromptEditorDebugLog(
   event: string,
   details: Record<string, string | number | boolean | null | undefined> = {},
 ) {
-  if (!isAppModalDebugLoggingEnabled()) {
+  if (!isPromptEditorDebugLoggingEnabled()) {
     return;
   }
   const payload = {

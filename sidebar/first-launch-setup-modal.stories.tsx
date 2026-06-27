@@ -53,6 +53,8 @@ const installedCliStatus: SidebarGhostexCliStatusMessage = {
   gxBlockedByExistingCommand: false,
   gxUsable: false,
   installed: true,
+  moveCodexSessionSkillInstalled: true,
+  moveCodexSessionSkillPath: "/Users/madda/agents/skills/ghostex-move-codex-session/SKILL.md",
   type: "ghostexCliStatus",
 };
 
@@ -68,6 +70,7 @@ const missingCliStatus: SidebarGhostexCliStatusMessage = {
   gxBlockedByExistingCommand: false,
   gxUsable: false,
   installed: false,
+  moveCodexSessionSkillInstalled: false,
   type: "ghostexCliStatus",
 };
 

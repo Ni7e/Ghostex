@@ -9,6 +9,7 @@ import {
   DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   DEFAULT_SIDEBAR_DEFAULT_WIDTH_PX,
   DEFAULT_TERMINAL_PANE_PADDING_PX,
+  DIAGNOSTIC_LOGGING_SCENARIOS,
   GHOSTTY_THEME_SETTING_OPTIONS,
   KEEP_AWAKE_DURATION_OPTIONS,
   MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
@@ -19,6 +20,7 @@ import {
   MIN_TERMINAL_PANE_PADDING_PX,
   applySidebarSettingsPreset,
   getDefaultEditorCommandForSettings,
+  isDiagnosticLoggingScenarioEnabled,
   getSidebarTitlebarBackgroundForDarkness,
   getSessionTitleGenerationCommandPreview,
   getSidebarTitlebarGradientColors,
@@ -509,9 +511,13 @@ describe("normalizeghostexSettings", () => {
      * sidebar stays compact without switching to the Minimal preset.
      *
      * CDXC:SessionStatusIndicators 2026-06-15-14:00:
-     * Sidebar presets intentionally omit the macOS floating badge toggle. This
-     * preset test should cover preset-owned sidebar chrome and menu bar
-     * indicator state without coupling the floating desktop surface.
+     * Sidebar presets intentionally omitted the legacy macOS floating badge
+     * toggle. This preset test should cover preset-owned sidebar chrome and
+     * menu bar indicator state without coupling the retired desktop surface.
+     *
+     * CDXC:SessionStatusIndicators 2026-06-27-20:11:
+     * The floating badge is no longer exposed, but presets must still omit the
+     * legacy compatibility key so old settings JSON never changes preset state.
      *
      * CDXC:SidebarSettingsPresets 2026-06-23-08:20:
      * All preset buttons should leave session-card close buttons enabled on
@@ -564,10 +570,14 @@ describe("normalizeghostexSettings", () => {
      * persisted fourth preset state.
      *
      * CDXC:SessionStatusIndicators 2026-06-15-14:00:
-     * The floating status indicator is a macOS Status Indicators preference, not
-     * sidebar preset chrome. Changing presets must preserve the current floating
-     * badge visibility, and toggling that badge must not make the sidebar preset
-     * read as Custom.
+     * The legacy floating status indicator was a macOS Status Indicators
+     * preference, not sidebar preset chrome. Changing presets must preserve the
+     * compatibility value, and toggling that legacy value must not make the
+     * sidebar preset read as Custom.
+     *
+     * CDXC:SessionStatusIndicators 2026-06-27-20:11:
+     * Keep this as compatibility coverage for old settings files after removing
+     * the macOS/GPUI floating badge UI and renderer.
      */
     expect(
       getSidebarSettingsPresetId(applySidebarSettingsPreset(DEFAULT_ghostex_SETTINGS, "codex")),
@@ -671,6 +681,65 @@ describe("normalizeghostexSettings", () => {
     expect(normalizeghostexSettings({ showSessionDetailsCopyAction: true })).toMatchObject({
       showSessionDetailsCopyAction: true,
     });
+  });
+
+  test("normalizes diagnostic logging scenarios as an explicit disk logging allowlist", () => {
+    /*
+     * CDXC:DiagnosticsSettings 2026-06-27-22:07:
+     * Persistent routine logs must default to failures-only and require an
+     * allowlisted scenario id, so enabling one repro area cannot turn on every
+     * macOS and GPUI diagnostic writer.
+     */
+    expect(DIAGNOSTIC_LOGGING_SCENARIOS.map((scenario) => scenario.id)).toContain(
+      "gpui.app.modal",
+    );
+    expect(DEFAULT_ghostex_SETTINGS.diagnosticLogging).toEqual({
+      scenarios: {},
+      version: 1,
+    });
+    expect(normalizeghostexSettings({}).diagnosticLogging).toEqual({
+      scenarios: {},
+      version: 1,
+    });
+
+    const normalized = normalizeghostexSettings({
+      diagnosticLogging: {
+        scenarios: {
+          "gpui.app.modal": { enabled: true, expiresAt: "2026-06-27T20:30:00.000Z" },
+          "native.terminal.focus": true,
+          "native.unknown": { enabled: true },
+          "native.sidebar.refresh": { enabled: false },
+        },
+      },
+    });
+    expect(normalized.diagnosticLogging).toEqual({
+      scenarios: {
+        "gpui.app.modal": { enabled: true, expiresAt: "2026-06-27T20:30:00.000Z" },
+        "native.terminal.focus": { enabled: true },
+      },
+      version: 1,
+    });
+    expect(
+      isDiagnosticLoggingScenarioEnabled(
+        normalized.diagnosticLogging,
+        "gpui.app.modal",
+        new Date("2026-06-27T20:00:00.000Z"),
+      ),
+    ).toBe(true);
+    expect(
+      isDiagnosticLoggingScenarioEnabled(
+        normalized.diagnosticLogging,
+        "gpui.app.modal",
+        new Date("2026-06-27T20:31:00.000Z"),
+      ),
+    ).toBe(false);
+    expect(
+      isDiagnosticLoggingScenarioEnabled(
+        normalized.diagnosticLogging,
+        "native.sidebar.refresh",
+        new Date("2026-06-27T20:00:00.000Z"),
+      ),
+    ).toBe(false);
   });
 
   test("keeps title-bar keep-awake settings English and bounded", () => {
@@ -1064,12 +1133,12 @@ describe("normalizeghostexSettings", () => {
     });
   });
 
-  test("defaults floating session status indicators on and keeps four selectable sizes", () => {
+  test("keeps legacy floating session status settings normalized", () => {
     /**
      * CDXC:SessionStatusIndicators 2026-05-07-18:20
-     * Medium is the default because it is 50% of the current approved X-Large
-     * indicator size. Settings must expose all named scale points so users can
-     * return to the larger visual or choose smaller indicators later.
+     * Medium is the legacy default because it was 50% of the approved X-Large
+     * indicator size. Keep all named scale points normalized for old settings
+     * files even though Settings no longer exposes this selector.
      *
      * CDXC:SessionStatusIndicators 2026-06-13-01:06:
      * Menu bar status badges remain visible in the default Recommended preset
@@ -1081,12 +1150,17 @@ describe("normalizeghostexSettings", () => {
      * surface.
      *
      * CDXC:SessionStatusIndicators 2026-06-15-14:00:
-     * The floating status toggle remains an explicit Status Indicators setting,
-     * so normalization should preserve it without relying on sidebar preset data.
+     * The floating status toggle was an explicit Status Indicators setting, so
+     * normalization should preserve it without relying on sidebar preset data.
      *
      * CDXC:SessionStatusIndicators 2026-06-16-09:20:
-     * New installs should show floating session indicators by default. Existing
-     * explicit hide/show values still normalize without preset involvement.
+     * The legacy default was visible. Existing explicit hide/show values still
+     * normalize without preset involvement.
+     *
+     * CDXC:SessionStatusIndicators 2026-06-27-20:11:
+     * The macOS and GPUI floating badge was removed. These assertions now prove
+     * backward-compatible settings reads only; no renderer or Settings UI should
+     * consume the legacy toggle or size values.
      */
     expect(DEFAULT_ghostex_SETTINGS.hideFloatingSessionStatusIndicators).toBe(false);
     expect(DEFAULT_ghostex_SETTINGS.hideMenuBarSessionStatusIndicators).toBe(false);

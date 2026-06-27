@@ -32,6 +32,7 @@ import {
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { Button } from "@/components/ui/button";
+import { isDiagnosticLoggingScenarioEnabled } from "../../shared/ghostex-settings";
 import {
   Card,
   CardContent,
@@ -115,6 +116,7 @@ import {
   type ProjectBoardConversationState,
   type ProjectBoardStartLocation,
 } from "../../shared/bead-conversation-links";
+import type { AppToastLevel } from "../../shared/app-toast-contract";
 import {
   compareAutomationRunsNewestFirst,
   computeNextRunAt,
@@ -149,6 +151,11 @@ type DetailDraft = {
   title: string;
   tshirt?: TshirtSize;
   ticket?: BoardTicket;
+};
+
+type TicketDetailSaveDraft = Omit<DetailDraft, "isDeleting" | "isSaving" | "ticket"> & {
+  commentMetadata: ProjectBoardCommentMetadata;
+  ticket: BoardTicket;
 };
 
 type TicketFormDraft = {
@@ -566,7 +573,7 @@ function ProjectBoardApp() {
    *
    * CDXC:ProjectBoard 2026-05-28-12:32:
    * New tickets need an explicit Create & Start path with agent selection and a current-project versus new-worktree start location.
-   * The ticket is still created on the board project first so the agent prompt carries the real bead id, and project-page diagnostics are emitted only when Settings Debugging Mode is enabled.
+   * The ticket is still created on the board project first so the agent prompt carries the real bead id, and project-page diagnostics are emitted only when the native.project.board scenario is enabled.
    *
    * CDXC:ProjectBoard 2026-05-28-16:21:
    * Ticket primary actions should reopen existing work before creating new work.
@@ -640,11 +647,16 @@ function ProjectBoardApp() {
    * CDXC:ProjectBoardLoading 2026-06-20-18:21:
    * The first time the macOS Kanban board opens, the lane strip should stay mounted but covered by a spinner overlay until the initial Beads load finishes.
    * Later refreshes should keep the already-loaded board visible and interactive instead of replaying the first-open loading mask.
+   *
+   * CDXC:ProjectBoardLocalFirst 2026-06-27-18:02:
+   * Edit-ticket Save must close immediately and treat Beads persistence as background reconciliation.
+   * Optimistically patch the local card, show an error toast, and reopen the same draft only if persistence fails so slow storage does not hold the modal open or lose the user's edits.
    */
   const isRefreshingRef = useRef(false);
   const issuesSignatureRef = useRef("");
   const labelsSignatureRef = useRef("");
   const newPromptRef = useRef<HTMLTextAreaElement>(null);
+  const detailSaveSerialRef = useRef(0);
   const automationProjectsRef = useRef<ProjectAutomationsBridgeState["projects"]>([]);
   const [conversationAction, setConversationAction] = useState<ConversationActionState>();
   /*
@@ -837,7 +849,12 @@ function ProjectBoardApp() {
 
   const logProjectBoardDebug = useCallback(
     (event: string, details?: Record<string, unknown>) => {
-      if (!conversationState.debuggingMode) {
+      if (
+        !isDiagnosticLoggingScenarioEnabled(
+          conversationState.diagnosticLogging,
+          "native.project.board",
+        )
+      ) {
         return;
       }
       void sendProjectBoardRequest({
@@ -852,7 +869,31 @@ function ProjectBoardApp() {
         console.warn("Project board debug log unavailable.", error);
       });
     },
-    [conversationState.debuggingMode, projectEditorId, projectId, projectPath, remoteMachineId],
+    [
+      conversationState.diagnosticLogging,
+      projectEditorId,
+      projectId,
+      projectPath,
+      remoteMachineId,
+    ],
+  );
+
+  const showProjectBoardToast = useCallback(
+    (level: AppToastLevel, title: string, description?: string) => {
+      void sendProjectBoardRequest({
+        action: "showToast",
+        projectEditorId,
+        projectId,
+        projectPath,
+        ...(remoteMachineId ? { remoteMachineId } : {}),
+        toastDescription: description,
+        toastLevel: level,
+        toastTitle: title,
+      }).catch((error) => {
+        console.warn("Project board toast unavailable.", error);
+      });
+    },
+    [projectEditorId, projectId, projectPath, remoteMachineId],
   );
 
   const setLocalTicketStatus = useCallback(
@@ -1218,69 +1259,104 @@ function ProjectBoardApp() {
     }
   };
 
-  const saveTicketDetail = async () => {
+  const persistTicketDetail = async (draft: TicketDetailSaveDraft) => {
+    const trimmedComment = draft.comment.trim();
+    await runBeads({
+      action: "updateTitle",
+      issueId: draft.ticket.id,
+      title: draft.title.trim(),
+    });
+    await runBeads({
+      action: "updateDescription",
+      description: draft.description,
+      issueId: draft.ticket.id,
+    });
+    await runBeads({
+      action: "updatePriority",
+      issueId: draft.ticket.id,
+      priority: draft.priority,
+    });
+    const estimate = tshirtToEstimate(draft.tshirt);
+    if (estimate !== undefined) {
+      await runBeads({
+        action: "updateEstimate",
+        estimate,
+        issueId: draft.ticket.id,
+      });
+    }
+    if (draft.labels.length > 0) {
+      await runBeads({
+        action: "setLabels",
+        issueId: draft.ticket.id,
+        labels: draft.labels,
+      });
+    }
+    await syncDependencies(draft.ticket.id, draft.blockedByIds, draft.blockingIds);
+    if (draft.status !== draft.ticket.boardStatus) {
+      await runBeads({
+        action: "updateStatus",
+        issueId: draft.ticket.id,
+        status: boardStatusBeadsValue(draft.status),
+      });
+    }
+    if (trimmedComment) {
+      await runBeads({
+        action: "addComment",
+        comment: formatProjectBoardCommentText(trimmedComment, draft.commentMetadata),
+        issueId: draft.ticket.id,
+      });
+    }
+    await loadTickets({ mode: "background" });
+  };
+
+  const saveTicketDetail = () => {
     if (!detail.ticket) {
       return;
     }
-    setDetail((current) => ({ ...current, isSaving: true }));
-    try {
-      const trimmedComment = detail.comment.trim();
-      await runBeads({
-        action: "updateTitle",
-        issueId: detail.ticket.id,
-        title: detail.title.trim(),
-      });
-      await runBeads({
-        action: "updateDescription",
-        description: detail.description,
-        issueId: detail.ticket.id,
-      });
-      await runBeads({
-        action: "updatePriority",
-        issueId: detail.ticket.id,
-        priority: detail.priority,
-      });
-      const estimate = tshirtToEstimate(detail.tshirt);
-      if (estimate !== undefined) {
-        await runBeads({
-          action: "updateEstimate",
-          estimate,
-          issueId: detail.ticket.id,
+    const draft: TicketDetailSaveDraft = {
+      blockedByIds: [...detail.blockedByIds],
+      blockingIds: [...detail.blockingIds],
+      comment: detail.comment,
+      commentMetadata: projectBoardCommentMetadataFromLink(detailCommentMetadataLink),
+      description: detail.description,
+      labels: [...detail.labels],
+      priority: detail.priority,
+      status: detail.status,
+      title: detail.title,
+      tshirt: detail.tshirt,
+      ticket: detail.ticket,
+    };
+    const saveToken = detailSaveSerialRef.current + 1;
+    detailSaveSerialRef.current = saveToken;
+    const parsedPriority = Number.parseInt(draft.priority, 10);
+    const estimate = tshirtToEstimate(draft.tshirt);
+    const optimisticIssue: BeadsIssue = {
+      ...draft.ticket,
+      description: draft.description,
+      ...(estimate !== undefined ? { estimate } : {}),
+      labels: draft.labels.length > 0 ? draft.labels : draft.ticket.labels,
+      priority: Number.isFinite(parsedPriority) ? parsedPriority : draft.ticket.priority,
+      status: boardStatusBeadsValue(draft.status),
+      title: draft.title.trim(),
+    };
+    setDeleteConfirmingTicketId("");
+    setDetail(createEmptyDetailDraft());
+    setErrorMessage("");
+    upsertLocalIssue(optimisticIssue);
+    setKnownLabels((current) => mergeKnownLabels(current, draft.labels));
+    void persistTicketDetail(draft).catch((error) => {
+      const message = error instanceof Error ? error.message : "Could not save the ticket.";
+      setErrorMessage(message);
+      showProjectBoardToast("error", "Ticket save failed", message);
+      if (detailSaveSerialRef.current === saveToken) {
+        setDetail({
+          ...draft,
+          isDeleting: false,
+          isSaving: false,
         });
       }
-      if (detail.labels.length > 0) {
-        await runBeads({
-          action: "setLabels",
-          issueId: detail.ticket.id,
-          labels: detail.labels,
-        });
-      }
-      await syncDependencies(detail.ticket.id, detail.blockedByIds, detail.blockingIds);
-      if (detail.status !== detail.ticket.boardStatus) {
-        await runBeads({
-          action: "updateStatus",
-          issueId: detail.ticket.id,
-          status: boardStatusBeadsValue(detail.status),
-        });
-      }
-      if (trimmedComment) {
-        await runBeads({
-          action: "addComment",
-          comment: formatProjectBoardCommentText(
-            trimmedComment,
-            projectBoardCommentMetadataFromLink(detailCommentMetadataLink),
-          ),
-          issueId: detail.ticket.id,
-        });
-      }
-      setDeleteConfirmingTicketId("");
-      setDetail(createEmptyDetailDraft());
-      setKnownLabels((current) => mergeKnownLabels(current, detail.labels));
-      await loadTickets({ mode: "mutation" });
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not save the ticket.");
-      setDetail((current) => ({ ...current, isSaving: false }));
-    }
+      void loadTickets({ mode: "background" });
+    });
   };
 
   const createTicket = async (options: { startAfterCreate?: boolean } = {}) => {
@@ -1503,7 +1579,9 @@ function ProjectBoardApp() {
           ) {
             pendingStatusMovesRef.current.delete(createdIssueId);
           }
-          setErrorMessage(error instanceof Error ? error.message : "Could not finish creating the ticket.");
+          const message = error instanceof Error ? error.message : "Could not finish creating the ticket.";
+          setErrorMessage(message);
+          showProjectBoardToast("error", "Ticket update failed", message);
           void loadTickets({ mode: "background" });
         }
       };
@@ -1530,7 +1608,9 @@ function ProjectBoardApp() {
         startAfterCreate,
         startLocation,
       });
-      setErrorMessage(error instanceof Error ? error.message : "Could not create the ticket.");
+      const message = error instanceof Error ? error.message : "Could not create the ticket.";
+      setErrorMessage(message);
+      showProjectBoardToast("error", "Ticket creation failed", message);
     } finally {
       createInFlightRef.current = false;
     }

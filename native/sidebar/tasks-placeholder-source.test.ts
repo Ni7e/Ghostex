@@ -2,13 +2,18 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 
 const tasksPlaceholderSource = readFileSync(new URL("./tasks-placeholder.tsx", import.meta.url), "utf8");
+const nativeSidebarSource = readFileSync(new URL("./native-sidebar.tsx", import.meta.url), "utf8");
 
-function sourceBetween(start: string, end: string): string {
-  const startIndex = tasksPlaceholderSource.indexOf(start);
-  const endIndex = tasksPlaceholderSource.indexOf(end, startIndex + start.length);
+function sourceBetweenIn(source: string, start: string, end: string): string {
+  const startIndex = source.indexOf(start);
+  const endIndex = source.indexOf(end, startIndex + start.length);
   expect(startIndex).toBeGreaterThanOrEqual(0);
   expect(endIndex).toBeGreaterThan(startIndex);
-  return tasksPlaceholderSource.slice(startIndex, endIndex);
+  return source.slice(startIndex, endIndex);
+}
+
+function sourceBetween(start: string, end: string): string {
+  return sourceBetweenIn(tasksPlaceholderSource, start, end);
 }
 
 function collectFunctionalUpdaterCalls(source: string, setterCallStart: string): string[] {
@@ -229,6 +234,33 @@ describe("Project Board form event handling", () => {
     expect(titleGenerationSource).toContain("setLocalTicketTitle(issueId, generatedTitle);");
     expect(titleGenerationSource).not.toContain('loadTickets({ mode: "background" })');
     expect(titleGenerationSource).not.toContain("setErrorMessage(");
+  });
+
+  test("closes edit-ticket Save before background persistence finishes", () => {
+    /*
+     * CDXC:ProjectBoardLocalFirst 2026-06-27-18:02:
+     * Edit-ticket Save should dismiss the Kanban modal immediately, update the visible card optimistically, and use a native error toast plus the saved draft if detached Beads persistence fails.
+     */
+    const saveSource = sourceBetween("const persistTicketDetail = async", "const createTicket = async");
+    const toastSource = sourceBetween("const showProjectBoardToast = useCallback", "const setLocalTicketStatus");
+    const nativeToastSource = sourceBetweenIn(
+      nativeSidebarSource,
+      "async function handleProjectBoardRequest",
+      "async function handleRemoteProjectBoardRequest",
+    );
+
+    expect(toastSource).toContain('action: "showToast"');
+    expect(nativeToastSource).toContain('if (request.action === "showToast")');
+    expect(nativeToastSource).toContain("showAppToast(");
+    expect(nativeToastSource).toContain("postProjectBoardResponse(request);");
+    expect(saveSource).toContain("setDetail(createEmptyDetailDraft());");
+    expect(saveSource).toContain("upsertLocalIssue(optimisticIssue);");
+    expect(saveSource).toContain("void persistTicketDetail(draft).catch");
+    expect(saveSource).toContain('showProjectBoardToast("error", "Ticket save failed", message);');
+    expect(saveSource).toContain("detailSaveSerialRef.current === saveToken");
+    expect(saveSource).toContain("setDetail({\n          ...draft,\n          isDeleting: false,\n          isSaving: false,");
+    expect(saveSource).not.toContain("setDetail((current) => ({ ...current, isSaving: true }))");
+    expect(saveSource).not.toContain('await loadTickets({ mode: "mutation" })');
   });
 
   test("snapshots form values before functional state updaters", () => {
