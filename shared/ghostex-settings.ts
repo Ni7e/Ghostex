@@ -256,15 +256,23 @@ export const MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT = 1;
 export const MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT = 50;
 export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_FOREGROUND_COLOR = "#d8d8d8";
 export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_DARK_FOREGROUND_COLOR = "#262626";
-export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR = "#0e0e0e";
-export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR = "#ffffff";
-export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 95;
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_COLOR = "#080c0e";
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR = "#88d7ff";
+export const DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 96;
+/*
+ * CDXC:SidebarTitlebarColors 2026-06-28-08:01:
+ * The default contrast moved to 96 for #88D7FF, but the tint scale keeps the
+ * previous 95 reference so existing saved contrast values for other tints do
+ * not darken or brighten when the app default changes.
+ */
+const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_SCALE_REFERENCE_DARKNESS_PERCENT = 95;
 export const MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 85;
 export const MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT = 100;
 const CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARK_TINTS: ReadonlyMap<string, string> = new Map([
   ["#000000", "#000000"],
   ["#ffffff", "#0e0e0e"],
   ["#808080", "#0e0e0e"],
+  ["#88d7ff", "#0a0f12"],
   ["#4f6672", "#0c0e10"],
   ["#884444", "#0d0005"],
   ["#8a5330", "#100502"],
@@ -469,7 +477,7 @@ function scaleSidebarTitlebarDefaultDarkTintBackground(
   }
   const defaultRange =
     MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT -
-    DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT;
+    CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_SCALE_REFERENCE_DARKNESS_PERCENT;
   const scale =
     (MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT - darknessPercent) / defaultRange;
   return {
@@ -648,10 +656,17 @@ export type ghostexSettings = {
   browserFeedbackTool: BrowserFeedbackTool;
   browserOpenMode: BrowserOpenMode;
   /**
-   * CDXC:BetaFeatures 2026-06-16-13:08:
-   * Beta features are user-facing experimental surfaces that should stay hidden
-   * by default. Settings owns one advanced opt-in so every beta surface can be
-   * audited from the Beta section before it appears in the app.
+   * CDXC:SettingsAdvanced 2026-06-28-08:01:
+   * Show Advanced is a persisted Settings browsing preference. When users enable
+   * advanced rows, keep that density enabled across app restarts until they
+   * explicitly turn it off again.
+   */
+  showAdvancedSettings: boolean;
+  /**
+   * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+   * Enable Experimental Features is the user-facing name for this persisted
+   * showBetaFeatures key. Experimental surfaces stay hidden by default, while
+   * Agents Hub remains outside this gate and visible in the sidebar.
    */
   showBetaFeatures: boolean;
   codeServerLinkVscodeUserConfig: boolean;
@@ -1032,9 +1047,17 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   browserOpenMode: "browser-pane",
   /**
-   * CDXC:BetaFeatures 2026-06-16-13:08:
-   * New installs and missing persisted settings should keep beta-only surfaces
-   * hidden until the user enables Show Beta features from Advanced Settings.
+   * CDXC:SettingsAdvanced 2026-06-28-08:01:
+   * New installs should start with ordinary Settings density, but an explicit
+   * Show Advanced toggle is saved so restart hydration preserves the user's
+   * last browsing mode.
+   */
+  showAdvancedSettings: false,
+  /**
+   * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+   * New installs and missing persisted settings should keep experimental
+   * surfaces hidden until the user enables Enable Experimental Features from
+   * Advanced Settings.
    */
   showBetaFeatures: false,
   /**
@@ -1202,10 +1225,10 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * the titlebar control completely for users who do not use Mac sleep
    * management from Ghostex.
    *
-   * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
-   * Keep Awake is now a beta-gated macOS feature. The Show Beta features gate
+   * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+   * Keep Awake is an experimental macOS feature. Enable Experimental Features
    * must be enabled before the titlebar button or runtime automation is
-   * available; this preference only hides the button again inside that beta-on
+   * available; this preference only hides the button again inside that enabled
    * state.
    */
   hideKeepAwakeTitlebarControl: false,
@@ -1341,6 +1364,10 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * The custom chrome default is now 95 contrast with white #FFFFFF tint.
    * Store the computed default background with those controls so Settings,
    * native startup, and protocol snapshots agree.
+   *
+   * CDXC:SidebarTitlebarColors 2026-06-28-08:01:
+   * Match the default app chrome to the user's current Settings choice:
+   * #88D7FF tint at 96 Background Contrast, resolving to #080c0e.
    *
    * CDXC:SettingsTheming 2026-06-15-21:35:
    * Background Contrast and Background Tint are standard Theming controls.
@@ -1793,6 +1820,16 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
      */
     browserOpenMode: normalizeBrowserOpenMode(
       readString(source, "browserOpenMode", DEFAULT_ghostex_SETTINGS.browserOpenMode),
+    ),
+    /**
+     * CDXC:SettingsAdvanced 2026-06-28-08:01:
+     * Persist the Show Advanced density switch with other Settings so advanced
+     * rows stay visible after a restart until the user disables the switch.
+     */
+    showAdvancedSettings: readBoolean(
+      source,
+      "showAdvancedSettings",
+      DEFAULT_ghostex_SETTINGS.showAdvancedSettings,
     ),
     /**
      * CDXC:BetaFeatures 2026-06-16-13:08:

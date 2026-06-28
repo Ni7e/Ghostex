@@ -117,6 +117,7 @@ import {
   IconTerminal2,
   IconTools,
   IconTrash,
+  IconX,
 } from "@tabler/icons-react";
 import { COMPLETION_SOUND_OPTIONS, type CompletionSoundSetting } from "../shared/completion-sound";
 import { GHOSTEX_RECOMMENDED_GHOSTTY_CONFIG_LINES } from "../shared/ghostty-config-actions";
@@ -690,9 +691,12 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
   storage: [],
   /*
    * CDXC:BetaFeatures 2026-06-16-13:08:
-   * The Beta section belongs directly above Debugging and currently owns the
-   * single advanced Show Beta features gate plus the list of beta surfaces that
-   * become visible when that gate is enabled.
+   * The experimental-feature gate belongs directly above Debugging and owns the
+   * list of hidden surfaces that become visible when that gate is enabled.
+   *
+   * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+   * The visible setting name is Enable Experimental Features. Agents Hub is not
+   * part of this gate and remains visible when the setting is disabled.
    */
   beta: ["showBetaFeatures"],
 };
@@ -742,10 +746,15 @@ const DIAGNOSTIC_LOGGING_GROUPS: readonly ["macOS", "GPUI"] = ["macOS", "GPUI"];
  * CDXC:SettingsAdvanced 2026-06-16-09:20:
  * Empty-sidebar double-click creation remains a low-frequency interaction preference and should hide behind Show Advanced. Status Indicators should keep only the floating desktop indicator toggle advanced; its size, the menu bar indicator, Wake Pet, and Pet picker are normal settings.
  *
- * CDXC:BetaFeatures 2026-06-16-13:08:
- * Show Beta features is a persisted advanced setting, while Show Advanced
- * remains only a local browsing filter. Keep the beta gate hidden from ordinary
- * settings browsing until users enable the advanced density view or search for it.
+ * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+ * Enable Experimental Features is the user-facing name for the persisted
+ * showBetaFeatures gate. Show Advanced is a persisted browsing-density
+ * preference, so keep the experimental gate hidden from ordinary settings
+ * browsing until users enable advanced density or search for it.
+ *
+ * CDXC:SettingsAdvanced 2026-06-28-08:01:
+ * Show Advanced persists as a Settings preference so advanced rows stay visible
+ * after restart until the user disables the switch.
  *
  * CDXC:SettingsAdvanced 2026-06-16-18:19:
  * Hide last-active timestamps, completion sounds, macOS attention notification, action-completion sound, Sidebar Tags, and the sidebar interface-size slider are common preferences. Keep them visible without Show Advanced while leaving terminal, debugging, storage, and lower-frequency utility controls advanced.
@@ -785,6 +794,11 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "terminalScrollToBottomWhenTyping",
   "codeServerUseVscodeInsidersUserConfig",
   "codeServerLinkVscodeUserConfig",
+  /*
+   * CDXC:AppIconPicker 2026-06-28-06:05:
+   * Custom Dock icons are advanced appearance personalization. Keep the control searchable, but hide it from normal Settings browsing and place it below Editor so it does not compete with daily sidebar/theme controls.
+   */
+  "appIconSourceId",
   "hideProjectHeaderDiffStats",
   "showProjectEditorDiffFileCount",
   "showUntrackedProjectDiffWhenNoTrackedChanges",
@@ -1051,7 +1065,9 @@ export function SettingsModal({
   const isFirstLaunchSetup = presentation === "firstLaunchSetup";
   const normalizedInitialSettings = normalizeghostexSettings(settings);
   const [draft, setDraft] = useState<ghostexSettings>(normalizedInitialSettings);
-  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(
+    normalizedInitialSettings.showAdvancedSettings,
+  );
   const [settingsSearchQuery, setSettingsSearchQuery] = useState("");
   const [activeMainSettingsSectionId, setActiveMainSettingsSectionId] =
     useState<MainSettingsSectionId>("sidebar");
@@ -1368,7 +1384,7 @@ export function SettingsModal({
       {
         key: "appIconSourceId",
         subtitle:
-          "Choose the macOS Dock and app-switcher icon. Changes the Dock & app-switcher icon only, not the Finder icon.",
+          "Choose the macOS Dock and app-switcher icon. The app file icon may also change when macOS allows it.",
         title: "App Icon",
       },
     ]),
@@ -1957,17 +1973,18 @@ export function SettingsModal({
         title: "Command Pane Default Height",
       },
     ]),
-    beta: getSettingsSectionSearch(settingsSearchQuery, "Beta", [
+    beta: getSettingsSectionSearch(settingsSearchQuery, "Experimental", [
       /*
-       * CDXC:BetaFeatures 2026-06-16-13:08:
-       * Settings search should find the advanced beta gate by label and by the
-       * concrete surfaces it enables so the required Beta list stays discoverable.
+       * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+       * Settings search should find the advanced experimental gate by label and
+       * by the concrete surfaces it enables so the required inventory stays
+       * discoverable without tying Agents Hub to this gate.
        */
       {
         key: "showBetaFeatures",
         subtitle:
-          "Show beta-only surfaces: OS Integration settings, Browser Profiles, Browser color scheme, and Keep Awake.",
-        title: "Show Beta features",
+          "Show experimental surfaces: OS Integration settings, Browser Profiles, Browser color scheme, and Keep Awake.",
+        title: "Enable Experimental Features",
       },
     ]),
     debugging: getSettingsSectionSearch(settingsSearchQuery, "Debugging", [
@@ -2017,8 +2034,6 @@ export function SettingsModal({
   }> = [
     { id: "sidebar", ref: sidebarSectionRef, searchResult: settingsSearch.sidebar, title: "Sidebar" },
     { id: "theming", ref: themingSectionRef, searchResult: settingsSearch.theming, title: "Theming" },
-    // CDXC:AppIconPicker 2026-06-25-21:50: App Icon nav entry sits below Theming in the Settings sidebar.
-    { id: "appIcon", ref: appIconSectionRef, searchResult: settingsSearch.appIcon, title: "App Icon" },
     {
       id: "statusIndicators",
       ref: statusIndicatorsSectionRef,
@@ -2062,6 +2077,11 @@ export function SettingsModal({
       title: "Dev Servers",
     },
     { id: "editor", ref: editorSectionRef, searchResult: settingsSearch.editor, title: "Editor" },
+    /*
+     * CDXC:AppIconPicker 2026-06-28-06:05:
+     * App Icon belongs below Editor in the advanced Settings order so it stays available without being presented as a primary appearance preset picker.
+     */
+    { id: "appIcon", ref: appIconSectionRef, searchResult: settingsSearch.appIcon, title: "App Icon" },
     {
       id: "autoSleep",
       ref: autoSleepSectionRef,
@@ -2085,7 +2105,7 @@ export function SettingsModal({
       id: "beta",
       ref: betaSectionRef,
       searchResult: settingsSearch.beta,
-      title: "Beta",
+      title: "Experimental",
     },
     {
       id: "debugging",
@@ -2118,9 +2138,9 @@ export function SettingsModal({
   ) => {
     /*
      * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
-     * Keep Awake is beta-only in the regular macOS Settings UI. Hide the Power
-     * section until Show Beta features is enabled, while preserving the
-     * first-launch lid-close preference required by onboarding.
+     * Keep Awake is experimental-only in the regular macOS Settings UI. Hide
+     * the Power section until Enable Experimental Features is enabled, while
+     * preserving the first-launch lid-close preference required by onboarding.
      */
     if (sectionId === "power" && !keepAwakeSettingsVisible) {
       return false;
@@ -2481,6 +2501,16 @@ export function SettingsModal({
   const updateDraft = <Key extends keyof ghostexSettings>(key: Key, value: ghostexSettings[Key]) => {
     applySettings({ ...(pendingSettingsRef.current ?? draft), [key]: value });
   };
+  const updateShowAdvancedSettings = (checked: boolean) => {
+    /*
+     * CDXC:SettingsAdvanced 2026-06-28-08:01:
+     * Show Advanced is settings chrome, but it still needs immediate durable
+     * persistence so restart hydration reopens Settings with the same advanced
+     * row visibility the user explicitly chose.
+     */
+    setShowAdvancedSettings(checked);
+    applySettings({ ...(pendingSettingsRef.current ?? draft), showAdvancedSettings: checked });
+  };
   const updateDiagnosticLoggingScenario = (
     scenarioId: DiagnosticLoggingScenarioId,
     duration: DiagnosticLoggingDurationValue,
@@ -2533,12 +2563,6 @@ export function SettingsModal({
     }
     setAppIconError(undefined);
     vscode.postMessage({ type: "pickAppIconFile" });
-  };
-  const revealAppIconsFolder = () => {
-    vscode?.postMessage({ type: "revealAppIconsFolder" });
-  };
-  const resetAppIcon = () => {
-    selectAppIcon("");
   };
   const activeSidebarSettingsPresetId = getSidebarSettingsPresetId(
     pendingSettingsRef.current ?? draft,
@@ -2693,7 +2717,7 @@ export function SettingsModal({
                 pages={settingsSidebarPages}
                 showAdvancedSettings={showAdvancedSettings}
                 showAdvancedSettingsId={showAdvancedSettingsId}
-                onShowAdvancedSettingsChange={setShowAdvancedSettings}
+                onShowAdvancedSettingsChange={updateShowAdvancedSettings}
                 onTogglePage={toggleSettingsSidebarPage}
               />
             ) : null}
@@ -2986,34 +3010,6 @@ export function SettingsModal({
                   />
                 ) : null}
               </SettingsSection>
-            ) : null}
-
-            {/*
-             * CDXC:AppIconPicker 2026-06-25-21:50:
-             * App Icon swaps only the macOS Dock and app-switcher icon via native.
-             * The section shows the live native preview, a grid of the newest
-             * icons plus the selected one, a native file picker, a reveal action,
-             * and a reset, plus the required disclaimer. Persistence is
-             * confirm-before-persist: appIconSourceId is written only after native
-             * returns an ok appIconState (handled in the host-event listener).
-             */}
-            {mainSectionVisible("appIcon", settingsSearch.appIcon) ? (
-            <SettingsSection
-              description="Changes the Dock & app-switcher icon only — not the Finder icon."
-              sectionRef={appIconSectionRef}
-              title="App Icon"
-            >
-              {mainSettingVisible(settingsSearch.appIcon, "appIconSourceId") ? (
-              <AppIconPickerField
-                error={appIconError}
-                onChooseFile={chooseAppIconFile}
-                onResetToDefault={resetAppIcon}
-                onReveal={revealAppIconsFolder}
-                onSelect={selectAppIcon}
-                state={appIconState}
-              />
-              ) : null}
-            </SettingsSection>
             ) : null}
 
             {mainSectionVisible("statusIndicators", settingsSearch.statusIndicators) ? (
@@ -3780,6 +3776,28 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
+            {/*
+             * CDXC:AppIconPicker 2026-06-28-06:05:
+             * The advanced App Icon section is a custom-image control, not a bundled preset picker. Show one preview, one Select Image action, and an inline X on the custom preview to restore the default icon; omit separate reset and folder-reveal actions so the flow stays direct.
+             */}
+            {mainSectionVisible("appIcon", settingsSearch.appIcon) ? (
+            <SettingsSection
+              description="Changes the Dock and app-switcher icon. The app file icon may also change when macOS allows it."
+              sectionRef={appIconSectionRef}
+              title="App Icon"
+            >
+              {mainSettingVisible(settingsSearch.appIcon, "appIconSourceId") ? (
+              <AppIconPickerField
+                advanced={isAdvancedMainSetting("appIconSourceId")}
+                error={appIconError}
+                onChooseFile={chooseAppIconFile}
+                onSelect={selectAppIcon}
+                state={appIconState}
+              />
+              ) : null}
+            </SettingsSection>
+            ) : null}
+
             {mainSectionVisible("autoSleep", settingsSearch.autoSleep) ? (
             <SettingsSection sectionRef={autoSleepSectionRef} title="Auto Sleep">
               {/* CDXC:AutoSleep 2026-05-28-08:32: Auto Sleep controls belong in one Settings section so VS Code, Git, Project, Manage, browser, and agent sessions can be tuned independently without hiding the relationship between the policies. */}
@@ -4157,27 +4175,27 @@ export function SettingsModal({
             ) : null}
 
             {mainSectionVisible("beta", settingsSearch.beta) ? (
-              <SettingsSection sectionRef={betaSectionRef} title="Beta">
+              <SettingsSection sectionRef={betaSectionRef} title="Experimental">
                 {mainSettingVisible(settingsSearch.beta, "showBetaFeatures") ? (
                   <>
                     {/*
-                     * CDXC:BetaFeatures 2026-06-16-13:08:
-                     * The Beta section must keep a current visible inventory of
-                     * every surface enabled by Show Beta features. Update this
-                     * list whenever a new beta-gated Settings tab, titlebar
-                     * button, or browser address-bar control is added or
-                     * removed.
+                     * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+                     * The Experimental section must keep a current visible
+                     * inventory of every surface enabled by Enable Experimental
+                     * Features. Update this list whenever a new experimental
+                     * Settings tab, titlebar button, or browser address-bar
+                     * control is added or removed.
                      *
                      * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
-                     * Keep Awake belongs in the Beta inventory because the
-                     * Power settings section, titlebar button, and titlebar
-                     * runtime automation stay hidden until Show Beta features
-                     * is enabled.
+                     * Keep Awake belongs in the Experimental inventory because
+                     * the Power settings section, titlebar button, and titlebar
+                     * runtime automation stay hidden until Enable Experimental
+                     * Features is enabled.
                      */}
                     <ToggleField
                       checked={draft.showBetaFeatures}
-                      description="Show beta-only settings, browser address-bar controls, and the Keep Awake title-bar button."
-                      label="Show Beta features"
+                      description="Show experimental settings, browser address-bar controls, and the Keep Awake title-bar button."
+                      label="Enable Experimental Features"
                       {...getSettingModificationProps("showBetaFeatures")}
                       onChange={(checked) => updateDraft("showBetaFeatures", checked)}
                     />
@@ -9324,29 +9342,26 @@ function PetPickerField({
 }
 
 /**
- * CDXC:AppIconPicker 2026-06-25-21:50:
- * App Icon picker field. State is owned by the parent (driven by native
- * appIconState events); this component only renders the live preview, the grid
- * of native-provided icons (already trimmed to the newest 10 plus the selected
- * one), the action buttons, an error notice, and the Dock-only disclaimer. The
- * Default tile and Reset both select the empty source id. Selection posts to
- * native; persistence happens upstream after native confirms.
+ * CDXC:AppIconPicker 2026-06-28-06:05:
+ * App Icon is an advanced custom-image flow, not a preset gallery. Render one
+ * selected-icon preview, one Select Image button, and an X on the custom preview
+ * to restore the empty/default source id. Selection still posts to native first;
+ * persistence happens upstream only after native confirms with appIconState.
  */
 function AppIconPickerField({
+  advanced,
   error,
   onChooseFile,
-  onResetToDefault,
-  onReveal,
   onSelect,
   state,
 }: {
+  advanced?: boolean;
   error?: string;
   onChooseFile: () => void;
-  onResetToDefault: () => void;
-  onReveal: () => void;
   onSelect: (sourceId: string) => void;
   state: SidebarAppIconStateMessage | undefined;
 }) {
+  const id = useId();
   const allIcons: SidebarAppIconInfo[] = state?.icons ?? [];
   const defaultIcon = allIcons.find((icon) => icon.id === "");
   const icons = allIcons.filter((icon) => icon.id !== "");
@@ -9356,141 +9371,72 @@ function AppIconPickerField({
     ? defaultIcon
     : icons.find((icon) => icon.id === selectedId);
 
+  const previewIcon = selectedIcon ?? defaultIcon;
+
   return (
-    <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-none border border-border bg-muted/30">
-          {selectedIcon ? (
-            <img
-              alt={selectedIcon.name}
-              className="size-full object-contain"
-              src={selectedIcon.thumbnailDataUrl}
-            />
-          ) : (
-            <IconPhoto aria-hidden="true" className="size-7 text-muted-foreground" />
-          )}
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <div className="truncate text-sm">
-            {isDefaultSelected ? "Default app icon" : selectedIcon?.name ?? selectedId}
-          </div>
-          <div className="truncate text-xs text-muted-foreground">
-            {isDefaultSelected
-              ? "Using the bundled Ghostex icon."
-              : "Custom Dock & app-switcher icon."}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(64px,1fr))] gap-2">
-        {/*
-         * CDXC:AppIconPicker 2026-06-25-21:50:
-         * The first tile always restores the default bundled icon (empty source
-         * id), then the native-provided icons follow newest-first.
-         */}
-        <AppIconPickerTile
-          label="Default"
-          onSelect={() => onSelect("")}
-          selected={isDefaultSelected}
-          thumbnailDataUrl={defaultIcon?.thumbnailDataUrl || undefined}
-        />
-        {icons.map((icon) => (
-          <AppIconPickerTile
-            key={icon.id}
-            label={icon.name}
-            onSelect={() => onSelect(icon.id)}
-            selected={icon.selected || icon.id === selectedId}
-            thumbnailDataUrl={icon.thumbnailDataUrl}
-          />
-        ))}
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <Button className="h-9 rounded-none px-3 text-sm" onClick={onChooseFile} type="button" variant="outline">
-          <IconDownload aria-hidden="true" data-icon="inline-start" />
-          Choose File…
-        </Button>
-        <Button className="h-9 rounded-none px-3 text-sm" onClick={onReveal} type="button" variant="outline">
-          <IconFolderOpen aria-hidden="true" data-icon="inline-start" />
-          Reveal in Finder
-        </Button>
-        <Button
-          className="h-9 rounded-none px-3 text-sm"
-          disabled={isDefaultSelected}
-          onClick={onResetToDefault}
-          type="button"
-          variant="outline"
-        >
-          <IconRefresh aria-hidden="true" data-icon="inline-start" />
-          Reset to default
-        </Button>
-      </div>
-
-      {error ? (
-        <div className="flex items-start gap-2 rounded-none border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          <IconAlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <span className="min-w-0">{error}</span>
-        </div>
-      ) : null}
-
-      {/*
-       * CDXC:AppIconPicker 2026-06-25-21:50:
-       * Required visible disclaimer so users know this only affects the Dock and
-       * app-switcher icon, not the Finder application icon.
-       */}
-      <p className="m-0 text-xs text-muted-foreground">
-        Changes the Dock &amp; app-switcher icon only — not the Finder icon.
-      </p>
-    </div>
-  );
-}
-
-/**
- * CDXC:AppIconPicker 2026-06-25-21:50:
- * One selectable App Icon tile. The Default tile renders a placeholder glyph
- * because native does not ship a thumbnail for the bundled icon.
- */
-function AppIconPickerTile({
-  label,
-  onSelect,
-  selected,
-  thumbnailDataUrl,
-}: {
-  label: string;
-  onSelect: () => void;
-  selected: boolean;
-  thumbnailDataUrl?: string;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            aria-label={label}
-            aria-pressed={selected}
-            className={cn(
-              "relative flex aspect-square items-center justify-center overflow-hidden rounded-none border bg-muted/30",
-              selected ? "border-primary ring-2 ring-primary" : "border-border hover:border-primary/60",
-            )}
-            onClick={onSelect}
-            type="button"
-          >
-            {thumbnailDataUrl ? (
-              <img alt={label} className="size-full object-contain" src={thumbnailDataUrl} />
-            ) : (
-              <IconPhoto aria-hidden="true" className="size-6 text-muted-foreground" />
-            )}
-            {selected ? (
-              <IconCircleCheckFilled
-                aria-hidden="true"
-                className="absolute right-0.5 top-0.5 size-4 text-primary"
-              />
+    <SettingRow
+      advanced={advanced}
+      description="Choose a PNG for the macOS Dock and app-switcher icon."
+      htmlFor={id}
+      label="Custom app icon"
+    >
+      <div className="flex min-w-0 flex-col gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="relative flex size-16 shrink-0 items-center justify-center overflow-visible">
+            <div className="flex size-16 items-center justify-center overflow-hidden rounded-none border border-border bg-muted/30">
+              {previewIcon ? (
+                <img
+                  alt={previewIcon.name}
+                  className="size-full object-contain"
+                  src={previewIcon.thumbnailDataUrl}
+                />
+              ) : (
+                <IconPhoto aria-hidden="true" className="size-7 text-muted-foreground" />
+              )}
+            </div>
+            {!isDefaultSelected ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      aria-label="Use default app icon"
+                      className="absolute -right-2 -top-2 flex size-6 items-center justify-center rounded-none border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground"
+                      onClick={() => onSelect("")}
+                      type="button"
+                    >
+                      <IconX aria-hidden="true" className="size-3.5" />
+                    </button>
+                  }
+                />
+                <TooltipContent sideOffset={6}>Use default icon</TooltipContent>
+              </Tooltip>
             ) : null}
-          </button>
-        }
-      />
-      <TooltipContent sideOffset={6}>{label}</TooltipContent>
-    </Tooltip>
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <Button
+              className="h-9 w-fit rounded-none px-3 text-sm"
+              id={id}
+              onClick={onChooseFile}
+              type="button"
+              variant="outline"
+            >
+              <IconDownload aria-hidden="true" data-icon="inline-start" />
+              Select Image
+            </Button>
+            <div className="truncate text-xs text-muted-foreground">
+              {isDefaultSelected ? "Using the bundled Ghostex icon." : selectedIcon?.name ?? selectedId}
+            </div>
+          </div>
+        </div>
+
+        {error ? (
+          <div className="flex items-start gap-2 rounded-none border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <IconAlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <span className="min-w-0">{error}</span>
+          </div>
+        ) : null}
+      </div>
+    </SettingRow>
   );
 }
 

@@ -280,21 +280,21 @@ describe("settings modal source", () => {
     expect(integrationsTab).toContain("Uninstall Skills");
   });
 
-  test("gates Keep Awake settings behind Show Beta features", () => {
+  test("gates Keep Awake settings behind Enable Experimental Features", () => {
     /*
-     * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
-     * Keep Awake is beta-only in regular macOS Settings, but the Beta section
-     * must name the hidden Power settings and titlebar button so search can
-     * lead users to the opt-in gate.
+     * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+     * Keep Awake is experimental-only in regular macOS Settings, but the
+     * Experimental section must name the hidden Power settings and titlebar
+     * button so search can lead users to the opt-in gate.
      */
     const betaSearch = sourceBetween(
       settingsModalSource,
-      'beta: getSettingsSectionSearch(settingsSearchQuery, "Beta", [',
+      'beta: getSettingsSectionSearch(settingsSearchQuery, "Experimental", [',
       'debugging: getSettingsSectionSearch(settingsSearchQuery, "Debugging", [',
     );
     const betaSection = sourceBetween(
       settingsModalSource,
-      '<SettingsSection sectionRef={betaSectionRef} title="Beta">',
+      '<SettingsSection sectionRef={betaSectionRef} title="Experimental">',
       '{mainSectionVisible("debugging", settingsSearch.debugging) ? (',
     );
     const mainVisibility = sourceBetween(
@@ -607,17 +607,23 @@ describe("settings modal source", () => {
 
   test("wires the App Icon picker to the native wire contract with prop-driven confirm-before-persist", () => {
     /*
-     * CDXC:AppIconPicker 2026-06-25-21:50:
-     * The App Icon section must speak the exact native wire-contract messages,
-     * receive appIconState as a PROP relayed through the modal host (mirroring
+     * CDXC:AppIconPicker 2026-06-28-06:05:
+     * The App Icon section must remain an advanced custom-image flow below
+     * Editor, speak the exact native wire-contract messages, receive
+     * appIconState as a PROP relayed through the modal host (mirroring
      * osIntegrationStatus, not direct host-event listeners), only persist
-     * appIconSourceId after an ok state (confirm-before-persist), and show the
-     * Dock-only disclaimer.
+     * appIconSourceId after an ok state (confirm-before-persist), and render
+     * one preview with Select Image plus an inline default-restore X.
      */
     const settingsNavigation = sourceBetween(
       settingsModalSource,
       "const mainSettingsSectionNavigation",
       "const hasVisibleMainSettings",
+    );
+    const advancedMainSettings = sourceBetween(
+      settingsModalSource,
+      "const ADVANCED_MAIN_SETTING_KEYS",
+      "type HotkeySettingsSectionId",
     );
     const appIconSearch = sourceBetween(
       settingsModalSource,
@@ -627,18 +633,25 @@ describe("settings modal source", () => {
     const appIconField = sourceBetween(
       settingsModalSource,
       "function AppIconPickerField",
-      "function AppIconPickerTile",
+      "function SoundField",
     );
 
-    // Section is registered in the sidebar navigation as an appearance section.
+    // Section is registered as advanced and ordered below Editor.
     expect(settingsNavigation).toContain('id: "appIcon"');
+    expect(settingsNavigation.indexOf('id: "appIcon"')).toBeGreaterThan(
+      settingsNavigation.indexOf('id: "editor"'),
+    );
+    expect(settingsNavigation.indexOf('id: "autoSleep"')).toBeGreaterThan(
+      settingsNavigation.indexOf('id: "appIcon"'),
+    );
+    expect(advancedMainSettings).toContain('"appIconSourceId"');
     expect(appIconSearch).toContain("appIconSourceId");
 
-    // Exact outbound wire-contract messages (these sends stay direct).
+    // Exact outbound wire-contract messages used by the simplified UI.
     expect(settingsModalSource).toContain('vscode.postMessage({ type: "listAppIcons" });');
     expect(settingsModalSource).toContain('vscode.postMessage({ type: "setAppIcon", sourceId });');
     expect(settingsModalSource).toContain('vscode.postMessage({ type: "pickAppIconFile" });');
-    expect(settingsModalSource).toContain('vscode?.postMessage({ type: "revealAppIconsFolder" });');
+    expect(settingsModalSource).not.toContain("revealAppIconsFolder");
 
     // Inbound appIconState is prop-driven (relayed via the modal host like
     // osIntegrationStatus), NOT direct window host-event listeners.
@@ -653,26 +666,30 @@ describe("settings modal source", () => {
     expect(settingsModalSource).toContain('updateDraft("appIconSourceId", sourceId);');
     expect(settingsModalSource).toContain('vscode?.postMessage({ type: "setAppIcon", sourceId: "" });');
 
-    // Reset selects the empty/default source id, the native default descriptor is
-    // filtered out of the custom grid, and the disclaimer is visible.
-    expect(settingsModalSource).toContain('const resetAppIcon = () => {');
+    // The field is one preview plus Select Image; no gallery, reveal action, or
+    // separate reset button. The preview X selects the empty/default source id.
     expect(appIconField).toContain('const defaultIcon = allIcons.find((icon) => icon.id === "");');
     expect(appIconField).toContain('const icons = allIcons.filter((icon) => icon.id !== "");');
-    expect(appIconField).toContain("Choose File");
-    expect(appIconField).toContain("Reveal in Finder");
-    expect(appIconField).toContain("Reset to default");
-    expect(appIconField).toContain(
-      "Changes the Dock &amp; app-switcher icon only — not the Finder icon.",
+    expect(appIconField).toContain("Select Image");
+    expect(appIconField).toContain("Use default icon");
+    expect(appIconField).toContain('onClick={() => onSelect("")}');
+    expect(appIconField).not.toContain("Choose File");
+    expect(appIconField).not.toContain("Reveal in Finder");
+    expect(appIconField).not.toContain("Reset to default");
+    expect(settingsModalSource).not.toContain("function AppIconPickerTile");
+    expect(settingsModalSource).toContain(
+      'description="Changes the Dock and app-switcher icon. The app file icon may also change when macOS allows it."',
     );
   });
 
   test("relays appIconState through the modal host like osIntegrationStatus", () => {
     /*
-     * CDXC:AppIconPicker 2026-06-25-21:50:
+     * CDXC:AppIconPicker 2026-06-28-06:05:
      * SettingsModal renders in the modal-host child window, so the native
      * appIconState host event must be relayed to the modal host through the same
-     * main-bus + sidebarState plumbing used by osIntegrationStatus, then exposed
-     * by useModalStateFromNative and passed to SettingsModal as a prop.
+     * main-bus + sidebarState plumbing used by osIntegrationStatus. App-icon
+     * commands must also forward through native-sidebar to Swift so Select Image
+     * can open the AppKit file picker from the modal-host surface.
      */
     const modalHostSource = readFileSync(
       new URL("../native/sidebar/modal-host.tsx", import.meta.url),
@@ -685,6 +702,10 @@ describe("settings modal source", () => {
     expect(nativeSidebarSource).toContain("postAppIconState({");
     expect(nativeSidebarSource).toContain("function postAppIconState(message: SidebarAppIconStateMessage)");
     expect(nativeSidebarSource).toContain('postAppModalHost({ message, type: "sidebarState" });');
+    expect(nativeSidebarSource).toContain('case "listAppIcons":');
+    expect(nativeSidebarSource).toContain('case "setAppIcon":');
+    expect(nativeSidebarSource).toContain('case "pickAppIconFile":');
+    expect(nativeSidebarSource).toContain('postNative({ type: "pickAppIconFile" });');
 
     // modal-host.tsx: route the relayed message into modal state and pass it on.
     expect(modalHostSource).toContain("isAppIconStateMessage(message.message)");

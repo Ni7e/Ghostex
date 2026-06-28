@@ -122,11 +122,11 @@ export function AgentsHubModal({
           <DialogHeader className="ghostex-modal-heading-bar agents-hub-header">
             <DialogTitle className="ghostex-modal-heading-title agents-hub-title">
               {/*
-               * CDXC:AgentsHub 2026-06-16-19:35:
-               * Agents Hub is gated by Enable beta settings in the sidebar, and
-               * the modal title should keep that beta status visible after open.
+               * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+               * Agents Hub is no longer gated by Enable Experimental Features,
+               * so the modal title should not carry beta status after open.
                */}
-              Agents Hub (Beta)
+              Agents Hub
             </DialogTitle>
           </DialogHeader>
           <AgentsHubSurface

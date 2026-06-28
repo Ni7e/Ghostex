@@ -237,11 +237,12 @@ describe("normalizeghostexSettings", () => {
     ]);
   });
 
-  test("defaults beta features off and normalizes the beta gate", () => {
+  test("defaults experimental features off and normalizes the persisted gate", () => {
     /*
-     * CDXC:BetaFeatures 2026-06-16-13:08:
-     * Show Beta features should be disabled for new installs and missing
-     * settings, with only an explicit boolean true exposing beta-only surfaces.
+     * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+     * Enable Experimental Features should be disabled for new installs and
+     * missing settings, with only an explicit boolean true exposing
+     * experimental surfaces.
      */
     expect(DEFAULT_ghostex_SETTINGS.showBetaFeatures).toBe(false);
     expect(normalizeghostexSettings({})).toMatchObject({
@@ -252,6 +253,24 @@ describe("normalizeghostexSettings", () => {
     });
     expect(normalizeghostexSettings({ showBetaFeatures: "true" })).toMatchObject({
       showBetaFeatures: false,
+    });
+  });
+
+  test("persists Show Advanced settings density", () => {
+    /*
+     * CDXC:SettingsAdvanced 2026-06-28-08:01:
+     * Show Advanced is a durable Settings preference so advanced rows remain
+     * visible after restarting the app until the switch is turned off.
+     */
+    expect(DEFAULT_ghostex_SETTINGS.showAdvancedSettings).toBe(false);
+    expect(normalizeghostexSettings({})).toMatchObject({
+      showAdvancedSettings: false,
+    });
+    expect(normalizeghostexSettings({ showAdvancedSettings: true })).toMatchObject({
+      showAdvancedSettings: true,
+    });
+    expect(normalizeghostexSettings({ showAdvancedSettings: "true" })).toMatchObject({
+      showAdvancedSettings: false,
     });
   });
 
@@ -1025,6 +1044,10 @@ describe("normalizeghostexSettings", () => {
      * settings must use that explicit slider default, while valid legacy saved
      * background colors still seed the slider during migration.
      *
+     * CDXC:SidebarTitlebarColors 2026-06-28-08:01:
+     * New app defaults should match the user's current chrome choice: #88D7FF
+     * tint at 96 Background Contrast, resolving to #080c0e.
+     *
      * CDXC:SidebarTitlebarColors 2026-06-19-14:20:
      * Preset tint previews stay brighter than the applied chrome. The default
      * applied backgrounds should be very dark, including #0d0005 for red and
@@ -1033,27 +1056,27 @@ describe("normalizeghostexSettings", () => {
      */
     expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarColorsEnabled).toBe(true);
     expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarForegroundColor).toBe("#d8d8d8");
-    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor).toBe("#ffffff");
-    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundDarknessPercent).toBe(95);
-    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundColor).toBe("#0e0e0e");
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundTintColor).toBe("#88d7ff");
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundDarknessPercent).toBe(96);
+    expect(DEFAULT_ghostex_SETTINGS.customSidebarTitlebarBackgroundColor).toBe("#080c0e");
     expect(getSidebarTitlebarBackgroundForDarkness(95, "#884444")).toBe("#0d0005");
     expect(getSidebarTitlebarBackgroundForDarkness(95, "#336699")).toBe("#0c0e11");
     expect(getSidebarTitlebarBackgroundForDarkness(95, "#000000")).toBe("#000000");
     expect(normalizeghostexSettings({})).toMatchObject({
       customSidebarTitlebarColorsEnabled: true,
       customSidebarTitlebarForegroundColor: "#d8d8d8",
-      customSidebarTitlebarBackgroundTintColor: "#ffffff",
-      customSidebarTitlebarBackgroundDarknessPercent: 95,
-      customSidebarTitlebarBackgroundColor: "#0e0e0e",
+      customSidebarTitlebarBackgroundTintColor: "#88d7ff",
+      customSidebarTitlebarBackgroundDarknessPercent: 96,
+      customSidebarTitlebarBackgroundColor: "#080c0e",
     });
     expect(
       normalizeghostexSettings({
-        customSidebarTitlebarBackgroundColor: "#0e0e0e",
+        customSidebarTitlebarBackgroundColor: "#080c0e",
       }),
     ).toMatchObject({
-      customSidebarTitlebarBackgroundTintColor: "#ffffff",
-      customSidebarTitlebarBackgroundDarknessPercent: 95,
-      customSidebarTitlebarBackgroundColor: "#0e0e0e",
+      customSidebarTitlebarBackgroundTintColor: "#88d7ff",
+      customSidebarTitlebarBackgroundDarknessPercent: 96,
+      customSidebarTitlebarBackgroundColor: "#080c0e",
     });
     expect(
       normalizeghostexSettings({
@@ -1080,9 +1103,9 @@ describe("normalizeghostexSettings", () => {
     ).toMatchObject({
       customSidebarTitlebarColorsEnabled: true,
       customSidebarTitlebarForegroundColor: "#d8d8d8",
-      customSidebarTitlebarBackgroundTintColor: "#ffffff",
+      customSidebarTitlebarBackgroundTintColor: "#88d7ff",
       customSidebarTitlebarBackgroundDarknessPercent: 85,
-      customSidebarTitlebarBackgroundColor: "#2a2a2a",
+      customSidebarTitlebarBackgroundColor: "#1e2d36",
     });
     expect(
       normalizeghostexSettings({
@@ -1091,8 +1114,8 @@ describe("normalizeghostexSettings", () => {
       }),
     ).toMatchObject({
       customSidebarTitlebarForegroundColor: "#d8d8d8",
-      customSidebarTitlebarBackgroundDarknessPercent: 95,
-      customSidebarTitlebarBackgroundColor: "#0e0e0e",
+      customSidebarTitlebarBackgroundDarknessPercent: 96,
+      customSidebarTitlebarBackgroundColor: "#080c0e",
     });
   });
 
@@ -1106,6 +1129,10 @@ describe("normalizeghostexSettings", () => {
      * CDXC:SidebarTitlebarColors 2026-06-19-14:20:
      * White, black, and gray custom chrome must stay neutral. The old cool
      * fallback direction should not add blue to same-channel backgrounds.
+     *
+     * CDXC:SidebarTitlebarColors 2026-06-28-08:01:
+     * Invalid gradient input falls back to the current default #88D7FF/96 chrome
+     * background, so the fallback gradient now follows that calibrated tint.
      */
     expect(getSidebarTitlebarGradientColors("#0e0e0e")).toEqual({
       sidebarTop: "#0e0e0e",
@@ -1126,10 +1153,10 @@ describe("normalizeghostexSettings", () => {
       titlebarRight: "#030d1b",
     });
     expect(getSidebarTitlebarGradientColors("invalid")).toEqual({
-      sidebarTop: "#0e0e0e",
-      sidebarBottom: "#0e0e0e",
-      titlebarLeft: "#0e0e0e",
-      titlebarRight: "#0e0e0e",
+      sidebarTop: "#060c10",
+      sidebarBottom: "#000e16",
+      titlebarLeft: "#060c10",
+      titlebarRight: "#000e16",
     });
   });
 
