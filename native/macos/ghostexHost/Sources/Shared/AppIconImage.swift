@@ -8,9 +8,10 @@ import UniformTypeIdentifiers
 /**
  CDXC:AppIconPicker 2026-06-25-21:50:
  AppIconImage validates, normalizes, and squircle-masks user PNGs for the macOS
- Dock runtime icon (NSApp.applicationIconImage only; the Finder/bundle icon is
- never touched). Every operation returns nil on any failure so the caller can
- fall back to the default bundle icon. Privacy: this file logs nothing and never
+ runtime app icon. AppDelegate applies the returned NSImage to
+ NSApp.applicationIconImage, NSDockTile, and the bundle custom file icon where
+ macOS permits. Every operation returns nil on any failure so the caller can fall
+ back to the default bundle icon. Privacy: this file logs nothing and never
  surfaces absolute paths or raw image bytes; callers own privacy-safe logging.
  */
 enum AppIconImage {
@@ -145,10 +146,10 @@ enum AppIconImage {
 
   /**
    CDXC:AppIconPicker 2026-06-25-21:50:
-   Convenience for applying the Dock icon: returns a runtime NSImage built from
+   Convenience for applying the runtime app icon: returns an NSImage built from
    the cached masked square, or nil to signal a default-icon fallback. Setting
-   NSApp.applicationIconImage = nil restores the bundle icon and is the caller's
-   responsibility.
+   NSApp.applicationIconImage / NSDockTile / bundle custom file icon back to the
+   default bundle icon is the caller's responsibility.
    */
   static func maskedDockImage(
     sourceId: String,

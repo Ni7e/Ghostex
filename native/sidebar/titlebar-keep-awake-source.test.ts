@@ -56,7 +56,7 @@ describe("native titlebar keep-awake source", () => {
     const runtimeSyncEffectSource = sourceBetween(
       titlebarHostSource,
       "useEffect(() => {\n    const handleStorage",
-      "useEffect(() => {\n    /*\n     * CDXC:TitlebarKeepAwake 2026-06-19-13:13:",
+      "useEffect(() => {\n    /*\n     * CDXC:ExperimentalFeatures 2026-06-28-07:41:",
     );
     const titlebarBridgeSource = sourceBetween(
       titlebarHostSource,
@@ -129,10 +129,10 @@ describe("native titlebar keep-awake source", () => {
     expect(titlebarHostSource).not.toContain("const toggleKeepAwake");
 
     /*
-     * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
-     * Keep Awake is beta-only in the macOS titlebar. When Show Beta features is
-     * off, the titlebar must hide the button and stop or suppress the runtime
-     * instead of leaving an invisible caffeinate process active.
+     * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+     * Keep Awake is experimental-only in the macOS titlebar. When Enable
+     * Experimental Features is off, the titlebar must hide the button and stop
+     * or suppress the runtime instead of leaving an invisible caffeinate process active.
      */
     expect(titlebarHostSource).toContain(
       "const keepAwakeFeatureEnabled = projectState.keepAwake.featureEnabled === true",
@@ -176,7 +176,7 @@ describe("native titlebar keep-awake source", () => {
     expect(externalDisplayEffectSource).toContain("!keepAwakeAutoStartSuppressed");
   });
 
-  test("carries beta-gated titlebar visibility through native layout sync", () => {
+  test("carries experimental titlebar visibility through native layout sync", () => {
     /*
      * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
      * Settings changes must reach the isolated titlebar webview through the

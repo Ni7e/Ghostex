@@ -6,8 +6,16 @@ const appDelegateSource = readFileSync(
   new URL("../macos/ghostexHost/Sources/ghostexHost/AppDelegate.swift", import.meta.url),
   "utf8",
 );
+const hostProtocolSource = readFileSync(
+  new URL("../macos/ghostexHost/Sources/ghostexHost/HostProtocol.swift", import.meta.url),
+  "utf8",
+);
 const nativeT3LogSource = readFileSync(
   new URL("../macos/ghostexHost/Sources/ghostexHost/NativeT3CodePaneReproLog.swift", import.meta.url),
+  "utf8",
+);
+const terminalWorkspaceSource = readFileSync(
+  new URL("../macos/ghostexHost/Sources/ghostexHost/TerminalWorkspaceView.swift", import.meta.url),
   "utf8",
 );
 
@@ -37,6 +45,8 @@ describe("code-server startup failure bridge", () => {
     );
     expect(wakeProjectEditor).toContain("projectId: nativeEditorId");
     expect(wakeProjectEditor).toContain("postStartCodeServerRuntimeForProject(project);");
+    expect(wakeProjectEditor).toContain("const shouldReuseAwakeTargetMode = hasAwakeTargetMode || activeBrowserTabIsPlaceholder;");
+    expect(wakeProjectEditor).toContain('if (!shouldReuseAwakeTargetMode || surfaceState?.status === "error")');
     expect(startRuntimeHelper).toContain('type: "startCodeServerRuntime"');
 
     const hostEventHandler = sourceBetween(
@@ -45,8 +55,22 @@ describe("code-server startup failure bridge", () => {
       'if (hostEvent.type === "projectEditorLoadState")',
     );
     expect(hostEventHandler).toContain('setProjectEditorLoadState(hostEvent.projectId, "error", hostEvent.message)');
+    expect(hostEventHandler).toContain(
+      'postNativeProjectEditorLoadState(hostEvent.projectId, "error", hostEvent.message)',
+    );
     expect(hostEventHandler).toContain('showAppToast("error", "VS Code server failed", hostEvent.message');
     expect(hostEventHandler).toContain("CODE_SERVER_RUNTIME_TOAST_ID");
+
+    expect(wakeProjectEditor).toContain('postNativeProjectEditorLoadState(nativeEditorId, "opening");');
+    expect(nativeSidebarSource).toContain("function forgetAwakeProjectEditorMode(projectId: string, mode: ProjectEditorSurfaceMode): void");
+    expect(nativeSidebarSource).toContain("forgetAwakeProjectEditorMode(projectId, surfaceState.mode);");
+    expect(nativeSidebarSource).toContain('type: "setProjectEditorLoadState"');
+    expect(hostProtocolSource).toContain("case setProjectEditorLoadState(SetProjectEditorLoadState)");
+    expect(hostProtocolSource).toContain("struct SetProjectEditorLoadState: Decodable");
+    expect(appDelegateSource).toContain("case .setProjectEditorLoadState(let command):");
+    expect(terminalWorkspaceSource).toContain("func setProjectEditorLoadState(_ command: SetProjectEditorLoadState)");
+    expect(terminalWorkspaceSource).toContain("projectEditorNativeLoadStatesByProjectId");
+    expect(terminalWorkspaceSource).toContain("applyProjectEditorNativeLoadError(");
 
     const nativeFailures = appDelegateSource.match(/codeServerRuntime\.start\.failed[\s\S]*?logger\.error/g) ?? [];
     expect(nativeFailures.length).toBeGreaterThanOrEqual(2);
@@ -68,5 +92,9 @@ describe("code-server startup failure bridge", () => {
     expect(nativeT3LogSource).toContain("code-server's raw 500 page");
     expect(nativeT3LogSource).toContain("@vscode/fs-copyfile/build/Release/vscode_fs.node");
     expect(nativeT3LogSource).toContain("Git activation failure toast");
+    expect(nativeT3LogSource).toContain("hasListenerForOwnedRuntime(metadata)");
+    expect(nativeT3LogSource).toContain("listener.pid == metadataPid || listener.parentPid == metadataPid");
+    expect(nativeT3LogSource).toContain("static func terminateRuntimeProcessTree(pid: Int32, logPrefix: String)");
+    expect(appDelegateSource).toContain("NativeCodeServerRuntimeLauncher.terminateRuntimeProcessTree(");
   });
 });

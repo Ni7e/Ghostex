@@ -162,12 +162,24 @@ type TitlebarOpenTargetsSettings = {
  *
  * CDXC:TipsAndTricks 2026-06-18-04:53:
  * The tips panel header should not repeat the Tips & Tricks label in text. Expose Docs as a first-row action and keep documentation inside the current workspace browser session.
+ *
+ * CDXC:TipsAndTricks 2026-06-28-08:00:
+ * Third-party skill recommendations from Tips should open as current-project
+ * browser panes so users can inspect the setup detail without leaving Ghostex.
  */
 const GHOSTEX_CHANGELOG_URL = "https://github.com/maddada/ghostex/releases";
 const GHOSTEX_DOCS_URL = "https://ghostex.dev/docs";
 const GHOSTEX_DISCORD_URL = "https://discord.gg/df7b3G92CS";
+const FASTER_CHROME_DEVTOOLS_SKILL_URL = "https://github.com/zeke/faster-chrome-devtools-skill";
 const TITLEBAR_GRADIENT_BLEND_START_PERCENT = 40;
-const CODE_SERVER_RESOURCE_PORT = 3775;
+const DEFAULT_CODE_SERVER_RESOURCE_PORT = 3775;
+
+function codeServerResourcePort(): number {
+  const port = window.__ghostex_NATIVE_HOST__?.codeServerRuntime?.port;
+  return typeof port === "number" && Number.isInteger(port) && port > 0
+    ? port
+    : DEFAULT_CODE_SERVER_RESOURCE_PORT;
+}
 
 type TitlebarSidebarActionsSettings = {
   commands: SidebarCommandButton[];
@@ -231,11 +243,22 @@ type TitlebarTipIcon =
   | "warning";
 
 type TitlebarTip = {
+  action?: TitlebarTipAction;
   body: string;
   icon: TitlebarTipIcon;
   id: string;
   title: string;
 };
+
+type TitlebarTipAction =
+  | {
+      settingsSearchQuery: string;
+      type: "openSettings";
+    }
+  | {
+      type: "openBrowserPane";
+      url: string;
+    };
 
 type TitlebarNotice = {
   action?: "openSettings";
@@ -672,6 +695,12 @@ const initialTitlebarDropdownPanelKind = readTitlebarDropdownPanelKind();
  *
  * CDXC:TipsAndTricks 2026-06-13-10:26:
  * The first tip should introduce Cmd Shift P as the universal entry point for app actions, not only pane moves.
+ *
+ * CDXC:TipsAndTricks 2026-06-28-08:00:
+ * Tips should actively teach the agent-facing Browser Use, Computer Use, and
+ * personal Chrome DevTools skills. Ghostex-owned skills deep-link to Settings >
+ * Integrations with the relevant row searched; the external Chrome skill opens
+ * its repository in a project browser pane.
  */
 const TITLEBAR_TIPS: TitlebarTip[] = [
   {
@@ -697,6 +726,36 @@ const TITLEBAR_TIPS: TitlebarTip[] = [
     icon: "browser",
     id: "attach-browser-pane-to-task",
     title: "Attach a browser pane to a task",
+  },
+  {
+    action: {
+      settingsSearchQuery: "Ghostex Computer Use",
+      type: "openSettings",
+    },
+    body: "Configure Ghostex Computer Use in Settings, then ask agents to use /ghostex-computer-use for native macOS app control.",
+    icon: "resources",
+    id: "use-ghostex-computer-use-skill",
+    title: "Use /ghostex-computer-use for desktop control",
+  },
+  {
+    action: {
+      settingsSearchQuery: "Ghostex Browser Use",
+      type: "openSettings",
+    },
+    body: "Configure Ghostex Browser Use in Settings, then ask agents to use /ghostex-browser-use for page inspection, console logs, screenshots, and clicks.",
+    icon: "browser",
+    id: "use-ghostex-browser-use-skill",
+    title: "Use /ghostex-browser-use for browser panes",
+  },
+  {
+    action: {
+      type: "openBrowserPane",
+      url: FASTER_CHROME_DEVTOOLS_SKILL_URL,
+    },
+    body: "Install Faster Chrome DevTools Skill when agents need fast CLI-backed access to your own Chrome profile, tabs, cookies, and extensions.",
+    icon: "command",
+    id: "recommend-faster-chrome-devtools-skill",
+    title: "Give agents fast access to your personal Chrome",
   },
   {
     body: 'Open the sidebar Search row, click "Search by Text", then type any words you remember from the prompt.',
@@ -1872,10 +1931,16 @@ function createCodeIdeResourceBundles(
    * CDXC:TitlebarResources 2026-06-22-13:50:
    * Embedded Code is one shared code-server runtime, not a project child process.
    * Identify it from Ghostex's fixed localhost editor listener and render it in a Code IDE section so a root "/" project cannot claim it through path substring matching.
+   *
+   * CDXC:SourceRuntimeOwnership 2026-06-28-04:05:
+   * Resources must use the native Source runtime port from bootstrap so legacy
+   * dev bundles and GPUI-specific ports are recognized without reverting to the
+   * old global 3775 assumption.
    */
+  const runtimePort = codeServerResourcePort();
   const server = servers.find(
     (candidate) =>
-      candidate.port === CODE_SERVER_RESOURCE_PORT && candidate.host === "localhost",
+      candidate.port === runtimePort && candidate.host === "localhost",
   );
   if (!server) {
     return [];
@@ -2496,6 +2561,28 @@ function App() {
   }, []);
   const openDocsFromTips = useCallback(() => {
     postTitlebarSidebarCommand({ type: "openBrowserPane", url: GHOSTEX_DOCS_URL });
+  }, []);
+  const openTipAction = useCallback((tip: TitlebarTip) => {
+    const action = tip.action;
+    if (!action) {
+      return;
+    }
+    if (action.type === "openSettings") {
+      /*
+       * CDXC:TipsAndTricks 2026-06-28-08:00:
+       * Clickable Ghostex skill tips should open Settings > Integrations with
+       * the skill name searched so users land on the install/configure detail
+       * instead of a generic setup page.
+       */
+      window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
+        initialSearchQuery: action.settingsSearchQuery,
+        initialTab: "integrations",
+        modal: "settings",
+        type: "open",
+      });
+      return;
+    }
+    postTitlebarSidebarCommand({ type: "openBrowserPane", url: action.url });
   }, []);
   const openChangelogFromTips = useCallback(() => {
     /*
@@ -3534,10 +3621,10 @@ function App() {
 
   useEffect(() => {
     /*
-     * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
-     * Keep Awake is beta-gated. If the user turns Show Beta features off while
-     * caffeinate is running, stop the hidden runtime instead of leaving a
-     * titlebar-invisible power assertion active.
+     * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+     * Keep Awake is gated by Enable Experimental Features. If the user turns it
+     * off while caffeinate is running, stop the hidden runtime instead of
+     * leaving a titlebar-invisible power assertion active.
      */
     if (keepAwakeFeatureEnabled || !keepAwakeRuntime) {
       return;
@@ -3931,23 +4018,21 @@ function App() {
     projectState.editorIsOpen &&
     !projectState.editorIsSleeping;
   /*
-   * CDXC:TitlebarManage 2026-06-20-17:13:
-   * Manage is an experimental project workarea. Hide its titlebar entry unless
-   * both Settings Debugging Mode and Show Beta features are enabled, while
-   * keeping the existing project-context disabled reason for eligible users.
-   */
-  const showManageTitlebarMode =
-    projectState.debuggingMode && projectState.showBetaFeatures;
-  /*
    * CDXC:TitlebarModeTabs 2026-05-31-12:00:
-   * macOS titlebar mode switcher labels use title case (Agents, Source, Browser, Kanban, Manage), not all-caps, so the segmented control reads like navigation chrome rather than shouting labels.
+   * macOS titlebar mode switcher labels use title case (Agents, Source, Browser, Kanban, Docs), not all-caps, so the segmented control reads like navigation chrome rather than shouting labels.
    *
    * CDXC:Manage 2026-06-20-04:36:
    * Manage is a project-scoped file browser workarea and should sit beside Kanban in the same titlebar segmented control instead of being hidden under a menu.
    *
-   * CDXC:TitlebarManage 2026-06-20-17:13:
-   * Manage should be absent from the titlebar mode list unless the user has
-   * both Debugging Mode and Show Beta features enabled in Settings.
+   * CDXC:TitlebarManage 2026-06-28-06:16:
+   * Manage is no longer beta or debugging-only chrome. Always show it in the
+   * titlebar mode list and keep only the project-context disabled reason for
+   * Quick sessions.
+   *
+   * CDXC:TitlebarDocs 2026-06-28-06:24:
+   * The user-facing titlebar name for the Manage-backed project document
+   * surface is Docs. Keep the stable internal "manage" mode id so persisted
+   * pane state and native bridge messages remain compatible.
    */
   const titlebarModes = [
     {
@@ -3974,17 +4059,13 @@ function App() {
       onSelect: openTasksMode,
       value: "tasks" as const,
     },
-    ...(showManageTitlebarMode
-      ? [
-          {
-            disabled: manageModeDisabledReason !== undefined,
-            disabledReason: manageModeDisabledReason,
-            label: "Manage",
-            onSelect: openManageMode,
-            value: "manage" as const,
-          },
-        ]
-      : []),
+    {
+      disabled: manageModeDisabledReason !== undefined,
+      disabledReason: manageModeDisabledReason,
+      label: "Docs",
+      onSelect: openManageMode,
+      value: "manage" as const,
+    },
   ];
   const resolveTitlebarDropdownPanelSize = useCallback(
     (kind: TitlebarDropdownPanelKind) =>
@@ -4142,6 +4223,7 @@ function App() {
           onOpenSettingsMenuSettings={openTitlebarSettingsMenuSettings}
           onOpenNoticeSettings={handleNoticeAction}
           onOpenPowerSettings={openPowerSettings}
+          onOpenTipAction={openTipAction}
           onOpenTarget={openTarget}
           onQuitResources={quitResourceBundles}
           onRunAction={runSidebarAction}
@@ -4634,6 +4716,7 @@ function TitlebarDropdownPanelSurface({
   onOpenSettingsMenuSettings,
   onOpenNoticeSettings,
   onOpenPowerSettings,
+  onOpenTipAction,
   onOpenTarget,
   onQuitResources,
   onRunAction,
@@ -4690,6 +4773,7 @@ function TitlebarDropdownPanelSurface({
   onOpenSettingsMenuSettings: () => void;
   onOpenNoticeSettings: (notice: TitlebarNotice) => void;
   onOpenPowerSettings: () => void;
+  onOpenTipAction: (tip: TitlebarTip) => void;
   onOpenTarget: (target: ResolvedOpenTarget | undefined) => void;
   onQuitResources: (bundles: ResourceProcessBundle[]) => void;
   onRunAction: (command: SidebarCommandButton | undefined) => void;
@@ -4774,6 +4858,7 @@ function TitlebarDropdownPanelSurface({
             onOpenDocs={() => closeAfter(onOpenDocs)}
             onOpenHighlightedFeatures={() => closeAfter(onOpenHighlightedFeatures)}
             onOpenNoticeSettings={(notice) => closeAfter(() => onOpenNoticeSettings(notice))}
+            onOpenTipAction={(tip) => closeAfter(() => onOpenTipAction(tip))}
             onViewGhostexGuide={() => closeAfter(onViewGhostexGuide)}
             readTips={readTips}
             unreadTips={unreadTips}
@@ -5562,10 +5647,11 @@ function createTitlebarKeepAwakeSettings(
   settings: ReturnType<typeof normalizeghostexSettings>,
 ): TitlebarKeepAwakeSettings {
   /*
-   * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
-   * The macOS Keep Awake feature is beta-only. Build the titlebar-facing state
-   * with one effective visibility flag so startup, Settings sync, and native
-   * child dropdown windows all hide the button when Show Beta features is off.
+   * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+   * The macOS Keep Awake feature is experimental-only. Build the titlebar-facing
+   * state with one effective visibility flag so startup, Settings sync, and
+   * native child dropdown windows all hide the button when Enable Experimental
+   * Features is off.
    */
   const featureEnabled = settings.showBetaFeatures;
   return {
@@ -5761,6 +5847,7 @@ function TitlebarTipsMenu({
   onOpenDocs,
   onOpenHighlightedFeatures,
   onOpenNoticeSettings,
+  onOpenTipAction,
   onViewGhostexGuide,
   readTips,
   unreadTips,
@@ -5771,6 +5858,7 @@ function TitlebarTipsMenu({
   onOpenDocs: () => void;
   onOpenHighlightedFeatures: () => void;
   onOpenNoticeSettings: (notice: TitlebarNotice) => void;
+  onOpenTipAction: (tip: TitlebarTip) => void;
   onViewGhostexGuide: () => void;
   readTips: TitlebarTip[];
   unreadTips: TitlebarTip[];
@@ -5851,6 +5939,7 @@ function TitlebarTipsMenu({
               <TitlebarTipRow
                 key={tip.id}
                 onMarkRead={onMarkRead}
+                onOpenTipAction={onOpenTipAction}
                 read={false}
                 tip={tip}
               />
@@ -5866,6 +5955,7 @@ function TitlebarTipsMenu({
             <TitlebarTipRow
               key={tip.id}
               onMarkRead={onMarkRead}
+              onOpenTipAction={onOpenTipAction}
               read
               tip={tip}
             />
@@ -5935,20 +6025,42 @@ function TitlebarNoticeRow({
 
 function TitlebarTipRow({
   onMarkRead,
+  onOpenTipAction,
   read,
   tip,
 }: {
   onMarkRead: (tipId: string) => void;
+  onOpenTipAction: (tip: TitlebarTip) => void;
   read: boolean;
   tip: TitlebarTip;
 }) {
+  const detailContent = (
+    <>
+      <span className="titlebar-tip-icon">{getTitlebarTipIcon(tip.icon)}</span>
+      <span className="titlebar-tip-copy">
+        <span className="titlebar-tip-title">{tip.title}</span>
+        <span className="titlebar-tip-body">{tip.body}</span>
+      </span>
+    </>
+  );
   return (
-    <article className="titlebar-tip-row" data-read={String(read)}>
-      <div className="titlebar-tip-icon">{getTitlebarTipIcon(tip.icon)}</div>
-      <div className="titlebar-tip-copy">
-        <div className="titlebar-tip-title">{tip.title}</div>
-        <div className="titlebar-tip-body">{tip.body}</div>
-      </div>
+    <article
+      className="titlebar-tip-row"
+      data-actionable={String(Boolean(tip.action))}
+      data-read={String(read)}
+    >
+      {tip.action ? (
+        <button
+          aria-label={`${tip.title}. Open related details.`}
+          className="titlebar-tip-detail titlebar-tip-detail-button"
+          onClick={() => onOpenTipAction(tip)}
+          type="button"
+        >
+          {detailContent}
+        </button>
+      ) : (
+        <span className="titlebar-tip-detail">{detailContent}</span>
+      )}
       {read ? (
         <span className="titlebar-tip-read-state" aria-label="Read">
           <IconCheck aria-hidden="true" size={15} stroke={1.9} />
@@ -8673,13 +8785,23 @@ styleElement.textContent = `
     border: 1px solid rgba(255,255,255,0.1);
     display: grid;
     gap: 10px;
-    grid-template-columns: 28px minmax(0, 1fr) 28px;
+    grid-template-columns: minmax(0, 1fr) 28px;
     min-height: 72px;
     overflow: hidden;
     padding: 9px 8px;
+    transition: background 120ms ease, border-color 120ms ease;
   }
   .titlebar-tip-row[data-read="true"] {
     opacity: 0.72;
+  }
+  .titlebar-tip-row[data-actionable="true"]:hover {
+    /*
+     * CDXC:TipsAndTricks 2026-06-28-08:00:
+     * Action-backed tips should read like clickable detail rows without making
+     * the per-row read check part of the navigation target.
+     */
+    background: rgba(255,255,255,0.05);
+    border-color: rgba(255,255,255,0.18);
   }
   .titlebar-tip-row-notice {
     cursor: pointer;
@@ -8715,6 +8837,23 @@ styleElement.textContent = `
     justify-content: center;
     width: 28px;
   }
+  .titlebar-tip-detail {
+    align-items: start;
+    display: grid;
+    gap: 10px;
+    grid-template-columns: 28px minmax(0, 1fr);
+    min-width: 0;
+    text-align: left;
+  }
+  .titlebar-tip-detail-button {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    padding: 0;
+    width: 100%;
+  }
   .titlebar-tip-copy {
     display: grid;
     gap: 7px;
@@ -8722,6 +8861,7 @@ styleElement.textContent = `
   }
   .titlebar-tip-title {
     color: rgba(255,255,255,0.94);
+    display: block;
     font: 700 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     overflow: hidden;
     text-overflow: ellipsis;

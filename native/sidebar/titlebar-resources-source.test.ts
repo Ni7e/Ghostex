@@ -253,10 +253,12 @@ describe("native titlebar Resources source", () => {
     );
 
     expect(titlebarHostSource).toContain("CDXC:TitlebarResources 2026-06-22-13:50:");
+    expect(titlebarHostSource).toContain("CDXC:SourceRuntimeOwnership 2026-06-28-04:05:");
     expect(groupSource).toContain("codeIdeBundles");
     expect(groupSource).toContain("bundles: [...bundles, ...browserBundles]");
     expect(groupSource).not.toContain("createProjectCodeServerBundle");
-    expect(codeSource).toContain("CODE_SERVER_RESOURCE_PORT");
+    expect(codeSource).toContain("const runtimePort = codeServerResourcePort()");
+    expect(codeSource).toContain("candidate.port === runtimePort");
     expect(codeSource).toContain('candidate.host === "localhost"');
     expect(codeSource).not.toContain("group.projectPath");
     expect(codeSource).toContain("projectEditorIds: Array.from(new Set(codeEditorProjectIds))");

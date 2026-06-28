@@ -19,6 +19,7 @@ enum HostCommand: Decodable {
   case startCodeServerRuntime(StartCodeServerRuntime)
   case stopCodeServerRuntime
   case createProjectEditorPane(CreateProjectEditorPane)
+  case setProjectEditorLoadState(SetProjectEditorLoadState)
   case setBrowserHistory(SetBrowserHistory)
   case focusProjectEditorPane(ProjectEditorCommand)
   case closeProjectEditorPane(ProjectEditorCommand)
@@ -138,6 +139,7 @@ enum HostCommand: Decodable {
     case startCodeServerRuntime
     case stopCodeServerRuntime
     case createProjectEditorPane
+    case setProjectEditorLoadState
     case setBrowserHistory
     case focusProjectEditorPane
     case closeProjectEditorPane
@@ -274,6 +276,8 @@ enum HostCommand: Decodable {
       self = .stopCodeServerRuntime
     case .createProjectEditorPane:
       self = .createProjectEditorPane(try CreateProjectEditorPane(from: decoder))
+    case .setProjectEditorLoadState:
+      self = .setProjectEditorLoadState(try SetProjectEditorLoadState(from: decoder))
     case .setBrowserHistory:
       self = .setBrowserHistory(try SetBrowserHistory(from: decoder))
     case .focusProjectEditorPane:
@@ -657,6 +661,16 @@ struct CreateProjectEditorPane: Decodable {
   let showsProjectTabs: Bool?
   let title: String
   let url: String
+}
+
+struct SetProjectEditorLoadState: Decodable {
+  /**
+   CDXC:EditorPanes 2026-06-28-04:29:
+   Source runtime failures can be detected before or during native Chromium pane creation. Let the sidebar push the scoped load state into TerminalWorkspaceView so the editor pane overlay leaves the spinner path immediately instead of only updating the React row/toast.
+   */
+  let message: String?
+  let projectId: String
+  let status: String
 }
 
 struct SetBrowserHistory: Decodable {

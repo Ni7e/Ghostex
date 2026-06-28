@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import OSLog
 import WebKit
@@ -233,12 +234,309 @@ struct NativeCodeServerRuntimeLaunch {
 
 enum NativeCodeServerRuntimeLauncher {
   static let host = "127.0.0.1"
-  static let port = 3775
+  private struct RuntimeConfiguration {
+    let ownerId: String
+    let port: Int
+    let storageName: String
+  }
+  private struct RuntimeOwnershipMetadata: Codable {
+    let schemaVersion: Int
+    let ownerId: String
+    let bundleIdentifier: String
+    let configKey: String
+    let pid: Int
+    let port: Int
+    let startedAt: TimeInterval
+    let storageName: String
+  }
+  private static var runtimeConfiguration: RuntimeConfiguration {
+    let bundleIdentifier = Bundle.main.bundleIdentifier ?? ""
+    if bundleIdentifier.hasPrefix("com.madda.ghostex-dev") {
+      /*
+       CDXC:SourceRuntimeOwnership 2026-06-28-04:05:
+       Legacy ghostex-dev bundles must not contend with installed Ghostex for
+       the Source code-server listener. Keep the port and profile identity
+       bundle-derived so LaunchServices starts get the same split as shell
+       starts without probing user paths or process command lines.
+       */
+      return RuntimeConfiguration(
+        ownerId: "macos-dev",
+        port: 3776,
+        storageName: "code-server-runtime-macos-dev")
+    }
+    /*
+     CDXC:SourceRuntimeOwnership 2026-06-28-04:05:
+     Installed macOS Ghostex keeps the historical Source port/profile contract,
+     while ownership metadata below decides whether an existing listener is safe
+     to reuse. GPUI owns a different port/profile so Source tab clicks do not
+     wait on cross-build code-server listeners.
+     */
+    return RuntimeConfiguration(
+      ownerId: "macos",
+      port: 3775,
+      storageName: "code-server-runtime")
+  }
+  static var ownerId: String { runtimeConfiguration.ownerId }
+  static var port: Int { runtimeConfiguration.port }
   static var origin: String { "http://\(host):\(port)" }
+  static var storageName: String { runtimeConfiguration.storageName }
   private struct NodeRuntimeVersion {
     let major: Int
     let raw: String
   }
+  private struct ListenerDiagnostic {
+    let ownerKind: String
+    let parentOwnerKind: String
+    let parentPid: Int?
+    let pid: Int
+    let runtimeAgeSeconds: Int?
+  }
+
+  /**
+   CDXC:ModeSwitcherDiagnostics 2026-06-28-03:44:
+   Source-tab lag repros need to distinguish a slow titlebar/sidebar bridge from
+   the fixed code-server port being owned by another app build. Capture only
+   listener counts, PIDs, runtime ages, and enum owner kinds; never persist raw
+   process command lines, executable paths, workspace paths, or launch arguments.
+   */
+  static func listenerDiagnosticsSnapshot() -> [String: Any] {
+    let listeners = listeningProcesses(onPort: port)
+    return [
+      "listenerCount": listeners.count,
+      "listenerOwnerKinds": listeners.map(\.ownerKind),
+      "listenerParentOwnerKinds": listeners.map(\.parentOwnerKind),
+      "listenerParentPids": listeners.map { $0.parentPid ?? 0 },
+      "listenerPids": listeners.map(\.pid),
+      "listenerRuntimeAgeSeconds": listeners.map { $0.runtimeAgeSeconds ?? -1 },
+      "port": port,
+    ]
+  }
+
+  static func bootstrapPayload() -> [String: Any] {
+    [
+      "host": host,
+      "origin": origin,
+      "ownerId": ownerId,
+      "port": port,
+      "storageName": storageName,
+    ]
+  }
+
+  static func runtimeConfigKey(
+    linkVscodeUserConfig: Bool,
+    vscodeUserConfigDir: String?
+  ) -> String {
+    guard linkVscodeUserConfig else {
+      return "ghostex-default"
+    }
+    let normalized = normalizedVscodeUserConfigDirectory(vscodeUserConfigDir)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    if normalized.hasSuffix("/library/application support/code - insiders/user") {
+      return "vscode-insiders"
+    }
+    if normalized.hasSuffix("/library/application support/code/user") {
+      return "vscode-stable"
+    }
+    return "vscode-custom"
+  }
+
+  static func ownedResponsiveRuntimePid(
+    linkVscodeUserConfig: Bool,
+    vscodeUserConfigDir: String?
+  ) -> Int32? {
+    let configKey = runtimeConfigKey(
+      linkVscodeUserConfig: linkVscodeUserConfig,
+      vscodeUserConfigDir: vscodeUserConfigDir)
+    guard let metadata = readOwnershipMetadata(),
+      metadataMatchesCurrentRuntime(metadata, configKey: configKey),
+      hasListenerForOwnedRuntime(metadata),
+      hasResponsiveRuntimeListener()
+    else {
+      return nil
+    }
+    return Int32(metadata.pid)
+  }
+
+  static func writeOwnershipMetadata(
+    pid: Int32,
+    linkVscodeUserConfig: Bool,
+    vscodeUserConfigDir: String?
+  ) {
+    let metadata = RuntimeOwnershipMetadata(
+      schemaVersion: 1,
+      ownerId: ownerId,
+      bundleIdentifier: Bundle.main.bundleIdentifier ?? "",
+      configKey: runtimeConfigKey(
+        linkVscodeUserConfig: linkVscodeUserConfig,
+        vscodeUserConfigDir: vscodeUserConfigDir),
+      pid: Int(pid),
+      port: port,
+      startedAt: Date().timeIntervalSince1970,
+      storageName: storageName)
+    do {
+      let metadataURL = try runtimeOwnershipMetadataURL()
+      let data = try JSONEncoder().encode(metadata)
+      try data.write(to: metadataURL, options: [.atomic])
+      NativeT3CodePaneReproLog.append("nativeCodeServerRuntime.ownership.written", [
+        "configKey": metadata.configKey,
+        "ownerId": metadata.ownerId,
+        "pid": metadata.pid,
+        "port": metadata.port,
+        "storageName": metadata.storageName,
+      ])
+    } catch {
+      NativeT3CodePaneReproLog.append("nativeCodeServerRuntime.ownership.writeFailed", [
+        "error": error.localizedDescription,
+        "ownerId": ownerId,
+        "pid": Int(pid),
+        "port": port,
+        "storageName": storageName,
+      ])
+    }
+  }
+
+  static func clearOwnershipMetadata(pid: Int32?) {
+    guard let metadata = readOwnershipMetadata(),
+      metadataMatchesCurrentOwner(metadata)
+    else {
+      return
+    }
+    if let pid, metadata.pid != Int(pid) {
+      return
+    }
+    do {
+      try FileManager.default.removeItem(at: runtimeOwnershipMetadataURL())
+      NativeT3CodePaneReproLog.append("nativeCodeServerRuntime.ownership.cleared", [
+        "ownerId": metadata.ownerId,
+        "pid": metadata.pid,
+        "port": metadata.port,
+        "storageName": metadata.storageName,
+      ])
+    } catch {
+      NativeT3CodePaneReproLog.append("nativeCodeServerRuntime.ownership.clearFailed", [
+        "error": error.localizedDescription,
+        "ownerId": metadata.ownerId,
+        "pid": metadata.pid,
+        "port": metadata.port,
+        "storageName": metadata.storageName,
+      ])
+    }
+  }
+
+  static func terminateOwnedRuntime(pid: Int32, logPrefix: String) {
+    guard let metadata = readOwnershipMetadata(),
+      metadataMatchesCurrentOwner(metadata),
+      metadata.pid == Int(pid)
+    else {
+      return
+    }
+    guard hasListenerForOwnedRuntime(metadata) else {
+      clearOwnershipMetadata(pid: pid)
+      return
+    }
+    NativeT3CodePaneReproLog.append("\(logPrefix).codeServerRuntime.stop.ownedMetadata", [
+      "ownerId": metadata.ownerId,
+      "pid": metadata.pid,
+      "port": metadata.port,
+      "storageName": metadata.storageName,
+    ])
+    terminateRuntimeProcessTree(pid: pid, logPrefix: logPrefix)
+    clearOwnershipMetadata(pid: pid)
+  }
+
+  static func terminateRuntimeProcessTree(pid: Int32, logPrefix: String) {
+    let metadataPid = Int(pid)
+    let ownedListenerPids = listeningProcesses(onPort: port)
+      .filter { listener in listenerBelongsToRuntime(listener, metadataPid: metadataPid) }
+      .map(\.pid)
+    /*
+     CDXC:SourceRuntimeOwnership 2026-06-28-04:37:
+     Stopping Source must terminate the recorded launcher and its direct
+     code-server listener child. Leaving the child alive creates a future
+     unowned-but-responsive port that makes the next Source click fail as a
+     cross-app conflict.
+     */
+    NativeT3CodePaneReproLog.append("\(logPrefix).codeServerRuntime.stop.processTree", [
+      "listenerPids": ownedListenerPids,
+      "pid": metadataPid,
+      "port": port,
+    ])
+    for listenerPid in ownedListenerPids where listenerPid != metadataPid {
+      kill(pid_t(listenerPid), SIGTERM)
+    }
+    kill(pid_t(pid), SIGTERM)
+  }
+
+  static func terminateCurrentOwnedRuntimeIfPresent(logPrefix: String) {
+    guard let metadata = readOwnershipMetadata(),
+      metadataMatchesCurrentOwner(metadata)
+    else {
+      return
+    }
+    let pid = Int32(metadata.pid)
+    guard hasListenerForOwnedRuntime(metadata) else {
+      NativeT3CodePaneReproLog.append("\(logPrefix).codeServerRuntime.stop.staleOwnership", [
+        "ownerId": metadata.ownerId,
+        "pid": metadata.pid,
+        "port": metadata.port,
+        "storageName": metadata.storageName,
+      ])
+      clearOwnershipMetadata(pid: pid)
+      return
+    }
+    terminateOwnedRuntime(pid: pid, logPrefix: logPrefix)
+  }
+
+  private static func runtimeOwnershipMetadataURL() throws -> URL {
+    try runtimeStorage().appendingPathComponent("owner.json", isDirectory: false)
+  }
+
+  private static func readOwnershipMetadata() -> RuntimeOwnershipMetadata? {
+    guard let metadataURL = try? runtimeOwnershipMetadataURL(),
+      let data = try? Data(contentsOf: metadataURL),
+      let metadata = try? JSONDecoder().decode(RuntimeOwnershipMetadata.self, from: data)
+    else {
+      return nil
+    }
+    return metadata
+  }
+
+  private static func metadataMatchesCurrentRuntime(
+    _ metadata: RuntimeOwnershipMetadata,
+    configKey: String
+  ) -> Bool {
+    metadataMatchesCurrentOwner(metadata) && metadata.configKey == configKey
+  }
+
+  private static func metadataMatchesCurrentOwner(_ metadata: RuntimeOwnershipMetadata) -> Bool {
+    metadata.schemaVersion == 1
+      && metadata.ownerId == ownerId
+      && metadata.port == port
+      && metadata.storageName == storageName
+  }
+
+  private static func hasListenerForOwnedRuntime(_ metadata: RuntimeOwnershipMetadata) -> Bool {
+    listeningProcesses(onPort: port).contains { listener in
+      listenerBelongsToRuntime(listener, metadataPid: metadata.pid)
+    }
+  }
+
+  private static func listenerBelongsToRuntime(
+    _ listener: ListenerDiagnostic,
+    metadataPid: Int
+  ) -> Bool {
+    /*
+     CDXC:SourceRuntimeOwnership 2026-06-28-04:37:
+     code-server is launched through a shell wrapper that records the parent PID
+     in owner.json, while the TCP listener can be the forked Node child. Treat
+     either the recorded PID or its direct listener child as the same owned
+     runtime so Source retries reuse Ghostex's own server instead of reporting a
+     false cross-app ownership conflict.
+     */
+    listener.pid == metadataPid || listener.parentPid == metadataPid
+  }
+
   /**
    CDXC:EditorPanes 2026-05-06-15:00
    code-server can take a few seconds to fork its IPC child and bind the local
@@ -274,6 +572,9 @@ enum NativeCodeServerRuntimeLauncher {
     let extensionsDirURL = storage.appendingPathComponent("extensions", isDirectory: true)
     let linkedVscodeUserConfigDir: String? =
       linkVscodeUserConfig ? normalizedVscodeUserConfigDirectory(vscodeUserConfigDir) : nil
+    let configKey = runtimeConfigKey(
+      linkVscodeUserConfig: linkVscodeUserConfig,
+      vscodeUserConfigDir: vscodeUserConfigDir)
     if NativeCodeServerUserSettings.shouldSeedDefaultTheme(
       linkedVscodeUserConfigDir: linkedVscodeUserConfigDir)
     {
@@ -325,6 +626,9 @@ enum NativeCodeServerRuntimeLauncher {
       "linkVscodeUserConfig": linkVscodeUserConfig,
       "node": nodePath,
       "origin": origin,
+      "runtimeConfigKey": configKey,
+      "runtimeOwnerId": ownerId,
+      "runtimeStorageName": storageName,
       "repoRoot": repoRoot.path,
       "storage": storage.path,
       "vscodeUserConfigDir": linkedVscodeUserConfigDir ?? NSNull(),
@@ -385,6 +689,154 @@ enum NativeCodeServerRuntimeLauncher {
       Thread.sleep(forTimeInterval: 0.2)
     }
     return !hasResponsiveRuntimeListener()
+  }
+
+  private static func listeningProcesses(onPort port: Int) -> [ListenerDiagnostic] {
+    let process = Process()
+    let pipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+    process.arguments = ["-nP", "-tiTCP:\(port)", "-sTCP:LISTEN"]
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      NativeT3CodePaneReproLog.append("nativeCodeServerRuntime.listenerProbe.failed", [
+        "error": error.localizedDescription,
+        "port": port,
+      ])
+      return []
+    }
+    return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+      .split(separator: "\n", omittingEmptySubsequences: true)
+      .compactMap { Int(String($0).trimmingCharacters(in: .whitespacesAndNewlines)) }
+      .map { pid in
+        let command = processCommand(pid: pid)
+        let parentPid = processParentPid(pid: pid)
+        let parentCommand = parentPid.map { processCommand(pid: $0) } ?? ""
+        return ListenerDiagnostic(
+          ownerKind: listenerOwnerKind(command),
+          parentOwnerKind: listenerOwnerKind(parentCommand),
+          parentPid: parentPid,
+          pid: pid,
+          runtimeAgeSeconds: runtimeAgeSeconds(pid: pid))
+      } ?? []
+  }
+
+  private static func listenerOwnerKind(_ command: String) -> String {
+    let normalized = command.lowercased()
+    if normalized.isEmpty {
+      return "unknown"
+    }
+    if normalized.contains("ghostexgpui.app") ||
+      (normalized.contains("/gpui/") && normalized.contains("code-server"))
+    {
+      return "ghostex-gpui-code-server"
+    }
+    if normalized.contains("ghostex.app") && normalized.contains("code-server") {
+      return "ghostex-app-code-server"
+    }
+    if normalized.contains("ghostex") && normalized.contains("code-server") {
+      return "ghostex-code-server"
+    }
+    if normalized.contains("code-server") {
+      return "code-server"
+    }
+    if normalized.contains("node") {
+      return "node"
+    }
+    return "foreign"
+  }
+
+  private static func processCommand(pid: Int) -> String {
+    let process = Process()
+    let pipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/ps")
+    process.arguments = ["-p", String(pid), "-o", "command="]
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      return ""
+    }
+    return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+  }
+
+  private static func processParentPid(pid: Int) -> Int? {
+    let process = Process()
+    let pipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/ps")
+    process.arguments = ["-p", String(pid), "-o", "ppid="]
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      return nil
+    }
+    let raw = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return Int(raw)
+  }
+
+  private static func runtimeAgeSeconds(pid: Int) -> Int? {
+    let process = Process()
+    let pipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/ps")
+    process.arguments = ["-p", String(pid), "-o", "etime="]
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      return nil
+    }
+    let raw = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return parsePsElapsedSeconds(raw)
+  }
+
+  private static func parsePsElapsedSeconds(_ raw: String) -> Int? {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+      return nil
+    }
+    let daySplit = trimmed.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+    let days: Int
+    let timePart: Substring
+    if daySplit.count == 2 {
+      guard let parsedDays = Int(daySplit[0]) else {
+        return nil
+      }
+      days = parsedDays
+      timePart = daySplit[1]
+    } else {
+      days = 0
+      timePart = Substring(trimmed)
+    }
+    let parts = timePart.split(separator: ":", omittingEmptySubsequences: false)
+    guard parts.count == 2 || parts.count == 3 else {
+      return nil
+    }
+    let secondsIndex = parts.count - 1
+    let minutesIndex = parts.count - 2
+    guard
+      let seconds = Int(parts[secondsIndex]),
+      let minutes = Int(parts[minutesIndex])
+    else {
+      return nil
+    }
+    let hours = parts.count == 3 ? Int(parts[0]) : 0
+    guard let hours else {
+      return nil
+    }
+    return days * 86_400 + hours * 3_600 + minutes * 60 + seconds
   }
 
   private static func resolveCodeServerRepoRoot() throws -> URL {
@@ -495,7 +947,7 @@ enum NativeCodeServerRuntimeLauncher {
 
   private static func runtimeStorage() throws -> URL {
     let storage = GhostexAppStorage.sharedRootDirectory
-      .appendingPathComponent("code-server-runtime", isDirectory: true)
+      .appendingPathComponent(storageName, isDirectory: true)
     try FileManager.default.createDirectory(
       at: storage.appendingPathComponent("user-data", isDirectory: true),
       withIntermediateDirectories: true)

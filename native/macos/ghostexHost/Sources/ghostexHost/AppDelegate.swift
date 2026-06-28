@@ -1026,6 +1026,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
   private var t3RuntimeLivenessTimer: Timer?
   private var t3RuntimeAutoStartBackoffUntil: Date?
   private var codeServerRuntimeProcess: Process?
+  private var codeServerRuntimeAdoptedPid: Int32?
   private var codeServerRuntimeStartedAt: Date?
   private var pendingOSIntegrationCommands: [(action: String, payloadJson: String)] = []
   private lazy var sessionAttentionNotificationController =
@@ -1080,8 +1081,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
        CDXC:AppIconPicker 2026-06-25-21:50:
        Apply the persisted custom Dock icon before window creation so the Dock
        and Cmd-Tab switcher show the chosen icon immediately at launch. This sets
-       only NSApp.applicationIconImage at runtime; the bundle/Finder icon is
-       never modified.
+       the runtime app icon, Dock tile, and app bundle custom file icon where
+       macOS permits.
        */
       Self.applyAppIcon(sourceId: Self.readPersistedAppIconSourceId())
       /**
@@ -3736,6 +3737,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       stopCodeServerRuntime(logPrefix: "nativeHost")
     case .createProjectEditorPane(let command):
       workspaceView?.createProjectEditorPane(command)
+    case .setProjectEditorLoadState(let command):
+      workspaceView?.setProjectEditorLoadState(command)
     case .setBrowserHistory(let command):
       workspaceView?.setBrowserHistory(command)
     case .focusProjectEditorPane(let command):
@@ -4291,9 +4294,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
    Embedded project editors use one shared code-server process. The native host
    verifies the localhost listener before reusing a tracked process so editor
    panes attach to a live VS Code runtime instead of a stale port or dead child.
-   */
+  */
   @MainActor
   private func startCodeServerRuntime(_ command: StartCodeServerRuntime) {
+    let linkVscodeUserConfig = command.linkVscodeUserConfig ?? false
     if let process = codeServerRuntimeProcess, process.isRunning {
       guard NativeCodeServerRuntimeLauncher.hasResponsiveRuntimeListener() else {
         if let startedAt = codeServerRuntimeStartedAt,
@@ -4312,10 +4316,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
           "pid": process.processIdentifier,
         ])
         process.terminate()
+        NativeCodeServerRuntimeLauncher.clearOwnershipMetadata(pid: process.processIdentifier)
         codeServerRuntimeProcess = nil
+        codeServerRuntimeAdoptedPid = nil
         codeServerRuntimeStartedAt = nil
         return startCodeServerRuntime(command)
       }
+      codeServerRuntimeAdoptedPid = nil
       NativeT3CodePaneReproLog.append("nativeHost.codeServerRuntime.start.reused", [
         "cwd": command.cwd,
         "pid": process.processIdentifier,
@@ -4324,18 +4331,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       return
     }
 
+    if let ownedPid = NativeCodeServerRuntimeLauncher.ownedResponsiveRuntimePid(
+      linkVscodeUserConfig: linkVscodeUserConfig,
+      vscodeUserConfigDir: command.vscodeUserConfigDir)
+    {
+      codeServerRuntimeAdoptedPid = ownedPid
+      codeServerRuntimeStartedAt = nil
+      NativeT3CodePaneReproLog.append("nativeHost.codeServerRuntime.start.reusedOwnedMetadata", [
+        "origin": NativeCodeServerRuntimeLauncher.origin,
+        "ownerId": NativeCodeServerRuntimeLauncher.ownerId,
+        "pid": ownedPid,
+        "projectId": command.projectId ?? NSNull(),
+        "runtimeConfigKey": NativeCodeServerRuntimeLauncher.runtimeConfigKey(
+          linkVscodeUserConfig: linkVscodeUserConfig,
+          vscodeUserConfigDir: command.vscodeUserConfigDir),
+        "storageName": NativeCodeServerRuntimeLauncher.storageName,
+      ])
+      return
+    }
+
     if NativeCodeServerRuntimeLauncher.hasResponsiveRuntimeListener() {
       /**
-       CDXC:EditorPanes 2026-05-06-15:00
-       code-server settings-link options are process launch arguments. Do not
-       adopt an untracked listener on the editor port because it may have been
-       started without the selected VS Code config flags.
+       CDXC:SourceRuntimeOwnership 2026-06-28-04:05:
+       Source tab clicks must not block the MainActor waiting for a responsive
+       but unowned code-server listener to exit. Reuse only matching ownership
+       metadata; otherwise fail immediately so cross-build or foreign listeners
+       are visible instead of feeling like a slow header button.
        */
-      NativeT3CodePaneReproLog.append("nativeHost.codeServerRuntime.start.portBusy", [
+      let listenerDiagnostics = NativeCodeServerRuntimeLauncher.listenerDiagnosticsSnapshot()
+      var portBusyDetails: [String: Any] = [
         "cwd": command.cwd,
         "origin": NativeCodeServerRuntimeLauncher.origin,
-      ])
-      _ = NativeCodeServerRuntimeLauncher.waitUntilNotResponsive(timeout: 2.0)
+        "ownerId": NativeCodeServerRuntimeLauncher.ownerId,
+        "port": NativeCodeServerRuntimeLauncher.port,
+        "projectId": command.projectId ?? NSNull(),
+        "runtimeConfigKey": NativeCodeServerRuntimeLauncher.runtimeConfigKey(
+          linkVscodeUserConfig: linkVscodeUserConfig,
+          vscodeUserConfigDir: command.vscodeUserConfigDir),
+        "storageName": NativeCodeServerRuntimeLauncher.storageName,
+      ]
+      for (key, value) in listenerDiagnostics {
+        portBusyDetails[key] = value
+      }
+      NativeT3CodePaneReproLog.append(
+        "nativeHost.codeServerRuntime.start.portBusy",
+        portBusyDetails)
+      var modeSwitcherPortBusyDetails = portBusyDetails
+      modeSwitcherPortBusyDetails["targetMode"] = "code"
+      NativeModeSwitcherDebugLog.append(
+        event: "titlebarModeSwitch.codeServerRuntimePortBusy",
+        details: modeSwitcherPortBusyDetails)
+      (window?.contentView as? ghostexRootView)?.postHostEvent(
+        .codeServerRuntimeStartFailed(
+          projectId: command.projectId,
+          message: "Source runtime is already owned by another app or process."))
+      return
     }
 
     do {
@@ -4345,13 +4395,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
          CDXC:EditorPanes 2026-06-08-20:12:
          Missing sidebar link flags should follow the bundled editor default so new macOS code-server launches start from Ghostex-owned Dark 2026 settings instead of resurrecting local VS Code settings.
          */
-        linkVscodeUserConfig: command.linkVscodeUserConfig ?? false,
+        linkVscodeUserConfig: linkVscodeUserConfig,
         vscodeUserConfigDir: command.vscodeUserConfigDir)
       let process = launch.process
       try process.run()
       codeServerRuntimeProcess = process
+      codeServerRuntimeAdoptedPid = nil
       let startedAt = Date()
       codeServerRuntimeStartedAt = startedAt
+      NativeCodeServerRuntimeLauncher.writeOwnershipMetadata(
+        pid: process.processIdentifier,
+        linkVscodeUserConfig: linkVscodeUserConfig,
+        vscodeUserConfigDir: command.vscodeUserConfigDir)
       NativeT3CodePaneReproLog.append("nativeHost.codeServerRuntime.start.spawned", [
         "args": process.arguments ?? [],
         "cwd": command.cwd,
@@ -4366,6 +4421,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
         details["status"] = terminatedProcess.terminationStatus
         details["uptimeSeconds"] = Date().timeIntervalSince(startedAt)
         NativeT3CodePaneReproLog.append("nativeHost.codeServerRuntime.exit", details)
+        NativeCodeServerRuntimeLauncher.clearOwnershipMetadata(
+          pid: terminatedProcess.processIdentifier)
       }
     } catch {
       NativeT3CodePaneReproLog.append("nativeHost.codeServerRuntime.start.failed", [
@@ -4393,14 +4450,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     if let process = codeServerRuntimeProcess {
       NativeT3CodePaneReproLog.append("\(logPrefix).codeServerRuntime.stop.tracked", [
         "isRunning": process.isRunning,
-        "pid": process.processIdentifier,
-      ])
-      if process.isRunning {
-        process.terminate()
-      }
-      codeServerRuntimeProcess = nil
-      codeServerRuntimeStartedAt = nil
+      "pid": process.processIdentifier,
+    ])
+    if process.isRunning {
+      NativeCodeServerRuntimeLauncher.terminateRuntimeProcessTree(
+        pid: process.processIdentifier,
+        logPrefix: logPrefix)
     }
+    NativeCodeServerRuntimeLauncher.clearOwnershipMetadata(pid: process.processIdentifier)
+      codeServerRuntimeProcess = nil
+    }
+    if let adoptedPid = codeServerRuntimeAdoptedPid {
+      NativeCodeServerRuntimeLauncher.terminateOwnedRuntime(pid: adoptedPid, logPrefix: logPrefix)
+      codeServerRuntimeAdoptedPid = nil
+    } else if codeServerRuntimeProcess == nil {
+      NativeCodeServerRuntimeLauncher.terminateCurrentOwnedRuntimeIfPresent(logPrefix: logPrefix)
+    }
+    codeServerRuntimeStartedAt = nil
   }
 
   @MainActor private func activateAppWindow() {
@@ -4970,14 +5036,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
    Apply the runtime Dock icon for a source id. "" resets NSApp to the bundle
    icon (applicationIconImage = nil). A non-empty id loads, validates, and masks
    the matching file in ~/.ghostex/icons through the self-validating cache; any
-   failure falls back to the default bundle icon. Only NSApp.applicationIconImage
-   changes here — the Finder/bundle icon is never touched. Logging is
-   privacy-safe (id presence and success boolean only).
+   failure falls back to the default bundle icon. Update
+   NSApp.applicationIconImage, the Dock tile content, and the app bundle custom
+   file icon where macOS permits. Logging is privacy-safe (id presence and
+   success boolean only).
+
+   CDXC:AppIconPicker 2026-06-28-08:24:
+   Startup overlay code reads NSApp.applicationIconImage, but the Dock can keep
+   rendering the bundle icon unless the NSDockTile itself is invalidated. Keep
+   the app image and Dock tile content synchronized so selecting a custom icon
+   changes the visible Dock icon immediately and on launch.
+
+   CDXC:AppIconPicker 2026-06-28-08:39:
+   Apple documents applicationIconImage as the temporary running-app Dock icon
+   and NSDockTile as the custom tile surface. In practice, the Dock can still
+   prefer its cached app-bundle icon, so also set the bundle's custom file icon
+   through NSWorkspace and notify/touch the bundle. This mirrors Finder's custom
+   app-icon path without rewriting sealed bundle resources.
    */
   @MainActor static func applyAppIcon(sourceId: String) {
     let trimmed = sourceId.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed.isEmpty {
-      NSApp.applicationIconImage = nil
+      setRuntimeAppIconImage(nil)
       if NativeDebugLogging.isEnabled {
         logger.info("AppIcon applied default bundle icon hasSource=false")
       }
@@ -4985,7 +5065,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     }
     guard let normalizedSourceId = AppIconImage.normalizedSourceId(trimmed) else {
       // CDXC:AppIconPicker 2026-06-26-23:42: Invalid source ids fall back before URL construction so persisted or bridged paths cannot escape ~/.ghostex/icons.
-      NSApp.applicationIconImage = nil
+      setRuntimeAppIconImage(nil)
       if NativeDebugLogging.isEnabled {
         logger.info("AppIcon fell back to default; invalid source id hasSource=true ok=false")
       }
@@ -4998,16 +5078,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       cacheDirectory: GhostexAppStorage.maskedIconCacheDirectory
     ) else {
       // CDXC:AppIconPicker 2026-06-25-21:50: Invalid/missing source falls back to the default bundle icon instead of leaving a stale custom icon.
-      NSApp.applicationIconImage = nil
+      setRuntimeAppIconImage(nil)
       if NativeDebugLogging.isEnabled {
         logger.info("AppIcon fell back to default; masked image unavailable hasSource=true ok=false")
       }
       return
     }
-    NSApp.applicationIconImage = image
+    setRuntimeAppIconImage(image)
     if NativeDebugLogging.isEnabled {
       logger.info("AppIcon applied custom icon hasSource=true ok=true")
     }
+  }
+
+  @MainActor private static func setRuntimeAppIconImage(_ image: NSImage?) {
+    let dockTile = NSApp.dockTile
+    guard let image else {
+      NSApp.applicationIconImage = nil
+      dockTile.contentView = nil
+      dockTile.display()
+      _ = setBundleCustomAppIcon(nil)
+      return
+    }
+
+    NSApp.applicationIconImage = image
+    let dockTileSize = dockTile.size
+    let tileSize: NSSize
+    if dockTileSize.width > 0 && dockTileSize.height > 0 {
+      tileSize = dockTileSize
+    } else {
+      tileSize = NSSize(width: 128, height: 128)
+    }
+    let imageView = NSImageView(frame: NSRect(origin: .zero, size: tileSize))
+    imageView.autoresizingMask = [.width, .height]
+    imageView.image = image
+    imageView.imageAlignment = .alignCenter
+    imageView.imageScaling = .scaleProportionallyUpOrDown
+    dockTile.contentView = imageView
+    dockTile.display()
+    _ = setBundleCustomAppIcon(image)
+  }
+
+  @MainActor private static func setBundleCustomAppIcon(_ image: NSImage?) -> Bool {
+    let bundlePath = Bundle.main.bundlePath
+    let ok = NSWorkspace.shared.setIcon(image, forFile: bundlePath, options: [])
+    if ok {
+      NSWorkspace.shared.noteFileSystemChanged(bundlePath)
+      try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: bundlePath)
+    }
+    if NativeDebugLogging.isEnabled {
+      logger.info("AppIcon bundle custom file icon updated ok=\(ok)")
+    }
+    return ok
   }
 
   // CDXC:AppIconPicker 2026-06-25-21:50: Human-friendly picker label derived from the icon filename (extension stripped, separators spaced). No path is exposed.
@@ -6495,6 +6616,7 @@ final class ghostexRootView: NSView {
   private var t3RuntimePaneStateGeneration: UInt64 = 0
   private var t3RuntimeAutoStartBackoffUntil: Date?
   private var codeServerRuntimeProcess: Process?
+  private var codeServerRuntimeAdoptedPid: Int32?
   private var codeServerRuntimeStartedAt: Date?
   private var titlebarOutsideClickMonitor: Any?
   private var titlebarBootstrapScriptSource: String?
@@ -6607,6 +6729,7 @@ final class ghostexRootView: NSView {
     var bootstrap: [String: Any] = [
       "accessibilityPermissionGranted": AXIsProcessTrusted(),
       "bundleIdentifier": Bundle.main.bundleIdentifier ?? "",
+      "codeServerRuntime": NativeCodeServerRuntimeLauncher.bootstrapPayload(),
       "cwd": cwd,
       "gxserver": gxserverBootstrap,
       "homeDir": FileManager.default.homeDirectoryForCurrentUser.path,
@@ -6650,6 +6773,12 @@ final class ghostexRootView: NSView {
        Sparkle download state can change while the titlebar document is loading
        or reloading. Seed updateDownloading alongside availability so the
        button fade reflects an in-progress download from the first React render.
+
+       CDXC:SourceRuntimeOwnership 2026-06-28-04:05:
+       Source editor URLs and IPC socket paths must come from the native-owned
+       runtime identity, not a React hardcoded localhost port. This keeps the
+       sidebar aligned with the app/build-specific code-server port and profile
+       that native starts and stops.
        */
       configuration.userContentController.addUserScript(bootstrapScript)
       titlebarConfiguration.userContentController.addUserScript(bootstrapScript)
@@ -9572,6 +9701,11 @@ final class ghostexRootView: NSView {
     case .stopT3CodeRuntime:
       stopT3CodeRuntime(logPrefix: "nativeSidebar")
     case .startCodeServerRuntime(let command):
+      /*
+       CDXC:ModeSwitcherDiagnostics 2026-06-28-05:48:
+       The current Source/Browser/Kanban/Manage lag investigation is instrumentation-only. Measure synchronous native sidebar bridge calls before and after execution so the rebuild can show whether the 500 ms delay happens in Swift command handling or later AppKit layout/focus work.
+       */
+      let startedAt = ProcessInfo.processInfo.systemUptime
       AppDelegate.appendModeSwitcherDebugLog(
         event: "titlebarModeSwitch.swiftStartCodeServerRuntimeReceived",
         details: AppDelegate.jsonObjectString([
@@ -9582,9 +9716,19 @@ final class ghostexRootView: NSView {
           "timeInterval": "\(Date().timeIntervalSince1970)",
         ]))
       startCodeServerRuntime(command)
+      AppDelegate.appendModeSwitcherDebugLog(
+        event: "titlebarModeSwitch.swiftStartCodeServerRuntimeCompleted",
+        details: AppDelegate.jsonObjectString([
+          "elapsedMs": Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000),
+          "hasProjectId": command.projectId != nil,
+          "projectId": command.projectId ?? "",
+          "targetMode": "code",
+          "timeInterval": "\(Date().timeIntervalSince1970)",
+        ]))
     case .stopCodeServerRuntime:
       stopCodeServerRuntime(logPrefix: "nativeSidebar")
     case .createProjectEditorPane(let command):
+      let startedAt = ProcessInfo.processInfo.systemUptime
       AppDelegate.appendModeSwitcherDebugLog(
         event: "titlebarModeSwitch.swiftCreateProjectEditorPaneReceived",
         details: AppDelegate.jsonObjectString([
@@ -9596,9 +9740,20 @@ final class ghostexRootView: NSView {
           "timeInterval": "\(Date().timeIntervalSince1970)",
         ]))
       workspaceView.createProjectEditorPane(command)
+      AppDelegate.appendModeSwitcherDebugLog(
+        event: "titlebarModeSwitch.swiftCreateProjectEditorPaneHandled",
+        details: AppDelegate.jsonObjectString([
+          "elapsedMs": Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000),
+          "mode": command.mode ?? "unknown",
+          "projectId": command.projectId,
+          "timeInterval": "\(Date().timeIntervalSince1970)",
+        ]))
+    case .setProjectEditorLoadState(let command):
+      workspaceView.setProjectEditorLoadState(command)
     case .setBrowserHistory(let command):
       workspaceView.setBrowserHistory(command)
     case .focusProjectEditorPane(let command):
+      let startedAt = ProcessInfo.processInfo.systemUptime
       AppDelegate.appendModeSwitcherDebugLog(
         event: "titlebarModeSwitch.swiftFocusProjectEditorPaneReceived",
         details: AppDelegate.jsonObjectString([
@@ -9606,6 +9761,13 @@ final class ghostexRootView: NSView {
           "timeInterval": "\(Date().timeIntervalSince1970)",
         ]))
       workspaceView.focusProjectEditorPane(projectId: command.projectId)
+      AppDelegate.appendModeSwitcherDebugLog(
+        event: "titlebarModeSwitch.swiftFocusProjectEditorPaneHandled",
+        details: AppDelegate.jsonObjectString([
+          "elapsedMs": Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000),
+          "projectId": command.projectId,
+          "timeInterval": "\(Date().timeIntervalSince1970)",
+        ]))
     case .closeProjectEditorPane(let command):
       workspaceView.closeProjectEditorPane(projectId: command.projectId)
     case .activateApp:
@@ -10538,8 +10700,9 @@ final class ghostexRootView: NSView {
    Sidebar editor buttons open a project-owned VS Code surface while sharing a
    single code-server process. Reuse only a responsive localhost runtime so the
    no-address-bar Chromium embed always points at live editor UI.
-   */
+  */
   private func startCodeServerRuntime(_ command: StartCodeServerRuntime) {
+    let linkVscodeUserConfig = command.linkVscodeUserConfig ?? false
     if let process = codeServerRuntimeProcess, process.isRunning {
       guard NativeCodeServerRuntimeLauncher.hasResponsiveRuntimeListener() else {
         if let startedAt = codeServerRuntimeStartedAt,
@@ -10558,10 +10721,13 @@ final class ghostexRootView: NSView {
           "pid": process.processIdentifier,
         ])
         process.terminate()
+        NativeCodeServerRuntimeLauncher.clearOwnershipMetadata(pid: process.processIdentifier)
         codeServerRuntimeProcess = nil
+        codeServerRuntimeAdoptedPid = nil
         codeServerRuntimeStartedAt = nil
         return startCodeServerRuntime(command)
       }
+      codeServerRuntimeAdoptedPid = nil
       NativeT3CodePaneReproLog.append("nativeSidebar.codeServerRuntime.start.reused", [
         "cwd": command.cwd,
         "pid": process.processIdentifier,
@@ -10570,18 +10736,60 @@ final class ghostexRootView: NSView {
       return
     }
 
+    if let ownedPid = NativeCodeServerRuntimeLauncher.ownedResponsiveRuntimePid(
+      linkVscodeUserConfig: linkVscodeUserConfig,
+      vscodeUserConfigDir: command.vscodeUserConfigDir)
+    {
+      codeServerRuntimeAdoptedPid = ownedPid
+      codeServerRuntimeStartedAt = nil
+      NativeT3CodePaneReproLog.append("nativeSidebar.codeServerRuntime.start.reusedOwnedMetadata", [
+        "origin": NativeCodeServerRuntimeLauncher.origin,
+        "ownerId": NativeCodeServerRuntimeLauncher.ownerId,
+        "pid": ownedPid,
+        "projectId": command.projectId ?? NSNull(),
+        "runtimeConfigKey": NativeCodeServerRuntimeLauncher.runtimeConfigKey(
+          linkVscodeUserConfig: linkVscodeUserConfig,
+          vscodeUserConfigDir: command.vscodeUserConfigDir),
+        "storageName": NativeCodeServerRuntimeLauncher.storageName,
+      ])
+      return
+    }
+
     if NativeCodeServerRuntimeLauncher.hasResponsiveRuntimeListener() {
       /**
-       CDXC:EditorPanes 2026-05-06-15:00
-       code-server settings-link options are process launch arguments. Do not
-       adopt an untracked listener on the editor port because it may have been
-       started without the selected VS Code config flags.
+       CDXC:SourceRuntimeOwnership 2026-06-28-04:05:
+       The sidebar Source runtime route must match the AppDelegate route:
+       never wait on a responsive listener without matching ownership metadata.
+       Immediate rejection preserves the real problem for support and avoids
+       slow header mode-switch clicks caused by cross-build code-server ports.
        */
-      NativeT3CodePaneReproLog.append("nativeSidebar.codeServerRuntime.start.portBusy", [
+      var portBusyDetails: [String: Any] = [
         "cwd": command.cwd,
         "origin": NativeCodeServerRuntimeLauncher.origin,
-      ])
-      _ = NativeCodeServerRuntimeLauncher.waitUntilNotResponsive(timeout: 2.0)
+        "ownerId": NativeCodeServerRuntimeLauncher.ownerId,
+        "port": NativeCodeServerRuntimeLauncher.port,
+        "projectId": command.projectId ?? NSNull(),
+        "runtimeConfigKey": NativeCodeServerRuntimeLauncher.runtimeConfigKey(
+          linkVscodeUserConfig: linkVscodeUserConfig,
+          vscodeUserConfigDir: command.vscodeUserConfigDir),
+        "storageName": NativeCodeServerRuntimeLauncher.storageName,
+      ]
+      for (key, value) in NativeCodeServerRuntimeLauncher.listenerDiagnosticsSnapshot() {
+        portBusyDetails[key] = value
+      }
+      NativeT3CodePaneReproLog.append(
+        "nativeSidebar.codeServerRuntime.start.portBusy",
+        portBusyDetails)
+      var modeSwitcherPortBusyDetails = portBusyDetails
+      modeSwitcherPortBusyDetails["targetMode"] = "code"
+      NativeModeSwitcherDebugLog.append(
+        event: "titlebarModeSwitch.codeServerRuntimePortBusy",
+        details: modeSwitcherPortBusyDetails)
+      sendHostEvent(
+        .codeServerRuntimeStartFailed(
+          projectId: command.projectId,
+          message: "Source runtime is already owned by another app or process."))
+      return
     }
 
     do {
@@ -10591,13 +10799,18 @@ final class ghostexRootView: NSView {
          CDXC:EditorPanes 2026-06-08-20:12:
          Missing sidebar link flags should follow the bundled editor default so new macOS code-server launches start from Ghostex-owned Dark 2026 settings instead of resurrecting local VS Code settings.
          */
-        linkVscodeUserConfig: command.linkVscodeUserConfig ?? false,
+        linkVscodeUserConfig: linkVscodeUserConfig,
         vscodeUserConfigDir: command.vscodeUserConfigDir)
       let process = launch.process
       try process.run()
       codeServerRuntimeProcess = process
+      codeServerRuntimeAdoptedPid = nil
       let startedAt = Date()
       codeServerRuntimeStartedAt = startedAt
+      NativeCodeServerRuntimeLauncher.writeOwnershipMetadata(
+        pid: process.processIdentifier,
+        linkVscodeUserConfig: linkVscodeUserConfig,
+        vscodeUserConfigDir: command.vscodeUserConfigDir)
       NativeT3CodePaneReproLog.append("nativeSidebar.codeServerRuntime.start.spawned", [
         "args": process.arguments ?? [],
         "cwd": command.cwd,
@@ -10612,6 +10825,8 @@ final class ghostexRootView: NSView {
         details["status"] = terminatedProcess.terminationStatus
         details["uptimeSeconds"] = Date().timeIntervalSince(startedAt)
         NativeT3CodePaneReproLog.append("nativeSidebar.codeServerRuntime.exit", details)
+        NativeCodeServerRuntimeLauncher.clearOwnershipMetadata(
+          pid: terminatedProcess.processIdentifier)
       }
     } catch {
       NativeT3CodePaneReproLog.append("nativeSidebar.codeServerRuntime.start.failed", [
@@ -10637,14 +10852,23 @@ final class ghostexRootView: NSView {
     if let process = codeServerRuntimeProcess {
       NativeT3CodePaneReproLog.append("\(logPrefix).codeServerRuntime.stop.tracked", [
         "isRunning": process.isRunning,
-        "pid": process.processIdentifier,
-      ])
-      if process.isRunning {
-        process.terminate()
-      }
-      codeServerRuntimeProcess = nil
-      codeServerRuntimeStartedAt = nil
+      "pid": process.processIdentifier,
+    ])
+    if process.isRunning {
+      NativeCodeServerRuntimeLauncher.terminateRuntimeProcessTree(
+        pid: process.processIdentifier,
+        logPrefix: logPrefix)
     }
+    NativeCodeServerRuntimeLauncher.clearOwnershipMetadata(pid: process.processIdentifier)
+      codeServerRuntimeProcess = nil
+    }
+    if let adoptedPid = codeServerRuntimeAdoptedPid {
+      NativeCodeServerRuntimeLauncher.terminateOwnedRuntime(pid: adoptedPid, logPrefix: logPrefix)
+      codeServerRuntimeAdoptedPid = nil
+    } else if codeServerRuntimeProcess == nil {
+      NativeCodeServerRuntimeLauncher.terminateCurrentOwnedRuntimeIfPresent(logPrefix: logPrefix)
+    }
+    codeServerRuntimeStartedAt = nil
   }
 
   func stopCodeServerRuntimeForAppTermination() {

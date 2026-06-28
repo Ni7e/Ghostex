@@ -326,6 +326,7 @@ private struct ProjectBoardImageBridgeResponse: Encodable {
 private struct ManageFilesBridgeRequest: Decodable {
   let action: String
   let content: String?
+  let newPath: String?
   let path: String?
   let projectEditorId: String?
   let projectId: String?
@@ -341,9 +342,24 @@ private struct ManageFileEntry: Encodable {
   let size: Int64?
 }
 
+private struct ManageGitBaselinePayload: Encodable {
+  let available: Bool
+  let baseText: String?
+  let headOid: String?
+  let maxBytesExceeded: Bool?
+  let reason: String?
+  let tracked: Bool
+}
+
+private struct ManageGitCommandResult {
+  let exitCode: Int32
+  let stdout: Data
+}
+
 private struct ManageFilePreview: Encodable {
   let content: String?
   let error: String?
+  let gitBaseline: ManageGitBaselinePayload?
   let kind: String
   let modifiedAt: String?
   let name: String
@@ -2361,6 +2377,18 @@ final class TerminalWorkspaceView: NSView {
     var url: String
   }
 
+  private struct ProjectEditorNativeLoadState {
+    /**
+     CDXC:EditorPanes 2026-06-28-04:29:
+     Source runtime failures may arrive while the sidebar and native workspace
+     are still crossing createProjectEditorPane messages. Keep the project-scoped
+     state in native so late Chromium readiness checks cannot replace a known
+     startup failure with a stale localhost navigation.
+     */
+    let message: String?
+    let status: String
+  }
+
   private enum ZmxPersistenceRefreshMode: String {
     case always
     case ifStale
@@ -2416,12 +2444,6 @@ final class TerminalWorkspaceView: NSView {
     let rightSeparatorFrame: CGRect
     let resizeHandleFrame: CGRect
     let sessionId: String
-  }
-
-  private struct ProjectEditorCompanionSurfaceSnapshot {
-    let frame: CGRect?
-    let isVisible: Bool
-    let sessionId: String?
   }
 
   private struct ProjectEditorFocusOwnerState {
@@ -2644,6 +2666,7 @@ final class TerminalWorkspaceView: NSView {
   private var browserHistoryItemsByScopeId: [String: [NativeBrowserHistoryItem]] = [:]
   private var webPaneSessions: [String: WebPaneSession] = [:]
   private var projectEditorPaneSessions: [String: ProjectEditorPaneSession] = [:]
+  private var projectEditorNativeLoadStatesByProjectId: [String: ProjectEditorNativeLoadState] = [:]
   private var customSidebarTitlebarNativeChrome = NativeSidebarTitlebarChromeColors.disabled
   private var webPaneFaviconTasksBySessionId: [String: Task<Void, Never>] = [:]
   private var completedWebPaneLoadSessionIds = Set<String>()
@@ -4946,6 +4969,60 @@ final class TerminalWorkspaceView: NSView {
     sendEvent(.terminalFocused(sessionId: sessionId))
   }
 
+  func setProjectEditorLoadState(_ command: SetProjectEditorLoadState) {
+    guard let status = Self.normalizedProjectEditorNativeLoadStatus(command.status) else {
+      return
+    }
+    if status == "error" {
+      applyProjectEditorNativeLoadError(
+        projectId: command.projectId,
+        message: command.message,
+        reason: "setProjectEditorLoadState")
+      return
+    }
+    projectEditorNativeLoadStatesByProjectId.removeValue(forKey: command.projectId)
+    guard let session = projectEditorPaneSessions[command.projectId] else {
+      return
+    }
+    if status == "opening" {
+      session.hostView.setInitialLoadingOverlayVisible(true, reason: "setProjectEditorLoadState.opening")
+    } else if status == "running" {
+      session.hostView.setInitialLoadingOverlayVisible(false, reason: "setProjectEditorLoadState.running")
+    }
+  }
+
+  private static func normalizedProjectEditorNativeLoadStatus(_ status: String) -> String? {
+    switch status {
+    case "opening", "running", "error":
+      return status
+    default:
+      return nil
+    }
+  }
+
+  private static func projectEditorNativeLoadErrorMessage(_ message: String?) -> String {
+    let trimmed = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return trimmed.isEmpty ? "VS Code server failed." : trimmed
+  }
+
+  private func applyProjectEditorNativeLoadError(projectId: String, message: String?, reason: String) {
+    let errorMessage = Self.projectEditorNativeLoadErrorMessage(message)
+    projectEditorNativeLoadStatesByProjectId[projectId] = ProjectEditorNativeLoadState(
+      message: errorMessage,
+      status: "error")
+    if let session = projectEditorPaneSessions[projectId] {
+      session.hostView.setInitialLoadingOverlayError(errorMessage, reason: reason)
+    }
+    NativeModeSwitcherDebugLog.append(
+      event: "titlebarModeSwitch.nativeProjectEditorLoadErrorApplied",
+      details: [
+        "hasSession": projectEditorPaneSessions[projectId] != nil,
+        "projectId": projectId,
+        "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+      ])
+    sendEvent(.projectEditorLoadState(projectId: projectId, status: "error", message: errorMessage))
+  }
+
   func createProjectEditorPane(_ command: CreateProjectEditorPane) {
     NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.create.received", [
       "projectId": command.projectId,
@@ -4995,6 +5072,16 @@ final class TerminalWorkspaceView: NSView {
       nextSession.url = command.url
       projectEditorPaneSessions[command.projectId] = nextSession
       nextSession.titleBarView?.setTitle(nextSession.projectTitle)
+      if let nativeLoadState = projectEditorNativeLoadStatesByProjectId[command.projectId],
+        nativeLoadState.status == "error"
+      {
+        applyProjectEditorNativeLoadError(
+          projectId: command.projectId,
+          message: nativeLoadState.message,
+          reason: "createProjectEditorPaneExisting")
+        focusProjectEditorPane(projectId: command.projectId, reason: "createProjectEditorPaneExisting")
+        return
+      }
       if existingSession.url != command.url {
         loadProjectEditorPaneWhenReady(
           projectId: command.projectId, url: command.url, reason: "createProjectEditorPaneReroute")
@@ -5133,6 +5220,19 @@ final class TerminalWorkspaceView: NSView {
       moveOffscreen(titleBarView)
     }
     syncProjectEditorTabBars()
+    if let nativeLoadState = projectEditorNativeLoadStatesByProjectId[command.projectId],
+      nativeLoadState.status == "error"
+    {
+      applyProjectEditorNativeLoadError(
+        projectId: command.projectId,
+        message: nativeLoadState.message,
+        reason: "createProjectEditorPaneNew")
+      focusProjectEditorPane(projectId: command.projectId, reason: "createProjectEditorPaneNew")
+      if requestedMode == "git" {
+        sendProjectEditorTabSelected(projectId: command.projectId)
+      }
+      return
+    }
     if initialActiveTab.isPlaceholder {
       sendEvent(.projectEditorLoadState(projectId: command.projectId, status: "running", message: nil))
     } else {
@@ -5427,12 +5527,33 @@ final class TerminalWorkspaceView: NSView {
     projectId: String,
     reason: String = "explicitFocusProjectEditorPaneCommand"
   ) {
-    guard let session = projectEditorPaneSessions[projectId] else {
+    let startedAt = ProcessInfo.processInfo.systemUptime
+    let existingSession = projectEditorPaneSessions[projectId]
+    NativeModeSwitcherDebugLog.append(
+      event: "titlebarModeSwitch.nativeFocusProjectEditorStart",
+      details: [
+        "activeProjectEditorChanged": activeProjectEditorId != projectId,
+        "companionHidden": projectEditorCompanionPaneHidden,
+        "hasCompanionSession": projectEditorCompanionSessionId != nil,
+        "hasSession": existingSession != nil,
+        "mode": existingSession?.mode ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+        "projectId": projectId,
+        "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+      ])
+    guard let session = existingSession else {
       NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.focus.missing", [
         "knownProjectIds": Array(projectEditorPaneSessions.keys).sorted(),
         "projectId": projectId,
         "reason": reason,
       ])
+      NativeModeSwitcherDebugLog.append(
+        event: "titlebarModeSwitch.nativeFocusProjectEditorMissing",
+        details: [
+          "elapsedMs": Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000),
+          "knownSessionCount": projectEditorPaneSessions.count,
+          "projectId": projectId,
+          "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+        ])
       return
     }
     /**
@@ -5450,10 +5571,24 @@ final class TerminalWorkspaceView: NSView {
      project-editor pane IDs for the same project. Focusing one pane must hide
      every other project-editor host immediately so mode switches keep each
      hosted page alive without showing stale content from the previously active mode.
+
+     CDXC:ModeSwitcher 2026-06-28-03:32:
+     Source, Browser, Kanban, and Manage switches should not make the left
+     companion terminal recompute rows when its width is unchanged. Use the same
+     command-panel-adjusted workspace bounds as layout() during immediate
+     focus, because raw bounds briefly give the companion a different height.
+
+     CDXC:ModeSwitcherDiagnostics 2026-06-28-05:48:
+     The current mode-switch lag investigation must add timing breadcrumbs only,
+     not behavior changes. Record focus start, settled fast path, frame apply,
+     responder focus, and completion timings without logging titles, paths, URLs,
+     command text, or user content so the next rebuilt app can isolate the 500 ms
+     delay.
    */
     let didSwitchProjectEditor = activeProjectEditorId != projectId
-    let currentCompanionLayout = projectEditorCompanionLayout(in: bounds)
-    let currentEditorFrame = currentCompanionLayout?.editorFrame ?? bounds
+    let projectEditorWorkspaceBounds = projectEditorCompanionWorkspaceBounds()
+    let currentCompanionLayout = projectEditorCompanionLayout(in: projectEditorWorkspaceBounds)
+    let currentEditorFrame = currentCompanionLayout?.editorFrame ?? projectEditorWorkspaceBounds
     let currentProjectEditorFrames = projectEditorPaneFrames(session, in: currentEditorFrame)
     let companionStateSettled = projectEditorCompanionPaneHidden || projectEditorCompanionSessionId != nil
     let activeHostSettled =
@@ -5487,9 +5622,19 @@ final class TerminalWorkspaceView: NSView {
        ownership so no terminal stays outlined when typing will not go there.
        */
       updateAllTerminalBorders()
+      NativeModeSwitcherDebugLog.append(
+        event: "titlebarModeSwitch.nativeFocusProjectEditorSettledFastPath",
+        details: [
+          "activeHostSettled": activeHostSettled,
+          "activeTitleBarSettled": activeTitleBarSettled,
+          "companionStateSettled": companionStateSettled,
+          "elapsedMs": Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000),
+          "mode": session.mode,
+          "projectId": projectId,
+          "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+        ])
       return
     }
-    let previousProjectEditorCompanionSurface = projectEditorCompanionSurfaceSnapshot()
     markProjectEditorFocusOwner(
       projectEditorId: projectId,
       event: "firstResponder",
@@ -5503,8 +5648,19 @@ final class TerminalWorkspaceView: NSView {
       openDefaultProjectEditorCompanionPane(reason: reason)
     }
     hideSplitSessionSurfacesForActiveEditor()
-    let companionLayout = projectEditorCompanionLayout(in: bounds)
-    projectEditorCompanionResizeWorkspaceBounds = bounds
+    let companionLayout = projectEditorCompanionLayout(in: projectEditorWorkspaceBounds)
+    projectEditorCompanionResizeWorkspaceBounds = projectEditorWorkspaceBounds
+    NativeModeSwitcherDebugLog.append(
+      event: "titlebarModeSwitch.nativeFocusProjectEditorBeforeFrameApply",
+      details: [
+        "companionHidden": projectEditorCompanionPaneHidden,
+        "didSwitchProjectEditor": didSwitchProjectEditor,
+        "elapsedMs": Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000),
+        "hasCompanionLayout": companionLayout != nil,
+        "mode": session.mode,
+        "projectId": projectId,
+        "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+      ])
     for otherSession in projectEditorPaneSessions.values where otherSession.projectId != projectId {
       setProjectEditorTabHostVisibility(otherSession, isActive: false)
       if let titleBarView = otherSession.titleBarView {
@@ -5515,13 +5671,20 @@ final class TerminalWorkspaceView: NSView {
     setProjectEditorTabHostVisibility(session, isActive: true)
     session.titleBarView?.isHidden = false
     syncProjectEditorTabBars()
-    layoutProjectEditorPane(session, in: companionLayout?.editorFrame ?? bounds)
+    layoutProjectEditorPane(session, in: companionLayout?.editorFrame ?? projectEditorWorkspaceBounds)
     orderProjectEditorPaneToFront(session)
-    let didChangeProjectEditorCompanionSurface = projectEditorCompanionSurfaceChanged(
-      from: previousProjectEditorCompanionSurface,
-      to: companionLayout)
     syncProjectEditorCompanionPane(layout: companionLayout)
-    if didSwitchProjectEditor && didChangeProjectEditorCompanionSurface {
+    NativeModeSwitcherDebugLog.append(
+      event: "titlebarModeSwitch.nativeFocusProjectEditorAfterFrameApply",
+      details: [
+        "didSwitchProjectEditor": didSwitchProjectEditor,
+        "elapsedMs": Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000),
+        "hasCompanionLayout": companionLayout != nil,
+        "mode": session.mode,
+        "projectId": projectId,
+        "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+      ])
+    if didSwitchProjectEditor {
       /*
        CDXC:ZmxPersistenceRefresh 2026-05-18-15:03:
        Switching from Agents into Code, Browser, Project, or Manage mode surfaces the current companion terminal without always taking the ordinary terminal-focus path.
@@ -5539,9 +5702,19 @@ final class TerminalWorkspaceView: NSView {
     */
     syncCEFNativeDragSourceReleaseMonitor(reason: "focusProjectEditorPane")
     syncSourceCEFDragDiagnosticsMonitor(reason: "focusProjectEditorPane")
+    NativeModeSwitcherDebugLog.append(
+      event: "titlebarModeSwitch.nativeFocusProjectEditorBeforeResponderFocus",
+      details: [
+        "elapsedMs": Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000),
+        "mode": session.mode,
+        "projectId": projectId,
+        "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+      ])
     let didFocusProjectEditor =
       window?.makeFirstResponder(projectEditorFocusTargetResponder(for: session)) ?? false
-    if didFocusProjectEditor || window?.firstResponder.flatMap({ projectEditorId(containing: $0) }) == projectId {
+    let firstResponderIsProjectEditor =
+      window?.firstResponder.flatMap({ projectEditorId(containing: $0) }) == projectId
+    if didFocusProjectEditor || firstResponderIsProjectEditor {
       /*
        CDXC:NativePaneChrome 2026-06-13-22:17:
        Project editor focus takes keyboard input away from the companion pane.
@@ -5551,6 +5724,18 @@ final class TerminalWorkspaceView: NSView {
       updateAllTerminalBorders()
     }
     needsLayout = true
+    NativeModeSwitcherDebugLog.append(
+      event: "titlebarModeSwitch.nativeFocusProjectEditorDone",
+      details: [
+        "didFocusProjectEditor": didFocusProjectEditor,
+        "didSwitchProjectEditor": didSwitchProjectEditor,
+        "elapsedMs": Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000),
+        "firstResponderIsProjectEditor": firstResponderIsProjectEditor,
+        "mode": session.mode,
+        "needsLayout": needsLayout,
+        "projectId": projectId,
+        "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+      ])
     NativeT3CodePaneReproLog.append("nativeWorkspace.projectEditor.focus.applied", [
       "projectId": projectId,
       "reason": reason,
@@ -5786,7 +5971,7 @@ final class TerminalWorkspaceView: NSView {
     case "tasks":
       return "Project - \(visibleTitle)"
     case "manage":
-      return "Manage - \(visibleTitle)"
+      return "Docs - \(visibleTitle)"
     default:
       return visibleTitle
     }
@@ -6046,6 +6231,7 @@ final class TerminalWorkspaceView: NSView {
   }
 
   func closeProjectEditorPane(projectId: String) {
+    projectEditorNativeLoadStatesByProjectId.removeValue(forKey: projectId)
     guard let session = projectEditorPaneSessions.removeValue(forKey: projectId) else {
       return
     }
@@ -7445,7 +7631,6 @@ final class TerminalWorkspaceView: NSView {
     let previousProjectEditorCompanionIsVisible = projectEditorCompanionIsVisible
     let previousProjectEditorCompanionPaneHidden = projectEditorCompanionPaneHidden
     let previousProjectEditorCompanionSessionId = projectEditorCompanionSessionId
-    let previousProjectEditorCompanionSurface = projectEditorCompanionSurfaceSnapshot()
     let previousSessionFocusModeAvailableSessionIds = sessionFocusModeAvailableSessionIds
     let previousSessionTitleBarActions = sessionTitleBarActions
     let previousSessionTitles = sessionTitles
@@ -7672,8 +7857,9 @@ final class TerminalWorkspaceView: NSView {
            Switching the active session shown in the Code/Git companion pane must not temporarily expand the editor CEF host to full workspace width before the normal layout pass restores the split.
            Use the current companion editor frame during setActiveTerminalSet relayout so Chromium sees a stable width while the companion pane retargets.
            */
-          let companionLayout = projectEditorCompanionLayout(in: bounds)
-          layoutProjectEditorPane(session, in: companionLayout?.editorFrame ?? bounds)
+          let workspaceBounds = projectEditorCompanionWorkspaceBounds()
+          let companionLayout = projectEditorCompanionLayout(in: workspaceBounds)
+          layoutProjectEditorPane(session, in: companionLayout?.editorFrame ?? workspaceBounds)
           orderProjectEditorPaneToFront(session)
         } else {
           if let titleBarView = session.titleBarView {
@@ -7770,20 +7956,12 @@ final class TerminalWorkspaceView: NSView {
       ])
     }
     if previousActiveProjectEditorId != activeProjectEditorId {
-      let shouldRefreshForProjectEditorModeSwitch =
-        previousActiveProjectEditorId == nil
-          || activeProjectEditorId == nil
-          || projectEditorCompanionSurfaceChanged(
-            from: previousProjectEditorCompanionSurface,
-            to: projectEditorCompanionLayout(in: bounds))
       /*
        CDXC:ZmxPersistenceRefresh 2026-05-18-15:03:
        Sidebar mode switches between Agents and Code/Browser/Project/Manage can reveal a zmx terminal set through layout state rather than direct terminal focus.
        Refresh every surfaced zmx terminal after the active project-editor id is applied so both directions repair persisted terminal text.
        */
-      if shouldRefreshForProjectEditorModeSwitch {
-        refreshZmxPersistenceTerminalsForSurfacedPanes(reason: "setActiveTerminalSet.projectEditorModeSwitch")
-      }
+      refreshZmxPersistenceTerminalsForSurfacedPanes(reason: "setActiveTerminalSet.projectEditorModeSwitch")
     }
     if abs(previousPaneGap - paneGap) > 0.5
       || abs(previousTerminalPaneHorizontalPaddingPx - terminalPaneHorizontalPaddingPx) > 0.5
@@ -9520,15 +9698,10 @@ final class TerminalWorkspaceView: NSView {
       hideProjectEditorCompanionChrome()
       return
     }
-    let isCompanionSurfaceSettled = isProjectEditorCompanionSurfaceSettled(layout)
-    if projectEditorCompanionRenderedSessionId != layout.sessionId {
-      moveRenderedProjectEditorCompanionSurfaceOffscreen(except: layout.sessionId)
-    }
+    moveRenderedProjectEditorCompanionSurfaceOffscreen(except: layout.sessionId)
     syncProjectEditorCompanionTitleBarControls(activeSessionId: layout.sessionId)
     setPaneTabs([], activeSessionId: layout.sessionId, on: layout.sessionId)
-    if !isCompanionSurfaceSettled {
-      setFrame(layout.contentFrame, for: layout.sessionId, webPaneMode: .projectEditorCompanion)
-    }
+    setFrame(layout.contentFrame, for: layout.sessionId, webPaneMode: .projectEditorCompanion)
     projectEditorCompanionRenderedSessionId = layout.sessionId
 
     syncProjectEditorCompanionRightSeparator(frame: layout.rightSeparatorFrame)
@@ -9540,84 +9713,6 @@ final class TerminalWorkspaceView: NSView {
     addSubview(projectEditorCompanionResizeHandleView, positioned: .above, relativeTo: nil)
     window?.invalidateCursorRects(for: projectEditorCompanionResizeHandleView)
     orderResizeHandlesToFront(reason: "syncProjectEditorCompanionPane")
-  }
-
-  private func projectEditorCompanionSurfaceSnapshot() -> ProjectEditorCompanionSurfaceSnapshot {
-    guard let sessionId = projectEditorCompanionRenderedSessionId else {
-      return ProjectEditorCompanionSurfaceSnapshot(frame: nil, isVisible: false, sessionId: nil)
-    }
-    return ProjectEditorCompanionSurfaceSnapshot(
-      frame: projectEditorCompanionContainerFrame(for: sessionId),
-      isVisible: isProjectEditorCompanionSurfaceVisible(sessionId),
-      sessionId: sessionId)
-  }
-
-  private func projectEditorCompanionSurfaceChanged(
-    from previousSnapshot: ProjectEditorCompanionSurfaceSnapshot,
-    to layout: ProjectEditorCompanionLayout?
-  ) -> Bool {
-    /*
-     CDXC:ModeSwitcher 2026-06-28-02:14:
-     Titlebar switches between Source, Browser, Kanban, and Manage must leave the left companion terminal visually static when its session and frame are unchanged. Treat companion frame sync and zmx viewport refresh as no-ops in that case because reapplying the same Ghostty/zmx viewport can visibly adjust terminal text even without a width change.
-     */
-    guard let layout else {
-      return previousSnapshot.isVisible
-    }
-    guard
-      previousSnapshot.sessionId == layout.sessionId,
-      previousSnapshot.isVisible,
-      let previousFrame = previousSnapshot.frame,
-      rectsMatch(previousFrame, layout.contentFrame)
-    else {
-      return true
-    }
-    return false
-  }
-
-  private func isProjectEditorCompanionSurfaceSettled(_ layout: ProjectEditorCompanionLayout) -> Bool {
-    guard
-      projectEditorCompanionRenderedSessionId == layout.sessionId,
-      let session = sessions[layout.sessionId],
-      isProjectEditorCompanionSurfaceVisible(layout.sessionId),
-      rectsMatch(session.containerView.frame, layout.contentFrame)
-    else {
-      return false
-    }
-    let titleBarHeight = min(titleBarHeight(for: layout.sessionId), max(layout.contentFrame.height, 0))
-    let titleBarRect = CGRect(
-      x: 0,
-      y: layout.contentFrame.height - titleBarHeight,
-      width: layout.contentFrame.width,
-      height: titleBarHeight)
-    let availableTerminalRect = CGRect(
-      x: 0,
-      y: 0,
-      width: layout.contentFrame.width,
-      height: max(layout.contentFrame.height - titleBarHeight, 1))
-    let terminalRect = terminalPaneContentRect(in: availableTerminalRect)
-    return rectsMatch(session.titleBarView.frame, titleBarRect)
-      && rectsMatch(session.scrollView.frame, terminalRect)
-  }
-
-  private func projectEditorCompanionContainerFrame(for sessionId: String) -> CGRect? {
-    projectEditorCompanionContainerView(for: sessionId)?.frame
-  }
-
-  private func isProjectEditorCompanionSurfaceVisible(_ sessionId: String) -> Bool {
-    guard let containerView = projectEditorCompanionContainerView(for: sessionId) else {
-      return false
-    }
-    return containerView.superview === self && !containerView.isHidden
-  }
-
-  private func projectEditorCompanionContainerView(for sessionId: String) -> TerminalPaneLeafContainerView? {
-    if let session = sessions[sessionId] {
-      return session.containerView
-    }
-    if let session = webPaneSessions[sessionId] {
-      return session.containerView
-    }
-    return nil
   }
 
   private func moveRenderedProjectEditorCompanionSurfaceOffscreen(
@@ -10073,33 +10168,17 @@ final class TerminalWorkspaceView: NSView {
      because command terminals float above the editor and keep their own
      interactive titlebar. Do not let the editor layout branch clear an
      in-flight command-tab drag before mouse-up can commit the split/drop.
-
-     CDXC:ModeSwitcher 2026-06-28-02:14:
-     Switching Source, Browser, Kanban, and Manage changes the right project
-     editor surface only. Keep the current companion session mounted while
-     hiding ordinary split panes so the left terminal does not disappear,
-     remount, or reflow when its width did not change.
      */
     if paneHeaderDrag.map({ commandsPanelActiveSessionIds.contains($0.sourceSessionId) }) != true {
       resetPaneHeaderInteractionState()
     }
-    let retainedCompanionSessionId =
-      projectEditorCompanionIsVisible && !projectEditorCompanionPaneHidden
-        ? projectEditorCompanionSessionId
-        : nil
     for session in sessions.values {
       if commandsPanelActiveSessionIds.contains(session.sessionId) {
-        continue
-      }
-      if let retainedCompanionSessionId, session.sessionId == retainedCompanionSessionId {
         continue
       }
       moveOffscreen(session.containerView)
     }
     for session in webPaneSessions.values {
-      if let retainedCompanionSessionId, session.sessionId == retainedCompanionSessionId {
-        continue
-      }
       moveOffscreen(session.containerView)
     }
     hidePaneResizeHandleViews()
@@ -10875,7 +10954,7 @@ final class TerminalWorkspaceView: NSView {
         ManageFilesBridgeResponse(
           action: request.action,
           entries: nil,
-          error: "Manage request was not sent by this project editor.",
+          error: "Docs request was not sent by this project editor.",
           file: nil,
           requestId: request.requestId,
           rootName: nil),
@@ -10914,7 +10993,7 @@ final class TerminalWorkspaceView: NSView {
           error: nil,
           file: nil,
           requestId: request.requestId,
-          rootName: manageArtifactsRelativePath)
+          rootName: manageDocsRelativePath)
       case "read":
         return ManageFilesBridgeResponse(
           action: request.action,
@@ -10922,7 +11001,7 @@ final class TerminalWorkspaceView: NSView {
           error: nil,
           file: try manageProjectFilePreview(rootURL: rootURL, path: request.path),
           requestId: request.requestId,
-          rootName: manageArtifactsRelativePath)
+          rootName: manageDocsRelativePath)
       case "save":
         return ManageFilesBridgeResponse(
           action: request.action,
@@ -10930,9 +11009,43 @@ final class TerminalWorkspaceView: NSView {
           error: nil,
           file: try manageSaveProjectFile(rootURL: rootURL, path: request.path, content: request.content),
           requestId: request.requestId,
-          rootName: manageArtifactsRelativePath)
+          rootName: manageDocsRelativePath)
+      case "rename":
+        return ManageFilesBridgeResponse(
+          action: request.action,
+          entries: nil,
+          error: nil,
+          file: try manageRenameProjectFile(rootURL: rootURL, path: request.path, newPath: request.newPath),
+          requestId: request.requestId,
+          rootName: manageDocsRelativePath)
+      case "delete":
+        try manageDeleteProjectFile(rootURL: rootURL, path: request.path)
+        return ManageFilesBridgeResponse(
+          action: request.action,
+          entries: nil,
+          error: nil,
+          file: nil,
+          requestId: request.requestId,
+          rootName: manageDocsRelativePath)
+      case "createFolder":
+        try manageCreateProjectFolder(rootURL: rootURL, path: request.path)
+        return ManageFilesBridgeResponse(
+          action: request.action,
+          entries: nil,
+          error: nil,
+          file: nil,
+          requestId: request.requestId,
+          rootName: manageDocsRelativePath)
+      case "move":
+        return ManageFilesBridgeResponse(
+          action: request.action,
+          entries: nil,
+          error: nil,
+          file: try manageMoveProjectItem(rootURL: rootURL, path: request.path, newPath: request.newPath),
+          requestId: request.requestId,
+          rootName: manageDocsRelativePath)
       default:
-        throw ManageFilesBridgeError.invalidRequest("Unsupported Manage file action.")
+        throw ManageFilesBridgeError.invalidRequest("Unsupported Docs file action.")
       }
     } catch {
       return ManageFilesBridgeResponse(
@@ -10949,7 +11062,8 @@ final class TerminalWorkspaceView: NSView {
   private nonisolated static let manageFileListMaxDepth = 8
   private nonisolated static let manageFilePreviewMaxBytes = 2_000_000
   private nonisolated static let manageFileSaveMaxBytes = 2_000_000
-  private nonisolated static let manageArtifactsRelativePath = "artifacts"
+  private nonisolated static let manageGitBaselineMaxBytes = 1024 * 1024
+  private nonisolated static let manageDocsRelativePath = "docs"
   private nonisolated static let manageAnnotationsSidecarRelativePath = ".ghostex/manage-annotations.json"
   private nonisolated static let manageIgnoredDirectoryNames: Set<String> = [
     ".cache",
@@ -11002,13 +11116,13 @@ final class TerminalWorkspaceView: NSView {
     guard !trimmedPath.contains("\0"),
       !trimmedPath.hasPrefix("/")
     else {
-      throw ManageFilesBridgeError.invalidRequest("Manage paths must be project-relative.")
+      throw ManageFilesBridgeError.invalidRequest("Docs paths must be project-relative.")
     }
     let components = trimmedPath.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
     guard !components.contains("."),
       !components.contains("..")
     else {
-      throw ManageFilesBridgeError.invalidRequest("Manage paths must stay inside the project.")
+      throw ManageFilesBridgeError.invalidRequest("Docs paths must stay inside the project.")
     }
     return components.joined(separator: "/")
   }
@@ -11024,9 +11138,26 @@ final class TerminalWorkspaceView: NSView {
       : rootURL.appendingPathComponent(normalizedRelativePath, isDirectory: false)
     let resolvedURL = url.standardizedFileURL.resolvingSymlinksInPath()
     guard manageURLIsInsideProjectRoot(resolvedURL, rootURL: rootURL) else {
-      throw ManageFilesBridgeError.invalidRequest("Manage paths must stay inside the project.")
+      throw ManageFilesBridgeError.invalidRequest("Docs paths must stay inside the project.")
     }
     return (resolvedURL, normalizedRelativePath)
+  }
+
+  private nonisolated static func manageFileOperationURL(
+    rootURL: URL,
+    relativePath: String?
+  ) throws -> (url: URL, relativePath: String) {
+    let normalizedRelativePath = try manageNormalizedRelativePath(relativePath)
+    let url =
+      normalizedRelativePath.isEmpty
+      ? rootURL
+      : rootURL.appendingPathComponent(normalizedRelativePath, isDirectory: false)
+    let standardizedURL = url.standardizedFileURL
+    let resolvedURL = standardizedURL.resolvingSymlinksInPath()
+    guard manageURLIsInsideProjectRoot(resolvedURL, rootURL: rootURL) else {
+      throw ManageFilesBridgeError.invalidRequest("Docs paths must stay inside the project.")
+    }
+    return (standardizedURL, normalizedRelativePath)
   }
 
   private nonisolated static func manageURLIsInsideProjectRoot(_ url: URL, rootURL: URL) -> Bool {
@@ -11035,29 +11166,256 @@ final class TerminalWorkspaceView: NSView {
     return candidatePath == rootPath || candidatePath.hasPrefix("\(rootPath)/")
   }
 
-  private nonisolated static func manageProjectArtifactsURL(rootURL: URL) throws -> URL? {
-    let artifactsURL = rootURL.appendingPathComponent(manageArtifactsRelativePath, isDirectory: true)
+  private nonisolated static func manageUnavailableGitBaseline(_ reason: String) -> ManageGitBaselinePayload {
+    ManageGitBaselinePayload(
+      available: false,
+      baseText: nil,
+      headOid: nil,
+      maxBytesExceeded: nil,
+      reason: reason,
+      tracked: false)
+  }
+
+  private nonisolated static func manageRenderableGitBaseline(
+    baseText: String? = nil,
+    headOid: String?,
+    maxBytesExceeded: Bool? = nil,
+    reason: String? = nil,
+    tracked: Bool
+  ) -> ManageGitBaselinePayload {
+    ManageGitBaselinePayload(
+      available: true,
+      baseText: baseText,
+      headOid: headOid,
+      maxBytesExceeded: maxBytesExceeded,
+      reason: reason,
+      tracked: tracked)
+  }
+
+  private nonisolated static func manageRunGit(
+    _ arguments: [String],
+    cwd: URL
+  ) -> ManageGitCommandResult? {
+    let process = Process()
+    let stdoutPipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = arguments
+    process.currentDirectoryURL = cwd
+    process.standardInput = FileHandle.nullDevice
+    process.standardOutput = stdoutPipe
+    process.standardError = FileHandle.nullDevice
+    process.qualityOfService = .utility
+    do {
+      try process.run()
+    } catch {
+      return nil
+    }
+    let stdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    return ManageGitCommandResult(exitCode: process.terminationStatus, stdout: stdout)
+  }
+
+  private nonisolated static func manageGitTrimmedOutput(_ result: ManageGitCommandResult) -> String {
+    String(decoding: result.stdout, as: UTF8.self)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private nonisolated static func manageGitRelativePath(
+    fileURL: URL,
+    repoRootURL: URL
+  ) -> String? {
+    let repoRootPath = repoRootURL.path
+    let filePath = fileURL.path
+    guard filePath.hasPrefix("\(repoRootPath)/") else {
+      return nil
+    }
+    let startIndex = filePath.index(filePath.startIndex, offsetBy: repoRootPath.count + 1)
+    let relativePath = String(filePath[startIndex...])
+    return relativePath.isEmpty ? nil : relativePath
+  }
+
+  private nonisolated static func manageGitPathIsIgnored(
+    repoRootURL: URL,
+    gitPath: String
+  ) -> (value: Bool?, unavailable: Bool) {
+    guard let result = manageRunGit(["check-ignore", "-q", "--", gitPath], cwd: repoRootURL) else {
+      return (nil, true)
+    }
+    if result.exitCode == 0 {
+      return (true, false)
+    }
+    if result.exitCode == 1 {
+      return (false, false)
+    }
+    return (nil, false)
+  }
+
+  private nonisolated static func manageGitPathIsTracked(
+    repoRootURL: URL,
+    gitPath: String
+  ) -> (value: Bool?, unavailable: Bool) {
+    guard let result = manageRunGit(["ls-files", "--error-unmatch", "--", gitPath], cwd: repoRootURL) else {
+      return (nil, true)
+    }
+    return (result.exitCode == 0, false)
+  }
+
+  private nonisolated static func manageGitHeadOid(repoRootURL: URL) -> String? {
+    guard let result = manageRunGit(["rev-parse", "--verify", "HEAD"], cwd: repoRootURL),
+      result.exitCode == 0
+    else {
+      return nil
+    }
+    let headOid = manageGitTrimmedOutput(result)
+    return headOid.isEmpty ? nil : headOid
+  }
+
+  private nonisolated static func manageHydrateGitBaselineText(
+    _ payload: ManageGitBaselinePayload,
+    repoRootURL: URL,
+    gitPath: String
+  ) -> ManageGitBaselinePayload {
+    guard payload.available, payload.tracked, payload.headOid != nil else {
+      return payload
+    }
+    guard let sizeResult = manageRunGit(["cat-file", "-s", "HEAD:\(gitPath)"], cwd: repoRootURL),
+      sizeResult.exitCode == 0
+    else {
+      return manageRenderableGitBaseline(
+        headOid: payload.headOid,
+        reason: "error",
+        tracked: payload.tracked)
+    }
+    if let baselineSize = Int64(manageGitTrimmedOutput(sizeResult)),
+      baselineSize > Int64(manageGitBaselineMaxBytes)
+    {
+      return manageRenderableGitBaseline(
+        headOid: payload.headOid,
+        maxBytesExceeded: true,
+        reason: "too-large",
+        tracked: payload.tracked)
+    }
+    guard let baselineResult = manageRunGit(["cat-file", "-p", "HEAD:\(gitPath)"], cwd: repoRootURL),
+      baselineResult.exitCode == 0
+    else {
+      return manageRenderableGitBaseline(
+        headOid: payload.headOid,
+        reason: "error",
+        tracked: payload.tracked)
+    }
+    if baselineResult.stdout.count > manageGitBaselineMaxBytes {
+      return manageRenderableGitBaseline(
+        headOid: payload.headOid,
+        maxBytesExceeded: true,
+        reason: "too-large",
+        tracked: payload.tracked)
+    }
+    if baselineResult.stdout.contains(0) {
+      return manageRenderableGitBaseline(
+        headOid: payload.headOid,
+        reason: "binary",
+        tracked: payload.tracked)
+    }
+    return manageRenderableGitBaseline(
+      baseText: String(decoding: baselineResult.stdout, as: UTF8.self),
+      headOid: payload.headOid,
+      tracked: payload.tracked)
+  }
+
+  private nonisolated static func manageGitBaselinePayload(
+    rootURL: URL,
+    fileURL: URL,
+    relativePath: String
+  ) -> ManageGitBaselinePayload {
+    /*
+     CDXC:ManageMarkdownGitGutter 2026-06-28-06:17:
+     Manage Markdown uses Meo's existing CodeMirror Git gutter, so native should supply the same HEAD baseline semantics Meo expects without sending repo roots or Git-relative paths to the web page. Resolve Git from the selected artifact file, reject repos outside the active project root, cap baseline text at 1 MB, and return sanitized enum-like reasons instead of stderr or filesystem paths.
+     */
+    guard !relativePath.isEmpty else {
+      return manageUnavailableGitBaseline("not-file")
+    }
+    guard let repoRootResult = manageRunGit(
+      ["rev-parse", "--show-toplevel"],
+      cwd: fileURL.deletingLastPathComponent())
+    else {
+      return manageUnavailableGitBaseline("git-unavailable")
+    }
+    guard repoRootResult.exitCode == 0 else {
+      return manageUnavailableGitBaseline("not-repo")
+    }
+    let repoRootPath = manageGitTrimmedOutput(repoRootResult)
+    guard !repoRootPath.isEmpty else {
+      return manageUnavailableGitBaseline("not-repo")
+    }
+    let repoRootURL = URL(fileURLWithPath: repoRootPath, isDirectory: true)
+      .standardizedFileURL
+      .resolvingSymlinksInPath()
+    guard manageURLIsInsideProjectRoot(repoRootURL, rootURL: rootURL) else {
+      return manageUnavailableGitBaseline("not-repo")
+    }
+    guard let gitPath = manageGitRelativePath(fileURL: fileURL, repoRootURL: repoRootURL) else {
+      return manageUnavailableGitBaseline("not-repo")
+    }
+    let ignored = manageGitPathIsIgnored(repoRootURL: repoRootURL, gitPath: gitPath)
+    if ignored.unavailable {
+      return manageUnavailableGitBaseline("git-unavailable")
+    }
+    guard let ignoredValue = ignored.value else {
+      return manageUnavailableGitBaseline("error")
+    }
+    if ignoredValue {
+      return manageUnavailableGitBaseline("ignored")
+    }
+    let tracked = manageGitPathIsTracked(repoRootURL: repoRootURL, gitPath: gitPath)
+    if tracked.unavailable {
+      return manageUnavailableGitBaseline("git-unavailable")
+    }
+    let headOid = manageGitHeadOid(repoRootURL: repoRootURL)
+    let payload = manageRenderableGitBaseline(
+      headOid: headOid,
+      tracked: tracked.value ?? false)
+    return manageHydrateGitBaselineText(payload, repoRootURL: repoRootURL, gitPath: gitPath)
+  }
+
+  private nonisolated static func manageProjectDocsURL(rootURL: URL) throws -> URL? {
+    let docsURL = rootURL.appendingPathComponent(manageDocsRelativePath, isDirectory: true)
       .standardizedFileURL
     var isDirectory: ObjCBool = false
-    guard FileManager.default.fileExists(atPath: artifactsURL.path, isDirectory: &isDirectory) else {
+    guard FileManager.default.fileExists(atPath: docsURL.path, isDirectory: &isDirectory) else {
       return nil
     }
     guard isDirectory.boolValue else {
-      throw ManageFilesBridgeError.invalidRequest("Project artifacts path is not a folder.")
+      throw ManageFilesBridgeError.invalidRequest("Project docs path is not a folder.")
     }
-    let resolvedArtifactsURL = artifactsURL.resolvingSymlinksInPath()
-    guard manageURLIsInsideProjectRoot(resolvedArtifactsURL, rootURL: rootURL) else {
-      throw ManageFilesBridgeError.invalidRequest("Project artifacts path must stay inside the project.")
+    let resolvedDocsURL = docsURL.resolvingSymlinksInPath()
+    guard manageURLIsInsideProjectRoot(resolvedDocsURL, rootURL: rootURL) else {
+      throw ManageFilesBridgeError.invalidRequest("Project docs path must stay inside the project.")
     }
-    return resolvedArtifactsURL
+    return resolvedDocsURL
   }
 
   private nonisolated static func manageValidateAccessibleRelativePath(_ relativePath: String) throws {
     guard relativePath == manageAnnotationsSidecarRelativePath
-      || relativePath.hasPrefix("\(manageArtifactsRelativePath)/")
+      || relativePath.hasPrefix("\(manageDocsRelativePath)/")
     else {
-      throw ManageFilesBridgeError.invalidRequest("Manage files must be inside project artifacts.")
+      throw ManageFilesBridgeError.invalidRequest("Docs files must be inside project docs.")
     }
+  }
+
+  private nonisolated static func manageValidateDocsTreeRelativePath(_ relativePath: String) throws {
+    guard relativePath == manageDocsRelativePath
+      || relativePath.hasPrefix("\(manageDocsRelativePath)/")
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Docs items must be inside project docs.")
+    }
+  }
+
+  private nonisolated static func manageParentRelativePath(_ relativePath: String) -> String {
+    let components = relativePath.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+    guard components.count > 1 else {
+      return ""
+    }
+    return components.dropLast().joined(separator: "/")
   }
 
   private nonisolated static func manageProjectFileEntries(rootURL: URL) throws -> [ManageFileEntry] {
@@ -11068,18 +11426,21 @@ final class TerminalWorkspaceView: NSView {
      CDXC:ManageFileListing 2026-06-20-06:52:
      Direct children of each directory must be appended before recursive descendants so root-level files, including .excalidraw drawings, cannot be pushed past the entry cap by a large nested tree.
 
-     CDXC:ManageArtifacts 2026-06-26-13:59:
-     The Manage sidebar should show only folders and files from the active project's artifacts/ directory. Keep returned paths project-relative as artifacts/... while starting the visible tree at artifacts/ so clicking Markdown, HTML, and Excalidraw files opens the same stable path that other Manage metadata uses.
+     CDXC:Docs 2026-06-28-06:24:
+     The user-facing Docs surface reads the active project's ./docs folder.
+     Keep returned paths project-relative as docs/... while starting the visible
+     tree at docs/ so Markdown, HTML, and Excalidraw documents use one stable
+     native bridge scope.
      */
-    guard let artifactsURL = try manageProjectArtifactsURL(rootURL: rootURL) else {
+    guard let docsURL = try manageProjectDocsURL(rootURL: rootURL) else {
       return []
     }
     var entries: [ManageFileEntry] = []
     try manageAppendProjectFileEntries(
       entries: &entries,
       rootURL: rootURL,
-      directoryURL: artifactsURL,
-      relativeDirectoryPath: manageArtifactsRelativePath,
+      directoryURL: docsURL,
+      relativeDirectoryPath: manageDocsRelativePath,
       depth: 0)
     return entries
   }
@@ -11189,6 +11550,7 @@ final class TerminalWorkspaceView: NSView {
       return ManageFilePreview(
         content: nil,
         error: "File is too large to preview.",
+        gitBaseline: nil,
         kind: "unsupported",
         modifiedAt: manageISOString(values.contentModificationDate),
         name: name,
@@ -11200,6 +11562,7 @@ final class TerminalWorkspaceView: NSView {
       return ManageFilePreview(
         content: nil,
         error: "Binary files are not previewed.",
+        gitBaseline: nil,
         kind: "unsupported",
         modifiedAt: manageISOString(values.contentModificationDate),
         name: name,
@@ -11210,6 +11573,7 @@ final class TerminalWorkspaceView: NSView {
       return ManageFilePreview(
         content: nil,
         error: "This file is not valid UTF-8 text.",
+        gitBaseline: nil,
         kind: "unsupported",
         modifiedAt: manageISOString(values.contentModificationDate),
         name: name,
@@ -11219,6 +11583,10 @@ final class TerminalWorkspaceView: NSView {
     return ManageFilePreview(
       content: text,
       error: nil,
+      gitBaseline: manageGitBaselinePayload(
+        rootURL: rootURL,
+        fileURL: target.url,
+        relativePath: target.relativePath),
       kind: "text",
       modifiedAt: manageISOString(values.contentModificationDate),
       name: name,
@@ -11240,7 +11608,7 @@ final class TerminalWorkspaceView: NSView {
     }
     let data = Data(content.utf8)
     guard data.count <= manageFileSaveMaxBytes else {
-      throw ManageFilesBridgeError.invalidRequest("File is too large to save from Manage.")
+      throw ManageFilesBridgeError.invalidRequest("File is too large to save from Docs.")
     }
     let target = try manageURL(rootURL: rootURL, relativePath: path)
     guard !target.relativePath.isEmpty else {
@@ -11251,7 +11619,7 @@ final class TerminalWorkspaceView: NSView {
       .standardizedFileURL
       .resolvingSymlinksInPath()
     guard manageURLIsInsideProjectRoot(parentURL, rootURL: rootURL) else {
-      throw ManageFilesBridgeError.invalidRequest("Manage paths must stay inside the project.")
+      throw ManageFilesBridgeError.invalidRequest("Docs paths must stay inside the project.")
     }
     let keys: Set<URLResourceKey> = [
       .isDirectoryKey,
@@ -11267,6 +11635,183 @@ final class TerminalWorkspaceView: NSView {
     try FileManager.default.createDirectory(at: parentURL, withIntermediateDirectories: true)
     try data.write(to: target.url, options: [.atomic])
     return try manageProjectFilePreview(rootURL: rootURL, path: target.relativePath)
+  }
+
+  private nonisolated static func manageRenameProjectFile(
+    rootURL: URL,
+    path: String?,
+    newPath: String?
+  ) throws -> ManageFilePreview {
+    /*
+     CDXC:ManageFileActions 2026-06-28-04:35:
+     The Manage sidebar context menu can rename artifact files, but JavaScript still sends only project-relative source and destination paths. Treat rename as a same-directory file operation so the menu cannot become a move API, reject overwrites, and keep filesystem errors sanitized before they cross back into WebKit.
+     */
+    let source = try manageFileOperationURL(rootURL: rootURL, relativePath: path)
+    let destination = try manageFileOperationURL(rootURL: rootURL, relativePath: newPath)
+    guard !source.relativePath.isEmpty,
+      !destination.relativePath.isEmpty
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Select a file to rename.")
+    }
+    try manageValidateAccessibleRelativePath(source.relativePath)
+    try manageValidateAccessibleRelativePath(destination.relativePath)
+    guard manageParentRelativePath(source.relativePath) == manageParentRelativePath(destination.relativePath) else {
+      throw ManageFilesBridgeError.invalidRequest("Docs rename cannot move files.")
+    }
+    if source.relativePath == destination.relativePath {
+      return try manageProjectFilePreview(rootURL: rootURL, path: source.relativePath)
+    }
+    var sourceIsDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: source.url.path, isDirectory: &sourceIsDirectory),
+      !sourceIsDirectory.boolValue
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Select a file to rename.")
+    }
+    var destinationParentIsDirectory: ObjCBool = false
+    let destinationParentURL = destination.url.deletingLastPathComponent()
+      .standardizedFileURL
+      .resolvingSymlinksInPath()
+    guard FileManager.default.fileExists(atPath: destinationParentURL.path, isDirectory: &destinationParentIsDirectory),
+      destinationParentIsDirectory.boolValue,
+      manageURLIsInsideProjectRoot(destinationParentURL, rootURL: rootURL)
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Docs rename target is unavailable.")
+    }
+    guard !FileManager.default.fileExists(atPath: destination.url.path) else {
+      throw ManageFilesBridgeError.invalidRequest("A file with that name already exists.")
+    }
+    do {
+      try FileManager.default.moveItem(at: source.url, to: destination.url)
+    } catch {
+      throw ManageFilesBridgeError.invalidRequest("Could not rename file.")
+    }
+    return try manageProjectFilePreview(rootURL: rootURL, path: destination.relativePath)
+  }
+
+  private nonisolated static func manageDeleteProjectFile(
+    rootURL: URL,
+    path: String?
+  ) throws {
+    /*
+     CDXC:ManageFileActions 2026-06-28-04:35:
+     Delete from the Manage file context menu is file-only and project-relative. Use the original normalized URL for removal so a listed symlink entry is removed as the entry itself, while the resolved-path guard still prevents escaping the active project.
+     */
+    let target = try manageFileOperationURL(rootURL: rootURL, relativePath: path)
+    guard !target.relativePath.isEmpty else {
+      throw ManageFilesBridgeError.invalidRequest("Select a file to delete.")
+    }
+    try manageValidateAccessibleRelativePath(target.relativePath)
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: target.url.path, isDirectory: &isDirectory),
+      !isDirectory.boolValue
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Select a file to delete.")
+    }
+    do {
+      try FileManager.default.removeItem(at: target.url)
+    } catch {
+      throw ManageFilesBridgeError.invalidRequest("Could not delete file.")
+    }
+  }
+
+  private nonisolated static func manageCreateProjectFolder(
+    rootURL: URL,
+    path: String?
+  ) throws {
+    /*
+     CDXC:ManageFolders 2026-06-28-06:39:
+     The Manage sidebar can create folders, but the bridge remains docs-scoped. Create only normalized project-relative docs folders, create the docs root when absent, reject path traversal, reject overwrites, and return sanitized filesystem errors to WebKit.
+     */
+    let target = try manageFileOperationURL(rootURL: rootURL, relativePath: path)
+    guard !target.relativePath.isEmpty,
+      target.relativePath != manageDocsRelativePath
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Select a folder to create.")
+    }
+    try manageValidateDocsTreeRelativePath(target.relativePath)
+    let docsURL = rootURL.appendingPathComponent(manageDocsRelativePath, isDirectory: true)
+      .standardizedFileURL
+    try FileManager.default.createDirectory(at: docsURL, withIntermediateDirectories: true)
+    let parentURL = target.url.deletingLastPathComponent()
+      .standardizedFileURL
+      .resolvingSymlinksInPath()
+    var parentIsDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: parentURL.path, isDirectory: &parentIsDirectory),
+      parentIsDirectory.boolValue,
+      manageURLIsInsideProjectRoot(parentURL, rootURL: rootURL)
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Folder parent is unavailable.")
+    }
+    guard !FileManager.default.fileExists(atPath: target.url.path) else {
+      throw ManageFilesBridgeError.invalidRequest("A file or folder with that name already exists.")
+    }
+    do {
+      try FileManager.default.createDirectory(at: target.url, withIntermediateDirectories: false)
+    } catch {
+      throw ManageFilesBridgeError.invalidRequest("Could not create folder.")
+    }
+  }
+
+  private nonisolated static func manageMoveProjectItem(
+    rootURL: URL,
+    path: String?,
+    newPath: String?
+  ) throws -> ManageFilePreview? {
+    /*
+     CDXC:ManageFolders 2026-06-28-06:39:
+     Drag/drop in Manage is a move operation inside docs/, not a general filesystem rename fallback. Accept only normalized docs-relative source and destination paths, reject overwrites and directory self-nesting, preserve the file preview contract for moved files, and keep errors sanitized.
+     */
+    let source = try manageFileOperationURL(rootURL: rootURL, relativePath: path)
+    let destination = try manageFileOperationURL(rootURL: rootURL, relativePath: newPath)
+    guard !source.relativePath.isEmpty,
+      !destination.relativePath.isEmpty,
+      source.relativePath != manageDocsRelativePath,
+      destination.relativePath != manageDocsRelativePath
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Select an item to move.")
+    }
+    try manageValidateDocsTreeRelativePath(source.relativePath)
+    try manageValidateDocsTreeRelativePath(destination.relativePath)
+    if source.relativePath == destination.relativePath {
+      var isDirectory: ObjCBool = false
+      if FileManager.default.fileExists(atPath: source.url.path, isDirectory: &isDirectory),
+        !isDirectory.boolValue
+      {
+        return try manageProjectFilePreview(rootURL: rootURL, path: source.relativePath)
+      }
+      return nil
+    }
+    var sourceIsDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: source.url.path, isDirectory: &sourceIsDirectory) else {
+      throw ManageFilesBridgeError.invalidRequest("Select an item to move.")
+    }
+    if sourceIsDirectory.boolValue,
+      destination.relativePath.hasPrefix("\(source.relativePath)/")
+    {
+      throw ManageFilesBridgeError.invalidRequest("Folders cannot be moved inside themselves.")
+    }
+    let destinationParentURL = destination.url.deletingLastPathComponent()
+      .standardizedFileURL
+      .resolvingSymlinksInPath()
+    var destinationParentIsDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: destinationParentURL.path, isDirectory: &destinationParentIsDirectory),
+      destinationParentIsDirectory.boolValue,
+      manageURLIsInsideProjectRoot(destinationParentURL, rootURL: rootURL)
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Move target is unavailable.")
+    }
+    guard !FileManager.default.fileExists(atPath: destination.url.path) else {
+      throw ManageFilesBridgeError.invalidRequest("A file or folder with that name already exists.")
+    }
+    do {
+      try FileManager.default.moveItem(at: source.url, to: destination.url)
+    } catch {
+      throw ManageFilesBridgeError.invalidRequest("Could not move item.")
+    }
+    if sourceIsDirectory.boolValue {
+      return nil
+    }
+    return try manageProjectFilePreview(rootURL: rootURL, path: destination.relativePath)
   }
 
   private nonisolated static func manageISOString(_ date: Date?) -> String? {
@@ -11450,6 +11995,15 @@ final class TerminalWorkspaceView: NSView {
             "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
             "urlKind": Self.modeSwitcherDebugURLKind(url),
           ])
+        if let nativeLoadState = self.projectEditorNativeLoadStatesByProjectId[projectId],
+          nativeLoadState.status == "error"
+        {
+          self.applyProjectEditorNativeLoadError(
+            projectId: projectId,
+            message: nativeLoadState.message,
+            reason: reason)
+          return
+        }
         if !isReady {
           /**
            CDXC:EditorPanes 2026-05-13-08:44
@@ -11717,6 +12271,15 @@ final class TerminalWorkspaceView: NSView {
           "projectId": projectId,
           "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
         ])
+      return
+    }
+    if let nativeLoadState = projectEditorNativeLoadStatesByProjectId[projectId],
+      nativeLoadState.status == "error"
+    {
+      applyProjectEditorNativeLoadError(
+        projectId: projectId,
+        message: nativeLoadState.message,
+        reason: reason)
       return
     }
     hostView.setInitialLoadingOverlayVisible(false, reason: reason)
@@ -12707,10 +13270,42 @@ final class TerminalWorkspaceView: NSView {
   }
 
   private func projectEditorCompanionWorkspaceBounds() -> CGRect {
-    projectEditorCompanionResizeWorkspaceBounds.width > 1
-      && projectEditorCompanionResizeWorkspaceBounds.height > 1
-      ? projectEditorCompanionResizeWorkspaceBounds
-      : bounds
+    /*
+     CDXC:ModeSwitcher 2026-06-28-03:32:
+     Project-editor focus can run before layout(), but it still has to reserve
+     the same bottom command-panel space as layout(). Otherwise right-side mode
+     switches momentarily assign the companion terminal a taller raw workspace
+     frame before layout restores the command-panel-adjusted frame.
+     */
+    let hasCommandsPanelSessions = !orderedVisibleCommandPaneOwnerSessionIds().isEmpty
+    let shouldShowExpandedCommandsPanel = commandsPanelIsVisible && hasCommandsPanelSessions
+    let shouldShowCollapsedCommandsPanel = !commandsPanelIsVisible && hasCommandsPanelSessions
+    let shouldFloatCommandsPanel = shouldShowExpandedCommandsPanel && commandsPanelMode == "floating"
+    let reservedFloatingCommandsPanelBottomBarHeight =
+      shouldFloatCommandsPanel ? collapsedCommandsPanelHeight() : 0
+    let shouldReserveCommandsPanelSpace =
+      shouldShowCollapsedCommandsPanel
+      || (shouldShowExpandedCommandsPanel && commandsPanelMode == "pinned")
+      || reservedFloatingCommandsPanelBottomBarHeight > 0
+    guard shouldReserveCommandsPanelSpace else {
+      return bounds
+    }
+    let commandPanelHeight = shouldShowExpandedCommandsPanel
+      ? clampedCommandsPanelHeight(bounds.height * commandsPanelHeightRatio)
+      : shouldShowCollapsedCommandsPanel ? collapsedCommandsPanelHeight() : 0
+    let floatingCommandsPanelMargin = shouldFloatCommandsPanel ? Self.floatingCommandsPanelMargin : 0
+    let commandPanelResolvedHeight = min(
+      max(0, bounds.height - reservedFloatingCommandsPanelBottomBarHeight - floatingCommandsPanelMargin * 2),
+      commandPanelHeight)
+    let reservedCommandsPanelSpaceHeight =
+      shouldFloatCommandsPanel
+        ? reservedFloatingCommandsPanelBottomBarHeight
+        : commandPanelResolvedHeight
+    return CGRect(
+      x: bounds.minX,
+      y: bounds.minY + reservedCommandsPanelSpaceHeight,
+      width: bounds.width,
+      height: max(0, bounds.height - reservedCommandsPanelSpaceHeight))
   }
 
   @discardableResult

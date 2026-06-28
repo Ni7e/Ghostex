@@ -543,6 +543,16 @@ type NativeHostCommand =
       vscodeUserConfigDir?: string;
     }
   | { type: "stopCodeServerRuntime" }
+  /*
+   * CDXC:AppIconPicker 2026-06-28-06:05:
+   * Settings runs inside the modal host, so custom app-icon commands must be
+   * valid native host commands here before the sidebar dispatcher can forward
+   * them to Swift for listing, file picking, selection, and default restore.
+   */
+  | { type: "listAppIcons" }
+  | { sourceId: string; type: "setAppIcon" }
+  | { type: "pickAppIconFile" }
+  | { type: "revealAppIconsFolder" }
   | {
       activeBrowserTabId?: string;
       browserTabs?: NativeProjectBrowserTabRestoreState[];
@@ -570,6 +580,18 @@ type NativeHostCommand =
       title: string;
       type: "createProjectEditorPane";
       url: string;
+    }
+  | {
+      /*
+       * CDXC:EditorPanes 2026-06-28-04:29:
+       * Source runtime failures must update the native editor overlay as well
+       * as the React row/toast. This command also lets a new Source open clear
+       * stale native failure state before starting another runtime attempt.
+       */
+      message?: string;
+      projectId: string;
+      status: Exclude<ProjectEditorLoadStatus, "idle">;
+      type: "setProjectEditorLoadState";
     }
   | {
       browserHistory: NativeProjectBrowserHistoryItem[];
@@ -1319,6 +1341,13 @@ function roundNativeSidebarBulkSleepDebugMs(value: number): number {
 type NativeBootstrap = {
   accessibilityPermissionGranted?: boolean;
   bundleIdentifier?: string;
+  codeServerRuntime?: {
+    host?: string;
+    origin?: string;
+    ownerId?: string;
+    port?: number;
+    storageName?: string;
+  };
   cwd?: string;
   gxserver?: NativeSidebarGxserverStatus;
   homeDir?: string;
@@ -1684,8 +1713,39 @@ let gitState = createDefaultSidebarGitState(
  * CDXC:AutoSleep 2026-05-28-08:06:
  * Inactive editor and Git webviews now use Settings-owned Auto Sleep idle
  * delays before closing their native Chromium surfaces.
+ *
+ * CDXC:SourceRuntimeOwnership 2026-06-28-04:05:
+ * Native owns the Source code-server runtime identity. Read the editor origin
+ * and profile storage name from bootstrap so macOS, legacy dev bundles, and
+ * GPUI cannot accidentally share one hardcoded listener/profile.
  */
-const CODE_SERVER_EDITOR_ORIGIN = "http://127.0.0.1:3775";
+const DEFAULT_CODE_SERVER_RUNTIME_ORIGIN = "http://127.0.0.1:3775";
+const DEFAULT_CODE_SERVER_RUNTIME_STORAGE_NAME = "code-server-runtime";
+const CODE_SERVER_EDITOR_ORIGIN = codeServerEditorOrigin();
+
+function codeServerEditorOrigin(): string {
+  const runtime = window.__ghostex_NATIVE_HOST__?.codeServerRuntime;
+  if (!runtime) {
+    return DEFAULT_CODE_SERVER_RUNTIME_ORIGIN;
+  }
+  const origin = runtime.origin?.trim();
+  if (!origin) {
+    throw new Error("Native Source runtime origin is missing.");
+  }
+  return origin;
+}
+
+function codeServerRuntimeStorageName(): string {
+  const runtime = window.__ghostex_NATIVE_HOST__?.codeServerRuntime;
+  if (!runtime) {
+    return DEFAULT_CODE_SERVER_RUNTIME_STORAGE_NAME;
+  }
+  const storageName = runtime.storageName?.trim();
+  if (!storageName || !/^[A-Za-z0-9._-]+$/u.test(storageName)) {
+    throw new Error("Native Source runtime storage name is invalid.");
+  }
+  return storageName;
+}
 /*
  * CDXC:ProjectBrowserTabs 2026-06-16-12:02:
  * Browser tabs created by Ghostex should never intentionally open about:blank because CEF can leave that page looking stuck in a loading state. When a project has no GitHub remote URL for the Browser new-tab destination, open Google instead.
@@ -26970,7 +27030,11 @@ function runNativeHotkeyAction(
 function switchNativeWorkareaView(view: "agents" | "github" | "kanban" | "manage" | "source"): void {
   /**
    * CDXC:Hotkeys 2026-06-06-04:36:
-   * Option+1..5 must switch the active project workarea using the same route as the titlebar segmented control: Agents, Source, Browser, Kanban, Manage. Reuse those handlers so hotkeys preserve project-editor sleep, focus, and validation behavior.
+   * Option+1..5 must switch the active project workarea using the same route as the titlebar segmented control: Agents, Source, Browser, Kanban, Docs. Reuse those handlers so hotkeys preserve project-editor sleep, focus, and validation behavior.
+   *
+   * CDXC:Docs 2026-06-28-06:24:
+   * The "manage" hotkey view value is still the stable internal route, but the
+   * visible fifth workarea is Docs.
    */
   switch (view) {
     case "agents":
@@ -36651,7 +36715,7 @@ function startQuickFileMissingMonitor(): void {
 }
 
 function codeServerSessionSocketPath(): string {
-  return `${nativeGhostexHomeDirectory().replace(/\/+$/, "")}/code-server-runtime/user-data/code-server-ipc.sock`;
+  return `${nativeGhostexHomeDirectory().replace(/\/+$/, "")}/${codeServerRuntimeStorageName()}/user-data/code-server-ipc.sock`;
 }
 
 function codeServerWaitMarkerPath(waitToken: string): string {
@@ -40832,6 +40896,19 @@ function rememberAwakeProjectEditorMode(projectId: string, mode: ProjectEditorSu
   awakeProjectEditorModesByProjectId.set(projectId, modes);
 }
 
+function forgetAwakeProjectEditorMode(projectId: string, mode: ProjectEditorSurfaceMode): void {
+  const modes = awakeProjectEditorModesByProjectId.get(projectId);
+  if (!modes) {
+    return;
+  }
+  modes.delete(mode);
+  if (modes.size === 0) {
+    awakeProjectEditorModesByProjectId.delete(projectId);
+    return;
+  }
+  awakeProjectEditorModesByProjectId.set(projectId, modes);
+}
+
 function forgetAwakeProjectEditorModes(projectId: string): void {
   awakeProjectEditorModesByProjectId.delete(projectId);
 }
@@ -40852,7 +40929,7 @@ function projectEditorErrorMessageForMode(mode: ProjectEditorSurfaceMode): strin
     return "Project did not finish loading within 10 seconds.";
   }
   if (mode === "manage") {
-    return "Manage did not finish loading within 10 seconds.";
+    return "Docs did not finish loading within 10 seconds.";
   }
   return "VS Code did not finish loading within 10 seconds.";
 }
@@ -40865,7 +40942,7 @@ function projectEditorLoadFailureMessageForMode(mode: ProjectEditorSurfaceMode):
     return "Project failed to load.";
   }
   if (mode === "manage") {
-    return "Manage failed to load.";
+    return "Docs failed to load.";
   }
   return "VS Code failed to load.";
 }
@@ -40881,7 +40958,7 @@ function projectEditorSurfaceTitleForMode(
     return "Project";
   }
   if (mode === "manage") {
-    return "Manage";
+    return "Docs";
   }
   return projectEditorTitle(project);
 }
@@ -40934,6 +41011,19 @@ function projectIdsForNativeProjectEditor(nativeEditorId: string): string[] {
     .map(([projectId]) => projectId);
 }
 
+function postNativeProjectEditorLoadState(
+  nativeEditorId: string,
+  status: Exclude<ProjectEditorLoadStatus, "idle">,
+  message?: string,
+): void {
+  postNative({
+    message,
+    projectId: nativeEditorId,
+    status,
+    type: "setProjectEditorLoadState",
+  });
+}
+
 function setProjectEditorLoadState(
   nativeEditorId: string,
   status: Exclude<ProjectEditorLoadStatus, "idle">,
@@ -40965,6 +41055,9 @@ function setProjectEditorLoadState(
     const surfaceState = projectEditorSurfaceByProjectId.get(projectId);
     if (!surfaceState || surfaceState.nativeEditorId !== nativeEditorId) {
       continue;
+    }
+    if (status === "error") {
+      forgetAwakeProjectEditorMode(projectId, surfaceState.mode);
     }
     cancelProjectEditorOpenTimer(projectId);
     projectEditorSurfaceByProjectId.set(projectId, {
@@ -41298,6 +41391,7 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
     return;
   }
   const hasAwakeTargetMode = hasAwakeProjectEditorMode(project.projectId, nextMode);
+  const shouldReuseAwakeTargetMode = hasAwakeTargetMode || activeBrowserTabIsPlaceholder;
   appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarWakeStart", {
     elapsedMs: performance.now() - startedAtMs,
     hasAwakeTargetMode: hasAwakeProjectEditorMode(project.projectId, nextMode),
@@ -41318,7 +41412,7 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
     lastAccessedAt: new Date().toISOString(),
     mode: nextMode,
     nativeEditorId,
-    status: hasAwakeTargetMode || activeBrowserTabIsPlaceholder ? "running" : "opening",
+    status: shouldReuseAwakeTargetMode ? "running" : "opening",
     title: projectEditorSurfaceTitleForMode(project, nextMode),
     url: url ?? "",
     ...(nextMode === "git"
@@ -41328,7 +41422,7 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
         }
       : {}),
   });
-  if (hasAwakeTargetMode || activeBrowserTabIsPlaceholder) {
+  if (shouldReuseAwakeTargetMode) {
     cancelProjectEditorOpenTimer(project.projectId);
   } else {
     scheduleProjectEditorOpenTimeout(project.projectId);
@@ -41342,6 +41436,17 @@ function wakeProjectEditorSurface(project: NativeProject, mode?: ProjectEditorSu
       nativeEditorId,
       projectId: project.projectId,
     });
+    /*
+     * CDXC:EditorPanes 2026-06-28-05:50:
+     * Switching Kanban/Project back to an already-awake Source pane must not
+     * tell native the editor is opening. Existing Source panes do not navigate,
+     * so no later CEF load event would clear the native loading overlay.
+     * Retrying an errored Source pane still sends opening to clear the native
+     * error state before the runtime start attempt.
+     */
+    if (!shouldReuseAwakeTargetMode || surfaceState?.status === "error") {
+      postNativeProjectEditorLoadState(nativeEditorId, "opening");
+    }
     postStartCodeServerRuntimeForProject(project);
     appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarWakeAfterStartRuntimePost", {
       elapsedMs: performance.now() - startedAtMs,
@@ -42047,6 +42152,11 @@ function openProjectManageEditorSurface(project: NativeProject, manageUrl: strin
   /*
    * CDXC:Manage 2026-06-20-06:14:
    * Manage follows Kanban's project-editor shell: keep the companion agent pane on the left, host a first-party WKWebView page on the right, and use a mode-scoped native editor id so file editing survives switching to Source, Browser, or Kanban.
+   *
+   * CDXC:Docs 2026-06-28-06:24:
+   * The Manage-backed surface is user-facing Docs chrome now. Keep the internal
+   * mode name and persisted open key stable, but render Docs in pane titles and
+   * native create-pane payloads.
    */
   cancelProjectEditorSleepTimer(project.projectId);
   const isAwakeManagePane = hasAwakeProjectEditorMode(project.projectId, "manage");
@@ -42063,7 +42173,7 @@ function openProjectManageEditorSurface(project: NativeProject, manageUrl: strin
     mode: "manage",
     nativeEditorId,
     status: isAwakeManagePane ? "running" : "opening",
-    title: "Manage",
+    title: "Docs",
     url: manageUrl,
   });
   rememberAwakeProjectEditorMode(project.projectId, "manage");
@@ -42083,7 +42193,7 @@ function openProjectManageEditorSurface(project: NativeProject, manageUrl: strin
     projectPath: project.path,
     projectTitle: projectEditorTitle(project),
     showBetaFeatures: settings.showBetaFeatures,
-    title: "Manage",
+    title: "Docs",
     type: "createProjectEditorPane",
     url: manageUrl,
   });
@@ -43825,6 +43935,24 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "requestOSIntegrationStatus":
       postNative({ type: "requestOSIntegrationStatus" });
+      return;
+    case "listAppIcons":
+      postNative({ type: "listAppIcons" });
+      return;
+    case "setAppIcon":
+      postNative({ sourceId: message.sourceId, type: "setAppIcon" });
+      return;
+    case "pickAppIconFile":
+      /*
+       * CDXC:AppIconPicker 2026-06-28-06:05:
+       * The Settings Select Image button posts through the modal-host sidebar
+       * command path. Forward it to Swift so AppKit presents the native PNG file
+       * picker instead of the click disappearing at the React/native boundary.
+       */
+      postNative({ type: "pickAppIconFile" });
+      return;
+    case "revealAppIconsFolder":
+      postNative({ type: "revealAppIconsFolder" });
       return;
     case "openBrowserChat":
       void createNativeBrowserChat();
@@ -45765,11 +45893,11 @@ function syncNativeLayout(
       defaultDurationMinutes: settings.keepAwakeDefaultDurationMinutes,
       delayedSendSessionCount: keepAwakeSessionState.delayedSendSessionCount,
       /*
-       * CDXC:TitlebarKeepAwake 2026-06-19-13:13:
-       * Keep Awake is beta-only in the macOS titlebar. Layout sync sends both
-       * the beta availability and the effective hide flag so the isolated
-       * titlebar can hide the button and stop runtime automation as soon as
-       * Show Beta features is disabled.
+       * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+       * Keep Awake is experimental-only in the macOS titlebar. Layout sync sends
+       * both the experimental availability and the effective hide flag so the
+       * isolated titlebar can hide the button and stop runtime automation as
+       * soon as Enable Experimental Features is disabled.
        */
       featureEnabled: settings.showBetaFeatures,
       hideTitlebarControl: !settings.showBetaFeatures || settings.hideKeepAwakeTitlebarControl,
@@ -46923,6 +47051,7 @@ window.addEventListener("ghostex-native-host-event", (event) => {
     */
     if (hostEvent.projectId) {
       setProjectEditorLoadState(hostEvent.projectId, "error", hostEvent.message);
+      postNativeProjectEditorLoadState(hostEvent.projectId, "error", hostEvent.message);
     }
     showAppToast("error", "VS Code server failed", hostEvent.message, {
       toastId: CODE_SERVER_RUNTIME_TOAST_ID,

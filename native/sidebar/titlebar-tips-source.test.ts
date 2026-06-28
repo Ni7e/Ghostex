@@ -79,6 +79,45 @@ describe("native titlebar Tips & Tricks source", () => {
     expect(stylesSource).not.toContain(".titlebar-tips-summary");
   });
 
+  test("opens agent skill tips to their related detail surfaces", () => {
+    /*
+     * CDXC:TipsAndTricks 2026-06-28-08:00:
+     * Agent-facing Browser Use and Computer Use tips should open Settings >
+     * Integrations with the relevant skill searched, while the external Faster
+     * Chrome DevTools recommendation should open its repository as a project
+     * browser pane. The read check remains separate from row navigation.
+     */
+    const tipsSource = sourceBetween(
+      titlebarHostSource,
+      "const TITLEBAR_TIPS: TitlebarTip[] = [",
+      "const TITLEBAR_PERSISTENCE_OFF_NOTICE",
+    );
+    const rowSource = sourceBetween(
+      titlebarHostSource,
+      "function TitlebarTipRow",
+      "function getTitlebarTipIcon",
+    );
+
+    expect(tipsSource).toContain('id: "use-ghostex-computer-use-skill"');
+    expect(tipsSource).toContain("/ghostex-computer-use");
+    expect(tipsSource).toContain('settingsSearchQuery: "Ghostex Computer Use"');
+    expect(tipsSource).toContain('id: "use-ghostex-browser-use-skill"');
+    expect(tipsSource).toContain("/ghostex-browser-use");
+    expect(tipsSource).toContain('settingsSearchQuery: "Ghostex Browser Use"');
+    expect(tipsSource).toContain('id: "recommend-faster-chrome-devtools-skill"');
+    expect(tipsSource).toContain("personal Chrome");
+    expect(titlebarHostSource).toContain(
+      'const FASTER_CHROME_DEVTOOLS_SKILL_URL = "https://github.com/zeke/faster-chrome-devtools-skill";',
+    );
+    expect(titlebarHostSource).toContain("initialSearchQuery: action.settingsSearchQuery");
+    expect(titlebarHostSource).toContain('initialTab: "integrations"');
+    expect(titlebarHostSource).toContain('postTitlebarSidebarCommand({ type: "openBrowserPane", url: action.url });');
+    expect(rowSource).toContain("titlebar-tip-detail-button");
+    expect(rowSource).toContain("onOpenTipAction(tip)");
+    expect(rowSource).toContain("titlebar-tip-read-button");
+    expect(rowSource).toContain("onMarkRead(tip.id)");
+  });
+
   test("does not render right-aligned section counts", () => {
     /*
      * CDXC:TipsAndTricks 2026-06-12-23:28:
