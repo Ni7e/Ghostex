@@ -225,7 +225,7 @@ describe("T3 runtime packaging", () => {
     expect(signingResolver).toContain("falling back to ad-hoc signing");
     const installedSignatureSource = sourceBetween(
       startGhostexSource,
-      "function hasReusableInstalledAppCodeSignature",
+      "function inspectInstalledAppCodeSignature",
       "function hasLinkerSignedBundledNativeModules",
     );
     expect(installedSignatureSource).toContain("function signatureDetailsMatchesExpectedIdentity");

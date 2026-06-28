@@ -64,7 +64,7 @@ describe("titlebar mode switch diagnostics source", () => {
     expect(hostProtocolSource).toContain("struct AppendModeSwitcherDebugLog: Decodable");
     expect(appDelegateSource).toContain("fileprivate static func appendModeSwitcherDebugLog");
     expect(modeSwitcherLogSource).toContain("native-mode-switcher-debug.log");
-    expect(modeSwitcherLogSource).toContain("NativeDebugLogging.isEnabled");
+    expect(modeSwitcherLogSource).toContain("NativeDiagnosticLogging.isScenarioEnabled(.nativeModeSwitcher)");
     expect(modeSwitcherLogSource).toContain("NativeLogPrivacy.sanitizePayload(payload)");
 
     const titlebarHelper = sourceBetween(

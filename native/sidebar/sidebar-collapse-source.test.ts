@@ -151,7 +151,7 @@ describe("native sidebar collapse source", () => {
     expect(titlebarHostSource).toContain("collapsedWhenKeyPresent");
     expect(titlebarHostSource).toContain("resourcesOpenCollapseSeededRef");
     expect(titlebarHostSource).toContain("useLayoutEffect(() => {");
-    expect(titlebarHostSource).toContain("createResourceViewItemCollapseTargets(resourceViews)");
+    expect(titlebarHostSource).toContain("createResourceViewItemCollapseTargets(resourceViews, resourceServerBundles)");
     expect(titlebarHostSource).toContain(
       "applyResourceItemCollapsedState(current, resourceItemCollapseTargets, true)",
     );

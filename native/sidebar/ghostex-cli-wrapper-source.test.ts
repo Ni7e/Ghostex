@@ -79,11 +79,10 @@ describe("Ghostex CLI command wrappers", () => {
     expect(renderer).toContain('system "/usr/bin/xattr", "-d", attribute, command_path.to_s');
     expect(renderer).toContain("uninstall_preflight do");
     expect(renderer).toContain("Ghostex cask must install wrapper files, not Homebrew binary aliases.");
-    expect(releaseGhostexSource).toContain("--except-cops Homebrew/OSDependsOn");
-    expect(releaseGhostexSource).toContain('depends_on macos: ">= :ventura"');
-    expect(releaseGhostexSource).not.toContain(
-      '.replace(/^  depends_on macos: ">= :ventura"$/m, "  depends_on macos: :ventura")',
-    );
+    expect(releaseGhostexSource).not.toContain("--except-cops Homebrew/OSDependsOn");
+    expect(releaseGhostexSource).toContain("HOMEBREW_NO_INSTALL_FROM_API=1 brew style --fix");
+    expect(releaseGhostexSource).toContain("depends_on macos: :ventura");
+    expect(releaseGhostexSource).not.toContain('depends_on macos: ">= :ventura"');
     expect(renderer).not.toContain("const ghostexBinary");
     expect(renderer).not.toContain("const gxBinary");
   });

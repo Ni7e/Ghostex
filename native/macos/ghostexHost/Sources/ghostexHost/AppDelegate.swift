@@ -6638,6 +6638,9 @@ final class ghostexRootView: NSView {
   private var sidebarSide: SidebarSide = .left
   private var lastSidebarFirstResponderIntentAt: Date?
   private static let sidebarFirstResponderIntentWindow: TimeInterval = 1.0
+  private var pendingSidebarFirstResponderClearWorkItem: DispatchWorkItem?
+  private var pendingSidebarFirstResponderClearGeneration: UInt64 = 0
+  private static let sidebarFirstResponderClearDelayMs = 300
 
   /**
    CDXC:NativeWorkspaceChrome 2026-04-26-00:47
@@ -6984,7 +6987,94 @@ final class ghostexRootView: NSView {
     if restoreTerminalFocusAfterPassiveSidebarFirstResponder(responder) {
       return
     }
+    if scheduleSidebarFirstResponderClearIfNeeded(responder) {
+      return
+    }
+    cancelPendingSidebarFirstResponderClear(reason: "windowFirstResponderChanged.nonSidebar")
     workspaceView.windowFirstResponderChanged(responder, reason: "windowMakeFirstResponder")
+  }
+
+  private func scheduleSidebarFirstResponderClearIfNeeded(_ responder: NSResponder?) -> Bool {
+    let now = Date()
+    guard isSidebarResponder(responder),
+      hasRecentSidebarFirstResponderIntent(now: now),
+      activeAppModalKind == nil,
+      activeNativeAppModalKind == nil,
+      !appModalPresentationPending
+    else {
+      return false
+    }
+    /*
+     CDXC:SidebarSessionFocus 2026-06-28-08:47:
+     Sidebar session clicks legitimately make the sidebar WKWebView first
+     responder before the deferred native focus command runs. Treat that first
+     responder change as a short handoff candidate instead of immediately
+     clearing the focused pane border; if no session focus command arrives, the
+     delayed clear preserves normal sidebar focus semantics.
+     */
+    guard workspaceView.beginSidebarFirstResponderFocusHandoff(
+      reason: "windowMakeFirstResponder.sidebarIntent")
+    else {
+      return false
+    }
+    pendingSidebarFirstResponderClearWorkItem?.cancel()
+    pendingSidebarFirstResponderClearGeneration &+= 1
+    let generation = pendingSidebarFirstResponderClearGeneration
+    let workItem = DispatchWorkItem { [weak self, weak responder] in
+      guard let self,
+        self.pendingSidebarFirstResponderClearGeneration == generation
+      else {
+        return
+      }
+      self.pendingSidebarFirstResponderClearWorkItem = nil
+      self.workspaceView.cancelSidebarFirstResponderFocusHandoff(
+        reason: "windowMakeFirstResponder.sidebarIntent.timeout")
+      self.workspaceView.windowFirstResponderChanged(
+        responder,
+        reason: "windowMakeFirstResponder.sidebarIntentDelayed")
+    }
+    pendingSidebarFirstResponderClearWorkItem = workItem
+    DispatchQueue.main.asyncAfter(
+      deadline: .now() + .milliseconds(Self.sidebarFirstResponderClearDelayMs),
+      execute: workItem)
+    TerminalFocusDebugLog.append(
+      event: "nativeFocusTrace.sidebarFirstResponderClearDelayed",
+      details: [
+        "delayMs": Self.sidebarFirstResponderClearDelayMs,
+        "intentAgeMs": sidebarFirstResponderIntentAgeMs(now: now) ?? 0,
+        "responder": responder.map { String(describing: type(of: $0)) } ?? "nil",
+      ])
+    return true
+  }
+
+  private func cancelPendingSidebarFirstResponderClear(
+    reason: String,
+    focusTargetSessionId: String? = nil
+  ) {
+    guard pendingSidebarFirstResponderClearWorkItem != nil else {
+      if let focusTargetSessionId {
+        workspaceView.targetSidebarFirstResponderFocusHandoff(
+          sessionId: focusTargetSessionId,
+          reason: reason)
+      }
+      return
+    }
+    pendingSidebarFirstResponderClearWorkItem?.cancel()
+    pendingSidebarFirstResponderClearWorkItem = nil
+    pendingSidebarFirstResponderClearGeneration &+= 1
+    if let focusTargetSessionId {
+      workspaceView.targetSidebarFirstResponderFocusHandoff(
+        sessionId: focusTargetSessionId,
+        reason: reason)
+    } else {
+      workspaceView.cancelSidebarFirstResponderFocusHandoff(reason: reason)
+    }
+    TerminalFocusDebugLog.append(
+      event: "nativeFocusTrace.sidebarFirstResponderClearCancelled",
+      details: [
+        "hasFocusTarget": focusTargetSessionId != nil,
+        "reason": reason,
+      ])
   }
 
   private func isInsideInteractiveSidebarContent(_ pointInRoot: NSPoint) -> Bool {
@@ -10134,6 +10224,9 @@ final class ghostexRootView: NSView {
         ])
       return
     }
+    cancelPendingSidebarFirstResponderClear(
+      reason: "sidebarFocusCommand.\(kind.debugName)",
+      focusTargetSessionId: sessionId)
     TerminalFocusDebugLog.append(
       event: "nativeFocusTrace.sidebarFocusCommandQueued",
       details: [

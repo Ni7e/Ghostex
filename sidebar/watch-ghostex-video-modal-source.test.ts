@@ -31,9 +31,7 @@ describe("watch ghostex video modal source", () => {
      * The walkthrough should use the editable Loom embed and the exact Ghostty
      * title requested for the single-page video modal.
      */
-    expect(watchModalSource).toContain(
-      "Please watch this video to understand how to use Ghostty! (1.5x recommended)",
-    );
+    expect(watchModalSource).toContain("Ghostex Features Walkthrough");
     expect(watchModalSource).toContain(
       "https://www.loom.com/embed/84a08f60871a4c57a589c057335ac25b",
     );
