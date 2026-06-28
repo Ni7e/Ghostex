@@ -1,4 +1,4 @@
-import { installKanbanCefBridge } from "./phase1-project-workarea-cef-bridge";
+import { installKanbanCefBridge } from "./project-workarea-cef-bridge";
 
 installKanbanCefBridge();
 

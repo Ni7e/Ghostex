@@ -1,8 +1,8 @@
-# Ghostex GPUI Phase 1
+# Ghostex GPUI
 
-This folder contains the first GPUI prototype for Ghostex.
+This folder contains the GPUI prototype for Ghostex.
 
-Phase 1 focuses on macOS while keeping the browser host behind a platform module:
+The current app focuses on macOS while keeping the browser host behind a platform module:
 
 - left side: the existing Ghostex React sidebar rendered inside CEF
 - main area: a CEF browser child view with a GPUI/gpui-component address bar

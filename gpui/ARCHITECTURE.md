@@ -64,8 +64,8 @@ The titlebar is GPUI-owned. It renders the project label, sidebar toggle, workar
 Main code:
 
 - `gpui/index.html`
-- `gpui/sidebar/phase1-main.tsx`
-- `gpui/sidebar/phase1-gxserver-runtime.ts`
+- `gpui/sidebar/main.tsx`
+- `gpui/sidebar/gxserver-runtime.ts`
 - `gpui/src/cef/macos.rs`
 
 Rust creates a `CefSurface` for `index.html`. The TypeScript runtime mounts the shared sidebar React app and adapts it to GPUI by providing a local message source and a `vscode.postMessage`-compatible facade. The sidebar gets gxserver bootstrap data through `window.ghostexGpui`, talks to local gxserver over HTTP/WebSocket, and posts active-project/readiness/native-action messages back through fixed CEF bridge functions.
@@ -130,8 +130,8 @@ Source has strict readiness and mount-request contracts plus an app-owned shared
 Main code:
 
 - `gpui/kanban.html`
-- `gpui/sidebar/phase1-kanban-main.tsx`
-- `gpui/sidebar/phase1-project-workarea-cef-bridge.ts`
+- `gpui/sidebar/kanban-main.tsx`
+- `gpui/sidebar/project-workarea-cef-bridge.ts`
 - `gpui/src/main.rs`
 
 Vite emits a self-contained `kanban.html` entry. Rust creates a project-scoped `CefSurface` for that bundled entry only when active project gates allow it. The TypeScript bridge maps existing WebKit-style message-handler calls to fixed CEF bridge functions.
@@ -143,8 +143,8 @@ Vite emits a self-contained `kanban.html` entry. Rust creates a project-scoped `
 Main code:
 
 - `gpui/manage.html`
-- `gpui/sidebar/phase1-manage-main.tsx`
-- `gpui/sidebar/phase1-project-workarea-cef-bridge.ts`
+- `gpui/sidebar/manage-main.tsx`
+- `gpui/sidebar/project-workarea-cef-bridge.ts`
 - `gpui/src/main.rs`
 
 Vite emits `manage.html`. Rust creates a project-scoped CEF surface when Manage is available and active. Manage file requests leave the renderer only through fixed bridge functions and are handled by Rust-side project/file policy code instead of trusting arbitrary renderer paths.

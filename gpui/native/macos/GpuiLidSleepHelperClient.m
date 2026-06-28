@@ -20,7 +20,11 @@ typedef NS_ENUM(int32_t, GhostexGpuiLidSleepHelperResult) {
 static NSString *GhostexGpuiLidSleepHelperLabel(void) {
   NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
   if (bundleIdentifier.length == 0) {
-    bundleIdentifier = @"com.madda.ghostex.gpui.phase1";
+    /*
+     CDXC:GPUIBundleIdentity 2026-06-28-16:18:
+     The fallback GPUI bundle id must match the packager's stable product identity because the privileged lid-sleep helper label is derived from this value when Bundle.main lacks metadata.
+     */
+    bundleIdentifier = @"com.madda.ghostex.gpui";
   }
   return [bundleIdentifier stringByAppendingString:@".LidSleepHelper"];
 }

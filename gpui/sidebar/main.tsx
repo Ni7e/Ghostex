@@ -1,8 +1,8 @@
 import { createRoot } from "react-dom/client";
 import "../../sidebar/styles.css";
 import { SidebarApp } from "../../sidebar/sidebar-app";
-import { createGpuiSidebarRuntime } from "./phase1-gxserver-runtime";
-import "./phase1-sidebar.css";
+import { createGpuiSidebarRuntime } from "./gxserver-runtime";
+import "./sidebar.css";
 
 /*
 CDXC:GPUISidebarGxserverRuntime 2026-06-24-11:00:
@@ -20,7 +20,7 @@ const gpuiSidebarRuntime = createGpuiSidebarRuntime();
 const root = createRoot(rootElement);
 
 root.render(
-  <div className="native-sidebar-shell gpui-phase1-sidebar" data-sidebar-mode="combined">
+  <div className="native-sidebar-shell gpui-sidebar" data-sidebar-mode="combined">
     <main className="native-sidebar-main">
       <SidebarApp
         messageSource={gpuiSidebarRuntime.messageSource}

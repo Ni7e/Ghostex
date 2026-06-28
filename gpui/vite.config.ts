@@ -14,10 +14,14 @@ const cefHtmlEntries = [
   "modal-host.html",
   "titlebar-host.html",
 ] as const;
+/*
+ * CDXC:GPUISidebarEntrypoints 2026-06-28-16:18:
+ * GPUI CEF entry modules should describe the stable surface they mount, not the historical porting phase. Keep this explicit entry map as the source of truth for the sidebar, Kanban, and Manage bundle inputs so HTML wrappers, Vite output, and packaged resources stay aligned.
+ */
 const cefHtmlEntryScripts = {
-  "index.html": path.resolve(gpuiRoot, "sidebar/phase1-main.tsx"),
-  "kanban.html": path.resolve(gpuiRoot, "sidebar/phase1-kanban-main.tsx"),
-  "manage.html": path.resolve(gpuiRoot, "sidebar/phase1-manage-main.tsx"),
+  "index.html": path.resolve(gpuiRoot, "sidebar/main.tsx"),
+  "kanban.html": path.resolve(gpuiRoot, "sidebar/kanban-main.tsx"),
+  "manage.html": path.resolve(gpuiRoot, "sidebar/manage-main.tsx"),
   "modal-host.html": path.resolve(repoRoot, "native/sidebar/modal-host.tsx"),
   "titlebar-host.html": path.resolve(repoRoot, "native/sidebar/titlebar-host.tsx"),
 } satisfies Record<(typeof cefHtmlEntries)[number], string>;
@@ -28,7 +32,7 @@ function inlineCefHtmlAssets(): Plugin {
     async writeBundle(options, bundle) {
       const outDir = options.dir ?? sidebarOutDir;
       /*
-       * CDXC:GPUIPhase1 2026-06-14-14:37:
+       * CDXC:GPUICefFileUrlBundle 2026-06-14-14:37:
        * The packaged GPUI sidebar is loaded by CEF from a file:// app resource URL. Chromium blocks external module scripts and stylesheets from that opaque origin, so the app bundle must ship a self-contained HTML entry that mounts React without relaxing file-origin security switches.
        *
        * CDXC:GPUIProjectWorkareaCefBundles 2026-06-24-11:03:
@@ -197,7 +201,7 @@ export default defineConfig({
     outDir: sidebarOutDir,
     rolldownOptions: {
       /*
-       * CDXC:GPUIPhase1 2026-06-14-12:50:
+       * CDXC:GPUICefHtmlEntries 2026-06-14-12:50:
        * The GPUI shell resolves the bundled sidebar through Contents/Resources/sidebar/index.html. Keep the Vite HTML entry at the package root so production-style packaging and local development share that single entry URL.
        */
       input: {
@@ -213,8 +217,8 @@ export default defineConfig({
     dedupe: ["react", "react-dom"],
     alias: {
       /*
-       * CDXC:GPUIPhase1 2026-06-14-12:06:
-       * The phase-1 CEF sidebar bundle imports app-owned sidebar and shadcn modules from the repository root. Keep the same @ alias as Storybook and Electron so this prototype exercises the production React component graph.
+       * CDXC:GPUISidebarReactImports 2026-06-14-12:06:
+       * The GPUI CEF sidebar bundle imports app-owned sidebar and shadcn modules from the repository root. Keep the same @ alias as Storybook and Electron so this app exercises the production React component graph.
        */
       "@": repoRoot,
     },

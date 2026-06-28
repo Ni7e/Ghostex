@@ -105,8 +105,8 @@ import {
   createGpuiSidebarActiveProjectContextPayloadFromGroups,
   type GpuiSidebarRuntimeSettings,
   type GpuiSidebarRuntimeSettingsSnapshot,
-} from "./phase1-active-project-context";
-import { runGpuiSidebarBulkSleepPaced } from "./phase1-bulk-sleep-pacing";
+} from "./active-project-context";
+import { runGpuiSidebarBulkSleepPaced } from "./bulk-sleep-pacing";
 
 export type GpuiGxserverBootstrap = {
   authToken?: string;
@@ -169,7 +169,6 @@ export type GhostexGpuiSidebarBridge = {
   postNativeAppShotPromptToSession?: (payload: string) => boolean;
   postNativeProjectPathAction?: (payload: string) => boolean;
   postPetOverlayState?: (payload: string) => boolean;
-  postSessionFocusDebugLog?: (payload: string) => boolean;
   postSidebarCommandAction?: (payload: string) => boolean;
   postSidebarCommandRunEnd?: (payload: string) => boolean;
   postSessionStatusIndicators?: (payload: string) => boolean;
@@ -371,9 +370,6 @@ const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_MESSAGE_TYPE =
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalLifecycleResult";
-const GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_VERSION = 1;
-const GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.sessionFocusDebugLog";
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.sessionStatusIndicators";
@@ -412,63 +408,6 @@ const GPUI_STATUS_INDICATOR_TITLE_MAX_CHARS = 120;
 const GPUI_RENDERER_COMMAND_RENAME_TITLE_MAX_CHARS = 120;
 const GPUI_RENDERER_COMMAND_RENAME_TITLE_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const DEFAULT_GPUI_PROMPT_AGENT_ID = "codex";
-const GPUI_SIDEBAR_FOCUS_DEBUG_LOOP_WINDOW_MS = 1_500;
-const GPUI_SIDEBAR_FOCUS_DEBUG_LOOP_TRANSITION_MIN = 4;
-
-type GpuiSidebarFocusDebugLogLevel = "debug" | "info" | "warning" | "error";
-
-type GpuiSidebarFocusDebugLogDetails = Partial<{
-  activeGroupId: string;
-  activeGroupIdAfter: string;
-  activeGroupIdBefore: string;
-  activeProjectId: string;
-  activeProjectIdAfter: string;
-  activeProjectIdBefore: string;
-  activeProjectSessionCount: number;
-  bridgeAvailable: boolean;
-  bridgeSent: boolean;
-  debuggingMode: boolean;
-  didChange: boolean;
-  focusedSessionId: string;
-  focusedSessionIdAfter: string;
-  focusedSessionIdBefore: string;
-  groupCount: number;
-  groupId: string;
-  hasClient: boolean;
-  hasPresentation: boolean;
-  incomingRevision: number;
-  involvedSessionIds: string[];
-  isLocal: boolean;
-  isRemote: boolean;
-  latestGroupCount: number;
-  latestSessionCount: number;
-  presentationRevision: number;
-  projectVisibleSessionCount: number;
-  projectVisibleSessionIds: string[];
-  removedGroupCount: number;
-  removedSessionCount: number;
-  requestedSessionId: string;
-  resolvedProjectId: string;
-  resolvedSessionId: string;
-  revision: number;
-  sameFocusedSession: boolean;
-  sequence: number;
-  sessionCount: number;
-  sessionId: string;
-  transitionCount: number;
-  visibleSessionCount: number;
-  visibleSessionCountAfter: number;
-  visibleSessionCountBefore: number;
-  visibleSessionIds: string[];
-  visibleSessionIdsAfter: string[];
-  visibleSessionIdsBefore: string[];
-  windowMs: number;
-}>;
-
-type GpuiSidebarFocusDebugTransition = {
-  at: number;
-  sessionId: string;
-};
 
 const GPUI_BACKGROUND_COMMIT_MESSAGE_DEFAULT_AGENT_IDS = new Set([
   "claude",
@@ -763,8 +702,6 @@ class GpuiSidebarRuntime {
   private commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
   private domainProjects: GxserverProjectDomainState[] = [];
   private focusedSessionId: string | undefined;
-  private focusDebugSequence = 0;
-  private focusDebugTransitions: GpuiSidebarFocusDebugTransition[] = [];
   private gxserverBootstrap: GpuiValidatedGxserverBootstrap | undefined;
   private gitState: SidebarGitState = createDefaultSidebarGitState();
   private hasHydrated = false;
@@ -931,7 +868,7 @@ class GpuiSidebarRuntime {
     if (pendingNativeAppShots.length > 0) {
       /*
       CDXC:GPUIAppShots 2026-06-25-23:07:
-      Rust may deliver a native App Shot before the SidebarApp runtime finishes installing callbacks. Drain only the first-party queued capture payloads and keep them transient; do not persist app names, window titles, image paths, command text, terminal content, URLs, or diagnostics from this bridge.
+      Rust may deliver a native App Shot before the SidebarApp runtime finishes installing callbacks. Drain only the first-party queued capture payloads and keep them transient; do not persist app names, window titles, image paths, command text, terminal content, URLs, or side-channel metadata from this bridge.
       */
       for (const payload of pendingNativeAppShots) {
         void this.handleNativeAppShotCaptured(payload);
@@ -1100,13 +1037,6 @@ class GpuiSidebarRuntime {
     Post-start same-transport bootstrap refreshes are Rust's replay channel for the sidebar bridge, not a new macOS-style focus command. Store the refreshed transport/focus hint snapshot but do not reapply `initialActiveProjectId`, focused session, or visible ids over live React focus; otherwise the active project can bounce between stale and current sidebar snapshots after a local click.
     */
     this.gxserverBootstrap = validated;
-    const details: GpuiSidebarFocusDebugLogDetails = {
-      ...this.currentFocusDebugLogDetails(),
-    };
-    if (this.presentation) {
-      details.incomingRevision = this.presentation.revision;
-    }
-    this.postSessionFocusDebugLog("bootstrapRefreshStored", "debug", details);
   }
 
   private async handleNativeAppShotCaptured(payload: unknown): Promise<void> {
@@ -1467,10 +1397,6 @@ class GpuiSidebarRuntime {
   private applyGxserverBootstrapPresentationState(
     bootstrap: GpuiValidatedGxserverBootstrap,
   ): boolean {
-    const previousActiveProjectId = this.activeProjectId;
-    const previousActiveGroupId = this.activeGroupId;
-    const previousFocusedSessionId = this.focusedSessionId;
-    const previousVisibleSessionIds = [...this.visibleSessionIds];
     const nextFocusedSessionId = bootstrap.focusedSessionId;
     const nextVisibleSessionIds = new Set(bootstrap.visibleSessionIds ?? []);
     const nextActiveProjectId = bootstrap.initialActiveProjectId;
@@ -1487,36 +1413,6 @@ class GpuiSidebarRuntime {
     this.activeGroupId = nextActiveGroupId;
     this.focusedSessionId = nextFocusedSessionId;
     this.visibleSessionIds = nextVisibleSessionIds;
-    const details: GpuiSidebarFocusDebugLogDetails = {
-      ...this.currentFocusDebugLogDetails(),
-      didChange,
-      visibleSessionCountAfter: this.visibleSessionIds.size,
-      visibleSessionCountBefore: previousVisibleSessionIds.length,
-      visibleSessionIdsAfter: [...this.visibleSessionIds],
-      visibleSessionIdsBefore: previousVisibleSessionIds,
-    };
-    if (nextActiveGroupId) {
-      details.activeGroupIdAfter = nextActiveGroupId;
-    }
-    if (previousActiveGroupId) {
-      details.activeGroupIdBefore = previousActiveGroupId;
-    }
-    if (nextActiveProjectId) {
-      details.activeProjectIdAfter = nextActiveProjectId;
-    }
-    if (previousActiveProjectId) {
-      details.activeProjectIdBefore = previousActiveProjectId;
-    }
-    if (nextFocusedSessionId) {
-      details.focusedSessionIdAfter = nextFocusedSessionId;
-    }
-    if (previousFocusedSessionId) {
-      details.focusedSessionIdBefore = previousFocusedSessionId;
-    }
-    this.postSessionFocusDebugLog("bootstrapFocusStateApplied", "debug", details);
-    if (nextFocusedSessionId && didChange) {
-      this.recordFocusDebugTransition(nextFocusedSessionId);
-    }
     return didChange;
   }
 
@@ -1771,12 +1667,6 @@ class GpuiSidebarRuntime {
     snapshot: GxserverPresentationSnapshot,
     kind: GpuiSidebarRuntimeSnapshotKind,
   ): void {
-    this.postSessionFocusDebugLog("presentationSnapshot", "debug", {
-      ...this.currentFocusDebugLogDetails(),
-      incomingRevision: snapshot.revision,
-      sessionCount: snapshot.sessions.length,
-      groupCount: snapshot.projects.length,
-    });
     this.presentation = snapshot;
     this.publishPresentation(kind);
     if (kind === "hydrate") {
@@ -1794,12 +1684,6 @@ class GpuiSidebarRuntime {
       delta,
       gxserverRevision,
     );
-    this.postSessionFocusDebugLog("presentationDelta", "debug", {
-      ...this.currentFocusDebugLogDetails(),
-      incomingRevision: gxserverRevision,
-      removedGroupCount: delta.type === "groupRemoved" || delta.type === "projectRemoved" ? 1 : 0,
-      removedSessionCount: delta.type === "sessionRemoved" ? 1 : 0,
-    });
     this.publishPresentation("patch");
   }
 
@@ -1866,10 +1750,6 @@ class GpuiSidebarRuntime {
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
-    this.postSessionFocusDebugLog("publishPresentation", "debug", {
-      ...this.currentFocusDebugLogDetails(),
-      revision: this.revision,
-    });
     this.refreshGitStateForActiveProjectIfNeeded();
   }
 
@@ -1906,9 +1786,6 @@ class GpuiSidebarRuntime {
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
-    this.postSessionFocusDebugLog("publishUnavailable", "debug", {
-      ...this.currentFocusDebugLogDetails(),
-    });
   }
 
   private publishRemotePresentationPatch(): void {
@@ -1957,10 +1834,6 @@ class GpuiSidebarRuntime {
     this.postGpuiStatusPetState();
     this.postActiveProjectContext();
     this.postGxserverPresentationFocusState();
-    this.postSessionFocusDebugLog("publishRemotePresentationPatch", "debug", {
-      ...this.currentFocusDebugLogDetails(),
-      revision: this.revision,
-    });
   }
 
   private applyDomainProjectDelta(delta: GxserverPresentationDelta): void {
@@ -2092,10 +1965,6 @@ class GpuiSidebarRuntime {
   private postGxserverPresentationFocusState(): void {
     const postFocusState = window.ghostexGpui?.postGxserverPresentationFocusState;
     if (typeof postFocusState !== "function") {
-      this.postSessionFocusDebugLog("focusStateBridgeMissing", "debug", {
-        ...this.currentFocusDebugLogDetails(),
-        bridgeAvailable: false,
-      });
       return;
     }
     const payload = JSON.stringify({
@@ -2105,116 +1974,12 @@ class GpuiSidebarRuntime {
       visibleSessionIds: [...this.visibleSessionIds],
     });
     try {
-      const bridgeSent = postFocusState(payload);
-      this.postSessionFocusDebugLog("focusStateBridgePost", "debug", {
-        ...this.currentFocusDebugLogDetails(),
-        bridgeAvailable: true,
-        bridgeSent,
-      });
+      postFocusState(payload);
     } catch {
-      this.postSessionFocusDebugLog("focusStateBridgeRejected", "warning", {
-        ...this.currentFocusDebugLogDetails(),
-        bridgeAvailable: true,
-        bridgeSent: false,
-      });
       /*
       CDXC:GPUISidebarGxserverFocusState 2026-06-24-21:07:
       Focus-state publication is a sidebar-native synchronization hint for Rust bootstrap replay only. A missing or rejecting CEF bridge must not change gxserver data, create fallback focus ids, log renderer payloads, or block the visible SidebarApp state that React already owns.
       */
-    }
-  }
-
-  private postSessionFocusDebugLog(
-    event: string,
-    level: GpuiSidebarFocusDebugLogLevel,
-    details: GpuiSidebarFocusDebugLogDetails = {},
-  ): void {
-    const postDebugLog = window.ghostexGpui?.postSessionFocusDebugLog;
-    if (typeof postDebugLog !== "function") {
-      return;
-    }
-    /*
-    CDXC:GPUISidebarFocusDebug 2026-06-26-04:55:
-    Focus diagnostics may include only enum event names, stable project/session/group ids, counts, booleans, and bounded id arrays. Rust still sanitizes at the support-log writer boundary; this sender type keeps React call sites from adding titles, paths, URLs, command text, terminal output, tokens, or raw payload strings.
-    */
-    const payload = JSON.stringify({
-      ...details,
-      debuggingMode: this.runtimeSettings?.debuggingMode === true,
-      event,
-      level,
-      sequence: ++this.focusDebugSequence,
-      type: GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_TYPE,
-      version: GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_VERSION,
-    });
-    try {
-      postDebugLog(payload);
-    } catch {
-      // CDXC:GPUISidebarFocusDebug 2026-06-26-04:55: Debug-log bridge failures must not recurse into logging or alter sidebar focus behavior.
-    }
-  }
-
-  private currentFocusDebugLogDetails(): GpuiSidebarFocusDebugLogDetails {
-    const details: GpuiSidebarFocusDebugLogDetails = {
-      hasClient: Boolean(this.client),
-      hasPresentation: Boolean(this.presentation),
-      latestGroupCount: this.latestGroups.length,
-      latestSessionCount: this.latestSidebarSessionCount(),
-      visibleSessionCount: this.visibleSessionIds.size,
-      visibleSessionIds: [...this.visibleSessionIds],
-    };
-    if (this.activeGroupId) {
-      details.activeGroupId = this.activeGroupId;
-    }
-    if (this.activeProjectId) {
-      details.activeProjectId = this.activeProjectId;
-    }
-    if (this.focusedSessionId) {
-      details.focusedSessionId = this.focusedSessionId;
-    }
-    if (this.presentation) {
-      details.presentationRevision = this.presentation.revision;
-      details.groupCount = this.presentation.projects.length;
-      details.sessionCount = this.presentation.sessions.length;
-    }
-    return details;
-  }
-
-  private latestSidebarSessionCount(): number {
-    return this.latestGroups.reduce((count, group) => count + group.sessions.length, 0);
-  }
-
-  private recordFocusDebugTransition(sessionId: string): void {
-    const normalizedSessionId = normalizeNonEmptyString(sessionId);
-    if (!normalizedSessionId) {
-      return;
-    }
-    const now = Date.now();
-    this.focusDebugTransitions = this.focusDebugTransitions.filter(
-      (transition) => now - transition.at <= GPUI_SIDEBAR_FOCUS_DEBUG_LOOP_WINDOW_MS,
-    );
-    const lastTransition = this.focusDebugTransitions[this.focusDebugTransitions.length - 1];
-    if (lastTransition?.sessionId === normalizedSessionId) {
-      return;
-    }
-    this.focusDebugTransitions.push({ at: now, sessionId: normalizedSessionId });
-
-    const involvedSessionIds = [...new Set(
-      this.focusDebugTransitions.map((transition) => transition.sessionId),
-    )];
-    const transitionCount = Math.max(0, this.focusDebugTransitions.length - 1);
-    if (
-      involvedSessionIds.length === 2 &&
-      transitionCount >= GPUI_SIDEBAR_FOCUS_DEBUG_LOOP_TRANSITION_MIN
-    ) {
-      const firstTransition = this.focusDebugTransitions[0];
-      this.postSessionFocusDebugLog("focusLoopSuspected", "warning", {
-        ...this.currentFocusDebugLogDetails(),
-        focusedSessionId: normalizedSessionId,
-        involvedSessionIds,
-        transitionCount,
-        windowMs: firstTransition ? now - firstTransition.at : 0,
-      });
-      this.focusDebugTransitions = this.focusDebugTransitions.slice(-2);
     }
   }
 
@@ -2238,7 +2003,7 @@ class GpuiSidebarRuntime {
     } catch {
       /*
       CDXC:GPUIStatusPetOverlay 2026-06-26-04:38:
-      The status/pet bridge is presentation-only. If CEF has not installed the fixed functions or rejects a payload, keep SidebarApp state authoritative and avoid fallback UI state, raw JSON logging, project/path/title diagnostics, or invented native indicators.
+      The status/pet bridge is presentation-only. If CEF has not installed the fixed functions or rejects a payload, keep SidebarApp state authoritative and avoid fallback UI state, raw JSON logging, project/path/title side channels, or invented native indicators.
       */
     }
   }
@@ -2378,26 +2143,14 @@ class GpuiSidebarRuntime {
 
   private async handleSidebarMessage(message: SidebarToExtensionMessage): Promise<void> {
     switch (message.type) {
-      case "sidebarDebugLog":
-        return;
       case "focusGroup":
         this.focusGroup(message.groupId, message);
         return;
       case "focusSession":
-        this.postSessionFocusDebugLog("sidebarFocusMessage", "debug", {
-          ...this.currentFocusDebugLogDetails(),
-          isRemote: Boolean(parseGpuiRemotePresentationSessionId(message.sessionId)),
-          requestedSessionId: message.sessionId,
-        });
         await this.focusSession(message.sessionId, message);
         return;
       case "focusSessionMode":
         if (parseGpuiRemotePresentationSessionId(message.sessionId)) {
-          this.postSessionFocusDebugLog("sidebarFocusModeMessage", "debug", {
-            ...this.currentFocusDebugLogDetails(),
-            isRemote: true,
-            requestedSessionId: message.sessionId,
-          });
           await this.focusSession(message.sessionId, message);
           return;
         }
@@ -2719,44 +2472,20 @@ class GpuiSidebarRuntime {
     sessionId: string,
     originalMessage?: SidebarToExtensionMessage,
   ): Promise<void> {
-    const beforeDetails = this.currentFocusDebugLogDetails();
     const remoteSession = parseGpuiRemotePresentationSessionId(sessionId);
     if (remoteSession) {
-      this.postSessionFocusDebugLog("remoteFocusRequested", "debug", {
-        ...beforeDetails,
-        isRemote: true,
-        requestedSessionId: sessionId,
-        resolvedProjectId: remoteSession.projectId,
-        resolvedSessionId: remoteSession.sessionId,
-      });
       if (this.postRemoteSessionNativeAction(
         "openRemoteSessionTerminal",
         remoteSession,
         originalMessage ?? { sessionId, type: "focusSession" },
       )) {
         this.setRemotePresentationSessionFocus(remoteSession);
-        const appliedDetails: GpuiSidebarFocusDebugLogDetails = {
-          ...this.currentFocusDebugLogDetails(),
-          requestedSessionId: sessionId,
-          resolvedProjectId: remoteSession.projectId,
-          resolvedSessionId: remoteSession.sessionId,
-        };
-        if (beforeDetails.focusedSessionId) {
-          appliedDetails.focusedSessionIdBefore = beforeDetails.focusedSessionId;
-        }
-        this.postSessionFocusDebugLog("remoteFocusApplied", "debug", appliedDetails);
         this.publishRemotePresentationPatch();
       }
       return;
     }
     const reference = parseGxserverPresentationProjectSessionId(sessionId);
     if (!reference || !this.client) {
-      this.postSessionFocusDebugLog("localFocusRejected", "debug", {
-        ...beforeDetails,
-        hasClient: Boolean(this.client),
-        isLocal: Boolean(reference),
-        requestedSessionId: sessionId,
-      });
       return;
     }
     if (this.isSleepingLocalPresentationSession(reference.projectId, reference.sessionId)) {
@@ -2765,16 +2494,6 @@ class GpuiSidebarRuntime {
       Sleeping local session-card clicks must match macOS session activation by committing gxserver `/api/wakeSession` before the Rust workspace materializes the terminal. A plain focus bridge can select the tab but leaves gxserver sleeping, so route this branch through the same Wake path as the sidebar sleep toggle.
       */
       await this.setSessionSleeping(sessionId, false);
-      const appliedDetails: GpuiSidebarFocusDebugLogDetails = {
-        ...this.currentFocusDebugLogDetails(),
-        requestedSessionId: sessionId,
-        resolvedProjectId: reference.projectId,
-        resolvedSessionId: reference.sessionId,
-      };
-      if (beforeDetails.focusedSessionId) {
-        appliedDetails.focusedSessionIdBefore = beforeDetails.focusedSessionId;
-      }
-      this.postSessionFocusDebugLog("localFocusApplied", "debug", appliedDetails);
       return;
     }
     /*
@@ -2782,16 +2501,6 @@ class GpuiSidebarRuntime {
     Local GPUI sidebar clicks must match the macOS sidebar ownership model: the SidebarApp adapter applies local focus immediately and publishes the CEF bootstrap focus hint, but it must not call gxserver `/api/focusSession`. That endpoint is an external renderer-command route and can bounce focus when another renderer is the first open gxserver subscriber.
     */
     this.focusLocalWorkspaceSession(reference.projectId, reference.sessionId);
-    const appliedDetails: GpuiSidebarFocusDebugLogDetails = {
-      ...this.currentFocusDebugLogDetails(),
-      requestedSessionId: sessionId,
-      resolvedProjectId: reference.projectId,
-      resolvedSessionId: reference.sessionId,
-    };
-    if (beforeDetails.focusedSessionId) {
-      appliedDetails.focusedSessionIdBefore = beforeDetails.focusedSessionId;
-    }
-    this.postSessionFocusDebugLog("localFocusApplied", "debug", appliedDetails);
     this.publishPresentation("patch");
   }
 
@@ -2816,11 +2525,6 @@ class GpuiSidebarRuntime {
     */
     const postFocus = window.ghostexGpui?.postWorkspaceTerminalFocus;
     if (typeof postFocus !== "function") {
-      this.postSessionFocusDebugLog("workspaceTerminalFocusBridgeMissing", "debug", {
-        ...this.currentFocusDebugLogDetails(),
-        resolvedProjectId: projectId,
-        resolvedSessionId: sessionId,
-      });
       return;
     }
     const payload = JSON.stringify({
@@ -2829,16 +2533,7 @@ class GpuiSidebarRuntime {
       type: GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_TYPE,
       version: GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_VERSION,
     });
-    const bridgeSent = postFocus(payload);
-    this.postSessionFocusDebugLog(
-      bridgeSent ? "workspaceTerminalFocusBridgePost" : "workspaceTerminalFocusBridgeRejected",
-      bridgeSent ? "debug" : "warning",
-      {
-        ...this.currentFocusDebugLogDetails(),
-        resolvedProjectId: projectId,
-        resolvedSessionId: sessionId,
-      },
-    );
+    postFocus(payload);
   }
 
   private async createSession(groupId = this.activeGroupId): Promise<void> {
@@ -3288,12 +2983,6 @@ class GpuiSidebarRuntime {
       !normalizedRemovedSessionId ||
       this.focusedSessionId !== normalizedRemovedSessionId
     ) {
-      this.postSessionFocusDebugLog("localTransitionFocusTargetSkipped", "debug", {
-        ...this.currentFocusDebugLogDetails(),
-        isRemovedSessionFocused: this.focusedSessionId === normalizedRemovedSessionId,
-        resolvedProjectId: normalizedProjectId,
-        resolvedSessionId: normalizedRemovedSessionId,
-      });
       return undefined;
     }
     const orderedSessionIds = this.localProjectTransitionSessionIds(
@@ -3308,14 +2997,6 @@ class GpuiSidebarRuntime {
       candidateSessionId !== normalizedRemovedSessionId &&
       this.isRunningLocalPresentationSession(normalizedProjectId, candidateSessionId),
     );
-    this.postSessionFocusDebugLog("localTransitionFocusTargetResolved", "debug", {
-      ...this.currentFocusDebugLogDetails(),
-      candidateCount: candidates.length,
-      orderedSessionCount: orderedSessionIds.length,
-      replacementSessionId,
-      resolvedProjectId: normalizedProjectId,
-      resolvedSessionId: normalizedRemovedSessionId,
-    });
     return replacementSessionId;
   }
 
@@ -6586,7 +6267,7 @@ class GpuiSidebarRuntime {
     } catch {
       /*
       CDXC:GPUIAppShots 2026-06-25-23:07:
-      App Shots diagnostics must not depend on toast-host availability and must not log raw app names, window titles, image paths, project paths, command text, terminal content, URLs, or tokens when presentation is unavailable.
+      App Shots user feedback must not depend on toast-host availability and must not log raw app names, window titles, image paths, project paths, command text, terminal content, URLs, or tokens when presentation is unavailable.
       */
     }
   }
@@ -7745,10 +7426,6 @@ class GpuiSidebarRuntime {
     if (!normalizedProjectId || !normalizedSessionId) {
       return;
     }
-    const previousActiveProjectId = this.activeProjectId;
-    const previousActiveGroupId = this.activeGroupId;
-    const previousFocusedSessionId = this.focusedSessionId;
-    const previousVisibleSessionIds = [...this.visibleSessionIds];
     this.activeProjectId = normalizedProjectId;
     this.activeGroupId = this.isGpuiPresentationChatProjectId(normalizedProjectId)
       ? GPUI_GXSERVER_CHATS_GROUP_ID
@@ -7759,41 +7436,6 @@ class GpuiSidebarRuntime {
       normalizedProjectId,
       normalizedSessionId,
     );
-    const didChange =
-      previousActiveProjectId !== this.activeProjectId ||
-      previousActiveGroupId !== this.activeGroupId ||
-      previousFocusedSessionId !== this.focusedSessionId ||
-      !sameStringSet(new Set(previousVisibleSessionIds), this.visibleSessionIds);
-    const details: GpuiSidebarFocusDebugLogDetails = {
-      ...this.currentFocusDebugLogDetails(),
-      didChange,
-      resolvedProjectId: normalizedProjectId,
-      resolvedSessionId: normalizedSessionId,
-      visibleSessionCountAfter: this.visibleSessionIds.size,
-      visibleSessionCountBefore: previousVisibleSessionIds.length,
-      visibleSessionIdsAfter: [...this.visibleSessionIds],
-      visibleSessionIdsBefore: previousVisibleSessionIds,
-    };
-    if (previousActiveProjectId) {
-      details.activeProjectIdBefore = previousActiveProjectId;
-    }
-    if (previousActiveGroupId) {
-      details.activeGroupIdBefore = previousActiveGroupId;
-    }
-    if (previousFocusedSessionId) {
-      details.focusedSessionIdBefore = previousFocusedSessionId;
-    }
-    if (this.activeProjectId) {
-      details.activeProjectIdAfter = this.activeProjectId;
-    }
-    if (this.activeGroupId) {
-      details.activeGroupIdAfter = this.activeGroupId;
-    }
-    if (this.focusedSessionId) {
-      details.focusedSessionIdAfter = this.focusedSessionId;
-    }
-    this.postSessionFocusDebugLog("localFocusStateSet", "debug", details);
-    this.recordFocusDebugTransition(normalizedSessionId);
     this.postGxserverPresentationFocusState();
   }
 
@@ -7816,17 +7458,6 @@ class GpuiSidebarRuntime {
       nextVisibleSessionIds.add(visibleSessionId);
     }
     nextVisibleSessionIds.add(sessionId);
-    this.postSessionFocusDebugLog("localVisibleProjection", "debug", {
-      ...this.currentFocusDebugLogDetails(),
-      projectVisibleSessionCount: projectVisibleSessionIds.length,
-      projectVisibleSessionIds,
-      resolvedProjectId: projectId,
-      resolvedSessionId: sessionId,
-      visibleSessionCountBefore: this.visibleSessionIds.size,
-      visibleSessionIdsBefore: [...this.visibleSessionIds],
-      visibleSessionIdsAfter: [...nextVisibleSessionIds],
-      visibleSessionCountAfter: nextVisibleSessionIds.size,
-    });
     return nextVisibleSessionIds;
   }
 
@@ -7862,33 +7493,11 @@ class GpuiSidebarRuntime {
     if (!machineId || !projectId || !sessionId) {
       return;
     }
-    const previousActiveGroupId = this.activeGroupId;
-    const previousFocusedSessionId = this.focusedSessionId;
-    const previousVisibleSessionIds = [...this.visibleSessionIds];
     const scopedSessionId = createGpuiRemotePresentationSessionId(machineId, projectId, sessionId);
     const scopedGroupId = createGpuiRemotePresentationGroupId(machineId, projectId);
     this.activeGroupId = scopedGroupId;
     this.focusedSessionId = scopedSessionId;
     this.visibleSessionIds = new Set([scopedSessionId]);
-    const details: GpuiSidebarFocusDebugLogDetails = {
-      ...this.currentFocusDebugLogDetails(),
-      activeGroupIdAfter: scopedGroupId,
-      focusedSessionIdAfter: scopedSessionId,
-      resolvedProjectId: projectId,
-      resolvedSessionId: sessionId,
-      visibleSessionCountAfter: this.visibleSessionIds.size,
-      visibleSessionCountBefore: previousVisibleSessionIds.length,
-      visibleSessionIdsAfter: [...this.visibleSessionIds],
-      visibleSessionIdsBefore: previousVisibleSessionIds,
-    };
-    if (previousActiveGroupId) {
-      details.activeGroupIdBefore = previousActiveGroupId;
-    }
-    if (previousFocusedSessionId) {
-      details.focusedSessionIdBefore = previousFocusedSessionId;
-    }
-    this.postSessionFocusDebugLog("remoteFocusStateSet", "debug", details);
-    this.recordFocusDebugTransition(scopedSessionId);
     this.postGxserverPresentationFocusState();
   }
 
@@ -8955,7 +8564,7 @@ function createGpuiSidebarSettings(
 ): ghostexSettings {
   /*
   CDXC:GPUISettingsSidebarHandoff 2026-06-24-11:22:
-  GPUI SidebarApp must receive the real saved shared Settings object, normalized through the same TypeScript settings schema as macOS, instead of hardcoded phase-1 defaults. Keep Manage availability strict by overriding only debuggingMode/showBetaFeatures from the CEF-provided booleans; missing, malformed, string-like truthy, or numeric truthy values cannot enable Manage.
+  GPUI SidebarApp must receive the real saved shared Settings object, normalized through the same TypeScript settings schema as macOS, instead of hardcoded bootstrap defaults. Keep Manage availability strict by overriding only debuggingMode/showBetaFeatures from the CEF-provided booleans; missing, malformed, string-like truthy, or numeric truthy values cannot enable Manage.
   */
   const settings = normalizeghostexSettings(runtimeSettings?.settings);
   return {
@@ -9179,7 +8788,7 @@ export function createGpuiSessionStatusIndicatorCandidatesFromSidebarGroups(
 ): GpuiSessionStatusIndicatorCandidate[] {
   /*
   CDXC:GPUIStatusPetOverlay 2026-06-26-04:38:
-  GPUI derives status/pet candidates from the live gxserver SidebarApp groups because phase1-main mounts SidebarApp directly and never runs native-sidebar.tsx. Preserve the same project/session order semantics as macOS by reusing shared display layout, but keep the bridge payload bounded and route with ids only rather than paths, commands, terminal text, external URLs, or daemon bodies. Project icon parity may carry only an already-normalized image data URL for notification attachments.
+  GPUI derives status/pet candidates from the live gxserver SidebarApp groups because the GPUI sidebar entry mounts SidebarApp directly and never runs native-sidebar.tsx. Preserve the same project/session order semantics as macOS by reusing shared display layout, but keep the bridge payload bounded and route with ids only rather than paths, commands, terminal text, external URLs, or daemon bodies. Project icon parity may carry only an already-normalized image data URL for notification attachments.
   */
   const candidates: GpuiSessionStatusIndicatorCandidate[] = [];
   let order = 0;

@@ -64,7 +64,7 @@ fn main() {
     );
 
     /*
-    CDXC:GPUIPhase1 2026-06-14-15:25:
+    CDXC:GPUICefAppKitShim 2026-06-14-15:25:
     CEF browser creation now comes from tauri-apps/cef-rs instead of GhostexCEFBridge.mm. Keep this build script limited to the AppKit protocol/message-pump shim required because GPUI owns NSApplication and the main run loop.
     */
     gpui_macos_objc_build()

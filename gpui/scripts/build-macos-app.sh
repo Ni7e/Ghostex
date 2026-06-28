@@ -5,7 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GPUI_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$GPUI_DIR/.." && pwd)"
 APP_NAME="GhostexGPUI"
-GPUI_BUNDLE_ID="com.madda.ghostex.gpui.phase1"
+# CDXC:GPUIBundleIdentity 2026-06-28-16:18:
+# GPUI source and packaged helper identity should no longer carry the historical phase label. Use one stable GPUI bundle id so CEF helper bundle ids and the lid-sleep helper label match the app's current product identity.
+GPUI_BUNDLE_ID="com.madda.ghostex.gpui"
 GPUI_LID_SLEEP_HELPER_LABEL="$GPUI_BUNDLE_ID.LidSleepHelper"
 APP_PATH="$GPUI_DIR/build/macos/$APP_NAME.app"
 RUN_APP=0
@@ -580,15 +582,15 @@ done
 
 stage_gpui_lid_sleep_helper
 
-# CDXC:GPUIPhase1 2026-06-14-15:25:
-# The phase-1 shell now consumes Tauri's cef-rs CEF distribution instead of Ghostex's production CEF vendor tree. Build with a local CEF_PATH cache so cef-dll-sys downloads the version matching the Rust bindings, then package helper apps named after the GPUI executable because macOS CEF discovers helpers from the main bundle name.
+# CDXC:GPUICefDistribution 2026-06-14-15:25:
+# The GPUI shell consumes Tauri's cef-rs CEF distribution instead of Ghostex's production CEF vendor tree. Build with a local CEF_PATH cache so cef-dll-sys downloads the version matching the Rust bindings, then package helper apps named after the GPUI executable because macOS CEF discovers helpers from the main bundle name.
 
-# CDXC:GPUIPhase1 2026-06-14-13:05:
+# CDXC:GPUIMacBundleSigning 2026-06-14-13:05:
 # The prototype rewrites helper app plists and copies the CEF framework into a new local bundle on every build. Re-sign the completed bundle ad hoc so macOS validates the nested helper apps and framework after packaging instead of running stale signatures from the source artifacts.
 codesign --force --deep --sign - "$APP_PATH"
 
-# CDXC:GPUIPhase1 2026-06-14-12:06:
-# The phase-1 macOS app must be runnable as a real CEF bundle, not only as a Cargo binary. Package the CEF framework, helper apps, React sidebar bundle, and GPUI executable into one local .app so the runtime layout matches the production Chromium embedding contract.
+# CDXC:GPUIMacBundlePackaging 2026-06-14-12:06:
+# The GPUI macOS app must be runnable as a real CEF bundle, not only as a Cargo binary. Package the CEF framework, helper apps, React sidebar bundle, and GPUI executable into one local .app so the runtime layout matches the production Chromium embedding contract.
 printf 'Built %s for %s (%s)\n' "$APP_PATH" "$GHOSTEX_MACOS_ARCH" "$RUST_TARGET_ARCH"
 
 if [[ "$RUN_APP" == "1" ]]; then

@@ -8,7 +8,7 @@ type ExplicitLiveSidebarProjectContext = NonNullable<SidebarSessionGroup["projec
 
 /**
  * CDXC:GPUIProjectSidebarBridge 2026-06-23-19:19:
- * Phase 1 active-project snapshots deliberately exclude Browser surface identity at the TypeScript payload boundary. Build Source, Kanban, and gated Manage ids through this helper-owned shape only; Browser readiness stays in the separate Browser workarea readiness message and must not become `browserWorkareaId` in active-project snapshots.
+ * GPUI active-project snapshots deliberately exclude Browser surface identity at the TypeScript payload boundary. Build Source, Kanban, and gated Manage ids through this helper-owned shape only; Browser readiness stays in the separate Browser workarea readiness message and must not become `browserWorkareaId` in active-project snapshots.
  */
 export type GpuiSidebarActiveProjectSurfaceIds = {
   sourceWorkareaId?: string | null;
@@ -72,7 +72,7 @@ export function createGpuiSidebarActiveProjectSurfaceIds(
 
 /**
  * CDXC:GPUIProjectSidebarBridge 2026-06-22-20:02:
- * Phase 1 must derive the GPUI active-project contract only from explicit sidebar workspace group metadata. A real project requires active-group projectContext and a non-chat collection marker; project titles are display labels only, and only projectContext.path plus the explicit projectContext.editor.projectId identity may enter the CEF bridge while fixture names, workspace names, .git probing, URLs, command text, logs, persistence, and other private user content must not.
+ * GPUI must derive the active-project contract only from explicit sidebar workspace group metadata. A real project requires active-group projectContext and a non-chat collection marker; project titles are display labels only, and only projectContext.path plus the explicit projectContext.editor.projectId identity may enter the CEF bridge while fixture names, workspace names, .git probing, URLs, command text, logs, persistence, and other private user content must not.
  *
  * CDXC:GPUIProjectSidebarBridge 2026-06-23-06:36:
  * Manage availability in the GPUI sidebar CEF payload must prefer the narrow runtime settings snapshot installed by Rust from the shared sidebar settings source. Only debuggingMode and showBetaFeatures may affect Manage, and both must be strict boolean true; missing, malformed, string-like truthy, Quick/projectless, workspace-default, path/name/project, and filesystem heuristics must not enable Manage.

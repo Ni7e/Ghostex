@@ -40,7 +40,7 @@ static BOOL GhostexGpuiCEFHandleSelectAllForResponder(id responder);
 static void GhostexGpuiCEFMarkFocusedResponder(id responder);
 
 /*
- CDXC:GPUIPhase1 2026-06-14-16:14:
+ CDXC:GPUICefAppProtocol 2026-06-14-16:14:
  CEF's macOS external-run-loop path requires NSApplication to conform to CefAppProtocol before Chromium installs its CFRunLoop observers. Mirror the protocol definitions from cef_application_mac.h locally so this lightweight cef-rs shim can register the Objective-C category at load time without restoring a direct CEF C++ header dependency.
  */
 @protocol CrAppProtocol
@@ -79,7 +79,7 @@ static void GhostexGpuiCEFMarkFocusedResponder(id responder);
 
 - (void)ghostexGpuiCEFSendEvent:(NSEvent*)event {
   /*
-   CDXC:GPUIPhase1 2026-06-14-17:25:
+   CDXC:GPUICefEditCommands 2026-06-14-17:25:
    GPUI can keep its address-input focus handle after Chromium has accepted a page click, so AppKit command-key dispatch may never invoke selectAll: on CEF's responder chain. When the active native target is a registered CEF view, mirror only Cmd+A in the existing CEF NSApplication sendEvent hook and call Chromium's Frame::select_all after normal dispatch; GPUI chrome clicks clear that active target before their own text shortcuts run.
    */
   BOOL shouldSelectAllInActiveCEF = GhostexGpuiCEFEventIsCommandA(event);
@@ -104,7 +104,7 @@ void GhostexGpuiCEFPrepareApplication(void) {
     NSMutableDictionary* argumentDefaults =
       [[defaults volatileDomainForName:NSArgumentDomain] mutableCopy] ?: [NSMutableDictionary dictionary];
     /*
-     CDXC:GPUIPhase1 2026-06-14-15:25:
+     CDXC:GPUICefCrashRestore 2026-06-14-15:25:
      The GPUI CEF shell is launched repeatedly while Chromium embedding is under construction. Disable AppKit's crash-state restoration prompts in the process argument domain so a saved-state modal cannot block the first GPUI frame or the deferred CEF initialization path.
      */
     argumentDefaults[@"ApplePersistenceIgnoreState"] = @YES;
@@ -119,10 +119,10 @@ void GhostexGpuiCEFInstallMessagePump(void) {
   }
 
   /*
-   CDXC:GPUIPhase1 2026-06-14-15:25:
+   CDXC:GPUICefMessagePump 2026-06-14-15:25:
    GPUI owns the AppKit run loop, while cef-rs exposes a single-step CefDoMessageLoopWork pump. Let CEF's BrowserProcessHandler schedule each required step onto the main queue instead of handing the process to CefRunMessageLoop, matching Ghostex's GPUI-safe external-pump model without replacing GPUI's application loop.
 
-   CDXC:GPUIPhase1 2026-06-14-17:38:
+   CDXC:GPUICefMessagePump 2026-06-14-17:38:
    The cef-rs/Tauri external pump does not fire only once. It cancels stale work, caps placeholder delays to a short timer, and reschedules idle work so CEF renderers continue painting React sidebar content and browser pages after startup.
    */
   g_ghostexGpuiCEFMessagePumpInstalled = YES;
@@ -220,10 +220,10 @@ void GhostexGpuiCEFInstallApplicationHooks(void) {
   }
 
   /*
-   CDXC:GPUIPhase1 2026-06-14-15:25:
+   CDXC:GPUICefAppProtocol 2026-06-14-15:25:
    Tauri's CEF runtime makes its NSApplication subclass conform to CefAppProtocol and toggles isHandlingSendEvent during sendEvent:. GPUI must keep GPUIApplication as the concrete app class, so install the same protocol surface and send-event state on GPUIApplication at runtime without changing window layout or input routing.
 
-   CDXC:GPUIPhase1 2026-06-14-16:14:
+   CDXC:GPUICefAppProtocol 2026-06-14-16:14:
    Chromium's message_pump_mac.mm traps if CefAppProtocol is missing when NSApplication's run loop is already active. Register the protocol through the NSApplication category above before main, then add the same protocol chain to GPUIApplication for direct conformance checks while leaving the early swizzled sendEvent implementation in place.
    */
   class_addProtocol(appClass, @protocol(CrAppProtocol));
@@ -277,7 +277,7 @@ static void GhostexGpuiCEFInstallStandardEditMenu(void) {
   }
 
   /*
-   CDXC:GPUIPhase1 2026-06-14-16:31:
+   CDXC:GPUICefEditCommands 2026-06-14-16:31:
    Web-page inputs inside the embedded CEF browser need macOS standard Edit commands, including Cmd+A Select All. Install first-responder menu actions instead of synthesizing web-specific fallbacks so CEF, AppKit text views, and future browser surfaces receive the platform's normal text-command dispatch.
    */
   if (!GhostexGpuiCEFMenuContainsAction(editMenu, @selector(undo:))) {
@@ -342,7 +342,7 @@ void GhostexGpuiCEFPrepareNativeViewForFocus(void* nativeView) {
   }
 
   /*
-   CDXC:GPUIPhase1 2026-06-14-16:45:
+   CDXC:GPUICefFocusRouting 2026-06-14-16:45:
    Browser clicks land on CEF's native child view, not always on GPUI's hitbox tree. Make the exact CEF NSView accept first responder and claim it on mouseDown before forwarding the event, so macOS command-key text actions route to Chromium after the user leaves the GPUI address bar.
    */
   GhostexGpuiCEFInstallBrowserViewFocusSubclassInTree(view);
@@ -432,10 +432,10 @@ static BOOL GhostexGpuiCEFBrowserViewAcceptsFirstResponder(id self, SEL _cmd) {
 
 static void GhostexGpuiCEFBrowserViewSelectAll(id self, SEL _cmd, id sender) {
   /*
-   CDXC:GPUIPhase1 2026-06-14-17:25:
+   CDXC:GPUICefEditCommands 2026-06-14-17:25:
    Cmd+A in focused CEF page text fields must stay inside Chromium after the GPUI address bar has previously owned focus. Implement the standard AppKit selectAll: command on the exact CEF NSView and delegate to cef-rs Frame::select_all, so macOS command dispatch uses Chromium selection semantics without a hidden hit-test layer or page-specific fallback.
 
-   CDXC:GPUIPhase1 2026-06-14-17:25:
+   CDXC:GPUICefEditCommands 2026-06-14-17:25:
    CEF can deliver page clicks to descendant NSViews below the browser host returned by cef-rs. Install the focus subclass on the CEF view tree and resolve selectAll: by walking ancestor views back to the registered browser root, so command-key focus follows the actual Chromium child that received the click.
    */
   if (GhostexGpuiCEFHandleSelectAllForResponder(self)) {
@@ -532,7 +532,7 @@ void GhostexGpuiCEFFocusNativeView(void* nativeView) {
   }
 
   /*
-   CDXC:GPUIPhase1 2026-06-14-18:05:
+   CDXC:GPUICefFocusRouting 2026-06-14-18:05:
    CEF child views can remain the AppKit first responder after browser interaction. When the GPUI-owned address bar is clicked, return first-responder ownership to the exact GPUI parent view before focusing the GPUI input so typed keys edit the address field instead of continuing into Chromium.
    */
   if (!GhostexGpuiCEFMarkNativeViewFocused(nativeView)) {
