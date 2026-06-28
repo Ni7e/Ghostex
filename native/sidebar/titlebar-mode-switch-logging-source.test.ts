@@ -81,7 +81,7 @@ describe("titlebar mode switch diagnostics source", () => {
       "function appendTerminalLaunchDebugLog",
     );
     expect(sidebarHelper).toContain('type: "appendModeSwitcherDebugLog"');
-    expect(sidebarHelper).toContain("isNativeSidebarDebugLoggingEnabled()");
+    expect(sidebarHelper).toContain('shouldPostNativeSidebarDiagnosticLog("native.mode.switcher", event)');
     expect(sidebarHelper).not.toContain("appendSessionTitleDebugLog");
   });
 

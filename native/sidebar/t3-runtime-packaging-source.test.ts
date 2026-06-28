@@ -231,7 +231,8 @@ describe("T3 runtime packaging", () => {
     expect(installedSignatureSource).toContain("function signatureDetailsMatchesExpectedIdentity");
     expect(installedSignatureSource).toContain("Signature=adhoc");
     expect(installedSignatureSource).toContain("Authority=${identity}");
-    expect(startGhostexSource).toContain('run(path.join(hostScriptDir, "codesign-ghostex-host.sh"), [appPath], { env: buildEnv })');
+    expect(startGhostexSource).toContain('run(path.join(hostScriptDir, "codesign-ghostex-host.sh"), [appPath], {');
+    expect(startGhostexSource).toContain("env: buildEnv,");
     expect(buildGhostexHostSource).toContain("CDXC:MacOSPermissions 2026-06-16-02:27");
     expect(buildGhostexHostSource).toContain("local_start_build_signing()");
     expect(buildGhostexHostSource).toContain("local_start_build_cache_reusable");

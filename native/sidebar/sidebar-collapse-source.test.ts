@@ -196,9 +196,9 @@ describe("native sidebar collapse source", () => {
     expect(titlebarHostSource).not.toContain(
       '<TooltipContent side="bottom">{projectState.toggleSidebarHotkeyLabel}</TooltipContent>',
     );
-    expect(sidebarCollapseIconStyle).toContain("height: 17px !important;");
-    expect(sidebarCollapseIconStyle).toContain("transform: translate(1px, 2px);");
-    expect(sidebarCollapseIconStyle).toContain("width: 17px !important;");
+    expect(sidebarCollapseIconStyle).toContain("height: 18px !important;");
+    expect(sidebarCollapseIconStyle).toContain("transform: translate(1px, 1.5px);");
+    expect(sidebarCollapseIconStyle).toContain("width: 18px !important;");
     expect(titlebarHostSource).toContain("margin-left: 0;");
     expect(appDelegateSource).toContain('"sidebarCollapsed": isSidebarCollapsed');
     expect(appDelegateSource).toContain('"sidebarSide": sidebarSide.rawValue');
