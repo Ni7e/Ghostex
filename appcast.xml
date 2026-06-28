@@ -8,6 +8,33 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>5.0.0</title>
+            <pubDate>Sun, 28 Jun 2026 09:02:56 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.0.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>50000</sparkle:version>
+            <sparkle:shortVersionString>5.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.0.0
+
+- Major
+  - Docs replaces Manage as the project document workarea with folders, Markdown, HTML explainers, Excalidraw drawings, review annotations, and Agentation feedback.
+  - Settings are simpler, with persisted Show Advanced, clearer Enable Experimental Features naming, visible Agents Hub access, and calmer app-icon controls.
+  - Source and project editor panes switch more reliably, show native load errors clearly, and avoid shared runtime port conflicts.
+  - The GPUI app continues moving toward cross-platform parity with sidebar, Source, browser, settings, remote, and command workflow progress.
+  - The Rust gxserver path now covers more session status, title, renderer-command, activity, and lifecycle behavior.
+- Minor
+  - Custom app icons can update the running app, Dock tile, and bundle icon more consistently. Thanks @NiTE.
+  - Sidebar search, collapsed project drawers, and first-responder focus handoff are faster and steadier.
+  - Agent history search finds newer Codex prompts and very large Codex transcripts more reliably.
+  - Homebrew installs no longer show the old macOS requirement warning. Thanks @Yabuku-xD.
+  - Tips now point users toward Ghostex Browser Use, Ghostex Computer Use, and Faster Chrome DevTools setup.
+
+[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.0.0)
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.0.0/ghostex-5.0.0-arm64.dmg" length="721558444" type="application/octet-stream" sparkle:edSignature="AuDcJ4FIPjdIlBpoRQHLDClMbFjlCi6xj0uSKYSp0//sdN2r8F2jrDYFye0L8adymMmJiU5hmdvLRnJCBMbHAw=="/>
+        </item>
+        <item>
             <title>4.21.4</title>
             <pubDate>Sun, 21 Jun 2026 04:32:31 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.21.4</sparkle:fullReleaseNotesLink>
@@ -155,31 +182,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.20.0/ghostex-4.20.0-arm64.dmg" length="571495942" type="application/octet-stream" sparkle:edSignature="fThU6aE1/fYEGf4BOLaO4xjR4vQELQMWSevxl94+SZBbY/hl2z08Joccx2C7e+OctGZ9eHf1HFTCMk4KIJgVBg=="/>
         </item>
         <item>
-            <title>4.14.2</title>
-            <pubDate>Wed, 17 Jun 2026 10:01:21 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.14.2</sparkle:fullReleaseNotesLink>
-            <sparkle:version>41402</sparkle:version>
-            <sparkle:shortVersionString>4.14.2</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 4.14.2
-
-- Major
-  - Highlighted Features and screenshots
-    - The macOS app bundle now includes the latest supplied Highlighted Features screenshots instead of the older package images.
-    - The feature tour and README media use the exact committed PNG captures for the agent splits, Chromium design mode, embedded editor, Kanban board, and rich prompt editor views.
-  - Titlebar Actions
-    - Custom titlebar Actions are preserved on startup when gxserver has not imported action content yet.
-    - Legacy saved Action icon colors are stripped so Action icons inherit the native chrome color consistently.
-- Minor
-  - Native pane chrome
-    - Focused pane borders keep their top and right edges visible against clipped pane edges.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.14.2)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.14.2/ghostex-4.14.2-arm64.dmg" length="586023654" type="application/octet-stream" sparkle:edSignature="nTI6/xF2XbH9AtCj87zNknRVxoBr+SF45ZAa1uCvwj/2SR9HFfLUCCrSa6aNs3gJ4+2Ni4VxVAFFJFei1gK8BA=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -191,6 +193,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: vCpZDCL78BUB+nHUSSFHCYOK0WtK0xJ9PZfzwuT0Cz02wjcH9kcZFo8bInkfMnTsm4E4m21UGNhsMFwzQPUMAQ==
-length: 14234
+edSignature: q80qIF9boBUb4FZ684ZPoEgcMCf5x9xwELs8IGlVBht4NLdMSlUXYQqRAdpTb7kveRq1HtAbFleEXbTJDjXKBA==
+length: 14747
 -->
