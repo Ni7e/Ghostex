@@ -75,14 +75,14 @@ describe("Manage project workarea source", () => {
     expect(manageTemplateSource).toContain("window.__ghostex_BOOT_ERROR__");
   });
 
-  test("uses a Manage sidebar overflow menu with hide and side controls", () => {
+  test("uses a Docs sidebar overflow menu with hide and side controls", () => {
     /*
      * CDXC:ManageSidebar 2026-06-20-17:15:
      * The Manage file-sidebar header should expose Hide as its own icon button, replace the direct Refresh icon with an overflow menu, keep Refresh inside that menu, and let users switch the file sidebar between left and right without losing a restore affordance after hiding it.
      */
     expect(manageSource).toContain("function ManageSidebarActions");
     expect(manageSource).toContain('aria-label="Hide file sidebar"');
-    expect(manageSource).toContain('aria-label="Manage sidebar menu"');
+    expect(manageSource).toContain('aria-label="Docs sidebar menu"');
     expect(manageSource).toContain("Switch sidebar side");
     expect(manageSource).toContain('aria-label="Show file sidebar"');
     expect(manageSource).toContain('data-sidebar-hidden={String(sidebarHidden)}');
@@ -111,23 +111,69 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain('grid-template-columns: minmax(0, 1fr) 7px var(--manage-sidebar-width, 292px)');
   });
 
-  test("creates Markdown, HTML, and Excalidraw artifacts from the Manage sidebar", () => {
+  test("creates folders, Markdown, HTML, and Excalidraw documents from the Docs sidebar", () => {
     /*
      * CDXC:ManageArtifacts 2026-06-26-13:59:
-     * Manage should offer top-sidebar creation buttons for Markdown, HTML, and Excalidraw artifacts, write them under artifacts/, and immediately open the created file in the Manage preview/editor.
+     * Manage should offer top-sidebar creation buttons for Markdown, HTML, and Excalidraw artifacts.
+     *
+     * CDXC:Docs 2026-06-28-06:24:
+     * The user-facing Docs surface should create Markdown, HTML, and Excalidraw
+     * documents under docs/ and immediately open the created file in the
+     * preview/editor.
+     *
+     * CDXC:ManageFolders 2026-06-28-06:39:
+     * The Docs sidebar create row now includes folders, so the accessible group
+     * label must describe docs items rather than documents only.
+     *
+     * CDXC:ManageFolders 2026-06-28-07:02:
+     * Native returns a flat capped listing, but the sidebar must tree-order it
+     * before collapsed-folder filtering so children render directly below their
+     * parent folders.
+     *
+     * CDXC:ManageFolders 2026-06-28-07:12:
+     * The Docs sidebar create actions live in the header plus menu, file rows
+     * can target their containing folder/root for drops, and selected file size
+     * is shown in sidebar toolbar metadata instead of row badges.
      */
     expect(manageSource).toContain('type ManageArtifactKind = "excalidraw" | "html" | "markdown"');
-    expect(manageSource).toContain('const MANAGE_ARTIFACT_ROOT_PATH = "artifacts"');
-    expect(manageSource).toContain("function ManageArtifactCreateButtons");
-    expect(manageSource).toContain('aria-label="Create artifact"');
-    expect(manageSource).toContain('title="New Markdown artifact"');
-    expect(manageSource).toContain('title="New HTML artifact"');
-    expect(manageSource).toContain('title="New Excalidraw artifact"');
+    expect(manageSource).toContain('const MANAGE_DOCS_ROOT_PATH = "docs"');
+    expect(manageSource).toContain("function ManageSidebarActions");
+    expect(manageSource).toContain('aria-label="Create docs item"');
+    expect(manageSource).toContain("<IconPlus");
+    expect(manageSource).toContain("New folder");
+    expect(manageSource).toContain("New Markdown");
+    expect(manageSource).toContain("New HTML");
+    expect(manageSource).toContain("New drawing");
+    expect(manageSource).toContain("createUniqueFolderPath(entries)");
+    expect(manageSource).toContain("function orderManageEntriesForTree");
+    expect(manageSource).toContain("const treeOrderedEntries = useMemo(() => orderManageEntriesForTree(entries), [entries]);");
+    expect(manageSource).toContain("return treeOrderedEntries.filter((entry) => !hasCollapsedManageAncestor(entry.path, collapsedDirectoryPaths));");
+    expect(manageSource).toContain('kind: "entry";');
+    expect(manageSource).toContain("targetDirectoryPath: string;");
+    expect(manageSource).toContain("function dropDirectoryPathForManageEntry");
+    expect(manageSource).toContain("entry.kind === \"directory\" ? entry.path : parentManagePath(entry.path) || MANAGE_DOCS_ROOT_PATH");
+    expect(manageSource).toContain("void moveEntryToDirectory(dragEntry, targetDirectoryPath)");
+    expect(manageSource).toContain('isDropTarget={dropTarget?.kind === "entry" && dropTarget.path === entry.path}');
+    expect(manageSource).toContain("function ManageSidebarFileToolbar");
+    expect(manageSource).toContain('aria-label="Selected file details"');
+    expect(manageSource).toContain("manage-sidebar-file-toolbar-title");
+    expect(manageSource).toContain("manage-sidebar-file-toolbar-spacer");
+    expect(manageSource).toContain("manage-sidebar-file-toolbar-size");
+    expect(manageSource).not.toContain('className="manage-file-size"');
     expect(manageSource).toContain("createUniqueArtifactPath(entries, kind)");
     expect(manageSource).toContain("createInitialArtifactContent(kind)");
+    /*
+     * CDXC:ManageDefaultHtml 2026-06-28-07:17:
+     * New HTML Docs files should explain that users can ask an agent to create a polished explanatory HTML document and then annotate the rendered page with Agentation.
+     */
+    expect(manageSource).toContain("function createDefaultHtmlDocument");
+    expect(manageSource).toContain("Ask your agent for an HTML explainer");
+    expect(manageSource).toContain('meta name="color-scheme" content="dark"');
+    expect(manageSource).toContain("background: var(--manage-bg);");
+    expect(manageSource).toContain("Use the bottom-left Agentation control when you are ready");
+    expect(manageSource).toContain("annotate it in Ghostex Docs with Agentation");
     expect(manageSource).toContain("selectedPathRef.current = createdFile.path");
     expect(manageSource).toContain("setPreview(createdFile)");
-    expect(manageSource).toContain(".manage-artifact-create");
   });
 
   test("omits the Manage editor header Save button", () => {
@@ -155,21 +201,27 @@ describe("Manage project workarea source", () => {
     expect(terminalWorkspaceSource).not.toContain("NSLog(content)");
   });
 
-  test("scopes the Manage file tree and normal file access to project artifacts", () => {
+  test("scopes the Docs file tree and normal file access to project docs", () => {
     /*
      * CDXC:ManageArtifacts 2026-06-26-13:59:
-     * Native Manage listing should expose only the active project's artifacts/ tree while preserving project-relative artifacts/... paths for file opens and saves. The annotation sidecar remains a fixed Ghostex-owned project path outside the visible tree.
+     * Native Manage listing used to expose only the active project's artifacts/ tree.
+     *
+     * CDXC:Docs 2026-06-28-06:24:
+     * Native Docs listing should expose only the active project's docs/ tree
+     * while preserving project-relative docs/... paths for file opens and
+     * saves. The annotation sidecar remains a fixed Ghostex-owned project path
+     * outside the visible tree.
      */
-    expect(terminalWorkspaceSource).toContain('manageArtifactsRelativePath = "artifacts"');
+    expect(terminalWorkspaceSource).toContain('manageDocsRelativePath = "docs"');
     expect(terminalWorkspaceSource).toContain('manageAnnotationsSidecarRelativePath = ".ghostex/manage-annotations.json"');
-    expect(terminalWorkspaceSource).toContain("rootName: manageArtifactsRelativePath");
-    expect(terminalWorkspaceSource).toContain("private nonisolated static func manageProjectArtifactsURL");
-    expect(terminalWorkspaceSource).toContain("guard let artifactsURL = try manageProjectArtifactsURL(rootURL: rootURL)");
-    expect(terminalWorkspaceSource).toContain("directoryURL: artifactsURL");
-    expect(terminalWorkspaceSource).toContain("relativeDirectoryPath: manageArtifactsRelativePath");
+    expect(terminalWorkspaceSource).toContain("rootName: manageDocsRelativePath");
+    expect(terminalWorkspaceSource).toContain("private nonisolated static func manageProjectDocsURL");
+    expect(terminalWorkspaceSource).toContain("guard let docsURL = try manageProjectDocsURL(rootURL: rootURL)");
+    expect(terminalWorkspaceSource).toContain("directoryURL: docsURL");
+    expect(terminalWorkspaceSource).toContain("relativeDirectoryPath: manageDocsRelativePath");
     expect(terminalWorkspaceSource).toContain("private nonisolated static func manageValidateAccessibleRelativePath");
     expect(terminalWorkspaceSource).toContain("relativePath == manageAnnotationsSidecarRelativePath");
-    expect(terminalWorkspaceSource).toContain('relativePath.hasPrefix("\\(manageArtifactsRelativePath)/")');
+    expect(terminalWorkspaceSource).toContain('relativePath.hasPrefix("\\(manageDocsRelativePath)/")');
     expect(terminalWorkspaceSource).toContain("try manageValidateAccessibleRelativePath(target.relativePath)");
   });
 
@@ -177,6 +229,18 @@ describe("Manage project workarea source", () => {
     /*
      * CDXC:ManageMarkdownEditing 2026-06-27-12:40:
      * Markdown artifacts in Manage should edit and render rich Markdown in one Meo live-editor surface while keeping Ghostex selection annotations, global comments, and structured feedback copy available in the same workarea.
+     *
+     * CDXC:ManageMarkdownAnnotations 2026-06-28-05:24:
+     * Manage owns its annotation selection state from a CodeMirror update listener so multi-line review ranges and caret previews are not limited by Meo's inline formatting menu rules.
+     *
+     * CDXC:ManageMarkdownToolbar 2026-06-28-06:00:
+     * Manage Markdown should mount Meo's editor-native toolbar in the macOS app and use Meo's selection callback only for the switchable formatting toolbar, while annotations still come from Manage's CodeMirror update listener.
+     *
+     * CDXC:ManageMarkdownToolbar 2026-06-28-07:56:
+     * The Live/Source segmented control should visibly mark the selected mode.
+     *
+     * CDXC:ManageMarkdownTheme 2026-06-28-06:00:
+     * The Manage Meo heading token should use #42a5f5.
      */
     expect(manageSource).not.toContain('import ReactMarkdown from "react-markdown"');
     expect(manageSource).not.toContain('import remarkGfm from "remark-gfm"');
@@ -199,15 +263,31 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("manageMeoAnnotationField");
     expect(manageSource).toContain("manageMeoAnnotationEffect");
     expect(manageSource).toContain("createManageMeoAnnotationDecorations");
-    expect(manageSource).toContain("normalizeManageMeoSelection");
+    expect(manageSource).toContain("syncManageMeoAnnotationReviewState");
     expect(manageSource).toContain("createMeoEditor({");
-    expect(manageSource).toContain("externalExtensions: [manageMeoAnnotationField]");
-    expect(manageSource).toContain('initialMode: "live"');
+    expect(manageSource).toContain("externalExtensions: [");
+    expect(manageSource).toContain("manageMeoAnnotationField,");
+    expect(manageSource).toContain("initialMode: currentMode");
+    expect(manageSource).toContain("function ManageMeoTopToolbar");
+    expect(manageSource).toContain("function ManageMeoSelectionFormatToolbar");
+    expect(manageSource).toContain("MeoHeadingIcon");
+    expect(manageSource).toContain("MeoTable2Icon");
+    expect(manageSource).toContain("MeoSearchIcon");
+    expect(manageSource).toContain("mode-toolbar");
+    expect(manageSource).toContain("format-group");
+    expect(manageSource).toContain("mode-group");
+    expect(manageSource).toContain('.manage-meo-markdown-editor .mode-button[aria-selected="true"],');
+    expect(manageSource).toContain("box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.34);");
+    expect(manageSource).toContain('const MANAGE_MEO_HEADING_COLOR = "#42a5f5";');
+    expect(manageSource).toContain("base04: MANAGE_MEO_HEADING_COLOR");
     expect(manageSource).toContain("onApplyChanges");
     expect(manageSource).toContain("onContentChangeRef.current(nextContent)");
     expect(manageSource).toContain("onContentChange={onDraftContentChange}");
     expect(manageSource).toContain("onSelectionClear={clearSelectedText}");
-    expect(manageSource).toContain("onSelectionClearRef.current()");
+    expect(manageSource).toContain("onSelectionToolbarModeChange={setSelectionToolbarMode}");
+    expect(manageSource).toContain('selectionToolbarMode === "formatting"');
+    expect(manageSource).toContain("onSelectionClearRef.current,");
+    expect(manageSource).toContain("onAnnotationPreviewChangeRef.current,");
     expect(manageSource).toContain("function ManageAnnotationToolbar");
     expect(manageSource).toContain("function ManageCommentPopover");
     expect(manageSource).toContain("function ManageAnnotationDropdown");
@@ -239,6 +319,9 @@ describe("Manage project workarea source", () => {
      *
      * CDXC:ManageHtmlAgentation 2026-06-28-02:29:
      * The HTML annotation control is named Annotate, is enabled by default, behaves as a toggle, mounts Agentation directly while enabled, and unmounts it when disabled.
+     *
+     * CDXC:ManageHtmlAgentation 2026-06-28-07:58:
+     * HTML Docs should show Agentation's bottom-left control on open without auto-clicking Start feedback mode, so reading or interacting with the page does not immediately become annotation input.
      */
     expect(manageSource).toContain("function ManageHtmlRenderViewer");
     expect(manageSource).toContain(") : isHtml ? (");
@@ -261,8 +344,11 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("function importManageAgentationModule");
     expect(manageSource).toContain('const MANAGE_AGENTATION_VERSION = "3.0.2";');
     expect(manageSource).toContain("React.createElement(Agentation)");
-    expect(manageSource).toContain('title="Start feedback mode"');
     expect(manageSource).toContain("disableManageAgentation();");
+    expect(manageSource).not.toContain("scheduleManageAgentationAutoActivate");
+    expect(manageSource).not.toContain("activateManageAgentationFeedbackMode");
+    expect(manageSource).not.toContain("findManageAgentationStartButton");
+    expect(manageSource).not.toContain('title="Start feedback mode"');
     expect(manageSource).not.toContain("ghostexManageAgentation");
   });
 
@@ -273,6 +359,9 @@ describe("Manage project workarea source", () => {
      *
      * CDXC:ManageArtifactHeader 2026-06-28-00:13:
      * HTML and Excalidraw files should share Markdown's compact artifact header: the title is the project-relative path, the separate path row is gone, and the header stays one row at the narrower Manage viewport.
+     *
+     * CDXC:ManageMarkdownAnnotations 2026-06-28-06:49:
+     * The Docs annotation dropdown should stay visually above Meo's editor toolbar when it opens from the compact header.
      */
     expect(manageSource).toContain("const isHtml = isHtmlPath(preview.path);");
     expect(manageSource).toContain("const usesCompactArtifactHeader = isMarkdown || isDrawing || isHtml;");
@@ -297,10 +386,10 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("grid-auto-rows: max-content;");
     expect(manageSource).toContain("align-content: start;");
     expect(manageSource).toContain("height: max-content;");
+    expect(manageSource).toContain("z-index: 700;");
     expect(manageSource).not.toContain("manage-markdown-review-topbar");
     expect(manageSource).not.toContain("manage-markdown-review-status");
     expect(manageSource).not.toContain("manage-markdown-annotation-rail");
-    expect(manageSource).not.toContain("IconTrash");
   });
 
   test("uses icon-only colored Markdown selection actions with matching highlights", () => {
@@ -311,6 +400,12 @@ describe("Manage project workarea source", () => {
      *
      * CDXC:ManageMarkdownSelectionToolbar 2026-06-28-01:49:
      * The floating selection toolbar should keep a real left edge margin in Manage, so selecting text at the start of a Markdown line does not pin the toolbar flush against the window edge.
+     *
+     * CDXC:ManageMarkdownAnnotations 2026-06-28-05:24:
+     * Manage Markdown annotations should capture multi-line CodeMirror selections directly, resolve normalized quotes back to raw Markdown ranges for highlights, and show a passive caret preview card above the annotated range when the caret enters saved annotated text.
+     *
+     * CDXC:ManageMarkdownToolbar 2026-06-28-06:00:
+     * The annotation toolbar should include a formatting switch, and formatting mode should show Meo's inline Bold/Italic/Lineover/Code/Link/Wiki/Kbd toolbar with an Annotations switch back.
      */
     const toolbarStart = manageSource.indexOf("function ManageAnnotationToolbar");
     const toolbarEnd = manageSource.indexOf("function ManageCommentPopover", toolbarStart);
@@ -320,6 +415,8 @@ describe("Manage project workarea source", () => {
     expect(toolbarSource).toContain('aria-label="Comment"');
     expect(toolbarSource).toContain('data-tooltip="Comment"');
     expect(toolbarSource).toContain("IconMessagePlus");
+    expect(toolbarSource).toContain('aria-label="Formatting"');
+    expect(toolbarSource).toContain("manageToolbarActionStyle(MANAGE_MEO_HEADING_COLOR)");
     expect(toolbarSource).toContain("renderManageQuickLabelIcon(label.id)");
     expect(toolbarSource).toContain('aria-label="Dismiss"');
     expect(toolbarSource).toContain('data-tooltip="Dismiss"');
@@ -329,6 +426,7 @@ describe("Manage project workarea source", () => {
     expect(toolbarSource).not.toContain("onCopy");
     expect(toolbarSource).not.toContain("onRedline");
     expect(toolbarSource).not.toContain("IconTag");
+    expect(toolbarSource).not.toContain("IconTrash");
     expect(toolbarSource).not.toContain("Copy selection");
     expect(toolbarSource).not.toContain("Mark as deletion");
     expect(manageSource).toContain('const MANAGE_COMMENT_ANNOTATION_COLOR = "#e2b340";');
@@ -339,13 +437,33 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain('color: "#f59e0b"');
     expect(manageSource).toContain('color: "#86efac"');
     expect(manageSource).toContain("const MANAGE_SELECTION_TOOLBAR_EDGE_MARGIN = 18;");
-    expect(manageSource).toContain("const MANAGE_SELECTION_TOOLBAR_WIDTH_ESTIMATE = 190;");
+    expect(manageSource).toContain("const MANAGE_SELECTION_TOOLBAR_WIDTH_ESTIMATE = 228;");
     expect(manageSource).toContain("function clampManageSelectionToolbarLeft");
+    expect(manageSource).toContain("function meoSelectionToolbarPosition");
+    expect(manageSource).toContain("selection-inline-menu is-visible");
+    expect(manageSource).toContain("selection-inline-button manage-selection-inline-mode-button");
+    expect(manageSource).toContain("MeoBoldIcon");
+    expect(manageSource).toContain("MeoItalicIcon");
+    expect(manageSource).toContain("MeoStrikethroughIcon");
+    expect(manageSource).toContain("MeoTerminalIcon");
+    expect(manageSource).toContain("MeoKeyboardIcon");
     expect(manageSource).toContain("max-width: calc(100vw - 36px);");
     expect(manageSource).toContain("data-label-id");
     expect(manageSource).toContain("manageAnnotationColor");
     expect(manageSource).toContain("content: attr(data-tooltip);");
     expect(manageSource).toContain("var(--manage-toolbar-action-color)");
+    expect(manageSource).toContain("EditorView.updateListener.of");
+    expect(manageSource).toContain("syncManageMeoAnnotationReviewState");
+    expect(manageSource).toContain("collectManageAnnotationRanges");
+    expect(manageSource).toContain("findManageAnnotationTextMatches");
+    expect(manageSource).toContain("buildManageNormalizedTextIndex");
+    expect(manageSource).toContain("onAnnotationPreviewChange={setAnnotationPreview}");
+    expect(manageSource).toContain("function ManageAnnotationPreviewCard");
+    expect(manageSource).toContain("annotationPreviewText(annotation)");
+    expect(manageSource).toContain("position >= range.from && position < range.to");
+    expect(manageSource).toContain(".manage-annotation-preview-card");
+    expect(manageSource).toContain("EditorView.updateListener.of");
+    expect(manageSource).toContain("setMeoSelectionState(state?.visible ? state : { visible: false })");
     expect(manageSource).not.toContain("IconTag");
   });
 
@@ -355,7 +473,13 @@ describe("Manage project workarea source", () => {
      * Manage Markdown files should reduce the visual gap between line numbers and editable text by narrowing only the Manage-scoped Meo gutters.
      *
      * CDXC:ManageAnnotationComposer 2026-06-28-01:49:
-     * The anchored comment composer should be a darker rounded panel with one textarea, a top-right close X, an Image action, and a green Submit button.
+     * The anchored comment composer should be a darker rounded panel with one textarea, a top-right close X, and a green Submit button.
+     *
+     * CDXC:ManageAnnotationComposer 2026-06-28-07:56:
+     * The Add global comment composer should render above Meo's toolbar layer when opened from the compact Docs header.
+     *
+     * CDXC:ManageAnnotationComposer 2026-06-28-08:31:
+     * The Image action should stay hidden and commented in source while its picker does not open from the Markdown annotation comment composer.
      */
     expect(manageSource).toContain(".manage-meo-markdown-editor .cm-gutter.cm-lineNumbers");
     expect(manageSource).toContain(".manage-meo-markdown-editor .cm-lineNumbers .cm-gutterElement");
@@ -371,6 +495,7 @@ describe("Manage project workarea source", () => {
     const popoverSource = manageSource.slice(popoverStart, popoverEnd);
     expect(popoverSource).not.toContain("manage-comment-popover-quote");
     expect(popoverSource).toContain('aria-label="Close comment composer"');
+    expect(popoverSource).toContain("The Image action in the Markdown annotation comment composer is hidden");
     expect(popoverSource).toContain("manage-comment-popover-image-button");
     expect(popoverSource).toContain("manage-comment-popover-submit");
     expect(popoverSource).toContain("Submit");
@@ -381,6 +506,7 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain(".manage-comment-popover-close");
     expect(manageSource).toContain(".manage-comment-popover-actions .manage-comment-popover-submit");
     expect(manageSource).toContain("background: rgba(34, 197, 94, 0.18);");
+    expect(manageSource).toContain("z-index: 710;");
   });
 
   test("persists Markdown annotations through a project-scoped sidecar", () => {
@@ -461,6 +587,12 @@ describe("Manage project workarea source", () => {
      *
      * CDXC:ManageDrawings 2026-06-28-01:43:
      * The Manage Excalidraw canvas should use Excalidraw's dark scheme so the drawing surface matches the macOS Manage workarea.
+     *
+     * CDXC:ManageDrawings 2026-06-28-04:56:
+     * Excalidraw dark theme serializes the dark-looking canvas as viewBackgroundColor #ffffff, so Manage should use that value for newly created drawings instead of trying to store #121212.
+     *
+     * CDXC:ManageDrawings 2026-06-28-05:12:
+     * The embedded Excalidraw editor should suppress the macOS WKWebView failure beep for unmodified 1-4 tool shortcuts without blocking Excalidraw's own shortcut handling.
      */
     expect(packageSource).toContain('"@excalidraw/excalidraw"');
     expect(manageSource).toContain('import { Excalidraw } from "@excalidraw/excalidraw"');
@@ -472,8 +604,13 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("hasAcceptedInitialSceneRef");
     expect(manageSource).toContain("previousSceneSignatureRef");
     expect(manageSource).toContain('const MANAGE_EXCALIDRAW_CANVAS_THEME: AppState["theme"] = "dark"');
+    expect(manageSource).toContain('const MANAGE_EXCALIDRAW_CANVAS_BACKGROUND = "#ffffff"');
     expect(manageSource).toContain("theme={MANAGE_EXCALIDRAW_CANVAS_THEME}");
     expect(manageSource).toContain("theme: MANAGE_EXCALIDRAW_CANVAS_THEME");
+    expect(manageSource).toContain("viewBackgroundColor: MANAGE_EXCALIDRAW_CANVAS_BACKGROUND");
+    expect(manageSource).toContain("onKeyDownCapture={suppressManageExcalidrawToolKeyBeep}");
+    expect(manageSource).toContain("function suppressManageExcalidrawToolKeyBeep");
+    expect(manageSource).toContain("/^[1-4]$/u.test(event.key)");
     expect(manageSource).not.toContain('theme="light"');
     expect(manageSource).toContain("return /\\.excalidraw$/iu.test(path);");
     expect(manageSource).toContain('excalidraw: "Excalidraw"');

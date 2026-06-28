@@ -11,6 +11,7 @@ import type {
 import {
   IconAlertTriangle,
   IconCheck,
+  IconChevronRight,
   IconCircleCheck,
   IconCopy,
   IconEdit,
@@ -19,6 +20,7 @@ import {
   IconFileTypeHtml,
   IconFolder,
   IconFolderOpen,
+  IconFolderPlus,
   IconHelpCircle,
   IconLayoutSidebarLeftCollapse,
   IconMarkdown,
@@ -26,12 +28,48 @@ import {
   IconMenu2,
   IconMessagePlus,
   IconMessages,
-  IconPhoto,
+  IconPlus,
   IconRefresh,
   IconSearch,
   IconTestPipe,
+  IconTrash,
   IconX,
 } from "@tabler/icons-react";
+import {
+  Bold as MeoBoldIcon,
+  Brackets as MeoBracketsIcon,
+  CaseSensitive as MeoCaseSensitiveIcon,
+  ChevronDown as MeoChevronDownIcon,
+  ChevronUp as MeoChevronUpIcon,
+  Code as MeoCodeIcon,
+  GitCompare as MeoGitCompareIcon,
+  Hash as MeoHashIcon,
+  Heading as MeoHeadingIcon,
+  Heading1 as MeoHeading1Icon,
+  Heading2 as MeoHeading2Icon,
+  Heading3 as MeoHeading3Icon,
+  Heading4 as MeoHeading4Icon,
+  Heading5 as MeoHeading5Icon,
+  Heading6 as MeoHeading6Icon,
+  Image as MeoImageIcon,
+  Italic as MeoItalicIcon,
+  Keyboard as MeoKeyboardIcon,
+  Link as MeoLinkIcon,
+  List as MeoListIcon,
+  ListOrdered as MeoListOrderedIcon,
+  ListTodo as MeoListTodoIcon,
+  Minus as MeoMinusIcon,
+  PanelLeftRightDashed as MeoPanelLeftRightDashedIcon,
+  Quote as MeoQuoteIcon,
+  Replace as MeoReplaceIcon,
+  ReplaceAll as MeoReplaceAllIcon,
+  Search as MeoSearchIcon,
+  Strikethrough as MeoStrikethroughIcon,
+  Table2 as MeoTable2Icon,
+  Terminal as MeoTerminalIcon,
+  WholeWord as MeoWholeWordIcon,
+  X as MeoXIcon,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -39,12 +77,16 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
+  type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { SidebarContextMenuPortal } from "../../sidebar/sidebar-context-menu-portal";
 import { createEditor as createMeoEditor } from "./meo/editor";
 import { applyThemeSettings as applyMeoThemeSettings } from "./meo/helpers/theme";
 import "./meo/styles.css";
@@ -58,9 +100,28 @@ type ManageFileEntry = {
   size?: number;
 };
 
+type ManageGitBaselineReason =
+  | "binary"
+  | "error"
+  | "git-unavailable"
+  | "ignored"
+  | "not-file"
+  | "not-repo"
+  | "too-large";
+
+type ManageGitBaseline = {
+  available: boolean;
+  baseText?: string | null;
+  headOid?: string | null;
+  maxBytesExceeded?: boolean;
+  reason?: ManageGitBaselineReason;
+  tracked: boolean;
+};
+
 type ManageFilePreview = {
   content?: string;
   error?: string;
+  gitBaseline?: ManageGitBaseline;
   kind: "text" | "unsupported";
   modifiedAt?: string;
   name: string;
@@ -69,8 +130,9 @@ type ManageFilePreview = {
 };
 
 type ManageFilesBridgeRequest = {
-  action: "list" | "read" | "save";
+  action: "list" | "read" | "save" | "rename" | "delete" | "createFolder" | "move";
   content?: string;
+  newPath?: string;
   path?: string;
   projectEditorId: string;
   projectId: string;
@@ -78,7 +140,7 @@ type ManageFilesBridgeRequest = {
 };
 
 type ManageFilesBridgeResponse = {
-  action: "list" | "read" | "save";
+  action: ManageFilesBridgeRequest["action"];
   entries?: ManageFileEntry[];
   error?: string;
   file?: ManageFilePreview;
@@ -133,6 +195,11 @@ type ManageCapturedSelection = {
   text: string;
 };
 
+type ManageAnnotationPreview = {
+  anchor: ManageSelectionAnchor;
+  annotation: ManageAnnotation;
+};
+
 type ManageCommentDraft = {
   anchor: ManageSelectionAnchor;
   attachmentError: string;
@@ -144,6 +211,40 @@ type ManageCommentDraft = {
 type ManageSidebarSide = "left" | "right";
 
 type ManageArtifactKind = "excalidraw" | "html" | "markdown";
+
+type ManageFileContextMenuState = {
+  confirmingDelete?: boolean;
+  path: string;
+  x: number;
+  y: number;
+};
+
+type ManageFileOperationState = {
+  action: "createFolder" | "delete" | "move" | "rename";
+  path: string;
+};
+
+type ManageDragState = {
+  kind: ManageFileEntry["kind"];
+  path: string;
+};
+
+type ManageDropTarget =
+  | {
+      kind: "entry";
+      path: string;
+      targetDirectoryPath: string;
+    }
+  | {
+      kind: "root";
+      path: typeof MANAGE_DOCS_ROOT_PATH;
+    };
+
+type ManageRenameDialogState = {
+  error?: string;
+  path: string;
+  value: string;
+};
 
 type ManageMarkdownAlertKind = "caution" | "important" | "note" | "tip" | "warning";
 
@@ -164,15 +265,43 @@ type ManageMarkdownBlock = {
 };
 
 type ManageMeoEditor = {
+  countMatches?: (query: string, options?: { caseSensitive?: boolean; wholeWord?: boolean }) => number;
   destroy: () => void;
+  findNext?: (
+    query: string,
+    options?: { caseSensitive?: boolean; focusEditor?: boolean; wholeWord?: boolean },
+  ) => { current?: number; found?: boolean; total?: number } | null;
+  findPrevious?: (
+    query: string,
+    options?: { caseSensitive?: boolean; focusEditor?: boolean; wholeWord?: boolean },
+  ) => { current?: number; found?: boolean; total?: number } | null;
   focus: () => void;
   getText: () => string;
+  insertFormat: (action: string, level?: number | { cols?: number; rows?: number }) => void;
   refreshLayout?: () => void;
+  replaceAll?: (
+    query: string,
+    replacement: string,
+    options?: { caseSensitive?: boolean; wholeWord?: boolean },
+  ) => { replaced?: number; total?: number };
+  replaceCurrent?: (
+    query: string,
+    replacement: string,
+    options?: { caseSensitive?: boolean; wholeWord?: boolean },
+  ) => { current?: number; found?: boolean; replaced?: boolean; total?: number };
+  setGitBaseline?: (snapshot?: ManageGitBaseline | null) => void;
+  setGitGutterVisible?: (visible: boolean) => void;
+  setLineNumbers?: (visible: boolean) => void;
+  setMode?: (mode: ManageMeoMode) => void;
+  setSearchQuery?: (query: string, options?: { caseSensitive?: boolean; wholeWord?: boolean }) => void;
   setText: (text: string) => void;
   view: EditorView;
 };
 
+type ManageMeoMode = "live" | "source";
+
 type ManageMeoSelectionState = {
+  align?: "center" | "start";
   anchorBottomY?: number;
   anchorX?: number;
   anchorY?: number;
@@ -181,11 +310,17 @@ type ManageMeoSelectionState = {
   visible?: boolean;
 };
 
+type ManageSelectionToolbarMode = "annotations" | "formatting";
+
 type ManageMeoAnnotationDecoration = {
   from: number;
   labelId?: ManageQuickLabelId;
   to: number;
   type: ManageAnnotationType;
+};
+
+type ManageResolvedAnnotationRange = ManageMeoAnnotationDecoration & {
+  annotation: ManageAnnotation;
 };
 
 type ManageAgentationRoot = {
@@ -194,7 +329,6 @@ type ManageAgentationRoot = {
 };
 
 type ManageAgentationState = {
-  activated?: boolean;
   canceled: boolean;
   container: HTMLElement | null;
   lastError?: {
@@ -230,8 +364,9 @@ type ExcalidrawFileData = {
 };
 
 const MANAGE_FILES_RESPONSE_EVENT = "ghostex-manage-files-response";
+const MANAGE_DRAG_DATA_TYPE = "application/x-ghostex-manage-path";
 const MANAGE_BRIDGE_TIMEOUT_MS = 15_000;
-const MANAGE_ARTIFACT_ROOT_PATH = "artifacts";
+const MANAGE_DOCS_ROOT_PATH = "docs";
 const MANAGE_SELECTION_MAX_LENGTH = 700;
 const MANAGE_ANNOTATIONS_SIDECAR_PATH = ".ghostex/manage-annotations.json";
 const MANAGE_ANNOTATION_SCHEMA_VERSION = 1;
@@ -248,10 +383,10 @@ const MANAGE_SIDEBAR_MAX_WIDTH = 560;
 const MANAGE_SIDEBAR_SIDE_STORAGE_KEY = "ghostex.manage.sidebarSide";
 const MANAGE_SIDEBAR_WIDTH_STORAGE_KEY = "ghostex.manage.sidebarWidth";
 /*
- * CDXC:ManageDrawings 2026-06-28-02:29:
- * Newly created Excalidraw artifacts should start with a #121212 canvas background so the default scene matches the dark Manage workarea. Existing drawings keep their saved viewBackgroundColor because file appState still overrides this default during hydration.
+ * CDXC:ManageDrawings 2026-06-28-04:56:
+ * Manage Excalidraw uses Excalidraw's dark theme, where the visually dark canvas is serialized as viewBackgroundColor #ffffff. Default new drawings to that saved value so created artifacts open with the same dark-looking background users get after choosing a dark canvas inside Excalidraw.
  */
-const MANAGE_EXCALIDRAW_CANVAS_BACKGROUND = "#121212";
+const MANAGE_EXCALIDRAW_CANVAS_BACKGROUND = "#ffffff";
 /*
  * CDXC:ManageDrawings 2026-06-28-01:43:
  * Manage should keep Excalidraw in dark mode so drawings match the macOS app's dark workarea instead of reopening through Excalidraw's light scheme. Apply the theme at the editor boundary so existing files and newly created artifacts render dark.
@@ -261,7 +396,33 @@ const MANAGE_COMMENT_ANNOTATION_COLOR = "#e2b340";
 const MANAGE_REDLINE_ANNOTATION_COLOR = "#fda4af";
 const MANAGE_DISMISS_TOOLBAR_COLOR = "#f87171";
 const MANAGE_SELECTION_TOOLBAR_EDGE_MARGIN = 18;
-const MANAGE_SELECTION_TOOLBAR_WIDTH_ESTIMATE = 190;
+const MANAGE_SELECTION_TOOLBAR_WIDTH_ESTIMATE = 228;
+const MANAGE_MEO_CONTENT_MAX_WIDTH = "800px";
+/*
+ * CDXC:ManageMarkdownToolbar 2026-06-28-06:00:
+ * Manage Markdown should keep Ghostex annotations as the default selection toolbar while letting users switch that floating surface to Meo's inline formatting controls.
+ * The annotation toolbar width estimate includes the formatting switch so first-column selections still keep a real left edge margin.
+ *
+ * CDXC:ManageMarkdownTheme 2026-06-28-06:00:
+ * Markdown headings in Manage's embedded Meo editor should use #42a5f5 instead of the previous red heading token so heading color matches the requested macOS Manage styling.
+ *
+ * CDXC:ManageMarkdownTheme 2026-06-28-06:50:
+ * Inline markdown code in the macOS Docs Project/Manage editor should use a dedicated orange code token instead of the yellow #fde68a token. Override the Meo monospace token directly so warning, frontmatter, and other base07 uses keep their existing yellow affordance.
+ *
+ * CDXC:ManageMarkdownTheme 2026-06-28-06:54:
+ * Variables inside Manage Docs markdown code blocks should render as normal text with #e5e7eb instead of the purple #c084fc token. Override variable-like Meo syntax tokens directly so base08 can still style non-variable purple affordances.
+ *
+ * CDXC:ManageMarkdownTheme 2026-06-28-06:59:
+ * Bash strings in Manage Docs markdown code blocks should stop using the yellow #fde68a token, and multiline bash variables should not keep the purple #c084fc token through alternate highlighter scopes.
+ * Code blocks in the same editor should use #2a2d30 with a 1px border while preserving CodeMirror's line-owned layout.
+ *
+ * CDXC:ManageMarkdownTheme 2026-06-28-07:10:
+ * Inline backtick code in Manage Docs should share the #2a2d30 code-block background and use a lighter orange than the previous #e8912c code token.
+ */
+const MANAGE_MEO_HEADING_COLOR = "#42a5f5";
+const MANAGE_MEO_CODE_COLOR = "#f2b35f";
+const MANAGE_MEO_VARIABLE_COLOR = "#e5e7eb";
+const MANAGE_MEO_CODE_BLOCK_BACKGROUND = "#2a2d30";
 const MANAGE_AGENTATION_VERSION = "3.0.2";
 const MANAGE_AGENTATION_REACT_VERSION = "18.2.0";
 const MANAGE_AGENTATION_PACKAGE_URL =
@@ -280,7 +441,7 @@ const MANAGE_MEO_THEME = {
     base01: "#e5e7eb",
     base02: "#8b949e",
     base03: "#30363d",
-    base04: "#f87171",
+    base04: MANAGE_MEO_HEADING_COLOR,
     base05: "#7dd3fc",
     base06: "#67e8f9",
     base07: "#fde68a",
@@ -310,8 +471,19 @@ const MANAGE_MEO_THEME = {
     sourceLineHeight: 1.55,
   },
   id: "ghostex-manage-meo",
-  name: "Ghostex Manage Meo",
-  syntaxTokens: {},
+  name: "Ghostex Docs Meo",
+  syntaxTokens: {
+    atom: MANAGE_MEO_VARIABLE_COLOR,
+    bool: MANAGE_MEO_VARIABLE_COLOR,
+    constant: MANAGE_MEO_VARIABLE_COLOR,
+    definedVariable: MANAGE_MEO_VARIABLE_COLOR,
+    monospace: MANAGE_MEO_CODE_COLOR,
+    regexp: MANAGE_MEO_VARIABLE_COLOR,
+    specialVariable: MANAGE_MEO_VARIABLE_COLOR,
+    specialString: MANAGE_MEO_VARIABLE_COLOR,
+    string: MANAGE_MEO_VARIABLE_COLOR,
+    variableName: MANAGE_MEO_VARIABLE_COLOR,
+  },
 };
 const manageMeoAnnotationEffect = StateEffect.define<ManageMeoAnnotationDecoration[]>();
 
@@ -379,7 +551,14 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  *
  * CDXC:ManageHtmlAgentation 2026-06-28-02:29:
  * The control is named Annotate, behaves as a toggle, and defaults on for HTML artifacts.
- * When enabled, Manage mounts the Agentation React component directly into the same rendered HTML document and auto-enters feedback mode; when disabled, Manage unmounts it so no annotation overlay remains.
+ * When enabled, Manage mounts the Agentation React component directly into the same rendered HTML document; when disabled, Manage unmounts it so no annotation overlay remains.
+ *
+ * CDXC:ManageHtmlAgentation 2026-06-28-07:58:
+ * Opening an HTML Docs page should show Agentation's bottom-left control but must not auto-enter feedback mode because immediate activation steals mouse focus from users who only want to read or interact with the page.
+ *
+ * CDXC:ManageDefaultHtml 2026-06-28-07:17:
+ * New HTML Docs files should start with a dark Ghostex-styled onboarding page that explains how to ask an agent for an explanatory HTML document and how to use Agentation to annotate the rendered result.
+ * Manage renders sanitized same-document HTML for Agentation and removes style tags, so the starter document uses inline styles and no scripts while the renderer keeps an app-themed dark baseline for unstyled pages.
  *
  * CDXC:ManageMarkdownSelectionToolbar 2026-06-27-22:41:
  * The floating Markdown selection toolbar should be icon-only: remove Copy/Delete, keep Comment plus quick labels and Dismiss, show hover tooltips, and color each annotation action to match the highlight it writes into the selected text.
@@ -389,16 +568,39 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * The floating selection toolbar should stay visually inset from the Manage window edge even when the selected text starts at the first column.
  * Clamp the centered toolbar by its real compact width so it does not sit flush against the left side.
  *
+ * CDXC:ManageMarkdownToolbar 2026-06-28-06:00:
+ * Markdown Manage in the macOS app should expose Meo's editor-native formatting toolbar and Meo's inline formatting selection toolbar while keeping Ghostex annotation actions active in the same editor.
+ * Selected text opens the annotation toolbar by default, and the floating toolbar provides an explicit switch between annotation actions and formatting actions.
+ *
+ * CDXC:ManageMarkdownToolbar 2026-06-28-07:56:
+ * The Live/Source segmented control must make the selected mode visually explicit. Manage overrides Meo's neutral active state with a tinted fill and inset outline while keeping the copied toolbar's stable button dimensions.
+ *
+ * CDXC:ManageMarkdownTheme 2026-06-28-06:00:
+ * Manage Markdown headings should use #42a5f5 for the Meo heading token instead of the previous red heading color.
+ *
+ * CDXC:ManageMarkdownGitGutter 2026-06-28-06:17:
+ * Markdown artifacts should show Meo's Git changes gutter in the same live editor surface by comparing the current editor text with the file's Git HEAD baseline. Native supplies only the Meo-compatible baseline fields needed for rendering so repo roots and Git paths do not cross into the bundled WK page.
+ *
  * CDXC:ManageMarkdownEditing 2026-06-28-01:49:
  * Markdown editing should keep the line-number gutter tight in Manage.
- * Scope the gutter width and content padding overrides to Manage's Meo wrapper so the gap between line numbers and text is minimal without changing the shared Meo editor.
+ * Scope the gutter width and content padding overrides to Manage's Meo wrapper so the gap between line numbers, Meo's 3px Git gutter, and text is minimal without changing the shared Meo editor.
  *
  * CDXC:ManageAnnotationComposer 2026-06-28-01:49:
  * The anchored comment composer should feel like a compact dark panel: show only the note textarea, close from a top-right X, keep image upload as a plain action button, and submit with a green Submit button instead of a Cancel/Comment action row.
  *
+ * CDXC:ManageAnnotationComposer 2026-06-28-07:56:
+ * The Add global comment composer opens from the compact Docs header and must render above Meo's copied toolbar layer, matching the annotation dropdown's overlay ownership instead of being hidden behind editor chrome.
+ *
  * CDXC:ManageMarkdownAnnotations 2026-06-27-22:52:
  * The annotation list should open as a top-row dropdown instead of occupying a persistent sidebar.
  * Keep cards compact, color their background from the annotation type or quick-label color, avoid repeating quick-label text as body copy, and show the remove X only while hovering or focusing the card.
+ *
+ * CDXC:ManageMarkdownAnnotations 2026-06-28-05:24:
+ * Manage Markdown annotations must accept selections that span multiple rendered lines and still resolve their normalized quote back onto the raw Markdown text.
+ * When the caret rests inside an existing annotated range, show a passive floating card above the full annotated range with a short preview of the saved comment so users can recover annotation context without opening the dropdown.
+ *
+ * CDXC:ManageMarkdownAnnotations 2026-06-28-06:49:
+ * The Docs annotation dropdown opens from the compact file header and must render above Meo's copied toolbar layer. Keep the dropdown owned by the header action but give it a higher stack level than Meo's z-index 500 toolbar so the menu is not hidden until below the editor toolbar.
  *
  * CDXC:ManageDrawings 2026-06-20-06:14:
  * .excalidraw files should open as editable drawings instead of raw JSON. Use the upstream Excalidraw component for canvas behavior, serialize full scene JSON through the normal Manage save bridge, and keep invalid drawings editable as source text so users can repair them.
@@ -413,10 +615,34 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * Manage's file-sidebar refresh control is an overflow menu with Refresh and Switch sidebar side actions. A separate adjacent icon hides the file sidebar, and the editor area provides a small restore affordance so hiding is reversible.
  *
  * CDXC:ManageArtifacts 2026-06-26-13:59:
- * Manage is an artifacts-focused project surface. Keep first-class sidebar actions for new Markdown, HTML, and Excalidraw files, create them under the active project's artifacts/ directory, and immediately open the created file in the Manage preview/editor.
+ * Manage started as an artifacts-focused project surface with first-class sidebar actions for new Markdown, HTML, and Excalidraw files.
+ *
+ * CDXC:Docs 2026-06-28-06:24:
+ * The Manage-backed surface is user-facing Docs and reads/writes project
+ * documents under ./docs. New Markdown, HTML, and Excalidraw documents should
+ * be created in that docs root instead of the previous artifacts root.
+ *
+ * CDXC:ManageFileActions 2026-06-28-04:35:
+ * Users need to right-click files in the Manage sidebar and rename or delete them from a context menu. Keep the menu file-scoped, require a second destructive click before delete, preserve annotations across rename, and send only project-relative paths through the native bridge.
  *
  * CDXC:ManageSidebar 2026-06-26-23:14:
  * The Manage file sidebar needs a visible resizer so users can widen the artifacts tree on either sidebar side without overlapping the preview/editor. Persist the width locally and clamp it to the current workarea so the preview keeps usable space.
+ *
+ * CDXC:ManageSidebar 2026-06-28-05:18:
+ * The Manage artifact sidebar should visually match Ghostex's left reference sidebar: use the same near-black surface, muted section hierarchy, borderless navigation-style controls, larger lightweight rows, and neutral selected-row chrome instead of boxed blue file-list styling.
+ *
+ * CDXC:ManageFolders 2026-06-28-06:39:
+ * The Docs sidebar needs first-class folders: users can create folders, collapse or expand folder rows, and drag files or folders into another folder or back to the docs root. Keep the drag feedback aligned with the main sidebar by dimming the dragged row, using the same neutral insertion-line treatment for root drops, and using a dark row target for folder drops.
+ *
+ * CDXC:ManageFolders 2026-06-28-07:02:
+ * Native preserves a flat listing order that protects root docs from nested-folder entry caps, but the UI must render that data as a real tree. Reorder entries in the web layer so each folder's children appear directly below their parent before applying collapsed-folder filtering.
+ *
+ * CDXC:ManageCreateMenu 2026-06-28-07:04:
+ * The Docs sidebar create actions should live behind one header plus button instead of consuming a permanent four-button row below the project title. Keep Folder, Markdown, HTML, and Draw as menu items so the left sidebar starts with Search and file content after the header.
+ *
+ * CDXC:ManageFolders 2026-06-28-07:12:
+ * Dragging over a file row should target that row's containing folder, and dragging over a root-level file should target docs/ so users can move items out of folders without needing blank sidebar space.
+ * File rows should not show file size badges; the selected file metadata belongs in a sidebar toolbar that mirrors the main sidebar's quiet title/meta hierarchy.
  */
 function ManageApp() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -442,7 +668,14 @@ function ManageApp() {
   const [sidebarSide, setSidebarSide] = useState<ManageSidebarSide>(() => readStoredManageSidebarSide());
   const [sidebarWidth, setSidebarWidth] = useState(() => readStoredManageSidebarWidth());
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [collapsedDirectoryPaths, setCollapsedDirectoryPaths] = useState<Set<string>>(() => new Set());
   const [creatingArtifactKind, setCreatingArtifactKind] = useState<ManageArtifactKind>();
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [fileContextMenu, setFileContextMenu] = useState<ManageFileContextMenuState>();
+  const [fileOperation, setFileOperation] = useState<ManageFileOperationState>();
+  const [renameDialog, setRenameDialog] = useState<ManageRenameDialogState>();
+  const [dragState, setDragState] = useState<ManageDragState>();
+  const [dropTarget, setDropTarget] = useState<ManageDropTarget>();
   const shellRef = useRef<HTMLElement | null>(null);
   const annotationsLoadedRef = useRef(false);
   const annotationsSaveTimerRef = useRef<number | undefined>(undefined);
@@ -619,6 +852,21 @@ function ManageApp() {
     setSidebarSide((current) => (current === "left" ? "right" : "left"));
   }, []);
 
+  const dismissFileContextMenu = useCallback(() => {
+    setFileContextMenu(undefined);
+  }, []);
+
+  const openFileContextMenu = useCallback((entry: ManageFileEntry, point: { x: number; y: number }) => {
+    if (entry.kind !== "file") {
+      return;
+    }
+    setFileContextMenu({
+      path: entry.path,
+      x: point.x,
+      y: point.y,
+    });
+  }, []);
+
   const updateSidebarWidthFromClientX = useCallback(
     (clientX: number) => {
       const shellRect = shellRef.current?.getBoundingClientRect();
@@ -738,7 +986,7 @@ function ManageApp() {
       }
       const savedFile = response.file;
       if (!savedFile) {
-        throw new Error("Manage did not return saved file metadata.");
+        throw new Error("Docs did not return saved file metadata.");
       }
       const savedContent = savedFile.content ?? content;
       /*
@@ -814,7 +1062,7 @@ function ManageApp() {
 
   const createArtifactFile = useCallback(
     async (kind: ManageArtifactKind) => {
-      if (creatingArtifactKind) {
+      if (creatingArtifactKind || isCreatingFolder) {
         return;
       }
       const path = createUniqueArtifactPath(entries, kind);
@@ -835,7 +1083,7 @@ function ManageApp() {
         }
         const createdFile = response.file;
         if (!createdFile) {
-          throw new Error("Manage did not return created file metadata.");
+          throw new Error("Docs did not return created file metadata.");
         }
         selectedPathRef.current = createdFile.path;
         setSelectedPath(createdFile.path);
@@ -855,13 +1103,407 @@ function ManageApp() {
         await refreshFiles();
       } catch (createError) {
         setSaveState("error");
-        setError(createError instanceof Error ? createError.message : "Could not create artifact.");
+        setError(createError instanceof Error ? createError.message : "Could not create document.");
       } finally {
         setCreatingArtifactKind(undefined);
       }
     },
-    [creatingArtifactKind, entries, projectEditorId, projectId, refreshFiles],
+    [creatingArtifactKind, entries, isCreatingFolder, projectEditorId, projectId, refreshFiles],
   );
+
+  const createFolder = useCallback(async () => {
+    if (creatingArtifactKind || isCreatingFolder) {
+      return;
+    }
+    const path = createUniqueFolderPath(entries);
+    setIsCreatingFolder(true);
+    setFileOperation({ action: "createFolder", path });
+    setError(undefined);
+    try {
+      const response = await requestManageFiles({
+        action: "createFolder",
+        path,
+        projectEditorId,
+        projectId,
+      });
+      if (response.error) {
+        throw new Error(response.error);
+      }
+      setCollapsedDirectoryPaths((current) => {
+        const next = new Set(current);
+        next.delete(path);
+        next.delete(parentManagePath(path));
+        return next;
+      });
+      await refreshFiles();
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Could not create folder.");
+    } finally {
+      setIsCreatingFolder(false);
+      setFileOperation((current) =>
+        current?.action === "createFolder" && current.path === path ? undefined : current,
+      );
+    }
+  }, [creatingArtifactKind, entries, isCreatingFolder, projectEditorId, projectId, refreshFiles]);
+
+  const clearPendingContentAutosave = useCallback(() => {
+    if (contentAutosaveTimerRef.current !== undefined) {
+      window.clearTimeout(contentAutosaveTimerRef.current);
+      contentAutosaveTimerRef.current = undefined;
+    }
+  }, []);
+
+  const startRenameFile = useCallback((entry: ManageFileEntry) => {
+    if (entry.kind !== "file") {
+      return;
+    }
+    setFileContextMenu(undefined);
+    setRenameDialog({
+      path: entry.path,
+      value: entry.name,
+    });
+  }, []);
+
+  const renameFile = useCallback(
+    async (path: string, nextNameInput: string) => {
+      const currentEntry = entries.find((entry) => entry.kind === "file" && entry.path === path);
+      if (!currentEntry) {
+        setRenameDialog((current) =>
+          current?.path === path ? { ...current, error: "This file is no longer available." } : current,
+        );
+        return;
+      }
+      const nextName = nextNameInput.trim();
+      const validationError = validateManageRenameFileName(nextName);
+      if (validationError) {
+        setRenameDialog((current) =>
+          current?.path === path ? { ...current, error: validationError } : current,
+        );
+        return;
+      }
+      const nextPath = renameManageFilePath(path, nextName);
+      if (nextPath === path) {
+        setRenameDialog(undefined);
+        return;
+      }
+      if (
+        entries.some(
+          (entry) =>
+            entry.path !== path &&
+            entry.path.toLocaleLowerCase() === nextPath.toLocaleLowerCase(),
+        )
+      ) {
+        setRenameDialog((current) =>
+          current?.path === path ? { ...current, error: "A file with that name already exists." } : current,
+        );
+        return;
+      }
+      if (selectedPathRef.current === path && saveState === "saving") {
+        setRenameDialog((current) =>
+          current?.path === path
+            ? { ...current, error: "Wait for the current save to finish before renaming." }
+            : current,
+        );
+        return;
+      }
+      setFileOperation({ action: "rename", path });
+      setError(undefined);
+      try {
+        if (selectedPathRef.current === path && isDirty) {
+          clearPendingContentAutosave();
+        }
+        const response = await requestManageFiles({
+          action: "rename",
+          newPath: nextPath,
+          path,
+          projectEditorId,
+          projectId,
+        });
+        if (response.error) {
+          throw new Error(response.error);
+        }
+        const renamedFile = response.file;
+        if (!renamedFile) {
+          throw new Error("Docs did not return renamed file metadata.");
+        }
+        if (selectedPathRef.current === path) {
+          selectedPathRef.current = renamedFile.path;
+          setSelectedPath(renamedFile.path);
+          setPreview(renamedFile);
+          const savedContent = renamedFile.content ?? "";
+          const nextContent = isDirty ? draftContent : savedContent;
+          setDraftContent(nextContent);
+          setLastSavedContent(savedContent);
+          setPreviewState("ready");
+          setSaveState("idle");
+        }
+        setAnnotationsByPath((current) => {
+          const renamedAnnotations = current[path];
+          if (!renamedAnnotations?.length) {
+            return current;
+          }
+          const { [path]: _removed, ...remaining } = current;
+          return {
+            ...remaining,
+            [renamedFile.path]: [...(remaining[renamedFile.path] ?? []), ...renamedAnnotations],
+          };
+        });
+        setRenameDialog(undefined);
+        await refreshFiles();
+      } catch (renameError) {
+        const message = renameError instanceof Error ? renameError.message : "Could not rename file.";
+        setRenameDialog((current) => (current?.path === path ? { ...current, error: message } : current));
+        setError(message);
+      } finally {
+        setFileOperation((current) =>
+          current?.action === "rename" && current.path === path ? undefined : current,
+        );
+      }
+    },
+    [
+      clearPendingContentAutosave,
+      draftContent,
+      entries,
+      isDirty,
+      projectEditorId,
+      projectId,
+      refreshFiles,
+      saveState,
+    ],
+  );
+
+  const deleteFile = useCallback(
+    async (path: string) => {
+      const currentEntry = entries.find((entry) => entry.kind === "file" && entry.path === path);
+      if (!currentEntry || fileOperation) {
+        return;
+      }
+      setFileOperation({ action: "delete", path });
+      setError(undefined);
+      if (selectedPathRef.current === path) {
+        clearPendingContentAutosave();
+      }
+      try {
+        const response = await requestManageFiles({
+          action: "delete",
+          path,
+          projectEditorId,
+          projectId,
+        });
+        if (response.error) {
+          throw new Error(response.error);
+        }
+        setAnnotationsByPath((current) => {
+          if (!current[path]?.length) {
+            return current;
+          }
+          const { [path]: _removed, ...remaining } = current;
+          return remaining;
+        });
+        setFileContextMenu(undefined);
+        if (selectedPathRef.current === path) {
+          selectedPathRef.current = undefined;
+          setSelectedPath(undefined);
+          setPreview(undefined);
+          setDraftContent("");
+          setLastSavedContent("");
+          setPreviewState("idle");
+          setSaveState("idle");
+        }
+        await refreshFiles();
+      } catch (deleteError) {
+        setError(deleteError instanceof Error ? deleteError.message : "Could not delete file.");
+      } finally {
+        setFileOperation((current) =>
+          current?.action === "delete" && current.path === path ? undefined : current,
+        );
+      }
+    },
+    [clearPendingContentAutosave, entries, fileOperation, projectEditorId, projectId, refreshFiles],
+  );
+
+  const moveEntryToDirectory = useCallback(
+    async (entry: ManageFileEntry, targetDirectoryPath: string) => {
+      if (fileOperation) {
+        return;
+      }
+      const nextPath = moveManagePathToDirectory(entry.path, targetDirectoryPath);
+      if (!nextPath || nextPath === entry.path) {
+        return;
+      }
+      if (
+        entries.some(
+          (candidate) =>
+            candidate.path !== entry.path &&
+            candidate.path.toLocaleLowerCase() === nextPath.toLocaleLowerCase(),
+        )
+      ) {
+        setError("A file or folder with that name already exists.");
+        return;
+      }
+      const selectedPathBeforeMove = selectedPathRef.current;
+      const movedSelectedPath =
+        selectedPathBeforeMove && remapManagePathByMove(selectedPathBeforeMove, entry.path, nextPath);
+      if (movedSelectedPath && (isDirty || saveState === "saving")) {
+        setError("Save the current file before moving it.");
+        return;
+      }
+      setFileOperation({ action: "move", path: entry.path });
+      setDropTarget(undefined);
+      setError(undefined);
+      try {
+        const response = await requestManageFiles({
+          action: "move",
+          newPath: nextPath,
+          path: entry.path,
+          projectEditorId,
+          projectId,
+        });
+        if (response.error) {
+          throw new Error(response.error);
+        }
+        setAnnotationsByPath((current) => remapManageAnnotationPathsForMove(current, entry.path, nextPath));
+        setCollapsedDirectoryPaths((current) => remapManagePathSetForMove(current, entry.path, nextPath));
+        if (movedSelectedPath) {
+          selectedPathRef.current = movedSelectedPath;
+          setSelectedPath(movedSelectedPath);
+        }
+        await refreshFiles();
+        if (movedSelectedPath) {
+          await readFile(movedSelectedPath);
+        }
+      } catch (moveError) {
+        setError(moveError instanceof Error ? moveError.message : "Could not move item.");
+      } finally {
+        setFileOperation((current) =>
+          current?.action === "move" && current.path === entry.path ? undefined : current,
+        );
+      }
+    },
+    [entries, fileOperation, isDirty, projectEditorId, projectId, readFile, refreshFiles, saveState],
+  );
+
+  const submitRenameDialog = useCallback(() => {
+    if (!renameDialog) {
+      return;
+    }
+    void renameFile(renameDialog.path, renameDialog.value);
+  }, [renameDialog, renameFile]);
+
+  const toggleDirectory = useCallback((path: string) => {
+    setCollapsedDirectoryPaths((current) => {
+      const next = new Set(current);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearDragState = useCallback(() => {
+    setDragState(undefined);
+    setDropTarget(undefined);
+  }, []);
+
+  const startEntryDrag = useCallback((entry: ManageFileEntry, event: ReactDragEvent<HTMLButtonElement>) => {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(MANAGE_DRAG_DATA_TYPE, entry.path);
+    event.dataTransfer.setData("text/plain", entry.path);
+    setDragState({ kind: entry.kind, path: entry.path });
+    setDropTarget(undefined);
+  }, []);
+
+  const dragEntry = useMemo(
+    () => (dragState ? entries.find((entry) => entry.path === dragState.path) : undefined),
+    [dragState, entries],
+  );
+
+  const updateEntryDropTarget = useCallback(
+    (entry: ManageFileEntry, event: ReactDragEvent<HTMLButtonElement>) => {
+      const targetDirectoryPath = dropDirectoryPathForManageEntry(entry);
+      if (
+        !dragEntry ||
+        !targetDirectoryPath ||
+        !canMoveManageEntryToDirectory(dragEntry, targetDirectoryPath, entries)
+      ) {
+        if (dragEntry) {
+          setDropTarget(undefined);
+        }
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "move";
+      setDropTarget({ kind: "entry", path: entry.path, targetDirectoryPath });
+    },
+    [dragEntry, entries],
+  );
+
+  const dropOnEntry = useCallback(
+    (entry: ManageFileEntry, event: ReactDragEvent<HTMLButtonElement>) => {
+      const targetDirectoryPath = dropDirectoryPathForManageEntry(entry);
+      if (
+        !dragEntry ||
+        !targetDirectoryPath ||
+        !canMoveManageEntryToDirectory(dragEntry, targetDirectoryPath, entries)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      clearDragState();
+      void moveEntryToDirectory(dragEntry, targetDirectoryPath);
+    },
+    [clearDragState, dragEntry, entries, moveEntryToDirectory],
+  );
+
+  const updateRootDropTarget = useCallback(
+    (event: ReactDragEvent<HTMLElement>) => {
+      if (!dragEntry) {
+        return;
+      }
+      const target = event.target;
+      if (target instanceof Element && target.closest(".manage-file-row")) {
+        return;
+      }
+      if (!canMoveManageEntryToDirectory(dragEntry, MANAGE_DOCS_ROOT_PATH, entries)) {
+        return;
+      }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      setDropTarget({ kind: "root", path: MANAGE_DOCS_ROOT_PATH });
+    },
+    [dragEntry, entries],
+  );
+
+  const dropOnRoot = useCallback(
+    (event: ReactDragEvent<HTMLElement>) => {
+      if (!dragEntry || dropTarget?.kind !== "root") {
+        return;
+      }
+      const target = event.target;
+      if (target instanceof Element && target.closest(".manage-file-row")) {
+        return;
+      }
+      if (!canMoveManageEntryToDirectory(dragEntry, MANAGE_DOCS_ROOT_PATH, entries)) {
+        return;
+      }
+      event.preventDefault();
+      clearDragState();
+      void moveEntryToDirectory(dragEntry, MANAGE_DOCS_ROOT_PATH);
+    },
+    [clearDragState, dragEntry, dropTarget, entries, moveEntryToDirectory],
+  );
+
+  const handleSidebarDragLeave = useCallback((event: ReactDragEvent<HTMLElement>) => {
+    const relatedTarget = event.relatedTarget;
+    if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) {
+      return;
+    }
+    setDropTarget(undefined);
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -877,18 +1519,46 @@ function ManageApp() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isDirty, saveFile, selectedPath]);
 
+  const directoryPathsWithChildren = useMemo(() => {
+    const paths = new Set<string>();
+    for (const entry of entries) {
+      const parentPath = parentManagePath(entry.path);
+      if (parentPath) {
+        paths.add(parentPath);
+      }
+    }
+    return paths;
+  }, [entries]);
+
+  const treeOrderedEntries = useMemo(() => orderManageEntriesForTree(entries), [entries]);
+  const selectedSidebarFile = useMemo(
+    () => (selectedPath ? entries.find((entry) => entry.kind === "file" && entry.path === selectedPath) : undefined),
+    [entries, selectedPath],
+  );
+
   const visibleEntries = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     if (!normalizedQuery) {
-      return entries;
+      return treeOrderedEntries.filter((entry) => !hasCollapsedManageAncestor(entry.path, collapsedDirectoryPaths));
     }
-    return entries.filter((entry) => entry.path.toLocaleLowerCase().includes(normalizedQuery));
-  }, [entries, query]);
+    return treeOrderedEntries.filter((entry) => entry.path.toLocaleLowerCase().includes(normalizedQuery));
+  }, [collapsedDirectoryPaths, query, treeOrderedEntries]);
 
   const filesCount = useMemo(
     () => entries.filter((entry) => entry.kind === "file").length,
     [entries],
   );
+  const contextMenuEntry = fileContextMenu
+    ? entries.find((entry) => entry.kind === "file" && entry.path === fileContextMenu.path)
+    : undefined;
+  const contextMenuOperation =
+    contextMenuEntry && fileOperation?.path === contextMenuEntry.path ? fileOperation.action : undefined;
+
+  useEffect(() => {
+    if (fileContextMenu && !entries.some((entry) => entry.kind === "file" && entry.path === fileContextMenu.path)) {
+      setFileContextMenu(undefined);
+    }
+  }, [entries, fileContextMenu]);
 
   const updateAnnotationsForSelectedFile = useCallback(
     (updater: (annotations: ManageAnnotation[]) => ManageAnnotation[]) => {
@@ -919,24 +1589,33 @@ function ManageApp() {
       style={{ "--manage-sidebar-width": `${sidebarWidth}px` } as CSSProperties}
     >
       {!sidebarHidden ? (
-        <aside className="manage-sidebar">
-          <div className="manage-sidebar-header">
+        <aside
+          className="manage-sidebar"
+          data-drag-active={String(Boolean(dragEntry))}
+          onDragLeave={handleSidebarDragLeave}
+          onDragOver={updateRootDropTarget}
+          onDrop={dropOnRoot}
+        >
+          <div
+            className="manage-sidebar-header"
+            data-root-drop-target={String(dropTarget?.kind === "root")}
+          >
             <div className="manage-project-title">
               <IconFolderOpen aria-hidden="true" size={17} stroke={1.8} />
               <span>{rootName}</span>
             </div>
             <ManageSidebarActions
+              creatingKind={creatingArtifactKind}
               isRefreshing={listState === "loading"}
+              isCreatingFolder={isCreatingFolder}
+              onCreate={(kind) => void createArtifactFile(kind)}
+              onCreateFolder={() => void createFolder()}
               onHideSidebar={() => setSidebarHidden(true)}
               onRefresh={() => void refreshFiles()}
               onSwitchSide={switchSidebarSide}
               sidebarSide={sidebarSide}
             />
           </div>
-          <ManageArtifactCreateButtons
-            creatingKind={creatingArtifactKind}
-            onCreate={(kind) => void createArtifactFile(kind)}
-          />
           <label className="manage-search">
             <IconSearch aria-hidden="true" size={15} stroke={1.8} />
             <input
@@ -950,7 +1629,12 @@ function ManageApp() {
             {filesCount} files
             {entries.length >= 1_200 ? " · capped" : ""}
           </div>
-          <div className="manage-file-list" role="tree">
+          <ManageSidebarFileToolbar entry={selectedSidebarFile} preview={preview} />
+          <div
+            className="manage-file-list"
+            data-root-drop-target={String(dropTarget?.kind === "root")}
+            role="tree"
+          >
             {listState === "loading" && entries.length === 0 ? (
               <ManageEmptyState icon={<IconRefresh aria-hidden="true" size={18} />} text="Loading files" />
             ) : null}
@@ -960,12 +1644,26 @@ function ManageApp() {
             {visibleEntries.map((entry) => (
               <ManageFileRow
                 annotationCount={annotationCountsByPath.get(entry.path) ?? 0}
+                isContextMenuOpen={fileContextMenu?.path === entry.path}
+                hasChildren={directoryPathsWithChildren.has(entry.path)}
                 entry={entry}
+                isDragging={dragState?.path === entry.path}
+                isDropTarget={dropTarget?.kind === "entry" && dropTarget.path === entry.path}
+                isExpanded={!collapsedDirectoryPaths.has(entry.path)}
                 isSelected={entry.path === selectedPath}
                 key={entry.path}
+                onEntryDragOver={updateEntryDropTarget}
+                onEntryDrop={dropOnEntry}
+                onDragEnd={clearDragState}
+                onDragStart={startEntryDrag}
+                onOpenContextMenu={openFileContextMenu}
                 onSelect={() => {
                   if (entry.kind === "file") {
                     void readFile(entry.path);
+                    return;
+                  }
+                  if (entry.kind === "directory" && directoryPathsWithChildren.has(entry.path)) {
+                    toggleDirectory(entry.path);
                   }
                 }}
               />
@@ -1016,73 +1714,76 @@ function ManageApp() {
           selectedPath={selectedPath}
         />
       </section>
+      {fileContextMenu && contextMenuEntry ? (
+        <ManageFileContextMenu
+          confirmingDelete={fileContextMenu.confirmingDelete === true}
+          onDelete={() => {
+            if (!fileContextMenu.confirmingDelete) {
+              setFileContextMenu((current) =>
+                current?.path === contextMenuEntry.path
+                  ? {
+                      ...current,
+                      confirmingDelete: true,
+                    }
+                  : current,
+              );
+              return;
+            }
+            void deleteFile(contextMenuEntry.path);
+          }}
+          onDismiss={dismissFileContextMenu}
+          onRename={() => startRenameFile(contextMenuEntry)}
+          pendingAction={contextMenuOperation}
+          position={fileContextMenu}
+        />
+      ) : null}
+      {renameDialog ? (
+        <ManageRenameDialog
+          error={renameDialog.error}
+          isRenaming={fileOperation?.action === "rename" && fileOperation.path === renameDialog.path}
+          onCancel={() => setRenameDialog(undefined)}
+          onChange={(value) =>
+            setRenameDialog((current) =>
+              current ? { ...current, error: undefined, value } : current,
+            )
+          }
+          onSubmit={submitRenameDialog}
+          value={renameDialog.value}
+        />
+      ) : null}
     </main>
   );
 }
 
-function ManageArtifactCreateButtons({
-  creatingKind,
-  onCreate,
-}: {
-  creatingKind?: ManageArtifactKind;
-  onCreate: (kind: ManageArtifactKind) => void;
-}) {
-  const isCreating = Boolean(creatingKind);
-  return (
-    <div className="manage-artifact-create" aria-label="Create artifact">
-      <button
-        className="manage-artifact-create-button"
-        disabled={isCreating}
-        onClick={() => onCreate("markdown")}
-        title="New Markdown artifact"
-        type="button"
-      >
-        <IconMarkdown aria-hidden="true" size={15} stroke={1.85} />
-        <span>{creatingKind === "markdown" ? "..." : "MD"}</span>
-      </button>
-      <button
-        className="manage-artifact-create-button"
-        disabled={isCreating}
-        onClick={() => onCreate("html")}
-        title="New HTML artifact"
-        type="button"
-      >
-        <IconFileTypeHtml aria-hidden="true" size={15} stroke={1.85} />
-        <span>{creatingKind === "html" ? "..." : "HTML"}</span>
-      </button>
-      <button
-        className="manage-artifact-create-button"
-        disabled={isCreating}
-        onClick={() => onCreate("excalidraw")}
-        title="New Excalidraw artifact"
-        type="button"
-      >
-        <IconEdit aria-hidden="true" size={15} stroke={1.85} />
-        <span>{creatingKind === "excalidraw" ? "..." : "Draw"}</span>
-      </button>
-    </div>
-  );
-}
-
 function ManageSidebarActions({
+  creatingKind,
   isRefreshing,
+  isCreatingFolder,
+  onCreate,
+  onCreateFolder,
   onHideSidebar,
   onRefresh,
   onSwitchSide,
   sidebarSide,
 }: {
+  creatingKind?: ManageArtifactKind;
   isRefreshing: boolean;
+  isCreatingFolder: boolean;
+  onCreate: (kind: ManageArtifactKind) => void;
+  onCreateFolder: () => void;
   onHideSidebar: () => void;
   onRefresh: () => void;
   onSwitchSide: () => void;
   sidebarSide: ManageSidebarSide;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const HideSidebarIcon = sidebarSide === "right" ? IconLayoutSidebarRightCollapse : IconLayoutSidebarLeftCollapse;
+  const isCreating = Boolean(creatingKind) || isCreatingFolder;
 
   useEffect(() => {
-    if (!menuOpen) {
+    if (!menuOpen && !createMenuOpen) {
       return;
     }
     const handlePointerDown = (event: PointerEvent) => {
@@ -1091,10 +1792,12 @@ function ManageSidebarActions({
         return;
       }
       setMenuOpen(false);
+      setCreateMenuOpen(false);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setMenuOpen(false);
+        setCreateMenuOpen(false);
       }
     };
     window.addEventListener("pointerdown", handlePointerDown);
@@ -1103,15 +1806,35 @@ function ManageSidebarActions({
       window.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [menuOpen]);
+  }, [createMenuOpen, menuOpen]);
 
   const runMenuAction = (action: () => void) => {
     setMenuOpen(false);
     action();
   };
 
+  const runCreateAction = (action: () => void) => {
+    setCreateMenuOpen(false);
+    action();
+  };
+
   return (
     <div className="manage-sidebar-actions" ref={wrapperRef}>
+      <button
+        aria-expanded={createMenuOpen}
+        aria-haspopup="menu"
+        aria-label="Create docs item"
+        className="manage-icon-button"
+        disabled={isCreating}
+        onClick={() => {
+          setCreateMenuOpen((current) => !current);
+          setMenuOpen(false);
+        }}
+        title="Create docs item"
+        type="button"
+      >
+        <IconPlus aria-hidden="true" size={15} stroke={1.9} />
+      </button>
       <button
         aria-label="Hide file sidebar"
         className="manage-icon-button"
@@ -1123,13 +1846,60 @@ function ManageSidebarActions({
       <button
         aria-expanded={menuOpen}
         aria-haspopup="menu"
-        aria-label="Manage sidebar menu"
+        aria-label="Docs sidebar menu"
         className="manage-icon-button"
-        onClick={() => setMenuOpen((current) => !current)}
+        onClick={() => {
+          setMenuOpen((current) => !current);
+          setCreateMenuOpen(false);
+        }}
         type="button"
       >
         <IconMenu2 aria-hidden="true" size={15} stroke={1.8} />
       </button>
+      {createMenuOpen ? (
+        <div className="manage-sidebar-menu manage-create-menu" role="menu">
+          <button
+            className="manage-sidebar-menu-item"
+            disabled={isCreating}
+            onClick={() => runCreateAction(onCreateFolder)}
+            role="menuitem"
+            type="button"
+          >
+            <IconFolderPlus aria-hidden="true" size={14} stroke={1.8} />
+            {isCreatingFolder ? "Creating folder" : "New folder"}
+          </button>
+          <button
+            className="manage-sidebar-menu-item"
+            disabled={isCreating}
+            onClick={() => runCreateAction(() => onCreate("markdown"))}
+            role="menuitem"
+            type="button"
+          >
+            <IconMarkdown aria-hidden="true" size={14} stroke={1.8} />
+            {creatingKind === "markdown" ? "Creating Markdown" : "New Markdown"}
+          </button>
+          <button
+            className="manage-sidebar-menu-item"
+            disabled={isCreating}
+            onClick={() => runCreateAction(() => onCreate("html"))}
+            role="menuitem"
+            type="button"
+          >
+            <IconFileTypeHtml aria-hidden="true" size={14} stroke={1.8} />
+            {creatingKind === "html" ? "Creating HTML" : "New HTML"}
+          </button>
+          <button
+            className="manage-sidebar-menu-item"
+            disabled={isCreating}
+            onClick={() => runCreateAction(() => onCreate("excalidraw"))}
+            role="menuitem"
+            type="button"
+          >
+            <IconEdit aria-hidden="true" size={14} stroke={1.8} />
+            {creatingKind === "excalidraw" ? "Creating drawing" : "New drawing"}
+          </button>
+        </div>
+      ) : null}
       {menuOpen ? (
         <div className="manage-sidebar-menu" role="menu">
           <button
@@ -1164,35 +1934,255 @@ function ManageSidebarActions({
 function ManageFileRow({
   annotationCount,
   entry,
+  hasChildren,
+  isContextMenuOpen,
+  isDragging,
+  isDropTarget,
+  isExpanded,
   isSelected,
+  onEntryDragOver,
+  onEntryDrop,
+  onDragEnd,
+  onDragStart,
+  onOpenContextMenu,
   onSelect,
 }: {
   annotationCount: number;
   entry: ManageFileEntry;
+  hasChildren: boolean;
+  isContextMenuOpen: boolean;
+  isDragging: boolean;
+  isDropTarget: boolean;
+  isExpanded: boolean;
   isSelected: boolean;
+  onEntryDragOver: (entry: ManageFileEntry, event: ReactDragEvent<HTMLButtonElement>) => void;
+  onEntryDrop: (entry: ManageFileEntry, event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDragEnd: () => void;
+  onDragStart: (entry: ManageFileEntry, event: ReactDragEvent<HTMLButtonElement>) => void;
+  onOpenContextMenu: (entry: ManageFileEntry, point: { x: number; y: number }) => void;
   onSelect: () => void;
 }) {
-  const Icon = entry.kind === "directory" ? IconFolder : fileIconForPath(entry.path);
+  const Icon = entry.kind === "directory" ? (isExpanded ? IconFolderOpen : IconFolder) : fileIconForPath(entry.path);
   return (
     <button
+      aria-expanded={entry.kind === "directory" && hasChildren ? isExpanded : undefined}
+      aria-haspopup={entry.kind === "file" ? "menu" : undefined}
       aria-selected={entry.kind === "file" ? isSelected : undefined}
       className="manage-file-row"
+      data-context-menu-open={String(isContextMenuOpen)}
+      data-dragging={String(isDragging)}
+      data-drop-target={String(isDropTarget)}
       data-kind={entry.kind}
       data-selected={String(isSelected)}
+      draggable={entry.kind === "file" || entry.kind === "directory"}
       onClick={onSelect}
+      onContextMenu={(event: ReactMouseEvent<HTMLButtonElement>) => {
+        if (entry.kind !== "file") {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenContextMenu(entry, { x: event.clientX, y: event.clientY });
+      }}
+      onKeyDown={(event: ReactKeyboardEvent<HTMLButtonElement>) => {
+        if (entry.kind !== "file") {
+          return;
+        }
+        if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
+          return;
+        }
+        event.preventDefault();
+        const bounds = event.currentTarget.getBoundingClientRect();
+        onOpenContextMenu(entry, {
+          x: bounds.left + 28,
+          y: bounds.top + Math.min(22, bounds.height),
+        });
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => onEntryDragOver(entry, event)}
+      onDragStart={(event) => onDragStart(entry, event)}
+      onDrop={(event) => onEntryDrop(entry, event)}
       role="treeitem"
       style={{ "--depth": entry.depth } as CSSProperties}
       type="button"
     >
+      <span
+        aria-hidden="true"
+        className="manage-file-disclosure"
+        data-visible={String(entry.kind === "directory" && hasChildren)}
+      >
+        <IconChevronRight size={14} stroke={1.9} />
+      </span>
       <Icon aria-hidden="true" className="manage-file-icon" size={15} stroke={1.75} />
       <span className="manage-file-name">{entry.name}</span>
       <span className="manage-file-badges">
         {annotationCount > 0 ? <span className="manage-count-badge">{annotationCount}</span> : null}
-        {entry.kind === "file" && entry.size !== undefined ? (
-          <span className="manage-file-size">{formatFileSize(entry.size)}</span>
-        ) : null}
       </span>
     </button>
+  );
+}
+
+function ManageSidebarFileToolbar({
+  entry,
+  preview,
+}: {
+  entry?: ManageFileEntry;
+  preview?: ManageFilePreview;
+}) {
+  const path = preview?.path ?? entry?.path;
+  if (!path) {
+    return null;
+  }
+  const size = preview?.size ?? entry?.size;
+  return (
+    <div aria-label="Selected file details" className="manage-sidebar-file-toolbar">
+      <div className="manage-sidebar-file-toolbar-title" title={path}>
+        {path}
+      </div>
+      <div aria-hidden="true" className="manage-sidebar-file-toolbar-spacer" />
+      <div className="manage-sidebar-file-toolbar-size">
+        {size !== undefined ? formatFileSize(size) : "Size unavailable"}
+      </div>
+    </div>
+  );
+}
+
+function ManageFileContextMenu({
+  confirmingDelete,
+  onDelete,
+  onDismiss,
+  onRename,
+  pendingAction,
+  position,
+}: {
+  confirmingDelete: boolean;
+  onDelete: () => void;
+  onDismiss: () => void;
+  onRename: () => void;
+  pendingAction?: ManageFileOperationState["action"];
+  position: Pick<ManageFileContextMenuState, "x" | "y">;
+}) {
+  const isBusy = Boolean(pendingAction);
+  return (
+    <SidebarContextMenuPortal
+      menuClassName="manage-file-context-menu"
+      menuStyle={{
+        left: `${position.x}px`,
+        position: "fixed",
+        top: `${position.y}px`,
+      }}
+      onDismiss={onDismiss}
+    >
+      <button
+        className="manage-file-context-menu-item"
+        disabled={isBusy}
+        onClick={onRename}
+        role="menuitem"
+        type="button"
+      >
+        <IconEdit aria-hidden="true" size={14} stroke={1.8} />
+        Rename
+      </button>
+      <button
+        className="manage-file-context-menu-item manage-file-context-menu-item-danger"
+        data-confirming={String(confirmingDelete)}
+        disabled={isBusy}
+        onClick={onDelete}
+        role="menuitem"
+        type="button"
+      >
+        <IconTrash aria-hidden="true" size={14} stroke={1.8} />
+        {pendingAction === "delete" ? "Deleting" : confirmingDelete ? "Confirm delete" : "Delete"}
+      </button>
+    </SidebarContextMenuPortal>
+  );
+}
+
+function ManageRenameDialog({
+  error,
+  isRenaming,
+  onCancel,
+  onChange,
+  onSubmit,
+  value,
+}: {
+  error?: string;
+  isRenaming: boolean;
+  onCancel: () => void;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  value: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const isSubmitDisabled = isRenaming || value.trim().length === 0;
+
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) {
+      return;
+    }
+    input.focus();
+    input.select();
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel]);
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isSubmitDisabled) {
+      return;
+    }
+    onSubmit();
+  };
+
+  return createPortal(
+    <>
+      <button
+        aria-label="Cancel rename"
+        className="manage-rename-backdrop"
+        onClick={onCancel}
+        type="button"
+      />
+      <form className="manage-rename-dialog" onSubmit={submit}>
+        <div className="manage-rename-header">
+          <span>Rename file</span>
+          <button
+            aria-label="Cancel rename"
+            className="manage-icon-button manage-rename-close"
+            onClick={onCancel}
+            type="button"
+          >
+            <IconX aria-hidden="true" size={15} stroke={1.8} />
+          </button>
+        </div>
+        <input
+          aria-label="File name"
+          className="manage-rename-input"
+          disabled={isRenaming}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          ref={inputRef}
+          value={value}
+        />
+        {error ? <div className="manage-rename-error">{error}</div> : null}
+        <div className="manage-rename-actions">
+          <button className="manage-rename-secondary" disabled={isRenaming} onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="manage-rename-primary" disabled={isSubmitDisabled} type="submit">
+            {isRenaming ? "Renaming" : "Rename"}
+          </button>
+        </div>
+      </form>
+    </>,
+    document.body,
   );
 }
 
@@ -1222,7 +2212,9 @@ function ManagePreview({
   selectedPath?: string;
 }) {
   const [selection, setSelection] = useState<ManageCapturedSelection>();
+  const [selectionToolbarMode, setSelectionToolbarMode] = useState<ManageSelectionToolbarMode>("annotations");
   const [commentDraft, setCommentDraft] = useState<ManageCommentDraft>();
+  const [annotationPreview, setAnnotationPreview] = useState<ManageAnnotationPreview>();
   const [feedbackCopyState, setFeedbackCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [annotationsDropdownOpen, setAnnotationsDropdownOpen] = useState(false);
   const [htmlAnnotationEnabled, setHtmlAnnotationEnabled] = useState(true);
@@ -1242,7 +2234,7 @@ function ManagePreview({
       return;
     }
     void ensureManageAgentationInjected().catch((agentationError) => {
-      console.warn("[Ghostex Manage Agentation] injection failed", {
+      console.warn("[Ghostex Docs Agentation] injection failed", {
         message: agentationError instanceof Error ? agentationError.message : String(agentationError),
       });
     });
@@ -1254,7 +2246,9 @@ function ManagePreview({
     if (selectedPathRef.current !== selectedPath) {
       selectedPathRef.current = selectedPath;
       setSelection(undefined);
+      setSelectionToolbarMode("annotations");
       setCommentDraft(undefined);
+      setAnnotationPreview(undefined);
       setFeedbackCopyState("idle");
       setAnnotationsDropdownOpen(false);
     }
@@ -1318,6 +2312,7 @@ function ManagePreview({
       };
       onAnnotationsChange((current) => [...current, nextAnnotation]);
       setSelection(undefined);
+      setSelectionToolbarMode("annotations");
       setCommentDraft(undefined);
     },
     [onAnnotationsChange],
@@ -1328,7 +2323,9 @@ function ManagePreview({
     if (!normalized) {
       return;
     }
+    setAnnotationPreview(undefined);
     setCommentDraft(undefined);
+    setSelectionToolbarMode("annotations");
     setSelection({
       anchor: capturedSelection.anchor,
       text: normalized,
@@ -1337,11 +2334,14 @@ function ManagePreview({
 
   const clearSelectedText = useCallback(() => {
     setSelection(undefined);
+    setSelectionToolbarMode("annotations");
   }, []);
 
   const openCommentDraft = useCallback(
     (quote: string, anchor: ManageSelectionAnchor, initialNote = "") => {
+      setAnnotationPreview(undefined);
       setSelection(undefined);
+      setSelectionToolbarMode("annotations");
       setCommentDraft({
         anchor,
         attachmentError: "",
@@ -1670,15 +2670,24 @@ function ManagePreview({
             annotations={annotations}
             content={draftContent}
             documentKey={preview.path}
+            gitBaseline={preview.gitBaseline}
             onContentChange={onDraftContentChange}
+            onAnnotationPreviewChange={setAnnotationPreview}
             onSelectionClear={clearSelectedText}
             onSelectionCapture={captureSelectedText}
+            onSelectionToolbarModeChange={setSelectionToolbarMode}
+            selection={selection}
+            selectionToolbarMode={selectionToolbarMode}
           />
-          {selection ? (
+          {selection && selectionToolbarMode === "annotations" ? (
             <ManageAnnotationToolbar
               anchor={selection.anchor}
               onComment={openCommentForSelection}
-              onDismiss={() => setSelection(undefined)}
+              onDismiss={() => {
+                setSelectionToolbarMode("annotations");
+                setSelection(undefined);
+              }}
+              onFormatting={() => setSelectionToolbarMode("formatting")}
               onQuickLabel={addQuickLabel}
             />
           ) : null}
@@ -1691,6 +2700,9 @@ function ManagePreview({
               onRemoveDraftAttachment={removeDraftAttachment}
               onSubmit={submitCommentDraft}
             />
+          ) : null}
+          {annotationPreview && !selection && !commentDraft ? (
+            <ManageAnnotationPreviewCard preview={annotationPreview} />
           ) : null}
         </>
       ) : (
@@ -1715,7 +2727,7 @@ function ManageHtmlRenderViewer({
 
   return (
     <div
-      aria-label="Rendered HTML artifact"
+      aria-label="Rendered HTML document"
       className="manage-html-render-view"
       data-agentation-html-root="true"
       data-document-key={documentKey}
@@ -1749,21 +2761,44 @@ function ManageMarkdownReviewViewer({
   annotations,
   content,
   documentKey,
+  gitBaseline,
+  onAnnotationPreviewChange,
   onContentChange,
   onSelectionClear,
   onSelectionCapture,
+  onSelectionToolbarModeChange,
+  selection,
+  selectionToolbarMode,
 }: {
   annotations: ManageAnnotation[];
   content: string;
   documentKey: string;
+  gitBaseline?: ManageGitBaseline;
+  onAnnotationPreviewChange: (preview: ManageAnnotationPreview | undefined) => void;
   onContentChange: (content: string) => void;
   onSelectionClear: () => void;
   onSelectionCapture: (selection: ManageCapturedSelection) => void;
+  onSelectionToolbarModeChange: (mode: ManageSelectionToolbarMode) => void;
+  selection?: ManageCapturedSelection;
+  selectionToolbarMode: ManageSelectionToolbarMode;
 }) {
   const editorHostRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<ManageMeoEditor | null>(null);
   const latestContentRef = useRef(content);
   const annotationsRef = useRef(annotations);
+  const [contentMaxWidthEnabled, setContentMaxWidthEnabled] = useState(false);
+  const [currentMode, setCurrentMode] = useState<ManageMeoMode>("live");
+  const [findCaseSensitive, setFindCaseSensitive] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findReplacement, setFindReplacement] = useState("");
+  const [findStatus, setFindStatus] = useState("");
+  const [findStatusIsError, setFindStatusIsError] = useState(false);
+  const [findWholeWord, setFindWholeWord] = useState(false);
+  const [gitGutterVisible, setGitGutterVisible] = useState(true);
+  const [lineNumbersVisible, setLineNumbersVisible] = useState(true);
+  const [meoSelectionState, setMeoSelectionState] = useState<ManageMeoSelectionState>({ visible: false });
+  const onAnnotationPreviewChangeRef = useRef(onAnnotationPreviewChange);
   const onContentChangeRef = useRef(onContentChange);
   const onSelectionClearRef = useRef(onSelectionClear);
   const onSelectionCaptureRef = useRef(onSelectionCapture);
@@ -1771,6 +2806,10 @@ function ManageMarkdownReviewViewer({
   useEffect(() => {
     annotationsRef.current = annotations;
   }, [annotations]);
+
+  useEffect(() => {
+    onAnnotationPreviewChangeRef.current = onAnnotationPreviewChange;
+  }, [onAnnotationPreviewChange]);
 
   useEffect(() => {
     onContentChangeRef.current = onContentChange;
@@ -1784,6 +2823,169 @@ function ManageMarkdownReviewViewer({
     onSelectionCaptureRef.current = onSelectionCapture;
   }, [onSelectionCapture]);
 
+  const applyMeoFormat = useCallback((action: string, level?: number | { cols?: number; rows?: number }) => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    editor.insertFormat(action, level);
+    editor.focus();
+  }, []);
+
+  const applyMeoMode = useCallback((mode: ManageMeoMode) => {
+    const editor = editorRef.current;
+    setCurrentMode(mode);
+    editor?.setMode?.(mode);
+    editor?.refreshLayout?.();
+    editor?.focus();
+  }, []);
+
+  const toggleMeoLineNumbers = useCallback(() => {
+    setLineNumbersVisible((current) => {
+      const next = !current;
+      editorRef.current?.setLineNumbers?.(next);
+      editorRef.current?.refreshLayout?.();
+      return next;
+    });
+  }, []);
+
+  const toggleMeoGitGutter = useCallback(() => {
+    setGitGutterVisible((current) => {
+      const next = !current;
+      editorRef.current?.setGitGutterVisible?.(next);
+      editorRef.current?.refreshLayout?.();
+      return next;
+    });
+  }, []);
+
+  const toggleMeoContentMaxWidth = useCallback(() => {
+    setContentMaxWidthEnabled((current) => {
+      const next = !current;
+      window.requestAnimationFrame(() => editorRef.current?.refreshLayout?.());
+      return next;
+    });
+  }, []);
+
+  const findOptions = useMemo(
+    () => ({
+      caseSensitive: findCaseSensitive,
+      wholeWord: findWholeWord,
+    }),
+    [findCaseSensitive, findWholeWord],
+  );
+
+  const setFindStatusText = useCallback((text: string, isError = false) => {
+    setFindStatus(text);
+    setFindStatusIsError(isError);
+  }, []);
+
+  const updateFindStatusSummary = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor || !findOpen) {
+      return;
+    }
+    editor.setSearchQuery?.(findQuery, findOptions);
+    if (!findQuery) {
+      setFindStatusText("");
+      return;
+    }
+    const total = editor.countMatches?.(findQuery, findOptions) ?? 0;
+    if (total === 0) {
+      setFindStatusText("No matches", true);
+      return;
+    }
+    setFindStatusText(`${total} matches`);
+  }, [findOpen, findOptions, findQuery, setFindStatusText]);
+
+  const runFind = useCallback(
+    (backward = false) => {
+      const editor = editorRef.current;
+      if (!editor) {
+        return;
+      }
+      if (!findQuery) {
+        setFindStatusText("Enter text", true);
+        return;
+      }
+      const result = backward
+        ? editor.findPrevious?.(findQuery, findOptions)
+        : editor.findNext?.(findQuery, findOptions);
+      if (!result?.found) {
+        setFindStatusText("No matches", true);
+        return;
+      }
+      setFindStatusText(`${result.current}/${result.total}`);
+    },
+    [findOptions, findQuery, setFindStatusText],
+  );
+
+  const replaceCurrentFindMatch = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    if (!findQuery) {
+      setFindStatusText("Enter text", true);
+      return;
+    }
+    const result = editor.replaceCurrent?.(findQuery, findReplacement, findOptions);
+    if (!result?.replaced) {
+      if (result?.found) {
+        setFindStatusText(`${result.current}/${result.total}`);
+      } else {
+        setFindStatusText("No matches", true);
+      }
+      return;
+    }
+    if (result.found) {
+      setFindStatusText(`Replaced - ${result.current}/${result.total}`);
+      return;
+    }
+    setFindStatusText(result.total ? `Replaced - ${result.total} remaining` : "Replaced");
+  }, [findOptions, findQuery, findReplacement, setFindStatusText]);
+
+  const replaceAllFindMatches = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    if (!findQuery) {
+      setFindStatusText("Enter text", true);
+      return;
+    }
+    const result = editor.replaceAll?.(findQuery, findReplacement, findOptions);
+    if (!result?.replaced) {
+      setFindStatusText("No matches", true);
+      return;
+    }
+    setFindStatusText(`Replaced ${result.replaced} matches`);
+  }, [findOptions, findQuery, findReplacement, setFindStatusText]);
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindQuery("");
+    setFindReplacement("");
+    setFindStatusText("");
+    editorRef.current?.setSearchQuery?.("", findOptions);
+    editorRef.current?.focus();
+  }, [findOptions, setFindStatusText]);
+
+  useEffect(() => {
+    if (!findOpen) {
+      editorRef.current?.setSearchQuery?.("", findOptions);
+      return;
+    }
+    updateFindStatusSummary();
+  }, [findOpen, findOptions, findQuery, updateFindStatusSummary]);
+
+  useEffect(() => {
+    setMeoSelectionState({ visible: false });
+    setFindOpen(false);
+    setFindQuery("");
+    setFindReplacement("");
+    setFindStatusText("");
+  }, [documentKey, setFindStatusText]);
+
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor || content === latestContentRef.current) {
@@ -1795,6 +2997,10 @@ function ManageMarkdownReviewViewer({
   }, [content]);
 
   useEffect(() => {
+    editorRef.current?.setGitBaseline?.(gitBaseline ?? null);
+  }, [documentKey, gitBaseline]);
+
+  useEffect(() => {
     const editor = editorRef.current;
     if (!editor) {
       return;
@@ -1802,6 +3008,13 @@ function ManageMarkdownReviewViewer({
     editor.view.dispatch({
       effects: manageMeoAnnotationEffect.of(createManageMeoAnnotationDecorations(editor.getText(), annotations)),
     });
+    syncManageMeoAnnotationReviewState(
+      editor.view,
+      annotations,
+      onSelectionCaptureRef.current,
+      onSelectionClearRef.current,
+      onAnnotationPreviewChangeRef.current,
+    );
   }, [annotations, content]);
 
   useEffect(() => {
@@ -1814,13 +3027,30 @@ function ManageMarkdownReviewViewer({
     applyManageMeoTheme();
     let mountedEditor: ManageMeoEditor | null = null;
     const editor = createMeoEditor({
-      externalExtensions: [manageMeoAnnotationField] satisfies Extension[],
-      initialGitGutter: false,
-      initialLineNumbers: true,
-      initialMode: "live",
+      externalExtensions: [
+        manageMeoAnnotationField,
+        EditorView.updateListener.of((update) => {
+          if (!update.selectionSet && !update.docChanged && !update.viewportChanged) {
+            return;
+          }
+          syncManageMeoAnnotationReviewState(
+            update.view,
+            annotationsRef.current,
+            onSelectionCaptureRef.current,
+            onSelectionClearRef.current,
+            onAnnotationPreviewChangeRef.current,
+          );
+        }),
+      ] satisfies Extension[],
+      initialGitGutter: gitGutterVisible,
+      initialLineNumbers: lineNumbersVisible,
+      initialMode: currentMode,
       initialVimKeybindings: [],
       parent: host,
       text: content,
+      onSelectionChange: (state: ManageMeoSelectionState) => {
+        setMeoSelectionState(state?.visible ? state : { visible: false });
+      },
       onApplyChanges: (nextContent: string) => {
         latestContentRef.current = nextContent;
         onContentChangeRef.current(nextContent);
@@ -1834,25 +3064,20 @@ function ManageMarkdownReviewViewer({
           window.open(safeHref, "_blank", "noopener,noreferrer");
         }
       },
-      onSelectionChange: (state: ManageMeoSelectionState) => {
-        const selection = normalizeManageMeoSelection(state, mountedEditor);
-        if (selection) {
-          onSelectionCaptureRef.current(selection);
-          return;
-        }
-        /*
-         * CDXC:ManageMarkdownAnnotations 2026-06-27-12:40:
-         * Meo reports hidden selection states after the user clicks away or collapses the range.
-         * Clear Manage's floating annotation toolbar then, so annotation actions follow the live editor selection instead of a stale previous quote.
-         */
-        onSelectionClearRef.current();
-      },
     }) as ManageMeoEditor;
     mountedEditor = editor;
     editorRef.current = editor;
+    editor.setGitBaseline?.(gitBaseline ?? null);
     editor.view.dispatch({
       effects: manageMeoAnnotationEffect.of(createManageMeoAnnotationDecorations(content, annotationsRef.current)),
     });
+    syncManageMeoAnnotationReviewState(
+      editor.view,
+      annotationsRef.current,
+      onSelectionCaptureRef.current,
+      onSelectionClearRef.current,
+      onAnnotationPreviewChangeRef.current,
+    );
     window.requestAnimationFrame(() => editor.refreshLayout?.());
     return () => {
       editor.destroy();
@@ -1865,13 +3090,431 @@ function ManageMarkdownReviewViewer({
   return (
     <div className="manage-markdown-review manage-markdown-meo-review">
       <section className="manage-markdown-review-main">
-        <div className="manage-meo-markdown-editor editor-root">
+        <div
+          className={`manage-meo-markdown-editor editor-root${contentMaxWidthEnabled ? " meo-content-max-width-enabled" : ""}`}
+          style={{ "--meo-content-max-width": contentMaxWidthEnabled ? MANAGE_MEO_CONTENT_MAX_WIDTH : "100%" } as CSSProperties}
+        >
+          <ManageMeoTopToolbar
+            contentMaxWidthEnabled={contentMaxWidthEnabled}
+            currentMode={currentMode}
+            findCaseSensitive={findCaseSensitive}
+            findOpen={findOpen}
+            findQuery={findQuery}
+            findReplacement={findReplacement}
+            findStatus={findStatus}
+            findStatusIsError={findStatusIsError}
+            findWholeWord={findWholeWord}
+            gitGutterVisible={gitGutterVisible}
+            lineNumbersVisible={lineNumbersVisible}
+            onCloseFind={closeFind}
+            onFindCaseSensitiveChange={setFindCaseSensitive}
+            onFindOpenChange={setFindOpen}
+            onFindQueryChange={setFindQuery}
+            onFindReplacementChange={setFindReplacement}
+            onFindWholeWordChange={setFindWholeWord}
+            onFormat={applyMeoFormat}
+            onModeChange={applyMeoMode}
+            onReplaceAll={replaceAllFindMatches}
+            onReplaceCurrent={replaceCurrentFindMatch}
+            onRunFind={runFind}
+            onToggleContentMaxWidth={toggleMeoContentMaxWidth}
+            onToggleGitGutter={toggleMeoGitGutter}
+            onToggleLineNumbers={toggleMeoLineNumbers}
+          />
           <div className="editor-wrapper" data-outline-position="right">
             <div className="editor-host" ref={editorHostRef} />
           </div>
+          {selectionToolbarMode === "formatting" && selection ? (
+            <ManageMeoSelectionFormatToolbar
+              anchor={selection.anchor}
+              onAnnotate={() => onSelectionToolbarModeChange("annotations")}
+              onFormat={applyMeoFormat}
+              selectionState={meoSelectionState}
+            />
+          ) : null}
         </div>
       </section>
     </div>
+  );
+}
+
+function ManageMeoTopToolbar({
+  contentMaxWidthEnabled,
+  currentMode,
+  findCaseSensitive,
+  findOpen,
+  findQuery,
+  findReplacement,
+  findStatus,
+  findStatusIsError,
+  findWholeWord,
+  gitGutterVisible,
+  lineNumbersVisible,
+  onCloseFind,
+  onFindCaseSensitiveChange,
+  onFindOpenChange,
+  onFindQueryChange,
+  onFindReplacementChange,
+  onFindWholeWordChange,
+  onFormat,
+  onModeChange,
+  onReplaceAll,
+  onReplaceCurrent,
+  onRunFind,
+  onToggleContentMaxWidth,
+  onToggleGitGutter,
+  onToggleLineNumbers,
+}: {
+  contentMaxWidthEnabled: boolean;
+  currentMode: ManageMeoMode;
+  findCaseSensitive: boolean;
+  findOpen: boolean;
+  findQuery: string;
+  findReplacement: string;
+  findStatus: string;
+  findStatusIsError: boolean;
+  findWholeWord: boolean;
+  gitGutterVisible: boolean;
+  lineNumbersVisible: boolean;
+  onCloseFind: () => void;
+  onFindCaseSensitiveChange: (enabled: boolean) => void;
+  onFindOpenChange: (open: boolean) => void;
+  onFindQueryChange: (query: string) => void;
+  onFindReplacementChange: (replacement: string) => void;
+  onFindWholeWordChange: (enabled: boolean) => void;
+  onFormat: (action: string, level?: number | { cols?: number; rows?: number }) => void;
+  onModeChange: (mode: ManageMeoMode) => void;
+  onReplaceAll: () => void;
+  onReplaceCurrent: () => void;
+  onRunFind: (backward?: boolean) => void;
+  onToggleContentMaxWidth: () => void;
+  onToggleGitGutter: () => void;
+  onToggleLineNumbers: () => void;
+}) {
+  const [tableSize, setTableSize] = useState({ cols: 1, rows: 1 });
+  const findInputRef = useRef<HTMLInputElement | null>(null);
+  const headingIcons = [
+    MeoHeading1Icon,
+    MeoHeading2Icon,
+    MeoHeading3Icon,
+    MeoHeading4Icon,
+    MeoHeading5Icon,
+    MeoHeading6Icon,
+  ];
+
+  const runFindFromKeyboard = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    onRunFind(event.shiftKey);
+  };
+
+  const runReplaceFromKeyboard = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    onReplaceCurrent();
+  };
+
+  useEffect(() => {
+    if (!findOpen) {
+      return;
+    }
+    findInputRef.current?.focus();
+    findInputRef.current?.select();
+  }, [findOpen]);
+
+  return (
+    <div aria-label="Editor toolbar" className="mode-toolbar" role="toolbar">
+      <div aria-label="Formatting" className="format-group" role="group">
+        <div className="heading-wrapper">
+          <button
+            className="format-button"
+            data-action="heading"
+            onClick={() => onFormat("heading", 1)}
+            title="Heading"
+            type="button"
+          >
+            <MeoHeadingIcon aria-hidden="true" size={18} />
+          </button>
+          <div className="heading-dropdown-wrapper">
+            <div aria-label="Heading levels" className="heading-dropdown" role="menu">
+              {headingIcons.map((HeadingIcon, index) => {
+                const level = index + 1;
+                return (
+                  <button
+                    className="heading-dropdown-option"
+                    data-level={level}
+                    key={level}
+                    onClick={() => onFormat("heading", level)}
+                    title={`Heading ${level}`}
+                    type="button"
+                  >
+                    <HeadingIcon aria-hidden="true" size={18} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        <button className="format-button" data-action="bulletList" onClick={() => onFormat("bulletList")} title="Bullet List" type="button">
+          <MeoListIcon aria-hidden="true" size={18} />
+        </button>
+        <button className="format-button" data-action="numberedList" onClick={() => onFormat("numberedList")} title="Numbered List" type="button">
+          <MeoListOrderedIcon aria-hidden="true" size={18} />
+        </button>
+        <button className="format-button" data-action="task" onClick={() => onFormat("task")} title="Task" type="button">
+          <MeoListTodoIcon aria-hidden="true" size={18} />
+        </button>
+        <div className="format-separator" role="separator" />
+        <div className="table-wrapper">
+          <button className="format-button" data-action="table" onClick={() => onFormat("table", tableSize)} title="Table" type="button">
+            <MeoTable2Icon aria-hidden="true" size={18} />
+          </button>
+          <div className="table-dropdown-wrapper">
+            <div className="table-dropdown">
+              <div className="table-grid">
+                {Array.from({ length: 25 }, (_, index) => {
+                  const row = Math.floor(index / 5) + 1;
+                  const col = (index % 5) + 1;
+                  const isHighlighted = col <= tableSize.cols && row <= tableSize.rows;
+                  return (
+                    <button
+                      aria-label={`${col} by ${row} table`}
+                      className={`table-grid-cell${isHighlighted ? " is-highlighted" : ""}`}
+                      data-col={col}
+                      data-row={row}
+                      key={`${col}-${row}`}
+                      onClick={() => onFormat("table", { cols: col, rows: row })}
+                      onMouseEnter={() => setTableSize({ cols: col, rows: row })}
+                      type="button"
+                    />
+                  );
+                })}
+              </div>
+              <div className="table-size-label">{tableSize.cols} x {tableSize.rows}</div>
+            </div>
+          </div>
+        </div>
+        <button className="format-button" data-action="codeBlock" onClick={() => onFormat("codeBlock")} title="Code Block" type="button">
+          <MeoCodeIcon aria-hidden="true" size={18} />
+        </button>
+        <button className="format-button" data-action="link" onClick={() => onFormat("link")} title="Link" type="button">
+          <MeoLinkIcon aria-hidden="true" size={18} />
+        </button>
+        <button className="format-button" data-action="wikiLink" onClick={() => onFormat("wikiLink")} title="Wiki Link" type="button">
+          <MeoBracketsIcon aria-hidden="true" size={18} />
+        </button>
+        <button className="format-button" data-action="image" onClick={() => onFormat("image")} title="Image" type="button">
+          <MeoImageIcon aria-hidden="true" size={18} />
+        </button>
+        <button className="format-button" data-action="quote" onClick={() => onFormat("quote")} title="Quote" type="button">
+          <MeoQuoteIcon aria-hidden="true" size={18} />
+        </button>
+        <button className="format-button" data-action="hr" onClick={() => onFormat("hr")} title="Horizontal Rule" type="button">
+          <MeoMinusIcon aria-hidden="true" size={18} />
+        </button>
+      </div>
+      <div className="right-group">
+        <button
+          aria-pressed={findOpen}
+          className={`format-button toggle-button${findOpen ? " is-active" : ""}`}
+          data-action="find"
+          onClick={() => {
+            if (findOpen) {
+              onCloseFind();
+              return;
+            }
+            onFindOpenChange(true);
+          }}
+          title="Find and Replace"
+          type="button"
+        >
+          <MeoSearchIcon aria-hidden="true" size={18} />
+        </button>
+        <button
+          aria-pressed={contentMaxWidthEnabled}
+          className={`format-button toggle-button${contentMaxWidthEnabled ? " is-active" : ""}`}
+          data-action="contentMaxWidth"
+          onClick={onToggleContentMaxWidth}
+          title={contentMaxWidthEnabled ? "Use Full Content Width" : "Constrain Content Width"}
+          type="button"
+        >
+          <MeoPanelLeftRightDashedIcon aria-hidden="true" size={18} />
+        </button>
+        <button
+          aria-pressed={lineNumbersVisible}
+          className={`format-button toggle-button${lineNumbersVisible ? " is-active" : ""}`}
+          data-action="lineNumbers"
+          onClick={onToggleLineNumbers}
+          title={lineNumbersVisible ? "Hide Line Numbers" : "Show Line Numbers"}
+          type="button"
+        >
+          <MeoHashIcon aria-hidden="true" size={18} />
+        </button>
+        <button
+          aria-pressed={gitGutterVisible}
+          className={`format-button toggle-button${gitGutterVisible ? " is-active" : ""}`}
+          data-action="gitChangesGutter"
+          onClick={onToggleGitGutter}
+          title={gitGutterVisible ? "Hide Git Changes" : "Show Git Changes"}
+          type="button"
+        >
+          <MeoGitCompareIcon aria-hidden="true" size={18} />
+        </button>
+      </div>
+      <div aria-label="Markdown mode" className="mode-group" role="tablist">
+        <button
+          aria-selected={currentMode === "live"}
+          className={`mode-button${currentMode === "live" ? " is-active" : ""}`}
+          data-mode="live"
+          onClick={() => onModeChange("live")}
+          role="tab"
+          tabIndex={currentMode === "live" ? 0 : -1}
+          title="Live"
+          type="button"
+        >
+          Live
+        </button>
+        <button
+          aria-selected={currentMode === "source"}
+          className={`mode-button${currentMode === "source" ? " is-active" : ""}`}
+          data-mode="source"
+          onClick={() => onModeChange("source")}
+          role="tab"
+          tabIndex={currentMode === "source" ? 0 : -1}
+          title="Source"
+          type="button"
+        >
+          Source
+        </button>
+      </div>
+      <div aria-label="Find and replace" className={`find-panel${findOpen ? " is-visible" : ""}`} role="search">
+        <div className="find-row">
+          <div className="find-input-wrap">
+            <input
+              aria-label="Find"
+              className="find-input"
+              onChange={(event) => onFindQueryChange(event.currentTarget.value)}
+              onKeyDown={runFindFromKeyboard}
+              placeholder="Find"
+              ref={findInputRef}
+              type="text"
+              value={findQuery}
+            />
+            <span className={`find-status${findStatusIsError ? " is-error" : ""}`}>{findStatus}</span>
+          </div>
+          <button
+            aria-label="Whole Word"
+            aria-pressed={findWholeWord}
+            className={`format-button toggle-button find-option-button${findWholeWord ? " is-active" : ""}`}
+            onClick={() => onFindWholeWordChange(!findWholeWord)}
+            title="Whole Word"
+            type="button"
+          >
+            <MeoWholeWordIcon aria-hidden="true" size={16} />
+          </button>
+          <button
+            aria-label="Case Sensitive"
+            aria-pressed={findCaseSensitive}
+            className={`format-button toggle-button find-option-button${findCaseSensitive ? " is-active" : ""}`}
+            onClick={() => onFindCaseSensitiveChange(!findCaseSensitive)}
+            title="Case Sensitive"
+            type="button"
+          >
+            <MeoCaseSensitiveIcon aria-hidden="true" size={16} />
+          </button>
+          <button className="format-button" onClick={() => onRunFind(true)} title="Previous Match" type="button">
+            <MeoChevronUpIcon aria-hidden="true" size={16} />
+          </button>
+          <button className="format-button" onClick={() => onRunFind(false)} title="Next Match" type="button">
+            <MeoChevronDownIcon aria-hidden="true" size={16} />
+          </button>
+        </div>
+        <div className="find-row">
+          <input
+            aria-label="Replace"
+            className="find-input"
+            onChange={(event) => onFindReplacementChange(event.currentTarget.value)}
+            onKeyDown={runReplaceFromKeyboard}
+            placeholder="Replace"
+            type="text"
+            value={findReplacement}
+          />
+          <button className="format-button" onClick={onReplaceCurrent} title="Replace Current Match" type="button">
+            <MeoReplaceIcon aria-hidden="true" size={16} />
+          </button>
+          <button className="format-button" onClick={onReplaceAll} title="Replace All Matches" type="button">
+            <MeoReplaceAllIcon aria-hidden="true" size={16} />
+          </button>
+          <span aria-hidden="true" className="find-button-spacer" />
+          <button aria-label="Close Find" className="format-button find-close-button" onClick={onCloseFind} title="Close Find" type="button">
+            <MeoXIcon aria-hidden="true" size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ManageMeoSelectionFormatToolbar({
+  anchor,
+  onAnnotate,
+  onFormat,
+  selectionState,
+}: {
+  anchor: ManageSelectionAnchor;
+  onAnnotate: () => void;
+  onFormat: (action: string, level?: number | { cols?: number; rows?: number }) => void;
+  selectionState: ManageMeoSelectionState;
+}) {
+  const position = meoSelectionToolbarPosition(selectionState, anchor);
+  const formatAction = (action: string) => {
+    onFormat(action);
+  };
+  return createPortal(
+    <div
+      aria-label="Inline markdown formatting"
+      className={`selection-inline-menu is-visible${position.isBelow ? " is-below" : ""}`}
+      onPointerDown={(event) => event.preventDefault()}
+      role="toolbar"
+      style={{ left: position.left, top: position.top }}
+    >
+      <button
+        aria-label="Annotations"
+        className="selection-inline-button manage-selection-inline-mode-button"
+        onClick={onAnnotate}
+        title="Annotations"
+        type="button"
+      >
+        <IconMessagePlus aria-hidden="true" size={16} />
+      </button>
+      <button aria-label="Bold" className="selection-inline-button" data-action="bold" onClick={() => formatAction("bold")} title="Bold" type="button">
+        <MeoBoldIcon aria-hidden="true" size={16} />
+      </button>
+      <button aria-label="Italic" className="selection-inline-button" data-action="italic" onClick={() => formatAction("italic")} title="Italic" type="button">
+        <MeoItalicIcon aria-hidden="true" size={16} />
+      </button>
+      <button aria-label="Lineover" className="selection-inline-button" data-action="lineover" onClick={() => formatAction("lineover")} title="Lineover" type="button">
+        <MeoStrikethroughIcon aria-hidden="true" size={16} />
+      </button>
+      <button aria-label="Inline Code" className="selection-inline-button" data-action="inlineCode" onClick={() => formatAction("inlineCode")} title="Inline Code" type="button">
+        <MeoTerminalIcon aria-hidden="true" size={16} />
+      </button>
+      <button aria-label="Link" className="selection-inline-button" data-action="link" onClick={() => formatAction("link")} title="Link" type="button">
+        <MeoLinkIcon aria-hidden="true" size={16} />
+      </button>
+      <button aria-label="Wiki Link" className="selection-inline-button" data-action="wikiLink" onClick={() => formatAction("wikiLink")} title="Wiki Link" type="button">
+        <MeoBracketsIcon aria-hidden="true" size={16} />
+      </button>
+      <button aria-label="Kbd" className="selection-inline-button" data-action="kbd" onClick={() => formatAction("kbd")} title="Kbd" type="button">
+        <MeoKeyboardIcon aria-hidden="true" size={16} />
+      </button>
+      <div aria-label="Suggested replacements" className="selection-inline-suggestions" hidden role="group" />
+    </div>,
+    document.body,
   );
 }
 
@@ -1879,11 +3522,13 @@ function ManageAnnotationToolbar({
   anchor,
   onComment,
   onDismiss,
+  onFormatting,
   onQuickLabel,
 }: {
   anchor: ManageSelectionAnchor;
   onComment: () => void;
   onDismiss: () => void;
+  onFormatting: () => void;
   onQuickLabel: (label: ManageQuickLabel) => void;
 }) {
   return createPortal(
@@ -1902,6 +3547,15 @@ function ManageAnnotationToolbar({
         type="button"
       >
         <IconMessagePlus aria-hidden="true" size={15} />
+      </button>
+      <button
+        aria-label="Formatting"
+        data-tooltip="Formatting"
+        onClick={onFormatting}
+        style={manageToolbarActionStyle(MANAGE_MEO_HEADING_COLOR)}
+        type="button"
+      >
+        <MeoBoldIcon aria-hidden="true" size={15} />
       </button>
       {MANAGE_QUICK_LABELS.map((label) => (
         <button
@@ -1925,6 +3579,33 @@ function ManageAnnotationToolbar({
         <IconX aria-hidden="true" size={15} />
       </button>
     </div>,
+    document.body,
+  );
+}
+
+function ManageAnnotationPreviewCard({ preview }: { preview: ManageAnnotationPreview }) {
+  const annotation = preview.annotation;
+  const note = annotationPreviewText(annotation);
+  return createPortal(
+    <aside
+      className="manage-annotation-preview-card"
+      data-label-id={annotation.labelId}
+      data-type={annotation.type}
+      style={{
+        ...annotationPreviewCardStyle(preview.anchor),
+        "--manage-annotation-color": manageAnnotationColor(annotation),
+      } as CSSProperties}
+    >
+      <header>
+        <span>{annotationTypeLabel(annotation)}</span>
+        {annotation.attachments.length > 0 ? (
+          <span>
+            {annotation.attachments.length} {annotation.attachments.length === 1 ? "image" : "images"}
+          </span>
+        ) : null}
+      </header>
+      <p>{note}</p>
+    </aside>,
     document.body,
   );
 }
@@ -1994,14 +3675,19 @@ function ManageCommentPopover({
       ) : null}
       {draft.attachmentError ? <div className="manage-attachment-error">{draft.attachmentError}</div> : null}
       <div className="manage-comment-popover-actions">
-        <button
-          className="manage-comment-popover-image-button"
-          onClick={() => attachmentInputRef.current?.click()}
-          type="button"
-        >
-          <IconPhoto aria-hidden="true" size={14} />
-          Image
-        </button>
+        {/*
+         * CDXC:ManageAnnotationComposer 2026-06-28-08:31:
+         * The Image action in the Markdown annotation comment composer is hidden because the current picker does not open from this surface. Keep the button source commented so the picker flow can be restored when it is fixed instead of deleting the intended UI.
+         *
+         * <button
+         *   className="manage-comment-popover-image-button"
+         *   onClick={() => attachmentInputRef.current?.click()}
+         *   type="button"
+         * >
+         *   <IconPhoto aria-hidden="true" size={14} />
+         *   Image
+         * </button>
+         */}
         <button
           className="manage-comment-popover-submit"
           disabled={!canSubmit}
@@ -2287,8 +3973,9 @@ function ManageExcalidrawEditor({
   }
 
   const data = parsed.data;
+  const drawingElements = data.elements ?? [];
   return (
-    <div className="manage-drawing-editor">
+    <div className="manage-drawing-editor" onKeyDownCapture={suppressManageExcalidrawToolKeyBeep}>
       {parseError ? (
         <div className="manage-drawing-error">
           <IconAlertTriangle aria-hidden="true" size={15} />
@@ -2306,7 +3993,7 @@ function ManageExcalidrawEditor({
             ...data.appState,
             theme: MANAGE_EXCALIDRAW_CANVAS_THEME,
           },
-          elements: data.elements ?? [],
+          elements: drawingElements,
           files: data.files ?? {},
         }}
         onChange={(elements, appState, files) => {
@@ -2344,6 +4031,26 @@ function ManageExcalidrawEditor({
   );
 }
 
+function suppressManageExcalidrawToolKeyBeep(event: ReactKeyboardEvent<HTMLDivElement>): void {
+  /*
+   * CDXC:ManageDrawings 2026-06-28-05:12:
+   * In macOS WKWebView, Excalidraw's unmodified 1-4 tool shortcuts can still reach AppKit as unhandled keyDown events and play the failure beep. Prevent the native default on the Manage wrapper while allowing propagation to Excalidraw, and skip editable targets so text editing can still type numbers.
+   */
+  if (
+    event.nativeEvent.isComposing ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.altKey ||
+    event.shiftKey ||
+    isEditableEventTarget(event.target)
+  ) {
+    return;
+  }
+  if (/^[1-4]$/u.test(event.key)) {
+    event.preventDefault();
+  }
+}
+
 function ManageEmptyState({ icon, text }: { icon: ReactNode; text: string }) {
   return (
     <div className="manage-empty">
@@ -2367,7 +4074,7 @@ function requestManageFiles(
 ): Promise<ManageFilesBridgeResponse> {
   const bridge = (window as ManageWebKitWindow).webkit?.messageHandlers?.ghostexManageFiles;
   if (!bridge) {
-    return Promise.reject(new Error("Manage is unavailable in this host."));
+    return Promise.reject(new Error("Docs is unavailable in this host."));
   }
   const requestId = `manage-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const message: ManageFilesBridgeRequest = {
@@ -2377,7 +4084,7 @@ function requestManageFiles(
   return new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
       window.removeEventListener(MANAGE_FILES_RESPONSE_EVENT, handleResponse);
-      reject(new Error("Manage request timed out."));
+      reject(new Error("Docs request timed out."));
     }, MANAGE_BRIDGE_TIMEOUT_MS);
     function handleResponse(event: Event) {
       const response = (event as CustomEvent<ManageFilesBridgeResponse>).detail;
@@ -2397,7 +4104,6 @@ function ensureManageAgentationInjected(): Promise<void> {
   const agentationWindow = window as ManageAgentationWindow;
   const existing = agentationWindow.__GHOSTEX_AGENTATION__;
   if (existing?.root && existing.container?.isConnected) {
-    scheduleManageAgentationAutoActivate(existing);
     return Promise.resolve();
   }
   if (existing?.promise) {
@@ -2476,49 +4182,10 @@ async function mountManageAgentation(state: ManageAgentationState): Promise<void
   state.container = container;
   state.root = ReactDOMClient.createRoot(container);
   state.root.render(React.createElement(Agentation));
-  scheduleManageAgentationAutoActivate(state);
 }
 
 function importManageAgentationModule(url: string): Promise<Record<string, unknown>> {
   return (new Function("url", "return import(url);") as (url: string) => Promise<Record<string, unknown>>)(url);
-}
-
-function scheduleManageAgentationAutoActivate(state: ManageAgentationState): void {
-  const run = () => activateManageAgentationFeedbackMode(state, 0);
-  if (typeof window.requestAnimationFrame === "function") {
-    window.requestAnimationFrame(() => window.requestAnimationFrame(run));
-    return;
-  }
-  window.setTimeout(run, 0);
-}
-
-function activateManageAgentationFeedbackMode(state: ManageAgentationState, attempt: number): void {
-  if (state.canceled) {
-    return;
-  }
-  const startButton = findManageAgentationStartButton(state);
-  if (startButton && typeof startButton.click === "function") {
-    startButton.click();
-    state.activated = true;
-    return;
-  }
-  if (attempt < 20) {
-    window.setTimeout(() => activateManageAgentationFeedbackMode(state, attempt + 1), 50);
-  }
-}
-
-function findManageAgentationStartButton(state: ManageAgentationState): HTMLElement | undefined {
-  const root = state.container || document.getElementById("ghostex-agentation-root");
-  return (
-    (document.querySelector('[data-agentation-toolbar] [title="Start feedback mode"][role="button"]') as HTMLElement | null) ??
-    (document.querySelector('[data-agentation-toolbar][title="Start feedback mode"][role="button"]') as HTMLElement | null) ??
-    (document.querySelector('[title="Start feedback mode"][role="button"]') as HTMLElement | null) ??
-    (root?.querySelector('[title="Start feedback mode"][role="button"]') as HTMLElement | null) ??
-    (document.querySelector('[data-agentation-toolbar][title="Start feedback mode"]') as HTMLElement | null) ??
-    (document.querySelector('[title="Start feedback mode"]') as HTMLElement | null) ??
-    (root?.querySelector('[title="Start feedback mode"]') as HTMLElement | null) ??
-    undefined
-  );
 }
 
 function createUniqueArtifactPath(entries: ManageFileEntry[], kind: ManageArtifactKind): string {
@@ -2526,12 +4193,60 @@ function createUniqueArtifactPath(entries: ManageFileEntry[], kind: ManageArtifa
   const { extension, stem } = artifactNameParts(kind);
   for (let index = 1; index < 10_000; index += 1) {
     const suffix = index === 1 ? "" : `-${index}`;
-    const path = `${MANAGE_ARTIFACT_ROOT_PATH}/${stem}${suffix}.${extension}`;
+    const path = `${MANAGE_DOCS_ROOT_PATH}/${stem}${suffix}.${extension}`;
     if (!occupiedPaths.has(path.toLocaleLowerCase())) {
       return path;
     }
   }
-  return `${MANAGE_ARTIFACT_ROOT_PATH}/${stem}-${Date.now()}.${extension}`;
+  return `${MANAGE_DOCS_ROOT_PATH}/${stem}-${Date.now()}.${extension}`;
+}
+
+function createUniqueFolderPath(entries: ManageFileEntry[]): string {
+  const occupiedPaths = new Set(entries.map((entry) => entry.path.toLocaleLowerCase()));
+  for (let index = 1; index < 10_000; index += 1) {
+    const suffix = index === 1 ? "" : `-${index}`;
+    const path = `${MANAGE_DOCS_ROOT_PATH}/folder${suffix}`;
+    if (!occupiedPaths.has(path.toLocaleLowerCase())) {
+      return path;
+    }
+  }
+  return `${MANAGE_DOCS_ROOT_PATH}/folder-${Date.now()}`;
+}
+
+function orderManageEntriesForTree(entries: readonly ManageFileEntry[]): ManageFileEntry[] {
+  const childrenByParentPath = new Map<string, ManageFileEntry[]>();
+  for (const entry of entries) {
+    const parentPath = parentManagePath(entry.path) || MANAGE_DOCS_ROOT_PATH;
+    const siblings = childrenByParentPath.get(parentPath);
+    if (siblings) {
+      siblings.push(entry);
+    } else {
+      childrenByParentPath.set(parentPath, [entry]);
+    }
+  }
+
+  const orderedEntries: ManageFileEntry[] = [];
+  const visitedPaths = new Set<string>();
+  const appendChildren = (parentPath: string) => {
+    for (const child of childrenByParentPath.get(parentPath) ?? []) {
+      if (visitedPaths.has(child.path)) {
+        continue;
+      }
+      visitedPaths.add(child.path);
+      orderedEntries.push(child);
+      if (child.kind === "directory") {
+        appendChildren(child.path);
+      }
+    }
+  };
+
+  appendChildren(MANAGE_DOCS_ROOT_PATH);
+  for (const entry of entries) {
+    if (!visitedPaths.has(entry.path)) {
+      orderedEntries.push(entry);
+    }
+  }
+  return orderedEntries;
 }
 
 function artifactNameParts(kind: ManageArtifactKind): { extension: string; stem: string } {
@@ -2545,29 +4260,199 @@ function artifactNameParts(kind: ManageArtifactKind): { extension: string; stem:
   }
 }
 
+function validateManageRenameFileName(name: string): string | undefined {
+  if (!name) {
+    return "Enter a file name.";
+  }
+  if (name === "." || name === "..") {
+    return "Use a normal file name.";
+  }
+  if (name.includes("/") || name.includes("\\") || name.includes("\0")) {
+    return "File names cannot contain path separators.";
+  }
+  return undefined;
+}
+
+function renameManageFilePath(path: string, nextName: string): string {
+  const separatorIndex = path.lastIndexOf("/");
+  if (separatorIndex === -1) {
+    return nextName;
+  }
+  return `${path.slice(0, separatorIndex + 1)}${nextName}`;
+}
+
+function parentManagePath(path: string): string {
+  const separatorIndex = path.lastIndexOf("/");
+  return separatorIndex === -1 ? "" : path.slice(0, separatorIndex);
+}
+
+function basenameManagePath(path: string): string {
+  const separatorIndex = path.lastIndexOf("/");
+  return separatorIndex === -1 ? path : path.slice(separatorIndex + 1);
+}
+
+function isManageDescendantPath(path: string, ancestorPath: string): boolean {
+  return path.startsWith(`${ancestorPath}/`);
+}
+
+function hasCollapsedManageAncestor(path: string, collapsedDirectoryPaths: Set<string>): boolean {
+  for (const collapsedPath of collapsedDirectoryPaths) {
+    if (isManageDescendantPath(path, collapsedPath)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function moveManagePathToDirectory(path: string, targetDirectoryPath: string): string | undefined {
+  const fileName = basenameManagePath(path);
+  if (!fileName || targetDirectoryPath.length === 0) {
+    return undefined;
+  }
+  return `${targetDirectoryPath}/${fileName}`;
+}
+
+function dropDirectoryPathForManageEntry(entry: ManageFileEntry): string {
+  return entry.kind === "directory" ? entry.path : parentManagePath(entry.path) || MANAGE_DOCS_ROOT_PATH;
+}
+
+function canMoveManageEntryToDirectory(
+  entry: ManageFileEntry,
+  targetDirectoryPath: string,
+  entries: readonly ManageFileEntry[],
+): boolean {
+  if (targetDirectoryPath !== MANAGE_DOCS_ROOT_PATH) {
+    const targetEntry = entries.find((candidate) => candidate.path === targetDirectoryPath);
+    if (targetEntry?.kind !== "directory") {
+      return false;
+    }
+  }
+  if (entry.path === targetDirectoryPath || parentManagePath(entry.path) === targetDirectoryPath) {
+    return false;
+  }
+  if (entry.kind === "directory" && isManageDescendantPath(targetDirectoryPath, entry.path)) {
+    return false;
+  }
+  const nextPath = moveManagePathToDirectory(entry.path, targetDirectoryPath);
+  if (!nextPath || nextPath === entry.path) {
+    return false;
+  }
+  return !entries.some(
+    (candidate) =>
+      candidate.path !== entry.path &&
+      candidate.path.toLocaleLowerCase() === nextPath.toLocaleLowerCase(),
+  );
+}
+
+function remapManagePathByMove(path: string, sourcePath: string, destinationPath: string): string | undefined {
+  if (path === sourcePath) {
+    return destinationPath;
+  }
+  if (isManageDescendantPath(path, sourcePath)) {
+    return `${destinationPath}${path.slice(sourcePath.length)}`;
+  }
+  return undefined;
+}
+
+function remapManageAnnotationPathsForMove(
+  annotationsByPath: Record<string, ManageAnnotation[]>,
+  sourcePath: string,
+  destinationPath: string,
+): Record<string, ManageAnnotation[]> {
+  let changed = false;
+  const next: Record<string, ManageAnnotation[]> = {};
+  for (const [path, annotations] of Object.entries(annotationsByPath)) {
+    const movedPath = remapManagePathByMove(path, sourcePath, destinationPath);
+    if (movedPath) {
+      changed = true;
+      next[movedPath] = [...(next[movedPath] ?? []), ...annotations];
+    } else {
+      next[path] = [...(next[path] ?? []), ...annotations];
+    }
+  }
+  return changed ? next : annotationsByPath;
+}
+
+function remapManagePathSetForMove(
+  paths: Set<string>,
+  sourcePath: string,
+  destinationPath: string,
+): Set<string> {
+  const next = new Set<string>();
+  for (const path of paths) {
+    next.add(remapManagePathByMove(path, sourcePath, destinationPath) ?? path);
+  }
+  return next;
+}
+
 function createInitialArtifactContent(kind: ManageArtifactKind): string {
   switch (kind) {
     case "excalidraw":
       return `${JSON.stringify(createEmptyExcalidrawFile(), null, 2)}\n`;
     case "html":
-      return [
-        "<!doctype html>",
-        '<html lang="en">',
-        "<head>",
-        '  <meta charset="utf-8">',
-        "  <title>Untitled</title>",
-        "</head>",
-        "<body>",
-        "  <main>",
-        "    <h1>Untitled</h1>",
-        "  </main>",
-        "</body>",
-        "</html>",
-        "",
-      ].join("\n");
+      return createDefaultHtmlDocument();
     case "markdown":
       return "# Untitled\n\n";
   }
+}
+
+function createDefaultHtmlDocument(): string {
+  /*
+   * CDXC:ManageDefaultHtml 2026-06-28-07:17:
+   * The default HTML document is user-facing onboarding copy, not a blank placeholder. It should teach users to ask an agent for a polished explanatory HTML page, then review and annotate exact rendered sections with Agentation.
+   * Keep the document self-contained with inline dark-mode styles because Manage sanitizes rendered HTML for same-document Agentation and strips style/script tags before display.
+   *
+   * CDXC:ManageHtmlAgentation 2026-06-28-07:58:
+   * The starter copy should describe Agentation as an idle bottom-left control on open. Users explicitly start feedback mode from Agentation only when they are ready to annotate.
+   */
+  return [
+    "<!doctype html>",
+    '<html lang="en">',
+    "<head>",
+    '  <meta charset="utf-8">',
+    '  <meta name="viewport" content="width=device-width, initial-scale=1">',
+    '  <meta name="color-scheme" content="dark">',
+    "  <title>Ask an agent for an HTML explainer</title>",
+    "</head>",
+    '<body style="margin: 0; background: #0e0e0e; color: #c8cdd5; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, &quot;SF Pro Text&quot;, &quot;Segoe UI&quot;, sans-serif;">',
+    '  <main aria-labelledby="docs-title" style="min-height: 100vh; background: #0e0e0e; padding: 42px 30px 52px;">',
+    '    <section style="max-width: 980px; margin: 0 auto; display: grid; gap: 18px;">',
+    '      <header style="background: #151515; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 30px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);">',
+    '        <p style="margin: 0 0 12px; color: #95d7f6; font-size: 12px; font-weight: 760; letter-spacing: 0; text-transform: uppercase;">Ghostex Docs</p>',
+    '        <h1 id="docs-title" style="margin: 0; color: #f3f4f6; font-size: 46px; line-height: 1.02; letter-spacing: 0; max-width: 780px;">Ask your agent for an HTML explainer</h1>',
+    '        <p style="margin: 18px 0 0; color: #a6adb6; font-size: 17px; line-height: 1.65; max-width: 760px;">Use this starter as a prompt target. Ask an agent to replace it with a focused HTML document that explains a feature, workflow, bug, decision, or research topic in a way your team can scan and discuss.</p>',
+    "      </header>",
+    '      <section style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">',
+    '        <article style="background: #181818; border: 1px solid rgba(255, 255, 255, 0.11); border-radius: 8px; padding: 18px;">',
+    '          <p style="margin: 0 0 10px; color: #95d7f6; font-size: 12px; font-weight: 760; text-transform: uppercase;">1. Ask</p>',
+    '          <h2 style="margin: 0 0 8px; color: #f3f4f6; font-size: 20px; line-height: 1.2;">Tell your agent what to explain</h2>',
+    '          <p style="margin: 0; color: #a6adb6; font-size: 14px; line-height: 1.55;">Name the topic, audience, and level of detail. Ask for sections, examples, diagrams, tables, or callouts when they help.</p>',
+    "        </article>",
+    '        <article style="background: #181818; border: 1px solid rgba(255, 255, 255, 0.11); border-radius: 8px; padding: 18px;">',
+    '          <p style="margin: 0 0 10px; color: #95d7f6; font-size: 12px; font-weight: 760; text-transform: uppercase;">2. Review</p>',
+    '          <h2 style="margin: 0 0 8px; color: #f3f4f6; font-size: 20px; line-height: 1.2;">Open the rendered document</h2>',
+    '          <p style="margin: 0; color: #a6adb6; font-size: 14px; line-height: 1.55;">Read it in Docs like a real page. Check whether the structure, labels, and examples make the explanation clear.</p>',
+    "        </article>",
+    '        <article style="background: #181818; border: 1px solid rgba(255, 255, 255, 0.11); border-radius: 8px; padding: 18px;">',
+    '          <p style="margin: 0 0 10px; color: #95d7f6; font-size: 12px; font-weight: 760; text-transform: uppercase;">3. Annotate</p>',
+    '          <h2 style="margin: 0 0 8px; color: #f3f4f6; font-size: 20px; line-height: 1.2;">Use Agentation for feedback</h2>',
+    '          <p style="margin: 0; color: #a6adb6; font-size: 14px; line-height: 1.55;">Use the bottom-left Agentation control when you are ready. Point at the exact paragraph, diagram, or layout issue, then leave notes your agent can act on.</p>',
+    "        </article>",
+    "      </section>",
+    '      <section style="background: #101112; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 22px;">',
+    '        <h2 style="margin: 0 0 12px; color: #f3f4f6; font-size: 22px; line-height: 1.25;">Prompt to try</h2>',
+    '        <pre style="margin: 0; overflow-x: auto; white-space: pre-wrap; background: #222426; border: 1px solid rgba(255, 255, 255, 0.10); border-radius: 8px; color: #e5e7eb; font: 13px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, &quot;Liberation Mono&quot;, monospace; padding: 16px;">Create an HTML document in docs/ that explains &lt;topic&gt; for &lt;audience&gt;. Make it dark, polished, and easy to scan. Use inline styles, clear sections, practical examples, and a small diagram or table if it helps. Keep it self-contained so I can annotate it in Ghostex Docs with Agentation.</pre>',
+    "      </section>",
+    '      <section style="display: grid; gap: 10px; color: #a6adb6; font-size: 14px; line-height: 1.6;">',
+    '        <p style="margin: 0;"><strong style="color: #f3f4f6;">Good requests are specific.</strong> Ask for the job the document should do: onboard a teammate, explain a tradeoff, compare options, summarize an incident, or teach a workflow.</p>',
+    '        <p style="margin: 0;"><strong style="color: #f3f4f6;">Good annotations are precise.</strong> Mark the part that is confusing, missing, too dense, or visually off, then ask your agent to revise this HTML file.</p>',
+    "      </section>",
+    "    </section>",
+    "  </main>",
+    "</body>",
+    "</html>",
+    "",
+  ].join("\n");
 }
 
 function formatFileSize(size: number): string {
@@ -2703,6 +4588,39 @@ function clampManageSelectionToolbarLeft(left: number): number {
   return Math.min(Math.max(left, minLeft), maxLeft);
 }
 
+function meoSelectionToolbarPosition(
+  selectionState: ManageMeoSelectionState,
+  fallbackAnchor: ManageSelectionAnchor,
+): { isBelow: boolean; left: number; top: number } {
+  const margin = 8;
+  const estimatedWidth = 236;
+  const estimatedHeight = 34;
+  const anchorX =
+    typeof selectionState.anchorX === "number" && Number.isFinite(selectionState.anchorX)
+      ? selectionState.anchorX
+      : fallbackAnchor.left;
+  const anchorY =
+    typeof selectionState.anchorY === "number" && Number.isFinite(selectionState.anchorY)
+      ? selectionState.anchorY
+      : fallbackAnchor.top;
+  const anchorBottomY =
+    typeof selectionState.anchorBottomY === "number" && Number.isFinite(selectionState.anchorBottomY)
+      ? selectionState.anchorBottomY
+      : fallbackAnchor.top;
+  const rawLeft = selectionState.align === "start" ? anchorX : anchorX - estimatedWidth / 2;
+  const maxLeft = Math.max(margin, window.innerWidth - estimatedWidth - margin);
+  const toolbarBottom =
+    (document.querySelector(".manage-meo-markdown-editor .mode-toolbar") as HTMLElement | null)?.getBoundingClientRect().bottom ??
+    0;
+  const aboveTop = anchorY - margin - estimatedHeight;
+  const isBelow = aboveTop < toolbarBottom + margin;
+  return {
+    isBelow,
+    left: Math.min(maxLeft, Math.max(margin, rawLeft)),
+    top: Math.max(margin, isBelow ? anchorBottomY + margin : anchorY - margin),
+  };
+}
+
 function renderManageQuickLabelIcon(labelId: ManageQuickLabelId): ReactNode {
   switch (labelId) {
     case "clarify":
@@ -2725,22 +4643,6 @@ function selectionAnchorFromRect(rect: DOMRect | undefined): ManageSelectionAnch
   const left = Math.min(Math.max(rect.left + rect.width / 2, 12), window.innerWidth - 12);
   const top = Math.min(Math.max(rect.top, 12), window.innerHeight - 12);
   return { left, top };
-}
-
-function selectionAnchorFromRange(range: Range): ManageSelectionAnchor | undefined {
-  const visibleRect = Array.from(range.getClientRects()).find((rect) => rect.width > 0 && rect.height > 0);
-  return selectionAnchorFromRect(visibleRect ?? range.getBoundingClientRect());
-}
-
-function selectionBelongsToElement(selection: Selection, element: HTMLElement): boolean {
-  const anchorNode = selection.anchorNode;
-  const focusNode = selection.focusNode;
-  return Boolean(
-    anchorNode &&
-      focusNode &&
-      element.contains(anchorNode.nodeType === Node.ELEMENT_NODE ? anchorNode : anchorNode.parentElement) &&
-      element.contains(focusNode.nodeType === Node.ELEMENT_NODE ? focusNode : focusNode.parentElement),
-  );
 }
 
 function defaultManageSelectionAnchor(): ManageSelectionAnchor {
@@ -2771,31 +4673,12 @@ function createManageMeoAnnotationDecorations(
   text: string,
   annotations: readonly ManageAnnotation[],
 ): ManageMeoAnnotationDecoration[] {
-  const decorations: ManageMeoAnnotationDecoration[] = [];
-  for (const annotation of annotations) {
-    if (annotation.scope !== "selection") {
-      continue;
-    }
-    const quote = normalizeAnnotationQuote(annotation.quote);
-    if (!quote) {
-      continue;
-    }
-    let fromIndex = 0;
-    while (fromIndex < text.length) {
-      const matchIndex = text.indexOf(quote, fromIndex);
-      if (matchIndex < 0) {
-        break;
-      }
-      decorations.push({
-        from: matchIndex,
-        labelId: annotation.labelId,
-        to: matchIndex + quote.length,
-        type: annotation.type,
-      });
-      fromIndex = matchIndex + quote.length;
-    }
-  }
-  return decorations;
+  return collectManageAnnotationRanges(text, annotations).map((range) => ({
+    from: range.from,
+    labelId: range.annotation.labelId,
+    to: range.to,
+    type: range.annotation.type,
+  }));
 }
 
 function buildManageMeoAnnotationDecorations(decorations: readonly ManageMeoAnnotationDecoration[]): DecorationSet {
@@ -2820,25 +4703,193 @@ function buildManageMeoAnnotationDecorations(decorations: readonly ManageMeoAnno
   return builder.finish();
 }
 
-function normalizeManageMeoSelection(
-  state: ManageMeoSelectionState | undefined,
-  editor: ManageMeoEditor | null,
-): ManageCapturedSelection | undefined {
-  if (!state?.visible || !editor || typeof state.from !== "number" || typeof state.to !== "number") {
+function collectManageAnnotationRanges(
+  text: string,
+  annotations: readonly ManageAnnotation[],
+): ManageResolvedAnnotationRange[] {
+  const ranges: ManageResolvedAnnotationRange[] = [];
+  for (const annotation of annotations) {
+    if (annotation.scope !== "selection") {
+      continue;
+    }
+    for (const match of findManageAnnotationTextMatches(text, annotation.quote)) {
+      ranges.push({
+        annotation,
+        from: match.from,
+        labelId: annotation.labelId,
+        to: match.to,
+        type: annotation.type,
+      });
+    }
+  }
+  return ranges;
+}
+
+function findManageAnnotationTextMatches(text: string, quote: string): Array<{ from: number; to: number }> {
+  const normalizedQuote = normalizeAnnotationQuote(quote);
+  if (!normalizedQuote) {
+    return [];
+  }
+  const normalizedText = buildManageNormalizedTextIndex(text);
+  const matches: Array<{ from: number; to: number }> = [];
+  let fromIndex = 0;
+  while (fromIndex < normalizedText.text.length) {
+    const matchIndex = normalizedText.text.indexOf(normalizedQuote, fromIndex);
+    if (matchIndex < 0) {
+      break;
+    }
+    const start = normalizedText.positions[matchIndex];
+    const end = normalizedText.positions[matchIndex + normalizedQuote.length - 1];
+    if (typeof start === "number" && typeof end === "number" && end >= start) {
+      matches.push({ from: start, to: end + 1 });
+    }
+    fromIndex = matchIndex + normalizedQuote.length;
+  }
+  return matches;
+}
+
+function buildManageNormalizedTextIndex(text: string): { positions: number[]; text: string } {
+  const positions: number[] = [];
+  let normalized = "";
+  let previousWasWhitespace = true;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index] ?? "";
+    if (/\s/u.test(character)) {
+      if (!previousWasWhitespace) {
+        normalized += " ";
+        positions.push(index);
+        previousWasWhitespace = true;
+      }
+      continue;
+    }
+    normalized += character;
+    positions.push(index);
+    previousWasWhitespace = false;
+  }
+  if (normalized.endsWith(" ")) {
+    normalized = normalized.slice(0, -1);
+    positions.pop();
+  }
+  return { positions, text: normalized };
+}
+
+function syncManageMeoAnnotationReviewState(
+  view: EditorView,
+  annotations: readonly ManageAnnotation[],
+  onSelectionCapture: (selection: ManageCapturedSelection) => void,
+  onSelectionClear: () => void,
+  onAnnotationPreviewChange: (preview: ManageAnnotationPreview | undefined) => void,
+): void {
+  const selection = view.state.selection.main;
+  const documentLength = view.state.doc.length;
+  if (!selection.empty) {
+    const from = Math.max(0, Math.min(Math.floor(Math.min(selection.from, selection.to)), documentLength));
+    const to = Math.max(from, Math.min(Math.floor(Math.max(selection.from, selection.to)), documentLength));
+    const text = view.state.doc.sliceString(from, to);
+    if (!normalizeAnnotationQuote(text)) {
+      onSelectionClear();
+      onAnnotationPreviewChange(undefined);
+      return;
+    }
+    onAnnotationPreviewChange(undefined);
+    onSelectionCapture({
+      anchor: manageEditorRangeAnchor(view, from, to) ?? defaultManageSelectionAnchor(),
+      text,
+    });
+    return;
+  }
+
+  onSelectionClear();
+  const caretPosition = Math.max(0, Math.min(Math.floor(selection.from), documentLength));
+  const activeRange = findManageAnnotationRangeAtPosition(view.state.doc.toString(), annotations, caretPosition);
+  if (!activeRange) {
+    onAnnotationPreviewChange(undefined);
+    return;
+  }
+  onAnnotationPreviewChange({
+    anchor: manageEditorRangeAnchor(view, activeRange.from, activeRange.to) ?? defaultManageSelectionAnchor(),
+    annotation: activeRange.annotation,
+  });
+}
+
+function findManageAnnotationRangeAtPosition(
+  text: string,
+  annotations: readonly ManageAnnotation[],
+  position: number,
+): ManageResolvedAnnotationRange | undefined {
+  return collectManageAnnotationRanges(text, annotations)
+    .filter((range) => position >= range.from && position < range.to)
+    .sort((left, right) => left.to - left.from - (right.to - right.from) || left.from - right.from)[0];
+}
+
+function manageEditorRangeAnchor(view: EditorView, from: number, to: number): ManageSelectionAnchor | undefined {
+  const documentLength = view.state.doc.length;
+  const rangeFrom = Math.max(0, Math.min(Math.floor(from), documentLength));
+  const rangeTo = Math.max(rangeFrom, Math.min(Math.floor(to), documentLength));
+  if (rangeTo <= rangeFrom) {
     return undefined;
   }
-  const documentLength = editor.view.state.doc.length;
-  const from = Math.max(0, Math.min(Math.floor(state.from), documentLength));
-  const to = Math.max(from, Math.min(Math.floor(state.to), documentLength));
-  const text = editor.view.state.doc.sliceString(from, to);
-  if (!normalizeAnnotationQuote(text)) {
+  const rects = manageEditorRangeRects(view, rangeFrom, rangeTo);
+  if (rects.length > 0) {
+    const left = Math.min(...rects.map((rect) => rect.left));
+    const right = Math.max(...rects.map((rect) => rect.right));
+    const top = Math.min(...rects.map((rect) => rect.top));
+    return {
+      left: Math.min(Math.max((left + right) / 2, 12), window.innerWidth - 12),
+      top: Math.min(Math.max(top, 12), window.innerHeight - 12),
+    };
+  }
+  const coords = view.coordsAtPos(rangeFrom);
+  if (!coords) {
     return undefined;
   }
-  const left = Math.min(Math.max(state.anchorX ?? window.innerWidth / 2, 12), window.innerWidth - 12);
-  const top = Math.min(Math.max(state.anchorY ?? state.anchorBottomY ?? 72, 12), window.innerHeight - 12);
   return {
-    anchor: { left, top },
-    text,
+    left: Math.min(Math.max((coords.left + coords.right) / 2, 12), window.innerWidth - 12),
+    top: Math.min(Math.max(coords.top, 12), window.innerHeight - 12),
+  };
+}
+
+function manageEditorRangeRects(view: EditorView, from: number, to: number): DOMRect[] {
+  try {
+    const start = view.domAtPos(from);
+    const end = view.domAtPos(to);
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+    const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+    range.detach();
+    return rects;
+  } catch {
+    return [];
+  }
+}
+
+function annotationPreviewText(annotation: ManageAnnotation): string {
+  const note = annotationDisplayNote(annotation);
+  if (note) {
+    return truncateManageAnnotationPreviewText(note);
+  }
+  if (annotation.labelId) {
+    return quickLabelText(annotation.labelId);
+  }
+  if (annotation.type === "redline") {
+    return "Marked for deletion";
+  }
+  return truncateManageAnnotationPreviewText(annotation.quote);
+}
+
+function truncateManageAnnotationPreviewText(text: string): string {
+  const normalized = normalizeAnnotationQuote(text);
+  return normalized.length > 150 ? `${normalized.slice(0, 147)}...` : normalized;
+}
+
+function annotationPreviewCardStyle(anchor: ManageSelectionAnchor): CSSProperties {
+  const width = Math.min(320, Math.max(240, window.innerWidth - 24));
+  const halfWidth = width / 2;
+  return {
+    left: Math.min(Math.max(anchor.left, 12 + halfWidth), window.innerWidth - 12 - halfWidth),
+    top: Math.max(12, anchor.top - 96),
+    width,
   };
 }
 
@@ -3521,9 +5572,9 @@ function normalizeQuickLabelId(value: unknown): ManageQuickLabelId | undefined {
 
 function formatManageAnnotationsAsMarkdown(path: string, annotations: ManageAnnotation[]): string {
   if (annotations.length === 0) {
-    return `# Manage Markdown Feedback\n\nFile: \`${path}\`\n\nNo annotations.\n`;
+    return `# Docs Markdown Feedback\n\nFile: \`${path}\`\n\nNo annotations.\n`;
   }
-  const lines = ["# Manage Markdown Feedback", "", `File: \`${path}\``, ""];
+  const lines = ["# Docs Markdown Feedback", "", `File: \`${path}\``, ""];
   const redlines = annotations.filter((annotation) => annotation.type === "redline");
   const comments = annotations.filter((annotation) => annotation.type === "comment");
   if (redlines.length > 0) {
@@ -3708,17 +5759,18 @@ const styleElement = document.createElement("style");
 styleElement.textContent = `
   :root {
     color-scheme: dark;
-    --manage-bg: #101112;
-    --manage-panel: #17191b;
-    --manage-panel-strong: #202326;
-    --manage-panel-raised: #23262a;
-    --manage-border: rgba(255, 255, 255, 0.085);
-    --manage-border-strong: rgba(255, 255, 255, 0.13);
-    --manage-text: rgba(248, 250, 252, 0.92);
-    --manage-muted: rgba(226, 232, 240, 0.58);
-    --manage-subtle: rgba(226, 232, 240, 0.38);
-    --manage-accent: #7dd3fc;
-    --manage-accent-muted: rgba(125, 211, 252, 0.14);
+    --manage-bg: #0e0e0e;
+    --manage-panel: #0e0e0e;
+    --manage-panel-strong: #181818;
+    --manage-panel-raised: #202020;
+    --manage-border: color-mix(in srgb, #ffffff 11%, transparent);
+    --manage-border-strong: rgba(255, 255, 255, 0.12);
+    --manage-text: #c8cdd5;
+    --manage-muted: #a6adb6;
+    --manage-subtle: #747b85;
+    --manage-accent: #95d7f6;
+    --manage-accent-muted: rgba(255, 255, 255, 0.055);
+    --manage-row-surface: #202020;
     --manage-green: #86efac;
     --manage-red: #fda4af;
     --manage-yellow: #fde68a;
@@ -3781,6 +5833,7 @@ styleElement.textContent = `
     grid-row: 1;
     min-height: 0;
     min-width: 0;
+    padding: 0 1px 7px 8px;
   }
 
   .manage-shell[data-sidebar-side="right"] .manage-sidebar {
@@ -3789,7 +5842,7 @@ styleElement.textContent = `
   }
 
   .manage-sidebar-resizer {
-    background: var(--manage-panel);
+    background: var(--manage-bg);
     cursor: ew-resize;
     grid-column: 2;
     grid-row: 1;
@@ -3800,7 +5853,7 @@ styleElement.textContent = `
   }
 
   .manage-sidebar-resizer::before {
-    background: var(--manage-border-strong);
+    background: #343434;
     content: "";
     inset: 0 3px;
     position: absolute;
@@ -3808,7 +5861,7 @@ styleElement.textContent = `
 
   .manage-sidebar-resizer:hover::before,
   .manage-sidebar-resizer:focus-visible::before {
-    background: rgba(125, 211, 252, 0.7);
+    background: rgba(200, 205, 213, 0.42);
   }
 
   .manage-preview {
@@ -3823,11 +5876,14 @@ styleElement.textContent = `
 
   .manage-sidebar-header {
     align-items: center;
-    border-bottom: 1px solid var(--manage-border);
     display: flex;
-    gap: 8px;
-    min-height: 48px;
-    padding: 0 10px 0 12px;
+    gap: 10px;
+    min-height: 52px;
+    padding: 12px 9px 6px 10px;
+  }
+
+  .manage-sidebar-header[data-root-drop-target="true"] {
+    background: color-mix(in srgb, var(--manage-text) 8%, transparent);
   }
 
   .manage-project-title {
@@ -3835,9 +5891,10 @@ styleElement.textContent = `
     color: var(--manage-text);
     display: flex;
     flex: 1 1 auto;
-    font-size: 13px;
-    font-weight: 680;
-    gap: 8px;
+    font-size: 15.55px;
+    font-weight: 300;
+    gap: 11px;
+    line-height: 18px;
     min-width: 0;
   }
 
@@ -3856,66 +5913,21 @@ styleElement.textContent = `
     position: relative;
   }
 
-  .manage-artifact-create {
-    border-bottom: 1px solid var(--manage-border);
-    display: grid;
-    gap: 6px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    padding: 8px 10px;
-  }
-
-  .manage-artifact-create-button {
-    align-items: center;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--manage-border);
-    color: rgba(248, 250, 252, 0.78);
-    display: inline-flex;
-    font-size: 11px;
-    font-weight: 720;
-    gap: 5px;
-    height: 30px;
-    justify-content: center;
-    min-width: 0;
-    overflow: hidden;
-    padding: 0 7px;
-    white-space: nowrap;
-  }
-
-  .manage-artifact-create-button:hover,
-  .manage-artifact-create-button:focus-visible {
-    background: rgba(125, 211, 252, 0.1);
-    border-color: rgba(125, 211, 252, 0.38);
-    color: var(--manage-text);
-    outline: none;
-  }
-
-  .manage-artifact-create-button:disabled {
-    color: var(--manage-subtle);
-    cursor: wait;
-  }
-
-  .manage-artifact-create-button span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
   .manage-icon-button {
     align-items: center;
     background: transparent;
-    border: 1px solid transparent;
-    color: rgba(248, 250, 252, 0.68);
+    border: 0;
+    color: color-mix(in srgb, var(--manage-text) 88%, var(--manage-subtle) 12%);
     display: inline-flex;
-    height: 28px;
+    height: 26px;
     justify-content: center;
     padding: 0;
-    width: 28px;
+    width: 26px;
   }
 
   .manage-icon-button:hover,
   .manage-icon-button:focus-visible {
-    background: rgba(255, 255, 255, 0.055);
-    border-color: var(--manage-border);
+    background: color-mix(in srgb, var(--manage-text) 10%, transparent);
     color: var(--manage-text);
     outline: none;
   }
@@ -3938,6 +5950,10 @@ styleElement.textContent = `
     right: 0;
     top: calc(100% + 6px);
     z-index: 20;
+  }
+
+  .manage-create-menu {
+    min-width: 182px;
   }
 
   .manage-sidebar-menu-item {
@@ -3995,21 +6011,21 @@ styleElement.textContent = `
 
   .manage-search {
     align-items: center;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--manage-border);
+    background: transparent;
+    border: 0;
     display: flex;
-    gap: 7px;
-    height: 32px;
-    margin: 10px 10px 6px;
-    padding: 0 9px;
+    gap: 11px;
+    height: 34px;
+    margin: 0 1px 20px 0;
+    padding: 7px 10px;
   }
 
   .manage-search:focus-within {
-    border-color: rgba(125, 211, 252, 0.58);
+    background: color-mix(in srgb, var(--manage-text) 8%, transparent);
   }
 
   .manage-search svg {
-    color: var(--manage-muted);
+    color: var(--manage-text);
     flex: 0 0 auto;
   }
 
@@ -4017,60 +6033,151 @@ styleElement.textContent = `
     background: transparent;
     border: 0;
     color: var(--manage-text);
+    font-size: 15.55px;
+    font-weight: 300;
+    line-height: 18px;
     min-width: 0;
     outline: 0;
+    padding: 0;
     width: 100%;
   }
 
   .manage-search input::placeholder {
-    color: var(--manage-subtle);
+    color: color-mix(in srgb, var(--manage-text) 52%, transparent);
   }
 
   .manage-sidebar-meta {
-    color: var(--manage-subtle);
-    font-size: 11px;
-    font-weight: 650;
-    padding: 0 12px 8px;
+    color: #686868;
+    font-size: 16px;
+    font-weight: 300;
+    line-height: 1.15;
+    padding: 0 18px 12px;
+  }
+
+  .manage-sidebar-file-toolbar {
+    color: color-mix(in srgb, var(--manage-text) 74%, var(--manage-muted) 26%);
+    display: grid;
+    gap: 0;
+    padding: 0 10px 14px 10px;
+  }
+
+  .manage-sidebar-file-toolbar-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1.25;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .manage-sidebar-file-toolbar-spacer {
+    height: 12px;
+  }
+
+  .manage-sidebar-file-toolbar-size {
+    color: color-mix(in srgb, var(--manage-muted) 82%, var(--manage-text) 18%);
+    font-size: 12px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
   }
 
   .manage-file-list {
     min-height: 0;
     overflow: auto;
-    padding: 3px 6px 10px;
+    padding: 0 0 10px;
+    position: relative;
+  }
+
+  .manage-file-list::before {
+    background: #c8cdd5;
+    box-shadow:
+      0 0 0 1px rgba(200, 205, 213, 0.22),
+      0 0 14px rgba(200, 205, 213, 0.24);
+    content: "";
+    height: 3px;
+    left: 12px;
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+    right: 12px;
+    top: 0;
+    transition: opacity 120ms ease;
+    z-index: 3;
+  }
+
+  .manage-file-list[data-root-drop-target="true"]::before {
+    opacity: 1;
   }
 
   .manage-file-row {
     --depth: 0;
     align-items: center;
     background: transparent;
-    border: 1px solid transparent;
+    border: 0;
     color: var(--manage-muted);
     display: grid;
-    gap: 7px;
-    grid-template-columns: 16px minmax(0, 1fr) auto;
-    min-height: 28px;
-    padding: 0 7px 0 calc(7px + (var(--depth) * 13px));
+    gap: 11px;
+    grid-template-columns: 14px 16px minmax(0, 1fr) auto;
+    min-height: 34px;
+    padding: 7px 9px 7px calc(18px + (var(--depth) * 18px));
+    position: relative;
     text-align: left;
     width: 100%;
   }
 
   .manage-file-row:hover,
   .manage-file-row:focus-visible {
-    background: rgba(255, 255, 255, 0.045);
-    border-color: rgba(255, 255, 255, 0.06);
+    background: color-mix(in srgb, var(--manage-text) 8%, transparent);
     color: var(--manage-text);
     outline: none;
   }
 
   .manage-file-row[data-kind="directory"] {
-    color: rgba(226, 232, 240, 0.66);
-    font-weight: 640;
+    color: var(--manage-muted);
+    font-weight: 300;
   }
 
   .manage-file-row[data-selected="true"] {
-    background: var(--manage-accent-muted);
-    border-color: rgba(125, 211, 252, 0.34);
+    background: color-mix(in srgb, var(--manage-row-surface) 72%, transparent);
+    color: #ffffff;
+  }
+
+  .manage-file-row[data-context-menu-open="true"] {
+    background: var(--manage-row-surface);
     color: var(--manage-text);
+  }
+
+  .manage-file-row[data-dragging="true"] {
+    opacity: 0.18;
+  }
+
+  .manage-file-row[data-drop-target="true"] {
+    background: var(--manage-row-surface);
+    color: var(--manage-text);
+  }
+
+  .manage-file-disclosure {
+    align-items: center;
+    color: var(--manage-subtle);
+    display: inline-flex;
+    height: 14px;
+    justify-content: center;
+    width: 14px;
+  }
+
+  .manage-file-disclosure[data-visible="false"] {
+    opacity: 0;
+  }
+
+  .manage-file-disclosure svg {
+    transition: transform 120ms ease;
+  }
+
+  .manage-file-row[aria-expanded="true"] .manage-file-disclosure svg {
+    transform: rotate(90deg);
   }
 
   .manage-file-icon {
@@ -4078,7 +6185,9 @@ styleElement.textContent = `
   }
 
   .manage-file-name {
-    font-size: 12px;
+    font-size: 15.55px;
+    font-weight: 300;
+    line-height: 18px;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -4106,11 +6215,182 @@ styleElement.textContent = `
     padding: 0 5px;
   }
 
-  .manage-file-size {
-    color: var(--manage-subtle);
-    font-size: 10px;
-    font-variant-numeric: tabular-nums;
+  /*
+   * CDXC:ManageFileActions 2026-06-28-04:35:
+   * The standalone Manage page does not load the shared sidebar overlay stylesheet. Define the right-click file menu and rename dialog locally so file actions remain viewport-clamped and dismissible inside the project-editor WebKit surface.
+   */
+  .sidebar-context-menu-backdrop,
+  .manage-rename-backdrop {
+    background: transparent;
+    border: 0;
+    cursor: default;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+    position: fixed;
+    z-index: 60;
+  }
+
+  .manage-file-context-menu {
+    background: color-mix(in srgb, var(--manage-panel-raised) 92%, #000 8%);
+    border: 1px solid var(--manage-border-strong);
+    box-shadow:
+      0 14px 28px rgba(0, 0, 0, 0.32),
+      0 0 0 1px rgba(255, 255, 255, 0.04);
+    color: rgba(244, 244, 245, 0.9);
+    display: grid;
+    gap: 2px;
+    min-width: 154px;
+    padding: 6px;
+    position: fixed;
+    z-index: 61;
+  }
+
+  .manage-file-context-menu-item {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    display: flex;
+    font-size: 12px;
+    font-weight: 620;
+    gap: 8px;
+    min-height: 32px;
+    padding: 8px 10px;
+    text-align: left;
     white-space: nowrap;
+    width: 100%;
+  }
+
+  .manage-file-context-menu-item:hover,
+  .manage-file-context-menu-item:focus-visible {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(250, 250, 250, 0.96);
+    outline: none;
+  }
+
+  .manage-file-context-menu-item:disabled {
+    color: var(--manage-subtle);
+    cursor: wait;
+  }
+
+  .manage-file-context-menu-item-danger {
+    color: rgba(253, 164, 175, 0.9);
+  }
+
+  .manage-file-context-menu-item-danger[data-confirming="true"] {
+    background: rgba(253, 164, 175, 0.12);
+    color: var(--manage-red);
+  }
+
+  .manage-rename-backdrop {
+    background: rgba(0, 0, 0, 0.34);
+    z-index: 70;
+  }
+
+  .manage-rename-dialog {
+    background: color-mix(in srgb, var(--manage-panel-raised) 94%, #000 6%);
+    border: 1px solid var(--manage-border-strong);
+    box-shadow:
+      0 20px 52px rgba(0, 0, 0, 0.46),
+      0 0 0 1px rgba(255, 255, 255, 0.04);
+    color: var(--manage-text);
+    display: grid;
+    gap: 10px;
+    left: 50%;
+    max-width: calc(100vw - 32px);
+    padding: 12px;
+    position: fixed;
+    top: 18%;
+    transform: translateX(-50%);
+    width: min(360px, calc(100vw - 32px));
+    z-index: 71;
+  }
+
+  .manage-rename-header {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .manage-rename-header span {
+    flex: 1 1 auto;
+    font-size: 13px;
+    font-weight: 700;
+    min-width: 0;
+  }
+
+  .manage-rename-close {
+    height: 26px;
+    width: 26px;
+  }
+
+  .manage-rename-input {
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid var(--manage-border);
+    color: var(--manage-text);
+    font-size: 13px;
+    height: 34px;
+    min-width: 0;
+    outline: 0;
+    padding: 0 9px;
+    width: 100%;
+  }
+
+  .manage-rename-input:focus {
+    border-color: rgba(125, 211, 252, 0.58);
+  }
+
+  .manage-rename-error {
+    color: var(--manage-red);
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .manage-rename-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .manage-rename-secondary,
+  .manage-rename-primary {
+    align-items: center;
+    border: 1px solid var(--manage-border);
+    display: inline-flex;
+    font-size: 12px;
+    font-weight: 680;
+    height: 30px;
+    justify-content: center;
+    min-width: 76px;
+    padding: 0 11px;
+  }
+
+  .manage-rename-secondary {
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(248, 250, 252, 0.78);
+  }
+
+  .manage-rename-primary {
+    background: rgba(125, 211, 252, 0.16);
+    border-color: rgba(125, 211, 252, 0.42);
+    color: var(--manage-text);
+  }
+
+  .manage-rename-secondary:hover,
+  .manage-rename-secondary:focus-visible,
+  .manage-rename-primary:hover,
+  .manage-rename-primary:focus-visible {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--manage-text);
+    outline: none;
+  }
+
+  .manage-rename-secondary:disabled,
+  .manage-rename-primary:disabled {
+    color: var(--manage-subtle);
+    cursor: wait;
   }
 
   .manage-empty {
@@ -4221,9 +6501,13 @@ styleElement.textContent = `
     width: 100%;
   }
 
+  /*
+   * CDXC:ManageDefaultHtml 2026-06-28-07:17:
+   * Rendered HTML Docs should inherit the dark Manage theme by default so the created onboarding page and future agent-authored pages fit the macOS app instead of opening on a white canvas.
+   */
   .manage-html-render-view {
-    background: #ffffff;
-    color: #111827;
+    background: var(--manage-bg);
+    color: var(--manage-text);
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
     font-size: 16px;
     height: 100%;
@@ -4232,12 +6516,24 @@ styleElement.textContent = `
     min-width: 0;
     overflow: auto;
     padding: 24px 28px 48px;
-    scrollbar-color: rgba(15, 23, 42, 0.28) transparent;
+    scrollbar-color: rgba(166, 173, 182, 0.38) transparent;
     width: 100%;
   }
 
   .manage-html-render-view :where(*) {
     max-width: 100%;
+  }
+
+  .manage-html-render-view :where(a) {
+    color: var(--manage-accent);
+  }
+
+  .manage-html-render-view :where(code) {
+    background: rgba(255, 255, 255, 0.075);
+    border: 1px solid var(--manage-border);
+    border-radius: 6px;
+    color: var(--manage-text);
+    padding: 0.12em 0.35em;
   }
 
   .manage-html-render-view :where(img, video, canvas, svg) {
@@ -4330,6 +6626,96 @@ styleElement.textContent = `
     overflow: hidden;
   }
 
+  .manage-meo-markdown-editor .mode-toolbar {
+    flex: 0 0 auto;
+    gap: 10px;
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .manage-meo-markdown-editor .format-group {
+    min-width: 0;
+  }
+
+  .manage-meo-markdown-editor .right-group,
+  .manage-meo-markdown-editor .mode-group {
+    flex: 0 0 auto;
+  }
+
+  .manage-meo-markdown-editor .mode-group {
+    background: rgba(255, 255, 255, 0.025);
+    border-color: rgba(255, 255, 255, 0.16);
+    border-radius: 9px;
+    gap: 2px;
+  }
+
+  .manage-meo-markdown-editor .mode-button {
+    color: var(--manage-muted);
+    min-width: 64px;
+  }
+
+  .manage-meo-markdown-editor .mode-button[aria-selected="true"],
+  .manage-meo-markdown-editor .mode-button.is-active {
+    background: rgba(125, 211, 252, 0.18);
+    box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.34);
+    color: var(--manage-text);
+  }
+
+  .manage-meo-markdown-editor .mode-button[aria-selected="false"]:hover,
+  .manage-meo-markdown-editor .mode-button:not(.is-active):hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--manage-text);
+  }
+
+  .manage-meo-markdown-editor .table-grid-cell {
+    appearance: none;
+    padding: 0;
+  }
+
+  .manage-selection-inline-mode-button {
+    color: ${MANAGE_MEO_HEADING_COLOR};
+  }
+
+  .manage-meo-markdown-editor .cm-line:not(.meo-md-code-block):not(.meo-src-code-block):not(.meo-mermaid-block) .meo-md-inline-code,
+  .manage-meo-markdown-editor .cm-line:not(.meo-md-code-block):not(.meo-src-code-block):not(.meo-mermaid-block) .meo-md-inline-code * {
+    background: ${MANAGE_MEO_CODE_BLOCK_BACKGROUND} !important;
+    color: ${MANAGE_MEO_CODE_COLOR} !important;
+    -webkit-text-fill-color: ${MANAGE_MEO_CODE_COLOR} !important;
+  }
+
+  .manage-meo-markdown-editor .cm-line:is(.meo-md-code-block, .meo-src-code-block),
+  .manage-meo-markdown-editor .cm-line.meo-md-alert:is(.meo-md-code-block, .meo-src-code-block) {
+    background: ${MANAGE_MEO_CODE_BLOCK_BACKGROUND} !important;
+  }
+
+  .manage-meo-markdown-editor .cm-line:is(.meo-md-code-block, .meo-src-code-block) {
+    --manage-code-block-top-border: transparent;
+    --manage-code-block-bottom-border: transparent;
+    box-shadow:
+      inset 1px 0 0 var(--manage-border-strong),
+      inset -1px 0 0 var(--manage-border-strong),
+      inset 0 1px 0 var(--manage-code-block-top-border),
+      inset 0 -1px 0 var(--manage-code-block-bottom-border);
+  }
+
+  .manage-meo-markdown-editor .cm-line:not(.meo-md-code-block):not(.meo-src-code-block) + .cm-line:is(.meo-md-code-block, .meo-src-code-block),
+  .manage-meo-markdown-editor .cm-content > .cm-line:is(.meo-md-code-block, .meo-src-code-block):first-child {
+    --manage-code-block-top-border: var(--manage-border-strong);
+  }
+
+  .manage-meo-markdown-editor .cm-line:is(.meo-md-code-block, .meo-src-code-block):has(+ .cm-line:not(.meo-md-code-block):not(.meo-src-code-block)),
+  .manage-meo-markdown-editor .cm-content > .cm-line:is(.meo-md-code-block, .meo-src-code-block):last-child {
+    --manage-code-block-bottom-border: var(--manage-border-strong);
+  }
+
+  .manage-meo-markdown-editor .cm-line:is(.meo-md-code-block, .meo-src-code-block) [style*="#fde68a" i],
+  .manage-meo-markdown-editor .cm-line:is(.meo-md-code-block, .meo-src-code-block) [style*="rgb(253, 230, 138)" i],
+  .manage-meo-markdown-editor .cm-line:is(.meo-md-code-block, .meo-src-code-block) [style*="#c084fc" i],
+  .manage-meo-markdown-editor .cm-line:is(.meo-md-code-block, .meo-src-code-block) [style*="rgb(192, 132, 252)" i] {
+    color: ${MANAGE_MEO_VARIABLE_COLOR} !important;
+    -webkit-text-fill-color: ${MANAGE_MEO_VARIABLE_COLOR} !important;
+  }
+
   .manage-meo-markdown-editor .editor-wrapper,
   .manage-meo-markdown-editor .editor-host,
   .manage-meo-markdown-editor .cm-editor {
@@ -4347,8 +6733,8 @@ styleElement.textContent = `
   }
 
   .manage-meo-markdown-editor .cm-gutters {
-    max-width: 44px;
-    min-width: 44px;
+    max-width: 47px;
+    min-width: 47px;
   }
 
   .manage-meo-markdown-editor .cm-gutter.meo-md-fold-gutter {
@@ -4393,7 +6779,7 @@ styleElement.textContent = `
   .manage-markdown-document h4,
   .manage-markdown-document h5,
   .manage-markdown-document h6 {
-    color: var(--manage-text);
+    color: ${MANAGE_MEO_HEADING_COLOR};
     letter-spacing: 0;
     line-height: 1.22;
   }
@@ -4405,14 +6791,12 @@ styleElement.textContent = `
   }
 
   .manage-markdown-document h2 {
-    color: rgba(248, 250, 252, 0.9);
     font-size: 20px;
     font-weight: 700;
     margin: 32px 0 12px;
   }
 
   .manage-markdown-document h3 {
-    color: rgba(248, 250, 252, 0.82);
     font-size: 16px;
     font-weight: 700;
     margin: 24px 0 8px;
@@ -4656,7 +7040,7 @@ styleElement.textContent = `
     right: 0;
     top: calc(100% + 8px);
     width: min(360px, calc(100vw - 28px));
-    z-index: 30;
+    z-index: 700;
   }
 
   .manage-annotation-dropdown header {
@@ -4918,6 +7302,61 @@ styleElement.textContent = `
     transform: translate(-50%, 0);
   }
 
+  .manage-annotation-preview-card {
+    --manage-annotation-color: ${MANAGE_COMMENT_ANNOTATION_COLOR};
+    background:
+      linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--manage-annotation-color) 18%, transparent) 0,
+        color-mix(in srgb, var(--manage-annotation-color) 8%, transparent) 46%,
+        transparent 100%
+      ),
+      color-mix(in srgb, var(--manage-panel-raised) 90%, #000 10%);
+    border: 1px solid color-mix(in srgb, var(--manage-annotation-color) 44%, var(--manage-border-strong));
+    border-radius: 8px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+    color: var(--manage-text);
+    display: grid;
+    gap: 6px;
+    max-width: calc(100vw - 24px);
+    padding: 10px 12px;
+    pointer-events: none;
+    position: fixed;
+    z-index: 39;
+  }
+
+  .manage-annotation-preview-card header {
+    align-items: center;
+    display: flex;
+    font-size: 10px;
+    font-weight: 760;
+    justify-content: space-between;
+    letter-spacing: 0;
+    line-height: 1.1;
+    text-transform: uppercase;
+  }
+
+  .manage-annotation-preview-card header span:first-child {
+    color: color-mix(in srgb, var(--manage-annotation-color) 76%, var(--manage-text));
+  }
+
+  .manage-annotation-preview-card header span:last-child {
+    color: var(--manage-muted);
+    font-weight: 680;
+    text-transform: none;
+  }
+
+  .manage-annotation-preview-card p {
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    color: color-mix(in srgb, var(--manage-text) 88%, var(--manage-muted));
+    display: -webkit-box;
+    font-size: 12px;
+    line-height: 1.4;
+    margin: 0;
+    overflow: hidden;
+  }
+
   .manage-comment-popover {
     background: color-mix(in srgb, var(--manage-panel-raised) 76%, #000 24%);
     border: 1px solid color-mix(in srgb, var(--manage-border-strong) 74%, #000 26%);
@@ -4929,7 +7368,7 @@ styleElement.textContent = `
     overflow: auto;
     padding: 34px 12px 12px;
     position: fixed;
-    z-index: 40;
+    z-index: 710;
   }
 
   .manage-comment-popover-close {
