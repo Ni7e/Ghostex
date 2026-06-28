@@ -1974,6 +1974,19 @@ export function SidebarApp({
   const normalizedSessionSearchQuery = sessionSearchQuery.trim();
   const isSessionSearchFiltering =
     isSessionSearchOpen && normalizedSessionSearchQuery.length >= MIN_SESSION_SEARCH_QUERY_LENGTH;
+  /*
+   * CDXC:SidebarSearch 2026-06-28-06:29:
+   * Search results must reveal matching live project sessions even when the
+   * user's normal section or project collapse state would hide them. Treat
+   * collapse as render-only while filtering so clearing search restores the
+   * user's previous sidebar shape without persisting temporary expansion.
+   */
+  const isReferenceChatsRenderedCollapsed =
+    isReferenceChatsCollapsed && !isSessionSearchFiltering;
+  const isReferenceProjectsRenderedCollapsed =
+    isReferenceProjectsCollapsed && !isSessionSearchFiltering;
+  const isSidebarSearchProjectGroupRenderedCollapsed = (groupId: string) =>
+    !isSessionSearchFiltering && collapsedGroupsById[ groupId ] === true;
   useEffect(() => {
     if (!isSessionSearchFiltering) {
       latestSessionSearchPreviousRequestIdRef.current = undefined;
@@ -2131,8 +2144,19 @@ export function SidebarApp({
     ],
   );
   const filteredRecentProjects = useMemo(
-    () => filterRecentProjects(recentProjects, recentProjectsQuery),
-    [ recentProjects, recentProjectsQuery ],
+    () => {
+      /*
+       * CDXC:SidebarPerformance 2026-06-28-05:39:
+       * Minimized Recent Projects should not rebuild fuzzy-search records while
+       * the drawer body is unmounted. Preserve the query in local state and
+       * apply it only when the user opens the drawer again.
+       */
+      if (!isRecentProjectsOpen) {
+        return recentProjects;
+      }
+      return filterRecentProjects(recentProjects, recentProjectsQuery);
+    },
+    [ isRecentProjectsOpen, recentProjects, recentProjectsQuery ],
   );
 
   const handleRecentProjectsListPointerMove = (
@@ -3812,7 +3836,6 @@ export function SidebarApp({
           onSearch={toggleSessionSearch}
           searchInputRef={searchInputRef}
           sessionSearchQuery={sessionSearchQuery}
-          showBetaFeatures={settings?.showBetaFeatures === true}
           setSessionSearchQuery={setSessionSearchQuery}
         />
         <div
@@ -3873,7 +3896,7 @@ export function SidebarApp({
                       <SidebarReferenceSectionHeader
                         activeSessionsSortMode={activeSessionsSortMode}
                         agents={agents}
-                        collapsed={isReferenceChatsCollapsed}
+                        collapsed={isReferenceChatsRenderedCollapsed}
                         onCreateBrowserChat={createReferenceBrowserChat}
                         onCreateChat={createReferenceChat}
                         onConfigureAgents={openConfigureAgentsModal}
@@ -3900,10 +3923,10 @@ export function SidebarApp({
                         title="Quick"
                       />
                       <div
-                        aria-hidden={isReferenceChatsCollapsed}
+                        aria-hidden={isReferenceChatsRenderedCollapsed}
                         className="group-list workspace-group-list reference-chat-group-list reference-sidebar-collapsible-body"
                         data-animate-children={String(referenceSectionChildAnimations.quick)}
-                        data-collapsed={String(isReferenceChatsCollapsed)}
+                        data-collapsed={String(isReferenceChatsRenderedCollapsed)}
                       >
                         {displayedReferenceChatGroupIds.map((groupId, groupIndex) => (
                           <SessionGroupSection
@@ -3951,7 +3974,7 @@ export function SidebarApp({
                             : "Expand Previous"
                           : undefined
                       }
-                      collapsed={isReferenceProjectsCollapsed}
+                      collapsed={isReferenceProjectsRenderedCollapsed}
                       onAddRepository={() => {
                         dismissAppModalForSidebarNavigation("SettingsDismissal:addRepository");
                         openAppModal({ modal: "addRepository", type: "open" });
@@ -4021,10 +4044,10 @@ export function SidebarApp({
                   ) : null}
                   {!shouldHideReferenceSectionsForSearchEmptyState ? (
                     <div
-                      aria-hidden={isReferenceProjectsCollapsed}
+                      aria-hidden={isReferenceProjectsRenderedCollapsed}
                       className="group-list workspace-group-list reference-project-group-list reference-sidebar-collapsible-body"
                       data-animate-children={String(referenceSectionChildAnimations.projects)}
-                      data-collapsed={String(isReferenceProjectsCollapsed)}
+                      data-collapsed={String(isReferenceProjectsRenderedCollapsed)}
                     >
                       {displayedReferenceProjectGroupIds.length > 0 ? (
                         displayedReferenceProjectGroupIds.map((groupId, groupIndex) => (
@@ -4037,7 +4060,7 @@ export function SidebarApp({
                             groupId={groupId}
                             index={groupIndex}
                             isGroupDragPreviewSource={groupDragPreview?.groupId === groupId}
-                            isCollapsed={collapsedGroupsById[ groupId ] === true}
+                            isCollapsed={isSidebarSearchProjectGroupRenderedCollapsed(groupId)}
                             key={groupId}
                             onAutoEditHandled={() => setAutoEditingGroupId(undefined)}
                             onCollapsedChange={setGroupCollapsed}
@@ -4076,7 +4099,10 @@ export function SidebarApp({
 	                     */}
                       {remoteMachines.map((machine, index) => (
                         <RemoteMachineSidebarSection
-                          collapsed={collapsedRemoteMachineSectionsById[ machine.id ] === true}
+                          collapsed={
+                            !isSessionSearchFiltering &&
+                            collapsedRemoteMachineSectionsById[ machine.id ] === true
+                          }
                           index={index}
                           key={machine.id}
                           machine={machine}
@@ -4121,7 +4147,7 @@ export function SidebarApp({
                               draggingDisabled={true}
                               groupId={groupId}
                               index={groupIndex}
-                              isCollapsed={collapsedGroupsById[ groupId ] === true}
+                              isCollapsed={isSidebarSearchProjectGroupRenderedCollapsed(groupId)}
                               key={groupId}
                               onAutoEditHandled={() => undefined}
                               onCollapsedChange={setGroupCollapsed}
@@ -4261,55 +4287,61 @@ export function SidebarApp({
                   <IconTerminal2 aria-hidden="true" size={15} stroke={1.9} />
                 </SidebarFixedTooltipButton>
               </div>
-              <div
-                aria-hidden={!isRecentProjectsOpen}
-                className="recent-projects-drawer-body"
-                data-collapsed={String(!isRecentProjectsOpen)}
-              >
-                {/*
-               * CDXC:SidebarSearch 2026-05-15-18:13:
-               * Recent Projects search must reuse the same shell, input, and
-               * icon classes as Search sessions so both boxes stay identical
-               * in typography, border, radius, padding, and icon placement.
-               */}
-                <SidebarSessionSearchField
-                  ariaLabel="Search recent projects"
-                  autoComplete="off"
-                  clearLabel="Clear recent projects search"
-                  inputRef={recentProjectsSearchInputRef}
-                  placeholder="Search projects"
-                  query={recentProjectsQuery}
-                  setQuery={setRecentProjectsQuery}
-                  shellClassName="recent-projects-search"
-                />
+              {isRecentProjectsOpen ? (
                 <div
-                  className="recent-projects-list vertical-scroll-fade-mask"
-                  onPointerEnter={handleRecentProjectsListPointerMove}
-                  onPointerLeave={handleRecentProjectsListPointerLeave}
-                  onPointerMove={handleRecentProjectsListPointerMove}
-                  onScrollCapture={handleRecentProjectsListScroll}
-                  onWheelCapture={handleRecentProjectsListScroll}
+                  className="recent-projects-drawer-body"
+                  data-collapsed="false"
                 >
-                  {filteredRecentProjects.length > 0 ? (
-                    filteredRecentProjects.map((project) => (
-                      <RecentProjectRow
-                        isContextMenuOpen={
-                          recentProjectContextMenuPosition?.projectId === project.projectId
-                        }
-                        isScrolling={isRecentProjectsListScrolling}
-                        key={project.projectId}
-                        onContextMenu={openRecentProjectContextMenu}
-                        onRestore={restoreRecentProject}
-                        pointerPointRef={recentProjectsPointerPointRef}
-                        project={project}
-                      />
-                    ))
-                  ) : (
-                    <div className="recent-projects-empty">No projects match that search.</div>
-                  )}
+                  {/*
+                 * CDXC:SidebarSearch 2026-05-15-18:13:
+                 * Recent Projects search must reuse the same shell, input, and
+                 * icon classes as Search sessions so both boxes stay identical
+                 * in typography, border, radius, padding, and icon placement.
+                 *
+                 * CDXC:SidebarPerformance 2026-06-28-05:39:
+                 * A minimized Recent Projects drawer should be real header-only
+                 * UI, not a hidden mounted list. Keep search/list rows and their
+                 * scroll/tooltip handlers unmounted until the drawer is open.
+                 */}
+                  <SidebarSessionSearchField
+                    ariaLabel="Search recent projects"
+                    autoComplete="off"
+                    clearLabel="Clear recent projects search"
+                    inputRef={recentProjectsSearchInputRef}
+                    placeholder="Search projects"
+                    query={recentProjectsQuery}
+                    setQuery={setRecentProjectsQuery}
+                    shellClassName="recent-projects-search"
+                  />
+                  <div
+                    className="recent-projects-list vertical-scroll-fade-mask"
+                    onPointerEnter={handleRecentProjectsListPointerMove}
+                    onPointerLeave={handleRecentProjectsListPointerLeave}
+                    onPointerMove={handleRecentProjectsListPointerMove}
+                    onScrollCapture={handleRecentProjectsListScroll}
+                    onWheelCapture={handleRecentProjectsListScroll}
+                  >
+                    {filteredRecentProjects.length > 0 ? (
+                      filteredRecentProjects.map((project) => (
+                        <RecentProjectRow
+                          isContextMenuOpen={
+                            recentProjectContextMenuPosition?.projectId === project.projectId
+                          }
+                          isScrolling={isRecentProjectsListScrolling}
+                          key={project.projectId}
+                          onContextMenu={openRecentProjectContextMenu}
+                          onRestore={restoreRecentProject}
+                          pointerPointRef={recentProjectsPointerPointRef}
+                          project={project}
+                        />
+                      ))
+                    ) : (
+                      <div className="recent-projects-empty">No projects match that search.</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-              {recentProjectContextMenuPosition ? (
+              ) : null}
+              {isRecentProjectsOpen && recentProjectContextMenuPosition ? (
                 <SidebarContextMenuPortal
                   menuStyle={{
                     left: `${recentProjectContextMenuPosition.x}px`,
@@ -4454,7 +4486,6 @@ function SidebarReferenceTopChrome({
   onSearch,
   searchInputRef,
   sessionSearchQuery,
-  showBetaFeatures,
   setSessionSearchQuery,
 }: {
   isSessionSearchOpen: boolean;
@@ -4467,7 +4498,6 @@ function SidebarReferenceTopChrome({
   onSearch: () => void;
   searchInputRef: RefObject<HTMLInputElement | null>;
   sessionSearchQuery: string;
-  showBetaFeatures: boolean;
   setSessionSearchQuery: (query: string) => void;
 }) {
   /**
@@ -4506,9 +4536,10 @@ function SidebarReferenceTopChrome({
    * Hide the Plugins sidebar affordance for now instead of keeping it as an
    * Agents Hub secondary action.
    *
-   * CDXC:AgentsHub 2026-06-16-19:35:
-   * Agents Hub is beta-only, so the primary sidebar entry should appear only
-   * after Enable beta settings is enabled.
+   * CDXC:ExperimentalFeatures 2026-06-28-07:41:
+   * Agents Hub is no longer gated by Enable Experimental Features. Keep it
+   * visible as the first primary sidebar destination even when experimental
+   * features are disabled.
    *
    * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
    * Global Settings, Commands, Hotkeys, pet, prompt, scratch, Running, and Discord actions live in the far-right native titlebar menu. Keep the sidebar primary nav free of More/overflow controls.
@@ -4524,26 +4555,16 @@ function SidebarReferenceTopChrome({
         <IconArrowRight className="reference-sidebar-window-icon" size={17} stroke={1.9} />
       </div>
       <nav aria-label="Sidebar primary navigation" className="reference-sidebar-primary-nav">
-        {showBetaFeatures ? (
-          <SidebarReferenceNavButton
-            icon={IconUsersGroup}
-            label="Agents Hub"
-            onClick={onOpenAgentsHub}
-          />
-        ) : (
-          <SidebarReferenceNavButton
-            icon={IconClock}
-            label="Automations"
-            onClick={onOpenAutomations}
-          />
-        )}
-        {showBetaFeatures ? (
-          <SidebarReferenceNavButton
-            icon={IconClock}
-            label="Automations"
-            onClick={onOpenAutomations}
-          />
-        ) : null}
+        <SidebarReferenceNavButton
+          icon={IconUsersGroup}
+          label="Agents Hub"
+          onClick={onOpenAgentsHub}
+        />
+        <SidebarReferenceNavButton
+          icon={IconClock}
+          label="Automations"
+          onClick={onOpenAutomations}
+        />
         <SidebarReferenceNavButton
           icon={IconDeviceMobile}
           label="Mobile"

@@ -674,7 +674,7 @@ export function SessionGroupSection({
       bottom: false,
       top: false,
     });
-  const { collapsibleStyle, contentRef } = useCollapsibleHeight<HTMLDivElement>();
+  const { collapsibleStyle, contentRef, setContentElement } = useCollapsibleHeight<HTMLDivElement>();
   const menuRef = useRef<HTMLDivElement>(null);
   const controlMenuRef = useRef<HTMLDivElement>(null);
   const projectAgentButtonRef = useRef<HTMLButtonElement>(null);
@@ -941,7 +941,7 @@ export function SessionGroupSection({
   ]);
 
   useLayoutEffect(() => {
-    if (!projectContext) {
+    if (!projectContext || isCollapsed) {
       return;
     }
 
@@ -1195,6 +1195,13 @@ export function SessionGroupSection({
    * Non-project empty groups keep the old static header behavior.
    */
   const canToggleCollapsed = actualSessionCount > 0 || Boolean(projectContext);
+  /*
+   * CDXC:SidebarPerformance 2026-06-28-05:39:
+   * Collapsed project groups must be header-only work. Do not mount hidden
+   * session rows, row dnd hooks, row observers, or sticky-body scroll
+   * measurement while the user has collapsed a project.
+   */
+  const shouldRenderGroupSessionsBody = !isCollapsed;
   const groupTitleActionLabel =
     canToggleCollapsed ? `${isCollapsed ? "Expand" : "Collapse"} ${group.title}` : group.title;
   /**
@@ -2301,36 +2308,37 @@ export function SessionGroupSection({
             <div aria-hidden className="session-status-dot" />
           </div>
         ) : null}
-        <div
-          aria-hidden={isCollapsed}
-          className={`group-sessions-shell sidebar-collapse-shell${
-            shouldScrollExpandedProjectSessionList ? " vertical-scroll-fade-mask" : ""
-          }`}
-          data-collapsed={String(isCollapsed)}
-          data-project-session-list-clipped={String(shouldClipProjectSessionList)}
-          data-project-session-list-scrollable={String(shouldScrollExpandedProjectSessionList)}
-          data-scroll-glow-bottom={
-            shouldScrollExpandedProjectSessionList
-              ? String(expandedProjectSessionListScrollState.bottom)
-              : undefined
-          }
-          data-scroll-glow-top={
-            shouldScrollExpandedProjectSessionList
-              ? String(expandedProjectSessionListScrollState.top)
-              : undefined
-          }
-          ref={sessionsShellRef}
-          style={sessionsShellStyle}
-        >
+        {shouldRenderGroupSessionsBody ? (
           <div
-            className="group-sessions sidebar-collapse-content"
-            data-drop-position={sessionGroupDropPosition}
-            data-pinned-drop-gaps={String(shouldRenderPinnedSessionDropGaps)}
-            data-drop-target={String(isSessionDropTargetVisible)}
-            id={sessionsRegionId}
-            onContextMenu={handleGroupSessionsContextMenu}
-            ref={contentRef}
+            aria-hidden={isCollapsed}
+            className={`group-sessions-shell sidebar-collapse-shell${
+              shouldScrollExpandedProjectSessionList ? " vertical-scroll-fade-mask" : ""
+            }`}
+            data-collapsed={String(isCollapsed)}
+            data-project-session-list-clipped={String(shouldClipProjectSessionList)}
+            data-project-session-list-scrollable={String(shouldScrollExpandedProjectSessionList)}
+            data-scroll-glow-bottom={
+              shouldScrollExpandedProjectSessionList
+                ? String(expandedProjectSessionListScrollState.bottom)
+                : undefined
+            }
+            data-scroll-glow-top={
+              shouldScrollExpandedProjectSessionList
+                ? String(expandedProjectSessionListScrollState.top)
+                : undefined
+            }
+            ref={sessionsShellRef}
+            style={sessionsShellStyle}
           >
+            <div
+              className="group-sessions sidebar-collapse-content"
+              data-drop-position={sessionGroupDropPosition}
+              data-pinned-drop-gaps={String(shouldRenderPinnedSessionDropGaps)}
+              data-drop-target={String(isSessionDropTargetVisible)}
+              id={sessionsRegionId}
+              onContextMenu={handleGroupSessionsContextMenu}
+              ref={setContentElement}
+            >
             {showSessionGroupConnector ? (
               <>
                 <div aria-hidden className="group-session-connector-rail" />
@@ -2511,20 +2519,21 @@ export function SessionGroupSection({
                 <div className="group-empty-state">{emptyStateLabel}</div>
               </div>
             )}
+            </div>
+            {showSessionGroupConnector
+              ? visibleGroupSessions.map((session) => (
+                  <div
+                    aria-hidden
+                    className="session-status-dot session-status-dot-anchored"
+                    data-activity={session.activity}
+                    data-lifecycle-state={getSidebarSessionLifecycleState(session)}
+                    key={`status-${session.sessionId}`}
+                    style={getAnchoredSessionStatusStyle(session.sessionId)}
+                  />
+                ))
+              : null}
           </div>
-          {showSessionGroupConnector
-            ? visibleGroupSessions.map((session) => (
-                <div
-                  aria-hidden
-                  className="session-status-dot session-status-dot-anchored"
-                  data-activity={session.activity}
-                  data-lifecycle-state={getSidebarSessionLifecycleState(session)}
-                  key={`status-${session.sessionId}`}
-                  style={getAnchoredSessionStatusStyle(session.sessionId)}
-                />
-              ))
-            : null}
-        </div>
+        ) : null}
       </section>
       {contextMenuPosition ? (
         <SidebarContextMenuPortal

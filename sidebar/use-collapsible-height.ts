@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
 type CollapsibleStyle = CSSProperties & {
   "--sidebar-collapse-content-height"?: string;
@@ -6,11 +6,25 @@ type CollapsibleStyle = CSSProperties & {
 
 export function useCollapsibleHeight<T extends HTMLElement>() {
   const contentRef = useRef<T>(null);
+  const [contentElement, setContentElementState] = useState<T | null>(null);
   const [contentHeight, setContentHeight] = useState<number>();
 
+  const setContentElement = useCallback((element: T | null) => {
+    /*
+     * CDXC:SidebarPerformance 2026-06-28-08:28:
+     * Collapsed project bodies are now unmounted so hidden session rows do not
+     * keep row observers and dnd hooks alive. Re-measure when the body ref
+     * appears again, otherwise expanding a previously collapsed project can
+     * keep the old undefined/zero collapse height and hide its sessions.
+     */
+    contentRef.current = element;
+    setContentElementState(element);
+  }, []);
+
   useLayoutEffect(() => {
-    const element = contentRef.current;
+    const element = contentElement;
     if (!element) {
+      setContentHeight(undefined);
       return;
     }
 
@@ -36,7 +50,7 @@ export function useCollapsibleHeight<T extends HTMLElement>() {
       observer.disconnect();
       window.cancelAnimationFrame(animationFrameId);
     };
-  }, []);
+  }, [contentElement]);
 
   const collapsibleStyle: CollapsibleStyle | undefined =
     contentHeight === undefined
@@ -48,5 +62,6 @@ export function useCollapsibleHeight<T extends HTMLElement>() {
   return {
     collapsibleStyle,
     contentRef,
+    setContentElement,
   };
 }

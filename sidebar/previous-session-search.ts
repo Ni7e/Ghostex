@@ -1,4 +1,3 @@
-import Fuse, { type IFuseOptions } from "fuse.js";
 import type {
   SidebarPreviousSessionItem,
   SidebarSessionItem,
@@ -27,15 +26,6 @@ type SidebarSessionSearchRecord<T extends SidebarSearchableSession> = {
   itemIndex: number;
   searchText: string;
 };
-
-const SESSION_SEARCH_OPTIONS = {
-  ignoreDiacritics: true,
-  ignoreLocation: true,
-  keys: ["searchText"],
-  shouldSort: false,
-  threshold: 0.3,
-  useTokenSearch: true,
-} satisfies IFuseOptions<SidebarSessionSearchRecord<SidebarSearchableSession>>;
 
 export function filterPreviousSessions(
   previousSessions: readonly SidebarPreviousSessionItem[],
@@ -169,15 +159,24 @@ export function filterSidebarSessionItems<T extends SidebarSearchableSession>(
   const shouldUseAbbreviationMatching =
     queryTokens.length > 0 && queryTokens.every((token) => token.length <= 3);
 
+  /*
+   * CDXC:SidebarSearch 2026-06-28-06:29:
+   * Sidebar session search should stay fuzzy enough for short abbreviations
+   * and one-character typos, but long terms such as "sidebar" must not match
+   * scattered letters across unrelated titles. Match normalized tokens
+   * directly against row text instead of using broad Fuse scoring for the
+   * main sidebar and Previous Sessions result sets.
+   */
   if (shouldUseAbbreviationMatching) {
     return searchableSessions.filter((_, itemIndex) =>
       matchesNormalizedQueryTokens(searchRecords[itemIndex]?.searchText ?? "", queryTokens),
     );
   }
 
-  const fuse = new Fuse(searchRecords, SESSION_SEARCH_OPTIONS);
   const matchedItemIndexes = new Set(
-    fuse.search(normalizedQuery).map((result) => result.item.itemIndex),
+    searchRecords
+      .filter((record) => matchesNormalizedQueryTokens(record.searchText, queryTokens))
+      .map((record) => record.itemIndex),
   );
 
   return searchableSessions.filter((_, itemIndex) => matchedItemIndexes.has(itemIndex));
@@ -328,7 +327,31 @@ function parsePreviousSessionTimestamp(value: string | undefined): number {
 }
 
 function matchesNormalizedQueryTokens(searchText: string, queryTokens: readonly string[]): boolean {
-  return queryTokens.every((token) => fuzzyIncludes(searchText, token));
+  return queryTokens.every((token) => matchesNormalizedQueryToken(searchText, token));
+}
+
+function matchesNormalizedQueryToken(searchText: string, query: string): boolean {
+  if (query.length <= 3) {
+    return fuzzyIncludes(searchText, query);
+  }
+
+  if (searchText.includes(query)) {
+    return true;
+  }
+
+  const compactSearchText = searchText.replace(/\s+/g, "");
+  if (
+    (query.length >= 5 && compactSearchText.includes(query)) ||
+    hasSingleEditDistance(compactSearchText, query)
+  ) {
+    return true;
+  }
+
+  const words = searchText.split(/\s+/).filter(Boolean);
+  return (
+    words.some((word) => isLongQueryTypoCandidate(word, query)) ||
+    hasAdjacentWordSingleEditDistance(words, query)
+  );
 }
 
 function fuzzyIncludes(text: string, query: string): boolean {
@@ -346,4 +369,65 @@ function fuzzyIncludes(text: string, query: string): boolean {
   }
 
   return query.length === 0;
+}
+
+function hasSingleEditDistance(candidate: string, query: string): boolean {
+  if (candidate === query) {
+    return true;
+  }
+
+  if (Math.abs(candidate.length - query.length) > 1) {
+    return false;
+  }
+
+  let candidateIndex = 0;
+  let queryIndex = 0;
+  let edits = 0;
+
+  while (candidateIndex < candidate.length && queryIndex < query.length) {
+    if (candidate[candidateIndex] === query[queryIndex]) {
+      candidateIndex += 1;
+      queryIndex += 1;
+      continue;
+    }
+
+    edits += 1;
+    if (edits > 1) {
+      return false;
+    }
+
+    if (candidate.length > query.length) {
+      candidateIndex += 1;
+    } else if (candidate.length < query.length) {
+      queryIndex += 1;
+    } else {
+      candidateIndex += 1;
+      queryIndex += 1;
+    }
+  }
+
+  return true;
+}
+
+function hasAdjacentWordSingleEditDistance(words: readonly string[], query: string): boolean {
+  for (let startIndex = 0; startIndex < words.length; startIndex += 1) {
+    let joinedWords = "";
+
+    for (let index = startIndex; index < words.length; index += 1) {
+      joinedWords += words[index];
+      if (joinedWords.length > query.length + 1) {
+        break;
+      }
+
+      if (isLongQueryTypoCandidate(joinedWords, query)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function isLongQueryTypoCandidate(candidate: string, query: string): boolean {
+  return candidate.length >= Math.max(4, query.length - 1) && hasSingleEditDistance(candidate, query);
 }

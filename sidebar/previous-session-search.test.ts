@@ -60,6 +60,48 @@ describe("filterPreviousSessions", () => {
     ]);
   });
 
+  test("should keep long session search terms tighter than scattered-letter fuzzy matches", () => {
+    const sessions = [
+      createPreviousSession({
+        alias: "Sidebar Divider Shift",
+        historyId: "history-sidebar",
+        sessionId: "session-sidebar",
+      }),
+      createPreviousSession({
+        alias: "Side Bar Resize",
+        historyId: "history-side-bar",
+        sessionId: "session-side-bar",
+      }),
+      createPreviousSession({
+        alias: "Status Bar Cleanup",
+        historyId: "history-status-bar",
+        sessionId: "session-status-bar",
+      }),
+      createPreviousSession({
+        alias: "Session Border Cleanup",
+        historyId: "history-session-border",
+        sessionId: "session-session-border",
+      }),
+    ];
+
+    /*
+     * CDXC:SidebarSearch 2026-06-28-06:29:
+     * Typing a concrete long term like "sidebar" should show exact and joined
+     * word matches in live projects and Previous Sessions, but it should not
+     * pull in rows whose only relationship is scattered letters such as
+     * "Status Bar".
+     */
+    expect(filterSidebarSessionItems(sessions, "sidebar").map((session) => session.sessionId)).toEqual([
+      "session-sidebar",
+      "session-side-bar",
+    ]);
+    expect(filterSidebarSessionItems(sessions, "sidebr").map((session) => session.sessionId)).toEqual([
+      "session-sidebar",
+      "session-side-bar",
+    ]);
+    expect(filterSidebarSessionItems(sessions, "sbar")).toEqual([]);
+  });
+
   test("should exclude default agent session names from searched sessions", () => {
     const sessions = [
       createPreviousSession({

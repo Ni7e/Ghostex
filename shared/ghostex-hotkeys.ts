@@ -218,7 +218,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     ["switchSourceView", "source", "alt+2", "Source"],
     ["switchGitHubView", "github", "alt+3", "GitHub"],
     ["switchKanbanView", "kanban", "alt+4", "Kanban"],
-    ["switchManageView", "manage", "alt+5", "Manage"],
+    ["switchManageView", "manage", "alt+5", "Docs"],
   ] as const).map(([id, view, defaultKey, title]) => ({
     action: {
       id,
@@ -227,10 +227,14 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     },
     /**
      * CDXC:Hotkeys 2026-06-06-04:36:
-     * Option+1..5 are default workarea view switchers in titlebar order: Agents, Source, Browser, Kanban, Manage. Keep these as named actions instead of overloading group/session slots so AppKit, Settings, and sidebar DOM dispatch switch the same project surface.
+     * Option+1..5 are default workarea view switchers in titlebar order: Agents, Source, Browser, Kanban, Docs. Keep these as named actions instead of overloading group/session slots so AppKit, Settings, and sidebar DOM dispatch switch the same project surface.
      *
      * CDXC:Manage 2026-06-20-04:36:
      * Manage is a first-party project workarea beside Kanban, so it needs a named configurable hotkey action instead of sharing another mode's shortcut or command id.
+     *
+     * CDXC:Docs 2026-06-28-06:24:
+     * The switchManageView id and "manage" view enum remain compatibility
+     * handles, but Settings and command labels should call the feature Docs.
      */
     defaultKey,
     description: `Switch to ${title} view.`,
