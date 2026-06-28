@@ -80,6 +80,11 @@ describe("settings modal source", () => {
      * CDXC:SettingsNavigation 2026-06-25-22:10:
      * The macOS Settings sidebar container should sit 1px higher than the
      * default grid alignment so it lines up with the native window chrome.
+     *
+     * CDXC:SettingsAdvanced 2026-06-28-18:14:
+     * Show Advanced is persisted in the settings draft. Do not keep a duplicate
+     * local state copy that can initialize before native settings hydrate and
+     * reset the switch on reopen.
      */
     const settingsSidebar = sourceBetween(
       settingsModalSource,
@@ -91,6 +96,9 @@ describe("settings modal source", () => {
     expect(settingsSidebar).toContain("settings-sidebar-subsection-list");
     expect(settingsSidebar).toContain("settings-section-sidebar-footer");
     expect(settingsSidebar).toContain("Show Advanced");
+    expect(settingsModalSource).toContain("const showAdvancedSettings = draft.showAdvancedSettings;");
+    expect(settingsModalSource).not.toContain("const [showAdvancedSettings, setShowAdvancedSettings]");
+    expect(settingsModalSource).toContain("showAdvancedSettings: checked");
     expect(settingsSidebar).toContain('<PageIcon aria-hidden="true" data-icon="inline-start" />');
     expect(settingsSidebar).toContain('className="settings-sidebar-page-title truncate"');
     expect(settingsModalSource).not.toContain("settings-show-advanced-anchor");
@@ -310,6 +318,49 @@ describe("settings modal source", () => {
     expect(betaSection).toContain("Keep Awake title-bar button");
     expect(mainVisibility).toContain('sectionId === "power" && !keepAwakeSettingsVisible');
     expect(mainVisibility).toContain("first-launch lid-close preference");
+  });
+
+  test("hides debugging settings below Show debug UI controls when disabled", () => {
+    /*
+     * CDXC:DebuggingSettings 2026-06-28-18:14:
+     * Disabling Show debug UI controls should hide the related Debugging rows
+     * below it, and Settings search/navigation should use the same gate so
+     * hidden diagnostic rows do not leave an empty Debugging section.
+     */
+    const dependentKeys = sourceBetween(
+      settingsModalSource,
+      "const DEBUGGING_MODE_DEPENDENT_SETTING_KEYS = [",
+      "] as const;",
+    );
+    const debuggingVisibility = sourceBetween(
+      settingsModalSource,
+      "const debuggingModeDependentSettingsVisible = draft.debuggingMode;",
+      "const hotkeyDefinitionsById",
+    );
+    const debuggingSection = sourceBetween(
+      settingsModalSource,
+      '<SettingsSection sectionRef={debuggingSectionRef} title="Debugging">',
+      "{!isFirstLaunchSetup && !hasVisibleMainSettings ? (",
+    );
+
+    expect(dependentKeys).toContain('"diagnosticLogging"');
+    expect(dependentKeys).toContain('"showSessionCommandCopyActions"');
+    expect(dependentKeys).toContain('"showSessionDetailsCopyAction"');
+    expect(debuggingVisibility).toContain("DEBUGGING_MODE_DEPENDENT_SETTING_KEY_SET.has(settingKey)");
+    expect(debuggingVisibility).toContain('sectionId === "debugging"');
+    expect(debuggingVisibility).toContain(
+      'return shouldShowSetting(sectionResult, "debuggingMode", showAdvancedSettings);',
+    );
+    expect(debuggingVisibility).toContain(
+      "const hasVisibleMainSettings = visibleMainSettingsSectionNavigation.length > 0;",
+    );
+    expect(debuggingSection).toContain('debuggingSettingVisible("debuggingMode")');
+    expect(debuggingSection).toContain('debuggingSettingVisible("diagnosticLogging")');
+    expect(debuggingSection).toContain('debuggingSettingVisible("showSessionCommandCopyActions")');
+    expect(debuggingSection).toContain('debuggingSettingVisible("showSessionDetailsCopyAction")');
+    expect(debuggingSection).toContain(
+      "Turn on to reveal debug-only UI controls and related diagnostic settings.",
+    );
   });
 
   test("shows unavailable gxserver-owned default prompt agents without selecting Codex", () => {

@@ -534,6 +534,19 @@ type MainSettingsSectionId =
 
 export type MainSettingsInitialSectionId = MainSettingsSectionId;
 
+/*
+ * CDXC:DebuggingSettings 2026-06-28-18:14:
+ * Show debug UI controls is the visibility gate for the support/debugging settings below it. When off, hide diagnostic scenario logging and session context-menu debug utilities instead of leaving disabled rows on screen.
+ */
+const DEBUGGING_MODE_DEPENDENT_SETTING_KEYS = [
+  "diagnosticLogging",
+  "showSessionCommandCopyActions",
+  "showSessionDetailsCopyAction",
+] as const;
+const DEBUGGING_MODE_DEPENDENT_SETTING_KEY_SET = new Set<string>(
+  DEBUGGING_MODE_DEPENDENT_SETTING_KEYS,
+);
+
 const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
   MainSettingsSectionId,
   readonly string[]
@@ -603,9 +616,7 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
    */
   debugging: [
     "debuggingMode",
-    "diagnosticLogging",
-    "showSessionCommandCopyActions",
-    "showSessionDetailsCopyAction",
+    ...DEBUGGING_MODE_DEPENDENT_SETTING_KEYS,
   ],
   terminal: [
     "ghosttySettingsActions",
@@ -1065,9 +1076,13 @@ export function SettingsModal({
   const isFirstLaunchSetup = presentation === "firstLaunchSetup";
   const normalizedInitialSettings = normalizeghostexSettings(settings);
   const [draft, setDraft] = useState<ghostexSettings>(normalizedInitialSettings);
-  const [showAdvancedSettings, setShowAdvancedSettings] = useState(
-    normalizedInitialSettings.showAdvancedSettings,
-  );
+  /*
+   * CDXC:SettingsAdvanced 2026-06-28-18:14:
+   * Show Advanced must use the persisted settings draft as its single source of
+   * truth. A separate React state can initialize before native settings hydrate
+   * and make the switch look disabled again when Settings reopens.
+   */
+  const showAdvancedSettings = draft.showAdvancedSettings;
   const [settingsSearchQuery, setSettingsSearchQuery] = useState("");
   const [activeMainSettingsSectionId, setActiveMainSettingsSectionId] =
     useState<MainSettingsSectionId>("sidebar");
@@ -2114,12 +2129,10 @@ export function SettingsModal({
       title: "Debugging",
     },
   ];
-  const hasVisibleMainSettings = mainSettingsSectionNavigation.some((section) =>
-    hasVisibleSettingsSearchResult(section.searchResult),
-  );
   const visibleFirstLaunchMainSettings =
     firstLaunchSetupVisibleSettings ?? FIRST_LAUNCH_SETUP_VISIBLE_MAIN_SETTINGS;
   const keepAwakeSettingsVisible = isFirstLaunchSetup || draft.showBetaFeatures;
+  const debuggingModeDependentSettingsVisible = draft.debuggingMode;
   const mainSettingVisible = (
     sectionResult: SettingsSectionSearchResult,
     settingKey: string,
@@ -2131,6 +2144,15 @@ export function SettingsModal({
       );
     }
     return shouldShowSetting(sectionResult, settingKey, showAdvancedSettings);
+  };
+  const debuggingSettingVisible = (settingKey: string) => {
+    if (
+      !debuggingModeDependentSettingsVisible &&
+      DEBUGGING_MODE_DEPENDENT_SETTING_KEY_SET.has(settingKey)
+    ) {
+      return false;
+    }
+    return mainSettingVisible(settingsSearch.debugging, settingKey);
   };
   const mainSectionVisible = (
     sectionId: MainSettingsSectionId,
@@ -2144,6 +2166,13 @@ export function SettingsModal({
      */
     if (sectionId === "power" && !keepAwakeSettingsVisible) {
       return false;
+    }
+    if (
+      sectionId === "debugging" &&
+      !isFirstLaunchSetup &&
+      !debuggingModeDependentSettingsVisible
+    ) {
+      return shouldShowSetting(sectionResult, "debuggingMode", showAdvancedSettings);
     }
     if (isFirstLaunchSetup) {
       return MAIN_SETTINGS_SECTION_SETTING_KEYS[sectionId].some((settingKey) =>
@@ -2167,6 +2196,7 @@ export function SettingsModal({
         ? mainSectionVisible("agents", settingsSearch.sidebar)
         : mainSectionVisible(section.id, section.searchResult),
     );
+  const hasVisibleMainSettings = visibleMainSettingsSectionNavigation.length > 0;
   const visibleMainSettingsSectionIds = visibleMainSettingsSectionNavigation
     .map((section) => section.id)
     .join("|");
@@ -2508,7 +2538,6 @@ export function SettingsModal({
      * persistence so restart hydration reopens Settings with the same advanced
      * row visibility the user explicitly chose.
      */
-    setShowAdvancedSettings(checked);
     applySettings({ ...(pendingSettingsRef.current ?? draft), showAdvancedSettings: checked });
   };
   const updateDiagnosticLoggingScenario = (
@@ -4214,16 +4243,20 @@ export function SettingsModal({
 
             {mainSectionVisible("debugging", settingsSearch.debugging) ? (
               <SettingsSection sectionRef={debuggingSectionRef} title="Debugging">
-                {mainSettingVisible(settingsSearch.debugging, "debuggingMode") ? (
+                {debuggingSettingVisible("debuggingMode") ? (
                   <ToggleField
                     checked={draft.debuggingMode}
-                    description="Shows debug-only UI controls. Routine diagnostic disk logging is controlled by the scenario list below."
+                    description={
+                      draft.debuggingMode
+                        ? "Shows debug-only UI controls. Use the scenarios below for targeted diagnostic disk logging."
+                        : "Turn on to reveal debug-only UI controls and related diagnostic settings."
+                    }
                     label="Show debug UI controls"
                     {...getSettingModificationProps("debuggingMode")}
                     onChange={(checked) => updateDraft("debuggingMode", checked)}
                   />
                 ) : null}
-                {mainSettingVisible(settingsSearch.debugging, "diagnosticLogging") ? (
+                {debuggingSettingVisible("diagnosticLogging") ? (
                   <DiagnosticLoggingSettingsField
                     isModified={
                       !areDiagnosticLoggingSettingsEqual(
@@ -4241,7 +4274,7 @@ export function SettingsModal({
                     value={draft.diagnosticLogging}
                   />
                 ) : null}
-                {mainSettingVisible(settingsSearch.debugging, "showSessionCommandCopyActions") ? (
+                {debuggingSettingVisible("showSessionCommandCopyActions") ? (
                   <>
                     {/*
                      * CDXC:SidebarContextMenu 2026-06-09-23:17:
@@ -4259,7 +4292,7 @@ export function SettingsModal({
                     />
                   </>
                 ) : null}
-                {mainSettingVisible(settingsSearch.debugging, "showSessionDetailsCopyAction") ? (
+                {debuggingSettingVisible("showSessionDetailsCopyAction") ? (
                   <>
                     {/*
                      * CDXC:SidebarContextMenu 2026-06-11-23:08:
