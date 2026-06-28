@@ -1974,15 +1974,6 @@ export function SidebarApp({
   const normalizedSessionSearchQuery = sessionSearchQuery.trim();
   const isSessionSearchFiltering =
     isSessionSearchOpen && normalizedSessionSearchQuery.length >= MIN_SESSION_SEARCH_QUERY_LENGTH;
-  /*
-   * CDXC:SidebarSearch 2026-06-28-06:29:
-   * Search results must reveal matching live project sessions even when the
-   * user's normal section or project collapse state would hide them. Treat
-   * collapse as render-only while filtering so clearing search restores the
-   * user's previous sidebar shape without persisting temporary expansion.
-   */
-  const isReferenceChatsRenderedCollapsed =
-    isReferenceChatsCollapsed && !isSessionSearchFiltering;
   const isReferenceProjectsRenderedCollapsed =
     isReferenceProjectsCollapsed && !isSessionSearchFiltering;
   const isSidebarSearchProjectGroupRenderedCollapsed = (groupId: string) =>
@@ -2055,6 +2046,32 @@ export function SidebarApp({
       displayedWorkspaceGroupIds.filter((groupId) => groupsById[ groupId ]?.isChatCollection),
     [ displayedWorkspaceGroupIds, groupsById ],
   );
+  const referenceQuickSessionCount = useMemo(
+    () =>
+      effectiveGroupIds.reduce(
+        (count, groupId) =>
+          groupsById[ groupId ]?.isChatCollection
+            ? count + (effectiveSessionIdsByGroup[ groupId ] ?? []).length
+            : count,
+        0,
+      ),
+    [ effectiveGroupIds, effectiveSessionIdsByGroup, groupsById ],
+  );
+  const hasReferenceQuickSessions = referenceQuickSessionCount > 0;
+  /*
+   * CDXC:SidebarSearch 2026-06-28-06:29:
+   * Search results must reveal matching live project sessions even when the
+   * user's normal section or project collapse state would hide them. Treat
+   * collapse as render-only while filtering so clearing search restores the
+   * user's previous sidebar shape without persisting temporary expansion.
+   *
+   * CDXC:QuickSessions 2026-06-28-15:04:
+   * Quick may keep its synthetic section header for Browser, Terminal, and agent
+   * creation, but an empty Quick section must stay collapsed and its toggle must
+   * not open an empty body.
+   */
+  const isReferenceChatsRenderedCollapsed =
+    !hasReferenceQuickSessions || (isReferenceChatsCollapsed && !isSessionSearchFiltering);
   const displayedReferenceProjectGroupIds = useMemo(
     () =>
       displayedWorkspaceGroupIds.filter(
@@ -3905,6 +3922,10 @@ export function SidebarApp({
                         onSetActiveSessionsSortMode={setActiveSessionsSortMode}
                         onToggleSessionTagFilter={toggleSessionTagFilter}
                         onToggleCollapsed={() => {
+                          if (!hasReferenceQuickSessions) {
+                            setIsReferenceChatsCollapsed(true);
+                            return;
+                          }
                           const nextCollapsed = !isReferenceChatsCollapsed;
                           postSidebarCollapseStateLog("sectionToggle", {
                             childGroupCount: displayedReferenceChatGroupIds.length,
@@ -4503,8 +4524,7 @@ function SidebarReferenceTopChrome({
   /**
    * CDXC:SidebarReference 2026-05-08-09:11
    * Combined mode should visually match the provided app sidebar: native-style
-   * window dots, disabled back/forward chrome, and large primary rows such as
-   * Agents Hub, Automations, Mobile, and Search.
+   * window dots, disabled back/forward chrome, and primary sidebar navigation.
    *
    * CDXC:TitlebarActions 2026-05-11-02:46
    * Actions moved out of the sidebar header into the native titlebar beside
@@ -4543,6 +4563,9 @@ function SidebarReferenceTopChrome({
    *
    * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
    * Global Settings, Commands, Hotkeys, pet, prompt, scratch, Running, and Discord actions live in the far-right native titlebar menu. Keep the sidebar primary nav free of More/overflow controls.
+   *
+   * CDXC:SidebarReference 2026-06-28-15:04:
+   * Agents Hub, Automations, and Mobile should be icon-only shortcuts sharing one full-width row at the top of the sidebar, with hover tooltips providing their labels. Search remains a separate full-width row below them.
    */
   return (
     <header className="reference-sidebar-top">
@@ -4555,21 +4578,30 @@ function SidebarReferenceTopChrome({
         <IconArrowRight className="reference-sidebar-window-icon" size={17} stroke={1.9} />
       </div>
       <nav aria-label="Sidebar primary navigation" className="reference-sidebar-primary-nav">
-        <SidebarReferenceNavButton
-          icon={IconUsersGroup}
-          label="Agents Hub"
-          onClick={onOpenAgentsHub}
-        />
-        <SidebarReferenceNavButton
-          icon={IconClock}
-          label="Automations"
-          onClick={onOpenAutomations}
-        />
-        <SidebarReferenceNavButton
-          icon={IconDeviceMobile}
-          label="Mobile"
-          onClick={onOpenMobile}
-        />
+        <div
+          aria-label="Sidebar shortcuts"
+          className="reference-sidebar-primary-icon-row"
+          role="group"
+        >
+          <SidebarReferenceNavButton
+            icon={IconUsersGroup}
+            iconOnly
+            label="Agents Hub"
+            onClick={onOpenAgentsHub}
+          />
+          <SidebarReferenceNavButton
+            icon={IconClock}
+            iconOnly
+            label="Automations"
+            onClick={onOpenAutomations}
+          />
+          <SidebarReferenceNavButton
+            icon={IconDeviceMobile}
+            iconOnly
+            label="Mobile"
+            onClick={onOpenMobile}
+          />
+        </div>
         <SidebarReferenceSearchNavItem
           inputRef={searchInputRef}
           isOpen={isSessionSearchOpen}
@@ -4729,16 +4761,42 @@ function SidebarReferenceSearchNavItem({
 
 function SidebarReferenceNavButton({
   icon: Icon,
+  iconOnly = false,
   label,
   onClick,
 }: {
   icon: TablerIcon;
+  iconOnly?: boolean;
   label: string;
   onClick: () => void;
 }) {
+  const className = iconOnly
+    ? "reference-sidebar-nav-button reference-sidebar-nav-icon-button reference-sidebar-hover-action-tooltip"
+    : "reference-sidebar-nav-button";
+
+  if (iconOnly) {
+    return (
+      <SidebarFixedTooltipButton
+        aria-label={label}
+        className={className}
+        onClick={onClick}
+        tooltip={label}
+        type="button"
+      >
+        <Icon
+          aria-hidden="true"
+          className="reference-sidebar-nav-icon"
+          data-icon="inline-start"
+          size={15}
+          stroke={1.9}
+        />
+      </SidebarFixedTooltipButton>
+    );
+  }
+
   return (
     <Button
-      className="reference-sidebar-nav-button"
+      className={className}
       onClick={onClick}
       size="sm"
       type="button"

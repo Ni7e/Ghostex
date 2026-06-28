@@ -936,10 +936,20 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
    * Top sidebar rows should have a 0px left gap in the native sidebar while
    * keeping icons/labels where users already scan for them. Bleed the row
    * surface left and right, then restore that distance as button padding.
+   *
+   * CDXC:SidebarReference 2026-06-28-15:04:
+   * Agents Hub, Automations, and Mobile share one equal-width icon row at the
+   * top of the sidebar. Keep Search as the separate full-width row underneath.
    */
   margin: 14px 0 0;
   min-width: 0;
   padding: 0;
+}
+
+.reference-sidebar-primary-icon-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
@@ -948,6 +958,9 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-sidebar-primary-nav
   > .reference-sidebar-nav-button,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-primary-nav
+  > .reference-sidebar-primary-icon-row,
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-sidebar-primary-nav
   > .reference-sidebar-search-slot {
@@ -1019,6 +1032,26 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
   );
 }
 
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-primary-nav
+  > .reference-sidebar-primary-icon-row {
+  max-width: none;
+  width: calc(
+    100% + var(--reference-sidebar-primary-nav-edge-bleed-left) +
+      var(--reference-sidebar-edge-bleed-right)
+  );
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-primary-icon-row
+  .reference-sidebar-nav-icon-button {
+  justify-content: center;
+  max-width: none;
+  padding-left: 0;
+  padding-right: 0;
+  width: 100%;
+}
+
 .sidebar-reference-layout[data-reference-sidebar="true"] .reference-sidebar-actions-button {
   padding-right: 42px;
 }
@@ -1046,9 +1079,9 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 /*
  * CDXC:SidebarReference 2026-05-15-10:04:
  * The top overflow trigger must not make the primary nav wider than a narrow
- * native sidebar. Allow all top rows to shrink below their intrinsic label
- * width, then truncate labels so Search, Mobile, Automations, and Agents Hub
- * stay inside the resized sidebar.
+ * native sidebar. Allow all top rows to shrink below their intrinsic width;
+ * text rows truncate labels while the icon shortcut row divides available
+ * width equally.
  *
  * CDXC:SidebarReference 2026-05-15-10:15:
  * Hidden secondary actions must not pre-truncate primary button titles. Use the
@@ -1059,7 +1092,7 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
  * CDXC:SidebarReference 2026-05-15-15:36:
  * Primary sidebar labels must keep their descenders visible in the 34px rows.
  * Use an 18px text line box instead of clipping labels to 14px, which cuts off
- * Agents Hub, Automations, Mobile, Search, and Recent Projects at the bottom.
+ * Search and Recent Projects at the bottom.
  *
  * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
  * The sidebar no longer owns a More overflow trigger. Shared hover-action padding now protects Search and the Recent Projects Commands Pane launcher while global actions live in the titlebar Settings menu.
