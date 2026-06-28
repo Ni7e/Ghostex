@@ -642,7 +642,19 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  *
  * CDXC:ManageFolders 2026-06-28-07:12:
  * Dragging over a file row should target that row's containing folder, and dragging over a root-level file should target docs/ so users can move items out of folders without needing blank sidebar space.
- * File rows should not show file size badges; the selected file metadata belongs in a sidebar toolbar that mirrors the main sidebar's quiet title/meta hierarchy.
+ * File rows should not show file size badges.
+ *
+ * CDXC:DocsSidebar 2026-06-28-15:05:
+ * Docs sidebar chrome should match the compact macOS sidebar: keep the project title non-selectable and 2px farther left, remove the file count/selected-file summary block, show a 2px scrollbar only on hover/focus, and mirror the native sidebar divider's five-point rail with a one-point edge line plus three-point hover affordance.
+ *
+ * CDXC:DocsSidebar 2026-06-28-15:57:
+ * Docs file rows should use tighter button padding. The active file keeps the selected-row surface, while every ancestor folder of the active file turns full white without gaining a background so users can track the open document through collapsed or nested folder context.
+ *
+ * CDXC:DocsSidebar 2026-06-28-16:29:
+ * Docs sidebar search and file row buttons should fill the sidebar width with no outer horizontal gutter. Keep spacing as internal padding so hover, active, and focus backgrounds reach both sidebar edges.
+ *
+ * CDXC:DocsHeader 2026-06-28-18:02:
+ * The Docs main header should compress to a 33px titlebar-like chrome strip. Reduce title/meta/action text, keep action buttons full-height with square corners and separator borders, and use hover/open fills that match the macOS titlebar button treatment.
  */
 function ManageApp() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -1531,10 +1543,6 @@ function ManageApp() {
   }, [entries]);
 
   const treeOrderedEntries = useMemo(() => orderManageEntriesForTree(entries), [entries]);
-  const selectedSidebarFile = useMemo(
-    () => (selectedPath ? entries.find((entry) => entry.kind === "file" && entry.path === selectedPath) : undefined),
-    [entries, selectedPath],
-  );
 
   const visibleEntries = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -1544,10 +1552,6 @@ function ManageApp() {
     return treeOrderedEntries.filter((entry) => entry.path.toLocaleLowerCase().includes(normalizedQuery));
   }, [collapsedDirectoryPaths, query, treeOrderedEntries]);
 
-  const filesCount = useMemo(
-    () => entries.filter((entry) => entry.kind === "file").length,
-    [entries],
-  );
   const contextMenuEntry = fileContextMenu
     ? entries.find((entry) => entry.kind === "file" && entry.path === fileContextMenu.path)
     : undefined;
@@ -1625,11 +1629,6 @@ function ManageApp() {
               value={query}
             />
           </label>
-          <div className="manage-sidebar-meta">
-            {filesCount} files
-            {entries.length >= 1_200 ? " · capped" : ""}
-          </div>
-          <ManageSidebarFileToolbar entry={selectedSidebarFile} preview={preview} />
           <div
             className="manage-file-list"
             data-root-drop-target={String(dropTarget?.kind === "root")}
@@ -1647,6 +1646,9 @@ function ManageApp() {
                 isContextMenuOpen={fileContextMenu?.path === entry.path}
                 hasChildren={directoryPathsWithChildren.has(entry.path)}
                 entry={entry}
+                hasActiveFileDescendant={
+                  entry.kind === "directory" && selectedPath !== undefined && isManageDescendantPath(selectedPath, entry.path)
+                }
                 isDragging={dragState?.path === entry.path}
                 isDropTarget={dropTarget?.kind === "entry" && dropTarget.path === entry.path}
                 isExpanded={!collapsedDirectoryPaths.has(entry.path)}
@@ -1934,6 +1936,7 @@ function ManageSidebarActions({
 function ManageFileRow({
   annotationCount,
   entry,
+  hasActiveFileDescendant,
   hasChildren,
   isContextMenuOpen,
   isDragging,
@@ -1949,6 +1952,7 @@ function ManageFileRow({
 }: {
   annotationCount: number;
   entry: ManageFileEntry;
+  hasActiveFileDescendant: boolean;
   hasChildren: boolean;
   isContextMenuOpen: boolean;
   isDragging: boolean;
@@ -1969,6 +1973,7 @@ function ManageFileRow({
       aria-haspopup={entry.kind === "file" ? "menu" : undefined}
       aria-selected={entry.kind === "file" ? isSelected : undefined}
       className="manage-file-row"
+      data-active-descendant={String(hasActiveFileDescendant)}
       data-context-menu-open={String(isContextMenuOpen)}
       data-dragging={String(isDragging)}
       data-drop-target={String(isDropTarget)}
@@ -2019,31 +2024,6 @@ function ManageFileRow({
         {annotationCount > 0 ? <span className="manage-count-badge">{annotationCount}</span> : null}
       </span>
     </button>
-  );
-}
-
-function ManageSidebarFileToolbar({
-  entry,
-  preview,
-}: {
-  entry?: ManageFileEntry;
-  preview?: ManageFilePreview;
-}) {
-  const path = preview?.path ?? entry?.path;
-  if (!path) {
-    return null;
-  }
-  const size = preview?.size ?? entry?.size;
-  return (
-    <div aria-label="Selected file details" className="manage-sidebar-file-toolbar">
-      <div className="manage-sidebar-file-toolbar-title" title={path}>
-        {path}
-      </div>
-      <div aria-hidden="true" className="manage-sidebar-file-toolbar-spacer" />
-      <div className="manage-sidebar-file-toolbar-size">
-        {size !== undefined ? formatFileSize(size) : "Size unavailable"}
-      </div>
-    </div>
   );
 }
 
@@ -5805,7 +5785,7 @@ styleElement.textContent = `
   .manage-shell {
     background: var(--manage-bg);
     display: grid;
-    grid-template-columns: var(--manage-sidebar-width, 292px) 7px minmax(0, 1fr);
+    grid-template-columns: var(--manage-sidebar-width, 292px) 5px minmax(0, 1fr);
     height: 100%;
     min-height: 0;
     position: relative;
@@ -5813,7 +5793,7 @@ styleElement.textContent = `
   }
 
   .manage-shell[data-sidebar-side="right"] {
-    grid-template-columns: minmax(0, 1fr) 7px var(--manage-sidebar-width, 292px);
+    grid-template-columns: minmax(0, 1fr) 5px var(--manage-sidebar-width, 292px);
   }
 
   .manage-shell[data-sidebar-hidden="true"] {
@@ -5827,13 +5807,14 @@ styleElement.textContent = `
 
   .manage-sidebar {
     background: var(--manage-panel);
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     grid-column: 1;
     grid-row: 1;
     min-height: 0;
     min-width: 0;
-    padding: 0 1px 7px 8px;
+    padding: 0 0 7px;
   }
 
   .manage-shell[data-sidebar-side="right"] .manage-sidebar {
@@ -5846,22 +5827,47 @@ styleElement.textContent = `
     cursor: ew-resize;
     grid-column: 2;
     grid-row: 1;
-    min-width: 7px;
+    min-width: 5px;
     outline: none;
     position: relative;
     touch-action: none;
   }
 
   .manage-sidebar-resizer::before {
-    background: #343434;
+    background: #212121;
     content: "";
-    inset: 0 3px;
+    bottom: 0;
     position: absolute;
+    right: 0;
+    top: 0;
+    width: 1px;
   }
 
-  .manage-sidebar-resizer:hover::before,
-  .manage-sidebar-resizer:focus-visible::before {
-    background: rgba(200, 205, 213, 0.42);
+  .manage-shell[data-sidebar-side="right"] .manage-sidebar-resizer::before {
+    left: 0;
+    right: auto;
+  }
+
+  .manage-sidebar-resizer::after {
+    background: #ffffff;
+    bottom: 0;
+    content: "";
+    opacity: 0;
+    position: absolute;
+    right: 0;
+    top: 0;
+    transition: opacity 180ms ease-out 50ms;
+    width: 3px;
+  }
+
+  .manage-shell[data-sidebar-side="right"] .manage-sidebar-resizer::after {
+    left: 0;
+    right: auto;
+  }
+
+  .manage-sidebar-resizer:hover::after,
+  .manage-sidebar-resizer:focus-visible::after {
+    opacity: 1;
   }
 
   .manage-preview {
@@ -5895,7 +5901,10 @@ styleElement.textContent = `
     font-weight: 300;
     gap: 11px;
     line-height: 18px;
+    margin-left: -2px;
     min-width: 0;
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   .manage-project-title span {
@@ -6013,11 +6022,13 @@ styleElement.textContent = `
     align-items: center;
     background: transparent;
     border: 0;
+    box-sizing: border-box;
     display: flex;
     gap: 11px;
     height: 34px;
-    margin: 0 1px 20px 0;
+    margin: 0 0 20px;
     padding: 7px 10px;
+    width: 100%;
   }
 
   .manage-search:focus-within {
@@ -6046,49 +6057,40 @@ styleElement.textContent = `
     color: color-mix(in srgb, var(--manage-text) 52%, transparent);
   }
 
-  .manage-sidebar-meta {
-    color: #686868;
-    font-size: 16px;
-    font-weight: 300;
-    line-height: 1.15;
-    padding: 0 18px 12px;
-  }
-
-  .manage-sidebar-file-toolbar {
-    color: color-mix(in srgb, var(--manage-text) 74%, var(--manage-muted) 26%);
-    display: grid;
-    gap: 0;
-    padding: 0 10px 14px 10px;
-  }
-
-  .manage-sidebar-file-toolbar-title {
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0;
-    line-height: 1.25;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .manage-sidebar-file-toolbar-spacer {
-    height: 12px;
-  }
-
-  .manage-sidebar-file-toolbar-size {
-    color: color-mix(in srgb, var(--manage-muted) 82%, var(--manage-text) 18%);
-    font-size: 12px;
-    font-weight: 500;
-    font-variant-numeric: tabular-nums;
-    line-height: 1.2;
-  }
-
   .manage-file-list {
     min-height: 0;
     overflow: auto;
     padding: 0 0 10px;
     position: relative;
+    scrollbar-color: transparent transparent;
+    scrollbar-width: thin;
+  }
+
+  .manage-file-list:hover,
+  .manage-file-list:focus-within {
+    scrollbar-color: rgba(255, 255, 255, 0.38) transparent;
+  }
+
+  .manage-file-list::-webkit-scrollbar {
+    height: 2px;
+    width: 2px;
+  }
+
+  .manage-file-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .manage-file-list::-webkit-scrollbar-thumb {
+    background: transparent;
+  }
+
+  .manage-file-list:hover::-webkit-scrollbar-thumb,
+  .manage-file-list:focus-within::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.38);
+  }
+
+  .manage-file-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.54);
   }
 
   .manage-file-list::before {
@@ -6117,12 +6119,13 @@ styleElement.textContent = `
     align-items: center;
     background: transparent;
     border: 0;
+    box-sizing: border-box;
     color: var(--manage-muted);
     display: grid;
-    gap: 11px;
+    gap: 9px;
     grid-template-columns: 14px 16px minmax(0, 1fr) auto;
-    min-height: 34px;
-    padding: 7px 9px 7px calc(18px + (var(--depth) * 18px));
+    min-height: 29px;
+    padding: 4px 7px 4px calc(14px + (var(--depth) * 18px));
     position: relative;
     text-align: left;
     width: 100%;
@@ -6138,6 +6141,10 @@ styleElement.textContent = `
   .manage-file-row[data-kind="directory"] {
     color: var(--manage-muted);
     font-weight: 300;
+  }
+
+  .manage-file-row[data-kind="directory"][data-active-descendant="true"] {
+    color: #ffffff;
   }
 
   .manage-file-row[data-selected="true"] {
@@ -6178,6 +6185,10 @@ styleElement.textContent = `
 
   .manage-file-row[aria-expanded="true"] .manage-file-disclosure svg {
     transform: rotate(90deg);
+  }
+
+  .manage-file-row[data-active-descendant="true"] .manage-file-disclosure {
+    color: currentColor;
   }
 
   .manage-file-icon {
@@ -6425,20 +6436,30 @@ styleElement.textContent = `
   .manage-preview-header {
     align-items: center;
     border-bottom: 1px solid var(--manage-border);
+    box-sizing: border-box;
     display: flex;
-    gap: 10px;
-    min-height: 48px;
-    padding: 0 12px 0 18px;
+    gap: 8px;
+    height: 33px;
+    max-height: 33px;
+    min-height: 33px;
+    overflow: hidden;
+    padding: 0 0 0 13px;
   }
 
   .manage-preview-title {
     align-items: center;
     display: flex;
     flex: 1 1 auto;
-    font-size: 13px;
-    font-weight: 700;
-    gap: 8px;
+    font-size: 12px;
+    font-weight: 680;
+    gap: 7px;
+    line-height: 33px;
     min-width: 0;
+  }
+
+  .manage-preview-title svg {
+    height: 15px;
+    width: 15px;
   }
 
   .manage-preview-title span {
@@ -6453,16 +6474,19 @@ styleElement.textContent = `
     color: var(--manage-subtle);
     display: flex;
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 650;
-    gap: 10px;
+    gap: 9px;
+    line-height: 33px;
   }
 
   .manage-preview-header-actions {
-    align-items: center;
+    align-items: stretch;
+    align-self: stretch;
     display: inline-flex;
     flex: 0 0 auto;
-    gap: 6px;
+    gap: 0;
+    height: 100%;
     min-width: 0;
   }
 
@@ -6569,7 +6593,6 @@ styleElement.textContent = `
   .manage-comment-popover-actions button,
   .manage-markdown-selection-toolbar button {
     align-items: center;
-    border-radius: 6px;
     display: inline-flex;
     font-size: 11px;
     font-weight: 750;
@@ -6587,6 +6610,24 @@ styleElement.textContent = `
     padding: 0 8px;
   }
 
+  .manage-preview-header-actions button {
+    background: transparent;
+    border: 0;
+    border-left: 1px solid #252525;
+    border-radius: 0;
+    box-shadow: none;
+    box-sizing: border-box;
+    color: rgba(255, 255, 255, 0.84);
+    font-size: 10.5px;
+    font-weight: 650;
+    height: 33px;
+    line-height: 33px;
+    max-height: 33px;
+    min-height: 33px;
+    min-width: 38px;
+    padding: 0 10px;
+  }
+
   .manage-preview-header-actions button:not(:disabled):hover,
   .manage-preview-header-actions button:not(:disabled):focus-visible,
   .manage-comment-popover-actions button:not(:disabled):hover,
@@ -6597,25 +6638,49 @@ styleElement.textContent = `
     outline: none;
   }
 
+  .manage-preview-header-actions button:not(:disabled):hover,
+  .manage-preview-header-actions button:not(:disabled):focus-visible,
+  .manage-preview-header-actions button[aria-expanded="true"],
+  .manage-preview-header-actions .manage-annotation-toggle[aria-pressed="true"] {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: #252525;
+    color: rgba(255, 255, 255, 0.96);
+    outline: none;
+  }
+
   .manage-preview-header-actions button:disabled,
   .manage-comment-popover-actions button:disabled {
     color: var(--manage-subtle);
   }
 
+  .manage-preview-header-actions button:disabled {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.34);
+    cursor: default;
+  }
+
+  .manage-preview-header-actions button:disabled:hover {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.34);
+  }
+
   .manage-preview-header-actions .manage-annotation-toggle[aria-pressed="true"] {
-    background: rgba(125, 211, 252, 0.16);
-    border-color: rgba(125, 211, 252, 0.36);
-    color: var(--manage-text);
+    border-left-color: #252525;
   }
 
   .manage-preview-header-actions .manage-annotation-dropdown-trigger {
-    padding: 0 7px;
+    padding: 0 9px;
   }
 
   .manage-preview-header-actions .manage-count-badge {
-    height: 16px;
-    min-width: 16px;
+    height: 17px;
+    min-width: 17px;
     padding: 0 4px;
+  }
+
+  .manage-preview-header-actions button svg {
+    height: 16px;
+    width: 16px;
   }
 
   .manage-meo-markdown-editor {
@@ -7500,22 +7565,27 @@ styleElement.textContent = `
 
   @media (max-width: 960px) {
     .manage-preview-header {
-      align-items: flex-start;
-      flex-direction: column;
-      gap: 7px;
-      padding: 8px 14px;
+      align-items: center;
+      flex-direction: row;
+      gap: 8px;
+      height: 33px;
+      max-height: 33px;
+      min-height: 33px;
+      padding: 0 0 0 13px;
     }
 
     .manage-preview-meta {
-      align-self: stretch;
+      align-self: auto;
     }
 
     .manage-preview-content[data-compact-header="true"] .manage-preview-header {
       align-items: center;
       flex-direction: row;
       gap: 8px;
-      min-height: 48px;
-      padding: 0 10px 0 14px;
+      height: 33px;
+      max-height: 33px;
+      min-height: 33px;
+      padding: 0 0 0 13px;
     }
 
     .manage-preview-content[data-compact-header="true"] .manage-preview-meta {

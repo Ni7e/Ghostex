@@ -97,6 +97,9 @@ describe("Manage project workarea source", () => {
     /*
      * CDXC:ManageSidebar 2026-06-26-23:14:
      * The Manage file sidebar should have a visible separator that can resize the artifacts tree on the left or right side, persists width locally, and keeps the preview/editor in normal non-overlapping grid layout.
+     *
+     * CDXC:DocsSidebar 2026-06-28-15:05:
+     * The Docs sidebar resize rail should visually match the main native sidebar rail: a five-point grid track, one-point edge separator, and three-point hover affordance.
      */
     expect(manageSource).toContain("MANAGE_SIDEBAR_WIDTH_STORAGE_KEY");
     expect(manageSource).toContain("readStoredManageSidebarWidth");
@@ -107,8 +110,9 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("handleSidebarResizePointerDown");
     expect(manageSource).toContain("handleSidebarResizeKeyDown");
     expect(manageSource).toContain(".manage-sidebar-resizer");
-    expect(manageSource).toContain('grid-template-columns: var(--manage-sidebar-width, 292px) 7px minmax(0, 1fr)');
-    expect(manageSource).toContain('grid-template-columns: minmax(0, 1fr) 7px var(--manage-sidebar-width, 292px)');
+    expect(manageSource).toContain('grid-template-columns: var(--manage-sidebar-width, 292px) 5px minmax(0, 1fr)');
+    expect(manageSource).toContain('grid-template-columns: minmax(0, 1fr) 5px var(--manage-sidebar-width, 292px)');
+    expect(manageSource).toContain("width: 3px;");
   });
 
   test("creates folders, Markdown, HTML, and Excalidraw documents from the Docs sidebar", () => {
@@ -132,8 +136,22 @@ describe("Manage project workarea source", () => {
      *
      * CDXC:ManageFolders 2026-06-28-07:12:
      * The Docs sidebar create actions live in the header plus menu, file rows
-     * can target their containing folder/root for drops, and selected file size
-     * is shown in sidebar toolbar metadata instead of row badges.
+     * can target their containing folder/root for drops, and file rows do not
+     * show size badges.
+     *
+     * CDXC:DocsSidebar 2026-06-28-15:05:
+     * The Docs sidebar should remove the file count and selected-file summary
+     * block so the tree starts directly below Search, keep the project title
+     * non-selectable and 2px farther left, and use a hover-only 2px scrollbar.
+     *
+     * CDXC:DocsSidebar 2026-06-28-15:57:
+     * Docs file rows should use tighter padding, keep the selected file on its
+     * selected-row surface, and show active parent folders by turning only
+     * their text/icon color full white.
+     *
+     * CDXC:DocsSidebar 2026-06-28-16:29:
+     * Docs sidebar search and file row buttons should fill the sidebar width
+     * without an outer horizontal gutter; spacing belongs inside the controls.
      */
     expect(manageSource).toContain('type ManageArtifactKind = "excalidraw" | "html" | "markdown"');
     expect(manageSource).toContain('const MANAGE_DOCS_ROOT_PATH = "docs"');
@@ -154,11 +172,23 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("entry.kind === \"directory\" ? entry.path : parentManagePath(entry.path) || MANAGE_DOCS_ROOT_PATH");
     expect(manageSource).toContain("void moveEntryToDirectory(dragEntry, targetDirectoryPath)");
     expect(manageSource).toContain('isDropTarget={dropTarget?.kind === "entry" && dropTarget.path === entry.path}');
-    expect(manageSource).toContain("function ManageSidebarFileToolbar");
-    expect(manageSource).toContain('aria-label="Selected file details"');
-    expect(manageSource).toContain("manage-sidebar-file-toolbar-title");
-    expect(manageSource).toContain("manage-sidebar-file-toolbar-spacer");
-    expect(manageSource).toContain("manage-sidebar-file-toolbar-size");
+    expect(manageSource).not.toContain("function ManageSidebarFileToolbar");
+    expect(manageSource).not.toContain('aria-label="Selected file details"');
+    expect(manageSource).not.toContain("manage-sidebar-meta");
+    expect(manageSource).toContain("margin-left: -2px;");
+    expect(manageSource).toContain("user-select: none;");
+    expect(manageSource).toContain("scrollbar-color: transparent transparent;");
+    expect(manageSource).toContain("width: 2px;");
+    expect(manageSource).toContain("hasActiveFileDescendant=");
+    expect(manageSource).toContain("isManageDescendantPath(selectedPath, entry.path)");
+    expect(manageSource).toContain('data-active-descendant={String(hasActiveFileDescendant)}');
+    expect(manageSource).toContain('padding: 4px 7px 4px calc(14px + (var(--depth) * 18px));');
+    expect(manageSource).toContain('min-height: 29px;');
+    expect(manageSource).toContain('.manage-file-row[data-kind="directory"][data-active-descendant="true"]');
+    expect(manageSource).toContain("color: #ffffff;");
+    expect(manageSource).toContain("padding: 0 0 7px;");
+    expect(manageSource).toContain("margin: 0 0 20px;");
+    expect(manageSource).toContain("box-sizing: border-box;");
     expect(manageSource).not.toContain('className="manage-file-size"');
     expect(manageSource).toContain("createUniqueArtifactPath(entries, kind)");
     expect(manageSource).toContain("createInitialArtifactContent(kind)");
@@ -362,6 +392,11 @@ describe("Manage project workarea source", () => {
      *
      * CDXC:ManageMarkdownAnnotations 2026-06-28-06:49:
      * The Docs annotation dropdown should stay visually above Meo's editor toolbar when it opens from the compact header.
+     *
+     * CDXC:DocsHeader 2026-06-28-18:02:
+     * The Docs main header should be a compact 33px titlebar-like strip with
+     * smaller title/meta text and full-height square action buttons separated
+     * like macOS titlebar controls.
      */
     expect(manageSource).toContain("const isHtml = isHtmlPath(preview.path);");
     expect(manageSource).toContain("const usesCompactArtifactHeader = isMarkdown || isDrawing || isHtml;");
@@ -371,6 +406,15 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain('{!usesCompactArtifactHeader ? <div className="manage-preview-path">{preview.path}</div> : null}');
     expect(manageSource).toContain('.manage-preview-content[data-compact-header="true"]');
     expect(manageSource).toContain("manage-preview-header-actions");
+    expect(manageSource).toContain("height: 33px;");
+    expect(manageSource).toContain("max-height: 33px;");
+    expect(manageSource).toContain("min-height: 33px;");
+    expect(manageSource).toContain("font-size: 12px;");
+    expect(manageSource).toContain("font-size: 10.5px;");
+    expect(manageSource).toContain("border-left: 1px solid #252525;");
+    expect(manageSource).toContain("border-radius: 0;");
+    expect(manageSource).toContain('.manage-preview-header-actions button[aria-expanded="true"]');
+    expect(manageSource).toContain(".manage-preview-header-actions button svg");
     expect(manageSource).toContain("annotationsDropdownOpen");
     expect(manageSource).toContain("annotationsDropdownRef");
     expect(manageSource).toContain('aria-haspopup="dialog"');
