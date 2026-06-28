@@ -2711,14 +2711,10 @@ final class TerminalWorkspaceView: NSView {
    have both settled on the same pane. Keep a separate settled gate so early
    focus-selection repaints clear stale borders, then a deferred pass revalidates
    "typing will go here" before drawing the outline.
-  */
+   */
   private var focusedPaneBorderSettledSessionIds = Set<String>()
   private var scheduledFocusedPaneBorderSettlementSessionIds = Set<String>()
   private var focusedPaneBorderSettlementGeneration: UInt64 = 0
-  private var sidebarFirstResponderFocusHandoffPreservedSessionIds = Set<String>()
-  private var sidebarFirstResponderFocusHandoffTargetSessionId: String?
-  private var sidebarFirstResponderFocusHandoffGeneration: UInt64 = 0
-  private static let sidebarFirstResponderFocusHandoffDelayMs = 300
   /**
   CDXC:NativeTerminalFocus 2026-06-09-23:14:
   Passive sidebar first-responder recovery must return to the terminal that actually owned keyboard focus before sidebar WKWebView churn. Track that responder separately because focusTerminal intentionally suppresses AppKit first-responder callbacks during programmatic native focus changes.
@@ -4895,9 +4891,6 @@ final class TerminalWorkspaceView: NSView {
     }
     if didFocusWebPane || view.window?.firstResponder === view {
       clearProjectEditorFocusOwner(reason: "focusWebPane.\(reason)")
-      completeSidebarFirstResponderFocusHandoff(
-        sessionId: sessionId,
-        reason: "focusWebPane.\(reason)")
       /*
        CDXC:NativePaneChrome 2026-06-13-22:17:
        Browser and T3 web pane borders are keyed to the live AppKit first
@@ -4957,9 +4950,6 @@ final class TerminalWorkspaceView: NSView {
     }
     let didFocus = session.contentView.window?.makeFirstResponder(session.contentView) ?? false
     if didFocus || session.contentView.window?.firstResponder === session.contentView {
-      completeSidebarFirstResponderFocusHandoff(
-        sessionId: sessionId,
-        reason: "focusSleepingPanePlaceholder.\(reason)")
       /*
        CDXC:NativePaneChrome 2026-06-13-22:17:
        Sleeping placeholders can own keyboard focus for the "Press Any Key to
@@ -6581,11 +6571,7 @@ final class TerminalWorkspaceView: NSView {
     }
   }
 
-  func focusTerminal(
-    sessionId rawSessionId: String,
-    reason: String = "explicitFocusTerminalCommand",
-    previousFocusedSessionOverride: String? = nil
-  ) {
+  func focusTerminal(sessionId rawSessionId: String, reason: String = "explicitFocusTerminalCommand") {
     let sessionId = ghostexNativeFocusSessionId(from: rawSessionId) ?? rawSessionId
     guard let view = sessions[sessionId]?.view else {
       TerminalFocusDebugLog.append(
@@ -6601,8 +6587,7 @@ final class TerminalWorkspaceView: NSView {
     }
     let isCommandPanelSession = commandsPanelActiveSessionIds.contains(sessionId)
     let previousFocusedTerminalSessionId =
-      previousFocusedSessionOverride
-        ?? (isCommandPanelSession ? commandsPanelFocusedSessionId : focusedSessionId)
+      isCommandPanelSession ? commandsPanelFocusedSessionId : focusedSessionId
     let hadActiveProjectEditor = !isCommandPanelSession && activeProjectEditorId != nil
     if !isCommandPanelSession,
       activateProjectEditorCompanionPane(sessionId: sessionId, focus: true, reason: reason)
@@ -6667,9 +6652,6 @@ final class TerminalWorkspaceView: NSView {
     if didApplyFirstResponder {
       rememberTerminalFirstResponderSessionId(sessionId)
       clearProjectEditorFocusOwner(reason: "focusTerminal.\(reason)")
-      completeSidebarFirstResponderFocusHandoff(
-        sessionId: sessionId,
-        reason: "focusTerminal.\(reason)")
       /**
        CDXC:CommandsPanel 2026-06-13-21:06:
        Pressing F12 twice can route typing focus into an already-visible command pane through programmatic AppKit focus. Command-pane active borders depend on the live first responder, and programmatic responder callbacks are intentionally ignored, so repaint pane chrome after makeFirstResponder accepts the command terminal.
@@ -7481,18 +7463,12 @@ final class TerminalWorkspaceView: NSView {
     reason: String = "explicitFocusMountedTerminalSessionCommand"
   ) -> Bool {
     let sessionId = ghostexNativeFocusSessionId(from: rawSessionId) ?? rawSessionId
-    let previousFocusedSessionId = focusedSessionId
     /*
      CDXC:SidebarSessionFocus 2026-06-27-22:54:
      Mounted sidebar terminal switches must change selected tab ownership and
      AppKit first responder as one native operation. Apply the owner silently,
      then let focusTerminal perform the only border repaint after first
      responder is confirmed.
-
-     CDXC:SidebarSessionFocus 2026-06-28-08:47:
-     Capture the previous owner before the silent owner update so the final
-     narrow repaint clears the old pane border and settles the new pane border
-     after AppKit accepts the target terminal as first responder.
      */
     guard applyFocusedTerminalOwner(
       sessionId: sessionId,
@@ -7503,10 +7479,7 @@ final class TerminalWorkspaceView: NSView {
     else {
       return false
     }
-    focusTerminal(
-      sessionId: sessionId,
-      reason: reason,
-      previousFocusedSessionOverride: previousFocusedSessionId)
+    focusTerminal(sessionId: sessionId, reason: reason)
     return true
   }
 
@@ -18380,123 +18353,6 @@ final class TerminalWorkspaceView: NSView {
     scheduleFocusedPaneBorderSettlementIfNeeded(for: sessionId, reason: "updateTerminalBorder.terminal")
   }
 
-  @discardableResult
-  func beginSidebarFirstResponderFocusHandoff(reason: String) -> Bool {
-    let preservedSessionIds = focusedPaneBorderSettledSessionIds.filter {
-      isSidebarFirstResponderFocusHandoffPreservable(sessionId: $0)
-    }
-    guard !preservedSessionIds.isEmpty else {
-      return false
-    }
-    /*
-     CDXC:SidebarSessionFocus 2026-06-28-08:47:
-     During a sidebar session click, AppKit can report the sidebar WKWebView as
-     first responder before the deferred native session focus command runs.
-     Preserve the currently settled pane border for one short handoff window so
-     unrelated border repaints do not interpret that transient sidebar responder
-     as a real terminal-focus loss.
-     */
-    sidebarFirstResponderFocusHandoffPreservedSessionIds = Set(preservedSessionIds)
-    sidebarFirstResponderFocusHandoffTargetSessionId = nil
-    sidebarFirstResponderFocusHandoffGeneration &+= 1
-    scheduleSidebarFirstResponderFocusHandoffExpiration(reason: reason)
-    TerminalFocusDebugLog.append(
-      event: "nativeFocusTrace.sidebarFirstResponderFocusHandoffStarted",
-      details: [
-        "preservedSessionIds": preservedSessionIds.sorted(),
-        "reason": reason,
-      ])
-    return true
-  }
-
-  func targetSidebarFirstResponderFocusHandoff(sessionId rawSessionId: String, reason: String) {
-    let sessionId = ghostexNativeFocusSessionId(from: rawSessionId) ?? rawSessionId
-    guard !sidebarFirstResponderFocusHandoffPreservedSessionIds.isEmpty else {
-      return
-    }
-    sidebarFirstResponderFocusHandoffTargetSessionId = sessionId
-    sidebarFirstResponderFocusHandoffGeneration &+= 1
-    scheduleSidebarFirstResponderFocusHandoffExpiration(reason: reason)
-    TerminalFocusDebugLog.append(
-      event: "nativeFocusTrace.sidebarFirstResponderFocusHandoffTargeted",
-      details: [
-        "preservedSessionIds": Array(sidebarFirstResponderFocusHandoffPreservedSessionIds).sorted(),
-        "reason": reason,
-        "targetSessionId": sessionId,
-      ])
-  }
-
-  func cancelSidebarFirstResponderFocusHandoff(reason: String) {
-    guard !sidebarFirstResponderFocusHandoffPreservedSessionIds.isEmpty
-      || sidebarFirstResponderFocusHandoffTargetSessionId != nil
-    else {
-      return
-    }
-    let preservedSessionIds = sidebarFirstResponderFocusHandoffPreservedSessionIds
-    sidebarFirstResponderFocusHandoffPreservedSessionIds.removeAll()
-    sidebarFirstResponderFocusHandoffTargetSessionId = nil
-    sidebarFirstResponderFocusHandoffGeneration &+= 1
-    TerminalFocusDebugLog.append(
-      event: "nativeFocusTrace.sidebarFirstResponderFocusHandoffCancelled",
-      details: [
-        "preservedSessionIds": Array(preservedSessionIds).sorted(),
-        "reason": reason,
-      ])
-  }
-
-  private func completeSidebarFirstResponderFocusHandoff(sessionId: String, reason: String) {
-    guard !sidebarFirstResponderFocusHandoffPreservedSessionIds.isEmpty
-      || sidebarFirstResponderFocusHandoffTargetSessionId != nil
-    else {
-      return
-    }
-    let preservedSessionIds = sidebarFirstResponderFocusHandoffPreservedSessionIds
-    let targetSessionId = sidebarFirstResponderFocusHandoffTargetSessionId
-    sidebarFirstResponderFocusHandoffPreservedSessionIds.removeAll()
-    sidebarFirstResponderFocusHandoffTargetSessionId = nil
-    sidebarFirstResponderFocusHandoffGeneration &+= 1
-    TerminalFocusDebugLog.append(
-      event: "nativeFocusTrace.sidebarFirstResponderFocusHandoffCompleted",
-      details: [
-        "completedSessionId": sessionId,
-        "preservedSessionIds": Array(preservedSessionIds).sorted(),
-        "reason": reason,
-        "targetSessionId": nullableString(targetSessionId),
-      ])
-  }
-
-  private func scheduleSidebarFirstResponderFocusHandoffExpiration(reason: String) {
-    let generation = sidebarFirstResponderFocusHandoffGeneration
-    DispatchQueue.main.asyncAfter(
-      deadline: .now() + .milliseconds(Self.sidebarFirstResponderFocusHandoffDelayMs)
-    ) { [weak self] in
-      guard let self,
-        self.sidebarFirstResponderFocusHandoffGeneration == generation,
-        !self.sidebarFirstResponderFocusHandoffPreservedSessionIds.isEmpty
-      else {
-        return
-      }
-      self.cancelSidebarFirstResponderFocusHandoff(
-        reason: "sidebarFirstResponderFocusHandoff.timeout.\(reason)")
-      self.invalidateFocusedPaneBorderSettlement(
-        reason: "sidebarFirstResponderFocusHandoff.timeout.\(reason)")
-      self.updateAllTerminalBorders()
-    }
-  }
-
-  private func shouldPreserveFocusedPaneBorderForSidebarFirstResponderHandoff(
-    sessionId: String
-  ) -> Bool {
-    sidebarFirstResponderFocusHandoffPreservedSessionIds.contains(sessionId)
-      && isSidebarFirstResponderFocusHandoffPreservable(sessionId: sessionId)
-  }
-
-  private func isSidebarFirstResponderFocusHandoffPreservable(sessionId: String) -> Bool {
-    commandsPanelActiveSessionIds.contains(sessionId)
-      || activeSessionIds.contains(sessionId)
-      || isPlaceholderPaneSession(sessionId)
-  }
-
   private func shouldShowFocusedPaneBorder(for sessionId: String) -> Bool {
     /**
      CDXC:NativePaneResize 2026-05-11-09:48
@@ -18523,9 +18379,6 @@ final class TerminalWorkspaceView: NSView {
      deferred settled pass after focus/layout changes so the border appears only
      once the pane frame is valid and still matches the live typing target.
      */
-    if shouldPreserveFocusedPaneBorderForSidebarFirstResponderHandoff(sessionId: sessionId) {
-      return true
-    }
     guard focusedPaneBorderSettledSessionIds.contains(sessionId) else {
       return false
     }
