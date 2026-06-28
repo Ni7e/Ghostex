@@ -73,19 +73,6 @@ pub(crate) enum NativeTerminalSurfaceHostCommand<SlotId = AgentsTerminalBodyMoun
     },
 }
 
-#[cfg(test)]
-#[derive(Clone, Copy, PartialEq)]
-enum NativeTerminalSurfaceHostSyncAction<SlotId = AgentsTerminalBodyMountSlotId> {
-    AwaitingVisibleSlotBounds {
-        slot_id: SlotId,
-    },
-    ReconcileVisibleSlotWithBounds {
-        plan: NativeTerminalSurfaceAttachmentPlan<SlotId>,
-    },
-    ClearBecauseAgentsWorkspaceHidden,
-    ClearBecauseNoCurrentSlot,
-}
-
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct NativeTerminalSurfacePlatformBounds {
@@ -185,30 +172,6 @@ where
         Self::default()
     }
 
-    #[cfg(test)]
-    pub(super) fn active_plan(&self) -> Option<NativeTerminalSurfaceAttachmentPlan<SlotId>> {
-        if self.active_plans.len() == 1 {
-            self.active_plans.values().copied().next()
-        } else {
-            None
-        }
-    }
-
-    #[cfg(test)]
-    pub(super) fn active_plan_for(
-        &self,
-        slot_id: SlotId,
-    ) -> Option<NativeTerminalSurfaceAttachmentPlan<SlotId>> {
-        self.active_plans.get(&slot_id).copied()
-    }
-
-    #[cfg(test)]
-    pub(super) fn active_plans(&self) -> Vec<NativeTerminalSurfaceAttachmentPlan<SlotId>> {
-        let mut plans = self.active_plans.values().copied().collect::<Vec<_>>();
-        plans.sort_by_key(|plan| plan.slot_id.terminal_surface_sort_key());
-        plans
-    }
-
     pub(crate) fn sync_visible_slots(
         &mut self,
         surface_visible: bool,
@@ -295,28 +258,6 @@ impl NativeTerminalSurfaceHost<AgentsTerminalBodyMountSlotId> {
         recorded_bounds: &HashMap<AgentsTerminalBodyMountSlotId, Bounds<Pixels>>,
     ) -> Vec<NativeTerminalSurfaceHostCommand> {
         self.sync_visible_slots(agents_workspace_visible, current_slot_ids, recorded_bounds)
-    }
-
-    #[cfg(test)]
-    fn visible_agents_slot_sync_action(
-        agents_workspace_visible: bool,
-        current_slot_ids: &[AgentsTerminalBodyMountSlotId],
-        recorded_bounds: &HashMap<AgentsTerminalBodyMountSlotId, Bounds<Pixels>>,
-    ) -> NativeTerminalSurfaceHostSyncAction {
-        if !agents_workspace_visible {
-            return NativeTerminalSurfaceHostSyncAction::ClearBecauseAgentsWorkspaceHidden;
-        }
-
-        let &[slot_id] = current_slot_ids else {
-            return NativeTerminalSurfaceHostSyncAction::ClearBecauseNoCurrentSlot;
-        };
-        let Some(bounds) = recorded_bounds.get(&slot_id).copied() else {
-            return NativeTerminalSurfaceHostSyncAction::AwaitingVisibleSlotBounds { slot_id };
-        };
-
-        NativeTerminalSurfaceHostSyncAction::ReconcileVisibleSlotWithBounds {
-            plan: NativeTerminalSurfaceAttachmentPlan::new(slot_id, bounds),
-        }
     }
 }
 

@@ -32,8 +32,6 @@ const SIDEBAR_WORKSPACE_TERMINAL_FOCUS_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.workspaceTerminalFocus";
 const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.workspaceTerminalLifecycleResult";
-const SIDEBAR_SESSION_FOCUS_DEBUG_LOG_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.sessionFocusDebugLog";
 const SIDEBAR_SESSION_STATUS_INDICATORS_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.sessionStatusIndicators";
 const SIDEBAR_PET_OVERLAY_STATE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.petOverlayState";
@@ -59,7 +57,6 @@ const SIDEBAR_GXSERVER_FOCUS_STATE_JS_FUNCTION: &str = "postGxserverPresentation
 const SIDEBAR_WORKSPACE_TERMINAL_FOCUS_JS_FUNCTION: &str = "postWorkspaceTerminalFocus";
 const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_JS_FUNCTION: &str =
     "postWorkspaceTerminalLifecycleResult";
-const SIDEBAR_SESSION_FOCUS_DEBUG_LOG_JS_FUNCTION: &str = "postSessionFocusDebugLog";
 const SIDEBAR_SESSION_STATUS_INDICATORS_JS_FUNCTION: &str = "postSessionStatusIndicators";
 const SIDEBAR_PET_OVERLAY_STATE_JS_FUNCTION: &str = "postPetOverlayState";
 const SIDEBAR_RUNTIME_SETTINGS_JS_OBJECT: &str = "runtimeSettings";
@@ -105,8 +102,11 @@ The helper renderer must expose the same sidebar post-function allowlist as the 
 
 CDXC:GPUICommandPalette 2026-06-27-08:17:
 Command-palette hotkey selectors are another fixed sidebar bridge call. Helper-based CEF runs must expose `postGhostexHotkeyAction` with the same private process message as the main renderer so Open Commands Panel and focused-pane routes do not depend on which renderer installed the bridge.
+
+CDXC:GPUILoggingRemoval 2026-06-28-17:06:
+Helper renderers must match the main CEF functional bridge allowlist and omit GPUI logging/diagnostic functions until a future requirement adds a deliberately scoped diagnostics bridge.
 */
-const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 16] = [
+const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 15] = [
     SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION,
         process_message_name: SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME,
@@ -158,10 +158,6 @@ const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 16] = [
     SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_JS_FUNCTION,
         process_message_name: SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_PROCESS_MESSAGE_NAME,
-    },
-    SidebarBridgeFunctionSpec {
-        js_function_name: SIDEBAR_SESSION_FOCUS_DEBUG_LOG_JS_FUNCTION,
-        process_message_name: SIDEBAR_SESSION_FOCUS_DEBUG_LOG_PROCESS_MESSAGE_NAME,
     },
     SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_SESSION_STATUS_INDICATORS_JS_FUNCTION,

@@ -47,55 +47,6 @@ where
         Self::default()
     }
 
-    #[cfg(test)]
-    pub(crate) fn active_plan(&self) -> Option<NativeTerminalSurfaceAttachmentPlan<SlotId>> {
-        if self.active_slots.len() == 1 {
-            self.active_slots.values().map(|slot| slot.plan).next()
-        } else {
-            None
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn active_plan_for(
-        &self,
-        slot_id: SlotId,
-    ) -> Option<NativeTerminalSurfaceAttachmentPlan<SlotId>> {
-        self.active_slots.get(&slot_id).map(|slot| slot.plan)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn active_plans(&self) -> Vec<NativeTerminalSurfaceAttachmentPlan<SlotId>> {
-        let mut plans = self
-            .active_slots
-            .values()
-            .map(|slot| slot.plan)
-            .collect::<Vec<_>>();
-        plans.sort_by_key(|plan| plan.slot_id.terminal_surface_sort_key());
-        plans
-    }
-
-    #[cfg(test)]
-    fn active_slot_is_awaiting_real_native_view(&self) -> bool {
-        self.active_slots.len() == 1
-            && self.active_slots.values().all(|slot| {
-                matches!(
-                    slot.native_view,
-                    NativeTerminalNativeViewState::AwaitingRealNativeView
-                )
-            })
-    }
-
-    #[cfg(test)]
-    fn active_slot_is_awaiting_real_native_view_for(&self, slot_id: SlotId) -> bool {
-        self.active_slots.get(&slot_id).is_some_and(|slot| {
-            matches!(
-                slot.native_view,
-                NativeTerminalNativeViewState::AwaitingRealNativeView
-            )
-        })
-    }
-
     #[cfg(target_os = "macos")]
     pub(crate) fn with_explicit_real_native_view(
         plan: NativeTerminalSurfaceAttachmentPlan<SlotId>,

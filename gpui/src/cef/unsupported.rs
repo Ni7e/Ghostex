@@ -6,10 +6,10 @@ pub fn prepare_application() {}
 
 pub fn initialize() -> Result<()> {
     /*
-    CDXC:GPUIPhase1 2026-06-14-12:06:
-    Phase 1 is macOS-first, but the app structure must make Linux and Windows CEF support a platform backend decision instead of mixing platform checks into UI code. Non-macOS builds fail explicitly until their CEF child-window implementations are added.
+    CDXC:GPUICefPlatformBackend 2026-06-14-12:06:
+    GPUI is macOS-first today, but the app structure must make Linux and Windows CEF support a platform backend decision instead of mixing platform checks into UI code. Non-macOS builds fail explicitly until their CEF child-window implementations are added.
     */
-    anyhow::bail!("CEF phase 1 currently has only a macOS backend")
+    anyhow::bail!("GPUI CEF currently has only a macOS backend")
 }
 
 pub type BrowserPopupOpenHandler = Rc<dyn Fn(String)>;
@@ -38,7 +38,6 @@ pub enum SidebarBridgeEvent {
     WorkspaceTerminalFocus(String),
     WorkspaceTerminalRenameCommand(String),
     WorkspaceTerminalLifecycleResult(String),
-    SessionFocusDebugLog(String),
     SessionStatusIndicators(String),
     PetOverlayState(String),
 }

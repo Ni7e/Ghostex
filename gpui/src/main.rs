@@ -1,8 +1,8 @@
 #![recursion_limit = "256"]
 
 /*
-CDXC:GPUIBuildSchemaPayloads 2026-06-24-09:59:
-GPUI runtime-parity and privacy-boundary audit payloads include schema-sized serde_json::json! objects. Keep the crate recursion limit high enough for those compile-time macro expansions so payload definitions can stay explicit and the build does not fail before runtime behavior is checked.
+CDXC:GPUIBuildSchemaPayloads 2026-06-28-17:09:
+GPUI still has schema-sized privacy-boundary serde_json::json! payloads outside the removed project-workarea proof chain. Keep the crate recursion limit high enough for those explicit payloads while runtime behavior is owned by direct gates.
 */
 mod cef;
 mod ghostty_kit;
@@ -426,14 +426,6 @@ const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTerminalLifecycleResult";
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_REQUEST_ID_MAX: u64 = 9_007_199_254_740_991;
-const GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_VERSION: u64 = 1;
-const GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_TYPE: &str =
-    "ghostex.gpui.sidebar.sessionFocusDebugLog";
-const GPUI_SIDEBAR_FOCUS_DEBUG_LOG_FILE_NAME: &str = "gpui-sidebar-focus-debug.jsonl";
-const GPUI_SIDEBAR_FOCUS_DEBUG_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
-const GPUI_SIDEBAR_FOCUS_DEBUG_ID_ARRAY_MAX: usize = 16;
-const GPUI_APP_MODAL_DEBUG_LOG_FILE_NAME: &str = "gpui-app-modal-debug.jsonl";
-const GPUI_APP_MODAL_DEBUG_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_SESSION_STATUS_INDICATORS_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.sessionStatusIndicators";
@@ -764,8 +756,6 @@ CDXC:GPUICommandTabDoubleClick 2026-06-25-13:50:
 Native pane titlebars reserve empty command tab chrome for double-click New Terminal when a real tab/add/control was not hit. Use the native 34px preferred target width, keep the 24px minimum as an asserted contract, and route only double-clicks through terminal creation.
 */
 const COMMAND_PANE_EMPTY_TITLEBAR_DOUBLE_CLICK_TARGET_WIDTH: f32 = 34.0;
-#[cfg(test)]
-const COMMAND_PANE_EMPTY_TITLEBAR_DOUBLE_CLICK_TARGET_MIN_WIDTH: f32 = 24.0;
 /*
 CDXC:GPUICommandPaneControls 2026-06-25-18:46:
 Native command titlebars hide the inline New Terminal button when it would squeeze the tab viewport below the compact double-click target. Preserve at least the 56px native empty-titlebar viewport before spending 26px on the command add button.
@@ -1730,38 +1720,17 @@ impl TitlebarMode {
     fn placeholder_message(self) -> &'static str {
         match self {
             Self::Agents => "",
-            Self::Source => {
-                "Source workspace area is represented by this GPUI shell for the current source-only parity pass."
-            }
+            Self::Source => "Source is unavailable for the current project context.",
             Self::Browser => "",
-            Self::Kanban => {
-                "Kanban workspace area is represented by this GPUI shell for the current CEF-only parity pass."
-            }
-            Self::Manage => {
-                "Manage workspace area is represented by this GPUI shell for the current CEF-only parity pass."
-            }
+            Self::Kanban => "Kanban is unavailable for the current project context.",
+            Self::Manage => "Manage is unavailable for the current project context.",
         }
     }
 }
 
 /*
-CDXC:GPUIProjectEditorPlaceholders 2026-06-24-07:41:
-Source, Kanban, and Manage colored shell surfaces are the current source-only/CEF-only parity representation for this pass. Future runtime replacement must be explicit, CEF-only work rather than an implied automatic port from these shells; Browser stays on the CEF workspace path, and Agents plus terminal bodies remain separate black placeholders instead of being classified as non-Browser project-editor colored placeholders.
-
-CDXC:GPUIProjectEditorPlaceholders 2026-06-24-07:22:
-Visible project-editor placeholder copy must match the current source-only parity requirement instead of saying parity is deferred. Keep the copy generic, private-detail-free, and non-mounting while Source, Kanban, and Manage stay on CEF-only source contracts for user runtime checks.
-
-CDXC:GPUIProjectEditorPlaceholders 2026-06-24-07:27:
-Visible placeholder titles must be the user-facing mode names during the source-only/CEF-only parity pass. Keep Source, Kanban, and Manage titles non-mounting and private-detail-free while runtime surfaces remain user-checked outside this slice.
-
-CDXC:GPUIProjectWorkareaLifecycle 2026-06-23-13:50:
-Kanban and Manage mounting/load-failed placeholder copy is source-only lifecycle visibility for Phase 6/7. It must stay static and generic, keep the existing color identities and layout, and must not create CEF web-surface or file-bridge mounts, fallback URLs, logs, persisted failure details, private ids, paths, titles, command text, raw JSON, or user-owned content.
-
-CDXC:GPUIProjectWorkareaLifecycle 2026-06-24-07:41:
-Kanban and Manage GPUI web panes target CEF for cross-platform parity. Placeholder and lifecycle copy should reflect the accepted CEF-only source-ledger contracts plus the separate Manage file-bridge boundary, while real runtime CEF/file-bridge creation and placeholder replacement remain explicit future work with no WKWebView/WebKit/non-CEF path.
-
-CDXC:GPUISourceWorkarea 2026-06-24-07:41:
-Source loading/load-failed copy is bridge lifecycle visibility while the current Source source-ledger CEF/code-server contracts are accepted for this pass. Keep the copy private-detail-free and non-mounting: no runtime code-server/CEF launch, runtime URL issuance, fallback localhost URL, project/path/detail persistence, logs, overlays, hit-test workarounds, or placeholder replacement.
+CDXC:GPUIProjectEditorPlaceholders 2026-06-28-17:09:
+Source, Kanban, and Manage colored placeholders are unavailable/loading/error surfaces only. Real workarea replacement is owned by the direct runtime URL plus normal-layout CefSurface gate, so placeholder rendering must not create CEF views, start code-server, run file operations, synthesize fallback URLs, persist private details, or add WKWebView/WebKit paths.
 */
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ProjectEditorPlaceholderColorIdentity {
@@ -1935,8 +1904,8 @@ impl ProjectEditorPlaceholderSignature {
 }
 
 /*
-CDXC:GPUIProjectEditorSleepingPlaceholders 2026-06-24-07:41:
-Selected sleeping/restored project-editor modes remain real layout participants with mode-specific colored shell surfaces/cards. Surface/card activation expresses wake intent for shell state; Browser CEF stays hidden while sleeping, and Source, Kanban, and Manage stay on the current source-only/CEF-only parity representation without mounting runtime code-server, CEF, file-bridge, or Manage surfaces, replacing placeholders, exposing private details, or adding WKWebView/WebKit/non-CEF paths.
+CDXC:GPUIProjectEditorSleepingPlaceholders 2026-06-28-17:09:
+Selected sleeping/restored project-editor modes remain real layout participants with mode-specific colored shell surfaces/cards. Surface/card activation expresses wake intent for shell state; Browser hides existing CEF while sleeping, and Source/Kanban/Manage must not mount or replace runtime surfaces until their awake direct CEF gates permit it.
 */
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ProjectEditorSleepingPlaceholderColorIdentity {
@@ -2015,8 +1984,8 @@ struct ProjectEditorSleepingPlaceholderSignature {
 impl ProjectEditorSleepingPlaceholderSignature {
     fn for_mode(mode: TitlebarMode) -> Option<Self> {
         /*
-        CDXC:GPUIProjectEditorSleepingPlaceholder 2026-06-24-07:30:
-        Sleeping/restored Source, Browser, Kanban, and Manage visible copy must be surface-oriented for the source-only/CEF-only parity pass. Keep it private-detail-free and non-mounting: no project/session/URL details, CEF creation, bridge mounts, placeholder replacement, or WKWebView/WebKit/non-CEF paths.
+        CDXC:GPUIProjectEditorSleepingPlaceholder 2026-06-28-17:09:
+        Sleeping/restored Source, Browser, Kanban, and Manage visible copy is private-detail-free shell state. It must not include project/session/URL details, create CEF views, mount bridges, replace placeholders, or introduce WKWebView/WebKit paths.
         */
         let (title, message, action_label, color_identity) = match mode {
             TitlebarMode::Source => (
@@ -2141,7 +2110,7 @@ impl GpuiProjectContext {
 
 /*
 CDXC:GPUIProjectSnapshot 2026-06-24-07:41:
-Phase 1 has a strict live sidebar active-project snapshot instead of a pre-bridge placeholder. The snapshot carries active project id, display name, Quick/projectless state, project-scoped availability, the allowlisted in-memory project path, and identity-only Source, Kanban, and gated Manage surface ids from explicit sidebar/native project-editor state without inventing .git, path, fixture, workspace-name, or fallback project detection. Browser identity/readiness plus mount, URL, CEF, and file-bridge facts stay outside the snapshot as separate source/runtime boundaries; current source-ledger contracts are accepted for this pass while runtime creation remains explicit future CEF-only work.
+The live sidebar active-project snapshot is strict instead of a pre-bridge placeholder. The snapshot carries active project id, display name, Quick/projectless state, project-scoped availability, the allowlisted in-memory project path, and identity-only Source, Kanban, and gated Manage surface ids from explicit sidebar/native project-editor state without inventing .git, path, fixture, workspace-name, or fallback project detection. Browser identity/readiness plus runtime URL, CEF, and file-bridge facts stay outside the snapshot; real workarea surfaces are created only through direct runtime gates after snapshot acceptance.
 
 CDXC:GPUIProjectSnapshot 2026-06-22-18:14:
 Project display names and project paths are private runtime facts. `in_memory_project_path` is accepted only from the future allowlisted sidebar contract, is not normalized or probed on disk, and must not be serialized by GPUI shell-state persistence or emitted in logs; durable shell state may only store privacy-boundary booleans/count-like facts unless a later requirement explicitly adds a sanitized field.
@@ -2150,28 +2119,28 @@ CDXC:GPUIProjectSnapshotContract 2026-06-22-18:14:
 The staged sidebar message contract is deliberately narrow: version 1, type `ghostex.gpui.sidebar.activeProjectContext`, and one `activeProject` object with explicit allowlisted fields. Reject non-object JSON, malformed booleans/strings, unknown keys, unsupported versions, unexpected message types, and Quick/projectless payloads that still carry project ids, paths, project-scoped surface ids, or enabled project-only workareas.
 
 CDXC:GPUIProjectSidebarBridge 2026-06-23-06:53:
-Phase 1 project-change semantics need deterministic duplicate handling: valid active-project payloads are accepted, but only snapshots that differ from the stored runtime snapshot may replace it or trigger titlebar label, mode-availability coercion, and render notification work.
+Active-project change semantics need deterministic duplicate handling: valid payloads are accepted, but only snapshots that differ from the stored runtime snapshot may replace it or trigger titlebar label, mode-availability coercion, and render notification work.
 
 CDXC:GPUISourceWorkarea 2026-06-23-12:16:
-Phase 5 Source mounting may only use explicit active-project and Source surface identity from the sidebar snapshot. The Phase 1 payload still does not carry runtime Source instantiation data, so GPUI must keep Source on the existing placeholder path instead of deriving readiness, URLs, paths, .git, labels, fixtures, filesystem probes, or localhost constants.
+Source mounting may only use explicit active-project and Source surface identity from the sidebar snapshot. The active-project payload still does not carry runtime Source instantiation data, so GPUI must keep Source on the existing placeholder path instead of deriving readiness, URLs, paths, .git, labels, fixtures, filesystem probes, or localhost constants.
 
 CDXC:GPUISourceWorkarea 2026-06-23-12:25:
-Normal sidebar project payloads may now carry the explicit Source workarea identity from the sidebar/native project-editor id. Missing or malformed Source identity still blocks without deriving ids or readiness from paths, titles, fixtures, probes, group ids, URLs, or localhost constants; runtime Source instantiation remains outside the Phase 1 snapshot.
+Normal sidebar project payloads may now carry the explicit Source workarea identity from the sidebar/native project-editor id. Missing or malformed Source identity still blocks without deriving ids or readiness from paths, titles, fixtures, probes, group ids, URLs, or localhost constants; runtime Source instantiation remains outside the active-project snapshot.
 
 CDXC:GPUISourceWorkarea 2026-06-24-07:41:
-Source identity is not Source readiness. Accepted Source readiness and CEF/code-server source-ledger contracts stay separate from snapshot identity; this boundary must not treat raw URLs, localhost values, paths, filesystem probes, or placeholder shell state as readiness, runtime URL authority, mount permission, or placeholder replacement.
+Source identity is not Source readiness. Source readiness and the app-owned code-server runtime stay separate from snapshot identity; this boundary must not treat raw URLs, localhost values, paths, filesystem probes, or placeholder shell state as readiness, runtime URL authority, mount permission, or placeholder replacement.
 
 CDXC:GPUISourceRuntime 2026-06-24-23:17:
 GPUI Source runtime authority now starts after this snapshot boundary: the snapshot may supply only explicit project identity, Source workarea identity, and in-memory project path; the app-owned runtime owner turns that into the macOS-compatible code-server folder URL only at the visible Source startup edge.
 
 CDXC:GPUISourceWorkarea 2026-06-23-14:36:
-Phase 5 Source sleep/wake evidence must preserve explicit Source runtime identity while keeping bridge load, ready, and failed states separate from shell lifecycle. Shell sleep/wake may only toggle the placeholder lifecycle; it must not synthesize Source readiness, mount CEF/code-server, persist private ids/paths/URLs, or reset companion and command-pane shell state.
+Source sleep/wake evidence must preserve explicit Source runtime identity while keeping bridge load, ready, and failed states separate from shell lifecycle. Shell sleep/wake may only toggle the placeholder lifecycle; it must not synthesize Source readiness, mount CEF/code-server, persist private ids/paths/URLs, or reset companion and command-pane shell state.
 
 CDXC:GPUIProjectSnapshotContract 2026-06-23-15:18:
-Phase 1 accepts identity-only Source, Kanban, and gated Manage surface ids, but Browser surface identity is not part of the active-project snapshot. Browser availability may still gate the titlebar; any `browserWorkareaId` field must be rejected instead of stored as speculative identity.
+The active-project snapshot accepts identity-only Source, Kanban, and gated Manage surface ids, but Browser surface identity is not part of the snapshot. Browser availability may still gate the titlebar; any `browserWorkareaId` field must be rejected instead of stored as speculative identity.
 
 CDXC:GPUIBrowserWorkareaReadiness 2026-06-23-16:24:
-Browser active-project identity/readiness now belongs to a separate strict source-only contract boundary, not the Phase 1 snapshot. Keep `browserWorkareaId` rejected in `surfaceIds`; readiness may only update enum state for an already-held explicit Browser identity and must not create, materialize, replace, suspend, or tear down CEF surfaces.
+Browser active-project identity/readiness now belongs to a separate strict source-only contract boundary, not the active-project snapshot. Keep `browserWorkareaId` rejected in `surfaceIds`; readiness may only update enum state for an already-held explicit Browser identity and must not create, materialize, replace, suspend, or tear down CEF surfaces.
 */
 #[allow(dead_code)]
 #[derive(Clone, PartialEq, Eq)]
@@ -2624,26 +2593,8 @@ impl Default for SourceWorkareaReadinessBridgeState {
 CDXC:GPUISourceReadiness 2026-06-23-16:10:
 GPUI may accept Source readiness only through a strict in-memory message keyed to the explicit active project and Source workarea identity already accepted from the active-project snapshot. This boundary is enum-only readiness evidence: it must not accept fallback URLs, mount CEF/code-server, log or persist private details, probe localhost or paths, or replace the Source placeholder.
 
-CDXC:GPUISourceReadiness 2026-06-24-07:41:
-Source readiness plus CEF/code-server source-ledger contracts are accepted for this pass, but real Source runtime instantiation is still absent. Do not advance readiness into URL, path, code-server, logging, persistence, fallback localhost probing, CEF creation, or placeholder-replacement payloads.
-
-CDXC:GPUISourceCefCodeServerMount 2026-06-23-21:43:
-Phase 5 may form only a source-side CEF/code-server mount request from the exact ready Source runtime identity. Slice 245 gives that request a fixed app-resource entrypoint, slice 246 gives it a non-spawning app-resource process launch-plan contract, slice 247 gives it source-ledger URL-boundary evidence, and slice 248 gives it a CEF-only source-ledger materialization contract without runtime instantiation.
-
-CDXC:GPUISourceCefCodeServerMount 2026-06-24-03:06:
-Slice 247 adds only a source-ledger code-server URL-boundary contract after the exact ready Source request already has fixed app-resource entrypoint and non-spawning launch-plan evidence. This is not an issued runtime URL and must not carry hostnames, ports, tokens, queries, fragments, paths, project data, process data, CEF payloads, logs, persistence, or placeholder replacement.
-
-CDXC:GPUISourceCefCodeServerMount 2026-06-24-03:12:
-Slice 248 adds a CEF-only source-ledger materialization contract after exact ready Source identity, fixed app-resource entrypoint, non-spawning launch plan, and source-ledger URL-boundary evidence exist. This contract is not an instantiated runtime CEF browser and must keep runtime URL issuance, code-server startup, hidden mounts, logging, persistence, private payloads, and placeholder replacement out of this slice.
-
-CDXC:GPUISourceCefCodeServerMount 2026-06-24-03:28:
-Slice 248 retires the remaining Source mount source-ledger gate while keeping runtime uninstantiated. Continue to distinguish accepted source-ledger parity from actual CEF browser creation, code-server startup, runtime URL issuance, hidden mounts, validation/app runs, and placeholder replacement.
-
-CDXC:GPUISourceCefCodeServerMount 2026-06-24-04:34:
-Source-only runtime parity may now be recorded as a plan only after the exact ready Source request already has the fixed app-resource entrypoint, non-spawning launch plan, source-ledger URL boundary, and CEF-only materialization evidence. The plan accepts only the CEF web-pane engine and rejects non-CEF engines by contract, while still forbidding runtime CEF browser creation, code-server startup, runtime URL issuance, hidden mounts, private logging/persistence, and placeholder replacement.
-
-CDXC:GPUISourcePlaceholderReplacement 2026-06-24-05:20:
-Source placeholder replacement now has a centralized CEF-only preflight gate formed from the existing Source CEF/code-server runtime-parity evidence. Current source behavior must report the gate but keep replacement disallowed until a future runtime slice proves a real code-server process, issued runtime URL, instantiated CEF browser, normal-layout CEF surface, and explicit replacement permission without hidden mounts, private payloads, or non-CEF engines.
+CDXC:GPUISourceRuntimeCleanup 2026-06-28-17:09:
+The old Source CEF/code-server proof objects were removed from runtime. Source readiness remains only enum state, and real Source CEF creation is authorized by the app-owned code-server runtime plus the direct runtime URL/CefSurface gate.
 
 CDXC:GPUISourceRuntime 2026-06-24-23:17:
 The strict Source readiness bridge remains URL-free and path-free, but GPUI now has a separate app-owned runtime owner that can set the bridge to loading, ready, or load-failed after launching the shared macOS-compatible code-server process. Keep runtime process/URL state out of this readiness contract JSON.
@@ -2747,16 +2698,6 @@ impl SourceWorkareaRuntimeState {
             "isReady": self.readiness_bridge.is_ready(),
         })
     }
-
-    #[allow(dead_code)]
-    fn source_cef_code_server_mount_request_contract(
-        &self,
-        snapshot: Option<&GpuiProjectSnapshot>,
-    ) -> SourceCefCodeServerMountRequestContract {
-        source_cef_code_server_mount_request_contract_from_runtime_availability(
-            &self.availability(snapshot),
-        )
-    }
 }
 
 fn source_workarea_runtime_identity_from_snapshot(
@@ -2786,29 +2727,6 @@ fn source_workarea_runtime_identity_from_snapshot(
     })
 }
 
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Eq)]
-struct SourceCefCodeServerMountRequestIdentity {
-    active_project_id: GpuiProjectId,
-    source_workarea_id: String,
-}
-
-#[allow(dead_code)]
-impl SourceCefCodeServerMountRequestIdentity {
-    fn from_source_runtime_identity(identity: &SourceWorkareaRuntimeIdentity) -> Self {
-        Self {
-            active_project_id: identity.active_project_id.clone(),
-            source_workarea_id: identity.source_workarea_id.clone(),
-        }
-    }
-}
-
-const SOURCE_CODE_SERVER_ENTRYPOINT_APP_RESOURCE: &str = "Web/code-server/out/node/entry.js";
-const SOURCE_CODE_SERVER_NODE_RUNTIME_APP_RESOURCE: &str = "Web/code-server/lib/node";
-const SOURCE_CODE_SERVER_ENTRYPOINT_RESOURCE_PRIVACY_LABEL: &str =
-    "appResourceCodeServerEntrypoint";
-const SOURCE_CODE_SERVER_NODE_RUNTIME_RESOURCE_PRIVACY_LABEL: &str =
-    "appResourceCodeServerNodeRuntime";
 const SOURCE_CODE_SERVER_EDITOR_HOST: &str = "127.0.0.1";
 /*
 CDXC:GPUISourceRuntime 2026-06-28-04:05:
@@ -2824,1391 +2742,294 @@ const SOURCE_CODE_SERVER_STARTUP_GRACE_INTERVAL: Duration = Duration::from_secs(
 const SOURCE_CODE_SERVER_PORT_BUSY_WAIT_INTERVAL: Duration = Duration::from_secs(2);
 const SOURCE_CODE_SERVER_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SourceCodeServerAppResourceEntrypoint {
-    entrypoint_resource: &'static str,
-    node_runtime_resource: &'static str,
-}
-
-#[allow(dead_code)]
-impl SourceCodeServerAppResourceEntrypoint {
-    const fn bundled() -> Self {
-        Self {
-            entrypoint_resource: SOURCE_CODE_SERVER_ENTRYPOINT_APP_RESOURCE,
-            node_runtime_resource: SOURCE_CODE_SERVER_NODE_RUNTIME_APP_RESOURCE,
-        }
-    }
-
-    fn entrypoint_resource_privacy_label(self) -> &'static str {
-        SOURCE_CODE_SERVER_ENTRYPOINT_RESOURCE_PRIVACY_LABEL
-    }
-
-    fn node_runtime_resource_privacy_label(self) -> &'static str {
-        SOURCE_CODE_SERVER_NODE_RUNTIME_RESOURCE_PRIVACY_LABEL
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceCodeServerEntrypointState {
-    AppResourceEntrypoint(SourceCodeServerAppResourceEntrypoint),
-    MissingFirstPartyEntrypoint,
-}
-
-#[allow(dead_code)]
-impl SourceCodeServerEntrypointState {
-    fn app_resource_entrypoint() -> Self {
-        Self::AppResourceEntrypoint(SourceCodeServerAppResourceEntrypoint::bundled())
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::AppResourceEntrypoint(_) => "appResourceEntrypoint",
-            Self::MissingFirstPartyEntrypoint => "missingFirstPartyEntrypoint",
-        }
-    }
-
-    fn has_first_party_entrypoint(self) -> bool {
-        match self {
-            Self::AppResourceEntrypoint(_) => true,
-            Self::MissingFirstPartyEntrypoint => false,
-        }
-    }
-
-    fn entrypoint_resource_privacy_label(self) -> &'static str {
-        match self {
-            Self::AppResourceEntrypoint(entrypoint) => {
-                entrypoint.entrypoint_resource_privacy_label()
-            }
-            Self::MissingFirstPartyEntrypoint => "none",
-        }
-    }
-
-    fn node_runtime_resource_privacy_label(self) -> &'static str {
-        match self {
-            Self::AppResourceEntrypoint(entrypoint) => {
-                entrypoint.node_runtime_resource_privacy_label()
-            }
-            Self::MissingFirstPartyEntrypoint => "none",
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SourceCodeServerProcessLaunchPlanContract {
-    entrypoint: SourceCodeServerAppResourceEntrypoint,
-}
-
-#[allow(dead_code)]
-impl SourceCodeServerProcessLaunchPlanContract {
-    fn from_ready_source_request(
-        entrypoint_state: SourceCodeServerEntrypointState,
-    ) -> Option<Self> {
-        match entrypoint_state {
-            SourceCodeServerEntrypointState::AppResourceEntrypoint(entrypoint) => {
-                Some(Self { entrypoint })
-            }
-            SourceCodeServerEntrypointState::MissingFirstPartyEntrypoint => None,
-        }
-    }
-
-    fn entrypoint_resource_privacy_label(self) -> &'static str {
-        self.entrypoint.entrypoint_resource_privacy_label()
-    }
-
-    fn node_runtime_resource_privacy_label(self) -> &'static str {
-        self.entrypoint.node_runtime_resource_privacy_label()
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceCodeServerProcessState {
-    AppResourceLaunchPlan(SourceCodeServerProcessLaunchPlanContract),
-    MissingCodeServerProcessContract,
-}
-
-#[allow(dead_code)]
-impl SourceCodeServerProcessState {
-    fn from_ready_source_request(entrypoint_state: SourceCodeServerEntrypointState) -> Self {
-        SourceCodeServerProcessLaunchPlanContract::from_ready_source_request(entrypoint_state)
-            .map(Self::AppResourceLaunchPlan)
-            .unwrap_or(Self::MissingCodeServerProcessContract)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::AppResourceLaunchPlan(_) => "appResourceCodeServerLaunchPlan",
-            Self::MissingCodeServerProcessContract => "missingCodeServerProcessContract",
-        }
-    }
-
-    fn has_process_launch_plan(self) -> bool {
-        match self {
-            Self::AppResourceLaunchPlan(_) => true,
-            Self::MissingCodeServerProcessContract => false,
-        }
-    }
-
-    fn entrypoint_resource_privacy_label(self) -> &'static str {
-        match self {
-            Self::AppResourceLaunchPlan(plan) => plan.entrypoint_resource_privacy_label(),
-            Self::MissingCodeServerProcessContract => "none",
-        }
-    }
-
-    fn node_runtime_resource_privacy_label(self) -> &'static str {
-        match self {
-            Self::AppResourceLaunchPlan(plan) => plan.node_runtime_resource_privacy_label(),
-            Self::MissingCodeServerProcessContract => "none",
-        }
-    }
-
-    fn can_start_code_server(self) -> bool {
-        match self {
-            Self::AppResourceLaunchPlan(_) => true,
-            Self::MissingCodeServerProcessContract => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SourceCodeServerUrlContract;
-
-#[allow(dead_code)]
-impl SourceCodeServerUrlContract {
-    fn from_ready_source_request(process_state: SourceCodeServerProcessState) -> Option<Self> {
-        if process_state.has_process_launch_plan() {
-            Some(Self)
-        } else {
-            None
-        }
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "sourceLedgerCodeServerUrlContract"
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceCodeServerUrlState {
-    SourceLedgerUrlContract(SourceCodeServerUrlContract),
-    MissingCodeServerUrlContract,
-}
-
-#[allow(dead_code)]
-impl SourceCodeServerUrlState {
-    fn from_ready_source_request(process_state: SourceCodeServerProcessState) -> Self {
-        SourceCodeServerUrlContract::from_ready_source_request(process_state)
-            .map(Self::SourceLedgerUrlContract)
-            .unwrap_or(Self::MissingCodeServerUrlContract)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceLedgerUrlContract(contract) => contract.privacy_label(),
-            Self::MissingCodeServerUrlContract => "missingCodeServerUrlContract",
-        }
-    }
-
-    fn has_code_server_url_contract(self) -> bool {
-        match self {
-            Self::SourceLedgerUrlContract(_) => true,
-            Self::MissingCodeServerUrlContract => false,
-        }
-    }
-
-    fn has_issued_runtime_code_server_url(self) -> bool {
-        false
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SourceCefCodeServerMaterializationContract;
-
-#[allow(dead_code)]
-impl SourceCefCodeServerMaterializationContract {
-    fn from_ready_source_request(
-        entrypoint_state: SourceCodeServerEntrypointState,
-        process_state: SourceCodeServerProcessState,
-        url_state: SourceCodeServerUrlState,
-    ) -> Option<Self> {
-        let SourceCodeServerEntrypointState::AppResourceEntrypoint(entrypoint) = entrypoint_state
-        else {
-            return None;
-        };
-        let SourceCodeServerProcessState::AppResourceLaunchPlan(process_launch_plan) =
-            process_state
-        else {
-            return None;
-        };
-        if process_launch_plan.entrypoint != entrypoint || !url_state.has_code_server_url_contract()
-        {
-            return None;
-        }
-
-        Some(Self)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "sourceLedgerCefMaterializationContract"
-    }
-
-    fn cef_engine_privacy_label(self) -> &'static str {
-        "cef"
-    }
-
-    fn has_instantiated_runtime_cef_browser(self) -> bool {
-        false
-    }
-
-    fn can_materialize_cef(self) -> bool {
-        false
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceCefCodeServerMaterializationState {
-    SourceLedgerCefMaterializationContract(SourceCefCodeServerMaterializationContract),
-    MissingCefCodeServerMaterializationContract,
-}
-
-#[allow(dead_code)]
-impl SourceCefCodeServerMaterializationState {
-    fn from_ready_source_request(
-        entrypoint_state: SourceCodeServerEntrypointState,
-        process_state: SourceCodeServerProcessState,
-        url_state: SourceCodeServerUrlState,
-    ) -> Self {
-        SourceCefCodeServerMaterializationContract::from_ready_source_request(
-            entrypoint_state,
-            process_state,
-            url_state,
-        )
-        .map(Self::SourceLedgerCefMaterializationContract)
-        .unwrap_or(Self::MissingCefCodeServerMaterializationContract)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(contract) => contract.privacy_label(),
-            Self::MissingCefCodeServerMaterializationContract => {
-                "missingCefCodeServerMaterializationContract"
-            }
-        }
-    }
-
-    fn has_source_ledger_cef_materialization_contract(self) -> bool {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(_) => true,
-            Self::MissingCefCodeServerMaterializationContract => false,
-        }
-    }
-
-    fn cef_engine_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(contract) => {
-                contract.cef_engine_privacy_label()
-            }
-            Self::MissingCefCodeServerMaterializationContract => "none",
-        }
-    }
-
-    fn has_instantiated_runtime_cef_browser(self) -> bool {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(contract) => {
-                contract.has_instantiated_runtime_cef_browser()
-            }
-            Self::MissingCefCodeServerMaterializationContract => false,
-        }
-    }
-
-    fn can_materialize_cef(self) -> bool {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(contract) => {
-                contract.can_materialize_cef()
-            }
-            Self::MissingCefCodeServerMaterializationContract => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceCefCodeServerWebPaneEngineContract {
-    Cef,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceCefCodeServerWebPaneEngineRejection {
-    NonCefWebPaneEngineRejected,
-}
-
-#[allow(dead_code)]
-impl SourceCefCodeServerWebPaneEngineContract {
-    fn cef_only() -> Self {
-        Self::Cef
-    }
-
-    fn from_source_contract_label(
-        candidate: &str,
-    ) -> Result<Self, SourceCefCodeServerWebPaneEngineRejection> {
-        if candidate == Self::Cef.privacy_label() {
-            Ok(Self::Cef)
-        } else {
-            Err(SourceCefCodeServerWebPaneEngineRejection::NonCefWebPaneEngineRejected)
-        }
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::Cef => "cef",
-        }
-    }
-
-    fn is_cef_only(self) -> bool {
-        matches!(self, Self::Cef)
-    }
-}
-
-#[allow(dead_code)]
-impl SourceCefCodeServerWebPaneEngineRejection {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::NonCefWebPaneEngineRejected => "nonCefWebPaneEngineRejected",
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SourceCefCodeServerRuntimeParityPlan {
-    web_pane_engine: SourceCefCodeServerWebPaneEngineContract,
-    materialization_contract: SourceCefCodeServerMaterializationContract,
-}
-
-#[allow(dead_code)]
-impl SourceCefCodeServerRuntimeParityPlan {
-    fn from_ready_source_request(
-        entrypoint_state: SourceCodeServerEntrypointState,
-        process_state: SourceCodeServerProcessState,
-        url_state: SourceCodeServerUrlState,
-        materialization_state: SourceCefCodeServerMaterializationState,
-    ) -> Option<Self> {
-        let SourceCodeServerEntrypointState::AppResourceEntrypoint(entrypoint) = entrypoint_state
-        else {
-            return None;
-        };
-        let SourceCodeServerProcessState::AppResourceLaunchPlan(process_launch_plan) =
-            process_state
-        else {
-            return None;
-        };
-        let SourceCefCodeServerMaterializationState::SourceLedgerCefMaterializationContract(
-            materialization_contract,
-        ) = materialization_state
-        else {
-            return None;
-        };
-        if process_launch_plan.entrypoint != entrypoint || !url_state.has_code_server_url_contract()
-        {
-            return None;
-        }
-
-        let web_pane_engine = SourceCefCodeServerWebPaneEngineContract::cef_only();
-        if !web_pane_engine.is_cef_only() {
-            return None;
-        }
-
-        Some(Self {
-            web_pane_engine,
-            materialization_contract,
-        })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "sourceOnlyRuntimeParityPlan"
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        self.web_pane_engine.privacy_label()
-    }
-
-    fn materialization_contract_privacy_label(self) -> &'static str {
-        self.materialization_contract.privacy_label()
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-    }
-
-    fn rejects_non_cef_web_pane_engines(self) -> bool {
-        true
-    }
-
-    fn counts_as_source_only_runtime_parity(self) -> bool {
-        true
-    }
-
-    fn has_runtime_code_server_process(self) -> bool {
-        false
-    }
-
-    fn has_runtime_code_server_url(self) -> bool {
-        false
-    }
-
-    fn has_runtime_cef_browser(self) -> bool {
-        false
-    }
-
-    fn has_hidden_source_surface_mount(self) -> bool {
-        false
-    }
-
-    fn can_replace_source_placeholder(self) -> bool {
-        false
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceCefCodeServerRuntimeParityState {
-    SourceOnlyRuntimeParityPlan(SourceCefCodeServerRuntimeParityPlan),
-    MissingRuntimeParityPlan,
-}
-
-#[allow(dead_code)]
-impl SourceCefCodeServerRuntimeParityState {
-    fn from_ready_source_request(
-        entrypoint_state: SourceCodeServerEntrypointState,
-        process_state: SourceCodeServerProcessState,
-        url_state: SourceCodeServerUrlState,
-        materialization_state: SourceCefCodeServerMaterializationState,
-    ) -> Self {
-        SourceCefCodeServerRuntimeParityPlan::from_ready_source_request(
-            entrypoint_state,
-            process_state,
-            url_state,
-            materialization_state,
-        )
-        .map(Self::SourceOnlyRuntimeParityPlan)
-        .unwrap_or(Self::MissingRuntimeParityPlan)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.privacy_label(),
-            Self::MissingRuntimeParityPlan => "missingRuntimeParityPlan",
-        }
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.web_pane_engine_privacy_label(),
-            Self::MissingRuntimeParityPlan => "none",
-        }
-    }
-
-    fn materialization_contract_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => {
-                plan.materialization_contract_privacy_label()
-            }
-            Self::MissingRuntimeParityPlan => "none",
-        }
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_cef_only_web_pane_engine_contract(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn rejects_non_cef_web_pane_engines(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.rejects_non_cef_web_pane_engines(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn counts_as_source_only_runtime_parity(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.counts_as_source_only_runtime_parity(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_runtime_code_server_process(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_runtime_code_server_process(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_runtime_code_server_url(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_runtime_code_server_url(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_runtime_cef_browser(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_runtime_cef_browser(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_hidden_source_surface_mount(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_hidden_source_surface_mount(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn can_replace_source_placeholder(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.can_replace_source_placeholder(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SourcePlaceholderReplacementPreflightGate {
-    web_pane_engine: SourceCefCodeServerWebPaneEngineContract,
-    runtime_parity_plan: SourceCefCodeServerRuntimeParityPlan,
-}
-
-#[allow(dead_code)]
-impl SourcePlaceholderReplacementPreflightGate {
-    fn from_runtime_parity_state(
-        runtime_parity_state: SourceCefCodeServerRuntimeParityState,
-    ) -> Option<Self> {
-        let SourceCefCodeServerRuntimeParityState::SourceOnlyRuntimeParityPlan(runtime_parity_plan) =
-            runtime_parity_state
-        else {
-            return None;
-        };
-        if !runtime_parity_plan.has_cef_only_web_pane_engine_contract() {
-            return None;
-        }
-
-        Some(Self {
-            web_pane_engine: runtime_parity_plan.web_pane_engine,
-            runtime_parity_plan,
-        })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "sourcePlaceholderReplacementPreflightGate"
-    }
-
-    fn runtime_parity_plan_privacy_label(self) -> &'static str {
-        self.runtime_parity_plan.privacy_label()
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        self.web_pane_engine.privacy_label()
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-    }
-
-    fn rejects_non_cef_web_pane_engines(self) -> bool {
-        true
-    }
-
-    fn has_runtime_code_server_process(self) -> bool {
-        self.runtime_parity_plan.has_runtime_code_server_process()
-    }
-
-    fn has_issued_runtime_code_server_url(self) -> bool {
-        false
-    }
-
-    fn has_runtime_cef_browser(self) -> bool {
-        self.runtime_parity_plan.has_runtime_cef_browser()
-    }
-
-    fn has_normal_layout_cef_surface(self) -> bool {
-        false
-    }
-
-    fn has_hidden_source_surface_mount(self) -> bool {
-        self.runtime_parity_plan.has_hidden_source_surface_mount()
-    }
-
-    fn has_private_runtime_data(self) -> bool {
-        false
-    }
-
-    fn has_placeholder_replacement_permission(self) -> bool {
-        false
-    }
-
-    fn can_replace_source_placeholder(self) -> bool {
-        self.has_cef_only_web_pane_engine_contract()
-            && self.has_runtime_code_server_process()
-            && self.has_issued_runtime_code_server_url()
-            && self.has_runtime_cef_browser()
-            && self.has_normal_layout_cef_surface()
-            && !self.has_private_runtime_data()
-            && self.has_placeholder_replacement_permission()
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourcePlaceholderReplacementPreflightState {
-    SourcePlaceholderReplacementPreflightGate(SourcePlaceholderReplacementPreflightGate),
-    MissingSourcePlaceholderReplacementPreflightGate,
-}
-
-#[allow(dead_code)]
-impl SourcePlaceholderReplacementPreflightState {
-    fn from_runtime_parity_state(
-        runtime_parity_state: SourceCefCodeServerRuntimeParityState,
-    ) -> Self {
-        SourcePlaceholderReplacementPreflightGate::from_runtime_parity_state(runtime_parity_state)
-            .map(Self::SourcePlaceholderReplacementPreflightGate)
-            .unwrap_or(Self::MissingSourcePlaceholderReplacementPreflightGate)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(gate) => gate.privacy_label(),
-            Self::MissingSourcePlaceholderReplacementPreflightGate => {
-                "missingSourcePlaceholderReplacementPreflightGate"
-            }
-        }
-    }
-
-    fn runtime_parity_plan_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(gate) => {
-                gate.runtime_parity_plan_privacy_label()
-            }
-            Self::MissingSourcePlaceholderReplacementPreflightGate => "none",
-        }
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(gate) => {
-                gate.web_pane_engine_privacy_label()
-            }
-            Self::MissingSourcePlaceholderReplacementPreflightGate => "none",
-        }
-    }
-
-    fn has_preflight_gate(self) -> bool {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(_) => true,
-            Self::MissingSourcePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_cef_only_web_pane_engine_contract()
-            }
-            Self::MissingSourcePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn rejects_non_cef_web_pane_engines(self) -> bool {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(gate) => {
-                gate.rejects_non_cef_web_pane_engines()
-            }
-            Self::MissingSourcePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_runtime_code_server_process(self) -> bool {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_runtime_code_server_process()
-            }
-            Self::MissingSourcePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_issued_runtime_code_server_url(self) -> bool {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_issued_runtime_code_server_url()
-            }
-            Self::MissingSourcePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_runtime_cef_browser(self) -> bool {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(gate) => gate.has_runtime_cef_browser(),
-            Self::MissingSourcePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_normal_layout_cef_surface(self) -> bool {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_normal_layout_cef_surface()
-            }
-            Self::MissingSourcePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_hidden_source_surface_mount(self) -> bool {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_hidden_source_surface_mount()
-            }
-            Self::MissingSourcePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_private_runtime_data(self) -> bool {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_private_runtime_data()
-            }
-            Self::MissingSourcePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_placeholder_replacement_permission(self) -> bool {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_placeholder_replacement_permission()
-            }
-            Self::MissingSourcePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn can_replace_source_placeholder(self) -> bool {
-        match self {
-            Self::SourcePlaceholderReplacementPreflightGate(gate) => {
-                gate.can_replace_source_placeholder()
-            }
-            Self::MissingSourcePlaceholderReplacementPreflightGate => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Eq)]
-struct SourceCefCodeServerMountRequest {
-    identity: SourceCefCodeServerMountRequestIdentity,
-    entrypoint_state: SourceCodeServerEntrypointState,
-    process_state: SourceCodeServerProcessState,
-    url_state: SourceCodeServerUrlState,
-    materialization_state: SourceCefCodeServerMaterializationState,
-    runtime_parity_state: SourceCefCodeServerRuntimeParityState,
-    placeholder_replacement_preflight_state: SourcePlaceholderReplacementPreflightState,
-}
-
-#[allow(dead_code)]
-impl SourceCefCodeServerMountRequest {
-    fn can_start_code_server(&self) -> bool {
-        self.entrypoint_state.has_first_party_entrypoint()
-            && self.process_state.can_start_code_server()
-    }
-
-    fn has_code_server_url_contract(&self) -> bool {
-        self.url_state.has_code_server_url_contract()
-    }
-
-    fn has_issued_runtime_code_server_url(&self) -> bool {
-        self.url_state.has_issued_runtime_code_server_url()
-    }
-
-    fn has_source_ledger_cef_materialization_contract(&self) -> bool {
-        self.materialization_state
-            .has_source_ledger_cef_materialization_contract()
-    }
-
-    fn has_instantiated_runtime_cef_browser(&self) -> bool {
-        self.materialization_state
-            .has_instantiated_runtime_cef_browser()
-    }
-
-    fn counts_as_source_only_runtime_parity(&self) -> bool {
-        self.runtime_parity_state
-            .counts_as_source_only_runtime_parity()
-    }
-
-    fn has_source_placeholder_replacement_preflight_gate(&self) -> bool {
-        self.placeholder_replacement_preflight_state
-            .has_preflight_gate()
-    }
-
-    fn can_mount_cef(&self) -> bool {
-        self.can_start_code_server()
-            && self.has_code_server_url_contract()
-            && self.materialization_state.can_materialize_cef()
-    }
-
-    fn can_materialize_source_surface(&self) -> bool {
-        self.can_mount_cef()
-    }
-
-    fn can_replace_source_placeholder(&self) -> bool {
-        self.placeholder_replacement_preflight_state
-            .can_replace_source_placeholder()
-    }
-
-    fn shell_state_privacy_boundary_json(&self) -> serde_json::Value {
-        let mut boundary = serde_json::Map::new();
-        insert_source_shell_state_privacy_boundary_field(&mut boundary, "surface", "source");
-        insert_source_shell_state_privacy_boundary_field(&mut boundary, "requested", true);
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasExactRuntimeIdentity",
-            true,
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "entrypointState",
-            self.entrypoint_state.privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasFirstPartyEntrypoint",
-            self.entrypoint_state.has_first_party_entrypoint(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "entrypointResource",
-            self.entrypoint_state.entrypoint_resource_privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "nodeRuntimeResource",
-            self.entrypoint_state.node_runtime_resource_privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "processState",
-            self.process_state.privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasCodeServerProcessLaunchPlan",
-            self.process_state.has_process_launch_plan(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "processEntrypointResource",
-            self.process_state.entrypoint_resource_privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "processNodeRuntimeResource",
-            self.process_state.node_runtime_resource_privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "urlState",
-            self.url_state.privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasCodeServerUrlContract",
-            self.has_code_server_url_contract(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasIssuedRuntimeCodeServerUrl",
-            self.has_issued_runtime_code_server_url(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "materializationState",
-            self.materialization_state.privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "materializationEngine",
-            self.materialization_state.cef_engine_privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasSourceLedgerCefMaterializationContract",
-            self.has_source_ledger_cef_materialization_contract(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasInstantiatedRuntimeCefBrowser",
-            self.has_instantiated_runtime_cef_browser(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "runtimeParityState",
-            self.runtime_parity_state.privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "runtimeParityMaterializationContract",
-            self.runtime_parity_state
-                .materialization_contract_privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "webPaneEngine",
-            self.runtime_parity_state.web_pane_engine_privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasCefOnlyWebPaneEngineContract",
-            self.runtime_parity_state
-                .has_cef_only_web_pane_engine_contract(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "rejectsNonCefWebPaneEngines",
-            self.runtime_parity_state.rejects_non_cef_web_pane_engines(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "countsAsSourceOnlyRuntimeParity",
-            self.counts_as_source_only_runtime_parity(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasRuntimeCodeServerProcess",
-            self.runtime_parity_state.has_runtime_code_server_process(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasRuntimeCodeServerUrl",
-            self.runtime_parity_state.has_runtime_code_server_url(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasRuntimeCefBrowser",
-            self.runtime_parity_state.has_runtime_cef_browser(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasHiddenSourceSurfaceMount",
-            self.runtime_parity_state.has_hidden_source_surface_mount(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightState",
-            self.placeholder_replacement_preflight_state.privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightRuntimeParityPlan",
-            self.placeholder_replacement_preflight_state
-                .runtime_parity_plan_privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightWebPaneEngine",
-            self.placeholder_replacement_preflight_state
-                .web_pane_engine_privacy_label(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasSourcePlaceholderReplacementPreflightGate",
-            self.has_source_placeholder_replacement_preflight_gate(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasCefOnlyWebPaneEngineContract",
-            self.placeholder_replacement_preflight_state
-                .has_cef_only_web_pane_engine_contract(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightRejectsNonCefWebPaneEngines",
-            self.placeholder_replacement_preflight_state
-                .rejects_non_cef_web_pane_engines(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasRuntimeCodeServerProcess",
-            self.placeholder_replacement_preflight_state
-                .has_runtime_code_server_process(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasIssuedRuntimeCodeServerUrl",
-            self.placeholder_replacement_preflight_state
-                .has_issued_runtime_code_server_url(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasRuntimeCefBrowser",
-            self.placeholder_replacement_preflight_state
-                .has_runtime_cef_browser(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasNormalLayoutCefSurface",
-            self.placeholder_replacement_preflight_state
-                .has_normal_layout_cef_surface(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasHiddenSourceSurfaceMount",
-            self.placeholder_replacement_preflight_state
-                .has_hidden_source_surface_mount(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasPrivateRuntimeData",
-            self.placeholder_replacement_preflight_state
-                .has_private_runtime_data(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasPlaceholderReplacementPermission",
-            self.placeholder_replacement_preflight_state
-                .has_placeholder_replacement_permission(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "canReplaceSourcePlaceholder",
-            self.can_replace_source_placeholder(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "canStartCodeServer",
-            self.can_start_code_server(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "canMountCef",
-            self.can_mount_cef(),
-        );
-        insert_source_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "canMaterializeSourceSurface",
-            self.can_materialize_source_surface(),
-        );
-
-        serde_json::Value::Object(boundary)
-    }
-}
-
 /*
-CDXC:GPUISourcePrivacyBoundary 2026-06-24-09:59:
-The Source shell-state privacy boundary carries many explicit enum/boolean facts for runtime-parity audits, so build it as a serde_json::Map instead of one oversized serde_json::json! object. This keeps the privacy-safe writer boundary explicit and avoids compile-time macro recursion failures without raising the crate-wide recursion limit.
+CDXC:GPUISourceRuntimeCleanup 2026-06-28-17:09:
+Keep only the lean runtime value types needed to launch Source and create Source/Kanban/Manage CEF surfaces. These structs are process-local implementation state, not retired proof records, and must not grow JSON status APIs, persisted URL fields, private logging, fallback navigation, or placeholder-preflight evidence.
 */
-fn insert_source_shell_state_privacy_boundary_field(
-    boundary: &mut serde_json::Map<String, serde_json::Value>,
-    key: &'static str,
-    value: impl Into<serde_json::Value>,
-) {
-    boundary.insert(key.to_string(), value.into());
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum ProjectWorkareaCefSurfaceSlotKey {
+    Source,
+    Kanban,
+    Manage,
 }
 
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceCefCodeServerMountRequestBlockReason {
-    RuntimeBlocked(SourceWorkareaRuntimeBlockReason),
-}
+impl ProjectWorkareaCefSurfaceSlotKey {
+    fn project_placeholder_slots() -> [Self; 3] {
+        [Self::Source, Self::Kanban, Self::Manage]
+    }
 
-#[allow(dead_code)]
-impl SourceCefCodeServerMountRequestBlockReason {
     fn privacy_label(self) -> &'static str {
         match self {
-            Self::RuntimeBlocked(_) => "runtimeBlocked",
+            Self::Source => "source",
+            Self::Kanban => "kanban",
+            Self::Manage => "manage",
         }
+    }
+
+    fn titlebar_mode(self) -> TitlebarMode {
+        match self {
+            Self::Source => TitlebarMode::Source,
+            Self::Kanban => TitlebarMode::Kanban,
+            Self::Manage => TitlebarMode::Manage,
+        }
+    }
+
+    fn cef_surface_id(self) -> String {
+        format!("project-workarea-{}", self.privacy_label())
+    }
+
+    fn cef_profile_id(self) -> String {
+        format!("project-workarea-{}", self.privacy_label())
     }
 }
 
-#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProjectWorkareaRealRuntimeUrl {
+    value: String,
+}
+
+impl ProjectWorkareaRealRuntimeUrl {
+    fn from_authorized_runtime_url(value: String) -> Option<Self> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() || trimmed != value {
+            return None;
+        }
+
+        let (scheme, rest) = trimmed.split_once("://")?;
+        let scheme = scheme.to_ascii_lowercase();
+        if !matches!(scheme.as_str(), "http" | "https" | "file") || rest.trim().is_empty() {
+            return None;
+        }
+
+        Some(Self { value })
+    }
+
+    fn into_cef_url(self) -> String {
+        self.value
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
-enum SourceCefCodeServerMountRequestContract {
-    Requested(SourceCefCodeServerMountRequest),
-    Blocked(SourceCefCodeServerMountRequestBlockReason),
+struct SourceCodeServerRuntimeTarget {
+    active_project_id: GpuiProjectId,
+    source_workarea_id: String,
+    project_path: PathBuf,
+    runtime_url: ProjectWorkareaRealRuntimeUrl,
 }
 
-#[allow(dead_code)]
-impl SourceCefCodeServerMountRequestContract {
-    fn materializable_request(&self) -> Option<&SourceCefCodeServerMountRequest> {
-        match self {
-            Self::Requested(request) if request.can_materialize_source_surface() => Some(request),
-            _ => None,
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SourceCodeServerRuntimeSettings {
+    link_vscode_user_config: bool,
+    use_vscode_insiders_user_config: bool,
+    vscode_user_config_dir: String,
+}
+
+impl SourceCodeServerRuntimeSettings {
+    fn from_shared_settings(settings: &shared_settings::SharedSidebarSettingsSnapshot) -> Self {
+        let link_vscode_user_config = settings
+            .object()
+            .get("codeServerLinkVscodeUserConfig")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let use_vscode_insiders_user_config = settings
+            .object()
+            .get("codeServerUseVscodeInsidersUserConfig")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let app_name = if use_vscode_insiders_user_config {
+            "Code - Insiders"
+        } else {
+            "Code"
+        };
+        Self {
+            link_vscode_user_config,
+            use_vscode_insiders_user_config,
+            vscode_user_config_dir: gpui_path_string(
+                &home_dir().join(format!("Library/Application Support/{app_name}/User")),
+            ),
         }
     }
 
-    fn shell_state_privacy_boundary_json(&self) -> serde_json::Value {
-        match self {
-            Self::Requested(request) => request.shell_state_privacy_boundary_json(),
-            Self::Blocked(reason) => {
-                let mut boundary = serde_json::Map::new();
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "surface",
-                    "source",
-                );
-                insert_source_shell_state_privacy_boundary_field(&mut boundary, "requested", false);
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasExactRuntimeIdentity",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "blockReason",
-                    reason.privacy_label(),
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasFirstPartyEntrypoint",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "entrypointResource",
-                    "none",
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "nodeRuntimeResource",
-                    "none",
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "canStartCodeServer",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "urlState",
-                    SourceCodeServerUrlState::MissingCodeServerUrlContract.privacy_label(),
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasCodeServerUrlContract",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasIssuedRuntimeCodeServerUrl",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "materializationState",
-                    SourceCefCodeServerMaterializationState::MissingCefCodeServerMaterializationContract.privacy_label(),
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "materializationEngine",
-                    "none",
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasSourceLedgerCefMaterializationContract",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasInstantiatedRuntimeCefBrowser",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "runtimeParityState",
-                    SourceCefCodeServerRuntimeParityState::MissingRuntimeParityPlan.privacy_label(),
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "runtimeParityMaterializationContract",
-                    "none",
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "webPaneEngine",
-                    "none",
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasCefOnlyWebPaneEngineContract",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "rejectsNonCefWebPaneEngines",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "countsAsSourceOnlyRuntimeParity",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasRuntimeCodeServerProcess",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasRuntimeCodeServerUrl",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasRuntimeCefBrowser",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasHiddenSourceSurfaceMount",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightState",
-                    SourcePlaceholderReplacementPreflightState::MissingSourcePlaceholderReplacementPreflightGate.privacy_label(),
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightRuntimeParityPlan",
-                    "none",
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightWebPaneEngine",
-                    "none",
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasSourcePlaceholderReplacementPreflightGate",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasCefOnlyWebPaneEngineContract",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightRejectsNonCefWebPaneEngines",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasRuntimeCodeServerProcess",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasIssuedRuntimeCodeServerUrl",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasRuntimeCefBrowser",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasNormalLayoutCefSurface",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasHiddenSourceSurfaceMount",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasPrivateRuntimeData",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasPlaceholderReplacementPermission",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "canReplaceSourcePlaceholder",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "canMountCef",
-                    false,
-                );
-                insert_source_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "canMaterializeSourceSurface",
-                    false,
-                );
+    fn from_sidebar_runtime_settings(settings: &cef::SidebarRuntimeSettingsSnapshot) -> Self {
+        let object = serde_json::from_str::<serde_json::Value>(&settings.saved_settings_json)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        Self::from_shared_settings(
+            &shared_settings::SharedSidebarSettingsSnapshot::from_object(object),
+        )
+    }
 
-                serde_json::Value::Object(boundary)
-            }
-        }
+    fn linked_vscode_user_config_dir(&self) -> Option<&str> {
+        self.link_vscode_user_config
+            .then_some(self.vscode_user_config_dir.as_str())
     }
 }
 
-#[allow(dead_code)]
-fn source_cef_code_server_mount_request_contract_from_runtime_availability(
-    availability: &SourceWorkareaRuntimeAvailability,
-) -> SourceCefCodeServerMountRequestContract {
-    match availability {
-        SourceWorkareaRuntimeAvailability::Ready(surface) => {
-            let entrypoint_state = SourceCodeServerEntrypointState::app_resource_entrypoint();
-            let process_state =
-                SourceCodeServerProcessState::from_ready_source_request(entrypoint_state);
-            let url_state = SourceCodeServerUrlState::from_ready_source_request(process_state);
-            let materialization_state =
-                SourceCefCodeServerMaterializationState::from_ready_source_request(
-                    entrypoint_state,
-                    process_state,
-                    url_state,
-                );
-            let runtime_parity_state =
-                SourceCefCodeServerRuntimeParityState::from_ready_source_request(
-                    entrypoint_state,
-                    process_state,
-                    url_state,
-                    materialization_state,
-                );
-            let placeholder_replacement_preflight_state =
-                SourcePlaceholderReplacementPreflightState::from_runtime_parity_state(
-                    runtime_parity_state,
-                );
-            SourceCefCodeServerMountRequestContract::Requested(SourceCefCodeServerMountRequest {
-                identity: SourceCefCodeServerMountRequestIdentity::from_source_runtime_identity(
-                    &surface.identity,
-                ),
-                entrypoint_state,
-                process_state,
-                url_state,
-                materialization_state,
-                runtime_parity_state,
-                placeholder_replacement_preflight_state,
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SourceCodeServerRuntimeLaunchState {
+    #[default]
+    Idle,
+    Launching,
+    Ready,
+    Failed,
+}
+
+struct SourceCodeServerRuntimeOwner {
+    child: Option<Child>,
+    started_at: Option<Instant>,
+    generation: u64,
+    state: SourceCodeServerRuntimeLaunchState,
+    target: Option<SourceCodeServerRuntimeTarget>,
+    settings: Option<SourceCodeServerRuntimeSettings>,
+}
+
+impl SourceCodeServerRuntimeOwner {
+    fn new() -> Self {
+        Self {
+            child: None,
+            started_at: None,
+            generation: 0,
+            state: SourceCodeServerRuntimeLaunchState::Idle,
+            target: None,
+            settings: None,
+        }
+    }
+
+    fn next_generation(&mut self) -> u64 {
+        self.generation = self.generation.saturating_add(1);
+        self.generation
+    }
+
+    fn runtime_url_for_target(
+        &self,
+        target: &SourceCodeServerRuntimeTarget,
+    ) -> Option<ProjectWorkareaRealRuntimeUrl> {
+        (self.state == SourceCodeServerRuntimeLaunchState::Ready
+            && self.target.as_ref() == Some(target)
+            && self.child.is_some())
+        .then(|| target.runtime_url.clone())
+    }
+
+    fn can_reuse_ready_process(&self, settings: &SourceCodeServerRuntimeSettings) -> bool {
+        self.state == SourceCodeServerRuntimeLaunchState::Ready
+            && self.settings.as_ref() == Some(settings)
+            && self.child.is_some()
+    }
+
+    fn launching_matches(
+        &self,
+        target: &SourceCodeServerRuntimeTarget,
+        settings: &SourceCodeServerRuntimeSettings,
+    ) -> bool {
+        self.state == SourceCodeServerRuntimeLaunchState::Launching
+            && self.target.as_ref() == Some(target)
+            && self.settings.as_ref() == Some(settings)
+    }
+
+    fn child_is_within_startup_grace(&self) -> bool {
+        self.child.is_some()
+            && self.started_at.is_some_and(|started_at| {
+                started_at.elapsed() < SOURCE_CODE_SERVER_STARTUP_GRACE_INTERVAL
             })
-        }
-        SourceWorkareaRuntimeAvailability::Blocked(reason) => {
-            SourceCefCodeServerMountRequestContract::Blocked(
-                SourceCefCodeServerMountRequestBlockReason::RuntimeBlocked(*reason),
-            )
+    }
+
+    fn set_launching(
+        &mut self,
+        target: SourceCodeServerRuntimeTarget,
+        settings: SourceCodeServerRuntimeSettings,
+    ) {
+        self.state = SourceCodeServerRuntimeLaunchState::Launching;
+        self.target = Some(target);
+        self.settings = Some(settings);
+        self.started_at = Some(Instant::now());
+    }
+
+    fn set_ready_target(
+        &mut self,
+        target: SourceCodeServerRuntimeTarget,
+        settings: SourceCodeServerRuntimeSettings,
+    ) {
+        self.state = SourceCodeServerRuntimeLaunchState::Ready;
+        self.target = Some(target);
+        self.settings = Some(settings);
+        if self.started_at.is_none() {
+            self.started_at = Some(Instant::now());
         }
     }
+
+    fn set_ready(
+        &mut self,
+        target: SourceCodeServerRuntimeTarget,
+        settings: SourceCodeServerRuntimeSettings,
+        child: Child,
+        started_at: Instant,
+    ) {
+        self.replace_child(child);
+        self.started_at = Some(started_at);
+        self.set_ready_target(target, settings);
+    }
+
+    fn set_failed(
+        &mut self,
+        target: SourceCodeServerRuntimeTarget,
+        settings: SourceCodeServerRuntimeSettings,
+        child: Option<Child>,
+        started_at: Option<Instant>,
+    ) {
+        if let Some(child) = child {
+            self.replace_child(child);
+        }
+        self.started_at = started_at;
+        self.state = SourceCodeServerRuntimeLaunchState::Failed;
+        self.target = Some(target);
+        self.settings = Some(settings);
+    }
+
+    fn replace_child(&mut self, child: Child) {
+        if let Some(mut previous_child) = self.child.take() {
+            let _ = previous_child.kill();
+            let _ = previous_child.wait();
+        }
+        self.child = Some(child);
+    }
+
+    fn refresh_child_exit(&mut self) -> bool {
+        let Some(child) = self.child.as_mut() else {
+            return false;
+        };
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => {
+                self.child = None;
+                self.started_at = None;
+                self.state = SourceCodeServerRuntimeLaunchState::Idle;
+                true
+            }
+            Ok(None) => false,
+        }
+    }
+
+    fn stop(&mut self) -> bool {
+        let had_state = self.child.is_some()
+            || self.target.is_some()
+            || self.state != SourceCodeServerRuntimeLaunchState::Idle;
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        self.generation = self.generation.saturating_add(1);
+        self.started_at = None;
+        self.state = SourceCodeServerRuntimeLaunchState::Idle;
+        self.target = None;
+        self.settings = None;
+        had_state
+    }
+}
+
+struct SourceCodeServerRuntimeStartOutput {
+    child: Child,
+    started_at: Instant,
+    responsive: bool,
 }
 
 #[allow(dead_code)]
@@ -4643,52 +3464,28 @@ fn required_browser_workarea_readiness_contract_string_field(
 
 /*
 CDXC:GPUIProjectWorkareaReadiness 2026-06-24-07:41:
-Kanban and Manage real surfaces need the same honest runtime boundary as Source. GPUI may recognize only explicit active-project snapshot ids and accepted source-ledger readiness/CEF/file-bridge contracts for this pass; actual runtime CEF web-surface creation, Manage file-bridge mounting, file I/O, URL issuance, and placeholder replacement remain absent until explicit future CEF-only implementation work. Do not synthesize identities or readiness from paths, titles, group ids, localhost URLs, filesystem probes, or placeholder shell state.
+Kanban and Manage real surfaces need the same honest runtime boundary as Source. GPUI may recognize only explicit active-project snapshot ids and strict readiness/file-operation messages; CEF web-surface creation uses the separate direct runtime URL/CefSurface path. Do not synthesize identities or readiness from paths, titles, group ids, localhost URLs, filesystem probes, or placeholder shell state.
 
 CDXC:GPUIProjectWorkareaReadiness 2026-06-23-12:56:
 The sidebar bridge can now provide Kanban and gated Manage native project-editor ids derived only from the explicit projectContext.editor.projectId. Treat those ids as runtime identity, not as CEF readiness, URL readiness, file-bridge readiness, persistence input, logging input, or permission to mount a fallback surface.
 
 CDXC:GPUIProjectWorkareaLifecycle 2026-06-23-13:42:
-Phase 6/7 lifecycle visibility needs source-only startup and load-failure states separate from runtime Kanban CEF, Manage CEF, or Manage file-bridge instantiation. Keep the bridge as enum-only runtime state with no failure details, private ids, paths, URLs, page titles, file names, tokens, raw payloads, fallback mounts, or persistent logging.
+Kanban and Manage lifecycle visibility needs startup and load-failure states separate from runtime CEF or Manage file-bridge instantiation. Keep the bridge as enum-only runtime state with no failure details, private ids, paths, URLs, page titles, file names, tokens, raw payloads, fallback mounts, or persistent logging.
 
 CDXC:GPUIManageFileWorkareaBridge 2026-06-23-13:58:
-Phase 7 Manage file/workarea bridge work needs a source-only policy boundary before any real bridge code exists. Runtime file operations must pass through explicit operation-kind allowlisting, and the boundary may serialize only safe decision facts such as accepted/rejected booleans, operation kind, rejection kind, and operation count; it must not accept, store, persist, log, or infer from paths, file names, file contents, raw command args, raw payload JSON, URLs, tokens, error details, filesystem probes, CEF state, or fallback behavior.
+Manage file/workarea bridge requests need a policy boundary before file operations. Runtime file operations must pass through explicit operation-kind allowlisting, and the boundary may serialize only safe decision facts such as accepted/rejected booleans, operation kind, rejection kind, and operation count; it must not accept, store, persist, log, or infer from paths, file names, file contents, raw command args, raw payload JSON, URLs, tokens, error details, filesystem probes, CEF state, or fallback behavior.
 
 CDXC:GPUIManageFileWorkareaBridge 2026-06-23-14:02:
 Credential-shaped operation names are treated as private bridge input even when they are not valid operations. The rejection path must keep only the rejection category so credentials, passwords, auth headers, and access-key-like values cannot become durable shell state or future diagnostics.
 
 CDXC:GPUIProjectWorkareaReadiness 2026-06-24-07:41:
-GPUI accepts Kanban/Manage readiness only through a strict in-memory v1 message keyed to the explicit active project plus exact Kanban/Manage surface identity. This source-ledger boundary must not mount runtime CEF web surfaces, perform file I/O, log or persist private details, accept paths, URLs, file names, file contents, failure details, or replace placeholders before separate runtime CEF and Manage file-bridge work exists.
+GPUI accepts Kanban/Manage readiness only through a strict in-memory v1 message keyed to the explicit active project plus exact Kanban/Manage surface identity. This readiness boundary must not mount runtime CEF web surfaces, perform file I/O, log or persist private details, accept paths, URLs, file names, file contents, failure details, or replace placeholders before the direct runtime gates permit it.
 
 CDXC:GPUIManageFileWorkareaBridge 2026-06-23-16:35:
-Manage file/workarea operation requests now have their own source-only v1 boundary separate from readiness. GPUI may record only the existing operation-policy decision for the exact current Manage active-project/workarea identity, and malformed, extra-key, private-shaped, stale, Quick/projectless, or wrong-surface requests must leave the previous decision and Manage readiness unchanged without file I/O, CEF mounting, raw payload retention, logging, persistence, fallbacks, or placeholder replacement.
+Manage file/workarea operation requests have their own v1 boundary separate from readiness. GPUI may record only the existing operation-policy decision for the exact current Manage active-project/workarea identity, and malformed, extra-key, private-shaped, stale, Quick/projectless, or wrong-surface requests must leave the previous decision and Manage readiness unchanged without file I/O, CEF mounting, raw payload retention, logging, persistence, fallbacks, or placeholder replacement.
 
-CDXC:GPUIKanbanCefMount 2026-06-23-21:32:
-Phase 6 can form a source-only Kanban CEF mount-request boundary from the exact active project plus Kanban surface identity. The request must stay source-only and must not accept URLs, paths, board names, page titles, CEF payloads, local probes, fixture names, fallbacks, logging, persistence, hidden surfaces, or placeholder replacement.
-
-CDXC:GPUIKanbanCefMount 2026-06-24-08:19:
-Phase 6 Kanban source-ledger CEF entrypoint, materialization, and runtime-parity contracts are accepted for this pass. Runtime CEF instantiation, runtime URL issuance, and explicit placeholder replacement permission remain gated by real authority; do not introduce non-CEF web engines, runtime URLs, paths, board names, page titles, CEF payloads, private payloads, retained rejected-engine labels, fallback probes, logging, persistence, hidden mounts, or placeholder replacement.
-
-CDXC:GPUIKanbanCefMount 2026-06-24-03:41:
-Phase 6 ready Kanban requests now form a CEF-only source-ledger materialization contract after exact runtime identity and the fixed first-party CEF app-resource entrypoint exist. The contract is label/boolean-only and still cannot instantiate runtime CEF, issue URLs, mount hidden surfaces, log/persist private details, carry private payloads, or replace placeholders.
-
-CDXC:GPUIKanbanCefMount 2026-06-24-04:45:
-Kanban source-only runtime parity may be recorded only after the exact ready request already has the fixed first-party CEF app-resource entrypoint and CEF-only source-ledger materialization evidence. The plan accepts CEF as the only web-pane engine, rejects non-CEF labels by contract, counts for the source ledger, and must not instantiate CEF, issue runtime URLs, mount hidden surfaces, persist/log private data, or replace the placeholder.
-
-CDXC:GPUIKanbanPlaceholderReplacement 2026-06-24-05:22:
-Kanban placeholder replacement now has a centralized CEF-only preflight gate formed from the existing Kanban runtime-parity evidence. Current source behavior must report the gate but keep replacement disallowed until real runtime authority proves an issued runtime URL, instantiated CEF browser, normal-layout CEF surface, no hidden mount, no private payload, and explicit replacement permission.
-
-CDXC:GPUIManageCefMount 2026-06-24-07:41:
-Phase 7 can form a source-only Manage CEF mount-request boundary from the exact active project plus Manage surface identity. The first-party Manage entrypoint, CEF-only materialization, source-only file-bridge mount, and file-operation proof are accepted source-ledger contracts for this pass, but they remain label/boolean evidence only and must not accept URLs, paths, file names, file contents, operation args, failure details, page titles, CEF payloads, file-bridge payloads, localhost probes, fixture names, fallbacks, logging, persistence, hidden surfaces, runtime CEF/file-bridge creation, file I/O, or placeholder replacement.
-
-CDXC:GPUIManageCefMount 2026-06-24-07:41:
-Phase 7 ready Manage requests keep first-party CEF app-resource entrypoint, CEF materialization, file-bridge mount, and file-operation proof as separate accepted source-ledger states. The request remains runtime-non-materializable and must not create CEF, file bridges, file I/O, URLs, hidden surfaces, logs/persistence, private payloads, or placeholder replacement.
-
-CDXC:GPUIManageCefMount 2026-06-24-03:58:
-Phase 7 Manage source-ledger parity can now credit CEF-only materialization, a source-only file-bridge mount contract, and a project-scoped file-operation proof only after exact ready Manage identity and the first-party CEF app-resource entrypoint exist. These contracts remain label/boolean evidence only: they must not instantiate runtime CEF, mount a real file bridge, accept paths/file names/file contents/operation args, create bridge payloads, run file I/O, log or persist private details, use WKWebView or hidden mounts, or replace the placeholder.
-
-CDXC:GPUIManagePlaceholderReplacement 2026-06-24-05:27:
-Phase 7 Manage placeholder replacement now has a centralized CEF-only preflight gate formed from the source-only Manage runtime-parity plan. Current source must keep `canReplaceManagePlaceholder:false` because it has no issued runtime URL, instantiated CEF browser, normal-layout CEF surface, runtime file bridge, runtime file operation, CEF/file-bridge payload, hidden mount, private runtime data/logging/persistence, or explicit replacement permission.
+CDXC:GPUIProjectWorkareaRuntimeCleanup 2026-06-28-17:09:
+The old Kanban/Manage source-proof CEF mount objects were removed from runtime. Readiness now stays as enum state plus Manage operation policy, while runtime CEF ownership is retained only when the current explicit project context can provide the direct bundled runtime URL for the selected surface.
 */
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ProjectScopedRealSurfaceKind {
@@ -5193,2610 +3990,6 @@ enum ProjectScopedRealSurfaceRuntimeAvailability {
     Blocked(ProjectScopedRealSurfaceRuntimeBlockReason),
 }
 
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Eq)]
-struct KanbanCefMountRequestIdentity {
-    active_project_id: GpuiProjectId,
-    kanban_surface_id: String,
-}
-
-#[allow(dead_code)]
-impl KanbanCefMountRequestIdentity {
-    fn from_project_scoped_identity(
-        identity: &ProjectScopedRealSurfaceRuntimeIdentity,
-    ) -> Result<Self, KanbanCefMountRequestBlockReason> {
-        if identity.kind != ProjectScopedRealSurfaceKind::Kanban {
-            return Err(KanbanCefMountRequestBlockReason::WrongSurface);
-        }
-
-        Ok(Self {
-            active_project_id: identity.active_project_id.clone(),
-            kanban_surface_id: identity.explicit_surface_id.clone(),
-        })
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum KanbanCefMountEntrypointState {
-    AppResourceEntrypoint(KanbanCefFirstPartyEntrypoint),
-}
-
-const KANBAN_CEF_FIRST_PARTY_APP_RESOURCE_PRIVACY_LABEL: &str = "appResourceKanbanSurface";
-const KANBAN_CEF_FIRST_PARTY_ENGINE_PRIVACY_LABEL: &str = "cef";
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct KanbanCefFirstPartyEntrypoint {
-    app_resource_privacy_label: &'static str,
-    engine_privacy_label: &'static str,
-}
-
-#[allow(dead_code)]
-impl KanbanCefFirstPartyEntrypoint {
-    const fn project_board_surface() -> Self {
-        Self {
-            app_resource_privacy_label: KANBAN_CEF_FIRST_PARTY_APP_RESOURCE_PRIVACY_LABEL,
-            engine_privacy_label: KANBAN_CEF_FIRST_PARTY_ENGINE_PRIVACY_LABEL,
-        }
-    }
-
-    fn app_resource_privacy_label(self) -> &'static str {
-        self.app_resource_privacy_label
-    }
-
-    fn engine_privacy_label(self) -> &'static str {
-        self.engine_privacy_label
-    }
-}
-
-#[allow(dead_code)]
-impl KanbanCefMountEntrypointState {
-    fn app_resource_entrypoint() -> Self {
-        Self::AppResourceEntrypoint(KanbanCefFirstPartyEntrypoint::project_board_surface())
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::AppResourceEntrypoint(_) => "appResourceEntrypoint",
-        }
-    }
-
-    fn has_first_party_entrypoint(self) -> bool {
-        match self {
-            Self::AppResourceEntrypoint(_) => true,
-        }
-    }
-
-    fn app_resource_privacy_label(self) -> &'static str {
-        match self {
-            Self::AppResourceEntrypoint(entrypoint) => entrypoint.app_resource_privacy_label(),
-        }
-    }
-
-    fn engine_privacy_label(self) -> &'static str {
-        match self {
-            Self::AppResourceEntrypoint(entrypoint) => entrypoint.engine_privacy_label(),
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum KanbanCefMaterializationState {
-    SourceLedgerCefMaterializationContract(KanbanCefMaterializationContract),
-    MissingCefMaterializationContract,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct KanbanCefMaterializationContract {
-    entrypoint: KanbanCefFirstPartyEntrypoint,
-}
-
-#[allow(dead_code)]
-impl KanbanCefMaterializationContract {
-    fn from_ready_kanban_request(entrypoint_state: KanbanCefMountEntrypointState) -> Option<Self> {
-        match entrypoint_state {
-            KanbanCefMountEntrypointState::AppResourceEntrypoint(entrypoint)
-                if entrypoint.app_resource_privacy_label()
-                    == KANBAN_CEF_FIRST_PARTY_APP_RESOURCE_PRIVACY_LABEL
-                    && entrypoint.engine_privacy_label()
-                        == KANBAN_CEF_FIRST_PARTY_ENGINE_PRIVACY_LABEL =>
-            {
-                Some(Self { entrypoint })
-            }
-            _ => None,
-        }
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "sourceLedgerCefMaterializationContract"
-    }
-
-    fn cef_engine_privacy_label(self) -> &'static str {
-        self.entrypoint.engine_privacy_label()
-    }
-
-    fn has_instantiated_runtime_cef_browser(self) -> bool {
-        false
-    }
-
-    fn can_materialize_cef(self) -> bool {
-        false
-    }
-}
-
-#[allow(dead_code)]
-impl KanbanCefMaterializationState {
-    fn from_ready_kanban_request(entrypoint_state: KanbanCefMountEntrypointState) -> Self {
-        KanbanCefMaterializationContract::from_ready_kanban_request(entrypoint_state)
-            .map(Self::SourceLedgerCefMaterializationContract)
-            .unwrap_or(Self::MissingCefMaterializationContract)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(contract) => contract.privacy_label(),
-            Self::MissingCefMaterializationContract => "missingCefMaterializationContract",
-        }
-    }
-
-    fn has_source_ledger_cef_materialization_contract(self) -> bool {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(_) => true,
-            Self::MissingCefMaterializationContract => false,
-        }
-    }
-
-    fn cef_engine_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(contract) => {
-                contract.cef_engine_privacy_label()
-            }
-            Self::MissingCefMaterializationContract => "none",
-        }
-    }
-
-    fn has_instantiated_runtime_cef_browser(self) -> bool {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(contract) => {
-                contract.has_instantiated_runtime_cef_browser()
-            }
-            Self::MissingCefMaterializationContract => false,
-        }
-    }
-
-    fn can_materialize_cef(self) -> bool {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(contract) => {
-                contract.can_materialize_cef()
-            }
-            Self::MissingCefMaterializationContract => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum KanbanCefWebPaneEngineContract {
-    Cef,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum KanbanCefWebPaneEngineRejection {
-    NonCefWebPaneEngineRejected,
-}
-
-#[allow(dead_code)]
-impl KanbanCefWebPaneEngineContract {
-    fn cef_only() -> Self {
-        Self::Cef
-    }
-
-    fn from_source_contract_label(
-        candidate: &str,
-    ) -> Result<Self, KanbanCefWebPaneEngineRejection> {
-        if candidate == Self::Cef.privacy_label() {
-            Ok(Self::Cef)
-        } else {
-            Err(KanbanCefWebPaneEngineRejection::NonCefWebPaneEngineRejected)
-        }
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::Cef => "cef",
-        }
-    }
-
-    fn is_cef_only(self) -> bool {
-        matches!(self, Self::Cef)
-    }
-}
-
-#[allow(dead_code)]
-impl KanbanCefWebPaneEngineRejection {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::NonCefWebPaneEngineRejected => "nonCefWebPaneEngineRejected",
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct KanbanCefRuntimeParityPlan {
-    web_pane_engine: KanbanCefWebPaneEngineContract,
-    materialization_contract: KanbanCefMaterializationContract,
-}
-
-#[allow(dead_code)]
-impl KanbanCefRuntimeParityPlan {
-    fn from_ready_kanban_request(
-        entrypoint_state: KanbanCefMountEntrypointState,
-        materialization_state: KanbanCefMaterializationState,
-    ) -> Option<Self> {
-        let KanbanCefMountEntrypointState::AppResourceEntrypoint(entrypoint) = entrypoint_state;
-        let KanbanCefMaterializationState::SourceLedgerCefMaterializationContract(
-            materialization_contract,
-        ) = materialization_state
-        else {
-            return None;
-        };
-        if entrypoint.app_resource_privacy_label()
-            != KANBAN_CEF_FIRST_PARTY_APP_RESOURCE_PRIVACY_LABEL
-            || entrypoint.engine_privacy_label() != KANBAN_CEF_FIRST_PARTY_ENGINE_PRIVACY_LABEL
-            || materialization_contract.entrypoint != entrypoint
-        {
-            return None;
-        }
-
-        let web_pane_engine = KanbanCefWebPaneEngineContract::cef_only();
-        if !web_pane_engine.is_cef_only() {
-            return None;
-        }
-
-        Some(Self {
-            web_pane_engine,
-            materialization_contract,
-        })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "sourceOnlyRuntimeParityPlan"
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        self.web_pane_engine.privacy_label()
-    }
-
-    fn materialization_contract_privacy_label(self) -> &'static str {
-        self.materialization_contract.privacy_label()
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-    }
-
-    fn rejects_non_cef_web_pane_engines(self) -> bool {
-        true
-    }
-
-    fn counts_as_source_only_runtime_parity(self) -> bool {
-        true
-    }
-
-    fn has_runtime_url(self) -> bool {
-        false
-    }
-
-    fn has_runtime_cef_browser(self) -> bool {
-        false
-    }
-
-    fn has_hidden_kanban_surface_mount(self) -> bool {
-        false
-    }
-
-    fn can_replace_kanban_placeholder(self) -> bool {
-        false
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum KanbanCefRuntimeParityState {
-    SourceOnlyRuntimeParityPlan(KanbanCefRuntimeParityPlan),
-    MissingRuntimeParityPlan,
-}
-
-#[allow(dead_code)]
-impl KanbanCefRuntimeParityState {
-    fn from_ready_kanban_request(
-        entrypoint_state: KanbanCefMountEntrypointState,
-        materialization_state: KanbanCefMaterializationState,
-    ) -> Self {
-        KanbanCefRuntimeParityPlan::from_ready_kanban_request(
-            entrypoint_state,
-            materialization_state,
-        )
-        .map(Self::SourceOnlyRuntimeParityPlan)
-        .unwrap_or(Self::MissingRuntimeParityPlan)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.privacy_label(),
-            Self::MissingRuntimeParityPlan => "missingRuntimeParityPlan",
-        }
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.web_pane_engine_privacy_label(),
-            Self::MissingRuntimeParityPlan => "none",
-        }
-    }
-
-    fn materialization_contract_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => {
-                plan.materialization_contract_privacy_label()
-            }
-            Self::MissingRuntimeParityPlan => "none",
-        }
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_cef_only_web_pane_engine_contract(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn rejects_non_cef_web_pane_engines(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.rejects_non_cef_web_pane_engines(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn counts_as_source_only_runtime_parity(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.counts_as_source_only_runtime_parity(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_runtime_url(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_runtime_url(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_runtime_cef_browser(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_runtime_cef_browser(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_hidden_kanban_surface_mount(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_hidden_kanban_surface_mount(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn can_replace_kanban_placeholder(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.can_replace_kanban_placeholder(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-}
-
-/*
-CDXC:GPUIKanbanPlaceholderReplacement 2026-06-24-05:22:
-Kanban placeholder replacement must pass a CEF-only preflight gate formed from the existing Kanban runtime-parity evidence. Current source may expose the gate but must deny replacement until future runtime work proves an issued runtime URL, instantiated CEF browser, normal-layout CEF surface, no hidden mount, no private runtime data, and explicit replacement permission.
-*/
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct KanbanPlaceholderReplacementPreflightGate {
-    web_pane_engine: KanbanCefWebPaneEngineContract,
-    runtime_parity_plan: KanbanCefRuntimeParityPlan,
-}
-
-#[allow(dead_code)]
-impl KanbanPlaceholderReplacementPreflightGate {
-    fn from_runtime_parity_state(
-        runtime_parity_state: KanbanCefRuntimeParityState,
-    ) -> Option<Self> {
-        let KanbanCefRuntimeParityState::SourceOnlyRuntimeParityPlan(runtime_parity_plan) =
-            runtime_parity_state
-        else {
-            return None;
-        };
-        if !runtime_parity_plan.has_cef_only_web_pane_engine_contract() {
-            return None;
-        }
-
-        Some(Self {
-            web_pane_engine: runtime_parity_plan.web_pane_engine,
-            runtime_parity_plan,
-        })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "kanbanPlaceholderReplacementPreflightGate"
-    }
-
-    fn runtime_parity_plan_privacy_label(self) -> &'static str {
-        self.runtime_parity_plan.privacy_label()
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        self.web_pane_engine.privacy_label()
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-    }
-
-    fn rejects_non_cef_web_pane_engines(self) -> bool {
-        true
-    }
-
-    fn has_issued_runtime_url(self) -> bool {
-        self.runtime_parity_plan.has_runtime_url()
-    }
-
-    fn has_runtime_cef_browser(self) -> bool {
-        self.runtime_parity_plan.has_runtime_cef_browser()
-    }
-
-    fn has_normal_layout_cef_surface(self) -> bool {
-        false
-    }
-
-    fn has_hidden_kanban_surface_mount(self) -> bool {
-        self.runtime_parity_plan.has_hidden_kanban_surface_mount()
-    }
-
-    fn has_private_runtime_data(self) -> bool {
-        false
-    }
-
-    fn has_placeholder_replacement_permission(self) -> bool {
-        false
-    }
-
-    fn can_replace_kanban_placeholder(self) -> bool {
-        self.has_cef_only_web_pane_engine_contract()
-            && self.has_issued_runtime_url()
-            && self.has_runtime_cef_browser()
-            && self.has_normal_layout_cef_surface()
-            && !self.has_hidden_kanban_surface_mount()
-            && !self.has_private_runtime_data()
-            && self.has_placeholder_replacement_permission()
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum KanbanPlaceholderReplacementPreflightState {
-    KanbanPlaceholderReplacementPreflightGate(KanbanPlaceholderReplacementPreflightGate),
-    MissingKanbanPlaceholderReplacementPreflightGate,
-}
-
-#[allow(dead_code)]
-impl KanbanPlaceholderReplacementPreflightState {
-    fn from_runtime_parity_state(runtime_parity_state: KanbanCefRuntimeParityState) -> Self {
-        KanbanPlaceholderReplacementPreflightGate::from_runtime_parity_state(runtime_parity_state)
-            .map(Self::KanbanPlaceholderReplacementPreflightGate)
-            .unwrap_or(Self::MissingKanbanPlaceholderReplacementPreflightGate)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::KanbanPlaceholderReplacementPreflightGate(gate) => gate.privacy_label(),
-            Self::MissingKanbanPlaceholderReplacementPreflightGate => {
-                "missingKanbanPlaceholderReplacementPreflightGate"
-            }
-        }
-    }
-
-    fn runtime_parity_plan_privacy_label(self) -> &'static str {
-        match self {
-            Self::KanbanPlaceholderReplacementPreflightGate(gate) => {
-                gate.runtime_parity_plan_privacy_label()
-            }
-            Self::MissingKanbanPlaceholderReplacementPreflightGate => "none",
-        }
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        match self {
-            Self::KanbanPlaceholderReplacementPreflightGate(gate) => {
-                gate.web_pane_engine_privacy_label()
-            }
-            Self::MissingKanbanPlaceholderReplacementPreflightGate => "none",
-        }
-    }
-
-    fn has_preflight_gate(self) -> bool {
-        match self {
-            Self::KanbanPlaceholderReplacementPreflightGate(_) => true,
-            Self::MissingKanbanPlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        match self {
-            Self::KanbanPlaceholderReplacementPreflightGate(gate) => {
-                gate.has_cef_only_web_pane_engine_contract()
-            }
-            Self::MissingKanbanPlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn rejects_non_cef_web_pane_engines(self) -> bool {
-        match self {
-            Self::KanbanPlaceholderReplacementPreflightGate(gate) => {
-                gate.rejects_non_cef_web_pane_engines()
-            }
-            Self::MissingKanbanPlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_issued_runtime_url(self) -> bool {
-        match self {
-            Self::KanbanPlaceholderReplacementPreflightGate(gate) => gate.has_issued_runtime_url(),
-            Self::MissingKanbanPlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_runtime_cef_browser(self) -> bool {
-        match self {
-            Self::KanbanPlaceholderReplacementPreflightGate(gate) => gate.has_runtime_cef_browser(),
-            Self::MissingKanbanPlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_normal_layout_cef_surface(self) -> bool {
-        match self {
-            Self::KanbanPlaceholderReplacementPreflightGate(gate) => {
-                gate.has_normal_layout_cef_surface()
-            }
-            Self::MissingKanbanPlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_hidden_kanban_surface_mount(self) -> bool {
-        match self {
-            Self::KanbanPlaceholderReplacementPreflightGate(gate) => {
-                gate.has_hidden_kanban_surface_mount()
-            }
-            Self::MissingKanbanPlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_private_runtime_data(self) -> bool {
-        match self {
-            Self::KanbanPlaceholderReplacementPreflightGate(gate) => {
-                gate.has_private_runtime_data()
-            }
-            Self::MissingKanbanPlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_placeholder_replacement_permission(self) -> bool {
-        match self {
-            Self::KanbanPlaceholderReplacementPreflightGate(gate) => {
-                gate.has_placeholder_replacement_permission()
-            }
-            Self::MissingKanbanPlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn can_replace_kanban_placeholder(self) -> bool {
-        match self {
-            Self::KanbanPlaceholderReplacementPreflightGate(gate) => {
-                gate.can_replace_kanban_placeholder()
-            }
-            Self::MissingKanbanPlaceholderReplacementPreflightGate => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Eq)]
-struct KanbanCefMountRequest {
-    identity: KanbanCefMountRequestIdentity,
-    entrypoint_state: KanbanCefMountEntrypointState,
-    materialization_state: KanbanCefMaterializationState,
-    runtime_parity_state: KanbanCefRuntimeParityState,
-    placeholder_replacement_preflight_state: KanbanPlaceholderReplacementPreflightState,
-}
-
-#[allow(dead_code)]
-impl KanbanCefMountRequest {
-    fn has_first_party_entrypoint(&self) -> bool {
-        self.entrypoint_state.has_first_party_entrypoint()
-    }
-
-    fn has_source_ledger_cef_materialization_contract(&self) -> bool {
-        self.materialization_state
-            .has_source_ledger_cef_materialization_contract()
-    }
-
-    fn has_instantiated_runtime_cef_browser(&self) -> bool {
-        self.materialization_state
-            .has_instantiated_runtime_cef_browser()
-    }
-
-    fn counts_as_source_only_runtime_parity(&self) -> bool {
-        self.runtime_parity_state
-            .counts_as_source_only_runtime_parity()
-    }
-
-    fn has_kanban_placeholder_replacement_preflight_gate(&self) -> bool {
-        self.placeholder_replacement_preflight_state
-            .has_preflight_gate()
-    }
-
-    fn can_materialize_cef(&self) -> bool {
-        self.entrypoint_state.has_first_party_entrypoint()
-            && self.materialization_state.can_materialize_cef()
-    }
-
-    fn can_replace_kanban_placeholder(&self) -> bool {
-        self.placeholder_replacement_preflight_state
-            .can_replace_kanban_placeholder()
-    }
-
-    fn shell_state_privacy_boundary_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "surface": "kanban",
-            "requested": true,
-            "hasExactRuntimeIdentity": true,
-            "entrypointState": self.entrypoint_state.privacy_label(),
-            "entrypointResource": self.entrypoint_state.app_resource_privacy_label(),
-            "entrypointEngine": self.entrypoint_state.engine_privacy_label(),
-            "hasFirstPartyEntrypoint": self.has_first_party_entrypoint(),
-            "materializationState": self.materialization_state.privacy_label(),
-            "materializationEngine": self.materialization_state.cef_engine_privacy_label(),
-            "hasSourceLedgerCefMaterializationContract": self.has_source_ledger_cef_materialization_contract(),
-            "hasInstantiatedRuntimeCefBrowser": self.has_instantiated_runtime_cef_browser(),
-            "runtimeParityState": self.runtime_parity_state.privacy_label(),
-            "runtimeParityMaterializationContract": self.runtime_parity_state.materialization_contract_privacy_label(),
-            "webPaneEngine": self.runtime_parity_state.web_pane_engine_privacy_label(),
-            "hasCefOnlyWebPaneEngineContract": self.runtime_parity_state.has_cef_only_web_pane_engine_contract(),
-            "rejectsNonCefWebPaneEngines": self.runtime_parity_state.rejects_non_cef_web_pane_engines(),
-            "countsAsSourceOnlyRuntimeParity": self.counts_as_source_only_runtime_parity(),
-            "hasRuntimeUrl": self.runtime_parity_state.has_runtime_url(),
-            "hasRuntimeCefBrowser": self.runtime_parity_state.has_runtime_cef_browser(),
-            "hasHiddenKanbanSurfaceMount": self.runtime_parity_state.has_hidden_kanban_surface_mount(),
-            "placeholderReplacementPreflightState": self.placeholder_replacement_preflight_state.privacy_label(),
-            "placeholderReplacementPreflightRuntimeParityPlan": self.placeholder_replacement_preflight_state.runtime_parity_plan_privacy_label(),
-            "placeholderReplacementPreflightWebPaneEngine": self.placeholder_replacement_preflight_state.web_pane_engine_privacy_label(),
-            "hasKanbanPlaceholderReplacementPreflightGate": self.has_kanban_placeholder_replacement_preflight_gate(),
-            "placeholderReplacementPreflightHasCefOnlyWebPaneEngineContract": self.placeholder_replacement_preflight_state.has_cef_only_web_pane_engine_contract(),
-            "placeholderReplacementPreflightRejectsNonCefWebPaneEngines": self.placeholder_replacement_preflight_state.rejects_non_cef_web_pane_engines(),
-            "placeholderReplacementPreflightHasIssuedRuntimeUrl": self.placeholder_replacement_preflight_state.has_issued_runtime_url(),
-            "placeholderReplacementPreflightHasRuntimeCefBrowser": self.placeholder_replacement_preflight_state.has_runtime_cef_browser(),
-            "placeholderReplacementPreflightHasNormalLayoutCefSurface": self.placeholder_replacement_preflight_state.has_normal_layout_cef_surface(),
-            "placeholderReplacementPreflightHasHiddenKanbanSurfaceMount": self.placeholder_replacement_preflight_state.has_hidden_kanban_surface_mount(),
-            "placeholderReplacementPreflightHasPrivateRuntimeData": self.placeholder_replacement_preflight_state.has_private_runtime_data(),
-            "placeholderReplacementPreflightHasPlaceholderReplacementPermission": self.placeholder_replacement_preflight_state.has_placeholder_replacement_permission(),
-            "canReplaceKanbanPlaceholder": self.can_replace_kanban_placeholder(),
-            "canMountCef": self.can_materialize_cef(),
-        })
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum KanbanCefMountRequestBlockReason {
-    WrongSurface,
-    RuntimeBlocked(ProjectScopedRealSurfaceRuntimeBlockReason),
-}
-
-#[allow(dead_code)]
-impl KanbanCefMountRequestBlockReason {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::WrongSurface => "wrongSurface",
-            Self::RuntimeBlocked(_) => "runtimeBlocked",
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Eq)]
-enum KanbanCefMountRequestContract {
-    Requested(KanbanCefMountRequest),
-    Blocked(KanbanCefMountRequestBlockReason),
-}
-
-#[allow(dead_code)]
-impl KanbanCefMountRequestContract {
-    fn materializable_request(&self) -> Option<&KanbanCefMountRequest> {
-        match self {
-            Self::Requested(request) if request.can_materialize_cef() => Some(request),
-            _ => None,
-        }
-    }
-
-    fn shell_state_privacy_boundary_json(&self) -> serde_json::Value {
-        match self {
-            Self::Requested(request) => request.shell_state_privacy_boundary_json(),
-            Self::Blocked(reason) => serde_json::json!({
-                "surface": "kanban",
-                "requested": false,
-                "hasExactRuntimeIdentity": false,
-                "blockReason": reason.privacy_label(),
-                "hasFirstPartyEntrypoint": false,
-                "materializationState": KanbanCefMaterializationState::MissingCefMaterializationContract.privacy_label(),
-                "materializationEngine": "none",
-                "hasSourceLedgerCefMaterializationContract": false,
-                "hasInstantiatedRuntimeCefBrowser": false,
-                "runtimeParityState": KanbanCefRuntimeParityState::MissingRuntimeParityPlan.privacy_label(),
-                "runtimeParityMaterializationContract": "none",
-                "webPaneEngine": "none",
-                "hasCefOnlyWebPaneEngineContract": false,
-                "rejectsNonCefWebPaneEngines": false,
-                "countsAsSourceOnlyRuntimeParity": false,
-                "hasRuntimeUrl": false,
-                "hasRuntimeCefBrowser": false,
-                "hasHiddenKanbanSurfaceMount": false,
-                "placeholderReplacementPreflightState": KanbanPlaceholderReplacementPreflightState::MissingKanbanPlaceholderReplacementPreflightGate.privacy_label(),
-                "placeholderReplacementPreflightRuntimeParityPlan": "none",
-                "placeholderReplacementPreflightWebPaneEngine": "none",
-                "hasKanbanPlaceholderReplacementPreflightGate": false,
-                "placeholderReplacementPreflightHasCefOnlyWebPaneEngineContract": false,
-                "placeholderReplacementPreflightRejectsNonCefWebPaneEngines": false,
-                "placeholderReplacementPreflightHasIssuedRuntimeUrl": false,
-                "placeholderReplacementPreflightHasRuntimeCefBrowser": false,
-                "placeholderReplacementPreflightHasNormalLayoutCefSurface": false,
-                "placeholderReplacementPreflightHasHiddenKanbanSurfaceMount": false,
-                "placeholderReplacementPreflightHasPrivateRuntimeData": false,
-                "placeholderReplacementPreflightHasPlaceholderReplacementPermission": false,
-                "canReplaceKanbanPlaceholder": false,
-                "canMountCef": false,
-            }),
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn kanban_cef_mount_request_contract_from_runtime_availability(
-    availability: &ProjectScopedRealSurfaceRuntimeAvailability,
-) -> KanbanCefMountRequestContract {
-    match availability {
-        ProjectScopedRealSurfaceRuntimeAvailability::Ready(surface) => {
-            match KanbanCefMountRequestIdentity::from_project_scoped_identity(&surface.identity) {
-                Ok(identity) => {
-                    let entrypoint_state = KanbanCefMountEntrypointState::app_resource_entrypoint();
-                    let materialization_state =
-                        KanbanCefMaterializationState::from_ready_kanban_request(entrypoint_state);
-                    let runtime_parity_state =
-                        KanbanCefRuntimeParityState::from_ready_kanban_request(
-                            entrypoint_state,
-                            materialization_state,
-                        );
-                    let placeholder_replacement_preflight_state =
-                        KanbanPlaceholderReplacementPreflightState::from_runtime_parity_state(
-                            runtime_parity_state,
-                        );
-                    KanbanCefMountRequestContract::Requested(KanbanCefMountRequest {
-                        identity,
-                        entrypoint_state,
-                        materialization_state,
-                        runtime_parity_state,
-                        placeholder_replacement_preflight_state,
-                    })
-                }
-                Err(reason) => KanbanCefMountRequestContract::Blocked(reason),
-            }
-        }
-        ProjectScopedRealSurfaceRuntimeAvailability::Blocked(reason) => {
-            KanbanCefMountRequestContract::Blocked(
-                KanbanCefMountRequestBlockReason::RuntimeBlocked(*reason),
-            )
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Eq)]
-struct ManageCefMountRequestIdentity {
-    active_project_id: GpuiProjectId,
-    manage_surface_id: String,
-}
-
-#[allow(dead_code)]
-impl ManageCefMountRequestIdentity {
-    fn from_project_scoped_identity(
-        identity: &ProjectScopedRealSurfaceRuntimeIdentity,
-    ) -> Result<Self, ManageCefMountRequestBlockReason> {
-        if identity.kind != ProjectScopedRealSurfaceKind::Manage {
-            return Err(ManageCefMountRequestBlockReason::WrongSurface);
-        }
-
-        Ok(Self {
-            active_project_id: identity.active_project_id.clone(),
-            manage_surface_id: identity.explicit_surface_id.clone(),
-        })
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManageCefMountEntrypointState {
-    AppResourceEntrypoint(ManageCefFirstPartyEntrypoint),
-    MissingFirstPartyEntrypoint,
-}
-
-const MANAGE_CEF_FIRST_PARTY_APP_RESOURCE_PRIVACY_LABEL: &str = "appResourceManageSurface";
-const MANAGE_CEF_FIRST_PARTY_ENGINE_PRIVACY_LABEL: &str = "cef";
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ManageCefFirstPartyEntrypoint {
-    app_resource_privacy_label: &'static str,
-    engine_privacy_label: &'static str,
-}
-
-#[allow(dead_code)]
-impl ManageCefFirstPartyEntrypoint {
-    const fn project_manage_surface() -> Self {
-        Self {
-            app_resource_privacy_label: MANAGE_CEF_FIRST_PARTY_APP_RESOURCE_PRIVACY_LABEL,
-            engine_privacy_label: MANAGE_CEF_FIRST_PARTY_ENGINE_PRIVACY_LABEL,
-        }
-    }
-
-    fn app_resource_privacy_label(self) -> &'static str {
-        self.app_resource_privacy_label
-    }
-
-    fn engine_privacy_label(self) -> &'static str {
-        self.engine_privacy_label
-    }
-}
-
-#[allow(dead_code)]
-impl ManageCefMountEntrypointState {
-    fn app_resource_entrypoint() -> Self {
-        Self::AppResourceEntrypoint(ManageCefFirstPartyEntrypoint::project_manage_surface())
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::AppResourceEntrypoint(_) => "appResourceEntrypoint",
-            Self::MissingFirstPartyEntrypoint => "missingFirstPartyEntrypoint",
-        }
-    }
-
-    fn has_first_party_entrypoint(self) -> bool {
-        match self {
-            Self::AppResourceEntrypoint(_) => true,
-            Self::MissingFirstPartyEntrypoint => false,
-        }
-    }
-
-    fn app_resource_privacy_label(self) -> &'static str {
-        match self {
-            Self::AppResourceEntrypoint(entrypoint) => entrypoint.app_resource_privacy_label(),
-            Self::MissingFirstPartyEntrypoint => "none",
-        }
-    }
-
-    fn engine_privacy_label(self) -> &'static str {
-        match self {
-            Self::AppResourceEntrypoint(entrypoint) => entrypoint.engine_privacy_label(),
-            Self::MissingFirstPartyEntrypoint => "none",
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManageCefMaterializationState {
-    SourceLedgerCefMaterializationContract(ManageCefMaterializationContract),
-    MissingCefMaterializationContract,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ManageCefMaterializationContract {
-    entrypoint: ManageCefFirstPartyEntrypoint,
-}
-
-#[allow(dead_code)]
-impl ManageCefMaterializationContract {
-    fn from_ready_manage_request(entrypoint_state: ManageCefMountEntrypointState) -> Option<Self> {
-        match entrypoint_state {
-            ManageCefMountEntrypointState::AppResourceEntrypoint(entrypoint)
-                if entrypoint.app_resource_privacy_label()
-                    == MANAGE_CEF_FIRST_PARTY_APP_RESOURCE_PRIVACY_LABEL
-                    && entrypoint.engine_privacy_label()
-                        == MANAGE_CEF_FIRST_PARTY_ENGINE_PRIVACY_LABEL =>
-            {
-                Some(Self { entrypoint })
-            }
-            _ => None,
-        }
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "sourceLedgerCefMaterializationContract"
-    }
-
-    fn cef_engine_privacy_label(self) -> &'static str {
-        self.entrypoint.engine_privacy_label()
-    }
-
-    fn has_instantiated_runtime_cef_browser(self) -> bool {
-        false
-    }
-
-    fn can_materialize_cef(self) -> bool {
-        false
-    }
-}
-
-#[allow(dead_code)]
-impl ManageCefMaterializationState {
-    fn from_ready_manage_request(entrypoint_state: ManageCefMountEntrypointState) -> Self {
-        ManageCefMaterializationContract::from_ready_manage_request(entrypoint_state)
-            .map(Self::SourceLedgerCefMaterializationContract)
-            .unwrap_or(Self::MissingCefMaterializationContract)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(contract) => contract.privacy_label(),
-            Self::MissingCefMaterializationContract => "missingCefMaterializationContract",
-        }
-    }
-
-    fn has_source_ledger_cef_materialization_contract(self) -> bool {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(_) => true,
-            Self::MissingCefMaterializationContract => false,
-        }
-    }
-
-    fn has_cef_materialization_contract(self) -> bool {
-        self.has_source_ledger_cef_materialization_contract()
-    }
-
-    fn cef_engine_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(contract) => {
-                contract.cef_engine_privacy_label()
-            }
-            Self::MissingCefMaterializationContract => "none",
-        }
-    }
-
-    fn has_instantiated_runtime_cef_browser(self) -> bool {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(contract) => {
-                contract.has_instantiated_runtime_cef_browser()
-            }
-            Self::MissingCefMaterializationContract => false,
-        }
-    }
-
-    fn can_materialize_cef(self) -> bool {
-        match self {
-            Self::SourceLedgerCefMaterializationContract(contract) => {
-                contract.can_materialize_cef()
-            }
-            Self::MissingCefMaterializationContract => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManageFileBridgeMountState {
-    SourceLedgerFileBridgeMountContract(ManageFileBridgeMountContract),
-    MissingFileBridgeMountContract,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ManageFileBridgeMountContract {
-    materialization_contract: ManageCefMaterializationContract,
-}
-
-#[allow(dead_code)]
-impl ManageFileBridgeMountContract {
-    fn from_ready_manage_request(
-        materialization_state: ManageCefMaterializationState,
-    ) -> Option<Self> {
-        match materialization_state {
-            ManageCefMaterializationState::SourceLedgerCefMaterializationContract(
-                materialization_contract,
-            ) => Some(Self {
-                materialization_contract,
-            }),
-            ManageCefMaterializationState::MissingCefMaterializationContract => None,
-        }
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "sourceLedgerFileBridgeMountContract"
-    }
-
-    fn has_mounted_runtime_file_bridge(self) -> bool {
-        false
-    }
-
-    fn can_mount_file_bridge(self) -> bool {
-        false
-    }
-}
-
-#[allow(dead_code)]
-impl ManageFileBridgeMountState {
-    fn from_ready_manage_request(materialization_state: ManageCefMaterializationState) -> Self {
-        ManageFileBridgeMountContract::from_ready_manage_request(materialization_state)
-            .map(Self::SourceLedgerFileBridgeMountContract)
-            .unwrap_or(Self::MissingFileBridgeMountContract)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceLedgerFileBridgeMountContract(contract) => contract.privacy_label(),
-            Self::MissingFileBridgeMountContract => "missingFileBridgeMountContract",
-        }
-    }
-
-    fn has_source_ledger_file_bridge_mount_contract(self) -> bool {
-        match self {
-            Self::SourceLedgerFileBridgeMountContract(_) => true,
-            Self::MissingFileBridgeMountContract => false,
-        }
-    }
-
-    fn has_mounted_runtime_file_bridge(self) -> bool {
-        match self {
-            Self::SourceLedgerFileBridgeMountContract(contract) => {
-                contract.has_mounted_runtime_file_bridge()
-            }
-            Self::MissingFileBridgeMountContract => false,
-        }
-    }
-
-    fn can_mount_file_bridge(self) -> bool {
-        match self {
-            Self::SourceLedgerFileBridgeMountContract(contract) => contract.can_mount_file_bridge(),
-            Self::MissingFileBridgeMountContract => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManageProjectScopedFileOperationProofState {
-    SourceLedgerProjectScopedFileOperationProof(ManageProjectScopedFileOperationProofContract),
-    MissingProjectScopedFileOperationProof,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ManageProjectScopedFileOperationProofContract {
-    file_bridge_mount_contract: ManageFileBridgeMountContract,
-    operation_decision: Option<ManageFileWorkareaBridgeOperationPolicyDecision>,
-}
-
-#[allow(dead_code)]
-impl ManageProjectScopedFileOperationProofContract {
-    fn from_ready_manage_request(
-        file_bridge_mount_state: ManageFileBridgeMountState,
-        operation_decision: Option<ManageFileWorkareaBridgeOperationPolicyDecision>,
-    ) -> Option<Self> {
-        match file_bridge_mount_state {
-            ManageFileBridgeMountState::SourceLedgerFileBridgeMountContract(
-                file_bridge_mount_contract,
-            ) => Some(Self {
-                file_bridge_mount_contract,
-                operation_decision,
-            }),
-            ManageFileBridgeMountState::MissingFileBridgeMountContract => None,
-        }
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "sourceLedgerProjectScopedFileOperationProof"
-    }
-
-    fn decision_kind_privacy_label(self) -> &'static str {
-        match self.operation_decision {
-            Some(ManageFileWorkareaBridgeOperationPolicyDecision::Accepted(_)) => "accepted",
-            Some(ManageFileWorkareaBridgeOperationPolicyDecision::Rejected(_)) => "rejected",
-            None => "policyOnly",
-        }
-    }
-
-    fn operation_kind_privacy_label(self) -> &'static str {
-        match self.operation_decision {
-            Some(ManageFileWorkareaBridgeOperationPolicyDecision::Accepted(kind)) => {
-                kind.privacy_label()
-            }
-            _ => "none",
-        }
-    }
-
-    fn rejection_kind_privacy_label(self) -> &'static str {
-        match self.operation_decision {
-            Some(ManageFileWorkareaBridgeOperationPolicyDecision::Rejected(kind)) => {
-                kind.privacy_label()
-            }
-            _ => "none",
-        }
-    }
-
-    fn has_accepted_operation_decision(self) -> bool {
-        matches!(
-            self.operation_decision,
-            Some(ManageFileWorkareaBridgeOperationPolicyDecision::Accepted(_))
-        )
-    }
-
-    fn has_run_runtime_file_operation(self) -> bool {
-        false
-    }
-}
-
-#[allow(dead_code)]
-impl ManageProjectScopedFileOperationProofState {
-    fn from_ready_manage_request(
-        file_bridge_mount_state: ManageFileBridgeMountState,
-        operation_decision: Option<ManageFileWorkareaBridgeOperationPolicyDecision>,
-    ) -> Self {
-        ManageProjectScopedFileOperationProofContract::from_ready_manage_request(
-            file_bridge_mount_state,
-            operation_decision,
-        )
-        .map(Self::SourceLedgerProjectScopedFileOperationProof)
-        .unwrap_or(Self::MissingProjectScopedFileOperationProof)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceLedgerProjectScopedFileOperationProof(contract) => contract.privacy_label(),
-            Self::MissingProjectScopedFileOperationProof => {
-                "missingProjectScopedFileOperationProof"
-            }
-        }
-    }
-
-    fn decision_kind_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceLedgerProjectScopedFileOperationProof(contract) => {
-                contract.decision_kind_privacy_label()
-            }
-            Self::MissingProjectScopedFileOperationProof => "none",
-        }
-    }
-
-    fn operation_kind_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceLedgerProjectScopedFileOperationProof(contract) => {
-                contract.operation_kind_privacy_label()
-            }
-            Self::MissingProjectScopedFileOperationProof => "none",
-        }
-    }
-
-    fn rejection_kind_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceLedgerProjectScopedFileOperationProof(contract) => {
-                contract.rejection_kind_privacy_label()
-            }
-            Self::MissingProjectScopedFileOperationProof => "none",
-        }
-    }
-
-    fn has_source_ledger_project_scoped_file_operation_proof(self) -> bool {
-        match self {
-            Self::SourceLedgerProjectScopedFileOperationProof(_) => true,
-            Self::MissingProjectScopedFileOperationProof => false,
-        }
-    }
-
-    fn has_accepted_operation_decision(self) -> bool {
-        match self {
-            Self::SourceLedgerProjectScopedFileOperationProof(contract) => {
-                contract.has_accepted_operation_decision()
-            }
-            Self::MissingProjectScopedFileOperationProof => false,
-        }
-    }
-
-    fn has_run_runtime_file_operation(self) -> bool {
-        match self {
-            Self::SourceLedgerProjectScopedFileOperationProof(contract) => {
-                contract.has_run_runtime_file_operation()
-            }
-            Self::MissingProjectScopedFileOperationProof => false,
-        }
-    }
-}
-
-/*
-CDXC:GPUIManageCefMount 2026-06-24-04:55:
-Manage source-only runtime parity may be recorded only after exact ready Manage identity, the fixed first-party CEF app-resource entrypoint, CEF-only materialization evidence, source-only file-bridge mount evidence, and project-scoped file-operation proof evidence already exist. This ledger state accepts CEF as the only web-pane engine and must not create a CefBrowser, URL, runtime file bridge, file operation, bridge payload, hidden surface, private logging/persistence, or placeholder replacement.
-*/
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManageCefWebPaneEngineContract {
-    Cef,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManageCefWebPaneEngineRejection {
-    NonCefWebPaneEngineRejected,
-}
-
-#[allow(dead_code)]
-impl ManageCefWebPaneEngineContract {
-    fn cef_only() -> Self {
-        Self::Cef
-    }
-
-    fn from_source_contract_label(
-        candidate: &str,
-    ) -> Result<Self, ManageCefWebPaneEngineRejection> {
-        if candidate == Self::Cef.privacy_label() {
-            Ok(Self::Cef)
-        } else {
-            Err(ManageCefWebPaneEngineRejection::NonCefWebPaneEngineRejected)
-        }
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::Cef => "cef",
-        }
-    }
-
-    fn is_cef_only(self) -> bool {
-        matches!(self, Self::Cef)
-    }
-}
-
-#[allow(dead_code)]
-impl ManageCefWebPaneEngineRejection {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::NonCefWebPaneEngineRejected => "nonCefWebPaneEngineRejected",
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ManageCefRuntimeParityPlan {
-    web_pane_engine: ManageCefWebPaneEngineContract,
-    materialization_contract: ManageCefMaterializationContract,
-    file_bridge_mount_contract: ManageFileBridgeMountContract,
-    file_operation_proof_contract: ManageProjectScopedFileOperationProofContract,
-}
-
-#[allow(dead_code)]
-impl ManageCefRuntimeParityPlan {
-    fn from_ready_manage_request(
-        entrypoint_state: ManageCefMountEntrypointState,
-        materialization_state: ManageCefMaterializationState,
-        file_bridge_mount_state: ManageFileBridgeMountState,
-        file_operation_proof_state: ManageProjectScopedFileOperationProofState,
-    ) -> Option<Self> {
-        let ManageCefMountEntrypointState::AppResourceEntrypoint(entrypoint) = entrypoint_state
-        else {
-            return None;
-        };
-        let ManageCefMaterializationState::SourceLedgerCefMaterializationContract(
-            materialization_contract,
-        ) = materialization_state
-        else {
-            return None;
-        };
-        let ManageFileBridgeMountState::SourceLedgerFileBridgeMountContract(
-            file_bridge_mount_contract,
-        ) = file_bridge_mount_state
-        else {
-            return None;
-        };
-        let ManageProjectScopedFileOperationProofState::SourceLedgerProjectScopedFileOperationProof(
-            file_operation_proof_contract,
-        ) = file_operation_proof_state
-        else {
-            return None;
-        };
-        if entrypoint.app_resource_privacy_label()
-            != MANAGE_CEF_FIRST_PARTY_APP_RESOURCE_PRIVACY_LABEL
-            || entrypoint.engine_privacy_label() != MANAGE_CEF_FIRST_PARTY_ENGINE_PRIVACY_LABEL
-            || materialization_contract.entrypoint != entrypoint
-            || file_bridge_mount_contract.materialization_contract != materialization_contract
-            || file_operation_proof_contract.file_bridge_mount_contract
-                != file_bridge_mount_contract
-        {
-            return None;
-        }
-
-        let web_pane_engine = ManageCefWebPaneEngineContract::cef_only();
-        if !web_pane_engine.is_cef_only() {
-            return None;
-        }
-
-        Some(Self {
-            web_pane_engine,
-            materialization_contract,
-            file_bridge_mount_contract,
-            file_operation_proof_contract,
-        })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "sourceOnlyRuntimeParityPlan"
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        self.web_pane_engine.privacy_label()
-    }
-
-    fn materialization_contract_privacy_label(self) -> &'static str {
-        self.materialization_contract.privacy_label()
-    }
-
-    fn file_bridge_mount_contract_privacy_label(self) -> &'static str {
-        self.file_bridge_mount_contract.privacy_label()
-    }
-
-    fn file_operation_proof_contract_privacy_label(self) -> &'static str {
-        self.file_operation_proof_contract.privacy_label()
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-    }
-
-    fn rejects_non_cef_web_pane_engines(self) -> bool {
-        true
-    }
-
-    fn counts_as_source_only_runtime_parity(self) -> bool {
-        true
-    }
-
-    fn has_runtime_url(self) -> bool {
-        false
-    }
-
-    fn has_runtime_cef_browser(self) -> bool {
-        false
-    }
-
-    fn has_runtime_file_bridge(self) -> bool {
-        false
-    }
-
-    fn has_run_runtime_file_operation(self) -> bool {
-        false
-    }
-
-    fn has_cef_or_file_bridge_payload(self) -> bool {
-        false
-    }
-
-    fn has_hidden_manage_surface_mount(self) -> bool {
-        false
-    }
-
-    fn has_logged_or_persisted_private_details(self) -> bool {
-        false
-    }
-
-    fn can_replace_manage_placeholder(self) -> bool {
-        false
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManageCefRuntimeParityState {
-    SourceOnlyRuntimeParityPlan(ManageCefRuntimeParityPlan),
-    MissingRuntimeParityPlan,
-}
-
-#[allow(dead_code)]
-impl ManageCefRuntimeParityState {
-    fn from_ready_manage_request(
-        entrypoint_state: ManageCefMountEntrypointState,
-        materialization_state: ManageCefMaterializationState,
-        file_bridge_mount_state: ManageFileBridgeMountState,
-        file_operation_proof_state: ManageProjectScopedFileOperationProofState,
-    ) -> Self {
-        ManageCefRuntimeParityPlan::from_ready_manage_request(
-            entrypoint_state,
-            materialization_state,
-            file_bridge_mount_state,
-            file_operation_proof_state,
-        )
-        .map(Self::SourceOnlyRuntimeParityPlan)
-        .unwrap_or(Self::MissingRuntimeParityPlan)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.privacy_label(),
-            Self::MissingRuntimeParityPlan => "missingRuntimeParityPlan",
-        }
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.web_pane_engine_privacy_label(),
-            Self::MissingRuntimeParityPlan => "none",
-        }
-    }
-
-    fn materialization_contract_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => {
-                plan.materialization_contract_privacy_label()
-            }
-            Self::MissingRuntimeParityPlan => "none",
-        }
-    }
-
-    fn file_bridge_mount_contract_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => {
-                plan.file_bridge_mount_contract_privacy_label()
-            }
-            Self::MissingRuntimeParityPlan => "none",
-        }
-    }
-
-    fn file_operation_proof_contract_privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => {
-                plan.file_operation_proof_contract_privacy_label()
-            }
-            Self::MissingRuntimeParityPlan => "none",
-        }
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_cef_only_web_pane_engine_contract(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn rejects_non_cef_web_pane_engines(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.rejects_non_cef_web_pane_engines(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn counts_as_source_only_runtime_parity(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.counts_as_source_only_runtime_parity(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_runtime_url(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_runtime_url(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_runtime_cef_browser(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_runtime_cef_browser(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_runtime_file_bridge(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_runtime_file_bridge(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_run_runtime_file_operation(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_run_runtime_file_operation(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_cef_or_file_bridge_payload(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_cef_or_file_bridge_payload(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_hidden_manage_surface_mount(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.has_hidden_manage_surface_mount(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn has_logged_or_persisted_private_details(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => {
-                plan.has_logged_or_persisted_private_details()
-            }
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-
-    fn can_replace_manage_placeholder(self) -> bool {
-        match self {
-            Self::SourceOnlyRuntimeParityPlan(plan) => plan.can_replace_manage_placeholder(),
-            Self::MissingRuntimeParityPlan => false,
-        }
-    }
-}
-
-/*
-CDXC:GPUIManagePlaceholderReplacement 2026-06-24-05:27:
-Manage placeholder replacement must pass a CEF-only preflight gate formed only from the existing source-only Manage CEF/file-bridge runtime-parity plan. Current source may expose the gate but must deny replacement until future runtime work proves an issued runtime URL, instantiated CEF browser, normal-layout CEF surface, runtime file bridge, runtime file operation, no CEF/file-bridge payload, no hidden mount, no private runtime data or logging/persistence, and explicit replacement permission.
-*/
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ManagePlaceholderReplacementPreflightGate {
-    web_pane_engine: ManageCefWebPaneEngineContract,
-    runtime_parity_plan: ManageCefRuntimeParityPlan,
-}
-
-#[allow(dead_code)]
-impl ManagePlaceholderReplacementPreflightGate {
-    fn from_runtime_parity_state(
-        runtime_parity_state: ManageCefRuntimeParityState,
-    ) -> Option<Self> {
-        let ManageCefRuntimeParityState::SourceOnlyRuntimeParityPlan(runtime_parity_plan) =
-            runtime_parity_state
-        else {
-            return None;
-        };
-        if !runtime_parity_plan.has_cef_only_web_pane_engine_contract() {
-            return None;
-        }
-
-        Some(Self {
-            web_pane_engine: runtime_parity_plan.web_pane_engine,
-            runtime_parity_plan,
-        })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "managePlaceholderReplacementPreflightGate"
-    }
-
-    fn runtime_parity_plan_privacy_label(self) -> &'static str {
-        self.runtime_parity_plan.privacy_label()
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        self.web_pane_engine.privacy_label()
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-    }
-
-    fn rejects_non_cef_web_pane_engines(self) -> bool {
-        true
-    }
-
-    fn has_issued_runtime_url(self) -> bool {
-        self.runtime_parity_plan.has_runtime_url()
-    }
-
-    fn has_runtime_cef_browser(self) -> bool {
-        self.runtime_parity_plan.has_runtime_cef_browser()
-    }
-
-    fn has_normal_layout_cef_surface(self) -> bool {
-        false
-    }
-
-    fn has_runtime_file_bridge(self) -> bool {
-        self.runtime_parity_plan.has_runtime_file_bridge()
-    }
-
-    fn has_run_runtime_file_operation(self) -> bool {
-        self.runtime_parity_plan.has_run_runtime_file_operation()
-    }
-
-    fn has_cef_or_file_bridge_payload(self) -> bool {
-        self.runtime_parity_plan.has_cef_or_file_bridge_payload()
-    }
-
-    fn has_hidden_manage_surface_mount(self) -> bool {
-        self.runtime_parity_plan.has_hidden_manage_surface_mount()
-    }
-
-    fn has_private_runtime_data(self) -> bool {
-        false
-    }
-
-    fn has_logged_or_persisted_private_details(self) -> bool {
-        self.runtime_parity_plan
-            .has_logged_or_persisted_private_details()
-    }
-
-    fn has_placeholder_replacement_permission(self) -> bool {
-        false
-    }
-
-    fn can_replace_manage_placeholder(self) -> bool {
-        self.has_cef_only_web_pane_engine_contract()
-            && self.has_issued_runtime_url()
-            && self.has_runtime_cef_browser()
-            && self.has_normal_layout_cef_surface()
-            && self.has_runtime_file_bridge()
-            && self.has_run_runtime_file_operation()
-            && !self.has_cef_or_file_bridge_payload()
-            && !self.has_hidden_manage_surface_mount()
-            && !self.has_private_runtime_data()
-            && !self.has_logged_or_persisted_private_details()
-            && self.has_placeholder_replacement_permission()
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManagePlaceholderReplacementPreflightState {
-    ManagePlaceholderReplacementPreflightGate(ManagePlaceholderReplacementPreflightGate),
-    MissingManagePlaceholderReplacementPreflightGate,
-}
-
-#[allow(dead_code)]
-impl ManagePlaceholderReplacementPreflightState {
-    fn from_runtime_parity_state(runtime_parity_state: ManageCefRuntimeParityState) -> Self {
-        ManagePlaceholderReplacementPreflightGate::from_runtime_parity_state(runtime_parity_state)
-            .map(Self::ManagePlaceholderReplacementPreflightGate)
-            .unwrap_or(Self::MissingManagePlaceholderReplacementPreflightGate)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => gate.privacy_label(),
-            Self::MissingManagePlaceholderReplacementPreflightGate => {
-                "missingManagePlaceholderReplacementPreflightGate"
-            }
-        }
-    }
-
-    fn runtime_parity_plan_privacy_label(self) -> &'static str {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => {
-                gate.runtime_parity_plan_privacy_label()
-            }
-            Self::MissingManagePlaceholderReplacementPreflightGate => "none",
-        }
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => {
-                gate.web_pane_engine_privacy_label()
-            }
-            Self::MissingManagePlaceholderReplacementPreflightGate => "none",
-        }
-    }
-
-    fn has_preflight_gate(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(_) => true,
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_cef_only_web_pane_engine_contract()
-            }
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn rejects_non_cef_web_pane_engines(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => {
-                gate.rejects_non_cef_web_pane_engines()
-            }
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_issued_runtime_url(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => gate.has_issued_runtime_url(),
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_runtime_cef_browser(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => gate.has_runtime_cef_browser(),
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_normal_layout_cef_surface(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_normal_layout_cef_surface()
-            }
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_runtime_file_bridge(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => gate.has_runtime_file_bridge(),
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_run_runtime_file_operation(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_run_runtime_file_operation()
-            }
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_cef_or_file_bridge_payload(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_cef_or_file_bridge_payload()
-            }
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_hidden_manage_surface_mount(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_hidden_manage_surface_mount()
-            }
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_private_runtime_data(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_private_runtime_data()
-            }
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_logged_or_persisted_private_details(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_logged_or_persisted_private_details()
-            }
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn has_placeholder_replacement_permission(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => {
-                gate.has_placeholder_replacement_permission()
-            }
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-
-    fn can_replace_manage_placeholder(self) -> bool {
-        match self {
-            Self::ManagePlaceholderReplacementPreflightGate(gate) => {
-                gate.can_replace_manage_placeholder()
-            }
-            Self::MissingManagePlaceholderReplacementPreflightGate => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Eq)]
-struct ManageCefMountRequest {
-    identity: ManageCefMountRequestIdentity,
-    entrypoint_state: ManageCefMountEntrypointState,
-    materialization_state: ManageCefMaterializationState,
-    file_bridge_mount_state: ManageFileBridgeMountState,
-    file_operation_proof_state: ManageProjectScopedFileOperationProofState,
-    runtime_parity_state: ManageCefRuntimeParityState,
-    placeholder_replacement_preflight_state: ManagePlaceholderReplacementPreflightState,
-}
-
-#[allow(dead_code)]
-impl ManageCefMountRequest {
-    fn has_first_party_entrypoint(&self) -> bool {
-        self.entrypoint_state.has_first_party_entrypoint()
-    }
-
-    fn has_cef_materialization_contract(&self) -> bool {
-        self.materialization_state
-            .has_cef_materialization_contract()
-    }
-
-    fn has_source_ledger_cef_materialization_contract(&self) -> bool {
-        self.materialization_state
-            .has_source_ledger_cef_materialization_contract()
-    }
-
-    fn has_instantiated_runtime_cef_browser(&self) -> bool {
-        self.materialization_state
-            .has_instantiated_runtime_cef_browser()
-    }
-
-    fn can_mount_cef(&self) -> bool {
-        self.entrypoint_state.has_first_party_entrypoint()
-            && self.materialization_state.can_materialize_cef()
-    }
-
-    fn can_mount_file_bridge(&self) -> bool {
-        self.file_bridge_mount_state.can_mount_file_bridge()
-    }
-
-    fn has_source_ledger_file_bridge_mount_contract(&self) -> bool {
-        self.file_bridge_mount_state
-            .has_source_ledger_file_bridge_mount_contract()
-    }
-
-    fn has_mounted_runtime_file_bridge(&self) -> bool {
-        self.file_bridge_mount_state
-            .has_mounted_runtime_file_bridge()
-    }
-
-    fn has_source_ledger_project_scoped_file_operation_proof(&self) -> bool {
-        self.file_operation_proof_state
-            .has_source_ledger_project_scoped_file_operation_proof()
-    }
-
-    fn has_run_runtime_file_operation(&self) -> bool {
-        self.file_operation_proof_state
-            .has_run_runtime_file_operation()
-    }
-
-    fn counts_as_source_only_runtime_parity(&self) -> bool {
-        self.runtime_parity_state
-            .counts_as_source_only_runtime_parity()
-    }
-
-    fn has_manage_placeholder_replacement_preflight_gate(&self) -> bool {
-        self.placeholder_replacement_preflight_state
-            .has_preflight_gate()
-    }
-
-    fn can_materialize_manage_surface(&self) -> bool {
-        self.can_mount_cef() && self.can_mount_file_bridge()
-    }
-
-    fn can_replace_manage_placeholder(&self) -> bool {
-        self.placeholder_replacement_preflight_state
-            .can_replace_manage_placeholder()
-    }
-
-    fn shell_state_privacy_boundary_json(&self) -> serde_json::Value {
-        let mut boundary = serde_json::Map::new();
-        insert_manage_shell_state_privacy_boundary_field(&mut boundary, "surface", "manage");
-        insert_manage_shell_state_privacy_boundary_field(&mut boundary, "requested", true);
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasExactRuntimeIdentity",
-            true,
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "entrypointState",
-            self.entrypoint_state.privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "entrypointResource",
-            self.entrypoint_state.app_resource_privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "entrypointEngine",
-            self.entrypoint_state.engine_privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasFirstPartyEntrypoint",
-            self.has_first_party_entrypoint(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "materializationState",
-            self.materialization_state.privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "materializationEngine",
-            self.materialization_state.cef_engine_privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasSourceLedgerCefMaterializationContract",
-            self.has_source_ledger_cef_materialization_contract(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasCefMaterializationContract",
-            self.has_cef_materialization_contract(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasInstantiatedRuntimeCefBrowser",
-            self.has_instantiated_runtime_cef_browser(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "fileBridgeMountState",
-            self.file_bridge_mount_state.privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasSourceLedgerFileBridgeMountContract",
-            self.has_source_ledger_file_bridge_mount_contract(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasMountedRuntimeFileBridge",
-            self.has_mounted_runtime_file_bridge(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "fileOperationProofState",
-            self.file_operation_proof_state.privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "operationProofDecisionKind",
-            self.file_operation_proof_state
-                .decision_kind_privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "operationKind",
-            self.file_operation_proof_state
-                .operation_kind_privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "operationRejectionKind",
-            self.file_operation_proof_state
-                .rejection_kind_privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasSourceLedgerProjectScopedFileOperationProof",
-            self.has_source_ledger_project_scoped_file_operation_proof(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasAcceptedOperationDecision",
-            self.file_operation_proof_state
-                .has_accepted_operation_decision(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasRunRuntimeFileOperation",
-            self.has_run_runtime_file_operation(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "runtimeParityState",
-            self.runtime_parity_state.privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "runtimeParityMaterializationContract",
-            self.runtime_parity_state
-                .materialization_contract_privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "runtimeParityFileBridgeMountContract",
-            self.runtime_parity_state
-                .file_bridge_mount_contract_privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "runtimeParityFileOperationProof",
-            self.runtime_parity_state
-                .file_operation_proof_contract_privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "webPaneEngine",
-            self.runtime_parity_state.web_pane_engine_privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasCefOnlyWebPaneEngineContract",
-            self.runtime_parity_state
-                .has_cef_only_web_pane_engine_contract(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "rejectsNonCefWebPaneEngines",
-            self.runtime_parity_state.rejects_non_cef_web_pane_engines(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "countsAsSourceOnlyRuntimeParity",
-            self.counts_as_source_only_runtime_parity(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasRuntimeUrl",
-            self.runtime_parity_state.has_runtime_url(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasRuntimeCefBrowser",
-            self.runtime_parity_state.has_runtime_cef_browser(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasRuntimeFileBridge",
-            self.runtime_parity_state.has_runtime_file_bridge(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasCefOrFileBridgePayload",
-            self.runtime_parity_state.has_cef_or_file_bridge_payload(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasHiddenManageSurfaceMount",
-            self.runtime_parity_state.has_hidden_manage_surface_mount(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasLoggedOrPersistedPrivateDetails",
-            self.runtime_parity_state
-                .has_logged_or_persisted_private_details(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightState",
-            self.placeholder_replacement_preflight_state.privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightRuntimeParityPlan",
-            self.placeholder_replacement_preflight_state
-                .runtime_parity_plan_privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightWebPaneEngine",
-            self.placeholder_replacement_preflight_state
-                .web_pane_engine_privacy_label(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "hasManagePlaceholderReplacementPreflightGate",
-            self.has_manage_placeholder_replacement_preflight_gate(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasCefOnlyWebPaneEngineContract",
-            self.placeholder_replacement_preflight_state
-                .has_cef_only_web_pane_engine_contract(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightRejectsNonCefWebPaneEngines",
-            self.placeholder_replacement_preflight_state
-                .rejects_non_cef_web_pane_engines(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasIssuedRuntimeUrl",
-            self.placeholder_replacement_preflight_state
-                .has_issued_runtime_url(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasRuntimeCefBrowser",
-            self.placeholder_replacement_preflight_state
-                .has_runtime_cef_browser(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasNormalLayoutCefSurface",
-            self.placeholder_replacement_preflight_state
-                .has_normal_layout_cef_surface(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasRuntimeFileBridge",
-            self.placeholder_replacement_preflight_state
-                .has_runtime_file_bridge(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasRunRuntimeFileOperation",
-            self.placeholder_replacement_preflight_state
-                .has_run_runtime_file_operation(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasCefOrFileBridgePayload",
-            self.placeholder_replacement_preflight_state
-                .has_cef_or_file_bridge_payload(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasHiddenManageSurfaceMount",
-            self.placeholder_replacement_preflight_state
-                .has_hidden_manage_surface_mount(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasPrivateRuntimeData",
-            self.placeholder_replacement_preflight_state
-                .has_private_runtime_data(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasLoggedOrPersistedPrivateDetails",
-            self.placeholder_replacement_preflight_state
-                .has_logged_or_persisted_private_details(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPreflightHasPlaceholderReplacementPermission",
-            self.placeholder_replacement_preflight_state
-                .has_placeholder_replacement_permission(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "canReplaceManagePlaceholder",
-            self.can_replace_manage_placeholder(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "canMountCef",
-            self.can_mount_cef(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "canMountFileBridge",
-            self.can_mount_file_bridge(),
-        );
-        insert_manage_shell_state_privacy_boundary_field(
-            &mut boundary,
-            "canMountManageSurface",
-            self.can_materialize_manage_surface(),
-        );
-
-        serde_json::Value::Object(boundary)
-    }
-}
-
-/*
-CDXC:GPUIManagePrivacyBoundary 2026-06-24-09:59:
-The Manage shell-state privacy boundary enumerates CEF, file-bridge, operation-proof, runtime-parity, and placeholder-preflight facts for audits. Build this payload with explicit serde_json::Map insertion so privacy-safe fields stay named at the writer boundary while avoiding serde_json::json! macro recursion limits.
-*/
-fn insert_manage_shell_state_privacy_boundary_field(
-    boundary: &mut serde_json::Map<String, serde_json::Value>,
-    key: &'static str,
-    value: impl Into<serde_json::Value>,
-) {
-    boundary.insert(key.to_string(), value.into());
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManageCefMountRequestBlockReason {
-    WrongSurface,
-    RuntimeBlocked(ProjectScopedRealSurfaceRuntimeBlockReason),
-}
-
-#[allow(dead_code)]
-impl ManageCefMountRequestBlockReason {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::WrongSurface => "wrongSurface",
-            Self::RuntimeBlocked(_) => "runtimeBlocked",
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Eq)]
-enum ManageCefMountRequestContract {
-    Requested(ManageCefMountRequest),
-    Blocked(ManageCefMountRequestBlockReason),
-}
-
-#[allow(dead_code)]
-impl ManageCefMountRequestContract {
-    fn materializable_request(&self) -> Option<&ManageCefMountRequest> {
-        match self {
-            Self::Requested(request) if request.can_materialize_manage_surface() => Some(request),
-            _ => None,
-        }
-    }
-
-    fn shell_state_privacy_boundary_json(&self) -> serde_json::Value {
-        match self {
-            Self::Requested(request) => request.shell_state_privacy_boundary_json(),
-            Self::Blocked(reason) => {
-                let mut boundary = serde_json::Map::new();
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "surface",
-                    "manage",
-                );
-                insert_manage_shell_state_privacy_boundary_field(&mut boundary, "requested", false);
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasExactRuntimeIdentity",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "blockReason",
-                    reason.privacy_label(),
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasFirstPartyEntrypoint",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "materializationState",
-                    ManageCefMaterializationState::MissingCefMaterializationContract
-                        .privacy_label(),
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "materializationEngine",
-                    "none",
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasSourceLedgerCefMaterializationContract",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasCefMaterializationContract",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasInstantiatedRuntimeCefBrowser",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "fileBridgeMountState",
-                    ManageFileBridgeMountState::MissingFileBridgeMountContract.privacy_label(),
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasSourceLedgerFileBridgeMountContract",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasMountedRuntimeFileBridge",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "fileOperationProofState",
-                    ManageProjectScopedFileOperationProofState::MissingProjectScopedFileOperationProof.privacy_label(),
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "operationProofDecisionKind",
-                    "none",
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "operationKind",
-                    "none",
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "operationRejectionKind",
-                    "none",
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasSourceLedgerProjectScopedFileOperationProof",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasAcceptedOperationDecision",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasRunRuntimeFileOperation",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "runtimeParityState",
-                    ManageCefRuntimeParityState::MissingRuntimeParityPlan.privacy_label(),
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "runtimeParityMaterializationContract",
-                    "none",
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "runtimeParityFileBridgeMountContract",
-                    "none",
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "runtimeParityFileOperationProof",
-                    "none",
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "webPaneEngine",
-                    "none",
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasCefOnlyWebPaneEngineContract",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "rejectsNonCefWebPaneEngines",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "countsAsSourceOnlyRuntimeParity",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasRuntimeUrl",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasRuntimeCefBrowser",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasRuntimeFileBridge",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasCefOrFileBridgePayload",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasHiddenManageSurfaceMount",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasLoggedOrPersistedPrivateDetails",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightState",
-                    ManagePlaceholderReplacementPreflightState::MissingManagePlaceholderReplacementPreflightGate.privacy_label(),
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightRuntimeParityPlan",
-                    "none",
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightWebPaneEngine",
-                    "none",
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "hasManagePlaceholderReplacementPreflightGate",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasCefOnlyWebPaneEngineContract",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightRejectsNonCefWebPaneEngines",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasIssuedRuntimeUrl",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasRuntimeCefBrowser",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasNormalLayoutCefSurface",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasRuntimeFileBridge",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasRunRuntimeFileOperation",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasCefOrFileBridgePayload",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasHiddenManageSurfaceMount",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasPrivateRuntimeData",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasLoggedOrPersistedPrivateDetails",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "placeholderReplacementPreflightHasPlaceholderReplacementPermission",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "canReplaceManagePlaceholder",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "canMountCef",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "canMountFileBridge",
-                    false,
-                );
-                insert_manage_shell_state_privacy_boundary_field(
-                    &mut boundary,
-                    "canMountManageSurface",
-                    false,
-                );
-
-                serde_json::Value::Object(boundary)
-            }
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn manage_cef_mount_request_contract_from_runtime_availability(
-    availability: &ProjectScopedRealSurfaceRuntimeAvailability,
-) -> ManageCefMountRequestContract {
-    manage_cef_mount_request_contract_from_runtime_availability_and_operation_decision(
-        availability,
-        None,
-    )
-}
-
-#[allow(dead_code)]
-fn manage_cef_mount_request_contract_from_runtime_availability_and_operation_decision(
-    availability: &ProjectScopedRealSurfaceRuntimeAvailability,
-    operation_decision: Option<ManageFileWorkareaBridgeOperationPolicyDecision>,
-) -> ManageCefMountRequestContract {
-    match availability {
-        ProjectScopedRealSurfaceRuntimeAvailability::Ready(surface) => {
-            match ManageCefMountRequestIdentity::from_project_scoped_identity(&surface.identity) {
-                Ok(identity) => {
-                    let entrypoint_state = ManageCefMountEntrypointState::app_resource_entrypoint();
-                    let materialization_state =
-                        ManageCefMaterializationState::from_ready_manage_request(entrypoint_state);
-                    let file_bridge_mount_state =
-                        ManageFileBridgeMountState::from_ready_manage_request(
-                            materialization_state,
-                        );
-                    let file_operation_proof_state =
-                        ManageProjectScopedFileOperationProofState::from_ready_manage_request(
-                            file_bridge_mount_state,
-                            operation_decision,
-                        );
-                    let runtime_parity_state =
-                        ManageCefRuntimeParityState::from_ready_manage_request(
-                            entrypoint_state,
-                            materialization_state,
-                            file_bridge_mount_state,
-                            file_operation_proof_state,
-                        );
-                    let placeholder_replacement_preflight_state =
-                        ManagePlaceholderReplacementPreflightState::from_runtime_parity_state(
-                            runtime_parity_state,
-                        );
-                    ManageCefMountRequestContract::Requested(ManageCefMountRequest {
-                        identity,
-                        entrypoint_state,
-                        materialization_state,
-                        file_bridge_mount_state,
-                        file_operation_proof_state,
-                        runtime_parity_state,
-                        placeholder_replacement_preflight_state,
-                    })
-                }
-                Err(reason) => ManageCefMountRequestContract::Blocked(reason),
-            }
-        }
-        ProjectScopedRealSurfaceRuntimeAvailability::Blocked(reason) => {
-            ManageCefMountRequestContract::Blocked(
-                ManageCefMountRequestBlockReason::RuntimeBlocked(*reason),
-            )
-        }
-    }
-}
-
 struct ProjectScopedRealSurfaceRuntimeState {
     kind: ProjectScopedRealSurfaceKind,
     active_identity: Option<ProjectScopedRealSurfaceRuntimeIdentity>,
@@ -7898,37 +4091,6 @@ impl ProjectScopedRealSurfaceRuntimeState {
         })
     }
 
-    #[allow(dead_code)]
-    fn kanban_cef_mount_request_contract(
-        &self,
-        snapshot: Option<&GpuiProjectSnapshot>,
-    ) -> KanbanCefMountRequestContract {
-        if self.kind != ProjectScopedRealSurfaceKind::Kanban {
-            return KanbanCefMountRequestContract::Blocked(
-                KanbanCefMountRequestBlockReason::WrongSurface,
-            );
-        }
-
-        kanban_cef_mount_request_contract_from_runtime_availability(&self.availability(snapshot))
-    }
-
-    #[allow(dead_code)]
-    fn manage_cef_mount_request_contract(
-        &self,
-        snapshot: Option<&GpuiProjectSnapshot>,
-    ) -> ManageCefMountRequestContract {
-        if self.kind != ProjectScopedRealSurfaceKind::Manage {
-            return ManageCefMountRequestContract::Blocked(
-                ManageCefMountRequestBlockReason::WrongSurface,
-            );
-        }
-
-        manage_cef_mount_request_contract_from_runtime_availability_and_operation_decision(
-            &self.availability(snapshot),
-            self.manage_file_workarea_operation_decision,
-        )
-    }
-
     fn shell_state_privacy_boundary_json(&self) -> serde_json::Value {
         serde_json::json!({
             "hasActiveIdentity": self.active_identity.is_some(),
@@ -8023,8 +4185,6 @@ fn store_sidebar_workarea_bridge_event(
         cef::SidebarBridgeEvent::WorkspaceTerminalFocus(_) => false,
         cef::SidebarBridgeEvent::WorkspaceTerminalRenameCommand(_) => false,
         cef::SidebarBridgeEvent::WorkspaceTerminalLifecycleResult(_) => false,
-        // CDXC:GPUISidebarFocusDebug 2026-06-26-04:55: Focus diagnostics are consumed only by the sanitized support-log writer, never by workarea readiness stores or status/pet presentation persistence.
-        cef::SidebarBridgeEvent::SessionFocusDebugLog(_) => false,
         cef::SidebarBridgeEvent::SessionStatusIndicators(_) => false,
         cef::SidebarBridgeEvent::PetOverlayState(_) => false,
     }
@@ -8188,662 +4348,6 @@ fn required_project_workarea_readiness_contract_string_field(
     Ok(value.to_string())
 }
 
-/*
-CDXC:GPUIPhase10BlockerLedger 2026-06-23-15:02:
-Phase 10 guardrail evidence must stay executable in source until the matching runtime contracts exist. This ledger is a source-only guardrail: it records accepted evidence, historical missing gates, and runtime caveats without mounting surfaces, synthesizing readiness, changing runtime behavior, adding logs, or converting placeholder work into completed parity.
-
-CDXC:GPUIPhase10BlockerLedger 2026-06-23-15:22:
-After slice 201, the source ledger must include Browser active-project identity/readiness as a missing gate too. Rejecting browserWorkareaId hardens Phase 1; it does not satisfy Browser runtime signoff, import, blank-popup transfer, CEF suspend/teardown, privacy, or validation requirements.
-
-CDXC:GPUIPhase10BlockerLedger 2026-06-23-15:50:
-Slice 208 recorded Phase 9 and running-app evidence as external signoff blockers under the then-current no-validation instruction. Slice 244 supersedes that for the source-ledger purpose: validation remains not run and outside this agent workflow, but it is not a current source-ledger blocker.
-
-CDXC:GPUIPhase10BlockerLedger 2026-06-23-16:06:
-Slice 212 keeps the source guardrail ledger mirrored to the docs table by adding explicit Terminal lifecycle activation/reattach and cross-surface runtime-transfer guardrails. This is source-only ledger data: it must not implement runtime wake, reattach, process/content transfer, validation, logging, persistence, or fallback behavior.
-
-CDXC:GPUIBrowserWorkareaReadiness 2026-06-23-16:24:
-Slice 215 adds Browser active-project identity/readiness as source-only boundary evidence. The ledger should record the strict enum-only parser/store without clearing the need for a Browser workarea identity product contract or CEF materialization policy decision.
-
-CDXC:GPUIManageFileWorkareaBridge 2026-06-23-16:35:
-Slice 216 adds a strict Manage file/workarea operation request parser/store as source-only boundary evidence. Slice 239 supersedes the old macOS-specific web-surface blocker with a CEF mount contract while keeping the file-bridge readiness/mount contract and project-scoped file-operation proof separate.
-
-CDXC:GPUIPhase10BlockerLedger 2026-06-23-16:54:
-Slice 218 separated Source's source-only readiness parser/store evidence from the then-missing real mount gates. Slice 248 supersedes those Source source-ledger gates with explicit CEF/code-server request contracts while preserving the runtime caveat: do not claim CEF creation, placeholder replacement, URL/path/code-server payloads, fallback localhost probes, logging, persistence, or synthetic mount state.
-
-CDXC:GPUIKanbanWorkareaParity 2026-06-24-07:41:
-Kanban source-ledger readiness, CEF mount-request, materialization, runtime-parity plan, placeholder preflight, URL-boundary, and owner-gate evidence are accepted for this pass. Real runtime CEF creation and placeholder replacement remain explicit future CEF-only work and must not be inferred through URL/path/CEF payloads, fallback probes, logging, persistence, hidden surfaces, or synthetic mount state.
-
-CDXC:GPUIManageWorkareaParity 2026-06-24-07:41:
-Manage source-ledger readiness, lifecycle, operation-request, CEF mount, materialization, file-bridge, file-operation proof, runtime-parity plan, placeholder preflight, URL-boundary, and owner-gate evidence are accepted for this pass. Real runtime CEF creation, runtime file-bridge mounting, file I/O, and placeholder replacement remain explicit future CEF-only work and must not be inferred through URL/path/file/private payloads, fallback probes, logging, persistence, hidden surfaces, or synthetic mount state.
-
-CDXC:GPUIBrowserRuntimeParity 2026-06-23-17:15:
-Slice 221 split Browser Phase 10 ledger evidence and then-missing gates so source-only profile/tab shell state, feedback injection, restored-placeholder no-op, unsupported import, blank-popup no-op, hide-and-hold, sanitized persistence, and readiness parser/store evidence could not be mistaken for missing Browser product/API decisions. Slice 252 supersedes those source-ledger gates with explicit no-runtime contracts while preserving the runtime caveat.
-
-CDXC:GPUITerminalLifecycle 2026-06-23-17:19:
-Slice 222 expanded the Phase 10 Terminal guardrail ledger as reconciliation-only evidence and recorded denied clipboard drain/no-op behavior as the then-current runtime clipboard state. Slice 233 supersedes that clipboard substatus with a source-side surface-scoped app-thread handoff, slice 235 supersedes the broad restored-materialization source gap with source-side startup contract evidence, slice 236 supersedes the broad sleeping/popped-out source gap with parked-owner contract evidence, and slice 237 supersedes the close-confirm ABI gap with source-side `needs_confirm_quit` evidence; terminal source/runtime evidence is accepted for the current source-ledger purpose, with native physical-key identity and parity/product decisions remaining separate.
-
-CDXC:GPUIRuntimeTransfer 2026-06-23-17:25:
-Slice 223 splits the cross-surface runtime/process/content transfer ledger into shell-only source evidence categories. Agents/command visible-title placeholders, tab/group/card movement, identity-only Source/Kanban/gated Manage movement, Browser profile/tab shell identity preservation, and the no-runtime-transfer privacy boundary must remain evidence only until product, per-source/target mount/runtime, family-specific transfer, and privacy contracts exist.
-
-CDXC:GPUITerminalLifecycle 2026-06-23-17:37:
-Slice 225 reconciles Terminal startup status as narrower runtime-only source evidence. The ledger may credit startup Ghostty metadata readiness/failure snapshots, readiness handoff plans, process-exited failure results, startup host/surface ownership transfer into Running maps, slice 235 restored-unmounted source materialization, slice 236 parked-owner wake/reattach, and slice 237 source-side close-confirm ABI evidence for the current source-ledger purpose.
-
-CDXC:GPUITerminalCloseConfirm 2026-06-23-17:45:
-Slice 226 splits close-confirm evidence from the missing confirm path. Request-close and confirmation-needed callbacks may create runtime-only pending state, exact pending identities may be validated, cancel may clear the matching runtime request, confirmed callbacks may clean up only exact current slots, and Agents/command maps plus privacy boundaries must stay isolated. At that point user confirmation still lacked a real UI surface, GhosttyKit confirm-close ABI, and app/runtime acceptance proof; later UI surface work still must not fake shell removal from confirm actions.
-
-CDXC:GPUITerminalClipboardPhysicalKeys 2026-06-23-17:51:
-Slice 227 separated Terminal clipboard and key evidence into source-only boundaries before the runtime clipboard handoff existed. Explicit Cmd+V paste may forward only explicit string clipboard entries to the exact focused mounted Agents or command surface and must not synthesize file paths; slice 233 now replaces the denied runtime clipboard drain with surface-scoped app-thread handoff evidence. Committed `key_char` and IME/preedit text-service delivery are text paths only; layout-only GPUI key values, Control/Cmd physical cases, and mouse modifier mapping do not provide native physical-key identity, so slice 253 accepts this as the current source-ledger product behavior without changing runtime physical-key forwarding.
-
-CDXC:GPUITerminalActivationRuntimeGuard 2026-06-23-18:00:
-Slice 228 adds a runtime-only startup eligibility guard to `Mounting` sessions so blocked placeholder activation and restored shell-state `mounting` cannot accidentally duplicate a runtime. Slice 235 narrows this by allowing explicit restored-unmounted materialization into the startup pipeline, while slice 236 keeps sleeping wake and popped-out reattach out of startup and limits them to exact parked-owner transfer. Slice 239 accepts this terminal source/runtime evidence for the current source-ledger purpose.
-
-CDXC:GPUITerminalActivationRuntimeGuard 2026-06-23-18:12:
-Slice 229 records the restored shell-state edge separately from runtime activation. `presentationState:"mounting"` restored from shell JSON is presentation-only and non-startup-eligible because persistence does not carry whether Mounting came from a new startup, failed retry, wake, materialize, or reattach action. New terminal creation and in-process failed-startup retry remain startup eligible through runtime-only state transitions; no fallback startup path, persistent runtime data, terminal content, or logging is added.
-
-CDXC:GPUITerminalStartupRetryIdentity 2026-06-23-18:19:
-Slice 230 records source-only retry attempt identity evidence. Explicit failed-startup retry keeps the durable shell `TerminalSessionId`, tab, title, and Mounting presentation flow, but rotates the process-local runtime session id before the next startup candidate, launch plan, or completion intent is created; sleeping and popped-out activation remain non-startup-eligible, and restored-unmounted materialization must not rotate as a retry attempt.
-
-CDXC:GPUITerminalRestoredMaterialization 2026-06-23-19:26:
-Slice 235 narrows restored-unmounted materialization: explicit restored placeholder activation may enter the existing startup pipeline with its current process-local runtime id, while restored shell-state `mounting` after restart stays presentation-only. Sleeping wake and popped-out reattach are separate from restored materialization and must not enter the startup pipeline.
-
-CDXC:GPUTerminalParkedOwnerReattach 2026-06-23-19:41:
-Slice 236 adds source-side parked runtime owner contracts for sleeping wake and popped-out reattach. Existing AppKit host and Ghostty surface owners can be parked only from exact Sleeping/popped-out detaches and reattached only to the same shell session, runtime id, pane/session slot, and current body geometry; this is accepted for the current source-ledger purpose.
-
-CDXC:GPUIProjectSidebarBridge 2026-06-23-18:29:
-Slice 231 records the sidebar-scoped safe external bridge into the existing strict Source, Browser, Kanban/Manage readiness stores and Manage operation-request store. This is source-only bridge evidence; it must not claim Source CEF/code-server mount, Kanban/Manage CEF or file-bridge mounts, Browser workarea identity/product contract, placeholder replacement, privacy proof, validation, or runtime evidence.
-
-CDXC:GPUITerminalCloseConfirm 2026-06-23-18:48:
-Slice 232 adds a source-side close-confirm UI surface contract only. Agents and command pending prompts render as family-scoped normal-layout banners with generic text and a Keep Open cancel action; slice 237 supersedes the missing GhosttyKit ABI with source evidence for the current source-ledger purpose.
-
-CDXC:GPUITerminalCloseConfirm 2026-06-23-20:04:
-Slice 237 replaces the disabled confirm action with source-side evidence from GhosttyKit's real `ghostty_surface_needs_confirm_quit` query. A confirmed prompt may remove only the exact mounted Agents or command shell/session through the existing model close path after matching pending state, current slot, runtime identity, mounted owner, and `needs_confirm_quit`; validation stays outside this agent workflow.
-
-CDXC:GPUITerminalClipboardPhysicalKeys 2026-06-23-19:07:
-Slice 233 replaces the denied-drain runtime clipboard gap with a source-side surface-scoped app-thread handoff for mounted Agents and command Ghostty owners. The ledger may credit standard clipboard read/write handoff only for exact still-mounted owners and explicit-string reads; slice 253 later accepts the current terminal physical-key/product behavior for this source-ledger pass without changing runtime input.
-
-CDXC:GPUITerminalClipboardPhysicalKeys 2026-06-24-04:15:
-Slice 253 accepts the current terminal physical-key/product behavior for the source ledger without changing runtime input. GPUI still lacks native keycode/UIEvents-code identity, physical keys are not synthesized from layout-only key data, Control/Cmd physical-key cases stay rejected by the committed-text helper, and current committed key_char, IME, preedit, and text-service paths remain the only accepted source behavior.
-
-CDXC:GPUIPhase10BlockerLedger 2026-06-23-20:44:
-Source-only runtime parity evidence may satisfy this Phase 10 source-ledger purpose when it directly matches current source/runtime contracts. Do not keep signoff blockers solely because accepted evidence is source-only; keep blockers only for explicit missing contracts or unresolved product/API decisions.
-
-CDXC:GPUIProjectWorkareaParity 2026-06-24-07:41:
-Kanban and Manage panes must use CEF for GPUI cross-platform parity. The Phase 10 ledger treats their source-ledger CEF materialization, runtime-parity, URL-boundary, owner-gate, and Manage file-bridge contracts as accepted for this pass, while real runtime CEF/file-bridge creation, file I/O, URL issuance, and placeholder replacement remain explicit future CEF-only work.
-
-CDXC:GPUIKanbanCefMount 2026-06-23-21:32:
-Slice 241 adds only the source-side Kanban CEF mount-request boundary. Slice 249 supersedes the first-party entrypoint gap with a fixed CEF app-resource label, and slice 250 supersedes the CEF materialization source-ledger gap while leaving runtime CEF instantiation absent.
-
-CDXC:GPUIKanbanCefMount 2026-06-24-03:41:
-Slice 250 supersedes the Kanban CEF materialization source-ledger gap with a CEF-only source-ledger contract while keeping runtime CEF browser instantiation, runtime URLs, hidden mounts, logging/persistence, private payloads, and placeholder replacement absent.
-
-CDXC:GPUIKanbanCefMount 2026-06-24-04:46:
-Slice 256 records Kanban CEF mount runtime parity as a source-only plan after exact ready Kanban identity, fixed first-party CEF app-resource entrypoint, and CEF-only source-ledger materialization evidence exist. This counts for the source ledger, accepts only CEF as the web-pane engine, rejects non-CEF labels by source contract, and still does not instantiate CEF, issue runtime URLs, mount hidden surfaces, log/persist private data, or replace placeholders.
-
-CDXC:GPUIKanbanPlaceholderReplacement 2026-06-24-05:22:
-Slice 260 records a Kanban placeholder-replacement preflight gate after the source-only runtime-parity plan exists. The gate centralizes future replacement requirements while current source still reports no issued runtime URL, no instantiated CEF browser, no normal-layout CEF surface, no hidden mount, no private runtime data, and no replacement permission.
-
-CDXC:GPUIManageCefMount 2026-06-24-07:41:
-Slice 242 adds the source-side Manage CEF mount-request boundary, slice 250 adds first-party CEF app-resource entrypoint evidence, and slice 251 accepts the source-ledger CEF materialization, file-bridge mount, and project-scoped file-operation proof gates for this pass. Runtime CEF/file-bridge/file-operation work remains absent.
-
-CDXC:GPUIManageCefMount 2026-06-24-03:41:
-Slice 250 credits the Manage first-party CEF app-resource entrypoint as source-only evidence. Slice 251 supersedes the separate Manage CEF materialization, file-bridge mount, and project-scoped file-operation proof source-ledger gates, with no CEF/file-bridge creation or private payload expansion.
-
-CDXC:GPUIManageCefMount 2026-06-24-03:58:
-Slice 251 retires the remaining Manage source-ledger gates with CEF-only materialization evidence, source-only file-bridge mount evidence, and project-scoped file-operation proof evidence. Runtime Manage remains caveated: no CEF browser is instantiated, no file bridge is mounted, no file operation is run, no private payload is accepted or persisted, no WKWebView path exists, and the placeholder is not replaced.
-
-CDXC:GPUIManagePlaceholderReplacement 2026-06-24-05:27:
-Slice 261 records a Manage placeholder-replacement preflight gate after the source-only runtime-parity plan exists. The gate is CEF-only and centralizes future replacement requirements while current source still reports no issued runtime URL, no instantiated CEF browser, no normal-layout CEF surface, no runtime file bridge, no runtime file operation, no CEF/file-bridge payload, no hidden mount, no private runtime data/logging/persistence, and no replacement permission.
-
-CDXC:GPUISourceCefCodeServerMount 2026-06-23-21:43:
-Slice 243 adds only the source-side Source CEF/code-server mount-request boundary. Slice 245 supersedes the entrypoint gap with a fixed app-resource entrypoint, slice 246 supersedes the process gap with a non-spawning app-resource launch plan, slice 247 supersedes the URL gap with source-ledger URL-boundary evidence, and slice 248 supersedes the Source CEF materialization source-ledger gap without instantiating a runtime CEF browser.
-
-CDXC:GPUISourceCefCodeServerMount 2026-06-24-02:53:
-Slice 245 recognizes the fixed bundled app-resource code-server entrypoint shape for Source requests. Slice 246 recognizes a source-only app-resource process launch plan, slice 247 recognizes source-ledger URL-boundary evidence without issuing a runtime URL, and slice 248 recognizes a CEF-only source-ledger materialization contract. Runtime CEF instantiation, paths, fallback probes, hidden mounts, and placeholder replacement remain absent.
-
-CDXC:GPUISourceCefCodeServerMount 2026-06-24-02:59:
-Slice 246 adds a source-only app-resource process launch-plan contract formed only from the exact ready Source runtime request and fixed app-resource entrypoint/runtime contract. It is not a spawned process and carries no cwd, args, env, URL, port, pid, stdout/stderr, paths, logs, persistence, hidden mount, CEF creation, or placeholder replacement; slice 248 later removes the CEF materialization source-ledger gap without runtime instantiation.
-
-CDXC:GPUISourceCefCodeServerMount 2026-06-24-03:06:
-Slice 247 retires the Source URL gap only as source-ledger URL-boundary evidence derived from the exact ready Source request plus app-resource launch-plan state. It does not issue, store, log, persist, synthesize, or expose a runtime URL value; slice 248 later adds CEF-only source-ledger materialization without runtime CEF browser creation.
-
-CDXC:GPUISourceCefCodeServerMount 2026-06-24-03:12:
-Slice 248 retires Source CEF materialization only as a CEF-only source-ledger contract formed after exact ready Source identity, fixed app-resource entrypoint, non-spawning launch plan, and source-ledger URL-boundary evidence. It is not an instantiated runtime CEF browser, issued URL, code-server startup, hidden mount, private payload, logging/persistence path, or placeholder replacement.
-
-CDXC:GPUISourceCefCodeServerMount 2026-06-24-04:34:
-Slice 255 records Source CEF/code-server runtime parity as a source-only plan after the exact ready Source request has entrypoint, launch-plan, URL-boundary, and CEF-only materialization evidence. This plan counts for the source ledger, accepts only the CEF web-pane engine, rejects non-CEF engine labels by contract, and still does not instantiate CEF, start code-server, issue runtime URLs, mount hidden surfaces, log/persist private data, or replace placeholders.
-
-CDXC:GPUISourcePlaceholderReplacement 2026-06-24-05:20:
-Slice 259 records a Source placeholder-replacement preflight gate after the source-only runtime-parity plan exists. The gate centralizes future replacement requirements while current source still reports no runtime code-server process, no issued runtime URL, no instantiated CEF browser, no normal-layout CEF surface, no hidden mount, no private payload, no non-CEF engine, and no replacement permission.
-
-CDXC:GPUIProjectWorkareaPaneEngine 2026-06-24-05:52:
-Slice 262 adds a central source-ledger pane-engine policy for Source, Browser, Kanban, and Manage. The Phase 10 ledger must record it as accepted evidence only: all four panes require CEF-only web-pane labels, rejected WKWebView/WebKit/non-CEF/candidate labels are not retained, runtime checking stays with the user, and no CEF/code-server/file-bridge runtime, hidden surface, private payload, logging/persistence, or placeholder replacement is created.
-
-CDXC:GPUIProjectWorkareaCefSlots 2026-06-24-06:06:
-Slice 263 adds a Phase 10 ledger row for the Source/Kanban/Manage CEF ownership-slot scaffold. The ledger must count only the typed source-side slot boundary: Browser stays tab-owned, no runtime URL is issued, no CefSurface or file bridge is created, no private payload is stored, and placeholder replacement remains denied.
-
-CDXC:GPUIProjectWorkareaRuntimeUrlIssuance 2026-06-24-06:13:
-Slice 264 adds a Phase 10 source-ledger row for the Source/Kanban/Manage runtime URL issuance boundary. The row is source-only evidence: it requires the existing CEF-only runtime parity, placeholder preflight, and ownership-slot evidence, records that real runtime URL authority is absent, and must not issue, retain, serialize, or materialize URL values, CefSurface entities, private payloads, hidden mounts, or placeholder replacement.
-
-CDXC:GPUIProjectWorkareaSourceStartupNavigationReadiness 2026-06-24-06:24:
-Slice 265 adds a Phase 10 source-ledger row for Source startup navigation readiness. The row mirrors macOS source truth only as typed evidence: Source code-mode panes are CEF-backed, first code-server navigation stays deferred until a runtime readiness gate succeeds and an issued runtime URL exists, Browser/Kanban/Manage do not use this wait, and GPUI still performs no direct navigation, URL issuance, code-server startup, CefSurface creation, fallback probing, private payload storage, logging/persistence, hidden mount, or placeholder replacement.
-
-CDXC:GPUIProjectWorkareaSourceRuntimeCefSurfaceOwnerGate 2026-06-24-06:37:
-Slice 266 adds a Phase 10 source-ledger row for the Source runtime CEF surface owner/creation gate. Source runtime replacement now targets the app-owned CefSurface map and requires runtime readiness, real URL authority, an issued runtime URL, code-server process availability, a created normal-layout CEF surface, and explicit replacement permission. No Source CEF surface is created without those facts, no private runtime data is stored/logged/persisted, and runtime work must remain explicit, Source-only, CEF-only, normal-layout-only, and free of WKWebView/WebKit/non-CEF paths.
-
-CDXC:GPUIProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate 2026-06-24-06:49:
-Slice 267 adds a Phase 10 source-ledger row for the Kanban runtime CEF surface owner/creation gate. Kanban runtime replacement now targets the app-owned CefSurface map and requires real runtime URL authority, an issued runtime URL, a created normal-layout CEF surface, and explicit replacement permission. No Kanban CEF surface, hidden/offscreen mount, private runtime data, payload, log, or persistence path is created without those facts, and runtime work must remain explicit, Kanban-only, CEF-only, normal-layout-only, and free of WKWebView/WebKit/non-CEF paths.
-
-CDXC:GPUIProjectWorkareaManageRuntimeCefSurfaceOwnerGate 2026-06-24-07:00:
-Slice 268 adds a Phase 10 source-ledger row for the Manage runtime CEF/file-bridge owner/creation gate. Manage runtime replacement now targets the app-owned CefSurface map and requires real runtime URL authority, an issued runtime URL, CEF surface creation, runtime file-bridge mounting, runtime file-operation execution, and explicit replacement permission. No Manage CEF/file-bridge/runtime surface, hidden/offscreen mount, private runtime data, CEF/file-bridge/runtime payload, log, or persistence path is created without those facts, and runtime work must remain explicit, Manage-only, CEF-only, normal-layout-only, and free of WKWebView/WebKit/non-CEF paths.
-
-CDXC:GPUIProjectWorkareaRuntimeOwnerGateComments 2026-06-24-07:46:
-Slice 279 is source-only comment cleanup; slice 314 supersedes the runtime-surface direction. Source, Kanban, and Manage owner-gate rows now feed active app-owned CEF surface wiring, while current source still creates no CEF/file-bridge/runtime surface unless real URL/process/file-bridge facts and replacement permission exist. Web-pane runtime work must be explicit, CEF-only, normal-layout-only, privacy-safe, and reject WKWebView/WebKit/non-CEF paths.
-
-CDXC:GPUITerminalLifecycle 2026-06-23-20:44:
-The user accepts the current terminal source/runtime evidence as working for the source-ledger purpose. Terminal lifecycle evidence should not remain blocked merely by app/runtime acceptance wording; slice 253 later accepts the physical-key/product difference for the source ledger without changing runtime input, and validation remains covered by the outside-workflow row.
-
-CDXC:GPUIPhase10BlockerLedger 2026-06-23-21:50:
-Source-only runtime parity now counts for this source-ledger effort, and the user will runtime-check later. Record agent-side external running evidence, runtime visual evidence, formatting/tests/checks/app launch validation, and equivalent validation as not run outside this workflow, not as blockers to the current source-ledger parity map. CEF is the only target for future web panes; do not reintroduce non-CEF web-pane targets.
-
-CDXC:GPUIPhase10BlockerLedger 2026-06-24-07:18:
-The current workflow treats source-only CEF contracts as runtime parity for Source, Browser, Kanban, and Manage while the user performs later runtime checks. Terminal is accepted as working. Future web-pane work must use CEF only and keep WKWebView/WebKit/non-CEF labels rejected rather than adding alternate pane engines or fallback runtime probes.
-
-CDXC:GPUIPhase10BlockerLedger 2026-06-24-08:46:
-Slice 298 keeps the legacy Phase 10 blocker type names but treats the current source data as a source-level guardrail ledger mirrored to the guardrail table, not current signoff blockers. After slice 268 no source-ledger blockers remain; the ledger records accepted source evidence and runtime/user-side caveats, and source-only assumptions without contracts still do not clear guardrails, replace placeholders, or authorize validation.
-
-CDXC:GPUIPhase10BlockerLedger 2026-06-24-09:03:
-Source-only work is the runtime-parity target for this pass. Terminal is accepted as working, Source/Browser/Kanban/Manage panes must use CEF only, and WKWebView/WebKit/non-CEF names may appear only as rejected labels or guardrail evidence, not implementation targets or fallback paths.
-
-CDXC:GPUIBrowserRuntimeParity 2026-06-24-04:10:
-Slice 252 retires the Browser Phase 10 source-ledger blockers with explicit source-only contracts. Phase 1 continues to reject browserWorkareaId while Browser identity stays owned by the strict Browser readiness boundary, compatible import stays unsupported/no-op without private data probes, blank/script-created popup transfer stays no-op/no-transfer, and Browser lifecycle stays CEF-only hide-and-hold plus restored-placeholder source evidence without instantiating, suspending, tearing down, hiding extra surfaces, issuing URLs, logging, persisting, or replacing placeholders.
-
-CDXC:GPUIBrowserRuntimeParity 2026-06-24-05:06:
-Slice 258 records Browser runtime parity as a source-only CEF plan. Browser may credit existing tab-owned CEF surface visibility plus unsupported import, blank-popup no-transfer, restored-placeholder, and Phase 1 identity rejection contracts for the source ledger, but it must still reject WKWebView/WebKit/non-CEF panes and must not create extra CEF surfaces, issue runtime URLs, import data, transfer popup content, add hidden mounts, log/persist private details, or replace restored placeholders.
-
-CDXC:GPUIRuntimeTransfer 2026-06-24-04:15:
-Slice 253 accepts cross-surface transfer for the source ledger as shell-only movement with no live runtime/process/content transfer families allowed in this pass. Because no runtime transfer family is allowed, per-source/target mount/runtime contracts and terminal, Browser, Source, Kanban, and Manage family transfer contracts are intentionally not required unless future product work enables live transfer; privacy proof is the absence of Ghostty process, terminal buffer, command payload/status, Browser CEF content, Source editor/runtime state, Kanban/Manage CEF/file-bridge content, clipboard/focus/key identity, URLs, paths, page titles, payloads, logs, persistence, hidden mounts, fallbacks, or private user content transfer.
-*/
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Phase10SignoffBlockerArea {
-    SourceReadinessMount,
-    KanbanReadinessMount,
-    ManageReadinessMountFileBridge,
-    TerminalLifecycleActivationReattach,
-    TerminalClipboardPhysicalKeys,
-    BrowserImportBlankPopupSuspend,
-    ProjectWorkareaPaneEnginePolicy,
-    ProjectWorkareaCefSurfaceOwnershipSlots,
-    ProjectWorkareaRuntimeUrlIssuanceBoundary,
-    ProjectWorkareaSourceStartupNavigationReadinessBoundary,
-    ProjectWorkareaSourceRuntimeCefSurfaceOwnerGate,
-    ProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate,
-    ProjectWorkareaManageRuntimeCefSurfaceOwnerGate,
-    CrossSurfaceRuntimeProcessContentTransfer,
-    ValidationOutsideAgentWorkflowRecord,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Phase10SignoffStatus {
-    Complete,
-    AcceptedForSourceLedger,
-    BlockedPendingExplicitContract,
-    BlockedPendingRuntimeApi,
-    DeferredProductDecision,
-    NotRunOutsideAgentWorkflow,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Phase10CurrentEvidence {
-    SourceOnlySourceSleepWakePreservation,
-    SourceOnlySourcePlaceholderBridgeStates,
-    SourceOnlySourceReadinessBoundary,
-    SourceOnlySourceCefCodeServerMountRequestBoundary,
-    SourceOnlySourceCodeServerUrlContractBoundary,
-    SourceOnlySourceCefCodeServerMaterializationContractBoundary,
-    SourceOnlySourceCefCodeServerRuntimeParityPlanBoundary,
-    SourceOnlySourcePlaceholderReplacementPreflightGateBoundary,
-    SourceOnlySidebarScopedWorkareaReadinessOperationBridge,
-    SourceOnlyKanbanSleepWakePreservation,
-    SourceOnlyKanbanLifecycleBridgeStates,
-    SourceOnlyKanbanReadinessBoundary,
-    SourceOnlyKanbanCefMountRequestBoundary,
-    SourceOnlyKanbanCefMaterializationContractBoundary,
-    SourceOnlyKanbanCefRuntimeParityPlanBoundary,
-    SourceOnlyKanbanPlaceholderReplacementPreflightGateBoundary,
-    SourceOnlyManageSleepWakePreservation,
-    SourceOnlyManageLifecycleBridgeStates,
-    SourceOnlyManageReadinessBoundary,
-    SourceOnlyManageCefMountRequestBoundary,
-    SourceOnlyManageFirstPartyCefEntrypointBoundary,
-    SourceOnlyManageCefMaterializationContractBoundary,
-    SourceOnlyManageFileBridgeMountContractBoundary,
-    SourceOnlyManageProjectScopedFileOperationProof,
-    SourceOnlyManagePlaceholderReplacementPreflightGateBoundary,
-    SourceOnlyManageFileOperationAllowlist,
-    SourceOnlyManageOperationRequestBoundary,
-    SourceOnlyBrowserProfileTabShellState,
-    SourceOnlyBrowserFeedbackInjectionBoundary,
-    SourceOnlyBrowserActiveProjectReadinessParserStore,
-    SourceOnlyBrowserPhase1IdentityRejectionContract,
-    SourceOnlyBrowserCompatibleImportUnsupportedNoopContract,
-    SourceOnlyBrowserBlankPopupNoTransferContract,
-    SourceOnlyBrowserCefLifecycleHideAndHoldContract,
-    SourceOnlyBrowserCefRuntimeParityPlanBoundary,
-    SourceOnlyBrowserSleepWakeHideAndHold,
-    SourceOnlyBrowserUnsupportedImportPolicy,
-    SourceOnlyBrowserBlankPopupNoopPolicy,
-    SourceOnlyBrowserRestoredPlaceholderMaterializationNoop,
-    SourceOnlyBrowserSanitizedPersistenceBoundary,
-    SourceOnlyProjectWorkareaCefOnlyPaneEnginePolicyBoundary,
-    SourceOnlyProjectWorkareaCefSurfaceOwnershipSlotsBoundary,
-    SourceOnlyProjectWorkareaRuntimeUrlIssuanceBoundary,
-    SourceOnlyProjectWorkareaSourceStartupNavigationReadinessBoundary,
-    SourceOnlyProjectWorkareaSourceRuntimeCefSurfaceOwnerGateBoundary,
-    SourceOnlyProjectWorkareaKanbanRuntimeCefSurfaceOwnerGateBoundary,
-    SourceOnlyProjectWorkareaManageRuntimeCefSurfaceOwnerGateBoundary,
-    SourceOnlyTerminalHostNativeViewGhosttyPipeline,
-    SourceOnlyTerminalAllVisibleAgentsMountSlots,
-    SourceOnlyTerminalPlaceholderActivationMountingBoundary,
-    SourceOnlyTerminalActivationStartupEligibilityGuard,
-    SourceOnlyTerminalParkedOwnerWakeReattachContract,
-    SourceOnlyTerminalRestoredUnmountedMaterializationStartupContract,
-    SourceOnlyTerminalStartupFailedRetryAttemptIdentity,
-    SourceOnlyTerminalStartupSurfaceMetadataReadinessBoundary,
-    SourceOnlyTerminalStartupReadinessHandoffPlans,
-    SourceOnlyTerminalStartupFailedResultFromExitedMetadata,
-    SourceOnlyTerminalStartupOwnershipTransferHandoff,
-    SourceOnlyTerminalCloseProcessExitCleanup,
-    SourceOnlyTerminalFocusResizeInputBoundaries,
-    SourceOnlyCommandTerminalRuntimeIsolation,
-    SourceOnlyCommandTerminalHostNativeViewGhosttyPipeline,
-    SourceOnlyTerminalCloseConfirmRequestPendingCallbackHandling,
-    SourceOnlyTerminalCloseConfirmExactPendingIdentityTracking,
-    SourceOnlyTerminalCloseConfirmCancelHandling,
-    SourceOnlyTerminalCloseConfirmUiSurfaceContract,
-    SourceOnlyTerminalCloseConfirmNeedsConfirmQuitAbi,
-    SourceOnlyTerminalCloseConfirmExactConfirmedShellRemoval,
-    SourceOnlyTerminalConfirmedCloseCallbackCleanup,
-    SourceOnlyTerminalCloseConfirmAgentsCommandIsolation,
-    SourceOnlyTerminalCloseConfirmPrivacyBoundary,
-    SourceOnlyTerminalRuntimePrivacyBoundary,
-    SourceOnlyTerminalExplicitStringPasteBoundary,
-    SourceOnlyTerminalNoFilePathClipboardSynthesisBoundary,
-    SourceOnlyTerminalSurfaceScopedAppThreadRuntimeClipboardHandoff,
-    SourceOnlyTerminalCommittedTextForwardingBoundary,
-    SourceOnlyTerminalImePreeditTextServiceBoundary,
-    SourceOnlyTerminalLayoutOnlyNoNativePhysicalKeyBoundary,
-    SourceOnlyTerminalNativePhysicalKeyIdentityAbsentAcceptedContract,
-    SourceOnlyTerminalControlCommandPhysicalKeyRejectionContract,
-    SourceOnlyTerminalCommandMacParityAcceptedProductDecision,
-    SourceOnlyTerminalNoRuntimeKeyForwardingChangeContract,
-    SourceOnlyCrossSurfaceAgentsCommandTitlePlaceholderMovement,
-    SourceOnlyCrossSurfaceTabGroupCardShellMovement,
-    SourceOnlyCrossSurfaceProjectEditorIdentityOnlyMovement,
-    SourceOnlyCrossSurfaceBrowserProfileTabShellIdentityPreservation,
-    SourceOnlyCrossSurfaceNoRuntimeTransferPrivacyBoundary,
-    SourceOnlyCrossSurfaceShellOnlyAllowedTransferProductDecision,
-    SourceOnlyCrossSurfaceNoLiveRuntimeProcessContentTransferContract,
-    SourceOnlyCrossSurfaceRuntimeTransferContractsNotRequiredForShellOnlyContract,
-    SourceOnlyCrossSurfaceFamilyTransferContractsNotRequiredForShellOnlyContract,
-    SourceOnlyCrossSurfaceNoPrivateRuntimeContentTransferPrivacyProof,
-    AgentSideExternalRunningEvidenceNotRun,
-    RuntimeVisualEvidenceNotRun,
-    FormattingTestsChecksNotRun,
-    AppLaunchValidationNotRun,
-    EquivalentValidationNotRun,
-}
-
-#[allow(dead_code)]
-impl Phase10CurrentEvidence {
-    fn is_source_only_blocker_evidence(self) -> bool {
-        !self.is_outside_agent_workflow_record()
-    }
-
-    fn is_outside_agent_workflow_record(self) -> bool {
-        matches!(
-            self,
-            Self::AgentSideExternalRunningEvidenceNotRun
-                | Self::RuntimeVisualEvidenceNotRun
-                | Self::FormattingTestsChecksNotRun
-                | Self::AppLaunchValidationNotRun
-                | Self::EquivalentValidationNotRun
-        )
-    }
-
-    fn is_source_only_sleep_wake_evidence(self) -> bool {
-        matches!(
-            self,
-            Self::SourceOnlySourceSleepWakePreservation
-                | Self::SourceOnlyKanbanSleepWakePreservation
-                | Self::SourceOnlyManageSleepWakePreservation
-                | Self::SourceOnlyBrowserSleepWakeHideAndHold
-                | Self::SourceOnlyTerminalPlaceholderActivationMountingBoundary
-                | Self::SourceOnlyTerminalActivationStartupEligibilityGuard
-                | Self::SourceOnlyTerminalParkedOwnerWakeReattachContract
-        )
-    }
-
-    fn is_terminal_startup_runtime_only_evidence(self) -> bool {
-        matches!(
-            self,
-            Self::SourceOnlyTerminalStartupSurfaceMetadataReadinessBoundary
-                | Self::SourceOnlyTerminalStartupReadinessHandoffPlans
-                | Self::SourceOnlyTerminalStartupFailedResultFromExitedMetadata
-                | Self::SourceOnlyTerminalRestoredUnmountedMaterializationStartupContract
-                | Self::SourceOnlyTerminalStartupFailedRetryAttemptIdentity
-                | Self::SourceOnlyTerminalStartupOwnershipTransferHandoff
-        )
-    }
-
-    fn is_terminal_close_confirm_source_only_evidence(self) -> bool {
-        matches!(
-            self,
-            Self::SourceOnlyTerminalCloseConfirmRequestPendingCallbackHandling
-                | Self::SourceOnlyTerminalCloseConfirmExactPendingIdentityTracking
-                | Self::SourceOnlyTerminalCloseConfirmCancelHandling
-                | Self::SourceOnlyTerminalCloseConfirmUiSurfaceContract
-                | Self::SourceOnlyTerminalCloseConfirmNeedsConfirmQuitAbi
-                | Self::SourceOnlyTerminalCloseConfirmExactConfirmedShellRemoval
-                | Self::SourceOnlyTerminalConfirmedCloseCallbackCleanup
-                | Self::SourceOnlyTerminalCloseConfirmAgentsCommandIsolation
-                | Self::SourceOnlyTerminalCloseConfirmPrivacyBoundary
-        )
-    }
-
-    fn is_terminal_clipboard_physical_key_source_only_evidence(self) -> bool {
-        matches!(
-            self,
-            Self::SourceOnlyTerminalHostNativeViewGhosttyPipeline
-                | Self::SourceOnlyCommandTerminalRuntimeIsolation
-                | Self::SourceOnlyCommandTerminalHostNativeViewGhosttyPipeline
-                | Self::SourceOnlyTerminalRuntimePrivacyBoundary
-                | Self::SourceOnlyTerminalExplicitStringPasteBoundary
-                | Self::SourceOnlyTerminalNoFilePathClipboardSynthesisBoundary
-                | Self::SourceOnlyTerminalSurfaceScopedAppThreadRuntimeClipboardHandoff
-                | Self::SourceOnlyTerminalCommittedTextForwardingBoundary
-                | Self::SourceOnlyTerminalImePreeditTextServiceBoundary
-                | Self::SourceOnlyTerminalLayoutOnlyNoNativePhysicalKeyBoundary
-                | Self::SourceOnlyTerminalNativePhysicalKeyIdentityAbsentAcceptedContract
-                | Self::SourceOnlyTerminalControlCommandPhysicalKeyRejectionContract
-                | Self::SourceOnlyTerminalCommandMacParityAcceptedProductDecision
-                | Self::SourceOnlyTerminalNoRuntimeKeyForwardingChangeContract
-        )
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Phase10MissingGate {}
-
-#[allow(dead_code)]
-impl Phase10MissingGate {
-    fn is_real_surface_or_runtime_signoff_gate(self) -> bool {
-        match self {}
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Phase10SignoffBlocker {
-    area: Phase10SignoffBlockerArea,
-    status: Phase10SignoffStatus,
-    current_evidence: &'static [Phase10CurrentEvidence],
-    missing_gates: &'static [Phase10MissingGate],
-}
-
-#[allow(dead_code)]
-impl Phase10SignoffBlocker {
-    fn is_complete(&self) -> bool {
-        self.status == Phase10SignoffStatus::Complete && self.missing_gates.is_empty()
-    }
-
-    fn blocks_current_source_ledger(&self) -> bool {
-        matches!(
-            self.status,
-            Phase10SignoffStatus::BlockedPendingExplicitContract
-                | Phase10SignoffStatus::BlockedPendingRuntimeApi
-                | Phase10SignoffStatus::DeferredProductDecision
-        )
-    }
-
-    fn has_source_only_sleep_wake_evidence(&self) -> bool {
-        self.current_evidence
-            .iter()
-            .any(|evidence| evidence.is_source_only_sleep_wake_evidence())
-    }
-
-    fn has_real_surface_or_runtime_signoff_gate(&self) -> bool {
-        self.missing_gates
-            .iter()
-            .any(|gate| gate.is_real_surface_or_runtime_signoff_gate())
-    }
-}
-
-#[allow(dead_code)]
-fn phase10_signoff_blockers() -> &'static [Phase10SignoffBlocker] {
-    &[
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::SourceReadinessMount,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlySourceSleepWakePreservation,
-                Phase10CurrentEvidence::SourceOnlySourcePlaceholderBridgeStates,
-                Phase10CurrentEvidence::SourceOnlySourceReadinessBoundary,
-                Phase10CurrentEvidence::SourceOnlySourceCefCodeServerMountRequestBoundary,
-                Phase10CurrentEvidence::SourceOnlySourceCodeServerUrlContractBoundary,
-                Phase10CurrentEvidence::SourceOnlySourceCefCodeServerMaterializationContractBoundary,
-                Phase10CurrentEvidence::SourceOnlySourceCefCodeServerRuntimeParityPlanBoundary,
-                Phase10CurrentEvidence::SourceOnlySourcePlaceholderReplacementPreflightGateBoundary,
-                Phase10CurrentEvidence::SourceOnlySidebarScopedWorkareaReadinessOperationBridge,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::KanbanReadinessMount,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlyKanbanSleepWakePreservation,
-                Phase10CurrentEvidence::SourceOnlyKanbanLifecycleBridgeStates,
-                Phase10CurrentEvidence::SourceOnlyKanbanReadinessBoundary,
-                Phase10CurrentEvidence::SourceOnlyKanbanCefMountRequestBoundary,
-                Phase10CurrentEvidence::SourceOnlyKanbanCefMaterializationContractBoundary,
-                Phase10CurrentEvidence::SourceOnlyKanbanCefRuntimeParityPlanBoundary,
-                Phase10CurrentEvidence::SourceOnlyKanbanPlaceholderReplacementPreflightGateBoundary,
-                Phase10CurrentEvidence::SourceOnlySidebarScopedWorkareaReadinessOperationBridge,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::ManageReadinessMountFileBridge,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlyManageSleepWakePreservation,
-                Phase10CurrentEvidence::SourceOnlyManageLifecycleBridgeStates,
-                Phase10CurrentEvidence::SourceOnlyManageReadinessBoundary,
-                Phase10CurrentEvidence::SourceOnlyManageCefMountRequestBoundary,
-                Phase10CurrentEvidence::SourceOnlyManageFirstPartyCefEntrypointBoundary,
-                Phase10CurrentEvidence::SourceOnlyManageCefMaterializationContractBoundary,
-                Phase10CurrentEvidence::SourceOnlyManageFileBridgeMountContractBoundary,
-                Phase10CurrentEvidence::SourceOnlyManageProjectScopedFileOperationProof,
-                Phase10CurrentEvidence::SourceOnlyManagePlaceholderReplacementPreflightGateBoundary,
-                Phase10CurrentEvidence::SourceOnlyManageFileOperationAllowlist,
-                Phase10CurrentEvidence::SourceOnlyManageOperationRequestBoundary,
-                Phase10CurrentEvidence::SourceOnlySidebarScopedWorkareaReadinessOperationBridge,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::TerminalLifecycleActivationReattach,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlyTerminalHostNativeViewGhosttyPipeline,
-                Phase10CurrentEvidence::SourceOnlyTerminalAllVisibleAgentsMountSlots,
-                Phase10CurrentEvidence::SourceOnlyTerminalPlaceholderActivationMountingBoundary,
-                Phase10CurrentEvidence::SourceOnlyTerminalActivationStartupEligibilityGuard,
-                Phase10CurrentEvidence::SourceOnlyTerminalParkedOwnerWakeReattachContract,
-                Phase10CurrentEvidence::SourceOnlyTerminalRestoredUnmountedMaterializationStartupContract,
-                Phase10CurrentEvidence::SourceOnlyTerminalStartupFailedRetryAttemptIdentity,
-                Phase10CurrentEvidence::SourceOnlyTerminalStartupSurfaceMetadataReadinessBoundary,
-                Phase10CurrentEvidence::SourceOnlyTerminalStartupReadinessHandoffPlans,
-                Phase10CurrentEvidence::SourceOnlyTerminalStartupFailedResultFromExitedMetadata,
-                Phase10CurrentEvidence::SourceOnlyTerminalStartupOwnershipTransferHandoff,
-                Phase10CurrentEvidence::SourceOnlyTerminalCloseProcessExitCleanup,
-                Phase10CurrentEvidence::SourceOnlyTerminalFocusResizeInputBoundaries,
-                Phase10CurrentEvidence::SourceOnlyTerminalCloseConfirmRequestPendingCallbackHandling,
-                Phase10CurrentEvidence::SourceOnlyTerminalCloseConfirmExactPendingIdentityTracking,
-                Phase10CurrentEvidence::SourceOnlyTerminalCloseConfirmCancelHandling,
-                Phase10CurrentEvidence::SourceOnlyTerminalCloseConfirmUiSurfaceContract,
-                Phase10CurrentEvidence::SourceOnlyTerminalCloseConfirmNeedsConfirmQuitAbi,
-                Phase10CurrentEvidence::SourceOnlyTerminalCloseConfirmExactConfirmedShellRemoval,
-                Phase10CurrentEvidence::SourceOnlyTerminalConfirmedCloseCallbackCleanup,
-                Phase10CurrentEvidence::SourceOnlyTerminalCloseConfirmAgentsCommandIsolation,
-                Phase10CurrentEvidence::SourceOnlyTerminalCloseConfirmPrivacyBoundary,
-                Phase10CurrentEvidence::SourceOnlyTerminalRuntimePrivacyBoundary,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::TerminalClipboardPhysicalKeys,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlyTerminalHostNativeViewGhosttyPipeline,
-                Phase10CurrentEvidence::SourceOnlyCommandTerminalRuntimeIsolation,
-                Phase10CurrentEvidence::SourceOnlyCommandTerminalHostNativeViewGhosttyPipeline,
-                Phase10CurrentEvidence::SourceOnlyTerminalRuntimePrivacyBoundary,
-                Phase10CurrentEvidence::SourceOnlyTerminalExplicitStringPasteBoundary,
-                Phase10CurrentEvidence::SourceOnlyTerminalNoFilePathClipboardSynthesisBoundary,
-                Phase10CurrentEvidence::SourceOnlyTerminalSurfaceScopedAppThreadRuntimeClipboardHandoff,
-                Phase10CurrentEvidence::SourceOnlyTerminalCommittedTextForwardingBoundary,
-                Phase10CurrentEvidence::SourceOnlyTerminalImePreeditTextServiceBoundary,
-                Phase10CurrentEvidence::SourceOnlyTerminalLayoutOnlyNoNativePhysicalKeyBoundary,
-                Phase10CurrentEvidence::SourceOnlyTerminalNativePhysicalKeyIdentityAbsentAcceptedContract,
-                Phase10CurrentEvidence::SourceOnlyTerminalControlCommandPhysicalKeyRejectionContract,
-                Phase10CurrentEvidence::SourceOnlyTerminalCommandMacParityAcceptedProductDecision,
-                Phase10CurrentEvidence::SourceOnlyTerminalNoRuntimeKeyForwardingChangeContract,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::BrowserImportBlankPopupSuspend,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlyBrowserProfileTabShellState,
-                Phase10CurrentEvidence::SourceOnlyBrowserFeedbackInjectionBoundary,
-                Phase10CurrentEvidence::SourceOnlyBrowserActiveProjectReadinessParserStore,
-                Phase10CurrentEvidence::SourceOnlySidebarScopedWorkareaReadinessOperationBridge,
-                Phase10CurrentEvidence::SourceOnlyBrowserPhase1IdentityRejectionContract,
-                Phase10CurrentEvidence::SourceOnlyBrowserCompatibleImportUnsupportedNoopContract,
-                Phase10CurrentEvidence::SourceOnlyBrowserBlankPopupNoTransferContract,
-                Phase10CurrentEvidence::SourceOnlyBrowserCefLifecycleHideAndHoldContract,
-                Phase10CurrentEvidence::SourceOnlyBrowserCefRuntimeParityPlanBoundary,
-                Phase10CurrentEvidence::SourceOnlyBrowserSleepWakeHideAndHold,
-                Phase10CurrentEvidence::SourceOnlyBrowserUnsupportedImportPolicy,
-                Phase10CurrentEvidence::SourceOnlyBrowserBlankPopupNoopPolicy,
-                Phase10CurrentEvidence::SourceOnlyBrowserRestoredPlaceholderMaterializationNoop,
-                Phase10CurrentEvidence::SourceOnlyBrowserSanitizedPersistenceBoundary,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::ProjectWorkareaPaneEnginePolicy,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlyProjectWorkareaCefOnlyPaneEnginePolicyBoundary,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::ProjectWorkareaCefSurfaceOwnershipSlots,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlyProjectWorkareaCefSurfaceOwnershipSlotsBoundary,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::ProjectWorkareaRuntimeUrlIssuanceBoundary,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlyProjectWorkareaRuntimeUrlIssuanceBoundary,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::ProjectWorkareaSourceStartupNavigationReadinessBoundary,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlyProjectWorkareaSourceStartupNavigationReadinessBoundary,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::ProjectWorkareaSourceRuntimeCefSurfaceOwnerGate,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlyProjectWorkareaSourceRuntimeCefSurfaceOwnerGateBoundary,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::ProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlyProjectWorkareaKanbanRuntimeCefSurfaceOwnerGateBoundary,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::ProjectWorkareaManageRuntimeCefSurfaceOwnerGate,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlyProjectWorkareaManageRuntimeCefSurfaceOwnerGateBoundary,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::CrossSurfaceRuntimeProcessContentTransfer,
-            status: Phase10SignoffStatus::AcceptedForSourceLedger,
-            current_evidence: &[
-                Phase10CurrentEvidence::SourceOnlyCrossSurfaceAgentsCommandTitlePlaceholderMovement,
-                Phase10CurrentEvidence::SourceOnlyCrossSurfaceTabGroupCardShellMovement,
-                Phase10CurrentEvidence::SourceOnlyCrossSurfaceProjectEditorIdentityOnlyMovement,
-                Phase10CurrentEvidence::SourceOnlyCrossSurfaceBrowserProfileTabShellIdentityPreservation,
-                Phase10CurrentEvidence::SourceOnlyCrossSurfaceNoRuntimeTransferPrivacyBoundary,
-                Phase10CurrentEvidence::SourceOnlyCrossSurfaceShellOnlyAllowedTransferProductDecision,
-                Phase10CurrentEvidence::SourceOnlyCrossSurfaceNoLiveRuntimeProcessContentTransferContract,
-                Phase10CurrentEvidence::SourceOnlyCrossSurfaceRuntimeTransferContractsNotRequiredForShellOnlyContract,
-                Phase10CurrentEvidence::SourceOnlyCrossSurfaceFamilyTransferContractsNotRequiredForShellOnlyContract,
-                Phase10CurrentEvidence::SourceOnlyCrossSurfaceNoPrivateRuntimeContentTransferPrivacyProof,
-            ],
-            missing_gates: &[],
-        },
-        Phase10SignoffBlocker {
-            area: Phase10SignoffBlockerArea::ValidationOutsideAgentWorkflowRecord,
-            status: Phase10SignoffStatus::NotRunOutsideAgentWorkflow,
-            current_evidence: &[
-                Phase10CurrentEvidence::AgentSideExternalRunningEvidenceNotRun,
-                Phase10CurrentEvidence::RuntimeVisualEvidenceNotRun,
-                Phase10CurrentEvidence::FormattingTestsChecksNotRun,
-                Phase10CurrentEvidence::AppLaunchValidationNotRun,
-                Phase10CurrentEvidence::EquivalentValidationNotRun,
-            ],
-            missing_gates: &[],
-        },
-    ]
-}
-
-#[allow(dead_code)]
-fn phase10_signoff_blocker(
-    area: Phase10SignoffBlockerArea,
-) -> Option<&'static Phase10SignoffBlocker> {
-    phase10_signoff_blockers()
-        .iter()
-        .find(|blocker| blocker.area == area)
-}
-
 fn project_scoped_real_surface_runtime_identity_from_snapshot(
     snapshot: Option<&GpuiProjectSnapshot>,
     kind: ProjectScopedRealSurfaceKind,
@@ -8950,11 +4454,6 @@ impl AgentsTerminalRuntimeSessionRegistry {
         let runtime_session_id = AgentsTerminalRuntimeSessionId(self.next_runtime_session_id);
         self.next_runtime_session_id += 1;
         runtime_session_id
-    }
-
-    #[cfg(test)]
-    fn runtime_session_count(&self) -> usize {
-        self.runtime_ids_by_shell_session.len()
     }
 }
 
@@ -9300,19 +4799,6 @@ impl AgentsTerminalStartupLaunchPayloadSource {
                 startup_body_slot_id: completion_intent.startup_body_slot_id,
             },
         );
-    }
-
-    #[cfg(test)]
-    fn with_explicit_payload_for_test(
-        mut self,
-        plan: AgentsTerminalStartupLaunchPlan,
-        payload: AgentsTerminalStartupExplicitLaunchPayload,
-    ) -> Self {
-        self.explicit_payloads_by_startup_key.insert(
-            AgentsTerminalStartupLaunchPayloadSourceKey::from_launch_plan(plan),
-            payload,
-        );
-        self
     }
 }
 
@@ -9993,67 +5479,6 @@ impl AgentsTerminalStartupCoordinator {
         changed
     }
 
-    #[cfg(test)]
-    fn pending_startup_count(&self) -> usize {
-        self.pending_startups_by_runtime_session.len()
-    }
-
-    #[cfg(test)]
-    fn pending_startup_for_runtime_session(
-        &self,
-        runtime_session_id: AgentsTerminalRuntimeSessionId,
-    ) -> Option<AgentsTerminalStartupRecord> {
-        self.pending_startups_by_runtime_session
-            .get(&runtime_session_id)
-            .copied()
-    }
-
-    #[cfg(test)]
-    fn startup_launch_plan_count(&self) -> usize {
-        self.startup_launch_plans_by_runtime_session.len()
-    }
-
-    #[cfg(test)]
-    fn startup_completion_intent_count(&self) -> usize {
-        self.startup_completion_intents_by_runtime_session.len()
-    }
-
-    #[cfg(test)]
-    fn startup_readiness_signal_preparation_count(&self) -> usize {
-        self.startup_readiness_signal_preparations_by_runtime_session
-            .len()
-    }
-
-    #[cfg(test)]
-    fn startup_launch_plan_for_runtime_session(
-        &self,
-        runtime_session_id: AgentsTerminalRuntimeSessionId,
-    ) -> Option<AgentsTerminalStartupLaunchPlan> {
-        self.startup_launch_plans_by_runtime_session
-            .get(&runtime_session_id)
-            .copied()
-    }
-
-    #[cfg(test)]
-    fn startup_completion_intent_for_runtime_session(
-        &self,
-        runtime_session_id: AgentsTerminalRuntimeSessionId,
-    ) -> Option<AgentsTerminalStartupCompletionIntent> {
-        self.startup_completion_intents_by_runtime_session
-            .get(&runtime_session_id)
-            .copied()
-    }
-
-    #[cfg(test)]
-    fn startup_readiness_signal_preparation_for_runtime_session(
-        &self,
-        runtime_session_id: AgentsTerminalRuntimeSessionId,
-    ) -> Option<AgentsTerminalStartupReadinessSignalPreparation> {
-        self.startup_readiness_signal_preparations_by_runtime_session
-            .get(&runtime_session_id)
-            .copied()
-    }
-
     #[cfg(target_os = "macos")]
     fn startup_launch_plans(&self) -> Vec<AgentsTerminalStartupLaunchPlan> {
         let mut plans = self
@@ -10567,44 +5992,8 @@ enum CommandPaneTabSessionAction {
     CloseAfterDone,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CommandPaneTabRuntimeAction {
-    ForkSession,
-    ReloadSession,
-    PopOutPane,
-}
-
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CommandPaneTabContextPrimaryRow {
-    RuntimeAction(CommandPaneTabRuntimeAction),
-    Focus,
-}
-
 fn command_pane_tab_context_focus_label() -> &'static str {
     "Focus"
-}
-
-#[cfg(test)]
-fn command_pane_tab_context_primary_rows(
-    command_pane: &CommandPaneModel,
-    group_id: CommandPaneGroupId,
-    session_id: CommandSessionId,
-) -> Vec<CommandPaneTabContextPrimaryRow> {
-    let mut rows = Vec::new();
-
-    rows.extend(
-        command_pane_tab_context_available_runtime_actions(command_pane, group_id, session_id)
-            .into_iter()
-            .map(CommandPaneTabContextPrimaryRow::RuntimeAction),
-    );
-
-    if command_pane.tab_context_allows_focus_mode(group_id, session_id) {
-        rows.push(CommandPaneTabContextPrimaryRow::Focus);
-    }
-
-    rows
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -10648,47 +6037,19 @@ fn command_pane_tab_context_scoped_lifecycle_focus_policy()
     CommandPaneScopedTabMutationFocusPolicy::PreserveCurrentFocus
 }
 
-#[cfg(test)]
-fn command_pane_tab_context_session_action_label(
-    action: CommandPaneTabSessionAction,
-) -> &'static str {
-    match action {
-        CommandPaneTabSessionAction::Rename => "Rename Session",
-        CommandPaneTabSessionAction::DelayedSend => "Delayed Send",
-        CommandPaneTabSessionAction::CloseAfterDone => "Close After Done",
-    }
-}
-
-#[cfg(test)]
-fn command_pane_tab_context_runtime_action_label(
-    action: CommandPaneTabRuntimeAction,
-) -> &'static str {
-    match action {
-        CommandPaneTabRuntimeAction::ForkSession => "Fork Session",
-        CommandPaneTabRuntimeAction::ReloadSession => "Reload Session",
-        CommandPaneTabRuntimeAction::PopOutPane => "Pop Out Pane",
-    }
-}
-
-#[cfg(test)]
-fn command_pane_tab_context_candidate_runtime_actions() -> [CommandPaneTabRuntimeAction; 3] {
-    [
-        CommandPaneTabRuntimeAction::ForkSession,
-        CommandPaneTabRuntimeAction::ReloadSession,
-        CommandPaneTabRuntimeAction::PopOutPane,
-    ]
-}
-
-fn command_pane_tab_context_available_runtime_actions(
+fn command_pane_tab_context_runtime_action_count(
     _command_pane: &CommandPaneModel,
     _group_id: CommandPaneGroupId,
     _session_id: CommandSessionId,
-) -> Vec<CommandPaneTabRuntimeAction> {
+) -> usize {
     /*
     CDXC:GPUICommandTabRuntimeActions 2026-06-25-21:59:
     Fork Session, Reload Session, and Pop Out Pane must stay absent from GPUI command-tab context menus until they can dispatch to real command-pane runtime semantics. Current command Ghostty surfaces support mount, focus, input, close/confirm, sleep parking, and action timers only; there is no command-session clone, live embedded reload, or popped-out command-owner transfer path. Do not add disabled rows, fallback toasts, shell-only duplicates, surface drops, or placeholder menu actions.
+
+    CDXC:GPUICommandTabRuntimeActions 2026-06-28-15:12:
+    GPUI tests are intentionally absent, so preserve this as the production row-count policy instead of retaining unused runtime-action enums or test-gated assertion helpers.
     */
-    Vec::new()
+    0
 }
 
 fn command_pane_tab_tooltip(title: &str, delayed_send_remaining_label: Option<&str>) -> String {
@@ -10761,15 +6122,6 @@ fn command_pane_tab_add_icon_path() -> &'static str {
     Native command-pane New Terminal chrome is the tab-strip add button, not the generic `.newTerminal` titlebar action button. It uses plus symbol chrome with the New Terminal tooltip, so GPUI should render a plus icon rather than the terminal action symbol here.
     */
     COMMAND_ICON_PLUS
-}
-
-#[cfg(test)]
-fn command_pane_tab_add_background_color() -> Hsla {
-    /*
-    CDXC:GPUICommandPaneControls 2026-06-25-14:44:
-    Native command tab-add uses stable tab-bar icon chrome for normal, hover, and active states. The GPUI inline New Terminal plus should share the fixed command action button background instead of relying on hover-only fill.
-    */
-    command_pane_control_button_color()
 }
 
 fn command_pane_panel_mode_controls_visible(expanded_chrome: bool) -> bool {
@@ -10874,51 +6226,6 @@ fn command_pane_control_trailing_padding(expanded_chrome: bool) -> f32 {
     }
 }
 
-#[cfg(test)]
-fn command_pane_collapsed_strip_has_leading_label() -> bool {
-    /*
-    CDXC:GPUICommandPaneControls 2026-06-25-12:32:
-    Native minimized command panels do not render a separate "Command" prefix before command tabs. The collapsed strip starts with tab chrome inside the native 4px/8px side margins.
-    */
-    false
-}
-
-#[cfg(test)]
-fn command_pane_tab_close_visible(tab_hovered: bool) -> bool {
-    /*
-    CDXC:GPUICommandTabChrome 2026-06-25-13:11:
-    Native command tabs only draw the inline close affordance while the tab is hovered. A non-hovered command tab should spend all available width on status and title chrome instead of reserving a persistent close button.
-    */
-    tab_hovered
-}
-
-#[cfg(test)]
-fn command_pane_tab_close_participates_in_flex_layout() -> bool {
-    /*
-    CDXC:GPUICommandTabChrome 2026-06-25-13:11:
-    The hover-only command-tab close affordance is positioned over the tab's trailing edge, not inserted as a flex child. This prevents title reflow when hover chrome appears.
-    */
-    false
-}
-
-#[cfg(test)]
-fn command_pane_tab_middle_click_closes_clicked_tab() -> bool {
-    /*
-    CDXC:GPUICommandTabClose 2026-06-25-14:01:
-    Native command tab buttons consume button-2 clicks and close the clicked tab on mouse-up through the same close request path as the visible close affordance. GPUI should not treat middle-click as tab selection or empty-titlebar chrome.
-    */
-    true
-}
-
-#[cfg(test)]
-fn command_pane_tab_close_affordance_invokes_on_mouse_up() -> bool {
-    /*
-    CDXC:GPUICommandTabClose 2026-06-25-14:04:
-    Native inline Close is a pending tab-button action after mouse-down and invokes only on mouse-up while the close control still resolves. GPUI command tabs should consume close mouse-down and use mouse-up for the existing command close request.
-    */
-    true
-}
-
 fn command_pane_tab_left_mouse_up_selects(
     pending_click: Option<CommandPanePendingTabClick>,
     target: CommandPanePendingTabClick,
@@ -11012,51 +6319,6 @@ fn workspace_tab_pending_click_after_mouse_up_out(
     } else {
         pending_click
     }
-}
-
-#[cfg(test)]
-fn command_pane_tab_title_style_depends_on_active_state() -> bool {
-    /*
-    CDXC:GPUICommandTabTypography 2026-06-25-13:25:
-    Native command-tab title typography is active-state invariant. Active selection changes command tab fill, not title font size, font weight, or inactive label dimming.
-    */
-    false
-}
-
-#[cfg(test)]
-fn command_pane_tab_inactive_title_uses_dimmed_text() -> bool {
-    /*
-    CDXC:GPUICommandTabTypography 2026-06-25-13:25:
-    Command tab inactive labels stay on the same stable light title color as active command tabs; dimmed inactive labels belong to workspace-style chrome, not command role chrome.
-    */
-    false
-}
-
-#[cfg(test)]
-fn command_pane_tab_close_icon_path() -> &'static str {
-    /*
-    CDXC:GPUICommandTabChrome 2026-06-25-14:01:
-    Native command-tab close chrome draws a stroked X glyph in the hover-only inline action frame. Keep GPUI on icon chrome rather than lowercase text.
-    */
-    COMMAND_ICON_XMARK
-}
-
-#[cfg(test)]
-fn command_pane_tab_close_background_color() -> Hsla {
-    /*
-    CDXC:GPUICommandTabChrome 2026-06-25-14:01:
-    Command-tab close appears only while the tab is hovered, but once visible its 20px command-role frame has the same stable background as native tab-bar icon buttons.
-    */
-    command_pane_control_button_color()
-}
-
-#[cfg(test)]
-fn command_pane_tab_close_icon_color() -> Hsla {
-    /*
-    CDXC:GPUICommandTabChrome 2026-06-25-14:01:
-    Command-tab close uses the same #cfcfcf command icon tint as native tab-bar icon buttons, independent of active tab state.
-    */
-    command_pane_control_text_color()
 }
 
 fn command_pane_tab_separator_visible(has_following_command_tab: bool) -> bool {
@@ -11345,69 +6607,12 @@ fn command_pane_sticky_active_tab_trailing_inset(
         }
 }
 
-#[cfg(test)]
-fn command_pane_sticky_active_tab_participates_in_flex_layout() -> bool {
-    /*
-    CDXC:GPUICommandTabOverflow 2026-06-25-18:51:
-    Native Show Active Tab is an overlay at the tab viewport edge, not a titlebar sibling that shrinks the tab run. GPUI keeps it out of flex layout so clipped tabs, inline New Terminal, and fixed panel controls retain native geometry.
-    */
-    false
-}
-
-#[cfg(test)]
-fn command_pane_sticky_active_tab_click_focuses_command_pane() -> bool {
-    /*
-    CDXC:GPUICommandTabOverflow 2026-06-25-18:56:
-    Native Show Active Tab is a direct titlebar control for the current command tab strip. It scrolls the existing active tab without selecting a different tab or dispatching terminal actions.
-
-    CDXC:GPUICommandTabOverflow 2026-06-25-21:50:
-    GPUI command overflow parity now treats Show Active Tab as command-pane navigation: clicking the real proxy button focuses the owning command group and command pane before centering the existing active tab, while still leaving tab selection, ordering, drag/drop, and command session identity unchanged.
-    */
-    true
-}
-
-#[cfg(test)]
-fn command_pane_collapsed_and_expanded_tabs_share_width_policy() -> bool {
-    /*
-    CDXC:GPUICommandTabSizing 2026-06-25-13:32:
-    Native collapsed command-panel bars and expanded command titlebars both use command-role tab sizing. A separate collapsed fixed width would diverge from macOS because the command tab strip fits tabs from the same 72px-160px range in both states.
-    */
-    true
-}
-
-#[cfg(test)]
-fn command_pane_tab_edge_reveal_visible_without_clipped_active_tab() -> bool {
-    /*
-    CDXC:GPUICommandTabOverflow 2026-06-25-13:30:
-    Native command chrome must not spend a permanent tab-strip slot on decorative edge reveal. The active-tab proxy appears only when scroll geometry proves the active command tab is clipped below the native visibility threshold.
-    */
-    false
-}
-
-#[cfg(test)]
-fn command_pane_tab_end_drop_target_participates_in_tab_width_distribution() -> bool {
-    /*
-    CDXC:GPUICommandTabSizing 2026-06-25-13:32:
-    The command tab-strip end drop target must stay a fixed trailing hit target so flex distribution is owned by command tabs. If the end target grows, tabs become narrower than the native equal-fit rule.
-    */
-    false
-}
-
 fn command_pane_empty_titlebar_double_click_creates_new_terminal(click_count: usize) -> bool {
     /*
     CDXC:GPUICommandTabDoubleClick 2026-06-25-13:50:
     Native command titlebars create New Terminal only for double-clicks on empty tab chrome. Single clicks and real tab/control hits must keep their normal focus, selection, drag, and action behavior.
     */
     click_count >= 2
-}
-
-#[cfg(test)]
-fn command_pane_empty_tabstrip_background_owns_double_click_new_terminal() -> bool {
-    /*
-    CDXC:GPUICommandTabDoubleClick 2026-06-25-13:58:
-    Native accepts double-click on any empty titlebar chrome after rejecting tabs and real controls. GPUI must therefore attach the gesture to the command tab-strip background, not only to the fixed end target.
-    */
-    true
 }
 
 fn command_pane_fixed_panel_control_count(expanded_chrome: bool) -> usize {
@@ -12584,7 +7789,7 @@ impl BrowserDataImportPolicy {
     Browser data import remains an explicit unsupported GPUI action because there is no compatible bounded importer requirement. Available profile-menu dispatch may show only the fixed unsupported notice and must not read browser stores, cookies, credentials, history, filesystem paths, profile directories, shell state, or CEF request-context data.
 
     CDXC:GPUIBrowserRuntimePolicy 2026-06-23-14:13:
-    The unsupported import notice may name broad data categories so users understand nothing was imported, but it must stay fixed and diagnostics-free: no browser names, profile paths, store filenames, URLs, tokens, importer results, or raw failure details can enter the notification path.
+    The unsupported import notice may name broad data categories so users understand nothing was imported, but it must stay fixed and side-channel-free: no browser names, profile paths, store filenames, URLs, tokens, importer results, or raw failure details can enter the notification path.
 
     CDXC:GPUIBrowserRuntimePolicy 2026-06-23-14:30:
     Browser import is a fixed unsupported policy and is intentionally separate from Browser lifecycle visibility and popup-target handling. Do not use popup callbacks, hidden/restored lifecycle states, profile selection, CEF request contexts, or shell-state restoration as an implicit importer trigger.
@@ -12603,3642 +7808,6 @@ impl BrowserDataImportPolicy {
             Self::UnsupportedNotification => Some(BROWSER_IMPORT_UNSUPPORTED_NOTIFICATION),
         }
     }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BrowserCefWebPaneEngineContract {
-    Cef,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BrowserCefWebPaneEngineRejection {
-    NonCefWebPaneEngineRejected,
-}
-
-#[allow(dead_code)]
-impl BrowserCefWebPaneEngineContract {
-    fn cef_only() -> Self {
-        Self::Cef
-    }
-
-    fn from_source_contract_label(
-        candidate: &str,
-    ) -> Result<Self, BrowserCefWebPaneEngineRejection> {
-        if candidate == Self::Cef.privacy_label() {
-            Ok(Self::Cef)
-        } else {
-            Err(BrowserCefWebPaneEngineRejection::NonCefWebPaneEngineRejected)
-        }
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::Cef => "cef",
-        }
-    }
-
-    fn is_cef_only(self) -> bool {
-        matches!(self, Self::Cef)
-    }
-}
-
-#[allow(dead_code)]
-impl BrowserCefWebPaneEngineRejection {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::NonCefWebPaneEngineRejected => "nonCefWebPaneEngineRejected",
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct BrowserCefRuntimeParityPlan {
-    web_pane_engine: BrowserCefWebPaneEngineContract,
-}
-
-#[allow(dead_code)]
-impl BrowserCefRuntimeParityPlan {
-    /*
-    CDXC:GPUIBrowserRuntimeParity 2026-06-24-05:06:
-    Browser source-only runtime parity is accepted when the current source contracts stay CEF-only: Phase 1 rejects Browser identity in active-project snapshots, readiness owns Browser identity separately, import remains unsupported/no-op, blank/script-created popups transfer no content, existing tab-owned CEF surfaces may be shown, and restored loaded tabs stay placeholders. This plan must not add WKWebView/WebKit/non-CEF panes, issue runtime URLs, create extra CEF surfaces, suspend/tear down CEF, import data, move popup content, log/persist private details, mount hidden surfaces, or replace placeholders.
-
-    CDXC:GPUIBrowserRuntimeParity 2026-06-24-09:05:
-    The Browser runtime-parity JSON should expose only the accepted `cef` engine label and generic unsupported-engine rejection evidence. Do not add WKWebView/WebKit-specific capability fields; those names are rejected candidate labels, not pane-engine capabilities or fallback targets.
-        */
-    fn from_source_contracts(
-        phase1_rejects_browser_workarea_id: bool,
-        import_policy: BrowserDataImportPolicy,
-        blank_popup_policy: BrowserPopupTargetPolicy,
-        restored_placeholder_policy: BrowserRuntimeSurfacePolicy,
-        existing_surface_policy: BrowserRuntimeSurfacePolicy,
-    ) -> Option<Self> {
-        if !phase1_rejects_browser_workarea_id
-            || import_policy != BrowserDataImportPolicy::UnsupportedNotification
-            || blank_popup_policy != BrowserPopupTargetPolicy::IgnoreWithoutTransfer
-            || restored_placeholder_policy != BrowserRuntimeSurfacePolicy::RestoredPlaceholder
-            || existing_surface_policy != BrowserRuntimeSurfacePolicy::Visible
-        {
-            return None;
-        }
-
-        let web_pane_engine = BrowserCefWebPaneEngineContract::cef_only();
-        if !web_pane_engine.is_cef_only() {
-            return None;
-        }
-
-        Some(Self { web_pane_engine })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "sourceOnlyRuntimeParityPlan"
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        self.web_pane_engine.privacy_label()
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-    }
-
-    fn rejects_non_cef_web_pane_engines(self) -> bool {
-        true
-    }
-
-    fn counts_as_source_only_runtime_parity(self) -> bool {
-        true
-    }
-
-    fn uses_existing_tab_owned_cef_surface_contract(self) -> bool {
-        true
-    }
-
-    fn creates_new_runtime_cef_surface(self) -> bool {
-        false
-    }
-
-    fn issues_runtime_url(self) -> bool {
-        false
-    }
-
-    fn imports_browser_data(self) -> bool {
-        false
-    }
-
-    fn transfers_blank_popup_content(self) -> bool {
-        false
-    }
-
-    fn can_materialize_restored_tab(self) -> bool {
-        false
-    }
-
-    fn can_suspend_or_teardown_cef(self) -> bool {
-        false
-    }
-
-    fn has_hidden_browser_surface_mount(self) -> bool {
-        false
-    }
-
-    fn has_logged_or_persisted_private_details(self) -> bool {
-        false
-    }
-
-    fn shell_state_privacy_boundary_json(self) -> serde_json::Value {
-        serde_json::json!({
-            "surface": "browser",
-            "runtimeParityState": self.privacy_label(),
-            "webPaneEngine": self.web_pane_engine_privacy_label(),
-            "hasCefOnlyWebPaneEngineContract": self.has_cef_only_web_pane_engine_contract(),
-            "rejectsNonCefWebPaneEngines": self.rejects_non_cef_web_pane_engines(),
-            "countsAsSourceOnlyRuntimeParity": self.counts_as_source_only_runtime_parity(),
-            "usesExistingTabOwnedCefSurfaceContract": self.uses_existing_tab_owned_cef_surface_contract(),
-            "createsNewRuntimeCefSurface": self.creates_new_runtime_cef_surface(),
-            "issuesRuntimeUrl": self.issues_runtime_url(),
-            "importsBrowserData": self.imports_browser_data(),
-            "transfersBlankPopupContent": self.transfers_blank_popup_content(),
-            "canMaterializeRestoredTab": self.can_materialize_restored_tab(),
-            "canSuspendOrTeardownCef": self.can_suspend_or_teardown_cef(),
-            "hasHiddenBrowserSurfaceMount": self.has_hidden_browser_surface_mount(),
-            "hasLoggedOrPersistedPrivateDetails": self.has_logged_or_persisted_private_details(),
-        })
-    }
-}
-
-/*
-CDXC:GPUIProjectWorkareaPaneEngine 2026-06-24-05:45:
-Slice 262 adds a central source-only pane-engine policy for Source, Browser, Kanban, and Manage runtime parity. These panes count for this source-ledger runtime parity only when the accepted web-pane engine is CEF; WKWebView/WebKit/non-CEF/candidate labels must be rejected without retaining rejected labels in safe JSON, and runtime checking remains deferred to the user without instantiating CEF, starting code-server, mounting file bridges, creating hidden surfaces, logging/persisting private data, or replacing placeholders.
-*/
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaPaneEnginePolicyPane {
-    Source,
-    Browser,
-    Kanban,
-    Manage,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaPaneEnginePolicyPane {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::Source => "source",
-            Self::Browser => "browser",
-            Self::Kanban => "kanban",
-            Self::Manage => "manage",
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaPaneEngineContract {
-    Cef,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaPaneEngineRejection {
-    UnsupportedWebPaneEngineRejected,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaPaneEngineContract {
-    fn cef_only() -> Self {
-        Self::Cef
-    }
-
-    fn from_source_contract_label(
-        candidate: &str,
-    ) -> Result<Self, ProjectWorkareaPaneEngineRejection> {
-        if candidate == Self::Cef.privacy_label() {
-            Ok(Self::Cef)
-        } else {
-            Err(ProjectWorkareaPaneEngineRejection::UnsupportedWebPaneEngineRejected)
-        }
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::Cef => "cef",
-        }
-    }
-
-    fn is_cef_only(self) -> bool {
-        matches!(self, Self::Cef)
-    }
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaPaneEngineRejection {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::UnsupportedWebPaneEngineRejected => "unsupportedWebPaneEngineRejected",
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ProjectWorkareaPaneEnginePolicyEntry {
-    pane: ProjectWorkareaPaneEnginePolicyPane,
-    runtime_parity_state_label: &'static str,
-    placeholder_preflight_state_label: &'static str,
-    source_only_evidence_label: &'static str,
-    web_pane_engine: ProjectWorkareaPaneEngineContract,
-    counts_as_source_only_runtime_parity: bool,
-    has_cef_only_web_pane_engine_contract: bool,
-    rejects_unsupported_web_pane_engines: bool,
-    retains_rejected_web_pane_engine_labels: bool,
-    has_runtime_code_server_process: bool,
-    has_issued_runtime_url: bool,
-    has_runtime_cef_browser: bool,
-    has_normal_layout_cef_surface: bool,
-    has_runtime_file_bridge: bool,
-    has_run_runtime_file_operation: bool,
-    has_cef_or_file_bridge_payload: bool,
-    has_hidden_surface_mount: bool,
-    has_private_runtime_data: bool,
-    has_logged_or_persisted_private_details: bool,
-    has_placeholder_replacement_permission: bool,
-    can_replace_placeholder: bool,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaPaneEnginePolicyEntry {
-    fn source(
-        runtime_parity_state: SourceCefCodeServerRuntimeParityState,
-        placeholder_preflight_state: SourcePlaceholderReplacementPreflightState,
-    ) -> Option<Self> {
-        let SourceCefCodeServerRuntimeParityState::SourceOnlyRuntimeParityPlan(runtime_parity_plan) =
-            runtime_parity_state
-        else {
-            return None;
-        };
-        let SourcePlaceholderReplacementPreflightState::SourcePlaceholderReplacementPreflightGate(
-            placeholder_preflight_gate,
-        ) = placeholder_preflight_state
-        else {
-            return None;
-        };
-        let web_pane_engine = ProjectWorkareaPaneEngineContract::from_source_contract_label(
-            runtime_parity_plan.web_pane_engine_privacy_label(),
-        )
-        .ok()?;
-        if !web_pane_engine.is_cef_only()
-            || placeholder_preflight_gate.web_pane_engine_privacy_label()
-                != web_pane_engine.privacy_label()
-            || !runtime_parity_plan.has_cef_only_web_pane_engine_contract()
-            || !placeholder_preflight_gate.has_cef_only_web_pane_engine_contract()
-        {
-            return None;
-        }
-
-        Some(Self {
-            pane: ProjectWorkareaPaneEnginePolicyPane::Source,
-            runtime_parity_state_label: runtime_parity_plan.privacy_label(),
-            placeholder_preflight_state_label: placeholder_preflight_gate.privacy_label(),
-            source_only_evidence_label: runtime_parity_plan
-                .materialization_contract_privacy_label(),
-            web_pane_engine,
-            counts_as_source_only_runtime_parity: runtime_parity_plan
-                .counts_as_source_only_runtime_parity(),
-            has_cef_only_web_pane_engine_contract: true,
-            rejects_unsupported_web_pane_engines: runtime_parity_plan
-                .rejects_non_cef_web_pane_engines()
-                && placeholder_preflight_gate.rejects_non_cef_web_pane_engines(),
-            retains_rejected_web_pane_engine_labels: false,
-            has_runtime_code_server_process: placeholder_preflight_gate
-                .has_runtime_code_server_process(),
-            has_issued_runtime_url: placeholder_preflight_gate.has_issued_runtime_code_server_url(),
-            has_runtime_cef_browser: placeholder_preflight_gate.has_runtime_cef_browser(),
-            has_normal_layout_cef_surface: placeholder_preflight_gate
-                .has_normal_layout_cef_surface(),
-            has_runtime_file_bridge: false,
-            has_run_runtime_file_operation: false,
-            has_cef_or_file_bridge_payload: false,
-            has_hidden_surface_mount: placeholder_preflight_gate.has_hidden_source_surface_mount(),
-            has_private_runtime_data: placeholder_preflight_gate.has_private_runtime_data(),
-            has_logged_or_persisted_private_details: false,
-            has_placeholder_replacement_permission: placeholder_preflight_gate
-                .has_placeholder_replacement_permission(),
-            can_replace_placeholder: placeholder_preflight_gate.can_replace_source_placeholder(),
-        })
-    }
-
-    fn browser(runtime_parity_plan: BrowserCefRuntimeParityPlan) -> Option<Self> {
-        let web_pane_engine = ProjectWorkareaPaneEngineContract::from_source_contract_label(
-            runtime_parity_plan.web_pane_engine_privacy_label(),
-        )
-        .ok()?;
-        if !web_pane_engine.is_cef_only()
-            || !runtime_parity_plan.has_cef_only_web_pane_engine_contract()
-            || !runtime_parity_plan.rejects_non_cef_web_pane_engines()
-        {
-            return None;
-        }
-
-        Some(Self {
-            pane: ProjectWorkareaPaneEnginePolicyPane::Browser,
-            runtime_parity_state_label: runtime_parity_plan.privacy_label(),
-            placeholder_preflight_state_label: "browserRestoredPlaceholderPolicy",
-            source_only_evidence_label: "existingTabOwnedCefSurfaceContract",
-            web_pane_engine,
-            counts_as_source_only_runtime_parity: runtime_parity_plan
-                .counts_as_source_only_runtime_parity(),
-            has_cef_only_web_pane_engine_contract: true,
-            rejects_unsupported_web_pane_engines: runtime_parity_plan
-                .rejects_non_cef_web_pane_engines(),
-            retains_rejected_web_pane_engine_labels: false,
-            has_runtime_code_server_process: false,
-            has_issued_runtime_url: runtime_parity_plan.issues_runtime_url(),
-            has_runtime_cef_browser: runtime_parity_plan.creates_new_runtime_cef_surface(),
-            has_normal_layout_cef_surface: false,
-            has_runtime_file_bridge: false,
-            has_run_runtime_file_operation: false,
-            has_cef_or_file_bridge_payload: false,
-            has_hidden_surface_mount: runtime_parity_plan.has_hidden_browser_surface_mount(),
-            has_private_runtime_data: false,
-            has_logged_or_persisted_private_details: runtime_parity_plan
-                .has_logged_or_persisted_private_details(),
-            has_placeholder_replacement_permission: false,
-            can_replace_placeholder: runtime_parity_plan.can_materialize_restored_tab(),
-        })
-    }
-
-    fn kanban(
-        runtime_parity_state: KanbanCefRuntimeParityState,
-        placeholder_preflight_state: KanbanPlaceholderReplacementPreflightState,
-    ) -> Option<Self> {
-        let KanbanCefRuntimeParityState::SourceOnlyRuntimeParityPlan(runtime_parity_plan) =
-            runtime_parity_state
-        else {
-            return None;
-        };
-        let KanbanPlaceholderReplacementPreflightState::KanbanPlaceholderReplacementPreflightGate(
-            placeholder_preflight_gate,
-        ) = placeholder_preflight_state
-        else {
-            return None;
-        };
-        let web_pane_engine = ProjectWorkareaPaneEngineContract::from_source_contract_label(
-            runtime_parity_plan.web_pane_engine_privacy_label(),
-        )
-        .ok()?;
-        if !web_pane_engine.is_cef_only()
-            || placeholder_preflight_gate.web_pane_engine_privacy_label()
-                != web_pane_engine.privacy_label()
-            || !runtime_parity_plan.has_cef_only_web_pane_engine_contract()
-            || !placeholder_preflight_gate.has_cef_only_web_pane_engine_contract()
-        {
-            return None;
-        }
-
-        Some(Self {
-            pane: ProjectWorkareaPaneEnginePolicyPane::Kanban,
-            runtime_parity_state_label: runtime_parity_plan.privacy_label(),
-            placeholder_preflight_state_label: placeholder_preflight_gate.privacy_label(),
-            source_only_evidence_label: runtime_parity_plan
-                .materialization_contract_privacy_label(),
-            web_pane_engine,
-            counts_as_source_only_runtime_parity: runtime_parity_plan
-                .counts_as_source_only_runtime_parity(),
-            has_cef_only_web_pane_engine_contract: true,
-            rejects_unsupported_web_pane_engines: runtime_parity_plan
-                .rejects_non_cef_web_pane_engines()
-                && placeholder_preflight_gate.rejects_non_cef_web_pane_engines(),
-            retains_rejected_web_pane_engine_labels: false,
-            has_runtime_code_server_process: false,
-            has_issued_runtime_url: placeholder_preflight_gate.has_issued_runtime_url(),
-            has_runtime_cef_browser: placeholder_preflight_gate.has_runtime_cef_browser(),
-            has_normal_layout_cef_surface: placeholder_preflight_gate
-                .has_normal_layout_cef_surface(),
-            has_runtime_file_bridge: false,
-            has_run_runtime_file_operation: false,
-            has_cef_or_file_bridge_payload: false,
-            has_hidden_surface_mount: placeholder_preflight_gate.has_hidden_kanban_surface_mount(),
-            has_private_runtime_data: placeholder_preflight_gate.has_private_runtime_data(),
-            has_logged_or_persisted_private_details: false,
-            has_placeholder_replacement_permission: placeholder_preflight_gate
-                .has_placeholder_replacement_permission(),
-            can_replace_placeholder: placeholder_preflight_gate.can_replace_kanban_placeholder(),
-        })
-    }
-
-    fn manage(
-        runtime_parity_state: ManageCefRuntimeParityState,
-        placeholder_preflight_state: ManagePlaceholderReplacementPreflightState,
-    ) -> Option<Self> {
-        let ManageCefRuntimeParityState::SourceOnlyRuntimeParityPlan(runtime_parity_plan) =
-            runtime_parity_state
-        else {
-            return None;
-        };
-        let ManagePlaceholderReplacementPreflightState::ManagePlaceholderReplacementPreflightGate(
-            placeholder_preflight_gate,
-        ) = placeholder_preflight_state
-        else {
-            return None;
-        };
-        let web_pane_engine = ProjectWorkareaPaneEngineContract::from_source_contract_label(
-            runtime_parity_plan.web_pane_engine_privacy_label(),
-        )
-        .ok()?;
-        if !web_pane_engine.is_cef_only()
-            || placeholder_preflight_gate.web_pane_engine_privacy_label()
-                != web_pane_engine.privacy_label()
-            || !runtime_parity_plan.has_cef_only_web_pane_engine_contract()
-            || !placeholder_preflight_gate.has_cef_only_web_pane_engine_contract()
-        {
-            return None;
-        }
-
-        Some(Self {
-            pane: ProjectWorkareaPaneEnginePolicyPane::Manage,
-            runtime_parity_state_label: runtime_parity_plan.privacy_label(),
-            placeholder_preflight_state_label: placeholder_preflight_gate.privacy_label(),
-            source_only_evidence_label: runtime_parity_plan
-                .materialization_contract_privacy_label(),
-            web_pane_engine,
-            counts_as_source_only_runtime_parity: runtime_parity_plan
-                .counts_as_source_only_runtime_parity(),
-            has_cef_only_web_pane_engine_contract: true,
-            rejects_unsupported_web_pane_engines: runtime_parity_plan
-                .rejects_non_cef_web_pane_engines()
-                && placeholder_preflight_gate.rejects_non_cef_web_pane_engines(),
-            retains_rejected_web_pane_engine_labels: false,
-            has_runtime_code_server_process: false,
-            has_issued_runtime_url: placeholder_preflight_gate.has_issued_runtime_url(),
-            has_runtime_cef_browser: placeholder_preflight_gate.has_runtime_cef_browser(),
-            has_normal_layout_cef_surface: placeholder_preflight_gate
-                .has_normal_layout_cef_surface(),
-            has_runtime_file_bridge: placeholder_preflight_gate.has_runtime_file_bridge(),
-            has_run_runtime_file_operation: placeholder_preflight_gate
-                .has_run_runtime_file_operation(),
-            has_cef_or_file_bridge_payload: placeholder_preflight_gate
-                .has_cef_or_file_bridge_payload(),
-            has_hidden_surface_mount: placeholder_preflight_gate.has_hidden_manage_surface_mount(),
-            has_private_runtime_data: placeholder_preflight_gate.has_private_runtime_data(),
-            has_logged_or_persisted_private_details: placeholder_preflight_gate
-                .has_logged_or_persisted_private_details(),
-            has_placeholder_replacement_permission: placeholder_preflight_gate
-                .has_placeholder_replacement_permission(),
-            can_replace_placeholder: placeholder_preflight_gate.can_replace_manage_placeholder(),
-        })
-    }
-
-    fn shell_state_privacy_boundary_json(self) -> serde_json::Value {
-        serde_json::json!({
-            "pane": self.pane.privacy_label(),
-            "runtimeParityState": self.runtime_parity_state_label,
-            "placeholderPreflightState": self.placeholder_preflight_state_label,
-            "sourceOnlyEvidence": self.source_only_evidence_label,
-            "webPaneEngine": self.web_pane_engine.privacy_label(),
-            "countsAsSourceOnlyRuntimeParity": self.counts_as_source_only_runtime_parity,
-            "hasCefOnlyWebPaneEngineContract": self.has_cef_only_web_pane_engine_contract,
-            "rejectsUnsupportedWebPaneEngines": self.rejects_unsupported_web_pane_engines,
-            "retainsRejectedWebPaneEngineLabels": self.retains_rejected_web_pane_engine_labels,
-            "hasRuntimeCodeServerProcess": self.has_runtime_code_server_process,
-            "hasIssuedRuntimeUrl": self.has_issued_runtime_url,
-            "hasRuntimeCefBrowser": self.has_runtime_cef_browser,
-            "hasNormalLayoutCefSurface": self.has_normal_layout_cef_surface,
-            "hasRuntimeFileBridge": self.has_runtime_file_bridge,
-            "hasRunRuntimeFileOperation": self.has_run_runtime_file_operation,
-            "hasCefOrFileBridgePayload": self.has_cef_or_file_bridge_payload,
-            "hasHiddenSurfaceMount": self.has_hidden_surface_mount,
-            "hasPrivateRuntimeData": self.has_private_runtime_data,
-            "hasLoggedOrPersistedPrivateDetails": self.has_logged_or_persisted_private_details,
-            "hasPlaceholderReplacementPermission": self.has_placeholder_replacement_permission,
-            "canReplacePlaceholder": self.can_replace_placeholder,
-        })
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ProjectWorkareaPaneEnginePolicy {
-    source: ProjectWorkareaPaneEnginePolicyEntry,
-    browser: ProjectWorkareaPaneEnginePolicyEntry,
-    kanban: ProjectWorkareaPaneEnginePolicyEntry,
-    manage: ProjectWorkareaPaneEnginePolicyEntry,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaPaneEnginePolicy {
-    fn from_source_runtime_evidence(
-        source_runtime_parity_state: SourceCefCodeServerRuntimeParityState,
-        source_placeholder_preflight_state: SourcePlaceholderReplacementPreflightState,
-        browser_runtime_parity_plan: BrowserCefRuntimeParityPlan,
-        kanban_runtime_parity_state: KanbanCefRuntimeParityState,
-        kanban_placeholder_preflight_state: KanbanPlaceholderReplacementPreflightState,
-        manage_runtime_parity_state: ManageCefRuntimeParityState,
-        manage_placeholder_preflight_state: ManagePlaceholderReplacementPreflightState,
-    ) -> Option<Self> {
-        Some(Self {
-            source: ProjectWorkareaPaneEnginePolicyEntry::source(
-                source_runtime_parity_state,
-                source_placeholder_preflight_state,
-            )?,
-            browser: ProjectWorkareaPaneEnginePolicyEntry::browser(browser_runtime_parity_plan)?,
-            kanban: ProjectWorkareaPaneEnginePolicyEntry::kanban(
-                kanban_runtime_parity_state,
-                kanban_placeholder_preflight_state,
-            )?,
-            manage: ProjectWorkareaPaneEnginePolicyEntry::manage(
-                manage_runtime_parity_state,
-                manage_placeholder_preflight_state,
-            )?,
-        })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "cefOnlyProjectWorkareaPaneEnginePolicy"
-    }
-
-    fn entries(self) -> [ProjectWorkareaPaneEnginePolicyEntry; 4] {
-        [self.source, self.browser, self.kanban, self.manage]
-    }
-
-    fn pane_count(self) -> usize {
-        self.entries().len()
-    }
-
-    fn all_panes_count_as_source_only_runtime_parity(self) -> bool {
-        self.entries()
-            .iter()
-            .all(|entry| entry.counts_as_source_only_runtime_parity)
-    }
-
-    fn has_cef_only_web_pane_engine_contracts(self) -> bool {
-        self.entries().iter().all(|entry| {
-            entry.web_pane_engine == ProjectWorkareaPaneEngineContract::cef_only()
-                && entry.has_cef_only_web_pane_engine_contract
-        })
-    }
-
-    fn rejects_unsupported_web_pane_engines(self) -> bool {
-        self.entries()
-            .iter()
-            .all(|entry| entry.rejects_unsupported_web_pane_engines)
-    }
-
-    fn retains_rejected_web_pane_engine_labels(self) -> bool {
-        self.entries()
-            .iter()
-            .any(|entry| entry.retains_rejected_web_pane_engine_labels)
-    }
-
-    fn runtime_checking_deferred_to_user(self) -> bool {
-        true
-    }
-
-    fn instantiates_cef(self) -> bool {
-        false
-    }
-
-    fn starts_code_server(self) -> bool {
-        false
-    }
-
-    fn mounts_file_bridge(self) -> bool {
-        false
-    }
-
-    fn runs_file_io(self) -> bool {
-        false
-    }
-
-    fn creates_hidden_surface(self) -> bool {
-        self.entries()
-            .iter()
-            .any(|entry| entry.has_hidden_surface_mount)
-    }
-
-    fn logs_or_persists_private_details(self) -> bool {
-        self.entries()
-            .iter()
-            .any(|entry| entry.has_logged_or_persisted_private_details)
-    }
-
-    fn has_private_runtime_data(self) -> bool {
-        self.entries()
-            .iter()
-            .any(|entry| entry.has_private_runtime_data)
-    }
-
-    fn has_runtime_code_server_process(self) -> bool {
-        self.entries()
-            .iter()
-            .any(|entry| entry.has_runtime_code_server_process)
-    }
-
-    fn has_issued_runtime_url(self) -> bool {
-        self.entries()
-            .iter()
-            .any(|entry| entry.has_issued_runtime_url)
-    }
-
-    fn has_runtime_cef_browser(self) -> bool {
-        self.entries()
-            .iter()
-            .any(|entry| entry.has_runtime_cef_browser)
-    }
-
-    fn has_normal_layout_cef_surface(self) -> bool {
-        self.entries()
-            .iter()
-            .any(|entry| entry.has_normal_layout_cef_surface)
-    }
-
-    fn has_runtime_file_bridge(self) -> bool {
-        self.entries()
-            .iter()
-            .any(|entry| entry.has_runtime_file_bridge)
-    }
-
-    fn has_run_runtime_file_operation(self) -> bool {
-        self.entries()
-            .iter()
-            .any(|entry| entry.has_run_runtime_file_operation)
-    }
-
-    fn has_cef_or_file_bridge_payload(self) -> bool {
-        self.entries()
-            .iter()
-            .any(|entry| entry.has_cef_or_file_bridge_payload)
-    }
-
-    fn has_placeholder_replacement_permission(self) -> bool {
-        self.entries()
-            .iter()
-            .any(|entry| entry.has_placeholder_replacement_permission)
-    }
-
-    fn can_replace_any_placeholder(self) -> bool {
-        self.entries()
-            .iter()
-            .any(|entry| entry.can_replace_placeholder)
-    }
-
-    fn shell_state_privacy_boundary_json(self) -> serde_json::Value {
-        let entries = self
-            .entries()
-            .iter()
-            .map(|entry| entry.shell_state_privacy_boundary_json())
-            .collect::<Vec<_>>();
-        serde_json::json!({
-            "policy": self.privacy_label(),
-            "paneCount": self.pane_count(),
-            "sourceLedgerRuntimeParityOnly": true,
-            "runtimeCheckingDeferredToUser": self.runtime_checking_deferred_to_user(),
-            "allPanesCountAsSourceOnlyRuntimeParity": self.all_panes_count_as_source_only_runtime_parity(),
-            "hasCefOnlyWebPaneEngineContracts": self.has_cef_only_web_pane_engine_contracts(),
-            "webPaneEngine": ProjectWorkareaPaneEngineContract::cef_only().privacy_label(),
-            "rejectsUnsupportedWebPaneEngines": self.rejects_unsupported_web_pane_engines(),
-            "retainsRejectedWebPaneEngineLabels": self.retains_rejected_web_pane_engine_labels(),
-            "instantiatesCef": self.instantiates_cef(),
-            "startsCodeServer": self.starts_code_server(),
-            "mountsFileBridge": self.mounts_file_bridge(),
-            "runsFileIo": self.runs_file_io(),
-            "createsHiddenSurface": self.creates_hidden_surface(),
-            "logsOrPersistsPrivateDetails": self.logs_or_persists_private_details(),
-            "hasPrivateRuntimeData": self.has_private_runtime_data(),
-            "hasRuntimeCodeServerProcess": self.has_runtime_code_server_process(),
-            "hasIssuedRuntimeUrl": self.has_issued_runtime_url(),
-            "hasRuntimeCefBrowser": self.has_runtime_cef_browser(),
-            "hasNormalLayoutCefSurface": self.has_normal_layout_cef_surface(),
-            "hasRuntimeFileBridge": self.has_runtime_file_bridge(),
-            "hasRunRuntimeFileOperation": self.has_run_runtime_file_operation(),
-            "hasCefOrFileBridgePayload": self.has_cef_or_file_bridge_payload(),
-            "hasPlaceholderReplacementPermission": self.has_placeholder_replacement_permission(),
-            "canReplaceAnyPlaceholder": self.can_replace_any_placeholder(),
-            "panes": entries,
-        })
-    }
-}
-
-/*
-CDXC:GPUIProjectWorkareaCefSlots 2026-06-24-05:58:
-Source, Kanban, and Manage GPUI-owned CEF surface slots are CEF-only normal-layout child boundaries. A slot may reserve ownership only after the existing runtime-parity plus placeholder preflight evidence exists; it still requires an issued real runtime URL before any CefSurface can be created and must not include Browser tab-owned CEF, hidden mounts, private runtime data, logging/persistence, or placeholder swaps.
-
-CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-10:12:
-Real Source, Kanban, and Manage panes are now the active GPUI implementation target and must use CEF only. Keep the slot keys as the app-owned surface ownership boundary, but create a CefSurface only from an explicit real runtime URL value; do not synthesize about:blank, localhost, raw app-resource labels, temporary pages, WKWebView/WebKit, hidden mounts, or fallback URLs.
-*/
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum ProjectWorkareaCefSurfaceSlotKey {
-    Source,
-    Kanban,
-    Manage,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaCefSurfaceSlotKey {
-    fn project_placeholder_slots() -> [Self; 3] {
-        [Self::Source, Self::Kanban, Self::Manage]
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::Source => "source",
-            Self::Kanban => "kanban",
-            Self::Manage => "manage",
-        }
-    }
-
-    fn titlebar_mode(self) -> TitlebarMode {
-        match self {
-            Self::Source => TitlebarMode::Source,
-            Self::Kanban => TitlebarMode::Kanban,
-            Self::Manage => TitlebarMode::Manage,
-        }
-    }
-
-    fn cef_surface_id(self) -> String {
-        format!("phase1-project-workarea-{}", self.privacy_label())
-    }
-
-    fn cef_profile_id(self) -> String {
-        format!("phase1-project-workarea-{}", self.privacy_label())
-    }
-}
-
-/*
-CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-10:12:
-Project-workarea CEF creation accepts only a caller-provided navigable runtime URL value. This type rejects blank strings, whitespace-mutated values, non-navigable labels such as about:blank, and raw app-resource labels; it does not normalize, invent, persist, log, or expose the URL outside the immediate CefSurface creation boundary.
-*/
-#[allow(dead_code)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ProjectWorkareaRealRuntimeUrl {
-    value: String,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaRealRuntimeUrl {
-    fn from_authorized_runtime_url(value: String) -> Option<Self> {
-        let trimmed = value.trim();
-        if trimmed.is_empty() || trimmed != value {
-            return None;
-        }
-
-        let (scheme, rest) = trimmed.split_once("://")?;
-        let scheme = scheme.to_ascii_lowercase();
-        if !matches!(scheme.as_str(), "http" | "https" | "file") || rest.trim().is_empty() {
-            return None;
-        }
-
-        Some(Self { value })
-    }
-
-    fn into_cef_url(self) -> String {
-        self.value
-    }
-}
-
-/*
-CDXC:GPUISourceRuntime 2026-06-24-23:17:
-The GPUI Source page owns a shared code-server runtime shape: one localhost process, a project folder URL derived only from the explicit sidebar snapshot, and runtime-only process/URL state that is never written to shell persistence or logs.
-*/
-#[derive(Clone, PartialEq, Eq)]
-struct SourceCodeServerRuntimeTarget {
-    active_project_id: GpuiProjectId,
-    source_workarea_id: String,
-    project_path: PathBuf,
-    runtime_url: ProjectWorkareaRealRuntimeUrl,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct SourceCodeServerRuntimeSettings {
-    link_vscode_user_config: bool,
-    use_vscode_insiders_user_config: bool,
-    vscode_user_config_dir: String,
-}
-
-impl SourceCodeServerRuntimeSettings {
-    fn from_shared_settings(settings: &shared_settings::SharedSidebarSettingsSnapshot) -> Self {
-        let link_vscode_user_config = settings
-            .object()
-            .get("codeServerLinkVscodeUserConfig")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        let use_vscode_insiders_user_config = settings
-            .object()
-            .get("codeServerUseVscodeInsidersUserConfig")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        let app_name = if use_vscode_insiders_user_config {
-            "Code - Insiders"
-        } else {
-            "Code"
-        };
-        Self {
-            link_vscode_user_config,
-            use_vscode_insiders_user_config,
-            vscode_user_config_dir: gpui_path_string(
-                &home_dir().join(format!("Library/Application Support/{app_name}/User")),
-            ),
-        }
-    }
-
-    fn linked_vscode_user_config_dir(&self) -> Option<&str> {
-        self.link_vscode_user_config
-            .then_some(self.vscode_user_config_dir.as_str())
-    }
-
-    fn from_sidebar_runtime_settings(settings: &cef::SidebarRuntimeSettingsSnapshot) -> Self {
-        let object = serde_json::from_str::<serde_json::Value>(&settings.saved_settings_json)
-            .ok()
-            .and_then(|value| value.as_object().cloned())
-            .unwrap_or_default();
-        Self::from_shared_settings(
-            &shared_settings::SharedSidebarSettingsSnapshot::from_object(object),
-        )
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceCodeServerRuntimeLaunchState {
-    Idle,
-    Launching,
-    Ready,
-    Failed,
-}
-
-impl Default for SourceCodeServerRuntimeLaunchState {
-    fn default() -> Self {
-        Self::Idle
-    }
-}
-
-struct SourceCodeServerRuntimeOwner {
-    child: Option<Child>,
-    started_at: Option<Instant>,
-    generation: u64,
-    state: SourceCodeServerRuntimeLaunchState,
-    target: Option<SourceCodeServerRuntimeTarget>,
-    settings: Option<SourceCodeServerRuntimeSettings>,
-}
-
-impl SourceCodeServerRuntimeOwner {
-    fn new() -> Self {
-        Self {
-            child: None,
-            started_at: None,
-            generation: 0,
-            state: SourceCodeServerRuntimeLaunchState::Idle,
-            target: None,
-            settings: None,
-        }
-    }
-
-    fn next_generation(&mut self) -> u64 {
-        self.generation = self.generation.saturating_add(1);
-        self.generation
-    }
-
-    fn runtime_url_for_target(
-        &self,
-        target: &SourceCodeServerRuntimeTarget,
-    ) -> Option<ProjectWorkareaRealRuntimeUrl> {
-        (self.state == SourceCodeServerRuntimeLaunchState::Ready
-            && self.target.as_ref() == Some(target)
-            && self.child.is_some())
-        .then(|| target.runtime_url.clone())
-    }
-
-    fn can_reuse_ready_process(&self, settings: &SourceCodeServerRuntimeSettings) -> bool {
-        self.state == SourceCodeServerRuntimeLaunchState::Ready
-            && self.settings.as_ref() == Some(settings)
-            && self.child.is_some()
-    }
-
-    fn launching_matches(
-        &self,
-        target: &SourceCodeServerRuntimeTarget,
-        settings: &SourceCodeServerRuntimeSettings,
-    ) -> bool {
-        self.state == SourceCodeServerRuntimeLaunchState::Launching
-            && self.target.as_ref() == Some(target)
-            && self.settings.as_ref() == Some(settings)
-    }
-
-    fn child_is_within_startup_grace(&self) -> bool {
-        self.child.is_some()
-            && self.started_at.is_some_and(|started_at| {
-                started_at.elapsed() < SOURCE_CODE_SERVER_STARTUP_GRACE_INTERVAL
-            })
-    }
-
-    fn set_launching(
-        &mut self,
-        target: SourceCodeServerRuntimeTarget,
-        settings: SourceCodeServerRuntimeSettings,
-    ) {
-        self.state = SourceCodeServerRuntimeLaunchState::Launching;
-        self.target = Some(target);
-        self.settings = Some(settings);
-        self.started_at = Some(Instant::now());
-    }
-
-    fn set_ready_target(
-        &mut self,
-        target: SourceCodeServerRuntimeTarget,
-        settings: SourceCodeServerRuntimeSettings,
-    ) {
-        self.state = SourceCodeServerRuntimeLaunchState::Ready;
-        self.target = Some(target);
-        self.settings = Some(settings);
-        if self.started_at.is_none() {
-            self.started_at = Some(Instant::now());
-        }
-    }
-
-    fn set_ready(
-        &mut self,
-        target: SourceCodeServerRuntimeTarget,
-        settings: SourceCodeServerRuntimeSettings,
-        child: Child,
-        started_at: Instant,
-    ) {
-        self.replace_child(child);
-        self.started_at = Some(started_at);
-        self.set_ready_target(target, settings);
-    }
-
-    fn set_failed(
-        &mut self,
-        target: SourceCodeServerRuntimeTarget,
-        settings: SourceCodeServerRuntimeSettings,
-        child: Option<Child>,
-        started_at: Option<Instant>,
-    ) {
-        if let Some(child) = child {
-            self.replace_child(child);
-        }
-        self.started_at = started_at;
-        self.state = SourceCodeServerRuntimeLaunchState::Failed;
-        self.target = Some(target);
-        self.settings = Some(settings);
-    }
-
-    fn replace_child(&mut self, child: Child) {
-        if let Some(mut previous_child) = self.child.take() {
-            let _ = previous_child.kill();
-            let _ = previous_child.wait();
-        }
-        self.child = Some(child);
-    }
-
-    fn refresh_child_exit(&mut self) -> bool {
-        let Some(child) = self.child.as_mut() else {
-            return false;
-        };
-        match child.try_wait() {
-            Ok(Some(_)) | Err(_) => {
-                self.child = None;
-                self.started_at = None;
-                self.state = SourceCodeServerRuntimeLaunchState::Idle;
-                true
-            }
-            Ok(None) => false,
-        }
-    }
-
-    fn stop(&mut self) -> bool {
-        let had_state = self.child.is_some()
-            || self.target.is_some()
-            || self.state != SourceCodeServerRuntimeLaunchState::Idle;
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        self.generation = self.generation.saturating_add(1);
-        self.started_at = None;
-        self.state = SourceCodeServerRuntimeLaunchState::Idle;
-        self.target = None;
-        self.settings = None;
-        had_state
-    }
-}
-
-struct SourceCodeServerRuntimeStartOutput {
-    child: Child,
-    started_at: Instant,
-    responsive: bool,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ProjectWorkareaCefSurfaceOwnershipSlotDecision {
-    slot_key: ProjectWorkareaCefSurfaceSlotKey,
-    runtime_parity_state_label: &'static str,
-    placeholder_preflight_state_label: &'static str,
-    source_only_evidence_label: &'static str,
-    web_pane_engine: ProjectWorkareaPaneEngineContract,
-    has_issued_runtime_url: bool,
-    has_runtime_cef_surface: bool,
-    has_runtime_file_bridge: bool,
-    has_run_runtime_file_operation: bool,
-    has_cef_or_file_bridge_payload: bool,
-    has_hidden_surface_mount: bool,
-    has_private_runtime_data: bool,
-    has_logged_or_persisted_private_details: bool,
-    has_placeholder_replacement_permission: bool,
-    can_replace_placeholder: bool,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaCefSurfaceOwnershipSlotDecision {
-    fn source(
-        runtime_parity_state: SourceCefCodeServerRuntimeParityState,
-        placeholder_preflight_state: SourcePlaceholderReplacementPreflightState,
-    ) -> Option<Self> {
-        let SourceCefCodeServerRuntimeParityState::SourceOnlyRuntimeParityPlan(runtime_parity_plan) =
-            runtime_parity_state
-        else {
-            return None;
-        };
-        let SourcePlaceholderReplacementPreflightState::SourcePlaceholderReplacementPreflightGate(
-            placeholder_preflight_gate,
-        ) = placeholder_preflight_state
-        else {
-            return None;
-        };
-        let web_pane_engine = ProjectWorkareaPaneEngineContract::from_source_contract_label(
-            runtime_parity_plan.web_pane_engine_privacy_label(),
-        )
-        .ok()?;
-        if !web_pane_engine.is_cef_only()
-            || !runtime_parity_plan.has_cef_only_web_pane_engine_contract()
-            || !placeholder_preflight_gate.has_cef_only_web_pane_engine_contract()
-            || placeholder_preflight_gate.web_pane_engine_privacy_label()
-                != web_pane_engine.privacy_label()
-        {
-            return None;
-        }
-
-        Some(Self {
-            slot_key: ProjectWorkareaCefSurfaceSlotKey::Source,
-            runtime_parity_state_label: runtime_parity_plan.privacy_label(),
-            placeholder_preflight_state_label: placeholder_preflight_gate.privacy_label(),
-            source_only_evidence_label: runtime_parity_plan
-                .materialization_contract_privacy_label(),
-            web_pane_engine,
-            has_issued_runtime_url: placeholder_preflight_gate.has_issued_runtime_code_server_url(),
-            has_runtime_cef_surface: placeholder_preflight_gate.has_runtime_cef_browser(),
-            has_runtime_file_bridge: false,
-            has_run_runtime_file_operation: false,
-            has_cef_or_file_bridge_payload: false,
-            has_hidden_surface_mount: placeholder_preflight_gate.has_hidden_source_surface_mount(),
-            has_private_runtime_data: placeholder_preflight_gate.has_private_runtime_data(),
-            has_logged_or_persisted_private_details: false,
-            has_placeholder_replacement_permission: placeholder_preflight_gate
-                .has_placeholder_replacement_permission(),
-            can_replace_placeholder: placeholder_preflight_gate.can_replace_source_placeholder(),
-        })
-    }
-
-    fn kanban(
-        runtime_parity_state: KanbanCefRuntimeParityState,
-        placeholder_preflight_state: KanbanPlaceholderReplacementPreflightState,
-    ) -> Option<Self> {
-        let KanbanCefRuntimeParityState::SourceOnlyRuntimeParityPlan(runtime_parity_plan) =
-            runtime_parity_state
-        else {
-            return None;
-        };
-        let KanbanPlaceholderReplacementPreflightState::KanbanPlaceholderReplacementPreflightGate(
-            placeholder_preflight_gate,
-        ) = placeholder_preflight_state
-        else {
-            return None;
-        };
-        let web_pane_engine = ProjectWorkareaPaneEngineContract::from_source_contract_label(
-            runtime_parity_plan.web_pane_engine_privacy_label(),
-        )
-        .ok()?;
-        if !web_pane_engine.is_cef_only()
-            || !runtime_parity_plan.has_cef_only_web_pane_engine_contract()
-            || !placeholder_preflight_gate.has_cef_only_web_pane_engine_contract()
-            || placeholder_preflight_gate.web_pane_engine_privacy_label()
-                != web_pane_engine.privacy_label()
-        {
-            return None;
-        }
-
-        Some(Self {
-            slot_key: ProjectWorkareaCefSurfaceSlotKey::Kanban,
-            runtime_parity_state_label: runtime_parity_plan.privacy_label(),
-            placeholder_preflight_state_label: placeholder_preflight_gate.privacy_label(),
-            source_only_evidence_label: runtime_parity_plan
-                .materialization_contract_privacy_label(),
-            web_pane_engine,
-            has_issued_runtime_url: placeholder_preflight_gate.has_issued_runtime_url(),
-            has_runtime_cef_surface: placeholder_preflight_gate.has_runtime_cef_browser(),
-            has_runtime_file_bridge: false,
-            has_run_runtime_file_operation: false,
-            has_cef_or_file_bridge_payload: false,
-            has_hidden_surface_mount: placeholder_preflight_gate.has_hidden_kanban_surface_mount(),
-            has_private_runtime_data: placeholder_preflight_gate.has_private_runtime_data(),
-            has_logged_or_persisted_private_details: false,
-            has_placeholder_replacement_permission: placeholder_preflight_gate
-                .has_placeholder_replacement_permission(),
-            can_replace_placeholder: placeholder_preflight_gate.can_replace_kanban_placeholder(),
-        })
-    }
-
-    fn manage(
-        runtime_parity_state: ManageCefRuntimeParityState,
-        placeholder_preflight_state: ManagePlaceholderReplacementPreflightState,
-    ) -> Option<Self> {
-        let ManageCefRuntimeParityState::SourceOnlyRuntimeParityPlan(runtime_parity_plan) =
-            runtime_parity_state
-        else {
-            return None;
-        };
-        let ManagePlaceholderReplacementPreflightState::ManagePlaceholderReplacementPreflightGate(
-            placeholder_preflight_gate,
-        ) = placeholder_preflight_state
-        else {
-            return None;
-        };
-        let web_pane_engine = ProjectWorkareaPaneEngineContract::from_source_contract_label(
-            runtime_parity_plan.web_pane_engine_privacy_label(),
-        )
-        .ok()?;
-        if !web_pane_engine.is_cef_only()
-            || !runtime_parity_plan.has_cef_only_web_pane_engine_contract()
-            || !placeholder_preflight_gate.has_cef_only_web_pane_engine_contract()
-            || placeholder_preflight_gate.web_pane_engine_privacy_label()
-                != web_pane_engine.privacy_label()
-        {
-            return None;
-        }
-
-        Some(Self {
-            slot_key: ProjectWorkareaCefSurfaceSlotKey::Manage,
-            runtime_parity_state_label: runtime_parity_plan.privacy_label(),
-            placeholder_preflight_state_label: placeholder_preflight_gate.privacy_label(),
-            source_only_evidence_label: runtime_parity_plan
-                .materialization_contract_privacy_label(),
-            web_pane_engine,
-            has_issued_runtime_url: placeholder_preflight_gate.has_issued_runtime_url(),
-            has_runtime_cef_surface: placeholder_preflight_gate.has_runtime_cef_browser(),
-            has_runtime_file_bridge: placeholder_preflight_gate.has_runtime_file_bridge(),
-            has_run_runtime_file_operation: placeholder_preflight_gate
-                .has_run_runtime_file_operation(),
-            has_cef_or_file_bridge_payload: placeholder_preflight_gate
-                .has_cef_or_file_bridge_payload(),
-            has_hidden_surface_mount: placeholder_preflight_gate.has_hidden_manage_surface_mount(),
-            has_private_runtime_data: placeholder_preflight_gate.has_private_runtime_data(),
-            has_logged_or_persisted_private_details: placeholder_preflight_gate
-                .has_logged_or_persisted_private_details(),
-            has_placeholder_replacement_permission: placeholder_preflight_gate
-                .has_placeholder_replacement_permission(),
-            can_replace_placeholder: placeholder_preflight_gate.can_replace_manage_placeholder(),
-        })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "projectWorkareaCefSurfaceOwnershipSlot"
-    }
-
-    fn slot_exists(self) -> bool {
-        true
-    }
-
-    fn slot_eligible(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-            && self.normal_layout_child_boundary_required()
-            && self.requires_issued_runtime_url_before_cef_surface_creation()
-            && !self.has_hidden_surface_mount()
-            && !self.has_private_runtime_data()
-            && !self.logs_or_persists_private_details()
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        self.web_pane_engine.privacy_label()
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-    }
-
-    fn normal_layout_child_boundary_required(self) -> bool {
-        true
-    }
-
-    fn requires_issued_runtime_url_before_cef_surface_creation(self) -> bool {
-        true
-    }
-
-    fn has_issued_runtime_url(self) -> bool {
-        self.has_issued_runtime_url
-    }
-
-    fn has_runtime_cef_surface(self) -> bool {
-        self.has_runtime_cef_surface
-    }
-
-    fn has_hidden_surface_mount(self) -> bool {
-        self.has_hidden_surface_mount
-    }
-
-    fn has_private_runtime_data(self) -> bool {
-        self.has_private_runtime_data
-    }
-
-    fn logs_or_persists_private_details(self) -> bool {
-        self.has_logged_or_persisted_private_details
-    }
-
-    fn can_create_cef_surface(self) -> bool {
-        self.slot_eligible()
-            && self.has_issued_runtime_url()
-            && !self.has_runtime_cef_surface()
-            && !self.has_cef_or_file_bridge_payload
-    }
-
-    fn shell_state_privacy_boundary_json(self) -> serde_json::Value {
-        serde_json::json!({
-            "slot": self.slot_key.privacy_label(),
-            "ownershipSlot": self.privacy_label(),
-            "slotExists": self.slot_exists(),
-            "slotEligible": self.slot_eligible(),
-            "runtimeParityState": self.runtime_parity_state_label,
-            "preflightState": self.placeholder_preflight_state_label,
-            "sourceOnlyEvidence": self.source_only_evidence_label,
-            "webPaneEngine": self.web_pane_engine_privacy_label(),
-            "hasCefOnlyWebPaneEngineContract": self.has_cef_only_web_pane_engine_contract(),
-            "normalLayoutOnly": true,
-            "normalLayoutChildBoundaryRequired": self.normal_layout_child_boundary_required(),
-            "requiresIssuedRuntimeUrlBeforeCefSurfaceCreation": self.requires_issued_runtime_url_before_cef_surface_creation(),
-            "issuedRuntimeUrlPresent": self.has_issued_runtime_url(),
-            "cefSurfaceCreated": self.has_runtime_cef_surface(),
-            "runtimeFileBridgePresent": self.has_runtime_file_bridge,
-            "runtimeFileOperationRan": self.has_run_runtime_file_operation,
-            "cefOrBridgeDataCreated": self.has_cef_or_file_bridge_payload,
-            "offscreenMountCreated": self.has_hidden_surface_mount(),
-            "privateRuntimeDataPresent": self.has_private_runtime_data(),
-            "logsOrPersistsPrivateDetails": self.logs_or_persists_private_details(),
-            "placeholderSwapAllowed": self.can_replace_placeholder,
-            "placeholderSwapPermission": self.has_placeholder_replacement_permission,
-            "canCreateCefSurface": self.can_create_cef_surface(),
-        })
-    }
-}
-
-#[allow(dead_code)]
-fn project_workarea_cef_surface_slot_decisions_from_source_requests(
-    source_request: &SourceCefCodeServerMountRequestContract,
-    kanban_request: &KanbanCefMountRequestContract,
-    manage_request: &ManageCefMountRequestContract,
-) -> HashMap<ProjectWorkareaCefSurfaceSlotKey, ProjectWorkareaCefSurfaceOwnershipSlotDecision> {
-    let mut slots = HashMap::new();
-    if let SourceCefCodeServerMountRequestContract::Requested(request) = source_request {
-        if let Some(decision) = ProjectWorkareaCefSurfaceOwnershipSlotDecision::source(
-            request.runtime_parity_state,
-            request.placeholder_replacement_preflight_state,
-        ) {
-            slots.insert(decision.slot_key, decision);
-        }
-    }
-    if let KanbanCefMountRequestContract::Requested(request) = kanban_request {
-        if let Some(decision) = ProjectWorkareaCefSurfaceOwnershipSlotDecision::kanban(
-            request.runtime_parity_state,
-            request.placeholder_replacement_preflight_state,
-        ) {
-            slots.insert(decision.slot_key, decision);
-        }
-    }
-    if let ManageCefMountRequestContract::Requested(request) = manage_request {
-        if let Some(decision) = ProjectWorkareaCefSurfaceOwnershipSlotDecision::manage(
-            request.runtime_parity_state,
-            request.placeholder_replacement_preflight_state,
-        ) {
-            slots.insert(decision.slot_key, decision);
-        }
-    }
-    slots
-}
-
-#[allow(dead_code)]
-fn project_workarea_cef_surface_slot_decisions_privacy_boundary_json(
-    slots: &HashMap<
-        ProjectWorkareaCefSurfaceSlotKey,
-        ProjectWorkareaCefSurfaceOwnershipSlotDecision,
-    >,
-) -> serde_json::Value {
-    let ordered_slots = ProjectWorkareaCefSurfaceSlotKey::project_placeholder_slots()
-        .iter()
-        .copied()
-        .filter_map(|slot_key| slots.get(&slot_key).copied())
-        .collect::<Vec<_>>();
-    let slot_json = ordered_slots
-        .iter()
-        .map(|slot| slot.shell_state_privacy_boundary_json())
-        .collect::<Vec<_>>();
-
-    serde_json::json!({
-        "ownership": "projectWorkareaCefSurfaceOwnershipSlots",
-        "slotCount": ordered_slots.len(),
-        "sourceKanbanManageOnly": true,
-        "browserSlotIncluded": false,
-        "webPaneEngine": ProjectWorkareaPaneEngineContract::cef_only().privacy_label(),
-        "allSlotsEligible": ordered_slots.iter().all(|slot| slot.slot_eligible()),
-        "allSlotsCefOnly": ordered_slots.iter().all(|slot| slot.has_cef_only_web_pane_engine_contract()),
-        "allSlotsNormalLayoutOnly": ordered_slots.iter().all(|slot| slot.normal_layout_child_boundary_required()),
-        "allSlotsRequireIssuedRuntimeUrlBeforeCefSurfaceCreation": ordered_slots.iter().all(|slot| slot.requires_issued_runtime_url_before_cef_surface_creation()),
-        "anyIssuedRuntimeUrlPresent": ordered_slots.iter().any(|slot| slot.has_issued_runtime_url()),
-        "anyCefSurfaceCreated": ordered_slots.iter().any(|slot| slot.has_runtime_cef_surface()),
-        "anyRuntimeFileBridgePresent": ordered_slots.iter().any(|slot| slot.has_runtime_file_bridge),
-        "anyRuntimeFileOperationRan": ordered_slots.iter().any(|slot| slot.has_run_runtime_file_operation),
-        "anyCefOrBridgeDataCreated": ordered_slots.iter().any(|slot| slot.has_cef_or_file_bridge_payload),
-        "anyOffscreenMountCreated": ordered_slots.iter().any(|slot| slot.has_hidden_surface_mount()),
-        "anyPrivateRuntimeDataPresent": ordered_slots.iter().any(|slot| slot.has_private_runtime_data()),
-        "logsOrPersistsPrivateDetails": ordered_slots.iter().any(|slot| slot.logs_or_persists_private_details()),
-        "anyPlaceholderSwapAllowed": ordered_slots.iter().any(|slot| slot.can_replace_placeholder),
-        "canCreateAnyCefSurface": ordered_slots.iter().any(|slot| slot.can_create_cef_surface()),
-        "slots": slot_json,
-    })
-}
-
-/*
-CDXC:GPUIProjectWorkareaRuntimeUrlIssuance 2026-06-24-06:13:
-Source, Kanban, and Manage CEF slots use this runtime URL issuance boundary before real CefSurface creation. The boundary may be formed only from ready runtime-parity evidence, placeholder-preflight evidence, and the ownership slot; it currently records that real URL authority is absent and intentionally stores no URL value, project identity, path, Browser state, payload, CefSurface entity, hidden mount, logging/persistence, or placeholder replacement state.
-*/
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaRuntimeUrlAuthorityState {
-    RealRuntimeUrlAuthorityAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaRuntimeUrlAuthorityState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::RealRuntimeUrlAuthorityAbsent => "realRuntimeUrlAuthorityAbsent",
-        }
-    }
-
-    fn has_real_runtime_url_authority(self) -> bool {
-        match self {
-            Self::RealRuntimeUrlAuthorityAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaIssuedRuntimeUrlState {
-    IssuedRuntimeUrlAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaIssuedRuntimeUrlState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::IssuedRuntimeUrlAbsent => "issuedRuntimeUrlAbsent",
-        }
-    }
-
-    fn has_issued_runtime_url(self) -> bool {
-        match self {
-            Self::IssuedRuntimeUrlAbsent => false,
-        }
-    }
-
-    fn runtime_url_value_present(self) -> bool {
-        match self {
-            Self::IssuedRuntimeUrlAbsent => false,
-        }
-    }
-
-    fn retains_runtime_url_value(self) -> bool {
-        match self {
-            Self::IssuedRuntimeUrlAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ProjectWorkareaRuntimeUrlIssuanceDecision {
-    slot_key: ProjectWorkareaCefSurfaceSlotKey,
-    runtime_parity_state_label: &'static str,
-    placeholder_preflight_state_label: &'static str,
-    ownership_slot_label: &'static str,
-    source_only_evidence_label: &'static str,
-    web_pane_engine: ProjectWorkareaPaneEngineContract,
-    runtime_url_authority_state: ProjectWorkareaRuntimeUrlAuthorityState,
-    issued_runtime_url_state: ProjectWorkareaIssuedRuntimeUrlState,
-    has_runtime_code_server_process: bool,
-    has_runtime_cef_surface: bool,
-    has_runtime_file_bridge: bool,
-    has_run_runtime_file_operation: bool,
-    has_cef_or_file_bridge_payload: bool,
-    has_hidden_surface_mount: bool,
-    has_private_runtime_data: bool,
-    has_logged_or_persisted_private_details: bool,
-    has_placeholder_replacement_permission: bool,
-    can_replace_placeholder: bool,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaRuntimeUrlIssuanceDecision {
-    fn source(
-        runtime_parity_state: SourceCefCodeServerRuntimeParityState,
-        placeholder_preflight_state: SourcePlaceholderReplacementPreflightState,
-        ownership_slot: Option<ProjectWorkareaCefSurfaceOwnershipSlotDecision>,
-    ) -> Option<Self> {
-        let SourceCefCodeServerRuntimeParityState::SourceOnlyRuntimeParityPlan(runtime_parity_plan) =
-            runtime_parity_state
-        else {
-            return None;
-        };
-        let SourcePlaceholderReplacementPreflightState::SourcePlaceholderReplacementPreflightGate(
-            placeholder_preflight_gate,
-        ) = placeholder_preflight_state
-        else {
-            return None;
-        };
-        if !runtime_parity_plan.has_cef_only_web_pane_engine_contract()
-            || !placeholder_preflight_gate.has_cef_only_web_pane_engine_contract()
-        {
-            return None;
-        }
-
-        Self::from_ownership_slot(
-            ProjectWorkareaCefSurfaceSlotKey::Source,
-            runtime_parity_plan.privacy_label(),
-            placeholder_preflight_gate.privacy_label(),
-            runtime_parity_plan.materialization_contract_privacy_label(),
-            placeholder_preflight_gate.web_pane_engine_privacy_label(),
-            placeholder_preflight_gate.has_runtime_code_server_process(),
-            ownership_slot?,
-        )
-    }
-
-    fn kanban(
-        runtime_parity_state: KanbanCefRuntimeParityState,
-        placeholder_preflight_state: KanbanPlaceholderReplacementPreflightState,
-        ownership_slot: Option<ProjectWorkareaCefSurfaceOwnershipSlotDecision>,
-    ) -> Option<Self> {
-        let KanbanCefRuntimeParityState::SourceOnlyRuntimeParityPlan(runtime_parity_plan) =
-            runtime_parity_state
-        else {
-            return None;
-        };
-        let KanbanPlaceholderReplacementPreflightState::KanbanPlaceholderReplacementPreflightGate(
-            placeholder_preflight_gate,
-        ) = placeholder_preflight_state
-        else {
-            return None;
-        };
-        if !runtime_parity_plan.has_cef_only_web_pane_engine_contract()
-            || !placeholder_preflight_gate.has_cef_only_web_pane_engine_contract()
-        {
-            return None;
-        }
-
-        Self::from_ownership_slot(
-            ProjectWorkareaCefSurfaceSlotKey::Kanban,
-            runtime_parity_plan.privacy_label(),
-            placeholder_preflight_gate.privacy_label(),
-            runtime_parity_plan.materialization_contract_privacy_label(),
-            placeholder_preflight_gate.web_pane_engine_privacy_label(),
-            false,
-            ownership_slot?,
-        )
-    }
-
-    fn manage(
-        runtime_parity_state: ManageCefRuntimeParityState,
-        placeholder_preflight_state: ManagePlaceholderReplacementPreflightState,
-        ownership_slot: Option<ProjectWorkareaCefSurfaceOwnershipSlotDecision>,
-    ) -> Option<Self> {
-        let ManageCefRuntimeParityState::SourceOnlyRuntimeParityPlan(runtime_parity_plan) =
-            runtime_parity_state
-        else {
-            return None;
-        };
-        let ManagePlaceholderReplacementPreflightState::ManagePlaceholderReplacementPreflightGate(
-            placeholder_preflight_gate,
-        ) = placeholder_preflight_state
-        else {
-            return None;
-        };
-        if !runtime_parity_plan.has_cef_only_web_pane_engine_contract()
-            || !placeholder_preflight_gate.has_cef_only_web_pane_engine_contract()
-        {
-            return None;
-        }
-
-        Self::from_ownership_slot(
-            ProjectWorkareaCefSurfaceSlotKey::Manage,
-            runtime_parity_plan.privacy_label(),
-            placeholder_preflight_gate.privacy_label(),
-            runtime_parity_plan.materialization_contract_privacy_label(),
-            placeholder_preflight_gate.web_pane_engine_privacy_label(),
-            false,
-            ownership_slot?,
-        )
-    }
-
-    fn from_ownership_slot(
-        slot_key: ProjectWorkareaCefSurfaceSlotKey,
-        runtime_parity_state_label: &'static str,
-        placeholder_preflight_state_label: &'static str,
-        source_only_evidence_label: &'static str,
-        web_pane_engine_label: &'static str,
-        has_runtime_code_server_process: bool,
-        ownership_slot: ProjectWorkareaCefSurfaceOwnershipSlotDecision,
-    ) -> Option<Self> {
-        let web_pane_engine =
-            ProjectWorkareaPaneEngineContract::from_source_contract_label(web_pane_engine_label)
-                .ok()?;
-        if ownership_slot.slot_key != slot_key
-            || ownership_slot.runtime_parity_state_label != runtime_parity_state_label
-            || ownership_slot.placeholder_preflight_state_label != placeholder_preflight_state_label
-            || ownership_slot.source_only_evidence_label != source_only_evidence_label
-            || ownership_slot.web_pane_engine != web_pane_engine
-            || !ownership_slot.slot_exists()
-            || !ownership_slot.slot_eligible()
-            || !ownership_slot.has_cef_only_web_pane_engine_contract()
-            || !ownership_slot.normal_layout_child_boundary_required()
-            || !ownership_slot.requires_issued_runtime_url_before_cef_surface_creation()
-            || ownership_slot.has_issued_runtime_url()
-            || ownership_slot.has_runtime_cef_surface()
-            || ownership_slot.has_hidden_surface_mount()
-            || ownership_slot.has_private_runtime_data()
-            || ownership_slot.logs_or_persists_private_details()
-            || ownership_slot.can_create_cef_surface()
-        {
-            return None;
-        }
-
-        Some(Self {
-            slot_key,
-            runtime_parity_state_label,
-            placeholder_preflight_state_label,
-            ownership_slot_label: ownership_slot.privacy_label(),
-            source_only_evidence_label,
-            web_pane_engine,
-            runtime_url_authority_state:
-                ProjectWorkareaRuntimeUrlAuthorityState::RealRuntimeUrlAuthorityAbsent,
-            issued_runtime_url_state: ProjectWorkareaIssuedRuntimeUrlState::IssuedRuntimeUrlAbsent,
-            has_runtime_code_server_process,
-            has_runtime_cef_surface: ownership_slot.has_runtime_cef_surface,
-            has_runtime_file_bridge: ownership_slot.has_runtime_file_bridge,
-            has_run_runtime_file_operation: ownership_slot.has_run_runtime_file_operation,
-            has_cef_or_file_bridge_payload: ownership_slot.has_cef_or_file_bridge_payload,
-            has_hidden_surface_mount: ownership_slot.has_hidden_surface_mount,
-            has_private_runtime_data: ownership_slot.has_private_runtime_data,
-            has_logged_or_persisted_private_details: ownership_slot
-                .has_logged_or_persisted_private_details,
-            has_placeholder_replacement_permission: ownership_slot
-                .has_placeholder_replacement_permission,
-            can_replace_placeholder: ownership_slot.can_replace_placeholder,
-        })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "projectWorkareaRuntimeUrlIssuanceDecision"
-    }
-
-    fn slot_exists(self) -> bool {
-        true
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        self.web_pane_engine.privacy_label()
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-    }
-
-    fn normal_layout_child_boundary_required(self) -> bool {
-        true
-    }
-
-    fn hidden_or_offscreen_mount_created(self) -> bool {
-        self.has_hidden_surface_mount
-    }
-
-    fn has_real_runtime_url_authority(self) -> bool {
-        self.runtime_url_authority_state
-            .has_real_runtime_url_authority()
-    }
-
-    fn requires_real_runtime_url_authority_before_issuing_runtime_url(self) -> bool {
-        true
-    }
-
-    fn has_issued_runtime_url(self) -> bool {
-        self.issued_runtime_url_state.has_issued_runtime_url()
-    }
-
-    fn runtime_url_value_present(self) -> bool {
-        self.issued_runtime_url_state.runtime_url_value_present()
-    }
-
-    fn retains_runtime_url_value(self) -> bool {
-        self.issued_runtime_url_state.retains_runtime_url_value()
-    }
-
-    fn starts_code_server(self) -> bool {
-        self.has_runtime_code_server_process
-    }
-
-    fn mounts_file_bridge(self) -> bool {
-        self.has_runtime_file_bridge
-    }
-
-    fn runs_file_io(self) -> bool {
-        self.has_run_runtime_file_operation
-    }
-
-    fn creates_cef_or_bridge_payload(self) -> bool {
-        self.has_cef_or_file_bridge_payload
-    }
-
-    fn has_private_runtime_data(self) -> bool {
-        self.has_private_runtime_data
-    }
-
-    fn logs_or_persists_private_details(self) -> bool {
-        self.has_logged_or_persisted_private_details
-    }
-
-    fn has_placeholder_replacement_permission(self) -> bool {
-        self.has_placeholder_replacement_permission
-    }
-
-    fn can_issue_runtime_url(self) -> bool {
-        self.slot_exists()
-            && self.has_cef_only_web_pane_engine_contract()
-            && self.normal_layout_child_boundary_required()
-            && self.requires_real_runtime_url_authority_before_issuing_runtime_url()
-            && self.has_real_runtime_url_authority()
-            && !self.has_issued_runtime_url()
-            && !self.runtime_url_value_present()
-            && !self.retains_runtime_url_value()
-            && !self.has_private_runtime_data()
-            && !self.logs_or_persists_private_details()
-    }
-
-    fn cef_surface_creation_allowed(self) -> bool {
-        self.can_issue_runtime_url()
-            && self.has_issued_runtime_url()
-            && !self.has_runtime_cef_surface
-            && !self.creates_cef_or_bridge_payload()
-    }
-
-    fn can_create_cef_surface(self) -> bool {
-        self.cef_surface_creation_allowed()
-    }
-
-    fn shell_state_privacy_boundary_json(self) -> serde_json::Value {
-        serde_json::json!({
-            "slot": self.slot_key.privacy_label(),
-            "runtimeUrlIssuanceDecision": self.privacy_label(),
-            "slotExists": self.slot_exists(),
-            "runtimeParityState": self.runtime_parity_state_label,
-            "preflightState": self.placeholder_preflight_state_label,
-            "ownershipSlot": self.ownership_slot_label,
-            "sourceOnlyEvidence": self.source_only_evidence_label,
-            "webPaneEngine": self.web_pane_engine_privacy_label(),
-            "hasCefOnlyWebPaneEngineContract": self.has_cef_only_web_pane_engine_contract(),
-            "normalLayoutOnly": true,
-            "normalLayoutChildBoundaryRequired": self.normal_layout_child_boundary_required(),
-            "runtimeUrlAuthorityState": self.runtime_url_authority_state.privacy_label(),
-            "hasRealRuntimeUrlAuthority": self.has_real_runtime_url_authority(),
-            "requiresRealRuntimeUrlAuthorityBeforeIssuingRuntimeUrl": self.requires_real_runtime_url_authority_before_issuing_runtime_url(),
-            "issuedRuntimeUrlState": self.issued_runtime_url_state.privacy_label(),
-            "issuedRuntimeUrlPresent": self.has_issued_runtime_url(),
-            "runtimeUrlValuePresent": self.runtime_url_value_present(),
-            "retainsRuntimeUrlValue": self.retains_runtime_url_value(),
-            "canIssueRuntimeUrl": self.can_issue_runtime_url(),
-            "startsCodeServer": self.starts_code_server(),
-            "cefSurfaceCreated": self.has_runtime_cef_surface,
-            "runtimeFileBridgePresent": self.mounts_file_bridge(),
-            "runtimeFileOperationRan": self.runs_file_io(),
-            "cefOrBridgeDataCreated": self.creates_cef_or_bridge_payload(),
-            "hiddenOrOffscreenMountCreated": self.hidden_or_offscreen_mount_created(),
-            "privateRuntimeDataPresent": self.has_private_runtime_data(),
-            "logsOrPersistsPrivateDetails": self.logs_or_persists_private_details(),
-            "placeholderReplacementPermission": self.has_placeholder_replacement_permission(),
-            "placeholderReplacementAllowed": self.can_replace_placeholder,
-            "cefSurfaceCreationAllowed": self.cef_surface_creation_allowed(),
-            "canCreateCefSurface": self.can_create_cef_surface(),
-        })
-    }
-}
-
-#[allow(dead_code)]
-fn project_workarea_runtime_url_issuance_decisions_from_source_requests(
-    source_request: &SourceCefCodeServerMountRequestContract,
-    kanban_request: &KanbanCefMountRequestContract,
-    manage_request: &ManageCefMountRequestContract,
-    ownership_slots: &HashMap<
-        ProjectWorkareaCefSurfaceSlotKey,
-        ProjectWorkareaCefSurfaceOwnershipSlotDecision,
-    >,
-) -> HashMap<ProjectWorkareaCefSurfaceSlotKey, ProjectWorkareaRuntimeUrlIssuanceDecision> {
-    let mut decisions = HashMap::new();
-    if let SourceCefCodeServerMountRequestContract::Requested(request) = source_request {
-        if let Some(decision) = ProjectWorkareaRuntimeUrlIssuanceDecision::source(
-            request.runtime_parity_state,
-            request.placeholder_replacement_preflight_state,
-            ownership_slots
-                .get(&ProjectWorkareaCefSurfaceSlotKey::Source)
-                .copied(),
-        ) {
-            decisions.insert(decision.slot_key, decision);
-        }
-    }
-    if let KanbanCefMountRequestContract::Requested(request) = kanban_request {
-        if let Some(decision) = ProjectWorkareaRuntimeUrlIssuanceDecision::kanban(
-            request.runtime_parity_state,
-            request.placeholder_replacement_preflight_state,
-            ownership_slots
-                .get(&ProjectWorkareaCefSurfaceSlotKey::Kanban)
-                .copied(),
-        ) {
-            decisions.insert(decision.slot_key, decision);
-        }
-    }
-    if let ManageCefMountRequestContract::Requested(request) = manage_request {
-        if let Some(decision) = ProjectWorkareaRuntimeUrlIssuanceDecision::manage(
-            request.runtime_parity_state,
-            request.placeholder_replacement_preflight_state,
-            ownership_slots
-                .get(&ProjectWorkareaCefSurfaceSlotKey::Manage)
-                .copied(),
-        ) {
-            decisions.insert(decision.slot_key, decision);
-        }
-    }
-    decisions
-}
-
-#[allow(dead_code)]
-fn project_workarea_runtime_url_issuance_decisions_privacy_boundary_json(
-    decisions: &HashMap<
-        ProjectWorkareaCefSurfaceSlotKey,
-        ProjectWorkareaRuntimeUrlIssuanceDecision,
-    >,
-) -> serde_json::Value {
-    let ordered_decisions = ProjectWorkareaCefSurfaceSlotKey::project_placeholder_slots()
-        .iter()
-        .copied()
-        .filter_map(|slot_key| decisions.get(&slot_key).copied())
-        .collect::<Vec<_>>();
-    let decision_json = ordered_decisions
-        .iter()
-        .map(|decision| decision.shell_state_privacy_boundary_json())
-        .collect::<Vec<_>>();
-
-    serde_json::json!({
-        "boundary": "projectWorkareaRuntimeUrlIssuanceBoundary",
-        "decisionCount": ordered_decisions.len(),
-        "sourceKanbanManageOnly": true,
-        "browserBoundaryIncluded": false,
-        "webPaneEngine": ProjectWorkareaPaneEngineContract::cef_only().privacy_label(),
-        "allDecisionsCefOnly": ordered_decisions.iter().all(|decision| decision.has_cef_only_web_pane_engine_contract()),
-        "allDecisionsNormalLayoutOnly": ordered_decisions.iter().all(|decision| decision.normal_layout_child_boundary_required()),
-        "allDecisionsRequireRealRuntimeUrlAuthorityBeforeIssuingRuntimeUrl": ordered_decisions.iter().all(|decision| decision.requires_real_runtime_url_authority_before_issuing_runtime_url()),
-        "anyRealRuntimeUrlAuthorityPresent": ordered_decisions.iter().any(|decision| decision.has_real_runtime_url_authority()),
-        "anyIssuedRuntimeUrlPresent": ordered_decisions.iter().any(|decision| decision.has_issued_runtime_url()),
-        "anyRuntimeUrlValuePresent": ordered_decisions.iter().any(|decision| decision.runtime_url_value_present()),
-        "anyRuntimeUrlValueRetained": ordered_decisions.iter().any(|decision| decision.retains_runtime_url_value()),
-        "canIssueAnyRuntimeUrl": ordered_decisions.iter().any(|decision| decision.can_issue_runtime_url()),
-        "anyCodeServerProcessStarted": ordered_decisions.iter().any(|decision| decision.starts_code_server()),
-        "anyCefSurfaceCreated": ordered_decisions.iter().any(|decision| decision.has_runtime_cef_surface),
-        "anyFileBridgeMounted": ordered_decisions.iter().any(|decision| decision.mounts_file_bridge()),
-        "anyFileIoRan": ordered_decisions.iter().any(|decision| decision.runs_file_io()),
-        "anyCefOrBridgePayloadCreated": ordered_decisions.iter().any(|decision| decision.creates_cef_or_bridge_payload()),
-        "anyHiddenOrOffscreenMountCreated": ordered_decisions.iter().any(|decision| decision.hidden_or_offscreen_mount_created()),
-        "anyPrivateRuntimeDataPresent": ordered_decisions.iter().any(|decision| decision.has_private_runtime_data()),
-        "logsOrPersistsPrivateDetails": ordered_decisions.iter().any(|decision| decision.logs_or_persists_private_details()),
-        "anyPlaceholderReplacementPermission": ordered_decisions.iter().any(|decision| decision.has_placeholder_replacement_permission()),
-        "anyPlaceholderReplacementAllowed": ordered_decisions.iter().any(|decision| decision.can_replace_placeholder),
-        "anyCefSurfaceCreationAllowed": ordered_decisions.iter().any(|decision| decision.cef_surface_creation_allowed()),
-        "canCreateAnyCefSurface": ordered_decisions.iter().any(|decision| decision.can_create_cef_surface()),
-        "decisions": decision_json,
-    })
-}
-
-/*
-CDXC:GPUIProjectWorkareaSourceStartupNavigationReadiness 2026-06-24-06:24:
-Slice 265 adds a Source-only startup navigation readiness boundary derived from the existing Source runtime URL issuance decision. It mirrors macOS code-mode truth as source-ledger evidence only: Source remains CEF-backed and normal-layout-only, first code-server navigation is deferred until a future runtime readiness gate succeeds and an issued runtime URL exists, non-code destinations are excluded from this wait, and GPUI must not navigate directly, issue or retain URL values, start code-server, create CefSurface, mount hidden/offscreen surfaces, store private payloads, log/persist, fallback-probe, or replace the placeholder.
-*/
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaSourceStartupNavigationReadinessState {
-    DeferredUntilRuntimeReadinessGateAndIssuedRuntimeUrl,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaSourceStartupNavigationReadinessState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::DeferredUntilRuntimeReadinessGateAndIssuedRuntimeUrl => {
-                "deferredUntilRuntimeReadinessGateAndIssuedRuntimeUrl"
-            }
-        }
-    }
-
-    fn first_code_server_navigation_deferred(self) -> bool {
-        match self {
-            Self::DeferredUntilRuntimeReadinessGateAndIssuedRuntimeUrl => true,
-        }
-    }
-
-    fn requires_future_runtime_readiness_gate_before_first_navigation(self) -> bool {
-        match self {
-            Self::DeferredUntilRuntimeReadinessGateAndIssuedRuntimeUrl => true,
-        }
-    }
-
-    fn requires_issued_runtime_url_before_first_navigation(self) -> bool {
-        match self {
-            Self::DeferredUntilRuntimeReadinessGateAndIssuedRuntimeUrl => true,
-        }
-    }
-
-    fn runtime_readiness_gate_succeeded(self) -> bool {
-        match self {
-            Self::DeferredUntilRuntimeReadinessGateAndIssuedRuntimeUrl => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaSourceStartupNavigationBlankStartLabel {
-    SourceCodeServerSafeBlankStart,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaSourceStartupNavigationBlankStartLabel {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::SourceCodeServerSafeBlankStart => "sourceCodeServerSafeBlankStartLabel",
-        }
-    }
-
-    fn is_url_value(self) -> bool {
-        match self {
-            Self::SourceCodeServerSafeBlankStart => false,
-        }
-    }
-
-    fn emits_url_payload(self) -> bool {
-        match self {
-            Self::SourceCodeServerSafeBlankStart => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ProjectWorkareaSourceStartupNavigationReadinessBoundary {
-    slot_key: ProjectWorkareaCefSurfaceSlotKey,
-    runtime_url_issuance_decision_label: &'static str,
-    runtime_parity_state_label: &'static str,
-    placeholder_preflight_state_label: &'static str,
-    ownership_slot_label: &'static str,
-    source_only_evidence_label: &'static str,
-    web_pane_engine: ProjectWorkareaPaneEngineContract,
-    runtime_url_authority_state: ProjectWorkareaRuntimeUrlAuthorityState,
-    issued_runtime_url_state: ProjectWorkareaIssuedRuntimeUrlState,
-    readiness_state: ProjectWorkareaSourceStartupNavigationReadinessState,
-    blank_start_label: ProjectWorkareaSourceStartupNavigationBlankStartLabel,
-    has_runtime_code_server_process: bool,
-    has_runtime_cef_surface: bool,
-    has_runtime_file_bridge: bool,
-    has_run_runtime_file_operation: bool,
-    has_cef_or_bridge_payload: bool,
-    has_hidden_surface_mount: bool,
-    has_private_runtime_data: bool,
-    has_logged_or_persisted_private_details: bool,
-    has_placeholder_replacement_permission: bool,
-    can_replace_placeholder: bool,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaSourceStartupNavigationReadinessBoundary {
-    fn source(
-        runtime_url_issuance_decision: Option<ProjectWorkareaRuntimeUrlIssuanceDecision>,
-    ) -> Option<Self> {
-        let decision = runtime_url_issuance_decision?;
-        if decision.slot_key != ProjectWorkareaCefSurfaceSlotKey::Source
-            || !decision.has_cef_only_web_pane_engine_contract()
-            || !decision.normal_layout_child_boundary_required()
-            || !decision.requires_real_runtime_url_authority_before_issuing_runtime_url()
-            || decision.has_real_runtime_url_authority()
-            || decision.has_issued_runtime_url()
-            || decision.runtime_url_value_present()
-            || decision.retains_runtime_url_value()
-            || decision.can_issue_runtime_url()
-            || decision.starts_code_server()
-            || decision.has_runtime_cef_surface
-            || decision.mounts_file_bridge()
-            || decision.runs_file_io()
-            || decision.creates_cef_or_bridge_payload()
-            || decision.hidden_or_offscreen_mount_created()
-            || decision.has_private_runtime_data()
-            || decision.logs_or_persists_private_details()
-            || decision.has_placeholder_replacement_permission()
-            || decision.can_replace_placeholder
-            || decision.cef_surface_creation_allowed()
-            || decision.can_create_cef_surface()
-        {
-            return None;
-        }
-
-        Some(Self {
-            slot_key: decision.slot_key,
-            runtime_url_issuance_decision_label: decision.privacy_label(),
-            runtime_parity_state_label: decision.runtime_parity_state_label,
-            placeholder_preflight_state_label: decision.placeholder_preflight_state_label,
-            ownership_slot_label: decision.ownership_slot_label,
-            source_only_evidence_label: decision.source_only_evidence_label,
-            web_pane_engine: decision.web_pane_engine,
-            runtime_url_authority_state: decision.runtime_url_authority_state,
-            issued_runtime_url_state: decision.issued_runtime_url_state,
-            readiness_state: ProjectWorkareaSourceStartupNavigationReadinessState::DeferredUntilRuntimeReadinessGateAndIssuedRuntimeUrl,
-            blank_start_label: ProjectWorkareaSourceStartupNavigationBlankStartLabel::SourceCodeServerSafeBlankStart,
-            has_runtime_code_server_process: decision.has_runtime_code_server_process,
-            has_runtime_cef_surface: decision.has_runtime_cef_surface,
-            has_runtime_file_bridge: decision.has_runtime_file_bridge,
-            has_run_runtime_file_operation: decision.has_run_runtime_file_operation,
-            has_cef_or_bridge_payload: decision.has_cef_or_file_bridge_payload,
-            has_hidden_surface_mount: decision.has_hidden_surface_mount,
-            has_private_runtime_data: decision.has_private_runtime_data,
-            has_logged_or_persisted_private_details: decision
-                .has_logged_or_persisted_private_details,
-            has_placeholder_replacement_permission: decision
-                .has_placeholder_replacement_permission,
-            can_replace_placeholder: decision.can_replace_placeholder,
-        })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "projectWorkareaSourceStartupNavigationReadinessBoundary"
-    }
-
-    fn source_boundary_included(self) -> bool {
-        self.slot_key == ProjectWorkareaCefSurfaceSlotKey::Source
-    }
-
-    fn browser_boundary_included(self) -> bool {
-        false
-    }
-
-    fn kanban_boundary_included(self) -> bool {
-        false
-    }
-
-    fn manage_boundary_included(self) -> bool {
-        false
-    }
-
-    fn non_code_destinations_use_this_readiness_wait(self) -> bool {
-        false
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        self.web_pane_engine.privacy_label()
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-    }
-
-    fn normal_layout_child_boundary_required(self) -> bool {
-        true
-    }
-
-    fn first_code_server_navigation_deferred(self) -> bool {
-        self.readiness_state.first_code_server_navigation_deferred()
-    }
-
-    fn requires_future_runtime_readiness_gate_before_first_navigation(self) -> bool {
-        self.readiness_state
-            .requires_future_runtime_readiness_gate_before_first_navigation()
-    }
-
-    fn requires_issued_runtime_url_before_first_navigation(self) -> bool {
-        self.readiness_state
-            .requires_issued_runtime_url_before_first_navigation()
-    }
-
-    fn runtime_readiness_gate_succeeded(self) -> bool {
-        self.readiness_state.runtime_readiness_gate_succeeded()
-    }
-
-    fn has_real_runtime_url_authority(self) -> bool {
-        self.runtime_url_authority_state
-            .has_real_runtime_url_authority()
-    }
-
-    fn has_issued_runtime_url(self) -> bool {
-        self.issued_runtime_url_state.has_issued_runtime_url()
-    }
-
-    fn runtime_url_value_present(self) -> bool {
-        self.issued_runtime_url_state.runtime_url_value_present()
-    }
-
-    fn retains_runtime_url_value(self) -> bool {
-        self.issued_runtime_url_state.retains_runtime_url_value()
-    }
-
-    fn direct_source_navigation_allowed(self) -> bool {
-        false
-    }
-
-    fn starts_code_server(self) -> bool {
-        self.has_runtime_code_server_process
-    }
-
-    fn has_runtime_cef_surface(self) -> bool {
-        self.has_runtime_cef_surface
-    }
-
-    fn mounts_file_bridge(self) -> bool {
-        self.has_runtime_file_bridge
-    }
-
-    fn runs_file_io(self) -> bool {
-        self.has_run_runtime_file_operation
-    }
-
-    fn creates_cef_or_bridge_payload(self) -> bool {
-        self.has_cef_or_bridge_payload
-    }
-
-    fn hidden_or_offscreen_mount_created(self) -> bool {
-        self.has_hidden_surface_mount
-    }
-
-    fn has_private_runtime_data(self) -> bool {
-        self.has_private_runtime_data
-    }
-
-    fn logs_or_persists_private_details(self) -> bool {
-        self.has_logged_or_persisted_private_details
-    }
-
-    fn has_placeholder_replacement_permission(self) -> bool {
-        self.has_placeholder_replacement_permission
-    }
-
-    fn has_fallback_readiness_probe(self) -> bool {
-        false
-    }
-
-    fn stores_or_emits_readiness_probe_payload(self) -> bool {
-        false
-    }
-
-    fn stores_or_emits_url_scheme_payload(self) -> bool {
-        false
-    }
-
-    fn stores_or_emits_host_payload(self) -> bool {
-        false
-    }
-
-    fn stores_or_emits_private_payload(self) -> bool {
-        self.has_private_runtime_data()
-    }
-
-    fn safe_blank_start_label_is_url_value(self) -> bool {
-        self.blank_start_label.is_url_value()
-    }
-
-    fn safe_blank_start_label_emits_url_payload(self) -> bool {
-        self.blank_start_label.emits_url_payload()
-    }
-
-    fn can_start_first_code_server_navigation(self) -> bool {
-        self.source_boundary_included()
-            && self.has_cef_only_web_pane_engine_contract()
-            && self.normal_layout_child_boundary_required()
-            && self.runtime_readiness_gate_succeeded()
-            && self.has_issued_runtime_url()
-            && !self.runtime_url_value_present()
-            && !self.retains_runtime_url_value()
-            && !self.direct_source_navigation_allowed()
-            && !self.starts_code_server()
-            && !self.has_runtime_cef_surface()
-            && !self.has_private_runtime_data()
-            && !self.logs_or_persists_private_details()
-            && !self.hidden_or_offscreen_mount_created()
-    }
-
-    fn shell_state_privacy_boundary_json(self) -> serde_json::Value {
-        let mut boundary = serde_json::Map::new();
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "boundary",
-            self.privacy_label(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "sourceLedgerRuntimeParityOnly",
-            true,
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "slot",
-            self.slot_key.privacy_label(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "sourceBoundaryIncluded",
-            self.source_boundary_included(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "browserBoundaryIncluded",
-            self.browser_boundary_included(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "kanbanBoundaryIncluded",
-            self.kanban_boundary_included(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "manageBoundaryIncluded",
-            self.manage_boundary_included(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "nonCodeDestinationsUseSourceStartupReadinessWait",
-            self.non_code_destinations_use_this_readiness_wait(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "runtimeUrlIssuanceDecision",
-            self.runtime_url_issuance_decision_label,
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "runtimeParityState",
-            self.runtime_parity_state_label,
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "preflightState",
-            self.placeholder_preflight_state_label,
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "ownershipSlot",
-            self.ownership_slot_label,
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "sourceOnlyEvidence",
-            self.source_only_evidence_label,
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "webPaneEngine",
-            self.web_pane_engine_privacy_label(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "hasCefOnlyWebPaneEngineContract",
-            self.has_cef_only_web_pane_engine_contract(),
-        );
-        insert_source_startup_navigation_boundary_field(&mut boundary, "normalLayoutOnly", true);
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "normalLayoutChildBoundaryRequired",
-            self.normal_layout_child_boundary_required(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "readinessState",
-            self.readiness_state.privacy_label(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "safeBlankStartLabel",
-            self.blank_start_label.privacy_label(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "safeBlankStartLabelIsUrlValue",
-            self.safe_blank_start_label_is_url_value(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "safeBlankStartLabelEmitsUrlPayload",
-            self.safe_blank_start_label_emits_url_payload(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "firstCodeServerNavigationDeferred",
-            self.first_code_server_navigation_deferred(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "requiresFutureRuntimeReadinessGateBeforeFirstNavigation",
-            self.requires_future_runtime_readiness_gate_before_first_navigation(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "requiresIssuedRuntimeUrlBeforeFirstNavigation",
-            self.requires_issued_runtime_url_before_first_navigation(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "runtimeReadinessGateSucceeded",
-            self.runtime_readiness_gate_succeeded(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "runtimeUrlAuthorityState",
-            self.runtime_url_authority_state.privacy_label(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "hasRealRuntimeUrlAuthority",
-            self.has_real_runtime_url_authority(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "issuedRuntimeUrlState",
-            self.issued_runtime_url_state.privacy_label(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "issuedRuntimeUrlPresent",
-            self.has_issued_runtime_url(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "runtimeUrlValuePresent",
-            self.runtime_url_value_present(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "retainsRuntimeUrlValue",
-            self.retains_runtime_url_value(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "directSourceNavigationAllowed",
-            self.direct_source_navigation_allowed(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "canStartFirstCodeServerNavigation",
-            self.can_start_first_code_server_navigation(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "startsCodeServer",
-            self.starts_code_server(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "cefSurfaceCreated",
-            self.has_runtime_cef_surface(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "runtimeFileBridgePresent",
-            self.mounts_file_bridge(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "runtimeFileOperationRan",
-            self.runs_file_io(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "cefOrBridgeDataCreated",
-            self.creates_cef_or_bridge_payload(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "hiddenOrOffscreenMountCreated",
-            self.hidden_or_offscreen_mount_created(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "privateRuntimeDataPresent",
-            self.has_private_runtime_data(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "logsOrPersistsPrivateDetails",
-            self.logs_or_persists_private_details(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "placeholderReplacementPermission",
-            self.has_placeholder_replacement_permission(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "placeholderReplacementAllowed",
-            self.can_replace_placeholder,
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "readinessProbePresent",
-            self.has_fallback_readiness_probe(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "readinessProbePayloadStoredOrEmitted",
-            self.stores_or_emits_readiness_probe_payload(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "schemePayloadStoredOrEmitted",
-            self.stores_or_emits_url_scheme_payload(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "hostPayloadStoredOrEmitted",
-            self.stores_or_emits_host_payload(),
-        );
-        insert_source_startup_navigation_boundary_field(
-            &mut boundary,
-            "privatePayloadStoredOrEmitted",
-            self.stores_or_emits_private_payload(),
-        );
-
-        serde_json::Value::Object(boundary)
-    }
-}
-
-/*
-CDXC:GPUISourceStartupNavigationBoundary 2026-06-24-09:59:
-The Source startup-navigation readiness boundary is an audit payload with many privacy-safe facts about URL authority, CEF ownership, normal layout, and placeholder replacement. Use explicit Map insertion so the emitted schema stays visible while avoiding serde_json::json! recursion limits.
-*/
-fn insert_source_startup_navigation_boundary_field(
-    boundary: &mut serde_json::Map<String, serde_json::Value>,
-    key: &'static str,
-    value: impl Into<serde_json::Value>,
-) {
-    boundary.insert(key.to_string(), value.into());
-}
-
-#[allow(dead_code)]
-fn project_workarea_source_startup_navigation_readiness_boundary_from_runtime_url_issuance_decisions(
-    decisions: &HashMap<
-        ProjectWorkareaCefSurfaceSlotKey,
-        ProjectWorkareaRuntimeUrlIssuanceDecision,
-    >,
-) -> Option<ProjectWorkareaSourceStartupNavigationReadinessBoundary> {
-    ProjectWorkareaSourceStartupNavigationReadinessBoundary::source(
-        decisions
-            .get(&ProjectWorkareaCefSurfaceSlotKey::Source)
-            .copied(),
-    )
-}
-
-/*
-CDXC:GPUIProjectWorkareaSourceRuntimeCefSurfaceOwnerGate 2026-06-24-06:37:
-The Source-only runtime CEF surface owner/creation gate follows startup navigation readiness. It is keyed by the safe Source slot kind, requires CEF plus a normal-layout child surface, and permits Source placeholder replacement only after runtime readiness, real URL authority, issued runtime URL, code-server process availability, CEF surface creation, and explicit replacement permission exist without storing URL values, project identity, paths, payloads, hidden mounts, logs, persistence, or a CefSurface entity in the gate payload.
-*/
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaSourceRuntimeCefSurfaceOwnerState {
-    RuntimeCefSurfaceOwnerAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaSourceRuntimeCefSurfaceOwnerState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::RuntimeCefSurfaceOwnerAbsent => "runtimeCefSurfaceOwnerAbsent",
-        }
-    }
-
-    fn owner_present(self) -> bool {
-        match self {
-            Self::RuntimeCefSurfaceOwnerAbsent => false,
-        }
-    }
-
-    fn stores_cef_surface_entity(self) -> bool {
-        match self {
-            Self::RuntimeCefSurfaceOwnerAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaSourceRuntimeReadinessGateState {
-    RuntimeReadinessGateNotRun,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaSourceRuntimeReadinessGateState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::RuntimeReadinessGateNotRun => "runtimeReadinessGateNotRun",
-        }
-    }
-
-    fn succeeded(self) -> bool {
-        match self {
-            Self::RuntimeReadinessGateNotRun => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaSourceRuntimeCodeServerProcessAvailabilityState {
-    RuntimeCodeServerProcessAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaSourceRuntimeCodeServerProcessAvailabilityState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::RuntimeCodeServerProcessAbsent => "runtimeCodeServerProcessAbsent",
-        }
-    }
-
-    fn available(self) -> bool {
-        match self {
-            Self::RuntimeCodeServerProcessAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaSourceRuntimeCefSurfaceCreationState {
-    RuntimeCefSurfaceAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaSourceRuntimeCefSurfaceCreationState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::RuntimeCefSurfaceAbsent => "runtimeCefSurfaceAbsent",
-        }
-    }
-
-    fn created(self) -> bool {
-        match self {
-            Self::RuntimeCefSurfaceAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaSourceRuntimeCefSurfaceReplacementPermissionState {
-    ExplicitReplacementPermissionAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaSourceRuntimeCefSurfaceReplacementPermissionState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::ExplicitReplacementPermissionAbsent => "explicitReplacementPermissionAbsent",
-        }
-    }
-
-    fn has_explicit_permission(self) -> bool {
-        match self {
-            Self::ExplicitReplacementPermissionAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ProjectWorkareaSourceRuntimeCefSurfaceOwnerGate {
-    slot_key: ProjectWorkareaCefSurfaceSlotKey,
-    startup_navigation_readiness_boundary_label: &'static str,
-    runtime_url_issuance_decision_label: &'static str,
-    source_only_evidence_label: &'static str,
-    web_pane_engine: ProjectWorkareaPaneEngineContract,
-    owner_state: ProjectWorkareaSourceRuntimeCefSurfaceOwnerState,
-    runtime_readiness_gate_state: ProjectWorkareaSourceRuntimeReadinessGateState,
-    runtime_url_authority_state: ProjectWorkareaRuntimeUrlAuthorityState,
-    issued_runtime_url_state: ProjectWorkareaIssuedRuntimeUrlState,
-    code_server_process_state: ProjectWorkareaSourceRuntimeCodeServerProcessAvailabilityState,
-    cef_surface_creation_state: ProjectWorkareaSourceRuntimeCefSurfaceCreationState,
-    replacement_permission_state: ProjectWorkareaSourceRuntimeCefSurfaceReplacementPermissionState,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaSourceRuntimeCefSurfaceOwnerGate {
-    fn source(
-        startup_navigation_readiness_boundary: Option<
-            ProjectWorkareaSourceStartupNavigationReadinessBoundary,
-        >,
-    ) -> Option<Self> {
-        let boundary = startup_navigation_readiness_boundary?;
-        if !boundary.source_boundary_included()
-            || boundary.slot_key != ProjectWorkareaCefSurfaceSlotKey::Source
-            || boundary.browser_boundary_included()
-            || boundary.kanban_boundary_included()
-            || boundary.manage_boundary_included()
-            || boundary.non_code_destinations_use_this_readiness_wait()
-            || !boundary.has_cef_only_web_pane_engine_contract()
-            || !boundary.normal_layout_child_boundary_required()
-            || !boundary.first_code_server_navigation_deferred()
-            || !boundary.requires_future_runtime_readiness_gate_before_first_navigation()
-            || !boundary.requires_issued_runtime_url_before_first_navigation()
-            || boundary.runtime_readiness_gate_succeeded()
-            || boundary.has_real_runtime_url_authority()
-            || boundary.has_issued_runtime_url()
-            || boundary.runtime_url_value_present()
-            || boundary.retains_runtime_url_value()
-            || boundary.direct_source_navigation_allowed()
-            || boundary.can_start_first_code_server_navigation()
-            || boundary.starts_code_server()
-            || boundary.has_runtime_cef_surface()
-            || boundary.mounts_file_bridge()
-            || boundary.runs_file_io()
-            || boundary.creates_cef_or_bridge_payload()
-            || boundary.hidden_or_offscreen_mount_created()
-            || boundary.has_private_runtime_data()
-            || boundary.logs_or_persists_private_details()
-            || boundary.has_placeholder_replacement_permission()
-            || boundary.has_fallback_readiness_probe()
-            || boundary.stores_or_emits_readiness_probe_payload()
-            || boundary.stores_or_emits_url_scheme_payload()
-            || boundary.stores_or_emits_host_payload()
-            || boundary.stores_or_emits_private_payload()
-        {
-            return None;
-        }
-
-        Some(Self {
-            slot_key: boundary.slot_key,
-            startup_navigation_readiness_boundary_label: boundary.privacy_label(),
-            runtime_url_issuance_decision_label: boundary.runtime_url_issuance_decision_label,
-            source_only_evidence_label: boundary.source_only_evidence_label,
-            web_pane_engine: boundary.web_pane_engine,
-            owner_state: ProjectWorkareaSourceRuntimeCefSurfaceOwnerState::RuntimeCefSurfaceOwnerAbsent,
-            runtime_readiness_gate_state:
-                ProjectWorkareaSourceRuntimeReadinessGateState::RuntimeReadinessGateNotRun,
-            runtime_url_authority_state: boundary.runtime_url_authority_state,
-            issued_runtime_url_state: boundary.issued_runtime_url_state,
-            code_server_process_state:
-                ProjectWorkareaSourceRuntimeCodeServerProcessAvailabilityState::RuntimeCodeServerProcessAbsent,
-            cef_surface_creation_state:
-                ProjectWorkareaSourceRuntimeCefSurfaceCreationState::RuntimeCefSurfaceAbsent,
-            replacement_permission_state:
-                ProjectWorkareaSourceRuntimeCefSurfaceReplacementPermissionState::ExplicitReplacementPermissionAbsent,
-        })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "projectWorkareaSourceRuntimeCefSurfaceOwnerGate"
-    }
-
-    fn source_boundary_included(self) -> bool {
-        self.slot_key == ProjectWorkareaCefSurfaceSlotKey::Source
-    }
-
-    fn browser_boundary_included(self) -> bool {
-        false
-    }
-
-    fn kanban_boundary_included(self) -> bool {
-        false
-    }
-
-    fn manage_boundary_included(self) -> bool {
-        false
-    }
-
-    fn non_source_input_rejected(self) -> bool {
-        true
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        self.web_pane_engine.privacy_label()
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-    }
-
-    fn normal_layout_only(self) -> bool {
-        true
-    }
-
-    fn normal_layout_cef_child_surface_required(self) -> bool {
-        true
-    }
-
-    fn hidden_or_offscreen_mount_created(self) -> bool {
-        false
-    }
-
-    fn owner_present(self) -> bool {
-        self.owner_state.owner_present()
-    }
-
-    fn cef_surface_entity_stored(self) -> bool {
-        self.owner_state.stores_cef_surface_entity()
-    }
-
-    fn requires_runtime_readiness_gate_success(self) -> bool {
-        true
-    }
-
-    fn runtime_readiness_gate_succeeded(self) -> bool {
-        self.runtime_readiness_gate_state.succeeded()
-    }
-
-    fn requires_real_runtime_url_authority(self) -> bool {
-        true
-    }
-
-    fn has_real_runtime_url_authority(self) -> bool {
-        self.runtime_url_authority_state
-            .has_real_runtime_url_authority()
-    }
-
-    fn requires_issued_runtime_url(self) -> bool {
-        true
-    }
-
-    fn has_issued_runtime_url(self) -> bool {
-        self.issued_runtime_url_state.has_issued_runtime_url()
-    }
-
-    fn runtime_url_value_present(self) -> bool {
-        self.issued_runtime_url_state.runtime_url_value_present()
-    }
-
-    fn retains_runtime_url_value(self) -> bool {
-        self.issued_runtime_url_state.retains_runtime_url_value()
-    }
-
-    fn requires_runtime_code_server_process(self) -> bool {
-        true
-    }
-
-    fn runtime_code_server_process_available(self) -> bool {
-        self.code_server_process_state.available()
-    }
-
-    fn requires_cef_surface_creation_before_placeholder_replacement(self) -> bool {
-        true
-    }
-
-    fn runtime_cef_surface_created(self) -> bool {
-        self.cef_surface_creation_state.created()
-    }
-
-    fn requires_explicit_replacement_permission(self) -> bool {
-        true
-    }
-
-    fn explicit_replacement_permission_present(self) -> bool {
-        self.replacement_permission_state.has_explicit_permission()
-    }
-
-    fn creates_or_stores_cef_or_code_server_payload(self) -> bool {
-        false
-    }
-
-    fn has_private_runtime_data(self) -> bool {
-        false
-    }
-
-    fn logs_or_persists_private_details(self) -> bool {
-        false
-    }
-
-    fn can_create_runtime_cef_surface(self) -> bool {
-        self.source_boundary_included()
-            && self.has_cef_only_web_pane_engine_contract()
-            && self.normal_layout_cef_child_surface_required()
-            && self.requires_runtime_readiness_gate_success()
-            && self.runtime_readiness_gate_succeeded()
-            && self.requires_real_runtime_url_authority()
-            && self.has_real_runtime_url_authority()
-            && self.requires_issued_runtime_url()
-            && self.has_issued_runtime_url()
-            && !self.runtime_url_value_present()
-            && !self.retains_runtime_url_value()
-            && self.requires_runtime_code_server_process()
-            && self.runtime_code_server_process_available()
-            && !self.runtime_cef_surface_created()
-            && !self.owner_present()
-            && !self.cef_surface_entity_stored()
-            && !self.hidden_or_offscreen_mount_created()
-            && !self.creates_or_stores_cef_or_code_server_payload()
-            && !self.has_private_runtime_data()
-            && !self.logs_or_persists_private_details()
-    }
-
-    fn can_replace_placeholder_with_runtime_cef_surface(self) -> bool {
-        self.source_boundary_included()
-            && self.has_cef_only_web_pane_engine_contract()
-            && self.normal_layout_cef_child_surface_required()
-            && self.runtime_readiness_gate_succeeded()
-            && self.has_real_runtime_url_authority()
-            && self.has_issued_runtime_url()
-            && !self.runtime_url_value_present()
-            && !self.retains_runtime_url_value()
-            && self.runtime_code_server_process_available()
-            && self.runtime_cef_surface_created()
-            && !self.hidden_or_offscreen_mount_created()
-            && !self.cef_surface_entity_stored()
-            && !self.creates_or_stores_cef_or_code_server_payload()
-            && !self.has_private_runtime_data()
-            && !self.logs_or_persists_private_details()
-            && self.requires_explicit_replacement_permission()
-            && self.explicit_replacement_permission_present()
-    }
-
-    fn shell_state_privacy_boundary_json(self) -> serde_json::Value {
-        serde_json::json!({
-            "boundary": self.privacy_label(),
-            "sourceLedgerRuntimeParityOnly": true,
-            "slot": self.slot_key.privacy_label(),
-            "sourceBoundaryIncluded": self.source_boundary_included(),
-            "browserBoundaryIncluded": self.browser_boundary_included(),
-            "kanbanBoundaryIncluded": self.kanban_boundary_included(),
-            "manageBoundaryIncluded": self.manage_boundary_included(),
-            "nonSourceInputRejected": self.non_source_input_rejected(),
-            "startupNavigationReadinessBoundary": self.startup_navigation_readiness_boundary_label,
-            "runtimeUrlIssuanceDecision": self.runtime_url_issuance_decision_label,
-            "sourceOnlyEvidence": self.source_only_evidence_label,
-            "ownerState": self.owner_state.privacy_label(),
-            "ownerPresent": self.owner_present(),
-            "cefSurfaceEntityStored": self.cef_surface_entity_stored(),
-            "webPaneEngine": self.web_pane_engine_privacy_label(),
-            "hasCefOnlyWebPaneEngineContract": self.has_cef_only_web_pane_engine_contract(),
-            "normalLayoutOnly": self.normal_layout_only(),
-            "normalLayoutCefChildSurfaceRequired": self.normal_layout_cef_child_surface_required(),
-            "hiddenOrOffscreenMountCreated": self.hidden_or_offscreen_mount_created(),
-            "runtimeReadinessGateState": self.runtime_readiness_gate_state.privacy_label(),
-            "requiresRuntimeReadinessGateSuccess": self.requires_runtime_readiness_gate_success(),
-            "runtimeReadinessGateSucceeded": self.runtime_readiness_gate_succeeded(),
-            "runtimeUrlAuthorityState": self.runtime_url_authority_state.privacy_label(),
-            "requiresRealRuntimeUrlAuthority": self.requires_real_runtime_url_authority(),
-            "hasRealRuntimeUrlAuthority": self.has_real_runtime_url_authority(),
-            "issuedRuntimeUrlState": self.issued_runtime_url_state.privacy_label(),
-            "requiresIssuedRuntimeUrl": self.requires_issued_runtime_url(),
-            "issuedRuntimeUrlPresent": self.has_issued_runtime_url(),
-            "runtimeUrlValuePresent": self.runtime_url_value_present(),
-            "retainsRuntimeUrlValue": self.retains_runtime_url_value(),
-            "codeServerProcessState": self.code_server_process_state.privacy_label(),
-            "requiresRuntimeCodeServerProcess": self.requires_runtime_code_server_process(),
-            "runtimeCodeServerProcessAvailable": self.runtime_code_server_process_available(),
-            "cefSurfaceCreationState": self.cef_surface_creation_state.privacy_label(),
-            "requiresCefSurfaceCreationBeforePlaceholderReplacement": self.requires_cef_surface_creation_before_placeholder_replacement(),
-            "runtimeCefSurfaceCreated": self.runtime_cef_surface_created(),
-            "replacementPermissionState": self.replacement_permission_state.privacy_label(),
-            "requiresExplicitReplacementPermission": self.requires_explicit_replacement_permission(),
-            "explicitReplacementPermissionPresent": self.explicit_replacement_permission_present(),
-            "cefOrCodeServerPayloadStored": self.creates_or_stores_cef_or_code_server_payload(),
-            "privateRuntimeDataPresent": self.has_private_runtime_data(),
-            "logsOrPersistsPrivateDetails": self.logs_or_persists_private_details(),
-            "canCreateRuntimeCefSurface": self.can_create_runtime_cef_surface(),
-            "canUseRuntimeCefSurfaceForSourcePlaceholder": self.can_replace_placeholder_with_runtime_cef_surface(),
-        })
-    }
-}
-
-#[allow(dead_code)]
-fn project_workarea_source_runtime_cef_surface_owner_gate_from_startup_navigation_readiness_boundary(
-    startup_navigation_readiness_boundary: Option<
-        ProjectWorkareaSourceStartupNavigationReadinessBoundary,
-    >,
-) -> Option<ProjectWorkareaSourceRuntimeCefSurfaceOwnerGate> {
-    ProjectWorkareaSourceRuntimeCefSurfaceOwnerGate::source(startup_navigation_readiness_boundary)
-}
-
-#[allow(dead_code)]
-fn source_workarea_runtime_cef_surface_gate_permits_placeholder_replacement(
-    mount_request: &SourceCefCodeServerMountRequestContract,
-    owner_gate: Option<ProjectWorkareaSourceRuntimeCefSurfaceOwnerGate>,
-) -> bool {
-    owner_gate.is_some_and(|gate| gate.can_replace_placeholder_with_runtime_cef_surface())
-        && mount_request.materializable_request().is_some()
-}
-
-#[allow(dead_code)]
-fn source_workarea_should_render_placeholder_until_runtime_cef_gate_permits_replacement(
-    mount_request: &SourceCefCodeServerMountRequestContract,
-    owner_gate: Option<ProjectWorkareaSourceRuntimeCefSurfaceOwnerGate>,
-) -> bool {
-    !source_workarea_runtime_cef_surface_gate_permits_placeholder_replacement(
-        mount_request,
-        owner_gate,
-    )
-}
-
-/*
-CDXC:GPUIProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate 2026-06-24-06:49:
-The Kanban-only runtime CEF surface owner/creation gate follows the runtime URL issuance boundary. It is keyed by the safe Kanban slot kind, accepts only the existing Kanban runtime URL issuance decision, requires CEF plus a normal-layout child surface, and permits Kanban placeholder replacement only after real runtime URL authority, an issued runtime URL, CEF surface creation, and explicit replacement permission exist without URL values, project identity, paths, Browser/Source/Manage state, payloads, hidden mounts, logs, persistence, or a CefSurface entity in this gate payload.
-*/
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaKanbanRuntimeCefSurfaceOwnerState {
-    RuntimeCefSurfaceOwnerAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaKanbanRuntimeCefSurfaceOwnerState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::RuntimeCefSurfaceOwnerAbsent => "runtimeCefSurfaceOwnerAbsent",
-        }
-    }
-
-    fn owner_present(self) -> bool {
-        match self {
-            Self::RuntimeCefSurfaceOwnerAbsent => false,
-        }
-    }
-
-    fn stores_cef_surface_entity(self) -> bool {
-        match self {
-            Self::RuntimeCefSurfaceOwnerAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaKanbanRuntimeCefSurfaceCreationState {
-    RuntimeCefSurfaceAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaKanbanRuntimeCefSurfaceCreationState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::RuntimeCefSurfaceAbsent => "runtimeCefSurfaceAbsent",
-        }
-    }
-
-    fn created(self) -> bool {
-        match self {
-            Self::RuntimeCefSurfaceAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaKanbanRuntimeCefSurfaceReplacementPermissionState {
-    ExplicitReplacementPermissionAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaKanbanRuntimeCefSurfaceReplacementPermissionState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::ExplicitReplacementPermissionAbsent => "explicitReplacementPermissionAbsent",
-        }
-    }
-
-    fn has_explicit_permission(self) -> bool {
-        match self {
-            Self::ExplicitReplacementPermissionAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate {
-    slot_key: ProjectWorkareaCefSurfaceSlotKey,
-    runtime_url_issuance_decision_label: &'static str,
-    runtime_parity_state_label: &'static str,
-    placeholder_preflight_state_label: &'static str,
-    ownership_slot_label: &'static str,
-    source_only_evidence_label: &'static str,
-    web_pane_engine: ProjectWorkareaPaneEngineContract,
-    owner_state: ProjectWorkareaKanbanRuntimeCefSurfaceOwnerState,
-    runtime_url_authority_state: ProjectWorkareaRuntimeUrlAuthorityState,
-    issued_runtime_url_state: ProjectWorkareaIssuedRuntimeUrlState,
-    cef_surface_creation_state: ProjectWorkareaKanbanRuntimeCefSurfaceCreationState,
-    replacement_permission_state: ProjectWorkareaKanbanRuntimeCefSurfaceReplacementPermissionState,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate {
-    fn kanban(
-        runtime_url_issuance_decision: Option<ProjectWorkareaRuntimeUrlIssuanceDecision>,
-    ) -> Option<Self> {
-        let decision = runtime_url_issuance_decision?;
-        if decision.slot_key != ProjectWorkareaCefSurfaceSlotKey::Kanban
-            || !decision.has_cef_only_web_pane_engine_contract()
-            || !decision.normal_layout_child_boundary_required()
-            || !decision.requires_real_runtime_url_authority_before_issuing_runtime_url()
-            || decision.has_real_runtime_url_authority()
-            || decision.has_issued_runtime_url()
-            || decision.runtime_url_value_present()
-            || decision.retains_runtime_url_value()
-            || decision.can_issue_runtime_url()
-            || decision.starts_code_server()
-            || decision.has_runtime_cef_surface
-            || decision.mounts_file_bridge()
-            || decision.runs_file_io()
-            || decision.creates_cef_or_bridge_payload()
-            || decision.hidden_or_offscreen_mount_created()
-            || decision.has_private_runtime_data()
-            || decision.logs_or_persists_private_details()
-            || decision.has_placeholder_replacement_permission()
-            || decision.can_replace_placeholder
-            || decision.cef_surface_creation_allowed()
-            || decision.can_create_cef_surface()
-        {
-            return None;
-        }
-
-        Some(Self {
-            slot_key: decision.slot_key,
-            runtime_url_issuance_decision_label: decision.privacy_label(),
-            runtime_parity_state_label: decision.runtime_parity_state_label,
-            placeholder_preflight_state_label: decision.placeholder_preflight_state_label,
-            ownership_slot_label: decision.ownership_slot_label,
-            source_only_evidence_label: decision.source_only_evidence_label,
-            web_pane_engine: decision.web_pane_engine,
-            owner_state:
-                ProjectWorkareaKanbanRuntimeCefSurfaceOwnerState::RuntimeCefSurfaceOwnerAbsent,
-            runtime_url_authority_state: decision.runtime_url_authority_state,
-            issued_runtime_url_state: decision.issued_runtime_url_state,
-            cef_surface_creation_state:
-                ProjectWorkareaKanbanRuntimeCefSurfaceCreationState::RuntimeCefSurfaceAbsent,
-            replacement_permission_state:
-                ProjectWorkareaKanbanRuntimeCefSurfaceReplacementPermissionState::ExplicitReplacementPermissionAbsent,
-        })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "projectWorkareaKanbanRuntimeCefSurfaceOwnerGate"
-    }
-
-    fn source_boundary_included(self) -> bool {
-        false
-    }
-
-    fn browser_boundary_included(self) -> bool {
-        false
-    }
-
-    fn kanban_boundary_included(self) -> bool {
-        self.slot_key == ProjectWorkareaCefSurfaceSlotKey::Kanban
-    }
-
-    fn manage_boundary_included(self) -> bool {
-        false
-    }
-
-    fn non_kanban_input_rejected(self) -> bool {
-        true
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        self.web_pane_engine.privacy_label()
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-    }
-
-    fn normal_layout_only(self) -> bool {
-        true
-    }
-
-    fn normal_layout_cef_child_surface_required(self) -> bool {
-        true
-    }
-
-    fn hidden_or_offscreen_mount_created(self) -> bool {
-        false
-    }
-
-    fn owner_present(self) -> bool {
-        self.owner_state.owner_present()
-    }
-
-    fn cef_surface_entity_stored(self) -> bool {
-        self.owner_state.stores_cef_surface_entity()
-    }
-
-    fn requires_real_runtime_url_authority(self) -> bool {
-        true
-    }
-
-    fn has_real_runtime_url_authority(self) -> bool {
-        self.runtime_url_authority_state
-            .has_real_runtime_url_authority()
-    }
-
-    fn requires_issued_runtime_url(self) -> bool {
-        true
-    }
-
-    fn has_issued_runtime_url(self) -> bool {
-        self.issued_runtime_url_state.has_issued_runtime_url()
-    }
-
-    fn runtime_url_value_present(self) -> bool {
-        self.issued_runtime_url_state.runtime_url_value_present()
-    }
-
-    fn retains_runtime_url_value(self) -> bool {
-        self.issued_runtime_url_state.retains_runtime_url_value()
-    }
-
-    fn requires_cef_surface_creation_before_placeholder_replacement(self) -> bool {
-        true
-    }
-
-    fn runtime_cef_surface_created(self) -> bool {
-        self.cef_surface_creation_state.created()
-    }
-
-    fn requires_explicit_replacement_permission(self) -> bool {
-        true
-    }
-
-    fn explicit_replacement_permission_present(self) -> bool {
-        self.replacement_permission_state.has_explicit_permission()
-    }
-
-    fn creates_or_stores_runtime_payload(self) -> bool {
-        false
-    }
-
-    fn has_private_runtime_data(self) -> bool {
-        false
-    }
-
-    fn logs_or_persists_private_details(self) -> bool {
-        false
-    }
-
-    fn can_create_runtime_cef_surface(self) -> bool {
-        self.kanban_boundary_included()
-            && self.has_cef_only_web_pane_engine_contract()
-            && self.normal_layout_cef_child_surface_required()
-            && self.requires_real_runtime_url_authority()
-            && self.has_real_runtime_url_authority()
-            && self.requires_issued_runtime_url()
-            && self.has_issued_runtime_url()
-            && !self.runtime_url_value_present()
-            && !self.retains_runtime_url_value()
-            && !self.runtime_cef_surface_created()
-            && !self.owner_present()
-            && !self.cef_surface_entity_stored()
-            && !self.hidden_or_offscreen_mount_created()
-            && !self.creates_or_stores_runtime_payload()
-            && !self.has_private_runtime_data()
-            && !self.logs_or_persists_private_details()
-    }
-
-    fn can_replace_placeholder_with_runtime_cef_surface(self) -> bool {
-        self.kanban_boundary_included()
-            && self.has_cef_only_web_pane_engine_contract()
-            && self.normal_layout_cef_child_surface_required()
-            && self.has_real_runtime_url_authority()
-            && self.has_issued_runtime_url()
-            && !self.runtime_url_value_present()
-            && !self.retains_runtime_url_value()
-            && self.runtime_cef_surface_created()
-            && !self.hidden_or_offscreen_mount_created()
-            && !self.cef_surface_entity_stored()
-            && !self.creates_or_stores_runtime_payload()
-            && !self.has_private_runtime_data()
-            && !self.logs_or_persists_private_details()
-            && self.requires_explicit_replacement_permission()
-            && self.explicit_replacement_permission_present()
-    }
-
-    fn shell_state_privacy_boundary_json(self) -> serde_json::Value {
-        serde_json::json!({
-            "boundary": self.privacy_label(),
-            "sourceLedgerRuntimeParityOnly": true,
-            "slot": self.slot_key.privacy_label(),
-            "sourceBoundaryIncluded": self.source_boundary_included(),
-            "browserBoundaryIncluded": self.browser_boundary_included(),
-            "kanbanBoundaryIncluded": self.kanban_boundary_included(),
-            "manageBoundaryIncluded": self.manage_boundary_included(),
-            "nonKanbanInputRejected": self.non_kanban_input_rejected(),
-            "runtimeUrlIssuanceDecision": self.runtime_url_issuance_decision_label,
-            "runtimeParityState": self.runtime_parity_state_label,
-            "preflightState": self.placeholder_preflight_state_label,
-            "ownershipSlot": self.ownership_slot_label,
-            "sourceOnlyEvidence": self.source_only_evidence_label,
-            "ownerState": self.owner_state.privacy_label(),
-            "ownerPresent": self.owner_present(),
-            "cefSurfaceEntityStored": self.cef_surface_entity_stored(),
-            "webPaneEngine": self.web_pane_engine_privacy_label(),
-            "hasCefOnlyWebPaneEngineContract": self.has_cef_only_web_pane_engine_contract(),
-            "normalLayoutOnly": self.normal_layout_only(),
-            "normalLayoutCefChildSurfaceRequired": self.normal_layout_cef_child_surface_required(),
-            "hiddenOrOffscreenMountCreated": self.hidden_or_offscreen_mount_created(),
-            "runtimeUrlAuthorityState": self.runtime_url_authority_state.privacy_label(),
-            "requiresRealRuntimeUrlAuthority": self.requires_real_runtime_url_authority(),
-            "hasRealRuntimeUrlAuthority": self.has_real_runtime_url_authority(),
-            "issuedRuntimeUrlState": self.issued_runtime_url_state.privacy_label(),
-            "requiresIssuedRuntimeUrl": self.requires_issued_runtime_url(),
-            "issuedRuntimeUrlPresent": self.has_issued_runtime_url(),
-            "runtimeUrlValuePresent": self.runtime_url_value_present(),
-            "retainsRuntimeUrlValue": self.retains_runtime_url_value(),
-            "cefSurfaceCreationState": self.cef_surface_creation_state.privacy_label(),
-            "requiresCefSurfaceCreationBeforePlaceholderReplacement": self.requires_cef_surface_creation_before_placeholder_replacement(),
-            "runtimeCefSurfaceCreated": self.runtime_cef_surface_created(),
-            "replacementPermissionState": self.replacement_permission_state.privacy_label(),
-            "requiresExplicitReplacementPermission": self.requires_explicit_replacement_permission(),
-            "explicitReplacementPermissionPresent": self.explicit_replacement_permission_present(),
-            "runtimePayloadStored": self.creates_or_stores_runtime_payload(),
-            "privateRuntimeDataPresent": self.has_private_runtime_data(),
-            "logsOrPersistsPrivateDetails": self.logs_or_persists_private_details(),
-            "canCreateRuntimeCefSurface": self.can_create_runtime_cef_surface(),
-            "canUseRuntimeCefSurfaceForKanbanPlaceholder": self.can_replace_placeholder_with_runtime_cef_surface(),
-        })
-    }
-}
-
-#[allow(dead_code)]
-fn project_workarea_kanban_runtime_cef_surface_owner_gate_from_runtime_url_issuance_decision(
-    runtime_url_issuance_decision: Option<ProjectWorkareaRuntimeUrlIssuanceDecision>,
-) -> Option<ProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate> {
-    ProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate::kanban(runtime_url_issuance_decision)
-}
-
-#[allow(dead_code)]
-fn kanban_workarea_runtime_cef_surface_gate_permits_placeholder_replacement(
-    mount_request: &KanbanCefMountRequestContract,
-    owner_gate: Option<ProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate>,
-) -> bool {
-    owner_gate.is_some_and(|gate| gate.can_replace_placeholder_with_runtime_cef_surface())
-        && mount_request.materializable_request().is_some()
-}
-
-#[allow(dead_code)]
-fn kanban_workarea_should_render_placeholder_until_runtime_cef_gate_permits_replacement(
-    mount_request: &KanbanCefMountRequestContract,
-    owner_gate: Option<ProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate>,
-) -> bool {
-    !kanban_workarea_runtime_cef_surface_gate_permits_placeholder_replacement(
-        mount_request,
-        owner_gate,
-    )
-}
-
-/*
-CDXC:GPUIProjectWorkareaManageRuntimeCefSurfaceOwnerGate 2026-06-24-07:00:
-The Manage-only runtime CEF surface plus file-bridge owner/creation gate follows the runtime URL issuance boundary. It is keyed by the safe Manage slot kind, accepts only the existing Manage runtime URL issuance decision, requires CEF plus a normal-layout child surface, and permits Manage placeholder replacement only after real runtime URL authority, an issued runtime URL, CEF surface creation, runtime file-bridge mounting, runtime file-operation execution, and explicit replacement permission exist without URL values, project identity, paths, Browser/Source/Kanban state, CEF/file-bridge/runtime payloads, hidden mounts, logs, persistence, or a CefSurface entity in this gate payload.
-*/
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaManageRuntimeCefSurfaceOwnerState {
-    RuntimeCefSurfaceOwnerAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaManageRuntimeCefSurfaceOwnerState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::RuntimeCefSurfaceOwnerAbsent => "runtimeCefSurfaceOwnerAbsent",
-        }
-    }
-
-    fn owner_present(self) -> bool {
-        match self {
-            Self::RuntimeCefSurfaceOwnerAbsent => false,
-        }
-    }
-
-    fn stores_cef_surface_entity(self) -> bool {
-        match self {
-            Self::RuntimeCefSurfaceOwnerAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaManageRuntimeCefSurfaceCreationState {
-    RuntimeCefSurfaceAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaManageRuntimeCefSurfaceCreationState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::RuntimeCefSurfaceAbsent => "runtimeCefSurfaceAbsent",
-        }
-    }
-
-    fn created(self) -> bool {
-        match self {
-            Self::RuntimeCefSurfaceAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaManageRuntimeFileBridgeMountState {
-    RuntimeFileBridgeAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaManageRuntimeFileBridgeMountState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::RuntimeFileBridgeAbsent => "runtimeFileBridgeAbsent",
-        }
-    }
-
-    fn mounted(self) -> bool {
-        match self {
-            Self::RuntimeFileBridgeAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaManageRuntimeFileOperationState {
-    RuntimeFileOperationAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaManageRuntimeFileOperationState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::RuntimeFileOperationAbsent => "runtimeFileOperationAbsent",
-        }
-    }
-
-    fn ran(self) -> bool {
-        match self {
-            Self::RuntimeFileOperationAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaManageRuntimeCefSurfaceReplacementPermissionState {
-    ExplicitReplacementPermissionAbsent,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaManageRuntimeCefSurfaceReplacementPermissionState {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::ExplicitReplacementPermissionAbsent => "explicitReplacementPermissionAbsent",
-        }
-    }
-
-    fn has_explicit_permission(self) -> bool {
-        match self {
-            Self::ExplicitReplacementPermissionAbsent => false,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ProjectWorkareaManageRuntimeCefSurfaceOwnerGate {
-    slot_key: ProjectWorkareaCefSurfaceSlotKey,
-    runtime_url_issuance_decision_label: &'static str,
-    runtime_parity_state_label: &'static str,
-    placeholder_preflight_state_label: &'static str,
-    ownership_slot_label: &'static str,
-    source_only_evidence_label: &'static str,
-    web_pane_engine: ProjectWorkareaPaneEngineContract,
-    owner_state: ProjectWorkareaManageRuntimeCefSurfaceOwnerState,
-    runtime_url_authority_state: ProjectWorkareaRuntimeUrlAuthorityState,
-    issued_runtime_url_state: ProjectWorkareaIssuedRuntimeUrlState,
-    cef_surface_creation_state: ProjectWorkareaManageRuntimeCefSurfaceCreationState,
-    file_bridge_mount_state: ProjectWorkareaManageRuntimeFileBridgeMountState,
-    file_operation_state: ProjectWorkareaManageRuntimeFileOperationState,
-    replacement_permission_state: ProjectWorkareaManageRuntimeCefSurfaceReplacementPermissionState,
-}
-
-#[allow(dead_code)]
-impl ProjectWorkareaManageRuntimeCefSurfaceOwnerGate {
-    fn manage(
-        runtime_url_issuance_decision: Option<ProjectWorkareaRuntimeUrlIssuanceDecision>,
-    ) -> Option<Self> {
-        let decision = runtime_url_issuance_decision?;
-        if decision.slot_key != ProjectWorkareaCefSurfaceSlotKey::Manage
-            || !decision.has_cef_only_web_pane_engine_contract()
-            || !decision.normal_layout_child_boundary_required()
-            || !decision.requires_real_runtime_url_authority_before_issuing_runtime_url()
-            || decision.has_real_runtime_url_authority()
-            || decision.has_issued_runtime_url()
-            || decision.runtime_url_value_present()
-            || decision.retains_runtime_url_value()
-            || decision.can_issue_runtime_url()
-            || decision.starts_code_server()
-            || decision.has_runtime_cef_surface
-            || decision.mounts_file_bridge()
-            || decision.runs_file_io()
-            || decision.creates_cef_or_bridge_payload()
-            || decision.hidden_or_offscreen_mount_created()
-            || decision.has_private_runtime_data()
-            || decision.logs_or_persists_private_details()
-            || decision.has_placeholder_replacement_permission()
-            || decision.can_replace_placeholder
-            || decision.cef_surface_creation_allowed()
-            || decision.can_create_cef_surface()
-        {
-            return None;
-        }
-
-        Some(Self {
-            slot_key: decision.slot_key,
-            runtime_url_issuance_decision_label: decision.privacy_label(),
-            runtime_parity_state_label: decision.runtime_parity_state_label,
-            placeholder_preflight_state_label: decision.placeholder_preflight_state_label,
-            ownership_slot_label: decision.ownership_slot_label,
-            source_only_evidence_label: decision.source_only_evidence_label,
-            web_pane_engine: decision.web_pane_engine,
-            owner_state:
-                ProjectWorkareaManageRuntimeCefSurfaceOwnerState::RuntimeCefSurfaceOwnerAbsent,
-            runtime_url_authority_state: decision.runtime_url_authority_state,
-            issued_runtime_url_state: decision.issued_runtime_url_state,
-            cef_surface_creation_state:
-                ProjectWorkareaManageRuntimeCefSurfaceCreationState::RuntimeCefSurfaceAbsent,
-            file_bridge_mount_state:
-                ProjectWorkareaManageRuntimeFileBridgeMountState::RuntimeFileBridgeAbsent,
-            file_operation_state:
-                ProjectWorkareaManageRuntimeFileOperationState::RuntimeFileOperationAbsent,
-            replacement_permission_state:
-                ProjectWorkareaManageRuntimeCefSurfaceReplacementPermissionState::ExplicitReplacementPermissionAbsent,
-        })
-    }
-
-    fn privacy_label(self) -> &'static str {
-        "projectWorkareaManageRuntimeCefSurfaceOwnerGate"
-    }
-
-    fn source_boundary_included(self) -> bool {
-        false
-    }
-
-    fn browser_boundary_included(self) -> bool {
-        false
-    }
-
-    fn kanban_boundary_included(self) -> bool {
-        false
-    }
-
-    fn manage_boundary_included(self) -> bool {
-        self.slot_key == ProjectWorkareaCefSurfaceSlotKey::Manage
-    }
-
-    fn non_manage_input_rejected(self) -> bool {
-        true
-    }
-
-    fn web_pane_engine_privacy_label(self) -> &'static str {
-        self.web_pane_engine.privacy_label()
-    }
-
-    fn has_cef_only_web_pane_engine_contract(self) -> bool {
-        self.web_pane_engine.is_cef_only()
-    }
-
-    fn normal_layout_only(self) -> bool {
-        true
-    }
-
-    fn normal_layout_cef_child_surface_required(self) -> bool {
-        true
-    }
-
-    fn hidden_or_offscreen_mount_created(self) -> bool {
-        false
-    }
-
-    fn owner_present(self) -> bool {
-        self.owner_state.owner_present()
-    }
-
-    fn cef_surface_entity_stored(self) -> bool {
-        self.owner_state.stores_cef_surface_entity()
-    }
-
-    fn requires_real_runtime_url_authority(self) -> bool {
-        true
-    }
-
-    fn has_real_runtime_url_authority(self) -> bool {
-        self.runtime_url_authority_state
-            .has_real_runtime_url_authority()
-    }
-
-    fn requires_issued_runtime_url(self) -> bool {
-        true
-    }
-
-    fn has_issued_runtime_url(self) -> bool {
-        self.issued_runtime_url_state.has_issued_runtime_url()
-    }
-
-    fn runtime_url_value_present(self) -> bool {
-        self.issued_runtime_url_state.runtime_url_value_present()
-    }
-
-    fn retains_runtime_url_value(self) -> bool {
-        self.issued_runtime_url_state.retains_runtime_url_value()
-    }
-
-    fn requires_cef_surface_creation_before_placeholder_replacement(self) -> bool {
-        true
-    }
-
-    fn runtime_cef_surface_created(self) -> bool {
-        self.cef_surface_creation_state.created()
-    }
-
-    fn requires_runtime_file_bridge_mount(self) -> bool {
-        true
-    }
-
-    fn runtime_file_bridge_mounted(self) -> bool {
-        self.file_bridge_mount_state.mounted()
-    }
-
-    fn requires_runtime_file_operation(self) -> bool {
-        true
-    }
-
-    fn runtime_file_operation_ran(self) -> bool {
-        self.file_operation_state.ran()
-    }
-
-    fn requires_explicit_replacement_permission(self) -> bool {
-        true
-    }
-
-    fn explicit_replacement_permission_present(self) -> bool {
-        self.replacement_permission_state.has_explicit_permission()
-    }
-
-    fn creates_or_stores_cef_or_file_bridge_runtime_payload(self) -> bool {
-        false
-    }
-
-    fn has_private_runtime_data(self) -> bool {
-        false
-    }
-
-    fn logs_or_persists_private_details(self) -> bool {
-        false
-    }
-
-    fn can_create_runtime_cef_surface(self) -> bool {
-        self.manage_boundary_included()
-            && self.has_cef_only_web_pane_engine_contract()
-            && self.normal_layout_cef_child_surface_required()
-            && self.requires_real_runtime_url_authority()
-            && self.has_real_runtime_url_authority()
-            && self.requires_issued_runtime_url()
-            && self.has_issued_runtime_url()
-            && !self.runtime_url_value_present()
-            && !self.retains_runtime_url_value()
-            && self.requires_runtime_file_bridge_mount()
-            && self.runtime_file_bridge_mounted()
-            && self.requires_runtime_file_operation()
-            && self.runtime_file_operation_ran()
-            && !self.runtime_cef_surface_created()
-            && !self.owner_present()
-            && !self.cef_surface_entity_stored()
-            && !self.hidden_or_offscreen_mount_created()
-            && !self.creates_or_stores_cef_or_file_bridge_runtime_payload()
-            && !self.has_private_runtime_data()
-            && !self.logs_or_persists_private_details()
-            && self.requires_explicit_replacement_permission()
-            && self.explicit_replacement_permission_present()
-    }
-
-    fn can_replace_placeholder_with_runtime_cef_surface(self) -> bool {
-        self.manage_boundary_included()
-            && self.has_cef_only_web_pane_engine_contract()
-            && self.normal_layout_cef_child_surface_required()
-            && self.has_real_runtime_url_authority()
-            && self.has_issued_runtime_url()
-            && !self.runtime_url_value_present()
-            && !self.retains_runtime_url_value()
-            && self.runtime_cef_surface_created()
-            && self.runtime_file_bridge_mounted()
-            && self.runtime_file_operation_ran()
-            && !self.hidden_or_offscreen_mount_created()
-            && !self.cef_surface_entity_stored()
-            && !self.creates_or_stores_cef_or_file_bridge_runtime_payload()
-            && !self.has_private_runtime_data()
-            && !self.logs_or_persists_private_details()
-            && self.requires_explicit_replacement_permission()
-            && self.explicit_replacement_permission_present()
-    }
-
-    fn shell_state_privacy_boundary_json(self) -> serde_json::Value {
-        serde_json::json!({
-            "boundary": self.privacy_label(),
-            "sourceLedgerRuntimeParityOnly": true,
-            "slot": self.slot_key.privacy_label(),
-            "sourceBoundaryIncluded": self.source_boundary_included(),
-            "browserBoundaryIncluded": self.browser_boundary_included(),
-            "kanbanBoundaryIncluded": self.kanban_boundary_included(),
-            "manageBoundaryIncluded": self.manage_boundary_included(),
-            "nonManageInputRejected": self.non_manage_input_rejected(),
-            "runtimeUrlIssuanceDecision": self.runtime_url_issuance_decision_label,
-            "runtimeParityState": self.runtime_parity_state_label,
-            "preflightState": self.placeholder_preflight_state_label,
-            "ownershipSlot": self.ownership_slot_label,
-            "sourceOnlyEvidence": self.source_only_evidence_label,
-            "ownerState": self.owner_state.privacy_label(),
-            "ownerPresent": self.owner_present(),
-            "cefSurfaceEntityStored": self.cef_surface_entity_stored(),
-            "webPaneEngine": self.web_pane_engine_privacy_label(),
-            "hasCefOnlyWebPaneEngineContract": self.has_cef_only_web_pane_engine_contract(),
-            "normalLayoutOnly": self.normal_layout_only(),
-            "normalLayoutCefChildSurfaceRequired": self.normal_layout_cef_child_surface_required(),
-            "hiddenOrOffscreenMountCreated": self.hidden_or_offscreen_mount_created(),
-            "runtimeUrlAuthorityState": self.runtime_url_authority_state.privacy_label(),
-            "requiresRealRuntimeUrlAuthority": self.requires_real_runtime_url_authority(),
-            "hasRealRuntimeUrlAuthority": self.has_real_runtime_url_authority(),
-            "issuedRuntimeUrlState": self.issued_runtime_url_state.privacy_label(),
-            "requiresIssuedRuntimeUrl": self.requires_issued_runtime_url(),
-            "issuedRuntimeUrlPresent": self.has_issued_runtime_url(),
-            "runtimeUrlValuePresent": self.runtime_url_value_present(),
-            "retainsRuntimeUrlValue": self.retains_runtime_url_value(),
-            "cefSurfaceCreationState": self.cef_surface_creation_state.privacy_label(),
-            "requiresCefSurfaceCreationBeforePlaceholderReplacement": self.requires_cef_surface_creation_before_placeholder_replacement(),
-            "runtimeCefSurfaceCreated": self.runtime_cef_surface_created(),
-            "runtimeFileBridgeState": self.file_bridge_mount_state.privacy_label(),
-            "requiresRuntimeFileBridgeMount": self.requires_runtime_file_bridge_mount(),
-            "runtimeFileBridgeMounted": self.runtime_file_bridge_mounted(),
-            "runtimeFileOperationState": self.file_operation_state.privacy_label(),
-            "requiresRuntimeFileOperation": self.requires_runtime_file_operation(),
-            "runtimeFileOperationRan": self.runtime_file_operation_ran(),
-            "replacementPermissionState": self.replacement_permission_state.privacy_label(),
-            "requiresExplicitReplacementPermission": self.requires_explicit_replacement_permission(),
-            "explicitReplacementPermissionPresent": self.explicit_replacement_permission_present(),
-            "cefOrFileBridgeRuntimePayloadStored": self.creates_or_stores_cef_or_file_bridge_runtime_payload(),
-            "privateRuntimeDataPresent": self.has_private_runtime_data(),
-            "logsOrPersistsPrivateDetails": self.logs_or_persists_private_details(),
-            "canCreateRuntimeCefSurface": self.can_create_runtime_cef_surface(),
-            "canUseRuntimeCefSurfaceForManagePlaceholder": self.can_replace_placeholder_with_runtime_cef_surface(),
-        })
-    }
-}
-
-#[allow(dead_code)]
-fn project_workarea_manage_runtime_cef_surface_owner_gate_from_runtime_url_issuance_decision(
-    runtime_url_issuance_decision: Option<ProjectWorkareaRuntimeUrlIssuanceDecision>,
-) -> Option<ProjectWorkareaManageRuntimeCefSurfaceOwnerGate> {
-    ProjectWorkareaManageRuntimeCefSurfaceOwnerGate::manage(runtime_url_issuance_decision)
-}
-
-#[allow(dead_code)]
-fn manage_workarea_runtime_cef_surface_gate_permits_placeholder_replacement(
-    mount_request: &ManageCefMountRequestContract,
-    owner_gate: Option<ProjectWorkareaManageRuntimeCefSurfaceOwnerGate>,
-) -> bool {
-    owner_gate.is_some_and(|gate| gate.can_replace_placeholder_with_runtime_cef_surface())
-        && mount_request.materializable_request().is_some()
-}
-
-#[allow(dead_code)]
-fn manage_workarea_should_render_placeholder_until_runtime_cef_gate_permits_replacement(
-    mount_request: &ManageCefMountRequestContract,
-    owner_gate: Option<ProjectWorkareaManageRuntimeCefSurfaceOwnerGate>,
-) -> bool {
-    !manage_workarea_runtime_cef_surface_gate_permits_placeholder_replacement(
-        mount_request,
-        owner_gate,
-    )
 }
 
 fn browser_runtime_visible_surface_tab_ids(
@@ -16751,16 +8320,16 @@ impl ProjectEditorShellModel {
         Source, Browser, Kanban, and Manage need independent shell-level awake/sleeping state while their real surfaces remain placeholders. Persist only enum-like lifecycle values and recency counters; runtime auto-sleep epochs live on the GPUI app so timer tokens never enter shell state and no source content, paths, raw page titles, command text, tokens, or secrets are stored.
 
         CDXC:GPUIManageLifecycle 2026-06-23-14:08:
-        Phase 7 Manage sleep/wake must preserve the selected project/workarea runtime identity while hiding or restoring only shell-owned placeholder state. Sleeping, waking, and load-failed Manage states must not clear or synthesize CEF/file-bridge readiness, perform file I/O, persist project facts, or create fallback surfaces.
+        Manage sleep/wake must preserve the selected project/workarea runtime identity while hiding or restoring only shell-owned surface state. Sleeping, waking, and load-failed Manage states must not clear or synthesize CEF/file-bridge readiness, perform file I/O, persist project facts, or create fallback surfaces.
 
         CDXC:GPUIManageLifecycle 2026-06-23-14:48:
-        Phase 7 Manage sleep/wake evidence now has to preserve companion layout and command-pane shell state at the same source-only bar as Source and Kanban. Lifecycle toggles may not synthesize readiness, mount CEF or file bridges, reset shell-owned layout, persist private project/workarea facts, or create fallback surfaces.
+        Manage sleep/wake must preserve companion layout and command-pane shell state at the same shell boundary as Source and Kanban. Lifecycle toggles may not synthesize readiness, mount CEF or file bridges, reset shell-owned layout, persist private project/workarea facts, or create fallback surfaces.
 
         CDXC:GPUIKanbanLifecycle 2026-06-24-08:09:
-        Kanban source-ledger CEF contracts are accepted for this pass. Sleep/wake/lifecycle remains source-only and must preserve the explicit project/board runtime identity plus separate CEF bridge state, including load-failed, without becoming runtime CEF instantiation, runtime URL issuance, hidden mounts, placeholder replacement, real hide/suspend/wake proof, fallback probes, logging/persistence/private payloads, or WKWebView/WebKit/non-CEF paths.
+        Kanban sleep/wake/lifecycle must preserve the explicit project/board runtime identity plus separate CEF bridge state, including load-failed, without becoming runtime CEF instantiation, runtime URL issuance, hidden mounts, placeholder replacement, fallback probes, logging/persistence/private payloads, or WKWebView/WebKit/non-CEF paths.
 
-        CDXC:GPUIKanbanWorkareaParity 2026-06-24-08:09:
-        Kanban source-ledger workarea CEF contracts are accepted for this pass while runtime mounting remains out of scope. Do not widen source-only readiness or sidebar bridge routing into runtime CEF instantiation, runtime URL issuance, URL/path/CEF payloads, hidden mounts, placeholder replacement, real hide/suspend/wake proof, fallback probes, logging, persistence, private payloads, or WKWebView/WebKit/non-CEF paths.
+        CDXC:GPUIKanbanLifecycle 2026-06-28-17:09:
+        Kanban runtime CEF creation is owned by the direct runtime URL/CefSurface gate, not by shell lifecycle. Do not widen readiness or sidebar bridge routing into URL/path/CEF payloads, hidden mounts, placeholder replacement, fallback probes, logging, persistence, private payloads, or WKWebView/WebKit paths.
 
         CDXC:GPUIProjectEditor 2026-06-22-08:15:
         The optional project-editor companion has explicit shell-owned hide and restore controls before real Source, Browser, Kanban, and Manage companion content exists. Hiding only toggles companion visibility and focus; it preserves the stored width ratio plus Browser tab/surface identity, placeholder editor identity, command-pane state, and terminal placeholder state.
@@ -17089,7 +8658,7 @@ impl BrowserTabModel {
         Browser tabs now own runtime CEF entities by tab id, while this persisted shell model remains limited to sanitized tab metadata. Address-only tabs keep no URL and should render an empty GPUI body rather than borrowing stale page content from another tab.
 
         CDXC:GPUIBrowserDefault 2026-06-22-19:52:
-        Fresh Browser shell state must use only the static default URL until a real sidebar/project snapshot contract carries an explicit browser start URL. GPUI Phase 1 must not infer Browser project start URLs from .git, paths, workspace names, fixture names, or sidebar titles.
+        Fresh Browser shell state must use only the static default URL until a real sidebar/project snapshot contract carries an explicit browser start URL. GPUI must not infer Browser project start URLs from .git, paths, workspace names, fixture names, or sidebar titles.
 
         CDXC:GPUIBrowserPopups 2026-06-22-07:14:
         Page-initiated target=_blank and window.open requests should become selected GPUI Browser shell tabs for the requested URL, reusing the same per-tab CEF surface creation path as address-bar navigation. The shell model can keep the raw runtime URL in memory, but persistence must continue using the existing Browser metadata sanitizer.
@@ -17146,26 +8715,6 @@ impl BrowserTabModel {
 
     fn has_tab(&self, tab_id: BrowserTabId) -> bool {
         self.tab(tab_id).is_some()
-    }
-
-    #[cfg(test)]
-    fn tab_chrome_signature(
-        &self,
-        pane_id: BrowserPaneId,
-        tab_id: BrowserTabId,
-        has_cef_surface: bool,
-    ) -> Option<BrowserTabChromeSignature> {
-        let leaf = self.find_leaf(pane_id)?;
-        if !leaf.tab_group.has_tab(tab_id) {
-            return None;
-        }
-
-        Some(browser_tab_chrome_signature(
-            &leaf.tab_group,
-            tab_id,
-            self.tab(tab_id)?.state,
-            has_cef_surface,
-        ))
     }
 
     fn active_tab(&self) -> Option<&BrowserTab> {
@@ -19381,24 +10930,6 @@ impl WorkspaceModel {
             .any(|current_slot_id| current_slot_id == slot_id)
     }
 
-    #[cfg(test)]
-    fn tab_chrome_signature(
-        &self,
-        pane_id: WorkspacePaneId,
-        session_id: TerminalSessionId,
-    ) -> Option<WorkspaceTabChromeSignature> {
-        let leaf = self.find_leaf(pane_id)?;
-        if !leaf.tab_group.has_session(session_id) {
-            return None;
-        }
-
-        Some(workspace_tab_chrome_signature(
-            &leaf.tab_group,
-            session_id,
-            self.session(session_id),
-        ))
-    }
-
     fn focus_pane(&mut self, pane_id: WorkspacePaneId) {
         if self.find_leaf_mut(pane_id).is_some() {
             self.focused_pane = pane_id;
@@ -19869,12 +11400,6 @@ impl WorkspaceModel {
 
     fn split_ratio(&self, split_id: WorkspaceSplitId) -> Option<f32> {
         find_workspace_split(&self.root, split_id).map(|split| workspace_split_ratio(split.ratio))
-    }
-
-    #[cfg(test)]
-    #[allow(dead_code)]
-    fn split_axis(&self, split_id: WorkspaceSplitId) -> Option<WorkspaceSplitAxis> {
-        find_workspace_split(&self.root, split_id).map(|split| split.axis)
     }
 
     fn set_split_ratio(&mut self, split_id: WorkspaceSplitId, ratio: f32) -> bool {
@@ -20446,22 +11971,6 @@ struct CommandPaneModel {
 }
 
 impl CommandPaneModel {
-    #[cfg(test)]
-    fn shell_default(content_height: f32) -> Self {
-        Self::shell_sample_with_default_height_px(content_height, COMMAND_PANE_DEFAULT_HEIGHT_PX)
-    }
-
-    #[cfg(test)]
-    fn shell_default_from_shared_settings(
-        content_height: f32,
-        settings: &shared_settings::SharedSidebarSettingsSnapshot,
-    ) -> Self {
-        Self::shell_default_with_default_height_px(
-            content_height,
-            command_pane_default_height_px_from_shared_settings(settings),
-        )
-    }
-
     fn shell_default_with_default_height_px(content_height: f32, default_height_px: f32) -> Self {
         /*
         CDXC:GPUICommandPane 2026-06-25-11:40:
@@ -20485,62 +11994,6 @@ impl CommandPaneModel {
             next_group_id: 1,
             next_split_id: 1,
             next_session_id: 1,
-        }
-    }
-
-    #[cfg(test)]
-    fn shell_sample_with_default_height_px(content_height: f32, default_height_px: f32) -> Self {
-        /*
-        CDXC:GPUICommandPane 2026-06-27-05:07:
-        The GPUI command pane is a separate bottom workspace surface, not an Agents workspace leaf. Command terminal sessions use their own ids and active-session state so command panes cannot be merged into the normal workspace tab tree. Action-owned command tabs may launch through the explicit run-start/status-file contract, while non-Action/restored command status remains safe enum/boolean metadata that cannot be inferred from shell titles, output, paths, command text, env, logs, or persisted shell JSON.
-
-        CDXC:GPUICommandPane 2026-06-25-15:54:
-        Command terminals need a command-pane-only tab/split tree instead of a flat tab list. Keep command tabs in command tab groups with axis-aware command splits, track active selection per command group, and keep all operations in memory so Agents workspace tab actions can never merge or close command terminals.
-
-        CDXC:GPUICommandPane 2026-06-25-11:29:
-        The command pane still stores height as a ratio for drag updates, but the app-owned constructor must accept the shared Workspace command-pane default height so first paint can match macOS Settings while tests and legacy pure model callers keep the 125px built-in default.
-
-        CDXC:GPUICommandTabStatus 2026-06-27-05:07:
-        Default command sample tabs are pure model fixtures with one idle semantic tab and one working semantic tab, no Action run id, no status-file path, and no owned command process. Since 2026-06-25-13:18, idle command tabs intentionally render without a status indicator, while visible command status uses the native trailing slot.
-
-        CDXC:GPUICommandPane 2026-06-25-11:40:
-        This seeded two-tab command model is retained only for existing pure model tests that exercise split, close, drag, focus, and status behavior. Production app startup must use the empty constructor above so fake sample tabs never appear before the user opens or launches a command.
-        */
-        let terminal_sessions = vec![
-            CommandTerminalSession::placeholder(CommandSessionId(1), "Command".to_string()),
-            CommandTerminalSession::placeholder(CommandSessionId(2), "Shell".to_string())
-                .with_activity(CommandTerminalActivity::Working),
-        ];
-        let group_id = CommandPaneGroupId(1);
-        let active_session = terminal_sessions[0].id;
-        let tabs = terminal_sessions
-            .iter()
-            .map(|session| CommandPaneTab {
-                session_id: session.id,
-            })
-            .collect();
-
-        Self {
-            terminal_sessions,
-            root: CommandPaneNode::Leaf(CommandPaneLeaf {
-                group_id,
-                tab_group: CommandPaneTabGroup {
-                    tabs,
-                    active_session,
-                },
-            }),
-            focused_group: group_id,
-            focus_mode_group: None,
-            mode: CommandPaneMode::Pinned,
-            last_expanded_mode: CommandPaneMode::Pinned,
-            height_ratio: command_pane_default_height_ratio_for_default_height_px(
-                default_height_px,
-                content_height,
-            ),
-            resize_drag: None,
-            next_group_id: 2,
-            next_split_id: 1,
-            next_session_id: 3,
         }
     }
 
@@ -20613,24 +12066,6 @@ impl CommandPaneModel {
         }
         session.title = title;
         true
-    }
-
-    #[cfg(test)]
-    fn tab_chrome_signature(
-        &self,
-        group_id: CommandPaneGroupId,
-        session_id: CommandSessionId,
-    ) -> Option<CommandTabChromeSignature> {
-        let leaf = self.find_leaf(group_id)?;
-        if !leaf.tab_group.has_session(session_id) {
-            return None;
-        }
-
-        Some(command_tab_chrome_signature(
-            &leaf.tab_group,
-            session_id,
-            self.session(session_id)?.tab_status(),
-        ))
     }
 
     fn set_focused_group_for_selected_owner(&mut self, group_id: CommandPaneGroupId) {
@@ -20769,21 +12204,6 @@ impl CommandPaneModel {
         self.find_leaf_mut(self.focused_group)
             .and_then(|leaf| leaf.tab_group.cycle_active_session(reverse))
             .is_some()
-    }
-
-    #[cfg(test)]
-    fn close_active_session(&mut self) -> bool {
-        /*
-        CDXC:GPUIKeyboardFocus 2026-06-22-06:02:
-        Surface-aware close treats command terminals as separate bottom-surface placeholders. Closing removes only the active command session from this in-memory command model, selects a neighboring command tab when possible, and collapses the command pane when the last placeholder closes; it does not tear down a real process.
-
-        CDXC:GPUICommandPane 2026-06-22-06:13:
-        Command close behavior is scoped to the focused command tab group. Closing a command tab selects a neighbor in that group, collapses empty split branches, and collapses the whole command panel when the final command terminal closes so no empty bottom band remains.
-        */
-        let Some((group_id, session_id)) = self.active_group_and_session_id() else {
-            return false;
-        };
-        self.close_session(group_id, session_id)
     }
 
     fn close_session(
@@ -21512,13 +12932,6 @@ impl CommandPaneModel {
             .any(|session| session.action_run_id.is_some())
     }
 
-    #[cfg(test)]
-    fn split_session_to_right_of_focused_group(
-        &mut self,
-    ) -> Option<(CommandPaneGroupId, CommandSessionId)> {
-        self.split_session_adjacent_to_focused_group(FocusedTerminalSplitDirection::Right)
-    }
-
     fn split_session_adjacent_to_focused_group(
         &mut self,
         direction: FocusedTerminalSplitDirection,
@@ -21926,9 +13339,7 @@ impl CommandPaneModel {
         session_id: CommandSessionId,
     ) -> Option<usize> {
         self.tab_context_allows_focus_mode(group_id, session_id)
-            .then(|| {
-                command_pane_tab_context_available_runtime_actions(self, group_id, session_id).len()
-            })
+            .then(|| command_pane_tab_context_runtime_action_count(self, group_id, session_id))
     }
 
     fn tab_strip_reorder_indices(
@@ -22133,11 +13544,6 @@ impl CommandPaneModel {
         find_command_split(&self.root, split_id).map(|split| workspace_split_ratio(split.ratio))
     }
 
-    #[cfg(test)]
-    fn split_axis(&self, split_id: CommandPaneSplitId) -> Option<WorkspaceSplitAxis> {
-        find_command_split(&self.root, split_id).map(|split| split.axis)
-    }
-
     fn set_split_ratio(&mut self, split_id: CommandPaneSplitId, ratio: f32) -> bool {
         let next_ratio = workspace_split_ratio(ratio);
         let Some(split) = find_command_split_mut(&mut self.root, split_id) else {
@@ -22211,11 +13617,6 @@ impl CommandPaneModel {
         if self.is_expanded() {
             self.last_expanded_mode = self.mode;
         }
-    }
-
-    #[cfg(test)]
-    fn reset_height(&mut self, content_height: f32) {
-        self.reset_height_with_default_height_px(content_height, COMMAND_PANE_DEFAULT_HEIGHT_PX);
     }
 
     fn reset_height_from_shared_settings(
@@ -23323,20 +14724,6 @@ impl GpuiShellLayoutState {
             .unwrap_or_else(|| Self::shell_default_from_shared_settings(content_height, settings))
     }
 
-    #[cfg(test)]
-    fn from_json_object(
-        object: &serde_json::Map<String, serde_json::Value>,
-        content_height: f32,
-        fallback_availability: ProjectScopedWorkareaAvailability,
-    ) -> Option<Self> {
-        Self::from_json_object_with_command_default_height_px(
-            object,
-            content_height,
-            fallback_availability,
-            COMMAND_PANE_DEFAULT_HEIGHT_PX,
-        )
-    }
-
     fn from_json_object_with_shared_settings(
         object: &serde_json::Map<String, serde_json::Value>,
         content_height: f32,
@@ -24053,18 +15440,6 @@ fn command_pane_node_to_shell_state_json(node: &CommandPaneNode) -> serde_json::
             "second": command_pane_node_to_shell_state_json(&split.second),
         }),
     }
-}
-
-#[cfg(test)]
-fn command_pane_model_from_shell_state(
-    value: &serde_json::Value,
-    content_height: f32,
-) -> Option<CommandPaneModel> {
-    command_pane_model_from_shell_state_with_default_height_px(
-        value,
-        content_height,
-        COMMAND_PANE_DEFAULT_HEIGHT_PX,
-    )
 }
 
 fn command_pane_model_from_shell_state_with_default_height_px(
@@ -26886,39 +18261,6 @@ impl CommandTerminalLaunchPayloadSource {
             .map(|payload| payload.to_ghostty_launch_payload())
             .transpose()
     }
-
-    #[cfg(test)]
-    fn with_explicit_payload_for_test(
-        mut self,
-        slot_id: CommandTerminalBodyMountSlotId,
-        payload: CommandTerminalExplicitLaunchPayload,
-    ) -> Self {
-        self.explicit_payloads_by_command_key.insert(
-            CommandTerminalLaunchPayloadSourceKey::from_mount_slot(slot_id),
-            payload,
-        );
-        self
-    }
-
-    #[cfg(test)]
-    fn with_explicit_payload_for_key_for_test(
-        mut self,
-        key: CommandTerminalLaunchPayloadSourceKey,
-        payload: CommandTerminalExplicitLaunchPayload,
-    ) -> Self {
-        self.explicit_payloads_by_command_key.insert(key, payload);
-        self
-    }
-
-    #[cfg(test)]
-    fn explicit_payload_for_mount_slot_for_test(
-        &self,
-        slot_id: CommandTerminalBodyMountSlotId,
-    ) -> Option<&CommandTerminalExplicitLaunchPayload> {
-        self.explicit_payloads_by_command_key.get(
-            &CommandTerminalLaunchPayloadSourceKey::from_mount_slot(slot_id),
-        )
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -27065,21 +18407,18 @@ enum GpuiFocusedPaneRuntimeAction {
     PopOutPane,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GpuiCommandPaletteTabCycleHotkeyAction {
     Previous,
     Next,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl GpuiCommandPaletteTabCycleHotkeyAction {
     fn reverse(self) -> bool {
         matches!(self, Self::Previous)
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn gpui_command_palette_tab_cycle_hotkey_action(
     action_id: &str,
 ) -> Option<GpuiCommandPaletteTabCycleHotkeyAction> {
@@ -27209,7 +18548,6 @@ fn gpui_command_palette_switch_workarea_hotkey_mode(action_id: &str) -> Option<T
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn gpui_command_palette_action_slot_index(action_id: &str) -> Option<usize> {
     /*
     CDXC:GPUICommandPalette 2026-06-26-10:04:
@@ -27250,12 +18588,10 @@ fn gpui_command_palette_adjacent_group_focus_source_allowed(shell_focus: ShellFo
     )
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn gpui_next_sidebar_collapsed_state(collapsed: bool) -> bool {
     !collapsed
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn gpui_sidebar_chrome_visible(sidebar_collapsed: bool) -> bool {
     !sidebar_collapsed
 }
@@ -27796,16 +19132,6 @@ impl AgentsTerminalCloseConfirmState {
         )?;
         (pending == current).then_some(slot_id)
     }
-
-    #[cfg(test)]
-    fn has_pending(&self, slot_id: AgentsTerminalBodyMountSlotId) -> bool {
-        self.pending_by_slot.contains_key(&slot_id)
-    }
-
-    #[cfg(test)]
-    fn pending_count(&self) -> usize {
-        self.pending_by_slot.len()
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -27993,16 +19319,6 @@ impl CommandTerminalCloseConfirmState {
             slot_id,
         )?;
         (pending == current).then_some(slot_id)
-    }
-
-    #[cfg(test)]
-    fn has_pending(&self, slot_id: CommandTerminalBodyMountSlotId) -> bool {
-        self.pending_by_slot.contains_key(&slot_id)
-    }
-
-    #[cfg(test)]
-    fn pending_count(&self) -> usize {
-        self.pending_by_slot.len()
     }
 }
 
@@ -29325,14 +20641,6 @@ fn command_pane_delayed_send_badge_paint(
     );
 }
 
-#[cfg(test)]
-fn command_pane_default_height_ratio(content_height: f32) -> f32 {
-    command_pane_default_height_ratio_for_default_height_px(
-        COMMAND_PANE_DEFAULT_HEIGHT_PX,
-        content_height,
-    )
-}
-
 fn command_pane_default_height_ratio_for_default_height_px(
     default_height_px: f32,
     content_height: f32,
@@ -29512,44 +20820,11 @@ pub struct GhostexGpuiApp {
     kanban_workarea_runtime: ProjectScopedRealSurfaceRuntimeState,
     manage_workarea_runtime: ProjectScopedRealSurfaceRuntimeState,
     /*
-    CDXC:GPUIProjectWorkareaCefSlots 2026-06-24-05:58:
-    Source, Kanban, and Manage CEF ownership slots are app-owned runtime bookkeeping keyed only by safe surface kind. The slot decision map intentionally does not hold Entity<CefSurface>, URLs, project ids, paths, Browser tab state, hidden mount state, payloads, persistence, or placeholder-swap permission.
-    */
-    project_workarea_cef_surface_slots:
-        HashMap<ProjectWorkareaCefSurfaceSlotKey, ProjectWorkareaCefSurfaceOwnershipSlotDecision>,
-    /*
-    CDXC:GPUIProjectWorkareaRuntimeUrlIssuance 2026-06-24-06:13:
-    Source, Kanban, and Manage runtime URL issuance bookkeeping is app-owned and keyed only by the same safe slot kind as the CEF ownership slots. It records only source-side labels and booleans; it must not hold URL values, project ids, paths, Browser state, payloads, Entity<CefSurface>, logs, persistence, or placeholder replacement state.
-    */
-    project_workarea_runtime_url_issuance_decisions:
-        HashMap<ProjectWorkareaCefSurfaceSlotKey, ProjectWorkareaRuntimeUrlIssuanceDecision>,
-    /*
-    CDXC:GPUIProjectWorkareaSourceStartupNavigationReadiness 2026-06-24-06:24:
-    Source startup navigation readiness bookkeeping is app-owned source evidence derived only from the Source runtime URL issuance decision. It stores no runtime URL value, path, project name/id, Browser/Kanban/Manage state, CEF/code-server payload, Entity<CefSurface>, hidden mount, fallback probe, logging/persistence, or placeholder replacement state.
-    */
-    project_workarea_source_startup_navigation_readiness_boundary:
-        Option<ProjectWorkareaSourceStartupNavigationReadinessBoundary>,
-    /*
-    CDXC:GPUIProjectWorkareaSourceRuntimeCefSurfaceOwnerGate 2026-06-24-06:37:
-    Source runtime CEF surface owner-gate bookkeeping is the app-owned intent slot for Source CEF creation. It is derived only from the Source startup navigation readiness boundary and stores only safe Source-slot labels/booleans, never URL values, project identity, paths, Browser/Kanban/Manage state, CEF/code-server payloads, Entity<CefSurface>, hidden mounts, logs, persistence, or placeholder replacement state.
-    */
-    project_workarea_source_runtime_cef_surface_owner_gate:
-        Option<ProjectWorkareaSourceRuntimeCefSurfaceOwnerGate>,
-    /*
-    CDXC:GPUIProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate 2026-06-24-06:49:
-    Kanban runtime CEF surface owner-gate bookkeeping is app-owned intent for Kanban CEF creation. It derives only from the Kanban runtime URL issuance decision and stores only safe Kanban-slot labels/booleans, never URL values, project identity, paths, Browser/Source/Manage state, runtime payloads, Entity<CefSurface>, hidden mounts, logs, persistence, or placeholder replacement state.
-    */
-    project_workarea_kanban_runtime_cef_surface_owner_gate:
-        Option<ProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate>,
-    /*
-    CDXC:GPUIProjectWorkareaManageRuntimeCefSurfaceOwnerGate 2026-06-24-07:00:
-    Manage runtime CEF/file-bridge owner-gate bookkeeping is app-owned intent for Manage CEF creation. It derives only from the Manage runtime URL issuance decision and stores only safe Manage-slot labels/booleans, never URL values, project identity, paths, Browser/Source/Kanban state, file names/contents/operations, runtime payloads, Entity<CefSurface>, hidden mounts, logs, persistence, or placeholder replacement state.
-    */
-    project_workarea_manage_runtime_cef_surface_owner_gate:
-        Option<ProjectWorkareaManageRuntimeCefSurfaceOwnerGate>,
-    /*
     CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-10:12:
     Source, Kanban, and Manage real CEF panes now have permanent app-owned runtime surface storage keyed by the safe workarea slot. The map owns only Entity<CefSurface>; it must not store URL values, project names/paths, page titles, bridge payloads, file contents, tokens, cookies, shell text, or fallback navigation state, and creation is allowed only through a helper that receives a real runtime URL value.
+
+    CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-28-17:09:
+    Runtime surface ownership no longer keeps slot, URL-issuance, or owner-gate proof maps. The direct runtime URL gate is the only authority for retaining already-created project workarea CefSurface entities.
     */
     project_workarea_runtime_cef_surfaces:
         HashMap<ProjectWorkareaCefSurfaceSlotKey, Entity<CefSurface>>,
@@ -29892,12 +21167,6 @@ impl GhostexGpuiApp {
                     ProjectScopedRealSurfaceKind::Manage,
                 ),
                 remote_attach_sessions: HashMap::new(),
-                project_workarea_cef_surface_slots: HashMap::new(),
-                project_workarea_runtime_url_issuance_decisions: HashMap::new(),
-                project_workarea_source_startup_navigation_readiness_boundary: None,
-                project_workarea_source_runtime_cef_surface_owner_gate: None,
-                project_workarea_kanban_runtime_cef_surface_owner_gate: None,
-                project_workarea_manage_runtime_cef_surface_owner_gate: None,
                 project_workarea_runtime_cef_surfaces: HashMap::new(),
                 sidebar_runtime_settings_snapshot,
                 sidebar_gxserver_bootstrap,
@@ -30094,102 +21363,18 @@ impl GhostexGpuiApp {
         )
     }
 
-    fn refresh_project_workarea_cef_surface_slots_from_source_state(
+    fn refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         /*
-        CDXC:GPUIProjectWorkareaCefSlots 2026-06-24-05:58:
-        The runtime app map follows only the existing Source/Kanban/Manage source evidence and omits Browser because Browser already owns tab-scoped CEF surfaces. Refreshing this map is pure ownership bookkeeping: it may add eligible normal-layout CEF slots, but it cannot issue URLs, probe resources, create CefSurface entities, mount offscreen views, persist/log private data, or swap placeholders.
-
-        CDXC:GPUIProjectWorkareaRuntimeUrlIssuance 2026-06-24-06:13:
-        Runtime URL issuance decisions refresh from the same ready request/runtime-parity/preflight evidence plus the ownership-slot decisions. The map records absent URL authority and absent issued URL state only, so this refresh cannot invent URL strings, retain runtime URL values, create CEF surfaces, start code-server/file-bridge work, run file I/O, mount hidden views, or replace placeholders.
-
-        CDXC:GPUIProjectWorkareaSourceStartupNavigationReadiness 2026-06-24-06:24:
-        Source startup navigation readiness refreshes only from the already-formed Source runtime URL issuance decision. It mirrors the runtime ordering as source evidence and cannot navigate Source, probe readiness, issue or store URL values, start code-server, create CefSurface, mount hidden views, touch Browser/Kanban/Manage, log/persist private data, or replace the placeholder.
-
-        CDXC:GPUIProjectWorkareaSourceRuntimeCefSurfaceOwnerGate 2026-06-24-06:37:
-        Source runtime CEF surface owner-gate refresh derives only from the Source startup navigation readiness boundary. It creates no surface and stores no URL value, project identity, Browser/Kanban/Manage state, Entity<CefSurface>, hidden/offscreen mount, payload, logging/persistence, or placeholder replacement state.
-
-        CDXC:GPUIProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate 2026-06-24-06:49:
-        Kanban runtime CEF surface owner-gate refresh derives only from the existing Kanban runtime URL issuance decision. It creates no surface and stores no URL value, project identity, Browser/Source/Manage state, Entity<CefSurface>, hidden/offscreen mount, payload, logging/persistence, or placeholder replacement state.
-
-        CDXC:GPUIProjectWorkareaManageRuntimeCefSurfaceOwnerGate 2026-06-24-07:00:
-        Manage runtime CEF/file-bridge owner-gate refresh derives only from the existing Manage runtime URL issuance decision. It creates no surface, file bridge, file operation, or payload, and stores no URL value, project identity, Browser/Source/Kanban state, Entity<CefSurface>, file names/contents/operations, hidden/offscreen mount, logging/persistence, or placeholder replacement state.
-
         CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-10:12:
-        The real CEF surface map is active app-level ownership, not source-ledger-only evidence. Refresh may prune already-owned Source/Kanban/Manage CefSurface entities when their safe gate disappears, but it still cannot create a surface, issue or store a URL, synthesize fallback navigation, mount hidden/offscreen views, use WKWebView/WebKit, or persist/log private runtime data.
-        */
-        let source_request = self
-            .source_workarea_runtime
-            .source_cef_code_server_mount_request_contract(
-                self.latest_sidebar_project_snapshot.as_ref(),
-            );
-        let kanban_request = self
-            .kanban_workarea_runtime
-            .kanban_cef_mount_request_contract(self.latest_sidebar_project_snapshot.as_ref());
-        let manage_request = self
-            .manage_workarea_runtime
-            .manage_cef_mount_request_contract(self.latest_sidebar_project_snapshot.as_ref());
-        let next_slots = project_workarea_cef_surface_slot_decisions_from_source_requests(
-            &source_request,
-            &kanban_request,
-            &manage_request,
-        );
-        let next_runtime_url_issuance_decisions =
-            project_workarea_runtime_url_issuance_decisions_from_source_requests(
-                &source_request,
-                &kanban_request,
-                &manage_request,
-                &next_slots,
-            );
-        let next_source_startup_navigation_readiness_boundary =
-            project_workarea_source_startup_navigation_readiness_boundary_from_runtime_url_issuance_decisions(
-                &next_runtime_url_issuance_decisions,
-            );
-        let next_source_runtime_cef_surface_owner_gate =
-            project_workarea_source_runtime_cef_surface_owner_gate_from_startup_navigation_readiness_boundary(
-                next_source_startup_navigation_readiness_boundary,
-            );
-        let next_kanban_runtime_cef_surface_owner_gate =
-            project_workarea_kanban_runtime_cef_surface_owner_gate_from_runtime_url_issuance_decision(
-                next_runtime_url_issuance_decisions
-                    .get(&ProjectWorkareaCefSurfaceSlotKey::Kanban)
-                    .copied(),
-            );
-        let next_manage_runtime_cef_surface_owner_gate =
-            project_workarea_manage_runtime_cef_surface_owner_gate_from_runtime_url_issuance_decision(
-                next_runtime_url_issuance_decisions
-                    .get(&ProjectWorkareaCefSurfaceSlotKey::Manage)
-                    .copied(),
-            );
-        if self.project_workarea_cef_surface_slots == next_slots
-            && self.project_workarea_runtime_url_issuance_decisions
-                == next_runtime_url_issuance_decisions
-            && self.project_workarea_source_startup_navigation_readiness_boundary
-                == next_source_startup_navigation_readiness_boundary
-            && self.project_workarea_source_runtime_cef_surface_owner_gate
-                == next_source_runtime_cef_surface_owner_gate
-            && self.project_workarea_kanban_runtime_cef_surface_owner_gate
-                == next_kanban_runtime_cef_surface_owner_gate
-            && self.project_workarea_manage_runtime_cef_surface_owner_gate
-                == next_manage_runtime_cef_surface_owner_gate
-        {
-            return self.prune_project_workarea_runtime_cef_surfaces_for_current_gates(cx);
-        }
+        The real CEF surface map is active app-level ownership, not proof-only evidence. Refresh may prune already-owned Source/Kanban/Manage CefSurface entities when their safe gate disappears, but it still cannot create a surface, issue or store a URL, synthesize fallback navigation, mount hidden/offscreen views, use WKWebView/WebKit, or persist/log private runtime data.
 
-        self.project_workarea_cef_surface_slots = next_slots;
-        self.project_workarea_runtime_url_issuance_decisions = next_runtime_url_issuance_decisions;
-        self.project_workarea_source_startup_navigation_readiness_boundary =
-            next_source_startup_navigation_readiness_boundary;
-        self.project_workarea_source_runtime_cef_surface_owner_gate =
-            next_source_runtime_cef_surface_owner_gate;
-        self.project_workarea_kanban_runtime_cef_surface_owner_gate =
-            next_kanban_runtime_cef_surface_owner_gate;
-        self.project_workarea_manage_runtime_cef_surface_owner_gate =
-            next_manage_runtime_cef_surface_owner_gate;
-        self.prune_project_workarea_runtime_cef_surfaces_for_current_gates(cx);
-        true
+        CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-28-17:09:
+        The old slot, URL-issuance, startup-readiness, and owner-gate proof maps are removed from runtime state. Refresh now only prunes already-owned project workarea CefSurface entities whose current explicit project context can no longer provide a direct runtime URL.
+        */
+        self.prune_project_workarea_runtime_cef_surfaces_for_current_gates(cx)
     }
 
     fn ensure_source_code_server_runtime_for_current_context(
@@ -30312,7 +21497,7 @@ impl GhostexGpuiApp {
                 );
                 self.source_workarea_runtime.readiness_bridge =
                     SourceWorkareaReadinessBridgeState::Ready;
-                self.refresh_project_workarea_cef_surface_slots_from_source_state(cx);
+                self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
                 self.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
             }
             Ok((target, settings, output)) => {
@@ -30328,7 +21513,7 @@ impl GhostexGpuiApp {
                     ProjectWorkareaCefSurfaceSlotKey::Source,
                     cx,
                 );
-                self.refresh_project_workarea_cef_surface_slots_from_source_state(cx);
+                self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
             }
             Err((target, settings)) => {
                 self.source_code_server_runtime
@@ -30339,7 +21524,7 @@ impl GhostexGpuiApp {
                     ProjectWorkareaCefSurfaceSlotKey::Source,
                     cx,
                 );
-                self.refresh_project_workarea_cef_surface_slots_from_source_state(cx);
+                self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
             }
         }
         self.update_project_workarea_runtime_cef_surface_visibility(cx);
@@ -30355,7 +21540,7 @@ impl GhostexGpuiApp {
         if changed || removed {
             self.source_workarea_runtime.readiness_bridge =
                 SourceWorkareaReadinessBridgeState::MissingExplicitBridge;
-            self.refresh_project_workarea_cef_surface_slots_from_source_state(cx);
+            self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
         }
         changed || removed
     }
@@ -30393,10 +21578,10 @@ impl GhostexGpuiApp {
     ) -> bool {
         /*
         CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-11:03:
-        Runtime placeholder replacement now follows real navigable CEF URL authority, not the retired source-ledger-only owner gates. Kanban and Manage can replace placeholders only when the current explicit project snapshot can issue a first-party bundled CEF URL.
+        Runtime placeholder replacement now follows real navigable CEF URL authority, not the retired proof-only owner gates. Kanban and Manage can replace placeholders only when the current explicit project snapshot can issue a first-party bundled CEF URL.
 
         CDXC:GPUISourceRuntime 2026-06-24-23:17:
-        Source joins this same replacement edge only after the app-owned code-server runtime has reached the ready state for the current explicit sidebar project target. The URL may be used immediately for CefSurface creation but is not retained in shell state, logs, or source-ledger JSON.
+        Source joins this same replacement edge only after the app-owned code-server runtime has reached the ready state for the current explicit sidebar project target. The URL may be used immediately for CefSurface creation but is not retained in shell state, logs, or proof JSON.
         */
         self.project_workarea_runtime_url_for_slot(slot_key)
             .is_some()
@@ -31459,7 +22644,7 @@ impl GhostexGpuiApp {
         }
 
         let parent_ns_view = self.parent_ns_view;
-        let surface_id = format!("phase1-browser-tab-{}", tab_id.0);
+        let surface_id = format!("gpui-browser-tab-{}", tab_id.0);
         /*
         CDXC:GPUIBrowserProfiles 2026-06-23-11:14:
         CEF Browser surfaces must be keyed by tab id for runtime ownership but created with the tab's generated Browser profile id. This lets existing loaded surfaces keep their profile after toolbar selection changes while future tabs/surfaces use the newly selected profile.
@@ -31953,29 +23138,13 @@ impl GhostexGpuiApp {
         CDXC:GPUIAppModalReturnFocus 2026-06-25-22:13:
         Command-pane app modals need the same dismissal focus contract as native child windows. Capture only a runtime command group/session return target at modal open, then restore that exact command tab on close if it still exists; do not persist modal payloads, titles, command text, paths, URLs, stdout/stderr, or fallback to another command group.
 
-        CDXC:GPUISettingsModalDiagnostics 2026-06-27-17:25:
-        Blank Settings pane repros need GPUI app-modal diagnostics before behavior changes. Log only sanitized native child-window lifecycle facts and bridge milestones under ~/.ghostex/logs/gpui-app-modal-debug.jsonl so Debug Logging and UI can show whether Settings reached host ready, hydrate dispatch, React renderability, and presented without persisting settings values, paths, titles, URLs, commands, tokens, or renderer text.
-
-        CDXC:GPUISettingsModalDiagnostics 2026-06-27-20:31:
-        If a newly created GPUI app-modal host never posts `ready`, recreate that host once and then fail closed with structured diagnostics. This fixes blank Settings/Hotkeys windows by correcting the missing-ready lifecycle instead of adding a UI fallback, while keeping logs limited to modal ids, booleans, counts, timings, and CEF lifecycle enums.
+        CDXC:GPUILoggingRemoval 2026-06-28-17:06:
+        GPUI app-modal open/retry behavior stays functional, but runtime log writers and diagnostic breadcrumbs are intentionally removed until a future requirement adds a narrower diagnostics surface.
         */
         if reset_ready_retry {
             self.app_modal_ready_retry_used = false;
         }
-        let debugging_mode = gpui_app_modal_debugging_mode_enabled();
         let window_size = modal.window_size();
-        append_gpui_app_modal_debug_log_event(
-            "window.open.requested",
-            "debug",
-            debugging_mode,
-            serde_json::json!({
-                "hasExistingWindow": self.app_modal_window.is_some(),
-                "isResizable": modal.is_resizable(),
-                "modal": modal.modal_id(),
-                "requiresSidebarState": modal.requires_sidebar_state(),
-                "sourceWindowProvided": source_window.is_some(),
-            }),
-        );
         let return_focus_target = gpui_app_modal_command_return_focus_target(
             modal,
             &open_message,
@@ -31983,15 +23152,6 @@ impl GhostexGpuiApp {
             &self.command_pane,
         );
         if let Some(handle) = self.app_modal_window.clone() {
-            append_gpui_app_modal_debug_log_event(
-                "window.existing.update.requested",
-                "debug",
-                debugging_mode,
-                serde_json::json!({
-                    "modal": modal.modal_id(),
-                    "requiresSidebarState": modal.requires_sidebar_state(),
-                }),
-            );
             let update_result = handle.update(cx, |host, modal_window, cx| {
                 host.open_modal(
                     open_message.clone(),
@@ -32003,14 +23163,6 @@ impl GhostexGpuiApp {
                 modal_window.refresh();
             });
             if update_result.is_ok() {
-                append_gpui_app_modal_debug_log_event(
-                    "window.existing.update.succeeded",
-                    "debug",
-                    debugging_mode,
-                    serde_json::json!({
-                        "modal": modal.modal_id(),
-                    }),
-                );
                 self.app_modal_command_return_focus_target =
                     gpui_app_modal_command_return_focus_target_for_active_modal(
                         self.app_modal_command_return_focus_target,
@@ -32021,26 +23173,10 @@ impl GhostexGpuiApp {
                 }
                 return;
             }
-            append_gpui_app_modal_debug_log_event(
-                "window.existing.update.failed",
-                "warning",
-                debugging_mode,
-                serde_json::json!({
-                    "modal": modal.modal_id(),
-                }),
-            );
             self.clear_lost_gpui_app_modal_window_handle();
         }
 
         let Some(url) = app_modal_host_url().ok() else {
-            append_gpui_app_modal_debug_log_event(
-                "window.bundle.missing",
-                "warning",
-                debugging_mode,
-                serde_json::json!({
-                    "modal": modal.modal_id(),
-                }),
-            );
             if let Some(window) = source_window {
                 window.push_notification(
                     Notification::warning("The GPUI app-modal host bundle is missing."),
@@ -32081,19 +23217,6 @@ impl GhostexGpuiApp {
                 )
             })
             .ok();
-        append_gpui_app_modal_debug_log_event(
-            "window.create.result",
-            if self.app_modal_window.is_some() {
-                "debug"
-            } else {
-                "warning"
-            },
-            debugging_mode,
-            serde_json::json!({
-                "modal": modal.modal_id(),
-                "windowCreated": self.app_modal_window.is_some(),
-            }),
-        );
         if self.app_modal_window.is_some() {
             self.app_modal_command_return_focus_target = return_focus_target;
             self.schedule_gpui_app_modal_ready_timeout(
@@ -32151,26 +23274,8 @@ impl GhostexGpuiApp {
             return;
         }
 
-        let debugging_mode = gpui_app_modal_debugging_mode_enabled();
-        append_gpui_app_modal_debug_log_event(
-            "window.ready.timeout",
-            "warning",
-            debugging_mode,
-            serde_json::json!({
-                "modal": modal.modal_id(),
-                "retryUsed": self.app_modal_ready_retry_used,
-            }),
-        );
         if !self.app_modal_ready_retry_used {
             self.app_modal_ready_retry_used = true;
-            append_gpui_app_modal_debug_log_event(
-                "window.ready.timeout.retry",
-                "warning",
-                debugging_mode,
-                serde_json::json!({
-                    "modal": modal.modal_id(),
-                }),
-            );
             self.remove_gpui_app_modal_window_without_focus_restore(cx);
             self.open_gpui_app_modal_window_inner(
                 modal,
@@ -32183,14 +23288,6 @@ impl GhostexGpuiApp {
             return;
         }
 
-        append_gpui_app_modal_debug_log_event(
-            "window.ready.timeout.final",
-            "error",
-            debugging_mode,
-            serde_json::json!({
-                "modal": modal.modal_id(),
-            }),
-        );
         self.remove_gpui_app_modal_window_without_focus_restore(cx);
         cx.notify();
     }
@@ -32224,14 +23321,6 @@ impl GhostexGpuiApp {
         CDXC:GPUIAppModalReturnFocus 2026-06-25-22:25:
         A failed GPUI app-modal window update means the runtime handle no longer owns a close lifecycle, so clear the paired command return-focus target with the stale handle to prevent a later modal close from consuming it.
         */
-        append_gpui_app_modal_debug_log_event(
-            "window.handle.cleared",
-            "warning",
-            gpui_app_modal_debugging_mode_enabled(),
-            serde_json::json!({
-                "hadAppModalWindow": self.app_modal_window.is_some(),
-            }),
-        );
         self.app_modal_window = None;
         self.app_modal_command_return_focus_target = None;
     }
@@ -32283,72 +23372,21 @@ impl GhostexGpuiApp {
     ) {
         let payload = match event {
             cef::AppModalHostBridgeEvent::Message(payload) => payload,
-            cef::AppModalHostBridgeEvent::Lifecycle(event) => {
-                append_gpui_app_modal_debug_log_event(
-                    event.kind.log_event_name(),
-                    if matches!(event.kind, cef::AppModalHostLifecycleEventKind::LoadError) {
-                        "warning"
-                    } else {
-                        "debug"
-                    },
-                    self.sidebar_runtime_settings_snapshot.debugging_mode,
-                    serde_json::json!({
-                        "errorCode": event.error_code,
-                        "httpStatusCode": event.http_status_code,
-                        "isMainFrame": event.is_main_frame,
-                        "surface": event.surface.map(|surface| surface.log_value()),
-                    }),
-                );
-                return;
-            }
         };
         let Ok(message) = serde_json::from_str::<serde_json::Value>(&payload) else {
-            append_gpui_app_modal_debug_log_event(
-                "bridge.payload.malformedJson",
-                "warning",
-                self.sidebar_runtime_settings_snapshot.debugging_mode,
-                serde_json::json!({
-                    "payloadCharCount": payload.chars().count() as u64,
-                }),
-            );
             return;
         };
         let Some(message_type) = message.get("type").and_then(serde_json::Value::as_str) else {
-            append_gpui_app_modal_debug_log_event(
-                "bridge.payload.missingType",
-                "warning",
-                self.sidebar_runtime_settings_snapshot.debugging_mode,
-                serde_json::json!({
-                    "payloadCharCount": payload.chars().count() as u64,
-                }),
-            );
             return;
         };
 
         match message_type {
             "open" => {
-                append_gpui_app_modal_debug_log_event(
-                    "bridge.open.received",
-                    "debug",
-                    self.sidebar_runtime_settings_snapshot.debugging_mode,
-                    serde_json::json!({
-                        "messageType": message_type,
-                        "modal": message.get("modal").and_then(serde_json::Value::as_str),
-                    }),
-                );
                 let Some(modal) = message
                     .get("modal")
                     .and_then(serde_json::Value::as_str)
                     .and_then(GpuiAppModalKind::from_modal_id)
                 else {
-                    append_gpui_app_modal_debug_log_event(
-                        "bridge.open.invalidModal",
-                        "warning",
-                        self.sidebar_runtime_settings_snapshot.debugging_mode,
-                        serde_json::json!({
-                            "messageType": message_type,
-                        }),
-                    );
                     return;
                 };
                 if !gpui_app_modal_has_required_live_command_session(
@@ -32356,14 +23394,6 @@ impl GhostexGpuiApp {
                     &message,
                     &self.command_pane,
                 ) {
-                    append_gpui_app_modal_debug_log_event(
-                        "bridge.open.rejectedMissingLiveCommandSession",
-                        "warning",
-                        self.sidebar_runtime_settings_snapshot.debugging_mode,
-                        serde_json::json!({
-                            "modal": modal.modal_id(),
-                        }),
-                    );
                     return;
                 }
                 let sidebar_state_message =
@@ -32381,32 +23411,10 @@ impl GhostexGpuiApp {
                 );
             }
             "ready" | "presented" => {
-                append_gpui_app_modal_debug_log_event(
-                    if message_type == "ready" {
-                        "bridge.ready.received"
-                    } else {
-                        "bridge.presented.received"
-                    },
-                    "debug",
-                    self.sidebar_runtime_settings_snapshot.debugging_mode,
-                    serde_json::json!({
-                        "messageType": message_type,
-                        "modal": message.get("modal").and_then(serde_json::Value::as_str),
-                    }),
-                );
                 if let Some(handle) = self.app_modal_window.clone() {
                     let _ = handle.update(cx, |host, modal_window, cx| {
                         host.receive_bridge_message(message, modal_window, cx);
                     });
-                } else {
-                    append_gpui_app_modal_debug_log_event(
-                        "bridge.lifecycle.noWindowHandle",
-                        "warning",
-                        self.sidebar_runtime_settings_snapshot.debugging_mode,
-                        serde_json::json!({
-                            "messageType": message_type,
-                        }),
-                    );
                 }
             }
             "updateSettings" => {
@@ -32475,18 +23483,6 @@ impl GhostexGpuiApp {
             }
             "closeTitlebarDropdownPanel" => {
                 self.set_gpui_titlebar_tips_panel_open(false, window, cx);
-            }
-            "debugLog" => {
-                append_gpui_app_modal_debug_log_payload(
-                    &message,
-                    self.sidebar_runtime_settings_snapshot.debugging_mode,
-                );
-            }
-            "logError" => {
-                append_gpui_app_modal_error_log_payload(
-                    &message,
-                    self.sidebar_runtime_settings_snapshot.debugging_mode,
-                );
             }
             "toast" => {}
             _ => {}
@@ -37380,7 +28376,7 @@ impl GhostexGpuiApp {
                     &mut self.manage_workarea_runtime,
                     event,
                 ) {
-                    self.refresh_project_workarea_cef_surface_slots_from_source_state(cx);
+                    self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
                     cx.notify();
                 }
             }
@@ -37398,9 +28394,6 @@ impl GhostexGpuiApp {
             }
             cef::SidebarBridgeEvent::GhostexHotkeyAction(payload) => {
                 self.receive_sidebar_ghostex_hotkey_action_payload(&payload, window, cx);
-            }
-            cef::SidebarBridgeEvent::SessionFocusDebugLog(payload) => {
-                self.receive_sidebar_session_focus_debug_log_payload(&payload);
             }
             cef::SidebarBridgeEvent::SessionStatusIndicators(payload) => {
                 self.receive_sidebar_session_status_indicators_payload(&payload, cx);
@@ -37547,17 +28540,6 @@ impl GhostexGpuiApp {
             let _ = (message, cx);
             false
         }
-    }
-
-    fn receive_sidebar_session_focus_debug_log_payload(&mut self, payload: &str) {
-        /*
-        CDXC:GPUISidebarFocusDebug 2026-06-26-04:55:
-        User-reproduced GPUI session bouncing needs a dedicated support-bundle log that captures focus ownership transitions without renderer text. Routine breadcrumbs persist only when the gpui.sidebar.focus scenario is enabled; warning-level loop evidence may persist so support can diagnose the stuck bounce without names, paths, URLs, command text, tokens, titles, terminal output, or raw payload JSON.
-        */
-        append_gpui_sidebar_focus_debug_log_payload(
-            payload,
-            self.sidebar_runtime_settings_snapshot.debugging_mode,
-        );
     }
 
     fn set_sidebar_gxserver_presentation_focus_state(
@@ -38498,10 +29480,10 @@ impl GhostexGpuiApp {
                     .reconcile_active_project(self.latest_sidebar_project_snapshot.as_ref());
                 /*
                 CDXC:GPUIBrowserWorkareaReadiness 2026-06-23-18:29:
-                The sidebar-scoped external bridge can route Browser readiness into the strict store, but Phase 1 still has no accepted Browser workarea identity field. Reconcile with no browserWorkareaId so readiness payloads remain no-op instead of deriving ids from tabs, URLs, titles, profiles, CEF state, or project data.
+                The sidebar-scoped external bridge can route Browser readiness into the strict store, but the active-project snapshot still has no accepted Browser workarea identity field. Reconcile with no browserWorkareaId so readiness payloads remain no-op instead of deriving ids from tabs, URLs, titles, profiles, CEF state, or project data.
 
-                CDXC:GPUIBrowserRuntimeParity 2026-06-24-04:10:
-                Slice 252 makes that rejection the source-ledger Browser identity contract: Browser identity is owned only by the strict Browser readiness boundary, not the active-project snapshot.
+                CDXC:GPUIBrowserWorkareaReadiness 2026-06-28-17:09:
+                Browser identity remains owned only by the strict Browser readiness boundary, not the active-project snapshot. Keep reconciling with no browserWorkareaId so the removed Browser proof path cannot reappear as fallback identity.
                 */
                 self.browser_workarea_runtime
                     .reconcile_explicit_active_project_identity(
@@ -38512,7 +29494,7 @@ impl GhostexGpuiApp {
                     .reconcile_active_project(self.latest_sidebar_project_snapshot.as_ref());
                 self.manage_workarea_runtime
                     .reconcile_active_project(self.latest_sidebar_project_snapshot.as_ref());
-                self.refresh_project_workarea_cef_surface_slots_from_source_state(cx);
+                self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
                 self.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
                 self.coerce_active_mode_to_available_project_context(cx);
                 self.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
@@ -44413,7 +35395,6 @@ impl GhostexGpuiApp {
             return;
         }
 
-        trace_startup("initializing deferred CEF surfaces");
         cef::initialize().expect("failed to initialize CEF");
         let parent_ns_view = self.parent_ns_view;
         let sidebar_url = self.sidebar_url.clone();
@@ -44423,10 +35404,10 @@ impl GhostexGpuiApp {
         let sidebar_gxserver_bootstrap = self.sidebar_gxserver_bootstrap.clone();
         self.sidebar = Some(cx.new(move |cx| {
             CefSurface::new(
-                "phase1-sidebar".to_string(),
+                "gpui-sidebar".to_string(),
                 parent_ns_view,
                 sidebar_url,
-                "phase1-sidebar".to_string(),
+                "gpui-sidebar".to_string(),
                 true,
                 None,
                 None,
@@ -44442,7 +35423,6 @@ impl GhostexGpuiApp {
         self.ensure_active_browser_surface(cx);
         self.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
         self.update_browser_visibility_for_active_mode(cx);
-        trace_startup("deferred CEF surfaces initialized");
         cx.notify();
     }
 
@@ -51122,23 +42102,11 @@ impl GhostexGpuiApp {
         CDXC:GPUISourceReadiness 2026-06-23-16:10:
         A strict Source readiness message may make the runtime availability Ready for the current explicit active project/source identity, but readiness is not a URL, mount instruction, log/persistence payload, localhost/path fallback, or permission to replace the placeholder.
 
-        CDXC:GPUISourceCefCodeServerMount 2026-06-23-21:43:
-        Source render may construct the source-side CEF/code-server request only from the exact current ready Source runtime identity. Source CEF replacement still requires a real code-server process, real runtime URL authority, an owned normal-layout CefSurface, and explicit replacement permission; render must not start code-server, synthesize URLs, probe localhost, use paths or fixtures, create hidden mounts, or log/persist private data.
-
-        CDXC:GPUISourceCefCodeServerMount 2026-06-24-03:12:
-        CEF-only source-ledger materialization evidence is not a runtime-instantiated CEF browser or placeholder replacement path. `materializable_request()` remains None until a real issued runtime URL and actual CEF browser creation are available without hidden surfaces or private payloads.
-
-        CDXC:GPUISourceCefCodeServerMount 2026-06-24-04:34:
-        The source-only Source CEF/code-server runtime-parity plan is CEF-only evidence and still forbids runtime CEF creation, code-server startup, runtime URL issuance, hidden mounts, private logging/persistence, non-CEF web engines, and placeholder replacement by itself.
-
-        CDXC:GPUISourcePlaceholderReplacement 2026-06-24-05:20:
-        Source render may only replace the colored placeholder after the centralized preflight gate reports a real runtime code-server process, issued runtime URL, instantiated CEF browser, normal-layout CEF surface, and explicit replacement permission.
-
-        CDXC:GPUIProjectWorkareaSourceRuntimeCefSurfaceOwnerGate 2026-06-24-06:37:
-        Source render routes through the app-owned runtime CEF owner gate before the existing materializable_request hook can matter. Until that gate proves runtime readiness, real URL authority, issued runtime URL, code-server process availability, CEF surface creation, and explicit replacement permission, Source stays on the placeholder and must not mount hidden views or swap content.
-
         CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-10:12:
         Source now checks the permanent app-owned CEF surface map first. When a real Source runtime URL has already produced an owned CefSurface and the gate permits replacement, render returns that normal-layout CEF child; otherwise the placeholder remains because real URL/process/surface authority is still absent.
+
+        CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-28-17:09:
+        Source render no longer constructs source-proof CEF/code-server objects. The placeholder changes only when the direct runtime URL gate plus an owned normal-layout CefSurface already exist for the current explicit project.
         */
         let slot_key = ProjectWorkareaCefSurfaceSlotKey::Source;
         if let Some(surface) = self.project_workarea_runtime_cef_surface_for_render(slot_key) {
@@ -51155,26 +42123,11 @@ impl GhostexGpuiApp {
 
     fn render_kanban_workarea_surface(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         /*
-        CDXC:GPUIKanbanCefMount 2026-06-24-08:16:
-        Kanban render may construct the source-side CEF mount-request boundary only from the current runtime availability. Kanban source-ledger CEF contracts are accepted, but placeholder replacement requires real runtime URL authority, an owned normal-layout CefSurface, and explicit replacement permission. This path must not synthesize URLs, mount hidden surfaces, run fallback probes, log or persist private details, use non-CEF web engines, or replace the placeholder without the gate.
-
-        CDXC:GPUIKanbanCefMount 2026-06-24-08:16:
-        Ready Kanban requests carry the fixed CEF app-resource entrypoint label plus accepted source-ledger CEF materialization evidence for the first-party project-board surface. Those labels are not navigable URLs; render must not turn them into runtime URL state, hidden surfaces, fallback probes, or placeholder replacement.
-
-        CDXC:GPUIKanbanCefMount 2026-06-24-08:16:
-        Ready Kanban requests carry an accepted source-ledger CEF materialization contract, but `materializable_request()` stays None from this render path until a real runtime URL value and CEF surface authority exist, with no hidden CEF mounts, private payloads, non-CEF engines, or placeholder replacement.
-
-        CDXC:GPUIKanbanCefMount 2026-06-24-04:49:
-        Ready Kanban requests may carry a source-only runtime-parity plan with CEF as the only accepted web-pane engine, but the plan does not instantiate CEF, issue runtime URLs, mount hidden surfaces, log/persist private data, or authorize placeholder replacement by itself.
-
-        CDXC:GPUIKanbanPlaceholderReplacement 2026-06-24-05:22:
-        Kanban render may only replace the colored placeholder after the centralized preflight gate reports an issued runtime URL, instantiated CEF browser, normal-layout CEF surface, no hidden mount, no private runtime data, and explicit replacement permission.
-
-        CDXC:GPUIProjectWorkareaKanbanRuntimeCefSurfaceOwnerGate 2026-06-24-06:49:
-        Kanban render routes through the app-owned runtime CEF owner gate before the existing materializable_request hook can matter. Until that gate proves real URL authority, issued runtime URL, CEF surface creation, and explicit replacement permission, Kanban stays on the placeholder and must not mount hidden views or swap content.
-
         CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-10:12:
         Kanban now checks the permanent app-owned CEF surface map first. When a real Kanban runtime URL has already produced an owned CefSurface and the gate permits replacement, render returns that normal-layout CEF child; otherwise the placeholder remains because real navigable URL authority is absent.
+
+        CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-28-17:09:
+        Kanban render no longer builds source-proof CEF mount objects. The placeholder changes only when the direct bundled runtime URL gate plus an owned normal-layout CefSurface already exist for the current explicit project.
         */
         let slot_key = ProjectWorkareaCefSurfaceSlotKey::Kanban;
         if let Some(surface) = self.project_workarea_runtime_cef_surface_for_render(slot_key) {
@@ -51188,26 +42141,11 @@ impl GhostexGpuiApp {
 
     fn render_manage_workarea_surface(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         /*
-        CDXC:GPUIManageCefMount 2026-06-24-07:41:
-        Manage render may construct the source-side CEF mount-request boundary only from the current runtime availability. The request keeps first-party entrypoint, CEF materialization, file-bridge mount, and file-operation proof states separate and accepted, while placeholder replacement requires real runtime CEF URL/surface authority plus the separate file-bridge and operation gates.
-
-        CDXC:GPUIManageCefMount 2026-06-24-07:41:
-        Ready Manage requests carry first-party entrypoint, CEF materialization, file-bridge mount, and file-operation proof labels as source-ledger evidence, but those labels do not create runtime CEF, file bridges, file I/O, URLs, hidden mounts, fallback probes, logs/persistence, or replacement paths.
-
-        CDXC:GPUIManageCefMount 2026-06-24-03:58:
-        Ready Manage requests may report source-ledger CEF materialization, file-bridge mount, and project-scoped file-operation proof labels from exact runtime identity and the safe operation-decision store. Those labels do not instantiate CEF, mount a file bridge, run file operations, create bridge payloads, accept private file data, or replace the normal layout surface.
-
-        CDXC:GPUIManageCefMount 2026-06-24-04:55:
-        Ready Manage requests may report a source-only runtime-parity plan after the CEF materialization, file-bridge mount, and file-operation proof labels exist. The plan does not instantiate CEF, issue runtime URLs, mount a runtime file bridge, run file operations, create bridge payloads, use non-CEF engines, log/persist private data, mount hidden surfaces, or authorize placeholder replacement by itself.
-
-        CDXC:GPUIManagePlaceholderReplacement 2026-06-24-05:27:
-        Ready Manage requests may expose the placeholder-replacement preflight gate, but replacement requires a real CEF URL/browser/surface, runtime file bridge and operation, no CEF/file-bridge payload, no hidden mount, no private runtime data/logging/persistence, and explicit replacement permission.
-
-        CDXC:GPUIProjectWorkareaManageRuntimeCefSurfaceOwnerGate 2026-06-24-07:00:
-        Manage render routes through the app-owned runtime CEF/file-bridge owner gate before the existing materializable_request hook can matter. Until that gate proves real URL authority, issued runtime URL, CEF surface creation, runtime file-bridge mounting, runtime file-operation execution, and explicit replacement permission, Manage stays on the placeholder and must not mount a bridge, run file operations, mount hidden views, or swap content.
-
         CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-10:12:
         Manage now checks the permanent app-owned CEF surface map first. When a real Manage runtime URL has already produced an owned CefSurface and the CEF/file-bridge gate permits replacement, render returns that normal-layout CEF child; otherwise the placeholder remains because real navigable URL and file-bridge authority are absent.
+
+        CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-28-17:09:
+        Manage render no longer builds source-proof CEF/file-bridge mount objects. The placeholder changes only when the direct bundled runtime URL gate plus an owned normal-layout CefSurface already exist; file operations remain owned by the separate sanitized Manage bridge path.
         */
         let slot_key = ProjectWorkareaCefSurfaceSlotKey::Manage;
         if let Some(surface) = self.project_workarea_runtime_cef_surface_for_render(slot_key) {
@@ -51227,10 +42165,10 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         /*
         CDXC:GPUIProjectWorkareaReadiness 2026-06-24-08:13:
-        Kanban and Manage source-ledger CEF/file-bridge contracts are accepted, but awake readiness still maps to runtime-placeholder states until explicit CEF-only runtime replacement is permitted by the real gates. Keep ready and blocked states on placeholders here; this path must not instantiate CEF surfaces, file bridges, runtime URLs, fallback mounts, hidden surfaces, or private payloads.
+        Kanban and Manage awake readiness still maps to placeholder states until runtime replacement is permitted by the real gates. Keep ready and blocked states on placeholders here; this path must not instantiate CEF surfaces, file bridges, runtime URLs, fallback mounts, hidden surfaces, or private payloads.
 
         CDXC:GPUIProjectWorkareaLifecycle 2026-06-24-08:13:
-        Phase 6/7 startup and load-failure states remain source-only/runtime-placeholder states. Runtime CEF/file-bridge instantiation and placeholder replacement now belong to the active CEF-only surface gate; missing, mounting, failed, and ready-without-authority states must not mount CEF surfaces, file bridges, runtime URLs, fallbacks, hidden surfaces, or private payloads from this path.
+        Startup and load-failure states remain placeholder states. Runtime CEF/file-bridge instantiation and placeholder replacement belong to the active CEF surface gate; missing, mounting, failed, and ready-without-authority states must not mount CEF surfaces, file bridges, runtime URLs, fallbacks, hidden surfaces, or private payloads from this path.
 
         CDXC:GPUIProjectWorkareaLifecycle 2026-06-23-13:50:
         Blocked mounting and load-failed reasons now select distinct static placeholder signatures so startup and failure are visible without changing titlebar mode, corrupting shell state, persisting failure details, or mounting real Kanban/Manage surfaces.
@@ -55335,16 +46273,9 @@ impl GhostexGpuiApp {
 
 impl Render for GhostexGpuiApp {
     fn render(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
-        if gpui_trace_enabled() {
-            eprintln!(
-                "[ghostex-gpui] app render sidebar={} browser_surfaces={}",
-                self.sidebar.is_some(),
-                self.browser_surfaces.len()
-            );
-        }
         /*
-        CDXC:GPUIPhase1 2026-06-14-12:06:
-        Phase 1 must prove the macOS sidebar React UI and a normal browser surface can run as CEF children inside a GPUI shell. Keep the CEF child views as exact GPUI layout siblings, with the address-bar chrome owned by GPUI above only the main browser area, so future Linux and Windows backends can replace the macOS FFI without changing the app layout contract.
+        CDXC:GPUICefShellLayout 2026-06-14-12:06:
+        GPUI must prove the macOS sidebar React UI and normal browser surfaces can run as CEF children inside the shell. Keep the CEF child views as exact GPUI layout siblings, with the address-bar chrome owned by GPUI above only the main browser area, so future Linux and Windows backends can replace the macOS FFI without changing the app layout contract.
 
         CDXC:GPUISidebarChrome 2026-06-21-18:34:
         The GPUI sidebar must match native macOS sidebar resizing: start from the persisted native sidebarWidth, reserve a real five-pixel divider rail between the sidebar and browser siblings, clamp drag/reset width to 150px..520px while preserving a 240px workspace minimum, and use the Settings-owned sidebarDefaultWidthPx only for double-click reset.
@@ -55968,16 +46899,6 @@ impl GpuiAppModalHostWindow {
                 cx,
             )
         });
-        append_gpui_app_modal_debug_log_event(
-            "host.created",
-            "debug",
-            gpui_app_modal_debugging_mode_enabled(),
-            serde_json::json!({
-                "modal": modal.modal_id(),
-                "pendingMessageCount": 1_u64,
-                "requiresSidebarState": modal.requires_sidebar_state(),
-            }),
-        );
         cx.new(move |_cx| Self {
             current_modal: modal,
             is_ready: false,
@@ -56004,31 +46925,9 @@ impl GpuiAppModalHostWindow {
         self.latest_sidebar_state_message = sidebar_state_message;
         if !self.is_ready {
             self.pending_messages.push(open_message);
-            append_gpui_app_modal_debug_log_event(
-                "host.open.queued",
-                "debug",
-                gpui_app_modal_debugging_mode_enabled(),
-                serde_json::json!({
-                    "isReady": false,
-                    "modal": modal.modal_id(),
-                    "pendingMessageCount": self.pending_messages.len() as u64,
-                    "requiresSidebarState": modal.requires_sidebar_state(),
-                }),
-            );
             cx.notify();
             return;
         }
-        append_gpui_app_modal_debug_log_event(
-            "host.open.dispatching",
-            "debug",
-            gpui_app_modal_debugging_mode_enabled(),
-            serde_json::json!({
-                "isReady": true,
-                "messageType": gpui_app_modal_debug_message_type(&open_message),
-                "modal": modal.modal_id(),
-                "requiresSidebarState": modal.requires_sidebar_state(),
-            }),
-        );
         if self.current_modal.requires_sidebar_state() {
             self.dispatch_sidebar_state(cx);
         }
@@ -56044,18 +46943,7 @@ impl GpuiAppModalHostWindow {
     ) {
         match message.get("type").and_then(serde_json::Value::as_str) {
             Some("ready") => {
-                let pending_message_count = self.pending_messages.len();
                 self.is_ready = true;
-                append_gpui_app_modal_debug_log_event(
-                    "host.bridge.ready",
-                    "debug",
-                    gpui_app_modal_debugging_mode_enabled(),
-                    serde_json::json!({
-                        "modal": self.current_modal.modal_id(),
-                        "pendingMessageCount": pending_message_count as u64,
-                        "requiresSidebarState": self.current_modal.requires_sidebar_state(),
-                    }),
-                );
                 if self.current_modal.requires_sidebar_state() {
                     self.dispatch_sidebar_state(cx);
                 }
@@ -56069,15 +46957,6 @@ impl GpuiAppModalHostWindow {
                     .get("modal")
                     .and_then(serde_json::Value::as_str)
                     .and_then(GpuiAppModalKind::from_modal_id);
-                append_gpui_app_modal_debug_log_event(
-                    "host.bridge.presented",
-                    "debug",
-                    gpui_app_modal_debugging_mode_enabled(),
-                    serde_json::json!({
-                        "modal": self.current_modal.modal_id(),
-                        "presentedModal": self.presented_modal.map(GpuiAppModalKind::modal_id),
-                    }),
-                );
                 window.activate_window();
                 self.surface.update(cx, |surface, _| {
                     surface.focus();
@@ -56089,15 +46968,6 @@ impl GpuiAppModalHostWindow {
     }
 
     fn dispatch_sidebar_state(&mut self, cx: &mut gpui::Context<Self>) {
-        append_gpui_app_modal_debug_log_event(
-            "host.dispatch.sidebarState",
-            "debug",
-            gpui_app_modal_debugging_mode_enabled(),
-            serde_json::json!({
-                "modal": self.current_modal.modal_id(),
-                "requiresSidebarState": self.current_modal.requires_sidebar_state(),
-            }),
-        );
         self.dispatch_message(
             serde_json::json!({
                 "message": self.latest_sidebar_state_message,
@@ -56117,15 +46987,6 @@ impl GpuiAppModalHostWindow {
         An open GPUI app-modal host must receive the saved sidebar hydrate snapshot after `updateSettings` succeeds, matching macOS publish-to-modal behavior. Update the stored latest snapshot and dispatch `sidebarState` only through the modal host's existing app-owned CEF script channel; do not create overlays, hidden views, global input routing, or a second Settings state channel.
         */
         self.latest_sidebar_state_message = sidebar_state_message;
-        append_gpui_app_modal_debug_log_event(
-            "host.sidebarState.refreshed",
-            "debug",
-            gpui_app_modal_debugging_mode_enabled(),
-            serde_json::json!({
-                "isReady": self.is_ready,
-                "modal": self.current_modal.modal_id(),
-            }),
-        );
         if self.is_ready {
             self.dispatch_sidebar_state(cx);
         }
@@ -56160,15 +47021,6 @@ impl GpuiAppModalHostWindow {
     }
 
     fn dispatch_message(&mut self, message: serde_json::Value, cx: &mut gpui::Context<Self>) {
-        append_gpui_app_modal_debug_log_event(
-            "host.dispatch.message",
-            "debug",
-            gpui_app_modal_debugging_mode_enabled(),
-            serde_json::json!({
-                "messageType": gpui_app_modal_debug_message_type(&message),
-                "modal": self.current_modal.modal_id(),
-            }),
-        );
         let script = format!(
             "window.dispatchEvent(new CustomEvent('ghostex-app-modal-host-message', {{ detail: {} }})); undefined;",
             message
@@ -56312,7 +47164,7 @@ impl CefSurface {
     ) {
         /*
         CDXC:GPUIProjectSidebarBridge 2026-06-23-06:57:
-        The phase-1 sidebar needs a callable post-load refresh path for strict debug/beta gates plus the saved shared Settings object without adding a broad settings watcher or event bus. Keep this as a narrow CEF surface forwarder so future callers can target only the sidebar main frame.
+        The GPUI sidebar needs a callable post-load refresh path for strict debug/beta gates plus the saved shared Settings object without adding a broad settings watcher or event bus. Keep this as a narrow CEF surface forwarder so future callers can target only the sidebar main frame.
         */
         self.browser
             .refresh_sidebar_runtime_settings(runtime_settings);
@@ -56504,15 +47356,6 @@ impl Element for CefElement {
             return None;
         }
 
-        if gpui_trace_enabled() {
-            eprintln!(
-                "[ghostex-gpui] CEF prepaint x={:.0} y={:.0} width={:.0} height={:.0}",
-                bounds.origin.x.as_f32(),
-                bounds.origin.y.as_f32(),
-                bounds.size.width.as_f32(),
-                bounds.size.height.as_f32()
-            );
-        }
         self.browser.set_visible(true);
         self.browser.set_bounds(bounds);
         let hitbox = window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal);
@@ -56520,7 +47363,7 @@ impl Element for CefElement {
         let focus_handle = self.focus_handle.clone();
         window.on_mouse_event(move |event: &gpui::MouseDownEvent, phase, window, cx| {
             /*
-            CDXC:GPUIPhase1 2026-06-14-16:45:
+            CDXC:GPUICefFocusRouting 2026-06-14-16:45:
             The CEF child view owns normal web-page input behavior after it is clicked. Focus a GPUI handle with a CEF key context before restoring CEF focus so page text fields receive command-key shortcuts such as Cmd+A instead of leaving the GPUI address bar as the action target.
             */
             if phase.bubble()
@@ -56557,7 +47400,6 @@ fn main() {
     cef::prepare_application();
 
     gpui_platform::application().run(move |cx| {
-        trace_startup("application callback entered");
         gpui_component::init(cx);
         cx.bind_keys([
             KeyBinding::new("cmd-a", CefSelectAll, Some(CEF_KEY_CONTEXT)),
@@ -56584,8 +47426,6 @@ fn main() {
             KeyBinding::new("cmd-alt-up", FocusWorkspaceUp, None),
             KeyBinding::new("cmd-alt-down", FocusWorkspaceDown, None),
         ]);
-        trace_startup("gpui-component initialized");
-
         let window_bounds = WindowBounds::centered(size(px(1280.0), px(820.0)), cx);
         let options = WindowOptions {
             window_bounds: Some(window_bounds),
@@ -56598,18 +47438,15 @@ fn main() {
         };
 
         /*
-        CDXC:GPUIPhase1 2026-06-14-13:10:
-        CEF is mandatory for the phase-1 shell, but CEF surfaces need an actual GPUI platform window before they attach native AppKit children. Create the GPUI window first, then let the CEF bridge wait for non-zero layout bounds before creating browser hosts.
+        CDXC:GPUICefStartup 2026-06-14-13:10:
+        CEF is mandatory for the GPUI shell, but CEF surfaces need an actual GPUI platform window before they attach native AppKit children. Create the GPUI window first, then let the CEF bridge wait for non-zero layout bounds before creating browser hosts.
 
-        CDXC:GPUIPhase1 2026-06-14-13:09:
+        CDXC:GPUICefStartup 2026-06-14-13:09:
         CEF startup must run after GPUI completes the first frame because initializing native Chromium children during root construction can stall the GPUI launch path without producing helper processes. Schedule CEF surface creation on the next frame, then explicitly refresh the window so the sidebar and browser elements enter the normal GPUI layout pass.
         */
-        trace_startup("opening GPUI window");
         cx.open_window(options, |window, cx| {
-            trace_startup("building GPUI root view");
             window.activate_window();
-            let view =
-                GhostexGpuiApp::new(window, cx).expect("failed to create Ghostex GPUI phase-1 app");
+            let view = GhostexGpuiApp::new(window, cx).expect("failed to create Ghostex GPUI app");
             let view_for_cef = view.clone();
             window.on_next_frame(move |window, cx| {
                 view_for_cef.update(cx, |app, cx| app.initialize_cef(cx));
@@ -56618,25 +47455,8 @@ fn main() {
             cx.new(|cx| Root::new(view, window, cx).bg(workspace_background_color()))
         })
         .expect("failed to open GPUI window");
-        trace_startup("GPUI window opened");
     });
-    trace_startup("GPUI application run returned");
     cef::shutdown();
-    trace_startup("CEF shutdown complete");
-}
-
-fn trace_startup(message: &str) {
-    if gpui_trace_enabled() {
-        eprintln!("[ghostex-gpui] {message}");
-    }
-}
-
-fn gpui_trace_enabled() -> bool {
-    /*
-    CDXC:GPUITracePrivacy 2026-06-23-13:18:
-    GHOSTEX_GPUI_TRACE is an opt-in stderr-only diagnostic path, not a persistent app/support-bundle log. Call sites may emit only fixed lifecycle strings, booleans, counts, and geometry dimensions, never project names, session names, paths, command text, stdout/stderr, terminal content, raw URLs, page titles, payload JSON, tokens, cookies, or secrets.
-    */
-    env::var_os("GHOSTEX_GPUI_TRACE").is_some()
 }
 
 fn titlebar_svg_icon(path: &'static str, icon_size: f32, color: Hsla) -> impl IntoElement {
@@ -58885,7 +49705,7 @@ fn browser_feedback_js_string_literal(value: &str) -> String {
 fn browser_agentation_feedback_injection_script() -> String {
     /*
     CDXC:GPUIBrowserFeedback 2026-06-23-11:04:
-    Browser feedback toolbar parity now injects the Settings-selected Agentation tool into the active GPUI CEF main frame instead of showing a placeholder notification. Keep the script bounded to pinned module URLs, auto-start feedback mode, and avoid persistent logs, console page diagnostics, raw URLs, titles, page content, cookies, tokens, paths, command text, terminal content, or JS error payloads.
+    Browser feedback toolbar parity now injects the Settings-selected Agentation tool into the active GPUI CEF main frame instead of showing a placeholder notification. Keep the script bounded to pinned module URLs, auto-start feedback mode, and avoid persistent logs, console page metadata, raw URLs, titles, page content, cookies, tokens, paths, command text, terminal content, or JS error payloads.
     */
     const TEMPLATE: &str = r##"
 (function() {
@@ -59133,7 +49953,7 @@ fn browser_tab_title_for_url(url: &str) -> String {
 fn browser_shell_default_url() -> String {
     /*
     CDXC:GPUIBrowserDefault 2026-06-22-19:52:
-    Browser startup parity is intentionally static for Phase 1. Do not derive the first URL from .git metadata, filesystem paths, workspace names, fixture names, or sidebar titles; wait for an explicit browser start URL in a future project snapshot contract.
+    Browser startup parity is intentionally static until a project snapshot contract carries an explicit browser start URL. Do not derive the first URL from .git metadata, filesystem paths, workspace names, fixture names, or sidebar titles.
     */
     DEFAULT_BROWSER_URL.to_string()
 }
@@ -59143,7 +49963,7 @@ fn titlebar_project_label_from_latest_sidebar_snapshot(
 ) -> String {
     /*
     CDXC:GPUITitlebarProjectLabel 2026-06-22-19:57:
-    The Phase 1 titlebar label is runtime-only sidebar state: use the latest valid snapshot display name and show the static Ghostex label before any valid sidebar payload arrives. Do not read env vars, repo folders, .git metadata, workspace names, fixture names, paths, URLs, sidebar titles, persisted state, or logs to infer the label.
+    The titlebar label is runtime-only sidebar state: use the latest valid snapshot display name and show the static Ghostex label before any valid sidebar payload arrives. Do not read env vars, repo folders, .git metadata, workspace names, fixture names, paths, URLs, sidebar titles, persisted state, or logs to infer the label.
     */
     latest_snapshot
         .map(|snapshot| snapshot.display_name.clone())
@@ -67779,7 +58599,7 @@ fn gpui_os_integration_status_payload() -> serde_json::Value {
 fn gpui_os_integration_status_payload() -> serde_json::Value {
     /*
     CDXC:GPUIOSIntegration 2026-06-24-15:02:
-    Settings diagnostics should mirror the Swift host payload: app bundle id, Launch Services defaults for representative editor/script extensions, ghostex:// default handler, and Info.plist registration booleans. This function is read-only and must not set defaults or register the app on status requests.
+    Settings OS integration status should mirror the Swift host payload: app bundle id, Launch Services defaults for representative editor/script extensions, ghostex:// default handler, and Info.plist registration booleans. This function is read-only and must not set defaults or register the app on status requests.
     */
     let bundle = gpui_macos_os_integration_bundle_info();
     let bundle_identifier = bundle
@@ -77134,576 +67954,6 @@ fn gxserver_focus_session_id_string(
         return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField);
     }
     Ok(value.to_string())
-}
-
-/*
-CDXC:GPUISettingsModalDiagnostics 2026-06-27-17:25:
-The blank GPUI Settings pane repro needs app-modal host logs before any behavior fix. Persist only sanitized lifecycle and renderer diagnostic checkpoints to ~/.ghostex/logs/gpui-app-modal-debug.jsonl and retain warning/error breadcrumbs without raw settings, project/session names, paths, URLs, command text, tokens, titles, stack text, or renderer messages.
-
-CDXC:DiagnosticsSettings 2026-06-27-22:46:
-Routine GPUI app-modal breadcrumbs now require the gpui.app.modal diagnostic scenario instead of broad Debugging Mode so Settings can expose debug UI without turning on every persistent log.
-*/
-fn gpui_app_modal_debugging_mode_enabled() -> bool {
-    shared_settings::shared_sidebar_settings_snapshot()
-        .diagnostic_logging_scenario_enabled("gpui.app.modal")
-}
-
-fn append_gpui_app_modal_debug_log_event(
-    event: &str,
-    level: &str,
-    debugging_mode: bool,
-    fields: serde_json::Value,
-) {
-    let mut object = fields.as_object().cloned().unwrap_or_default();
-    object.insert(
-        "event".to_string(),
-        serde_json::Value::String(event.to_string()),
-    );
-    object.insert(
-        "level".to_string(),
-        serde_json::Value::String(level.to_string()),
-    );
-    object.insert(
-        "eventSource".to_string(),
-        serde_json::Value::String("native".to_string()),
-    );
-    append_gpui_app_modal_debug_log_object(&object, debugging_mode);
-}
-
-fn append_gpui_app_modal_debug_log_payload(message: &serde_json::Value, debugging_mode: bool) {
-    let Some(object) = message.as_object() else {
-        return;
-    };
-    let mut fields = serde_json::Map::new();
-    fields.insert(
-        "event".to_string(),
-        serde_json::Value::String(
-            object
-                .get("event")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("renderer.debug")
-                .to_string(),
-        ),
-    );
-    fields.insert(
-        "level".to_string(),
-        serde_json::Value::String("debug".to_string()),
-    );
-    fields.insert(
-        "eventSource".to_string(),
-        serde_json::Value::String("renderer".to_string()),
-    );
-    if let Some(details) = object.get("details").and_then(serde_json::Value::as_str) {
-        fields.insert(
-            "detailsCharCount".to_string(),
-            serde_json::json!(details.chars().count() as u64),
-        );
-        if let Ok(serde_json::Value::Object(details_object)) =
-            serde_json::from_str::<serde_json::Value>(details)
-        {
-            fields.insert("detailsParsed".to_string(), serde_json::json!(true));
-            for (key, value) in details_object {
-                fields.insert(key, value);
-            }
-        } else {
-            fields.insert("detailsParsed".to_string(), serde_json::json!(false));
-        }
-    }
-    append_gpui_app_modal_debug_log_object(&fields, debugging_mode);
-}
-
-fn append_gpui_app_modal_error_log_payload(message: &serde_json::Value, debugging_mode: bool) {
-    let Some(object) = message.as_object() else {
-        return;
-    };
-    let mut fields = serde_json::Map::new();
-    fields.insert(
-        "event".to_string(),
-        serde_json::Value::String("renderer.logError".to_string()),
-    );
-    fields.insert(
-        "level".to_string(),
-        serde_json::Value::String("error".to_string()),
-    );
-    fields.insert(
-        "eventSource".to_string(),
-        serde_json::Value::String("renderer".to_string()),
-    );
-    if let Some(area) = object.get("area").and_then(serde_json::Value::as_str) {
-        fields.insert(
-            "errorArea".to_string(),
-            serde_json::Value::String(area.to_string()),
-        );
-    }
-    if let Some(name) = object.get("name").and_then(serde_json::Value::as_str) {
-        fields.insert(
-            "errorName".to_string(),
-            serde_json::Value::String(name.to_string()),
-        );
-    }
-    if let Some(message) = object.get("message").and_then(serde_json::Value::as_str) {
-        fields.insert(
-            "hasMessage".to_string(),
-            serde_json::json!(!message.is_empty()),
-        );
-        fields.insert(
-            "messageCharCount".to_string(),
-            serde_json::json!(message.chars().count() as u64),
-        );
-    }
-    if let Some(stack) = object.get("stack").and_then(serde_json::Value::as_str) {
-        fields.insert("hasStack".to_string(), serde_json::json!(!stack.is_empty()));
-        fields.insert(
-            "stackCharCount".to_string(),
-            serde_json::json!(stack.chars().count() as u64),
-        );
-        fields.insert(
-            "stackLineCount".to_string(),
-            serde_json::json!(stack.lines().count() as u64),
-        );
-    }
-    append_gpui_app_modal_debug_log_object(&fields, debugging_mode);
-}
-
-fn append_gpui_app_modal_debug_log_object(
-    object: &serde_json::Map<String, serde_json::Value>,
-    debugging_mode: bool,
-) {
-    let Some(line) =
-        gpui_app_modal_debug_log_line_from_object(object, debugging_mode, gpui_current_unix_ms())
-    else {
-        return;
-    };
-    let path = gpui_app_modal_debug_log_path();
-    let _ = append_gpui_app_modal_debug_log_line_to_path(&path, &line);
-}
-
-fn gpui_app_modal_debug_log_line_from_object(
-    object: &serde_json::Map<String, serde_json::Value>,
-    debugging_mode: bool,
-    unix_ms: u64,
-) -> Option<String> {
-    let level = object
-        .get("level")
-        .and_then(serde_json::Value::as_str)
-        .and_then(gpui_app_modal_debug_log_level)?;
-    if !debugging_mode && !matches!(level, "warning" | "error") {
-        return None;
-    }
-
-    let event = object
-        .get("event")
-        .and_then(serde_json::Value::as_str)
-        .and_then(gpui_app_modal_debug_sanitized_enum)
-        .unwrap_or_else(|| "unknown".to_string());
-
-    let mut sanitized = serde_json::Map::new();
-    sanitized.insert("area".to_string(), serde_json::json!("gpuiAppModal"));
-    sanitized.insert("unixMs".to_string(), serde_json::json!(unix_ms));
-    sanitized.insert("level".to_string(), serde_json::json!(level));
-    sanitized.insert("event".to_string(), serde_json::Value::String(event));
-
-    for key in GPUI_APP_MODAL_DEBUG_BOOL_KEYS {
-        if let Some(value) = object.get(*key).and_then(serde_json::Value::as_bool) {
-            sanitized.insert((*key).to_string(), serde_json::json!(value));
-        }
-    }
-    for key in GPUI_APP_MODAL_DEBUG_NUMBER_KEYS {
-        if let Some(value) = object
-            .get(*key)
-            .and_then(gpui_app_modal_debug_sanitized_number)
-        {
-            sanitized.insert((*key).to_string(), value);
-        }
-    }
-    for key in GPUI_APP_MODAL_DEBUG_ENUM_KEYS {
-        if let Some(value) = object
-            .get(*key)
-            .and_then(serde_json::Value::as_str)
-            .and_then(gpui_app_modal_debug_sanitized_enum)
-        {
-            sanitized.insert((*key).to_string(), serde_json::Value::String(value));
-        }
-    }
-
-    serde_json::to_string(&serde_json::Value::Object(sanitized)).ok()
-}
-
-const GPUI_APP_MODAL_DEBUG_BOOL_KEYS: &[&str] = &[
-    "debuggingMode",
-    "detailsParsed",
-    "hadAppModalWindow",
-    "handled",
-    "hasExistingWindow",
-    "hasInlineSidebarStateMessage",
-    "hasInitialRemoteMachineId",
-    "hasInitialSearchQuery",
-    "hasMessage",
-    "hasNativeSettingsHydrated",
-    "hasSettings",
-    "hasSettingsInitialRemoteMachineId",
-    "hasSettingsInitialSearchQuery",
-    "hasSettingsInitialSection",
-    "hasStack",
-    "isActiveModalRenderable",
-    "isBaseActiveModalRenderable",
-    "isMainFrame",
-    "isReady",
-    "isResizable",
-    "isSettingsRenderable",
-    "nativeWindowSurface",
-    "queued",
-    "requiresSidebarState",
-    "retryUsed",
-    "sent",
-    "sourceWindowProvided",
-    "success",
-    "windowCreated",
-];
-
-const GPUI_APP_MODAL_DEBUG_NUMBER_KEYS: &[&str] = &[
-    "detailsCharCount",
-    "messageCharCount",
-    "pendingMessageCount",
-    "performanceNow",
-    "payloadCharCount",
-    "errorCode",
-    "httpStatusCode",
-    "revision",
-    "stackCharCount",
-    "stackLineCount",
-    "windowHeight",
-    "windowWidth",
-];
-
-const GPUI_APP_MODAL_DEBUG_ENUM_KEYS: &[&str] = &[
-    "activeModal",
-    "activeModalBeforeOpen",
-    "errorArea",
-    "errorName",
-    "eventSource",
-    "initialSection",
-    "initialTab",
-    "messageType",
-    "modal",
-    "presentedModal",
-    "settingsInitialTab",
-    "surface",
-];
-
-fn gpui_app_modal_debug_log_level(value: &str) -> Option<&'static str> {
-    match value {
-        "debug" => Some("debug"),
-        "info" => Some("info"),
-        "warning" => Some("warning"),
-        "error" => Some("error"),
-        _ => None,
-    }
-}
-
-fn gpui_app_modal_debug_sanitized_enum(value: &str) -> Option<String> {
-    gpui_sidebar_focus_debug_sanitized_enum(value)
-}
-
-fn gpui_app_modal_debug_sanitized_number(value: &serde_json::Value) -> Option<serde_json::Value> {
-    if let Some(number) = value.as_u64() {
-        return Some(serde_json::json!(number));
-    }
-    if let Some(number) = value.as_i64() {
-        return Some(serde_json::json!(number));
-    }
-    if let Some(number) = value.as_f64().filter(|number| number.is_finite()) {
-        return serde_json::Number::from_f64(number).map(serde_json::Value::Number);
-    }
-    None
-}
-
-fn gpui_app_modal_debug_message_type(message: &serde_json::Value) -> Option<String> {
-    message
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .and_then(gpui_app_modal_debug_sanitized_enum)
-}
-
-fn gpui_app_modal_debug_log_path() -> PathBuf {
-    home_dir()
-        .join(".ghostex")
-        .join("logs")
-        .join(GPUI_APP_MODAL_DEBUG_LOG_FILE_NAME)
-}
-
-fn append_gpui_app_modal_debug_log_line_to_path(path: &Path, line: &str) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    if fs::metadata(path)
-        .map(|metadata| metadata.len() > GPUI_APP_MODAL_DEBUG_LOG_MAX_BYTES)
-        .unwrap_or(false)
-    {
-        let rotated_path = path.with_extension("jsonl.1");
-        let _ = fs::rename(path, rotated_path);
-    }
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(file, "{line}")?;
-    Ok(())
-}
-
-/*
-CDXC:GPUISidebarFocusDebug 2026-06-26-04:55:
-The GPUI sidebar focus debug log is a temporary root-cause instrument for rapid session bounce reports. Sanitize at the writer boundary, write only JSONL under ~/.ghostex/logs, and allow warning/error events only after dropping raw renderer strings, names, paths, URLs, command text, tokens, titles, terminal output, and unknown keys.
-
-CDXC:DiagnosticsSettings 2026-06-27-22:46:
-Routine GPUI sidebar-focus breadcrumbs now require the gpui.sidebar.focus diagnostic scenario instead of broad Debugging Mode so session-bounce repro logging can be enabled by itself.
-*/
-fn append_gpui_sidebar_focus_debug_log_payload(payload: &str, _debugging_mode: bool) {
-    let Some(line) = gpui_sidebar_focus_debug_log_line_from_payload(
-        payload,
-        shared_settings::shared_sidebar_settings_snapshot()
-            .diagnostic_logging_scenario_enabled("gpui.sidebar.focus"),
-        gpui_current_unix_ms(),
-    ) else {
-        return;
-    };
-    let path = gpui_sidebar_focus_debug_log_path();
-    let _ = append_gpui_sidebar_focus_debug_log_line_to_path(&path, &line);
-}
-
-fn gpui_sidebar_focus_debug_log_line_from_payload(
-    payload: &str,
-    debugging_mode: bool,
-    unix_ms: u64,
-) -> Option<String> {
-    let value = serde_json::from_str::<serde_json::Value>(payload).ok()?;
-    let object = value.as_object()?;
-    let version = object.get("version").and_then(serde_json::Value::as_u64)?;
-    if version != GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_VERSION {
-        return None;
-    }
-    let message_type = object.get("type").and_then(serde_json::Value::as_str)?;
-    if message_type != GPUI_SIDEBAR_SESSION_FOCUS_DEBUG_LOG_MESSAGE_TYPE {
-        return None;
-    }
-
-    let level = gpui_sidebar_focus_debug_log_level(object.get("level"))?;
-    if !debugging_mode && !matches!(level, "warning" | "error") {
-        return None;
-    }
-
-    let event = object
-        .get("event")
-        .and_then(serde_json::Value::as_str)
-        .and_then(gpui_sidebar_focus_debug_sanitized_enum)
-        .unwrap_or_else(|| "unknown".to_string());
-
-    let mut sanitized = serde_json::Map::new();
-    sanitized.insert("area".to_string(), serde_json::json!("gpuiSidebarFocus"));
-    sanitized.insert("unixMs".to_string(), serde_json::json!(unix_ms));
-    sanitized.insert("level".to_string(), serde_json::json!(level));
-    sanitized.insert("event".to_string(), serde_json::Value::String(event));
-
-    for key in GPUI_SIDEBAR_FOCUS_DEBUG_BOOL_KEYS {
-        if let Some(value) = object.get(*key).and_then(serde_json::Value::as_bool) {
-            sanitized.insert((*key).to_string(), serde_json::json!(value));
-        }
-    }
-    for key in GPUI_SIDEBAR_FOCUS_DEBUG_NUMBER_KEYS {
-        if let Some(value) = object
-            .get(*key)
-            .and_then(gpui_sidebar_focus_debug_sanitized_number)
-        {
-            sanitized.insert((*key).to_string(), value);
-        }
-    }
-    for key in GPUI_SIDEBAR_FOCUS_DEBUG_ID_KEYS {
-        if let Some(value) = object
-            .get(*key)
-            .and_then(serde_json::Value::as_str)
-            .and_then(gpui_sidebar_focus_debug_sanitized_id)
-        {
-            sanitized.insert((*key).to_string(), serde_json::Value::String(value));
-        }
-    }
-    for key in GPUI_SIDEBAR_FOCUS_DEBUG_ID_ARRAY_KEYS {
-        if let Some(value) = object
-            .get(*key)
-            .and_then(gpui_sidebar_focus_debug_sanitized_id_array)
-        {
-            sanitized.insert((*key).to_string(), value);
-        }
-    }
-
-    serde_json::to_string(&serde_json::Value::Object(sanitized)).ok()
-}
-
-const GPUI_SIDEBAR_FOCUS_DEBUG_BOOL_KEYS: &[&str] = &[
-    "bridgeAvailable",
-    "bridgeSent",
-    "debuggingMode",
-    "didChange",
-    "hasClient",
-    "hasPresentation",
-    "isLocal",
-    "isRemote",
-    "sameFocusedSession",
-];
-
-const GPUI_SIDEBAR_FOCUS_DEBUG_NUMBER_KEYS: &[&str] = &[
-    "activeProjectSessionCount",
-    "groupCount",
-    "incomingRevision",
-    "latestGroupCount",
-    "latestSessionCount",
-    "presentationRevision",
-    "projectVisibleSessionCount",
-    "removedGroupCount",
-    "removedSessionCount",
-    "revision",
-    "sequence",
-    "sessionCount",
-    "transitionCount",
-    "visibleSessionCount",
-    "visibleSessionCountAfter",
-    "visibleSessionCountBefore",
-    "windowMs",
-];
-
-const GPUI_SIDEBAR_FOCUS_DEBUG_ID_KEYS: &[&str] = &[
-    "activeGroupId",
-    "activeGroupIdAfter",
-    "activeGroupIdBefore",
-    "activeProjectId",
-    "activeProjectIdAfter",
-    "activeProjectIdBefore",
-    "focusedSessionId",
-    "focusedSessionIdAfter",
-    "focusedSessionIdBefore",
-    "groupId",
-    "requestedSessionId",
-    "resolvedProjectId",
-    "resolvedSessionId",
-    "sessionId",
-];
-
-const GPUI_SIDEBAR_FOCUS_DEBUG_ID_ARRAY_KEYS: &[&str] = &[
-    "involvedSessionIds",
-    "projectVisibleSessionIds",
-    "visibleSessionIds",
-    "visibleSessionIdsAfter",
-    "visibleSessionIdsBefore",
-];
-
-fn gpui_sidebar_focus_debug_log_level(value: Option<&serde_json::Value>) -> Option<&'static str> {
-    match value.and_then(serde_json::Value::as_str) {
-        Some("debug") => Some("debug"),
-        Some("info") => Some("info"),
-        Some("warning") => Some("warning"),
-        Some("error") => Some("error"),
-        _ => None,
-    }
-}
-
-fn gpui_sidebar_focus_debug_sanitized_enum(value: &str) -> Option<String> {
-    let value = value.trim();
-    if value.is_empty() || value.chars().count() > 80 {
-        return None;
-    }
-    if value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':'))
-    {
-        Some(value.to_string())
-    } else {
-        None
-    }
-}
-
-fn gpui_sidebar_focus_debug_sanitized_id(value: &str) -> Option<String> {
-    let value = value.trim();
-    if value.is_empty() || value.chars().count() > GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS {
-        return None;
-    }
-    if value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':'))
-    {
-        Some(value.to_string())
-    } else {
-        None
-    }
-}
-
-fn gpui_sidebar_focus_debug_sanitized_id_array(
-    value: &serde_json::Value,
-) -> Option<serde_json::Value> {
-    let array = value.as_array()?;
-    let mut seen = HashSet::new();
-    let mut ids = Vec::new();
-    for value in array {
-        let Some(id) = value
-            .as_str()
-            .and_then(gpui_sidebar_focus_debug_sanitized_id)
-        else {
-            continue;
-        };
-        if seen.insert(id.clone()) {
-            ids.push(serde_json::Value::String(id));
-        }
-        if ids.len() >= GPUI_SIDEBAR_FOCUS_DEBUG_ID_ARRAY_MAX {
-            break;
-        }
-    }
-    Some(serde_json::Value::Array(ids))
-}
-
-fn gpui_sidebar_focus_debug_sanitized_number(
-    value: &serde_json::Value,
-) -> Option<serde_json::Value> {
-    if let Some(number) = value.as_u64() {
-        return Some(serde_json::json!(number));
-    }
-    if let Some(number) = value.as_i64() {
-        return Some(serde_json::json!(number));
-    }
-    None
-}
-
-fn gpui_sidebar_focus_debug_log_path() -> PathBuf {
-    home_dir()
-        .join(".ghostex")
-        .join("logs")
-        .join(GPUI_SIDEBAR_FOCUS_DEBUG_LOG_FILE_NAME)
-}
-
-fn append_gpui_sidebar_focus_debug_log_line_to_path(
-    path: &Path,
-    line: &str,
-) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    if fs::metadata(path)
-        .map(|metadata| metadata.len() > GPUI_SIDEBAR_FOCUS_DEBUG_LOG_MAX_BYTES)
-        .unwrap_or(false)
-    {
-        let rotated_path = path.with_extension("jsonl.1");
-        let _ = fs::rename(path, rotated_path);
-    }
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(file, "{line}")?;
-    Ok(())
-}
-
-fn gpui_current_unix_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
-        .unwrap_or(0)
 }
 
 fn gpui_sidebar_gxserver_presentation_session_id_allowed(value: &str) -> bool {

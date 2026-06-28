@@ -1,4 +1,5 @@
 # CDXC:GPUITestingPolicy 2026-06-27-12:06: GPUI app tests are intentionally absent while product behavior is still moving. Lock GPUI behavior down with tests later, and keep test suites for other Ghostex projects intact.
+# CDXC:GPUITestingPolicy 2026-06-28-15:12: GPUI source should not retain test-only scaffolding while the project policy excludes GPUI tests. Keep behavioral notes in production comments and verify cleanup with compile/check paths instead of hidden #[cfg(test)] helpers.
 [package]
 name = "ghostex-gpui"
 version = "0.1.0"

@@ -237,17 +237,6 @@ impl TerminalHostNativeViewFactory {
 #[cfg(target_os = "macos")]
 pub(crate) struct OwnedTerminalHostNativeView {
     native_view: RealTerminalNativeViewHandle,
-    destroyer: OwnedTerminalHostNativeViewDestroyer,
-}
-
-#[cfg(target_os = "macos")]
-enum OwnedTerminalHostNativeViewDestroyer {
-    AppKit,
-    #[cfg(test)]
-    Test {
-        destroy_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-        destroyed_pointer: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-    },
 }
 
 #[cfg(target_os = "macos")]
@@ -259,27 +248,11 @@ impl OwnedTerminalHostNativeView {
     unsafe fn from_created_native_view(native_view: NonNull<c_void>) -> Self {
         Self {
             native_view: RealTerminalNativeViewHandle { native_view },
-            destroyer: OwnedTerminalHostNativeViewDestroyer::AppKit,
         }
     }
 
     pub(crate) fn real_native_view_handle(&self) -> RealTerminalNativeViewHandle {
         self.native_view
-    }
-
-    #[cfg(test)]
-    pub(crate) unsafe fn from_created_native_view_for_test(
-        native_view: NonNull<c_void>,
-        destroy_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-        destroyed_pointer: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-    ) -> Self {
-        Self {
-            native_view: RealTerminalNativeViewHandle { native_view },
-            destroyer: OwnedTerminalHostNativeViewDestroyer::Test {
-                destroy_count,
-                destroyed_pointer,
-            },
-        }
     }
 }
 
@@ -287,21 +260,8 @@ impl OwnedTerminalHostNativeView {
 impl Drop for OwnedTerminalHostNativeView {
     fn drop(&mut self) {
         terminal_ghostty_surface::unregister_native_key_target(self.native_view);
-        match &self.destroyer {
-            OwnedTerminalHostNativeViewDestroyer::AppKit => unsafe {
-                GhostexGpuiTerminalDestroyHostNativeView(self.native_view.as_ptr());
-            },
-            #[cfg(test)]
-            OwnedTerminalHostNativeViewDestroyer::Test {
-                destroy_count,
-                destroyed_pointer,
-            } => {
-                destroy_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                destroyed_pointer.store(
-                    self.native_view.as_ptr() as usize,
-                    std::sync::atomic::Ordering::SeqCst,
-                );
-            }
+        unsafe {
+            GhostexGpuiTerminalDestroyHostNativeView(self.native_view.as_ptr());
         }
     }
 }
@@ -324,11 +284,6 @@ where
         Self { plan, native_view }
     }
 
-    #[cfg(test)]
-    fn plan(&self) -> NativeTerminalSurfaceAttachmentPlan<SlotId> {
-        self.plan
-    }
-
     pub(crate) fn attachment_plan(&self) -> NativeTerminalSurfaceAttachmentPlan<SlotId> {
         self.plan
     }
@@ -339,14 +294,6 @@ where
 
     pub(crate) fn native_view_handle(&self) -> RealTerminalNativeViewHandle {
         self.real_native_view_handle()
-    }
-
-    #[cfg(test)]
-    fn owns_test_native_view(&self) -> bool {
-        matches!(
-            self.native_view.destroyer,
-            OwnedTerminalHostNativeViewDestroyer::Test { .. }
-        )
     }
 
     fn matches_plan_identity(&self, plan: NativeTerminalSurfaceAttachmentPlan<SlotId>) -> bool {
@@ -390,14 +337,6 @@ where
         Command sleeping wake uses the same typed host-owner move for `CommandTerminalBodyMountSlotId`; the host child view is rekeyed only to the same command group/session slot and never recreated, retargeted to Agents, logged, persisted, or backed by fallback host state.
         */
         AppOwnedTerminalHostNativeView::new(plan, self.native_view)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_owned_native_view_for_test(
-        plan: NativeTerminalSurfaceAttachmentPlan<SlotId>,
-        native_view: OwnedTerminalHostNativeView,
-    ) -> Self {
-        Self::new(plan, native_view)
     }
 }
 
@@ -456,14 +395,6 @@ impl AppOwnedTerminalStartupHostNativeView {
         The startup host owns the retained AppKit child view until a ready startup surface can become the same Running mount slot. Moving `native_view` into `AppOwnedTerminalHostNativeView` preserves the child view and leaves visibility/focus to the existing Running sync path.
         */
         AppOwnedTerminalHostNativeView::new(plan, self.native_view)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_owned_native_view_for_test(
-        plan: AgentsTerminalStartupLaunchPlan,
-        native_view: OwnedTerminalHostNativeView,
-    ) -> Self {
-        Self::new(plan, native_view)
     }
 }
 
@@ -838,14 +769,6 @@ pub(crate) fn set_app_owned_terminal_host_native_view_visible<SlotId>(
         terminal_ghostty_surface::unregister_native_key_target(
             owned_host_view.real_native_view_handle(),
         );
-    }
-    #[cfg(test)]
-    if owned_host_view.owns_test_native_view() {
-        /*
-        CDXC:GPUICommandTerminalParkedOwnerReattach 2026-06-27-07:42:
-        Unit tests use non-AppKit sentinel handles to prove command parked-owner transfer without creating native child views. Skip Objective-C show/hide dispatch for those test-owned handles while keeping production AppKit visibility behavior unchanged.
-        */
-        return;
     }
     let executor =
         NativeTerminalSurfaceAppKitExecutor::new(owned_host_view.real_native_view_handle());

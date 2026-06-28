@@ -506,42 +506,6 @@ impl SharedSidebarSettingsSnapshot {
         strict_bool_field(&self.object, "debuggingMode") == Some(true)
     }
 
-    pub fn diagnostic_logging_scenario_enabled(&self, scenario_id: &str) -> bool {
-        /*
-        CDXC:DiagnosticsSettings 2026-06-27-22:07:
-        GPUI routine support logs use the shared diagnosticLogging.scenarios
-        allowlist instead of broad debuggingMode. Parse only exact scenario ids,
-        strict enabled booleans, and optional ISO expiresAt strings so expired
-        repro logging cannot keep writing noisy JSONL files.
-        */
-        let Some(scenarios) = self
-            .object
-            .get("diagnosticLogging")
-            .and_then(Value::as_object)
-            .and_then(|object| object.get("scenarios"))
-            .and_then(Value::as_object)
-        else {
-            return false;
-        };
-        let Some(state) = scenarios.get(scenario_id) else {
-            return false;
-        };
-        if state.as_bool() == Some(true) {
-            return true;
-        }
-        let Some(state_object) = state.as_object() else {
-            return false;
-        };
-        if state_object.get("enabled").and_then(Value::as_bool) != Some(true) {
-            return false;
-        }
-        let Some(expires_at) = state_object.get("expiresAt").and_then(Value::as_str) else {
-            return true;
-        };
-        shared_settings_iso8601_utc_millis_like(expires_at)
-            && expires_at > shared_settings_iso8601_utc(SystemTime::now()).as_str()
-    }
-
     pub fn show_beta_features(&self) -> bool {
         strict_bool_field(&self.object, "showBetaFeatures") == Some(true)
     }
@@ -1600,10 +1564,9 @@ fn shared_settings_iso8601_utc_millis_like(value: &str) -> bool {
         && bytes[16] == b':'
         && bytes[19] == b'.'
         && bytes[23] == b'Z'
-        && bytes
-            .iter()
-            .enumerate()
-            .all(|(index, byte)| matches!(index, 4 | 7 | 10 | 13 | 16 | 19 | 23) || byte.is_ascii_digit())
+        && bytes.iter().enumerate().all(|(index, byte)| {
+            matches!(index, 4 | 7 | 10 | 13 | 16 | 19 | 23) || byte.is_ascii_digit()
+        })
 }
 
 fn strict_bool_field(object: &Map<String, Value>, key: &str) -> Option<bool> {

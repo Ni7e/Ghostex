@@ -244,7 +244,7 @@ static void GhostexGpuiAppShotsHandleModifierEvent(NSEvent *event) {
 
   /*
   CDXC:GPUIAppShots 2026-06-25-23:07:
-  The App Shots hotkey reads shared Settings for every flagsChanged event so toggles and hotkey changes apply without restarting GPUI. The trigger labels are fixed enum-like values only; never include raw key text, app names, titles, paths, commands, or user content in diagnostics.
+  The App Shots hotkey reads shared Settings for every flagsChanged event so toggles and hotkey changes apply without restarting GPUI. The trigger labels are fixed enum-like values only; never include raw key text, app names, titles, paths, commands, or user content in side-channel metadata.
   */
   NSString *trigger = @"both-command";
   if (hotkey == GhostexGpuiAppShotsHotkeyDoubleLeftShift) {

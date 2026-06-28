@@ -312,116 +312,6 @@ impl GhosttyKitFunctionTable {
                 production_ghostty_surface_complete_clipboard_request,
         }
     }
-
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) const fn new_for_test(
-        init: unsafe fn(usize, *mut *mut c_char) -> c_int,
-        config_new: unsafe fn() -> ffi::ghostty_config_t,
-        config_free: unsafe fn(ffi::ghostty_config_t),
-        config_load_default_files: unsafe fn(ffi::ghostty_config_t),
-        config_finalize: unsafe fn(ffi::ghostty_config_t),
-        app_new: unsafe fn(
-            *const ffi::ghostty_runtime_config_s,
-            ffi::ghostty_config_t,
-        ) -> ffi::ghostty_app_t,
-        app_free: unsafe fn(ffi::ghostty_app_t),
-        app_tick: unsafe fn(ffi::ghostty_app_t),
-        app_set_focus: unsafe fn(ffi::ghostty_app_t, bool),
-        string_free: unsafe fn(ffi::ghostty_string_s),
-        surface_config_new: unsafe fn() -> ffi::ghostty_surface_config_s,
-        surface_new: unsafe fn(
-            ffi::ghostty_app_t,
-            *const ffi::ghostty_surface_config_s,
-        ) -> ffi::ghostty_surface_t,
-        surface_free: unsafe fn(ffi::ghostty_surface_t),
-        surface_set_content_scale: unsafe fn(ffi::ghostty_surface_t, f64, f64),
-        surface_set_size: unsafe fn(ffi::ghostty_surface_t, u32, u32),
-        surface_set_focus: unsafe fn(ffi::ghostty_surface_t, bool),
-        surface_size: unsafe fn(ffi::ghostty_surface_t) -> ffi::ghostty_surface_size_s,
-        surface_needs_confirm_quit: unsafe fn(ffi::ghostty_surface_t) -> bool,
-        surface_process_exited: unsafe fn(ffi::ghostty_surface_t) -> bool,
-        surface_foreground_pid: unsafe fn(ffi::ghostty_surface_t) -> u64,
-        surface_tty_name: unsafe fn(ffi::ghostty_surface_t) -> ffi::ghostty_string_s,
-        surface_key_translation_mods: unsafe fn(
-            ffi::ghostty_surface_t,
-            ffi::ghostty_input_mods_e,
-        ) -> ffi::ghostty_input_mods_e,
-        surface_key: unsafe fn(ffi::ghostty_surface_t, ffi::ghostty_input_key_s) -> bool,
-        surface_key_is_binding: unsafe fn(
-            ffi::ghostty_surface_t,
-            ffi::ghostty_input_key_s,
-            *mut ffi::ghostty_binding_flags_e,
-        ) -> bool,
-        surface_text: unsafe fn(ffi::ghostty_surface_t, *const c_char, usize),
-        surface_preedit: unsafe fn(ffi::ghostty_surface_t, *const c_char, usize),
-        surface_mouse_captured: unsafe fn(ffi::ghostty_surface_t) -> bool,
-        surface_mouse_button: unsafe fn(
-            ffi::ghostty_surface_t,
-            ffi::ghostty_input_mouse_state_e,
-            ffi::ghostty_input_mouse_button_e,
-            ffi::ghostty_input_mods_e,
-        ) -> bool,
-        surface_mouse_pos: unsafe fn(ffi::ghostty_surface_t, f64, f64, ffi::ghostty_input_mods_e),
-        surface_mouse_scroll: unsafe fn(
-            ffi::ghostty_surface_t,
-            f64,
-            f64,
-            ffi::ghostty_input_scroll_mods_t,
-        ),
-        surface_mouse_pressure: unsafe fn(ffi::ghostty_surface_t, u32, f64),
-        surface_ime_point: unsafe fn(
-            ffi::ghostty_surface_t,
-            *mut f64,
-            *mut f64,
-            *mut f64,
-            *mut f64,
-        ),
-        surface_request_close: unsafe fn(ffi::ghostty_surface_t),
-        surface_complete_clipboard_request: unsafe fn(
-            ffi::ghostty_surface_t,
-            *const c_char,
-            *mut c_void,
-            bool,
-        ),
-    ) -> Self {
-        Self {
-            init,
-            config_new,
-            config_free,
-            config_load_default_files,
-            config_finalize,
-            app_new,
-            app_free,
-            app_tick,
-            app_set_focus,
-            string_free,
-            surface_config_new,
-            surface_new,
-            surface_free,
-            surface_set_content_scale,
-            surface_set_size,
-            surface_set_focus,
-            surface_size,
-            surface_needs_confirm_quit,
-            surface_process_exited,
-            surface_foreground_pid,
-            surface_tty_name,
-            surface_key_translation_mods,
-            surface_key,
-            surface_key_is_binding,
-            surface_text,
-            surface_preedit,
-            surface_mouse_captured,
-            surface_mouse_button,
-            surface_mouse_pos,
-            surface_mouse_scroll,
-            surface_mouse_pressure,
-            surface_ime_point,
-            surface_request_close,
-            surface_complete_clipboard_request,
-        }
-    }
 }
 
 unsafe fn production_ghostty_init(argc: usize, argv: *mut *mut c_char) -> c_int {
@@ -1071,11 +961,6 @@ impl GhosttySurfacePreparedConfig {
     fn set_surface_userdata(&mut self, userdata: *mut c_void) {
         self.config.userdata = userdata;
     }
-
-    #[cfg(test)]
-    fn config(&self) -> &ffi::ghostty_surface_config_s {
-        &self.config
-    }
 }
 
 fn cstring_from_validated_launch_string(value: &str) -> CString {
@@ -1173,14 +1058,6 @@ impl GhosttyAppOwner {
         Self::new_after_runtime_init(functions)
     }
 
-    #[cfg(test)]
-    pub(crate) fn new_with_functions(
-        functions: GhosttyKitFunctionTable,
-    ) -> Result<Self, GhosttySurfaceRuntimeError> {
-        initialize_ghostty_runtime(functions)?;
-        Self::new_after_runtime_init(functions)
-    }
-
     fn new_after_runtime_init(
         functions: GhosttyKitFunctionTable,
     ) -> Result<Self, GhosttySurfaceRuntimeError> {
@@ -1229,11 +1106,6 @@ impl GhosttyAppOwner {
             (self.functions.app_set_focus)(self.as_raw(), focused);
         }
         self.latest_focus_state = Some(focused);
-    }
-
-    #[cfg(test)]
-    fn wakeup_requested(&self) -> bool {
-        self.runtime_state.wakeup_requested.load(Ordering::SeqCst)
     }
 }
 
@@ -1552,11 +1424,6 @@ impl GhosttySurfaceCloseToken {
             Ordering::SeqCst,
             Ordering::SeqCst,
         );
-    }
-
-    #[cfg(test)]
-    fn confirmation_needed_pending(&self) -> bool {
-        self.close_state.load(Ordering::SeqCst) == GHOSTTY_SURFACE_CLOSE_STATE_CONFIRMATION_NEEDED
     }
 }
 
@@ -2028,18 +1895,6 @@ where
         self.close_token.clear_confirmation_needed_close_requested();
         self.close_requested = false;
         true
-    }
-
-    #[cfg(test)]
-    pub(crate) fn simulate_runtime_close_callback_for_test(&self, confirmation_needed: bool) {
-        unsafe {
-            ghostty_runtime_close_surface_cb(self.close_token.as_userdata(), confirmation_needed);
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn confirmation_needed_close_pending_for_test(&self) -> bool {
-        self.close_token.confirmation_needed_pending()
     }
 
     pub(crate) fn drain_runtime_clipboard_requests(

@@ -2,7 +2,7 @@ use anyhow::{Context as _, Result};
 use cef::rc::Rc as _;
 use cef::{
     App, BrowserProcessHandler, BrowserSettings, CefString, Client, CommandLine, DictionaryValue,
-    DisplayHandler, Errorcode, Frame, ImplApp, ImplBrowser as _, ImplBrowserHost as _,
+    DisplayHandler, Frame, ImplApp, ImplBrowser as _, ImplBrowserHost as _,
     ImplBrowserProcessHandler, ImplClient, ImplCommandLine as _, ImplDictionaryValue as _,
     ImplDisplayHandler, ImplFrame as _, ImplLifeSpanHandler, ImplListValue as _, ImplLoadHandler,
     ImplProcessMessage as _, ImplRenderProcessHandler, ImplV8Context as _, ImplV8Handler,
@@ -73,8 +73,6 @@ const SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.workspaceTerminalRenameCommand";
 const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.workspaceTerminalLifecycleResult";
-const SIDEBAR_SESSION_FOCUS_DEBUG_LOG_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.sidebar.sessionFocusDebugLog";
 const SIDEBAR_SESSION_STATUS_INDICATORS_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.sessionStatusIndicators";
 const SIDEBAR_PET_OVERLAY_STATE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.sidebar.petOverlayState";
@@ -102,7 +100,6 @@ const SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_JS_FUNCTION: &str =
     "postWorkspaceTerminalRenameCommand";
 const SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_JS_FUNCTION: &str =
     "postWorkspaceTerminalLifecycleResult";
-const SIDEBAR_SESSION_FOCUS_DEBUG_LOG_JS_FUNCTION: &str = "postSessionFocusDebugLog";
 const SIDEBAR_SESSION_STATUS_INDICATORS_JS_FUNCTION: &str = "postSessionStatusIndicators";
 const SIDEBAR_PET_OVERLAY_STATE_JS_FUNCTION: &str = "postPetOverlayState";
 const SIDEBAR_RUNTIME_SETTINGS_JS_OBJECT: &str = "runtimeSettings";
@@ -136,7 +133,6 @@ const PROJECT_WORKAREA_PROJECT_BOARD_IMAGE_REQUEST_JS_FUNCTION: &str =
     "postProjectBoardImageRequest";
 const PROJECT_WORKAREA_MANAGE_FILES_REQUEST_JS_FUNCTION: &str = "postManageFilesRequest";
 const APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.appModalHost.message";
-const APP_MODAL_HOST_LIFECYCLE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.appModalHost.lifecycle";
 const APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY: &str = "ghostexGpuiAppModalHostSurface";
 const APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW: &str = "nativeWindow";
 const APP_MODAL_HOST_BRIDGE_SURFACE_SIDEBAR: &str = "sidebar";
@@ -166,13 +162,6 @@ const SIDEBAR_GXSERVER_BOOTSTRAP_ARGUMENT_COUNT_WITHOUT_VISIBLE_IDS: usize = 8;
 const SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS: usize = 32 * 1024;
 const PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS: usize = 3 * 1024 * 1024;
 const APP_MODAL_HOST_BRIDGE_PAYLOAD_MAX_CHARS: usize = 1024 * 1024;
-const APP_MODAL_HOST_LIFECYCLE_ARGUMENT_COUNT: usize = 5;
-const APP_MODAL_HOST_LIFECYCLE_KIND_ARGUMENT_INDEX: usize = 0;
-const APP_MODAL_HOST_LIFECYCLE_SURFACE_ARGUMENT_INDEX: usize = 1;
-const APP_MODAL_HOST_LIFECYCLE_IS_MAIN_FRAME_ARGUMENT_INDEX: usize = 2;
-const APP_MODAL_HOST_LIFECYCLE_HTTP_STATUS_ARGUMENT_INDEX: usize = 3;
-const APP_MODAL_HOST_LIFECYCLE_ERROR_CODE_ARGUMENT_INDEX: usize = 4;
-const APP_MODAL_HOST_LIFECYCLE_NO_NUMBER: c_int = -1;
 const BROWSER_APP_OWNED_SCRIPT_URL: &str = "ghostex://gpui/browser-feedback";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -191,7 +180,6 @@ enum SidebarBridgeEventKind {
     WorkspaceTerminalFocus,
     WorkspaceTerminalRenameCommand,
     WorkspaceTerminalLifecycleResult,
-    SessionFocusDebugLog,
     SessionStatusIndicators,
     PetOverlayState,
 }
@@ -203,7 +191,11 @@ struct SidebarBridgeFunctionSpec {
     event_kind: SidebarBridgeEventKind,
 }
 
-const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 17] = [
+/*
+CDXC:GPUILoggingRemoval 2026-06-28-17:06:
+GPUI should not expose renderer logging or diagnostic bridge functions while the app is being simplified. Keep this allowlist limited to functional app messages; future diagnostics should add a deliberate, narrow bridge instead of reusing dormant logging plumbing.
+*/
+const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 16] = [
     SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION,
         process_message_name: SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME,
@@ -275,11 +267,6 @@ const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 17] = [
         event_kind: SidebarBridgeEventKind::WorkspaceTerminalLifecycleResult,
     },
     SidebarBridgeFunctionSpec {
-        js_function_name: SIDEBAR_SESSION_FOCUS_DEBUG_LOG_JS_FUNCTION,
-        process_message_name: SIDEBAR_SESSION_FOCUS_DEBUG_LOG_PROCESS_MESSAGE_NAME,
-        event_kind: SidebarBridgeEventKind::SessionFocusDebugLog,
-    },
-    SidebarBridgeFunctionSpec {
         js_function_name: SIDEBAR_SESSION_STATUS_INDICATORS_JS_FUNCTION,
         process_message_name: SIDEBAR_SESSION_STATUS_INDICATORS_PROCESS_MESSAGE_NAME,
         event_kind: SidebarBridgeEventKind::SessionStatusIndicators,
@@ -345,10 +332,6 @@ impl AppModalHostBridgeSurface {
         }
     }
 
-    pub fn log_value(self) -> &'static str {
-        self.extra_info_value()
-    }
-
     fn from_extra_info_value(value: &str) -> Option<Self> {
         match value {
             APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW => Some(Self::NativeWindow),
@@ -357,61 +340,6 @@ impl AppModalHostBridgeSurface {
             _ => None,
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AppModalHostLifecycleEventKind {
-    LoadStart,
-    LoadEnd,
-    LoadError,
-    ContextCreated,
-    BridgeInstalled,
-    BridgePostMessageCalled,
-}
-
-impl AppModalHostLifecycleEventKind {
-    fn message_value(self) -> &'static str {
-        match self {
-            Self::LoadStart => "loadStart",
-            Self::LoadEnd => "loadEnd",
-            Self::LoadError => "loadError",
-            Self::ContextCreated => "contextCreated",
-            Self::BridgeInstalled => "bridgeInstalled",
-            Self::BridgePostMessageCalled => "bridgePostMessageCalled",
-        }
-    }
-
-    pub fn log_event_name(self) -> &'static str {
-        match self {
-            Self::LoadStart => "cef.load.start",
-            Self::LoadEnd => "cef.load.end",
-            Self::LoadError => "cef.load.error",
-            Self::ContextCreated => "cef.context.created",
-            Self::BridgeInstalled => "cef.bridge.installed",
-            Self::BridgePostMessageCalled => "cef.bridge.postMessage.called",
-        }
-    }
-
-    fn from_message_value(value: &str) -> Option<Self> {
-        match value {
-            "loadStart" => Some(Self::LoadStart),
-            "loadEnd" => Some(Self::LoadEnd),
-            "loadError" => Some(Self::LoadError),
-            "contextCreated" => Some(Self::ContextCreated),
-            "bridgeInstalled" => Some(Self::BridgeInstalled),
-            "bridgePostMessageCalled" => Some(Self::BridgePostMessageCalled),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AppModalHostLifecycleEvent {
-    pub kind: AppModalHostLifecycleEventKind,
-    pub surface: Option<AppModalHostBridgeSurface>,
-    pub is_main_frame: bool,
-    pub http_status_code: Option<c_int>,
-    pub error_code: Option<c_int>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -528,16 +456,6 @@ fn app_modal_host_bridge_surface_for_browser_id(
         .with(|surfaces| surfaces.borrow().get(&browser_id).copied())
 }
 
-fn app_modal_host_bridge_surface_for_frame(frame: &Frame) -> Option<AppModalHostBridgeSurface> {
-    frame
-        .browser()
-        .and_then(|browser| app_modal_host_bridge_surface_for_browser_id(browser.identifier()))
-        .or_else(|| {
-            let frame_url = CefString::from(&frame.url()).to_string();
-            app_modal_host_bridge_surface_for_frame_url(&frame_url)
-        })
-}
-
 thread_local! {
     static CEF_BROWSERS_BY_NATIVE_VIEW: RefCell<HashMap<usize, cef::Browser>> = RefCell::new(HashMap::new());
     static CEF_REQUEST_CONTEXTS_BY_PROFILE: RefCell<HashMap<String, cef::RequestContext>> = RefCell::new(HashMap::new());
@@ -575,7 +493,6 @@ pub enum SidebarBridgeEvent {
     WorkspaceTerminalFocus(String),
     WorkspaceTerminalRenameCommand(String),
     WorkspaceTerminalLifecycleResult(String),
-    SessionFocusDebugLog(String),
     SessionStatusIndicators(String),
     PetOverlayState(String),
 }
@@ -595,7 +512,6 @@ pub type ProjectWorkareaBridgeEventHandler = StdRc<dyn Fn(ProjectWorkareaBridgeE
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AppModalHostBridgeEvent {
     Message(String),
-    Lifecycle(AppModalHostLifecycleEvent),
 }
 
 pub type AppModalHostBridgeEventHandler = StdRc<dyn Fn(AppModalHostBridgeEvent)>;
@@ -625,7 +541,6 @@ impl SidebarBridgeEventKind {
             Self::WorkspaceTerminalLifecycleResult => {
                 SidebarBridgeEvent::WorkspaceTerminalLifecycleResult(payload)
             }
-            Self::SessionFocusDebugLog => SidebarBridgeEvent::SessionFocusDebugLog(payload),
             Self::SessionStatusIndicators => SidebarBridgeEvent::SessionStatusIndicators(payload),
             Self::PetOverlayState => SidebarBridgeEvent::PetOverlayState(payload),
         }
@@ -753,13 +668,13 @@ pub fn initialize() -> Result<()> {
     };
 
     /*
-    CDXC:GPUIPhase1 2026-06-14-15:25:
-    The GPUI shell must use Tauri's cef-rs binding path instead of the earlier GhostexCEFBridge.mm browser wrapper. Initialize CEF through cef-rs, keep GPUI as the AppKit loop owner, and scope profile data to the prototype so the React sidebar and main browser share a stable Chromium runtime without production-host coupling.
+    CDXC:GPUICefRuntime 2026-06-14-15:25:
+    The GPUI shell must use Tauri's cef-rs binding path instead of the earlier GhostexCEFBridge.mm browser wrapper. Initialize CEF through cef-rs, keep GPUI as the AppKit loop owner, and scope profile data to the GPUI app so the React sidebar and main browser share a stable Chromium runtime without production-host coupling.
 
-    CDXC:GPUIPhase1 2026-06-14-16:29:
+    CDXC:GPUICefMessagePump 2026-06-14-16:29:
     GPUI runs a blocking NSApplication loop, so the cef-rs port must use CEF's external_message_pump together with BrowserProcessHandler::on_schedule_message_pump_work. CEF schedules each pump step and the AppKit shim executes it on the main queue, avoiding the Chromium run-loop observer trap caused by an unconditional timer.
 
-    CDXC:GPUIPhase1 2026-06-14-16:54:
+    CDXC:GPUICefMessagePump 2026-06-14-16:54:
     CEF can call on_schedule_message_pump_work during cef::initialize before the first browser is created. Install the GPUI pump gate before initialization so those startup callbacks reach the main queue instead of leaving Chromium partially initialized with only helper processes alive.
     */
     unsafe { GhostexGpuiCEFInstallMessagePump() };
@@ -799,8 +714,8 @@ wrap_app! {
             command_line: Option<&mut CommandLine>,
         ) {
             /*
-            CDXC:GPUIPhase1 2026-06-14-17:00:
-            The GPUI shell is a local prototype and must not block CEF startup on macOS Keychain prompts or locks. Match production Ghostex's CEF switch set by using Chromium's mock keychain and keeping browser subprocesses foreground-capable for embedded child views.
+            CDXC:GPUICefCommandLine 2026-06-14-17:00:
+            The GPUI shell is a local app and must not block CEF startup on macOS Keychain prompts or locks. Match production Ghostex's CEF switch set by using Chromium's mock keychain and keeping browser subprocesses foreground-capable for embedded child views.
             */
             if let Some(command_line) = command_line {
                 command_line.append_switch(Some(&CefString::from("use-mock-keychain")));
@@ -901,30 +816,13 @@ wrap_client! {
                 project_workarea_bridge_event_kind_for_process_message(&message_name);
             let is_app_modal_host_message =
                 message_name == APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME;
-            let is_app_modal_host_lifecycle_message =
-                message_name == APP_MODAL_HOST_LIFECYCLE_PROCESS_MESSAGE_NAME;
             if sidebar_event_kind.is_none()
                 && project_workarea_event_kind.is_none()
                 && !is_app_modal_host_message
-                && !is_app_modal_host_lifecycle_message
             {
                 return 0;
             }
             if frame.map(|frame| frame.is_main() == 0).unwrap_or(true) {
-                return 1;
-            }
-
-            if is_app_modal_host_lifecycle_message {
-                let Some(handler) = self.app_modal_host_bridge_event_handler.clone() else {
-                    return 0;
-                };
-                /*
-                CDXC:GPUIAppModalDiagnostics 2026-06-27-20:31:
-                Blank GPUI app-modal windows need first-party CEF lifecycle breadcrumbs before the React modal host can post `ready`. Forward only fixed enum-like lifecycle fields from tagged sidebar/titlebar/native modal surfaces; do not forward or log renderer URLs, titles, page text, command content, file paths, or generic IPC names.
-                */
-                if let Some(event) = app_modal_host_lifecycle_event_from_process_message(message) {
-                    handler(AppModalHostBridgeEvent::Lifecycle(event));
-                }
                 return 1;
             }
 
@@ -1054,80 +952,6 @@ wrap_load_handler! {
     }
 }
 
-wrap_load_handler! {
-    struct GhostexGpuiAppModalHostLoadHandler {
-        surface: AppModalHostBridgeSurface,
-    }
-
-    impl LoadHandler {
-        fn on_load_start(
-            &self,
-            _browser: Option<&mut cef::Browser>,
-            frame: Option<&mut Frame>,
-            _transition_type: cef::TransitionType,
-        ) {
-            let Some(frame) = frame else {
-                return;
-            };
-            /*
-            CDXC:GPUIAppModalDiagnostics 2026-06-27-20:31:
-            The native Settings/Hotkeys app-modal host must expose whether CEF reached the first-party modal page before React posts `ready`. Emit only lifecycle enum/state fields from the tagged surface so support logs can diagnose blank windows without raw URL, path, title, text, or command data.
-            */
-            let is_main_frame = frame.is_main() != 0;
-            let _ = send_app_modal_host_lifecycle_process_message(
-                frame,
-                AppModalHostLifecycleEventKind::LoadStart,
-                Some(self.surface),
-                is_main_frame,
-                None,
-                None,
-            );
-        }
-
-        fn on_load_end(
-            &self,
-            _browser: Option<&mut cef::Browser>,
-            frame: Option<&mut Frame>,
-            http_status_code: c_int,
-        ) {
-            let Some(frame) = frame else {
-                return;
-            };
-            let is_main_frame = frame.is_main() != 0;
-            let _ = send_app_modal_host_lifecycle_process_message(
-                frame,
-                AppModalHostLifecycleEventKind::LoadEnd,
-                Some(self.surface),
-                is_main_frame,
-                Some(http_status_code),
-                None,
-            );
-        }
-
-        fn on_load_error(
-            &self,
-            _browser: Option<&mut cef::Browser>,
-            frame: Option<&mut Frame>,
-            _error_code: Errorcode,
-            _error_text: Option<&CefString>,
-            _failed_url: Option<&CefString>,
-        ) {
-            let Some(frame) = frame else {
-                return;
-            };
-            let is_main_frame = frame.is_main() != 0;
-            let _ = send_app_modal_host_lifecycle_process_message(
-                frame,
-                AppModalHostLifecycleEventKind::LoadError,
-                Some(self.surface),
-                is_main_frame,
-                None,
-                None,
-            );
-        }
-    }
-}
-
 wrap_render_process_handler! {
     struct GhostexGpuiRenderProcessHandler;
 
@@ -1177,26 +1001,10 @@ wrap_render_process_handler! {
             CDXC:GPUITitlebarAppModalHost 2026-06-24-11:09:
             Install the CEF-compatible `window.webkit.messageHandlers.ghostexAppModalHost` shim at V8 context creation for only bundled modal-host.html, titlebar-host.html, and sidebar index.html entries. The shared React modal host posts `ready` during mount, the titlebar Tips panel posts sidebarCommand header actions, and the shared sidebar can emit Settings/Hotkeys/Command Palette opens after hydration, so waiting for load-end would race real presentation. Only modal-host.html receives the native-window identity fields; Browser tabs, project workareas, arbitrary pages, raw URLs, titles, logs, persistence, and generic IPC do not receive this bridge.
 
-            CDXC:GPUIAppModalDiagnostics 2026-06-27-20:31:
-            CEF bridge installation must prefer the app-owned surface role passed through `extra_info`, with URL matching only as compatibility for packaged first-party entries. This prevents blank modal debugging from widening bridge access to arbitrary Browser/workarea content while still logging fixed lifecycle state before React posts `ready`.
+            CDXC:GPUILoggingRemoval 2026-06-28-17:06:
+            App-modal CEF setup keeps only the functional host message bridge. Do not emit lifecycle diagnostic IPC or renderer logging events from bridge installation while GPUI logging is intentionally removed.
             */
-            let _ = send_app_modal_host_lifecycle_process_message(
-                frame,
-                AppModalHostLifecycleEventKind::ContextCreated,
-                Some(surface),
-                true,
-                None,
-                None,
-            );
             install_app_modal_host_v8_bridge(Some(context), expose_native_window_identity);
-            let _ = send_app_modal_host_lifecycle_process_message(
-                frame,
-                AppModalHostLifecycleEventKind::BridgeInstalled,
-                Some(surface),
-                true,
-                None,
-                None,
-            );
         }
 
         fn on_process_message_received(
@@ -1323,9 +1131,6 @@ wrap_v8_handler! {
             if name.as_deref() != Some(WEBKIT_POST_MESSAGE_JS_FUNCTION) {
                 return 0;
             }
-            let _ = send_app_modal_host_lifecycle_process_message_from_current_context(
-                AppModalHostLifecycleEventKind::BridgePostMessageCalled,
-            );
 
             let payload = arguments
                 .and_then(|arguments| arguments.first())
@@ -1387,7 +1192,7 @@ fn install_sidebar_project_context_v8_bridge(
 ) {
     /*
     CDXC:GPUIProjectSidebarBridge 2026-06-23-18:29:
-    The renderer-side sidebar bridge exposes only fixed typed string-payload functions for active-project context, Source readiness, Browser readiness, project-workarea readiness, Manage operation requests, sidebar-native side-effect requests, gxserver focus-state hints, workspace terminal focus and rename requests, and the sanitized session-focus debug log, plus `window.ghostexGpui.runtimeSettings` with strict debuggingMode/showBetaFeatures booleans and the saved shared Settings object. It does not expose generic message names, event buses, filesystem/project detection, trusted file paths, URL/title inspection, arbitrary logging, persistence, or fallback project inference.
+    The renderer-side sidebar bridge exposes only fixed typed string-payload functions for active-project context, Source readiness, Browser readiness, project-workarea readiness, Manage operation requests, sidebar-native side-effect requests, gxserver focus-state hints, and workspace terminal focus and rename requests, plus `window.ghostexGpui.runtimeSettings` with strict debuggingMode/showBetaFeatures booleans and the saved shared Settings object. It does not expose generic message names, event buses, filesystem/project detection, trusted file paths, URL/title inspection, arbitrary logging, persistence, or fallback project inference.
 
     CDXC:GPUIProjectSidebarBridge 2026-06-23-06:57:
     After initial install, runtime settings refresh uses a second private browser-to-renderer CEF message that can replace the sidebar runtimeSettings object and notify the page through `window.ghostexGpui.onRuntimeSettingsChanged(settings)`. This keeps ordinary Browser tabs out of the sidebar bridge and avoids a generic event/settings bus.
@@ -1406,9 +1211,6 @@ fn install_sidebar_project_context_v8_bridge(
 
     CDXC:GPUIWorkspaceRenameCommand 2026-06-27-02:27:
     Workspace terminal rename parity adds one fixed sidebar-only bridge function for the already-trimmed rename title plus gxserver project/session ids. CEF still exposes no generic terminal-text sender, command bus, cwd/path authority, logging path, renderer-selected target surface, or fallback terminal IPC.
-
-    CDXC:GPUISidebarFocusDebug 2026-06-26-04:55:
-    The focus-debug bridge is a separate fixed sidebar-only diagnostic path for focus bounce investigation. Rust must sanitize at the support-log writer boundary and Debugging Mode must gate routine events, while warning-level loop events may persist without raw names, paths, URLs, commands, tokens, titles, or terminal data.
 
     CDXC:GPUICommandPane 2026-06-24-23:17:
     The sidebar command-action bridge is a fixed-function handoff for the shared SidebarApp `runSidebarCommand` message. It may carry the selected gxserver HUD action fields to app Rust, but it must not expose generic IPC, filesystem/project discovery, logs, persistence, terminal content, stdout/stderr, or renderer-side execution authority.
@@ -2243,101 +2045,6 @@ fn send_app_modal_host_bridge_process_message(payload: &str) -> bool {
     true
 }
 
-fn send_app_modal_host_lifecycle_process_message(
-    frame: &Frame,
-    kind: AppModalHostLifecycleEventKind,
-    surface: Option<AppModalHostBridgeSurface>,
-    is_main_frame: bool,
-    http_status_code: Option<c_int>,
-    error_code: Option<c_int>,
-) -> bool {
-    let mut message = match cef::process_message_create(Some(&CefString::from(
-        APP_MODAL_HOST_LIFECYCLE_PROCESS_MESSAGE_NAME,
-    ))) {
-        Some(message) => message,
-        None => return false,
-    };
-    let Some(arguments) = message.argument_list() else {
-        return false;
-    };
-    arguments.set_size(APP_MODAL_HOST_LIFECYCLE_ARGUMENT_COUNT);
-    arguments.set_string(
-        APP_MODAL_HOST_LIFECYCLE_KIND_ARGUMENT_INDEX,
-        Some(&CefString::from(kind.message_value())),
-    );
-    arguments.set_string(
-        APP_MODAL_HOST_LIFECYCLE_SURFACE_ARGUMENT_INDEX,
-        Some(&CefString::from(
-            surface
-                .map(AppModalHostBridgeSurface::extra_info_value)
-                .unwrap_or(""),
-        )),
-    );
-    arguments.set_bool(
-        APP_MODAL_HOST_LIFECYCLE_IS_MAIN_FRAME_ARGUMENT_INDEX,
-        bool_to_cef_int(is_main_frame),
-    );
-    arguments.set_int(
-        APP_MODAL_HOST_LIFECYCLE_HTTP_STATUS_ARGUMENT_INDEX,
-        http_status_code.unwrap_or(APP_MODAL_HOST_LIFECYCLE_NO_NUMBER),
-    );
-    arguments.set_int(
-        APP_MODAL_HOST_LIFECYCLE_ERROR_CODE_ARGUMENT_INDEX,
-        error_code.unwrap_or(APP_MODAL_HOST_LIFECYCLE_NO_NUMBER),
-    );
-    frame.send_process_message(ProcessId::BROWSER, Some(&mut message));
-    true
-}
-
-fn send_app_modal_host_lifecycle_process_message_from_current_context(
-    kind: AppModalHostLifecycleEventKind,
-) -> bool {
-    let Some(context) = cef::v8_context_get_current_context() else {
-        return false;
-    };
-    let Some(frame) = context.frame() else {
-        return false;
-    };
-    let surface = app_modal_host_bridge_surface_for_frame(&frame);
-    send_app_modal_host_lifecycle_process_message(
-        &frame,
-        kind,
-        surface,
-        frame.is_main() != 0,
-        None,
-        None,
-    )
-}
-
-fn app_modal_host_lifecycle_event_from_process_message(
-    message: &ProcessMessage,
-) -> Option<AppModalHostLifecycleEvent> {
-    let arguments = message.argument_list()?;
-    if arguments.size() != APP_MODAL_HOST_LIFECYCLE_ARGUMENT_COUNT {
-        return None;
-    }
-    if arguments.get_type(APP_MODAL_HOST_LIFECYCLE_KIND_ARGUMENT_INDEX) != ValueType::STRING
-        || arguments.get_type(APP_MODAL_HOST_LIFECYCLE_SURFACE_ARGUMENT_INDEX) != ValueType::STRING
-    {
-        return None;
-    }
-    let kind = CefString::from(&arguments.string(APP_MODAL_HOST_LIFECYCLE_KIND_ARGUMENT_INDEX))
-        .to_string();
-    let surface =
-        CefString::from(&arguments.string(APP_MODAL_HOST_LIFECYCLE_SURFACE_ARGUMENT_INDEX))
-            .to_string();
-    let http_status_code = arguments.int(APP_MODAL_HOST_LIFECYCLE_HTTP_STATUS_ARGUMENT_INDEX);
-    let error_code = arguments.int(APP_MODAL_HOST_LIFECYCLE_ERROR_CODE_ARGUMENT_INDEX);
-    Some(AppModalHostLifecycleEvent {
-        kind: AppModalHostLifecycleEventKind::from_message_value(kind.as_str())?,
-        surface: AppModalHostBridgeSurface::from_extra_info_value(surface.as_str()),
-        is_main_frame: arguments.bool(APP_MODAL_HOST_LIFECYCLE_IS_MAIN_FRAME_ARGUMENT_INDEX) != 0,
-        http_status_code: (http_status_code != APP_MODAL_HOST_LIFECYCLE_NO_NUMBER)
-            .then_some(http_status_code),
-        error_code: (error_code != APP_MODAL_HOST_LIFECYCLE_NO_NUMBER).then_some(error_code),
-    })
-}
-
 fn set_v8_bool_return(retval: Option<&mut Option<V8Value>>, value: bool) {
     if let Some(retval) = retval {
         *retval = cef::v8_value_create_bool(if value { 1 } else { 0 });
@@ -2500,8 +2207,6 @@ impl CefBrowser {
                 ))
             } else if project_workarea_bridge_event_handler.is_some() {
                 Some(GhostexGpuiProjectWorkareaBridgeLoadHandler::new())
-            } else if let Some(surface) = app_modal_host_bridge_surface {
-                Some(GhostexGpuiAppModalHostLoadHandler::new(surface))
             } else {
                 None
             };
@@ -2579,7 +2284,7 @@ impl CefBrowser {
         let native_view = host.window_handle();
         unsafe {
             /*
-            CDXC:GPUIPhase1 2026-06-14-15:25:
+            CDXC:GPUICefNativeViewFrame 2026-06-14-15:25:
             Match Tauri's CEF child-view model: cef-rs owns the browser host while a thin platform adapter positions the native child view inside the GPUI-owned parent. The shim respects the parent NSView's flipped coordinate system so CEF never overlaps GPUI chrome or sibling surfaces.
             */
             GhostexGpuiCEFSetNativeViewFrame(
@@ -2613,7 +2318,7 @@ impl CefBrowser {
             return;
         };
         /*
-        CDXC:GPUIPhase1 2026-06-14-16:31:
+        CDXC:GPUICefFocusRouting 2026-06-14-16:31:
         Web-page text fields inside CEF must regain both AppKit first-responder ownership and Chromium browser focus after GPUI chrome has been focused. Without this handoff, macOS command shortcuts such as Cmd+A can stay routed to GPUI instead of selecting text in the active page input.
         */
         unsafe {
@@ -2933,7 +2638,7 @@ pub extern "C" fn GhostexGpuiCEFDoMessageLoopWork() {
 #[unsafe(no_mangle)]
 pub extern "C" fn GhostexGpuiCEFHandleSelectAllForNativeView(native_view: *mut c_void) -> c_int {
     /*
-    CDXC:GPUIPhase1 2026-06-14-17:25:
+    CDXC:GPUICefEditCommands 2026-06-14-17:25:
     Native AppKit command dispatch can reach CEF's NSView even when GPUI still remembers the address input as its focused element. Keep a main-thread native-view to cef-rs browser registry so the standard selectAll: command can call Chromium's Frame::select_all for the focused page field instead of selecting GPUI chrome.
     */
     select_all_for_native_view(native_view)
