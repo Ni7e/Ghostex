@@ -1,13 +1,5 @@
 # gxserver architecture and protocol baseline
 
-<!--
-CDXC:GxserverArchitecture 2026-05-30-14:04:
-gxserver is the daemon/server name and is not the gx CLI. This branch is a hard cutover: future work must move non-UI backend ownership into gxserver without compatibility mode, dual backend routing, or gradual bridge behavior.
-
-CDXC:GxserverArchitecture 2026-05-30-14:04:
-The macOS app keeps the React sidebar, native UI, native renderer, pane layout, browser/editor surfaces, and client chrome. gxserver owns shared backend state, terminal/session lifecycle decisions, zmx identity, remote control, storage, auth, API, logs, and packaging behavior.
--->
-
 This document is the source of truth for the gxserver hard-cutover architecture. Future gxserver beads should update this document and the shared TypeScript protocol types when requirements change.
 
 Operational commands, install paths, server-only packaging, remote setup, and troubleshooting live in [gxserver operations](./gxserver-operations.md).
