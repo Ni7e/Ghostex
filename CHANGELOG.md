@@ -32,6 +32,22 @@
 <!-- CDXC:Distribution 2026-06-19-16:11: Release notes for 4.21.1 must cover fresh agent startup materialization, focused-session command actions, Git commit modal polish, and Chromium page-canvas appearance fixes while preserving Major and Minor top-level bullets. -->
 <!-- CDXC:Distribution 2026-06-19-20:37: Release notes for 4.21.3 and the previous two public sections must be shorter and simpler: use only Major and Minor top-level bullets with direct user-facing sub-bullets, while still covering Settings focus, Browser appearance, status-menu clicks, Resources, agent prompt chunking, and Rust gxserver parity. -->
 <!-- CDXC:Distribution 2026-06-21-04:22: Release notes for 4.21.4 must stay simple with only Major and Minor top-level bullets, short user-facing sub-bullets, and coverage for Manage, Settings reliability, Integrations recovery controls, Project Board feedback, and native/browser polish. -->
+<!-- CDXC:Distribution 2026-06-28-09:00: Release notes for 5.0.0 must keep the simple Major and Minor top-level bullet structure while covering Docs, simplified Settings, Source/runtime reliability, GPUI progress, sidebar performance, app icons, history search, and contributor credits. -->
+
+## 5.0.0 - 2026-06-28
+
+- Major
+  - Docs replaces Manage as the project document workarea with folders, Markdown, HTML explainers, Excalidraw drawings, review annotations, and Agentation feedback.
+  - Settings are simpler, with persisted Show Advanced, clearer Enable Experimental Features naming, visible Agents Hub access, and calmer app-icon controls.
+  - Source and project editor panes switch more reliably, show native load errors clearly, and avoid shared runtime port conflicts.
+  - The GPUI app continues moving toward cross-platform parity with sidebar, Source, browser, settings, remote, and command workflow progress.
+  - The Rust gxserver path now covers more session status, title, renderer-command, activity, and lifecycle behavior.
+- Minor
+  - Custom app icons can update the running app, Dock tile, and bundle icon more consistently. Thanks @NiTE.
+  - Sidebar search, collapsed project drawers, and first-responder focus handoff are faster and steadier.
+  - Agent history search finds newer Codex prompts and very large Codex transcripts more reliably.
+  - Homebrew installs no longer show the old macOS requirement warning. Thanks @Yabuku-xD.
+  - Tips now point users toward Ghostex Browser Use, Ghostex Computer Use, and Faster Chrome DevTools setup.
 
 ## 4.21.4 - 2026-06-21
 
