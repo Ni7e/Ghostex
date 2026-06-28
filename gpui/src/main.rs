@@ -2810,8 +2810,16 @@ const SOURCE_CODE_SERVER_ENTRYPOINT_RESOURCE_PRIVACY_LABEL: &str =
 const SOURCE_CODE_SERVER_NODE_RUNTIME_RESOURCE_PRIVACY_LABEL: &str =
     "appResourceCodeServerNodeRuntime";
 const SOURCE_CODE_SERVER_EDITOR_HOST: &str = "127.0.0.1";
-const SOURCE_CODE_SERVER_EDITOR_PORT: u16 = 3775;
-const SOURCE_CODE_SERVER_EDITOR_ORIGIN: &str = "http://127.0.0.1:3775";
+/*
+CDXC:GPUISourceRuntime 2026-06-28-04:05:
+GPUI Source must not bind the macOS app's 3775 listener or share its code-server
+profile. The macOS header click lag was caused by a GPUI-owned 3775 listener, so
+GPUI owns a separate localhost port and storage name while keeping all project
+URLs derived from the strict in-memory sidebar snapshot.
+*/
+const SOURCE_CODE_SERVER_EDITOR_PORT: u16 = 3777;
+const SOURCE_CODE_SERVER_EDITOR_ORIGIN: &str = "http://127.0.0.1:3777";
+const SOURCE_CODE_SERVER_RUNTIME_STORAGE_NAME: &str = "code-server-runtime-gpui";
 const SOURCE_CODE_SERVER_STARTUP_GRACE_INTERVAL: Duration = Duration::from_secs(10);
 const SOURCE_CODE_SERVER_PORT_BUSY_WAIT_INTERVAL: Duration = Duration::from_secs(2);
 const SOURCE_CODE_SERVER_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -13393,7 +13401,7 @@ impl ProjectWorkareaRealRuntimeUrl {
 
 /*
 CDXC:GPUISourceRuntime 2026-06-24-23:17:
-The GPUI Source page now owns the same shared code-server runtime shape as the macOS app: one localhost process on 127.0.0.1:3775, a project folder URL derived only from the explicit sidebar snapshot, and runtime-only process/URL state that is never written to shell persistence or logs.
+The GPUI Source page owns a shared code-server runtime shape: one localhost process, a project folder URL derived only from the explicit sidebar snapshot, and runtime-only process/URL state that is never written to shell persistence or logs.
 */
 #[derive(Clone, PartialEq, Eq)]
 struct SourceCodeServerRuntimeTarget {
@@ -72001,7 +72009,8 @@ fn source_code_server_validate_development_payload(repo_root: &Path) -> Result<(
 
 #[cfg(target_os = "macos")]
 fn source_code_server_runtime_storage() -> Result<(PathBuf, PathBuf), String> {
-    let storage = shared_settings::ghostex_home_root().join("code-server-runtime");
+    let storage =
+        shared_settings::ghostex_home_root().join(SOURCE_CODE_SERVER_RUNTIME_STORAGE_NAME);
     let user_data_dir = storage.join("user-data");
     let extensions_dir = storage.join("extensions");
     fs::create_dir_all(&user_data_dir)
