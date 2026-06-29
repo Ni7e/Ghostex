@@ -10,6 +10,7 @@ import path from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { automationHelpCommands, registerAutomationCommands } from "./ghostex-cli-automations.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_PORT = 58743;
@@ -141,12 +142,6 @@ const COMMANDS = new Map([
   ["run-command", bridgeAction("runCommand", parseCommandButton)],
   ["click-button", bridgeAction("clickButton", parseClickButton)],
   ["save-agent", bridgeAction("saveAgent", parseSaveAgent, { failOnNotOk: true })],
-  ["automation-state", bridgeAction("automationState", parseAutomationProject, { failOnNotOk: true })],
-  ["automation-save", bridgeAction("automationSave", parseAutomationSave, { failOnNotOk: true })],
-  ["automation-run-now", bridgeAction("automationRunNow", parseAutomationId, { failOnNotOk: true })],
-  ["automation-set-enabled", bridgeAction("automationSetEnabled", parseAutomationEnabled, { failOnNotOk: true })],
-  ["automation-archive-run", bridgeAction("automationArchiveRun", parseAutomationRun, { failOnNotOk: true })],
-  ["automation-mark-run-read", bridgeAction("automationMarkRunRead", parseAutomationRun, { failOnNotOk: true })],
   ["focus-session", bridgeAction("focusSession", parseSessionSelector)],
   ["acknowledge-session-attention", bridgeAction("acknowledgeSessionAttention", parseSessionSelector)],
   ["ack-session-attention", bridgeAction("acknowledgeSessionAttention", parseSessionSelector)],
@@ -204,6 +199,13 @@ const COMMANDS = new Map([
   ["bundle", bundleCommand],
   ["help", helpCommand],
 ]);
+
+registerAutomationCommands(COMMANDS, {
+  callGxserverRpc,
+  isFailedCliResult,
+  parseArgs,
+  printJson,
+});
 
 if (isDirectCliEntryPoint()) {
   main().catch((error) => {
@@ -1637,12 +1639,6 @@ async function sendGxserverCliAction(action, payload = {}, flags = {}) {
     case "sendMessage":
       return callGxserverRpc("/api/sendSessionMessage", payload, flags);
     case "assertSidebarCard":
-    case "automationArchiveRun":
-    case "automationMarkRunRead":
-    case "automationRunNow":
-    case "automationSave":
-    case "automationSetEnabled":
-    case "automationState":
     case "clickButton":
     case "focusGroup":
     case "fullReloadSession":
@@ -5594,43 +5590,6 @@ function parseSaveAgent(rest, flags) {
   };
 }
 
-function parseAutomationProject(rest, flags) {
-  return {
-    projectId: flags.projectId,
-    projectPath: flags.projectPath ?? flags.path ?? rest[0],
-  };
-}
-
-function parseAutomationSave(rest, flags) {
-  const definitionJson = flags.definitionJson ?? flags.payloadJson ?? rest.join(" ");
-  return {
-    ...parseAutomationProject([], flags),
-    definition: typeof definitionJson === "string" ? parseJson(definitionJson) : undefined,
-  };
-}
-
-function parseAutomationId(rest, flags) {
-  return {
-    ...parseAutomationProject([], flags),
-    automationId: flags.automationId ?? flags.id ?? rest[0],
-  };
-}
-
-function parseAutomationEnabled(rest, flags) {
-  return {
-    ...parseAutomationId(rest, flags),
-    enabled: parseBoolean(flags.enabled ?? flags.value ?? rest[1] ?? "true"),
-  };
-}
-
-function parseAutomationRun(rest, flags) {
-  return {
-    ...parseAutomationProject([], flags),
-    removeWorktree: parseBoolean(flags.removeWorktree ?? "false"),
-    runId: flags.runId ?? flags.id ?? rest[0],
-  };
-}
-
 function parseGroup(rest, flags) {
   return { groupId: flags.groupId ?? rest[0] };
 }
@@ -5987,12 +5946,7 @@ function usage() {
 
   const automationCommands = [
     formatHelpCommand("save-agent --agent-id id --name name --command command", "Create or update an agent button"),
-    formatHelpCommand("automation-state [--path path|--project-id id]", "Print project automations and run history"),
-    formatHelpCommand("automation-save --path path --definition-json json", "Create or update an automation"),
-    formatHelpCommand("automation-run-now <automationId> --path path", "Queue an automation immediately"),
-    formatHelpCommand("automation-set-enabled <automationId> <true|false> --path path", "Pause or resume an automation"),
-    formatHelpCommand("automation-archive-run --run-id id --path path [--remove-worktree true]", "Archive a completed run"),
-    formatHelpCommand("automation-mark-run-read --run-id id --path path", "Mark a run as read"),
+    ...automationHelpCommands(formatHelpCommand),
     formatHelpCommand("bd <args...>", "Run Ghostex's bundled Beads CLI for the current project"),
   ].join("\n");
 
