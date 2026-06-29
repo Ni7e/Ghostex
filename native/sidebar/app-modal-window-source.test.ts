@@ -17,6 +17,7 @@ const remoteGxserverLinuxPackageScriptSource = readFileSync(
   new URL("../../gxserver-rs/package-remote-linux.mjs", import.meta.url),
   "utf8",
 );
+const packageJsonSource = readFileSync(new URL("../../package.json", import.meta.url), "utf8");
 const gpuiMainSource = readFileSync(new URL("../../gpui/src/main.rs", import.meta.url), "utf8");
 const gpuiCefMacosSource = readFileSync(
   new URL("../../gpui/src/cef/macos.rs", import.meta.url),
@@ -602,15 +603,31 @@ describe("native app modal window source", () => {
 
     CDXC:GPUISettingsModalDiagnostics 2026-06-27-20:31:
     GPUI Settings blank-window recovery must add CEF lifecycle diagnostics and one ready-timeout recreate while keeping the persistent app-modal log writer sanitized to fixed booleans, numbers, and enums.
+
+    CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:
+    Setup slow-open repros must log native child-window lifecycle and React
+    renderability checkpoints in app-modal-debug.log while keeping payloads to
+    modal ids, booleans, revisions, request ids, timings, and enum-like fields.
     */
     const settingsWindowLogger = sourceBetween(
       appDelegateSource,
       "private func logSettingsWindowEvent(",
       "private func defaultSize(for modal: String)",
     );
-    expect(settingsWindowLogger).toContain("AppDelegate.appendAgentDetectionDebugLog");
+    expect(settingsWindowLogger).toContain("CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:");
+    expect(settingsWindowLogger).toContain("isFirstLaunchSetupAppModal(loadedModal)");
+    expect(settingsWindowLogger).toContain("AppDelegate.appendAppModalDebugLog");
     expect(appDelegateSource).toContain(
-      "guard isNativePersistentLogImportantDiagnostic(event) || NativeDebugLogging.isEnabled else",
+      "NativeDiagnosticLogging.isScenarioEnabled(.nativeAppModal)",
+    );
+    expect(appDelegateSource).toContain(
+      'AppDelegate.appendAppModalDebugLog(\n        event: "nativeBridge.appModal.open.received"',
+    );
+    expect(appDelegateSource).toContain(
+      'AppDelegate.appendAppModalDebugLog(\n        event: "nativeBridge.appModal.nativeWindow.ready"',
+    );
+    expect(appDelegateSource).toContain(
+      'AppDelegate.appendAppModalDebugLog(\n        event: "nativeBridge.appModal.nativeWindow.presented"',
     );
     expect(appDelegateSource).toContain('"nativeWindow.webView.loadStart"');
     expect(appDelegateSource).toContain('"nativeWindow.webView.didFinish"');
@@ -682,6 +699,46 @@ describe("native app modal window source", () => {
     expect(reactSettingsPresentedPayload).not.toContain("projectPath");
     expect(reactSettingsPresentedPayload).not.toContain("password");
 
+    const reactSetupOpenLog = sourceBetween(
+      modalHostSource,
+      'postAppModalDebugLog("modalHost.setup.open.received"',
+      "          }\n          if (message.modal === \"renameSession\")",
+    );
+    expect(reactSetupOpenLog).toContain("hasInlineSidebarStateMessage");
+    expect(reactSetupOpenLog).toContain("hasNativeSettingsHydrated");
+    expect(reactSetupOpenLog).toContain("inlineSidebarStateApplied");
+    expect(reactSetupOpenLog).toContain("revision");
+    expect(reactSetupOpenLog).not.toContain("initialSearchQuery:");
+    expect(reactSetupOpenLog).not.toContain("initialRemoteMachineId:");
+    expect(reactSetupOpenLog).not.toContain("projectName");
+    expect(reactSetupOpenLog).not.toContain("projectPath");
+    expect(reactSetupOpenLog).not.toContain("password");
+
+    const reactSetupRenderStateLog = sourceBetween(
+      modalHostSource,
+      'postAppModalDebugLog("modalHost.setup.renderState"',
+      "  }, [\n    activeModal,",
+    );
+    expect(reactSetupRenderStateLog).toContain("hasNativeSettingsHydrated");
+    expect(reactSetupRenderStateLog).toContain("isFirstLaunchSetupRenderable");
+    expect(reactSetupRenderStateLog).toContain("isActiveModalRenderable");
+    expect(reactSetupRenderStateLog).not.toContain("settings:");
+    expect(reactSetupRenderStateLog).not.toContain("projectName");
+    expect(reactSetupRenderStateLog).not.toContain("projectPath");
+    expect(reactSetupRenderStateLog).not.toContain("password");
+
+    const reactSetupPresentedPayload = sourceBetween(
+      modalHostSource,
+      "latestFirstLaunchSetupPresentedLogDetailsRef.current = {",
+      "  };\n\n  useEffect(() => {\n    if (!isSettingsModalKind(activeModal))",
+    );
+    expect(reactSetupPresentedPayload).toContain("isFirstLaunchSetupRenderable");
+    expect(reactSetupPresentedPayload).toContain("isActiveModalRenderable");
+    expect(reactSetupPresentedPayload).not.toContain("settings:");
+    expect(reactSetupPresentedPayload).not.toContain("projectName");
+    expect(reactSetupPresentedPayload).not.toContain("projectPath");
+    expect(reactSetupPresentedPayload).not.toContain("password");
+
     const reactPresentedEffect = sourceBetween(
       modalHostSource,
       "useLayoutEffect(() => {",
@@ -689,6 +746,8 @@ describe("native app modal window source", () => {
     );
     expect(modalHostSource).toContain("(!isSettingsModal || isSettingsRenderable)");
     expect(reactPresentedEffect).toContain("latestSettingsPresentedLogDetailsRef.current");
+    expect(reactPresentedEffect).toContain("latestFirstLaunchSetupPresentedLogDetailsRef.current");
+    expect(reactPresentedEffect).toContain("modalHost.setup.presented.sent");
     expect(reactPresentedEffect).toContain(
       "[activeModal, activeModalRequestId, floatingPromptEditor?.requestId, isActiveModalRenderable]",
     );
@@ -754,6 +813,76 @@ describe("native app modal window source", () => {
     expect(gpuiCefMacosSource).toContain("app_modal_host_bridge_surface_from_extra_info(extra_info)");
     expect(gpuiCefMacosSource).not.toContain("failed_url.map");
     expect(gpuiCefMacosSource).not.toContain("error_text.map");
+  });
+
+  test("logs first-launch setup slow-open diagnostics without private payloads", () => {
+    /*
+    CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:
+    Setup slow-open repros need app-modal-debug.log checkpoints for native
+    open/WebView/ready/dispatch/present and React open/renderability/presented
+    without logging settings values, project names, paths, URLs, command text,
+    user text, or secrets.
+    */
+    const settingsWindowLogger = sourceBetween(
+      appDelegateSource,
+      "private func logSettingsWindowEvent(",
+      "private func defaultSize(for modal: String)",
+    );
+    expect(settingsWindowLogger).toContain("CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:");
+    expect(settingsWindowLogger).toContain("isFirstLaunchSetupAppModal(loadedModal)");
+    expect(settingsWindowLogger).toContain("AppDelegate.appendAppModalDebugLog");
+    expect(appDelegateSource).toContain(
+      'AppDelegate.appendAppModalDebugLog(event: "nativeBridge.appModal.\\(event)", details: details)',
+    );
+    expect(appDelegateSource).toContain(
+      'AppDelegate.appendAppModalDebugLog(\n        event: "nativeBridge.appModal.open.received"',
+    );
+    expect(appDelegateSource).toContain(
+      'AppDelegate.appendAppModalDebugLog(\n        event: "nativeBridge.appModal.nativeWindow.ready"',
+    );
+    expect(appDelegateSource).toContain(
+      'AppDelegate.appendAppModalDebugLog(\n        event: "nativeBridge.appModal.nativeWindow.presented"',
+    );
+    expect(appDelegateSource).toContain('"nativeWindow.webView.loadStart"');
+    expect(appDelegateSource).toContain('"nativeWindow.webView.didFinish"');
+    expect(appDelegateSource).toContain('"nativeWindow.hostReady"');
+    expect(appDelegateSource).toContain('"nativeWindow.present.completed"');
+
+    const reactSetupOpenLog = sourceBetween(
+      modalHostSource,
+      'postAppModalDebugLog("modalHost.setup.open.received"',
+      "          }\n          if (message.modal === \"renameSession\")",
+    );
+    expect(reactSetupOpenLog).toContain("hasInlineSidebarStateMessage");
+    expect(reactSetupOpenLog).toContain("hasNativeSettingsHydrated");
+    expect(reactSetupOpenLog).toContain("inlineSidebarStateApplied");
+    expect(reactSetupOpenLog).toContain("revision");
+    expect(reactSetupOpenLog).not.toContain("initialSearchQuery:");
+    expect(reactSetupOpenLog).not.toContain("projectName");
+    expect(reactSetupOpenLog).not.toContain("projectPath");
+    expect(reactSetupOpenLog).not.toContain("password");
+
+    const reactSetupRenderStateLog = sourceBetween(
+      modalHostSource,
+      'postAppModalDebugLog("modalHost.setup.renderState"',
+      "  }, [\n    activeModal,",
+    );
+    expect(reactSetupRenderStateLog).toContain("hasNativeSettingsHydrated");
+    expect(reactSetupRenderStateLog).toContain("isFirstLaunchSetupRenderable");
+    expect(reactSetupRenderStateLog).toContain("isActiveModalRenderable");
+    expect(reactSetupRenderStateLog).not.toContain("settings:");
+    expect(reactSetupRenderStateLog).not.toContain("projectName");
+    expect(reactSetupRenderStateLog).not.toContain("projectPath");
+    expect(reactSetupRenderStateLog).not.toContain("password");
+
+    const reactPresentedEffect = sourceBetween(
+      modalHostSource,
+      "useLayoutEffect(() => {",
+      "  useEffect(() => {\n    if (activeModal !== \"settings\")",
+    );
+    expect(reactPresentedEffect).toContain("latestFirstLaunchSetupPresentedLogDetailsRef.current");
+    expect(reactPresentedEffect).toContain("modalHost.setup.presented.sent");
+    expect(reactPresentedEffect).not.toContain("revision,\n");
   });
 
   test("keeps remote gxserver install approval state renderable", () => {
@@ -986,6 +1115,9 @@ describe("native app modal window source", () => {
     expect(buildGhostexHostSource).toContain("wrong Linux ELF architecture");
     expect(buildGhostexHostSource).toContain("bin/ghostex-tui");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("Usage: node gxserver-rs/package-remote-linux.mjs");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain("--arch x64|arm64|all");
+    expect(remoteGxserverLinuxPackageScriptSource).toContain('requestedArch === "all"');
+    expect(remoteGxserverLinuxPackageScriptSource).toContain('["x64", "arm64"]');
     expect(remoteGxserverLinuxPackageScriptSource).toContain("build/remote-gxserver-linux");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("bin/gxserver");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("bin/zmx");
@@ -998,6 +1130,9 @@ describe("native app modal window source", () => {
     expect(remoteGxserverLinuxPackageScriptSource).toContain("CLI/ghostex-cli.mjs");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("Linux remote package expected an ELF binary");
     expect(remoteGxserverLinuxPackageScriptSource).toContain("Linux remote package expected ${config.arch} ELF architecture");
+    expect(packageJsonSource).toContain('"gxserver:remote-linux": "node gxserver-rs/package-remote-linux.mjs --arch all"');
+    expect(packageJsonSource).toContain('"gxserver:remote-linux:x64": "node gxserver-rs/package-remote-linux.mjs --arch x64"');
+    expect(packageJsonSource).toContain('"gxserver:remote-linux:arm64": "node gxserver-rs/package-remote-linux.mjs --arch arm64"');
     expect(nativeSidebarSource).toContain('case "unsupportedRemotePlatform":');
     expect(nativeSidebarSource).toContain("No compatible gxserver package");
   });
@@ -1450,7 +1585,7 @@ describe("native app modal window source", () => {
     child window and switch modes in-place instead of closing the palette.
 
     CDXC:AppModals 2026-06-15-13:30:
-    Configure Action, Rename Session, and Previous Sessions are compact native
+    Command Palette, Rename Session, and Previous Sessions are compact native
     child-window modals too, so they must close on parent-window mouse-downs
     outside their NSPanel.
 
@@ -1458,6 +1593,11 @@ describe("native app modal window source", () => {
     Highlighted Features should not use the compact outside-click close monitor.
     It closes from its in-modal X, Escape, or native close lifecycle while the
     native backdrop absorbs parent-window clicks.
+
+    CDXC:AppModals 2026-06-29-13:46:
+    The compact fixed-size native dialog set should close from parent-window
+    outside clicks, matching the React backdrop behavior that cannot receive
+    those clicks once the modal lives in a child NSPanel.
     */
     const dispatchNativeHotkey = sourceBetween(
       appDelegateSource,
@@ -1497,7 +1637,10 @@ describe("native app modal window source", () => {
     expect(appModalWindowController).toContain("installOutsideEventMonitorIfNeeded(for: modal)");
     expect(appModalWindowController).toContain("guard shouldCloseFromOutsideMouseDown(modal: modal)");
     expect(appModalWindowController).toContain(
-      'case "commandPalette", "renameSession", "previousSessions":',
+      'case "commandPalette", "renameSession", "previousSessions", "delayedSend", "worktree",',
+    );
+    expect(appModalWindowController).toContain(
+      '"remoteGxserverInstall", "remoteProjectPicker":',
     );
     expect(appModalWindowController).toContain(
       "Do not install the compact\n     outside-click monitor for discoverGhostex.",
@@ -1544,18 +1687,27 @@ describe("native app modal window source", () => {
     CDXC:GhostexTutorialVideo 2026-06-18-04:49:
     The copied tutorial video modal should use the same native backdrop as
     Highlighted Features while its own dialog owns close behavior.
+
+    CDXC:FirstLaunchSetup 2026-06-29-13:46:
+    First Time Setup should close from clicks on the visible native backdrop;
+    Highlighted Features and Tutorial Video still absorb backdrop clicks.
     */
     expect(appDelegateSource).toContain("private var onboardingAppModalBackdropPanel: AppModalBackdropPanel?");
     expect(appDelegateSource).toContain("private final class AppModalBackdropPanel: NSPanel");
     expect(appDelegateSource).toContain("private final class AppModalBackdropView: NSView");
     expect(appDelegateSource).toContain("override var canBecomeKey: Bool { false }");
-    expect(appDelegateSource).toContain("override func mouseDown(with event: NSEvent) {}");
+    expect(appDelegateSource).toContain("var onBackdropMouseDown: (() -> Void)?");
+    expect(appDelegateSource).toContain("onBackdropMouseDown?()");
 
     const backdropHelpers = sourceBetween(
       appDelegateSource,
       "private func shouldShowOnboardingAppModalBackdrop",
       "private func takeFirstLaunchSetupAfterDiscoverClose",
     );
+    expect(backdropHelpers).toContain("private func shouldCloseOnOnboardingAppModalBackdropClick");
+    expect(backdropHelpers).toContain('case "firstLaunchSetup", "tipsAndTricks":');
+    expect(backdropHelpers).toContain("contentView.onBackdropMouseDown");
+    expect(backdropHelpers).toContain('reason: "onboardingBackdropMouseDown"');
     expect(backdropHelpers).toContain('case "discoverGhostex", "watchGhostexVideo", "firstLaunchSetup", "tipsAndTricks":');
     expect(backdropHelpers).toContain("NSColor.black.withAlphaComponent(0.4)");
     expect(backdropHelpers).toContain("styleMask: [.borderless, .nonactivatingPanel]");

@@ -280,6 +280,57 @@ describe("normalizeghostexSettings", () => {
     });
   });
 
+  test("normalizes the persisted Settings modal location", () => {
+    /*
+     * CDXC:SettingsNavigation 2026-06-29-17:54:
+     * macOS Settings restart restore should persist only safe tab ids and
+     * bounded scroll offsets so app relaunch can return to the last closed
+     * Settings spot without accepting malformed storage.
+     */
+    expect(DEFAULT_ghostex_SETTINGS.settingsModalNavigation).toEqual({
+      activeTab: "settings",
+      scrollTopByTab: {},
+      version: 1,
+    });
+    expect(
+      normalizeghostexSettings({
+        settingsModalNavigation: {
+          activeTab: "hotkeys",
+          scrollTopByTab: {
+            hotkeys: 340.5,
+            settings: 120,
+          },
+          version: 1,
+        },
+      }).settingsModalNavigation,
+    ).toEqual({
+      activeTab: "hotkeys",
+      scrollTopByTab: {
+        settings: 120,
+        hotkeys: 340.5,
+      },
+      version: 1,
+    });
+    expect(
+      normalizeghostexSettings({
+        settingsModalNavigation: {
+          activeTab: "missing",
+          scrollTopByTab: {
+            hotkeys: -20,
+            integrations: 2_000_000,
+            settings: "500",
+          },
+        },
+      }).settingsModalNavigation,
+    ).toEqual({
+      activeTab: "settings",
+      scrollTopByTab: {
+        integrations: 1_000_000,
+      },
+      version: 1,
+    });
+  });
+
   test("normalizes the default prompt agent setting", () => {
     /**
      * CDXC:PromptAgents 2026-05-28-07:15:
@@ -579,11 +630,13 @@ describe("normalizeghostexSettings", () => {
         hideProjectHeaderDiffStats: false,
         hideBrowserFaviconUntilHover: true,
         hideSessionAgentIconUntilHover: false,
+        useColoredSessionAgentIcons: true,
       }),
     ).toMatchObject({
       hideProjectHeaderDiffStats: false,
       hideBrowserFaviconUntilHover: true,
       hideSessionAgentIconUntilHover: false,
+      useColoredSessionAgentIcons: true,
     });
   });
 
@@ -644,6 +697,22 @@ describe("normalizeghostexSettings", () => {
         showProjectEditorDiffFileCount: true,
       }),
     ).toBeUndefined();
+    /*
+     * CDXC:SidebarSessionAgentIcons 2026-06-29-23:58:
+     * Colored agent icons are an independent Session Cards preference, not a
+     * sidebar density preset. Toggling color mode must not make the current
+     * preset become Custom.
+     */
+    expect(DEFAULT_ghostex_SETTINGS.useColoredSessionAgentIcons).toBe(false);
+    expect(normalizeghostexSettings({ useColoredSessionAgentIcons: true })).toMatchObject({
+      useColoredSessionAgentIcons: true,
+    });
+    expect(
+      getSidebarSettingsPresetId({
+        ...DEFAULT_ghostex_SETTINGS,
+        useColoredSessionAgentIcons: true,
+      }),
+    ).toBe("recommended");
   });
 
   test("hides session-card last active timestamps by default unless explicitly shown", () => {
@@ -714,16 +783,25 @@ describe("normalizeghostexSettings", () => {
      * Persistent routine logs must default to failures-only and require an
      * allowlisted scenario id, so enabling one repro area cannot turn on every
      * macOS and GPUI diagnostic writer.
+     *
+     * CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:
+     * The setup slow-open repro temporarily defaults native.app.modal on so
+     * app-modal-debug.log captures the timing checkpoints without requiring a
+     * manual Settings toggle before reproducing startup/onboarding behavior.
      */
     expect(DIAGNOSTIC_LOGGING_SCENARIOS.map((scenario) => scenario.id)).toContain(
       "gpui.app.modal",
     );
     expect(DEFAULT_ghostex_SETTINGS.diagnosticLogging).toEqual({
-      scenarios: {},
+      scenarios: {
+        "native.app.modal": { enabled: true },
+      },
       version: 1,
     });
     expect(normalizeghostexSettings({}).diagnosticLogging).toEqual({
-      scenarios: {},
+      scenarios: {
+        "native.app.modal": { enabled: true },
+      },
       version: 1,
     });
 
@@ -740,6 +818,7 @@ describe("normalizeghostexSettings", () => {
     expect(normalized.diagnosticLogging).toEqual({
       scenarios: {
         "gpui.app.modal": { enabled: true, expiresAt: "2026-06-27T20:30:00.000Z" },
+        "native.app.modal": { enabled: true },
         "native.terminal.focus": { enabled: true },
       },
       version: 1,
@@ -1438,19 +1517,16 @@ describe("normalizeghostexSettings", () => {
     });
   });
 
-  test("defaults Ctrl+G prompt editing to Monaco and supports explicit backend choices", () => {
+  test("defaults Ctrl+G prompt editing to Monaco and only exposes machine default as the alternative", () => {
     /**
      * CDXC:PromptEditorBackend 2026-05-11-14:38
-     * Monaco is the default floating editor backend. Explicit gte opt-in keys
-     * normalize to gte so selected Ctrl+G prompt-editor behavior is stable.
-     *
-     * CDXC:PromptEditorBackend 2026-05-22-09:56
-     * The terminal prompt editor is named gte for Ghostex Terminal Editor. Tests should pin gte as the persisted backend value and visible Settings option.
+     * Monaco is the default floating editor backend.
      *
      * CDXC:PromptEditorBackend 2026-05-25-11:31:
-     * Monaco is the built-in default again. New settings normalize to Monaco
-     * unless a backend is explicitly selected, while native SSH runtime handling
-     * can still resolve configured Monaco to gte for remote terminals.
+     * Monaco is the built-in default again. New settings normalize to Monaco unless a backend is explicitly selected.
+     *
+     * CDXC:PromptEditorBackend 2026-06-30-00:08:
+     * Settings must offer only Monaco and the user's machine default editor. Removed gte/custom persisted choices and legacy gte booleans normalize to inherit so the app stops advertising or installing gte from Ctrl+G Settings.
      */
     expect(DEFAULT_ghostex_SETTINGS.promptEditorBackend).toBe("monaco");
     expect(normalizeghostexSettings({})).toMatchObject({
@@ -1470,15 +1546,19 @@ describe("normalizeghostexSettings", () => {
       useGteForCtrlGPromptEditing: false,
     });
     expect(normalizeghostexSettings({ richPromptEditingWithGte: true })).toMatchObject({
-      promptEditorBackend: "gte",
-      richPromptEditingWithGte: true,
-      useGteForCtrlGPromptEditing: true,
+      promptEditorBackend: "inherit",
+      richPromptEditingWithGte: false,
+      useGteForCtrlGPromptEditing: false,
     });
     expect(normalizeghostexSettings({ useGteForCtrlGPromptEditing: true })).toMatchObject({
-      promptEditorBackend: "gte",
+      promptEditorBackend: "inherit",
+      richPromptEditingWithGte: false,
+      useGteForCtrlGPromptEditing: false,
     });
     expect(normalizeghostexSettings({ promptEditorBackend: "gte" })).toMatchObject({
-      promptEditorBackend: "gte",
+      promptEditorBackend: "inherit",
+      richPromptEditingWithGte: false,
+      useGteForCtrlGPromptEditing: false,
     });
     expect(normalizeghostexSettings({ promptEditorBackend: "inherit" })).toMatchObject({
       promptEditorBackend: "inherit",
@@ -1490,7 +1570,7 @@ describe("normalizeghostexSettings", () => {
       }),
     ).toMatchObject({
       customPromptEditorCommand: "vim -f",
-      promptEditorBackend: "custom",
+      promptEditorBackend: "inherit",
     });
     expect(
       normalizeghostexSettings({
@@ -1499,16 +1579,14 @@ describe("normalizeghostexSettings", () => {
       }),
     ).toMatchObject({
       customPromptEditorCommand: "code --wait",
-      promptEditorBackend: "custom",
+      promptEditorBackend: "inherit",
     });
     expect(normalizeghostexSettings({ promptEditorBackend: "invalid" })).toMatchObject({
       promptEditorBackend: "monaco",
     });
     expect(PROMPT_EDITOR_BACKEND_OPTIONS).toEqual([
-      { label: "Inherit from system", value: "inherit" },
-      { label: "Monaco floating editor", value: "monaco" },
-      { label: "gte terminal editor", value: "gte" },
-      { label: "Custom", value: "custom" },
+      { label: "Monaco editor", value: "monaco" },
+      { label: "Use default from this machine", value: "inherit" },
     ]);
   });
 

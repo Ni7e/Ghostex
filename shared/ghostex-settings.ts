@@ -62,8 +62,25 @@ export type SessionPersistenceProvider = "off" | "tmux" | "zmx" | "zellij";
 export type SessionStatusIndicatorSize = "small" | "medium" | "large" | "x-large";
 export type SidebarSide = "left" | "right";
 export type SidebarSettingsPresetId = "codex" | "minimal" | "detailed" | "recommended";
-export type PromptEditorBackend = "inherit" | "monaco" | "gte" | "custom";
+export type PromptEditorBackend = "inherit" | "monaco";
 export type SessionTitleGenerationAgent = "codex" | "cursor" | "claude" | "grok" | "custom";
+export const SETTINGS_MODAL_NAVIGATION_TABS = [
+  "settings",
+  "integrations",
+  "osIntegration",
+  "remote",
+  "projects",
+  "agents",
+  "actions",
+  "openTargets",
+  "hotkeys",
+] as const;
+export type SettingsModalNavigationTab = (typeof SETTINGS_MODAL_NAVIGATION_TABS)[number];
+export type SettingsModalNavigationState = {
+  activeTab: SettingsModalNavigationTab;
+  scrollTopByTab: Partial<Record<SettingsModalNavigationTab, number>>;
+  version: 1;
+};
 export type AppShotsHotkey =
   | "both-command"
   | "both-shift"
@@ -241,6 +258,16 @@ export const DIAGNOSTIC_LOGGING_SCENARIOS = [
     logFiles: ["gpui-app-modal-debug.jsonl"],
   },
 ] as const satisfies readonly DiagnosticLoggingScenarioDefinition[];
+
+const DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS: DiagnosticLoggingSettings["scenarios"] = {
+  /*
+   * CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:
+   * Temporarily keep app-modal diagnostics enabled for the setup slow-open
+   * repro so existing local settings cannot silently gate off the timing logs
+   * needed under ~/.ghostex/logs/app-modal-debug.log.
+   */
+  "native.app.modal": { enabled: true },
+};
 const DIAGNOSTIC_LOGGING_SCENARIO_IDS = new Set<string>(
   DIAGNOSTIC_LOGGING_SCENARIOS.map((scenario) => scenario.id),
 );
@@ -305,6 +332,13 @@ const DEFAULT_TERMINAL_DEV_SERVER_IGNORED_PORT_RULES: readonly string[] = [];
 const TERMINAL_DEV_SERVER_OPEN_TARGET_SET = new Set(
   TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS.map((option) => option.value),
 );
+const SETTINGS_MODAL_NAVIGATION_TAB_SET = new Set<string>(SETTINGS_MODAL_NAVIGATION_TABS);
+const MAX_SETTINGS_MODAL_SCROLL_TOP = 1_000_000;
+export const DEFAULT_SETTINGS_MODAL_NAVIGATION_STATE: SettingsModalNavigationState = {
+  activeTab: "settings",
+  scrollTopByTab: {},
+  version: 1,
+};
 export const SESSION_TITLE_GENERATION_AGENT_OPTIONS: ReadonlyArray<{
   label: string;
   value: SessionTitleGenerationAgent;
@@ -669,6 +703,13 @@ export type ghostexSettings = {
    */
   showAdvancedSettings: boolean;
   /**
+   * CDXC:SettingsNavigation 2026-06-29-17:54:
+   * Closing Settings should persist the user's current Settings page and
+   * scroll offsets so relaunching the macOS app can reopen Settings at the
+   * exact spot they left, while explicit deep links can still override it.
+   */
+  settingsModalNavigation: SettingsModalNavigationState;
+  /**
    * CDXC:ExperimentalFeatures 2026-06-28-07:41:
    * Enable Experimental Features is the user-facing name for this persisted
    * showBetaFeatures key. Experimental surfaces stay hidden by default, while
@@ -703,6 +744,13 @@ export type ghostexSettings = {
   diagnosticLogging: DiagnosticLoggingSettings;
   renameSessionOnDoubleClick: boolean;
   hideSessionAgentIconUntilHover: boolean;
+  /**
+   * CDXC:SidebarSessionAgentIcons 2026-06-29-23:58:
+   * Session-card agent logos are monochrome by default for compatibility, but
+   * Settings needs an independent toggle for colored brand artwork. Favorite
+   * state must not recolor the agent logo to gold.
+   */
+  useColoredSessionAgentIcons: boolean;
   hideBrowserFaviconUntilHover: boolean;
   showCloseButtonOnSessionCards: boolean;
   hideLastActiveTimeOnSessionCards: boolean;
@@ -1065,6 +1113,13 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   showAdvancedSettings: false,
   /**
+   * CDXC:SettingsNavigation 2026-06-29-17:54:
+   * New installs start at General Settings. Once the user closes Settings, the
+   * modal saves only navigation chrome state here, not search text or private
+   * setting values beyond the already persisted preferences.
+   */
+  settingsModalNavigation: DEFAULT_SETTINGS_MODAL_NAVIGATION_STATE,
+  /**
    * CDXC:ExperimentalFeatures 2026-06-28-07:41:
    * New installs and missing persisted settings should keep experimental
    * surfaces hidden until the user enables Enable Experimental Features from
@@ -1132,7 +1187,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   createSessionOnSidebarDoubleClick: false,
   debuggingMode: false,
   diagnosticLogging: {
-    scenarios: {},
+    scenarios: DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS,
     version: 1,
   },
   renameSessionOnDoubleClick: false,
@@ -1147,6 +1202,12 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   hideSessionAgentIconUntilHover:
     SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideSessionAgentIconUntilHover,
+  /**
+   * CDXC:SidebarSessionAgentIcons 2026-06-29-23:58:
+   * Preserve the existing monochrome sidebar until users opt into colored
+   * session agent logos from Session Cards settings.
+   */
+  useColoredSessionAgentIcons: false,
   /**
    * CDXC:BrowserPanes 2026-05-28-07:38:
    * Browser page favicons are page identity, not agent chrome. Keep them
@@ -1446,25 +1507,22 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   portlessProtocol: "https",
   /**
    * CDXC:PromptEditorBackend 2026-05-13-15:58
-   * Ctrl+G rich prompt editing originally defaulted to the floating Monaco editor. Preserve explicit gte choices, but keep new and invalid settings on the current built-in backend.
-   *
-   * CDXC:PromptEditorBackend 2026-05-22-09:56
-   * The terminal prompt editor is named gte for Ghostex Terminal Editor. Settings, launch commands, and install copy must use gte consistently across the app.
-   *
-   * CDXC:PromptEditorBackend 2026-05-22-10:16
-   * Monaco is popup-backed, but gte is terminal-native. A gte backend selection must resolve to the plain `gte` command so Ctrl+G edits inside the terminal that launched the editor.
+   * Ctrl+G rich prompt editing originally defaulted to the floating Monaco editor.
    *
    * CDXC:PromptEditorBackend 2026-05-25-11:31:
-   * Monaco is the out-of-the-box Ctrl+G prompt editor again. New installs should open the floating Monaco editor for local app terminals, while the native runtime resolves Monaco-over-SSH to gte because remote terminals cannot use the local overlay.
+   * Monaco is the out-of-the-box Ctrl+G prompt editor again. New installs should open the floating Monaco editor for local app terminals.
+   *
+   * CDXC:PromptEditorBackend 2026-06-30-00:08:
+   * Settings must expose only Monaco and the user's machine default editor. Removed gte and custom selections migrate to inherit so Ctrl+G stops injecting a Ghostex-owned editor command when users choose the machine default path.
    */
   promptEditorBackend: "monaco",
   customPromptEditorCommand: "code --wait",
   /**
    * CDXC:GtePromptEditing 2026-05-22-09:56
-   * The boolean mirrors keep the Ctrl+G prompt-editor setting easy to search while promptEditorBackend remains the source of truth for launch behavior.
+   * The boolean mirrors keep legacy Ctrl+G prompt-editor settings readable while promptEditorBackend remains the source of truth for launch behavior.
    *
-   * CDXC:GtePromptEditing 2026-05-25-11:31:
-   * First-run settings mirror the default Monaco backend so older call sites that still read these booleans do not enable gte unless Settings or legacy persisted keys explicitly request it.
+   * CDXC:PromptEditorBackend 2026-06-30-00:08:
+   * The Settings UI no longer offers gte. New normalized settings keep these legacy mirrors false so removed gte choices cannot keep exporting a gte editor command.
    */
   richPromptEditingWithGte: false,
   useGteForCtrlGPromptEditing: false,
@@ -1651,10 +1709,12 @@ export const PROMPT_EDITOR_BACKEND_OPTIONS: ReadonlyArray<{
   label: string;
   value: PromptEditorBackend;
 }> = [
-  { label: "Inherit from system", value: "inherit" },
-  { label: "Monaco floating editor", value: "monaco" },
-  { label: "gte terminal editor", value: "gte" },
-  { label: "Custom", value: "custom" },
+  /**
+   * CDXC:PromptEditorBackend 2026-06-30-00:08:
+   * Ctrl+G Settings should be a two-choice dropdown: use the bundled Monaco prompt editor or leave $EDITOR/$VISUAL to the user's machine defaults. gte install/use and custom command controls are intentionally absent.
+   */
+  { label: "Monaco editor", value: "monaco" },
+  { label: "Use default from this machine", value: "inherit" },
 ];
 
 export const GHOSTTY_THEME_SETTING_OPTIONS: ReadonlyArray<{
@@ -1850,6 +1910,15 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       DEFAULT_ghostex_SETTINGS.showAdvancedSettings,
     ),
     /**
+     * CDXC:SettingsNavigation 2026-06-29-17:54:
+     * Restart restore reads Settings location from the shared settings file, so
+     * normalize active tab and scroll offsets at the storage boundary before
+     * React uses them to choose the initial Settings surface.
+     */
+    settingsModalNavigation: normalizeSettingsModalNavigationState(
+      source.settingsModalNavigation,
+    ),
+    /**
      * CDXC:BetaFeatures 2026-06-16-13:08:
      * Normalize the beta gate as a strict boolean so stale or malformed settings
      * cannot expose beta-only OS Integration or browser address-bar controls.
@@ -1945,6 +2014,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       source,
       "hideSessionAgentIconUntilHover",
       DEFAULT_ghostex_SETTINGS.hideSessionAgentIconUntilHover,
+    ),
+    useColoredSessionAgentIcons: readBoolean(
+      source,
+      "useColoredSessionAgentIcons",
+      DEFAULT_ghostex_SETTINGS.useColoredSessionAgentIcons,
     ),
     /**
      * CDXC:BrowserPanes 2026-05-28-07:38:
@@ -2453,21 +2527,13 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     ),
     /**
      * CDXC:GtePromptEditing 2026-05-10-11:11
-     * Keep reading the old opt-in key so older snapshots round-trip cleanly.
+     * Keep reading the old opt-in keys so older snapshots round-trip cleanly.
      *
-     * CDXC:GtePromptEditing 2026-05-23-01:51:
-     * Mirror defaults follow the normalized backend so first-run settings and older files without mirror keys still report gte as the active Ctrl+G editor.
+     * CDXC:PromptEditorBackend 2026-06-30-00:08:
+     * Removed gte Settings choices normalize to inherit, so legacy mirrors must no longer resurrect gte after the canonical backend has been migrated.
      */
-    richPromptEditingWithGte: readBoolean(
-      source,
-      "richPromptEditingWithGte",
-      promptEditorBackend === "gte",
-    ),
-    useGteForCtrlGPromptEditing: readBoolean(
-      source,
-      "useGteForCtrlGPromptEditing",
-      readBoolean(source, "richPromptEditingWithGte", promptEditorBackend === "gte") === true,
-    ),
+    richPromptEditingWithGte: false,
+    useGteForCtrlGPromptEditing: false,
     /**
      * CDXC:Hotkeys 2026-04-28-05:20
      * User-defined app shortcuts are normalized with defaults on every settings
@@ -2587,6 +2653,35 @@ export function applySidebarSettingsPreset(
     ...settings,
     ...SIDEBAR_SETTINGS_PRESET_SETTINGS[presetId],
   });
+}
+
+export function normalizeSettingsModalNavigationState(
+  candidate: unknown,
+): SettingsModalNavigationState {
+  const source = isRecord(candidate) ? candidate : {};
+  const rawActiveTab = readLooseString(source.activeTab);
+  const activeTab = SETTINGS_MODAL_NAVIGATION_TAB_SET.has(rawActiveTab)
+    ? (rawActiveTab as SettingsModalNavigationTab)
+    : DEFAULT_SETTINGS_MODAL_NAVIGATION_STATE.activeTab;
+  const scrollSource = isRecord(source.scrollTopByTab) ? source.scrollTopByTab : {};
+  const scrollTopByTab: SettingsModalNavigationState["scrollTopByTab"] = {};
+  for (const tab of SETTINGS_MODAL_NAVIGATION_TABS) {
+    const scrollTop = scrollSource[tab];
+    if (typeof scrollTop !== "number" || !Number.isFinite(scrollTop) || scrollTop <= 0) {
+      continue;
+    }
+    scrollTopByTab[tab] = clampNumber(
+      scrollTop,
+      0,
+      MAX_SETTINGS_MODAL_SCROLL_TOP,
+      DEFAULT_SETTINGS_MODAL_NAVIGATION_STATE.scrollTopByTab[tab] ?? 0,
+    );
+  }
+  return {
+    activeTab,
+    scrollTopByTab,
+    version: 1,
+  };
 }
 
 function normalizeTerminalCursorStyle(value: string | undefined): TerminalCursorStyle {
@@ -2865,14 +2960,17 @@ function normalizeAutoSleepIdleMinutes(
 
 function normalizePromptEditorBackend(source: Record<string, unknown>): PromptEditorBackend {
   const backend = readString(source, "promptEditorBackend", "");
-  if (backend === "inherit" || backend === "monaco" || backend === "gte" || backend === "custom") {
+  if (backend === "inherit" || backend === "monaco") {
     return backend;
+  }
+  if (backend === "gte" || backend === "custom") {
+    return "inherit";
   }
   if (
     readBoolean(source, "useGteForCtrlGPromptEditing", false) ||
     readBoolean(source, "richPromptEditingWithGte", false)
   ) {
-    return "gte";
+    return "inherit";
   }
   return DEFAULT_ghostex_SETTINGS.promptEditorBackend;
 }
@@ -2949,7 +3047,9 @@ export function normalizeDiagnosticLoggingSettings(
 ): DiagnosticLoggingSettings {
   const source = isRecord(candidate) ? candidate : {};
   const scenariosSource = isRecord(source.scenarios) ? source.scenarios : {};
-  const scenarios: DiagnosticLoggingSettings["scenarios"] = {};
+  const scenarios: DiagnosticLoggingSettings["scenarios"] = {
+    ...DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS,
+  };
   for (const [scenarioId, rawState] of Object.entries(scenariosSource)) {
     if (!DIAGNOSTIC_LOGGING_SCENARIO_IDS.has(scenarioId)) {
       continue;

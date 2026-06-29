@@ -467,7 +467,7 @@ function isPromptEditorDebugLoggingEnabled(): boolean {
   return isDiagnosticLoggingEnabledForScenario("native.prompt.editor");
 }
 
-function postSettingsModalDebugLog(
+function postAppModalDebugLog(
   event: string,
   details: Record<string, string | number | boolean | null | undefined>,
 ) {
@@ -475,6 +475,11 @@ function postSettingsModalDebugLog(
     return;
   }
   /*
+   * CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:
+   * Slow setup-modal repros need the same modal-host timing checkpoints as
+   * Settings, but the payload must stay limited to lifecycle booleans, enum ids,
+   * revisions, request ids, and timings.
+   *
    * CDXC:SettingsModalDiagnostics 2026-06-20-05:38:
    * Settings blank-window reports need React renderability milestones, but logs
    * must never include settings values, search text, project names, paths, URLs,
@@ -498,6 +503,13 @@ function postSettingsModalDebugLog(
     },
     "AppModals:debug",
   );
+}
+
+function postSettingsModalDebugLog(
+  event: string,
+  details: Record<string, string | number | boolean | null | undefined>,
+) {
+  postAppModalDebugLog(event, details);
 }
 
 /**
@@ -1828,6 +1840,21 @@ function isSettingsModalKind(modal: AppModalKind | undefined): boolean {
   );
 }
 
+function isFirstLaunchSetupModalKind(modal: AppModalKind | undefined): boolean {
+  return modal === "firstLaunchSetup" || modal === "tipsAndTricks";
+}
+
+function shouldApplySidebarStateBeforeModalOpen(modal: AppModalKind | undefined): boolean {
+  /*
+   * CDXC:FirstLaunchSetup 2026-06-29-13:46:
+   * First-launch setup reads the same hydrated Settings store as the Settings
+   * modal. Apply the native sidebar snapshot before setting activeModal so the
+   * child-window setup flow cannot stay blank behind its native backdrop while
+   * React waits at revision 0.
+   */
+  return isSettingsModalKind(modal) || isFirstLaunchSetupModalKind(modal);
+}
+
 function getSettingsInitialTab(modal: AppModalKind | undefined): SettingsModalTab {
   /**
    * CDXC:UnifiedSettings 2026-05-09-15:30
@@ -2041,7 +2068,11 @@ function AppModalHost() {
   const [osIntegrationStatusLoading, setOSIntegrationStatusLoading] = useState(false);
   const [isPreviousSessionsInitialLoadReady, setIsPreviousSessionsInitialLoadReady] = useState(false);
   const previousSettingsRenderStateLogRef = useRef("");
+  const previousFirstLaunchSetupRenderStateLogRef = useRef("");
   const latestSettingsPresentedLogDetailsRef = useRef<
+    Record<string, string | number | boolean | null | undefined>
+  >({});
+  const latestFirstLaunchSetupPresentedLogDetailsRef = useRef<
     Record<string, string | number | boolean | null | undefined>
   >({});
   const settings = useSidebarStore((state) => state.hud.settings);
@@ -2081,6 +2112,8 @@ function AppModalHost() {
   const hasNativeSettingsHydrated = revision > 0;
   const isSettingsModal = isSettingsModalKind(activeModal);
   const isSettingsRenderable = isSettingsModal && hasNativeSettingsHydrated;
+  const isFirstLaunchSetupModal = isFirstLaunchSetupModalKind(activeModal);
+  const isFirstLaunchSetupRenderable = isFirstLaunchSetupModal && hasNativeSettingsHydrated;
   const settingsInitialTab = settingsInitialTabOverride ?? getSettingsInitialTab(activeModal);
   const hasSettings = settings !== undefined;
   const hasSettingsInitialSection = settingsInitialSection !== undefined;
@@ -2119,6 +2152,7 @@ function AppModalHost() {
   const isActiveModalRenderable =
     isBaseActiveModalRenderable &&
     (!isSettingsModal || isSettingsRenderable) &&
+    (!isFirstLaunchSetupModal || isFirstLaunchSetupRenderable) &&
     (activeModal !== "previousSessions" || isPreviousSessionsInitialLoadReady);
   /*
    * CDXC:SettingsModalDiagnostics 2026-06-20-20:24:
@@ -2140,6 +2174,17 @@ function AppModalHost() {
     nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
     revision,
     settingsInitialTab,
+  };
+  latestFirstLaunchSetupPresentedLogDetailsRef.current = {
+    activeModal,
+    hasNativeSettingsHydrated,
+    hasSettings,
+    isActiveModalRenderable,
+    isBaseActiveModalRenderable,
+    isFirstLaunchSetupModal,
+    isFirstLaunchSetupRenderable,
+    nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
+    revision,
   };
 
   useEffect(() => {
@@ -2191,6 +2236,51 @@ function AppModalHost() {
     isSettingsRenderable,
     revision,
     settingsInitialTab,
+  ]);
+
+  useEffect(() => {
+    if (!isFirstLaunchSetupModalKind(activeModal)) {
+      previousFirstLaunchSetupRenderStateLogRef.current = "";
+      return;
+    }
+    /*
+     * CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:
+     * Setup can feel slow before it ever becomes visible because native waits
+     * for React renderability before presenting the child NSPanel. Log each
+     * distinct setup renderability state with no settings values or user text.
+     */
+    const signature = JSON.stringify({
+      activeModal,
+      hasNativeSettingsHydrated,
+      hasSettings,
+      isActiveModalRenderable,
+      isBaseActiveModalRenderable,
+      isFirstLaunchSetupRenderable,
+      nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
+      revision,
+    });
+    if (previousFirstLaunchSetupRenderStateLogRef.current === signature) {
+      return;
+    }
+    previousFirstLaunchSetupRenderStateLogRef.current = signature;
+    postAppModalDebugLog("modalHost.setup.renderState", {
+      activeModal,
+      hasNativeSettingsHydrated,
+      hasSettings,
+      isActiveModalRenderable,
+      isBaseActiveModalRenderable,
+      isFirstLaunchSetupRenderable,
+      nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
+      revision,
+    });
+  }, [
+    activeModal,
+    hasNativeSettingsHydrated,
+    hasSettings,
+    isActiveModalRenderable,
+    isBaseActiveModalRenderable,
+    isFirstLaunchSetupRenderable,
+    revision,
   ]);
 
   useEffect(() => {
@@ -2265,6 +2355,12 @@ function AppModalHost() {
       postSettingsModalDebugLog(
         "modalHost.settings.presented.sent",
         latestSettingsPresentedLogDetailsRef.current,
+      );
+    }
+    if (isFirstLaunchSetupModalKind(activeModal)) {
+      postAppModalDebugLog(
+        "modalHost.setup.presented.sent",
+        latestFirstLaunchSetupPresentedLogDetailsRef.current,
       );
     }
     postAppModalHostMessage(presentedMessage, "AppModals:presented");
@@ -2725,9 +2821,6 @@ function AppModalHost() {
         onGhosttySettingsAction={(action) => {
           vscode.postMessage({ type: action });
         }}
-        onInstallGte={() => {
-          vscode.postMessage({ type: "installGte" });
-        }}
         onInstallGhostexCli={() => {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: "installGhostexCli" });
@@ -2844,10 +2937,7 @@ function AppModalHost() {
         agentHookStatusLoading={agentHookStatusLoading}
         ghostexCliStatus={ghostexCliStatus}
         ghostexCliStatusLoading={ghostexCliStatusLoading}
-        isOpen={
-          hasNativeSettingsHydrated &&
-          (activeModal === "firstLaunchSetup" || activeModal === "tipsAndTricks")
-        }
+        isOpen={isFirstLaunchSetupRenderable}
         onChange={(nextSettings) => {
           vscode.postMessage({
             settings: nextSettings,
@@ -3174,17 +3264,21 @@ function useModalStateFromNative() {
         }
 
         if (message.type === "open") {
-          if (
-            isSettingsModalKind(message.modal) &&
-            message.latestSidebarStateMessage !== undefined
-          ) {
+          const hasInlineSidebarStateMessage = message.latestSidebarStateMessage !== undefined;
+          const shouldApplyInlineSidebarState = shouldApplySidebarStateBeforeModalOpen(message.modal);
+          if (shouldApplyInlineSidebarState && hasInlineSidebarStateMessage) {
             /*
              * CDXC:SettingsModalStuckBlank 2026-06-20-23:02:
              * Settings opens must apply the native window's latest sidebar
              * snapshot before setting activeModal. This keeps Debugging Mode,
              * revision, and settings data in the modal host before React decides
              * whether the Settings component can actually render.
-             */
+             *
+             * CDXC:FirstLaunchSetup 2026-06-29-13:46:
+             * The first-launch setup modal uses the same hydrated settings store,
+             * so it must receive the inline native snapshot before activeModal is
+             * set and before native waits for the React presented acknowledgement.
+            */
             applySidebarStateMessage(message.latestSidebarStateMessage);
           }
           const sidebarStateAtOpen = useSidebarStore.getState();
@@ -3193,6 +3287,8 @@ function useModalStateFromNative() {
               {
                 details: JSON.stringify({
                   hasSettings: sidebarStateAtOpen.hud.settings !== undefined,
+                  inlineSidebarStateApplied:
+                    shouldApplyInlineSidebarState && hasInlineSidebarStateMessage,
                   modal: message.modal,
                   performanceNow: performance.now(),
                 }),
@@ -3214,6 +3310,24 @@ function useModalStateFromNative() {
               initialSection:
                 typeof message.initialSection === "string" ? message.initialSection : null,
               initialTab: isSettingsModalTab(message.initialTab) ? message.initialTab : null,
+              modal: message.modal,
+              nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
+              revision: sidebarStateAtOpen.revision,
+            });
+          }
+          if (isFirstLaunchSetupModalKind(message.modal)) {
+            /*
+             * CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:
+             * Capture the setup open boundary after any inline sidebar-state
+             * hydrate has applied so a slow repro can tell whether React already
+             * has settings state before renderability waits begin.
+             */
+            postAppModalDebugLog("modalHost.setup.open.received", {
+              activeModalBeforeOpen: activeModalRef.current ?? null,
+              hasInlineSidebarStateMessage,
+              hasNativeSettingsHydrated: sidebarStateAtOpen.revision > 0,
+              hasSettings: sidebarStateAtOpen.hud.settings !== undefined,
+              inlineSidebarStateApplied: shouldApplyInlineSidebarState && hasInlineSidebarStateMessage,
               modal: message.modal,
               nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
               revision: sidebarStateAtOpen.revision,

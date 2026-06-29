@@ -59,12 +59,21 @@ describe("default prompt agent settings source", () => {
      * Settings renderability now separates the Settings-family modal check from
      * the hydrate check so native child windows can block `presented` until the
      * actual Settings UI is renderable.
+     *
+     * CDXC:FirstLaunchSetup 2026-06-29-13:46:
+     * First Launch uses the same hydrated Settings store gate, so it must also
+     * block native presentation until the modal host has applied native state.
      */
     expect(modalHostSource).toContain("const revision = useSidebarStore((state) => state.revision);");
     expect(modalHostSource).toContain("const hasNativeSettingsHydrated = revision > 0;");
     expect(modalHostSource).toContain("const isSettingsModal = isSettingsModalKind(activeModal);");
     expect(modalHostSource).toContain("const isSettingsRenderable = isSettingsModal && hasNativeSettingsHydrated;");
-    expect(modalHostSource).toContain("hasNativeSettingsHydrated &&");
+    expect(modalHostSource).toContain(
+      "const isFirstLaunchSetupRenderable = isFirstLaunchSetupModal && hasNativeSettingsHydrated;",
+    );
+    expect(modalHostSource).toContain(
+      "(!isFirstLaunchSetupModal || isFirstLaunchSetupRenderable)",
+    );
   });
 
   test("does not silently fall back to Codex for unavailable default prompt agents", () => {

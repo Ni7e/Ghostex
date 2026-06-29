@@ -1,13 +1,6 @@
-export type SettingsModalTab =
-  | "settings"
-  | "integrations"
-  | "osIntegration"
-  | "remote"
-  | "projects"
-  | "agents"
-  | "actions"
-  | "openTargets"
-  | "hotkeys";
+import type { SettingsModalNavigationTab } from "../shared/ghostex-settings";
+
+export type SettingsModalTab = SettingsModalNavigationTab;
 
 export type SettingsModalTabVisibilityOptions = {
   showOSIntegrationSettingsTab: boolean;

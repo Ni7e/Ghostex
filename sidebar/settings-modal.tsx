@@ -172,6 +172,7 @@ import {
   MIN_SIDEBAR_DEFAULT_WIDTH_PX,
   normalizeTerminalDevServerIgnoredPortRuleInput,
   normalizeTerminalDevServerIgnoredPortRules,
+  normalizeSettingsModalNavigationState,
   normalizeghostexSettings,
   normalizeRemoteMachineSettings,
   setDiagnosticLoggingScenario,
@@ -188,6 +189,7 @@ import {
   type PortlessProtocol,
   type RemoteMachineSettings,
   type SessionPersistenceProvider,
+  type SettingsModalNavigationState,
   type SessionTitleGenerationAgent,
   type SidebarSettingsPresetId,
   type SidebarSide,
@@ -607,6 +609,7 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
   ],
   sessionCards: [
     "hideSessionAgentIconUntilHover",
+    "useColoredSessionAgentIcons",
     "hideBrowserFaviconUntilHover",
     "showCloseButtonOnSessionCards",
     "hideLastActiveTimeOnSessionCards",
@@ -641,7 +644,6 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "sessionPersistenceProvider",
     "showSessionIdInTerminalPanes",
     "promptEditorBackend",
-    "customPromptEditorCommand",
   ],
   terminalBehavior: [
     "terminalScrollbackLimitMb",
@@ -799,7 +801,6 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "terminalCursorStyleBlink",
   "showSessionIdInTerminalPanes",
   "promptEditorBackend",
-  "customPromptEditorCommand",
   "terminalScrollbackLimitMb",
   "terminalCopyOnSelect",
   "terminalConfirmCloseSurface",
@@ -875,20 +876,45 @@ const rememberedSettingsModalScrollTopByTab: Partial<Record<SettingsModalTab, nu
  * Settings must keep app-session tab and scroll memory, but the main SettingsModal render needs React Compiler coverage so scroll-section highlight updates do not re-render the whole long settings page.
  * Keep the mutable session memory behind helpers so SettingsModal does not directly reassign module variables and the compiler can memoize the large render tree.
  */
-function getRememberedSettingsModalTab(): SettingsModalTab | undefined {
-  return rememberedSettingsModalTab;
+function getRememberedSettingsModalTab(
+  storedNavigation: SettingsModalNavigationState,
+): SettingsModalTab | undefined {
+  return rememberedSettingsModalTab ?? storedNavigation.activeTab;
 }
 
 function rememberSettingsModalTab(tab: SettingsModalTab): void {
   rememberedSettingsModalTab = tab;
 }
 
-function getRememberedSettingsModalScrollTop(tab: SettingsModalTab): number {
-  return rememberedSettingsModalScrollTopByTab[tab] ?? 0;
+function getRememberedSettingsModalScrollTop(
+  tab: SettingsModalTab,
+  storedNavigation: SettingsModalNavigationState,
+): number {
+  return rememberedSettingsModalScrollTopByTab[tab] ?? storedNavigation.scrollTopByTab[tab] ?? 0;
 }
 
 function rememberSettingsModalScrollTop(tab: SettingsModalTab, scrollTop: number): void {
   rememberedSettingsModalScrollTopByTab[tab] = scrollTop;
+}
+
+function getRememberedSettingsModalNavigationState(
+  activeTab: SettingsModalTab,
+  storedNavigation: SettingsModalNavigationState,
+): SettingsModalNavigationState {
+  return normalizeSettingsModalNavigationState({
+    activeTab,
+    scrollTopByTab: {
+      ...storedNavigation.scrollTopByTab,
+      ...rememberedSettingsModalScrollTopByTab,
+    },
+  });
+}
+
+function areSettingsModalNavigationStatesEqual(
+  left: SettingsModalNavigationState,
+  right: SettingsModalNavigationState,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 /*
@@ -907,14 +933,23 @@ function setSettingsSortableRowElement(
 function getInitialSettingsModalTab(
   initialTab: SettingsModalTab,
   visibility: SettingsModalTabVisibilityOptions,
+  storedNavigation: SettingsModalNavigationState,
 ): SettingsModalTab {
   /**
    * CDXC:Settings 2026-05-11-09:06
-   * Settings remembers the last selected tab for the current app session. A
+   * Settings remembers the last selected tab during the current app session. A
    * non-default entry point such as Hotkeys still opens its requested tab, then
-   * that tab becomes the remembered choice until the app restarts.
+   * that tab becomes the remembered choice for later ordinary Settings opens.
+   *
+   * CDXC:SettingsNavigation 2026-06-29-17:54:
+   * Ordinary Settings opens should also restore the last closed Settings tab
+   * from durable macOS settings storage after an app relaunch. Explicit entry
+   * points still win so menu actions and deep links land on the requested page.
    */
-  const requestedTab = initialTab !== "settings" ? initialTab : getRememberedSettingsModalTab() ?? initialTab;
+  const requestedTab =
+    initialTab !== "settings"
+      ? initialTab
+      : getRememberedSettingsModalTab(storedNavigation) ?? initialTab;
   return resolveSettingsModalTabForVisibility(requestedTab, visibility);
 }
 
@@ -1036,7 +1071,6 @@ export type SettingsModalProps = {
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
   onInstallGenerateTitleSkill?: () => void;
-  onInstallGte?: () => void;
   onInstallGhostexCli?: () => void;
   onInstallMoveCodexSessionSkill?: () => void;
   onPlayCompletionSound?: (sound: CompletionSoundSetting) => void;
@@ -1087,7 +1121,6 @@ export function SettingsModal({
   onInstallComputerUseSkill,
   onInstallCuaDriver,
   onInstallGenerateTitleSkill,
-  onInstallGte,
   onInstallGhostexCli,
   onInstallMoveCodexSessionSkill,
   onPlayCompletionSound,
@@ -1140,12 +1173,16 @@ export function SettingsModal({
     showBetaFeatures: draft.showBetaFeatures,
   });
   const [activeTab, setActiveTabState] = useState<SettingsModalTab>(() =>
-    getInitialSettingsModalTab(initialTab, {
-      showOSIntegrationSettingsTab: shouldShowOSIntegrationSettingsTab({
-        isFirstLaunchSetup,
-        showBetaFeatures: normalizedInitialSettings.showBetaFeatures,
-      }),
-    }),
+    getInitialSettingsModalTab(
+      initialTab,
+      {
+        showOSIntegrationSettingsTab: shouldShowOSIntegrationSettingsTab({
+          isFirstLaunchSetup,
+          showBetaFeatures: normalizedInitialSettings.showBetaFeatures,
+        }),
+      },
+      normalizedInitialSettings.settingsModalNavigation,
+    ),
   );
   const dialogContentRef = useRef<HTMLDivElement>(null);
   const showAdvancedSettingsId = useId();
@@ -1311,7 +1348,11 @@ export function SettingsModal({
     if (!isOpen) {
       return;
     }
-    const nextTab = getInitialSettingsModalTab(initialTab, { showOSIntegrationSettingsTab });
+    const nextTab = getInitialSettingsModalTab(
+      initialTab,
+      { showOSIntegrationSettingsTab },
+      (pendingSettingsRef.current ?? draft).settingsModalNavigation,
+    );
     rememberActiveScrollPosition();
     rememberSettingsModalTab(nextTab);
     setActiveTabState(nextTab);
@@ -1387,7 +1428,12 @@ export function SettingsModal({
      * CDXC:SettingsNavigation 2026-05-26-18:47:
      * During one app session, reopening Settings should return to the same tab
      * and scroll position the user left. Keep that state in module memory so it
-     * survives modal remounts but resets naturally when the app restarts.
+     * survives modal remounts.
+     *
+     * CDXC:SettingsNavigation 2026-06-29-17:54:
+     * App relaunch should also restore the last closed Settings location from
+     * persisted settings, while in-memory state remains the fastest source for
+     * repeated opens during the same app run.
      *
      * CDXC:SettingsSearch 2026-05-26-18:47:
      * When a searchable Settings tab opens, ordinary typing should enter the
@@ -1404,7 +1450,10 @@ export function SettingsModal({
     const animationFrame = requestAnimationFrame(() => {
       const viewport = getActiveSettingsModalScrollViewport(dialogContentRef.current);
       if (viewport) {
-        viewport.scrollTop = getRememberedSettingsModalScrollTop(activeTab);
+        viewport.scrollTop = getRememberedSettingsModalScrollTop(
+          activeTab,
+          (pendingSettingsRef.current ?? draft).settingsModalNavigation,
+        );
       }
       focusSearchInput();
     });
@@ -1655,6 +1704,11 @@ export function SettingsModal({
         key: "hideSessionAgentIconUntilHover",
         subtitle: "Hide session agent icons until a session row is hovered.",
         title: "Hide agent icon until hover",
+      },
+      {
+        key: "useColoredSessionAgentIcons",
+        subtitle: "Render session agent logos with colored brand artwork instead of monochrome masks.",
+        title: "Use colored agent icons",
       },
       {
         key: "hideBrowserFaviconUntilHover",
@@ -1929,20 +1983,11 @@ export function SettingsModal({
           ]),
       {
         key: "promptEditorBackend",
-        options: [...PROMPT_EDITOR_BACKEND_OPTIONS, { label: "Install gte", value: "installGte" }],
+        options: PROMPT_EDITOR_BACKEND_OPTIONS,
         subtitle:
           "Choose which editor Ctrl+G uses when a terminal prompt asks for $EDITOR.",
         title: "Ctrl+G prompt editor",
       },
-      ...(draft.promptEditorBackend === "custom"
-        ? [
-            {
-              key: "customPromptEditorCommand",
-              subtitle: "Write a custom $EDITOR command for Ctrl+G prompt editing.",
-              title: "Custom Ctrl+G editor command",
-            },
-          ]
-        : []),
     ]),
     terminalBehavior: getSettingsSectionSearch(settingsSearchQuery, "Terminal Behavior", [
       {
@@ -2538,18 +2583,42 @@ export function SettingsModal({
     }
   };
 
-  const flushPendingSettings = () => {
-    clearPendingSettings();
+  const flushPendingSettingsWithNavigation = () => {
+    rememberActiveScrollPosition();
     const pendingSettings = pendingSettingsRef.current;
+    const baseSettings = pendingSettings ?? draft;
+    const nextSettings = isFirstLaunchSetup
+      ? baseSettings
+      : normalizeghostexSettings({
+          ...baseSettings,
+          settingsModalNavigation: getRememberedSettingsModalNavigationState(
+            activeTab,
+            baseSettings.settingsModalNavigation,
+          ),
+        });
+    const shouldPersistNavigation =
+      !isFirstLaunchSetup &&
+      !areSettingsModalNavigationStatesEqual(
+        baseSettings.settingsModalNavigation,
+        nextSettings.settingsModalNavigation,
+      );
+    /*
+     * CDXC:SettingsNavigation 2026-06-29-17:54:
+     * Closing the normal macOS Settings window is the durable restore boundary.
+     * Merge pending debounced edits with the last tab and scroll offsets in one
+     * normalized write so relaunch opens where the user left without racing
+     * numeric-control debounce saves.
+     */
+    clearPendingSettings();
     pendingSettingsRef.current = undefined;
-    if (pendingSettings) {
-      onChange(pendingSettings);
+    if (pendingSettings || shouldPersistNavigation) {
+      setDraft(nextSettings);
+      onChange(nextSettings);
     }
   };
 
   const closeSettingsModal = () => {
-    rememberActiveScrollPosition();
-    flushPendingSettings();
+    flushPendingSettingsWithNavigation();
     onClose();
   };
 
@@ -2761,9 +2830,7 @@ export function SettingsModal({
     <Dialog
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
-          rememberActiveScrollPosition();
-          flushPendingSettings();
-          onClose();
+          closeSettingsModal();
         }
       }}
       open={isOpen}
@@ -3191,6 +3258,16 @@ export function SettingsModal({
                 onChange={(checked) => updateDraft("hideSessionAgentIconUntilHover", checked)}
               />
               ) : null}
+              {/* CDXC:SidebarSessionAgentIcons 2026-06-29-23:58: Users need a Session Cards toggle for colored agent brand artwork while the default sidebar remains monochrome and favorite rows no longer gold-tint agent logos. */}
+              {mainSettingVisible(settingsSearch.sessionCards, "useColoredSessionAgentIcons") ? (
+              <ToggleField
+                checked={draft.useColoredSessionAgentIcons}
+                description="Render session agent logos with colored brand artwork instead of monochrome masks."
+                label="Use colored agent icons"
+                {...getSettingModificationProps("useColoredSessionAgentIcons")}
+                onChange={(checked) => updateDraft("useColoredSessionAgentIcons", checked)}
+              />
+              ) : null}
               {mainSettingVisible(settingsSearch.sessionCards, "hideBrowserFaviconUntilHover") ? (
               <ToggleField
                 checked={draft.hideBrowserFaviconUntilHover}
@@ -3536,36 +3613,23 @@ export function SettingsModal({
               {mainSettingVisible(settingsSearch.terminal, "promptEditorBackend") ? (
                 /**
                  * CDXC:PromptEditorBackend 2026-05-11-14:38
-                 * Ctrl+G prompt editing can render either through the native
-                 * WebKit Monaco overlay or the gte TUI running inside the
-                 * launching terminal. Keep the install action with the gte option.
+                 * Ctrl+G prompt editing can render through the native WebKit
+                 * Monaco editor or leave the terminal's machine-level editor
+                 * settings untouched.
                  *
-                 * CDXC:PromptEditorBackend 2026-05-22-09:56:
-                 * Settings copy must use gte for Ghostex Terminal Editor so users see the same name in the app, install command, and Ctrl+G editor selection.
-                 *
-                 * CDXC:PromptEditorBackend 2026-05-22-10:16:
-                 * Selecting gte must not describe or launch a popup. gte runs in the terminal that invoked Ctrl+G, while Monaco remains the popup editor.
+                 * CDXC:PromptEditorBackend 2026-06-30-00:08:
+                 * The Settings dropdown must only offer Monaco and "Use default
+                 * from this machine"; remove gte install/use and custom command
+                 * controls from this surface.
                  */
-                <GtePromptEditingField
+                <PromptEditorBackendField
                   advanced={getSettingModificationProps("promptEditorBackend").advanced}
                   backend={draft.promptEditorBackend}
                   isModified={getSettingModificationProps("promptEditorBackend").isModified}
-                  onInstall={() => onInstallGte?.()}
                   onChange={(backend) => updateDraft("promptEditorBackend", backend)}
                   onResetToDefault={
                     getSettingModificationProps("promptEditorBackend").onResetToDefault
                   }
-                />
-              ) : null}
-              {draft.promptEditorBackend === "custom" &&
-              mainSettingVisible(settingsSearch.terminal, "customPromptEditorCommand") ? (
-                <TextField
-                  description="Write the command exactly as the terminal should export it for $EDITOR and $VISUAL."
-                  label="Custom Ctrl+G editor command"
-                  {...getSettingModificationProps("customPromptEditorCommand")}
-                  onChange={(value) => updateDraft("customPromptEditorCommand", value)}
-                  placeholder="code --wait"
-                  value={draft.customPromptEditorCommand}
                 />
               ) : null}
             </SettingsSection>
@@ -4406,11 +4470,7 @@ export function SettingsModal({
               <div className="flex justify-end pt-2">
                 <Button
                   className="h-10 px-5 text-sm"
-                  onClick={() => {
-                    rememberActiveScrollPosition();
-                    flushPendingSettings();
-                    onClose();
-                  }}
+                  onClick={closeSettingsModal}
                   type="button"
                 >
                   Continue
@@ -4621,10 +4681,14 @@ function SettingsSidebarNavigation({
           return (
             <div className="settings-sidebar-page-group" key={page.id}>
               <div className="settings-sidebar-page-row">
+                {/*
+                 * CDXC:SettingsNavigation 2026-06-29-21:45:
+                 * Expandable Settings sidebar headers must expand and collapse from the full visible header, not only from the disclosure chevron, because the row highlight presents the icon, label, and chevron as one control.
+                 */}
                 <TabsTrigger
                   className="settings-sidebar-tab-trigger"
                   onClick={() => {
-                    if (hasSections && !expanded) {
+                    if (hasSections) {
                       onTogglePage(page.id);
                     }
                   }}
@@ -8776,19 +8840,17 @@ function GhosttySettingsActions({
   );
 }
 
-function GtePromptEditingField({
+function PromptEditorBackendField({
   advanced,
   backend,
   isModified,
   onChange,
-  onInstall,
   onResetToDefault,
 }: {
   advanced?: boolean;
   backend: PromptEditorBackend;
   isModified?: boolean;
   onChange: (backend: PromptEditorBackend) => void;
-  onInstall: () => void;
   onResetToDefault?: () => void;
 }) {
   const id = useId();
@@ -8801,33 +8863,23 @@ function GtePromptEditingField({
       label="Ctrl+G prompt editor"
       onResetToDefault={onResetToDefault}
     >
-      <div className="flex flex-col items-start gap-3">
-        <SettingsSelect
-          onValueChange={(value) => onChange(value as PromptEditorBackend)}
-          value={backend}
-        >
-          <SelectTrigger className="h-10 w-full px-3 text-sm" id={id}>
-            <SelectValue />
-          </SelectTrigger>
-          <SettingsSelectContent>
-            <SelectGroup>
-              {PROMPT_EDITOR_BACKEND_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SettingsSelectContent>
-        </SettingsSelect>
-        <Button
-          className="h-9 w-fit px-3 text-sm"
-          onClick={onInstall}
-          type="button"
-          variant="outline"
-        >
-          Install gte
-        </Button>
-      </div>
+      <SettingsSelect
+        onValueChange={(value) => onChange(value as PromptEditorBackend)}
+        value={backend}
+      >
+        <SelectTrigger className="h-10 w-full px-3 text-sm" id={id}>
+          <SelectValue />
+        </SelectTrigger>
+        <SettingsSelectContent>
+          <SelectGroup>
+            {PROMPT_EDITOR_BACKEND_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SettingsSelectContent>
+      </SettingsSelect>
     </SettingRow>
   );
 }
