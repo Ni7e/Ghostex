@@ -37,6 +37,40 @@ function svgTextToDataUrl(svgText: string): string {
   return `data:image/svg+xml,${encodeURIComponent(svgText)}`;
 }
 
+function svgTextFromMaybeDataUrl(svgText: string): string {
+  if (!svgText.startsWith("data:image/svg+xml,")) {
+    return svgText;
+  }
+
+  const commaIndex = svgText.indexOf(",");
+  if (commaIndex === -1) {
+    return svgText;
+  }
+
+  try {
+    return decodeURIComponent(svgText.slice(commaIndex + 1));
+  } catch {
+    return svgText;
+  }
+}
+
+function svgTextToColorizedDataUrl(svgText: string, color: string): string {
+  const rawSvgText = svgTextFromMaybeDataUrl(svgText);
+  const withRootColor = rawSvgText.replace(/<svg\b([^>]*)>/i, (_match, attributes: string) => {
+    const colorAttribute = /\scolor=/i.test(attributes) ? "" : ` color="${color}"`;
+    const fillAttribute = /\sfill=/i.test(attributes) ? "" : ` fill="${color}"`;
+    return `<svg${attributes}${colorAttribute}${fillAttribute}>`;
+  });
+  const colorizedSvgText = withRootColor
+    .replace(/currentColor/g, color)
+    .replace(/fill=(["'])#(?:000|000000)\1/gi, `fill="${color}"`)
+    .replace(/fill:\s*#(?:000|000000)\b/gi, `fill:${color}`)
+    .replace(/fill=(["'])rgb\(\s*(?:0\s*,\s*0\s*,\s*0|16\s*,\s*24\s*,\s*32)\s*\)\1/gi, `fill="${color}"`)
+    .replace(/fill:\s*rgb\(\s*(?:0\s*,\s*0\s*,\s*0|16\s*,\s*24\s*,\s*32)\s*\)/gi, `fill:${color}`);
+
+  return `data:image/svg+xml,${encodeURIComponent(colorizedSvgText)}`;
+}
+
 export const AGENT_LOGOS: Record<SidebarAgentIcon, string> = {
   "amp-cli": svgTextToDataUrl(ampCliLogo),
   "antigravity-cli": svgTextToDataUrl(antigravityCliLogo),
@@ -86,4 +120,42 @@ export const AGENT_LOGO_COLORS: Record<SidebarAgentIcon, string> = {
   qoder: "#a991ff",
   "rovo-dev": "#4fc3a1",
   t3: "#ff6af3",
+};
+
+/**
+ * CDXC:SidebarSessionAgentIcons 2026-06-29-23:58:
+ * Colored session-card agent icons render the SVGs as image backgrounds, not
+ * CSS masks. Patch currentColor, inherited-fill, and black-only source logos
+ * to the existing brand color map so colored mode does not turn dark logos
+ * invisible on the dark macOS sidebar.
+ */
+export const COLORED_AGENT_LOGOS: Record<SidebarAgentIcon, string> = {
+  "amp-cli": svgTextToColorizedDataUrl(ampCliLogo, AGENT_LOGO_COLORS["amp-cli"]),
+  "antigravity-cli": svgTextToColorizedDataUrl(
+    antigravityCliLogo,
+    AGENT_LOGO_COLORS["antigravity-cli"],
+  ),
+  browser: svgTextToColorizedDataUrl(browserLogo, AGENT_LOGO_COLORS.browser),
+  claude: svgTextToColorizedDataUrl(claudeLogo, AGENT_LOGO_COLORS.claude),
+  codebuddy: svgTextToColorizedDataUrl(codebuddyLogo, AGENT_LOGO_COLORS.codebuddy),
+  "cursor-cli": svgTextToColorizedDataUrl(cursorCliLogo, AGENT_LOGO_COLORS["cursor-cli"]),
+  codex: svgTextToColorizedDataUrl(codexLogo, AGENT_LOGO_COLORS.codex),
+  copilot: svgTextToColorizedDataUrl(copilotLogo, AGENT_LOGO_COLORS.copilot),
+  "factory-droid": svgTextToColorizedDataUrl(
+    factoryDroidLogo,
+    AGENT_LOGO_COLORS["factory-droid"],
+  ),
+  gemini: svgTextToColorizedDataUrl(geminiLogo, AGENT_LOGO_COLORS.gemini),
+  "grok-build": svgTextToColorizedDataUrl(grokBuildLogo, AGENT_LOGO_COLORS["grok-build"]),
+  "hermes-agent": svgTextToColorizedDataUrl(
+    hermesAgentLogo,
+    AGENT_LOGO_COLORS["hermes-agent"],
+  ),
+  kiro: svgTextToColorizedDataUrl(kiroLogo, AGENT_LOGO_COLORS.kiro),
+  omp: svgTextToColorizedDataUrl(ompLogo, AGENT_LOGO_COLORS.omp),
+  opencode: svgTextToColorizedDataUrl(opencodeLogo, AGENT_LOGO_COLORS.opencode),
+  pi: svgTextToColorizedDataUrl(piLogo, AGENT_LOGO_COLORS.pi),
+  qoder: svgTextToColorizedDataUrl(qoderLogo, AGENT_LOGO_COLORS.qoder),
+  "rovo-dev": svgTextToColorizedDataUrl(rovoDevLogo, AGENT_LOGO_COLORS["rovo-dev"]),
+  t3: svgTextToColorizedDataUrl(t3Logo, AGENT_LOGO_COLORS.t3),
 };

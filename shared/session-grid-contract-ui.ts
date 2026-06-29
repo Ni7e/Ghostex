@@ -120,8 +120,12 @@ export function createSidebarSessionItems(
      * CDXC:SessionFavorites 2026-05-15-12:43
      * Favorite state is stored on the canonical session record but rendered by
      * sidebar cards and Previous Sessions. Project it into SidebarSessionItem so
-     * card icons receive data-favorite and context menus can toggle back to
-     * Unfavorite after publish.
+     * context menus can toggle back to Unfavorite after publish.
+     *
+     * CDXC:SidebarSessionAgentIcons 2026-06-29-23:58:
+     * Favorite projection must not gold-tint the session's agent icon; Favorite
+     * remains a session tag/state, while icon color follows the Session Cards
+     * monochrome/colored setting.
      */
     isFavorite: getEffectiveSidebarSessionTag(session) === "favorite",
     sessionTag: getEffectiveSidebarSessionTag(session),

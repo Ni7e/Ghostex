@@ -748,7 +748,13 @@ export function SortableSessionCard({
     (count, section) => count + section.options.length,
     0,
   );
+  /*
+  CDXC:RemotePresentation 2026-06-30-00:11:
+  Remote session rows need visible lifecycle chrome and a non-debug state tooltip while keeping local session cards unchanged. Derive that from the owning group so the session model does not need a separate remote-only flag.
+  */
+  const isRemoteSession = Boolean(sessionGroup?.remoteMachineContext);
   const sessionTitleTooltip = getSessionCardTitleTooltip({
+    alwaysShowStateTooltip: isRemoteSession,
     session,
     showDebugSessionNumbers,
   });
@@ -2025,6 +2031,7 @@ export function SortableSessionCard({
           data-project-session-list-overflow={String(isProjectSessionListOverflowRow)}
           data-pinned={String(session.isPinned === true)}
           data-tagged={String(Boolean(currentSessionTag))}
+          data-remote-session={String(isRemoteSession)}
           data-running={String(lifecycleState === "running")}
           data-sleeping={String(Boolean(session.isSleeping))}
           data-visible={String(session.isVisible)}
@@ -2073,6 +2080,7 @@ export function SortableSessionCard({
             data-search-selected={String(isSearchSelected)}
             data-pinned={String(session.isPinned === true)}
             data-tagged={String(Boolean(currentSessionTag))}
+            data-remote-session={String(isRemoteSession)}
             data-sleeping={String(Boolean(session.isSleeping))}
             data-sidebar-session-id={session.sessionId}
             data-visible={String(session.isVisible)}

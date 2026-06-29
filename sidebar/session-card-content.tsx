@@ -25,7 +25,7 @@ import {
   type SidebarSessionItem,
 } from "../shared/session-grid-contract";
 import { getSidebarAgentNameByIcon, type SidebarAgentIcon } from "../shared/sidebar-agents";
-import { AGENT_LOGOS } from "./agent-logos";
+import { AGENT_LOGOS, COLORED_AGENT_LOGOS } from "./agent-logos";
 import {
   getEffectiveSessionTag,
   getSidebarSessionTagLabel,
@@ -249,7 +249,6 @@ export function SessionCardContent({
               <SessionHeaderAgentIcon
                 agentIcon={session.agentIcon}
                 faviconDataUrl={session.faviconDataUrl}
-                isFavorite={session.isFavorite}
                 isGeneratingFirstPromptTitle={session.isGeneratingFirstPromptTitle}
                 isReloading={session.isReloading}
                 sessionPersistenceName={session.sessionPersistenceName}
@@ -346,11 +345,13 @@ function formatSessionTimerCountdown(delayMs: number): string {
 
 export function getSessionCardTitleTooltip({
   alwaysShowTitleTooltip = false,
+  alwaysShowStateTooltip = false,
   session,
   showDebugSessionNumbers,
   showSessionDetails = false,
 }: {
   alwaysShowTitleTooltip?: boolean;
+  alwaysShowStateTooltip?: boolean;
   session: Pick<
     SidebarSessionItem,
     | "activityLabel"
@@ -435,6 +436,12 @@ export function getSessionCardTitleTooltip({
    * CDXC:SessionTooltips 2026-06-14-16:56:
    * Session status lines expose provider/surface internals, so show `State: ...`
    * only while Debugging Mode is enabled.
+   *
+   * CDXC:RemotePresentation 2026-06-30-00:11:
+   * Remote sidebar rows need their title tooltip to expose the terminal state
+   * without enabling Debugging Mode. Keep IDs and provider names debug-only,
+   * but allow callers to opt into the non-private state label for remote
+   * sessions.
    */
   const sessionIdTooltipValue = session.sessionRoutingId?.trim() || session.sessionNumber?.trim();
   const sessionIdTooltip =
@@ -466,7 +473,7 @@ export function getSessionCardTitleTooltip({
       : session.closeAfterDone
         ? "Close After Done armed"
         : undefined,
-    getSessionStateTooltipText(session, showDebugSessionNumbers),
+    getSessionStateTooltipText(session, showDebugSessionNumbers || alwaysShowStateTooltip),
     getSessionTooltipSecondaryText(session),
     ...(showSessionDetails ? getSessionDetailsTooltipLines(session) : []),
     agentSessionIdTooltip,
@@ -728,9 +735,9 @@ function containsFilesystemPath(value: string): boolean {
 
 function getSessionStateTooltipText(
   session: SessionTooltipStateInput,
-  showDebugSessionNumbers: boolean,
+  showStateTooltip: boolean,
 ): string | undefined {
-  if (!showDebugSessionNumbers) {
+  if (!showStateTooltip) {
     return undefined;
   }
 
@@ -840,6 +847,7 @@ type SessionAgentIconProps = {
 
 type SessionAgentLogoStyle = CSSProperties & {
   "--session-agent-logo": string;
+  "--session-agent-logo-colored": string;
 };
 
 type SessionAgentIconDecorationProps = SessionAgentIconProps & {
@@ -852,7 +860,6 @@ function SessionAgentIconDecoration({
   agentIcon,
   className,
   faviconDataUrl,
-  isFavorite = false,
   isGeneratingFirstPromptTitle = false,
   isReloading = false,
   loadingClassName,
@@ -863,7 +870,6 @@ function SessionAgentIconDecoration({
     return <IconLoader2 aria-hidden="true" className={loadingClassName} size={14} stroke={1.8} />;
   }
 
-  const favoriteState = String(isFavorite);
   if (agentIcon === "browser") {
     if (faviconDataUrl) {
       /**
@@ -883,7 +889,6 @@ function SessionAgentIconDecoration({
           aria-hidden="true"
           className={tablerClassName}
           data-agent-icon="browser"
-          data-favorite={favoriteState}
           data-icon-variant="favicon"
           src={faviconDataUrl}
         />
@@ -894,7 +899,6 @@ function SessionAgentIconDecoration({
         aria-hidden="true"
         className={tablerClassName}
         data-agent-icon="browser"
-        data-favorite={favoriteState}
         size={14}
         stroke={1.8}
       />
@@ -913,7 +917,6 @@ function SessionAgentIconDecoration({
         aria-hidden="true"
         className={tablerClassName}
         data-agent-icon="terminal"
-        data-favorite={favoriteState}
         size={14}
         stroke={1.8}
       />
@@ -925,7 +928,15 @@ function SessionAgentIconDecoration({
   }
 
   const agentLogoStyle: SessionAgentLogoStyle = {
+    /*
+     * CDXC:SidebarSessionAgentIcons 2026-06-29-23:58:
+     * Session cards need both render assets at the element boundary: masks for
+     * monochrome mode and image backgrounds for the colored Settings toggle.
+     * Favorite state must not feed this style, so favorite rows keep the same
+     * agent logo colors as non-favorite rows.
+     */
     "--session-agent-logo": `url("${AGENT_LOGOS[agentIcon]}")`,
+    "--session-agent-logo-colored": `url("${COLORED_AGENT_LOGOS[agentIcon]}")`,
   };
 
   return (
@@ -933,7 +944,6 @@ function SessionAgentIconDecoration({
       aria-hidden="true"
       className={className}
       data-agent-icon={agentIcon}
-      data-favorite={favoriteState}
       style={agentLogoStyle}
     />
   );
@@ -1061,7 +1071,6 @@ function PinnedSessionSidebarIcon() {
 function SessionHeaderAgentIcon({
   agentIcon,
   faviconDataUrl,
-  isFavorite = false,
   isGeneratingFirstPromptTitle = false,
   isReloading = false,
   sessionPersistenceName,
@@ -1074,7 +1083,6 @@ function SessionHeaderAgentIcon({
         agentIcon={agentIcon}
         className="session-header-agent-icon"
         faviconDataUrl={faviconDataUrl}
-        isFavorite={isFavorite}
         isGeneratingFirstPromptTitle={isGeneratingFirstPromptTitle}
         isReloading={isReloading}
         loadingClassName="session-header-reloading-icon"

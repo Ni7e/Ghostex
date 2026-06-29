@@ -539,11 +539,6 @@
   translate: 0 -50%;
 }
 
-.session-history-frame .session-floating-agent-icon[data-favorite="true"],
-.session-history-frame .session-floating-agent-tabler-icon[data-favorite="true"] {
-  opacity: 1;
-}
-
 .session-history-frame:is([data-tagged="true"], [data-pinned="true"]):not(:hover):not(
     :has(.session:hover)
   ):not(:has(.session:focus-visible)):not(:has(.session:focus-within))
@@ -625,8 +620,42 @@
 
 .session-frame[data-activity="working"] .session-status-dot,
 .session-frame[data-activity="attention"] .session-status-dot,
+.session-frame[data-remote-session="true"]:is(
+    [data-lifecycle-state="running"],
+    [data-lifecycle-state="sleeping"],
+    [data-lifecycle-state="done"]
+  )
+  .session-status-dot,
 .session-frame[data-lifecycle-state="error"] .session-status-dot {
   opacity: 1;
+}
+
+/*
+ * CDXC:RemotePresentation 2026-06-30-00:11:
+ * Remote terminal rows must show a visible lifecycle state even when activity is
+ * idle, because otherwise a live remote `running` session has no status chrome
+ * in the macOS sidebar. Keep working, attention, and error as higher-priority
+ * states; these colors only apply to neutral remote lifecycle dots.
+ */
+.session-frame[data-remote-session="true"][data-lifecycle-state="running"]:not(
+    [data-activity="working"]
+  ):not([data-activity="attention"])
+  .session-status-dot {
+  --session-status-dot-color: color-mix(in srgb, #5ea0ff 72%, #39c27d 28%);
+}
+
+.session-frame[data-remote-session="true"][data-lifecycle-state="sleeping"]:not(
+    [data-activity="working"]
+  ):not([data-activity="attention"])
+  .session-status-dot {
+  --session-status-dot-color: color-mix(in srgb, var(--app-muted) 86%, var(--app-foreground) 14%);
+}
+
+.session-frame[data-remote-session="true"][data-lifecycle-state="done"]:not(
+    [data-activity="working"]
+  ):not([data-activity="attention"])
+  .session-status-dot {
+  --session-status-dot-color: var(--done-attention-color, #95d7f6);
 }
 
 .session-frame[data-activity="working"] .session-status-dot {
@@ -658,8 +687,31 @@
 
 .session-status-dot-anchored[data-activity="working"],
 .session-status-dot-anchored[data-activity="attention"],
+.session-status-dot-anchored[data-remote-session="true"]:is(
+    [data-lifecycle-state="running"],
+    [data-lifecycle-state="sleeping"],
+    [data-lifecycle-state="done"]
+  ),
 .session-status-dot-anchored[data-lifecycle-state="error"] {
   opacity: 1;
+}
+
+.session-status-dot-anchored[data-remote-session="true"][data-lifecycle-state="running"]:not(
+    [data-activity="working"]
+  ):not([data-activity="attention"]) {
+  --session-status-dot-color: color-mix(in srgb, #5ea0ff 72%, #39c27d 28%);
+}
+
+.session-status-dot-anchored[data-remote-session="true"][data-lifecycle-state="sleeping"]:not(
+    [data-activity="working"]
+  ):not([data-activity="attention"]) {
+  --session-status-dot-color: color-mix(in srgb, var(--app-muted) 86%, var(--app-foreground) 14%);
+}
+
+.session-status-dot-anchored[data-remote-session="true"][data-lifecycle-state="done"]:not(
+    [data-activity="working"]
+  ):not([data-activity="attention"]) {
+  --session-status-dot-color: var(--done-attention-color, #95d7f6);
 }
 
 .session-status-dot-anchored[data-activity="working"] {
@@ -713,6 +765,9 @@
 .session-frame:not(.session-history-frame):not(.project-editor-session-frame):is(
     [data-activity="working"],
     [data-activity="attention"],
+    [data-remote-session="true"][data-lifecycle-state="running"],
+    [data-remote-session="true"][data-lifecycle-state="sleeping"],
+    [data-remote-session="true"][data-lifecycle-state="done"],
     [data-lifecycle-state="error"]
   )
   .session-head[data-title-full-width="true"]
@@ -822,6 +877,23 @@
   mask-repeat: no-repeat;
   mask-size: contain;
   transition: opacity 120ms ease;
+}
+
+.sidebar-reference-layout[data-session-agent-icon-color-mode="colored"] .session-floating-agent-icon,
+.sidebar-reference-layout[data-session-agent-icon-color-mode="colored"] .session-header-agent-icon {
+  /*
+   * CDXC:SidebarSessionAgentIcons 2026-06-29-23:58:
+   * The Session Cards color toggle switches agent-logo spans from mask tinting
+   * to image backgrounds. Keep the same element box and opacity rules so the
+   * setting changes only logo color treatment, not layout or hover behavior.
+   */
+  background-color: transparent;
+  background-image: var(--session-agent-logo-colored);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 
 .session-floating-agent-tabler-icon {
@@ -1186,8 +1258,13 @@
   opacity: 1;
 }
 
-.session-tag-colored-icon[data-session-tag="favorite"],
-.session-tag-agent-icon[data-session-tag="favorite"] {
+.session-tag-colored-icon[data-session-tag="favorite"] {
+  /*
+   * CDXC:SidebarSessionAgentIcons 2026-06-29-23:58:
+   * Favorite session rows use the star shape to communicate Favorite without
+   * forcing the leading session slot to gold. Keep the gold swatch only in
+   * tag picker/filter chrome where users compare tag categories directly.
+   */
   color: color-mix(in srgb, #ffdf75 78%, #c78b12 22%);
 }
 
@@ -1256,14 +1333,6 @@
   color: #ff9ee7;
 }
 
-.session-floating-agent-icon[data-favorite="true"],
-.session-floating-agent-tabler-icon[data-favorite="true"],
-.session-header-agent-icon[data-favorite="true"],
-.session-header-agent-tabler-icon[data-favorite="true"] {
-  --session-agent-icon-color: color-mix(in srgb, #ffdf75 78%, #c78b12 22%);
-  filter: brightness(1.04) saturate(1.08);
-}
-
 .session-frame:hover .session-floating-agent-icon,
 .session-frame:hover .session-floating-agent-tabler-icon,
 .session-frame:hover .session-floating-reloading-icon,
@@ -1284,11 +1353,6 @@
    * that same left slot, so suppress the pin/timer only for that interaction.
    */
   opacity: 0 !important;
-}
-
-.session-frame:hover .session-floating-agent-icon[data-favorite="true"],
-.session-frame:hover .session-floating-agent-tabler-icon[data-favorite="true"] {
-  opacity: 1;
 }
 
 .session-frame:hover .session-persistence-provider-badge[data-slot="floating"] {
@@ -1652,31 +1716,6 @@ body.native-sidebar-body[data-native-pointer-inside="false"]
   100% {
     opacity: 1;
   }
-}
-
-.session-frame:not(.session-history-frame)
-  .session:hover
-  .session-head-trailing[data-hover-trailing-display="icon"]
-  .session-header-agent-icon[data-favorite="true"],
-.session-frame:not(.session-history-frame):hover
-  .session-head-trailing[data-hover-trailing-display="icon"]
-  .session-header-agent-icon[data-favorite="true"],
-.session-frame:not(.session-history-frame)
-  .session:hover
-  .session-head-trailing[data-hover-trailing-display="icon"]
-  .session-header-agent-tabler-icon[data-favorite="true"],
-.session-frame:not(.session-history-frame):hover
-  .session-head-trailing[data-hover-trailing-display="icon"]
-  .session-header-agent-tabler-icon[data-favorite="true"],
-.session-frame:not(.session-history-frame)
-  .session:focus-visible
-  .session-head-trailing[data-hover-trailing-display="icon"]
-  .session-header-agent-icon[data-favorite="true"],
-.session-frame:not(.session-history-frame)
-  .session:focus-visible
-  .session-head-trailing[data-hover-trailing-display="icon"]
-  .session-header-agent-tabler-icon[data-favorite="true"] {
-  opacity: 1;
 }
 
 /* CDXC:SidebarReference 2026-05-08-01:10: The reference screenshots require
@@ -2049,9 +2088,9 @@ body[data-custom-sidebar-titlebar-colors="true"]
 /*
  * CDXC:SidebarReference 2026-05-15-09:13
  * The sidebar session dropdown/list needs every row with an agent identity to
- * show its brand-colored leading icon while scanning sessions. Keep active,
- * visible, hover, and favorite states stronger, but do not hide inactive agent
- * colors by default.
+ * show its leading icon while scanning sessions. Keep active, visible, and
+ * hover states stronger, but let the Session Cards color-mode setting decide
+ * whether agent logos render as monochrome masks or colored artwork.
  */
 .sidebar-reference-layout[data-reference-sidebar="true"] .session-frame:has(.session[data-has-agent-icon="true"])
   .session-floating-agent-icon,
