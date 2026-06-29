@@ -2389,6 +2389,15 @@ final class TerminalWorkspaceView: NSView {
     let status: String
   }
 
+  private struct ProjectEditorCEFLoadResult {
+    let errorCode: Int
+    let eventName: String
+    let expectedURL: String
+    let httpStatusCode: Int
+    let loadedURL: String
+    let status: String
+  }
+
   private enum ZmxPersistenceRefreshMode: String {
     case always
     case ifStale
@@ -2453,7 +2462,7 @@ final class TerminalWorkspaceView: NSView {
     let revision: UInt64
   }
 
-  private enum WebPaneFrameMode: Equatable {
+  private enum PaneFrameMode: Equatable {
     case normal
     case projectEditorCompanion
   }
@@ -2539,6 +2548,14 @@ final class TerminalWorkspaceView: NSView {
    top/bottom chrome gap, so the non-command titlebar height returns to 36pt.
    */
   private static let terminalTitleBarHeight: CGFloat = 36
+  /**
+   CDXC:ProjectEditorChrome 2026-06-29-23:39:
+   Source, Browser, Kanban, and Docs project-editor chrome should be one pixel
+   shorter than normal workspace terminal tabs. Keep project-editor tab strips
+   and companion-pane titlebars at 35pt without shrinking Agents/workspace
+   terminal titlebars.
+   */
+  private static let projectEditorTitleBarHeight: CGFloat = 35
   /**
    CDXC:PaneTabs 2026-05-15-08:29:
    Command pane tabs must match the visible command tab bar height exactly.
@@ -2667,6 +2684,9 @@ final class TerminalWorkspaceView: NSView {
   private var webPaneSessions: [String: WebPaneSession] = [:]
   private var projectEditorPaneSessions: [String: ProjectEditorPaneSession] = [:]
   private var projectEditorNativeLoadStatesByProjectId: [String: ProjectEditorNativeLoadState] = [:]
+  private var projectEditorCEFLoadResultsByProjectId: [String: ProjectEditorCEFLoadResult] = [:]
+  private var projectEditorCEFLoadAttemptIdsByProjectId: [String: UInt64] = [:]
+  private var nextProjectEditorCEFLoadAttemptId: UInt64 = 0
   private var customSidebarTitlebarNativeChrome = NativeSidebarTitlebarChromeColors.disabled
   private var webPaneFaviconTasksBySessionId: [String: Task<Void, Never>] = [:]
   private var completedWebPaneLoadSessionIds = Set<String>()
@@ -4989,6 +5009,10 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     projectEditorNativeLoadStatesByProjectId.removeValue(forKey: command.projectId)
+    if status == "opening" {
+      projectEditorCEFLoadResultsByProjectId.removeValue(forKey: command.projectId)
+      projectEditorCEFLoadAttemptIdsByProjectId.removeValue(forKey: command.projectId)
+    }
     guard let session = projectEditorPaneSessions[command.projectId] else {
       return
     }
@@ -5011,6 +5035,54 @@ final class TerminalWorkspaceView: NSView {
   private static func projectEditorNativeLoadErrorMessage(_ message: String?) -> String {
     let trimmed = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     return trimmed.isEmpty ? "VS Code server failed." : trimmed
+  }
+
+  private static func normalizedProjectEditorNavigationURL(_ value: String?) -> String {
+    value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+  }
+
+  private static func projectEditorNavigationURLMatches(_ lhs: String?, _ rhs: String?) -> Bool {
+    let normalizedLHS = normalizedProjectEditorNavigationURL(lhs)
+    let normalizedRHS = normalizedProjectEditorNavigationURL(rhs)
+    guard !normalizedLHS.isEmpty && !normalizedRHS.isEmpty else {
+      return false
+    }
+    if normalizedLHS == normalizedRHS {
+      return true
+    }
+    guard let lhsURL = URL(string: normalizedLHS),
+      let rhsURL = URL(string: normalizedRHS),
+      lhsURL.scheme?.lowercased() == rhsURL.scheme?.lowercased(),
+      lhsURL.host?.lowercased() == rhsURL.host?.lowercased(),
+      lhsURL.port == rhsURL.port
+    else {
+      return false
+    }
+    if normalizedLHS.hasPrefix(NativeCodeServerRuntimeLauncher.origin),
+      normalizedRHS.hasPrefix(NativeCodeServerRuntimeLauncher.origin)
+    {
+      return true
+    }
+    let lhsPath = lhsURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    let rhsPath = rhsURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    return lhsPath == rhsPath && lhsURL.query == rhsURL.query
+  }
+
+  private static func projectEditorCEFLoadEventStatus(
+    eventName: String,
+    errorCode: Int,
+    httpStatusCode: Int
+  ) -> String? {
+    switch eventName {
+    case "loadStart":
+      return "loading"
+    case "loadEnd":
+      return errorCode == 0 && (200..<400).contains(httpStatusCode) ? "succeeded" : "failed"
+    case "loadError":
+      return "failed"
+    default:
+      return nil
+    }
   }
 
   private func applyProjectEditorNativeLoadError(projectId: String, message: String?, reason: String) {
@@ -5611,6 +5683,17 @@ final class TerminalWorkspaceView: NSView {
         && session.titleBarView?.isHidden == currentTitleBarShouldBeHidden
         && rectsMatch(session.titleBarView?.frame ?? .zero, currentProjectEditorFrames.titleBarFrame)
       )
+    logProjectEditorSurfaceSnapshot(
+      event: "titlebarModeSwitch.nativeProjectEditorSurface.beforeFocusDecision",
+      projectId: projectId,
+      session: session,
+      reason: reason,
+      details: [
+        "activeHostSettled": activeHostSettled,
+        "activeTitleBarSettled": activeTitleBarSettled,
+        "companionStateSettled": companionStateSettled,
+        "didSwitchProjectEditor": didSwitchProjectEditor,
+      ])
     /*
      CDXC:ChromiumBrowserPanes 2026-05-16-22:37:
      Disabled browser-toolbar clicks call the project-editor focus path even though the same editor is already visible.
@@ -5641,6 +5724,11 @@ final class TerminalWorkspaceView: NSView {
           "projectId": projectId,
           "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
         ])
+      logProjectEditorSurfaceSnapshot(
+        event: "titlebarModeSwitch.nativeProjectEditorSurface.settledFastPath",
+        projectId: projectId,
+        session: session,
+        reason: reason)
       return
     }
     markProjectEditorFocusOwner(
@@ -5682,6 +5770,15 @@ final class TerminalWorkspaceView: NSView {
     layoutProjectEditorPane(session, in: companionLayout?.editorFrame ?? projectEditorWorkspaceBounds)
     orderProjectEditorPaneToFront(session)
     syncProjectEditorCompanionPane(layout: companionLayout)
+    logProjectEditorSurfaceSnapshot(
+      event: "titlebarModeSwitch.nativeProjectEditorSurface.afterFrameApply",
+      projectId: projectId,
+      session: session,
+      reason: reason,
+      details: [
+        "didSwitchProjectEditor": didSwitchProjectEditor,
+        "hasCompanionLayout": companionLayout != nil,
+      ])
     NativeModeSwitcherDebugLog.append(
       event: "titlebarModeSwitch.nativeFocusProjectEditorAfterFrameApply",
       details: [
@@ -5862,6 +5959,53 @@ final class TerminalWorkspaceView: NSView {
       return tabChromiumView === chromiumView
     })?.hostView
       ?? (session.chromiumView.map { $0 === chromiumView } == true ? session.hostView : nil)
+  }
+
+  private func logProjectEditorSurfaceSnapshot(
+    event: String,
+    projectId: String,
+    session: ProjectEditorPaneSession,
+    reason: String,
+    details extraDetails: [String: Any] = [:]
+  ) {
+    /*
+     CDXC:EditorPanesDiagnostics 2026-06-29-21:58:
+     Blank retained Source/Browser repros need native focus snapshots that prove whether the selected project-editor CEF/WK host exists, is attached, has a nonzero frame, and still reports loading. Log only stable ids, booleans, enum-like URL kinds, frame dimensions, and browser ids so support can diagnose project switches without writing project names, paths, full URLs, titles, or page text to disk.
+     */
+    let activeTab = session.tabs.first { $0.tabId == session.activeTabId }
+    var details: [String: Any] = [
+      "activeProjectEditorId": activeProjectEditorId ?? NSNull(),
+      "activeTabHasChromiumView": activeTab?.chromiumView != nil,
+      "activeTabHasLoaded": activeTab?.hasLoaded ?? false,
+      "activeTabHasWebView": activeTab?.webView != nil,
+      "activeTabHostMatchesSession": activeTab.map { $0.hostView === session.hostView } ?? false,
+      "activeTabIsPlaceholder": activeTab?.isPlaceholder ?? false,
+      "browserIdentifier": session.chromiumView?.browserIdentifier ?? -1,
+      "cefCurrentUrlKind": Self.modeSwitcherDebugURLKind(session.chromiumView?.currentURLString),
+      "cefFrame": session.chromiumView.map { describeFrame($0.frame) } ?? "none",
+      "cefHasSuperview": session.chromiumView?.superview != nil,
+      "cefHidden": session.chromiumView?.isHidden ?? false,
+      "cefIsLoading": session.chromiumView?.isLoading ?? false,
+      "hostFrame": describeFrame(session.hostView.frame),
+      "hostHasSuperview": session.hostView.superview != nil,
+      "hostHidden": session.hostView.isHidden,
+      "mode": session.mode,
+      "nativeLoadStatus": projectEditorNativeLoadStatesByProjectId[projectId]?.status ?? "none",
+      "projectId": projectId,
+      "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+      "sessionHasChromiumView": session.chromiumView != nil,
+      "sessionHasWebView": session.webView != nil,
+      "tabCount": session.tabs.count,
+      "titleBarFrame": describeFrame(session.titleBarView?.frame ?? .zero),
+      "titleBarHidden": session.titleBarView?.isHidden ?? true,
+      "webKitCurrentUrlKind": Self.modeSwitcherDebugURLKind(session.webView?.url?.absoluteString),
+      "webKitIsLoading": session.webView?.isLoading ?? false,
+      "windowNumber": window?.windowNumber ?? NSNull(),
+    ]
+    for (key, value) in extraDetails {
+      details[key] = value
+    }
+    NativeModeSwitcherDebugLog.append(event: event, details: details)
   }
 
   private func focusProjectEditorPaneFromUserInteraction(projectId: String, reason: String) {
@@ -6240,6 +6384,8 @@ final class TerminalWorkspaceView: NSView {
 
   func closeProjectEditorPane(projectId: String) {
     projectEditorNativeLoadStatesByProjectId.removeValue(forKey: projectId)
+    projectEditorCEFLoadResultsByProjectId.removeValue(forKey: projectId)
+    projectEditorCEFLoadAttemptIdsByProjectId.removeValue(forKey: projectId)
     guard let session = projectEditorPaneSessions.removeValue(forKey: projectId) else {
       return
     }
@@ -9494,7 +9640,7 @@ final class TerminalWorkspaceView: NSView {
       let sessionId = projectEditorCompanionSessionId,
       isProjectEditorCompanionEligibleSession(sessionId),
       workspaceBounds.width > Self.paneResizeRailWidth + 1,
-      workspaceBounds.height > Self.terminalTitleBarHeight + 1
+      workspaceBounds.height > Self.projectEditorTitleBarHeight + 1
     else {
       return nil
     }
@@ -9570,7 +9716,7 @@ final class TerminalWorkspaceView: NSView {
     moveRenderedProjectEditorCompanionSurfaceOffscreen(except: layout.sessionId)
     syncProjectEditorCompanionTitleBarControls(activeSessionId: layout.sessionId)
     setPaneTabs([], activeSessionId: layout.sessionId, on: layout.sessionId)
-    setFrame(layout.contentFrame, for: layout.sessionId, webPaneMode: .projectEditorCompanion)
+    setFrame(layout.contentFrame, for: layout.sessionId, paneFrameMode: .projectEditorCompanion)
     projectEditorCompanionRenderedSessionId = layout.sessionId
 
     syncProjectEditorCompanionRightSeparator(frame: layout.rightSeparatorFrame)
@@ -9862,7 +10008,7 @@ final class TerminalWorkspaceView: NSView {
     let nextFrame = chromiumBackingPixelAlignedFrame(rect)
     let titleBarHeight =
       session.showsProjectTabs && session.titleBarView != nil
-      ? min(Self.terminalTitleBarHeight, max(nextFrame.height, 0))
+      ? min(Self.projectEditorTitleBarHeight, max(nextFrame.height, 0))
       : 0
     let titleBarFrame = CGRect(
       x: nextFrame.minX,
@@ -11336,8 +11482,24 @@ final class TerminalWorkspaceView: NSView {
 
      CDXC:Docs 2026-06-29-03:54:
      Docs should also surface Markdown, HTML, and Excalidraw files that live directly in the active repo root. List only those root files, keep nested folders docs-scoped, and validate read/write actions through the same root-artifact allowlist so the sidebar does not become a broad repo browser.
+
+     CDXC:Docs 2026-06-29-04:08:
+     Because root artifacts now share the Docs sidebar with docs/ content, docs/ must render as its own top-level folder entry. Append docs/ as a real directory before recursing one level deeper so collapse state and row indentation reflect the actual repo tree.
      */
     var entries: [ManageFileEntry] = []
+    if let docsURL = try manageProjectDocsURL(rootURL: rootURL) {
+      let values = try? docsURL.resourceValues(forKeys: [
+        .contentModificationDateKey,
+      ])
+      entries.append(
+        ManageFileEntry(
+          depth: 0,
+          kind: "directory",
+          modifiedAt: manageISOString(values?.contentModificationDate),
+          name: manageDocsRelativePath,
+          path: manageDocsRelativePath,
+          size: nil))
+    }
     try manageAppendProjectRootArtifactFileEntries(entries: &entries, rootURL: rootURL)
     if let docsURL = try manageProjectDocsURL(rootURL: rootURL) {
       try manageAppendProjectFileEntries(
@@ -11345,7 +11507,7 @@ final class TerminalWorkspaceView: NSView {
         rootURL: rootURL,
         directoryURL: docsURL,
         relativeDirectoryPath: manageDocsRelativePath,
-        depth: 0)
+        depth: 1)
     }
     return entries
   }
@@ -11876,12 +12038,17 @@ final class TerminalWorkspaceView: NSView {
   private static func modeSwitcherDebugReasonKind(_ value: String) -> String {
     switch value {
     case "createProjectEditorPaneNew",
+      "createProjectEditorPaneExisting",
+      "createProjectEditorPaneExistingBrowser",
       "createProjectEditorPaneReroute",
       "createProjectEditorPaneRestoredTab",
       "chromiumNavigationStateChanged",
+      "explicitFocusProjectEditorPaneCommand",
       "loadEnd",
       "navigationFinish",
       "navigationFail",
+      "projectEditorGitTabSelected",
+      "projectEditorHostFocus",
       "provisionalNavigationFail":
       return value
     default:
@@ -11908,6 +12075,8 @@ final class TerminalWorkspaceView: NSView {
         "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
         "urlKind": Self.modeSwitcherDebugURLKind(url),
       ])
+    projectEditorCEFLoadResultsByProjectId.removeValue(forKey: projectId)
+    projectEditorCEFLoadAttemptIdsByProjectId.removeValue(forKey: projectId)
     sendEvent(.projectEditorLoadState(projectId: projectId, status: "opening", message: nil))
     guard isCodeServerURL else {
       /**
@@ -12012,9 +12181,133 @@ final class TerminalWorkspaceView: NSView {
               message: message))
           return
         }
-        session.chromiumView?.loadURLString(url)
+        guard let chromiumView = session.chromiumView else {
+          self.applyProjectEditorNativeLoadError(
+            projectId: projectId,
+            message: "VS Code failed to finish loading.",
+            reason: reason)
+          return
+        }
+        let attemptId = self.beginProjectEditorCEFLoadAttempt(projectId: projectId, url: url)
+        chromiumView.loadURLString(url)
         session.hostView.refreshHostedWebView(reason: reason)
+        self.scheduleProjectEditorCEFLoadTimeout(
+          projectId: projectId,
+          url: url,
+          attemptId: attemptId,
+          reason: reason)
       }
+    }
+  }
+
+  private func recordProjectEditorCEFLoadEvent(
+    projectId: String,
+    chromiumView: GhostexCEFBrowserView?,
+    eventName: String,
+    url: String,
+    httpStatusCode: Int,
+    errorCode: Int,
+    reason: String
+  ) {
+    /*
+     CDXC:EditorPanes 2026-06-29-23:45:
+     Source panes must not leave loading just because CEF stops loading a non-blank localhost URL. The reproduced blank gray state is a main-frame CEF loadError with httpStatusCode 0, followed by navigationStateChanged(false). Track the code-server load result and require a successful loadEnd for the intended URL before native reports running.
+
+     CDXC:EditorPanes 2026-06-29-23:51:
+     GhostexCEFBrowserView updates its currentURLString before Chromium commits the load, so an aborted about:blank startup navigation can appear beside the intended localhost URL. Only classify CEF loadEnd/loadError events whose event URL matches the intended code-server URL; use the per-attempt timeout for the "no real load result arrived" case.
+     */
+    guard let session = projectEditorPaneSessions[projectId],
+      session.url.hasPrefix(NativeCodeServerRuntimeLauncher.origin),
+      let status = Self.projectEditorCEFLoadEventStatus(
+        eventName: eventName,
+        errorCode: errorCode,
+        httpStatusCode: httpStatusCode)
+    else {
+      return
+    }
+    let currentURL = chromiumView?.currentURLString
+    let loadedURLMatchesSession = Self.projectEditorNavigationURLMatches(url, session.url)
+    guard loadedURLMatchesSession else {
+      return
+    }
+    projectEditorCEFLoadResultsByProjectId[projectId] = ProjectEditorCEFLoadResult(
+      errorCode: errorCode,
+      eventName: eventName,
+      expectedURL: session.url,
+      httpStatusCode: httpStatusCode,
+      loadedURL: url,
+      status: status)
+    NativeModeSwitcherDebugLog.append(
+      event: "titlebarModeSwitch.nativeCefLoadResultRecorded",
+      details: [
+        "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
+        "errorCode": errorCode,
+        "eventName": eventName,
+        "httpStatusCode": httpStatusCode,
+        "mode": session.mode,
+        "projectId": projectId,
+        "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+        "resultStatus": status,
+        "urlKind": Self.modeSwitcherDebugURLKind(url),
+        "urlMatchesSession": loadedURLMatchesSession,
+      ])
+  }
+
+  private func beginProjectEditorCEFLoadAttempt(projectId: String, url: String) -> UInt64 {
+    nextProjectEditorCEFLoadAttemptId &+= 1
+    let attemptId = nextProjectEditorCEFLoadAttemptId
+    projectEditorCEFLoadAttemptIdsByProjectId[projectId] = attemptId
+    projectEditorCEFLoadResultsByProjectId.removeValue(forKey: projectId)
+    NativeModeSwitcherDebugLog.append(
+      event: "titlebarModeSwitch.nativeCefLoadAttemptStarted",
+      details: [
+        "attemptId": attemptId,
+        "projectId": projectId,
+        "urlKind": Self.modeSwitcherDebugURLKind(url),
+      ])
+    return attemptId
+  }
+
+  private func scheduleProjectEditorCEFLoadTimeout(
+    projectId: String,
+    url: String,
+    attemptId: UInt64,
+    reason: String
+  ) {
+    Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: 10_000_000_000)
+      guard let self,
+        self.projectEditorCEFLoadAttemptIdsByProjectId[projectId] == attemptId,
+        let session = self.projectEditorPaneSessions[projectId],
+        Self.projectEditorNavigationURLMatches(session.url, url),
+        session.url.hasPrefix(NativeCodeServerRuntimeLauncher.origin)
+      else {
+        return
+      }
+      if let loadResult = self.projectEditorCEFLoadResultsByProjectId[projectId],
+        Self.projectEditorNavigationURLMatches(loadResult.expectedURL, url),
+        loadResult.status == "succeeded"
+      {
+        return
+      }
+      if self.projectEditorNativeLoadStatesByProjectId[projectId]?.status == "error" {
+        return
+      }
+      NativeModeSwitcherDebugLog.append(
+        event: "titlebarModeSwitch.nativeCefRunningDeferred",
+        details: [
+          "attemptId": attemptId,
+          "deferReason": "codeServerLoadTimedOut",
+          "hasLoadResult": self.projectEditorCEFLoadResultsByProjectId[projectId] != nil,
+          "mode": session.mode,
+          "projectId": projectId,
+          "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+          "urlKind": Self.modeSwitcherDebugURLKind(url),
+        ])
+      self.applyProjectEditorNativeLoadError(
+        projectId: projectId,
+        message: "VS Code did not finish loading within 10 seconds.",
+        reason: "codeServerLoadTimedOut")
     }
   }
 
@@ -12142,6 +12435,24 @@ final class TerminalWorkspaceView: NSView {
           "urlKind": Self.modeSwitcherDebugURLKind(url),
           "urlMatchesSession": session?.url == url,
         ])
+      self.recordProjectEditorCEFLoadEvent(
+        projectId: projectId,
+        chromiumView: chromiumView,
+        eventName: event,
+        url: url,
+        httpStatusCode: httpStatusCode,
+        errorCode: errorCode,
+        reason: reason)
+      if (event == "loadEnd" || event == "loadError"),
+        session?.url.hasPrefix(NativeCodeServerRuntimeLauncher.origin) == true,
+        let chromiumView
+      {
+        self.updateProjectEditorInitialLoadingOverlay(
+          projectId: projectId,
+          chromiumView: chromiumView,
+          isLoading: chromiumView.isLoading,
+          reason: event)
+      }
       if event == "loadEnd", let chromiumView {
         self.installSourceCEFDragPageDiagnosticsIfNeeded(
           chromiumView,
@@ -12221,6 +12532,7 @@ final class TerminalWorkspaceView: NSView {
     reason: String
   ) {
     let currentURL = chromiumView.currentURLString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let session = projectEditorPaneSessions[projectId]
     guard let hostView = projectEditorHostView(projectId: projectId, chromiumView: chromiumView) else {
       NativeModeSwitcherDebugLog.append(
         event: "titlebarModeSwitch.nativeCefRunningDeferred",
@@ -12272,13 +12584,66 @@ final class TerminalWorkspaceView: NSView {
         reason: reason)
       return
     }
+    if session?.url.hasPrefix(NativeCodeServerRuntimeLauncher.origin) == true {
+      guard let loadResult = projectEditorCEFLoadResultsByProjectId[projectId],
+        Self.projectEditorNavigationURLMatches(loadResult.expectedURL, session?.url)
+      else {
+        NativeModeSwitcherDebugLog.append(
+          event: "titlebarModeSwitch.nativeCefRunningDeferred",
+          details: [
+            "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
+            "deferReason": "awaitingCodeServerLoadResult",
+            "isLoading": isLoading,
+            "mode": session?.mode ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+            "projectId": projectId,
+            "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+          ])
+        return
+      }
+      switch loadResult.status {
+      case "succeeded":
+        break
+      case "failed":
+        NativeModeSwitcherDebugLog.append(
+          event: "titlebarModeSwitch.nativeCefRunningDeferred",
+          details: [
+            "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
+            "deferReason": "codeServerLoadFailed",
+            "errorCode": loadResult.errorCode,
+            "eventName": loadResult.eventName,
+            "httpStatusCode": loadResult.httpStatusCode,
+            "isLoading": isLoading,
+            "mode": session?.mode ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+            "projectId": projectId,
+            "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+          ])
+        applyProjectEditorNativeLoadError(
+          projectId: projectId,
+          message: "VS Code failed to finish loading.",
+          reason: reason)
+        return
+      default:
+        NativeModeSwitcherDebugLog.append(
+          event: "titlebarModeSwitch.nativeCefRunningDeferred",
+          details: [
+            "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
+            "deferReason": "awaitingSuccessfulCodeServerLoadEnd",
+            "eventName": loadResult.eventName,
+            "isLoading": isLoading,
+            "mode": session?.mode ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+            "projectId": projectId,
+            "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+          ])
+        return
+      }
+    }
     hostView.setInitialLoadingOverlayVisible(false, reason: reason)
     NativeModeSwitcherDebugLog.append(
       event: "titlebarModeSwitch.nativeCefRunningSent",
       details: [
         "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
         "isLoading": isLoading,
-        "mode": projectEditorPaneSessions[projectId]?.mode
+        "mode": session?.mode
           ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
         "projectId": projectId,
         "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
@@ -15747,7 +16112,7 @@ final class TerminalWorkspaceView: NSView {
   private func setFrame(
     _ rect: CGRect,
     for sessionId: String,
-    webPaneMode: WebPaneFrameMode = .normal
+    paneFrameMode: PaneFrameMode = .normal
   ) {
     if poppedOutSessionIds.contains(sessionId) {
       setPoppedOutPlaceholderFrame(rect, for: sessionId)
@@ -15756,7 +16121,7 @@ final class TerminalWorkspaceView: NSView {
     removePoppedOutPlaceholder(sessionId: sessionId)
     removeSleepingPanePlaceholder(sessionId: sessionId)
     if let webPane = webPaneSessions[sessionId] {
-      setWebPaneFrame(rect, for: webPane, mode: webPaneMode)
+      setWebPaneFrame(rect, for: webPane, mode: paneFrameMode)
       return
     }
 
@@ -15792,7 +16157,9 @@ final class TerminalWorkspaceView: NSView {
       session.titleBarView.setActions(
         sessionTitleBarActions[sessionId] ?? commandPanelTitleBarActions())
     }
-    let titleBarHeight = min(titleBarHeight(for: sessionId), max(rect.height, 0))
+    let titleBarHeight = min(
+      titleBarHeight(for: sessionId, paneFrameMode: paneFrameMode),
+      max(rect.height, 0))
     mountTerminalPaneContainer(for: session)
     session.containerView.frame = rect
     session.containerView.setBackgroundColor(terminalPaneBackgroundColor())
@@ -15929,8 +16296,11 @@ final class TerminalWorkspaceView: NSView {
     terminalRect.width > 1 && terminalRect.height > 1 ? terminalRect : .zero
   }
 
-  private func titleBarHeight(for sessionId: String) -> CGFloat {
-    commandsPanelActiveSessionIds.contains(sessionId)
+  private func titleBarHeight(for sessionId: String, paneFrameMode: PaneFrameMode = .normal) -> CGFloat {
+    if paneFrameMode == .projectEditorCompanion {
+      return Self.projectEditorTitleBarHeight
+    }
+    return commandsPanelActiveSessionIds.contains(sessionId)
       ? Self.commandPanelTitleBarHeight
       : Self.terminalTitleBarHeight
   }
@@ -16092,10 +16462,11 @@ final class TerminalWorkspaceView: NSView {
   private func setWebPaneFrame(
     _ rect: CGRect,
     for session: WebPaneSession,
-    mode: WebPaneFrameMode = .normal
+    mode: PaneFrameMode = .normal
   ) {
+    let requestedTitleBarHeight = titleBarHeight(for: session.sessionId, paneFrameMode: mode)
     let resolvedRect: CGRect
-    if rect.width <= 1 || rect.height <= Self.terminalTitleBarHeight + 1 {
+    if rect.width <= 1 || rect.height <= requestedTitleBarHeight + 1 {
       resolvedRect = layoutBounds(forVisibleCount: max(orderedVisibleSessionIds().count, 1))
       NativeT3CodePaneReproLog.append("nativeWorkspace.t3WebPane.layout.fallbackRect", [
         "inputRect": describeFrame(rect),
@@ -16118,7 +16489,7 @@ final class TerminalWorkspaceView: NSView {
     session.titleBarView.setChromeRole(chromeRole)
     session.borderView.setChromeRole(chromeRole)
     session.borderView.setSuppressesFocusedBorder(false)
-    let titleBarHeight = min(titleBarHeight(for: session.sessionId), max(paneRect.height, 0))
+    let titleBarHeight = min(requestedTitleBarHeight, max(paneRect.height, 0))
     mountWebPaneContainer(for: session)
     session.containerView.frame = paneRect
     session.containerView.isHidden = false
@@ -25457,6 +25828,20 @@ private final class TerminalSessionTitleBarView: NSView {
     blue: 0x08 / 255,
     alpha: 0.96
   ).cgColor
+  /*
+   CDXC:ProjectEditorCompanion 2026-06-29-23:39:
+   Companion-pane titlebars in Source, Browser, Kanban, and Docs should use the
+   exact same background as the Docs view titlebars. The Docs React surface uses
+   #0e0e0e for its header chrome, so companion titlebars bypass the normal
+   workspace tab color and custom sidebar/titlebar color override for background
+   only.
+   */
+  private static let projectEditorCompanionBackgroundColor = NSColor(
+    srgbRed: 0x0E / 255,
+    green: 0x0E / 255,
+    blue: 0x0E / 255,
+    alpha: 1
+  ).cgColor
   private static let commandBackgroundColor = NSColor(
     calibratedWhite: 0.0,
     alpha: 1.0
@@ -26213,6 +26598,9 @@ private final class TerminalSessionTitleBarView: NSView {
   }
 
   private func backgroundColor(for role: TerminalPaneChromeRole) -> CGColor {
+    if role == .workspace, usesProjectEditorCompanionChrome {
+      return Self.projectEditorCompanionBackgroundColor
+    }
     if role == .workspace, customSidebarTitlebarChrome.enabled {
       return customSidebarTitlebarChrome.background.cgColor
     }
@@ -27710,9 +28098,9 @@ private final class TerminalSessionTitleBarView: NSView {
     }
     /**
      CDXC:ProjectEditorCompanion 2026-05-16-11:46:
-     Code, Browser, Project, and Manage companion panes should not show the generic pane
-     overflow menu in their titlebar. Agents view panes still use the normal
-     action menu because they do not enable companion controls.
+     Source, Browser, Kanban, and Docs companion panes should not show the
+     generic pane overflow menu in their titlebar. Agents view panes still use
+     the normal action menu because they do not enable companion controls.
 
      CDXC:ProjectEditorCompanion 2026-06-12-03:18:
      Companion panes no longer render a local collapse control. Keep only this
@@ -27720,7 +28108,7 @@ private final class TerminalSessionTitleBarView: NSView {
      actions while the React titlebar toggle owns hiding and expanding.
      */
     usesProjectEditorCompanionChrome = shouldUseCompanionChrome
-    needsLayout = true
+    applyCustomSidebarTitlebarChrome()
   }
 
   func setActions(_ actions: [TerminalTitleBarAction]) {
