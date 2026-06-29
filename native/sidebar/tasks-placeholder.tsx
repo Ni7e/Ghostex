@@ -492,6 +492,8 @@ function ProjectBoardApp() {
   const projectId = projectBoardRawProjectIdFromUrlParam(projectIdParam);
   const projectEditorId = urlSearchParams.get("projectEditorId") || projectIdParam;
   const remoteMachineId = urlSearchParams.get("remoteMachineId") || "";
+  const initialSurfaceTab: ProjectSurfaceTab =
+    urlSearchParams.get("surface") === "automations" ? "automations" : "board";
   const displayKey = normalizeDisplayIssueKey(
     urlSearchParams.get("beadsDisplayKey") ?? projectName,
   );
@@ -655,8 +657,13 @@ function ProjectBoardApp() {
    *
    * CDXC:ProjectBoard 2026-06-29-03:49:
    * The Kanban board should not render the Board, Automations, Runs, or Triage tab strip; the visible toolbar is project title plus ticket actions.
+   *
+   * CDXC:Automations 2026-06-29-15:55:
+   * Opening the dedicated Automation page should enter the existing automation
+   * surface directly from the URL while ordinary Project/Kanban launches keep
+   * the tab strip hidden and start on the board.
    */
-  const [activeSurfaceTab, setActiveSurfaceTab] = useState<ProjectSurfaceTab>("board");
+  const [activeSurfaceTab, setActiveSurfaceTab] = useState<ProjectSurfaceTab>(initialSurfaceTab);
   const [automationState, setAutomationState] = useState<ProjectAutomationsBridgeState>({
     agents: [],
     automations: [],
@@ -2178,6 +2185,31 @@ function ProjectBoardApp() {
           )}
         </div>
       </section>
+
+      {activeSurfaceTab !== "board" ? (
+        <>
+          {/*
+           * CDXC:Automations 2026-06-29-15:55:
+           * The dedicated Automation page needs lightweight navigation between
+           * definitions, run history, and triage while the Kanban page still hides
+           * these future tabs from its board header.
+           */}
+          <nav className="project-automation-tabs" aria-label="Automation sections">
+            {(["automations", "runs", "triage"] as const).map((tab) => (
+              <button
+                aria-current={activeSurfaceTab === tab ? "page" : undefined}
+                className="project-automation-tab"
+                data-active={activeSurfaceTab === tab ? "true" : "false"}
+                key={tab}
+                onClick={() => setActiveSurfaceTab(tab)}
+                type="button"
+              >
+                {tab === "automations" ? "Automations" : tab === "runs" ? "Runs" : "Triage"}
+              </button>
+            ))}
+          </nav>
+        </>
+      ) : null}
 
       {activeSurfaceTab === "board" ? (
         <section className="project-board-filters" aria-label="Ticket filters">
@@ -5332,7 +5364,7 @@ styleElement.textContent = `
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
-    --radius: 0;
+    --radius: 6px;
     --project-board-bg: var(--app-background, #191919);
     --project-board-panel: #171717;
     --project-board-panel-hover: #1d1d1d;
@@ -5347,6 +5379,15 @@ styleElement.textContent = `
     --project-board-border-strong: rgba(255, 255, 255, 0.16);
     --project-board-control-height: 36px;
     --project-board-scrollbar: rgba(255, 255, 255, 0.28);
+    /*
+     * CDXC:ProjectBoardRoundness 2026-06-29-20:55:
+     * The Kanban ticket dialog and board cards/controls should adopt the Settings surface roundness instead of the global square theme.
+     * Small chips/labels use the compact radius, interactive controls/cards/inputs use the control radius, and the dialog plus dropdown popups use the section/control radius. Field focus reuses a neutral dimmed border like Settings rather than a saturated focus ring.
+     */
+    --project-board-radius-compact: 4px;
+    --project-board-radius-control: 6px;
+    --project-board-radius-section: 10px;
+    --project-board-focus-border: color-mix(in srgb, #f4f4f5 58%, var(--project-board-border) 42%);
   }
 
   * { box-sizing: border-box; }
@@ -5448,10 +5489,73 @@ styleElement.textContent = `
     padding: 22px 24px 24px;
   }
 
-  .project-board-shell *,
-  .project-ticket-dialog,
-  .project-ticket-dialog * {
+  .project-board-shell * {
     border-radius: 0 !important;
+  }
+
+  /*
+   * CDXC:ProjectBoardRoundness 2026-06-29-20:55:
+   * Match the Settings surface look: round the Kanban ticket dialog plus the board's interactive controls and bead cards while large swimlane panels stay square so adjacent lanes keep one shared separator line.
+   * Board opt-ins need higher specificity than the .project-board-shell square reset, so they reassert the radius with !important; the ticket dialog and portaled dropdown popups live outside the shell and round without it.
+   */
+  .project-board-card,
+  .project-board-card-conversation,
+  .project-board-card [data-slot="button"],
+  .project-board-toolbar-actions [data-slot="button"],
+  .project-board-lane-header-action,
+  .project-board-search input,
+  .project-board-filter-select {
+    border-radius: var(--project-board-radius-control) !important;
+  }
+
+  .project-board-card-label {
+    border-radius: var(--project-board-radius-compact) !important;
+  }
+
+  [data-slot="select-content"],
+  [data-slot="popover-content"] {
+    border-radius: var(--project-board-radius-control) !important;
+  }
+
+  .project-ticket-dialog .rounded-none,
+  .project-ticket-dialog [data-slot="input"],
+  .project-ticket-dialog [data-slot="textarea"],
+  .project-ticket-dialog [data-slot="select-trigger"],
+  .project-ticket-dialog [data-slot="button"],
+  .project-ticket-dialog [data-slot="dialog-close"],
+  .project-ticket-dialog .project-ticket-image-thumb,
+  .project-ticket-dialog .project-ticket-image-remove,
+  .project-ticket-dialog .project-ticket-comment-list,
+  .project-ticket-dialog .project-ticket-comment,
+  .project-ticket-dialog .project-ticket-conversation-row {
+    border-radius: var(--project-board-radius-control);
+  }
+
+  .project-ticket-dialog .project-ticket-label-chip {
+    border-radius: var(--project-board-radius-compact);
+  }
+
+  /*
+   * CDXC:ProjectBoardRoundness 2026-06-29-20:55:
+   * Give Kanban form controls the Settings field treatment: a subtle translucent fill, a visible neutral border (select triggers ship transparent borders by default), and a dimmed neutral focus border without the saturated shadcn focus ring.
+   */
+  .project-ticket-dialog [data-slot="input"],
+  .project-ticket-dialog [data-slot="textarea"],
+  .project-ticket-dialog [data-slot="select-trigger"],
+  .project-board-shell .project-board-search input,
+  .project-board-shell .project-board-filter-select {
+    background: color-mix(in srgb, var(--input) 30%, transparent);
+    border: 1px solid var(--input);
+  }
+
+  .project-ticket-dialog [data-slot="input"]:is(:focus, :focus-visible),
+  .project-ticket-dialog [data-slot="textarea"]:is(:focus, :focus-visible),
+  .project-ticket-dialog [data-slot="select-trigger"]:is(:focus, :focus-visible),
+  .project-board-shell .project-board-search input:is(:focus, :focus-visible),
+  .project-board-shell .project-board-filter-select:is(:focus, :focus-visible) {
+    border-color: var(--project-board-focus-border);
+    box-shadow: none;
+    outline: none;
   }
 
   .project-board-lanes,
@@ -5546,6 +5650,41 @@ styleElement.textContent = `
     display: flex;
     gap: 8px;
     justify-self: end;
+  }
+
+  /*
+   * CDXC:Automations 2026-06-29-15:55:
+   * The first shipped Automation page uses a compact local nav for gxserver
+   * definitions, run history, and triage while keeping the Kanban board header
+   * unchanged.
+   */
+  .project-automation-tabs {
+    align-items: center;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    display: inline-flex;
+    flex: 0 0 auto;
+    gap: 4px;
+    padding: 4px;
+    width: fit-content;
+  }
+
+  .project-automation-tab {
+    background: transparent;
+    border: 1px solid transparent;
+    color: rgba(250, 250, 250, 0.68);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1;
+    padding: 8px 11px;
+  }
+
+  .project-automation-tab:hover,
+  .project-automation-tab[data-active="true"] {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: rgba(250, 250, 250, 0.94);
   }
 
   /*
@@ -6636,6 +6775,7 @@ styleElement.textContent = `
      */
     background: var(--app-modal-background, #191919);
     background-color: var(--app-modal-background, #191919);
+    border-radius: var(--project-board-radius-section);
     max-width: min(780px, calc(100vw - 44px));
     overflow: hidden;
     width: 780px;

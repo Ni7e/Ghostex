@@ -679,10 +679,10 @@ describe("command palette source contracts", () => {
     );
     expect(gpuiProjectSlotResolverSource).toContain("handleSidebarProjectJump({");
     expect(gpuiProjectSlotResolverSource).toContain(
-      "expandCollapsedProject: settings.expandCollapsedProjectsOnJump",
+      "expandCollapsedProject: effectiveSettings.expandCollapsedProjectsOnJump",
     );
     expect(gpuiProjectSlotResolverSource).toContain(
-      "showLessAfterExpand: settings.showLessForExpandedProjectJumps",
+      "showLessAfterExpand: effectiveSettings.showLessForExpandedProjectJumps",
     );
     expect(gpuiProjectSlotResolverSource).toContain("revealFocusedSession: true");
     expect(gpuiProjectSlotResolverSource).toContain(
@@ -913,7 +913,7 @@ describe("command palette source contracts", () => {
     expect(commandPaletteSource).toContain('message: { type: "searchPreviousSessionsByText" }');
     expect(commandPaletteSource).toContain('message: { type: "createChat" }');
     expect(commandPaletteSource).toContain('message: { type: "openBrowserChat" }');
-    expect(commandPaletteSource).toContain('message: { type: "showAutomationsComingSoonToast" }');
+    expect(commandPaletteSource).toContain('message: { type: "openAutomationsPage" }');
     expect(commandPaletteSource).toContain('message: { type: "openCurrentProjectInFinder" }');
     expect(commandPaletteSource).toContain('message: { type: "openGhostexTutorialVideo" }');
     expect(commandPaletteSource).toContain('message: { type: "openWorkspaceWelcome" }');

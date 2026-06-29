@@ -216,7 +216,7 @@ type PaletteSidebarMessage =
   | Extract<SidebarToExtensionMessage, { type: "openWorkspaceWelcome" }>
   | Extract<SidebarToExtensionMessage, { type: "pickWorkspaceFolder" }>
   | Extract<SidebarToExtensionMessage, { type: "searchPreviousSessionsByText" }>
-  | Extract<SidebarToExtensionMessage, { type: "showAutomationsComingSoonToast" }>;
+  | Extract<SidebarToExtensionMessage, { type: "openAutomationsPage" }>;
 
 const PANE_ACTION_COMMAND_IDS = [
   "openBrowserPane",
@@ -344,8 +344,8 @@ const SIDEBAR_MESSAGE_PALETTE_COMMANDS = [
     commandId: "automations",
     hotkey: "",
     kind: "sidebarMessage",
-    message: { type: "showAutomationsComingSoonToast" },
-    searchText: "Automations coming soon",
+    message: { type: "openAutomationsPage" },
+    searchText: "Automations schedules recurring agents",
     title: "Automations",
   },
   {

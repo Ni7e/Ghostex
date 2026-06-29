@@ -1141,7 +1141,6 @@ export type SidebarToExtensionMessage =
         | "openMacOSNotificationSettings"
         | "openGhosttyConfigFile"
         | "openGhosttySettingsDocs"
-        | "installGte"
         | "resetGhosttySettingsToDefault";
     }
   | {
@@ -1279,16 +1278,17 @@ export type SidebarToExtensionMessage =
     }
   | {
       /**
-       * CDXC:Automations 2026-06-16-00:47:
-       * The top-sidebar Automations entry is visible before the feature ships.
-       * Clicks must show a native app toast instead of opening a modal, browser,
-       * or project-scoped surface.
-       *
-       * CDXC:Automations 2026-06-16-01:23:
-       * The toast text must remain fully visible, so native owns a short title
-       * plus a description instead of one long truncating title string.
+       * CDXC:Automations 2026-06-29-15:55:
+       * The top-sidebar Automations entry now opens the project Automation page backed by gxserver-rs, but keep the old toast message in the contract for older native bundles during the cutover.
        */
       type: "showAutomationsComingSoonToast";
+    }
+  | {
+      /**
+       * CDXC:Automations 2026-06-29-15:55:
+       * The sidebar shortcut should open a real first-party Automation page for the active project. Native owns the project-editor surface and the page talks to gxserver automation RPCs through the Project Board bridge.
+       */
+      type: "openAutomationsPage";
     }
   | {
       /**

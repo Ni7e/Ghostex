@@ -26,6 +26,7 @@ import {
   shouldSkipNativeSleepRequest,
   shouldUseGxserverProviderTransition,
 } from "./gxserver-provider-transition";
+import { createGxserverPresentationSidebarSession } from "../../shared/gxserver-presentation-sidebar-projection";
 import {
   createNativeLayoutSyncKey,
   createNativePaneOwnerSelectionKey,
@@ -368,6 +369,7 @@ import type {
   GxserverAttachSessionMetadataResult,
   GxserverCancelFirstPromptAutoTitleResult,
   GxserverDeleteWorktreeProjectResult,
+  GxserverEndpointPath,
   GxserverIngestAgentHookEventResult,
   GxserverPresentationDelta,
   GxserverPresentationProject,
@@ -6985,40 +6987,6 @@ function resetGhosttySettingsToDefault(): void {
 
 function openGhosttyConfigFile(): void {
   postNative({ type: "openGhosttyConfigFile" });
-}
-
-async function installGteFromBrew(): Promise<void> {
-  /**
-   * CDXC:GtePromptEditing 2026-05-10-11:11
-   * The Settings install button installs gte from the user's Homebrew tap.
-   * macOS GUI launches may not inherit a shell PATH, so resolve Homebrew from
-   * the shell command before running the single brew install operation.
-   *
-   * CDXC:PromptEditorBackend 2026-05-22-09:56:
-   * The prompt editor is named gte for Ghostex Terminal Editor. Install status copy and Homebrew commands must use gte consistently.
-   */
-  const result = await runNativeProcess(
-    "/bin/zsh",
-    [
-      "-lc",
-      [
-        "if command -v brew >/dev/null 2>&1; then BREW=$(command -v brew);",
-        "elif [ -x /opt/homebrew/bin/brew ]; then BREW=/opt/homebrew/bin/brew;",
-        "elif [ -x /usr/local/bin/brew ]; then BREW=/usr/local/bin/brew;",
-        "else echo 'Homebrew was not found on PATH, /opt/homebrew/bin, or /usr/local/bin.' >&2; exit 127; fi;",
-        '"$BREW" install maddada/tap/gte',
-      ].join(" "),
-    ],
-    { timeoutMs: 5 * 60_000 },
-  );
-  if (result.exitCode === 0) {
-    showAppToast("success", "gte installed from Homebrew.");
-    return;
-  }
-  showNativeMessage(
-    "error",
-    `gte install failed: ${(result.stderr || result.stdout || "brew install failed").trim()}`,
-  );
 }
 
 let nativeGhostexCliCommandEnsurePromise: Promise<boolean> | undefined;
@@ -18781,43 +18749,26 @@ function createRemotePresentationSidebarSession(
   presentation: GxserverPresentationSession,
   index: number,
 ): SidebarSessionItem {
-  const lifecycleState = presentationLifecycleStateForSidebar(presentation.lifecycleState);
-  const providerSessionState = providerSessionStateForGxserverPresentation(presentation);
-  const isLive = providerSessionState === "exists";
-  const agentIcon = resolveNativeSidebarAgentIcon(presentation.agentIcon ?? presentation.agentName ?? presentation.agentId);
   const sessionId = createRemotePresentationSessionId(machineId, projectId, presentation.sessionId);
   const isFocused = isRemoteAttachCarrierFocused(sessionId);
+  /*
+  CDXC:RemotePresentation 2026-06-30-00:11:
+  Remote gxserver sessions must show the same title, lifecycle, activity, tag, and persistence fields as local gxserver-backed sidebar rows. Use the shared gxserver presentation projector as the canonical row shape, then apply only the remote id namespace and remote attach focus overlay here.
+  */
+  const session = createGxserverPresentationSidebarSession({
+    createProjectSessionId: (projectId, sessionId) =>
+      createRemotePresentationSessionId(machineId, projectId, sessionId),
+    index,
+    isActiveProject: false,
+    presentation,
+    projectId,
+    resolveAgentIcon: (agentName) => resolveNativeSidebarAgentIcon(agentName),
+  });
   return {
-    activity: presentation.activity,
-    agentIcon,
-    agentSessionId: presentation.agentSessionId,
-    alias: presentation.title,
-    column: index % GRID_COLUMN_COUNT,
-    detail: presentation.subtitle,
-    displayTitle: presentation.displayTitle,
-    displayTitleTooltip: presentation.displayTitleTooltip,
-    isFavorite: presentation.isFavorite,
+    ...session,
     isFocused,
-    isGeneratingFirstPromptTitle: presentation.isGeneratingFirstPromptTitle,
-    isLive,
-    isPinned: presentation.isPinned,
-    isPrimaryTitleTerminalTitle: presentation.isPrimaryTitleTerminalTitle,
-    isRunning: isLive,
-    isSleeping: lifecycleState === "sleeping",
     isVisible: isFocused || index === 0,
-    lastInteractionAt: presentation.lastActiveAt ?? presentation.updatedAt,
-    lifecycleState,
-    primaryTitle: presentation.primaryTitle ?? presentation.title,
-    providerSessionState,
-    row: Math.floor(index / GRID_COLUMN_COUNT),
     sessionId,
-    sessionKind: presentation.kind === "agent" ? "terminal" : presentation.kind,
-    sessionNumber: String(index + 1),
-    sessionPersistenceName: presentation.zmxName,
-    sessionPersistenceProvider: presentation.sessionPersistenceProvider,
-    shortcutLabel: String(index + 1),
-    terminalTitle: presentation.terminalTitle,
-    titleObservation: presentation.titleObservation,
   };
 }
 
@@ -21334,36 +21285,25 @@ function createNativeAgentSessionEnvironment(args: {
       environment.GHOSTEX_GXSERVER_PROTOCOL_VERSION = String(protocolVersion);
     }
   }
-  if (
-    settings.promptEditorBackend === "monaco" ||
-    settings.promptEditorBackend === "gte" ||
-    settings.promptEditorBackend === "custom"
-  ) {
+  if (settings.promptEditorBackend === "monaco") {
     /**
      * CDXC:PromptEditorBackend 2026-05-11-14:38
      * Ctrl+G prompt editing is selected in Settings as a backend. Inject both
      * the immediate EDITOR value and the backend marker native uses to reapply
      * the same command after zsh startup files have run.
      *
-     * CDXC:PromptEditorBackend 2026-05-22-10:16
-     * gte is a terminal-native editor, so selecting gte must export the plain
-     * command and let Ctrl+G run inside the launching terminal instead of
-     * opening Ghostex's floating editor overlay. Monaco remains overlay-backed.
+     * CDXC:PromptEditorBackend 2026-06-30-00:08:
+     * Settings now offers only Monaco or the user's machine default. Only Monaco
+     * should inject Ghostex prompt-editor environment; inherit leaves EDITOR and
+     * VISUAL to the shell/user configuration.
      */
-    const promptEditorCommand =
-      settings.promptEditorBackend === "custom"
-        ? settings.customPromptEditorCommand.trim() || "code --wait"
-        : "ghostex prompt-editor";
+    const promptEditorCommand = "ghostex prompt-editor";
     environment.EDITOR = promptEditorCommand;
     environment.VISUAL = promptEditorCommand;
     environment.GHOSTEX_PROMPT_EDITOR_BACKEND = settings.promptEditorBackend;
     environment.GHOSTEX_PROMPT_EDITOR_CLIENT = "macos-app";
-    if (settings.promptEditorBackend === "custom") {
-      environment.GHOSTEX_CUSTOM_PROMPT_EDITOR_COMMAND = promptEditorCommand;
-    }
     environment.GHOSTEX_PROMPT_EDITING_ENABLED = "1";
-    environment.GHOSTEX_RICH_PROMPT_EDITING_WITH_GTE =
-      settings.promptEditorBackend === "gte" ? "1" : "0";
+    environment.GHOSTEX_RICH_PROMPT_EDITING_WITH_GTE = "0";
   }
   return environment;
 }
@@ -39100,10 +39040,89 @@ function patchAutomationRun(
   );
 }
 
+type GxserverAutomationResponse = { automationState: ProjectAutomationsBridgeState };
+
+function gxserverAutomationEndpointForProjectBoardAction(
+  action: ProjectBoardBridgeRequest["action"],
+): GxserverEndpointPath | undefined {
+  switch (action) {
+    case "automationGetState":
+      return "/api/readAutomationState";
+    case "automationSave":
+      return "/api/saveAutomation";
+    case "automationDelete":
+      return "/api/deleteAutomation";
+    case "automationRunNow":
+      return "/api/runAutomationNow";
+    case "automationSetEnabled":
+      return "/api/setAutomationEnabled";
+    case "automationArchiveRun":
+      return "/api/archiveAutomationRun";
+    case "automationMarkRunRead":
+      return "/api/markAutomationRunRead";
+    default:
+      return undefined;
+  }
+}
+
+function createGxserverAutomationParams(
+  project: Pick<NativeProject, "path" | "projectId">,
+  request: ProjectBoardBridgeRequest,
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {
+    projectId: request.projectId?.trim() || project.projectId,
+    projectPath: request.projectPath?.trim() || project.path,
+  };
+  switch (request.action) {
+    case "automationSave":
+      params.definition = parseProjectAutomationPayload(request);
+      break;
+    case "automationDelete":
+    case "automationRunNow":
+    case "automationSetEnabled":
+      params.automationId = request.sessionId?.trim();
+      break;
+    case "automationArchiveRun":
+    case "automationMarkRunRead":
+      params.runId = request.sessionId?.trim();
+      break;
+  }
+  if (request.action === "automationSetEnabled") {
+    params.enabled = parseAutomationEnabledPayload(request.payloadJson);
+  }
+  if (request.action === "automationArchiveRun") {
+    params.removeWorktree = parseAutomationArchiveOptions(request.payloadJson).removeWorktree === true;
+  }
+  return params;
+}
+
+async function handleGxserverProjectAutomationRequest(
+  project: NativeProject,
+  request: ProjectBoardBridgeRequest,
+): Promise<boolean> {
+  const endpoint = gxserverAutomationEndpointForProjectBoardAction(request.action);
+  if (!endpoint) {
+    return false;
+  }
+  /*
+   * CDXC:GxserverAutomations 2026-06-29-15:55:
+   * The Project/Automations frontend now controls gxserver-owned automation definitions and runs. Keep this bridge as UI plumbing only: translate existing Project Board messages into first-class gxserver automation RPCs instead of mutating NativeProject.automations or renderer timers.
+   */
+  const response = await gxserverClient.rpc<GxserverAutomationResponse>(
+    endpoint,
+    createGxserverAutomationParams(project, request),
+  );
+  postProjectAutomationsResponse(request, response.automationState);
+  return true;
+}
+
 async function handleProjectAutomationRequest(
   project: NativeProject,
   request: ProjectBoardBridgeRequest,
 ): Promise<void> {
+  if (await handleGxserverProjectAutomationRequest(project, request)) {
+    return;
+  }
   switch (request.action) {
     case "automationGetState":
       postProjectAutomationsResponse(request, await createProjectAutomationsBridgeState(project));
@@ -39854,6 +39873,10 @@ async function handleRemoteProjectBoardRequest(request: ProjectBoardBridgeReques
     postProjectBoardResponse(request, undefined, "Remote Project Board target is missing.");
     return;
   }
+  if (request.action.startsWith("automation")) {
+    await handleRemoteProjectAutomationRequest(scope, request);
+    return;
+  }
   try {
     const project = await readRemoteProjectBoardProject(scope);
     switch (request.action) {
@@ -39895,6 +39918,48 @@ async function handleRemoteProjectBoardRequest(request: ProjectBoardBridgeReques
       request,
       undefined,
       error instanceof Error ? error.message : "Remote Project Board conversation action failed.",
+    );
+  }
+}
+
+async function handleRemoteProjectAutomationRequest(
+  scope: { machineId: string; projectId: string },
+  request: ProjectBoardBridgeRequest,
+): Promise<void> {
+  const endpoint = gxserverAutomationEndpointForProjectBoardAction(request.action);
+  if (!endpoint) {
+    postProjectBoardResponse(request, undefined, "Remote automation action is not available.");
+    return;
+  }
+  try {
+    const params = createGxserverAutomationParams(
+      {
+        path: request.projectPath || "",
+        projectId: scope.projectId,
+      },
+      request,
+    );
+    params.projectId = scope.projectId;
+    const response = await requestRemoteGxserver<GxserverAutomationResponse>(
+      scope.machineId,
+      endpoint,
+      {
+        params,
+        timeoutMs: 30_000,
+      },
+    ) as { result: GxserverAutomationResponse };
+    postProjectAutomationsResponse(request, response.result.automationState);
+  } catch (error) {
+    appendProjectBoardDebugLog("remoteProjectBoard.automation.failed", {
+      action: request.action,
+      error: error instanceof Error ? error.message : String(error),
+      machineKnown: settings.remoteMachines.some((machine) => machine.id === scope.machineId),
+      projectId: scope.projectId,
+    });
+    postProjectBoardResponse(
+      request,
+      undefined,
+      error instanceof Error ? error.message : "Remote automation request failed.",
     );
   }
 }
@@ -42413,7 +42478,7 @@ async function resolveProjectBrowserSeedUrlUncached(project: NativeProject): Pro
   }
 }
 
-function openTasksPlaceholderFromTitlebar(): void {
+function openTasksPlaceholderFromTitlebar(surface: "automations" | "board" = "board"): void {
   const startedAtMs = performance.now();
   const project = activeProject();
   if (isQuickProject(project) || project.isRecentProject === true) {
@@ -42452,6 +42517,12 @@ function openTasksPlaceholderFromTitlebar(): void {
    * Quick sessions are projectless, including newer `isQuick` containers that
    * are not legacy chat projects. Reject Kanban here too so hotkeys and stale
    * titlebar bridge calls follow the disabled titlebar state.
+   *
+   * CDXC:Automations 2026-06-29-15:55:
+   * The same project-editor WK surface now hosts the gxserver Automation page
+   * when launched from the sidebar shortcut. Carry `surface=automations` in the
+   * URL instead of creating a separate native overlay so normal project-editor
+   * layout and companion-pane ownership remain unchanged.
    */
   const boardMetadata = resolveProjectBoardDisplayMetadata(project);
   const url = new URL("tasks-placeholder.html", window.location.href);
@@ -42460,6 +42531,9 @@ function openTasksPlaceholderFromTitlebar(): void {
   url.searchParams.set("projectId", project.projectId);
   url.searchParams.set("projectEditorId", createNativeProjectEditorId(project.projectId, "tasks"));
   url.searchParams.set("beadsDisplayKey", boardMetadata.beadsDisplayKey);
+  if (surface !== "board") {
+    url.searchParams.set("surface", surface);
+  }
   appendModeSwitcherDebugLog("titlebarModeSwitch.tasksHandlerResolvedBoard", {
     elapsedMs: performance.now() - startedAtMs,
     hasBeadsDisplayKey: Boolean(boardMetadata.beadsDisplayKey),
@@ -43891,6 +43965,9 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
        */
       showAppToast("info", "Coming very soon!", "Join discord to help test this feature.");
       return;
+    case "openAutomationsPage":
+      openTasksPlaceholderFromTitlebar("automations");
+      return;
     case "openAgentsHubPathInFinder":
       openNativeWorkspaceInFinder(message.path);
       return;
@@ -45138,9 +45215,6 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "openGhosttyConfigFile":
       openGhosttyConfigFile();
-      return;
-    case "installGte":
-      void installGteFromBrew();
       return;
     case "openAccessibilityPreferences":
       postNative({ type: "openAccessibilityPreferences" });
