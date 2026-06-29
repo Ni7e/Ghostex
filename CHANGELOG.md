@@ -1,5 +1,20 @@
 # Changelog
 
+## 5.1.0 - 2026-06-29
+
+- Major
+  - GPUI can create and focus project-scoped T3 Code draft sessions from the sidebar.
+  - App Shots now support both Shift and both Option hotkeys, return Ghostex to the front after capture, and keep metadata optional.
+  - Docs can show root Markdown, HTML, and Excalidraw files, plus rename or delete folders from the file tree.
+  - Settings and Keep Awake now live in the sidebar shortcut row with compact dropdowns.
+  - Settings uses faster native scrolling and keeps hook setup focused in Settings > Agents.
+- Minor
+  - Factory Droid session titles no longer show the status marker prefix.
+  - Sidebar session focus borders stay steadier during WebKit-to-native focus handoff.
+  - Sleeping pane placeholders can receive keyboard focus from directional hotkeys without waking early.
+  - Docs sidebar and editor header chrome are tighter and easier to scan.
+  - GPUI CEF bridge ownership is cleaner for the sidebar and helper process.
+
 ## 5.0.0 - 2026-06-28
 
 - Major
