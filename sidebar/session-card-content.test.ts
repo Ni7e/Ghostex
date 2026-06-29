@@ -200,6 +200,34 @@ describe("getSessionCardTitleTooltip", () => {
     });
   });
 
+  test("should show remote session state metadata without debug ids", () => {
+    expect(
+      getSessionCardTitleTooltip({
+        alwaysShowStateTooltip: true,
+        session: {
+          activityLabel: undefined,
+          agentIcon: "codex",
+          alias: "Session 1",
+          detail: "OpenAI Codex",
+          isLive: true,
+          isPrimaryTitleTerminalTitle: true,
+          isRunning: true,
+          lifecycleState: "running",
+          primaryTitle: "Remote restore",
+          providerSessionState: "exists",
+          sessionNumber: "05",
+          sessionRoutingId: "S7k-P3a91-G8v20",
+          terminalTitle: undefined,
+        },
+        showDebugSessionNumbers: false,
+      }),
+    ).toEqual({
+      headingText: "Remote restore",
+      tooltip: "Remote restore\n\nState: Active, not loaded",
+      tooltipWhen: "always",
+    });
+  });
+
   test("should describe a live loaded session as active in app when debugging mode is on", () => {
     expect(
       getSessionCardTitleTooltip({

@@ -1387,14 +1387,10 @@ fn normalize_session_input(
     normalize_launch_settings_with_surface(&mut launch_settings, input.get("surface"));
     let surface = resolve_surface(input.get("surface"), &launch_settings, &runtime_settings);
     let session_tag = normalize_optional_session_tag(input.get("sessionTag"))?;
-    let mut provider_state = normalize_object(input.get("providerState"));
-    provider_state.insert(
-        "lifecycleState".to_string(),
-        Value::String(normalize_provider_lifecycle_state(
-            provider_state.get("lifecycleState"),
-        )),
+    let provider_state = normalize_zmx_provider_state(
+        normalize_object(input.get("providerState")),
+        &zmx_name,
     );
-    provider_state.insert("zmxName".to_string(), Value::String(zmx_name.clone()));
 
     let mut session = Map::new();
     insert_optional_string(
@@ -1500,6 +1496,25 @@ fn normalize_session_input(
     );
     session.insert("zmxName".to_string(), Value::String(zmx_name));
     Ok(Value::Object(session))
+}
+
+fn normalize_zmx_provider_state(
+    mut provider_state: Map<String, Value>,
+    zmx_name: &str,
+) -> Map<String, Value> {
+    /*
+    CDXC:RemotePresentation 2026-06-30-00:11:
+    Remote sidebar clients depend on presentation publishing both the canonical zmx session name and its provider label so titles, status dots, and native idle indicators agree. Store `provider: "zmx"` with every gxserver session provider state instead of forcing clients to infer it from zmxName.
+    */
+    provider_state.insert(
+        "lifecycleState".to_string(),
+        Value::String(normalize_provider_lifecycle_state(
+            provider_state.get("lifecycleState"),
+        )),
+    );
+    provider_state.insert("provider".to_string(), Value::String("zmx".to_string()));
+    provider_state.insert("zmxName".to_string(), Value::String(zmx_name.to_string()));
+    provider_state
 }
 
 fn merge_session_update(
@@ -1618,22 +1633,17 @@ fn merge_session_update(
     }
     update_object_field(&mut next, input, "notificationRules");
     if input.contains_key("providerState") {
-        let mut provider_state = normalize_object(input.get("providerState"));
-        provider_state.insert(
-            "lifecycleState".to_string(),
-            Value::String(normalize_provider_lifecycle_state(
-                provider_state.get("lifecycleState"),
-            )),
+        let provider_state = normalize_zmx_provider_state(
+            normalize_object(input.get("providerState")),
+            &zmx_name,
         );
-        provider_state.insert("zmxName".to_string(), Value::String(zmx_name.clone()));
         next.insert("providerState".to_string(), Value::Object(provider_state));
     } else if let Some(provider_state) = next
         .get("providerState")
         .and_then(Value::as_object)
         .cloned()
     {
-        let mut provider_state = provider_state;
-        provider_state.insert("zmxName".to_string(), Value::String(zmx_name.clone()));
+        let provider_state = normalize_zmx_provider_state(provider_state, &zmx_name);
         next.insert("providerState".to_string(), Value::Object(provider_state));
     }
     next.insert(
@@ -2171,13 +2181,7 @@ fn session_from_row(server_id: &str, row: SessionRow) -> DomainResult<Value> {
         "session",
         &row_id,
     )?;
-    provider_state.insert(
-        "lifecycleState".to_string(),
-        Value::String(normalize_provider_lifecycle_state(
-            provider_state.get("lifecycleState"),
-        )),
-    );
-    provider_state.insert("zmxName".to_string(), Value::String(zmx_name.clone()));
+    provider_state = normalize_zmx_provider_state(provider_state, &zmx_name);
     let launch_settings = parse_object_map(
         &row.launch_settings_json,
         "launchSettingsJson",
@@ -3257,6 +3261,69 @@ mod tests {
                 .get("provider")
                 .and_then(Value::as_str),
             Some("t3code")
+        );
+    }
+
+    #[test]
+    fn session_provider_state_carries_canonical_zmx_provider() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let project = repository
+            .create_project(
+                json!({ "name": "Provider Metadata" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("project created");
+        let project_id = value_str(&project, "projectId").to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "projectId": project_id.as_str(),
+                    "providerState": { "lifecycleState": "exists", "provider": "tmux" },
+                    "title": "Remote provider metadata",
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("session created");
+        let session_id = value_str(&session, "sessionId").to_string();
+        let zmx_name = format!("S7k-{project_id}-{session_id}");
+        let provider_state = object_field(&session, "providerState");
+        assert_eq!(provider_state.get("provider"), Some(&json!("zmx")));
+        assert_eq!(provider_state.get("zmxName"), Some(&json!(zmx_name)));
+        assert_eq!(provider_state.get("lifecycleState"), Some(&json!("exists")));
+
+        let updated = repository
+            .update_session(
+                json!({
+                    "projectId": project_id.as_str(),
+                    "providerState": { "lifecycleState": "missing" },
+                    "sessionId": session_id.as_str(),
+                })
+                .as_object()
+                .expect("update params"),
+            )
+            .expect("session updated");
+        let updated_provider_state = object_field(&updated, "providerState");
+        assert_eq!(updated_provider_state.get("provider"), Some(&json!("zmx")));
+        assert_eq!(updated_provider_state.get("zmxName"), Some(&json!(zmx_name)));
+        assert_eq!(
+            updated_provider_state.get("lifecycleState"),
+            Some(&json!("missing"))
+        );
+
+        let reloaded = repository
+            .get_session(&project_id, &session_id)
+            .expect("session reloaded")
+            .expect("session exists");
+        let reloaded_provider_state = object_field(&reloaded, "providerState");
+        assert_eq!(reloaded_provider_state.get("provider"), Some(&json!("zmx")));
+        assert_eq!(reloaded_provider_state.get("zmxName"), Some(&json!(zmx_name)));
+        assert_eq!(
+            reloaded_provider_state.get("lifecycleState"),
+            Some(&json!("missing"))
         );
     }
 

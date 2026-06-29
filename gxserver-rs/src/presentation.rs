@@ -1920,6 +1920,12 @@ mod tests {
         );
         assert_eq!(
             missing
+                .get("sessionPersistenceProvider")
+                .and_then(Value::as_str),
+            Some("zmx")
+        );
+        assert_eq!(
+            missing
                 .get("actions")
                 .and_then(Value::as_object)
                 .and_then(|actions| actions.get("attach"))
@@ -2632,7 +2638,7 @@ mod tests {
             "kind": "terminal",
             "lifecycleState": lifecycle_state,
             "projectId": project_id,
-            "providerState": { "lifecycleState": "missing" },
+            "providerState": { "lifecycleState": "missing", "provider": "zmx" },
             "runtimeSettings": {},
             "sessionId": session_id,
             "sidebarOrder": sidebar_order,
