@@ -2,6 +2,7 @@ pub mod agent_hooks;
 pub mod agent_skills;
 pub mod agents;
 pub mod auth;
+pub mod automations;
 pub mod cli;
 pub mod config;
 pub mod constants;

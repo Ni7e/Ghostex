@@ -50,6 +50,7 @@ use crate::{
         ensure_gxserver_auth_token, is_authorized_headers, is_expected_gxserver_auth_token,
         read_gxserver_auth_token,
     },
+    automations::{handle_automation_endpoint, AutomationRuntime},
     config::{read_gxserver_config, GxserverConfig},
     constants::{
         GXSERVER_CAPABILITIES, GXSERVER_JSON_BODY_LIMIT_BYTES, GXSERVER_PRODUCT,
@@ -131,6 +132,7 @@ enum ExistingGxserverState {
 #[derive(Clone)]
 struct AppState {
     auth_token: String,
+    automation_runtime: AutomationRuntime,
     build_identity: String,
     config: GxserverConfig,
     event_hub: GxserverEventHub,
@@ -165,12 +167,6 @@ const GXSERVER_SESSION_STATE_SIDECAR_MAX_BYTES: u64 = 1024 * 1024;
 
 const RENDERER_COMMAND_ACTIONS: &[&str] = &[
     "assertSidebarCard",
-    "automationArchiveRun",
-    "automationMarkRunRead",
-    "automationRunNow",
-    "automationSave",
-    "automationSetEnabled",
-    "automationState",
     "clickButton",
     "focusGroup",
     "focusSession",
@@ -268,9 +264,18 @@ pub async fn run_gxserver_foreground(
     let (shutdown_tx, _) = broadcast::channel(8);
     let local_host = config.listeners.local.host.clone();
     let local_port = config.listeners.local.port;
+    let automation_runtime = AutomationRuntime::new(
+        paths.clone(),
+        metadata.server_id.clone(),
+        format!(
+            "http://{}:{}",
+            config.listeners.local.host, config.listeners.local.port
+        ),
+    );
 
     let state = Arc::new(AppState {
         auth_token: auth.token,
+        automation_runtime,
         build_identity,
         config,
         event_hub,
@@ -326,6 +331,7 @@ pub async fn run_gxserver_foreground(
         "serverId": metadata.server_id.clone(),
         "type": "serverStarted",
     }));
+    state.automation_runtime.start(shutdown_tx.subscribe());
     sync_zmx_title_observers_for_all_sessions(&state, "server-start");
     let portless_background_sync_task = spawn_portless_background_sync_task(&state);
 
@@ -1092,6 +1098,15 @@ async fn route_http(
             &body_json,
             |repository, _, _, _| repository.read_app_user_data(),
         ),
+        "/api/readAutomationState"
+        | "/api/saveAutomation"
+        | "/api/deleteAutomation"
+        | "/api/runAutomationNow"
+        | "/api/setAutomationEnabled"
+        | "/api/archiveAutomationRun"
+        | "/api/markAutomationRunRead" => {
+            handle_automation_http(&state, endpoint.path, request_id, &body_json).await
+        }
         "/api/saveScratchPad" => handle_domain_http(
             &state,
             endpoint.path,
@@ -1420,6 +1435,26 @@ fn domain_error_response(
         status,
         rpc_error(error.code, error.message, Some(request_id)),
     )
+}
+
+async fn handle_automation_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    /*
+    CDXC:GxserverAutomations 2026-06-29-15:55:
+    Automation RPCs are first-class gxserver endpoints now. Route them through the modular automation runtime instead of `/api/dispatchRendererCommand` so CLI, macOS, and remote clients do not depend on a native sidebar renderer being connected.
+    */
+    match handle_automation_endpoint(&state.automation_runtime, &endpoint_path, body).await {
+        Ok(result) => routed_json(
+            Some(endpoint_path),
+            StatusCode::OK,
+            rpc_success(request_id, result),
+        ),
+        Err(error) => domain_error_response(endpoint_path, request_id, error),
+    }
 }
 
 /*
@@ -7964,8 +7999,17 @@ mod tests {
             version: "0.0.0-test".to_string(),
         };
         let (shutdown_tx, _) = broadcast::channel(8);
+        let automation_runtime = AutomationRuntime::new(
+            paths.clone(),
+            metadata.server_id.clone(),
+            format!(
+                "http://{}:{}",
+                config.listeners.local.host, config.listeners.local.port
+            ),
+        );
         Arc::new(AppState {
             auth_token: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            automation_runtime,
             build_identity: "test-build".to_string(),
             config,
             event_hub: GxserverEventHub::new(metadata.server_id.clone()),

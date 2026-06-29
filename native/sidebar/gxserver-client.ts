@@ -1066,6 +1066,20 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "load sidebar state";
     case "/api/mutateSidebarHudSettings":
       return "save sidebar settings";
+    case "/api/readAutomationState":
+      return "load automation state";
+    case "/api/saveAutomation":
+      return "save the automation";
+    case "/api/deleteAutomation":
+      return "delete the automation";
+    case "/api/runAutomationNow":
+      return "run the automation";
+    case "/api/setAutomationEnabled":
+      return "update the automation schedule";
+    case "/api/archiveAutomationRun":
+      return "archive the automation run";
+    case "/api/markAutomationRunRead":
+      return "mark the automation run read";
     case "/api/searchSessions":
     case "/api/listPreviousSessions":
       return "load previous sessions";

@@ -48,12 +48,6 @@ export type GxserverRpcErrorCode =
 
 export const GXSERVER_RENDERER_COMMAND_ACTIONS = [
   "assertSidebarCard",
-  "automationArchiveRun",
-  "automationMarkRunRead",
-  "automationRunNow",
-  "automationSave",
-  "automationSetEnabled",
-  "automationState",
   "clickButton",
   "focusGroup",
   "focusSession",
@@ -107,6 +101,13 @@ export type GxserverEndpointPath =
   | "/api/readPresentationSnapshot"
   | "/api/readSidebarHud"
   | "/api/mutateSidebarHudSettings"
+  | "/api/readAutomationState"
+  | "/api/saveAutomation"
+  | "/api/deleteAutomation"
+  | "/api/runAutomationNow"
+  | "/api/setAutomationEnabled"
+  | "/api/archiveAutomationRun"
+  | "/api/markAutomationRunRead"
   | "/api/searchSessions"
   | "/api/listPreviousSessions"
   | "/api/transitionSession"

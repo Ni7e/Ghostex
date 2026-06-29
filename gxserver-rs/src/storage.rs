@@ -34,7 +34,7 @@ const LEGACY_NATIVE_PROJECTS_STATE_FILE: &str = "native-sidebar-projects.json";
 
 /*
 CDXC:GxserverStorage 2026-06-14-20:37:
-SQLite remains TypeScript-compatible during the Rust port. Open every connection with foreign_keys=ON and journal_mode=WAL, then apply migration IDs 0001 through 0013 without inventing a parallel schema.
+SQLite remains TypeScript-compatible during the Rust port. Open every connection with foreign_keys=ON and journal_mode=WAL, then apply migration IDs 0001 through 0014 without inventing a parallel schema.
 
 CDXC:GxserverAppUserData 2026-06-24-13:30:
 Scratch Pad and Pinned Prompts are shared user-data surfaces, not GPUI-local modal state. Store their content in gxserver SQLite behind explicit product-data RPCs so macOS and GPUI hydrate the same React contract without logging prompt or note bodies.
@@ -913,6 +913,61 @@ pub const GXSERVER_STORAGE_MIGRATIONS: &[Migration] = &[
       PRAGMA user_version = 13;
     "#,
     },
+    Migration {
+        id: "0014_automations",
+        /*
+        CDXC:GxserverAutomations 2026-06-29-15:55:
+        Project automations are daemon-owned instead of native-sidebar project-cache fields. Store definitions and run history in dedicated tables so macOS, CLI, GPUI, and remote clients control the same scheduler without renderer-local timers or duplicated CLI bridge state.
+        */
+        sql: r#"
+      CREATE TABLE IF NOT EXISTS automations (
+        automationId TEXT PRIMARY KEY,
+        projectId TEXT NOT NULL,
+        agentId TEXT NOT NULL,
+        name TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+        scheduleJson TEXT NOT NULL,
+        executionModeJson TEXT NOT NULL,
+        nextRunAt TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (projectId) REFERENCES projects(projectId) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_automations_project_updated
+        ON automations(projectId, updatedAt);
+
+      CREATE INDEX IF NOT EXISTS idx_automations_due
+        ON automations(enabled, nextRunAt);
+
+      CREATE TABLE IF NOT EXISTS automation_runs (
+        runId TEXT PRIMARY KEY,
+        automationId TEXT NOT NULL,
+        projectId TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'findings', 'no_findings', 'failed', 'needs_attention', 'cancelled', 'skipped')),
+        sessionId TEXT,
+        worktreeJson TEXT NOT NULL DEFAULT '{}',
+        errorMessage TEXT,
+        findingsSummary TEXT,
+        isArchived INTEGER NOT NULL DEFAULT 0 CHECK (isArchived IN (0, 1)),
+        isUnread INTEGER NOT NULL DEFAULT 0 CHECK (isUnread IN (0, 1)),
+        createdAt TEXT NOT NULL,
+        completedAt TEXT,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (automationId) REFERENCES automations(automationId) ON DELETE CASCADE,
+        FOREIGN KEY (projectId) REFERENCES projects(projectId) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_automation_runs_project_created
+        ON automation_runs(projectId, createdAt);
+
+      CREATE INDEX IF NOT EXISTS idx_automation_runs_active
+        ON automation_runs(automationId, status);
+
+      PRAGMA user_version = 14;
+    "#,
+    },
 ];
 
 #[cfg(unix)]
@@ -961,14 +1016,18 @@ mod tests {
         let journal_mode: String = db
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("journal_mode");
-        assert_eq!(user_version, 13);
+        assert_eq!(user_version, 14);
         assert_eq!(foreign_keys, 1);
         assert_eq!(journal_mode, "wal");
-        assert_eq!(schema_migration_count(&db), 13);
+        assert_eq!(schema_migration_count(&db), 14);
         assert_eq!(
             explicit_index_names(&db),
             vec![
                 "idx_app_user_data_kind_updated".to_string(),
+                "idx_automation_runs_active".to_string(),
+                "idx_automation_runs_project_created".to_string(),
+                "idx_automations_due".to_string(),
+                "idx_automations_project_updated".to_string(),
                 "idx_id_allocations_kind_parent".to_string(),
                 "idx_portless_domain_project_identity".to_string(),
                 "idx_portless_domain_project_slug".to_string(),
@@ -1062,6 +1121,40 @@ mod tests {
                 "setupStatus",
                 "runtimeStatus",
                 "createdAt",
+                "updatedAt",
+            ]
+        );
+        assert_eq!(
+            table_columns(&db, "automations"),
+            vec![
+                "automationId",
+                "projectId",
+                "agentId",
+                "name",
+                "prompt",
+                "enabled",
+                "scheduleJson",
+                "executionModeJson",
+                "nextRunAt",
+                "createdAt",
+                "updatedAt",
+            ]
+        );
+        assert_eq!(
+            table_columns(&db, "automation_runs"),
+            vec![
+                "runId",
+                "automationId",
+                "projectId",
+                "status",
+                "sessionId",
+                "worktreeJson",
+                "errorMessage",
+                "findingsSummary",
+                "isArchived",
+                "isUnread",
+                "createdAt",
+                "completedAt",
                 "updatedAt",
             ]
         );

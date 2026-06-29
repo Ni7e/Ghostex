@@ -31,4 +31,5 @@ pub const GXSERVER_MIGRATION_IDS: &[&str] = &[
     "0011_t3_session_kind",
     "0012_recent_projects",
     "0013_app_user_data",
+    "0014_automations",
 ];
