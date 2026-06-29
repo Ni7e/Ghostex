@@ -134,6 +134,11 @@ describe("Manage project workarea source", () => {
      * before collapsed-folder filtering so children render directly below their
      * parent folders.
      *
+     * CDXC:DocsSidebar 2026-06-29-04:08:
+     * The docs/ directory should be a real top-level folder row now that
+     * repo-root artifact files can also appear in the Docs sidebar. The header
+     * needs a compact collapse/expand button immediately before Create.
+     *
      * CDXC:ManageFolders 2026-06-28-07:12:
      * The Docs sidebar create actions live in the header plus menu, file rows
      * can target their containing folder/root for drops, and file rows do not
@@ -154,9 +159,17 @@ describe("Manage project workarea source", () => {
      * without an outer horizontal gutter; spacing belongs inside the controls.
      *
      * CDXC:DocsHeader 2026-06-29-03:43:
-     * The Manage sidebar header should match the editor header's 33px titlebar
+     * The Manage sidebar header should match the editor header's compact titlebar
      * strip, and the hidden-sidebar button should sit in that same strip with
      * an expand icon that indicates the sidebar will reopen.
+     *
+     * CDXC:DocsHeader 2026-06-29-21:48:
+     * The Manage sidebar and editor headers were raised to 36px, with matching
+     * full-height header buttons.
+     *
+     * CDXC:DocsHeader 2026-06-29-23:39:
+     * The Manage sidebar and editor titlebars should now be 35px tall, with
+     * matching full-height header buttons.
      *
      * CDXC:ManageFileActions 2026-06-29-03:27:
      * Folders should use the same right-click Rename/Delete menu as files, and
@@ -175,6 +188,8 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("createUniqueFolderPath(entries)");
     expect(manageSource).toContain("function orderManageEntriesForTree");
     expect(manageSource).toContain("const treeOrderedEntries = useMemo(() => orderManageEntriesForTree(entries), [entries]);");
+    expect(manageSource).toContain("const parentPath = parentManagePath(entry.path);");
+    expect(manageSource).toContain('appendChildren("");');
     expect(manageSource).toContain("return treeOrderedEntries.filter((entry) => !hasCollapsedManageAncestor(entry.path, collapsedDirectoryPaths));");
     expect(manageSource).toContain('kind: "entry";');
     expect(manageSource).toContain("targetDirectoryPath: string;");
@@ -200,8 +215,16 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("box-sizing: border-box;");
     expect(manageSource).toContain("IconLayoutSidebarLeftExpand");
     expect(manageSource).toContain("IconLayoutSidebarRightExpand");
+    expect(manageSource).toContain("isDocsFolderCollapsed");
+    expect(manageSource).toContain('aria-label={isDocsFolderCollapsed ? "Expand docs folder" : "Collapse docs folder"}');
+    expect(manageSource).toContain("manage-sidebar-tree-toggle");
+    expect(manageSource).toContain("onToggleDocsFolder={() => toggleDirectory(MANAGE_DOCS_ROOT_PATH)}");
+    expect(manageSource).toContain("function canOpenManageEntryContextMenu");
     expect(manageSource).toContain(".manage-sidebar-header .manage-icon-button,");
     expect(manageSource).toContain(".manage-sidebar-restore-button {");
+    expect(manageSource).toContain("height: 35px;");
+    expect(manageSource).toContain("max-height: 35px;");
+    expect(manageSource).toContain("min-height: 35px;");
     expect(manageSource).toContain("padding-left: 51px;");
     expect(manageSource).toContain("padding-right: 51px;");
     expect(manageSource).not.toContain('className="manage-file-size"');
@@ -273,17 +296,26 @@ describe("Manage project workarea source", () => {
      * The Docs sidebar should also show Markdown, HTML, and Excalidraw files
      * that live directly at the repo root. Root access must be file-only and
      * extension allowlisted so Docs does not become a broad repo browser.
+     *
+     * CDXC:Docs 2026-06-29-04:08:
+     * The native list should include docs/ itself as a directory entry and then
+     * recurse into its children at depth 1 so the web sidebar can expand and
+     * collapse docs/ as a normal folder beside root artifacts.
      */
     expect(terminalWorkspaceSource).toContain('manageDocsRelativePath = "docs"');
     expect(terminalWorkspaceSource).toContain('manageAnnotationsSidecarRelativePath = ".ghostex/manage-annotations.json"');
     expect(terminalWorkspaceSource).toContain("manageRootArtifactFileExtensions");
     expect(terminalWorkspaceSource).toContain("rootName: manageDocsRelativePath");
     expect(terminalWorkspaceSource).toContain("private nonisolated static func manageProjectDocsURL");
+    expect(terminalWorkspaceSource).toContain("kind: \"directory\"");
+    expect(terminalWorkspaceSource).toContain("name: manageDocsRelativePath");
+    expect(terminalWorkspaceSource).toContain("path: manageDocsRelativePath");
     expect(terminalWorkspaceSource).toContain("manageAppendProjectRootArtifactFileEntries(entries: &entries, rootURL: rootURL)");
     expect(terminalWorkspaceSource).toContain("private nonisolated static func manageAppendProjectRootArtifactFileEntries");
     expect(terminalWorkspaceSource).toContain("if let docsURL = try manageProjectDocsURL(rootURL: rootURL)");
     expect(terminalWorkspaceSource).toContain("directoryURL: docsURL");
     expect(terminalWorkspaceSource).toContain("relativeDirectoryPath: manageDocsRelativePath");
+    expect(terminalWorkspaceSource).toContain("depth: 1)");
     expect(terminalWorkspaceSource).toContain("private nonisolated static func manageValidateAccessibleRelativePath");
     expect(terminalWorkspaceSource).toContain("relativePath == manageAnnotationsSidecarRelativePath");
     expect(terminalWorkspaceSource).toContain('relativePath.hasPrefix("\\(manageDocsRelativePath)/")');
@@ -376,28 +408,47 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("writeTextToClipboard");
   });
 
-  test("renders HTML artifacts as sanitized DOM for Agentation", () => {
+  test("renders HTML artifacts as isolated real documents for Agentation", () => {
     /*
      * CDXC:ManageHtmlRendering 2026-06-28-01:25:
-     * HTML artifacts should render as sanitized same-document DOM, not as source code or an iframe, because Project Editor Agentation needs to inspect and annotate the actual rendered elements.
+     * HTML artifacts should render as a page surface instead of source code while scripts, event handlers, and script-like URLs remain passive in the app.
+     *
+     * CDXC:ManageHtmlRendering 2026-06-29-17:25:
+     * HTML Docs should render like browser HTML by preserving head CSS, stylesheet links, and meta tags in a srcdoc iframe instead of stripping styles and injecting only body markup into Ghostex's dark Manage document.
      *
      * CDXC:ManageHtmlAgentation 2026-06-28-01:46:
      * Rendered HTML artifacts need a visible Manage header action for annotation mode because the Manage surface hides the native browser feedback toolbar.
      *
      * CDXC:ManageHtmlAgentation 2026-06-28-02:29:
-     * The HTML annotation control is named Annotate, is enabled by default, behaves as a toggle, mounts Agentation directly while enabled, and unmounts it when disabled.
+     * The HTML annotation control is named Annotate, is enabled by default, behaves as a toggle, includes the Agentation bootstrap while enabled, and reloads the document without that bootstrap when disabled.
+     *
+     * CDXC:ManageHtmlAgentation 2026-06-29-18:20:
+     * Agentation should be appended as a fixed bootstrap module inside the loaded HTML document, not mounted by the parent Manage React page against the iframe window or wrapper.
      *
      * CDXC:ManageHtmlAgentation 2026-06-28-07:58:
      * HTML Docs should show Agentation's bottom-left control on open without auto-clicking Start feedback mode, so reading or interacting with the page does not immediately become annotation input.
      */
     expect(manageSource).toContain("function ManageHtmlRenderViewer");
     expect(manageSource).toContain(") : isHtml ? (");
-    expect(manageSource).toContain("<ManageHtmlRenderViewer content={draftContent} documentKey={preview.path} />");
+    expect(manageSource).toContain("annotationsEnabled={htmlAnnotationEnabled}");
+    expect(manageSource).toContain("content={draftContent}");
+    expect(manageSource).toContain("documentKey={preview.path}");
     expect(manageSource).toContain("function sanitizeManageHtmlDocument");
+    expect(manageSource).toContain("sanitizeManageHtmlDocument(content, { injectAgentation: annotationsEnabled })");
     expect(manageSource).toContain('new DOMParser().parseFromString(html, "text/html")');
-    expect(manageSource).toContain('data-agentation-html-root="true"');
-    expect(manageSource).toContain("dangerouslySetInnerHTML={{ __html: renderedHtml }}");
-    expect(manageSource).toContain("return documentValue.body.innerHTML;");
+    expect(manageSource).toContain("srcDoc={renderedHtml}");
+    expect(manageSource).toContain('sandbox="allow-popups allow-popups-to-escape-sandbox allow-scripts"');
+    expect(manageSource).not.toContain("allow-same-origin");
+    expect(manageSource).toContain('documentValue.querySelectorAll("script, iframe, object, embed, base")');
+    expect(manageSource).not.toContain('documentValue.querySelectorAll("script, style');
+    expect(manageSource).toContain("function injectManageAgentationScript");
+    expect(manageSource).toContain('script.type = "module";');
+    expect(manageSource).toContain("script.textContent = buildManageAgentationBootstrapScript()");
+    expect(manageSource).toContain("rootEl.setAttribute(\"data-agentation-html-root\", \"true\")");
+    expect(manageSource).toContain("Promise.all([");
+    expect(manageSource).toContain("globalThis.__GHOSTEX_AGENTATION__ = { container: rootEl, root };");
+    expect(manageSource).toContain("serializeManageDocumentType(documentValue)");
+    expect(manageSource).toContain("documentValue.documentElement.outerHTML");
     expect(manageSource).toContain('name.startsWith("on") || name === "srcdoc"');
     expect(manageSource).toContain("/^(?:javascript|vbscript|data:text\\/html)/iu.test(value)");
     expect(manageSource).toContain(".manage-html-render-view");
@@ -405,13 +456,13 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain('aria-label="Toggle annotations"');
     expect(manageSource).toContain("aria-pressed={htmlAnnotationEnabled}");
     expect(manageSource).toContain("<span>Annotate</span>");
-    expect(manageSource).toContain("function ensureManageAgentationInjected");
-    expect(manageSource).toContain("function disableManageAgentation");
-    expect(manageSource).toContain("function mountManageAgentation");
-    expect(manageSource).toContain("function importManageAgentationModule");
+    expect(manageSource).not.toContain("function ensureManageAgentationInjected");
+    expect(manageSource).not.toContain("function disableManageAgentation");
+    expect(manageSource).not.toContain("function mountManageAgentation");
+    expect(manageSource).not.toContain("function importManageAgentationModule");
     expect(manageSource).toContain('const MANAGE_AGENTATION_VERSION = "3.0.2";');
     expect(manageSource).toContain("React.createElement(Agentation)");
-    expect(manageSource).toContain("disableManageAgentation();");
+    expect(manageSource).not.toContain("iframe.contentWindow");
     expect(manageSource).not.toContain("scheduleManageAgentationAutoActivate");
     expect(manageSource).not.toContain("activateManageAgentationFeedbackMode");
     expect(manageSource).not.toContain("findManageAgentationStartButton");
@@ -422,7 +473,7 @@ describe("Manage project workarea source", () => {
   test("keeps Markdown Manage controls in a single header row with annotation dropdown cards", () => {
     /*
      * CDXC:ManageMarkdownAnnotations 2026-06-27-22:52:
-     * Markdown files should keep Comment/Copy/annotations controls in the top row, open annotations as a dropdown instead of a sidebar, simplify quick-label cards so labels are not repeated, tint cards with their annotation color, and reveal a remove X only on card hover/focus.
+     * Markdown files should keep Comment/Copy/annotations controls in the top row, open annotations as a dropdown instead of a sidebar, simplify quick-label cards so labels are not repeated, subtly tint cards with their annotation color, and expose persistent top-right remove controls.
      *
      * CDXC:ManageArtifactHeader 2026-06-28-00:13:
      * HTML and Excalidraw files should share Markdown's compact artifact header: the title is the project-relative path, the separate path row is gone, and the header stays one row at the narrower Manage viewport.
@@ -431,10 +482,57 @@ describe("Manage project workarea source", () => {
      * The Docs annotation dropdown should stay visually above Meo's editor toolbar when it opens from the compact header.
      *
      * CDXC:DocsHeader 2026-06-28-18:02:
-     * The Docs main header should be a compact 33px titlebar-like strip with
+     * The Docs main header should be a compact titlebar-like strip with
      * smaller title/meta text and full-height square action buttons separated
      * like macOS titlebar controls.
+     *
+     * CDXC:DocsHeader 2026-06-29-13:00:
+     * The annotations count button opens a dropdown from inside the compact
+     * header, so the header itself must not clip overflow to its titlebar
+     * height.
+     *
+     * CDXC:DocsHeader 2026-06-29-13:45:
+     * Drawing compact headers have no action buttons on the right edge, so the
+     * file type and size metadata need a right inset when the sidebar divider is
+     * visible.
+     *
+     * CDXC:DocsHeader 2026-06-29-21:48:
+     * The editor and sidebar headers had been raised three pixels from the
+     * earlier compact strip, landing at 36px with matching line-height and
+     * full-height action buttons.
+     *
+     * CDXC:DocsHeader 2026-06-29-23:39:
+     * The editor and sidebar titlebars should now be one pixel shorter at 35px
+     * with matching line-height and full-height action buttons.
+     *
+     * CDXC:ManageMarkdownAnnotations 2026-06-29-20:13:
+     * The Markdown header needs a Clear button beside Copy that requires a
+     * second Confirm click within three seconds, turns red while armed, and
+     * keeps the annotations dropdown control 7px away from the right edge.
+     *
+     * CDXC:ManageMarkdownAnnotations 2026-06-29-20:16:
+     * Annotation cards need an always-visible remove X pinned to the top-right
+     * corner so deletion does not depend on hover-only discovery.
+     *
+     * CDXC:ManageMarkdownAnnotations 2026-06-29-20:54:
+     * The caret-triggered floating annotation preview is a separate card and
+     * needs the same top-right remove X, with pointer events enabled only on
+     * that button.
+     *
+     * CDXC:ManageMarkdownAnnotations 2026-06-29-21:02:
+     * Dropdown and caret-preview annotation cards should use flat, subtle
+     * tinted backgrounds instead of gradients.
+     *
+     * CDXC:ManageMarkdownAnnotations 2026-06-29-21:21:
+     * Annotation remove X controls should not show a left divider or boxed
+     * chrome inside the card.
      */
+    const annotationCardCssStart = manageSource.indexOf("  .manage-annotation-card {");
+    const annotationCardCssEnd = manageSource.indexOf('  .manage-annotation-card[data-type="redline"]', annotationCardCssStart);
+    expect(annotationCardCssStart).toBeGreaterThan(-1);
+    expect(annotationCardCssEnd).toBeGreaterThan(annotationCardCssStart);
+    const annotationCardCss = manageSource.slice(annotationCardCssStart, annotationCardCssEnd);
+    expect(annotationCardCss).not.toContain("linear-gradient(");
     expect(manageSource).toContain("const isHtml = isHtmlPath(preview.path);");
     expect(manageSource).toContain("const usesCompactArtifactHeader = isMarkdown || isDrawing || isHtml;");
     expect(manageSource).toContain("const previewTitle = usesCompactArtifactHeader ? preview.path : preview.name;");
@@ -443,9 +541,13 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain('{!usesCompactArtifactHeader ? <div className="manage-preview-path">{preview.path}</div> : null}');
     expect(manageSource).toContain('.manage-preview-content[data-compact-header="true"]');
     expect(manageSource).toContain("manage-preview-header-actions");
-    expect(manageSource).toContain("height: 33px;");
-    expect(manageSource).toContain("max-height: 33px;");
-    expect(manageSource).toContain("min-height: 33px;");
+    expect(manageSource).toContain("height: 35px;");
+    expect(manageSource).toContain("line-height: 35px;");
+    expect(manageSource).toContain("max-height: 35px;");
+    expect(manageSource).toContain("min-height: 35px;");
+    expect(manageSource).toContain("overflow: visible;");
+    expect(manageSource).toContain('.manage-preview-content[data-kind="drawing"] .manage-preview-header');
+    expect(manageSource).toContain("padding-right: 13px;");
     expect(manageSource).toContain("font-size: 12px;");
     expect(manageSource).toContain("font-size: 10.5px;");
     expect(manageSource).toContain("border-left: 1px solid #252525;");
@@ -454,15 +556,38 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain(".manage-preview-header-actions button svg");
     expect(manageSource).toContain("annotationsDropdownOpen");
     expect(manageSource).toContain("annotationsDropdownRef");
+    expect(manageSource).toContain("clearAnnotationsConfirming");
+    expect(manageSource).toContain("clearAnnotationsTimerRef");
+    expect(manageSource).toContain("clearAllAnnotations");
+    expect(manageSource).toContain('title="Clear All Annotations"');
+    expect(manageSource).toContain('className="manage-clear-annotations-button"');
+    expect(manageSource).toContain('data-confirming={String(clearAnnotationsConfirming)}');
+    expect(manageSource).toContain('<span>{clearAnnotationsConfirming ? "Confirm" : "Clear"}</span>');
+    expect(manageSource).toContain("}, 3_000);");
+    expect(manageSource).toContain("onAnnotationsChange(() => []);");
     expect(manageSource).toContain('aria-haspopup="dialog"');
     expect(manageSource).toContain("IconMessages");
+    expect(manageSource).toContain("margin-right: 7px;");
+    expect(manageSource).toContain('.manage-preview-header-actions .manage-clear-annotations-button[data-confirming="true"]');
+    expect(manageSource).toContain("rgba(244, 63, 94, 0.13)");
     expect(manageSource).toContain("function ManageAnnotationDropdown");
     expect(manageSource).toContain('id="manage-markdown-annotation-dropdown"');
     expect(manageSource).toContain("annotationDisplayNote(annotation)");
     expect(manageSource).toContain("note === quickLabelText(annotation.labelId) ? \"\" : note");
     expect(manageSource).toContain("manage-annotation-remove-button");
     expect(manageSource).toContain("<IconX");
+    expect(manageSource).toContain("padding: 9px 33px 9px 9px;");
+    expect(manageSource).toContain("position: absolute;");
+    expect(manageSource).toContain("right: 7px;");
+    expect(manageSource).toContain("top: 7px;");
+    expect(manageSource).toContain("border: 0;");
+    expect(manageSource).toContain("box-shadow: none;");
+    expect(manageSource).toContain(".manage-annotation-remove-button:hover,");
+    expect(manageSource).toContain(".manage-annotation-preview-remove-button:hover,");
+    expect(manageSource).toContain("background: transparent;");
     expect(manageSource).toContain("manageAnnotationColor(annotation)");
+    expect(manageSource).toContain("background: color-mix(in srgb, var(--manage-panel) 96%, var(--manage-annotation-color) 4%);");
+    expect(manageSource).toContain("border: 1px solid color-mix(in srgb, var(--manage-annotation-color) 24%, var(--manage-border));");
     expect(manageSource).toContain("color-mix(in srgb, var(--manage-annotation-color)");
     expect(manageSource).toContain("grid-auto-rows: max-content;");
     expect(manageSource).toContain("align-content: start;");
@@ -485,9 +610,23 @@ describe("Manage project workarea source", () => {
      * CDXC:ManageMarkdownAnnotations 2026-06-28-05:24:
      * Manage Markdown annotations should capture multi-line CodeMirror selections directly, resolve normalized quotes back to raw Markdown ranges for highlights, and show a passive caret preview card above the annotated range when the caret enters saved annotated text.
      *
+     * CDXC:ManageMarkdownAnnotations 2026-06-29-21:02:
+     * The caret preview should match the dropdown card's flat, subtle tinted
+     * surface instead of using a gradient.
+     *
+     * CDXC:ManageMarkdownAnnotations 2026-06-29-21:21:
+     * The floating preview remove X should also avoid divider or boxed button
+     * chrome.
+     *
      * CDXC:ManageMarkdownToolbar 2026-06-28-06:00:
      * The annotation toolbar should include a formatting switch, and formatting mode should show Meo's inline Bold/Italic/Lineover/Code/Link/Wiki/Kbd toolbar with an Annotations switch back.
      */
+    const annotationPreviewCardCssStart = manageSource.indexOf("  .manage-annotation-preview-card {");
+    const annotationPreviewCardCssEnd = manageSource.indexOf("  .manage-annotation-preview-card header", annotationPreviewCardCssStart);
+    expect(annotationPreviewCardCssStart).toBeGreaterThan(-1);
+    expect(annotationPreviewCardCssEnd).toBeGreaterThan(annotationPreviewCardCssStart);
+    const annotationPreviewCardCss = manageSource.slice(annotationPreviewCardCssStart, annotationPreviewCardCssEnd);
+    expect(annotationPreviewCardCss).not.toContain("linear-gradient(");
     const toolbarStart = manageSource.indexOf("function ManageAnnotationToolbar");
     const toolbarEnd = manageSource.indexOf("function ManageCommentPopover", toolbarStart);
     expect(toolbarStart).toBeGreaterThan(-1);
@@ -540,6 +679,13 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("buildManageNormalizedTextIndex");
     expect(manageSource).toContain("onAnnotationPreviewChange={setAnnotationPreview}");
     expect(manageSource).toContain("function ManageAnnotationPreviewCard");
+    expect(manageSource).toContain("removePreviewAnnotation");
+    expect(manageSource).toContain("onRemoveAnnotation={removePreviewAnnotation}");
+    expect(manageSource).toContain('className="manage-annotation-preview-remove-button manage-icon-button"');
+    expect(manageSource).toContain("onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) => {");
+    expect(manageSource).toContain("pointer-events: auto;");
+    expect(manageSource).toContain("background: color-mix(in srgb, var(--manage-panel-raised) 96%, var(--manage-annotation-color) 4%);");
+    expect(manageSource).toContain("border: 1px solid color-mix(in srgb, var(--manage-annotation-color) 28%, var(--manage-border-strong));");
     expect(manageSource).toContain("annotationPreviewText(annotation)");
     expect(manageSource).toContain("position >= range.from && position < range.to");
     expect(manageSource).toContain(".manage-annotation-preview-card");

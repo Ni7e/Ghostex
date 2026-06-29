@@ -325,27 +325,6 @@ type ManageResolvedAnnotationRange = ManageMeoAnnotationDecoration & {
   annotation: ManageAnnotation;
 };
 
-type ManageAgentationRoot = {
-  render: (node: unknown) => void;
-  unmount: () => void;
-};
-
-type ManageAgentationState = {
-  canceled: boolean;
-  container: HTMLElement | null;
-  lastError?: {
-    message: string;
-    name?: string;
-  };
-  promise?: Promise<void>;
-  root: ManageAgentationRoot | null;
-  unmount: () => void;
-};
-
-type ManageAgentationWindow = Window & {
-  __GHOSTEX_AGENTATION__?: ManageAgentationState;
-};
-
 type ManageWebKitWindow = Window & {
   webkit?: {
     messageHandlers?: {
@@ -546,21 +525,27 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  *
  * CDXC:ManageHtmlRendering 2026-06-28-01:25:
  * HTML artifacts in Manage should render as page DOM instead of source text.
- * Render sanitized body content into the Manage document, not an iframe, so the native Project Editor Agentation injector can inspect and annotate the actual HTML elements while scripts, event handlers, and script-like URLs stay passive.
+ * Keep scripts, event handlers, and script-like URLs passive so Docs can show generated HTML without executing page-authored code in the app.
+ *
+ * CDXC:ManageHtmlRendering 2026-06-29-17:25:
+ * HTML Docs need to look like the same real page users see in a browser. Preserve full-document head CSS, stylesheet links, and meta tags inside an isolated srcdoc frame instead of stripping styles and injecting only body markup into Ghostex's dark Manage document.
  *
  * CDXC:ManageHtmlAgentation 2026-06-28-01:46:
  * Rendered HTML artifacts need their own Agentation launch control because Manage hides the native browser toolbar that normally exposes feedback tools.
  *
  * CDXC:ManageHtmlAgentation 2026-06-28-02:29:
  * The control is named Annotate, behaves as a toggle, and defaults on for HTML artifacts.
- * When enabled, Manage mounts the Agentation React component directly into the same rendered HTML document; when disabled, Manage unmounts it so no annotation overlay remains.
+ * When enabled, the rendered HTML document includes the Agentation bootstrap; when disabled, the document reloads without that bootstrap so no annotation overlay remains.
+ *
+ * CDXC:ManageHtmlAgentation 2026-06-29-18:20:
+ * Agentation must be injected into the loaded HTML document itself, not mounted by the parent Manage page into the iframe wrapper. Add only a fixed Ghostex bootstrap module after sanitizing user HTML so page-authored scripts stay removed while the annotation runtime executes in the rendered page context.
  *
  * CDXC:ManageHtmlAgentation 2026-06-28-07:58:
  * Opening an HTML Docs page should show Agentation's bottom-left control but must not auto-enter feedback mode because immediate activation steals mouse focus from users who only want to read or interact with the page.
  *
  * CDXC:ManageDefaultHtml 2026-06-28-07:17:
  * New HTML Docs files should start with a dark Ghostex-styled onboarding page that explains how to ask an agent for an explanatory HTML document and how to use Agentation to annotate the rendered result.
- * Manage renders sanitized same-document HTML for Agentation and removes style tags, so the starter document uses inline styles and no scripts while the renderer keeps an app-themed dark baseline for unstyled pages.
+ * The starter document stays self-contained with inline styles and no scripts, while the HTML renderer now preserves author CSS in an isolated document so future generated pages render like browser HTML instead of inheriting Ghostex UI styles.
  *
  * CDXC:ManageMarkdownSelectionToolbar 2026-06-27-22:41:
  * The floating Markdown selection toolbar should be icon-only: remove Copy/Delete, keep Comment plus quick labels and Dismiss, show hover tooltips, and color each annotation action to match the highlight it writes into the selected text.
@@ -598,7 +583,7 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  *
  * CDXC:ManageMarkdownAnnotations 2026-06-27-22:52:
  * The annotation list should open as a top-row dropdown instead of occupying a persistent sidebar.
- * Keep cards compact, color their background from the annotation type or quick-label color, avoid repeating quick-label text as body copy, and show the remove X only while hovering or focusing the card.
+ * Keep cards compact, subtly tint their background from the annotation type or quick-label color, avoid repeating quick-label text as body copy, and expose a persistent top-right remove X.
  *
  * CDXC:ManageMarkdownAnnotations 2026-06-28-05:24:
  * Manage Markdown annotations must accept selections that span multiple rendered lines and still resolve their normalized quote back onto the raw Markdown text.
@@ -659,10 +644,43 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * Docs sidebar search and file row buttons should fill the sidebar width with no outer horizontal gutter. Keep spacing as internal padding so hover, active, and focus backgrounds reach both sidebar edges.
  *
  * CDXC:DocsHeader 2026-06-28-18:02:
- * The Docs main header should compress to a 33px titlebar-like chrome strip. Reduce title/meta/action text, keep action buttons full-height with square corners and separator borders, and use hover/open fills that match the macOS titlebar button treatment.
+ * The Docs main header should be a compact titlebar-like chrome strip. Reduce title/meta/action text, keep action buttons full-height with square corners and separator borders, and use hover/open fills that match the macOS titlebar button treatment.
  *
  * CDXC:DocsHeader 2026-06-29-03:43:
- * Manage's sidebar header and hidden-sidebar restore affordance should share the editor header's 33px titlebar strip: compact title typography, full-height square buttons with separator borders, and expand icons that communicate reopening the sidebar.
+ * Manage's sidebar header and hidden-sidebar restore affordance should share the editor header's compact titlebar strip: compact title typography, full-height square buttons with separator borders, and expand icons that communicate reopening the sidebar.
+ *
+ * CDXC:DocsHeader 2026-06-29-13:00:
+ * The compact editor header hosts dropdown actions such as the annotations button. Keep text truncation on the title span, but let the header overflow visibly so action popovers are not clipped to the titlebar strip.
+ *
+ * CDXC:DocsHeader 2026-06-29-13:45:
+ * Drawing-mode compact headers do not have a right-side action group, so keep a right inset on the header metadata instead of letting the file type and size touch the expanded sidebar divider.
+ *
+ * CDXC:DocsHeader 2026-06-29-21:48:
+ * The Docs editor and sidebar headers were raised to 36px, three pixels taller than the earlier compact strip, with title line-height and full-height header buttons matching that height.
+ *
+ * CDXC:DocsHeader 2026-06-29-23:39:
+ * The Docs editor and sidebar titlebars should now be one pixel shorter at
+ * 35px, while keeping the same full-height button and title line-height
+ * geometry so the internal Docs chrome matches the native project-editor
+ * companion titlebar height.
+ *
+ * CDXC:ManageMarkdownAnnotations 2026-06-29-20:13:
+ * Markdown header annotations need a two-step Clear All action beside Copy: first click arms a three-second red Confirm state, the second click clears the current file's annotations, and the annotations count button keeps a 7px inset from the right edge.
+ *
+ * CDXC:ManageMarkdownAnnotations 2026-06-29-20:16:
+ * Annotation cards need a persistent remove X in the card's top-right corner so deletion is discoverable without depending on hover-only opacity.
+ *
+ * CDXC:ManageMarkdownAnnotations 2026-06-29-20:54:
+ * The caret-triggered floating annotation preview uses a separate card from the dropdown. It needs the same top-right remove X, with pointer events enabled only for that button so the preview remains passive while the remove action is clickable.
+ *
+ * CDXC:ManageMarkdownAnnotations 2026-06-29-21:02:
+ * Annotation dropdown and caret-preview cards should use flat, subtle tinted surfaces instead of gradient backgrounds so annotations read as quieter UI chrome.
+ *
+ * CDXC:ManageMarkdownAnnotations 2026-06-29-21:21:
+ * Annotation-card remove X controls should not draw a left divider or boxed chrome; they sit directly on the card surface as simple icon affordances.
+ *
+ * CDXC:DocsSidebar 2026-06-29-04:08:
+ * Root-level artifact files and docs/ content share the same Docs sidebar, so docs/ must render as an explicit expandable folder instead of an invisible tree root. Keep creation/drop defaults targeting docs/, but order rows from the real repo root and provide a header button to collapse or expand docs/.
  *
  * CDXC:ManageFileActions 2026-06-29-03:27:
  * Docs sidebar context actions apply to folders as well as files. Right-clicking empty sidebar chrome must suppress the browser/WebKit default context menu, while folder rename/delete remaps nested selected paths and annotation keys through the same docs-relative bridge.
@@ -880,6 +898,9 @@ function ManageApp() {
   }, []);
 
   const openFileContextMenu = useCallback((entry: ManageFileEntry, point: { x: number; y: number }) => {
+    if (!canOpenManageEntryContextMenu(entry)) {
+      return;
+    }
     setFileContextMenu({
       path: entry.path,
       x: point.x,
@@ -1579,6 +1600,11 @@ function ManageApp() {
   }, [entries]);
 
   const treeOrderedEntries = useMemo(() => orderManageEntriesForTree(entries), [entries]);
+  const hasDocsFolder = useMemo(
+    () => entries.some((entry) => entry.kind === "directory" && entry.path === MANAGE_DOCS_ROOT_PATH),
+    [entries],
+  );
+  const isDocsFolderCollapsed = collapsedDirectoryPaths.has(MANAGE_DOCS_ROOT_PATH);
 
   const visibleEntries = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -1649,11 +1675,14 @@ function ManageApp() {
               creatingKind={creatingArtifactKind}
               isRefreshing={listState === "loading"}
               isCreatingFolder={isCreatingFolder}
+              hasDocsFolder={hasDocsFolder}
+              isDocsFolderCollapsed={isDocsFolderCollapsed}
               onCreate={(kind) => void createArtifactFile(kind)}
               onCreateFolder={() => void createFolder()}
               onHideSidebar={() => setSidebarHidden(true)}
               onRefresh={() => void refreshFiles()}
               onSwitchSide={switchSidebarSide}
+              onToggleDocsFolder={() => toggleDirectory(MANAGE_DOCS_ROOT_PATH)}
               sidebarSide={sidebarSide}
             />
           </div>
@@ -1691,6 +1720,7 @@ function ManageApp() {
                 isExpanded={!collapsedDirectoryPaths.has(entry.path)}
                 isSelected={entry.path === selectedPath}
                 key={entry.path}
+                canOpenContextMenu={canOpenManageEntryContextMenu(entry)}
                 onEntryDragOver={updateEntryDropTarget}
                 onEntryDrop={dropOnEntry}
                 onDragEnd={clearDragState}
@@ -1798,21 +1828,27 @@ function ManageSidebarActions({
   creatingKind,
   isRefreshing,
   isCreatingFolder,
+  hasDocsFolder,
+  isDocsFolderCollapsed,
   onCreate,
   onCreateFolder,
   onHideSidebar,
   onRefresh,
   onSwitchSide,
+  onToggleDocsFolder,
   sidebarSide,
 }: {
   creatingKind?: ManageArtifactKind;
   isRefreshing: boolean;
   isCreatingFolder: boolean;
+  hasDocsFolder: boolean;
+  isDocsFolderCollapsed: boolean;
   onCreate: (kind: ManageArtifactKind) => void;
   onCreateFolder: () => void;
   onHideSidebar: () => void;
   onRefresh: () => void;
   onSwitchSide: () => void;
+  onToggleDocsFolder: () => void;
   sidebarSide: ManageSidebarSide;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1859,6 +1895,25 @@ function ManageSidebarActions({
 
   return (
     <div className="manage-sidebar-actions" ref={wrapperRef}>
+      <button
+        aria-label={isDocsFolderCollapsed ? "Expand docs folder" : "Collapse docs folder"}
+        className="manage-icon-button manage-sidebar-tree-toggle"
+        disabled={!hasDocsFolder}
+        onClick={() => {
+          setCreateMenuOpen(false);
+          setMenuOpen(false);
+          onToggleDocsFolder();
+        }}
+        title={isDocsFolderCollapsed ? "Expand docs folder" : "Collapse docs folder"}
+        type="button"
+      >
+        <IconChevronRight
+          aria-hidden="true"
+          data-expanded={String(!isDocsFolderCollapsed)}
+          size={15}
+          stroke={1.9}
+        />
+      </button>
       <button
         aria-expanded={createMenuOpen}
         aria-haspopup="menu"
@@ -1972,6 +2027,7 @@ function ManageSidebarActions({
 
 function ManageFileRow({
   annotationCount,
+  canOpenContextMenu,
   entry,
   hasActiveFileDescendant,
   hasChildren,
@@ -1988,6 +2044,7 @@ function ManageFileRow({
   onSelect,
 }: {
   annotationCount: number;
+  canOpenContextMenu: boolean;
   entry: ManageFileEntry;
   hasActiveFileDescendant: boolean;
   hasChildren: boolean;
@@ -2007,7 +2064,7 @@ function ManageFileRow({
   return (
     <button
       aria-expanded={entry.kind === "directory" && hasChildren ? isExpanded : undefined}
-      aria-haspopup="menu"
+      aria-haspopup={canOpenContextMenu ? "menu" : undefined}
       aria-selected={entry.kind === "file" ? isSelected : undefined}
       className="manage-file-row"
       data-active-descendant={String(hasActiveFileDescendant)}
@@ -2021,9 +2078,15 @@ function ManageFileRow({
       onContextMenu={(event: ReactMouseEvent<HTMLButtonElement>) => {
         event.preventDefault();
         event.stopPropagation();
+        if (!canOpenContextMenu) {
+          return;
+        }
         onOpenContextMenu(entry, { x: event.clientX, y: event.clientY });
       }}
       onKeyDown={(event: ReactKeyboardEvent<HTMLButtonElement>) => {
+        if (!canOpenContextMenu) {
+          return;
+        }
         if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
           return;
         }
@@ -2227,31 +2290,20 @@ function ManagePreview({
   const [commentDraft, setCommentDraft] = useState<ManageCommentDraft>();
   const [annotationPreview, setAnnotationPreview] = useState<ManageAnnotationPreview>();
   const [feedbackCopyState, setFeedbackCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [clearAnnotationsConfirming, setClearAnnotationsConfirming] = useState(false);
   const [annotationsDropdownOpen, setAnnotationsDropdownOpen] = useState(false);
   const [htmlAnnotationEnabled, setHtmlAnnotationEnabled] = useState(true);
   const annotationsDropdownRef = useRef<HTMLDivElement | null>(null);
+  const clearAnnotationsTimerRef = useRef<number | undefined>(undefined);
   const selectedPathRef = useRef<string | undefined>(selectedPath);
-  const currentPreviewPath = preview?.path ?? "";
-  const shouldMountHtmlAnnotation =
-    Boolean(selectedPath) &&
-    previewState === "ready" &&
-    preview?.kind === "text" &&
-    isHtmlPath(currentPreviewPath) &&
-    htmlAnnotationEnabled;
 
-  useEffect(() => {
-    if (!shouldMountHtmlAnnotation) {
-      disableManageAgentation();
-      return;
+  const resetClearAnnotationsConfirm = useCallback(() => {
+    if (clearAnnotationsTimerRef.current !== undefined) {
+      window.clearTimeout(clearAnnotationsTimerRef.current);
+      clearAnnotationsTimerRef.current = undefined;
     }
-    void ensureManageAgentationInjected().catch((agentationError) => {
-      console.warn("[Ghostex Docs Agentation] injection failed", {
-        message: agentationError instanceof Error ? agentationError.message : String(agentationError),
-      });
-    });
-  }, [currentPreviewPath, shouldMountHtmlAnnotation]);
-
-  useEffect(() => () => disableManageAgentation(), []);
+    setClearAnnotationsConfirming(false);
+  }, []);
 
   useEffect(() => {
     if (selectedPathRef.current !== selectedPath) {
@@ -2261,9 +2313,25 @@ function ManagePreview({
       setCommentDraft(undefined);
       setAnnotationPreview(undefined);
       setFeedbackCopyState("idle");
+      resetClearAnnotationsConfirm();
       setAnnotationsDropdownOpen(false);
     }
-  }, [selectedPath]);
+  }, [resetClearAnnotationsConfirm, selectedPath]);
+
+  useEffect(() => {
+    if (annotations.length === 0) {
+      resetClearAnnotationsConfirm();
+    }
+  }, [annotations.length, resetClearAnnotationsConfirm]);
+
+  useEffect(
+    () => () => {
+      if (clearAnnotationsTimerRef.current !== undefined) {
+        window.clearTimeout(clearAnnotationsTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!annotationsDropdownOpen) {
@@ -2490,6 +2558,27 @@ function ManagePreview({
     }
   }, [annotations, selectedPath]);
 
+  const clearAllAnnotations = useCallback(() => {
+    if (annotations.length === 0) {
+      resetClearAnnotationsConfirm();
+      return;
+    }
+    if (!clearAnnotationsConfirming) {
+      setClearAnnotationsConfirming(true);
+      if (clearAnnotationsTimerRef.current !== undefined) {
+        window.clearTimeout(clearAnnotationsTimerRef.current);
+      }
+      clearAnnotationsTimerRef.current = window.setTimeout(() => {
+        clearAnnotationsTimerRef.current = undefined;
+        setClearAnnotationsConfirming(false);
+      }, 3_000);
+      return;
+    }
+    resetClearAnnotationsConfirm();
+    setAnnotationsDropdownOpen(false);
+    onAnnotationsChange(() => []);
+  }, [annotations.length, clearAnnotationsConfirming, onAnnotationsChange, resetClearAnnotationsConfirm]);
+
   const openCommentForSelection = useCallback(() => {
     if (!selection) {
       return;
@@ -2551,6 +2640,14 @@ function ManagePreview({
       onAnnotationsChange((current) => current.filter((annotation) => annotation.id !== annotationId));
     },
     [onAnnotationsChange],
+  );
+
+  const removePreviewAnnotation = useCallback(
+    (annotationId: string) => {
+      removeAnnotation(annotationId);
+      setAnnotationPreview(undefined);
+    },
+    [removeAnnotation],
   );
 
   if (previewState === "loading") {
@@ -2625,6 +2722,18 @@ function ManagePreview({
               )}
               <span>{feedbackCopyState === "copied" ? "Copied" : "Copy"}</span>
             </button>
+            <button
+              aria-label="Clear all annotations"
+              className="manage-clear-annotations-button"
+              data-confirming={String(clearAnnotationsConfirming)}
+              disabled={annotations.length === 0}
+              onClick={clearAllAnnotations}
+              title="Clear All Annotations"
+              type="button"
+            >
+              <IconTrash aria-hidden="true" size={14} />
+              <span>{clearAnnotationsConfirming ? "Confirm" : "Clear"}</span>
+            </button>
             <div className="manage-annotation-dropdown-shell" ref={annotationsDropdownRef}>
               <button
                 aria-controls="manage-markdown-annotation-dropdown"
@@ -2674,7 +2783,11 @@ function ManagePreview({
           onChange={onDraftContentChange}
         />
       ) : isHtml ? (
-        <ManageHtmlRenderViewer content={draftContent} documentKey={preview.path} />
+        <ManageHtmlRenderViewer
+          annotationsEnabled={htmlAnnotationEnabled}
+          content={draftContent}
+          documentKey={preview.path}
+        />
       ) : isMarkdown ? (
         <>
           <ManageMarkdownReviewViewer
@@ -2713,7 +2826,7 @@ function ManagePreview({
             />
           ) : null}
           {annotationPreview && !selection && !commentDraft ? (
-            <ManageAnnotationPreviewCard preview={annotationPreview} />
+            <ManageAnnotationPreviewCard onRemoveAnnotation={removePreviewAnnotation} preview={annotationPreview} />
           ) : null}
         </>
       ) : (
@@ -2728,22 +2841,27 @@ function ManagePreview({
 }
 
 function ManageHtmlRenderViewer({
+  annotationsEnabled,
   content,
   documentKey,
 }: {
+  annotationsEnabled: boolean;
   content: string;
   documentKey: string;
 }) {
-  const renderedHtml = useMemo(() => sanitizeManageHtmlDocument(content), [content]);
+  const renderedHtml = useMemo(
+    () => sanitizeManageHtmlDocument(content, { injectAgentation: annotationsEnabled }),
+    [annotationsEnabled, content],
+  );
 
   return (
-    <div
+    <iframe
       aria-label="Rendered HTML document"
       className="manage-html-render-view"
-      data-agentation-html-root="true"
       data-document-key={documentKey}
-      dangerouslySetInnerHTML={{ __html: renderedHtml }}
-      role="document"
+      sandbox="allow-popups allow-popups-to-escape-sandbox allow-scripts"
+      srcDoc={renderedHtml}
+      title={documentKey}
     />
   );
 }
@@ -3594,7 +3712,13 @@ function ManageAnnotationToolbar({
   );
 }
 
-function ManageAnnotationPreviewCard({ preview }: { preview: ManageAnnotationPreview }) {
+function ManageAnnotationPreviewCard({
+  onRemoveAnnotation,
+  preview,
+}: {
+  onRemoveAnnotation: (annotationId: string) => void;
+  preview: ManageAnnotationPreview;
+}) {
   const annotation = preview.annotation;
   const note = annotationPreviewText(annotation);
   return createPortal(
@@ -3615,6 +3739,22 @@ function ManageAnnotationPreviewCard({ preview }: { preview: ManageAnnotationPre
           </span>
         ) : null}
       </header>
+      <button
+        aria-label="Remove annotation"
+        className="manage-annotation-preview-remove-button manage-icon-button"
+        onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
+          event.stopPropagation();
+          onRemoveAnnotation(annotation.id);
+        }}
+        onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        title="Remove annotation"
+        type="button"
+      >
+        <IconX aria-hidden="true" size={14} />
+      </button>
       <p>{note}</p>
     </aside>,
     document.body,
@@ -4111,94 +4251,6 @@ function requestManageFiles(
   });
 }
 
-function ensureManageAgentationInjected(): Promise<void> {
-  const agentationWindow = window as ManageAgentationWindow;
-  const existing = agentationWindow.__GHOSTEX_AGENTATION__;
-  if (existing?.root && existing.container?.isConnected) {
-    return Promise.resolve();
-  }
-  if (existing?.promise) {
-    return existing.promise;
-  }
-
-  const state: ManageAgentationState = {
-    canceled: false,
-    container: null,
-    root: null,
-    unmount() {
-      this.canceled = true;
-      if (this.root) {
-        this.root.unmount();
-      }
-      if (this.container?.parentNode) {
-        this.container.parentNode.removeChild(this.container);
-      }
-      delete agentationWindow.__GHOSTEX_AGENTATION__;
-    },
-  };
-  agentationWindow.__GHOSTEX_AGENTATION__ = state;
-
-  state.promise = mountManageAgentation(state).catch((error) => {
-    state.lastError = {
-      message: error instanceof Error ? error.message : String(error),
-      name: error instanceof Error ? error.name : undefined,
-    };
-    state.unmount();
-    throw error;
-  });
-  return state.promise;
-}
-
-function disableManageAgentation(): void {
-  const agentationWindow = window as ManageAgentationWindow;
-  const existing = agentationWindow.__GHOSTEX_AGENTATION__;
-  if (existing) {
-    existing.unmount();
-    return;
-  }
-  document.getElementById("ghostex-agentation-root")?.remove();
-}
-
-async function mountManageAgentation(state: ManageAgentationState): Promise<void> {
-  if (!document.body && document.readyState === "loading") {
-    await new Promise<void>((resolve) => {
-      window.addEventListener("DOMContentLoaded", () => resolve(), { once: true });
-    });
-  }
-
-  const [reactModule, reactDomClientModule, agentationModule] = await Promise.all([
-    importManageAgentationModule(MANAGE_AGENTATION_REACT_URL),
-    importManageAgentationModule(MANAGE_AGENTATION_REACT_DOM_CLIENT_URL),
-    importManageAgentationModule(MANAGE_AGENTATION_PACKAGE_URL),
-  ]);
-  if (state.canceled) {
-    return;
-  }
-
-  const React = (reactModule.default ?? reactModule) as {
-    createElement?: (component: unknown, props?: unknown) => unknown;
-  };
-  const ReactDOMClient = reactDomClientModule as {
-    createRoot?: (container: Element) => ManageAgentationRoot;
-  };
-  const Agentation = agentationModule.Agentation;
-  if (!React.createElement || !ReactDOMClient.createRoot || !Agentation) {
-    throw new Error("Agentation modules did not expose the expected React mounting API.");
-  }
-
-  const container = document.createElement("div");
-  container.id = "ghostex-agentation-root";
-  container.setAttribute("data-agentation-root", "true");
-  (document.body || document.documentElement).appendChild(container);
-  state.container = container;
-  state.root = ReactDOMClient.createRoot(container);
-  state.root.render(React.createElement(Agentation));
-}
-
-function importManageAgentationModule(url: string): Promise<Record<string, unknown>> {
-  return (new Function("url", "return import(url);") as (url: string) => Promise<Record<string, unknown>>)(url);
-}
-
 function createUniqueArtifactPath(entries: ManageFileEntry[], kind: ManageArtifactKind): string {
   const occupiedPaths = new Set(entries.map((entry) => entry.path.toLocaleLowerCase()));
   const { extension, stem } = artifactNameParts(kind);
@@ -4227,7 +4279,7 @@ function createUniqueFolderPath(entries: ManageFileEntry[]): string {
 function orderManageEntriesForTree(entries: readonly ManageFileEntry[]): ManageFileEntry[] {
   const childrenByParentPath = new Map<string, ManageFileEntry[]>();
   for (const entry of entries) {
-    const parentPath = parentManagePath(entry.path) || MANAGE_DOCS_ROOT_PATH;
+    const parentPath = parentManagePath(entry.path);
     const siblings = childrenByParentPath.get(parentPath);
     if (siblings) {
       siblings.push(entry);
@@ -4251,13 +4303,17 @@ function orderManageEntriesForTree(entries: readonly ManageFileEntry[]): ManageF
     }
   };
 
-  appendChildren(MANAGE_DOCS_ROOT_PATH);
+  appendChildren("");
   for (const entry of entries) {
     if (!visitedPaths.has(entry.path)) {
       orderedEntries.push(entry);
     }
   }
   return orderedEntries;
+}
+
+function canOpenManageEntryContextMenu(entry: ManageFileEntry): boolean {
+  return !(entry.kind === "directory" && entry.path === MANAGE_DOCS_ROOT_PATH);
 }
 
 function artifactNameParts(kind: ManageArtifactKind): { extension: string; stem: string } {
@@ -4440,7 +4496,7 @@ function createDefaultHtmlDocument(): string {
   /*
    * CDXC:ManageDefaultHtml 2026-06-28-07:17:
    * The default HTML document is user-facing onboarding copy, not a blank placeholder. It should teach users to ask an agent for a polished explanatory HTML page, then review and annotate exact rendered sections with Agentation.
-   * Keep the document self-contained with inline dark-mode styles because Manage sanitizes rendered HTML for same-document Agentation and strips style/script tags before display.
+   * Keep the document self-contained with inline dark-mode styles and no scripts so it remains portable, while Manage now preserves author styles for real HTML rendering.
    *
    * CDXC:ManageHtmlAgentation 2026-06-28-07:58:
    * The starter copy should describe Agentation as an idle bottom-left control on open. Users explicitly start feedback mode from Agentation only when they are ready to annotate.
@@ -5461,9 +5517,9 @@ function sanitizeManageBlockHtml(html: string): string {
   return template.innerHTML;
 }
 
-function sanitizeManageHtmlDocument(html: string): string {
+function sanitizeManageHtmlDocument(html: string, options: { injectAgentation?: boolean } = {}): string {
   const documentValue = new DOMParser().parseFromString(html, "text/html");
-  documentValue.querySelectorAll("script, style, iframe, object, embed, link, meta, base").forEach((element) => {
+  documentValue.querySelectorAll("script, iframe, object, embed, base").forEach((element) => {
     element.remove();
   });
   documentValue.querySelectorAll("*").forEach((element) => {
@@ -5486,7 +5542,59 @@ function sanitizeManageHtmlDocument(html: string): string {
       element.rel = "noreferrer";
     }
   });
-  return documentValue.body.innerHTML;
+  if (options.injectAgentation) {
+    injectManageAgentationScript(documentValue);
+  }
+  return `${serializeManageDocumentType(documentValue)}\n${documentValue.documentElement.outerHTML}`;
+}
+
+function injectManageAgentationScript(documentValue: Document): void {
+  const script = documentValue.createElement("script");
+  script.type = "module";
+  script.textContent = buildManageAgentationBootstrapScript();
+  (documentValue.body || documentValue.documentElement).appendChild(script);
+}
+
+function buildManageAgentationBootstrapScript(): string {
+  return `
+const rootId = "ghostex-agentation-root";
+document.getElementById(rootId)?.remove();
+const rootEl = document.createElement("div");
+rootEl.id = rootId;
+rootEl.setAttribute("data-agentation-html-root", "true");
+rootEl.setAttribute("data-agentation-root", "true");
+(document.body || document.documentElement).appendChild(rootEl);
+Promise.all([
+  import(${JSON.stringify(MANAGE_AGENTATION_REACT_URL)}),
+  import(${JSON.stringify(MANAGE_AGENTATION_REACT_DOM_CLIENT_URL)}),
+  import(${JSON.stringify(MANAGE_AGENTATION_PACKAGE_URL)})
+]).then(([reactModule, reactDomClientModule, agentationModule]) => {
+  const React = reactModule.default ?? reactModule;
+  const ReactDOMClient = reactDomClientModule;
+  const Agentation = agentationModule.Agentation;
+  if (!React?.createElement || !ReactDOMClient?.createRoot || !Agentation) {
+    throw new Error("Agentation modules did not expose the expected React mounting API.");
+  }
+  const root = ReactDOMClient.createRoot(rootEl);
+  globalThis.__GHOSTEX_AGENTATION__ = { container: rootEl, root };
+  root.render(React.createElement(Agentation));
+}).catch((error) => {
+  console.warn("[Ghostex Docs Agentation] page injection failed", {
+    message: error instanceof Error ? error.message : String(error)
+  });
+  rootEl.remove();
+});
+`.trim();
+}
+
+function serializeManageDocumentType(documentValue: Document): string {
+  const doctype = documentValue.doctype;
+  if (!doctype) {
+    return "<!doctype html>";
+  }
+  const publicId = doctype.publicId ? ` PUBLIC "${doctype.publicId}"` : "";
+  const systemId = doctype.systemId ? `${publicId ? "" : " SYSTEM"} "${doctype.systemId}"` : "";
+  return `<!doctype ${doctype.name}${publicId}${systemId}>`;
 }
 
 function normalizeAttachmentName(name: string): string {
@@ -5946,9 +6054,9 @@ styleElement.textContent = `
     box-sizing: border-box;
     display: flex;
     gap: 8px;
-    height: 33px;
-    max-height: 33px;
-    min-height: 33px;
+    height: 35px;
+    max-height: 35px;
+    min-height: 35px;
     overflow: visible;
     padding: 0 0 0 13px;
   }
@@ -5965,7 +6073,7 @@ styleElement.textContent = `
     font-size: 12px;
     font-weight: 680;
     gap: 7px;
-    line-height: 33px;
+    line-height: 35px;
     min-width: 0;
     -webkit-user-select: none;
     user-select: none;
@@ -6024,9 +6132,9 @@ styleElement.textContent = `
     box-shadow: none;
     box-sizing: border-box;
     color: rgba(255, 255, 255, 0.84);
-    height: 33px;
-    max-height: 33px;
-    min-height: 33px;
+    height: 35px;
+    max-height: 35px;
+    min-height: 35px;
     padding: 0;
     width: 38px;
   }
@@ -6059,6 +6167,15 @@ styleElement.textContent = `
   .manage-sidebar-restore-button svg {
     height: 16px;
     width: 16px;
+  }
+
+  .manage-sidebar-tree-toggle svg {
+    transform: rotate(0deg);
+    transition: transform 120ms ease;
+  }
+
+  .manage-sidebar-tree-toggle svg[data-expanded="true"] {
+    transform: rotate(90deg);
   }
 
   .manage-sidebar-menu {
@@ -6557,11 +6674,15 @@ styleElement.textContent = `
     box-sizing: border-box;
     display: flex;
     gap: 8px;
-    height: 33px;
-    max-height: 33px;
-    min-height: 33px;
-    overflow: hidden;
+    height: 35px;
+    max-height: 35px;
+    min-height: 35px;
+    overflow: visible;
     padding: 0 0 0 13px;
+  }
+
+  .manage-preview-content[data-kind="drawing"] .manage-preview-header {
+    padding-right: 13px;
   }
 
   .manage-preview-title {
@@ -6571,7 +6692,7 @@ styleElement.textContent = `
     font-size: 12px;
     font-weight: 680;
     gap: 7px;
-    line-height: 33px;
+    line-height: 35px;
     min-width: 0;
   }
 
@@ -6595,7 +6716,7 @@ styleElement.textContent = `
     font-size: 10.5px;
     font-weight: 650;
     gap: 9px;
-    line-height: 33px;
+    line-height: 35px;
   }
 
   .manage-preview-header-actions {
@@ -6610,6 +6731,7 @@ styleElement.textContent = `
 
   .manage-annotation-dropdown-shell {
     display: inline-flex;
+    margin-right: 7px;
     position: relative;
   }
 
@@ -6644,49 +6766,17 @@ styleElement.textContent = `
   }
 
   /*
-   * CDXC:ManageDefaultHtml 2026-06-28-07:17:
-   * Rendered HTML Docs should inherit the dark Manage theme by default so the created onboarding page and future agent-authored pages fit the macOS app instead of opening on a white canvas.
+   * CDXC:ManageHtmlRendering 2026-06-29-17:25:
+   * Rendered HTML Docs should give the artifact an isolated browser-like viewport. Do not apply Ghostex typography, padding, link colors, or dark background to the iframe because the HTML document's own CSS must decide how the page looks.
    */
   .manage-html-render-view {
-    background: var(--manage-bg);
-    color: var(--manage-text);
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-    font-size: 16px;
+    background: #ffffff;
+    border: 0;
+    display: block;
     height: 100%;
-    line-height: 1.5;
     min-height: 0;
     min-width: 0;
-    overflow: auto;
-    padding: 24px 28px 48px;
-    scrollbar-color: rgba(166, 173, 182, 0.38) transparent;
     width: 100%;
-  }
-
-  .manage-html-render-view :where(*) {
-    max-width: 100%;
-  }
-
-  .manage-html-render-view :where(a) {
-    color: var(--manage-accent);
-  }
-
-  .manage-html-render-view :where(code) {
-    background: rgba(255, 255, 255, 0.075);
-    border: 1px solid var(--manage-border);
-    border-radius: 6px;
-    color: var(--manage-text);
-    padding: 0.12em 0.35em;
-  }
-
-  .manage-html-render-view :where(img, video, canvas, svg) {
-    height: auto;
-    max-width: 100%;
-  }
-
-  .manage-html-render-view :where(table) {
-    border-collapse: collapse;
-    display: block;
-    overflow-x: auto;
   }
 
   .manage-markdown-review {
@@ -6738,10 +6828,10 @@ styleElement.textContent = `
     color: rgba(255, 255, 255, 0.84);
     font-size: 10.5px;
     font-weight: 650;
-    height: 33px;
-    line-height: 33px;
-    max-height: 33px;
-    min-height: 33px;
+    height: 35px;
+    line-height: 35px;
+    max-height: 35px;
+    min-height: 35px;
     min-width: 38px;
     padding: 0 10px;
   }
@@ -6784,6 +6874,19 @@ styleElement.textContent = `
 
   .manage-preview-header-actions .manage-annotation-toggle[aria-pressed="true"] {
     border-left-color: #252525;
+  }
+
+  .manage-preview-header-actions .manage-clear-annotations-button[data-confirming="true"] {
+    background: rgba(244, 63, 94, 0.13);
+    border-color: rgba(244, 63, 94, 0.34);
+    color: #fda4af;
+  }
+
+  .manage-preview-header-actions .manage-clear-annotations-button[data-confirming="true"]:not(:disabled):hover,
+  .manage-preview-header-actions .manage-clear-annotations-button[data-confirming="true"]:not(:disabled):focus-visible {
+    background: rgba(244, 63, 94, 0.18);
+    border-color: rgba(244, 63, 94, 0.46);
+    color: #fecdd3;
   }
 
   .manage-preview-header-actions .manage-annotation-dropdown-trigger {
@@ -7314,24 +7417,18 @@ styleElement.textContent = `
   .manage-annotation-card {
     --manage-annotation-color: ${MANAGE_COMMENT_ANNOTATION_COLOR};
     align-self: start;
-    background:
-      linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--manage-annotation-color) 16%, transparent) 0,
-        color-mix(in srgb, var(--manage-annotation-color) 7%, transparent) 42%,
-        rgba(255, 255, 255, 0.032) 100%
-      ),
-      color-mix(in srgb, var(--manage-panel) 90%, var(--manage-annotation-color) 10%);
-    border: 1px solid color-mix(in srgb, var(--manage-annotation-color) 38%, var(--manage-border));
+    background: color-mix(in srgb, var(--manage-panel) 96%, var(--manage-annotation-color) 4%);
+    border: 1px solid color-mix(in srgb, var(--manage-annotation-color) 24%, var(--manage-border));
     display: grid;
     gap: 7px;
     height: max-content;
     min-width: 0;
-    padding: 9px;
+    padding: 9px 33px 9px 9px;
+    position: relative;
   }
 
   .manage-annotation-card[data-type="redline"] {
-    border-color: color-mix(in srgb, var(--manage-annotation-color) 42%, var(--manage-border));
+    border-color: color-mix(in srgb, var(--manage-annotation-color) 28%, var(--manage-border));
   }
 
   .manage-annotation-card-header {
@@ -7352,14 +7449,20 @@ styleElement.textContent = `
   }
 
   .manage-annotation-remove-button {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
     color: color-mix(in srgb, var(--manage-annotation-color) 48%, var(--manage-muted));
-    opacity: 0;
-    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+    position: absolute;
+    right: 7px;
+    top: 7px;
+    transition: background 120ms ease, color 120ms ease;
   }
 
-  .manage-annotation-card:hover .manage-annotation-remove-button,
-  .manage-annotation-card:focus-within .manage-annotation-remove-button {
-    opacity: 1;
+  .manage-annotation-remove-button:hover,
+  .manage-annotation-remove-button:focus-visible {
+    background: transparent;
+    color: color-mix(in srgb, var(--manage-annotation-color) 70%, var(--manage-text));
   }
 
   .manage-annotation-card blockquote {
@@ -7488,22 +7591,15 @@ styleElement.textContent = `
 
   .manage-annotation-preview-card {
     --manage-annotation-color: ${MANAGE_COMMENT_ANNOTATION_COLOR};
-    background:
-      linear-gradient(
-        135deg,
-        color-mix(in srgb, var(--manage-annotation-color) 18%, transparent) 0,
-        color-mix(in srgb, var(--manage-annotation-color) 8%, transparent) 46%,
-        transparent 100%
-      ),
-      color-mix(in srgb, var(--manage-panel-raised) 90%, #000 10%);
-    border: 1px solid color-mix(in srgb, var(--manage-annotation-color) 44%, var(--manage-border-strong));
+    background: color-mix(in srgb, var(--manage-panel-raised) 96%, var(--manage-annotation-color) 4%);
+    border: 1px solid color-mix(in srgb, var(--manage-annotation-color) 28%, var(--manage-border-strong));
     border-radius: 8px;
     box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
     color: var(--manage-text);
     display: grid;
     gap: 6px;
     max-width: calc(100vw - 24px);
-    padding: 10px 12px;
+    padding: 10px 36px 10px 12px;
     pointer-events: none;
     position: fixed;
     z-index: 39;
@@ -7528,6 +7624,24 @@ styleElement.textContent = `
     color: var(--manage-muted);
     font-weight: 680;
     text-transform: none;
+  }
+
+  .manage-annotation-preview-remove-button {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    color: color-mix(in srgb, var(--manage-annotation-color) 48%, var(--manage-muted));
+    pointer-events: auto;
+    position: absolute;
+    right: 7px;
+    top: 7px;
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  .manage-annotation-preview-remove-button:hover,
+  .manage-annotation-preview-remove-button:focus-visible {
+    background: transparent;
+    color: color-mix(in srgb, var(--manage-annotation-color) 70%, var(--manage-text));
   }
 
   .manage-annotation-preview-card p {
@@ -7687,9 +7801,9 @@ styleElement.textContent = `
       align-items: center;
       flex-direction: row;
       gap: 8px;
-      height: 33px;
-      max-height: 33px;
-      min-height: 33px;
+      height: 35px;
+      max-height: 35px;
+      min-height: 35px;
       padding: 0 0 0 13px;
     }
 
@@ -7701,9 +7815,9 @@ styleElement.textContent = `
       align-items: center;
       flex-direction: row;
       gap: 8px;
-      height: 33px;
-      max-height: 33px;
-      min-height: 33px;
+      height: 35px;
+      max-height: 35px;
+      min-height: 35px;
       padding: 0 0 0 13px;
     }
 
