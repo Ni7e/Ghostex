@@ -261,16 +261,6 @@ type TicketContextMenuState = {
 
 const PROJECT_BOARD_CONTEXT_MENU_VIEWPORT_MARGIN_PX = 12;
 
-/*
- * CDXC:ProjectBoard 2026-06-09-19:30:
- * Automations, Runs, and Triage stay visible in the Project header but remain disabled with a Coming soon tooltip until those surfaces are ready for general use.
- */
-const PROJECT_BOARD_COMING_SOON_TABS = new Set<ProjectSurfaceTab>([
-  "automations",
-  "runs",
-  "triage",
-]);
-
 const AUTOMATION_SCHEDULE_PRESETS = [
   { label: "Every 5 minutes", value: "5m" },
   { label: "Every 15 minutes", value: "15m" },
@@ -661,7 +651,10 @@ function ProjectBoardApp() {
   const [conversationAction, setConversationAction] = useState<ConversationActionState>();
   /*
    * CDXC:ProjectBoard 2026-06-09-19:25:
-   * The Project surface opens on Board by default and shows tabs in Board, Automations, Runs, Triage order so ticket work stays primary while triage remains available at the end.
+   * The Project surface opens on Board by default so ticket work stays primary.
+   *
+   * CDXC:ProjectBoard 2026-06-29-03:49:
+   * The Kanban board should not render the Board, Automations, Runs, or Triage tab strip; the visible toolbar is project title plus ticket actions.
    */
   const [activeSurfaceTab, setActiveSurfaceTab] = useState<ProjectSurfaceTab>("board");
   const [automationState, setAutomationState] = useState<ProjectAutomationsBridgeState>({
@@ -2151,52 +2144,13 @@ function ProjectBoardApp() {
     <main className="project-board-shell">
       {/*
        * CDXC:ProjectBoard 2026-06-09-14:35:
-       * The Project surface header is one row: project name, centered equal-width view tabs, then refresh and create actions. Drop the eyebrow plus generic "Project" title so the board opens directly on the active project name.
+       * The Project surface header is one row: project name, then refresh and create actions. Drop the eyebrow plus generic "Project" title so the board opens directly on the active project name.
+       *
+       * CDXC:ProjectBoard 2026-06-29-03:49:
+       * Remove the Board, Automations, Runs, and Triage tabs from the Kanban board header so disabled future surfaces do not occupy board chrome.
        */}
       <section className="project-board-toolbar">
         <h1 className="project-board-toolbar-title">{projectName}</h1>
-        <TooltipProvider delayDuration={350}>
-          <div className="project-board-tabs" aria-label="Project views">
-            {[
-              ["board", "Board"],
-              ["automations", "Automations"],
-              ["runs", "Runs"],
-              ["triage", "Triage"],
-            ].map(([value, label]) => {
-              const tabValue = value as ProjectSurfaceTab;
-              const isComingSoon = PROJECT_BOARD_COMING_SOON_TABS.has(tabValue);
-              if (!isComingSoon) {
-                return (
-                  <button
-                    className="project-board-tab"
-                    data-active={activeSurfaceTab === tabValue}
-                    key={value}
-                    onClick={() => setActiveSurfaceTab(tabValue)}
-                    type="button"
-                  >
-                    {label}
-                  </button>
-                );
-              }
-              return (
-                <Tooltip key={value}>
-                  <TooltipTrigger className="project-board-tab-tooltip-trigger" render={<span />}>
-                    <button
-                      className="project-board-tab"
-                      data-active={activeSurfaceTab === tabValue}
-                      data-disabled="true"
-                      disabled
-                      type="button"
-                    >
-                      {label}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">Coming soon!</TooltipContent>
-                </Tooltip>
-              );
-            })}
-          </div>
-        </TooltipProvider>
         <div className="project-board-toolbar-actions">
           <Button
             aria-label="Refresh project"
@@ -5570,7 +5524,7 @@ styleElement.textContent = `
     display: grid;
     flex: 0 0 auto;
     gap: 12px;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
     min-height: 40px;
   }
 
@@ -5592,67 +5546,6 @@ styleElement.textContent = `
     display: flex;
     gap: 8px;
     justify-self: end;
-  }
-
-  .project-board-tabs {
-    align-items: center;
-    display: flex;
-    flex: 0 0 auto;
-    gap: 6px;
-    justify-self: center;
-  }
-
-  .project-board-tab {
-    align-items: center;
-    background: rgba(255, 255, 255, 0.055);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 7px;
-    box-sizing: border-box;
-    color: rgba(244, 244, 245, 0.72);
-    display: inline-flex;
-    font: inherit;
-    font-size: 12px;
-    font-weight: 650;
-    gap: 7px;
-    height: 30px;
-    justify-content: center;
-    min-width: 96px;
-    padding: 0 10px;
-    width: 96px;
-  }
-
-  .project-board-tab[data-active="true"] {
-    background: rgba(244, 244, 245, 0.92);
-    color: #151617;
-  }
-
-  .project-board-tab:disabled,
-  .project-board-tab[data-disabled="true"] {
-    cursor: not-allowed;
-    opacity: 0.42;
-  }
-
-  .project-board-tab:disabled[data-active="true"],
-  .project-board-tab[data-disabled="true"][data-active="true"] {
-    background: rgba(255, 255, 255, 0.055);
-    color: rgba(244, 244, 245, 0.42);
-  }
-
-  .project-board-tab-tooltip-trigger {
-    display: inline-flex;
-  }
-
-  .project-board-tab span {
-    background: rgba(255, 255, 255, 0.18);
-    border-radius: 999px;
-    font-size: 11px;
-    min-width: 18px;
-    padding: 1px 5px;
-    text-align: center;
-  }
-
-  .project-board-tab[data-active="true"] span {
-    background: rgba(0, 0, 0, 0.14);
   }
 
   /*

@@ -6,9 +6,9 @@ enum HostCommand: Decodable {
   case openFloatingEditor(OpenFloatingEditor)
   case closeTerminal(SessionCommand)
   case closeWebPane(SessionCommand)
+  case setSidebarSessionFocusBorderHandoffHitTarget(SetSidebarSessionFocusBorderHandoffHitTarget)
+  case cancelSidebarSessionFocusBorderHandoff
   case focusTerminal(SessionCommand)
-  case focusMountedTerminalSession(FocusMountedTerminalSession)
-  case setFocusedTerminalOwner(SetFocusedTerminalOwner)
   case focusProjectEditorCompanionSession(SessionCommand)
   case retargetProjectEditorCompanionSession(SessionCommand)
   case focusWebPane(SessionCommand)
@@ -67,6 +67,7 @@ enum HostCommand: Decodable {
   case remoteSshPasswordSave(RemoteSshPasswordSave)
   case setKeepAwakeLidSleepPrevention(SetKeepAwakeLidSleepPrevention)
   case syncTitlebarKeepAwakeRuntime(SyncTitlebarKeepAwakeRuntime)
+  case runTitlebarKeepAwakeCommand(RunTitlebarKeepAwakeCommand)
   case syncGhosttyTerminalSettings(SyncGhosttyTerminalSettings)
   case applyGhosttyConfigSettings(ApplyGhosttyConfigSettings)
   case openGhosttyConfigFile
@@ -126,9 +127,9 @@ enum HostCommand: Decodable {
     case openFloatingEditor
     case closeTerminal
     case closeWebPane
+    case setSidebarSessionFocusBorderHandoffHitTarget
+    case cancelSidebarSessionFocusBorderHandoff
     case focusTerminal
-    case focusMountedTerminalSession
-    case setFocusedTerminalOwner
     case focusProjectEditorCompanionSession
     case retargetProjectEditorCompanionSession
     case focusWebPane
@@ -187,6 +188,7 @@ enum HostCommand: Decodable {
     case remoteSshPasswordSave
     case setKeepAwakeLidSleepPrevention
     case syncTitlebarKeepAwakeRuntime
+    case runTitlebarKeepAwakeCommand
     case syncGhosttyTerminalSettings
     case applyGhosttyConfigSettings
     case openGhosttyConfigFile
@@ -250,12 +252,13 @@ enum HostCommand: Decodable {
       self = .closeTerminal(try SessionCommand(from: decoder))
     case .closeWebPane:
       self = .closeWebPane(try SessionCommand(from: decoder))
+    case .setSidebarSessionFocusBorderHandoffHitTarget:
+      self = .setSidebarSessionFocusBorderHandoffHitTarget(
+        try SetSidebarSessionFocusBorderHandoffHitTarget(from: decoder))
+    case .cancelSidebarSessionFocusBorderHandoff:
+      self = .cancelSidebarSessionFocusBorderHandoff
     case .focusTerminal:
       self = .focusTerminal(try SessionCommand(from: decoder))
-    case .focusMountedTerminalSession:
-      self = .focusMountedTerminalSession(try FocusMountedTerminalSession(from: decoder))
-    case .setFocusedTerminalOwner:
-      self = .setFocusedTerminalOwner(try SetFocusedTerminalOwner(from: decoder))
     case .focusProjectEditorCompanionSession:
       self = .focusProjectEditorCompanionSession(try SessionCommand(from: decoder))
     case .retargetProjectEditorCompanionSession:
@@ -373,6 +376,8 @@ enum HostCommand: Decodable {
       self = .setKeepAwakeLidSleepPrevention(try SetKeepAwakeLidSleepPrevention(from: decoder))
     case .syncTitlebarKeepAwakeRuntime:
       self = .syncTitlebarKeepAwakeRuntime(try SyncTitlebarKeepAwakeRuntime(from: decoder))
+    case .runTitlebarKeepAwakeCommand:
+      self = .runTitlebarKeepAwakeCommand(try RunTitlebarKeepAwakeCommand(from: decoder))
     case .syncGhosttyTerminalSettings:
       self = .syncGhosttyTerminalSettings(try SyncGhosttyTerminalSettings(from: decoder))
     case .applyGhosttyConfigSettings:
@@ -528,25 +533,14 @@ struct SessionCommand: Decodable {
   let sessionId: String
 }
 
-struct SetFocusedTerminalOwner: Decodable {
-  /**
-   CDXC:SidebarSessionFocus 2026-06-27-22:54:
-   The owner-only command remains available for compatibility and diagnostics.
-   It carries only the selected native session id and must not reuse
-   SessionCommand, whose optional close/sleep fields belong to lifecycle
-   commands and are irrelevant to focus ownership.
+struct SetSidebarSessionFocusBorderHandoffHitTarget: Decodable {
+  /*
+   CDXC:SidebarSessionFocus 2026-06-29-02:04:
+   Swift only needs to know whether the sidebar pointer is over a real session
+   row before AppKit dispatches mouseDown. Keep this payload as a boolean so
+   the focus-border handoff is scoped without persisting sidebar content.
    */
-  let sessionId: String
-}
-
-struct FocusMountedTerminalSession: Decodable {
-  /**
-   CDXC:SidebarSessionFocus 2026-06-27-22:54:
-   Mounted sidebar terminal switches carry only the native session id into one
-   combined native command. Native then updates tab ownership and AppKit focus
-   as one operation so focused-border chrome is not repainted between phases.
-   */
-  let sessionId: String
+  let isSessionCard: Bool
 }
 
 struct ProjectBoardResponse: Decodable {
@@ -1399,6 +1393,15 @@ struct SyncTitlebarKeepAwakeRuntime: Decodable {
    */
   let runtime: TitlebarKeepAwakeRuntime?
   let suppressAutoStart: Bool
+}
+
+struct RunTitlebarKeepAwakeCommand: Decodable {
+  /*
+   CDXC:SidebarTopChrome 2026-06-29-01:43:
+   The sidebar top Keep Awake dropdown sends only the selected action and duration into the existing titlebar runtime owner, so AppKit does not duplicate caffeinate process lifecycle logic.
+   */
+  let action: String
+  let durationMinutes: Int?
 }
 
 struct TitlebarKeepAwakeRuntime: Decodable {

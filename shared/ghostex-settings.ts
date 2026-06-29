@@ -64,7 +64,12 @@ export type SidebarSide = "left" | "right";
 export type SidebarSettingsPresetId = "codex" | "minimal" | "detailed" | "recommended";
 export type PromptEditorBackend = "inherit" | "monaco" | "gte" | "custom";
 export type SessionTitleGenerationAgent = "codex" | "cursor" | "claude" | "grok" | "custom";
-export type AppShotsHotkey = "both-command" | "double-left-shift" | "double-left-option";
+export type AppShotsHotkey =
+  | "both-command"
+  | "both-shift"
+  | "both-option"
+  | "double-left-shift"
+  | "double-left-option";
 export type KeepAwakeDurationMinutes = 0 | 120 | 300;
 export type AutoSleepIdleMinutes = 5 | 10 | 15 | 30 | 60 | 120 | 300;
 export type RemoteMachineSettings = {
@@ -614,6 +619,7 @@ export type ghostexSettings = {
   actionCompletionSound: CompletionSoundSetting;
   appShotsEnabled: boolean;
   appShotsHotkey: AppShotsHotkey;
+  appShotsMetadataEnabled: boolean;
   /**
    * CDXC:GxserverAgentSettings 2026-06-02-22:23:
    * This field is the sidebar render cache for gxserver-owned global Accept All
@@ -1018,6 +1024,11 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   appShotsEnabled: false,
   appShotsHotkey: "both-command",
+  /*
+   * CDXC:AppShots 2026-06-29-02:59:
+   * App Shot prompts should paste only the image link by default. Window metadata is useful for debugging and context-heavy cases, but it must be an explicit Settings opt-in so routine image prompts stay compact.
+   */
+  appShotsMetadataEnabled: false,
   /**
    * CDXC:GxserverAgentSettings 2026-06-02-22:23:
    * New installs should start with gxserver-owned Accept All enabled so built-in
@@ -1529,6 +1540,8 @@ export const APP_SHOTS_HOTKEY_OPTIONS: ReadonlyArray<{
   value: AppShotsHotkey;
 }> = [
   { label: "Both Command keys", value: "both-command" },
+  { label: "Both Shift keys", value: "both-shift" },
+  { label: "Both Option keys", value: "both-option" },
   { label: "Double-tap Left Shift", value: "double-left-shift" },
   { label: "Double-tap Left Option", value: "double-left-option" },
 ];
@@ -1772,6 +1785,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     ),
     appShotsHotkey: normalizeAppShotsHotkey(
       readString(source, "appShotsHotkey", DEFAULT_ghostex_SETTINGS.appShotsHotkey),
+    ),
+    appShotsMetadataEnabled: readBoolean(
+      source,
+      "appShotsMetadataEnabled",
+      DEFAULT_ghostex_SETTINGS.appShotsMetadataEnabled,
     ),
     agentAcceptAllEnabled: readBoolean(
       source,
@@ -2584,7 +2602,14 @@ function normalizeBrowserFeedbackTool(value: string | undefined): BrowserFeedbac
 }
 
 function normalizeAppShotsHotkey(value: string | undefined): AppShotsHotkey {
-  return value === "double-left-shift" || value === "double-left-option"
+  /*
+   * CDXC:AppShots 2026-06-29-01:29:
+   * App Shots hotkeys must support both physical Shift keys and both physical Option keys in addition to both Command and left-key double-taps, because modifier-only capture should be usable without overloading one hand.
+   */
+  return value === "both-shift" ||
+    value === "both-option" ||
+    value === "double-left-shift" ||
+    value === "double-left-option"
     ? value
     : DEFAULT_ghostex_SETTINGS.appShotsHotkey;
 }

@@ -198,4 +198,45 @@ describe("project editor companion retarget source", () => {
       "if (!nextHidden && focusProjectEditorCompanionSessionAfterExpand(project))",
     );
   });
+
+  test("Agents mode preserves a focused T3 Code companion pane", () => {
+    /*
+     * CDXC:ModeSwitcher 2026-06-29-01:53:
+     * Leaving Source/Browser/Project/Docs for Agents should keep a visible T3
+     * Code companion pane selected. The older remembered-terminal restore path
+     * still applies after this T3-specific check, so command-panel and terminal
+     * focus behavior remains unchanged.
+     */
+    const helperSource = sourceBetween(
+      nativeSidebarSource,
+      "function focusedT3CompanionSessionIdForAgentsMode",
+      "function shouldRestoreSessionFocusAfterCommandsPanelHide",
+    );
+    expect(helperSource).toContain("surfaceState?.isOpen !== true");
+    expect(helperSource).toContain("surfaceState.isSleeping === true");
+    expect(helperSource).toContain("project.projectEditorCompanionPaneHidden === true");
+    expect(helperSource).toContain('session?.kind === "t3" ? sessionId : undefined');
+
+    const focusedT3Index = helperSource.indexOf(
+      "const focusedT3CompanionSessionId = focusedT3CompanionSessionIdForAgentsMode(project);",
+    );
+    const rememberedTerminalIndex = helperSource.indexOf(
+      "const rememberedTerminalSessionId = rememberedWorkspaceTerminal(project);",
+    );
+    const focusedWorkspaceIndex = helperSource.indexOf(
+      "const focusedWorkspaceSessionId = focusedWorkspaceSessionIdForProject(project);",
+    );
+    expect(focusedT3Index).toBeGreaterThanOrEqual(0);
+    expect(rememberedTerminalIndex).toBeGreaterThan(focusedT3Index);
+    expect(focusedWorkspaceIndex).toBeGreaterThan(rememberedTerminalIndex);
+
+    const agentsModeSource = sourceBetween(
+      nativeSidebarSource,
+      "function openAgentsModeFromTitlebar(): void {",
+      "function toggleProjectEditorCompanionFromTitlebar(): void {",
+    );
+    expect(agentsModeSource).toContain("agentsModeFocusSessionTargetForProject(project)");
+    expect(agentsModeSource).toContain("focusSessionTarget.source");
+    expect(agentsModeSource).not.toContain("rememberedWorkspaceTerminal(project) === focusSessionId");
+  });
 });

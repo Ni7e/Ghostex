@@ -187,29 +187,23 @@ export type NativeGhosttyHostCommand =
       type: "closeWebPane";
     }
   | {
+      /*
+       * CDXC:SidebarSessionFocus 2026-06-29-02:04:
+       * The macOS host needs a pre-dispatch session-row hit hint because the focused border can be invalidated before the later focusTerminal/focusWebPane command arrives. The hint contains only a boolean and lets Swift keep the handoff scoped to actual sidebar session rows.
+       */
+      isSessionCard: boolean;
+      type: "setSidebarSessionFocusBorderHandoffHitTarget";
+    }
+  | {
+      /*
+       * CDXC:SidebarSessionFocus 2026-06-29-02:04:
+       * Child controls and modified clicks inside a session row must cancel the candidate border handoff so non-focus interactions still remove terminal focus immediately.
+       */
+      type: "cancelSidebarSessionFocusBorderHandoff";
+    }
+  | {
       sessionId: string;
       type: "focusTerminal";
-    }
-  | {
-      /*
-       * CDXC:SidebarSessionFocus 2026-06-27-22:54:
-       * Mounted terminal sidebar switches use one bridge command so native
-       * selected-tab ownership and AppKit focus cannot repaint in separate
-       * phases.
-       */
-      sessionId: string;
-      type: "focusMountedTerminalSession";
-    }
-  | {
-      /*
-       * CDXC:SidebarSessionFocus 2026-06-27-22:54:
-       * This owner-only bridge command remains for compatibility and targeted
-       * diagnostics. Normal mounted sidebar switching uses
-       * focusMountedTerminalSession so owner selection and focus repaint happen
-       * together.
-       */
-      sessionId: string;
-      type: "setFocusedTerminalOwner";
     }
   | {
       sessionId: string;

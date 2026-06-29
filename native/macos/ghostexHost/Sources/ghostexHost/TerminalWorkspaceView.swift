@@ -2715,6 +2715,14 @@ final class TerminalWorkspaceView: NSView {
   private var focusedPaneBorderSettledSessionIds = Set<String>()
   private var scheduledFocusedPaneBorderSettlementSessionIds = Set<String>()
   private var focusedPaneBorderSettlementGeneration: UInt64 = 0
+  /*
+   CDXC:SidebarSessionFocus 2026-06-29-02:04:
+   Logs showed the sidebar click flash starts when SidebarWebView becomes first responder 1-3 ms after mouse down, well before the deferred session focus command reaches native. Preserve the current settled border only during this sidebar-click handoff, attach the clicked session when the focus command is queued, and complete once AppKit reports that session as first responder so non-session sidebar interactions release after a short timeout.
+   */
+  private var sidebarFocusBorderHandoffPreservedSessionIds = Set<String>()
+  private var sidebarFocusBorderHandoffTargetSessionId: String?
+  private var sidebarFocusBorderHandoffGeneration: UInt64 = 0
+  private static let sidebarFocusBorderHandoffTimeoutMs = 350
   /**
   CDXC:NativeTerminalFocus 2026-06-09-23:14:
   Passive sidebar first-responder recovery must return to the terminal that actually owned keyboard focus before sidebar WKWebView churn. Track that responder separately because focusTerminal intentionally suppresses AppKit first-responder callbacks during programmatic native focus changes.
@@ -6601,17 +6609,6 @@ final class TerminalWorkspaceView: NSView {
         layoutSubtreeIfNeeded()
       }
     }
-    let shouldUseNarrowSidebarFocusBorderUpdate =
-      reason == "sidebarFocusCommand" && !isCommandPanelSession && !hadActiveProjectEditor
-    /*
-     CDXC:SidebarSessionFocus 2026-06-27-22:54:
-     Sidebar-mounted terminal switches should keep the old focused border
-     visible until AppKit accepts the new terminal as first responder. Repaint
-     only after the responder is confirmed and the new border can be marked
-     settled, otherwise the settlement gate briefly paints no active border.
-     */
-    let shouldDeferSidebarFocusBorderUpdateUntilResponder =
-      shouldUseNarrowSidebarFocusBorderUpdate
     if isCommandPanelSession {
       /**
        CDXC:CommandsPanel 2026-05-14-09:31:
@@ -6628,15 +6625,7 @@ final class TerminalWorkspaceView: NSView {
     }
     orderTerminalPaneViewsToFront(sessions[sessionId])
     invalidateFocusedPaneBorderSettlement(reason: "focusTerminal.\(reason)")
-    if !shouldDeferSidebarFocusBorderUpdateUntilResponder {
-      if shouldUseNarrowSidebarFocusBorderUpdate {
-        updateTerminalBordersForFocusTransition(
-          previousSessionId: previousFocusedTerminalSessionId,
-          nextSessionId: sessionId)
-      } else {
-        updateAllTerminalBorders()
-      }
-    }
+    updateAllTerminalBorders()
     if shouldRevealActivePaneTabOnFocus(reason: reason) {
       revealActivePaneTab(for: sessionId, reason: "focusTerminal.\(reason)")
     }
@@ -6648,7 +6637,6 @@ final class TerminalWorkspaceView: NSView {
     let makeFirstResponderResult = targetWindow?.makeFirstResponder(view) ?? false
     programmaticFocusDepth -= 1
     let didApplyFirstResponder = makeFirstResponderResult || targetWindow?.firstResponder === view
-    var didSettleFocusedBorderImmediately = false
     if didApplyFirstResponder {
       rememberTerminalFirstResponderSessionId(sessionId)
       clearProjectEditorFocusOwner(reason: "focusTerminal.\(reason)")
@@ -6662,17 +6650,7 @@ final class TerminalWorkspaceView: NSView {
        succeeds so the border appears only when typing really reaches this
        terminal.
        */
-      if shouldUseNarrowSidebarFocusBorderUpdate {
-        didSettleFocusedBorderImmediately =
-          settleFocusedPaneBorderImmediatelyIfGeometryReady(
-            for: sessionId,
-            reason: "focusTerminal.\(reason)")
-        updateTerminalBordersForFocusTransition(
-          previousSessionId: previousFocusedTerminalSessionId,
-          nextSessionId: sessionId)
-      } else {
-        updateAllTerminalBorders()
-      }
+      updateAllTerminalBorders()
     }
     let responderAfter = responderSnapshot()
     logFocusSurfaceState(
@@ -6680,8 +6658,6 @@ final class TerminalWorkspaceView: NSView {
       reason: reason,
       details: [
         "didChangeFocus": didChangeFocus,
-        "didSettleFocusedBorderImmediately": didSettleFocusedBorderImmediately,
-        "deferredSidebarFocusBorderUpdate": shouldDeferSidebarFocusBorderUpdateUntilResponder,
         "makeFirstResponderResult": makeFirstResponderResult,
         "requestedSessionId": sessionId,
         "targetWindowNumber": targetWindow?.windowNumber ?? 0,
@@ -6690,9 +6666,7 @@ final class TerminalWorkspaceView: NSView {
       event: "nativeWorkspace.focusTerminal.completed",
       details: [
         "activeSessionIds": Array(activeSessionIds).sorted(),
-        "deferredSidebarFocusBorderUpdate": shouldDeferSidebarFocusBorderUpdateUntilResponder,
         "didChangeFocus": didChangeFocus,
-        "didSettleFocusedBorderImmediately": didSettleFocusedBorderImmediately,
         "makeFirstResponderResult": makeFirstResponderResult,
         "reason": reason,
         "requestedSessionId": sessionId,
@@ -6705,12 +6679,6 @@ final class TerminalWorkspaceView: NSView {
     /*
      CDXC:ZmxPersistenceRefresh 2026-06-05-21:27:
      Sidebar session-button and terminal-content clicks should repair a zmx session that another client resized, but a normal click inside an already-correct pane must not repaint the terminal because the repaint scrolls the Ghostty view to the visible bottom. Use zmx's conditional grid-size refresh for click-originated requests.
-
-     CDXC:SidebarSessionFocus 2026-06-27-21:08:
-     Mounted sidebar session switches must not spawn a zmx viewport check on
-     every click. Resize, surface-change, terminal-content, and attention-pane
-     paths still repair stale zmx geometry; plain tab selection keeps focus
-     instant and leaves the terminal buffer untouched.
      */
     if reason == "nativeTerminalContentMouseDown" || reason == "nativeAttentionPaneMouseDown" {
       refreshZmxPersistenceTerminalIfNeeded(
@@ -7115,7 +7083,7 @@ final class TerminalWorkspaceView: NSView {
      not just the later terminalFocused event. Persist each AppKit-originated
      responder handoff while debugging so key-route logs can be correlated with
      the exact responder that existed before the user typed.
-    */
+     */
     let responderSessionId = sessionId(containing: responder)
     rememberTerminalFirstResponderSessionId(responderSessionId)
     if let projectEditorId = projectEditorId(containing: responder) {
@@ -7126,14 +7094,26 @@ final class TerminalWorkspaceView: NSView {
     } else if responderSessionId != nil {
       clearProjectEditorFocusOwner(reason: "windowFirstResponderChanged.\(reason)")
     }
+    let didPreserveSidebarFocusBorderHandoff =
+      preserveSidebarFocusBorderHandoffIfNeeded(
+        responderSessionId: responderSessionId,
+        reason: "windowFirstResponderChanged.\(reason)")
     /*
      CDXC:NativePaneChrome 2026-06-13-22:17:
      The focused border follows the live first responder, not just stored
      sidebar selection. Repaint on every non-programmatic responder transition
      so project editor, sidebar, titlebar, modal, terminal, web-pane, and
      sleeping-placeholder focus all clear or set pane chrome immediately.
+
+     CDXC:SidebarSessionFocus 2026-06-29-02:04:
+     During a sidebar session-click handoff, SidebarWebView is the expected
+     temporary first responder. Do not clear the settled border at this point;
+     preserve it until the queued session focus command either reaches the
+     target responder or times out.
      */
-    invalidateFocusedPaneBorderSettlement(reason: "windowFirstResponderChanged.\(reason)")
+    if !didPreserveSidebarFocusBorderHandoff {
+      invalidateFocusedPaneBorderSettlement(reason: "windowFirstResponderChanged.\(reason)")
+    }
     updateAllTerminalBorders()
     TerminalFocusDebugLog.append(
       event: "nativeFocusTrace.windowFirstResponderChanged",
@@ -7455,117 +7435,6 @@ final class TerminalWorkspaceView: NSView {
     setHidden(!visible, for: session.borderView)
     needsLayout = true
     updateTerminalBorder(for: sessionId)
-  }
-
-  @discardableResult
-  func focusMountedTerminalSession(
-    sessionId rawSessionId: String,
-    reason: String = "explicitFocusMountedTerminalSessionCommand"
-  ) -> Bool {
-    let sessionId = ghostexNativeFocusSessionId(from: rawSessionId) ?? rawSessionId
-    /*
-     CDXC:SidebarSessionFocus 2026-06-27-22:54:
-     Mounted sidebar terminal switches must change selected tab ownership and
-     AppKit first responder as one native operation. Apply the owner silently,
-     then let focusTerminal perform the only border repaint after first
-     responder is confirmed.
-     */
-    guard applyFocusedTerminalOwner(
-      sessionId: sessionId,
-      reason: "focusMountedTerminalSession",
-      logEventPrefix: "nativeWorkspace.focusMountedTerminalSession.owner",
-      repaintBorders: false,
-      revealTab: false)
-    else {
-      return false
-    }
-    focusTerminal(sessionId: sessionId, reason: reason)
-    return true
-  }
-
-  @discardableResult
-  func setFocusedTerminalOwner(_ command: SetFocusedTerminalOwner) -> Bool {
-    applyFocusedTerminalOwner(
-      sessionId: command.sessionId,
-      reason: "setFocusedTerminalOwner",
-      logEventPrefix: "nativeWorkspace.setFocusedTerminalOwner",
-      repaintBorders: true,
-      revealTab: true)
-  }
-
-  @discardableResult
-  private func applyFocusedTerminalOwner(
-    sessionId rawSessionId: String,
-    reason: String,
-    logEventPrefix: String,
-    repaintBorders: Bool,
-    revealTab: Bool
-  ) -> Bool {
-    let sessionId = ghostexNativeFocusSessionId(from: rawSessionId) ?? rawSessionId
-    guard activeProjectEditorId == nil else {
-      TerminalFocusDebugLog.append(
-        event: "\(logEventPrefix).skipped",
-        details: [
-          "activeProjectEditorId": nullableString(activeProjectEditorId),
-          "reason": "projectEditorActive",
-          "requestedSessionId": sessionId,
-        ])
-      return false
-    }
-    guard activeSessionIds.contains(sessionId), sessions[sessionId] != nil else {
-      TerminalFocusDebugLog.append(
-        event: "\(logEventPrefix).skipped",
-        details: [
-          "activeSessionIds": Array(activeSessionIds).sorted(),
-          "knownSessionIds": Array(sessions.keys).sorted(),
-          "reason": "sessionNotMountedWorkspaceTerminal",
-          "requestedSessionId": sessionId,
-        ])
-      return false
-    }
-    /*
-     CDXC:SidebarSessionFocus 2026-06-27-22:54:
-     Mounted sidebar terminal switches update stored tab ownership through this
-     helper instead of setActiveTerminalSet so a plain click does not rebuild
-     all pane chrome, run titlebar sync, or trigger zmx refresh. The combined
-     focus command uses the helper without repainting; the compatibility
-     owner-only command can still request an immediate narrow repaint.
-     */
-    let previousFocusedSessionId = focusedSessionId
-    focusedSessionId = sessionId
-    let ownerSelectionResult = terminalLayout.map {
-      layoutSelectingPaneOwner(sessionId: sessionId, in: $0)
-    }
-    if let ownerSelectionResult, ownerSelectionResult.containsSession {
-      terminalLayout = ownerSelectionResult.layout
-    }
-    let didApplyPaneOwnerSelection =
-      ownerSelectionResult?.containsSession == true
-        ? applyPaneOwnerSelectionFromCurrentLayout(reason: reason)
-        : false
-    if repaintBorders {
-      invalidateFocusedPaneBorderSettlement(reason: reason)
-      updateTerminalBordersForFocusTransition(
-        previousSessionId: previousFocusedSessionId,
-        nextSessionId: sessionId)
-    }
-    if revealTab {
-      revealActivePaneTab(for: sessionId, reason: reason)
-    }
-    TerminalFocusDebugLog.append(
-      event: "\(logEventPrefix).applied",
-      details: [
-        "didApplyPaneOwnerSelection": didApplyPaneOwnerSelection,
-        "didChangeStoredLayoutOwner": ownerSelectionResult?.changed == true,
-        "foundSessionInStoredLayout": ownerSelectionResult?.containsSession == true,
-        "previousFocusedSessionId": nullableString(previousFocusedSessionId),
-        "reason": reason,
-        "repaintBorders": repaintBorders,
-        "revealTab": revealTab,
-        "requestedSessionId": sessionId,
-        "responder": responderSnapshot(),
-      ])
-    return true
   }
 
   func setActiveTerminalSet(
@@ -11065,6 +10934,15 @@ final class TerminalWorkspaceView: NSView {
   private nonisolated static let manageGitBaselineMaxBytes = 1024 * 1024
   private nonisolated static let manageDocsRelativePath = "docs"
   private nonisolated static let manageAnnotationsSidecarRelativePath = ".ghostex/manage-annotations.json"
+  private nonisolated static let manageRootArtifactFileExtensions: Set<String> = [
+    "excalidraw",
+    "htm",
+    "html",
+    "markdown",
+    "md",
+    "mdown",
+    "mkdn",
+  ]
   private nonisolated static let manageIgnoredDirectoryNames: Set<String> = [
     ".cache",
     ".git",
@@ -11397,16 +11275,40 @@ final class TerminalWorkspaceView: NSView {
   private nonisolated static func manageValidateAccessibleRelativePath(_ relativePath: String) throws {
     guard relativePath == manageAnnotationsSidecarRelativePath
       || relativePath.hasPrefix("\(manageDocsRelativePath)/")
+      || manageIsRootArtifactFileRelativePath(relativePath)
     else {
-      throw ManageFilesBridgeError.invalidRequest("Docs files must be inside project docs.")
+      throw ManageFilesBridgeError.invalidRequest(
+        "Docs files must be inside project docs or be root Markdown, HTML, or Excalidraw files.")
     }
   }
 
-  private nonisolated static func manageValidateDocsTreeRelativePath(_ relativePath: String) throws {
-    guard relativePath == manageDocsRelativePath
+  private nonisolated static func manageIsDocsTreeRelativePath(_ relativePath: String) -> Bool {
+    relativePath == manageDocsRelativePath
       || relativePath.hasPrefix("\(manageDocsRelativePath)/")
+  }
+
+  private nonisolated static func manageIsRootArtifactFileRelativePath(_ relativePath: String) -> Bool {
+    guard !relativePath.isEmpty,
+      !relativePath.contains("/")
     else {
+      return false
+    }
+    let fileExtension = URL(fileURLWithPath: relativePath).pathExtension.lowercased()
+    return manageRootArtifactFileExtensions.contains(fileExtension)
+  }
+
+  private nonisolated static func manageValidateDocsTreeRelativePath(_ relativePath: String) throws {
+    guard manageIsDocsTreeRelativePath(relativePath) else {
       throw ManageFilesBridgeError.invalidRequest("Docs items must be inside project docs.")
+    }
+  }
+
+  private nonisolated static func manageValidateDocsActionRelativePath(_ relativePath: String) throws {
+    guard manageIsDocsTreeRelativePath(relativePath)
+      || manageIsRootArtifactFileRelativePath(relativePath)
+    else {
+      throw ManageFilesBridgeError.invalidRequest(
+        "Docs items must be inside project docs or be root Markdown, HTML, or Excalidraw files.")
     }
   }
 
@@ -11431,18 +11333,70 @@ final class TerminalWorkspaceView: NSView {
      Keep returned paths project-relative as docs/... while starting the visible
      tree at docs/ so Markdown, HTML, and Excalidraw documents use one stable
      native bridge scope.
+
+     CDXC:Docs 2026-06-29-03:54:
+     Docs should also surface Markdown, HTML, and Excalidraw files that live directly in the active repo root. List only those root files, keep nested folders docs-scoped, and validate read/write actions through the same root-artifact allowlist so the sidebar does not become a broad repo browser.
      */
-    guard let docsURL = try manageProjectDocsURL(rootURL: rootURL) else {
-      return []
-    }
     var entries: [ManageFileEntry] = []
-    try manageAppendProjectFileEntries(
-      entries: &entries,
-      rootURL: rootURL,
-      directoryURL: docsURL,
-      relativeDirectoryPath: manageDocsRelativePath,
-      depth: 0)
+    try manageAppendProjectRootArtifactFileEntries(entries: &entries, rootURL: rootURL)
+    if let docsURL = try manageProjectDocsURL(rootURL: rootURL) {
+      try manageAppendProjectFileEntries(
+        entries: &entries,
+        rootURL: rootURL,
+        directoryURL: docsURL,
+        relativeDirectoryPath: manageDocsRelativePath,
+        depth: 0)
+    }
     return entries
+  }
+
+  private nonisolated static func manageAppendProjectRootArtifactFileEntries(
+    entries: inout [ManageFileEntry],
+    rootURL: URL
+  ) throws {
+    guard entries.count < manageFileListMaxEntries else {
+      return
+    }
+    let keys: Set<URLResourceKey> = [
+      .contentModificationDateKey,
+      .fileSizeKey,
+      .isDirectoryKey,
+      .isSymbolicLinkKey,
+    ]
+    let children = try FileManager.default.contentsOfDirectory(
+      at: rootURL,
+      includingPropertiesForKeys: Array(keys),
+      options: [.skipsPackageDescendants])
+    let sortedChildren = children.sorted { left, right in
+      left.lastPathComponent.localizedStandardCompare(right.lastPathComponent) == .orderedAscending
+    }
+    for child in sortedChildren {
+      if entries.count >= manageFileListMaxEntries {
+        return
+      }
+      let name = child.lastPathComponent
+      guard manageIsRootArtifactFileRelativePath(name),
+        name != ".DS_Store"
+      else {
+        continue
+      }
+      let values = try? child.resourceValues(forKeys: keys)
+      guard values?.isDirectory != true else {
+        continue
+      }
+      let resolvedChild = child.standardizedFileURL.resolvingSymlinksInPath()
+      guard manageURLIsInsideProjectRoot(resolvedChild, rootURL: rootURL) else {
+        continue
+      }
+      entries.append(
+        ManageFileEntry(
+          depth: 0,
+          kind: "file",
+          modifiedAt: manageISOString(values?.contentModificationDate),
+          name: name,
+          path: name,
+          size: values?.fileSize.map(Int64.init)))
+    }
   }
 
   private nonisolated static func manageAppendProjectFileEntries(
@@ -11641,31 +11595,45 @@ final class TerminalWorkspaceView: NSView {
     rootURL: URL,
     path: String?,
     newPath: String?
-  ) throws -> ManageFilePreview {
+  ) throws -> ManageFilePreview? {
     /*
      CDXC:ManageFileActions 2026-06-28-04:35:
      The Manage sidebar context menu can rename artifact files, but JavaScript still sends only project-relative source and destination paths. Treat rename as a same-directory file operation so the menu cannot become a move API, reject overwrites, and keep filesystem errors sanitized before they cross back into WebKit.
+
+     CDXC:ManageFileActions 2026-06-29-03:27:
+     Folder rename from Docs uses the same docs-relative bridge as file rename. Accept files or folders inside docs/, require same-parent rename, reject docs root and overwrites, return a preview only when the renamed item is a file.
+
+     CDXC:Docs 2026-06-29-03:54:
+     Direct root artifacts shown in Docs can be renamed in place, but they must remain root-level Markdown, HTML, or Excalidraw files. Root directories are never accepted through this file-action path.
      */
     let source = try manageFileOperationURL(rootURL: rootURL, relativePath: path)
     let destination = try manageFileOperationURL(rootURL: rootURL, relativePath: newPath)
     guard !source.relativePath.isEmpty,
-      !destination.relativePath.isEmpty
+      !destination.relativePath.isEmpty,
+      source.relativePath != manageDocsRelativePath,
+      destination.relativePath != manageDocsRelativePath
     else {
-      throw ManageFilesBridgeError.invalidRequest("Select a file to rename.")
+      throw ManageFilesBridgeError.invalidRequest("Select an item to rename.")
     }
-    try manageValidateAccessibleRelativePath(source.relativePath)
-    try manageValidateAccessibleRelativePath(destination.relativePath)
+    try manageValidateDocsActionRelativePath(source.relativePath)
+    try manageValidateDocsActionRelativePath(destination.relativePath)
     guard manageParentRelativePath(source.relativePath) == manageParentRelativePath(destination.relativePath) else {
-      throw ManageFilesBridgeError.invalidRequest("Docs rename cannot move files.")
-    }
-    if source.relativePath == destination.relativePath {
-      return try manageProjectFilePreview(rootURL: rootURL, path: source.relativePath)
+      throw ManageFilesBridgeError.invalidRequest("Docs rename cannot move items.")
     }
     var sourceIsDirectory: ObjCBool = false
-    guard FileManager.default.fileExists(atPath: source.url.path, isDirectory: &sourceIsDirectory),
-      !sourceIsDirectory.boolValue
-    else {
+    guard FileManager.default.fileExists(atPath: source.url.path, isDirectory: &sourceIsDirectory) else {
+      throw ManageFilesBridgeError.invalidRequest("Select an item to rename.")
+    }
+    if manageIsRootArtifactFileRelativePath(source.relativePath),
+      sourceIsDirectory.boolValue
+    {
       throw ManageFilesBridgeError.invalidRequest("Select a file to rename.")
+    }
+    if source.relativePath == destination.relativePath {
+      if !sourceIsDirectory.boolValue {
+        return try manageProjectFilePreview(rootURL: rootURL, path: source.relativePath)
+      }
+      return nil
     }
     var destinationParentIsDirectory: ObjCBool = false
     let destinationParentURL = destination.url.deletingLastPathComponent()
@@ -11678,12 +11646,15 @@ final class TerminalWorkspaceView: NSView {
       throw ManageFilesBridgeError.invalidRequest("Docs rename target is unavailable.")
     }
     guard !FileManager.default.fileExists(atPath: destination.url.path) else {
-      throw ManageFilesBridgeError.invalidRequest("A file with that name already exists.")
+      throw ManageFilesBridgeError.invalidRequest("A file or folder with that name already exists.")
     }
     do {
       try FileManager.default.moveItem(at: source.url, to: destination.url)
     } catch {
-      throw ManageFilesBridgeError.invalidRequest("Could not rename file.")
+      throw ManageFilesBridgeError.invalidRequest("Could not rename item.")
+    }
+    if sourceIsDirectory.boolValue {
+      return nil
     }
     return try manageProjectFilePreview(rootURL: rootURL, path: destination.relativePath)
   }
@@ -11695,22 +11666,33 @@ final class TerminalWorkspaceView: NSView {
     /*
      CDXC:ManageFileActions 2026-06-28-04:35:
      Delete from the Manage file context menu is file-only and project-relative. Use the original normalized URL for removal so a listed symlink entry is removed as the entry itself, while the resolved-path guard still prevents escaping the active project.
+
+     CDXC:ManageFileActions 2026-06-29-03:27:
+     Folder delete from Docs is intentionally recursive inside docs/. Reject docs root and path escapes, but allow listed files or folders so the React context menu does not need a fallback action.
+
+     CDXC:Docs 2026-06-29-03:54:
+     Direct root artifacts shown in Docs can be deleted as files. Keep root directories out of this path even when their names match an artifact extension.
      */
     let target = try manageFileOperationURL(rootURL: rootURL, relativePath: path)
-    guard !target.relativePath.isEmpty else {
-      throw ManageFilesBridgeError.invalidRequest("Select a file to delete.")
-    }
-    try manageValidateAccessibleRelativePath(target.relativePath)
-    var isDirectory: ObjCBool = false
-    guard FileManager.default.fileExists(atPath: target.url.path, isDirectory: &isDirectory),
-      !isDirectory.boolValue
+    guard !target.relativePath.isEmpty,
+      target.relativePath != manageDocsRelativePath
     else {
+      throw ManageFilesBridgeError.invalidRequest("Select an item to delete.")
+    }
+    try manageValidateDocsActionRelativePath(target.relativePath)
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: target.url.path, isDirectory: &isDirectory) else {
+      throw ManageFilesBridgeError.invalidRequest("Select an item to delete.")
+    }
+    if manageIsRootArtifactFileRelativePath(target.relativePath),
+      isDirectory.boolValue
+    {
       throw ManageFilesBridgeError.invalidRequest("Select a file to delete.")
     }
     do {
       try FileManager.default.removeItem(at: target.url)
     } catch {
-      throw ManageFilesBridgeError.invalidRequest("Could not delete file.")
+      throw ManageFilesBridgeError.invalidRequest("Could not delete item.")
     }
   }
 
@@ -11760,6 +11742,9 @@ final class TerminalWorkspaceView: NSView {
     /*
      CDXC:ManageFolders 2026-06-28-06:39:
      Drag/drop in Manage is a move operation inside docs/, not a general filesystem rename fallback. Accept only normalized docs-relative source and destination paths, reject overwrites and directory self-nesting, preserve the file preview contract for moved files, and keep errors sanitized.
+
+     CDXC:Docs 2026-06-29-03:54:
+     Root artifacts may be dragged into docs folders because they are visible Docs files, but move destinations remain docs-scoped and root directories are still rejected.
      */
     let source = try manageFileOperationURL(rootURL: rootURL, relativePath: path)
     let destination = try manageFileOperationURL(rootURL: rootURL, relativePath: newPath)
@@ -11770,7 +11755,7 @@ final class TerminalWorkspaceView: NSView {
     else {
       throw ManageFilesBridgeError.invalidRequest("Select an item to move.")
     }
-    try manageValidateDocsTreeRelativePath(source.relativePath)
+    try manageValidateDocsActionRelativePath(source.relativePath)
     try manageValidateDocsTreeRelativePath(destination.relativePath)
     if source.relativePath == destination.relativePath {
       var isDirectory: ObjCBool = false
@@ -11784,6 +11769,11 @@ final class TerminalWorkspaceView: NSView {
     var sourceIsDirectory: ObjCBool = false
     guard FileManager.default.fileExists(atPath: source.url.path, isDirectory: &sourceIsDirectory) else {
       throw ManageFilesBridgeError.invalidRequest("Select an item to move.")
+    }
+    if manageIsRootArtifactFileRelativePath(source.relativePath),
+      sourceIsDirectory.boolValue
+    {
+      throw ManageFilesBridgeError.invalidRequest("Select a file to move.")
     }
     if sourceIsDirectory.boolValue,
       destination.relativePath.hasPrefix("\(source.relativePath)/")
@@ -18258,29 +18248,153 @@ final class TerminalWorkspaceView: NSView {
     }
   }
 
-  private func updateTerminalBordersForFocusTransition(
-    previousSessionId: String?,
-    nextSessionId: String
-  ) {
-    /*
-     CDXC:SidebarSessionFocus 2026-06-27-20:28:
-     Mounted sidebar terminal switches change focus chrome for the old and new
-     pane owners only. Avoid repainting every terminal, web pane, and sleeping
-     placeholder on that hot path so large workspaces do not make session
-     switching wait on unrelated pane chrome.
-     */
-    cancelIneligibleFocusedPaneBorderSettlements()
-    if let previousSessionId, previousSessionId != nextSessionId {
-      updateTerminalOrPlaceholderBorder(for: previousSessionId)
-    }
-    updateTerminalOrPlaceholderBorder(for: nextSessionId)
-  }
-
   private func updateTerminalOrPlaceholderBorder(for sessionId: String) {
     if sleepingPanePlaceholderSessions[sessionId] != nil {
       updateSleepingPanePlaceholderBorder(for: sessionId)
     } else {
       updateTerminalBorder(for: sessionId)
+    }
+  }
+
+  func beginSidebarFocusBorderHandoff(reason: String) {
+    let preservedSessionIds = focusedPaneBorderSettledSessionIds.filter {
+      isSidebarFocusBorderHandoffDrawable(sessionId: $0)
+    }
+    guard !preservedSessionIds.isEmpty else {
+      return
+    }
+    sidebarFocusBorderHandoffPreservedSessionIds = Set(preservedSessionIds)
+    sidebarFocusBorderHandoffTargetSessionId = nil
+    sidebarFocusBorderHandoffGeneration &+= 1
+    let generation = sidebarFocusBorderHandoffGeneration
+    DispatchQueue.main.asyncAfter(
+      deadline: .now() + .milliseconds(Self.sidebarFocusBorderHandoffTimeoutMs)
+    ) { [weak self] in
+      guard let self,
+        self.sidebarFocusBorderHandoffGeneration == generation,
+        self.hasSidebarFocusBorderHandoff
+      else {
+        return
+      }
+      self.cancelSidebarFocusBorderHandoff(reason: "timeout.\(reason)")
+    }
+  }
+
+  func setSidebarFocusBorderHandoffTarget(sessionId rawSessionId: String, reason: String) {
+    let sessionId = ghostexNativeFocusSessionId(from: rawSessionId) ?? rawSessionId
+    guard hasSidebarFocusBorderHandoff else {
+      return
+    }
+    sidebarFocusBorderHandoffTargetSessionId = sessionId
+    sidebarFocusBorderHandoffGeneration &+= 1
+  }
+
+  func cancelSidebarFocusBorderHandoff(reason: String) {
+    guard hasSidebarFocusBorderHandoff else {
+      return
+    }
+    let affectedSessionIds = sidebarFocusBorderHandoffAffectedSessionIds()
+    let preservedSessionIds = sidebarFocusBorderHandoffPreservedSessionIds
+    let targetSessionId = sidebarFocusBorderHandoffTargetSessionId
+    sidebarFocusBorderHandoffPreservedSessionIds.removeAll()
+    sidebarFocusBorderHandoffTargetSessionId = nil
+    sidebarFocusBorderHandoffGeneration &+= 1
+    cancelIneligibleFocusedPaneBorderSettlements()
+    updateSidebarFocusBorderHandoffAffectedBorders(affectedSessionIds)
+  }
+
+  private var hasSidebarFocusBorderHandoff: Bool {
+    !sidebarFocusBorderHandoffPreservedSessionIds.isEmpty
+      || sidebarFocusBorderHandoffTargetSessionId != nil
+  }
+
+  private func preserveSidebarFocusBorderHandoffIfNeeded(
+    responderSessionId: String?,
+    reason: String
+  ) -> Bool {
+    guard hasSidebarFocusBorderHandoff else {
+      return false
+    }
+    if let responderSessionId,
+      let targetSessionId = sidebarFocusBorderHandoffTargetSessionId,
+      responderSessionId != targetSessionId
+    {
+      cancelSidebarFocusBorderHandoff(
+        reason: "unexpectedResponder.\(reason).\(responderSessionId)")
+      return false
+    }
+    return true
+  }
+
+  private func completeSidebarFocusBorderHandoffIfTargetFocused(
+    sessionId: String,
+    reason: String
+  ) -> Bool {
+    guard hasSidebarFocusBorderHandoff,
+      sidebarFocusBorderHandoffTargetSessionId == sessionId,
+      currentResponderSessionId() == sessionId
+    else {
+      return false
+    }
+    superview?.layoutSubtreeIfNeeded()
+    layoutSubtreeIfNeeded()
+    let isEligible = isFocusedPaneBorderEligible(for: sessionId)
+    let isGeometrySettled = isEligible && isFocusedPaneBorderGeometrySettled(for: sessionId)
+    guard isEligible, isGeometrySettled else {
+      if isEligible {
+        scheduleFocusedPaneBorderSettlementIfNeeded(
+          for: sessionId,
+          reason: "sidebarFocusBorderHandoff.\(reason)")
+      }
+      return false
+    }
+    let affectedSessionIds = sidebarFocusBorderHandoffAffectedSessionIds()
+    let preservedSessionIds = sidebarFocusBorderHandoffPreservedSessionIds
+    sidebarFocusBorderHandoffPreservedSessionIds.removeAll()
+    sidebarFocusBorderHandoffTargetSessionId = nil
+    sidebarFocusBorderHandoffGeneration &+= 1
+    scheduledFocusedPaneBorderSettlementSessionIds.removeAll()
+    focusedPaneBorderSettledSessionIds = [sessionId]
+    focusedPaneBorderSettlementGeneration &+= 1
+    return true
+  }
+
+  private func shouldShowSidebarFocusBorderHandoffBorder(for sessionId: String) -> Bool {
+    guard hasSidebarFocusBorderHandoff,
+      isSidebarFocusBorderHandoffDrawable(sessionId: sessionId)
+    else {
+      return false
+    }
+    if let targetSessionId = sidebarFocusBorderHandoffTargetSessionId,
+      currentResponderSessionId() == targetSessionId
+    {
+      return sessionId == targetSessionId
+    }
+    return sidebarFocusBorderHandoffPreservedSessionIds.contains(sessionId)
+  }
+
+  private func isSidebarFocusBorderHandoffDrawable(sessionId: String) -> Bool {
+    if commandsPanelActiveSessionIds.contains(sessionId) {
+      return commandsPanelIsVisible || commandsPanelFocusedSessionId == sessionId
+    }
+    return activeSessionIds.contains(sessionId)
+      || isPlaceholderPaneSession(sessionId)
+      || sessions[sessionId] != nil
+      || webPaneSessions[sessionId] != nil
+      || sleepingPanePlaceholderSessions[sessionId] != nil
+  }
+
+  private func sidebarFocusBorderHandoffAffectedSessionIds() -> Set<String> {
+    var sessionIds = sidebarFocusBorderHandoffPreservedSessionIds
+    if let targetSessionId = sidebarFocusBorderHandoffTargetSessionId {
+      sessionIds.insert(targetSessionId)
+    }
+    return sessionIds
+  }
+
+  private func updateSidebarFocusBorderHandoffAffectedBorders(_ sessionIds: Set<String>) {
+    for sessionId in sessionIds {
+      updateTerminalOrPlaceholderBorder(for: sessionId)
     }
   }
 
@@ -18296,10 +18410,13 @@ final class TerminalWorkspaceView: NSView {
       faviconDataUrls: sessionFaviconDataUrls,
       agentIconDataUrls: sessionAgentIconDataUrls,
       agentIconColors: sessionAgentIconColors)
-    session.titleBarView.setFocusedPane(focusedSessionId == sessionId)
+    let titleBarFocused = focusedSessionId == sessionId
+    let isFocusedBorder = shouldShowFocusedPaneBorder(for: sessionId)
+    let isAttention = attentionSessionIds.contains(sessionId)
+    session.titleBarView.setFocusedPane(titleBarFocused)
     session.borderView.setState(
-      isFocused: shouldShowFocusedPaneBorder(for: sessionId),
-      isAttention: attentionSessionIds.contains(sessionId))
+      isFocused: isFocusedBorder,
+      isAttention: isAttention)
     scheduleFocusedPaneBorderSettlementIfNeeded(for: sessionId, reason: "updateSleepingPanePlaceholderBorder")
   }
 
@@ -18317,10 +18434,13 @@ final class TerminalWorkspaceView: NSView {
         faviconDataUrls: sessionFaviconDataUrls,
         agentIconDataUrls: sessionAgentIconDataUrls,
         agentIconColors: sessionAgentIconColors)
-      session.titleBarView.setFocusedPane(focusedSessionId == sessionId)
+      let titleBarFocused = focusedSessionId == sessionId
+      let isFocusedBorder = shouldShowFocusedPaneBorder(for: sessionId)
+      let isAttention = attentionSessionIds.contains(sessionId)
+      session.titleBarView.setFocusedPane(titleBarFocused)
       session.borderView.setState(
-        isFocused: shouldShowFocusedPaneBorder(for: sessionId),
-        isAttention: attentionSessionIds.contains(sessionId)
+        isFocused: isFocusedBorder,
+        isAttention: isAttention
       )
       scheduleFocusedPaneBorderSettlementIfNeeded(for: sessionId, reason: "updateTerminalBorder.web")
       return
@@ -18345,10 +18465,13 @@ final class TerminalWorkspaceView: NSView {
       agentIconDataUrls: sessionAgentIconDataUrls,
       agentIconColors: sessionAgentIconColors)
     let isCommandFocused = isCommandActive && commandPanelFocusedResponderSessionId() == sessionId
-    session.titleBarView.setFocusedPane(focusedSessionId == sessionId || isCommandFocused)
+    let titleBarFocused = focusedSessionId == sessionId || isCommandFocused
+    let isFocusedBorder = shouldShowFocusedPaneBorder(for: sessionId)
+    let isAttention = attentionSessionIds.contains(sessionId)
+    session.titleBarView.setFocusedPane(titleBarFocused)
     session.borderView.setState(
-      isFocused: shouldShowFocusedPaneBorder(for: sessionId),
-      isAttention: attentionSessionIds.contains(sessionId)
+      isFocused: isFocusedBorder,
+      isAttention: isAttention
     )
     scheduleFocusedPaneBorderSettlementIfNeeded(for: sessionId, reason: "updateTerminalBorder.terminal")
   }
@@ -18379,6 +18502,9 @@ final class TerminalWorkspaceView: NSView {
      deferred settled pass after focus/layout changes so the border appears only
      once the pane frame is valid and still matches the live typing target.
      */
+    if shouldShowSidebarFocusBorderHandoffBorder(for: sessionId) {
+      return true
+    }
     guard focusedPaneBorderSettledSessionIds.contains(sessionId) else {
       return false
     }
@@ -18406,7 +18532,7 @@ final class TerminalWorkspaceView: NSView {
     return activeSessionIds.contains(sessionId) || isPlaceholderPaneSession(sessionId)
   }
 
-  private func invalidateFocusedPaneBorderSettlement(reason _: String) {
+  private func invalidateFocusedPaneBorderSettlement(reason: String) {
     guard !focusedPaneBorderSettledSessionIds.isEmpty
       || !scheduledFocusedPaneBorderSettlementSessionIds.isEmpty
     else {
@@ -18417,34 +18543,14 @@ final class TerminalWorkspaceView: NSView {
     focusedPaneBorderSettlementGeneration &+= 1
   }
 
-  private func settleFocusedPaneBorderImmediatelyIfGeometryReady(
-    for sessionId: String,
-    reason _: String
-  ) -> Bool {
-    /*
-     CDXC:SidebarSessionFocus 2026-06-27-22:54:
-     Mounted sidebar session switches reuse existing pane geometry. Once AppKit
-     first responder points at the new terminal, mark that border settled before
-     repainting so the active outline moves directly from old pane to new pane
-     instead of disappearing until the async settlement pass runs.
-     */
-    guard isFocusedPaneBorderEligible(for: sessionId),
-      isFocusedPaneBorderGeometrySettled(for: sessionId)
-    else {
-      return false
-    }
-    scheduledFocusedPaneBorderSettlementSessionIds.removeAll()
-    focusedPaneBorderSettledSessionIds = [sessionId]
-    focusedPaneBorderSettlementGeneration &+= 1
-    return true
-  }
-
   private func cancelIneligibleFocusedPaneBorderSettlements() {
     let nextSettledSessionIds = focusedPaneBorderSettledSessionIds.filter {
       isFocusedPaneBorderEligible(for: $0)
+        || shouldShowSidebarFocusBorderHandoffBorder(for: $0)
     }
     let nextScheduledSessionIds = scheduledFocusedPaneBorderSettlementSessionIds.filter {
       isFocusedPaneBorderEligible(for: $0)
+        || shouldShowSidebarFocusBorderHandoffBorder(for: $0)
     }
     guard nextSettledSessionIds.count != focusedPaneBorderSettledSessionIds.count
       || nextScheduledSessionIds.count != scheduledFocusedPaneBorderSettlementSessionIds.count
@@ -18456,11 +18562,11 @@ final class TerminalWorkspaceView: NSView {
     focusedPaneBorderSettlementGeneration &+= 1
   }
 
-  private func scheduleFocusedPaneBorderSettlementIfNeeded(for sessionId: String, reason _: String) {
-    guard isFocusedPaneBorderEligible(for: sessionId),
-      !focusedPaneBorderSettledSessionIds.contains(sessionId),
-      !scheduledFocusedPaneBorderSettlementSessionIds.contains(sessionId)
-    else {
+  private func scheduleFocusedPaneBorderSettlementIfNeeded(for sessionId: String, reason: String) {
+    let isEligible = isFocusedPaneBorderEligible(for: sessionId)
+    let isAlreadySettled = focusedPaneBorderSettledSessionIds.contains(sessionId)
+    let isAlreadyScheduled = scheduledFocusedPaneBorderSettlementSessionIds.contains(sessionId)
+    guard isEligible, !isAlreadySettled, !isAlreadyScheduled else {
       return
     }
     scheduledFocusedPaneBorderSettlementSessionIds.insert(sessionId)
@@ -18477,9 +18583,10 @@ final class TerminalWorkspaceView: NSView {
       self.superview?.layoutSubtreeIfNeeded()
       self.layoutSubtreeIfNeeded()
       self.scheduledFocusedPaneBorderSettlementSessionIds.remove(sessionId)
-      guard self.isFocusedPaneBorderEligible(for: sessionId),
-        self.isFocusedPaneBorderGeometrySettled(for: sessionId)
-      else {
+      let isEligibleAfterLayout = self.isFocusedPaneBorderEligible(for: sessionId)
+      let isGeometrySettledAfterLayout =
+        isEligibleAfterLayout && self.isFocusedPaneBorderGeometrySettled(for: sessionId)
+      guard isEligibleAfterLayout, isGeometrySettledAfterLayout else {
         return
       }
       self.focusedPaneBorderSettledSessionIds = [sessionId]
@@ -19522,7 +19629,17 @@ final class TerminalWorkspaceView: NSView {
     } else {
       self.focusedSessionId = focusedSessionId
     }
-    invalidateFocusedPaneBorderSettlement(reason: "emitFocusedSessionSelection.\(reason)")
+    let shouldPreserveSidebarFocusBorderHandoff =
+      hasSidebarFocusBorderHandoff
+        && sidebarFocusBorderHandoffTargetSessionId == focusedSessionId
+        && currentResponderSessionId() == focusedSessionId
+    if shouldPreserveSidebarFocusBorderHandoff {
+      _ = completeSidebarFocusBorderHandoffIfTargetFocused(
+        sessionId: focusedSessionId,
+        reason: "emitFocusedSessionSelection.\(reason)")
+    } else {
+      invalidateFocusedPaneBorderSettlement(reason: "emitFocusedSessionSelection.\(reason)")
+    }
     updateAllTerminalBorders()
     TerminalFocusDebugLog.append(
       event: "nativeWorkspace.terminalFocused.emitted",

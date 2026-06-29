@@ -245,6 +245,11 @@ describe("native sidebar hotkey source", () => {
      * Rendered pane hotkeys must reuse native pane-tab selection instead of
      * sidebar focus. The tab path preserves selected sleeping placeholders and
      * avoids waking or relocating the target pane while click-to-wake is enabled.
+     *
+     * CDXC:SleepingPanePlaceholders 2026-06-29-03:59:
+     * Cmd+Opt+Arrow must still focus a selected sleeping placeholder as an
+     * AppKit keyboard target, so the rendered hotkey path needs an explicit
+     * placeholder focus reason while preserving the non-wake tab-selection path.
      */
     const directionSourceStart = nativeSidebarSource.indexOf(
       "function focusNativeHotkeyDirection(",
@@ -289,7 +294,8 @@ describe("native sidebar hotkey source", () => {
     expect(renderedResolverIndex).toBeGreaterThanOrEqual(0);
     expect(companionResolverAfterRenderedIndex).toBeGreaterThan(renderedResolverIndex);
     expect(sharedReducerIndex).toBeGreaterThan(renderedResolverIndex);
-    expect(directionSource).toContain("handleNativePaneTabSelected(renderedPaneTarget.sessionId);");
+    expect(directionSource).toContain("handleNativePaneTabSelected(renderedPaneTarget.sessionId, {");
+    expect(directionSource).toContain('focusSleepingPlaceholderReason: "focusDirectionHotkey"');
     expect(directionSource).not.toContain("focusSidebarSession(renderedPaneTarget.sessionId);");
   });
 
@@ -300,10 +306,26 @@ describe("native sidebar hotkey source", () => {
      * Commands panel pane. The layout focus request must include that exact
      * native session id, and Swift must honor it before the workspace
      * focusedSessionId so first responder moves to the command terminal.
+     *
+     * CDXC:SleepingPanePlaceholders 2026-06-29-03:59:
+     * Sleeping workspace placeholders are represented as active pane owners
+     * while focusedSessionId remains on the last awake runtime owner. The layout
+     * sync gate must consume those explicit focus requests too so Swift can
+     * focus the placeholder view without waking it.
      */
     expect(nativeSidebarSource).toContain("focusRequestSessionId?: string;");
     expect(nativeSidebarSource).toContain(
       "const focusRequestSessionId =\n    shouldConsumeFocusRequest && pendingNativeLayoutFocusRequest",
+    );
+    expect(nativeSidebarSource).toContain("const activeWorkspacePaneOwnerSessionIds = new Set(");
+    expect(nativeSidebarSource).toContain(
+      "collectActivePaneOwnerSessionIds(snapshot.paneLayout, {",
+    );
+    expect(nativeSidebarSource).toContain(
+      "validSessionIds: visibleSidebarSessionIds,",
+    );
+    expect(nativeSidebarSource).toContain(
+      "activeWorkspacePaneOwnerSessionIds.has(pendingFocusSessionId)",
     );
     expect(nativeSidebarSource).toContain(
       "nativeSessionIdForSidebarSession(pendingNativeLayoutFocusRequest.sessionId)",

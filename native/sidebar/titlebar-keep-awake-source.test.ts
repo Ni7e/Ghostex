@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 
 const titlebarHostSource = readFileSync(new URL("./titlebar-host.tsx", import.meta.url), "utf8");
 const nativeSidebarSource = readFileSync(new URL("./native-sidebar.tsx", import.meta.url), "utf8");
+const sidebarAppSource = readFileSync(new URL("../../sidebar/sidebar-app.tsx", import.meta.url), "utf8");
 const appDelegateSource = readFileSync(
   new URL("../macos/ghostexHost/Sources/ghostexHost/AppDelegate.swift", import.meta.url),
   "utf8",
@@ -36,17 +37,17 @@ describe("native titlebar keep-awake source", () => {
     const startKeepAwakeSource = sourceBetween(
       titlebarHostSource,
       "const startKeepAwake = useCallback",
-      "const openKeepAwakeMenuFromTitlebar = useCallback",
+      "useEffect(() => {\n    if (isDropdownPanel || !window.__ghostex_TITLEBAR__)",
     );
-    const openKeepAwakeMenuSource = sourceBetween(
+    const runKeepAwakeBridgeSource = sourceBetween(
       titlebarHostSource,
-      "const openKeepAwakeMenuFromTitlebar = useCallback",
+      "const runKeepAwakeCommand = (command: TitlebarKeepAwakeCommand)",
       "const openPowerSettings = () =>",
     );
-    const keepAwakeButtonSource = sourceBetween(
-      titlebarHostSource,
-      '<TitlebarAppTooltip content="Keep awake">',
-      '<ButtonGroup\n              className="titlebar-open-group"\n              data-titlebar-dropdown-anchor\n            >',
+    const sidebarKeepAwakeDropdownSource = sourceBetween(
+      sidebarAppSource,
+      "function SidebarReferenceKeepAwakeDropdown({",
+      "function SidebarReferencePrimaryMenuItem({",
     );
     const runtimeSyncStateSource = sourceBetween(
       titlebarHostSource,
@@ -87,6 +88,7 @@ describe("native titlebar keep-awake source", () => {
     expect(titlebarHostSource).toContain("function readKeepAwakeRuntimeSyncState");
     expect(titlebarHostSource).toContain("function syncKeepAwakeRuntimeToMainTitlebar");
     expect(titlebarHostSource).toContain('type: "syncTitlebarKeepAwakeRuntime"');
+    expect(titlebarHostSource).toContain("type TitlebarKeepAwakeCommand =");
 
     expect(stopKeepAwakeSource).toContain("options: { suppressAutoStart?: boolean } = {}");
     expect(stopKeepAwakeSource).toContain("setKeepAwakeAutoStartSuppressed(true)");
@@ -111,28 +113,28 @@ describe("native titlebar keep-awake source", () => {
     expect(keepAwakeDropdownSource).not.toContain("void onStartKeepAwake(option.value)");
 
     /*
-     * CDXC:TitlebarKeepAwake 2026-06-15-23:25:
-     * The titlebar button should only open the Keep Awake dropdown. Clicks and
-     * double-clicks must not start or stop keep-awake directly, because duration
-     * and "Don't keep awake" choices now live in the menu.
-     *
-     * CDXC:TitlebarKeepAwake 2026-06-15-23:25:
-     * Re-clicking the Keep Awake trigger while the dropdown is open should close
-     * the menu, matching the other titlebar dropdown buttons.
+     * CDXC:SidebarTopChrome 2026-06-29-01:43:
+     * The visible Keep Awake trigger moved from the titlebar to the sidebar
+     * shortcut row. The sidebar renders the normal dropdown while the titlebar
+     * host remains the caffeinate runtime owner through a compact bridge.
      */
-    expect(openKeepAwakeMenuSource).toContain('showTitlebarDropdownPanel("keepAwake", event.currentTarget)');
-    expect(openKeepAwakeMenuSource).not.toContain("closeWhenAlreadyOpen: false");
-    expect(keepAwakeButtonSource).toContain('<TitlebarAppTooltip content="Keep awake">');
-    expect(keepAwakeButtonSource).toContain('aria-label="Keep awake"');
-    expect(keepAwakeButtonSource).toContain("onClick={openKeepAwakeMenuFromTitlebar}");
-    expect(keepAwakeButtonSource).toContain("onDoubleClick={openKeepAwakeMenuFromTitlebar}");
+    expect(titlebarHostSource).toContain("runKeepAwakeCommand?: (command: TitlebarKeepAwakeCommand) => void");
+    expect(runKeepAwakeBridgeSource).toContain('if (command.action === "stop")');
+    expect(runKeepAwakeBridgeSource).toContain("void stopKeepAwake()");
+    expect(runKeepAwakeBridgeSource).toContain("void startKeepAwake(command.durationMinutes)");
+    expect(titlebarHostSource).not.toContain("openKeepAwakeMenuFromTitlebar");
+    expect(titlebarHostSource).not.toContain('<TitlebarAppTooltip content="Keep awake">');
+    expect(sidebarAppSource).toContain('label="Keep awake"');
+    expect(sidebarAppSource).toContain('type: "runTitlebarKeepAwakeCommand"');
+    expect(sidebarKeepAwakeDropdownSource).toContain("KEEP_AWAKE_DURATION_OPTIONS.map");
+    expect(sidebarKeepAwakeDropdownSource).toContain("label=\"Don't keep awake\"");
     expect(titlebarHostSource).not.toContain("const toggleKeepAwake");
 
     /*
      * CDXC:ExperimentalFeatures 2026-06-28-07:41:
-     * Keep Awake is experimental-only in the macOS titlebar. When Enable
-     * Experimental Features is off, the titlebar must hide the button and stop
-     * or suppress the runtime instead of leaving an invisible caffeinate process active.
+     * Keep Awake is experimental-only in macOS chrome. When Enable Experimental
+     * Features is off, chrome must hide the sidebar button and stop or suppress
+     * the runtime instead of leaving an invisible caffeinate process active.
      */
     expect(titlebarHostSource).toContain(
       "const keepAwakeFeatureEnabled = projectState.keepAwake.featureEnabled === true",
@@ -142,8 +144,8 @@ describe("native titlebar keep-awake source", () => {
     );
     expect(titlebarHostSource).toContain("!keepAwakeFeatureEnabled ||");
     expect(titlebarHostSource).toContain("!projectState.keepAwake.activateOnLaunch ||");
-    expect(titlebarHostSource).toContain(
-      "keepAwakeFeatureEnabled && !projectState.keepAwake.hideTitlebarControl",
+    expect(sidebarAppSource).toContain(
+      "effectiveSettings.showBetaFeatures && !effectiveSettings.hideKeepAwakeTitlebarControl",
     );
     expect(titlebarHostSource).toContain("const featureEnabled = settings.showBetaFeatures");
     expect(titlebarHostSource).toContain(
@@ -167,10 +169,14 @@ describe("native titlebar keep-awake source", () => {
     expect(titlebarBlankMouseDownSource).toContain("closeTitlebarDropdownPanel()");
     expect(titlebarBlankMouseDownSource).toContain('postNative({ type: "titlebarBlankMouseDown" })');
     expect(hostProtocolSource).toContain("case syncTitlebarKeepAwakeRuntime(SyncTitlebarKeepAwakeRuntime)");
+    expect(hostProtocolSource).toContain("case runTitlebarKeepAwakeCommand(RunTitlebarKeepAwakeCommand)");
     expect(hostProtocolSource).toContain("struct SyncTitlebarKeepAwakeRuntime: Decodable");
+    expect(hostProtocolSource).toContain("struct RunTitlebarKeepAwakeCommand: Decodable");
     expect(hostProtocolSource).toContain("let runtime: TitlebarKeepAwakeRuntime?");
     expect(appDelegateSource).toContain("func syncTitlebarKeepAwakeRuntime(_ command: SyncTitlebarKeepAwakeRuntime)");
+    expect(appDelegateSource).toContain("func runTitlebarKeepAwakeCommand(_ command: RunTitlebarKeepAwakeCommand)");
     expect(appDelegateSource).toContain("window.__ghostex_TITLEBAR__?.syncKeepAwakeRuntime");
+    expect(appDelegateSource).toContain("window.__ghostex_TITLEBAR__?.runKeepAwakeCommand");
 
     expect(externalDisplayEffectSource).toContain("!keepAwakeRuntime");
     expect(externalDisplayEffectSource).toContain("!keepAwakeAutoStartSuppressed");

@@ -68,7 +68,8 @@ describe("native sidebar App Shots source", () => {
     );
 
     expect(settingsSource).toContain("focused or recent agent session");
-    expect(settingsSource).toContain("basic window metadata");
+    expect(settingsSource).toContain("routine captures should paste only the image link");
+    expect(settingsSource).toContain("Include App Shots metadata");
     expect(settingsSource).toContain('badge="Beta"');
     expect(settingsSource).not.toContain("available Accessibility text");
     expect(settingsSource).not.toContain("recent Codex session");
@@ -100,6 +101,10 @@ describe("native sidebar App Shots source", () => {
     expect(nativeCaptureSource).not.toContain("accessibilityTextForFrontmostWindow");
     expect(nativeCaptureSource).not.toContain("collectAccessibilityText");
     expect(promptSource).toContain("Window size");
+    expect(promptSource).toContain("settings.appShotsMetadataEnabled");
+    expect(promptSource).toContain("return `\\n${lines.join(\"\\n\")}\\n`");
+    expect(promptSource).not.toContain("App shot from ${appName}.");
+    expect(promptSource).not.toContain("Use this app shot as context for my next request.");
     expect(promptSource).not.toContain("Available app text");
     expect(promptSource).not.toContain("APP_SHOT_TEXT_MAX_LENGTH");
     expect(promptSource).not.toContain("appShot.text");

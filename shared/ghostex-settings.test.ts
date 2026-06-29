@@ -214,24 +214,30 @@ describe("normalizeghostexSettings", () => {
   test("normalizes App Shots settings", () => {
     expect(DEFAULT_ghostex_SETTINGS.appShotsEnabled).toBe(false);
     expect(DEFAULT_ghostex_SETTINGS.appShotsHotkey).toBe("both-command");
+    expect(DEFAULT_ghostex_SETTINGS.appShotsMetadataEnabled).toBe(false);
     expect(normalizeghostexSettings({})).toMatchObject({
       appShotsEnabled: false,
       appShotsHotkey: "both-command",
+      appShotsMetadataEnabled: false,
     });
     expect(
       normalizeghostexSettings({
         appShotsEnabled: true,
-        appShotsHotkey: "double-left-shift",
+        appShotsHotkey: "both-option",
+        appShotsMetadataEnabled: true,
       }),
     ).toMatchObject({
       appShotsEnabled: true,
-      appShotsHotkey: "double-left-shift",
+      appShotsHotkey: "both-option",
+      appShotsMetadataEnabled: true,
     });
     expect(normalizeghostexSettings({ appShotsHotkey: "cmd+r" })).toMatchObject({
       appShotsHotkey: "both-command",
     });
     expect(APP_SHOTS_HOTKEY_OPTIONS.map((option) => option.value)).toEqual([
       "both-command",
+      "both-shift",
+      "both-option",
       "double-left-shift",
       "double-left-option",
     ]);

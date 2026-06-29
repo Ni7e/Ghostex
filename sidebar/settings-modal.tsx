@@ -57,7 +57,6 @@ import {
   FieldTitle,
 } from "@/components/ui/field";
 import { Input as BaseInput } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -470,8 +469,12 @@ type SettingsSectionSearchResult = {
 
 type SettingsSectionNavigationItem<SectionId extends string> = {
   id: SectionId;
-  ref: RefObject<HTMLDivElement | null>;
   title: string;
+};
+
+type SettingsSectionMeasurementItem<SectionId extends string> = {
+  id: SectionId;
+  ref: RefObject<HTMLDivElement | null>;
 };
 
 type SettingsSidebarPageSection = {
@@ -533,6 +536,11 @@ type MainSettingsSectionId =
   | "beta";
 
 export type MainSettingsInitialSectionId = MainSettingsSectionId;
+
+type MainSettingsSectionRefs = Record<
+  MainSettingsSectionId,
+  RefObject<HTMLDivElement | null>
+>;
 
 /*
  * CDXC:DebuggingSettings 2026-06-28-18:14:
@@ -862,6 +870,40 @@ type HotkeySettingsSectionDefinition = {
 let rememberedSettingsModalTab: SettingsModalTab | undefined;
 const rememberedSettingsModalScrollTopByTab: Partial<Record<SettingsModalTab, number>> = {};
 
+/*
+ * CDXC:SettingsPerformance 2026-06-29-00:40:
+ * Settings must keep app-session tab and scroll memory, but the main SettingsModal render needs React Compiler coverage so scroll-section highlight updates do not re-render the whole long settings page.
+ * Keep the mutable session memory behind helpers so SettingsModal does not directly reassign module variables and the compiler can memoize the large render tree.
+ */
+function getRememberedSettingsModalTab(): SettingsModalTab | undefined {
+  return rememberedSettingsModalTab;
+}
+
+function rememberSettingsModalTab(tab: SettingsModalTab): void {
+  rememberedSettingsModalTab = tab;
+}
+
+function getRememberedSettingsModalScrollTop(tab: SettingsModalTab): number {
+  return rememberedSettingsModalScrollTopByTab[tab] ?? 0;
+}
+
+function rememberSettingsModalScrollTop(tab: SettingsModalTab, scrollTop: number): void {
+  rememberedSettingsModalScrollTopByTab[tab] = scrollTop;
+}
+
+/*
+ * CDXC:SettingsPerformance 2026-06-29-00:40:
+ * Settings management rows still need dnd-kit to register one element as both sortable item and drag source, but the row components need React Compiler coverage.
+ * Keep the callback-ref mutation behind this helper so render code does not directly invoke ref-named mutators.
+ */
+function setSettingsSortableRowElement(
+  sortableRefs: Pick<ReturnType<typeof useSortable>, "ref" | "sourceRef">,
+  element: HTMLDivElement | null,
+): void {
+  sortableRefs.ref(element);
+  sortableRefs.sourceRef(element);
+}
+
 function getInitialSettingsModalTab(
   initialTab: SettingsModalTab,
   visibility: SettingsModalTabVisibilityOptions,
@@ -872,7 +914,7 @@ function getInitialSettingsModalTab(
    * non-default entry point such as Hotkeys still opens its requested tab, then
    * that tab becomes the remembered choice until the app restarts.
    */
-  const requestedTab = initialTab !== "settings" ? initialTab : rememberedSettingsModalTab ?? initialTab;
+  const requestedTab = initialTab !== "settings" ? initialTab : getRememberedSettingsModalTab() ?? initialTab;
   return resolveSettingsModalTabForVisibility(requestedTab, visibility);
 }
 
@@ -910,14 +952,14 @@ function getActiveSettingsModalScrollViewport(dialogElement: HTMLElement | null)
 
 function getMainSettingsSectionRef(
   sectionId: MainSettingsSectionId,
-  refs: Record<MainSettingsSectionId, RefObject<HTMLDivElement | null>>,
+  refs: MainSettingsSectionRefs,
 ): RefObject<HTMLDivElement | null> {
   return refs[sectionId];
 }
 
 function getMostlyVisibleSettingsSectionId<SectionId extends string>(
   viewport: HTMLElement,
-  sections: readonly SettingsSectionNavigationItem<SectionId>[],
+  sections: readonly SettingsSectionMeasurementItem<SectionId>[],
 ): SectionId | undefined {
   /*
    * CDXC:SettingsNavigation 2026-06-15-22:28:
@@ -1148,13 +1190,16 @@ export function SettingsModal({
    */
   const [appIconError, setAppIconError] = useState<string | undefined>(undefined);
   const pendingAppIconSourceIdRef = useRef<string | undefined>(undefined);
+  const handledAppIconStateRef = useRef<SidebarAppIconStateMessage | undefined>(undefined);
   const hasRequestedAppIconsRef = useRef(false);
+  const pendingMainSettingsSectionViewportRef = useRef<HTMLElement | null>(null);
+  const mainSettingsSectionFrameRef = useRef<number | undefined>(undefined);
   const modalTheme = resolveSidebarTheme(draft.sidebarTheme, getSidebarThemeVariant(theme));
   const isModalDarkTheme = getSidebarThemeVariant(modalTheme) === "dark";
   const rememberActiveScrollPosition = () => {
     const viewport = getActiveSettingsModalScrollViewport(dialogContentRef.current);
     if (viewport) {
-      rememberedSettingsModalScrollTopByTab[activeTab] = viewport.scrollTop;
+      rememberSettingsModalScrollTop(activeTab, viewport.scrollTop);
     }
   };
   const shouldFocusSettingsSearchInput = useCallback((inputElement: HTMLInputElement): boolean => {
@@ -1184,17 +1229,40 @@ export function SettingsModal({
     inputElement.focus({ preventScroll: true });
     return true;
   }, [isFirstLaunchSetup, shouldFocusSettingsSearchInput]);
+  const scheduleMainSettingsSectionMeasurement = (viewport: HTMLElement) => {
+    /*
+     * CDXC:SettingsPerformance 2026-06-29-00:40:
+     * General Settings is long, and section tracking reads layout for every
+     * visible section. Batch that work to one requestAnimationFrame per scroll
+     * frame so raw scroll events only persist scrollTop and stay lightweight.
+     */
+    pendingMainSettingsSectionViewportRef.current = viewport;
+    if (mainSettingsSectionFrameRef.current !== undefined) {
+      return;
+    }
+    mainSettingsSectionFrameRef.current = requestAnimationFrame(() => {
+      mainSettingsSectionFrameRef.current = undefined;
+      const pendingViewport = pendingMainSettingsSectionViewportRef.current;
+      pendingMainSettingsSectionViewportRef.current = null;
+      if (!pendingViewport?.isConnected) {
+        return;
+      }
+      const mostlyVisibleSectionId = getMostlyVisibleSettingsSectionId(
+        pendingViewport,
+        getMainSettingsSectionMeasurementItems(),
+      );
+      if (mostlyVisibleSectionId) {
+        setActiveMainSettingsSectionId((currentSectionId) =>
+          currentSectionId === mostlyVisibleSectionId ? currentSectionId : mostlyVisibleSectionId,
+        );
+      }
+    });
+  };
   const handleSettingsModalScrollCapture = (event: ReactUIEvent<HTMLDivElement>) => {
     if (event.target instanceof HTMLElement && event.target.dataset.slot === "scroll-area-viewport") {
-      rememberedSettingsModalScrollTopByTab[activeTab] = event.target.scrollTop;
+      rememberSettingsModalScrollTop(activeTab, event.target.scrollTop);
       if (activeTab === "settings") {
-        const mostlyVisibleSectionId = getMostlyVisibleSettingsSectionId(
-          event.target,
-          visibleMainSettingsSectionNavigation,
-        );
-        if (mostlyVisibleSectionId) {
-          setActiveMainSettingsSectionId(mostlyVisibleSectionId);
-        }
+        scheduleMainSettingsSectionMeasurement(event.target);
       }
     }
   };
@@ -1222,7 +1290,7 @@ export function SettingsModal({
       showOSIntegrationSettingsTab,
     });
     rememberActiveScrollPosition();
-    rememberedSettingsModalTab = visibleTab;
+    rememberSettingsModalTab(visibleTab);
     if (visibleTab === "settings" || visibleTab === "hotkeys") {
       setExpandedSettingsSidebarPages((expandedPages) => ({
         ...expandedPages,
@@ -1232,23 +1300,11 @@ export function SettingsModal({
     setActiveTabState(visibleTab);
   };
 
-  const scrollSettingsSectionIntoView = (sectionRef: RefObject<HTMLDivElement | null>) => {
-    sectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-
   const toggleSettingsSidebarPage = (pageId: SettingsModalTab) => {
     setExpandedSettingsSidebarPages((expandedPages) => ({
       ...expandedPages,
       [pageId]: !expandedPages[pageId],
     }));
-  };
-
-  const selectSettingsSidebarSection = (
-    tab: SettingsModalTab,
-    sectionRef: RefObject<HTMLDivElement | null>,
-  ) => {
-    setActiveTab(tab);
-    requestAnimationFrame(() => scrollSettingsSectionIntoView(sectionRef));
   };
 
   useEffect(() => {
@@ -1257,7 +1313,7 @@ export function SettingsModal({
     }
     const nextTab = getInitialSettingsModalTab(initialTab, { showOSIntegrationSettingsTab });
     rememberActiveScrollPosition();
-    rememberedSettingsModalTab = nextTab;
+    rememberSettingsModalTab(nextTab);
     setActiveTabState(nextTab);
   }, [initialTab, isOpen]);
 
@@ -1265,9 +1321,17 @@ export function SettingsModal({
     if (activeTab !== "osIntegration" || showOSIntegrationSettingsTab) {
       return;
     }
-    rememberedSettingsModalTab = "settings";
+    rememberSettingsModalTab("settings");
     setActiveTabState("settings");
   }, [activeTab, showOSIntegrationSettingsTab]);
+
+  useEffect(() => {
+    return () => {
+      if (mainSettingsSectionFrameRef.current !== undefined) {
+        cancelAnimationFrame(mainSettingsSectionFrameRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!isOpen || isFirstLaunchSetup || !initialSearchQuery?.trim()) {
@@ -1340,7 +1404,7 @@ export function SettingsModal({
     const animationFrame = requestAnimationFrame(() => {
       const viewport = getActiveSettingsModalScrollViewport(dialogContentRef.current);
       if (viewport) {
-        viewport.scrollTop = rememberedSettingsModalScrollTopByTab[activeTab] ?? 0;
+        viewport.scrollTop = getRememberedSettingsModalScrollTop(activeTab);
       }
       focusSearchInput();
     });
@@ -1360,15 +1424,13 @@ export function SettingsModal({
     }
     /**
      * CDXC:IntegrationsSetup 2026-05-27-04:17:
-     * Settings -> Integrations is the single ongoing setup page for CLI,
-     * Ghostex Browser Use, agent hooks, Ghostex Computer Use, and macOS permissions.
-     * Request machine-local statuses only when the tab opens so Settings does
-     * not run filesystem checks while the user is editing unrelated settings.
+     * Settings -> Integrations is the ongoing setup page for CLI, Ghostex Browser Use, Ghostex Computer Use, and macOS permissions. Request machine-local statuses only when the tab opens so Settings does not run filesystem checks while the user is editing unrelated settings.
+     *
+     * CDXC:AgentHookSettings 2026-06-29-01:26:
+     * Integrations still requests hook status for the bottom hook-removal recovery card, but hook installation and per-agent hook status now belong in Settings -> Agents.
      *
      * CDXC:ComputerAgentControl 2026-05-27-06:58:
-     * Settings should present the public skill names Ghostex Browser Use and
-     * Ghostex Computer Use. Desktop Control is ready only when Cua Driver and
-     * the `$ghostex-computer-use` skill are both installed.
+     * Settings should present the public skill names Ghostex Browser Use and Ghostex Computer Use. Desktop Control is ready only when Cua Driver and the `$ghostex-computer-use` skill are both installed.
      */
     if (!agentHookStatus && !agentHookStatusLoading) {
       onRequestAgentHookStatus?.();
@@ -2043,28 +2105,24 @@ export function SettingsModal({
   };
   const mainSettingsSectionNavigation: Array<{
     id: MainSettingsSectionId;
-    ref: RefObject<HTMLDivElement | null>;
     searchResult: SettingsSectionSearchResult;
     title: string;
   }> = [
-    { id: "sidebar", ref: sidebarSectionRef, searchResult: settingsSearch.sidebar, title: "Sidebar" },
-    { id: "theming", ref: themingSectionRef, searchResult: settingsSearch.theming, title: "Theming" },
+    { id: "sidebar", searchResult: settingsSearch.sidebar, title: "Sidebar" },
+    { id: "theming", searchResult: settingsSearch.theming, title: "Theming" },
     {
       id: "statusIndicators",
-      ref: statusIndicatorsSectionRef,
       searchResult: settingsSearch.statusIndicators,
       title: "Status Indicators",
     },
-    { id: "browser", ref: browserSectionRef, searchResult: settingsSearch.browser, title: "Browser" },
+    { id: "browser", searchResult: settingsSearch.browser, title: "Browser" },
     {
       id: "sessionCards",
-      ref: sessionCardsSectionRef,
       searchResult: settingsSearch.sessionCards,
       title: "Session Cards",
     },
     {
       id: "workspace",
-      ref: workspaceSectionRef,
       searchResult: settingsSearch.workspace,
       title: "Workspace",
     },
@@ -2072,59 +2130,52 @@ export function SettingsModal({
      * CDXC:SettingsNavigation 2026-06-12-04:13:
      * Ghostty terminal controls belong on the main Settings page so one search query can find app settings and terminal settings together.
      */
-    { id: "terminal", ref: ghosttyTerminalSectionRef, searchResult: settingsSearch.terminal, title: "Terminal" },
+    { id: "terminal", searchResult: settingsSearch.terminal, title: "Terminal" },
     {
       id: "terminalBehavior",
-      ref: ghosttyBehaviorSectionRef,
       searchResult: settingsSearch.terminalBehavior,
       title: "Terminal Behavior",
     },
     {
       id: "terminalScrolling",
-      ref: ghosttyScrollingSectionRef,
       searchResult: settingsSearch.terminalScrolling,
       title: "Terminal Scrolling",
     },
     {
       id: "terminalDevServers",
-      ref: terminalDevServersSectionRef,
       searchResult: settingsSearch.terminalDevServers,
       title: "Dev Servers",
     },
-    { id: "editor", ref: editorSectionRef, searchResult: settingsSearch.editor, title: "Editor" },
+    { id: "editor", searchResult: settingsSearch.editor, title: "Editor" },
     /*
      * CDXC:AppIconPicker 2026-06-28-06:05:
      * App Icon belongs below Editor in the advanced Settings order so it stays available without being presented as a primary appearance preset picker.
      */
-    { id: "appIcon", ref: appIconSectionRef, searchResult: settingsSearch.appIcon, title: "App Icon" },
+    { id: "appIcon", searchResult: settingsSearch.appIcon, title: "App Icon" },
     {
       id: "autoSleep",
-      ref: autoSleepSectionRef,
       searchResult: settingsSearch.autoSleep,
       title: "Auto Sleep",
     },
-    { id: "power", ref: powerSectionRef, searchResult: settingsSearch.power, title: "Power" },
-    { id: "sounds", ref: soundsSectionRef, searchResult: settingsSearch.sounds, title: "Sounds" },
+    { id: "power", searchResult: settingsSearch.power, title: "Power" },
+    { id: "sounds", searchResult: settingsSearch.sounds, title: "Sounds" },
     /*
      * CDXC:SettingsNavigation 2026-06-15-21:36:
      * Sidebar Tags should appear directly above Storage in the Settings modal, keeping lower-frequency storage inspection at the bottom of this settings group.
      */
     {
       id: "sidebarTags",
-      ref: sidebarTagsSectionRef,
       searchResult: settingsSearch.sidebarTags,
       title: "Sidebar Tags",
     },
-    { id: "storage", ref: storageSectionRef, searchResult: settingsSearch.storage, title: "Storage" },
+    { id: "storage", searchResult: settingsSearch.storage, title: "Storage" },
     {
       id: "beta",
-      ref: betaSectionRef,
       searchResult: settingsSearch.beta,
       title: "Experimental",
     },
     {
       id: "debugging",
-      ref: debuggingSectionRef,
       searchResult: settingsSearch.debugging,
       title: "Debugging",
     },
@@ -2184,10 +2235,46 @@ export function SettingsModal({
     }
     return shouldShowSettingsSection(sectionResult, showAdvancedSettings);
   };
-  const visibleMainSettingsSectionNavigation: SettingsSectionNavigationItem<MainSettingsSectionId>[] =
+  const mainSettingsSectionRefs: MainSettingsSectionRefs = {
+    agents: agentsOnboardingSectionRef,
+    appIcon: appIconSectionRef,
+    autoSleep: autoSleepSectionRef,
+    beta: betaSectionRef,
+    browser: browserSectionRef,
+    debugging: debuggingSectionRef,
+    editor: editorSectionRef,
+    power: powerSectionRef,
+    sessionCards: sessionCardsSectionRef,
+    sidebar: sidebarSectionRef,
+    sidebarTags: sidebarTagsSectionRef,
+    sounds: soundsSectionRef,
+    statusIndicators: statusIndicatorsSectionRef,
+    storage: storageSectionRef,
+    terminal: ghosttyTerminalSectionRef,
+    terminalBehavior: ghosttyBehaviorSectionRef,
+    terminalDevServers: terminalDevServersSectionRef,
+    terminalScrolling: ghosttyScrollingSectionRef,
+    theming: themingSectionRef,
+    workspace: workspaceSectionRef,
+  };
+  const scrollMainSettingsSectionIntoView = (sectionId: MainSettingsSectionId) => {
+    getMainSettingsSectionRef(sectionId, mainSettingsSectionRefs).current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+  const visibleMainSettingsSectionNavigation: Array<
+    SettingsSectionNavigationItem<MainSettingsSectionId> & {
+      searchResult: SettingsSectionSearchResult;
+    }
+  > =
     (isFirstLaunchSetup
       ? [
-          { id: "agents" as const, ref: agentsOnboardingSectionRef, title: "Agents" },
+          {
+            id: "agents" as const,
+            searchResult: settingsSearch.sidebar,
+            title: "Agents",
+          },
           ...mainSettingsSectionNavigation,
         ]
       : mainSettingsSectionNavigation
@@ -2196,6 +2283,11 @@ export function SettingsModal({
         ? mainSectionVisible("agents", settingsSearch.sidebar)
         : mainSectionVisible(section.id, section.searchResult),
     );
+  const getMainSettingsSectionMeasurementItems = (): SettingsSectionMeasurementItem<MainSettingsSectionId>[] =>
+    visibleMainSettingsSectionNavigation.map((section) => ({
+      id: section.id,
+      ref: getMainSettingsSectionRef(section.id, mainSettingsSectionRefs),
+    }));
   const hasVisibleMainSettings = visibleMainSettingsSectionNavigation.length > 0;
   const visibleMainSettingsSectionIds = visibleMainSettingsSectionNavigation
     .map((section) => section.id)
@@ -2227,9 +2319,11 @@ export function SettingsModal({
   const visibleHotkeySectionNavigation: SettingsSectionNavigationItem<HotkeySettingsSectionId>[] =
     visibleHotkeySections.map((section) => ({
       id: section.id,
-      ref: hotkeySectionRefs[section.id],
       title: section.title,
     }));
+  const scrollHotkeySettingsSectionIntoView = (sectionId: HotkeySettingsSectionId) => {
+    hotkeySectionRefs[sectionId].current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   /*
    * CDXC:SettingsNavigation 2026-06-24-22:16:
    * Settings no longer has a top tab bar. Keep top-level Settings pages in the
@@ -2250,7 +2344,8 @@ export function SettingsModal({
         id: section.id,
         onSelect: () => {
           setActiveMainSettingsSectionId(section.id);
-          selectSettingsSidebarSection("settings", section.ref);
+          setActiveTab("settings");
+          requestAnimationFrame(() => scrollMainSettingsSectionIntoView(section.id));
         },
         title: section.title,
       })),
@@ -2267,7 +2362,8 @@ export function SettingsModal({
         id: section.id,
         onSelect: () => {
           setActiveHotkeySettingsSectionId(section.id);
-          selectSettingsSidebarSection("hotkeys", section.ref);
+          setActiveTab("hotkeys");
+          requestAnimationFrame(() => scrollHotkeySettingsSectionIntoView(section.id));
         },
         title: section.title,
       })),
@@ -2332,10 +2428,12 @@ export function SettingsModal({
       }
       const mostlyVisibleSectionId = getMostlyVisibleSettingsSectionId(
         viewport,
-        visibleMainSettingsSectionNavigation,
+        getMainSettingsSectionMeasurementItems(),
       );
       if (mostlyVisibleSectionId) {
-        setActiveMainSettingsSectionId(mostlyVisibleSectionId);
+        setActiveMainSettingsSectionId((currentSectionId) =>
+          currentSectionId === mostlyVisibleSectionId ? currentSectionId : mostlyVisibleSectionId,
+        );
       }
     });
     return () => cancelAnimationFrame(animationFrame);
@@ -2409,15 +2507,6 @@ export function SettingsModal({
 
   /**
    * CDXC:AppIconPicker 2026-06-25-21:50:
-   * Keep a stable ref to the latest persist closure so the host-event listener
-   * below can subscribe once per open without re-binding every render. The ref
-   * always reflects the current draft, so confirm-before-persist writes the
-   * native-confirmed source id on top of the freshest settings.
-   */
-  const commitAppIconSourceIdRef = useRef<(sourceId: string) => void>(() => {});
-
-  /**
-   * CDXC:AppIconPicker 2026-06-25-21:50:
    * Request the current icon list once whenever the App Icon settings surface
    * opens, mirroring the lazy native-data requests used elsewhere in Settings.
    * Native answers through the appIconState prop (relayed via the modal host).
@@ -2433,36 +2522,6 @@ export function SettingsModal({
     hasRequestedAppIconsRef.current = true;
     vscode.postMessage({ type: "listAppIcons" });
   }, [activeTab, isOpen, vscode]);
-
-  /**
-   * CDXC:AppIconPicker 2026-06-25-21:50:
-   * Confirm-before-persist is prop-driven: native relays appIconState into this
-   * component through the modal-state plumbing (exactly like osIntegrationStatus),
-   * so react to each new prop value. On an ok state, persist the in-flight
-   * pending selection (falling back to native's selectedId) and clear any error;
-   * on a failed state, drop the pending id and surface the error without writing
-   * appIconSourceId.
-   */
-  useEffect(() => {
-    if (!appIconState) {
-      return;
-    }
-    if (appIconState.ok) {
-      setAppIconError(undefined);
-      const pendingSourceId = pendingAppIconSourceIdRef.current;
-      const confirmedSourceId =
-        pendingSourceId !== undefined ? pendingSourceId : appIconState.selectedId;
-      pendingAppIconSourceIdRef.current = undefined;
-      commitAppIconSourceIdRef.current(confirmedSourceId);
-      return;
-    }
-    pendingAppIconSourceIdRef.current = undefined;
-    setAppIconError(
-      typeof appIconState.error === "string" && appIconState.error.trim()
-        ? appIconState.error.trim()
-        : "Could not update the app icon.",
-    );
-  }, [appIconState]);
 
   useEffect(() => {
     return () => {
@@ -2561,16 +2620,45 @@ export function SettingsModal({
   };
   /**
    * CDXC:AppIconPicker 2026-06-25-21:50:
-   * Refresh the confirm-before-persist closure each render so the host-event
-   * listener writes appIconSourceId onto the current draft only after native
-   * confirms the icon swap with an ok: true state.
+   * Confirm-before-persist is prop-driven: native relays appIconState into this
+   * component through the modal-state plumbing (exactly like osIntegrationStatus),
+   * so react to each new prop value. On an ok state, persist the in-flight
+   * pending selection (falling back to native's selectedId) and clear any error;
+   * on a failed state, drop the pending id and surface the error without writing
+   * appIconSourceId.
+   *
+   * CDXC:SettingsPerformance 2026-06-29-00:40:
+   * Process each native appIconState once inside this effect instead of updating
+   * a closure ref during render, because SettingsModal needs React Compiler
+   * coverage to reduce large settings-page rerenders during scroll navigation.
    */
-  commitAppIconSourceIdRef.current = (sourceId: string) => {
-    if ((pendingSettingsRef.current ?? draft).appIconSourceId === sourceId) {
+  useEffect(() => {
+    if (!appIconState) {
       return;
     }
-    updateDraft("appIconSourceId", sourceId);
-  };
+    if (handledAppIconStateRef.current === appIconState) {
+      return;
+    }
+    handledAppIconStateRef.current = appIconState;
+    if (appIconState.ok) {
+      setAppIconError(undefined);
+      const pendingSourceId = pendingAppIconSourceIdRef.current;
+      const confirmedSourceId =
+        pendingSourceId !== undefined ? pendingSourceId : appIconState.selectedId;
+      pendingAppIconSourceIdRef.current = undefined;
+      const currentSettings = pendingSettingsRef.current ?? draft;
+      if (currentSettings.appIconSourceId !== confirmedSourceId) {
+        updateDraft("appIconSourceId", confirmedSourceId);
+      }
+      return;
+    }
+    pendingAppIconSourceIdRef.current = undefined;
+    setAppIconError(
+      typeof appIconState.error === "string" && appIconState.error.trim()
+        ? appIconState.error.trim()
+        : "Could not update the app icon.",
+    );
+  }, [appIconState, draft]);
   /**
    * CDXC:AppIconPicker 2026-06-25-21:50:
    * Selecting, choosing a file, revealing the folder, and resetting all post the
@@ -2593,9 +2681,7 @@ export function SettingsModal({
     setAppIconError(undefined);
     vscode.postMessage({ type: "pickAppIconFile" });
   };
-  const activeSidebarSettingsPresetId = getSidebarSettingsPresetId(
-    pendingSettingsRef.current ?? draft,
-  );
+  const activeSidebarSettingsPresetId = getSidebarSettingsPresetId(draft);
   const updateSidebarSettingsPreset = (presetId: SidebarSettingsPresetId) => {
     applySettings(applySidebarSettingsPreset(pendingSettingsRef.current ?? draft, presetId));
   };
@@ -2623,10 +2709,7 @@ export function SettingsModal({
     key: Key,
   ): Required<SettingModificationProps> => ({
     advanced: isAdvancedMainSetting(String(key)),
-    isModified: !Object.is(
-      (pendingSettingsRef.current ?? draft)[key],
-      DEFAULT_ghostex_SETTINGS[key],
-    ),
+    isModified: !Object.is(draft[key], DEFAULT_ghostex_SETTINGS[key]),
     onResetToDefault: () => resetSetting(key),
   });
 
@@ -2815,8 +2898,8 @@ export function SettingsModal({
               outside this tab panel, while this panel owns only scrollable
               General settings content. */}
           <div className="settings-main-tab-layout">
-          <ScrollArea className="settings-main-scroll h-full min-h-0">
-          <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
+            <SettingsNativeScrollArea className="settings-main-scroll h-full min-h-0">
+              <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
             {isFirstLaunchSetup && mainSectionVisible("agents", settingsSearch.sidebar) ? (
               <SettingsSection sectionRef={agentsOnboardingSectionRef} title="Agents">
                 {mainSettingVisible(settingsSearch.sidebar, "agentAcceptAllEnabled") ? (
@@ -4349,7 +4432,7 @@ export function SettingsModal({
               </>
             )}
           </div>
-          </ScrollArea>
+          </SettingsNativeScrollArea>
           </div>
           </TabsContent>
           {!isFirstLaunchSetup && showOSIntegrationSettingsTab ? (
@@ -4371,10 +4454,13 @@ export function SettingsModal({
               ghostexCliStatusLoading={ghostexCliStatusLoading}
               appShotsEnabled={draft.appShotsEnabled}
               appShotsHotkey={draft.appShotsHotkey}
+              appShotsMetadataEnabled={draft.appShotsMetadataEnabled}
               onAppShotsEnabledChange={(checked) => updateDraft("appShotsEnabled", checked)}
               onAppShotsHotkeyChange={(hotkey) => updateDraft("appShotsHotkey", hotkey)}
+              onAppShotsMetadataEnabledChange={(checked) =>
+                updateDraft("appShotsMetadataEnabled", checked)
+              }
               onInstallAgentOrchestrationSkill={onInstallAgentOrchestrationSkill}
-              onInstallAgentHooks={onInstallAgentHooks}
               onInstallBrowserControl={onInstallBrowserControl}
               onInstallComputerUseSkill={onInstallComputerUseSkill}
               onInstallCuaDriver={onInstallCuaDriver}
@@ -4385,7 +4471,6 @@ export function SettingsModal({
               onUninstallBundledAgentSkills={onUninstallBundledAgentSkills}
               onOpenAccessibilityPreferences={onOpenAccessibilityPreferences}
               onOpenScreenRecordingPreferences={onOpenScreenRecordingPreferences}
-              onRequestAgentHookStatus={onRequestAgentHookStatus}
               onRequestGhostexCliStatus={onRequestGhostexCliStatus}
             />
           </TabsContent>
@@ -4488,7 +4573,11 @@ export function SettingsModal({
               visibleSections={visibleHotkeySections}
               searchQuery={settingsSearchQuery}
               onChange={(hotkeys) => updateDraft("hotkeys", hotkeys)}
-              onActiveSectionChange={setActiveHotkeySettingsSectionId}
+              onActiveSectionChange={(sectionId) =>
+                setActiveHotkeySettingsSectionId((currentSectionId) =>
+                  currentSectionId === sectionId ? currentSectionId : sectionId,
+                )
+              }
               onExpandCollapsedProjectsOnJumpChange={(checked) =>
                 updateDraft("expandCollapsedProjectsOnJump", checked)
               }
@@ -4602,6 +4691,39 @@ function SettingsSidebarNavigation({
         </label>
       </div>
     </aside>
+  );
+}
+
+function SettingsNativeScrollArea({
+  children,
+  className,
+  onScrollCapture,
+  viewportClassName,
+  ...props
+}: ComponentProps<"div"> & {
+  viewportClassName?: string;
+}) {
+  return (
+    <div {...props} className={cn("relative", className)} data-slot="scroll-area">
+      {/*
+       * CDXC:SettingsPerformance 2026-06-29-00:40:
+       * Settings pages must scroll with native overflow instead of Base UI
+       * ScrollArea because long pages do not need custom scrollbar metrics or
+       * scroll-linked edge masks on every frame. Keep the viewport data-slot so
+       * existing section tracking and padding CSS continue to target the
+       * scrollable element.
+       */}
+      <div
+        className={cn(
+          "settings-native-scroll-viewport size-full overflow-x-hidden overflow-y-auto rounded-none outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1",
+          viewportClassName,
+        )}
+        data-slot="scroll-area-viewport"
+        onScrollCapture={onScrollCapture}
+      >
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -4805,7 +4927,7 @@ function RemoteSettingsTab({
   const canAddMachine = newMachine.name.trim().length > 0 && newMachine.sshHost.trim().length > 0;
 
   return (
-    <div className="settings-tab-scroll scroll-mask-y" ref={containerRef}>
+    <div className="settings-tab-scroll" ref={containerRef}>
       <div className="settings-management-layout">
         <header className="settings-management-header">
           <div className="settings-management-header-text">
@@ -5241,7 +5363,7 @@ function ProjectsSettingsPanel({
   };
 
   return (
-    <div className="settings-tab-scroll scroll-mask-y">
+    <div className="settings-tab-scroll">
       {/*
        * CDXC:PortlessSettings 2026-06-23-03:47:
        * Projects settings starts with global Portless controls because the
@@ -5920,7 +6042,7 @@ function OpenTargetsSettingsTab({
   };
 
   return (
-    <ScrollArea className="h-full min-h-0">
+    <SettingsNativeScrollArea className="h-full min-h-0">
       <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
         <SettingsSection title="Open In">
           {/* CDXC:TitlebarOpenIn 2026-05-11-00:22
@@ -6067,7 +6189,7 @@ function OpenTargetsSettingsTab({
           </div>
         </SettingsSection>
       </div>
-    </ScrollArea>
+    </SettingsNativeScrollArea>
   );
 }
 
@@ -6117,7 +6239,7 @@ function OSIntegrationSettingsTab({
   const visibleStatusItems = statusItems.slice(0, 6);
   const remainingStatusItemCount = Math.max(0, statusItems.length - visibleStatusItems.length);
   return (
-    <ScrollArea className="h-full min-h-0">
+    <SettingsNativeScrollArea className="h-full min-h-0">
       <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
         <SettingsSection title="Defaults">
           {/*
@@ -6264,7 +6386,7 @@ function OSIntegrationSettingsTab({
           </div>
         </SettingsSection>
       </div>
-    </ScrollArea>
+    </SettingsNativeScrollArea>
   );
 }
 
@@ -6381,21 +6503,6 @@ function getCuaPermissionStatus(
   return { status: "Permission Status Unknown", tone: "warning" };
 }
 
-function canInstallOrUpdateAgentHooks(
-  agentHookStatus: SidebarAgentHookStatusMessage | undefined,
-): boolean {
-  if (!agentHookStatus) {
-    return true;
-  }
-  if (agentHookStatus.errorMessage) {
-    return false;
-  }
-  return agentHookStatus.agents.some(
-    (status) =>
-      status.cliInstalled && (status.status === "missing" || status.status === "updateRequired"),
-  );
-}
-
 function hasRemovableAgentHooks(
   agentHookStatus: SidebarAgentHookStatusMessage | undefined,
 ): boolean {
@@ -6425,12 +6532,13 @@ function IntegrationsSettingsTab({
   agentHookStatusLoading,
   appShotsEnabled,
   appShotsHotkey,
+  appShotsMetadataEnabled,
   ghostexCliStatus,
   ghostexCliStatusLoading,
   onAppShotsEnabledChange,
   onAppShotsHotkeyChange,
+  onAppShotsMetadataEnabledChange,
   onInstallAgentOrchestrationSkill,
-  onInstallAgentHooks,
   onInstallBrowserControl,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
@@ -6441,19 +6549,19 @@ function IntegrationsSettingsTab({
   onUninstallBundledAgentSkills,
   onOpenAccessibilityPreferences,
   onOpenScreenRecordingPreferences,
-  onRequestAgentHookStatus,
   onRequestGhostexCliStatus,
 }: {
   agentHookStatus?: SidebarAgentHookStatusMessage;
   agentHookStatusLoading: boolean;
   appShotsEnabled: boolean;
   appShotsHotkey: AppShotsHotkey;
+  appShotsMetadataEnabled: boolean;
   ghostexCliStatus?: SidebarGhostexCliStatusMessage;
   ghostexCliStatusLoading: boolean;
   onAppShotsEnabledChange: (checked: boolean) => void;
   onAppShotsHotkeyChange: (hotkey: AppShotsHotkey) => void;
+  onAppShotsMetadataEnabledChange: (checked: boolean) => void;
   onInstallAgentOrchestrationSkill?: () => void;
-  onInstallAgentHooks?: () => void;
   onInstallBrowserControl?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
@@ -6464,37 +6572,10 @@ function IntegrationsSettingsTab({
   onUninstallBundledAgentSkills?: () => void;
   onOpenAccessibilityPreferences?: () => void;
   onOpenScreenRecordingPreferences?: () => void;
-  onRequestAgentHookStatus?: () => void;
   onRequestGhostexCliStatus?: () => void;
 }) {
-  const installedHookCount =
-    agentHookStatus?.agents.filter(
-      (status) => status.status === "installed" || status.status === "notRequired",
-    ).length ?? 0;
-  const updateRequiredHookCount =
-    agentHookStatus?.agents.filter((status) => status.status === "updateRequired").length ?? 0;
-  const agentHooksAvailableForInstall = canInstallOrUpdateAgentHooks(agentHookStatus);
-  const agentHooksInstallComplete = Boolean(
-    agentHookStatus && !agentHooksAvailableForInstall && installedHookCount > 0,
-  );
-  const agentHookInstallLabel = updateRequiredHookCount > 0
-    ? "Update Hooks"
-    : agentHooksInstallComplete
-      ? "Hooks Installed"
-      : "Install Hooks";
   const agentHooksAvailableForUninstall = hasRemovableAgentHooks(agentHookStatus);
   const bundledAgentSkillsAvailableForUninstall = hasInstalledBundledAgentSkills(ghostexCliStatus);
-  const updateRequiredHookSummary =
-    updateRequiredHookCount === 1 ? "1 needs update" : `${updateRequiredHookCount} need update`;
-  const hookSummary = agentHookStatus
-    ? agentHookStatus.errorMessage
-      ? "Unable to check"
-      : updateRequiredHookCount > 0
-        ? updateRequiredHookSummary
-        : `${installedHookCount}/${AGENT_HOOK_SUPPORTED_DEFAULT_AGENTS.length} installed`
-    : agentHookStatusLoading
-      ? "Checking"
-      : "Not checked";
   const cliReady = ghostexCliStatus?.installed === true;
   const desktopControlReady =
     ghostexCliStatus?.cuaDriverInstalled === true &&
@@ -6523,14 +6604,14 @@ function IntegrationsSettingsTab({
   const cuaPermissionStatus = getCuaPermissionStatus(ghostexCliStatus, ghostexCliStatusLoading);
 
   return (
-    <ScrollArea className="h-full min-h-0">
+    <SettingsNativeScrollArea className="h-full min-h-0">
       <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
         {/*
          * CDXC:IntegrationsSetup 2026-05-27-04:17:
-         * Settings owns one Integrations tab for post-onboarding setup. Keep
-         * CLI, bundled Ghostex skills, agent hooks, Cua Driver, and macOS privacy
-         * permissions on the same page so users can recover skipped first-launch
-         * steps without hunting through unrelated tabs.
+         * Settings owns one Integrations tab for post-onboarding setup. Keep CLI, bundled Ghostex skills, Cua Driver, and macOS privacy permissions on the same page so users can recover skipped first-launch steps without hunting through unrelated tabs.
+         *
+         * CDXC:AgentHookSettings 2026-06-29-01:26:
+         * Agent hook install/status UI lives in Settings -> Agents, where the detailed per-agent hook list already exists. Integrations should not duplicate that setup row; it only keeps hook removal as a recovery action at the bottom of the page.
          *
          * CDXC:AgentSkills 2026-05-31-09:18:
          * Bundled Ghostex skills are explicit per-skill installs in Settings,
@@ -6608,47 +6689,19 @@ function IntegrationsSettingsTab({
             onRefreshStatus={onRequestGhostexCliStatus}
           />
 
-          <IntegrationSettingsRow
-            description="Install agent hooks for supported CLIs so Ghostex can show In Progress and Needs Attention notifications and name sessions from the first message."
-            icon={IconTools}
-            status={hookSummary}
-            tone={installedHookCount > 0 ? "success" : "warning"}
-            title="Agent Hooks"
-          >
-            <Button
-              disabled={agentHookStatusLoading || !agentHooksAvailableForInstall || !onInstallAgentHooks}
-              onClick={onInstallAgentHooks}
-              type="button"
-              variant={installedHookCount > 0 ? "outline" : "default"}
-            >
-              {agentHooksInstallComplete ? (
-                <IconCircleCheckFilled aria-hidden="true" data-icon="inline-start" />
-              ) : (
-                <IconDownload aria-hidden="true" data-icon="inline-start" />
-              )}
-              {agentHookInstallLabel}
-            </Button>
-            <Button
-              disabled={agentHookStatusLoading || !onRequestAgentHookStatus}
-              onClick={onRequestAgentHookStatus}
-              type="button"
-              variant="ghost"
-            >
-              <IconRefresh aria-hidden="true" data-icon="inline-start" />
-              Refresh
-            </Button>
-          </IntegrationSettingsRow>
-
           {/*
            * CDXC:AppShots 2026-06-12-11:12:
            * Settings copy must describe App Shots as an agent-session feature because captured context now targets the focused or recent agent instead of Codex only.
            *
            * CDXC:AppShots 2026-06-15-02:01:
            * App Shots should be instant screenshot capture. Settings copy must not promise OCR, Accessibility text extraction, or other app-content scraping.
+           *
+           * CDXC:AppShots 2026-06-29-02:59:
+           * App Shot prompt metadata is disabled by default and must be a visible opt-in under the App Shots row, because routine captures should paste only the image link unless the user asks for window metadata.
            */}
           <IntegrationSettingsRow
             badge="Beta"
-            description="Capture the frontmost app window and basic window metadata, then stage it in the focused or recent agent session as local image context."
+            description="Capture the frontmost app window, then stage it in the focused or recent agent session as local image context."
             icon={IconDeviceDesktop}
             status={appShotsEnabled ? "Enabled" : "Disabled"}
             tone={appShotsEnabled ? "success" : "neutral"}
@@ -6681,6 +6734,15 @@ function IntegrationsSettingsTab({
                   </SelectGroup>
                 </SettingsSelectContent>
               </SettingsSelect>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Metadata</span>
+                <Switch
+                  aria-label="Include App Shots metadata"
+                  checked={appShotsMetadataEnabled}
+                  disabled={!appShotsEnabled}
+                  onCheckedChange={onAppShotsMetadataEnabledChange}
+                />
+              </div>
             </div>
           </IntegrationSettingsRow>
 
@@ -6734,11 +6796,13 @@ function IntegrationsSettingsTab({
         </SettingsSection>
         {/*
           CDXC:IntegrationsSetup 2026-06-21-02:54:
-          Hooks & Skills removal is an integration recovery action, so keep it as the final card in Settings > Integrations rather than a General Settings advanced section.
-          Disable actions when status proves the corresponding Ghostex-owned artifacts are already absent, and disable Agent Hooks install/update once no installed CLI needs hook work, so users cannot click no-op setup buttons.
+          Hooks & Skills removal is an integration recovery action, so keep it as the final card in Settings > Integrations rather than a General Settings advanced section. Disable actions when status proves the corresponding Ghostex-owned artifacts are already absent, so users cannot click no-op recovery buttons.
+
+          CDXC:AgentHookSettings 2026-06-29-01:26:
+          Hook installation moved to Settings > Agents, so the Integrations recovery card must point users there for reinstall while bundled skills remain reinstallable from this page.
         */}
         <SettingsSection
-          description="Remove Ghostex-owned setup artifacts. You can install hooks and bundled skills again from the rows above."
+          description="Remove Ghostex-owned setup artifacts. You can install hooks again from Settings > Agents and bundled skills again from the rows above."
           title="Hooks & Skills"
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -6765,7 +6829,7 @@ function IntegrationsSettingsTab({
           </div>
         </SettingsSection>
       </div>
-    </ScrollArea>
+    </SettingsNativeScrollArea>
   );
 }
 
@@ -6993,7 +7057,7 @@ function AgentsSettingsTab({
   }) satisfies DragDropEventHandlers["onDragEnd"];
 
   return (
-    <ScrollArea className="h-full min-h-0">
+    <SettingsNativeScrollArea className="h-full min-h-0">
       <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
         {!editorState ? (
           <SettingsSection title="Agent Hooks">
@@ -7242,7 +7306,7 @@ function AgentsSettingsTab({
           )}
         </SettingsSection>
       </div>
-    </ScrollArea>
+    </SettingsNativeScrollArea>
   );
 }
 
@@ -7387,21 +7451,21 @@ function SettingsAgentRow({
     index,
     type: "settings-agent",
   });
+  const { handleRef, isDragging } = sortable;
 
   const setRowRef = (element: HTMLDivElement | null) => {
-    sortable.ref(element);
-    sortable.sourceRef(element);
+    setSettingsSortableRowElement(sortable, element);
   };
 
   return (
     <div
       className="settings-management-row flex items-center gap-2 border border-border bg-muted/20 p-2"
-      data-dragging={String(Boolean(sortable.isDragging))}
+      data-dragging={String(Boolean(isDragging))}
       ref={setRowRef}
     >
       <Button
         aria-label={`Reorder ${agent.name}`}
-        ref={sortable.handleRef}
+        ref={handleRef}
         size="icon-sm"
         type="button"
         variant="ghost"
@@ -7709,7 +7773,7 @@ function ActionsSettingsTab({ vscode }: { vscode?: WebviewApi }) {
   }) satisfies DragDropEventHandlers["onDragEnd"];
 
   return (
-    <ScrollArea className="h-full min-h-0">
+    <SettingsNativeScrollArea className="h-full min-h-0">
       <div className="settings-page-width flex flex-col gap-6 px-5 pb-5">
         {!editorState && !hasConfiguredActions ? (
           <div className="flex items-start gap-3 border border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
@@ -7800,7 +7864,7 @@ function ActionsSettingsTab({ vscode }: { vscode?: WebviewApi }) {
           )}
         </SettingsSection>
       </div>
-    </ScrollArea>
+    </SettingsNativeScrollArea>
   );
 }
 
@@ -7823,21 +7887,21 @@ function SettingsCommandRow({
     index,
     type: "settings-command",
   });
+  const { handleRef, isDragging } = sortable;
 
   const setRowRef = (element: HTMLDivElement | null) => {
-    sortable.ref(element);
-    sortable.sourceRef(element);
+    setSettingsSortableRowElement(sortable, element);
   };
 
   return (
     <div
       className="settings-management-row flex items-center gap-2 border border-border bg-muted/20 p-2"
-      data-dragging={String(Boolean(sortable.isDragging))}
+      data-dragging={String(Boolean(isDragging))}
       ref={setRowRef}
     >
       <Button
         aria-label={`Reorder ${getActionTitle(command)}`}
-        ref={sortable.handleRef}
+        ref={handleRef}
         size="icon-sm"
         type="button"
         variant="ghost"
@@ -8163,6 +8227,8 @@ function HotkeysSettingsTab({
     () => getDuplicateHotkeyIds(normalizedHotkeys),
     [normalizedHotkeys],
   );
+  const pendingHotkeySectionViewportRef = useRef<HTMLElement | null>(null);
+  const hotkeySectionFrameRef = useRef<number | undefined>(undefined);
   /**
    * CDXC:Hotkeys 2026-05-13-16:05
    * Superseded by CDXC:SettingsNavigation 2026-06-24-22:16.
@@ -8176,8 +8242,12 @@ function HotkeysSettingsTab({
   const visibleHotkeySectionNavigation: SettingsSectionNavigationItem<HotkeySettingsSectionId>[] =
     visibleSections.map((section) => ({
       id: section.id,
-      ref: sectionRefs[section.id],
       title: section.title,
+    }));
+  const visibleHotkeySectionMeasurementItems: SettingsSectionMeasurementItem<HotkeySettingsSectionId>[] =
+    visibleSections.map((section) => ({
+      id: section.id,
+      ref: sectionRefs[section.id],
     }));
   const visibleHotkeySectionIds = visibleHotkeySectionNavigation
     .map((section) => section.id)
@@ -8197,29 +8267,59 @@ function HotkeysSettingsTab({
     onChange(normalizeghostexHotkeySettings(DEFAULT_ghostex_HOTKEYS));
   };
 
+  const scheduleHotkeySectionMeasurement = (viewport: HTMLElement) => {
+    /*
+     * CDXC:SettingsPerformance 2026-06-29-00:40:
+     * Hotkeys uses the same active-section measurement as General Settings.
+     * Keep scroll handlers cheap by measuring section rects once per animation
+     * frame instead of on every scroll event.
+     */
+    pendingHotkeySectionViewportRef.current = viewport;
+    if (hotkeySectionFrameRef.current !== undefined) {
+      return;
+    }
+    hotkeySectionFrameRef.current = requestAnimationFrame(() => {
+      hotkeySectionFrameRef.current = undefined;
+      const pendingViewport = pendingHotkeySectionViewportRef.current;
+      pendingHotkeySectionViewportRef.current = null;
+      if (!pendingViewport?.isConnected) {
+        return;
+      }
+      const mostlyVisibleSectionId = getMostlyVisibleSettingsSectionId(
+        pendingViewport,
+        visibleHotkeySectionMeasurementItems,
+      );
+      if (mostlyVisibleSectionId) {
+        onActiveSectionChange(mostlyVisibleSectionId);
+      }
+    });
+  };
+
   const handleHotkeySettingsScrollCapture = (event: ReactUIEvent<HTMLDivElement>) => {
     if (!(event.target instanceof HTMLElement) || event.target.dataset.slot !== "scroll-area-viewport") {
       return;
     }
-    const mostlyVisibleSectionId = getMostlyVisibleSettingsSectionId(
-      event.target,
-      visibleHotkeySectionNavigation,
-    );
-    if (mostlyVisibleSectionId) {
-      onActiveSectionChange(mostlyVisibleSectionId);
-    }
+    scheduleHotkeySectionMeasurement(event.target);
   };
 
   useEffect(() => {
+    return () => {
+      if (hotkeySectionFrameRef.current !== undefined) {
+        cancelAnimationFrame(hotkeySectionFrameRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     const animationFrame = requestAnimationFrame(() => {
-      const firstSection = visibleHotkeySectionNavigation[0];
+      const firstSection = visibleHotkeySectionMeasurementItems[0];
       const viewport = firstSection?.ref.current?.closest<HTMLElement>("[data-slot='scroll-area-viewport']");
       if (!viewport) {
         return;
       }
       const mostlyVisibleSectionId = getMostlyVisibleSettingsSectionId(
         viewport,
-        visibleHotkeySectionNavigation,
+        visibleHotkeySectionMeasurementItems,
       );
       if (mostlyVisibleSectionId) {
         onActiveSectionChange(mostlyVisibleSectionId);
@@ -8230,7 +8330,7 @@ function HotkeysSettingsTab({
 
   return (
     <div className="settings-main-tab-layout">
-      <ScrollArea
+      <SettingsNativeScrollArea
         className="settings-main-scroll h-full min-h-0"
         onScrollCapture={handleHotkeySettingsScrollCapture}
       >
@@ -8304,7 +8404,7 @@ function HotkeysSettingsTab({
             </Button>
           </div>
         </div>
-      </ScrollArea>
+      </SettingsNativeScrollArea>
     </div>
   );
 }
@@ -10326,13 +10426,13 @@ function SidebarTagListSettingsRow({
     index,
     type: "settings-sidebar-tag-list-item",
   });
+  const { handleRef, isDragging } = sortable;
   const isDimmed = !item.enabled || !item.visible;
   const label =
     item.type === "tag" ? getSidebarSessionTagLabel(item.tag) ?? item.tag : "Separator";
 
   const setRowRef = (element: HTMLDivElement | null) => {
-    sortable.ref(element);
-    sortable.sourceRef(element);
+    setSettingsSortableRowElement(sortable, element);
   };
 
   return (
@@ -10341,14 +10441,14 @@ function SidebarTagListSettingsRow({
         "settings-management-row flex w-full items-center gap-2 border border-border bg-muted/20 p-2",
         isDimmed && "text-muted-foreground",
       )}
-      data-dragging={String(Boolean(sortable.isDragging))}
+      data-dragging={String(Boolean(isDragging))}
       data-enabled={String(item.enabled)}
       data-visible={String(item.visible)}
       ref={setRowRef}
     >
       <Button
         aria-label={`Reorder ${label}`}
-        ref={sortable.handleRef}
+        ref={handleRef}
         size="icon-sm"
         type="button"
         variant="ghost"

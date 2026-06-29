@@ -256,6 +256,10 @@ describe("settings modal source", () => {
      * Hooks & Skills uninstall controls belong at the bottom of Settings >
      * Integrations, and their no-op states must be disabled when hooks or
      * bundled skills are already absent.
+     *
+     * CDXC:AgentHookSettings 2026-06-29-01:26:
+     * Agent hook setup belongs in Settings > Agents, so Integrations must keep
+     * only the hook recovery control instead of duplicating the Agent Hooks row.
      */
     const navigation = sourceBetween(
       settingsModalSource,
@@ -267,9 +271,17 @@ describe("settings modal source", () => {
       "function IntegrationsSettingsTab",
       "function IntegrationSettingsRow",
     );
+    const agentsTab = sourceBetween(
+      settingsModalSource,
+      "function AgentsSettingsTab",
+      "function AgentHookStatusRow",
+    );
 
     expect(navigation).not.toContain('title: "Hooks & Skills"');
     expect(settingsModalSource).not.toContain("hooksSkills");
+    expect(integrationsTab).not.toContain('title="Agent Hooks"');
+    expect(integrationsTab).not.toContain("Install Hooks");
+    expect(agentsTab).toContain('<SettingsSection title="Agent Hooks">');
     const cuaPermissionsIndex = integrationsTab.indexOf('title="Cua Permissions"');
     const hooksSkillsIndex = integrationsTab.indexOf('title="Hooks & Skills"');
     expect(cuaPermissionsIndex).toBeGreaterThanOrEqual(0);
@@ -707,14 +719,14 @@ describe("settings modal source", () => {
     // Inbound appIconState is prop-driven (relayed via the modal host like
     // osIntegrationStatus), NOT direct window host-event listeners.
     expect(settingsModalSource).toContain("appIconState?: SidebarAppIconStateMessage;");
-    expect(settingsModalSource).toContain("}, [appIconState]);");
+    expect(settingsModalSource).toContain("}, [appIconState, draft]);");
     expect(settingsModalSource).not.toContain("handleAppIconHostEvent");
     expect(settingsModalSource).not.toContain("isSidebarAppIconStateMessage");
 
     // Confirm-before-persist: only an ok prop state writes appIconSourceId.
     expect(settingsModalSource).toContain("if (appIconState.ok) {");
-    expect(settingsModalSource).toContain("commitAppIconSourceIdRef.current(confirmedSourceId);");
-    expect(settingsModalSource).toContain('updateDraft("appIconSourceId", sourceId);');
+    expect(settingsModalSource).toContain("handledAppIconStateRef.current === appIconState");
+    expect(settingsModalSource).toContain('updateDraft("appIconSourceId", confirmedSourceId);');
     expect(settingsModalSource).toContain('vscode?.postMessage({ type: "setAppIcon", sourceId: "" });');
 
     // The field is one preview plus Select Image; no gallery, reveal action, or

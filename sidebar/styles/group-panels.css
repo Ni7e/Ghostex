@@ -940,16 +940,61 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
    * CDXC:SidebarReference 2026-06-28-15:04:
    * Agents Hub, Automations, and Mobile share one equal-width icon row at the
    * top of the sidebar. Keep Search as the separate full-width row underneath.
+   *
+   * CDXC:SidebarTopChrome 2026-06-29-01:43:
+   * Settings and Keep Awake now live in the same icon row as Agents Hub,
+   * Automations, and Mobile. Keep all top controls full-width while Search
+   * remains a full-width row below the shortcut strip.
+   *
+   * CDXC:SidebarTopChrome 2026-06-29-02:13:
+   * Search should stay visually distinct as a borderless full-width row under
+   * the shortcut strip.
+   *
+   * CDXC:SidebarTopChrome 2026-06-29-02:24:
+   * Settings and Keep Awake dropdowns should open centered within the sidebar
+   * instead of anchoring to a single shortcut cell, because the 230px minimum
+   * sidebar is narrower than a cell-anchored menu.
+   *
+   * CDXC:SidebarTopChrome 2026-06-29-03:01:
+   * The primary shortcut icons should sit 14px higher in the sidebar, while
+   * Search keeps its own gap below the shortcut row instead of inheriting
+   * the old nav-level top offset.
+   *
+   * CDXC:SidebarTopChrome 2026-06-29-03:25:
+   * Search should sit 3px lower than the first shortcut-row spacing pass, so
+   * its dedicated top gap is 12px.
+   *
+   * CDXC:SidebarTopChrome 2026-06-29-03:05:
+   * The shortcut icon buttons should extend 1px farther downward than the
+   * standard sidebar nav button height, keeping their top edge fixed while
+   * increasing the button box from 34px to 35px.
+   *
+   * CDXC:SidebarTopChrome 2026-06-29-03:19:
+   * The top shortcut icon buttons should now be borderless too. Keep the
+   * full-width icon row layout and dropdown borders, but let each shortcut
+   * inherit the base transparent nav-button border style.
    */
-  margin: 14px 0 0;
+  margin: 0;
   min-width: 0;
   padding: 0;
 }
 
 .reference-sidebar-primary-icon-row {
+  --reference-sidebar-primary-shortcut-count: 5;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--reference-sidebar-primary-shortcut-count), minmax(0, 1fr));
   min-width: 0;
+  position: relative;
+}
+
+.reference-sidebar-primary-icon-row > .reference-sidebar-nav-icon-button,
+.reference-sidebar-primary-menu-cell {
+  min-width: 0;
+  position: relative;
+}
+
+.reference-sidebar-primary-menu-cell {
+  position: static;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
@@ -974,6 +1019,7 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 }
 
 .reference-sidebar-search-slot {
+  margin-top: 12px;
   min-width: 0;
 }
 
@@ -1045,11 +1091,98 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-sidebar-primary-icon-row
   .reference-sidebar-nav-icon-button {
+  height: 35px;
   justify-content: center;
   max-width: none;
+  min-height: 35px;
   padding-left: 0;
   padding-right: 0;
   width: 100%;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-primary-icon-row
+  .reference-sidebar-nav-icon-button[data-state="open"],
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-primary-icon-row
+  .reference-sidebar-nav-icon-button[data-active="true"] {
+  background: color-mix(in srgb, var(--app-foreground) 10%, transparent);
+}
+
+.reference-sidebar-primary-dropdown {
+  background: var(--app-card);
+  border: 1px solid var(--titlebar-button-border-color, #252525);
+  box-sizing: border-box;
+  box-shadow: 0 14px 34px rgb(0 0 0 / 32%);
+  color: var(--app-foreground);
+  display: grid;
+  font-size: 13px;
+  gap: 1px;
+  left: 50%;
+  min-width: 0;
+  padding: 4px;
+  position: absolute;
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+  width: min(220px, calc(100% - 16px));
+  z-index: 80;
+}
+
+.reference-sidebar-primary-menu-label {
+  color: color-mix(in srgb, var(--app-foreground) 52%, transparent);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 5px 8px 3px;
+  text-transform: uppercase;
+}
+
+.reference-sidebar-primary-menu-item {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--app-foreground);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 9px;
+  min-height: 29px;
+  min-width: 0;
+  padding: 6px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.reference-sidebar-primary-menu-item:hover,
+.reference-sidebar-primary-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--app-foreground) 9%, transparent);
+  outline: none;
+}
+
+.reference-sidebar-primary-menu-icon,
+.reference-sidebar-primary-menu-check {
+  color: color-mix(in srgb, var(--app-foreground) 84%, var(--app-muted) 16%);
+  flex: none;
+}
+
+.reference-sidebar-primary-menu-label-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-sidebar-primary-menu-shortcut {
+  color: color-mix(in srgb, var(--app-foreground) 48%, transparent);
+  flex: none;
+  font-size: 12px;
+}
+
+.reference-sidebar-primary-menu-separator {
+  background: color-mix(in srgb, var(--app-border) 72%, transparent);
+  height: 1px;
+  margin: 4px 6px;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .reference-sidebar-actions-button {
@@ -1094,8 +1227,8 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
  * Use an 18px text line box instead of clipping labels to 14px, which cuts off
  * Search and Recent Projects at the bottom.
  *
- * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
- * The sidebar no longer owns a More overflow trigger. Shared hover-action padding now protects Search and the Recent Projects Commands Pane launcher while global actions live in the titlebar Settings menu.
+ * CDXC:SidebarTopChrome 2026-06-29-01:43:
+ * The sidebar still has no More overflow trigger, but Settings and Keep Awake now live as bordered icon buttons in the primary shortcut row. Shared hover-action padding only protects Search and the Recent Projects Commands Pane launcher.
  */
 .sidebar-reference-layout[data-reference-sidebar="true"] .reference-sidebar-primary-nav > * {
   min-width: 0;
@@ -1469,9 +1602,14 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
    * Quick needs 5px more visible breathing room inside the scroll area after
    * the Search-to-scroll gap was increased, so expose a separate first-section
    * top inset instead of changing project sticky positioning.
+   *
+   * CDXC:SidebarTopChrome 2026-06-29-03:25:
+   * The gap above Quick should be 7px tighter toward Search even after Search
+   * moves down by 3px. Reduce only the Quick first-section extra so Projects,
+   * remote sections, and sticky project headers keep their existing spacing.
    */
   --reference-sidebar-project-sticky-top: 0px;
-  --reference-sidebar-quick-top-extra: 5px;
+  --reference-sidebar-quick-top-extra: -2px;
   --reference-sidebar-scroll-top-offset: 15px;
   /*
    * CDXC:SidebarSearch 2026-05-08-16:20

@@ -954,6 +954,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     "activationBoundaryInput",
     "workspaceApplicationActivated",
   ])
+  private static let appShotsLeftShiftModifierMask: UInt = 0x00000002
+  private static let appShotsRightShiftModifierMask: UInt = 0x00000004
+  private static let appShotsLeftCommandModifierMask: UInt = 0x00000008
+  private static let appShotsRightCommandModifierMask: UInt = 0x00000010
+  private static let appShotsLeftOptionModifierMask: UInt = 0x00000020
+  private static let appShotsRightOptionModifierMask: UInt = 0x00000040
   private static var createdLogDirectories = Set<String>()
   private static var nativeHostLifecycleSampleStateByEvent: [String: LogSampleState] = [:]
   nonisolated(unsafe) let ghostty: GhostexGhosttyApp
@@ -2286,39 +2292,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
   private func shouldTriggerAppShot(for event: NSEvent, hotkey: String) -> Bool {
     let now = event.timestamp
     switch hotkey {
+    case "both-shift":
+      return shouldTriggerAppShotBothKeys(
+        event: event,
+        leftKeyCode: 56,
+        rightKeyCode: 60,
+        leftModifierMask: Self.appShotsLeftShiftModifierMask,
+        rightModifierMask: Self.appShotsRightShiftModifierMask)
+    case "both-option":
+      return shouldTriggerAppShotBothKeys(
+        event: event,
+        leftKeyCode: 58,
+        rightKeyCode: 61,
+        leftModifierMask: Self.appShotsLeftOptionModifierMask,
+        rightModifierMask: Self.appShotsRightOptionModifierMask)
     case "double-left-shift":
-      return shouldTriggerAppShotDoubleTap(event: event, keyCode: 56, modifier: .shift, now: now)
+      return shouldTriggerAppShotDoubleTap(
+        event: event,
+        keyCode: 56,
+        modifierMask: Self.appShotsLeftShiftModifierMask,
+        now: now)
     case "double-left-option":
-      return shouldTriggerAppShotDoubleTap(event: event, keyCode: 58, modifier: .option, now: now)
+      return shouldTriggerAppShotDoubleTap(
+        event: event,
+        keyCode: 58,
+        modifierMask: Self.appShotsLeftOptionModifierMask,
+        now: now)
     default:
-      let commandKeyCodes: Set<UInt16> = [54, 55]
-      guard commandKeyCodes.contains(event.keyCode) else {
-        return false
-      }
-      if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
-        appShotsPressedModifierKeyCodes.insert(event.keyCode)
-      } else {
-        appShotsPressedModifierKeyCodes.remove(event.keyCode)
-      }
-      let shouldTrigger = commandKeyCodes.isSubset(of: appShotsPressedModifierKeyCodes)
-      if shouldTrigger {
-        appShotsPressedModifierKeyCodes.removeAll()
-      }
-      return shouldTrigger
+      return shouldTriggerAppShotBothKeys(
+        event: event,
+        leftKeyCode: 55,
+        rightKeyCode: 54,
+        leftModifierMask: Self.appShotsLeftCommandModifierMask,
+        rightModifierMask: Self.appShotsRightCommandModifierMask)
     }
+  }
+
+  @MainActor
+  private func shouldTriggerAppShotBothKeys(
+    event: NSEvent,
+    leftKeyCode: UInt16,
+    rightKeyCode: UInt16,
+    leftModifierMask: UInt,
+    rightModifierMask: UInt
+  ) -> Bool {
+    /**
+     CDXC:AppShots 2026-06-29-01:29:
+     App Shots modifier-only capture supports both physical Shift keys and both physical Option keys alongside both Command keys. Track physical key codes so capture fires only after the requested left/right pair is down, then reset to avoid repeat captures while both keys remain held.
+     */
+    let keyCodes: Set<UInt16> = [leftKeyCode, rightKeyCode]
+    guard keyCodes.contains(event.keyCode) else {
+      return false
+    }
+    let rawFlags = event.modifierFlags.rawValue
+    if rawFlags & leftModifierMask != 0 {
+      appShotsPressedModifierKeyCodes.insert(leftKeyCode)
+    } else {
+      appShotsPressedModifierKeyCodes.remove(leftKeyCode)
+    }
+    if rawFlags & rightModifierMask != 0 {
+      appShotsPressedModifierKeyCodes.insert(rightKeyCode)
+    } else {
+      appShotsPressedModifierKeyCodes.remove(rightKeyCode)
+    }
+    let shouldTrigger = keyCodes.isSubset(of: appShotsPressedModifierKeyCodes)
+    if shouldTrigger {
+      appShotsPressedModifierKeyCodes.removeAll()
+    }
+    return shouldTrigger
   }
 
   @MainActor
   private func shouldTriggerAppShotDoubleTap(
     event: NSEvent,
     keyCode: UInt16,
-    modifier: NSEvent.ModifierFlags,
+    modifierMask: UInt,
     now: TimeInterval
   ) -> Bool {
     guard event.keyCode == keyCode else {
       return false
     }
-    let isPress = event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(modifier)
+    let isPress = event.modifierFlags.rawValue & modifierMask != 0
     guard isPress else {
       return false
     }
@@ -2347,9 +2401,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
     }
     do {
       try ghostexRootView.postFrontmostAppShot(trigger: trigger, to: root)
+      bringGhostexToFrontAfterAppShot()
     } catch {
       root.postHostEvent(.appShotCaptureFailed(message: error.localizedDescription))
+      bringGhostexToFrontAfterAppShot()
     }
+  }
+
+  @MainActor
+  private func bringGhostexToFrontAfterAppShot() {
+    /**
+     CDXC:AppShots 2026-06-29-01:29:
+     App Shots must capture the previously frontmost app before Ghostex activates, then bring Ghostex back to the front so the staged agent prompt and result toast are visible immediately after capture.
+     */
+    window?.makeKeyAndOrderFront(nil)
+    NSApp.activate(ignoringOtherApps: true)
   }
 
   @MainActor
@@ -3709,14 +3775,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       }
     case .closeWebPane(let command):
       workspaceView?.closeWebPane(sessionId: command.sessionId)
+    case .setSidebarSessionFocusBorderHandoffHitTarget(let command):
+      /*
+       CDXC:SidebarSessionFocus 2026-06-29-02:13:
+       Native-host sidebar commands can arrive through AppDelegate, but the
+       focus-border handoff hit-target state belongs to ghostexRootView's
+       root-level mouse pre-dispatch path. Route through the root view instead
+       of duplicating that state on AppDelegate.
+       */
+      (window?.contentView as? ghostexRootView)?.setSidebarSessionFocusBorderHandoffHitTarget(
+        command.isSessionCard)
+    case .cancelSidebarSessionFocusBorderHandoff:
+      workspaceView?.cancelSidebarFocusBorderHandoff(reason: "nativeHostCommand.cancelled")
     case .focusTerminal(let command):
       workspaceView?.focusTerminal(sessionId: command.sessionId)
-    case .focusMountedTerminalSession(let command):
-      workspaceView?.focusMountedTerminalSession(
-        sessionId: command.sessionId,
-        reason: "nativeHostCommand")
-    case .setFocusedTerminalOwner(let command):
-      workspaceView?.setFocusedTerminalOwner(command)
     case .focusProjectEditorCompanionSession(let command):
       workspaceView?.focusProjectEditorCompanionSession(sessionId: command.sessionId)
     case .retargetProjectEditorCompanionSession(let command):
@@ -3971,6 +4043,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SPUU
       (window?.contentView as? ghostexRootView)?.closeTitlebarDropdownPanel()
     case .syncTitlebarKeepAwakeRuntime(let command):
       (window?.contentView as? ghostexRootView)?.syncTitlebarKeepAwakeRuntime(command)
+    case .runTitlebarKeepAwakeCommand(let command):
+      (window?.contentView as? ghostexRootView)?.runTitlebarKeepAwakeCommand(command)
     case .resizeTitlebarDropdownPanel(let command):
       (window?.contentView as? ghostexRootView)?.resizeTitlebarDropdownPanel(command)
     case .titlebarDropdownPanelReady(let command):
@@ -6021,10 +6095,14 @@ private final class NativeSettingsStore {
     }
     let enabled = settings["appShotsEnabled"] as? Bool ?? false
     let rawHotkey = settings["appShotsHotkey"] as? String
-    let hotkey =
-      rawHotkey == "double-left-shift" || rawHotkey == "double-left-option"
-      ? rawHotkey!
-      : "both-command"
+    let supportedHotkeys: Set<String> = [
+      "both-command",
+      "both-shift",
+      "both-option",
+      "double-left-shift",
+      "double-left-option",
+    ]
+    let hotkey = rawHotkey.flatMap { supportedHotkeys.contains($0) ? $0 : nil } ?? "both-command"
     return NativeAppShotsSettings(enabled: enabled, hotkey: hotkey)
   }
 
@@ -6469,8 +6547,13 @@ final class ghostexRootView: NSView {
    light centering, and the React titlebar bundle agree on the same top chrome.
    */
   private static let reactTitlebarHeight: CGFloat = ghostexAppTitlebarHeight
-  private static let sidebarMinWidth: CGFloat = 220
-  private static let combinedSidebarMinWidthReduction: CGFloat = 70
+  /**
+   CDXC:SidebarLayout 2026-06-29-02:13:
+   The macOS sidebar should not resize below 230px after adding the five icon
+   shortcuts. Keep the native clamp at 230px so the shortcut row and Search
+   remain usable.
+   */
+  private static let sidebarMinWidth: CGFloat = 230
   private static let sidebarMaxWidth: CGFloat = 520
   /*
    CDXC:NativeSidebarChrome 2026-06-15-20:46:
@@ -6637,6 +6720,15 @@ final class ghostexRootView: NSView {
   private var sidebarWidth: CGFloat
   private var sidebarSide: SidebarSide = .left
   private var lastSidebarFirstResponderIntentAt: Date?
+  /*
+   CDXC:SidebarSessionFocus 2026-06-29-02:04:
+   The focused border can disappear before the sidebar focus command reaches
+   Swift because AppKit first reports SidebarWebView as first responder. Track
+   only whether React's pointer is currently over a real session row so the
+   pre-dispatch border handoff starts for session focus clicks, not other
+   sidebar controls.
+   */
+  private var sidebarSessionFocusBorderHandoffHitTarget = false
   private static let sidebarFirstResponderIntentWindow: TimeInterval = 1.0
 
   /**
@@ -6975,8 +7067,23 @@ final class ghostexRootView: NSView {
     }
     let point = convert(event.locationInWindow, from: nil)
     dismissSidebarContextMenuForOutsideClick(at: point)
-    if isInsideInteractiveSidebarContent(point) {
+    let isInsideSidebar = isInsideInteractiveSidebarContent(point)
+    let isSessionFocusBorderHandoffMouseDown =
+      Self.isSidebarSessionFocusBorderHandoffMouseDown(event)
+    let shouldBeginSidebarFocusBorderHandoff =
+      isInsideSidebar
+        && sidebarSessionFocusBorderHandoffHitTarget
+        && isSessionFocusBorderHandoffMouseDown
+    if isInsideSidebar {
+      if shouldBeginSidebarFocusBorderHandoff {
+        workspaceView.beginSidebarFocusBorderHandoff(reason: "sidebarSessionMouseDown")
+      } else {
+        workspaceView.cancelSidebarFocusBorderHandoff(reason: "sidebarMouseDown.notSessionFocus")
+      }
       markSidebarFirstResponderIntent(reason: "mouseDown")
+    } else {
+      setSidebarSessionFocusBorderHandoffHitTarget(false)
+      workspaceView.cancelSidebarFocusBorderHandoff(reason: "outsideSidebarMouseDown")
     }
   }
 
@@ -6998,8 +7105,22 @@ final class ghostexRootView: NSView {
     return !isSidebarCollapsed && !sidebarView.isHidden && sidebarView.frame.contains(pointInRoot)
   }
 
+  fileprivate func setSidebarSessionFocusBorderHandoffHitTarget(_ isSessionCard: Bool) {
+    guard sidebarSessionFocusBorderHandoffHitTarget != isSessionCard else {
+      return
+    }
+    sidebarSessionFocusBorderHandoffHitTarget = isSessionCard
+  }
+
   private func markSidebarFirstResponderIntent(reason: String) {
     lastSidebarFirstResponderIntentAt = Date()
+    /*
+     CDXC:SidebarSessionFocus 2026-06-29-02:04:
+     Sidebar session-card clicks intentionally let WebKit own first responder
+     briefly before the deferred native focus command runs. Mark recent sidebar
+     input so passive WKWebView hydration can still be distinguished from a real
+     click without relying on the removed persistent focus-border debug log.
+     */
     TerminalFocusDebugLog.append(
       event: "nativeFocusTrace.sidebarFirstResponderIntent",
       details: [
@@ -7092,6 +7213,19 @@ final class ghostexRootView: NSView {
     default:
       return false
     }
+  }
+
+  private static func isSidebarSessionFocusBorderHandoffMouseDown(_ event: NSEvent) -> Bool {
+    guard event.type == .leftMouseDown, event.clickCount <= 1 else {
+      return false
+    }
+    let disallowedModifierFlags: NSEvent.ModifierFlags = [
+      .command,
+      .control,
+      .option,
+      .shift,
+    ]
+    return event.modifierFlags.intersection(disallowedModifierFlags).isEmpty
   }
 
   private func noteSidebarContextMenuOpened() {
@@ -9215,6 +9349,32 @@ final class ghostexRootView: NSView {
       """)
   }
 
+  func runTitlebarKeepAwakeCommand(_ command: RunTitlebarKeepAwakeCommand) {
+    /*
+     CDXC:SidebarTopChrome 2026-06-29-01:43:
+     Sidebar top chrome now owns the visible Keep Awake menu, but the React titlebar still owns caffeinate start/stop state. Relay the compact sidebar command into the titlebar bridge instead of starting a second native runtime path.
+     */
+    guard command.action == "start" || command.action == "stop" else {
+      return
+    }
+    var payload: [String: Any] = [
+      "action": command.action
+    ]
+    if let durationMinutes = command.durationMinutes {
+      payload["durationMinutes"] = durationMinutes
+    }
+    guard let data = try? JSONSerialization.data(withJSONObject: payload),
+      let json = String(data: data, encoding: .utf8)
+    else {
+      return
+    }
+    titlebarChromeWebView.evaluateJavaScript(
+      """
+      window.__ghostex_TITLEBAR__?.runKeepAwakeCommand?.(\(json));
+      undefined;
+      """)
+  }
+
   func resizeTitlebarDropdownPanel(_ command: ResizeTitlebarDropdownPanel) {
     titlebarDropdownPanelController?.resize(
       kind: command.kind,
@@ -9671,14 +9831,12 @@ final class ghostexRootView: NSView {
         preservePersistenceSession: command.preservePersistenceSession == true)
     case .closeWebPane(let command):
       workspaceView.closeWebPane(sessionId: command.sessionId)
+    case .setSidebarSessionFocusBorderHandoffHitTarget(let command):
+      setSidebarSessionFocusBorderHandoffHitTarget(command.isSessionCard)
+    case .cancelSidebarSessionFocusBorderHandoff:
+      workspaceView.cancelSidebarFocusBorderHandoff(reason: "sidebarCommand.cancelled")
     case .focusTerminal(let command):
       focusWorkspaceSessionAfterSidebarActivation(sessionId: command.sessionId, kind: .terminal)
-    case .focusMountedTerminalSession(let command):
-      focusWorkspaceSessionAfterSidebarActivation(
-        sessionId: command.sessionId,
-        kind: .mountedTerminal)
-    case .setFocusedTerminalOwner(let command):
-      workspaceView.setFocusedTerminalOwner(command)
     case .focusProjectEditorCompanionSession(let command):
       focusWorkspaceSessionAfterSidebarActivation(
         sessionId: command.sessionId,
@@ -10006,6 +10164,8 @@ final class ghostexRootView: NSView {
       closeTitlebarDropdownPanel()
     case .syncTitlebarKeepAwakeRuntime(let command):
       syncTitlebarKeepAwakeRuntime(command)
+    case .runTitlebarKeepAwakeCommand(let command):
+      runTitlebarKeepAwakeCommand(command)
     case .resizeTitlebarDropdownPanel(let command):
       resizeTitlebarDropdownPanel(command)
     case .titlebarDropdownPanelReady(let command):
@@ -10068,15 +10228,12 @@ final class ghostexRootView: NSView {
   }
 
   private enum SidebarWorkspaceFocusKind {
-    case mountedTerminal
     case projectEditorCompanion
     case terminal
     case webPane
 
     var debugName: String {
       switch self {
-      case .mountedTerminal:
-        return "mountedTerminal"
       case .projectEditorCompanion:
         return "projectEditorCompanion"
       case .terminal:
@@ -10120,8 +10277,10 @@ final class ghostexRootView: NSView {
      CDXC:ProjectBoardFocus 2026-06-12-08:44:
      Deferred sidebar focus commands must lose to newer Project/Kanban editor input.
      Capture the project-editor focus-owner revision before queueing and skip dispatch/reinforcement if the editor reports focus after this command was requested, while still allowing deliberate session clicks when no newer board input occurs.
-     */
+    */
     guard !isFloatingPromptEditorActiveForUserInput else {
+      workspaceView.cancelSidebarFocusBorderHandoff(
+        reason: "sidebarFocusCommand.skipped.floatingPromptEditorActive")
       TerminalFocusDebugLog.append(
         event: "nativeFocusTrace.sidebarFocusCommandSkipped",
         details: [
@@ -10134,6 +10293,9 @@ final class ghostexRootView: NSView {
         ])
       return
     }
+    workspaceView.setSidebarFocusBorderHandoffTarget(
+      sessionId: sessionId,
+      reason: "sidebarFocusCommand.queued.\(kind.debugName)")
     TerminalFocusDebugLog.append(
       event: "nativeFocusTrace.sidebarFocusCommandQueued",
       details: [
@@ -10150,6 +10312,8 @@ final class ghostexRootView: NSView {
         return
       }
       guard !self.isFloatingPromptEditorActiveForUserInput else {
+        self.workspaceView.cancelSidebarFocusBorderHandoff(
+          reason: "sidebarFocusCommand.skipped.floatingPromptEditorActiveAfterQueue")
         TerminalFocusDebugLog.append(
           event: "nativeFocusTrace.sidebarFocusCommandSkipped",
           details: [
@@ -10167,6 +10331,8 @@ final class ghostexRootView: NSView {
       else {
         let latestProjectEditorFocusOwnerRevision =
           self.workspaceView.currentProjectEditorFocusOwnerRevision()
+        self.workspaceView.cancelSidebarFocusBorderHandoff(
+          reason: "sidebarFocusCommand.skipped.projectEditorFocusOwnerChangedAfterQueue")
         TerminalFocusDebugLog.append(
           event: "nativeFocusTrace.sidebarFocusCommandSkipped",
           details: [
@@ -10188,12 +10354,8 @@ final class ghostexRootView: NSView {
           "sessionId": sessionId,
           "webChromeFirstResponder": self.isWebChromeFirstResponder(),
           "workspaceSnapshotBeforeDispatch": self.workspaceView.activationDebugSnapshot(),
-        ])
+      ])
       switch kind {
-      case .mountedTerminal:
-        self.workspaceView.focusMountedTerminalSession(
-          sessionId: sessionId,
-          reason: "sidebarFocusCommand")
       case .projectEditorCompanion:
         self.workspaceView.focusProjectEditorCompanionSession(
           sessionId: sessionId,
@@ -10207,8 +10369,13 @@ final class ghostexRootView: NSView {
        CDXC:SidebarSessionFocus 2026-06-27-21:08:
        Direct sidebar focus should not pay the reinforcement cost when the
        target session already owns first responder. Keep the repair available
-       for WebKit/sidebar responder steals, but skip it on the successful fast
-       path so mounted-session switching settles immediately.
+       for WebKit/sidebar responder steals, but skip it when the target already
+       owns AppKit focus.
+
+       CDXC:SidebarSessionFocus 2026-06-29-02:04:
+       Sidebar session-card clicks now rely on the native border handoff for
+       visual continuity while the standard focus command runs. Keep this as a
+       narrow first-responder repair only.
        */
       let shouldReinforceImmediately =
         !self.workspaceView.isWorkspaceFocusOwnedBySession(sessionId)
@@ -12697,11 +12864,12 @@ final class ghostexRootView: NSView {
 
   private func currentSidebarMinWidth() -> CGFloat {
     /**
-     CDXC:SidebarLayout 2026-05-13-08:11
-     Combined is the only supported sidebar layout, so the native resize floor
-     permanently uses the rail-free width that used to belong to combined mode.
+     CDXC:SidebarLayout 2026-06-29-02:13:
+     Combined is the only supported sidebar layout, and its user-resizable
+     native width now floors at the shared 230px sidebar minimum instead of
+     applying the old combined-mode reduction.
      */
-    return Self.sidebarMinWidth - Self.combinedSidebarMinWidthReduction
+    return Self.sidebarMinWidth
   }
 
   private func currentWorkspaceBarWidth() -> CGFloat {

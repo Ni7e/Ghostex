@@ -300,6 +300,7 @@ import {
   getSidebarTitlebarForegroundForBackground,
   isDiagnosticLoggingScenarioEnabled,
   normalizeghostexSettings,
+  type KeepAwakeDurationMinutes,
   type SessionTitleGenerationAgent,
   type SidebarSide,
   type DiagnosticLoggingScenarioId,
@@ -499,18 +500,22 @@ type NativeHostCommand =
       type: "closeTerminal";
     }
   | { sessionId: string; type: "closeWebPane" }
-  | { sessionId: string; type: "focusTerminal" }
   | {
       /*
-       * CDXC:SidebarSessionFocus 2026-06-27-22:54:
-       * Mounted terminal sidebar switches use one native command so Swift can
-       * update tab ownership, move AppKit focus, and repaint the focused border
-       * after first responder is confirmed. Splitting this into focus plus
-       * owner repaint creates a visible active-border flash.
+       * CDXC:SidebarSessionFocus 2026-06-29-02:04:
+       * Session-card hover tells Swift whether a pre-dispatch sidebar mouseDown should preserve the current focused-pane border. This keeps the AppKit sidebar-responder gap fix scoped to real session-row focus clicks instead of all sidebar chrome.
        */
-      sessionId: string;
-      type: "focusMountedTerminalSession";
+      isSessionCard: boolean;
+      type: "setSidebarSessionFocusBorderHandoffHitTarget";
     }
+  | {
+      /*
+       * CDXC:SidebarSessionFocus 2026-06-29-02:04:
+       * React cancels the candidate handoff when pointerDown resolves to a child control, modified click, or context-menu path, so native does not delay border removal for non-session focus interactions.
+       */
+      type: "cancelSidebarSessionFocusBorderHandoff";
+    }
+  | { sessionId: string; type: "focusTerminal" }
   | {
       /**
        * CDXC:ProjectEditorCompanion 2026-06-13-22:39:
@@ -610,17 +615,6 @@ type NativeHostCommand =
       requestId: string;
       sessionName: string;
       type: "checkPersistenceSession";
-    }
-  | {
-      /*
-       * CDXC:SidebarSessionFocus 2026-06-27-22:54:
-       * This owner-only command remains for compatibility and targeted
-       * diagnostics. The normal mounted sidebar switch path uses
-       * focusMountedTerminalSession so native owner selection and AppKit focus
-       * repaint in one phase.
-       */
-      sessionId: string;
-      type: "setFocusedTerminalOwner";
     }
   | {
 	      activeSessionIds: string[];
@@ -937,6 +931,12 @@ type NativeHostCommand =
   | { target: "editor" | "terminalLinks" | "scriptRunner" | "all"; type: "setOSIntegrationDefaults" }
   | { type: "requestOSIntegrationStatus" }
   | { type: "openExternalUrl"; url: string }
+  | {
+      action: "start";
+      durationMinutes: KeepAwakeDurationMinutes;
+      type: "runTitlebarKeepAwakeCommand";
+    }
+  | { action: "stop"; type: "runTitlebarKeepAwakeCommand" }
   | { type: "openWorkspaceInFinder"; workspacePath: string }
   | {
       targetApp: WorkspaceIdeTargetApp;
@@ -2292,6 +2292,7 @@ let activeProjectId = restoredProjectState.activeProjectId;
 let remoteRecentProjects = readStoredRemoteRecentProjects();
 let revision = 0;
 let lastPublishedSidebarMessage: SidebarHydrateMessage | undefined;
+let lastSidebarFocusProjectionDebugKey: string | undefined;
 let nextNativeLayoutFocusRequestId = 0;
 let pendingNativeLayoutFocusRequest:
   | { reason: string; requestId: number; sessionId: string }
@@ -5747,12 +5748,10 @@ function isTerminalFocusDebugCommand(command: NativeHostCommand): boolean {
     command.type === "createTerminal" ||
     command.type === "createWebPane" ||
     command.type === "focusTerminal" ||
-    command.type === "focusMountedTerminalSession" ||
     command.type === "focusProjectEditorCompanionSession" ||
     command.type === "retargetProjectEditorCompanionSession" ||
     command.type === "focusWebPane" ||
     command.type === "sendTerminalEnter" ||
-    command.type === "setFocusedTerminalOwner" ||
     command.type === "setActiveTerminalSet" ||
     command.type === "setTerminalLayout" ||
     command.type === "setTerminalVisibility" ||
@@ -5985,27 +5984,6 @@ function postNativeFocusTerminalForCurrentIntent(
     return;
   }
   postNative({ sessionId: nativeSessionId, type: "focusTerminal" });
-}
-
-function postNativeFocusMountedTerminalForCurrentIntent(
-  nativeSessionId: string,
-  intent: NativeSidebarFocusIntent | undefined,
-  reason: string,
-): void {
-  if (!isNativeSidebarFocusIntentCurrent(intent)) {
-    appendTerminalFocusDebugLog("nativeFocusTrace.sidebarFocusIntentStaleSkipped", {
-      latestProjectId: latestNativeSidebarFocusIntent?.projectId,
-      latestRequestId: latestNativeSidebarFocusIntent?.requestId,
-      latestSessionId: latestNativeSidebarFocusIntent?.sessionId,
-      nativeSessionId,
-      projectId: intent?.projectId,
-      reason,
-      requestId: intent?.requestId,
-      sessionId: intent?.sessionId,
-    });
-    return;
-  }
-  postNative({ sessionId: nativeSessionId, type: "focusMountedTerminalSession" });
 }
 
 function postNativeFocusProjectEditorCompanionForCurrentIntent(
@@ -17065,12 +17043,64 @@ function commandsPanelRestoreSessionId(project: NativeProject): string | undefin
   return rememberedWorkspaceTerminal(project);
 }
 
-function agentsModeFocusSessionIdForProject(project: NativeProject): string | undefined {
+type AgentsModeFocusSessionSource =
+  | "focusedT3CompanionSession"
+  | "focusedWorkspaceSession"
+  | "rememberedWorkspaceTerminal";
+
+type AgentsModeFocusSessionTarget = {
+  sessionId: string;
+  source: AgentsModeFocusSessionSource;
+};
+
+function focusedT3CompanionSessionIdForAgentsMode(project: NativeProject): string | undefined {
+  const surfaceState = projectEditorSurfaceByProjectId.get(project.projectId);
+  if (
+    surfaceState?.isOpen !== true ||
+    surfaceState.isSleeping === true ||
+    project.projectEditorCompanionPaneHidden === true
+  ) {
+    return undefined;
+  }
+  const sessionId = focusedWorkspaceSessionIdForProject(project);
+  if (!sessionId) {
+    return undefined;
+  }
+  const session = findSessionRecordInProject(project, sessionId);
+  return session?.kind === "t3" ? sessionId : undefined;
+}
+
+function agentsModeFocusSessionTargetForProject(
+  project: NativeProject,
+): AgentsModeFocusSessionTarget | undefined {
   /*
    * CDXC:CommandsPanel 2026-06-16-08:19:
    * Explicit Agents-mode navigation after using Source, Browser, or Kanban should restore keyboard focus to the last real workspace terminal, not to a command-pane terminal or whichever sidebar session was selected for the project-editor companion.
+   *
+   * CDXC:ModeSwitcher 2026-06-29-01:53:
+   * A visible T3 Code companion pane is the selected workspace session, not transient editor chrome. When leaving Source, Browser, Project, or Docs for Agents, preserve that focused T3 pane before falling back to remembered terminal focus so Agents mode does not switch users away from the code session they were using.
    */
-  return rememberedWorkspaceTerminal(project) ?? focusedWorkspaceSessionIdForProject(project);
+  const focusedT3CompanionSessionId = focusedT3CompanionSessionIdForAgentsMode(project);
+  if (focusedT3CompanionSessionId) {
+    return {
+      sessionId: focusedT3CompanionSessionId,
+      source: "focusedT3CompanionSession",
+    };
+  }
+  const rememberedTerminalSessionId = rememberedWorkspaceTerminal(project);
+  if (rememberedTerminalSessionId) {
+    return {
+      sessionId: rememberedTerminalSessionId,
+      source: "rememberedWorkspaceTerminal",
+    };
+  }
+  const focusedWorkspaceSessionId = focusedWorkspaceSessionIdForProject(project);
+  return focusedWorkspaceSessionId
+    ? {
+        sessionId: focusedWorkspaceSessionId,
+        source: "focusedWorkspaceSession",
+      }
+    : undefined;
 }
 
 function shouldRestoreSessionFocusAfterCommandsPanelHide(project: NativeProject): boolean {
@@ -19346,6 +19376,132 @@ function setPortlessEnabledFromSetupPrompt(
   });
 }
 
+type SidebarFocusProjectionDebugRow = {
+  groupId: string;
+  isActiveGroup: boolean;
+  isExpectedSession: boolean;
+  isFocused: boolean;
+  isVisible: boolean;
+  projectId?: string;
+  sessionId: string;
+};
+
+function maybeLogSidebarFocusProjectionDebug(input: {
+  groups: readonly SidebarSessionGroup[];
+  hasGxserverPresentation: boolean;
+  localGroupCount: number;
+  project: NativeProject;
+  remoteGroupCount: number;
+  snapshot: SessionGridSnapshot;
+}): void {
+  const expectedFocusedSessionId = input.snapshot.focusedSessionId;
+  const rows = createSidebarFocusProjectionDebugRows(
+    input.groups,
+    input.project.projectId,
+    expectedFocusedSessionId,
+  );
+  const expectedRows = rows.filter((row) => row.isExpectedSession);
+  const expectedVisibleRows = expectedRows.filter((row) => row.isVisible);
+  const focusedRows = rows.filter((row) => row.isFocused);
+  const focusedExpectedRows = focusedRows.filter((row) => row.isExpectedSession);
+  const focusedUnexpectedRows = focusedRows.filter((row) => !row.isExpectedSession);
+  const visibleFocusedRows = focusedRows.filter((row) => row.isVisible);
+  const mismatchReason =
+    expectedFocusedSessionId &&
+    expectedVisibleRows.length > 0 &&
+    focusedExpectedRows.length === 0
+      ? "expected-visible-row-not-focused"
+      : focusedUnexpectedRows.some((row) => row.isVisible)
+        ? "unexpected-visible-row-focused"
+        : undefined;
+  const debugKey = JSON.stringify({
+    activeGroupId: input.project.workspace.activeGroupId,
+    activeProjectId: input.project.projectId,
+    expectedFocusedSessionId,
+    expectedVisibleRowCount: expectedVisibleRows.length,
+    focusedRowIds: focusedRows.map((row) => row.sessionId),
+    hasGxserverPresentation: input.hasGxserverPresentation,
+    mismatchReason,
+    visibleFocusedRowIds: visibleFocusedRows.map((row) => row.sessionId),
+  });
+  if (!mismatchReason && debugKey === lastSidebarFocusProjectionDebugKey) {
+    return;
+  }
+  lastSidebarFocusProjectionDebugKey = debugKey;
+  /*
+  CDXC:SidebarSessionFocus 2026-06-29-03:03:
+  Cmd+number hotkeys and native pane-tab clicks can update workspace focus without the sidebar row showing focused. Log the already-built hydrate projection so support can compare the expected workspace focus target with the actual `isFocused` rows before React renders, using only stable ids, counts, booleans, and visibility flags.
+  */
+  appendSidebarRefreshDebugLog(
+    mismatchReason
+      ? "nativeSidebar.focusProjection.mismatch"
+      : "nativeSidebar.focusProjection.changed",
+    {
+      activeGroupId: input.project.workspace.activeGroupId,
+      activeProjectId: input.project.projectId,
+      expectedFocusedSessionId,
+      expectedProjectedRowCount: expectedRows.length,
+      expectedVisibleRowCount: expectedVisibleRows.length,
+      focusedExpectedRowCount: focusedExpectedRows.length,
+      focusedRowCount: focusedRows.length,
+      focusedRows,
+      focusedUnexpectedRowCount: focusedUnexpectedRows.length,
+      hasGxserverPresentation: input.hasGxserverPresentation,
+      localGroupCount: input.localGroupCount,
+      mismatchReason,
+      remoteGroupCount: input.remoteGroupCount,
+      totalRowCount: rows.length,
+      visibleFocusedRowCount: visibleFocusedRows.length,
+    },
+  );
+}
+
+function createSidebarFocusProjectionDebugRows(
+  groups: readonly SidebarSessionGroup[],
+  activeProjectIdForFocus: string,
+  expectedFocusedSessionId: string | undefined,
+): SidebarFocusProjectionDebugRow[] {
+  return groups.flatMap((group) => {
+    const groupProjectId = group.projectContext?.editor.projectId;
+    return group.sessions.map((session) => ({
+      groupId: group.groupId,
+      isActiveGroup: group.isActive === true,
+      isExpectedSession: isExpectedSidebarFocusProjectionSession(
+        session.sessionId,
+        groupProjectId,
+        activeProjectIdForFocus,
+        expectedFocusedSessionId,
+      ),
+      isFocused: session.isFocused === true,
+      isVisible: session.isVisible === true,
+      projectId: groupProjectId,
+      sessionId: session.sessionId,
+    }));
+  });
+}
+
+function isExpectedSidebarFocusProjectionSession(
+  sidebarSessionId: string,
+  groupProjectId: string | undefined,
+  activeProjectIdForFocus: string,
+  expectedFocusedSessionId: string | undefined,
+): boolean {
+  if (!expectedFocusedSessionId) {
+    return false;
+  }
+  if (sidebarSessionId === expectedFocusedSessionId && groupProjectId === activeProjectIdForFocus) {
+    return true;
+  }
+  const combinedReference = parseCombinedProjectSessionId(sidebarSessionId);
+  if (combinedReference) {
+    return (
+      combinedReference.projectId === activeProjectIdForFocus &&
+      combinedReference.sessionId === expectedFocusedSessionId
+    );
+  }
+  return sidebarSessionId === expectedFocusedSessionId && groupProjectId === undefined;
+}
+
 function buildSidebarMessage(): SidebarHydrateMessage {
   const project = activeProject();
   const snapshot = activeSnapshot();
@@ -19353,6 +19509,15 @@ function buildSidebarMessage(): SidebarHydrateMessage {
     createPresentationSidebarGroups(gxserverStartupSnapshot?.presentation) ??
     createGxserverUnavailableSidebarGroups();
   const remoteGroups = createRemotePresentationSidebarGroups();
+  const groups = [...localGroups, ...remoteGroups];
+  maybeLogSidebarFocusProjectionDebug({
+    groups,
+    hasGxserverPresentation: gxserverStartupSnapshot?.presentation !== undefined,
+    localGroupCount: localGroups.length,
+    project,
+    remoteGroupCount: remoteGroups.length,
+    snapshot,
+  });
   /**
    * CDXC:NativeSidebar 2026-04-27-17:03
    * Native sidebar editor checks must stay aligned with the shipped UX. Keep
@@ -19360,7 +19525,7 @@ function buildSidebarMessage(): SidebarHydrateMessage {
    * passing them to shared sidebar HUD creation.
    */
   return {
-    groups: [...localGroups, ...remoteGroups],
+    groups,
     hud: {
       ...createSidebarHudState(
         snapshot,
@@ -19908,70 +20073,6 @@ function publishTitlebarModeSwitchAfterNativeFocus(): void {
     pendingTitlebarModeSwitchPublishTimeout = undefined;
     publish({ nativeLayoutBeforeSidebarHydrate: true });
   }, 0);
-}
-
-function updateLastPublishedSidebarFocusCache(focusedSessionId: string): void {
-  /*
-   * CDXC:SidebarSessionFocus 2026-06-27-21:08:
-   * The mounted-terminal fast path intentionally skips the full sidebar hydrate
-   * after local React focus. Keep the host's last published snapshot aligned
-   * with the focused row so later sidebar patch messages do not revive an old
-   * isFocused flag from the cached pre-click hydrate.
-   */
-  if (!lastPublishedSidebarMessage) {
-    return;
-  }
-  const focusedSidebarSessionIds = new Set([
-    focusedSessionId,
-    projectScopedSidebarSessionId(activeProjectId, focusedSessionId),
-  ]);
-  let didChange = false;
-  let focusedSessionTitle = lastPublishedSidebarMessage.hud.focusedSessionTitle;
-  const nextGroups = lastPublishedSidebarMessage.groups.map((group) => {
-    let didChangeGroup = false;
-    const nextSessions = group.sessions.map((session) => {
-      const isFocused = focusedSidebarSessionIds.has(session.sessionId);
-      if (isFocused) {
-        focusedSessionTitle =
-          session.displayTitle ??
-          session.primaryTitle ??
-          session.terminalTitle ??
-          session.alias ??
-          focusedSessionTitle;
-      }
-      if (session.isFocused === isFocused) {
-        return session;
-      }
-      didChange = true;
-      didChangeGroup = true;
-      return {
-        ...session,
-        isFocused,
-        isVisible: isFocused ? true : session.isVisible,
-      };
-    });
-    if (!didChangeGroup) {
-      return group;
-    }
-    return {
-      ...group,
-      sessions: nextSessions,
-    };
-  });
-  if (!didChange && focusedSessionTitle === lastPublishedSidebarMessage.hud.focusedSessionTitle) {
-    return;
-  }
-  lastPublishedSidebarMessage = {
-    ...lastPublishedSidebarMessage,
-    groups: didChange ? nextGroups : lastPublishedSidebarMessage.groups,
-    hud:
-      focusedSessionTitle === lastPublishedSidebarMessage.hud.focusedSessionTitle
-        ? lastPublishedSidebarMessage.hud
-        : {
-            ...lastPublishedSidebarMessage.hud,
-            focusedSessionTitle,
-          },
-  };
 }
 
 function ensureActiveWorkspaceVirtualPaneTabs(reason: string): boolean {
@@ -26321,35 +26422,23 @@ function focusTerminal(
       startedAt: Date.now(),
     });
   }
-  const canUseImmediateWorkspaceTerminalFocus =
-    options.forceNativeLayoutSync !== true &&
-    activeProjectId === reference.project.projectId &&
-    sessionRecord?.kind === "terminal" &&
-    terminalState !== undefined &&
-    !wasSleepingTerminal &&
-    !shouldKeepProjectEditorOpen &&
-    !isCommandPanelFocusTarget &&
-    projectEditorSurfaceByProjectId.get(reference.project.projectId)?.isOpen !== true &&
-    isCurrentWorkspaceNativeFocusTarget(activeSnapshot(), reference.sessionId);
-  if (shouldPersistNativeSessionAccessTimestamp && !canUseImmediateWorkspaceTerminalFocus) {
+  if (shouldPersistNativeSessionAccessTimestamp) {
     persistNativeSessionLifecycleTimestamps(reference.project.projectId, reference.sessionId, {
       lastAccessedAt: nativeSessionAccessedAt,
     });
   }
-  if (!canUseImmediateWorkspaceTerminalFocus) {
-    appendSidebarWakeScrollDebugLog("nativeFocusStart", {
-      focusTraceRequestId: sidebarCardFocusTrace?.requestId,
-      hadRecentSidebarCardFocusTrace: sidebarCardFocusTrace !== undefined,
-      hadNativeTerminalStateBefore: terminalState !== undefined,
-      requestedSessionId: sessionId,
-      resolvedProjectId: reference.project.projectId,
-      resolvedSessionId: reference.sessionId,
-      shouldKeepProjectEditorOpen,
-      wasSleepingTerminal,
-      ...summarizeSidebarWakeScrollNativeState(reference.project, reference.sessionId),
-    });
-  }
-  if (isZmxPersistenceSession && !canUseImmediateWorkspaceTerminalFocus) {
+  appendSidebarWakeScrollDebugLog("nativeFocusStart", {
+    focusTraceRequestId: sidebarCardFocusTrace?.requestId,
+    hadRecentSidebarCardFocusTrace: sidebarCardFocusTrace !== undefined,
+    hadNativeTerminalStateBefore: terminalState !== undefined,
+    requestedSessionId: sessionId,
+    resolvedProjectId: reference.project.projectId,
+    resolvedSessionId: reference.sessionId,
+    shouldKeepProjectEditorOpen,
+    wasSleepingTerminal,
+    ...summarizeSidebarWakeScrollNativeState(reference.project, reference.sessionId),
+  });
+  if (isZmxPersistenceSession) {
     appendZmxPersistenceFocusReproLog("nativeSidebar.zmxPersistenceFocus.requested", {
       activeProjectId,
       activeSnapshotFocusedSessionId: activeSnapshot().focusedSessionId,
@@ -26371,21 +26460,19 @@ function focusTerminal(
       visibleSessionIdsBefore: activeSnapshot().visibleSessionIds,
     });
   }
-  if (!canUseImmediateWorkspaceTerminalFocus) {
-    appendTerminalFocusDebugLog("nativeFocusTrace.sidebarFocusTerminalStart", {
-      activeProjectId,
-      activeSnapshotFocusedSessionId: activeSnapshot().focusedSessionId,
-      commandPanelContainsSession: isCommandPanelFocusTarget,
-      focusTargetBefore: summarizeFocusTargetBefore(),
-      projectEditorIsOpen:
-        projectEditorSurfaceByProjectId.get(reference.project.projectId)?.isOpen === true,
-      forceNativeLayoutSync: options.forceNativeLayoutSync === true,
-      requestedSessionId: sessionId,
-      resolvedProjectId: reference.project.projectId,
-      resolvedSessionId: reference.sessionId,
-      sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
-    }, { force: forceSidebarCardFocusTrace });
-  }
+  appendTerminalFocusDebugLog("nativeFocusTrace.sidebarFocusTerminalStart", {
+    activeProjectId,
+    activeSnapshotFocusedSessionId: activeSnapshot().focusedSessionId,
+    commandPanelContainsSession: isCommandPanelFocusTarget,
+    focusTargetBefore: summarizeFocusTargetBefore(),
+    projectEditorIsOpen:
+      projectEditorSurfaceByProjectId.get(reference.project.projectId)?.isOpen === true,
+    forceNativeLayoutSync: options.forceNativeLayoutSync === true,
+    requestedSessionId: sessionId,
+    resolvedProjectId: reference.project.projectId,
+    resolvedSessionId: reference.sessionId,
+    sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
+  }, { force: forceSidebarCardFocusTrace });
   if (activeProjectId !== reference.project.projectId) {
     focusProject(reference.project.projectId);
   }
@@ -26461,9 +26548,7 @@ function focusTerminal(
       ? focusSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot
       : focusSidebarSessionInSimpleWorkspace(workspace, reference.sessionId).snapshot,
   );
-  const shouldUseImmediateWorkspaceTerminalFocus =
-    canUseImmediateWorkspaceTerminalFocus && !shouldRestoreProjectModeAfterFocus;
-  if (!shouldKeepProjectEditorOpen && !shouldUseImmediateWorkspaceTerminalFocus) {
+  if (!shouldKeepProjectEditorOpen) {
     queueNativeLayoutFocusRequest(reference.sessionId, "focusTerminal");
   }
   if (shouldRestoreProjectModeAfterFocus) {
@@ -26473,73 +26558,6 @@ function focusTerminal(
     reference.project.projectId,
     reference.sessionId,
   );
-  if (shouldUseImmediateWorkspaceTerminalFocus) {
-    /*
-     * CDXC:SidebarSessionFocus 2026-06-27-22:54:
-     * A mounted workspace terminal already known to the current native layout
-     * can switch through one combined native focus command. Do not queue a
-     * layout focus request for the same click; that makes setActiveTerminalSet
-     * run the focus/border/zmx path again and delays the visible switch.
-     */
-    postNativeFocusMountedTerminalForCurrentIntent(
-      nativeFocusSessionId,
-      focusIntent,
-      "focus-mounted-terminal-direct-fast",
-    );
-    if (shouldPersistNativeSessionAccessTimestamp) {
-      persistNativeSessionLifecycleTimestamps(reference.project.projectId, reference.sessionId, {
-        lastAccessedAt: nativeSessionAccessedAt,
-      });
-    }
-    const didAcknowledgeAttention = acknowledgeNativeTerminalAttention(
-      reference.sessionId,
-      "sidebar-focus",
-    );
-    const focusTargetAfter = summarizeSidebarSessionFocusTarget(activeProject(), reference.sessionId);
-    appendSidebarWakeScrollDebugLog("nativeFocusDirectTerminalFastPath", {
-      didAcknowledgeAttention,
-      focusTraceRequestId: sidebarCardFocusTrace?.requestId,
-      requestedSessionId: sessionId,
-      resolvedProjectId: reference.project.projectId,
-      resolvedSessionId: reference.sessionId,
-      skippedNativeLayoutFocusRequest: true,
-      ...summarizeSidebarWakeScrollNativeState(activeProject(), reference.sessionId),
-    });
-    appendTerminalFocusDebugLog("nativeFocusTrace.sidebarFocusTerminalPostState", {
-      activeProjectId,
-      focusTargetAfter,
-      focusedSessionId: activeSnapshot().focusedSessionId,
-      isProjectEditorCompanionPath: false,
-      nativeSessionId: nativeFocusSessionId,
-      requestedSessionId: sessionId,
-      resolvedSessionId: reference.sessionId,
-      sidebarCardFocusTrace: summarizeSidebarCardFocusTrace(sidebarCardFocusTrace),
-      sessionKind: sessionRecord?.kind,
-      visibleSessionIds: activeSnapshot().visibleSessionIds,
-    }, { force: forceSidebarCardFocusTrace });
-    if (isZmxPersistenceSession) {
-      appendZmxPersistenceFocusReproLog("nativeSidebar.zmxPersistenceFocus.afterFastNativeFocus", {
-        activeProjectId,
-        focusedSessionId: activeSnapshot().focusedSessionId,
-        focusTargetAfter,
-        nativeSessionId: nativeFocusSessionId,
-        resolvedProjectId: reference.project.projectId,
-        resolvedSessionId: reference.sessionId,
-        sessionPersistenceName,
-        sessionPersistenceProvider,
-      });
-    }
-    /*
-     * CDXC:SidebarSessionFocus 2026-06-27-21:08:
-     * A mounted terminal focus click already updated React local focus and the
-     * combined native focus command updates Swift's selected tab owner. Do not
-     * run the deferred publish here: rebuilding a 130-session hydrate and
-     * posting setActiveTerminalSet is the laggy work this path is meant to
-     * avoid.
-     */
-    updateLastPublishedSidebarFocusCache(reference.sessionId);
-    return;
-  }
   const focusTargetAfter = summarizeSidebarSessionFocusTarget(activeProject(), reference.sessionId);
   appendSidebarWakeScrollDebugLog("nativeFocusStateUpdated", {
     focusTraceRequestId: sidebarCardFocusTrace?.requestId,
@@ -27719,7 +27737,9 @@ function focusNativeHotkeyDirection(
       },
     );
     lastNativeFocusedSidebarSessionId = renderedPaneTarget.sessionId;
-    handleNativePaneTabSelected(renderedPaneTarget.sessionId);
+    handleNativePaneTabSelected(renderedPaneTarget.sessionId, {
+      focusSleepingPlaceholderReason: "focusDirectionHotkey",
+    });
     return;
   }
   const result = focusVisibleDirectionInSimpleWorkspace(activeProject().workspace, direction);
@@ -41727,23 +41747,22 @@ function openAgentsModeFromTitlebar(): void {
    * Agents mode is the explicit place to restore the last focused workspace terminal after Source/Browser/Kanban or Commands-panel interactions. Resolve that terminal before deactivating the project-editor surface so the layout focus request targets the terminal the user last used.
    *
    * CDXC:ModeSwitcher 2026-06-28-01:44:
-   * Source-to-Agents and other project-editor-to-Agents clicks must not reuse
-   * the mounted-terminal fast path before native receives activeProjectEditorId
-   * nil. Force one native layout sync only when the project editor was open;
-   * ordinary Agents session switches keep the instant mounted-terminal path.
+   * Source-to-Agents and other project-editor-to-Agents clicks must send one
+   * native layout sync after activeProjectEditorId is nil. Force that sync only
+   * when the project editor was open; ordinary Agents session switches use the
+   * standard session-focus path.
    */
-  const focusSessionId = agentsModeFocusSessionIdForProject(project);
+  const focusSessionTarget = agentsModeFocusSessionTargetForProject(project);
   const shouldForceAgentsNativeLayoutSync = surfaceState?.isOpen === true;
   activateWorkspaceSurfaceForProject(project.projectId);
-  if (focusSessionId) {
-    focusTerminal(createCombinedProjectSessionId(project.projectId, focusSessionId), {
+  if (focusSessionTarget) {
+    focusTerminal(createCombinedProjectSessionId(project.projectId, focusSessionTarget.sessionId), {
       forceNativeLayoutSync: shouldForceAgentsNativeLayoutSync,
     });
     appendModeSwitcherDebugLog("titlebarModeSwitch.sidebarAgentsHandlerDone", {
       elapsedMs: performance.now() - startedAtMs,
       focusRequestQueued: true,
-      focusSessionSource:
-        rememberedWorkspaceTerminal(project) === focusSessionId ? "rememberedWorkspaceTerminal" : "focusedWorkspaceSession",
+      focusSessionSource: focusSessionTarget.source,
       projectId: project.projectId,
       targetMode: "agents",
     });
@@ -44047,6 +44066,24 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
     case "openExternalUrl":
       openNativeExternalUrl(message.url);
       return;
+    case "runTitlebarKeepAwakeCommand":
+      /*
+       * CDXC:SidebarTopChrome 2026-06-29-01:43:
+       * The moved sidebar Keep Awake dropdown should reuse the titlebar runtime bridge so one owner starts/stops caffeinate and syncs the runtime across titlebar webviews.
+       */
+      if (message.action === "start") {
+        postNative({
+          action: "start",
+          durationMinutes: message.durationMinutes,
+          type: "runTitlebarKeepAwakeCommand",
+        });
+      } else {
+        postNative({
+          action: "stop",
+          type: "runTitlebarKeepAwakeCommand",
+        });
+      }
+      return;
     case "pickWorkspaceFolder":
       postNative({ type: "pickWorkspaceFolder" });
       return;
@@ -44133,6 +44170,17 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
       return;
     case "toggleSidebarCollapsed":
       toggleSidebarCollapsed();
+      return;
+    case "setSidebarSessionFocusBorderHandoffHitTarget":
+      postNative({
+        isSessionCard: message.isSessionCard,
+        type: "setSidebarSessionFocusBorderHandoffHitTarget",
+      });
+      return;
+    case "cancelSidebarSessionFocusBorderHandoff":
+      postNative({
+        type: "cancelSidebarSessionFocusBorderHandoff",
+      });
       return;
     case "sidebarContextMenuOpened":
       postNative({ type: "sidebarContextMenuOpened" });
@@ -45731,14 +45779,25 @@ function syncNativeLayout(
           ...(layout ? { workspaceLayout: layout } : {}),
         }
       : undefined;
+  const pendingFocusSessionId = pendingNativeLayoutFocusRequest?.sessionId;
+  const activeWorkspacePaneOwnerSessionIds = new Set(
+    collectActivePaneOwnerSessionIds(snapshot.paneLayout, {
+      validSessionIds: visibleSidebarSessionIds,
+    }),
+  );
   const shouldConsumeFocusRequest =
-    pendingNativeLayoutFocusRequest !== undefined &&
-    ((pendingNativeLayoutFocusRequest.sessionId === snapshot.focusedSessionId &&
-      visibleSessions.some((session) => session.sessionId === pendingNativeLayoutFocusRequest?.sessionId)) ||
-      (pendingNativeLayoutFocusRequest.sessionId === commandsPanel.activeSessionId &&
-        commandPanelVisibleSessions.some(
-          (session) => session.sessionId === pendingNativeLayoutFocusRequest?.sessionId,
-        )));
+    pendingFocusSessionId !== undefined &&
+    ((pendingFocusSessionId === snapshot.focusedSessionId &&
+      visibleSidebarSessionIds.has(pendingFocusSessionId)) ||
+      /*
+       * CDXC:SleepingPanePlaceholders 2026-06-29-03:59:
+       * Selecting a sleeping workspace placeholder keeps focusedSessionId on the last awake runtime owner, but paneLayout.activeSessionId moves to the sleeping pane.
+       * Consume explicit Cmd+Opt+Arrow focus requests for that active pane owner so Swift receives focusRequestSessionId and makes the "Press Any Key to Wake" placeholder first responder without waking it.
+       */
+      (activeWorkspacePaneOwnerSessionIds.has(pendingFocusSessionId) &&
+        visibleSidebarSessionIds.has(pendingFocusSessionId)) ||
+      (pendingFocusSessionId === commandsPanel.activeSessionId &&
+        commandPanelVisibleSessionIds.has(pendingFocusSessionId)));
   const focusRequestId = shouldConsumeFocusRequest
     ? pendingNativeLayoutFocusRequest?.requestId
     : undefined;
@@ -46874,11 +46933,7 @@ function formatNativeAppShotPrompt(
     appShot.windowWidth && appShot.windowHeight
       ? `${Math.round(appShot.windowWidth)} x ${Math.round(appShot.windowHeight)} px`
       : undefined;
-  const lines = [
-    `App shot from ${appName}.`,
-    "",
-    `[Image #1](${appShot.imagePath})`,
-  ];
+  const lines = [`[Image #1](${appShot.imagePath})`];
   const metadata = [
     `App: ${appName}`,
     bundleIdentifier ? `Bundle ID: ${bundleIdentifier}` : undefined,
@@ -46888,12 +46943,14 @@ function formatNativeAppShotPrompt(
   /*
   CDXC:AppShots 2026-06-15-02:01:
   App Shot prompts should be instant screenshot context with cheap window metadata only. Do not include OCR, Accessibility tree text, or other app-content extraction in the agent prompt.
+
+  CDXC:AppShots 2026-06-29-02:59:
+  App Shot prompt text should paste only the image link by default, with no intro sentence, no closing instruction, no blank spacer lines, and one newline of padding before and after. Add WindowServer metadata only when the Settings App Shots metadata toggle is enabled.
   */
-  if (metadata.length) {
-    lines.push("", "Metadata:", "", ...metadata);
+  if (settings.appShotsMetadataEnabled && metadata.length) {
+    lines.push("Metadata:", ...metadata);
   }
-  lines.push("", "Use this app shot as context for my next request.");
-  return `${lines.join("\n")}\n`;
+  return `\n${lines.join("\n")}\n`;
 }
 
 window.addEventListener("ghostex-native-host-event", (event) => {
@@ -47854,11 +47911,17 @@ function getGxserverPresentationLifecycleForLocalNativePaneSession(
   return findGxserverPresentationSession(projectId, session.sessionId)?.lifecycleState;
 }
 
-function handleNativePaneTabSelected(sessionId: string): void {
+function handleNativePaneTabSelected(
+  sessionId: string,
+  options: { focusSleepingPlaceholderReason?: string } = {},
+): void {
   const acknowledgedAttention = acknowledgeNativeTerminalAttention(sessionId, "native-focus");
   if (activeCommandPanelContainsSession(sessionId)) {
     const selectedCommandSessionBefore = findTerminalSession(sessionId);
     const wasSleepingCommandSession = selectedCommandSessionBefore?.isSleeping === true;
+    const shouldKeepSleepingPlaceholder =
+      settings.clickToWakeSleepingSessions && wasSleepingCommandSession;
+    const focusSleepingPlaceholderReason = options.focusSleepingPlaceholderReason;
     /**
      * CDXC:SessionAttention 2026-05-16-23:35:
      * Clicking an already-selected command or workspace tab must still acknowledge #95d7f6 attention. Tab selection can be a layout no-op, so acknowledge before the unchanged guard and let the delayed attention timer preserve the 1.5-second visual floor when needed.
@@ -47897,8 +47960,15 @@ function handleNativePaneTabSelected(sessionId: string): void {
         { forceTerminalRestore: true },
       );
     }
-    if (!wasSleepingCommandSession || !settings.clickToWakeSleepingSessions) {
+    if (!shouldKeepSleepingPlaceholder) {
       queueNativeLayoutFocusRequest(sessionId, "commandPaneTabSelected");
+    } else if (focusSleepingPlaceholderReason) {
+      /*
+       * CDXC:SleepingPanePlaceholders 2026-06-29-03:59:
+       * Cmd+Opt+Arrow must be able to focus a selected "Press Any Key to Wake" command-pane placeholder without waking it.
+       * Send Swift an explicit layout focus request only for keyboard-directed selection so click-to-wake still keeps the renderer cold until the placeholder body receives wake input.
+       */
+      queueNativeLayoutFocusRequest(sessionId, focusSleepingPlaceholderReason);
     }
     publish();
     return;
@@ -47953,13 +48023,22 @@ function handleNativePaneTabSelected(sessionId: string): void {
       ? wakePaneTabSessionInSimpleWorkspace(activeProject().workspace, group.groupId, sessionId).snapshot
       : activeProject().workspace;
   const result = selectPaneTabInSimpleWorkspace(workspaceWithWake, group.groupId, sessionId);
+  const focusSleepingPlaceholderReason = options.focusSleepingPlaceholderReason;
+  const shouldFocusSleepingPlaceholder =
+    shouldKeepSleepingPlaceholder && focusSleepingPlaceholderReason !== undefined;
   if (!result.changed && !shouldRestoreSelectedSurface) {
     /*
      * CDXC:PaneFocus 2026-06-13-23:18:
      * Cmd+Opt+Up from an expanded Commands panel can target the workspace pane that React already has selected.
      * Even when paneLayout is unchanged, this is an explicit native tab/hotkey focus request and must move AppKit first responder back to the awake workspace terminal.
+     *
+     * CDXC:SleepingPanePlaceholders 2026-06-29-03:59:
+     * Cmd+Opt+Arrow can also resolve to an already-selected sleeping placeholder.
+     * Keep the session sleeping, but still send the explicit focus request so the AppKit placeholder owns keyboard input for "Press Any Key to Wake".
      */
-    if (!shouldKeepSleepingPlaceholder) {
+    if (shouldKeepSleepingPlaceholder && focusSleepingPlaceholderReason !== undefined) {
+      queueNativeLayoutFocusRequest(sessionId, focusSleepingPlaceholderReason);
+    } else if (!shouldKeepSleepingPlaceholder) {
       queueNativeLayoutFocusRequest(sessionId, "paneTabSelectedAlreadyActive");
     }
     appendPaneLayoutTraceDebugLog("paneTabSelected.unchanged", {
@@ -47969,7 +48048,7 @@ function handleNativePaneTabSelected(sessionId: string): void {
       sessionId,
       targetGroup: summarizeWorkspaceGroupForPaneLayoutTrace(workspaceWithWake, group.groupId),
     });
-    if (acknowledgedAttention || !shouldKeepSleepingPlaceholder) {
+    if (acknowledgedAttention || !shouldKeepSleepingPlaceholder || shouldFocusSleepingPlaceholder) {
       publish();
     }
     return;
@@ -48016,7 +48095,9 @@ function handleNativePaneTabSelected(sessionId: string): void {
       forceTerminalRestore: wasSleeping || shouldReconcileGxserverRunningPaneTab,
     });
   }
-  if (!shouldKeepSleepingPlaceholder) {
+  if (shouldKeepSleepingPlaceholder && focusSleepingPlaceholderReason !== undefined) {
+    queueNativeLayoutFocusRequest(sessionId, focusSleepingPlaceholderReason);
+  } else if (!shouldKeepSleepingPlaceholder) {
     const focusReason =
       shouldRestoreSelectedSurface && gxserverPresentationLifecycle === "running"
         ? "paneTabAttach"

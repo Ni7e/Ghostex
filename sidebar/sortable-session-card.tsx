@@ -1921,6 +1921,22 @@ export function SortableSessionCard({
     }
   };
 
+  const setNativeSidebarSessionFocusBorderHandoffHitTarget = (isSessionCard: boolean) => {
+    if (isProjectSessionListMoreRow || isProjectSessionListOverflowRow) {
+      return;
+    }
+    vscode.postMessage({
+      isSessionCard,
+      type: "setSidebarSessionFocusBorderHandoffHitTarget",
+    });
+  };
+
+  const cancelNativeSidebarSessionFocusBorderHandoff = () => {
+    vscode.postMessage({
+      type: "cancelSidebarSessionFocusBorderHandoff",
+    });
+  };
+
   const rememberImmediateFocusClickSuppression = () => {
     if (immediateFocusClickSuppressionRef.current) {
       window.clearTimeout(immediateFocusClickSuppressionRef.current.timeoutId);
@@ -2060,6 +2076,12 @@ export function SortableSessionCard({
             data-sleeping={String(Boolean(session.isSleeping))}
             data-sidebar-session-id={session.sessionId}
             data-visible={String(session.isVisible)}
+            onPointerEnter={() => {
+              setNativeSidebarSessionFocusBorderHandoffHitTarget(true);
+            }}
+            onPointerLeave={() => {
+              setNativeSidebarSessionFocusBorderHandoffHitTarget(false);
+            }}
             onPointerCancel={(event) => {
               postSessionDragDebugLog("session.pointerCancel", {
                 button: event.button,
@@ -2069,8 +2091,24 @@ export function SortableSessionCard({
                 pointerId: event.pointerId,
                 pointerType: event.pointerType,
               });
+
+              setNativeSidebarSessionFocusBorderHandoffHitTarget(false);
             }}
             onPointerDown={(event) => {
+              const isInteractiveDescendant = isSessionCardPointerFocusBlockedByDescendant({
+                currentTarget: event.currentTarget,
+                target: event.target,
+              });
+              const isUnmodifiedPrimarySessionFocusMouseDown =
+                event.button === 0 &&
+                event.metaKey === false &&
+                event.ctrlKey === false &&
+                event.altKey === false &&
+                event.shiftKey === false &&
+                isInteractiveDescendant !== true &&
+                (event.isPrimary ?? true) &&
+                !isProjectSessionListMoreRow &&
+                !isProjectSessionListOverflowRow;
               postSessionDragDebugLog("session.pointerDown", {
                 button: event.button,
                 buttons: event.buttons,
@@ -2081,15 +2119,20 @@ export function SortableSessionCard({
                 pointerType: event.pointerType,
               });
 
+              /*
+               * CDXC:SidebarSessionFocus 2026-06-29-02:04:
+               * Native must start preserving the existing focused border before WebKit takes first responder, but only session-focus clicks should use that path. Keep the native hit target hot while the pointer is over a real session row, then cancel the handoff when this mouseDown is a child control or modified click instead of a normal row focus action.
+               */
+              if (!isUnmodifiedPrimarySessionFocusMouseDown) {
+                cancelNativeSidebarSessionFocusBorderHandoff();
+              }
+
               if (
                 shouldFocusSidebarSessionOnPointerDown({
                   altKey: event.altKey,
                   button: event.button,
                   ctrlKey: event.ctrlKey,
-                  isInteractiveDescendant: isSessionCardPointerFocusBlockedByDescendant({
-                    currentTarget: event.currentTarget,
-                    target: event.target,
-                  }),
+                  isInteractiveDescendant,
                   isPrimary: event.isPrimary,
                   isProjectSessionListMoreRow,
                   isProjectSessionListOverflowRow,

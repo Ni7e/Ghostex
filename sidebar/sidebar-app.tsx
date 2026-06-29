@@ -12,10 +12,12 @@ import {
   IconChevronRight,
   IconCheck,
   IconClock,
+  IconCoffee,
+  IconCommand,
   IconCopy,
+  IconDeviceMobile,
   IconDownload,
   IconEdit,
-  IconDeviceMobile,
   IconFilter2,
   IconFileSearch,
   IconFolder,
@@ -23,12 +25,17 @@ import {
   IconGitBranch,
   IconHistory,
   IconHistoryToggle,
+  IconKeyboard,
   IconLayoutSidebar,
+  IconMenu2,
+  IconMoon,
   IconPlus,
   IconPlusFilled,
   IconRefresh,
+  IconRobotFace,
   IconSearch,
   IconSettings,
+  IconSquareMinus,
   IconTerminal2,
   IconTrash,
   IconUsersGroup,
@@ -157,9 +164,12 @@ import {
 } from "../shared/ghostex-hotkeys";
 import {
   DEFAULT_ghostex_SETTINGS,
+  KEEP_AWAKE_DURATION_OPTIONS,
   getSidebarTitlebarForegroundForBackground,
   getSidebarTitlebarGradientColors,
   isDiagnosticLoggingScenarioEnabled,
+  type ghostexSettings,
+  type KeepAwakeDurationMinutes,
   type RemoteMachineSettings,
 } from "../shared/ghostex-settings";
 import {
@@ -229,6 +239,47 @@ const SIDEBAR_HOTKEY_OVERLAY_ENABLED = false;
  * re-enable. Holding Cmd must not show the overlay from sidebar DOM focus or
  * native terminal/browser/titlebar focus while this flag is false.
  */
+
+const SIDEBAR_KEEP_AWAKE_RUNTIME_STORAGE_KEY = "ghostex.titlebar.keepAwakeRuntime";
+const GHOSTEX_DISCORD_URL = "https://discord.gg/df7b3G92CS";
+
+type SidebarKeepAwakeRuntimeState = {
+  durationMinutes: KeepAwakeDurationMinutes;
+};
+
+function isSidebarRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isKeepAwakeDurationMinutes(value: unknown): value is KeepAwakeDurationMinutes {
+  return KEEP_AWAKE_DURATION_OPTIONS.some((option) => option.value === value);
+}
+
+function readSidebarKeepAwakeRuntime(): SidebarKeepAwakeRuntimeState | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  try {
+    const rawRuntime = window.localStorage.getItem(SIDEBAR_KEEP_AWAKE_RUNTIME_STORAGE_KEY);
+    if (!rawRuntime) {
+      return undefined;
+    }
+    const parsedRuntime: unknown = JSON.parse(rawRuntime);
+    if (!isSidebarRecord(parsedRuntime) || !isKeepAwakeDurationMinutes(parsedRuntime.durationMinutes)) {
+      return undefined;
+    }
+    const fireAtMs = parsedRuntime.fireAtMs;
+    if (typeof fireAtMs === "number" && Number.isFinite(fireAtMs) && fireAtMs <= Date.now()) {
+      return undefined;
+    }
+    return {
+      durationMinutes: parsedRuntime.durationMinutes,
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 type SidebarGroupDragPreview = {
   groupId: string;
@@ -870,6 +921,9 @@ export function SidebarApp({
   const [ remoteMachineRuntimeStatuses, setRemoteMachineRuntimeStatuses ] =
     useState<RemoteMachineRuntimeStatuses>({});
   const [ primaryAgentLauncherId, setPrimaryAgentLauncherId ] = useState(readPrimaryAgentLauncherId);
+  const [ sidebarKeepAwakeRuntime, setSidebarKeepAwakeRuntime ] = useState(
+    readSidebarKeepAwakeRuntime,
+  );
   const buildStamp = useSidebarStore((state) =>
     state.hud.debuggingMode ? state.hud.buildStamp : undefined,
   );
@@ -902,6 +956,8 @@ export function SidebarApp({
   }, [ hasGxserverUnavailablePlaceholder ]);
 
   const effectiveSettings = settings ?? DEFAULT_ghostex_SETTINGS;
+  const showSidebarKeepAwakeButton =
+    effectiveSettings.showBetaFeatures && !effectiveSettings.hideKeepAwakeTitlebarControl;
   const sidebarRefreshDiagnosticLoggingEnabled = isDiagnosticLoggingScenarioEnabled(
     effectiveSettings.diagnosticLogging,
     "native.sidebar.refresh",
@@ -910,6 +966,21 @@ export function SidebarApp({
     effectiveSettings.diagnosticLogging,
     "native.sidebar.collapse",
   );
+
+  useEffect(() => {
+    const refreshKeepAwakeRuntime = () => {
+      setSidebarKeepAwakeRuntime(readSidebarKeepAwakeRuntime());
+    };
+    window.addEventListener("focus", refreshKeepAwakeRuntime);
+    window.addEventListener("storage", refreshKeepAwakeRuntime);
+    document.addEventListener("visibilitychange", refreshKeepAwakeRuntime);
+    return () => {
+      window.removeEventListener("focus", refreshKeepAwakeRuntime);
+      window.removeEventListener("storage", refreshKeepAwakeRuntime);
+      document.removeEventListener("visibilitychange", refreshKeepAwakeRuntime);
+    };
+  }, []);
+
   const sidebarSessionTagListItems = useMemo(
     () => normalizeSidebarSessionTagListItems(effectiveSettings.sidebarSessionTagListItems),
     [ effectiveSettings.sidebarSessionTagListItems ],
@@ -3366,8 +3437,8 @@ export function SidebarApp({
 
   const openHotkeys = () => {
     /*
-     * CDXC:Hotkeys 2026-06-19-00:35:
-     * Cmd+. is the advertised Hotkeys shortcut in the far-right titlebar Settings menu. Route it to the same full-window app-modal host as Settings and Command Palette, closing transient sidebar drawers first so the shortcut opens one focused Hotkeys surface.
+     * CDXC:SidebarTopChrome 2026-06-29-01:43:
+     * Cmd+. is advertised in the sidebar Settings dropdown after the menu moved out of the titlebar. Route it to the same full-window app-modal host as Settings and Command Palette, closing transient sidebar drawers first so the shortcut opens one focused Hotkeys surface.
      */
     setIsPinnedPromptsOpen(false);
     setIsPreviousSessionsOpen(false);
@@ -3411,6 +3482,48 @@ export function SidebarApp({
       modal: "commandPalette",
       type: "open",
     });
+  };
+
+  const openKeepAwakePowerSettings = () => {
+    setIsPinnedPromptsOpen(false);
+    setIsPreviousSessionsOpen(false);
+    setIsDaemonSessionsOpen(false);
+    setIsScratchPadOpen(false);
+    setIsSessionSearchSelectionVisible(false);
+    setIsSessionSearchOpen(false);
+    setSessionSearchQuery("");
+    openAppModal({
+      initialSearchQuery: "Keep awake",
+      modal: "settings",
+      type: "open",
+    });
+  };
+
+  const startSidebarKeepAwake = (durationMinutes: KeepAwakeDurationMinutes) => {
+    /*
+     * CDXC:SidebarTopChrome 2026-06-29-01:43:
+     * Keep Awake moved from the macOS titlebar into the sidebar shortcut row, but the titlebar host remains the caffeinate runtime owner. Optimistically reflect the chosen duration in sidebar UI while native forwards the command to the existing titlebar start path.
+     */
+    setSidebarKeepAwakeRuntime({ durationMinutes });
+    vscode.postMessage({
+      action: "start",
+      durationMinutes,
+      type: "runTitlebarKeepAwakeCommand",
+    });
+    window.setTimeout(() => {
+      setSidebarKeepAwakeRuntime(readSidebarKeepAwakeRuntime() ?? { durationMinutes });
+    }, 250);
+  };
+
+  const stopSidebarKeepAwake = () => {
+    setSidebarKeepAwakeRuntime(undefined);
+    vscode.postMessage({
+      action: "stop",
+      type: "runTitlebarKeepAwakeCommand",
+    });
+    window.setTimeout(() => {
+      setSidebarKeepAwakeRuntime(readSidebarKeepAwakeRuntime());
+    }, 250);
   };
 
   const closeSessionSearch = () => {
@@ -3843,17 +3956,32 @@ export function SidebarApp({
       <div className="sidebar-reference-layout" data-reference-sidebar="true">
         {showCommandHotkeyOverlay ? <SidebarHotkeyOverlay hotkeys={settings?.hotkeys} /> : null}
         <SidebarReferenceTopChrome
+          keepAwakeRuntime={sidebarKeepAwakeRuntime}
           isSessionSearchOpen={isSessionSearchOpen}
           onCloseSearch={closeSessionSearch}
           onOpenAgentsHub={openReferenceAgentsHub}
           onOpenAutomations={openReferenceAutomations}
+          onOpenCommands={() => openCommandPalette(">")}
+          onOpenDiscord={() => {
+            vscode.postMessage({ type: "openExternalUrl", url: GHOSTEX_DISCORD_URL });
+          }}
+          onOpenHotkeys={openHotkeys}
           onOpenMobile={openReferenceMobile}
+          onOpenPowerSettings={openKeepAwakePowerSettings}
           onOpenPreviousSessions={openPreviousSessions}
+          onOpenSettings={openSidebarSettings}
+          onRunKeepAwake={startSidebarKeepAwake}
           onSearchPreviousSessionsByText={searchPreviousSessionsByText}
           onSearch={toggleSessionSearch}
+          onStopKeepAwake={stopSidebarKeepAwake}
+          onTogglePetOverlay={() => {
+            vscode.postMessage({ type: "togglePetOverlay" });
+          }}
           searchInputRef={searchInputRef}
           sessionSearchQuery={sessionSearchQuery}
           setSessionSearchQuery={setSessionSearchQuery}
+          settings={effectiveSettings}
+          showKeepAwakeButton={showSidebarKeepAwakeButton}
         />
         <div
           className="stack"
@@ -4496,31 +4624,96 @@ export function SidebarApp({
   );
 }
 
+type SidebarReferencePrimaryMenuKind = "keepAwake" | "settings";
+
 function SidebarReferenceTopChrome({
+  keepAwakeRuntime,
   isSessionSearchOpen,
   onCloseSearch,
   onOpenAgentsHub,
   onOpenAutomations,
+  onOpenCommands,
+  onOpenDiscord,
+  onOpenHotkeys,
   onOpenMobile,
+  onOpenPowerSettings,
   onOpenPreviousSessions,
+  onOpenSettings,
+  onRunKeepAwake,
   onSearchPreviousSessionsByText,
   onSearch,
+  onStopKeepAwake,
+  onTogglePetOverlay,
   searchInputRef,
   sessionSearchQuery,
   setSessionSearchQuery,
+  settings,
+  showKeepAwakeButton,
 }: {
+  keepAwakeRuntime?: SidebarKeepAwakeRuntimeState;
   isSessionSearchOpen: boolean;
   onCloseSearch: () => void;
   onOpenAgentsHub: () => void;
   onOpenAutomations: () => void;
+  onOpenCommands: () => void;
+  onOpenDiscord: () => void;
+  onOpenHotkeys: () => void;
   onOpenMobile: () => void;
+  onOpenPowerSettings: () => void;
   onOpenPreviousSessions: () => void;
+  onOpenSettings: () => void;
+  onRunKeepAwake: (durationMinutes: KeepAwakeDurationMinutes) => void;
   onSearchPreviousSessionsByText: () => void;
   onSearch: () => void;
+  onStopKeepAwake: () => void;
+  onTogglePetOverlay: () => void;
   searchInputRef: RefObject<HTMLInputElement | null>;
   sessionSearchQuery: string;
   setSessionSearchQuery: (query: string) => void;
+  settings: ghostexSettings;
+  showKeepAwakeButton: boolean;
 }) {
+  const shortcutRowRef = useRef<HTMLDivElement>(null);
+  const [ openMenu, setOpenMenu ] = useState<SidebarReferencePrimaryMenuKind>();
+  const settingsMenuHotkeys = normalizeghostexHotkeySettings(settings.hotkeys);
+  const shortcutCount = showKeepAwakeButton ? 5 : 4;
+
+  useEffect(() => {
+    if (!openMenu) {
+      return undefined;
+    }
+
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      if (isNode(event.target) && shortcutRowRef.current?.contains(event.target)) {
+        return;
+      }
+      setOpenMenu(undefined);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenMenu(undefined);
+      }
+    };
+
+    document.addEventListener("pointerdown", handleOutsidePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handleOutsidePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openMenu]);
+
+  const toggleMenu = (menu: SidebarReferencePrimaryMenuKind) => {
+    dismissSidebarTooltips();
+    setOpenMenu((current) => current === menu ? undefined : menu);
+  };
+
+  const closeMenuAndRun = (action: () => void) => {
+    dismissSidebarTooltips();
+    setOpenMenu(undefined);
+    action();
+  };
+
   /**
    * CDXC:SidebarReference 2026-05-08-09:11
    * Combined mode should visually match the provided app sidebar: native-style
@@ -4561,11 +4754,15 @@ function SidebarReferenceTopChrome({
    * visible as the first primary sidebar destination even when experimental
    * features are disabled.
    *
-   * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
-   * Global Settings, Commands, Hotkeys, pet, prompt, scratch, Running, and Discord actions live in the far-right native titlebar menu. Keep the sidebar primary nav free of More/overflow controls.
-   *
    * CDXC:SidebarReference 2026-06-28-15:04:
    * Agents Hub, Automations, and Mobile should be icon-only shortcuts sharing one full-width row at the top of the sidebar, with hover tooltips providing their labels. Search remains a separate full-width row below them.
+   *
+   * CDXC:SidebarTopChrome 2026-06-29-01:43:
+   * Settings and Keep Awake moved out of the macOS titlebar into the same full-width sidebar shortcut row. They remain icon-only with hover tooltips, and normal clicks open local sidebar dropdowns instead of native titlebar child-window menus.
+   *
+   * CDXC:SidebarTopChrome 2026-06-29-03:39:
+   * The overflow menu trigger should present itself as "More" in the sidebar
+   * tooltip while the dropdown still contains the Settings destination.
    */
   return (
     <header className="reference-sidebar-top">
@@ -4581,26 +4778,71 @@ function SidebarReferenceTopChrome({
         <div
           aria-label="Sidebar shortcuts"
           className="reference-sidebar-primary-icon-row"
+          ref={shortcutRowRef}
           role="group"
+          style={{
+            "--reference-sidebar-primary-shortcut-count": shortcutCount,
+          } as CSSProperties}
         >
-          <SidebarReferenceNavButton
+          <SidebarReferenceShortcutButton
             icon={IconUsersGroup}
-            iconOnly
             label="Agents Hub"
-            onClick={onOpenAgentsHub}
+            onClick={() => closeMenuAndRun(onOpenAgentsHub)}
           />
-          <SidebarReferenceNavButton
+          <SidebarReferenceShortcutButton
             icon={IconClock}
-            iconOnly
             label="Automations"
-            onClick={onOpenAutomations}
+            onClick={() => closeMenuAndRun(onOpenAutomations)}
           />
-          <SidebarReferenceNavButton
+          <SidebarReferenceShortcutButton
             icon={IconDeviceMobile}
-            iconOnly
             label="Mobile"
-            onClick={onOpenMobile}
+            onClick={() => closeMenuAndRun(onOpenMobile)}
           />
+          {showKeepAwakeButton ? (
+            <div className="reference-sidebar-primary-menu-cell">
+              <SidebarReferenceShortcutButton
+                ariaExpanded={openMenu === "keepAwake"}
+                ariaHaspopup="menu"
+                active={Boolean(keepAwakeRuntime)}
+                icon={keepAwakeRuntime ? IconCoffee : IconMoon}
+                label="Keep awake"
+                menuOpen={openMenu === "keepAwake"}
+                onClick={() => toggleMenu("keepAwake")}
+              />
+              {openMenu === "keepAwake" ? (
+                <SidebarReferenceKeepAwakeDropdown
+                  activeDuration={keepAwakeRuntime?.durationMinutes}
+                  isRunning={Boolean(keepAwakeRuntime)}
+                  onOpenPowerSettings={() => closeMenuAndRun(onOpenPowerSettings)}
+                  onStartKeepAwake={(durationMinutes) =>
+                    closeMenuAndRun(() => onRunKeepAwake(durationMinutes))
+                  }
+                  onStopKeepAwake={() => closeMenuAndRun(onStopKeepAwake)}
+                />
+              ) : null}
+            </div>
+          ) : null}
+          <div className="reference-sidebar-primary-menu-cell">
+            <SidebarReferenceShortcutButton
+              ariaExpanded={openMenu === "settings"}
+              ariaHaspopup="menu"
+              icon={IconMenu2}
+              label="More"
+              menuOpen={openMenu === "settings"}
+              onClick={() => toggleMenu("settings")}
+            />
+            {openMenu === "settings" ? (
+              <SidebarReferenceSettingsDropdown
+                hotkeys={settingsMenuHotkeys}
+                onOpenCommands={() => closeMenuAndRun(onOpenCommands)}
+                onOpenDiscord={() => closeMenuAndRun(onOpenDiscord)}
+                onOpenHotkeys={() => closeMenuAndRun(onOpenHotkeys)}
+                onOpenSettings={() => closeMenuAndRun(onOpenSettings)}
+                onTogglePetOverlay={() => closeMenuAndRun(onTogglePetOverlay)}
+              />
+            ) : null}
+          </div>
         </div>
         <SidebarReferenceSearchNavItem
           inputRef={searchInputRef}
@@ -4812,6 +5054,191 @@ function SidebarReferenceNavButton({
       <span className="reference-sidebar-nav-label">{label}</span>
     </Button>
   );
+}
+
+function SidebarReferenceShortcutButton({
+  active = false,
+  ariaExpanded,
+  ariaHaspopup,
+  icon: Icon,
+  label,
+  menuOpen = false,
+  onClick,
+}: {
+  active?: boolean;
+  ariaExpanded?: boolean;
+  ariaHaspopup?: "menu";
+  icon: TablerIcon;
+  label: string;
+  menuOpen?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <SidebarFixedTooltipButton
+      aria-expanded={ariaExpanded}
+      aria-haspopup={ariaHaspopup}
+      aria-label={label}
+      className="reference-sidebar-nav-button reference-sidebar-nav-icon-button reference-sidebar-hover-action-tooltip"
+      data-active={String(active)}
+      data-state={menuOpen ? "open" : undefined}
+      onClick={onClick}
+      tooltip={label}
+      type="button"
+    >
+      <Icon
+        aria-hidden="true"
+        className="reference-sidebar-nav-icon"
+        data-icon="inline-start"
+        size={15}
+        stroke={1.9}
+      />
+    </SidebarFixedTooltipButton>
+  );
+}
+
+function SidebarReferenceSettingsDropdown({
+  hotkeys,
+  onOpenCommands,
+  onOpenDiscord,
+  onOpenHotkeys,
+  onOpenSettings,
+  onTogglePetOverlay,
+}: {
+  hotkeys: ghostexHotkeySettings;
+  onOpenCommands: () => void;
+  onOpenDiscord: () => void;
+  onOpenHotkeys: () => void;
+  onOpenSettings: () => void;
+  onTogglePetOverlay: () => void;
+}) {
+  return (
+    <div className="reference-sidebar-primary-dropdown" role="menu">
+      {/*
+       * CDXC:SidebarTopChrome 2026-06-29-01:43:
+       * The moved Settings menu should keep the titlebar menu's compact order and shortcut column while opening as a normal sidebar dropdown from the icon row.
+       */}
+      <SidebarReferencePrimaryMenuItem
+        icon={IconSettings}
+        label="Settings"
+        onSelect={onOpenSettings}
+        shortcut={formatSidebarMenuHotkeyLabel(hotkeys.openSettings)}
+      />
+      <SidebarReferencePrimaryMenuSeparator />
+      <SidebarReferencePrimaryMenuItem
+        icon={IconKeyboard}
+        label="Hotkeys"
+        onSelect={onOpenHotkeys}
+        shortcut={formatSidebarMenuHotkeyLabel(hotkeys.openHotkeys)}
+      />
+      <SidebarReferencePrimaryMenuItem
+        icon={IconCommand}
+        label="Commands"
+        onSelect={onOpenCommands}
+        shortcut={formatSidebarMenuHotkeyLabel(hotkeys.openCommandPalette)}
+      />
+      <SidebarReferencePrimaryMenuSeparator />
+      <SidebarReferencePrimaryMenuItem
+        icon={IconRobotFace}
+        label="Wake Pet"
+        onSelect={onTogglePetOverlay}
+      />
+      <SidebarReferencePrimaryMenuItem
+        icon={IconUsersGroup}
+        label="Join Discord"
+        onSelect={onOpenDiscord}
+      />
+    </div>
+  );
+}
+
+function SidebarReferenceKeepAwakeDropdown({
+  activeDuration,
+  isRunning,
+  onOpenPowerSettings,
+  onStartKeepAwake,
+  onStopKeepAwake,
+}: {
+  activeDuration?: KeepAwakeDurationMinutes;
+  isRunning: boolean;
+  onOpenPowerSettings: () => void;
+  onStartKeepAwake: (durationMinutes: KeepAwakeDurationMinutes) => void;
+  onStopKeepAwake: () => void;
+}) {
+  return (
+    <div className="reference-sidebar-primary-dropdown" role="menu">
+      {/*
+       * CDXC:SidebarTopChrome 2026-06-29-01:43:
+       * Keep Awake moved into the sidebar shortcut row but keeps the same duration choices as the titlebar menu: Until turned off, For 2 hours, For 5 hours, Don't keep awake, and Power Settings.
+       */}
+      <div className="reference-sidebar-primary-menu-label">Keep awake period</div>
+      {KEEP_AWAKE_DURATION_OPTIONS.map((option) => (
+        <SidebarReferencePrimaryMenuItem
+          active={activeDuration === option.value}
+          icon={IconCoffee}
+          key={option.value}
+          label={getSidebarKeepAwakeMenuLabel(option.label)}
+          onSelect={() => onStartKeepAwake(option.value)}
+        />
+      ))}
+      {isRunning ? (
+        <SidebarReferencePrimaryMenuItem
+          icon={IconSquareMinus}
+          label="Don't keep awake"
+          onSelect={onStopKeepAwake}
+        />
+      ) : null}
+      <SidebarReferencePrimaryMenuSeparator />
+      <SidebarReferencePrimaryMenuItem
+        icon={IconSettings}
+        label="Power Settings"
+        onSelect={onOpenPowerSettings}
+      />
+    </div>
+  );
+}
+
+function SidebarReferencePrimaryMenuItem({
+  active = false,
+  icon: Icon,
+  label,
+  onSelect,
+  shortcut,
+}: {
+  active?: boolean;
+  icon: TablerIcon;
+  label: string;
+  onSelect: () => void;
+  shortcut?: string;
+}) {
+  return (
+    <button
+      className="reference-sidebar-primary-menu-item"
+      onClick={onSelect}
+      role="menuitem"
+      type="button"
+    >
+      <Icon aria-hidden="true" className="reference-sidebar-primary-menu-icon" size={16} stroke={1.8} />
+      <span className="reference-sidebar-primary-menu-label-text">{label}</span>
+      {shortcut ? (
+        <span className="reference-sidebar-primary-menu-shortcut">{shortcut}</span>
+      ) : null}
+      {active ? (
+        <IconCheck aria-hidden="true" className="reference-sidebar-primary-menu-check" size={15} stroke={1.8} />
+      ) : null}
+    </button>
+  );
+}
+
+function SidebarReferencePrimaryMenuSeparator() {
+  return <div className="reference-sidebar-primary-menu-separator" role="separator" />;
+}
+
+function getSidebarKeepAwakeMenuLabel(label: string): string {
+  return label === "Until turned off" ? label : `For ${label.toLowerCase()}`;
+}
+
+function formatSidebarMenuHotkeyLabel(hotkey: string | undefined): string | undefined {
+  return hotkey ? formatSidebarHotkeyLabel(hotkey) : undefined;
 }
 
 function isNode(value: EventTarget | null): value is Node {

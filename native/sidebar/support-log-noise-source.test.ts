@@ -13,6 +13,7 @@ const nativeT3CodePaneReproLogSource = readFileSync(
   new URL("../macos/ghostexHost/Sources/ghostexHost/NativeT3CodePaneReproLog.swift", import.meta.url),
   "utf8",
 );
+const nativeSidebarSource = readFileSync(new URL("./native-sidebar.tsx", import.meta.url), "utf8");
 
 function sourceBetween(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);
@@ -83,5 +84,26 @@ describe("support log noise source", () => {
     expect(sampledEvents).toContain('"nativeWorkspace.projectEditor.cef.sourceDragDiagnostic.nativeMouse"');
     expect(sampledEvents).toContain('"nativeWorkspace.projectEditor.companion.sync"');
     expect(nativeT3CodePaneReproLogSource).toContain("shouldWriteSampledLogEvent(");
+  });
+
+  test("keeps sidebar focus projection diagnostics metadata-only", () => {
+    /*
+    CDXC:SidebarSessionFocus 2026-06-29-03:03:
+    Sidebar focus projection repro logs should show whether the focused
+    workspace session was projected as a focused visible row, without writing
+    session names, paths, URLs, command text, terminal titles, or raw details.
+    */
+    const focusProjectionSource = sourceBetween(
+      nativeSidebarSource,
+      "type SidebarFocusProjectionDebugRow = {",
+      "function buildSidebarMessage()",
+    );
+    expect(focusProjectionSource).toContain("appendSidebarRefreshDebugLog(");
+    expect(focusProjectionSource).toContain('"nativeSidebar.focusProjection.mismatch"');
+    expect(focusProjectionSource).toContain("sessionId: session.sessionId");
+    expect(focusProjectionSource).toContain("groupId: group.groupId");
+    expect(focusProjectionSource).not.toMatch(/\b(title|path|url|command|terminalTitle|primaryTitle|displayTitle|details):/i);
+    expect(focusProjectionSource).not.toContain("session.title");
+    expect(focusProjectionSource).not.toContain("group.title");
   });
 });

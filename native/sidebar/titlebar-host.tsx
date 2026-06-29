@@ -26,7 +26,6 @@ import {
   IconLayoutSidebarRight,
   IconLoader2,
   IconKeyboard,
-  IconMenu2,
   IconMoon,
   IconPlayerPlay,
   IconRefresh,
@@ -485,6 +484,7 @@ declare global {
       setNativeDropdownOpen: (kind: TitlebarDropdownPanelKind | undefined) => void;
       setNativePointerInside: (isInside: boolean) => void;
       setWindowFocused: (isFocused: boolean) => void;
+      runKeepAwakeCommand?: (command: TitlebarKeepAwakeCommand) => void;
       syncKeepAwakeRuntime: (syncState: KeepAwakeRuntimeSyncState) => void;
     };
   }
@@ -949,6 +949,10 @@ type KeepAwakeRuntimeSyncState = {
   runtime?: KeepAwakeRuntimeState | null;
   suppressAutoStart: boolean;
 };
+
+type TitlebarKeepAwakeCommand =
+  | { action: "start"; durationMinutes?: KeepAwakeDurationMinutes }
+  | { action: "stop" };
 
 const pendingProcessResults = new Map<
   string,
@@ -3256,8 +3260,8 @@ function App() {
   };
   const openTitlebarSettingsMenuSettings = () => {
     /*
-     * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
-     * Settings moved from the sidebar footer into the far-right titlebar menu. Route the menu row through the existing app-modal host so Settings still opens as the native modal surface rather than a titlebar overlay.
+     * CDXC:SidebarTopChrome 2026-06-29-01:43:
+     * The visible Settings menu moved from the titlebar into the sidebar shortcut row. Keep this titlebar-panel compatibility route on the same app-modal host so any existing native child-window path still opens Settings as the native modal surface.
      */
     closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarSettingsMenu");
     window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
@@ -3499,12 +3503,28 @@ function App() {
     ],
   );
 
-  const openKeepAwakeMenuFromTitlebar = useCallback(
-    (event: { currentTarget: HTMLElement }) => {
-      showTitlebarDropdownPanel("keepAwake", event.currentTarget);
-    },
-    [showTitlebarDropdownPanel],
-  );
+  useEffect(() => {
+    if (isDropdownPanel || !window.__ghostex_TITLEBAR__) {
+      return undefined;
+    }
+    const runKeepAwakeCommand = (command: TitlebarKeepAwakeCommand) => {
+      /*
+       * CDXC:SidebarTopChrome 2026-06-29-01:43:
+       * Keep Awake moved from the titlebar trigger strip into the sidebar shortcut row. Keep this bridge as the only sidebar entry point so the titlebar host remains the single owner of caffeinate start/stop and runtime sync.
+       */
+      if (command.action === "stop") {
+        void stopKeepAwake();
+        return;
+      }
+      void startKeepAwake(command.durationMinutes);
+    };
+    window.__ghostex_TITLEBAR__.runKeepAwakeCommand = runKeepAwakeCommand;
+    return () => {
+      if (window.__ghostex_TITLEBAR__?.runKeepAwakeCommand === runKeepAwakeCommand) {
+        delete window.__ghostex_TITLEBAR__.runKeepAwakeCommand;
+      }
+    };
+  }, [isDropdownPanel, startKeepAwake, stopKeepAwake]);
 
   const openPowerSettings = () => {
     window.webkit?.messageHandlers?.ghostexAppModalHost?.postMessage({
@@ -4426,16 +4446,15 @@ function App() {
              * right-click options through compact hover tooltips.
              *
              * CDXC:ReactTitlebar 2026-05-30-08:39:
-             * Tips & Tricks should sit before Keep Awake in the top-right
-             * titlebar control order, keeping the info/help affordance closer to
-             * the mode switcher while power controls remain farther right.
+             * Tips & Tricks sits in the top-right titlebar controls as the
+             * compact info/help affordance near the mode switcher.
              *
              * CDXC:ReactTitlebar 2026-06-18-05:16:
              * User-facing titlebar labels should use the shorter "Tips" copy
              * while the underlying tips menu behavior stays unchanged.
              *
-             * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
-             * Settings is the rightmost dedicated menu button, so it opens its dropdown on normal click while the primary-action buttons keep their existing click/right-click split behavior.
+             * CDXC:SidebarTopChrome 2026-06-29-01:43:
+             * Settings and Keep Awake are no longer titlebar triggers; they render in the sidebar shortcut row so this titlebar cluster stays focused on project/window actions.
              */}
             <ButtonGroup
               className="titlebar-open-group titlebar-tips-group"
@@ -4471,45 +4490,6 @@ function App() {
                 </Button>
               </TitlebarAppTooltip>
             </ButtonGroup>
-            {keepAwakeFeatureEnabled && !projectState.keepAwake.hideTitlebarControl ? (
-              <ButtonGroup
-                className="titlebar-open-group titlebar-keep-awake-group"
-                data-titlebar-dropdown-anchor
-              >
-                <TitlebarAppTooltip content="Keep awake">
-                  <Button
-                    aria-expanded={nativeDropdownOpen === "keepAwake"}
-                    aria-haspopup="menu"
-                    aria-label="Keep awake"
-                    className="titlebar-session-button titlebar-open-main-button"
-                    data-active={String(Boolean(keepAwakeRuntime))}
-                    data-state={nativeDropdownOpen === "keepAwake" ? "open" : undefined}
-                    onClick={openKeepAwakeMenuFromTitlebar}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      openKeepAwakeMenuFromTitlebar(event);
-                    }}
-                    onDoubleClick={openKeepAwakeMenuFromTitlebar}
-                    type="button"
-                    variant={keepAwakeRuntime ? "outline" : "ghost"}
-                  >
-                    {/*
-                     * CDXC:TitlebarKeepAwake 2026-05-27-07:32:
-                     * Keep-awake titlebar chrome must be icon-only so it cannot
-                     * clip in the narrow right-side slot. Coffee means Ghostex is
-                     * keeping the Mac awake; moon means inactive. Clicking or
-                     * double-clicking opens the dropdown rather than starting or
-                     * stopping keep-awake directly.
-                     */}
-                    {keepAwakeRuntime ? (
-                      <IconCoffee aria-hidden="true" size={14} stroke={1.8} />
-                    ) : (
-                      <IconMoon aria-hidden="true" size={14} stroke={1.8} />
-                    )}
-                  </Button>
-                </TitlebarAppTooltip>
-              </ButtonGroup>
-            ) : null}
             <ButtonGroup
               className="titlebar-open-group"
               data-titlebar-dropdown-anchor
@@ -4646,35 +4626,6 @@ function App() {
                   ) : (
                     <IconFolderOpen aria-hidden="true" className="size-4 text-zinc-400" />
                   )}
-                </Button>
-              </TitlebarAppTooltip>
-            </ButtonGroup>
-            <ButtonGroup
-              className="titlebar-open-group titlebar-settings-group"
-              data-titlebar-dropdown-anchor
-            >
-              <TitlebarAppTooltip content="Settings">
-                <Button
-                  aria-expanded={nativeDropdownOpen === "settings"}
-                  aria-haspopup="menu"
-                  aria-label="Settings menu"
-                  className="titlebar-session-button titlebar-open-main-button titlebar-settings-menu-button"
-                  data-state={nativeDropdownOpen === "settings" ? "open" : undefined}
-                  onClick={(event) => {
-                    showTitlebarDropdownPanel("settings", event.currentTarget);
-                  }}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    showTitlebarDropdownPanel("settings", event.currentTarget);
-                  }}
-                  type="button"
-                  variant="ghost"
-                >
-                  {/*
-                   * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
-                   * The far-right titlebar button replaces the sidebar Settings row and sidebar overflow trigger. Use a compact three-line menu glyph and open a native child-window dropdown on normal click so global app actions have one rightmost home.
-                   */}
-                  <IconMenu2 aria-hidden="true" size={16} stroke={1.9} />
                 </Button>
               </TitlebarAppTooltip>
             </ButtonGroup>
@@ -5105,8 +5056,8 @@ function TitlebarDropdownPanelSurface({
       {kind === "settings" ? (
         <div className="titlebar-open-menu titlebar-settings-menu min-w-[220px] rounded-none border-border/80 p-1 text-[13px] text-foreground shadow-2xl">
           {/*
-           * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
-           * The far-right titlebar Settings menu replaces the sidebar footer Settings row and sidebar overflow menu. Use the same compact native child-window menu chrome as Actions.
+           * CDXC:SidebarTopChrome 2026-06-29-01:43:
+           * The visible Settings trigger moved into the sidebar shortcut row as a normal dropdown. Keep this titlebar panel content aligned for native child-window compatibility paths, but do not render a titlebar Settings trigger.
            *
            * CDXC:TitlebarSettingsMenu 2026-06-19-00:35:
            * Menu rows need right-aligned shortcut labels. Commands must be titled "Commands" with Cmd+Shift+P in the shortcut column, and Pinned Prompts plus Scratch Pad stay hidden from this dropdown while remaining available elsewhere in the app.
@@ -7603,8 +7554,8 @@ const styles = {
      * CDXC:ReactTitlebar 2026-05-30-12:00:
      * Right-side titlebar controls should sit flush with the window edge.
      *
-     * CDXC:TitlebarSettingsMenu 2026-06-18-23:28:
-     * The Settings menu button is now the rightmost titlebar control, so do not reserve trailing inset on the slot container.
+     * CDXC:SidebarTopChrome 2026-06-29-01:43:
+     * Settings and Keep Awake moved to the sidebar shortcut row. Keep the titlebar right slot flush so the remaining project/window controls still align with the window edge.
      */
     right: 0,
     top: TITLEBAR_RIGHT_CONTROLS_TOP,
@@ -7965,15 +7916,6 @@ styleElement.textContent = `
     padding: 0 12px;
     width: 42px;
   }
-  .titlebar-settings-menu-button {
-    /*
-     * CDXC:TitlebarSettingsMenu 2026-06-19-08:56:
-     * The far-right overflow/settings button needs 3px more right-side hit area than the other icon buttons. Keep the generic titlebar button width unchanged and widen only this rightmost Settings menu trigger.
-     */
-    padding-left: 12px;
-    padding-right: 15px;
-    width: 45px;
-  }
   .titlebar-git-main-button {
     gap: 0;
     padding: 0 12px;
@@ -8224,12 +8166,11 @@ styleElement.textContent = `
     /**
      * CDXC:ReactTitlebar 2026-05-29-16:05:
      * App widths below 620px need the top-right titlebar chrome to prioritize
-     * the primary Git action. Hide Exit Focus, Keep Awake, Tips, and Resources,
+     * the primary Git action. Hide Exit Focus, Tips, and Resources,
      * and remove visible Commit wording from the Git primary label while
      * keeping non-commit destination text such as push or PR when there is room.
      */
     .titlebar-exit-focus-button,
-    .titlebar-keep-awake-group,
     .titlebar-tips-group,
     .titlebar-resource-button {
       display: none !important;

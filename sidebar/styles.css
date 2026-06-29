@@ -2085,12 +2085,16 @@ button,
   /*
    * CDXC:SettingsNavigation 2026-06-19-10:30:
    * The sidebar intentionally extends upward to the tabs row while the body
-   * keeps scrolling inside ScrollArea. Let this tab content expose that
+   * keeps scrolling inside the owned Settings viewport. Let this tab content expose that
    * sidebar extension instead of clipping it at the search-field baseline.
    *
    * CDXC:SettingsNavigation 2026-06-24-22:16:
    * The sidebar is no longer inside tab content, so tab panels can keep normal
    * overflow clipping inside the content column.
+   *
+   * CDXC:SettingsPerformance 2026-06-29-00:40:
+   * Settings now uses a native overflow viewport instead of Base UI ScrollArea
+   * so long pages avoid custom scrollbar bookkeeping during scroll.
    */
   overflow: hidden !important;
 }
@@ -2098,6 +2102,17 @@ button,
 .ghostex-settings-shadcn .settings-main-scroll {
   height: 100%;
   min-height: 0;
+}
+
+.ghostex-settings-shadcn .settings-native-scroll-viewport {
+  /*
+   * CDXC:SettingsPerformance 2026-06-29-00:40:
+   * Native overflow is the fast path for Settings scrolling. Keep scrollbars
+   * from shifting content and contain wheel momentum inside the modal now that
+   * Settings no longer uses Base UI ScrollArea.
+   */
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .ghostex-settings-shadcn .settings-main-scroll [data-slot="scroll-area-viewport"] {

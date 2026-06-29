@@ -15,7 +15,7 @@ import type {
   SidebarGitState,
 } from "./sidebar-git";
 import type { SidebarProjectDiffStats } from "./project-diff-stats";
-import type { ghostexSettings } from "./ghostex-settings";
+import type { ghostexSettings, KeepAwakeDurationMinutes } from "./ghostex-settings";
 import type { ghostexHotkeyActionId } from "./ghostex-hotkeys";
 import type { WorkspaceIdeTargetApp } from "./workspace-open-targets";
 import type { SidebarPinnedPrompt } from "./sidebar-pinned-prompts";
@@ -993,6 +993,19 @@ export type SidebarToExtensionMessage =
     }
   | {
       /**
+       * CDXC:SidebarTopChrome 2026-06-29-01:43:
+       * The sidebar Keep Awake dropdown moved into top chrome but must command the existing titlebar runtime owner instead of duplicating caffeinate lifecycle state in the sidebar renderer.
+       */
+      action: "start";
+      durationMinutes: KeepAwakeDurationMinutes;
+      type: "runTitlebarKeepAwakeCommand";
+    }
+  | {
+      action: "stop";
+      type: "runTitlebarKeepAwakeCommand";
+    }
+  | {
+      /**
        * CDXC:SettingsStorage 2026-05-09-15:25
        * The settings modal can request ~/.ghostex folder stats lazily, but native
        * resolves the folder path itself and never trusts a path from React.
@@ -1525,6 +1538,21 @@ export type SidebarToExtensionMessage =
     }
   | {
       type: "toggleFullscreenSession";
+    }
+  | {
+      /*
+       * CDXC:SidebarSessionFocus 2026-06-29-02:04:
+       * The macOS focused-pane border must be preserved only for real sidebar session-row clicks. Send a hover-scoped native hint from the session card so AppKit's pre-dispatch mouseDown path can distinguish session focus clicks from other sidebar chrome before WebKit temporarily becomes first responder.
+       */
+      isSessionCard: boolean;
+      type: "setSidebarSessionFocusBorderHandoffHitTarget";
+    }
+  | {
+      /*
+       * CDXC:SidebarSessionFocus 2026-06-29-02:04:
+       * If a session-row mouseDown is actually a child control, modified click, or context-menu path, cancel the pre-dispatch border handoff so only session focus selection keeps the old border during the AppKit sidebar responder gap.
+       */
+      type: "cancelSidebarSessionFocusBorderHandoff";
     }
   | {
       type: "focusSession";

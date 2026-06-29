@@ -23,8 +23,10 @@ import {
   IconFolderPlus,
   IconHelpCircle,
   IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftExpand,
   IconMarkdown,
   IconLayoutSidebarRightCollapse,
+  IconLayoutSidebarRightExpand,
   IconMenu2,
   IconMessagePlus,
   IconMessages,
@@ -585,6 +587,9 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * Markdown editing should keep the line-number gutter tight in Manage.
  * Scope the gutter width and content padding overrides to Manage's Meo wrapper so the gap between line numbers, Meo's 3px Git gutter, and text is minimal without changing the shared Meo editor.
  *
+ * CDXC:ManageMarkdownLineNumbers 2026-06-29-01:53:
+ * Wrapped Markdown lines should keep their line number aligned with the first visual row instead of centering the number across the wrapped block. Override Meo's flex-centered line-number gutter only inside Manage so source and live Markdown text stay visually scan-aligned.
+ *
  * CDXC:ManageAnnotationComposer 2026-06-28-01:49:
  * The anchored comment composer should feel like a compact dark panel: show only the note textarea, close from a top-right X, keep image upload as a plain action button, and submit with a green Submit button instead of a Cancel/Comment action row.
  *
@@ -645,7 +650,7 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * File rows should not show file size badges.
  *
  * CDXC:DocsSidebar 2026-06-28-15:05:
- * Docs sidebar chrome should match the compact macOS sidebar: keep the project title non-selectable and 2px farther left, remove the file count/selected-file summary block, show a 2px scrollbar only on hover/focus, and mirror the native sidebar divider's five-point rail with a one-point edge line plus three-point hover affordance.
+ * Docs sidebar chrome should match the compact macOS sidebar: keep the project title non-selectable, remove the file count/selected-file summary block, show a 2px scrollbar only on hover/focus, and mirror the native sidebar divider's five-point rail with a one-point edge line plus three-point hover affordance.
  *
  * CDXC:DocsSidebar 2026-06-28-15:57:
  * Docs file rows should use tighter button padding. The active file keeps the selected-row surface, while every ancestor folder of the active file turns full white without gaining a background so users can track the open document through collapsed or nested folder context.
@@ -655,6 +660,12 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  *
  * CDXC:DocsHeader 2026-06-28-18:02:
  * The Docs main header should compress to a 33px titlebar-like chrome strip. Reduce title/meta/action text, keep action buttons full-height with square corners and separator borders, and use hover/open fills that match the macOS titlebar button treatment.
+ *
+ * CDXC:DocsHeader 2026-06-29-03:43:
+ * Manage's sidebar header and hidden-sidebar restore affordance should share the editor header's 33px titlebar strip: compact title typography, full-height square buttons with separator borders, and expand icons that communicate reopening the sidebar.
+ *
+ * CDXC:ManageFileActions 2026-06-29-03:27:
+ * Docs sidebar context actions apply to folders as well as files. Right-clicking empty sidebar chrome must suppress the browser/WebKit default context menu, while folder rename/delete remaps nested selected paths and annotation keys through the same docs-relative bridge.
  */
 function ManageApp() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -869,14 +880,20 @@ function ManageApp() {
   }, []);
 
   const openFileContextMenu = useCallback((entry: ManageFileEntry, point: { x: number; y: number }) => {
-    if (entry.kind !== "file") {
-      return;
-    }
     setFileContextMenu({
       path: entry.path,
       x: point.x,
       y: point.y,
     });
+  }, []);
+
+  const suppressSidebarDefaultContextMenu = useCallback((event: ReactMouseEvent<HTMLElement>) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest(".manage-file-row, input, textarea")) {
+      return;
+    }
+    event.preventDefault();
+    setFileContextMenu(undefined);
   }, []);
 
   const updateSidebarWidthFromClientX = useCallback(
@@ -1166,9 +1183,6 @@ function ManageApp() {
   }, []);
 
   const startRenameFile = useCallback((entry: ManageFileEntry) => {
-    if (entry.kind !== "file") {
-      return;
-    }
     setFileContextMenu(undefined);
     setRenameDialog({
       path: entry.path,
@@ -1178,10 +1192,10 @@ function ManageApp() {
 
   const renameFile = useCallback(
     async (path: string, nextNameInput: string) => {
-      const currentEntry = entries.find((entry) => entry.kind === "file" && entry.path === path);
+      const currentEntry = entries.find((entry) => entry.path === path);
       if (!currentEntry) {
         setRenameDialog((current) =>
-          current?.path === path ? { ...current, error: "This file is no longer available." } : current,
+          current?.path === path ? { ...current, error: "This item is no longer available." } : current,
         );
         return;
       }
@@ -1206,14 +1220,25 @@ function ManageApp() {
         )
       ) {
         setRenameDialog((current) =>
-          current?.path === path ? { ...current, error: "A file with that name already exists." } : current,
+          current?.path === path ? { ...current, error: "A file or folder with that name already exists." } : current,
         );
         return;
       }
-      if (selectedPathRef.current === path && saveState === "saving") {
+      const selectedPathBeforeRename = selectedPathRef.current;
+      const renamedSelectedPath =
+        selectedPathBeforeRename && remapManagePathByMove(selectedPathBeforeRename, path, nextPath);
+      if (renamedSelectedPath && saveState === "saving") {
         setRenameDialog((current) =>
           current?.path === path
             ? { ...current, error: "Wait for the current save to finish before renaming." }
+            : current,
+        );
+        return;
+      }
+      if (currentEntry.kind === "directory" && renamedSelectedPath && isDirty) {
+        setRenameDialog((current) =>
+          current?.path === path
+            ? { ...current, error: "Save the current file before renaming its folder." }
             : current,
         );
         return;
@@ -1235,10 +1260,12 @@ function ManageApp() {
           throw new Error(response.error);
         }
         const renamedFile = response.file;
-        if (!renamedFile) {
+        if (currentEntry.kind === "file" && !renamedFile) {
           throw new Error("Docs did not return renamed file metadata.");
         }
-        if (selectedPathRef.current === path) {
+        setAnnotationsByPath((current) => remapManageAnnotationPathsForMove(current, path, nextPath));
+        setCollapsedDirectoryPaths((current) => remapManagePathSetForMove(current, path, nextPath));
+        if (currentEntry.kind === "file" && renamedFile && selectedPathRef.current === path) {
           selectedPathRef.current = renamedFile.path;
           setSelectedPath(renamedFile.path);
           setPreview(renamedFile);
@@ -1249,21 +1276,15 @@ function ManageApp() {
           setPreviewState("ready");
           setSaveState("idle");
         }
-        setAnnotationsByPath((current) => {
-          const renamedAnnotations = current[path];
-          if (!renamedAnnotations?.length) {
-            return current;
-          }
-          const { [path]: _removed, ...remaining } = current;
-          return {
-            ...remaining,
-            [renamedFile.path]: [...(remaining[renamedFile.path] ?? []), ...renamedAnnotations],
-          };
-        });
         setRenameDialog(undefined);
         await refreshFiles();
+        if (currentEntry.kind === "directory" && renamedSelectedPath) {
+          selectedPathRef.current = renamedSelectedPath;
+          setSelectedPath(renamedSelectedPath);
+          await readFile(renamedSelectedPath);
+        }
       } catch (renameError) {
-        const message = renameError instanceof Error ? renameError.message : "Could not rename file.";
+        const message = renameError instanceof Error ? renameError.message : "Could not rename item.";
         setRenameDialog((current) => (current?.path === path ? { ...current, error: message } : current));
         setError(message);
       } finally {
@@ -1279,6 +1300,7 @@ function ManageApp() {
       isDirty,
       projectEditorId,
       projectId,
+      readFile,
       refreshFiles,
       saveState,
     ],
@@ -1286,13 +1308,23 @@ function ManageApp() {
 
   const deleteFile = useCallback(
     async (path: string) => {
-      const currentEntry = entries.find((entry) => entry.kind === "file" && entry.path === path);
+      const currentEntry = entries.find((entry) => entry.path === path);
       if (!currentEntry || fileOperation) {
+        return;
+      }
+      const selectedPathBeforeDelete = selectedPathRef.current;
+      const deletesSelectedPath =
+        selectedPathBeforeDelete === path ||
+        (currentEntry.kind === "directory" &&
+          selectedPathBeforeDelete !== undefined &&
+          isManageDescendantPath(selectedPathBeforeDelete, path));
+      if (currentEntry.kind === "directory" && deletesSelectedPath && (isDirty || saveState === "saving")) {
+        setError("Save the current file before deleting its folder.");
         return;
       }
       setFileOperation({ action: "delete", path });
       setError(undefined);
-      if (selectedPathRef.current === path) {
+      if (deletesSelectedPath) {
         clearPendingContentAutosave();
       }
       try {
@@ -1305,15 +1337,10 @@ function ManageApp() {
         if (response.error) {
           throw new Error(response.error);
         }
-        setAnnotationsByPath((current) => {
-          if (!current[path]?.length) {
-            return current;
-          }
-          const { [path]: _removed, ...remaining } = current;
-          return remaining;
-        });
+        setAnnotationsByPath((current) => removeManageAnnotationPathsForDeletedEntry(current, path));
+        setCollapsedDirectoryPaths((current) => removeManagePathSetForDeletedEntry(current, path));
         setFileContextMenu(undefined);
-        if (selectedPathRef.current === path) {
+        if (deletesSelectedPath) {
           selectedPathRef.current = undefined;
           setSelectedPath(undefined);
           setPreview(undefined);
@@ -1324,14 +1351,23 @@ function ManageApp() {
         }
         await refreshFiles();
       } catch (deleteError) {
-        setError(deleteError instanceof Error ? deleteError.message : "Could not delete file.");
+        setError(deleteError instanceof Error ? deleteError.message : "Could not delete item.");
       } finally {
         setFileOperation((current) =>
           current?.action === "delete" && current.path === path ? undefined : current,
         );
       }
     },
-    [clearPendingContentAutosave, entries, fileOperation, projectEditorId, projectId, refreshFiles],
+    [
+      clearPendingContentAutosave,
+      entries,
+      fileOperation,
+      isDirty,
+      projectEditorId,
+      projectId,
+      refreshFiles,
+      saveState,
+    ],
   );
 
   const moveEntryToDirectory = useCallback(
@@ -1553,13 +1589,13 @@ function ManageApp() {
   }, [collapsedDirectoryPaths, query, treeOrderedEntries]);
 
   const contextMenuEntry = fileContextMenu
-    ? entries.find((entry) => entry.kind === "file" && entry.path === fileContextMenu.path)
+    ? entries.find((entry) => entry.path === fileContextMenu.path)
     : undefined;
   const contextMenuOperation =
     contextMenuEntry && fileOperation?.path === contextMenuEntry.path ? fileOperation.action : undefined;
 
   useEffect(() => {
-    if (fileContextMenu && !entries.some((entry) => entry.kind === "file" && entry.path === fileContextMenu.path)) {
+    if (fileContextMenu && !entries.some((entry) => entry.path === fileContextMenu.path)) {
       setFileContextMenu(undefined);
     }
   }, [entries, fileContextMenu]);
@@ -1596,6 +1632,7 @@ function ManageApp() {
         <aside
           className="manage-sidebar"
           data-drag-active={String(Boolean(dragEntry))}
+          onContextMenu={suppressSidebarDefaultContextMenu}
           onDragLeave={handleSidebarDragLeave}
           onDragOver={updateRootDropTarget}
           onDrop={dropOnRoot}
@@ -1680,9 +1717,9 @@ function ManageApp() {
           type="button"
         >
           {sidebarSide === "right" ? (
-            <IconLayoutSidebarRightCollapse aria-hidden="true" size={16} stroke={1.8} />
+            <IconLayoutSidebarRightExpand aria-hidden="true" size={16} stroke={1.8} />
           ) : (
-            <IconLayoutSidebarLeftCollapse aria-hidden="true" size={16} stroke={1.8} />
+            <IconLayoutSidebarLeftExpand aria-hidden="true" size={16} stroke={1.8} />
           )}
         </button>
       )}
@@ -1970,7 +2007,7 @@ function ManageFileRow({
   return (
     <button
       aria-expanded={entry.kind === "directory" && hasChildren ? isExpanded : undefined}
-      aria-haspopup={entry.kind === "file" ? "menu" : undefined}
+      aria-haspopup="menu"
       aria-selected={entry.kind === "file" ? isSelected : undefined}
       className="manage-file-row"
       data-active-descendant={String(hasActiveFileDescendant)}
@@ -1982,17 +2019,11 @@ function ManageFileRow({
       draggable={entry.kind === "file" || entry.kind === "directory"}
       onClick={onSelect}
       onContextMenu={(event: ReactMouseEvent<HTMLButtonElement>) => {
-        if (entry.kind !== "file") {
-          return;
-        }
         event.preventDefault();
         event.stopPropagation();
         onOpenContextMenu(entry, { x: event.clientX, y: event.clientY });
       }}
       onKeyDown={(event: ReactKeyboardEvent<HTMLButtonElement>) => {
-        if (entry.kind !== "file") {
-          return;
-        }
         if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
           return;
         }
@@ -2133,7 +2164,7 @@ function ManageRenameDialog({
       />
       <form className="manage-rename-dialog" onSubmit={submit}>
         <div className="manage-rename-header">
-          <span>Rename file</span>
+          <span>Rename item</span>
           <button
             aria-label="Cancel rename"
             className="manage-icon-button manage-rename-close"
@@ -2144,7 +2175,7 @@ function ManageRenameDialog({
           </button>
         </div>
         <input
-          aria-label="File name"
+          aria-label="Item name"
           className="manage-rename-input"
           disabled={isRenaming}
           onChange={(event) => onChange(event.currentTarget.value)}
@@ -4365,6 +4396,35 @@ function remapManagePathSetForMove(
   return next;
 }
 
+function removeManageAnnotationPathsForDeletedEntry(
+  annotationsByPath: Record<string, ManageAnnotation[]>,
+  deletedPath: string,
+): Record<string, ManageAnnotation[]> {
+  let changed = false;
+  const next: Record<string, ManageAnnotation[]> = {};
+  for (const [path, annotations] of Object.entries(annotationsByPath)) {
+    if (path === deletedPath || isManageDescendantPath(path, deletedPath)) {
+      changed = true;
+      continue;
+    }
+    next[path] = [...annotations];
+  }
+  return changed ? next : annotationsByPath;
+}
+
+function removeManagePathSetForDeletedEntry(paths: Set<string>, deletedPath: string): Set<string> {
+  let changed = false;
+  const next = new Set<string>();
+  for (const path of paths) {
+    if (path === deletedPath || isManageDescendantPath(path, deletedPath)) {
+      changed = true;
+      continue;
+    }
+    next.add(path);
+  }
+  return changed ? next : paths;
+}
+
 function createInitialArtifactContent(kind: ManageArtifactKind): string {
   switch (kind) {
     case "excalidraw":
@@ -5882,10 +5942,15 @@ styleElement.textContent = `
 
   .manage-sidebar-header {
     align-items: center;
+    border-bottom: 1px solid var(--manage-border);
+    box-sizing: border-box;
     display: flex;
-    gap: 10px;
-    min-height: 52px;
-    padding: 12px 9px 6px 10px;
+    gap: 8px;
+    height: 33px;
+    max-height: 33px;
+    min-height: 33px;
+    overflow: visible;
+    padding: 0 0 0 13px;
   }
 
   .manage-sidebar-header[data-root-drop-target="true"] {
@@ -5897,14 +5962,18 @@ styleElement.textContent = `
     color: var(--manage-text);
     display: flex;
     flex: 1 1 auto;
-    font-size: 15.55px;
-    font-weight: 300;
-    gap: 11px;
-    line-height: 18px;
-    margin-left: -2px;
+    font-size: 12px;
+    font-weight: 680;
+    gap: 7px;
+    line-height: 33px;
     min-width: 0;
     -webkit-user-select: none;
     user-select: none;
+  }
+
+  .manage-project-title svg {
+    height: 15px;
+    width: 15px;
   }
 
   .manage-project-title span {
@@ -5916,9 +5985,11 @@ styleElement.textContent = `
 
   .manage-sidebar-actions {
     align-items: center;
+    align-self: stretch;
     display: inline-flex;
     flex: 0 0 auto;
-    gap: 4px;
+    gap: 0;
+    height: 100%;
     position: relative;
   }
 
@@ -5943,6 +6014,51 @@ styleElement.textContent = `
 
   .manage-icon-button:disabled {
     color: var(--manage-subtle);
+  }
+
+  .manage-sidebar-header .manage-icon-button,
+  .manage-sidebar-restore-button {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    box-sizing: border-box;
+    color: rgba(255, 255, 255, 0.84);
+    height: 33px;
+    max-height: 33px;
+    min-height: 33px;
+    padding: 0;
+    width: 38px;
+  }
+
+  .manage-sidebar-header .manage-icon-button {
+    border-left: 1px solid #252525;
+  }
+
+  .manage-sidebar-restore-button {
+    border-right: 1px solid #252525;
+  }
+
+  .manage-sidebar-header .manage-icon-button:not(:disabled):hover,
+  .manage-sidebar-header .manage-icon-button:not(:disabled):focus-visible,
+  .manage-sidebar-header .manage-icon-button[aria-expanded="true"],
+  .manage-sidebar-restore-button:not(:disabled):hover,
+  .manage-sidebar-restore-button:not(:disabled):focus-visible {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.96);
+    outline: none;
+  }
+
+  .manage-sidebar-header .manage-icon-button:disabled {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.34);
+    cursor: default;
+  }
+
+  .manage-sidebar-header .manage-icon-button svg,
+  .manage-sidebar-restore-button svg {
+    height: 16px;
+    width: 16px;
   }
 
   .manage-sidebar-menu {
@@ -5998,24 +6114,26 @@ styleElement.textContent = `
   }
 
   .manage-sidebar-restore-button {
-    left: 12px;
+    left: 0;
     position: absolute;
-    top: 10px;
+    top: 0;
     z-index: 5;
   }
 
   .manage-shell[data-sidebar-side="right"] .manage-sidebar-restore-button {
+    border-left: 1px solid #252525;
+    border-right: 0;
     left: auto;
-    right: 12px;
+    right: 0;
   }
 
   .manage-shell[data-sidebar-hidden="true"] .manage-preview-header {
-    padding-left: 50px;
+    padding-left: 51px;
   }
 
   .manage-shell[data-sidebar-hidden="true"][data-sidebar-side="right"] .manage-preview-header {
     padding-left: 16px;
-    padding-right: 50px;
+    padding-right: 51px;
   }
 
   .manage-search {
@@ -6816,6 +6934,7 @@ styleElement.textContent = `
   }
 
   .manage-meo-markdown-editor .cm-lineNumbers .cm-gutterElement {
+    align-items: flex-start;
     padding: 0 4px 0 0;
   }
 

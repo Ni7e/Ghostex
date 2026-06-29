@@ -165,7 +165,7 @@ describe("native pointer hover boundary source", () => {
     expect(titlebarHostSource).not.toContain("<TooltipTrigger");
     expect(titlebarHostSource).not.toContain("<TooltipContent");
     expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Tips">');
-    expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Keep awake">');
+    expect(titlebarHostSource).not.toContain('<TitlebarAppTooltip content="Keep awake">');
     expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Resources Monitor">');
     expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Git actions">');
     expect(titlebarHostSource).toContain('<TitlebarAppTooltip content="Quick Actions. Right click for more options">');
