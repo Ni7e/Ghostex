@@ -1317,21 +1317,34 @@ stage_remote_gxserver_linux_package_if_configured() {
 	local package_label="$3"
 	local default_source_dir="$4"
 	local target_dir="$WEB_DIR/$target_name"
+	local source_is_default=0
+	local validation_output
 	if [[ -z "$source_dir" && -d "$default_source_dir" ]]; then
 		source_dir="$default_source_dir"
+		source_is_default=1
 	fi
 	if [[ -z "$source_dir" ]]; then
 		if [[ "$GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES" == "1" ]]; then
 			echo "Missing $package_label remote gxserver package. Set GHOSTEX_REMOTE_GXSERVER_${package_label}_PACKAGE to a prebuilt Linux package directory." >&2
 			exit 1
 		fi
+		rm -rf "$target_dir"
 		return 0
 	fi
 	if [[ ! -d "$source_dir" ]]; then
 		echo "Configured $package_label remote gxserver package is not a directory: $source_dir" >&2
 		exit 1
 	fi
-	validate_remote_gxserver_linux_package "$source_dir" "$package_label" || exit 1
+	if ! validation_output="$(validate_remote_gxserver_linux_package "$source_dir" "$package_label" 2>&1)"; then
+		# CDXC:RemoteMachines 2026-06-30-00:31: Normal local starts should not fail because an optional auto-discovered Ubuntu gxserver package under build/ is stale after CLI resource changes. Strict release builds and explicit package env vars still fail validation; local starts clear the staged Web package and continue without remote install resources.
+		if [[ "$source_is_default" == "1" && "$GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES" != "1" ]]; then
+			echo "Remote gxserver $package_label default package is stale or incomplete; skipping optional staging." >&2
+			rm -rf "$target_dir"
+			return 0
+		fi
+		printf '%s\n' "$validation_output" >&2
+		exit 1
+	fi
 	# CDXC:RemoteMachines 2026-06-23-09:46: macOS app bundles may stage Linux remote gxserver packages only from explicit prebuilt directories. Validate required gxserver/zmx/zehn/bd/Node/Portless/CLI resources and require Linux ELF payloads before copying to Web/gxserver-linux-* so the installer never uploads the host Darwin package to Ubuntu.
 	#
 	# CDXC:RemoteMachines 2026-06-23-10:07: The Ubuntu package builder writes build/remote-gxserver-linux/<arch>/package by default. Auto-stage that deterministic output when it exists so release/local app packaging can include the already-built Linux package without requiring another env var or rebuilding it in the macOS app pass.
