@@ -62,6 +62,44 @@ const releaseArchitectures = [
   },
 ];
 
+/*
+ CDXC:RemoteUbuntuPackaging 2026-06-29-19:45:
+ Public Ghostex releases must bundle first-run gxserver-rs packages for Ubuntu
+ x64 and arm64. Validate the deterministic Linux CI outputs before mutating
+ release metadata and force native app packaging to stage both resources so the
+ remote installer cannot silently ship without Ubuntu x64 support.
+ */
+const remoteGxserverLinuxPackageConfigs = [
+  {
+    arch: "x64",
+    defaultPackageDir: path.join(repoRoot, "build", "remote-gxserver-linux", "x64", "package"),
+    packageLabel: "LINUX_X64",
+    resourceName: "gxserver-linux-x64",
+  },
+  {
+    arch: "arm64",
+    defaultPackageDir: path.join(repoRoot, "build", "remote-gxserver-linux", "arm64", "package"),
+    packageLabel: "LINUX_ARM64",
+    resourceName: "gxserver-linux-arm64",
+  },
+];
+
+const remoteGxserverLinuxRequiredPackageResources = [
+  "bin/gxserver",
+  "bin/zmx",
+  "bin/zehn",
+  "bin/bd",
+  "bin/ghostex-tui",
+  "code-server/lib/node",
+  "portless/dist/cli.js",
+  "CLI/ghostex-cli.mjs",
+  "CLI/ghostex-cli-automations.mjs",
+  "dist/protocol/index.js",
+  "dist/protocol/index.d.ts",
+  "package.json",
+  "build-identity.json",
+];
+
 class ReleaseError extends Error {
   constructor(message) {
     super(message);
@@ -199,6 +237,12 @@ function releaseBuildVersion(version) {
 
 function isPrereleaseVersion(version) {
   return version.includes("-");
+}
+
+function missingRemoteGxserverLinuxPackageResources(packageDir, exists = existsSync) {
+  return remoteGxserverLinuxRequiredPackageResources.filter((relativePath) => {
+    return !exists(path.join(packageDir, relativePath));
+  });
 }
 
 function timestampForComment(date = new Date()) {
@@ -1008,6 +1052,62 @@ android_tool_found aapt
   }
 }
 
+function remoteGxserverLinuxPackageBuildHint() {
+  return [
+    "Build the Ubuntu remote gxserver packages on Ubuntu/Linux CI with:",
+    "  bun run gxserver:remote-linux",
+    "Then run the release again from macOS so build/remote-gxserver-linux/x64/package and build/remote-gxserver-linux/arm64/package can be bundled.",
+  ].join("\n");
+}
+
+async function remoteGxserverLinuxPackageIdentity(packageDir) {
+  try {
+    return JSON.parse(await readFile(path.join(packageDir, "build-identity.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+async function ensureRemoteGxserverLinuxPackagesReady() {
+  const expectedRevision = await capture("git rev-parse HEAD");
+  const failures = [];
+  for (const packageConfig of remoteGxserverLinuxPackageConfigs) {
+    const missingResources = missingRemoteGxserverLinuxPackageResources(packageConfig.defaultPackageDir);
+    if (missingResources.length > 0) {
+      failures.push(
+        `${packageConfig.packageLabel} (${packageConfig.arch}) at ${packageConfig.defaultPackageDir} is missing: ${missingResources.join(", ")}`,
+      );
+      continue;
+    }
+    const identity = await remoteGxserverLinuxPackageIdentity(packageConfig.defaultPackageDir);
+    if (!identity?.sourceRevision) {
+      failures.push(
+        `${packageConfig.packageLabel} (${packageConfig.arch}) at ${packageConfig.defaultPackageDir} was built without sourceRevision metadata. Rebuild it with the current package script.`,
+      );
+      continue;
+    }
+    if (identity.sourceRevision !== expectedRevision) {
+      failures.push(
+        `${packageConfig.packageLabel} (${packageConfig.arch}) at ${packageConfig.defaultPackageDir} was built from ${identity.sourceRevision}, but the release source is ${expectedRevision}.`,
+      );
+    }
+    if (identity.sourceDirty) {
+      failures.push(
+        `${packageConfig.packageLabel} (${packageConfig.arch}) at ${packageConfig.defaultPackageDir} was built from a dirty worktree.`,
+      );
+    }
+  }
+  if (failures.length > 0) {
+    throw new ReleaseError(
+      [
+        "Remote Ubuntu gxserver packages are required for Ghostex releases.",
+        ...failures,
+        remoteGxserverLinuxPackageBuildHint(),
+      ].join("\n"),
+    );
+  }
+}
+
 async function latestSparkleVersion() {
   let maxVersion = 0;
   const xml = await readFile(path.join(repoRoot, config.armFeed), "utf8");
@@ -1064,6 +1164,7 @@ async function preflight(version, buildVersion, options) {
   await ensureReleaseBranchSynced(options.releaseBranch);
   await ensureTagMissing(version);
   await extractChangelogSection(version);
+  await ensureRemoteGxserverLinuxPackagesReady();
   if (!options.noPush) {
     await ensureReleaseMissing(version);
     await verifyHomebrewReleaseReadiness(version);
@@ -1164,6 +1265,7 @@ async function buildArch(version, entry) {
     DERIVED_DATA: derivedData,
     GHOSTEX_CODE_SIGN_IDENTITY: releaseSigningIdentity(),
     GHOSTEX_CODE_SIGN_TIMESTAMP_FLAG: "--timestamp",
+    GHOSTEX_REQUIRE_REMOTE_GXSERVER_LINUX_PACKAGES: "1",
   };
 
   logStep(`Build ${entry.arch}`);
@@ -1197,6 +1299,7 @@ async function validateBuiltApp(version, buildVersion, entry) {
   } catch (error) {
     throw new ReleaseError(error instanceof Error ? error.message : String(error));
   }
+  validateBundledRemoteGxserverLinuxPackages(entry);
 
   const info = await capture(`plutil -extract CFBundleShortVersionString raw ${shellQuote(path.join(entry.appPath, "Contents/Info.plist"))}`);
   const bundleVersion = await capture(`plutil -extract CFBundleVersion raw ${shellQuote(path.join(entry.appPath, "Contents/Info.plist"))}`);
@@ -1214,6 +1317,24 @@ async function validateBuiltApp(version, buildVersion, entry) {
   }
 
   await validateLidSleepHelperSigning(entry);
+}
+
+function validateBundledRemoteGxserverLinuxPackages(entry) {
+  for (const packageConfig of remoteGxserverLinuxPackageConfigs) {
+    const packageDir = path.join(
+      entry.appPath,
+      "Contents",
+      "Resources",
+      "Web",
+      packageConfig.resourceName,
+    );
+    const missingResources = missingRemoteGxserverLinuxPackageResources(packageDir);
+    if (missingResources.length > 0) {
+      throw new ReleaseError(
+        `${entry.arch} app bundle is missing remote Ubuntu ${packageConfig.arch} gxserver resources under ${packageConfig.resourceName}: ${missingResources.join(", ")}`,
+      );
+    }
+  }
 }
 
 async function validateLidSleepHelperSigning(entry) {
@@ -2249,6 +2370,7 @@ export {
   ReleaseError,
   buildGithubReleaseNotes,
   isHomebrewHostToolchainVersionError,
+  missingRemoteGxserverLinuxPackageResources,
   releaseBuildVersion,
   renderGhostexCask,
   renderGhostexCaskForTap,

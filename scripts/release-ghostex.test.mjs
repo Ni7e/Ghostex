@@ -3,6 +3,7 @@ import {
   ReleaseError,
   buildGithubReleaseNotes,
   isHomebrewHostToolchainVersionError,
+  missingRemoteGxserverLinuxPackageResources,
   renderGhostexCask,
   renderGhostexCaskForTap,
   selectLatestAndroidBuildTool,
@@ -162,5 +163,40 @@ describe("Ghostex release automation helpers", () => {
       ),
     ).toBe(true);
     expect(isHomebrewHostToolchainVersionError("Error: Cask is missing a sha256.")).toBe(false);
+  });
+
+  test("requires complete remote Ubuntu gxserver package resources for release", () => {
+    /*
+     * CDXC:RemoteUbuntuPackaging 2026-06-29-19:45:
+     * Release automation must prove the prebuilt Ubuntu remote gxserver package
+     * contains every runtime resource that macOS app packaging will stage for
+     * remote first-run installs, including the x64 path added after arm64.
+     */
+    const packageDir = "/package";
+    const existing = new Set([
+      "/package/bin/gxserver",
+      "/package/bin/zmx",
+      "/package/bin/zehn",
+      "/package/bin/bd",
+      "/package/bin/ghostex-tui",
+      "/package/code-server/lib/node",
+      "/package/portless/dist/cli.js",
+      "/package/CLI/ghostex-cli.mjs",
+      "/package/CLI/ghostex-cli-automations.mjs",
+      "/package/dist/protocol/index.js",
+      "/package/dist/protocol/index.d.ts",
+      "/package/package.json",
+      "/package/build-identity.json",
+    ]);
+
+    expect(missingRemoteGxserverLinuxPackageResources(packageDir, (candidate) => existing.has(candidate))).toEqual([]);
+
+    existing.delete("/package/CLI/ghostex-cli-automations.mjs");
+    existing.delete("/package/build-identity.json");
+
+    expect(missingRemoteGxserverLinuxPackageResources(packageDir, (candidate) => existing.has(candidate))).toEqual([
+      "CLI/ghostex-cli-automations.mjs",
+      "build-identity.json",
+    ]);
   });
 });

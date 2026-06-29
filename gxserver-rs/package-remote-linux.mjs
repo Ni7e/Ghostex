@@ -46,7 +46,7 @@ const archConfigs = {
 };
 
 const helpText = `
-Usage: node gxserver-rs/package-remote-linux.mjs [--arch x64|arm64] [--out <dir>]
+Usage: node gxserver-rs/package-remote-linux.mjs [--arch x64|arm64|all] [--out <dir>]
 
 Builds the self-contained Linux remote gxserver package that the macOS app
 stages as Web/gxserver-linux-<arch> and uploads to Ubuntu after the user clicks
@@ -61,6 +61,7 @@ Inputs can be overridden with:
   --beads-root <dir>     default: BEADS_ROOT/GHOSTEX_BEADS_ROOT or common checkouts
   --bd-bin <path>        use a prebuilt Linux bd binary instead of building Beads
   --node-bin <path>      use a prebuilt Linux Node binary instead of downloading Node
+  --out-root <dir>       default for --arch all: build/remote-gxserver-linux
   --portless-dir <dir>   default: node_modules/portless
   --rust-target <triple> default: arch-specific Linux GNU target
   --tui-root <dir>       default: tui
@@ -84,7 +85,22 @@ async function main() {
     return;
   }
 
-  const arch = normalizeArch(options.arch || process.arch);
+  const requestedArch = normalizeArch(options.arch || process.arch);
+  const arches = requestedArch === "all" ? ["x64", "arm64"] : [requestedArch];
+  if (arches.length > 1 && options.out) {
+    throw new Error("--out can only be used with one --arch value. Use --out-root or omit --out when building all Linux arches.");
+  }
+
+  /*
+   * CDXC:RemoteUbuntuPackaging 2026-06-29-18:58:
+   * Ubuntu remote installs need x64 and arm64 gxserver-rs packages from the same packaging entry point. Keep the default host-arch build for existing single-arch CI, and add explicit --arch all so release builders can produce both deterministic build/remote-gxserver-linux/<arch>/package outputs before macOS and GPUI staging.
+   */
+  for (const arch of arches) {
+    await buildLinuxPackageForArch({ arch, options });
+  }
+}
+
+async function buildLinuxPackageForArch({ arch, options }) {
   const archConfig = archConfigs[arch];
   if (!archConfig) {
     throw new Error(`Unsupported Linux package arch: ${options.arch || process.arch}`);
@@ -97,7 +113,10 @@ async function main() {
 
   const outputDir = path.resolve(
     repoRoot,
-    options.out || path.join("build", "remote-gxserver-linux", arch, "package"),
+    options.out ||
+      (options.outRoot
+        ? path.join(options.outRoot, arch, "package")
+        : path.join("build", "remote-gxserver-linux", arch, "package")),
   );
   await assertSafeOutputDir(outputDir);
 
@@ -112,6 +131,8 @@ async function main() {
       packageVersion: options.packageVersion || await gxserverPackageVersion(),
       portlessDir: path.resolve(repoRoot, options.portlessDir || "node_modules/portless"),
       rustTarget: options.rustTarget || archConfig.rustTarget,
+      sourceDirty: await gitSourceDirty(repoRoot),
+      sourceRevision: await gitOutput(repoRoot, ["rev-parse", "HEAD"], "unknown"),
       tuiBin: options.tuiBin ? path.resolve(repoRoot, options.tuiBin) : "",
       tuiRoot: path.resolve(repoRoot, options.tuiRoot || "tui"),
       tuiZigBin: options.tuiZigBin || process.env.TUI_ZIG || process.env.ZMX_ZIG || process.env.ZIG || "zig",
@@ -134,6 +155,12 @@ async function main() {
      * Bare `ghostex` on Ubuntu is the documented terminal UI entry point, so the
      * remote package must include `bin/ghostex-tui` instead of telling users to
      * build from a source checkout or a Homebrew-only Zig path after install.
+     *
+     * CDXC:RemoteUbuntuPackaging 2026-06-29-19:45:
+     * Release automation must reject stale prebuilt Linux packages. Record the
+     * source git revision and dirty-state in build-identity.json so macOS
+     * releases can prove x64 and arm64 Ubuntu payloads were built from the
+     * commit being released before staging them into the app bundle.
      */
     await buildPackage({ config, outputDir, workRoot });
     console.log(`Remote gxserver Linux ${arch} package written to ${outputDir}`);
@@ -175,6 +202,9 @@ function normalizeArch(value) {
   }
   if (normalized === "arm64" || normalized === "aarch64") {
     return "arm64";
+  }
+  if (normalized === "all" || normalized === "both") {
+    return "all";
   }
   return normalized;
 }
@@ -221,7 +251,7 @@ async function buildPackage({ config, outputDir, workRoot }) {
   await writePackageManifest(stageDir, config.packageVersion);
   await stageProtocolExports(stageDir, workRoot);
   await validateLinuxPackage(stageDir, config);
-  await writeBuildIdentity(stageDir, config.packageVersion);
+  await writeBuildIdentity(stageDir, config.packageVersion, config);
 
   await rm(outputDir, { force: true, recursive: true });
   await mkdir(path.dirname(outputDir), { recursive: true });
@@ -341,7 +371,12 @@ async function copyPortlessPackage(sourceDir, targetDir) {
 
 async function copyGhostexCli(targetDir) {
   await mkdir(targetDir, { recursive: true });
+  /*
+   * CDXC:GxserverAutomations 2026-06-29-23:13:
+   * Remote Ubuntu packages run the same bundled CLI as macOS. Copy the automation command module with the entrypoint because Node resolves the static import before any command dispatch can run.
+   */
   await cp(path.join(repoRoot, "scripts", "ghostex-cli.mjs"), path.join(targetDir, "ghostex-cli.mjs"));
+  await cp(path.join(repoRoot, "scripts", "ghostex-cli-automations.mjs"), path.join(targetDir, "ghostex-cli-automations.mjs"));
   const wsDir = path.join(repoRoot, "node_modules", "ws");
   if (await fileExists(wsDir)) {
     await mkdir(path.join(targetDir, "node_modules"), { recursive: true });
@@ -426,6 +461,7 @@ async function validateLinuxPackage(packageDir, config) {
     "code-server/lib/node",
     "portless/dist/cli.js",
     "CLI/ghostex-cli.mjs",
+    "CLI/ghostex-cli-automations.mjs",
     "dist/protocol/index.js",
     "dist/protocol/index.d.ts",
     "package.json",
@@ -445,7 +481,7 @@ async function validateLinuxPackage(packageDir, config) {
   }
 }
 
-async function writeBuildIdentity(packageDir, version) {
+async function writeBuildIdentity(packageDir, version, config = {}) {
   const hash = createHash("sha256");
   await hashDirectory(packageDir, packageDir, hash);
   const fingerprint = `sha256:${hash.digest("hex")}`;
@@ -455,6 +491,8 @@ async function writeBuildIdentity(packageDir, version) {
       buildIdentity: `gxserver:${version}:${fingerprint}`,
       fingerprint,
       packageVersion: version,
+      sourceDirty: Boolean(config.sourceDirty),
+      sourceRevision: config.sourceRevision || "unknown",
     }, null, 2)}\n`,
     "utf8",
   );
@@ -654,6 +692,15 @@ async function gitOutput(cwd, args, fallback) {
     return stdout.trim() || fallback;
   } catch {
     return fallback;
+  }
+}
+
+async function gitSourceDirty(cwd) {
+  try {
+    const { stdout } = await execFileAsync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd });
+    return stdout.trim().length > 0;
+  } catch {
+    return true;
   }
 }
 
