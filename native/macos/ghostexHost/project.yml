@@ -74,6 +74,7 @@ targets:
         # include it before CEF browser panes are enabled.
         NSBluetoothAlwaysUsageDescription: Ghostex uses Bluetooth only when a website in a Chromium browser pane requests browser features such as passkeys, security keys, or Bluetooth devices.
         # CDXC:OSIntegration 2026-05-27-18:06: The generated app bundle must register Ghostex as an available macOS editor, script handler, and ghostex:// URL target without taking over defaults on install. Settings owns explicit Launch Services default changes.
+        # CDXC:OSIntegration 2026-06-29-15:42: `bun run start` keeps these declarations only on /Applications/Ghostex.app. Local build products strip them before signing so Finder Open With does not show duplicate Ghostex entries from DerivedData or build folders.
         CFBundleDocumentTypes:
           - CFBundleTypeName: Editable Files
             CFBundleTypeRole: Editor

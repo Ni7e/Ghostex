@@ -1274,6 +1274,10 @@ validate_remote_gxserver_linux_package() {
 		echo "Remote gxserver $package_label package is missing Ghostex CLI entrypoint: CLI/ghostex-cli.mjs" >&2
 		return 1
 	fi
+	if [[ ! -f "$package_dir/CLI/ghostex-cli-automations.mjs" && ! -f "$package_dir/cli/ghostex-cli-automations.mjs" ]]; then
+		echo "Remote gxserver $package_label package is missing Ghostex CLI automation module: CLI/ghostex-cli-automations.mjs" >&2
+		return 1
+	fi
 	for required_path in \
 		"bin/gxserver" \
 		"bin/zmx" \
@@ -1727,7 +1731,9 @@ mkdir -p "$CLI_DIR"
 # launchers automatically so Homebrew can install both public commands without
 # asking users to add shell aliases by hand.
 # CDXC:CliInstall 2026-06-07-13:53: The app CLI is not a web asset. Stage it under Contents/Resources/CLI so DMG and Homebrew installs can symlink public commands to one app-owned runtime while Web remains only the sidebar/runtime asset folder.
+# CDXC:GxserverAutomations 2026-06-29-23:13: The bundled CLI statically imports its automation command module. Stage that module beside ghostex-cli.mjs so installed `ghostex` and `gx` launchers do not fail module resolution before showing help or running non-automation commands.
 cp "$REPO_ROOT/scripts/ghostex-cli.mjs" "$CLI_DIR/ghostex-cli.mjs"
+cp "$REPO_ROOT/scripts/ghostex-cli-automations.mjs" "$CLI_DIR/ghostex-cli-automations.mjs"
 cp "$REPO_ROOT/scripts/ghostex-cli-launcher.sh" "$CLI_DIR/ghostex"
 cp "$REPO_ROOT/scripts/ghostex-cli-launcher.sh" "$CLI_DIR/gx"
 chmod 755 "$CLI_DIR/ghostex" "$CLI_DIR/gx"
@@ -2351,6 +2357,27 @@ sync_built_app_resources() {
 	rsync -a --delete "$CLI_DIR/" "$resources_dir/CLI/"
 }
 
+strip_local_start_launch_services_handlers() {
+	local app_path="$1"
+	local info_plist="$app_path/Contents/Info.plist"
+	if [[ "${GHOSTEX_LOCAL_START:-}" != "1" || ! -f "$info_plist" ]]; then
+		return 0
+	fi
+	# CDXC:OSIntegration 2026-06-29-15:42: `bun run start` installs and opens /Applications/Ghostex.app, so local build products must not advertise Finder Open With or ghostex:// handlers. Strip LaunchServices-facing keys from build-folder app bundles before signing; the start installer restores them only on the installed app.
+	/usr/libexec/PlistBuddy -c "Delete :CFBundleDocumentTypes" "$info_plist" >/dev/null 2>&1 || true
+	/usr/libexec/PlistBuddy -c "Delete :CFBundleURLTypes" "$info_plist" >/dev/null 2>&1 || true
+}
+
+unregister_local_start_build_app_from_launch_services() {
+	local app_path="$1"
+	local lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+	if [[ "${GHOSTEX_LOCAL_START:-}" != "1" || ! -d "$app_path" || ! -x "$lsregister" ]]; then
+		return 0
+	fi
+	# CDXC:OSIntegration 2026-06-29-15:42: Existing LaunchServices records can outlive the Info.plist mutation above. Unregister the current local build product so Finder stops offering that build-folder app while keeping /Applications/Ghostex.app registered by the start installer.
+	"$lsregister" -u "$app_path" >/dev/null 2>&1 || true
+}
+
 sign_built_app_if_needed() {
 	if can_reuse_build_app_signature; then
 		echo "Built $GHOSTEX_APP_NAME signature is current; skipping build app re-sign."
@@ -2404,8 +2431,10 @@ else
 	NATIVE_APP_REBUILT=1
 fi
 
+strip_local_start_launch_services_handlers "$APP_PATH"
 sync_built_app_resources
 sign_built_app_if_needed
+unregister_local_start_build_app_from_launch_services "$APP_PATH"
 if [[ "$NATIVE_APP_REBUILT" == "1" ]]; then
 	write_cache_stamp "$NATIVE_APP_CACHE_KEY" "$NATIVE_APP_DIGEST"
 fi

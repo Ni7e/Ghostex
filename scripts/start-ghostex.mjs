@@ -1,7 +1,18 @@
 #!/usr/bin/env bun
 
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  rmSync,
+  statSync,
+  writeSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,6 +79,7 @@ buildEnv.GHOSTEX_BUILT_APP_PATH_FILE = builtAppPathFile;
 const xcodeDestination = `platform=macOS,arch=${arch}`;
 const installedApp = path.join(installDir, `${appName}.app`);
 const installedExecutable = path.join(installedApp, "Contents", "MacOS", appName);
+const installedInfoPlist = path.join(installedApp, "Contents", "Info.plist");
 const localStartLockFile = path.join(repoRoot, "build", "ghostex-local-start.lock");
 reexecUnderLocalStartLock();
 logStartStep(`Checking local resources (${configuration}, ${arch})...`);
@@ -652,15 +664,99 @@ async function installAndOpenApp(appPath) {
 }
 
 function syncInstalledAppBundle(appPath) {
+  /*
+  CDXC:OSIntegration 2026-06-29-15:42:
+  `bun run start` should publish Finder Open With and ghostex:// handlers only from /Applications/Ghostex.app. Keep the build product's Info.plist handler-free, then write the installed app's LaunchServices metadata separately so Spotlight does not list each DerivedData/build copy as another Ghostex app.
+  */
+  const rsyncArgs = ["-a", "--delete", "--exclude=Contents/Info.plist", `${appPath}/`, `${installedApp}/`];
   if (startVerbose) {
-    run("rsync", ["-a", "--delete", `${appPath}/`, `${installedApp}/`]);
+    run("rsync", rsyncArgs);
   } else {
-    run("rsync", ["-a", "--delete", "--itemize-changes", `${appPath}/`, `${installedApp}/`], {
+    run("rsync", [...rsyncArgs.slice(0, 2), "--itemize-changes", ...rsyncArgs.slice(2)], {
       quietLabel: `Install ${appName} bundle`,
       quietSummary: "rsync",
     });
   }
+  syncInstalledLaunchServicesInfoPlist(appPath);
   logStartDetail(`Installed bundle synced to ${installedApp}.`);
+}
+
+function syncInstalledLaunchServicesInfoPlist(appPath) {
+  const sourceInfoPlist = path.join(appPath, "Contents", "Info.plist");
+  if (!existsSync(sourceInfoPlist)) {
+    throw new Error(`Built app is missing Info.plist at ${sourceInfoPlist}.`);
+  }
+  const stagedInfoPlist = path.join(repoRoot, "build", "local-start", `${appName}-installed-Info.plist`);
+  mkdirSync(path.dirname(stagedInfoPlist), { recursive: true });
+  copyFileSync(sourceInfoPlist, stagedInfoPlist);
+  writeInstalledLaunchServicesHandlers(stagedInfoPlist);
+  if (existsSync(installedInfoPlist) && readFileSync(installedInfoPlist).equals(readFileSync(stagedInfoPlist))) {
+    logStartDetail("Installed LaunchServices metadata is current.");
+    return;
+  }
+  mkdirSync(path.dirname(installedInfoPlist), { recursive: true });
+  copyFileSync(stagedInfoPlist, installedInfoPlist);
+  logStartDetail("Installed LaunchServices metadata refreshed.");
+}
+
+function writeInstalledLaunchServicesHandlers(infoPlist) {
+  removePlistKeyIfPresent(infoPlist, "CFBundleDocumentTypes");
+  removePlistKeyIfPresent(infoPlist, "CFBundleURLTypes");
+  for (const command of installedLaunchServicesPlistCommands()) {
+    run("/usr/libexec/PlistBuddy", ["-c", command, infoPlist], { stdio: "ignore" });
+  }
+}
+
+function removePlistKeyIfPresent(infoPlist, key) {
+  if (!plistKeyExists(infoPlist, key)) {
+    return;
+  }
+  run("/usr/libexec/PlistBuddy", ["-c", `Delete :${key}`, infoPlist], { stdio: "ignore" });
+}
+
+function plistKeyExists(infoPlist, key) {
+  const result = spawnSync("/usr/libexec/PlistBuddy", ["-c", `Print :${key}`, infoPlist], {
+    cwd: repoRoot,
+    env: startEnvironment,
+    stdio: ["ignore", "ignore", "ignore"],
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  return result.status === 0;
+}
+
+function installedLaunchServicesPlistCommands() {
+  return [
+    "Add :CFBundleDocumentTypes array",
+    "Add :CFBundleDocumentTypes:0 dict",
+    "Add :CFBundleDocumentTypes:0:CFBundleTypeName string Editable Files",
+    "Add :CFBundleDocumentTypes:0:CFBundleTypeRole string Editor",
+    "Add :CFBundleDocumentTypes:0:LSHandlerRank string Alternate",
+    "Add :CFBundleDocumentTypes:0:LSItemContentTypes array",
+    "Add :CFBundleDocumentTypes:0:LSItemContentTypes:0 string public.text",
+    "Add :CFBundleDocumentTypes:0:LSItemContentTypes:1 string public.source-code",
+    "Add :CFBundleDocumentTypes:0:LSItemContentTypes:2 string public.script",
+    "Add :CFBundleDocumentTypes:0:LSItemContentTypes:3 string public.data",
+    "Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions array",
+    "Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:0 string *",
+    "Add :CFBundleDocumentTypes:1 dict",
+    "Add :CFBundleDocumentTypes:1:CFBundleTypeName string Script Files",
+    "Add :CFBundleDocumentTypes:1:CFBundleTypeRole string Shell",
+    "Add :CFBundleDocumentTypes:1:LSHandlerRank string Alternate",
+    "Add :CFBundleDocumentTypes:1:LSItemContentTypes array",
+    "Add :CFBundleDocumentTypes:1:LSItemContentTypes:0 string public.shell-script",
+    "Add :CFBundleDocumentTypes:1:LSItemContentTypes:1 string public.unix-executable",
+    "Add :CFBundleDocumentTypes:1:CFBundleTypeExtensions array",
+    "Add :CFBundleDocumentTypes:1:CFBundleTypeExtensions:0 string command",
+    "Add :CFBundleDocumentTypes:1:CFBundleTypeExtensions:1 string tool",
+    "Add :CFBundleDocumentTypes:1:CFBundleTypeExtensions:2 string sh",
+    "Add :CFBundleURLTypes array",
+    "Add :CFBundleURLTypes:0 dict",
+    "Add :CFBundleURLTypes:0:CFBundleURLName string Ghostex",
+    "Add :CFBundleURLTypes:0:CFBundleURLSchemes array",
+    "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string ghostex",
+  ];
 }
 
 function ensureInstalledAppCodeSignature(appPath) {
