@@ -28,6 +28,37 @@ pub(crate) struct SidebarBridgeFunctionSpec {
     pub(crate) process_message_name: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProjectWorkareaBridgeFunctionId {
+    ProjectBeadsRequest,
+    ProjectBoardRequest,
+    ProjectBoardImageRequest,
+    ManageFilesRequest,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ProjectWorkareaBridgeFunctionSpec {
+    #[allow(dead_code)]
+    pub(crate) id: ProjectWorkareaBridgeFunctionId,
+    pub(crate) js_function_name: &'static str,
+    pub(crate) process_message_name: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppModalHostBridgeSurface {
+    NativeWindow,
+    Sidebar,
+    Titlebar,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AppModalHostBridgeSurfaceSpec {
+    pub(crate) surface: AppModalHostBridgeSurface,
+    pub(crate) entry_file_name: &'static str,
+    pub(crate) extra_info_value: &'static str,
+    pub(crate) exposes_native_window_identity: bool,
+}
+
 const SIDEBAR_PROJECT_CONTEXT_PROCESS_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.activeProjectContext";
 const SIDEBAR_SOURCE_WORKAREA_READINESS_PROCESS_MESSAGE_NAME: &str =
@@ -84,10 +115,45 @@ const SIDEBAR_SESSION_STATUS_INDICATORS_JS_FUNCTION: &str = "postSessionStatusIn
 const SIDEBAR_PET_OVERLAY_STATE_JS_FUNCTION: &str = "postPetOverlayState";
 
 pub(crate) const SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS: usize = 32 * 1024;
+pub(crate) const PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME: &str =
+    "ghostex.gpui.projectWorkarea.installBridge";
+const PROJECT_WORKAREA_PROJECT_BEADS_REQUEST_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.projectWorkarea.projectBeadsRequest";
+const PROJECT_WORKAREA_PROJECT_BOARD_REQUEST_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.projectWorkarea.projectBoardRequest";
+const PROJECT_WORKAREA_PROJECT_BOARD_IMAGE_REQUEST_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.projectWorkarea.projectBoardImageRequest";
+const PROJECT_WORKAREA_MANAGE_FILES_REQUEST_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.projectWorkarea.manageFilesRequest";
+const PROJECT_WORKAREA_PROJECT_BEADS_REQUEST_JS_FUNCTION: &str = "postProjectBeadsRequest";
+const PROJECT_WORKAREA_PROJECT_BOARD_REQUEST_JS_FUNCTION: &str = "postProjectBoardRequest";
+const PROJECT_WORKAREA_PROJECT_BOARD_IMAGE_REQUEST_JS_FUNCTION: &str =
+    "postProjectBoardImageRequest";
+const PROJECT_WORKAREA_MANAGE_FILES_REQUEST_JS_FUNCTION: &str = "postManageFilesRequest";
+pub(crate) const PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS: usize = 3 * 1024 * 1024;
+pub(crate) const APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME: &str =
+    "ghostex.gpui.appModalHost.message";
+pub(crate) const APP_MODAL_HOST_BRIDGE_PAYLOAD_MAX_CHARS: usize = 1024 * 1024;
+pub(crate) const APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY: &str =
+    "ghostexGpuiAppModalHostSurface";
+const APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW: &str = "nativeWindow";
+const APP_MODAL_HOST_BRIDGE_SURFACE_SIDEBAR: &str = "sidebar";
+const APP_MODAL_HOST_BRIDGE_SURFACE_TITLEBAR: &str = "titlebar";
+pub(crate) const APP_MODAL_HOST_SURFACE_JS_FIELD: &str = "__ghostex_APP_MODAL_HOST_SURFACE__";
+pub(crate) const APP_MODAL_HOST_ID_JS_FIELD: &str = "__ghostex_APP_MODAL_HOST_ID__";
+pub(crate) const APP_MODAL_HOST_SURFACE_VALUE: &str = "nativeWindow";
+pub(crate) const APP_MODAL_HOST_ID_VALUE: &str = "gpui";
+pub(crate) const WEBKIT_JS_OBJECT: &str = "webkit";
+pub(crate) const WEBKIT_MESSAGE_HANDLERS_JS_OBJECT: &str = "messageHandlers";
+pub(crate) const WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT: &str = "ghostexAppModalHost";
+pub(crate) const WEBKIT_POST_MESSAGE_JS_FUNCTION: &str = "postMessage";
 
 /*
 CDXC:GPUISidebarBridgeOwnership 2026-06-28-23:24:
 The sidebar CEF post-function allowlist must have one Rust manifest shared by main-process macOS CEF and the helper renderer, so packaged helper-backed sidebars cannot lose supported calls such as workspace terminal rename.
+
+CDXC:GPUICefBridgeOwnership 2026-06-29-14:45:
+GPUI CEF bridge names, payload budgets, and allowed app-modal/project-workarea surfaces live in this Rust manifest so the macOS browser process and helper renderer consume one ownership point. Keep sidebar, project-workarea, and app-modal handlers surface-specific; this manifest is an allowlist, not a generic IPC bus.
 */
 pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 18] = [
     SidebarBridgeFunctionSpec {
@@ -182,10 +248,105 @@ pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 18] 
     },
 ];
 
+pub(crate) const PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS: [ProjectWorkareaBridgeFunctionSpec; 4] = [
+    ProjectWorkareaBridgeFunctionSpec {
+        id: ProjectWorkareaBridgeFunctionId::ProjectBeadsRequest,
+        js_function_name: PROJECT_WORKAREA_PROJECT_BEADS_REQUEST_JS_FUNCTION,
+        process_message_name: PROJECT_WORKAREA_PROJECT_BEADS_REQUEST_PROCESS_MESSAGE_NAME,
+    },
+    ProjectWorkareaBridgeFunctionSpec {
+        id: ProjectWorkareaBridgeFunctionId::ProjectBoardRequest,
+        js_function_name: PROJECT_WORKAREA_PROJECT_BOARD_REQUEST_JS_FUNCTION,
+        process_message_name: PROJECT_WORKAREA_PROJECT_BOARD_REQUEST_PROCESS_MESSAGE_NAME,
+    },
+    ProjectWorkareaBridgeFunctionSpec {
+        id: ProjectWorkareaBridgeFunctionId::ProjectBoardImageRequest,
+        js_function_name: PROJECT_WORKAREA_PROJECT_BOARD_IMAGE_REQUEST_JS_FUNCTION,
+        process_message_name: PROJECT_WORKAREA_PROJECT_BOARD_IMAGE_REQUEST_PROCESS_MESSAGE_NAME,
+    },
+    ProjectWorkareaBridgeFunctionSpec {
+        id: ProjectWorkareaBridgeFunctionId::ManageFilesRequest,
+        js_function_name: PROJECT_WORKAREA_MANAGE_FILES_REQUEST_JS_FUNCTION,
+        process_message_name: PROJECT_WORKAREA_MANAGE_FILES_REQUEST_PROCESS_MESSAGE_NAME,
+    },
+];
+
+pub(crate) const APP_MODAL_HOST_BRIDGE_SURFACE_SPECS: [AppModalHostBridgeSurfaceSpec; 3] = [
+    AppModalHostBridgeSurfaceSpec {
+        surface: AppModalHostBridgeSurface::NativeWindow,
+        entry_file_name: "modal-host.html",
+        extra_info_value: APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW,
+        exposes_native_window_identity: true,
+    },
+    AppModalHostBridgeSurfaceSpec {
+        surface: AppModalHostBridgeSurface::Sidebar,
+        entry_file_name: "index.html",
+        extra_info_value: APP_MODAL_HOST_BRIDGE_SURFACE_SIDEBAR,
+        exposes_native_window_identity: false,
+    },
+    AppModalHostBridgeSurfaceSpec {
+        surface: AppModalHostBridgeSurface::Titlebar,
+        entry_file_name: "titlebar-host.html",
+        extra_info_value: APP_MODAL_HOST_BRIDGE_SURFACE_TITLEBAR,
+        exposes_native_window_identity: false,
+    },
+];
+
+impl AppModalHostBridgeSurface {
+    #[allow(dead_code)]
+    pub(crate) fn extra_info_value(self) -> &'static str {
+        app_modal_host_bridge_surface_spec(self).extra_info_value
+    }
+
+    pub(crate) fn exposes_native_window_identity(self) -> bool {
+        app_modal_host_bridge_surface_spec(self).exposes_native_window_identity
+    }
+
+    pub(crate) fn from_extra_info_value(value: &str) -> Option<Self> {
+        APP_MODAL_HOST_BRIDGE_SURFACE_SPECS
+            .iter()
+            .find(|spec| spec.extra_info_value == value)
+            .map(|spec| spec.surface)
+    }
+}
+
+pub(crate) fn app_modal_host_bridge_surface_spec(
+    surface: AppModalHostBridgeSurface,
+) -> &'static AppModalHostBridgeSurfaceSpec {
+    APP_MODAL_HOST_BRIDGE_SURFACE_SPECS
+        .iter()
+        .find(|spec| spec.surface == surface)
+        .expect("app-modal host surface must be listed in bridge manifest")
+}
+
 pub(crate) fn sidebar_bridge_function_spec_for_js_function(
     function_name: &str,
 ) -> Option<&'static SidebarBridgeFunctionSpec> {
     SIDEBAR_BRIDGE_FUNCTION_SPECS
         .iter()
         .find(|spec| spec.js_function_name == function_name)
+}
+
+pub(crate) fn sidebar_bridge_function_spec_for_process_message(
+    process_message_name: &str,
+) -> Option<&'static SidebarBridgeFunctionSpec> {
+    SIDEBAR_BRIDGE_FUNCTION_SPECS
+        .iter()
+        .find(|spec| spec.process_message_name == process_message_name)
+}
+
+pub(crate) fn project_workarea_bridge_function_spec_for_js_function(
+    function_name: &str,
+) -> Option<&'static ProjectWorkareaBridgeFunctionSpec> {
+    PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS
+        .iter()
+        .find(|spec| spec.js_function_name == function_name)
+}
+
+pub(crate) fn project_workarea_bridge_function_spec_for_process_message(
+    process_message_name: &str,
+) -> Option<&'static ProjectWorkareaBridgeFunctionSpec> {
+    PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS
+        .iter()
+        .find(|spec| spec.process_message_name == process_message_name)
 }

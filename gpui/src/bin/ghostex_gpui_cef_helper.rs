@@ -1,18 +1,28 @@
 use cef::rc::Rc as _;
 use cef::{
-    App, CefString, Frame, ImplApp, ImplFrame as _, ImplListValue as _, ImplProcessMessage as _,
-    ImplRenderProcessHandler, ImplV8Context as _, ImplV8Handler, ImplV8Value as _, ProcessId,
-    RenderProcessHandler, V8Handler, V8Propertyattribute, V8Value, ValueType, WrapApp,
-    WrapRenderProcessHandler, WrapV8Handler, wrap_app, wrap_render_process_handler,
-    wrap_v8_handler,
+    App, CefString, DictionaryValue, Frame, ImplApp, ImplBrowser as _, ImplDictionaryValue as _,
+    ImplFrame as _, ImplListValue as _, ImplProcessMessage as _, ImplRenderProcessHandler,
+    ImplV8Context as _, ImplV8Handler, ImplV8Value as _, ProcessId, RenderProcessHandler,
+    V8Handler, V8Propertyattribute, V8Value, ValueType, WrapApp, WrapRenderProcessHandler,
+    WrapV8Handler, wrap_app, wrap_render_process_handler, wrap_v8_handler,
 };
 #[path = "../cef/sidebar_bridge_manifest.rs"]
 mod sidebar_bridge_manifest;
 use sidebar_bridge_manifest::{
-    SIDEBAR_BRIDGE_FUNCTION_SPECS, SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS,
-    SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE, sidebar_bridge_function_spec_for_js_function,
+    APP_MODAL_HOST_BRIDGE_PAYLOAD_MAX_CHARS, APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME,
+    APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY, APP_MODAL_HOST_BRIDGE_SURFACE_SPECS,
+    APP_MODAL_HOST_ID_JS_FIELD, APP_MODAL_HOST_ID_VALUE, APP_MODAL_HOST_SURFACE_JS_FIELD,
+    APP_MODAL_HOST_SURFACE_VALUE, AppModalHostBridgeSurface,
+    PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS, PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME,
+    PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS, SIDEBAR_BRIDGE_FUNCTION_SPECS,
+    SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS, SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE,
+    WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_JS_OBJECT,
+    WEBKIT_MESSAGE_HANDLERS_JS_OBJECT, WEBKIT_POST_MESSAGE_JS_FUNCTION,
+    project_workarea_bridge_function_spec_for_js_function,
+    project_workarea_bridge_function_spec_for_process_message,
+    sidebar_bridge_function_spec_for_js_function, sidebar_bridge_function_spec_for_process_message,
 };
-use std::os::raw::c_int;
+use std::{cell::RefCell, collections::HashMap, os::raw::c_int};
 
 const SIDEBAR_PROJECT_CONTEXT_INSTALL_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.installActiveProjectContextBridge";
@@ -68,6 +78,10 @@ struct SidebarGxserverBootstrap {
     visible_session_ids: Vec<String>,
 }
 
+thread_local! {
+    static APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID: RefCell<HashMap<c_int, AppModalHostBridgeSurface>> = RefCell::new(HashMap::new());
+}
+
 fn main() {
     let args = cef::args::Args::new();
 
@@ -104,6 +118,55 @@ wrap_render_process_handler! {
     struct GhostexGpuiRenderProcessHandler;
 
     impl RenderProcessHandler {
+        fn on_browser_created(
+            &self,
+            browser: Option<&mut cef::Browser>,
+            extra_info: Option<&mut DictionaryValue>,
+        ) {
+            let Some(surface) = app_modal_host_bridge_surface_from_extra_info(extra_info) else {
+                return;
+            };
+            remember_app_modal_host_bridge_surface_for_browser(browser, surface);
+        }
+
+        fn on_browser_destroyed(&self, browser: Option<&mut cef::Browser>) {
+            forget_app_modal_host_bridge_surface_for_browser(browser);
+        }
+
+        fn on_context_created(
+            &self,
+            browser: Option<&mut cef::Browser>,
+            frame: Option<&mut Frame>,
+            context: Option<&mut cef::V8Context>,
+        ) {
+            let Some(frame) = frame else {
+                return;
+            };
+            if frame.is_main() == 0 {
+                return;
+            }
+            let frame_url = CefString::from(&frame.url()).to_string();
+            let browser_surface = browser
+                .as_ref()
+                .and_then(|browser| app_modal_host_bridge_surface_for_browser_id(browser.identifier()));
+            let surface = browser_surface
+                .or_else(|| app_modal_host_bridge_surface_for_frame_url(&frame_url));
+            let Some(surface) = surface else {
+                return;
+            };
+            let Some(context) = context else {
+                return;
+            };
+            /*
+            CDXC:GPUICefBridgeOwnership 2026-06-29-14:45:
+            Helper-backed renderers must install the same surface-scoped app-modal shim as the macOS CEF path by reading allowed surfaces from the shared Rust manifest. Browser tabs and project workareas still do not receive this bridge.
+            */
+            install_app_modal_host_v8_bridge(
+                Some(context),
+                surface.exposes_native_window_identity(),
+            );
+        }
+
         fn on_process_message_received(
             &self,
             _browser: Option<&mut cef::Browser>,
@@ -123,7 +186,12 @@ wrap_render_process_handler! {
                 message_name == SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME;
             let is_gxserver_bootstrap_update =
                 message_name == SIDEBAR_GXSERVER_BOOTSTRAP_UPDATE_MESSAGE_NAME;
-            if !is_install_message && !is_runtime_settings_update && !is_gxserver_bootstrap_update
+            let is_project_workarea_install_message =
+                message_name == PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME;
+            if !is_install_message
+                && !is_runtime_settings_update
+                && !is_gxserver_bootstrap_update
+                && !is_project_workarea_install_message
             {
                 return 0;
             }
@@ -139,7 +207,9 @@ wrap_render_process_handler! {
             if context.enter() == 0 {
                 return 1;
             }
-            if is_install_message {
+            if is_project_workarea_install_message {
+                install_project_workarea_v8_bridge(Some(&mut context));
+            } else if is_install_message {
                 let runtime_settings = sidebar_runtime_settings_from_install_message(message);
                 let gxserver_bootstrap = sidebar_gxserver_bootstrap_from_process_message(
                     message,
@@ -161,6 +231,77 @@ wrap_render_process_handler! {
                 );
             }
             context.exit();
+            1
+        }
+    }
+}
+
+wrap_v8_handler! {
+    struct GhostexGpuiProjectWorkareaBridgeV8Handler;
+
+    impl V8Handler {
+        fn execute(
+            &self,
+            name: Option<&CefString>,
+            _object: Option<&mut V8Value>,
+            arguments: Option<&[Option<V8Value>]>,
+            retval: Option<&mut Option<V8Value>>,
+            _exception: Option<&mut CefString>,
+        ) -> std::os::raw::c_int {
+            let name = name.map(CefString::to_string);
+            let Some(spec) = name
+                .as_deref()
+                .and_then(project_workarea_bridge_function_spec_for_js_function)
+            else {
+                return 0;
+            };
+
+            let payload = arguments
+                .and_then(|arguments| arguments.first())
+                .and_then(Option::as_ref)
+                .filter(|argument| argument.is_string() != 0)
+                .map(|argument| CefString::from(&argument.string_value()).to_string());
+            let Some(payload) = payload else {
+                set_v8_bool_return(retval, false);
+                return 1;
+            };
+
+            let sent =
+                send_project_workarea_bridge_process_message(spec.process_message_name, &payload);
+            set_v8_bool_return(retval, sent);
+            1
+        }
+    }
+}
+
+wrap_v8_handler! {
+    struct GhostexGpuiAppModalHostBridgeV8Handler;
+
+    impl V8Handler {
+        fn execute(
+            &self,
+            name: Option<&CefString>,
+            _object: Option<&mut V8Value>,
+            arguments: Option<&[Option<V8Value>]>,
+            retval: Option<&mut Option<V8Value>>,
+            _exception: Option<&mut CefString>,
+        ) -> std::os::raw::c_int {
+            let name = name.map(CefString::to_string);
+            if name.as_deref() != Some(WEBKIT_POST_MESSAGE_JS_FUNCTION) {
+                return 0;
+            }
+
+            let payload = arguments
+                .and_then(|arguments| arguments.first())
+                .and_then(Option::as_ref)
+                .and_then(app_modal_host_payload_from_v8_value);
+            let Some(payload) = payload else {
+                set_v8_bool_return(retval, false);
+                return 1;
+            };
+
+            let sent = send_app_modal_host_bridge_process_message(&payload);
+            set_v8_bool_return(retval, sent);
             1
         }
     }
@@ -272,6 +413,117 @@ fn install_sidebar_project_context_v8_bridge(
     );
 }
 
+fn install_project_workarea_v8_bridge(context: Option<&mut cef::V8Context>) {
+    let Some(context) = context else {
+        return;
+    };
+    let Some(global) = context.global() else {
+        return;
+    };
+
+    let namespace_key = CefString::from(SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE);
+    let mut namespace = global
+        .value_bykey(Some(&namespace_key))
+        .filter(|value| value.is_object() != 0)
+        .or_else(|| cef::v8_value_create_object(None, None));
+    let Some(namespace) = namespace.as_mut() else {
+        return;
+    };
+
+    /*
+    CDXC:GPUICefBridgeOwnership 2026-06-29-14:45:
+    Project workarea renderers in the helper install only the manifest-listed Kanban/Manage fixed functions. This keeps helper support in sync with macOS CEF without exposing project-workarea calls to sidebar, modal, titlebar, or Browser surfaces.
+    */
+    for spec in PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS {
+        let mut handler = GhostexGpuiProjectWorkareaBridgeV8Handler::new();
+        let function_name = CefString::from(spec.js_function_name);
+        let mut function = cef::v8_value_create_function(Some(&function_name), Some(&mut handler));
+        let Some(function) = function.as_mut() else {
+            return;
+        };
+
+        namespace.set_value_bykey(
+            Some(&function_name),
+            Some(function),
+            V8Propertyattribute::default(),
+        );
+    }
+
+    global.set_value_bykey(
+        Some(&namespace_key),
+        Some(namespace),
+        V8Propertyattribute::default(),
+    );
+}
+
+fn install_app_modal_host_v8_bridge(
+    context: Option<&mut cef::V8Context>,
+    expose_native_window_identity: bool,
+) {
+    let Some(context) = context else {
+        return;
+    };
+    let Some(global) = context.global() else {
+        return;
+    };
+
+    if expose_native_window_identity {
+        let _ = set_v8_string_property(
+            &global,
+            APP_MODAL_HOST_SURFACE_JS_FIELD,
+            APP_MODAL_HOST_SURFACE_VALUE,
+        );
+        let _ =
+            set_v8_string_property(&global, APP_MODAL_HOST_ID_JS_FIELD, APP_MODAL_HOST_ID_VALUE);
+    }
+
+    let Some(mut webkit) = v8_object_property_or_new(&global, WEBKIT_JS_OBJECT) else {
+        return;
+    };
+    let Some(mut message_handlers) =
+        v8_object_property_or_new(&webkit, WEBKIT_MESSAGE_HANDLERS_JS_OBJECT)
+    else {
+        return;
+    };
+    let Some(mut app_modal_host) = cef::v8_value_create_object(None, None) else {
+        return;
+    };
+
+    let mut handler = GhostexGpuiAppModalHostBridgeV8Handler::new();
+    let function_name = CefString::from(WEBKIT_POST_MESSAGE_JS_FUNCTION);
+    let mut post_message =
+        match cef::v8_value_create_function(Some(&function_name), Some(&mut handler)) {
+            Some(function) => function,
+            None => return,
+        };
+    app_modal_host.set_value_bykey(
+        Some(&function_name),
+        Some(&mut post_message),
+        V8Propertyattribute::default(),
+    );
+
+    let app_modal_host_key = CefString::from(WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT);
+    message_handlers.set_value_bykey(
+        Some(&app_modal_host_key),
+        Some(&mut app_modal_host),
+        V8Propertyattribute::default(),
+    );
+
+    let message_handlers_key = CefString::from(WEBKIT_MESSAGE_HANDLERS_JS_OBJECT);
+    webkit.set_value_bykey(
+        Some(&message_handlers_key),
+        Some(&mut message_handlers),
+        V8Propertyattribute::default(),
+    );
+
+    let webkit_key = CefString::from(WEBKIT_JS_OBJECT);
+    global.set_value_bykey(
+        Some(&webkit_key),
+        Some(&mut webkit),
+        V8Propertyattribute::default(),
+    );
+}
+
 fn update_sidebar_runtime_settings_v8_bridge(
     context: Option<&mut cef::V8Context>,
     runtime_settings: SidebarRuntimeSettingsSnapshot,
@@ -342,6 +594,93 @@ fn update_sidebar_gxserver_bootstrap_v8_bridge(
         return;
     };
     notify_sidebar_gxserver_bootstrap_changed(context, namespace, bootstrap_object);
+}
+
+fn is_gpui_first_party_cef_entry_url(url: &str, entry_file_name: &str) -> bool {
+    let Some(base) = url.split(['?', '#']).next() else {
+        return false;
+    };
+    base.starts_with("file://")
+        && base.ends_with(&format!("/{entry_file_name}"))
+        && (base.contains("/Contents/Resources/sidebar/") || base.contains("/dist/sidebar/"))
+}
+
+fn app_modal_host_bridge_surface_for_frame_url(url: &str) -> Option<AppModalHostBridgeSurface> {
+    APP_MODAL_HOST_BRIDGE_SURFACE_SPECS
+        .iter()
+        .find(|spec| is_gpui_first_party_cef_entry_url(url, spec.entry_file_name))
+        .map(|spec| spec.surface)
+}
+
+fn app_modal_host_bridge_surface_from_extra_info(
+    extra_info: Option<&mut DictionaryValue>,
+) -> Option<AppModalHostBridgeSurface> {
+    let extra_info = extra_info?;
+    let key = CefString::from(APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY);
+    if extra_info.get_type(Some(&key)) != ValueType::STRING {
+        return None;
+    }
+    let surface = CefString::from(&extra_info.string(Some(&key))).to_string();
+    AppModalHostBridgeSurface::from_extra_info_value(surface.as_str())
+}
+
+fn remember_app_modal_host_bridge_surface_for_browser(
+    browser: Option<&mut cef::Browser>,
+    surface: AppModalHostBridgeSurface,
+) {
+    let Some(browser) = browser else {
+        return;
+    };
+    APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID.with(|surfaces| {
+        surfaces.borrow_mut().insert(browser.identifier(), surface);
+    });
+}
+
+fn forget_app_modal_host_bridge_surface_for_browser(browser: Option<&mut cef::Browser>) {
+    let Some(browser) = browser else {
+        return;
+    };
+    APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID.with(|surfaces| {
+        surfaces.borrow_mut().remove(&browser.identifier());
+    });
+}
+
+fn app_modal_host_bridge_surface_for_browser_id(
+    browser_id: c_int,
+) -> Option<AppModalHostBridgeSurface> {
+    APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID
+        .with(|surfaces| surfaces.borrow().get(&browser_id).copied())
+}
+
+fn v8_object_property_or_new(parent: &V8Value, key: &str) -> Option<V8Value> {
+    let key = CefString::from(key);
+    parent
+        .value_bykey(Some(&key))
+        .filter(|value| value.is_object() != 0)
+        .or_else(|| cef::v8_value_create_object(None, None))
+}
+
+fn app_modal_host_payload_from_v8_value(value: &V8Value) -> Option<String> {
+    if value.is_string() != 0 {
+        return Some(CefString::from(&value.string_value()).to_string());
+    }
+
+    let context = cef::v8_context_get_current_context()?;
+    let global = context.global()?;
+    let json_key = CefString::from("JSON");
+    let mut json = global
+        .value_bykey(Some(&json_key))
+        .filter(|value| value.is_object() != 0)?;
+    let stringify_key = CefString::from("stringify");
+    let stringify = json
+        .value_bykey(Some(&stringify_key))
+        .filter(|value| value.is_function() != 0)?;
+    let argument = value.clone();
+    let result = stringify.execute_function(Some(&mut json), Some(&[Some(argument)]))?;
+    if result.is_string() == 0 {
+        return None;
+    }
+    Some(CefString::from(&result.string_value()).to_string())
 }
 
 fn sidebar_runtime_settings_from_install_message(
@@ -672,6 +1011,9 @@ fn set_v8_string_array_property(object: &mut V8Value, key: &str, values: &[Strin
 }
 
 fn send_sidebar_bridge_process_message(process_message_name: &str, payload: &str) -> bool {
+    if sidebar_bridge_function_spec_for_process_message(process_message_name).is_none() {
+        return false;
+    }
     if payload.chars().count() > SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS {
         return false;
     }
@@ -687,6 +1029,60 @@ fn send_sidebar_bridge_process_message(process_message_name: &str, payload: &str
             Some(message) => message,
             None => return false,
         };
+    let Some(arguments) = message.argument_list() else {
+        return false;
+    };
+    arguments.set_size(1);
+    arguments.set_string(0, Some(&CefString::from(payload)));
+    frame.send_process_message(ProcessId::BROWSER, Some(&mut message));
+    true
+}
+
+fn send_project_workarea_bridge_process_message(process_message_name: &str, payload: &str) -> bool {
+    if project_workarea_bridge_function_spec_for_process_message(process_message_name).is_none() {
+        return false;
+    }
+    if payload.chars().count() > PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS {
+        return false;
+    }
+
+    let Some(context) = cef::v8_context_get_current_context() else {
+        return false;
+    };
+    let Some(frame) = context.frame() else {
+        return false;
+    };
+    let mut message =
+        match cef::process_message_create(Some(&CefString::from(process_message_name))) {
+            Some(message) => message,
+            None => return false,
+        };
+    let Some(arguments) = message.argument_list() else {
+        return false;
+    };
+    arguments.set_size(1);
+    arguments.set_string(0, Some(&CefString::from(payload)));
+    frame.send_process_message(ProcessId::BROWSER, Some(&mut message));
+    true
+}
+
+fn send_app_modal_host_bridge_process_message(payload: &str) -> bool {
+    if payload.chars().count() > APP_MODAL_HOST_BRIDGE_PAYLOAD_MAX_CHARS {
+        return false;
+    }
+
+    let Some(context) = cef::v8_context_get_current_context() else {
+        return false;
+    };
+    let Some(frame) = context.frame() else {
+        return false;
+    };
+    let mut message = match cef::process_message_create(Some(&CefString::from(
+        APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME,
+    ))) {
+        Some(message) => message,
+        None => return false,
+    };
     let Some(arguments) = message.argument_list() else {
         return false;
     };

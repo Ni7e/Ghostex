@@ -1,7 +1,17 @@
+pub use super::sidebar_bridge_manifest::AppModalHostBridgeSurface;
 use super::sidebar_bridge_manifest::{
-    SIDEBAR_BRIDGE_FUNCTION_SPECS, SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS,
-    SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE, SidebarBridgeFunctionId,
-    sidebar_bridge_function_spec_for_js_function,
+    APP_MODAL_HOST_BRIDGE_PAYLOAD_MAX_CHARS, APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME,
+    APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY, APP_MODAL_HOST_BRIDGE_SURFACE_SPECS,
+    APP_MODAL_HOST_ID_JS_FIELD, APP_MODAL_HOST_ID_VALUE, APP_MODAL_HOST_SURFACE_JS_FIELD,
+    APP_MODAL_HOST_SURFACE_VALUE, PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS,
+    PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS,
+    ProjectWorkareaBridgeFunctionId, SIDEBAR_BRIDGE_FUNCTION_SPECS,
+    SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS, SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE,
+    SidebarBridgeFunctionId, WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_JS_OBJECT,
+    WEBKIT_MESSAGE_HANDLERS_JS_OBJECT, WEBKIT_POST_MESSAGE_JS_FUNCTION,
+    project_workarea_bridge_function_spec_for_js_function,
+    project_workarea_bridge_function_spec_for_process_message,
+    sidebar_bridge_function_spec_for_js_function, sidebar_bridge_function_spec_for_process_message,
 };
 use anyhow::{Context as _, Result};
 use cef::rc::Rc as _;
@@ -73,34 +83,6 @@ const SIDEBAR_GXSERVER_BOOTSTRAP_INITIAL_ACTIVE_PROJECT_ID_JS_FIELD: &str =
     "initialActiveProjectId";
 const SIDEBAR_GXSERVER_BOOTSTRAP_FOCUSED_SESSION_ID_JS_FIELD: &str = "focusedSessionId";
 const SIDEBAR_GXSERVER_BOOTSTRAP_VISIBLE_SESSION_IDS_JS_FIELD: &str = "visibleSessionIds";
-const PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME: &str =
-    "ghostex.gpui.projectWorkarea.installBridge";
-const PROJECT_WORKAREA_PROJECT_BEADS_REQUEST_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.projectWorkarea.projectBeadsRequest";
-const PROJECT_WORKAREA_PROJECT_BOARD_REQUEST_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.projectWorkarea.projectBoardRequest";
-const PROJECT_WORKAREA_PROJECT_BOARD_IMAGE_REQUEST_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.projectWorkarea.projectBoardImageRequest";
-const PROJECT_WORKAREA_MANAGE_FILES_REQUEST_PROCESS_MESSAGE_NAME: &str =
-    "ghostex.gpui.projectWorkarea.manageFilesRequest";
-const PROJECT_WORKAREA_PROJECT_BEADS_REQUEST_JS_FUNCTION: &str = "postProjectBeadsRequest";
-const PROJECT_WORKAREA_PROJECT_BOARD_REQUEST_JS_FUNCTION: &str = "postProjectBoardRequest";
-const PROJECT_WORKAREA_PROJECT_BOARD_IMAGE_REQUEST_JS_FUNCTION: &str =
-    "postProjectBoardImageRequest";
-const PROJECT_WORKAREA_MANAGE_FILES_REQUEST_JS_FUNCTION: &str = "postManageFilesRequest";
-const APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME: &str = "ghostex.gpui.appModalHost.message";
-const APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY: &str = "ghostexGpuiAppModalHostSurface";
-const APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW: &str = "nativeWindow";
-const APP_MODAL_HOST_BRIDGE_SURFACE_SIDEBAR: &str = "sidebar";
-const APP_MODAL_HOST_BRIDGE_SURFACE_TITLEBAR: &str = "titlebar";
-const APP_MODAL_HOST_SURFACE_JS_FIELD: &str = "__ghostex_APP_MODAL_HOST_SURFACE__";
-const APP_MODAL_HOST_ID_JS_FIELD: &str = "__ghostex_APP_MODAL_HOST_ID__";
-const APP_MODAL_HOST_SURFACE_VALUE: &str = "nativeWindow";
-const APP_MODAL_HOST_ID_VALUE: &str = "gpui";
-const WEBKIT_JS_OBJECT: &str = "webkit";
-const WEBKIT_MESSAGE_HANDLERS_JS_OBJECT: &str = "messageHandlers";
-const WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT: &str = "ghostexAppModalHost";
-const WEBKIT_POST_MESSAGE_JS_FUNCTION: &str = "postMessage";
 const SIDEBAR_RUNTIME_SETTINGS_DEBUGGING_MODE_ARGUMENT_INDEX: usize = 0;
 const SIDEBAR_RUNTIME_SETTINGS_SHOW_BETA_FEATURES_ARGUMENT_INDEX: usize = 1;
 const SIDEBAR_RUNTIME_SETTINGS_SAVED_SETTINGS_JSON_ARGUMENT_INDEX: usize = 2;
@@ -115,8 +97,6 @@ const SIDEBAR_GXSERVER_BOOTSTRAP_INITIAL_ACTIVE_PROJECT_ID_ARGUMENT_INDEX: usize
 const SIDEBAR_GXSERVER_BOOTSTRAP_FOCUSED_SESSION_ID_ARGUMENT_INDEX: usize = 6;
 const SIDEBAR_GXSERVER_BOOTSTRAP_VISIBLE_SESSION_COUNT_ARGUMENT_INDEX: usize = 7;
 const SIDEBAR_GXSERVER_BOOTSTRAP_ARGUMENT_COUNT_WITHOUT_VISIBLE_IDS: usize = 8;
-const PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS: usize = 3 * 1024 * 1024;
-const APP_MODAL_HOST_BRIDGE_PAYLOAD_MAX_CHARS: usize = 1024 * 1024;
 const BROWSER_APP_OWNED_SCRIPT_URL: &str = "ghostex://gpui/browser-feedback";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,58 +162,15 @@ enum ProjectWorkareaBridgeEventKind {
     ManageFilesRequest,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ProjectWorkareaBridgeFunctionSpec {
-    js_function_name: &'static str,
-    process_message_name: &'static str,
-    event_kind: ProjectWorkareaBridgeEventKind,
-}
-
-const PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS: [ProjectWorkareaBridgeFunctionSpec; 4] = [
-    ProjectWorkareaBridgeFunctionSpec {
-        js_function_name: PROJECT_WORKAREA_PROJECT_BEADS_REQUEST_JS_FUNCTION,
-        process_message_name: PROJECT_WORKAREA_PROJECT_BEADS_REQUEST_PROCESS_MESSAGE_NAME,
-        event_kind: ProjectWorkareaBridgeEventKind::ProjectBeadsRequest,
-    },
-    ProjectWorkareaBridgeFunctionSpec {
-        js_function_name: PROJECT_WORKAREA_PROJECT_BOARD_REQUEST_JS_FUNCTION,
-        process_message_name: PROJECT_WORKAREA_PROJECT_BOARD_REQUEST_PROCESS_MESSAGE_NAME,
-        event_kind: ProjectWorkareaBridgeEventKind::ProjectBoardRequest,
-    },
-    ProjectWorkareaBridgeFunctionSpec {
-        js_function_name: PROJECT_WORKAREA_PROJECT_BOARD_IMAGE_REQUEST_JS_FUNCTION,
-        process_message_name: PROJECT_WORKAREA_PROJECT_BOARD_IMAGE_REQUEST_PROCESS_MESSAGE_NAME,
-        event_kind: ProjectWorkareaBridgeEventKind::ProjectBoardImageRequest,
-    },
-    ProjectWorkareaBridgeFunctionSpec {
-        js_function_name: PROJECT_WORKAREA_MANAGE_FILES_REQUEST_JS_FUNCTION,
-        process_message_name: PROJECT_WORKAREA_MANAGE_FILES_REQUEST_PROCESS_MESSAGE_NAME,
-        event_kind: ProjectWorkareaBridgeEventKind::ManageFilesRequest,
-    },
-];
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AppModalHostBridgeSurface {
-    NativeWindow,
-    Sidebar,
-    Titlebar,
-}
-
-impl AppModalHostBridgeSurface {
-    fn extra_info_value(self) -> &'static str {
-        match self {
-            Self::NativeWindow => APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW,
-            Self::Sidebar => APP_MODAL_HOST_BRIDGE_SURFACE_SIDEBAR,
-            Self::Titlebar => APP_MODAL_HOST_BRIDGE_SURFACE_TITLEBAR,
-        }
-    }
-
-    fn from_extra_info_value(value: &str) -> Option<Self> {
-        match value {
-            APP_MODAL_HOST_BRIDGE_SURFACE_NATIVE_WINDOW => Some(Self::NativeWindow),
-            APP_MODAL_HOST_BRIDGE_SURFACE_SIDEBAR => Some(Self::Sidebar),
-            APP_MODAL_HOST_BRIDGE_SURFACE_TITLEBAR => Some(Self::Titlebar),
-            _ => None,
+impl From<ProjectWorkareaBridgeFunctionId> for ProjectWorkareaBridgeEventKind {
+    fn from(function_id: ProjectWorkareaBridgeFunctionId) -> Self {
+        match function_id {
+            ProjectWorkareaBridgeFunctionId::ProjectBeadsRequest => Self::ProjectBeadsRequest,
+            ProjectWorkareaBridgeFunctionId::ProjectBoardRequest => Self::ProjectBoardRequest,
+            ProjectWorkareaBridgeFunctionId::ProjectBoardImageRequest => {
+                Self::ProjectBoardImageRequest
+            }
+            ProjectWorkareaBridgeFunctionId::ManageFilesRequest => Self::ManageFilesRequest,
         }
     }
 }
@@ -278,28 +215,11 @@ fn is_gpui_first_party_cef_entry_url(url: &str, entry_file_name: &str) -> bool {
         && (base.contains("/Contents/Resources/sidebar/") || base.contains("/dist/sidebar/"))
 }
 
-fn is_app_modal_host_frame_url(url: &str) -> bool {
-    is_gpui_first_party_cef_entry_url(url, "modal-host.html")
-}
-
-fn is_gpui_titlebar_host_frame_url(url: &str) -> bool {
-    is_gpui_first_party_cef_entry_url(url, "titlebar-host.html")
-}
-
-fn is_gpui_sidebar_frame_url(url: &str) -> bool {
-    is_gpui_first_party_cef_entry_url(url, "index.html")
-}
-
 fn app_modal_host_bridge_surface_for_frame_url(url: &str) -> Option<AppModalHostBridgeSurface> {
-    if is_app_modal_host_frame_url(url) {
-        Some(AppModalHostBridgeSurface::NativeWindow)
-    } else if is_gpui_titlebar_host_frame_url(url) {
-        Some(AppModalHostBridgeSurface::Titlebar)
-    } else if is_gpui_sidebar_frame_url(url) {
-        Some(AppModalHostBridgeSurface::Sidebar)
-    } else {
-        None
-    }
+    APP_MODAL_HOST_BRIDGE_SURFACE_SPECS
+        .iter()
+        .find(|spec| is_gpui_first_party_cef_entry_url(url, spec.entry_file_name))
+        .map(|spec| spec.surface)
 }
 
 fn app_modal_host_bridge_extra_info(surface: AppModalHostBridgeSurface) -> Option<DictionaryValue> {
@@ -450,9 +370,7 @@ impl SidebarBridgeEventKind {
 fn sidebar_bridge_event_kind_for_process_message(
     process_message_name: &str,
 ) -> Option<SidebarBridgeEventKind> {
-    SIDEBAR_BRIDGE_FUNCTION_SPECS
-        .iter()
-        .find(|spec| spec.process_message_name == process_message_name)
+    sidebar_bridge_function_spec_for_process_message(process_message_name)
         .map(|spec| SidebarBridgeEventKind::from(spec.id))
 }
 
@@ -473,21 +391,11 @@ impl ProjectWorkareaBridgeEventKind {
     }
 }
 
-fn project_workarea_bridge_function_spec_for_js_function(
-    function_name: &str,
-) -> Option<&'static ProjectWorkareaBridgeFunctionSpec> {
-    PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS
-        .iter()
-        .find(|spec| spec.js_function_name == function_name)
-}
-
 fn project_workarea_bridge_event_kind_for_process_message(
     process_message_name: &str,
 ) -> Option<ProjectWorkareaBridgeEventKind> {
-    PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS
-        .iter()
-        .find(|spec| spec.process_message_name == process_message_name)
-        .map(|spec| spec.event_kind)
+    project_workarea_bridge_function_spec_for_process_message(process_message_name)
+        .map(|spec| ProjectWorkareaBridgeEventKind::from(spec.id))
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -884,8 +792,7 @@ wrap_render_process_handler! {
             let Some(surface) = surface else {
                 return;
             };
-            let expose_native_window_identity =
-                surface == AppModalHostBridgeSurface::NativeWindow;
+            let expose_native_window_identity = surface.exposes_native_window_identity();
             let Some(context) = context else {
                 return;
             };
