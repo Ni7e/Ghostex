@@ -1179,7 +1179,9 @@ fn trusted_resume_title(title: &str, title_source: &str) -> Option<String> {
 }
 
 fn session_card_primary_title(title: &str, agent_id: Option<&str>) -> Option<String> {
-    let normalized = normalize_spaces(title.trim());
+    let normalized = normalize_terminal_title(Some(title))
+        .map(|title| normalize_spaces(title.trim()))
+        .unwrap_or_else(|| normalize_spaces(title.trim()));
     if normalized.is_empty()
         || is_session_number_title(&normalized)
         || is_ignored_generic_agent_terminal_title(&normalized)
@@ -1265,6 +1267,11 @@ fn normalize_terminal_title(title: Option<&str>) -> Option<String> {
 }
 
 fn is_leading_terminal_title_status_marker(ch: char) -> bool {
+    /*
+    CDXC:GxserverSessionTitles 2026-06-29-01:21:
+    Factory Droid terminal titles can prefix visible session names with the U+26EC status marker.
+    Presentation must strip the marker for existing stored rows too, because sidebar copy/details reads displayTitle before the raw durable title.
+    */
     ch.is_whitespace()
         || ('\u{2800}'..='\u{28ff}').contains(&ch)
         || matches!(
@@ -1284,6 +1291,7 @@ fn is_leading_terminal_title_status_marker(ch: char) -> bool {
                 | '\u{273a}'
                 | '\u{2737}'
                 | '\u{2734}'
+                | '\u{26ec}'
                 | '\u{2726}'
                 | '\u{25c7}'
                 | '\u{1f916}'
@@ -2557,6 +2565,45 @@ mod tests {
         assert_eq!(
             row.get("displayTitleTooltip").and_then(Value::as_str),
             Some("\u{2217} Terminal Session (Unsynced title)")
+        );
+    }
+
+    #[test]
+    fn title_projection_strips_factory_droid_status_marker_from_stored_title() {
+        let mut session = session("P100", "G100", "\u{26ec} New Session", "running", 1000.0);
+        let session_object = session.as_object_mut().expect("session object");
+        session_object.insert("agentId".to_string(), json!("droid"));
+        session_object.insert(
+            "runtimeSettings".to_string(),
+            json!({
+                "agentName": "factory droid",
+                "titleSource": "terminal-auto"
+            }),
+        );
+
+        let projection = project_session_title_projection(&session);
+
+        assert_eq!(
+            projection.get("displayTitle").and_then(Value::as_str),
+            Some("New Session")
+        );
+        assert_eq!(
+            projection
+                .get("displayTitleTooltip")
+                .and_then(Value::as_str),
+            Some("New Session")
+        );
+        assert_eq!(
+            projection.get("primaryTitle").and_then(Value::as_str),
+            Some("New Session")
+        );
+        assert_eq!(
+            projection.get("trustedResumeTitle").and_then(Value::as_str),
+            Some("New Session")
+        );
+        assert_eq!(
+            projection.get("title").and_then(Value::as_str),
+            Some("\u{26ec} New Session")
         );
     }
 

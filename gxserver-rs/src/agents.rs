@@ -5213,6 +5213,11 @@ fn normalize_spaces(value: &str) -> String {
 }
 
 fn is_leading_title_marker(ch: char) -> bool {
+    /*
+    CDXC:GxserverSessionTitles 2026-06-29-01:21:
+    Factory Droid terminal titles can prefix visible session names with the U+26EC status marker.
+    Strip it at the same boundary as Claude, Codex, Cursor, Gemini, and Copilot title chrome so copied details and sidebar rows show the semantic title instead of provider decoration.
+    */
     ch.is_whitespace()
         || ('\u{2800}'..='\u{28ff}').contains(&ch)
         || matches!(
@@ -5232,6 +5237,7 @@ fn is_leading_title_marker(ch: char) -> bool {
                 | '\u{273a}'
                 | '\u{2737}'
                 | '\u{2734}'
+                | '\u{26ec}'
                 | '\u{2726}'
                 | '\u{25c7}'
                 | '\u{1f916}'
@@ -6247,6 +6253,79 @@ mod tests {
                 .and_then(Value::as_object)
                 .and_then(|settings| settings.get("agentName")),
             None
+        );
+    }
+
+    #[test]
+    fn terminal_title_strips_factory_droid_status_marker_before_sync() {
+        let (_temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let project = repository
+            .create_project(
+                json!({ "name": "Factory Droid Titles" })
+                    .as_object()
+                    .expect("project params"),
+            )
+            .expect("create project");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id")
+            .to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "agentId": "droid",
+                    "kind": "agent",
+                    "projectId": project_id,
+                    "runtimeSettings": {
+                        "agentName": "factory droid",
+                        "titleSource": "placeholder"
+                    },
+                    "title": "Factory Droid Session"
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("create session");
+        let lifecycle = LifecycleParams {
+            project_id,
+            session_id: session
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .expect("session id")
+                .to_string(),
+        };
+
+        let output = ingest_terminal_title_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "factory droid",
+                "rawTitle": "\u{26ec} New Session",
+                "sessionPersistenceProvider": "zmx"
+            })
+            .as_object()
+            .expect("terminal title params"),
+        )
+        .expect("terminal title result");
+        let result = output.result;
+
+        assert!(output.schedule_presentation_delta);
+        assert_eq!(result.get("changed"), Some(&json!(true)));
+        assert_eq!(
+            result.get("reason"),
+            Some(&json!("zmx-terminal-title-from-placeholder"))
+        );
+        let session = result.get("session").expect("result session");
+        assert_eq!(session.get("title"), Some(&json!("New Session")));
+        assert_eq!(
+            session
+                .get("runtimeSettings")
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("titleSource")),
+            Some(&json!("terminal-auto"))
         );
     }
 
