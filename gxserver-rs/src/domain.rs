@@ -1387,10 +1387,8 @@ fn normalize_session_input(
     normalize_launch_settings_with_surface(&mut launch_settings, input.get("surface"));
     let surface = resolve_surface(input.get("surface"), &launch_settings, &runtime_settings);
     let session_tag = normalize_optional_session_tag(input.get("sessionTag"))?;
-    let provider_state = normalize_zmx_provider_state(
-        normalize_object(input.get("providerState")),
-        &zmx_name,
-    );
+    let provider_state =
+        normalize_zmx_provider_state(normalize_object(input.get("providerState")), &zmx_name);
 
     let mut session = Map::new();
     insert_optional_string(
@@ -1633,10 +1631,8 @@ fn merge_session_update(
     }
     update_object_field(&mut next, input, "notificationRules");
     if input.contains_key("providerState") {
-        let provider_state = normalize_zmx_provider_state(
-            normalize_object(input.get("providerState")),
-            &zmx_name,
-        );
+        let provider_state =
+            normalize_zmx_provider_state(normalize_object(input.get("providerState")), &zmx_name);
         next.insert("providerState".to_string(), Value::Object(provider_state));
     } else if let Some(provider_state) = next
         .get("providerState")
@@ -3308,7 +3304,10 @@ mod tests {
             .expect("session updated");
         let updated_provider_state = object_field(&updated, "providerState");
         assert_eq!(updated_provider_state.get("provider"), Some(&json!("zmx")));
-        assert_eq!(updated_provider_state.get("zmxName"), Some(&json!(zmx_name)));
+        assert_eq!(
+            updated_provider_state.get("zmxName"),
+            Some(&json!(zmx_name))
+        );
         assert_eq!(
             updated_provider_state.get("lifecycleState"),
             Some(&json!("missing"))
@@ -3320,7 +3319,10 @@ mod tests {
             .expect("session exists");
         let reloaded_provider_state = object_field(&reloaded, "providerState");
         assert_eq!(reloaded_provider_state.get("provider"), Some(&json!("zmx")));
-        assert_eq!(reloaded_provider_state.get("zmxName"), Some(&json!(zmx_name)));
+        assert_eq!(
+            reloaded_provider_state.get("zmxName"),
+            Some(&json!(zmx_name))
+        );
         assert_eq!(
             reloaded_provider_state.get("lifecycleState"),
             Some(&json!("missing"))
