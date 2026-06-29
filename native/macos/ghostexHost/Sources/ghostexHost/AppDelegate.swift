@@ -11504,6 +11504,22 @@ final class ghostexRootView: NSView {
     }
   }
 
+  private func shouldCloseOnOnboardingAppModalBackdropClick(for modal: String?) -> Bool {
+    /*
+     CDXC:FirstLaunchSetup 2026-06-29-13:46:
+     Setup should close when users click the visible dimmed area outside the
+     child-window box. Keep Highlighted Features and Tutorial Video absorb-only
+     because those tour surfaces still own dismissal through their in-modal close
+     controls and Escape/native close lifecycle.
+     */
+    switch modal {
+    case "firstLaunchSetup", "tipsAndTricks":
+      return true
+    default:
+      return false
+    }
+  }
+
   private func makeOnboardingAppModalBackdropPanel(parentWindow: NSWindow) -> AppModalBackdropPanel {
     /*
      CDXC:AppModals 2026-06-16-19:50:
@@ -11543,6 +11559,17 @@ final class ghostexRootView: NSView {
     }
     let panel = onboardingAppModalBackdropPanel ?? makeOnboardingAppModalBackdropPanel(parentWindow: window)
     onboardingAppModalBackdropPanel = panel
+    if let contentView = panel.contentView as? AppModalBackdropView {
+      if shouldCloseOnOnboardingAppModalBackdropClick(for: modal) {
+        contentView.onBackdropMouseDown = { [weak self] in
+          self?.closeNativeAppModalWindow(
+            reason: "onboardingBackdropMouseDown",
+            sendReactClose: true)
+        }
+      } else {
+        contentView.onBackdropMouseDown = nil
+      }
+    }
     if onboardingAppModalBackdropParentWindow !== window {
       onboardingAppModalBackdropParentWindow?.removeChildWindow(panel)
       window.addChildWindow(panel, ordered: .above)
@@ -11616,7 +11643,7 @@ final class ghostexRootView: NSView {
     }
     let returnFocusSessionId = appModalReturnFocusSessionId
     let closingModal = activeNativeAppModalKind ?? activeAppModalWindowController()?.currentModalKind
-    AppDelegate.appendAgentDetectionDebugLog(
+    AppDelegate.appendAppModalDebugLog(
       event: "nativeBridge.appModal.nativeWindow.close",
       details: "reason=\(reason) modal=\(activeNativeAppModalKind ?? "<none>") sendReactClose=\(sendReactClose)"
     )
@@ -12915,7 +12942,7 @@ final class ghostexRootView: NSView {
     case "debugLog":
       let event = message["event"] as? String ?? "nativeBridge.appModal.debug"
       let details = message["details"] as? String
-      AppDelegate.appendAgentDetectionDebugLog(event: "nativeBridge.appModal.\(event)", details: details)
+      AppDelegate.appendAppModalDebugLog(event: "nativeBridge.appModal.\(event)", details: details)
     case "promptEditorDebugLog":
       let event = message["event"] as? String ?? "modalHost.promptEditor.unknown"
       /*
@@ -12964,7 +12991,7 @@ final class ghostexRootView: NSView {
       finishFloatingPromptEditorPrewarm()
     case "ready":
       let nativeWindowHostId = message["nativeWindowHostId"] as? String
-      AppDelegate.appendAgentDetectionDebugLog(
+      AppDelegate.appendAppModalDebugLog(
         event: "nativeBridge.appModal.nativeWindow.ready",
         details: "hasLatestState=\(latestModalHostSidebarState != nil) nativeWindowHostId=\(nativeWindowHostId ?? "<none>")"
       )
@@ -12983,7 +13010,7 @@ final class ghostexRootView: NSView {
        and WKWebView editor panes.
        */
       let requestedModal = message["modal"] as? String
-      AppDelegate.appendAgentDetectionDebugLog(
+      AppDelegate.appendAppModalDebugLog(
         event: "nativeBridge.appModal.open.received",
         details:
           "modal=\(requestedModal ?? "unknown") hasLatestState=\(latestModalHostSidebarState != nil) rootModalHostMounted=false"
@@ -13005,7 +13032,7 @@ final class ghostexRootView: NSView {
         return
       }
       if shouldRouteAppModalOpenIntoActiveNativeWindow(modal: requestedModal) {
-        AppDelegate.appendAgentDetectionDebugLog(
+        AppDelegate.appendAppModalDebugLog(
           event: "nativeBridge.appModal.open.routeActiveNativeWindow",
           details: "modal=\(requestedModal ?? "unknown") activeNativeAppModalKind=\(activeNativeAppModalKind ?? "<none>")"
         )
@@ -13024,7 +13051,7 @@ final class ghostexRootView: NSView {
     case "presented":
       let modal = message["modal"] as? String
       let requestId = message["requestId"] as? String
-      AppDelegate.appendAgentDetectionDebugLog(
+      AppDelegate.appendAppModalDebugLog(
         event: "nativeBridge.appModal.nativeWindow.presented",
         details: "modal=\(modal ?? "unknown")"
       )
@@ -15724,9 +15751,19 @@ private final class AppModalBackdropPanel: NSPanel {
 }
 
 private final class AppModalBackdropView: NSView {
-  override func mouseDown(with event: NSEvent) {}
-  override func rightMouseDown(with event: NSEvent) {}
-  override func otherMouseDown(with event: NSEvent) {}
+  var onBackdropMouseDown: (() -> Void)?
+
+  override func mouseDown(with event: NSEvent) {
+    onBackdropMouseDown?()
+  }
+
+  override func rightMouseDown(with event: NSEvent) {
+    onBackdropMouseDown?()
+  }
+
+  override func otherMouseDown(with event: NSEvent) {
+    onBackdropMouseDown?()
+  }
 }
 
 private final class AppModalWindowWebView: WKWebView {
@@ -15791,6 +15828,21 @@ private func isSettingsAppModal(_ modal: String?) -> Bool {
   default:
     return false
   }
+}
+
+private func isFirstLaunchSetupAppModal(_ modal: String?) -> Bool {
+  modal == "firstLaunchSetup" || modal == "tipsAndTricks"
+}
+
+private func shouldInlineLatestSidebarStateForAppModal(_ modal: String?) -> Bool {
+  /*
+   CDXC:FirstLaunchSetup 2026-06-29-13:46:
+   First-launch setup is not a Settings modal id, but it reads hydrated Settings
+   state and intentionally stays closed at revision 0. Inline the latest sidebar
+   snapshot for setup opens so React can mount content before native presents the
+   child window.
+   */
+  return isSettingsAppModal(modal) || isFirstLaunchSetupAppModal(modal)
 }
 
 private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavigationDelegate {
@@ -16526,7 +16578,7 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
 
   private func messageForDispatch(_ message: [String: Any]) -> [String: Any] {
     guard (message["type"] as? String) == "open",
-      isSettingsAppModal(message["modal"] as? String),
+      shouldInlineLatestSidebarStateForAppModal(message["modal"] as? String),
       let latestSidebarState
     else {
       return message
@@ -16537,6 +16589,11 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
      the same JS event as the open request. React applies this inline snapshot
      before setting activeModal, so Settings cannot present against the modal
      host's revision-0 default store.
+
+     CDXC:FirstLaunchSetup 2026-06-29-13:46:
+     First-launch setup shares that revision gate even though it has its own
+     modal id, so setup opens need the same inline hydrate before React can send
+     native the presented acknowledgement.
      */
     var deliveryMessage = message
     if let sidebarStateMessage = latestSidebarState["message"] {
@@ -16662,10 +16719,16 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
      its target.
 
      CDXC:AppModals 2026-06-15-13:30:
-     Configure Action, Rename Session, and Previous Sessions are also compact
-     native child-window modals. Parent-window clicks outside their NSPanel must
-     close the modal because those clicks cannot reach the React backdrop inside
-     the modal WKWebView.
+     Command Palette, Rename Session, and Previous Sessions are compact native
+     child-window modals. Parent-window clicks outside their NSPanel must close
+     the modal because those clicks cannot reach the React backdrop inside the
+     modal WKWebView.
+
+     CDXC:AppModals 2026-06-29-13:46:
+     Delayed Send, Add Worktree, Remote Setup, and Add Remote Project are the
+     same fixed-size native child-window dialog pattern. They should inherit
+     the React backdrop dismissal contract when the click lands in the parent
+     app window instead of inside the modal WKWebView.
 
      CDXC:HighlightedFeatures 2026-06-16-19:50:
      Highlighted Features should ignore outside clicks and close from its
@@ -16696,7 +16759,8 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
 
   private func shouldCloseFromOutsideMouseDown(modal: String) -> Bool {
     switch modal {
-    case "commandPalette", "renameSession", "previousSessions":
+    case "commandPalette", "renameSession", "previousSessions", "delayedSend", "worktree",
+      "remoteGxserverInstall", "remoteProjectPicker":
       return true
     default:
       return false
@@ -16884,6 +16948,12 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
 
   private func logSettingsWindowEvent(_ event: String, details: [String: Any] = [:]) {
     /*
+     CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:
+     Setup slow-appearance repros need native child-window lifecycle timings
+     across open, WebView load, ready, dispatch, and AppKit presentation. Reuse
+     the app-modal diagnostic log with the same safe lifecycle-only payloads as
+     Settings.
+
      CDXC:SettingsModalDiagnostics 2026-06-20-05:38:
      Settings blank-window reports need native child-window delivery milestones without persisting settings values, paths, project names, titles, URLs, command text, or user content.
      Record only modal ids, message types, request ids, booleans, and timings while the native.app.modal scenario gates app-modal diagnostics.
@@ -16896,6 +16966,10 @@ private final class AppModalWindowController: NSObject, NSWindowDelegate, WKNavi
       || isSettingsAppModal(currentModal)
       || isSettingsAppModal(details["modal"] as? String)
       || isSettingsAppModal(details["messageModal"] as? String)
+      || isFirstLaunchSetupAppModal(loadedModal)
+      || isFirstLaunchSetupAppModal(currentModal)
+      || isFirstLaunchSetupAppModal(details["modal"] as? String)
+      || isFirstLaunchSetupAppModal(details["messageModal"] as? String)
     else {
       return
     }
