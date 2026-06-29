@@ -2551,11 +2551,17 @@ final class TerminalWorkspaceView: NSView {
   /**
    CDXC:ProjectEditorChrome 2026-06-29-23:39:
    Source, Browser, Kanban, and Docs project-editor chrome should be one pixel
-   shorter than normal workspace terminal tabs. Keep project-editor tab strips
-   and companion-pane titlebars at 35pt without shrinking Agents/workspace
-   terminal titlebars.
+   shorter than normal workspace terminal tabs. Keep project-editor tab strips at
+   35pt without shrinking Agents/workspace terminal titlebars.
    */
   private static let projectEditorTitleBarHeight: CGFloat = 35
+  /**
+   CDXC:ProjectEditorCompanion 2026-06-30-00:27:
+   Companion-pane titlebars in Source, Browser, Kanban, and Docs need one less
+   vertical pixel than project-editor tab strips, so companion panes reserve
+   34pt while the main project-editor chrome remains 35pt.
+   */
+  private static let projectEditorCompanionTitleBarHeight: CGFloat = 34
   /**
    CDXC:PaneTabs 2026-05-15-08:29:
    Command pane tabs must match the visible command tab bar height exactly.
@@ -9640,7 +9646,7 @@ final class TerminalWorkspaceView: NSView {
       let sessionId = projectEditorCompanionSessionId,
       isProjectEditorCompanionEligibleSession(sessionId),
       workspaceBounds.width > Self.paneResizeRailWidth + 1,
-      workspaceBounds.height > Self.projectEditorTitleBarHeight + 1
+      workspaceBounds.height > Self.projectEditorCompanionTitleBarHeight + 1
     else {
       return nil
     }
@@ -16298,7 +16304,7 @@ final class TerminalWorkspaceView: NSView {
 
   private func titleBarHeight(for sessionId: String, paneFrameMode: PaneFrameMode = .normal) -> CGFloat {
     if paneFrameMode == .projectEditorCompanion {
-      return Self.projectEditorTitleBarHeight
+      return Self.projectEditorCompanionTitleBarHeight
     }
     return commandsPanelActiveSessionIds.contains(sessionId)
       ? Self.commandPanelTitleBarHeight
@@ -25835,6 +25841,12 @@ private final class TerminalSessionTitleBarView: NSView {
    #0e0e0e for its header chrome, so companion titlebars bypass the normal
    workspace tab color and custom sidebar/titlebar color override for background
    only.
+
+   CDXC:ProjectEditorCompanion 2026-06-30-00:27:
+   Theme chrome must not repaint companion titlebar backgrounds. Route parent,
+   sticky-tab, and fixed-action backgrounds through the companion chrome color
+   first so the companion pane keeps the Docs titlebar background during theme
+   updates.
    */
   private static let projectEditorCompanionBackgroundColor = NSColor(
     srgbRed: 0x0E / 255,
@@ -26597,8 +26609,12 @@ private final class TerminalSessionTitleBarView: NSView {
     ]
   }
 
+  private func isProjectEditorCompanionWorkspaceChrome(_ role: TerminalPaneChromeRole) -> Bool {
+    role == .workspace && usesProjectEditorCompanionChrome
+  }
+
   private func backgroundColor(for role: TerminalPaneChromeRole) -> CGColor {
-    if role == .workspace, usesProjectEditorCompanionChrome {
+    if isProjectEditorCompanionWorkspaceChrome(role) {
       return Self.projectEditorCompanionBackgroundColor
     }
     if role == .workspace, customSidebarTitlebarChrome.enabled {
@@ -26633,6 +26649,9 @@ private final class TerminalSessionTitleBarView: NSView {
   }
 
   private func workspaceTabBarActionBackgroundColor(for role: TerminalPaneChromeRole) -> CGColor {
+    if isProjectEditorCompanionWorkspaceChrome(role) {
+      return Self.projectEditorCompanionBackgroundColor
+    }
     if role == .workspace, customSidebarTitlebarChrome.enabled {
       return customSidebarTitlebarChrome.background.cgColor
     }
@@ -26654,6 +26673,9 @@ private final class TerminalSessionTitleBarView: NSView {
   }
 
   private func stickyActiveTabButtonBackgroundColor(for role: TerminalPaneChromeRole) -> CGColor {
+    if isProjectEditorCompanionWorkspaceChrome(role) {
+      return Self.projectEditorCompanionBackgroundColor
+    }
     if role == .workspace, customSidebarTitlebarChrome.enabled {
       return customSidebarTitlebarChrome.background.cgColor
     }
@@ -28093,7 +28115,8 @@ private final class TerminalSessionTitleBarView: NSView {
   }
 
   func setProjectEditorCompanionChromeVisible(_ shouldUseCompanionChrome: Bool) {
-    guard usesProjectEditorCompanionChrome != shouldUseCompanionChrome else {
+    let didChange = usesProjectEditorCompanionChrome != shouldUseCompanionChrome
+    guard didChange || shouldUseCompanionChrome else {
       return
     }
     /**
@@ -28106,6 +28129,11 @@ private final class TerminalSessionTitleBarView: NSView {
      Companion panes no longer render a local collapse control. Keep only this
      chrome state so selected companion titlebars can suppress generic pane
      actions while the React titlebar toggle owns hiding and expanding.
+
+     CDXC:ProjectEditorCompanion 2026-06-30-00:27:
+     Companion titlebar background chrome should be authoritative on each sync.
+     Reapply the companion chrome even when the flag is already enabled so
+     theme updates cannot leave themed backgrounds on the companion pane.
      */
     usesProjectEditorCompanionChrome = shouldUseCompanionChrome
     applyCustomSidebarTitlebarChrome()
