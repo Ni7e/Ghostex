@@ -36,6 +36,8 @@ pub enum SidebarBridgeEvent {
     GhostexHotkeyAction(String),
     GxserverPresentationFocusState(String),
     WorkspaceTerminalFocus(String),
+    T3SessionFocus(String),
+    T3SessionCreate(String),
     WorkspaceTerminalRenameCommand(String),
     WorkspaceTerminalLifecycleResult(String),
     SessionStatusIndicators(String),

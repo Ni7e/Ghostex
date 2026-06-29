@@ -415,6 +415,10 @@ const GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE: &str =
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTerminalFocus";
+const GPUI_SIDEBAR_T3_SESSION_FOCUS_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_T3_SESSION_FOCUS_MESSAGE_TYPE: &str = "ghostex.gpui.sidebar.t3SessionFocus";
+const GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_VERSION: u64 = 1;
+const GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_TYPE: &str = "ghostex.gpui.sidebar.t3SessionCreate";
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.workspaceTerminalRenameCommand";
@@ -453,15 +457,6 @@ const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_VERSION: u64 = 1;
 const GPUI_SIDEBAR_NATIVE_APP_SHOT_PROMPT_RESULT_MESSAGE_TYPE: &str =
     "ghostex.gpui.sidebar.nativeAppShotPromptResult";
 const GPUI_SIDEBAR_REMOTE_EVENT_NAME: &str = "ghostex-gpui-sidebar-remote-event";
-const GPUI_SOURCE_READINESS_MESSAGE_VERSION: u64 = 1;
-const GPUI_SOURCE_READINESS_MESSAGE_TYPE: &str = "ghostex.gpui.source.readiness";
-const GPUI_BROWSER_WORKAREA_READINESS_MESSAGE_VERSION: u64 = 1;
-const GPUI_BROWSER_WORKAREA_READINESS_MESSAGE_TYPE: &str = "ghostex.gpui.browserWorkarea.readiness";
-const GPUI_PROJECT_WORKAREA_READINESS_MESSAGE_VERSION: u64 = 1;
-const GPUI_PROJECT_WORKAREA_READINESS_MESSAGE_TYPE: &str = "ghostex.gpui.projectWorkarea.readiness";
-const GPUI_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_MESSAGE_VERSION: u64 = 1;
-const GPUI_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_MESSAGE_TYPE: &str =
-    "ghostex.gpui.manageFileWorkarea.operationRequest";
 const GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS: usize = 512;
 const GPUI_PROJECT_CONTRACT_PATH_MAX_CHARS: usize = 4096;
 const GPUI_NATIVE_APP_SHOT_PROMPT_MAX_CHARS: usize = 24 * 1024;
@@ -1814,83 +1809,18 @@ impl ProjectEditorPlaceholderSignature {
         })
     }
 
-    fn for_source_runtime_availability(
-        availability: &SourceWorkareaRuntimeAvailability,
+    fn for_source_code_server_launch_state(
+        state: SourceCodeServerRuntimeLaunchState,
     ) -> Option<Self> {
-        match availability {
-            SourceWorkareaRuntimeAvailability::Ready(_) => Self::for_mode(TitlebarMode::Source),
-            SourceWorkareaRuntimeAvailability::Blocked(reason) => {
-                Self::for_source_block_reason(*reason)
-            }
-        }
-    }
-
-    fn for_source_block_reason(reason: SourceWorkareaRuntimeBlockReason) -> Option<Self> {
         let signature = Self::for_mode(TitlebarMode::Source)?;
-        let (title, message) = match reason {
-            SourceWorkareaRuntimeBlockReason::SourceReadinessBridgeLoading => (
+        let (title, message) = match state {
+            SourceCodeServerRuntimeLaunchState::Launching => (
                 "Source is loading",
                 "Source is preparing the editor. The workspace stays selected while the editor surface is not ready.",
             ),
-            SourceWorkareaRuntimeBlockReason::SourceReadinessBridgeLoadFailed => (
+            SourceCodeServerRuntimeLaunchState::Failed => (
                 "Source load failed",
                 "Source could not load. The workspace stays selected so the editor state can be retried later.",
-            ),
-            _ => return Some(signature),
-        };
-
-        Some(Self {
-            title,
-            message,
-            ..signature
-        })
-    }
-
-    fn for_project_scoped_runtime_availability(
-        mode: TitlebarMode,
-        availability: &ProjectScopedRealSurfaceRuntimeAvailability,
-    ) -> Option<Self> {
-        match availability {
-            ProjectScopedRealSurfaceRuntimeAvailability::Ready(_) => Self::for_mode(mode),
-            ProjectScopedRealSurfaceRuntimeAvailability::Blocked(reason) => {
-                Self::for_project_scoped_block_reason(mode, *reason)
-            }
-        }
-    }
-
-    fn for_project_scoped_block_reason(
-        mode: TitlebarMode,
-        reason: ProjectScopedRealSurfaceRuntimeBlockReason,
-    ) -> Option<Self> {
-        let signature = Self::for_mode(mode)?;
-        let (title, message) = match (mode, reason) {
-            (
-                TitlebarMode::Kanban,
-                ProjectScopedRealSurfaceRuntimeBlockReason::KanbanCefMounting,
-            ) => (
-                "Kanban is mounting",
-                "Kanban is preparing the project board. The workspace stays selected while the board surface is not ready.",
-            ),
-            (
-                TitlebarMode::Manage,
-                ProjectScopedRealSurfaceRuntimeBlockReason::ManageCefAndFileBridgeMounting,
-            ) => (
-                "Manage is mounting",
-                "Manage is preparing the workspace view. The workspace stays selected while the workarea surface is not ready.",
-            ),
-            (
-                TitlebarMode::Kanban,
-                ProjectScopedRealSurfaceRuntimeBlockReason::KanbanCefLoadFailed,
-            ) => (
-                "Kanban load failed",
-                "Kanban could not load. The workspace stays selected so the board state can be retried later.",
-            ),
-            (
-                TitlebarMode::Manage,
-                ProjectScopedRealSurfaceRuntimeBlockReason::ManageCefAndFileBridgeLoadFailed,
-            ) => (
-                "Manage load failed",
-                "Manage could not load. The workspace stays selected so the workarea state can be retried later.",
             ),
             _ => return Some(signature),
         };
@@ -2110,7 +2040,7 @@ impl GpuiProjectContext {
 
 /*
 CDXC:GPUIProjectSnapshot 2026-06-24-07:41:
-The live sidebar active-project snapshot is strict instead of a pre-bridge placeholder. The snapshot carries active project id, display name, Quick/projectless state, project-scoped availability, the allowlisted in-memory project path, and identity-only Source, Kanban, and gated Manage surface ids from explicit sidebar/native project-editor state without inventing .git, path, fixture, workspace-name, or fallback project detection. Browser identity/readiness plus runtime URL, CEF, and file-bridge facts stay outside the snapshot; real workarea surfaces are created only through direct runtime gates after snapshot acceptance.
+The live sidebar active-project snapshot is strict instead of a pre-bridge placeholder. The snapshot carries active project id, display name, Quick/projectless state, project-scoped availability, the allowlisted in-memory project path, and identity-only Source, Kanban, and gated Manage surface ids from explicit sidebar/native project-editor state without inventing .git, path, fixture, workspace-name, or fallback project detection. Browser runtime state plus Source/Kanban/Manage runtime URL, CEF, and file-bridge facts stay outside the snapshot; real workarea surfaces are created only through direct runtime gates after snapshot acceptance.
 
 CDXC:GPUIProjectSnapshot 2026-06-22-18:14:
 Project display names and project paths are private runtime facts. `in_memory_project_path` is accepted only from the future allowlisted sidebar contract, is not normalized or probed on disk, and must not be serialized by GPUI shell-state persistence or emitted in logs; durable shell state may only store privacy-boundary booleans/count-like facts unless a later requirement explicitly adds a sanitized field.
@@ -2128,19 +2058,19 @@ CDXC:GPUISourceWorkarea 2026-06-23-12:25:
 Normal sidebar project payloads may now carry the explicit Source workarea identity from the sidebar/native project-editor id. Missing or malformed Source identity still blocks without deriving ids or readiness from paths, titles, fixtures, probes, group ids, URLs, or localhost constants; runtime Source instantiation remains outside the active-project snapshot.
 
 CDXC:GPUISourceWorkarea 2026-06-24-07:41:
-Source identity is not Source readiness. Source readiness and the app-owned code-server runtime stay separate from snapshot identity; this boundary must not treat raw URLs, localhost values, paths, filesystem probes, or placeholder shell state as readiness, runtime URL authority, mount permission, or placeholder replacement.
+Source identity is not runtime authority. The app-owned code-server owner must turn the snapshot into the only Source runtime URL gate; this boundary must not treat raw URLs, localhost values, paths, filesystem probes, sidebar readiness messages, or placeholder shell state as readiness, mount permission, or placeholder replacement.
 
 CDXC:GPUISourceRuntime 2026-06-24-23:17:
 GPUI Source runtime authority now starts after this snapshot boundary: the snapshot may supply only explicit project identity, Source workarea identity, and in-memory project path; the app-owned runtime owner turns that into the macOS-compatible code-server folder URL only at the visible Source startup edge.
 
 CDXC:GPUISourceWorkarea 2026-06-23-14:36:
-Source sleep/wake evidence must preserve explicit Source runtime identity while keeping bridge load, ready, and failed states separate from shell lifecycle. Shell sleep/wake may only toggle the placeholder lifecycle; it must not synthesize Source readiness, mount CEF/code-server, persist private ids/paths/URLs, or reset companion and command-pane shell state.
+Source sleep/wake evidence must preserve explicit Source runtime identity while keeping code-server launch state separate from shell lifecycle. Shell sleep/wake may only toggle the placeholder lifecycle; it must not synthesize Source readiness, mount CEF/code-server, persist private ids/paths/URLs, or reset companion and command-pane shell state.
 
 CDXC:GPUIProjectSnapshotContract 2026-06-23-15:18:
 The active-project snapshot accepts identity-only Source, Kanban, and gated Manage surface ids, but Browser surface identity is not part of the snapshot. Browser availability may still gate the titlebar; any `browserWorkareaId` field must be rejected instead of stored as speculative identity.
 
-CDXC:GPUIBrowserWorkareaReadiness 2026-06-23-16:24:
-Browser active-project identity/readiness now belongs to a separate strict source-only contract boundary, not the active-project snapshot. Keep `browserWorkareaId` rejected in `surfaceIds`; readiness may only update enum state for an already-held explicit Browser identity and must not create, materialize, replace, suspend, or tear down CEF surfaces.
+CDXC:GPUIProjectWorkareaRuntimeCleanup 2026-06-29-00:02:
+Browser active-project readiness no longer has a GPUI proof store. Keep `browserWorkareaId` rejected in `surfaceIds`; Source/Kanban/Manage readiness messages are compatibility no-ops, and real workarea surfaces depend on direct runtime URL plus CEF surface ownership.
 */
 #[allow(dead_code)]
 #[derive(Clone, PartialEq, Eq)]
@@ -2232,6 +2162,17 @@ struct GpuiGxserverPresentationFocusState {
 struct GpuiSidebarWorkspaceTerminalFocusMessage {
     project_id: String,
     session_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiSidebarT3SessionFocusMessage {
+    project_id: String,
+    session_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiSidebarT3SessionCreateMessage {
+    project_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2340,6 +2281,15 @@ fn gpui_workspace_terminal_rename_command_target_from_model(
 
 impl From<&GpuiSidebarWorkspaceTerminalFocusMessage> for GpuiLocalWorkspaceSessionKey {
     fn from(message: &GpuiSidebarWorkspaceTerminalFocusMessage) -> Self {
+        Self {
+            project_id: message.project_id.clone(),
+            session_id: message.session_id.clone(),
+        }
+    }
+}
+
+impl From<&GpuiSidebarT3SessionFocusMessage> for GpuiLocalWorkspaceSessionKey {
+    fn from(message: &GpuiSidebarT3SessionFocusMessage) -> Self {
         Self {
             project_id: message.project_id.clone(),
             session_id: message.session_id.clone(),
@@ -2519,214 +2469,13 @@ impl ProjectScopedWorkareaAvailability {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
-struct SourceWorkareaRuntimeIdentity {
-    active_project_id: GpuiProjectId,
-    source_workarea_id: String,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-struct SourceWorkareaRuntimeSurface {
-    identity: SourceWorkareaRuntimeIdentity,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceWorkareaRuntimeBlockReason {
-    MissingActiveProjectSnapshot,
-    QuickProjectlessContext,
-    SourceUnavailableInSnapshot,
-    MissingSourceWorkareaId,
-    MissingSourceReadinessBridge,
-    SourceReadinessBridgeLoading,
-    SourceReadinessBridgeLoadFailed,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-enum SourceWorkareaRuntimeAvailability {
-    Ready(SourceWorkareaRuntimeSurface),
-    Blocked(SourceWorkareaRuntimeBlockReason),
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SourceWorkareaReadinessBridgeState {
-    MissingExplicitBridge,
-    Loading,
-    Ready,
-    LoadFailed,
-}
-
-impl SourceWorkareaReadinessBridgeState {
-    fn is_ready(self) -> bool {
-        matches!(self, Self::Ready)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::MissingExplicitBridge => "missingExplicitBridge",
-            Self::Loading => "loading",
-            Self::Ready => "ready",
-            Self::LoadFailed => "loadFailed",
-        }
-    }
-
-    fn block_reason(self) -> SourceWorkareaRuntimeBlockReason {
-        match self {
-            Self::MissingExplicitBridge => {
-                SourceWorkareaRuntimeBlockReason::MissingSourceReadinessBridge
-            }
-            Self::Loading => SourceWorkareaRuntimeBlockReason::SourceReadinessBridgeLoading,
-            Self::LoadFailed => SourceWorkareaRuntimeBlockReason::SourceReadinessBridgeLoadFailed,
-            Self::Ready => {
-                unreachable!("ready Source readiness bridge does not block availability")
-            }
-        }
-    }
-}
-
-impl Default for SourceWorkareaReadinessBridgeState {
-    fn default() -> Self {
-        Self::MissingExplicitBridge
-    }
-}
-
 /*
-CDXC:GPUISourceReadiness 2026-06-23-16:10:
-GPUI may accept Source readiness only through a strict in-memory message keyed to the explicit active project and Source workarea identity already accepted from the active-project snapshot. This boundary is enum-only readiness evidence: it must not accept fallback URLs, mount CEF/code-server, log or persist private details, probe localhost or paths, or replace the Source placeholder.
+CDXC:GPUIProjectWorkareaRuntimeCleanup 2026-06-29-00:02:
+Source, Kanban, and Manage no longer keep sidebar readiness/proof stores beside the direct runtime gates. Source placeholder copy comes from the app-owned code-server launch state, while real Source/Kanban/Manage replacement is authorized only by `project_workarea_runtime_url_for_slot` plus an owned normal-layout CEF surface.
 
-CDXC:GPUISourceRuntimeCleanup 2026-06-28-17:09:
-The old Source CEF/code-server proof objects were removed from runtime. Source readiness remains only enum state, and real Source CEF creation is authorized by the app-owned code-server runtime plus the direct runtime URL/CefSurface gate.
-
-CDXC:GPUISourceRuntime 2026-06-24-23:17:
-The strict Source readiness bridge remains URL-free and path-free, but GPUI now has a separate app-owned runtime owner that can set the bridge to loading, ready, or load-failed after launching the shared macOS-compatible code-server process. Keep runtime process/URL state out of this readiness contract JSON.
+CDXC:GPUIProjectWorkareaRuntimeCleanup 2026-06-29-00:15:
+Owned Source/Kanban/Manage CEF surfaces must also match the current direct runtime URL identity before reuse or visibility. A valid URL for a different active project is not authority to keep a stale slot-owned surface alive.
 */
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Eq)]
-struct SourceWorkareaReadinessContractMessage {
-    identity: SourceWorkareaRuntimeIdentity,
-    state: SourceWorkareaReadinessBridgeState,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceWorkareaReadinessContractError {
-    MalformedJson,
-    ExpectedObject,
-    UnexpectedKey,
-    MissingField,
-    MalformedField,
-    UnexpectedVersion,
-    UnexpectedMessageType,
-    UnsupportedState,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceWorkareaReadinessStoreResult {
-    Changed,
-    Unchanged,
-    IgnoredStaleIdentity,
-    MissingActiveIdentity,
-}
-
-#[derive(Default)]
-struct SourceWorkareaRuntimeState {
-    active_identity: Option<SourceWorkareaRuntimeIdentity>,
-    readiness_bridge: SourceWorkareaReadinessBridgeState,
-}
-
-impl SourceWorkareaRuntimeState {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn reconcile_active_project(&mut self, snapshot: Option<&GpuiProjectSnapshot>) {
-        let next_identity = source_workarea_runtime_identity_from_snapshot(snapshot).ok();
-        if self.active_identity != next_identity {
-            self.active_identity = next_identity;
-            self.readiness_bridge = SourceWorkareaReadinessBridgeState::MissingExplicitBridge;
-        }
-    }
-
-    #[allow(dead_code)]
-    fn apply_readiness_contract_message(
-        &mut self,
-        message: &SourceWorkareaReadinessContractMessage,
-    ) -> SourceWorkareaReadinessStoreResult {
-        let Some(active_identity) = self.active_identity.as_ref() else {
-            return SourceWorkareaReadinessStoreResult::MissingActiveIdentity;
-        };
-        if active_identity != &message.identity {
-            return SourceWorkareaReadinessStoreResult::IgnoredStaleIdentity;
-        }
-        if self.readiness_bridge == message.state {
-            return SourceWorkareaReadinessStoreResult::Unchanged;
-        }
-
-        self.readiness_bridge = message.state;
-        SourceWorkareaReadinessStoreResult::Changed
-    }
-
-    fn availability(
-        &self,
-        snapshot: Option<&GpuiProjectSnapshot>,
-    ) -> SourceWorkareaRuntimeAvailability {
-        let identity = match source_workarea_runtime_identity_from_snapshot(snapshot) {
-            Ok(identity) => identity,
-            Err(reason) => return SourceWorkareaRuntimeAvailability::Blocked(reason),
-        };
-
-        if self.active_identity.as_ref() != Some(&identity) {
-            return SourceWorkareaRuntimeAvailability::Blocked(
-                SourceWorkareaRuntimeBlockReason::MissingSourceReadinessBridge,
-            );
-        }
-
-        if !self.readiness_bridge.is_ready() {
-            return SourceWorkareaRuntimeAvailability::Blocked(
-                self.readiness_bridge.block_reason(),
-            );
-        }
-
-        SourceWorkareaRuntimeAvailability::Ready(SourceWorkareaRuntimeSurface { identity })
-    }
-
-    fn shell_state_privacy_boundary_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "hasActiveIdentity": self.active_identity.is_some(),
-            "bridgeState": self.readiness_bridge.privacy_label(),
-            "hasReadinessBridge": self.readiness_bridge.is_ready(),
-            "isReady": self.readiness_bridge.is_ready(),
-        })
-    }
-}
-
-fn source_workarea_runtime_identity_from_snapshot(
-    snapshot: Option<&GpuiProjectSnapshot>,
-) -> Result<SourceWorkareaRuntimeIdentity, SourceWorkareaRuntimeBlockReason> {
-    let snapshot =
-        snapshot.ok_or(SourceWorkareaRuntimeBlockReason::MissingActiveProjectSnapshot)?;
-    if snapshot.is_quick_projectless {
-        return Err(SourceWorkareaRuntimeBlockReason::QuickProjectlessContext);
-    }
-    if !snapshot.feature_availability.source {
-        return Err(SourceWorkareaRuntimeBlockReason::SourceUnavailableInSnapshot);
-    }
-    let active_project_id = snapshot
-        .active_project_id
-        .clone()
-        .ok_or(SourceWorkareaRuntimeBlockReason::MissingActiveProjectSnapshot)?;
-    let source_workarea_id = snapshot
-        .surface_ids
-        .source_workarea_id
-        .clone()
-        .ok_or(SourceWorkareaRuntimeBlockReason::MissingSourceWorkareaId)?;
-
-    Ok(SourceWorkareaRuntimeIdentity {
-        active_project_id,
-        source_workarea_id,
-    })
-}
-
 const SOURCE_CODE_SERVER_EDITOR_HOST: &str = "127.0.0.1";
 /*
 CDXC:GPUISourceRuntime 2026-06-28-04:05:
@@ -2806,6 +2555,21 @@ impl ProjectWorkareaRealRuntimeUrl {
 
     fn into_cef_url(self) -> String {
         self.value
+    }
+}
+
+/*
+CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-29-00:15:
+Project workarea CEF ownership keeps only the process-local direct runtime URL identity beside the CefSurface so active-project changes can prune stale slot reuse. This identity is not a readiness/proof store, must not be serialized or logged, and must only be compared against `project_workarea_runtime_url_for_slot`.
+*/
+struct ProjectWorkareaRuntimeCefSurface {
+    runtime_url: ProjectWorkareaRealRuntimeUrl,
+    surface: Entity<CefSurface>,
+}
+
+impl ProjectWorkareaRuntimeCefSurface {
+    fn matches_runtime_url(&self, runtime_url: &ProjectWorkareaRealRuntimeUrl) -> bool {
+        self.runtime_url.eq(runtime_url)
     }
 }
 
@@ -3030,1349 +2794,6 @@ struct SourceCodeServerRuntimeStartOutput {
     child: Child,
     started_at: Instant,
     responsive: bool,
-}
-
-#[allow(dead_code)]
-fn store_source_workarea_readiness_from_contract_json(
-    runtime: &mut SourceWorkareaRuntimeState,
-    text: &str,
-) -> Result<SourceWorkareaReadinessStoreResult, SourceWorkareaReadinessContractError> {
-    let message = source_workarea_readiness_from_contract_json(text)?;
-    Ok(runtime.apply_readiness_contract_message(&message))
-}
-
-#[allow(dead_code)]
-fn source_workarea_readiness_from_contract_json(
-    text: &str,
-) -> Result<SourceWorkareaReadinessContractMessage, SourceWorkareaReadinessContractError> {
-    let value = serde_json::from_str::<serde_json::Value>(text)
-        .map_err(|_| SourceWorkareaReadinessContractError::MalformedJson)?;
-    source_workarea_readiness_from_contract_value(&value)
-}
-
-#[allow(dead_code)]
-fn source_workarea_readiness_from_contract_value(
-    value: &serde_json::Value,
-) -> Result<SourceWorkareaReadinessContractMessage, SourceWorkareaReadinessContractError> {
-    let object = source_readiness_contract_object(value)?;
-    reject_unexpected_source_readiness_contract_keys(
-        object,
-        &[
-            "version",
-            "type",
-            "activeProjectId",
-            "sourceWorkareaId",
-            "state",
-        ],
-    )?;
-
-    let version = object
-        .get("version")
-        .and_then(serde_json::Value::as_u64)
-        .ok_or(SourceWorkareaReadinessContractError::UnexpectedVersion)?;
-    if version != GPUI_SOURCE_READINESS_MESSAGE_VERSION {
-        return Err(SourceWorkareaReadinessContractError::UnexpectedVersion);
-    }
-
-    let message_type = object
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .ok_or(SourceWorkareaReadinessContractError::UnexpectedMessageType)?;
-    if message_type != GPUI_SOURCE_READINESS_MESSAGE_TYPE {
-        return Err(SourceWorkareaReadinessContractError::UnexpectedMessageType);
-    }
-
-    let active_project_id = required_source_readiness_contract_string_field(
-        object,
-        "activeProjectId",
-        GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS,
-    )
-    .map(GpuiProjectId)?;
-    let source_workarea_id = required_source_readiness_contract_string_field(
-        object,
-        "sourceWorkareaId",
-        GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS,
-    )?;
-    let state = object
-        .get("state")
-        .ok_or(SourceWorkareaReadinessContractError::MissingField)
-        .and_then(source_workarea_readiness_bridge_state_from_contract_value)?;
-
-    Ok(SourceWorkareaReadinessContractMessage {
-        identity: SourceWorkareaRuntimeIdentity {
-            active_project_id,
-            source_workarea_id,
-        },
-        state,
-    })
-}
-
-#[allow(dead_code)]
-fn source_workarea_readiness_bridge_state_from_contract_value(
-    value: &serde_json::Value,
-) -> Result<SourceWorkareaReadinessBridgeState, SourceWorkareaReadinessContractError> {
-    let state = value
-        .as_str()
-        .ok_or(SourceWorkareaReadinessContractError::MalformedField)?;
-    match state {
-        "loading" => Ok(SourceWorkareaReadinessBridgeState::Loading),
-        "ready" => Ok(SourceWorkareaReadinessBridgeState::Ready),
-        "loadFailed" => Ok(SourceWorkareaReadinessBridgeState::LoadFailed),
-        _ => Err(SourceWorkareaReadinessContractError::UnsupportedState),
-    }
-}
-
-#[allow(dead_code)]
-fn source_readiness_contract_object(
-    value: &serde_json::Value,
-) -> Result<&serde_json::Map<String, serde_json::Value>, SourceWorkareaReadinessContractError> {
-    value
-        .as_object()
-        .ok_or(SourceWorkareaReadinessContractError::ExpectedObject)
-}
-
-#[allow(dead_code)]
-fn reject_unexpected_source_readiness_contract_keys(
-    object: &serde_json::Map<String, serde_json::Value>,
-    allowed_keys: &[&str],
-) -> Result<(), SourceWorkareaReadinessContractError> {
-    if object
-        .keys()
-        .any(|key| !allowed_keys.contains(&key.as_str()))
-    {
-        return Err(SourceWorkareaReadinessContractError::UnexpectedKey);
-    }
-    Ok(())
-}
-
-#[allow(dead_code)]
-fn required_source_readiness_contract_string_field(
-    object: &serde_json::Map<String, serde_json::Value>,
-    key: &str,
-    max_chars: usize,
-) -> Result<String, SourceWorkareaReadinessContractError> {
-    let value = object
-        .get(key)
-        .ok_or(SourceWorkareaReadinessContractError::MissingField)?;
-    let value = value
-        .as_str()
-        .ok_or(SourceWorkareaReadinessContractError::MalformedField)?;
-    if value.trim().is_empty() || value.chars().count() > max_chars {
-        return Err(SourceWorkareaReadinessContractError::MalformedField);
-    }
-    Ok(value.to_string())
-}
-
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Eq)]
-struct BrowserWorkareaRuntimeIdentity {
-    active_project_id: GpuiProjectId,
-    browser_workarea_id: String,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BrowserWorkareaRuntimeIdentityError {
-    MissingActiveProjectSnapshot,
-    QuickProjectlessContext,
-    BrowserUnavailableInSnapshot,
-    MissingBrowserWorkareaId,
-    MalformedBrowserWorkareaId,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum BrowserWorkareaReadinessBridgeState {
-    MissingExplicitBridge,
-    Loading,
-    Ready,
-    LoadFailed,
-}
-
-impl BrowserWorkareaReadinessBridgeState {
-    fn is_ready(self) -> bool {
-        matches!(self, Self::Ready)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::MissingExplicitBridge => "missingExplicitBridge",
-            Self::Loading => "loading",
-            Self::Ready => "ready",
-            Self::LoadFailed => "loadFailed",
-        }
-    }
-}
-
-impl Default for BrowserWorkareaReadinessBridgeState {
-    fn default() -> Self {
-        Self::MissingExplicitBridge
-    }
-}
-
-/*
-CDXC:GPUIBrowserWorkareaReadiness 2026-06-23-16:24:
-GPUI may accept future Browser active-project readiness only through a strict in-memory v1 message keyed to an explicit Browser identity already held by source-only runtime state. The message is enum-only lifecycle evidence and must not carry URLs, page titles, profile names or paths, cookies, history, import content, failure details, CEF request-context data, logs, persisted private data, or permission to create/materialize/suspend/tear down Browser CEF surfaces.
-*/
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Eq)]
-struct BrowserWorkareaReadinessContractMessage {
-    identity: BrowserWorkareaRuntimeIdentity,
-    state: BrowserWorkareaReadinessBridgeState,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BrowserWorkareaReadinessContractError {
-    MalformedJson,
-    ExpectedObject,
-    UnexpectedKey,
-    MissingField,
-    MalformedField,
-    UnexpectedVersion,
-    UnexpectedMessageType,
-    UnsupportedState,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BrowserWorkareaReadinessStoreResult {
-    Changed,
-    Unchanged,
-    IgnoredStaleIdentity,
-    MissingActiveIdentity,
-}
-
-#[allow(dead_code)]
-#[derive(Default)]
-struct BrowserWorkareaRuntimeState {
-    active_identity: Option<BrowserWorkareaRuntimeIdentity>,
-    readiness_bridge: BrowserWorkareaReadinessBridgeState,
-}
-
-#[allow(dead_code)]
-impl BrowserWorkareaRuntimeState {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn reconcile_explicit_active_project_identity(
-        &mut self,
-        snapshot: Option<&GpuiProjectSnapshot>,
-        browser_workarea_id: Option<&str>,
-    ) {
-        let next_identity = browser_workarea_runtime_identity_from_explicit_active_project(
-            snapshot,
-            browser_workarea_id,
-        )
-        .ok();
-        if self.active_identity != next_identity {
-            self.active_identity = next_identity;
-            self.readiness_bridge = BrowserWorkareaReadinessBridgeState::MissingExplicitBridge;
-        }
-    }
-
-    fn apply_readiness_contract_message(
-        &mut self,
-        message: &BrowserWorkareaReadinessContractMessage,
-    ) -> BrowserWorkareaReadinessStoreResult {
-        let Some(active_identity) = self.active_identity.as_ref() else {
-            return BrowserWorkareaReadinessStoreResult::MissingActiveIdentity;
-        };
-        if active_identity != &message.identity {
-            return BrowserWorkareaReadinessStoreResult::IgnoredStaleIdentity;
-        }
-        if self.readiness_bridge == message.state {
-            return BrowserWorkareaReadinessStoreResult::Unchanged;
-        }
-
-        self.readiness_bridge = message.state;
-        BrowserWorkareaReadinessStoreResult::Changed
-    }
-
-    fn shell_state_privacy_boundary_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "hasActiveIdentity": self.active_identity.is_some(),
-            "bridgeState": self.readiness_bridge.privacy_label(),
-            "hasReadinessBridge": self.readiness_bridge.is_ready(),
-            "isReady": self.readiness_bridge.is_ready(),
-        })
-    }
-}
-
-#[allow(dead_code)]
-fn browser_workarea_runtime_identity_from_explicit_active_project(
-    snapshot: Option<&GpuiProjectSnapshot>,
-    browser_workarea_id: Option<&str>,
-) -> Result<BrowserWorkareaRuntimeIdentity, BrowserWorkareaRuntimeIdentityError> {
-    let snapshot =
-        snapshot.ok_or(BrowserWorkareaRuntimeIdentityError::MissingActiveProjectSnapshot)?;
-    if snapshot.is_quick_projectless {
-        return Err(BrowserWorkareaRuntimeIdentityError::QuickProjectlessContext);
-    }
-    if !snapshot.feature_availability.browser {
-        return Err(BrowserWorkareaRuntimeIdentityError::BrowserUnavailableInSnapshot);
-    }
-    let active_project_id = snapshot
-        .active_project_id
-        .clone()
-        .ok_or(BrowserWorkareaRuntimeIdentityError::MissingActiveProjectSnapshot)?;
-    let browser_workarea_id =
-        browser_workarea_id.ok_or(BrowserWorkareaRuntimeIdentityError::MissingBrowserWorkareaId)?;
-    if browser_workarea_id.trim().is_empty()
-        || browser_workarea_id.chars().count() > GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS
-    {
-        return Err(BrowserWorkareaRuntimeIdentityError::MalformedBrowserWorkareaId);
-    }
-
-    Ok(BrowserWorkareaRuntimeIdentity {
-        active_project_id,
-        browser_workarea_id: browser_workarea_id.to_string(),
-    })
-}
-
-#[allow(dead_code)]
-fn store_browser_workarea_readiness_from_contract_json(
-    runtime: &mut BrowserWorkareaRuntimeState,
-    text: &str,
-) -> Result<BrowserWorkareaReadinessStoreResult, BrowserWorkareaReadinessContractError> {
-    let message = browser_workarea_readiness_from_contract_json(text)?;
-    Ok(runtime.apply_readiness_contract_message(&message))
-}
-
-#[allow(dead_code)]
-fn browser_workarea_readiness_from_contract_json(
-    text: &str,
-) -> Result<BrowserWorkareaReadinessContractMessage, BrowserWorkareaReadinessContractError> {
-    let value = serde_json::from_str::<serde_json::Value>(text)
-        .map_err(|_| BrowserWorkareaReadinessContractError::MalformedJson)?;
-    browser_workarea_readiness_from_contract_value(&value)
-}
-
-#[allow(dead_code)]
-fn browser_workarea_readiness_from_contract_value(
-    value: &serde_json::Value,
-) -> Result<BrowserWorkareaReadinessContractMessage, BrowserWorkareaReadinessContractError> {
-    let object = browser_workarea_readiness_contract_object(value)?;
-    reject_unexpected_browser_workarea_readiness_contract_keys(
-        object,
-        &[
-            "version",
-            "type",
-            "activeProjectId",
-            "browserWorkareaId",
-            "state",
-        ],
-    )?;
-
-    let version = object
-        .get("version")
-        .and_then(serde_json::Value::as_u64)
-        .ok_or(BrowserWorkareaReadinessContractError::UnexpectedVersion)?;
-    if version != GPUI_BROWSER_WORKAREA_READINESS_MESSAGE_VERSION {
-        return Err(BrowserWorkareaReadinessContractError::UnexpectedVersion);
-    }
-
-    let message_type = object
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .ok_or(BrowserWorkareaReadinessContractError::UnexpectedMessageType)?;
-    if message_type != GPUI_BROWSER_WORKAREA_READINESS_MESSAGE_TYPE {
-        return Err(BrowserWorkareaReadinessContractError::UnexpectedMessageType);
-    }
-
-    let active_project_id = required_browser_workarea_readiness_contract_string_field(
-        object,
-        "activeProjectId",
-        GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS,
-    )
-    .map(GpuiProjectId)?;
-    let browser_workarea_id = required_browser_workarea_readiness_contract_string_field(
-        object,
-        "browserWorkareaId",
-        GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS,
-    )?;
-    let state = object
-        .get("state")
-        .ok_or(BrowserWorkareaReadinessContractError::MissingField)
-        .and_then(browser_workarea_readiness_bridge_state_from_contract_value)?;
-
-    Ok(BrowserWorkareaReadinessContractMessage {
-        identity: BrowserWorkareaRuntimeIdentity {
-            active_project_id,
-            browser_workarea_id,
-        },
-        state,
-    })
-}
-
-#[allow(dead_code)]
-fn browser_workarea_readiness_bridge_state_from_contract_value(
-    value: &serde_json::Value,
-) -> Result<BrowserWorkareaReadinessBridgeState, BrowserWorkareaReadinessContractError> {
-    let state = value
-        .as_str()
-        .ok_or(BrowserWorkareaReadinessContractError::MalformedField)?;
-    match state {
-        "loading" => Ok(BrowserWorkareaReadinessBridgeState::Loading),
-        "ready" => Ok(BrowserWorkareaReadinessBridgeState::Ready),
-        "loadFailed" => Ok(BrowserWorkareaReadinessBridgeState::LoadFailed),
-        _ => Err(BrowserWorkareaReadinessContractError::UnsupportedState),
-    }
-}
-
-#[allow(dead_code)]
-fn browser_workarea_readiness_contract_object(
-    value: &serde_json::Value,
-) -> Result<&serde_json::Map<String, serde_json::Value>, BrowserWorkareaReadinessContractError> {
-    value
-        .as_object()
-        .ok_or(BrowserWorkareaReadinessContractError::ExpectedObject)
-}
-
-#[allow(dead_code)]
-fn reject_unexpected_browser_workarea_readiness_contract_keys(
-    object: &serde_json::Map<String, serde_json::Value>,
-    allowed_keys: &[&str],
-) -> Result<(), BrowserWorkareaReadinessContractError> {
-    if object
-        .keys()
-        .any(|key| !allowed_keys.contains(&key.as_str()))
-    {
-        return Err(BrowserWorkareaReadinessContractError::UnexpectedKey);
-    }
-    Ok(())
-}
-
-#[allow(dead_code)]
-fn required_browser_workarea_readiness_contract_string_field(
-    object: &serde_json::Map<String, serde_json::Value>,
-    key: &str,
-    max_chars: usize,
-) -> Result<String, BrowserWorkareaReadinessContractError> {
-    let value = object
-        .get(key)
-        .ok_or(BrowserWorkareaReadinessContractError::MissingField)?;
-    let value = value
-        .as_str()
-        .ok_or(BrowserWorkareaReadinessContractError::MalformedField)?;
-    if value.trim().is_empty() || value.chars().count() > max_chars {
-        return Err(BrowserWorkareaReadinessContractError::MalformedField);
-    }
-    Ok(value.to_string())
-}
-
-/*
-CDXC:GPUIProjectWorkareaReadiness 2026-06-24-07:41:
-Kanban and Manage real surfaces need the same honest runtime boundary as Source. GPUI may recognize only explicit active-project snapshot ids and strict readiness/file-operation messages; CEF web-surface creation uses the separate direct runtime URL/CefSurface path. Do not synthesize identities or readiness from paths, titles, group ids, localhost URLs, filesystem probes, or placeholder shell state.
-
-CDXC:GPUIProjectWorkareaReadiness 2026-06-23-12:56:
-The sidebar bridge can now provide Kanban and gated Manage native project-editor ids derived only from the explicit projectContext.editor.projectId. Treat those ids as runtime identity, not as CEF readiness, URL readiness, file-bridge readiness, persistence input, logging input, or permission to mount a fallback surface.
-
-CDXC:GPUIProjectWorkareaLifecycle 2026-06-23-13:42:
-Kanban and Manage lifecycle visibility needs startup and load-failure states separate from runtime CEF or Manage file-bridge instantiation. Keep the bridge as enum-only runtime state with no failure details, private ids, paths, URLs, page titles, file names, tokens, raw payloads, fallback mounts, or persistent logging.
-
-CDXC:GPUIManageFileWorkareaBridge 2026-06-23-13:58:
-Manage file/workarea bridge requests need a policy boundary before file operations. Runtime file operations must pass through explicit operation-kind allowlisting, and the boundary may serialize only safe decision facts such as accepted/rejected booleans, operation kind, rejection kind, and operation count; it must not accept, store, persist, log, or infer from paths, file names, file contents, raw command args, raw payload JSON, URLs, tokens, error details, filesystem probes, CEF state, or fallback behavior.
-
-CDXC:GPUIManageFileWorkareaBridge 2026-06-23-14:02:
-Credential-shaped operation names are treated as private bridge input even when they are not valid operations. The rejection path must keep only the rejection category so credentials, passwords, auth headers, and access-key-like values cannot become durable shell state or future diagnostics.
-
-CDXC:GPUIProjectWorkareaReadiness 2026-06-24-07:41:
-GPUI accepts Kanban/Manage readiness only through a strict in-memory v1 message keyed to the explicit active project plus exact Kanban/Manage surface identity. This readiness boundary must not mount runtime CEF web surfaces, perform file I/O, log or persist private details, accept paths, URLs, file names, file contents, failure details, or replace placeholders before the direct runtime gates permit it.
-
-CDXC:GPUIManageFileWorkareaBridge 2026-06-23-16:35:
-Manage file/workarea operation requests have their own v1 boundary separate from readiness. GPUI may record only the existing operation-policy decision for the exact current Manage active-project/workarea identity, and malformed, extra-key, private-shaped, stale, Quick/projectless, or wrong-surface requests must leave the previous decision and Manage readiness unchanged without file I/O, CEF mounting, raw payload retention, logging, persistence, fallbacks, or placeholder replacement.
-
-CDXC:GPUIProjectWorkareaRuntimeCleanup 2026-06-28-17:09:
-The old Kanban/Manage source-proof CEF mount objects were removed from runtime. Readiness now stays as enum state plus Manage operation policy, while runtime CEF ownership is retained only when the current explicit project context can provide the direct bundled runtime URL for the selected surface.
-*/
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ProjectScopedRealSurfaceKind {
-    Kanban,
-    Manage,
-}
-
-impl ProjectScopedRealSurfaceKind {
-    fn feature_available(self, snapshot: &GpuiProjectSnapshot) -> bool {
-        match self {
-            Self::Kanban => snapshot.feature_availability.kanban,
-            Self::Manage => snapshot.feature_availability.manage,
-        }
-    }
-
-    fn explicit_surface_id(self, snapshot: &GpuiProjectSnapshot) -> Option<String> {
-        match self {
-            Self::Kanban => snapshot.surface_ids.kanban_board_id.clone(),
-            Self::Manage => snapshot.surface_ids.manage_workspace_id.clone(),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn readiness_contract_surface(self) -> &'static str {
-        match self {
-            Self::Kanban => "kanban",
-            Self::Manage => "manage",
-        }
-    }
-
-    fn unavailable_reason(self) -> ProjectScopedRealSurfaceRuntimeBlockReason {
-        match self {
-            Self::Kanban => ProjectScopedRealSurfaceRuntimeBlockReason::KanbanUnavailableInSnapshot,
-            Self::Manage => ProjectScopedRealSurfaceRuntimeBlockReason::ManageUnavailableInSnapshot,
-        }
-    }
-
-    fn missing_surface_id_reason(self) -> ProjectScopedRealSurfaceRuntimeBlockReason {
-        match self {
-            Self::Kanban => ProjectScopedRealSurfaceRuntimeBlockReason::MissingKanbanBoardId,
-            Self::Manage => ProjectScopedRealSurfaceRuntimeBlockReason::MissingManageWorkspaceId,
-        }
-    }
-
-    fn missing_lifecycle_bridge_reason(self) -> ProjectScopedRealSurfaceRuntimeBlockReason {
-        match self {
-            Self::Kanban => ProjectScopedRealSurfaceRuntimeBlockReason::MissingKanbanCefBridge,
-            Self::Manage => {
-                ProjectScopedRealSurfaceRuntimeBlockReason::MissingManageCefAndFileBridge
-            }
-        }
-    }
-
-    fn lifecycle_bridge_block_reason(
-        self,
-        state: ProjectScopedRealSurfaceLifecycleBridgeState,
-    ) -> ProjectScopedRealSurfaceRuntimeBlockReason {
-        match (self, state) {
-            (Self::Kanban, ProjectScopedRealSurfaceLifecycleBridgeState::MissingExplicitBridge) => {
-                ProjectScopedRealSurfaceRuntimeBlockReason::MissingKanbanCefBridge
-            }
-            (Self::Manage, ProjectScopedRealSurfaceLifecycleBridgeState::MissingExplicitBridge) => {
-                ProjectScopedRealSurfaceRuntimeBlockReason::MissingManageCefAndFileBridge
-            }
-            (Self::Kanban, ProjectScopedRealSurfaceLifecycleBridgeState::Mounting) => {
-                ProjectScopedRealSurfaceRuntimeBlockReason::KanbanCefMounting
-            }
-            (Self::Manage, ProjectScopedRealSurfaceLifecycleBridgeState::Mounting) => {
-                ProjectScopedRealSurfaceRuntimeBlockReason::ManageCefAndFileBridgeMounting
-            }
-            (Self::Kanban, ProjectScopedRealSurfaceLifecycleBridgeState::LoadFailed) => {
-                ProjectScopedRealSurfaceRuntimeBlockReason::KanbanCefLoadFailed
-            }
-            (Self::Manage, ProjectScopedRealSurfaceLifecycleBridgeState::LoadFailed) => {
-                ProjectScopedRealSurfaceRuntimeBlockReason::ManageCefAndFileBridgeLoadFailed
-            }
-            (_, ProjectScopedRealSurfaceLifecycleBridgeState::Ready) => {
-                unreachable!("ready lifecycle bridge does not block availability")
-            }
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-struct ProjectScopedRealSurfaceRuntimeIdentity {
-    kind: ProjectScopedRealSurfaceKind,
-    active_project_id: GpuiProjectId,
-    explicit_surface_id: String,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ProjectScopedRealSurfaceLifecycleBridgeState {
-    MissingExplicitBridge,
-    Mounting,
-    Ready,
-    LoadFailed,
-}
-
-impl ProjectScopedRealSurfaceLifecycleBridgeState {
-    fn is_ready(self) -> bool {
-        matches!(self, Self::Ready)
-    }
-
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::MissingExplicitBridge => "missingExplicitBridge",
-            Self::Mounting => "mounting",
-            Self::Ready => "ready",
-            Self::LoadFailed => "loadFailed",
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Eq)]
-struct ProjectWorkareaReadinessContractMessage {
-    identity: ProjectScopedRealSurfaceRuntimeIdentity,
-    state: ProjectScopedRealSurfaceLifecycleBridgeState,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaReadinessContractError {
-    MalformedJson,
-    ExpectedObject,
-    UnexpectedKey,
-    MissingField,
-    MalformedField,
-    UnexpectedVersion,
-    UnexpectedMessageType,
-    UnsupportedSurface,
-    UnsupportedState,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectWorkareaReadinessStoreResult {
-    Changed,
-    Unchanged,
-    IgnoredStaleIdentity,
-    MissingActiveIdentity,
-}
-
-const MANAGE_FILE_WORKAREA_BRIDGE_OPERATION_NAME_MAX_CHARS: usize = 64;
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManageFileWorkareaBridgeOperationKind {
-    ListWorkareaEntries,
-    ReadTextFile,
-    WriteTextFile,
-    CreateWorkareaEntry,
-    RenameWorkareaEntry,
-    DeleteWorkareaEntry,
-    MoveWorkareaEntry,
-    SearchWorkareaText,
-}
-
-#[allow(dead_code)]
-impl ManageFileWorkareaBridgeOperationKind {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::ListWorkareaEntries => "listWorkareaEntries",
-            Self::ReadTextFile => "readTextFile",
-            Self::WriteTextFile => "writeTextFile",
-            Self::CreateWorkareaEntry => "createWorkareaEntry",
-            Self::RenameWorkareaEntry => "renameWorkareaEntry",
-            Self::DeleteWorkareaEntry => "deleteWorkareaEntry",
-            Self::MoveWorkareaEntry => "moveWorkareaEntry",
-            Self::SearchWorkareaText => "searchWorkareaText",
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManageFileWorkareaBridgeOperationRejectionKind {
-    MalformedOperationName,
-    PrivateInputRejected,
-    UnknownOperation,
-}
-
-#[allow(dead_code)]
-impl ManageFileWorkareaBridgeOperationRejectionKind {
-    fn privacy_label(self) -> &'static str {
-        match self {
-            Self::MalformedOperationName => "malformedOperationName",
-            Self::PrivateInputRejected => "privateInputRejected",
-            Self::UnknownOperation => "unknownOperation",
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManageFileWorkareaBridgeOperationPolicyDecision {
-    Accepted(ManageFileWorkareaBridgeOperationKind),
-    Rejected(ManageFileWorkareaBridgeOperationRejectionKind),
-}
-
-#[allow(dead_code)]
-impl ManageFileWorkareaBridgeOperationPolicyDecision {
-    fn from_bridge_operation_name(name: &str) -> Self {
-        let operation_kind = match name {
-            "listWorkareaEntries" => ManageFileWorkareaBridgeOperationKind::ListWorkareaEntries,
-            "readTextFile" => ManageFileWorkareaBridgeOperationKind::ReadTextFile,
-            "writeTextFile" => ManageFileWorkareaBridgeOperationKind::WriteTextFile,
-            "createWorkareaEntry" => ManageFileWorkareaBridgeOperationKind::CreateWorkareaEntry,
-            "renameWorkareaEntry" => ManageFileWorkareaBridgeOperationKind::RenameWorkareaEntry,
-            "deleteWorkareaEntry" => ManageFileWorkareaBridgeOperationKind::DeleteWorkareaEntry,
-            "moveWorkareaEntry" => ManageFileWorkareaBridgeOperationKind::MoveWorkareaEntry,
-            "searchWorkareaText" => ManageFileWorkareaBridgeOperationKind::SearchWorkareaText,
-            _ if manage_file_workarea_bridge_operation_name_looks_private(name) => {
-                return Self::Rejected(
-                    ManageFileWorkareaBridgeOperationRejectionKind::PrivateInputRejected,
-                );
-            }
-            _ if !manage_file_workarea_bridge_operation_name_has_contract_shape(name) => {
-                return Self::Rejected(
-                    ManageFileWorkareaBridgeOperationRejectionKind::MalformedOperationName,
-                );
-            }
-            _ => {
-                return Self::Rejected(
-                    ManageFileWorkareaBridgeOperationRejectionKind::UnknownOperation,
-                );
-            }
-        };
-
-        Self::Accepted(operation_kind)
-    }
-
-    fn shell_state_privacy_boundary_json(&self) -> serde_json::Value {
-        match self {
-            Self::Accepted(operation_kind) => serde_json::json!({
-                "accepted": true,
-                "rejected": false,
-                "operationCount": 1,
-                "operationKind": operation_kind.privacy_label(),
-            }),
-            Self::Rejected(rejection_kind) => serde_json::json!({
-                "accepted": false,
-                "rejected": true,
-                "operationCount": 0,
-                "rejectionKind": rejection_kind.privacy_label(),
-            }),
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn manage_file_workarea_bridge_policy_for_operation_name(
-    name: &str,
-) -> ManageFileWorkareaBridgeOperationPolicyDecision {
-    ManageFileWorkareaBridgeOperationPolicyDecision::from_bridge_operation_name(name)
-}
-
-fn manage_file_workarea_bridge_operation_name_has_contract_shape(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= MANAGE_FILE_WORKAREA_BRIDGE_OPERATION_NAME_MAX_CHARS
-        && name.trim() == name
-        && name.chars().all(|ch| ch.is_ascii_alphanumeric())
-}
-
-fn manage_file_workarea_bridge_operation_name_looks_private(name: &str) -> bool {
-    let lowercase_name = name.to_ascii_lowercase();
-    name.contains('/')
-        || name.contains('\\')
-        || name.contains('.')
-        || name.contains(':')
-        || name.contains('?')
-        || name.contains('#')
-        || name.contains('=')
-        || name.contains('{')
-        || name.contains('}')
-        || name.contains('[')
-        || name.contains(']')
-        || name.contains('"')
-        || name.contains('\'')
-        || name.contains('$')
-        || name.contains('~')
-        || lowercase_name.contains("token")
-        || lowercase_name.contains("cookie")
-        || lowercase_name.contains("secret")
-        || lowercase_name.contains("bearer")
-        || lowercase_name.contains("credential")
-        || lowercase_name.contains("password")
-        || lowercase_name.contains("authorization")
-        || lowercase_name.contains("apikey")
-        || lowercase_name.contains("accesskey")
-        || lowercase_name.contains("path")
-        || lowercase_name.contains("content")
-        || lowercase_name.contains("payload")
-        || lowercase_name.contains("command")
-        || lowercase_name.contains("stdout")
-        || lowercase_name.contains("stderr")
-}
-
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Eq)]
-struct ManageFileWorkareaOperationRequestContractMessage {
-    identity: ProjectScopedRealSurfaceRuntimeIdentity,
-    decision: ManageFileWorkareaBridgeOperationPolicyDecision,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManageFileWorkareaOperationRequestContractError {
-    MalformedJson,
-    ExpectedObject,
-    UnexpectedKey,
-    MissingField,
-    MalformedField,
-    UnexpectedVersion,
-    UnexpectedMessageType,
-    MalformedOperationName,
-    PrivateInputRejected,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ManageFileWorkareaOperationRequestStoreResult {
-    Changed,
-    Unchanged,
-    IgnoredStaleIdentity,
-    MissingActiveIdentity,
-    IgnoredWrongSurface,
-}
-
-#[allow(dead_code)]
-fn store_manage_file_workarea_operation_request_from_contract_json(
-    runtime: &mut ProjectScopedRealSurfaceRuntimeState,
-    text: &str,
-) -> Result<
-    ManageFileWorkareaOperationRequestStoreResult,
-    ManageFileWorkareaOperationRequestContractError,
-> {
-    let message = manage_file_workarea_operation_request_from_contract_json(text)?;
-    Ok(runtime.apply_manage_file_workarea_operation_request_contract_message(&message))
-}
-
-#[allow(dead_code)]
-fn manage_file_workarea_operation_request_from_contract_json(
-    text: &str,
-) -> Result<
-    ManageFileWorkareaOperationRequestContractMessage,
-    ManageFileWorkareaOperationRequestContractError,
-> {
-    let value = serde_json::from_str::<serde_json::Value>(text)
-        .map_err(|_| ManageFileWorkareaOperationRequestContractError::MalformedJson)?;
-    manage_file_workarea_operation_request_from_contract_value(&value)
-}
-
-#[allow(dead_code)]
-fn manage_file_workarea_operation_request_from_contract_value(
-    value: &serde_json::Value,
-) -> Result<
-    ManageFileWorkareaOperationRequestContractMessage,
-    ManageFileWorkareaOperationRequestContractError,
-> {
-    let object = manage_file_workarea_operation_request_contract_object(value)?;
-    reject_unexpected_manage_file_workarea_operation_request_contract_keys(
-        object,
-        &[
-            "version",
-            "type",
-            "activeProjectId",
-            "manageWorkspaceId",
-            "operation",
-        ],
-    )?;
-
-    let version = object
-        .get("version")
-        .and_then(serde_json::Value::as_u64)
-        .ok_or(ManageFileWorkareaOperationRequestContractError::UnexpectedVersion)?;
-    if version != GPUI_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_MESSAGE_VERSION {
-        return Err(ManageFileWorkareaOperationRequestContractError::UnexpectedVersion);
-    }
-
-    let message_type = object
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .ok_or(ManageFileWorkareaOperationRequestContractError::UnexpectedMessageType)?;
-    if message_type != GPUI_MANAGE_FILE_WORKAREA_OPERATION_REQUEST_MESSAGE_TYPE {
-        return Err(ManageFileWorkareaOperationRequestContractError::UnexpectedMessageType);
-    }
-
-    let active_project_id = required_manage_file_workarea_operation_request_contract_string_field(
-        object,
-        "activeProjectId",
-        GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS,
-    )
-    .map(GpuiProjectId)?;
-    let manage_workspace_id =
-        required_manage_file_workarea_operation_request_contract_string_field(
-            object,
-            "manageWorkspaceId",
-            GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS,
-        )?;
-    let operation_name = required_manage_file_workarea_operation_request_contract_string_field(
-        object,
-        "operation",
-        MANAGE_FILE_WORKAREA_BRIDGE_OPERATION_NAME_MAX_CHARS,
-    )?;
-    let decision = manage_file_workarea_bridge_policy_for_operation_name(&operation_name);
-    match decision {
-        ManageFileWorkareaBridgeOperationPolicyDecision::Rejected(
-            ManageFileWorkareaBridgeOperationRejectionKind::MalformedOperationName,
-        ) => {
-            return Err(ManageFileWorkareaOperationRequestContractError::MalformedOperationName);
-        }
-        ManageFileWorkareaBridgeOperationPolicyDecision::Rejected(
-            ManageFileWorkareaBridgeOperationRejectionKind::PrivateInputRejected,
-        ) => {
-            return Err(ManageFileWorkareaOperationRequestContractError::PrivateInputRejected);
-        }
-        ManageFileWorkareaBridgeOperationPolicyDecision::Accepted(_)
-        | ManageFileWorkareaBridgeOperationPolicyDecision::Rejected(
-            ManageFileWorkareaBridgeOperationRejectionKind::UnknownOperation,
-        ) => {}
-    }
-
-    Ok(ManageFileWorkareaOperationRequestContractMessage {
-        identity: ProjectScopedRealSurfaceRuntimeIdentity {
-            kind: ProjectScopedRealSurfaceKind::Manage,
-            active_project_id,
-            explicit_surface_id: manage_workspace_id,
-        },
-        decision,
-    })
-}
-
-#[allow(dead_code)]
-fn manage_file_workarea_operation_request_contract_object(
-    value: &serde_json::Value,
-) -> Result<
-    &serde_json::Map<String, serde_json::Value>,
-    ManageFileWorkareaOperationRequestContractError,
-> {
-    value
-        .as_object()
-        .ok_or(ManageFileWorkareaOperationRequestContractError::ExpectedObject)
-}
-
-#[allow(dead_code)]
-fn reject_unexpected_manage_file_workarea_operation_request_contract_keys(
-    object: &serde_json::Map<String, serde_json::Value>,
-    allowed_keys: &[&str],
-) -> Result<(), ManageFileWorkareaOperationRequestContractError> {
-    if object
-        .keys()
-        .any(|key| !allowed_keys.contains(&key.as_str()))
-    {
-        return Err(ManageFileWorkareaOperationRequestContractError::UnexpectedKey);
-    }
-    Ok(())
-}
-
-#[allow(dead_code)]
-fn required_manage_file_workarea_operation_request_contract_string_field(
-    object: &serde_json::Map<String, serde_json::Value>,
-    key: &str,
-    max_chars: usize,
-) -> Result<String, ManageFileWorkareaOperationRequestContractError> {
-    let value = object
-        .get(key)
-        .ok_or(ManageFileWorkareaOperationRequestContractError::MissingField)?;
-    let value = value
-        .as_str()
-        .ok_or(ManageFileWorkareaOperationRequestContractError::MalformedField)?;
-    if value.trim().is_empty() || value.chars().count() > max_chars {
-        return Err(ManageFileWorkareaOperationRequestContractError::MalformedField);
-    }
-    Ok(value.to_string())
-}
-
-#[derive(Clone, PartialEq, Eq)]
-struct ProjectScopedRealSurfaceRuntimeSurface {
-    identity: ProjectScopedRealSurfaceRuntimeIdentity,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectScopedRealSurfaceRuntimeBlockReason {
-    MissingActiveProjectSnapshot,
-    QuickProjectlessContext,
-    KanbanUnavailableInSnapshot,
-    ManageUnavailableInSnapshot,
-    MissingKanbanBoardId,
-    MissingManageWorkspaceId,
-    MissingKanbanCefBridge,
-    MissingManageCefAndFileBridge,
-    KanbanCefMounting,
-    ManageCefAndFileBridgeMounting,
-    KanbanCefLoadFailed,
-    ManageCefAndFileBridgeLoadFailed,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-enum ProjectScopedRealSurfaceRuntimeAvailability {
-    Ready(ProjectScopedRealSurfaceRuntimeSurface),
-    Blocked(ProjectScopedRealSurfaceRuntimeBlockReason),
-}
-
-struct ProjectScopedRealSurfaceRuntimeState {
-    kind: ProjectScopedRealSurfaceKind,
-    active_identity: Option<ProjectScopedRealSurfaceRuntimeIdentity>,
-    lifecycle_bridge: ProjectScopedRealSurfaceLifecycleBridgeState,
-    manage_file_workarea_operation_decision:
-        Option<ManageFileWorkareaBridgeOperationPolicyDecision>,
-}
-
-impl ProjectScopedRealSurfaceRuntimeState {
-    fn new(kind: ProjectScopedRealSurfaceKind) -> Self {
-        Self {
-            kind,
-            active_identity: None,
-            lifecycle_bridge: ProjectScopedRealSurfaceLifecycleBridgeState::MissingExplicitBridge,
-            manage_file_workarea_operation_decision: None,
-        }
-    }
-
-    fn reconcile_active_project(&mut self, snapshot: Option<&GpuiProjectSnapshot>) {
-        let next_identity =
-            project_scoped_real_surface_runtime_identity_from_snapshot(snapshot, self.kind).ok();
-        if self.active_identity != next_identity {
-            self.active_identity = next_identity;
-            self.lifecycle_bridge =
-                ProjectScopedRealSurfaceLifecycleBridgeState::MissingExplicitBridge;
-            self.manage_file_workarea_operation_decision = None;
-        }
-    }
-
-    #[allow(dead_code)]
-    fn apply_readiness_contract_message(
-        &mut self,
-        message: &ProjectWorkareaReadinessContractMessage,
-    ) -> ProjectWorkareaReadinessStoreResult {
-        let Some(active_identity) = self.active_identity.as_ref() else {
-            return ProjectWorkareaReadinessStoreResult::MissingActiveIdentity;
-        };
-        if active_identity != &message.identity {
-            return ProjectWorkareaReadinessStoreResult::IgnoredStaleIdentity;
-        }
-        if self.lifecycle_bridge == message.state {
-            return ProjectWorkareaReadinessStoreResult::Unchanged;
-        }
-
-        self.lifecycle_bridge = message.state;
-        ProjectWorkareaReadinessStoreResult::Changed
-    }
-
-    #[allow(dead_code)]
-    fn apply_manage_file_workarea_operation_request_contract_message(
-        &mut self,
-        message: &ManageFileWorkareaOperationRequestContractMessage,
-    ) -> ManageFileWorkareaOperationRequestStoreResult {
-        if self.kind != ProjectScopedRealSurfaceKind::Manage
-            || message.identity.kind != ProjectScopedRealSurfaceKind::Manage
-        {
-            return ManageFileWorkareaOperationRequestStoreResult::IgnoredWrongSurface;
-        }
-
-        let Some(active_identity) = self.active_identity.as_ref() else {
-            return ManageFileWorkareaOperationRequestStoreResult::MissingActiveIdentity;
-        };
-        if active_identity != &message.identity {
-            return ManageFileWorkareaOperationRequestStoreResult::IgnoredStaleIdentity;
-        }
-        if self.manage_file_workarea_operation_decision == Some(message.decision) {
-            return ManageFileWorkareaOperationRequestStoreResult::Unchanged;
-        }
-
-        self.manage_file_workarea_operation_decision = Some(message.decision);
-        ManageFileWorkareaOperationRequestStoreResult::Changed
-    }
-
-    fn availability(
-        &self,
-        snapshot: Option<&GpuiProjectSnapshot>,
-    ) -> ProjectScopedRealSurfaceRuntimeAvailability {
-        let identity =
-            match project_scoped_real_surface_runtime_identity_from_snapshot(snapshot, self.kind) {
-                Ok(identity) => identity,
-                Err(reason) => return ProjectScopedRealSurfaceRuntimeAvailability::Blocked(reason),
-            };
-
-        if self.active_identity.as_ref() != Some(&identity) {
-            return ProjectScopedRealSurfaceRuntimeAvailability::Blocked(
-                self.kind.missing_lifecycle_bridge_reason(),
-            );
-        }
-
-        if !self.lifecycle_bridge.is_ready() {
-            return ProjectScopedRealSurfaceRuntimeAvailability::Blocked(
-                self.kind
-                    .lifecycle_bridge_block_reason(self.lifecycle_bridge),
-            );
-        }
-
-        ProjectScopedRealSurfaceRuntimeAvailability::Ready(ProjectScopedRealSurfaceRuntimeSurface {
-            identity,
-        })
-    }
-
-    fn shell_state_privacy_boundary_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "hasActiveIdentity": self.active_identity.is_some(),
-            "bridgeState": self.lifecycle_bridge.privacy_label(),
-            "isReady": self.lifecycle_bridge.is_ready(),
-        })
-    }
-
-    #[allow(dead_code)]
-    fn manage_file_workarea_operation_decision_privacy_boundary_json(&self) -> serde_json::Value {
-        match self.manage_file_workarea_operation_decision {
-            Some(decision) => decision.shell_state_privacy_boundary_json(),
-            None => serde_json::json!({
-                "hasOperationDecision": false,
-                "accepted": false,
-                "rejected": false,
-                "operationCount": 0,
-            }),
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn store_project_workarea_readiness_from_contract_json(
-    runtime: &mut ProjectScopedRealSurfaceRuntimeState,
-    text: &str,
-) -> Result<ProjectWorkareaReadinessStoreResult, ProjectWorkareaReadinessContractError> {
-    let message = project_workarea_readiness_from_contract_json(text)?;
-    Ok(runtime.apply_readiness_contract_message(&message))
-}
-
-fn store_sidebar_workarea_bridge_event(
-    source_runtime: &mut SourceWorkareaRuntimeState,
-    browser_runtime: &mut BrowserWorkareaRuntimeState,
-    kanban_runtime: &mut ProjectScopedRealSurfaceRuntimeState,
-    manage_runtime: &mut ProjectScopedRealSurfaceRuntimeState,
-    event: cef::SidebarBridgeEvent,
-) -> bool {
-    /*
-    CDXC:GPUIProjectSidebarBridge 2026-06-23-18:29:
-    Sidebar-scoped workarea bridge events are only a safe external entry point into existing strict stores. Each event carries one bounded string payload from the private CEF bridge, not a generic bus, and GPUI repaints only when the target store reports an actual runtime state or decision change; malformed, stale, missing-identity, duplicate, or private-shaped payloads remain no-ops with no logging, persistence, fallback probing, mount creation, file I/O, or placeholder replacement.
-
-    CDXC:GPUISidebarProjectPathActions 2026-06-24-14:18:
-    Native project path actions are deliberately outside the readiness stores. They have a separate parser/resolver path that may perform clipboard/Finder side effects after gxserver id lookup, so this store treats them as no-ops.
-
-    CDXC:GPUICommandPane 2026-06-24-23:17:
-    Sidebar command actions are also outside workarea readiness stores. They are parsed by the app action path and may create Browser/command-pane surfaces only through that path, never through Source/Browser/Kanban/Manage readiness or operation state.
-
-    CDXC:GPUICommandPane 2026-06-25-10:34:
-    Sidebar command-run-end events are outside workarea readiness stores for the same reason: they close mapped command-pane Action sessions through the command-pane owner path and clear sidebar button feedback, never through Source/Browser/Kanban/Manage readiness or file-operation state.
-
-    CDXC:GPUIAppShots 2026-06-25-23:28:
-    App Shot prompt insertion is outside workarea readiness stores. It has a dedicated parser and exact Agents-terminal surface writer, so Source/Browser/Kanban/Manage stores must treat it as a no-op.
-
-    CDXC:GPUIWorkspaceRenameCommand 2026-06-27-02:27:
-    Workspace rename commands are outside workarea readiness stores. They have a dedicated strict parser and exact mapped Agents-terminal input path, so malformed payloads must not affect Source/Browser/Kanban/Manage readiness or create fallback terminal targeting.
-
-    CDXC:GPUIStatusPetOverlay 2026-06-26-04:38:
-    Status indicator and pet overlay sync are also outside workarea readiness stores. They update only runtime presentation state through their strict parsers and must not affect Source/Browser/Kanban/Manage readiness, native side effects, or CEF surface ownership.
-    */
-    match event {
-        cef::SidebarBridgeEvent::ActiveProjectContext(_) => false,
-        cef::SidebarBridgeEvent::SourceWorkareaReadiness(payload) => matches!(
-            store_source_workarea_readiness_from_contract_json(source_runtime, &payload),
-            Ok(SourceWorkareaReadinessStoreResult::Changed)
-        ),
-        cef::SidebarBridgeEvent::BrowserWorkareaReadiness(payload) => matches!(
-            store_browser_workarea_readiness_from_contract_json(browser_runtime, &payload),
-            Ok(BrowserWorkareaReadinessStoreResult::Changed)
-        ),
-        cef::SidebarBridgeEvent::ProjectWorkareaReadiness(payload) => matches!(
-            store_project_workarea_readiness_from_sidebar_bridge_json(
-                kanban_runtime,
-                manage_runtime,
-                &payload,
-            ),
-            Ok(ProjectWorkareaReadinessStoreResult::Changed)
-        ),
-        cef::SidebarBridgeEvent::ManageFileWorkareaOperationRequest(payload) => matches!(
-            store_manage_file_workarea_operation_request_from_contract_json(
-                manage_runtime,
-                &payload,
-            ),
-            Ok(ManageFileWorkareaOperationRequestStoreResult::Changed)
-        ),
-        cef::SidebarBridgeEvent::NativeProjectPathAction(_) => false,
-        cef::SidebarBridgeEvent::NativeAppShotPrompt(_) => false,
-        cef::SidebarBridgeEvent::SidebarCommandAction(_) => false,
-        cef::SidebarBridgeEvent::SidebarCommandRunEnd(_) => false,
-        cef::SidebarBridgeEvent::GhostexHotkeyAction(_) => false,
-        cef::SidebarBridgeEvent::GxserverPresentationFocusState(_) => false,
-        cef::SidebarBridgeEvent::WorkspaceTerminalFocus(_) => false,
-        cef::SidebarBridgeEvent::WorkspaceTerminalRenameCommand(_) => false,
-        cef::SidebarBridgeEvent::WorkspaceTerminalLifecycleResult(_) => false,
-        cef::SidebarBridgeEvent::SessionStatusIndicators(_) => false,
-        cef::SidebarBridgeEvent::PetOverlayState(_) => false,
-    }
-}
-
-fn store_project_workarea_readiness_from_sidebar_bridge_json(
-    kanban_runtime: &mut ProjectScopedRealSurfaceRuntimeState,
-    manage_runtime: &mut ProjectScopedRealSurfaceRuntimeState,
-    text: &str,
-) -> Result<ProjectWorkareaReadinessStoreResult, ProjectWorkareaReadinessContractError> {
-    let message = project_workarea_readiness_from_contract_json(text)?;
-    match message.identity.kind {
-        ProjectScopedRealSurfaceKind::Kanban => {
-            store_project_workarea_readiness_from_contract_json(kanban_runtime, text)
-        }
-        ProjectScopedRealSurfaceKind::Manage => {
-            store_project_workarea_readiness_from_contract_json(manage_runtime, text)
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn project_workarea_readiness_from_contract_json(
-    text: &str,
-) -> Result<ProjectWorkareaReadinessContractMessage, ProjectWorkareaReadinessContractError> {
-    let value = serde_json::from_str::<serde_json::Value>(text)
-        .map_err(|_| ProjectWorkareaReadinessContractError::MalformedJson)?;
-    project_workarea_readiness_from_contract_value(&value)
-}
-
-#[allow(dead_code)]
-fn project_workarea_readiness_from_contract_value(
-    value: &serde_json::Value,
-) -> Result<ProjectWorkareaReadinessContractMessage, ProjectWorkareaReadinessContractError> {
-    let object = project_workarea_readiness_contract_object(value)?;
-    reject_unexpected_project_workarea_readiness_contract_keys(
-        object,
-        &[
-            "version",
-            "type",
-            "surface",
-            "activeProjectId",
-            "surfaceId",
-            "state",
-        ],
-    )?;
-
-    let version = object
-        .get("version")
-        .and_then(serde_json::Value::as_u64)
-        .ok_or(ProjectWorkareaReadinessContractError::UnexpectedVersion)?;
-    if version != GPUI_PROJECT_WORKAREA_READINESS_MESSAGE_VERSION {
-        return Err(ProjectWorkareaReadinessContractError::UnexpectedVersion);
-    }
-
-    let message_type = object
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .ok_or(ProjectWorkareaReadinessContractError::UnexpectedMessageType)?;
-    if message_type != GPUI_PROJECT_WORKAREA_READINESS_MESSAGE_TYPE {
-        return Err(ProjectWorkareaReadinessContractError::UnexpectedMessageType);
-    }
-
-    let kind = object
-        .get("surface")
-        .ok_or(ProjectWorkareaReadinessContractError::MissingField)
-        .and_then(project_workarea_readiness_surface_from_contract_value)?;
-    let active_project_id = required_project_workarea_readiness_contract_string_field(
-        object,
-        "activeProjectId",
-        GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS,
-    )
-    .map(GpuiProjectId)?;
-    let explicit_surface_id = required_project_workarea_readiness_contract_string_field(
-        object,
-        "surfaceId",
-        GPUI_PROJECT_CONTRACT_STRING_MAX_CHARS,
-    )?;
-    let state = object
-        .get("state")
-        .ok_or(ProjectWorkareaReadinessContractError::MissingField)
-        .and_then(project_workarea_readiness_bridge_state_from_contract_value)?;
-
-    Ok(ProjectWorkareaReadinessContractMessage {
-        identity: ProjectScopedRealSurfaceRuntimeIdentity {
-            kind,
-            active_project_id,
-            explicit_surface_id,
-        },
-        state,
-    })
-}
-
-#[allow(dead_code)]
-fn project_workarea_readiness_surface_from_contract_value(
-    value: &serde_json::Value,
-) -> Result<ProjectScopedRealSurfaceKind, ProjectWorkareaReadinessContractError> {
-    let surface = value
-        .as_str()
-        .ok_or(ProjectWorkareaReadinessContractError::MalformedField)?;
-    match surface {
-        "kanban" => Ok(ProjectScopedRealSurfaceKind::Kanban),
-        "manage" => Ok(ProjectScopedRealSurfaceKind::Manage),
-        _ => Err(ProjectWorkareaReadinessContractError::UnsupportedSurface),
-    }
-}
-
-#[allow(dead_code)]
-fn project_workarea_readiness_bridge_state_from_contract_value(
-    value: &serde_json::Value,
-) -> Result<ProjectScopedRealSurfaceLifecycleBridgeState, ProjectWorkareaReadinessContractError> {
-    let state = value
-        .as_str()
-        .ok_or(ProjectWorkareaReadinessContractError::MalformedField)?;
-    match state {
-        "mounting" => Ok(ProjectScopedRealSurfaceLifecycleBridgeState::Mounting),
-        "ready" => Ok(ProjectScopedRealSurfaceLifecycleBridgeState::Ready),
-        "loadFailed" => Ok(ProjectScopedRealSurfaceLifecycleBridgeState::LoadFailed),
-        _ => Err(ProjectWorkareaReadinessContractError::UnsupportedState),
-    }
-}
-
-#[allow(dead_code)]
-fn project_workarea_readiness_contract_object(
-    value: &serde_json::Value,
-) -> Result<&serde_json::Map<String, serde_json::Value>, ProjectWorkareaReadinessContractError> {
-    value
-        .as_object()
-        .ok_or(ProjectWorkareaReadinessContractError::ExpectedObject)
-}
-
-#[allow(dead_code)]
-fn reject_unexpected_project_workarea_readiness_contract_keys(
-    object: &serde_json::Map<String, serde_json::Value>,
-    allowed_keys: &[&str],
-) -> Result<(), ProjectWorkareaReadinessContractError> {
-    if object
-        .keys()
-        .any(|key| !allowed_keys.contains(&key.as_str()))
-    {
-        return Err(ProjectWorkareaReadinessContractError::UnexpectedKey);
-    }
-    Ok(())
-}
-
-#[allow(dead_code)]
-fn required_project_workarea_readiness_contract_string_field(
-    object: &serde_json::Map<String, serde_json::Value>,
-    key: &str,
-    max_chars: usize,
-) -> Result<String, ProjectWorkareaReadinessContractError> {
-    let value = object
-        .get(key)
-        .ok_or(ProjectWorkareaReadinessContractError::MissingField)?;
-    let value = value
-        .as_str()
-        .ok_or(ProjectWorkareaReadinessContractError::MalformedField)?;
-    if value.trim().is_empty() || value.chars().count() > max_chars {
-        return Err(ProjectWorkareaReadinessContractError::MalformedField);
-    }
-    Ok(value.to_string())
-}
-
-fn project_scoped_real_surface_runtime_identity_from_snapshot(
-    snapshot: Option<&GpuiProjectSnapshot>,
-    kind: ProjectScopedRealSurfaceKind,
-) -> Result<ProjectScopedRealSurfaceRuntimeIdentity, ProjectScopedRealSurfaceRuntimeBlockReason> {
-    let snapshot =
-        snapshot.ok_or(ProjectScopedRealSurfaceRuntimeBlockReason::MissingActiveProjectSnapshot)?;
-    if snapshot.is_quick_projectless {
-        return Err(ProjectScopedRealSurfaceRuntimeBlockReason::QuickProjectlessContext);
-    }
-    if !kind.feature_available(snapshot) {
-        return Err(kind.unavailable_reason());
-    }
-    let active_project_id = snapshot
-        .active_project_id
-        .clone()
-        .ok_or(ProjectScopedRealSurfaceRuntimeBlockReason::MissingActiveProjectSnapshot)?;
-    let explicit_surface_id = kind
-        .explicit_surface_id(snapshot)
-        .ok_or_else(|| kind.missing_surface_id_reason())?;
-
-    Ok(ProjectScopedRealSurfaceRuntimeIdentity {
-        kind,
-        active_project_id,
-        explicit_surface_id,
-    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -20813,21 +19234,23 @@ pub struct GhostexGpuiApp {
     /*
     CDXC:GPUISourceRuntime 2026-06-24-23:17:
     GPUI Source uses a runtime-only code-server owner equivalent to macOS's shared editor process. It may hold the owned Child and current in-memory folder URL target while the app runs, but it must not persist paths, URLs, command text, stdout/stderr, tokens, page titles, or project names into shell state or support logs.
+
+    CDXC:GPUIProjectWorkareaRuntimeCleanup 2026-06-29-00:02:
+    Source readiness is represented by this direct code-server runtime owner, not by a parallel sidebar proof store. Kanban and Manage readiness likewise derives from current project URL gates and owned CEF surfaces instead of stored readiness messages.
     */
     source_code_server_runtime: SourceCodeServerRuntimeOwner,
-    source_workarea_runtime: SourceWorkareaRuntimeState,
-    browser_workarea_runtime: BrowserWorkareaRuntimeState,
-    kanban_workarea_runtime: ProjectScopedRealSurfaceRuntimeState,
-    manage_workarea_runtime: ProjectScopedRealSurfaceRuntimeState,
     /*
     CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-10:12:
-    Source, Kanban, and Manage real CEF panes now have permanent app-owned runtime surface storage keyed by the safe workarea slot. The map owns only Entity<CefSurface>; it must not store URL values, project names/paths, page titles, bridge payloads, file contents, tokens, cookies, shell text, or fallback navigation state, and creation is allowed only through a helper that receives a real runtime URL value.
+    Source, Kanban, and Manage real CEF panes now have permanent app-owned runtime surface storage keyed by the safe workarea slot. The map owns Entity<CefSurface> plus the process-local direct runtime URL identity required to reject stale slot reuse; it must not store project names/paths, page titles, bridge payloads, file contents, tokens, cookies, shell text, or fallback navigation state, and creation is allowed only through a helper that receives a real runtime URL value.
 
     CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-28-17:09:
     Runtime surface ownership no longer keeps slot, URL-issuance, or owner-gate proof maps. The direct runtime URL gate is the only authority for retaining already-created project workarea CefSurface entities.
+
+    CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-29-00:15:
+    The map stores the current direct runtime URL identity only as process-local ownership metadata so Source/Kanban/Manage cannot reuse a valid-but-stale slot surface after active project changes. Do not persist, log, expose, or treat this as sidebar readiness proof.
     */
     project_workarea_runtime_cef_surfaces:
-        HashMap<ProjectWorkareaCefSurfaceSlotKey, Entity<CefSurface>>,
+        HashMap<ProjectWorkareaCefSurfaceSlotKey, ProjectWorkareaRuntimeCefSurface>,
     /*
     CDXC:GPUIProjectSidebarBridge 2026-06-23-08:23:
     GPUI stores the last sidebar runtime settings snapshot it installed or sent so polling and Settings-save refreshes can no-op unchanged strict debug/beta plus saved-settings payloads, refresh only the sidebar CEF bridge when they change, and keep Manage titlebar availability plus active-mode fallback on the same strict two-boolean gate.
@@ -21158,14 +19581,6 @@ impl GhostexGpuiApp {
                 remote_gxserver_presentation_stream_generation: 0,
                 remote_repository_clone_requests: HashMap::new(),
                 source_code_server_runtime: SourceCodeServerRuntimeOwner::new(),
-                source_workarea_runtime: SourceWorkareaRuntimeState::new(),
-                browser_workarea_runtime: BrowserWorkareaRuntimeState::new(),
-                kanban_workarea_runtime: ProjectScopedRealSurfaceRuntimeState::new(
-                    ProjectScopedRealSurfaceKind::Kanban,
-                ),
-                manage_workarea_runtime: ProjectScopedRealSurfaceRuntimeState::new(
-                    ProjectScopedRealSurfaceKind::Manage,
-                ),
                 remote_attach_sessions: HashMap::new(),
                 project_workarea_runtime_cef_surfaces: HashMap::new(),
                 sidebar_runtime_settings_snapshot,
@@ -21373,6 +19788,9 @@ impl GhostexGpuiApp {
 
         CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-28-17:09:
         The old slot, URL-issuance, startup-readiness, and owner-gate proof maps are removed from runtime state. Refresh now only prunes already-owned project workarea CefSurface entities whose current explicit project context can no longer provide a direct runtime URL.
+
+        CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-29-00:15:
+        Refresh must also prune already-owned surfaces whose stored runtime URL identity differs from the current direct runtime URL so a valid new project cannot inherit the previous project's slot-owned CEF view.
         */
         self.prune_project_workarea_runtime_cef_surfaces_for_current_gates(cx)
     }
@@ -21405,15 +19823,10 @@ impl GhostexGpuiApp {
             .source_code_server_runtime
             .can_reuse_ready_process(&settings)
         {
+            let previous_target = self.source_code_server_runtime.target.clone();
             self.source_code_server_runtime
                 .set_ready_target(target, settings);
-            if self.source_workarea_runtime.readiness_bridge
-                != SourceWorkareaReadinessBridgeState::Ready
-            {
-                self.source_workarea_runtime.readiness_bridge =
-                    SourceWorkareaReadinessBridgeState::Ready;
-                changed = true;
-            }
+            changed |= previous_target != self.source_code_server_runtime.target;
             return changed;
         }
         if self
@@ -21427,13 +19840,6 @@ impl GhostexGpuiApp {
             .child_is_within_startup_grace()
             && self.source_code_server_runtime.settings.as_ref() == Some(&settings)
         {
-            if self.source_workarea_runtime.readiness_bridge
-                != SourceWorkareaReadinessBridgeState::Loading
-            {
-                self.source_workarea_runtime.readiness_bridge =
-                    SourceWorkareaReadinessBridgeState::Loading;
-                changed = true;
-            }
             return changed;
         }
 
@@ -21444,12 +19850,6 @@ impl GhostexGpuiApp {
         let generation = self.source_code_server_runtime.next_generation();
         self.source_code_server_runtime
             .set_launching(target.clone(), settings.clone());
-        if self.source_workarea_runtime.readiness_bridge
-            != SourceWorkareaReadinessBridgeState::Loading
-        {
-            self.source_workarea_runtime.readiness_bridge =
-                SourceWorkareaReadinessBridgeState::Loading;
-        }
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             let result = background
@@ -21495,8 +19895,6 @@ impl GhostexGpuiApp {
                     output.child,
                     output.started_at,
                 );
-                self.source_workarea_runtime.readiness_bridge =
-                    SourceWorkareaReadinessBridgeState::Ready;
                 self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
                 self.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
             }
@@ -21507,8 +19905,6 @@ impl GhostexGpuiApp {
                     Some(output.child),
                     Some(output.started_at),
                 );
-                self.source_workarea_runtime.readiness_bridge =
-                    SourceWorkareaReadinessBridgeState::LoadFailed;
                 self.remove_project_workarea_runtime_cef_surface(
                     ProjectWorkareaCefSurfaceSlotKey::Source,
                     cx,
@@ -21518,8 +19914,6 @@ impl GhostexGpuiApp {
             Err((target, settings)) => {
                 self.source_code_server_runtime
                     .set_failed(target, settings, None, None);
-                self.source_workarea_runtime.readiness_bridge =
-                    SourceWorkareaReadinessBridgeState::LoadFailed;
                 self.remove_project_workarea_runtime_cef_surface(
                     ProjectWorkareaCefSurfaceSlotKey::Source,
                     cx,
@@ -21538,8 +19932,6 @@ impl GhostexGpuiApp {
             cx,
         );
         if changed || removed {
-            self.source_workarea_runtime.readiness_bridge =
-                SourceWorkareaReadinessBridgeState::MissingExplicitBridge;
             self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
         }
         changed || removed
@@ -21564,10 +19956,13 @@ impl GhostexGpuiApp {
         slot_key: ProjectWorkareaCefSurfaceSlotKey,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        let Some(surface) = self.project_workarea_runtime_cef_surfaces.remove(&slot_key) else {
+        let Some(owned_surface) = self.project_workarea_runtime_cef_surfaces.remove(&slot_key)
+        else {
             return false;
         };
-        surface.update(cx, |surface, _| surface.set_visible(false));
+        owned_surface
+            .surface
+            .update(cx, |surface, _| surface.set_visible(false));
         self.update_project_workarea_runtime_cef_surface_visibility(cx);
         true
     }
@@ -21626,17 +20021,31 @@ impl GhostexGpuiApp {
             && self.project_workarea_runtime_cef_surface_may_be_visible(slot_key)
     }
 
+    fn project_workarea_runtime_cef_surface_is_current(
+        &self,
+        slot_key: ProjectWorkareaCefSurfaceSlotKey,
+    ) -> bool {
+        let Some(runtime_url) = self.project_workarea_runtime_url_for_slot(slot_key) else {
+            return false;
+        };
+        self.project_workarea_runtime_cef_surfaces
+            .get(&slot_key)
+            .is_some_and(|owned_surface| owned_surface.matches_runtime_url(&runtime_url))
+    }
+
     fn project_workarea_runtime_cef_surface_for_render(
         &self,
         slot_key: ProjectWorkareaCefSurfaceSlotKey,
     ) -> Option<Entity<CefSurface>> {
-        if !self.project_workarea_runtime_cef_surface_should_be_visible(slot_key) {
+        if !self.project_workarea_runtime_cef_surface_may_be_visible(slot_key) {
             return None;
         }
 
-        self.project_workarea_runtime_cef_surfaces
-            .get(&slot_key)
-            .cloned()
+        let runtime_url = self.project_workarea_runtime_url_for_slot(slot_key)?;
+        let owned_surface = self.project_workarea_runtime_cef_surfaces.get(&slot_key)?;
+        owned_surface
+            .matches_runtime_url(&runtime_url)
+            .then(|| owned_surface.surface.clone())
     }
 
     #[allow(dead_code)]
@@ -21655,14 +20064,21 @@ impl GhostexGpuiApp {
         {
             return None;
         }
-        if let Some(surface) = self.project_workarea_runtime_cef_surfaces.get(&slot_key) {
-            return Some(surface.clone());
+        if let Some(owned_surface) = self.project_workarea_runtime_cef_surfaces.get(&slot_key) {
+            if owned_surface.matches_runtime_url(&runtime_url) {
+                return Some(owned_surface.surface.clone());
+            }
+        }
+        if let Some(stale_surface) = self.project_workarea_runtime_cef_surfaces.remove(&slot_key) {
+            stale_surface
+                .surface
+                .update(cx, |surface, _| surface.set_visible(false));
         }
 
         let parent_ns_view = self.parent_ns_view;
         let surface_id = slot_key.cef_surface_id();
         let profile = slot_key.cef_profile_id();
-        let url = runtime_url.into_cef_url();
+        let url = runtime_url.clone().into_cef_url();
         let project_workarea_bridge_event_handler =
             self.project_workarea_bridge_event_handler(slot_key, cx);
         let surface = cx.new(move |cx| {
@@ -21683,8 +20099,13 @@ impl GhostexGpuiApp {
                 cx,
             )
         });
-        self.project_workarea_runtime_cef_surfaces
-            .insert(slot_key, surface.clone());
+        self.project_workarea_runtime_cef_surfaces.insert(
+            slot_key,
+            ProjectWorkareaRuntimeCefSurface {
+                runtime_url,
+                surface: surface.clone(),
+            },
+        );
         self.update_project_workarea_runtime_cef_surface_visibility(cx);
         Some(surface)
     }
@@ -21698,26 +20119,28 @@ impl GhostexGpuiApp {
         Workarea CEF surface materialization is active-workarea-only. The app creates Kanban/Manage CefSurface entities only when CEF is initialized, the workarea is selected and awake, and a real bundled runtime URL can be issued from the current explicit sidebar snapshot; it does not prewarm hidden surfaces or synthesize Source/code-server URLs.
 
         CDXC:GPUISourceRuntime 2026-06-24-23:17:
-        Source uses the same active-workarea-only materialization edge, with one extra predecessor: ensure the shared code-server runtime is launching or ready before asking the URL gate for a Source CefSurface. Until readiness succeeds, this method leaves Source on its loading/error placeholder instead of creating an about:blank or dead localhost surface.
+        Source uses the same active-workarea-only materialization edge, with one extra predecessor: ensure the shared code-server runtime is launching or ready before asking the URL gate for a Source CefSurface. Until the app-owned runtime reaches ready, this method leaves Source on its loading/error placeholder instead of creating an about:blank or dead localhost surface.
         */
         let mut changed = false;
-        if !self
-            .project_workarea_runtime_cef_surfaces
-            .contains_key(&ProjectWorkareaCefSurfaceSlotKey::Source)
-        {
+        if !self.project_workarea_runtime_cef_surface_is_current(
+            ProjectWorkareaCefSurfaceSlotKey::Source,
+        ) {
             changed |= self.ensure_source_code_server_runtime_for_current_context(cx);
         }
         for slot_key in ProjectWorkareaCefSurfaceSlotKey::project_placeholder_slots() {
-            if self
-                .project_workarea_runtime_cef_surfaces
-                .contains_key(&slot_key)
-                || !self.project_workarea_runtime_cef_surface_should_be_visible(slot_key)
-            {
+            if !self.project_workarea_runtime_cef_surface_may_be_visible(slot_key) {
                 continue;
             }
             let Some(runtime_url) = self.project_workarea_runtime_url_for_slot(slot_key) else {
                 continue;
             };
+            if self
+                .project_workarea_runtime_cef_surfaces
+                .get(&slot_key)
+                .is_some_and(|owned_surface| owned_surface.matches_runtime_url(&runtime_url))
+            {
+                continue;
+            }
             if self
                 .ensure_project_workarea_runtime_cef_surface(slot_key, runtime_url, cx)
                 .is_some()
@@ -21739,11 +20162,21 @@ impl GhostexGpuiApp {
             .collect::<Vec<_>>();
         let mut pruned = false;
         for slot_key in surface_slot_keys {
-            if self.project_workarea_runtime_cef_surface_replacement_permitted(slot_key) {
+            let current_runtime_url = self.project_workarea_runtime_url_for_slot(slot_key);
+            let surface_is_current = current_runtime_url.as_ref().is_some_and(|runtime_url| {
+                self.project_workarea_runtime_cef_surfaces
+                    .get(&slot_key)
+                    .is_some_and(|owned_surface| owned_surface.matches_runtime_url(runtime_url))
+            });
+            if surface_is_current {
                 continue;
             }
-            if let Some(surface) = self.project_workarea_runtime_cef_surfaces.remove(&slot_key) {
-                surface.update(cx, |surface, _| surface.set_visible(false));
+            if let Some(owned_surface) =
+                self.project_workarea_runtime_cef_surfaces.remove(&slot_key)
+            {
+                owned_surface
+                    .surface
+                    .update(cx, |surface, _| surface.set_visible(false));
                 pruned = true;
             }
         }
@@ -21767,10 +20200,15 @@ impl GhostexGpuiApp {
             .copied()
             .collect::<Vec<_>>();
         for slot_key in surface_slot_keys {
-            let surface_visible =
-                self.project_workarea_runtime_cef_surface_should_be_visible(slot_key);
-            if let Some(surface) = self.project_workarea_runtime_cef_surfaces.get(&slot_key) {
-                surface.update(cx, |surface, _| {
+            let current_runtime_url = self.project_workarea_runtime_url_for_slot(slot_key);
+            let surface_may_be_visible =
+                self.project_workarea_runtime_cef_surface_may_be_visible(slot_key);
+            if let Some(owned_surface) = self.project_workarea_runtime_cef_surfaces.get(&slot_key) {
+                let surface_visible = surface_may_be_visible
+                    && current_runtime_url
+                        .as_ref()
+                        .is_some_and(|runtime_url| owned_surface.matches_runtime_url(runtime_url));
+                owned_surface.surface.update(cx, |surface, _| {
                     surface.set_visible(surface_visible);
                 });
             }
@@ -28327,13 +26765,16 @@ impl GhostexGpuiApp {
         json: &str,
         cx: &mut gpui::Context<Self>,
     ) {
-        let Some(surface) = self
-            .project_workarea_runtime_cef_surfaces
-            .get(&slot_key)
-            .cloned()
-        else {
+        let Some(runtime_url) = self.project_workarea_runtime_url_for_slot(slot_key) else {
             return;
         };
+        let Some(owned_surface) = self.project_workarea_runtime_cef_surfaces.get(&slot_key) else {
+            return;
+        };
+        if !owned_surface.matches_runtime_url(&runtime_url) {
+            return;
+        }
+        let surface = owned_surface.surface.clone();
         let script = format!(
             "window.dispatchEvent(new CustomEvent('{}', {{ detail: {} }})); undefined;",
             event_name, json
@@ -28359,26 +26800,26 @@ impl GhostexGpuiApp {
             cef::SidebarBridgeEvent::WorkspaceTerminalFocus(payload) => {
                 self.receive_sidebar_workspace_terminal_focus_payload(&payload, cx);
             }
+            cef::SidebarBridgeEvent::T3SessionFocus(payload) => {
+                self.receive_sidebar_t3_session_focus_payload(&payload, cx);
+            }
+            cef::SidebarBridgeEvent::T3SessionCreate(payload) => {
+                self.receive_sidebar_t3_session_create_payload(&payload, cx);
+            }
             cef::SidebarBridgeEvent::WorkspaceTerminalRenameCommand(payload) => {
                 self.receive_sidebar_workspace_terminal_rename_command_payload(&payload, cx);
             }
             cef::SidebarBridgeEvent::WorkspaceTerminalLifecycleResult(payload) => {
                 self.receive_sidebar_workspace_terminal_lifecycle_result_payload(&payload, cx);
             }
-            event @ (cef::SidebarBridgeEvent::SourceWorkareaReadiness(_)
+            cef::SidebarBridgeEvent::SourceWorkareaReadiness(_)
             | cef::SidebarBridgeEvent::BrowserWorkareaReadiness(_)
             | cef::SidebarBridgeEvent::ProjectWorkareaReadiness(_)
-            | cef::SidebarBridgeEvent::ManageFileWorkareaOperationRequest(_)) => {
-                if store_sidebar_workarea_bridge_event(
-                    &mut self.source_workarea_runtime,
-                    &mut self.browser_workarea_runtime,
-                    &mut self.kanban_workarea_runtime,
-                    &mut self.manage_workarea_runtime,
-                    event,
-                ) {
-                    self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
-                    cx.notify();
-                }
+            | cef::SidebarBridgeEvent::ManageFileWorkareaOperationRequest(_) => {
+                /*
+                CDXC:GPUIProjectWorkareaRuntimeCleanup 2026-06-29-00:02:
+                Legacy sidebar readiness/proof messages stay accepted as compatibility no-ops. Source, Kanban, and Manage mounting now follows only the current runtime URL gate plus owned CEF surface map, and first-party Kanban/Manage CEF requests still flow through the separate project-workarea bridge.
+                */
             }
             cef::SidebarBridgeEvent::NativeProjectPathAction(payload) => {
                 self.receive_sidebar_native_project_path_action_payload(&payload, cx);
@@ -28479,6 +26920,86 @@ impl GhostexGpuiApp {
             });
         })
         .detach();
+    }
+
+    fn receive_sidebar_t3_session_focus_payload(
+        &mut self,
+        payload: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUIT3SessionFocus 2026-06-28-22:27:
+        GPUI T3 Code session clicks must materialize a T3 route, not a Ghostty terminal attach. Parse only the fixed project/session id payload, read the durable T3 metadata from localhost gxserver, then load the resolved draft/thread URL through the existing Browser CEF surface ownership path without accepting renderer URLs, paths, commands, tokens, stdout/stderr, or terminal content.
+        */
+        let Ok(message) = gpui_sidebar_t3_session_focus_from_json(payload) else {
+            return;
+        };
+        let key = GpuiLocalWorkspaceSessionKey::from(&message);
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let result = background
+                .spawn(async move { gpui_prepare_local_t3_session_route(&key) })
+                .await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(url) => this.open_gpui_t3_session_browser_url(url, cx),
+                Err(message) => this.dispatch_gpui_app_modal_toast(
+                    "warning",
+                    "T3 Code unavailable",
+                    message.as_str(),
+                    cx,
+                ),
+            });
+        })
+        .detach();
+    }
+
+    fn receive_sidebar_t3_session_create_payload(
+        &mut self,
+        payload: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUIT3SessionCreate 2026-06-29-01:22:
+        T3 Code creation is not a terminal agent launch. Parse only the fixed project-id bridge payload, let Rust create the durable gxserver T3 row and resolve T3's owner-only project metadata, then focus the sidebar with a one-way selection callback and load the concrete draft URL through Browser CEF.
+        */
+        let Ok(message) = gpui_sidebar_t3_session_create_from_json(payload) else {
+            return;
+        };
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let result = background
+                .spawn(async move { gpui_create_local_t3_session(&message.project_id) })
+                .await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(created) => {
+                    this.dispatch_gpui_workspace_tab_session_selected(
+                        &created.project_id,
+                        &created.session_id,
+                        false,
+                        cx,
+                    );
+                    this.open_gpui_t3_session_browser_url(created.url, cx);
+                }
+                Err(message) => this.dispatch_gpui_app_modal_toast(
+                    "warning",
+                    "T3 Code unavailable",
+                    message.as_str(),
+                    cx,
+                ),
+            });
+        })
+        .detach();
+    }
+
+    fn open_gpui_t3_session_browser_url(&mut self, url: String, cx: &mut gpui::Context<Self>) {
+        if !self.titlebar_mode_available(TitlebarMode::Browser) {
+            return;
+        }
+        self.active_mode = TitlebarMode::Browser;
+        self.set_shell_focus(ShellFocusTarget::BrowserPane(
+            self.browser_tabs.focused_pane,
+        ));
+        self.commit_browser_address(url, cx);
     }
 
     fn receive_sidebar_workspace_terminal_rename_command_payload(
@@ -29467,6 +27988,9 @@ impl GhostexGpuiApp {
 
         CDXC:GPUIProjectSidebarBridge 2026-06-23-06:53:
         Duplicate valid active-project payloads are accepted as a bridge heartbeat but are not a project change. Only a changed stored snapshot may refresh the titlebar label, coerce project-scoped mode availability, or notify GPUI, and malformed payloads still preserve the prior snapshot.
+
+        CDXC:GPUIProjectWorkareaRuntimeCleanup 2026-06-29-00:02:
+        Active-project changes no longer reconcile Source/Browser/Kanban/Manage readiness stores. The stored snapshot immediately feeds titlebar availability and the direct runtime URL/CEF gates, so stale proof state cannot keep or block a workarea surface.
         */
         match store_latest_gpui_project_snapshot_from_sidebar_contract_json(
             &mut self.latest_sidebar_project_snapshot,
@@ -29476,24 +28000,6 @@ impl GhostexGpuiApp {
                 self.project_name = titlebar_project_label_from_latest_sidebar_snapshot(
                     self.latest_sidebar_project_snapshot.as_ref(),
                 );
-                self.source_workarea_runtime
-                    .reconcile_active_project(self.latest_sidebar_project_snapshot.as_ref());
-                /*
-                CDXC:GPUIBrowserWorkareaReadiness 2026-06-23-18:29:
-                The sidebar-scoped external bridge can route Browser readiness into the strict store, but the active-project snapshot still has no accepted Browser workarea identity field. Reconcile with no browserWorkareaId so readiness payloads remain no-op instead of deriving ids from tabs, URLs, titles, profiles, CEF state, or project data.
-
-                CDXC:GPUIBrowserWorkareaReadiness 2026-06-28-17:09:
-                Browser identity remains owned only by the strict Browser readiness boundary, not the active-project snapshot. Keep reconciling with no browserWorkareaId so the removed Browser proof path cannot reappear as fallback identity.
-                */
-                self.browser_workarea_runtime
-                    .reconcile_explicit_active_project_identity(
-                        self.latest_sidebar_project_snapshot.as_ref(),
-                        None,
-                    );
-                self.kanban_workarea_runtime
-                    .reconcile_active_project(self.latest_sidebar_project_snapshot.as_ref());
-                self.manage_workarea_runtime
-                    .reconcile_active_project(self.latest_sidebar_project_snapshot.as_ref());
                 self.refresh_project_workarea_runtime_cef_surfaces_from_runtime_state(cx);
                 self.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
                 self.coerce_active_mode_to_available_project_context(cx);
@@ -42088,6 +40594,29 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
+    fn source_workarea_placeholder_signature(&self) -> ProjectEditorPlaceholderSignature {
+        let fallback = ProjectEditorPlaceholderSignature::for_mode(TitlebarMode::Source)
+            .expect("Source placeholder signature must exist");
+        let Some(snapshot) = self.latest_sidebar_project_snapshot.as_ref() else {
+            return fallback;
+        };
+        let Some(target) = source_code_server_runtime_target_from_project_snapshot(snapshot) else {
+            return fallback;
+        };
+        let settings = SourceCodeServerRuntimeSettings::from_sidebar_runtime_settings(
+            &self.sidebar_runtime_settings_snapshot,
+        );
+        if self.source_code_server_runtime.target.as_ref() != Some(&target)
+            || self.source_code_server_runtime.settings.as_ref() != Some(&settings)
+        {
+            return fallback;
+        }
+        ProjectEditorPlaceholderSignature::for_source_code_server_launch_state(
+            self.source_code_server_runtime.state,
+        )
+        .unwrap_or(fallback)
+    }
+
     fn render_source_workarea_surface(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         /*
         CDXC:GPUISourceWorkarea 2026-06-23-12:16:
@@ -42097,27 +40626,25 @@ impl GhostexGpuiApp {
         The normal sidebar project payload can provide sourceWorkareaId, but missing or malformed Source identity remains a placeholder-only block. Do not recover by inventing Source ids or readiness from paths, titles, fixture names, group ids, filesystem probes, URLs, or localhost constants.
 
         CDXC:GPUISourceWorkarea 2026-06-23-14:41:
-        Loading and load-failed Source bridge states may alter only the static placeholder title/message. Ready and blocked states render placeholders while real URL/process/surface authority is absent, and this path must not create fallback URLs, logs, overlays, or private shell-state fields.
+        Loading and load-failed Source code-server states may alter only the static placeholder title/message. Runtime states still cannot create fallback URLs, logs, overlays, or private shell-state fields from the render path.
 
-        CDXC:GPUISourceReadiness 2026-06-23-16:10:
-        A strict Source readiness message may make the runtime availability Ready for the current explicit active project/source identity, but readiness is not a URL, mount instruction, log/persistence payload, localhost/path fallback, or permission to replace the placeholder.
+        CDXC:GPUIProjectWorkareaRuntimeCleanup 2026-06-29-00:02:
+        Source readiness messages no longer make the runtime available. Only the app-owned code-server state for the current explicit project target can drive loading/error placeholder copy, and only a direct runtime URL plus owned CEF surface can replace the placeholder.
 
         CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-24-10:12:
         Source now checks the permanent app-owned CEF surface map first. When a real Source runtime URL has already produced an owned CefSurface and the gate permits replacement, render returns that normal-layout CEF child; otherwise the placeholder remains because real URL/process/surface authority is still absent.
 
         CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-28-17:09:
         Source render no longer constructs source-proof CEF/code-server objects. The placeholder changes only when the direct runtime URL gate plus an owned normal-layout CefSurface already exist for the current explicit project.
+
+        CDXC:GPUIProjectWorkareaRuntimeCleanup 2026-06-29-00:02:
+        Source placeholder loading/error copy now comes only from the app-owned code-server runtime target for the current sidebar snapshot. Legacy Source readiness messages are compatibility no-ops and cannot make Source ready or failed.
         */
         let slot_key = ProjectWorkareaCefSurfaceSlotKey::Source;
         if let Some(surface) = self.project_workarea_runtime_cef_surface_for_render(slot_key) {
             return self.render_project_workarea_runtime_cef_surface(slot_key, surface, cx);
         }
-        let availability = self
-            .source_workarea_runtime
-            .availability(self.latest_sidebar_project_snapshot.as_ref());
-        let signature =
-            ProjectEditorPlaceholderSignature::for_source_runtime_availability(&availability)
-                .expect("Source placeholder signature must exist until CEF mount is wired");
+        let signature = self.source_workarea_placeholder_signature();
         self.render_project_editor_placeholder(signature, cx)
     }
 
@@ -42128,15 +40655,17 @@ impl GhostexGpuiApp {
 
         CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-28-17:09:
         Kanban render no longer builds source-proof CEF mount objects. The placeholder changes only when the direct bundled runtime URL gate plus an owned normal-layout CefSurface already exist for the current explicit project.
+
+        CDXC:GPUIProjectWorkareaRuntimeCleanup 2026-06-29-00:02:
+        Kanban has no readiness store in the render path. If the direct URL/owned-CEF gate cannot produce a surface, render the static Kanban placeholder and let the active awake runtime edge try creation.
         */
         let slot_key = ProjectWorkareaCefSurfaceSlotKey::Kanban;
         if let Some(surface) = self.project_workarea_runtime_cef_surface_for_render(slot_key) {
             return self.render_project_workarea_runtime_cef_surface(slot_key, surface, cx);
         }
-        let availability = self
-            .kanban_workarea_runtime
-            .availability(self.latest_sidebar_project_snapshot.as_ref());
-        self.render_project_scoped_real_surface_placeholder(TitlebarMode::Kanban, &availability, cx)
+        let signature = ProjectEditorPlaceholderSignature::for_mode(TitlebarMode::Kanban)
+            .expect("Kanban placeholder signature must exist");
+        self.render_project_editor_placeholder(signature, cx)
     }
 
     fn render_manage_workarea_surface(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
@@ -42146,38 +40675,16 @@ impl GhostexGpuiApp {
 
         CDXC:GPUIProjectWorkareaRuntimeCefSurfaces 2026-06-28-17:09:
         Manage render no longer builds source-proof CEF/file-bridge mount objects. The placeholder changes only when the direct bundled runtime URL gate plus an owned normal-layout CefSurface already exist; file operations remain owned by the separate sanitized Manage bridge path.
+
+        CDXC:GPUIProjectWorkareaRuntimeCleanup 2026-06-29-00:02:
+        Manage has no readiness/file-proof store in the render path. If the direct URL/owned-CEF gate cannot produce a surface, render the static Manage placeholder while first-party file requests remain handled by the project-workarea CEF bridge.
         */
         let slot_key = ProjectWorkareaCefSurfaceSlotKey::Manage;
         if let Some(surface) = self.project_workarea_runtime_cef_surface_for_render(slot_key) {
             return self.render_project_workarea_runtime_cef_surface(slot_key, surface, cx);
         }
-        let availability = self
-            .manage_workarea_runtime
-            .availability(self.latest_sidebar_project_snapshot.as_ref());
-        self.render_project_scoped_real_surface_placeholder(TitlebarMode::Manage, &availability, cx)
-    }
-
-    fn render_project_scoped_real_surface_placeholder(
-        &self,
-        mode: TitlebarMode,
-        availability: &ProjectScopedRealSurfaceRuntimeAvailability,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
-        /*
-        CDXC:GPUIProjectWorkareaReadiness 2026-06-24-08:13:
-        Kanban and Manage awake readiness still maps to placeholder states until runtime replacement is permitted by the real gates. Keep ready and blocked states on placeholders here; this path must not instantiate CEF surfaces, file bridges, runtime URLs, fallback mounts, hidden surfaces, or private payloads.
-
-        CDXC:GPUIProjectWorkareaLifecycle 2026-06-24-08:13:
-        Startup and load-failure states remain placeholder states. Runtime CEF/file-bridge instantiation and placeholder replacement belong to the active CEF surface gate; missing, mounting, failed, and ready-without-authority states must not mount CEF surfaces, file bridges, runtime URLs, fallbacks, hidden surfaces, or private payloads from this path.
-
-        CDXC:GPUIProjectWorkareaLifecycle 2026-06-23-13:50:
-        Blocked mounting and load-failed reasons now select distinct static placeholder signatures so startup and failure are visible without changing titlebar mode, corrupting shell state, persisting failure details, or mounting real Kanban/Manage surfaces.
-        */
-        let signature = ProjectEditorPlaceholderSignature::for_project_scoped_runtime_availability(
-            mode,
-            availability,
-        )
-        .expect("Kanban and Manage placeholders must have signatures");
+        let signature = ProjectEditorPlaceholderSignature::for_mode(TitlebarMode::Manage)
+            .expect("Manage placeholder signature must exist");
         self.render_project_editor_placeholder(signature, cx)
     }
 
@@ -54499,6 +53006,652 @@ fn gpui_prepare_local_workspace_attach_terminal_plan(
         title,
         working_directory,
     })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiLocalT3SessionRouteMetadata {
+    created_at: Option<String>,
+    project_id: String,
+    server_origin: String,
+    thread_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuiCreatedLocalT3Session {
+    project_id: String,
+    session_id: String,
+    url: String,
+}
+
+const GPUI_T3_LOCAL_SERVER_ORIGIN: &str = "http://127.0.0.1:3774";
+
+fn gpui_create_local_t3_session(project_id: &str) -> Result<GpuiCreatedLocalT3Session, String> {
+    /*
+    CDXC:GPUIT3SessionCreate 2026-06-29-01:22:
+    Creating T3 Code from the GPUI sidebar must create a durable gxserver `kind: "t3"` session and open a T3 draft route for the selected project. Resolve T3 project metadata with the persisted local owner bearer in Rust; the sidebar renderer may pass only the bounded gxserver project id and must never provide commands, paths, URLs, tokens, stdout/stderr, or daemon responses.
+    */
+    if !gpui_remote_sidebar_project_id_allowed(project_id) {
+        return Err("T3 project id is invalid.".to_string());
+    }
+    let status = gpui_gxserver_rpc_result(
+        "/api/readProjectStatus",
+        &serde_json::json!({
+            "projectId": project_id,
+        }),
+        Duration::from_secs(10),
+    )?;
+    let project = status
+        .get("project")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| "gxserver project metadata is unavailable.".to_string())?;
+    let workspace_root = gpui_trimmed_json_string_field(project, "path")
+        .ok_or_else(|| "T3 Code needs a project workspace path.".to_string())?;
+    let server_origin = GPUI_T3_LOCAL_SERVER_ORIGIN.to_string();
+    let environment_id = gpui_read_t3_environment_id(&server_origin)?;
+    let owner_bearer = gpui_read_t3_owner_bearer_token()?;
+    let snapshot = gpui_t3_loopback_json_request(
+        &server_origin,
+        "GET",
+        "/api/orchestration/snapshot",
+        Some(owner_bearer.as_str()),
+        None,
+        Duration::from_secs(10),
+    )?;
+    let t3_project_id = gpui_ensure_t3_project_for_workspace(
+        &server_origin,
+        owner_bearer.as_str(),
+        &snapshot,
+        workspace_root,
+    )?;
+    let create_result = gpui_gxserver_rpc_result(
+        "/api/createSession",
+        &serde_json::json!({
+            "cwd": workspace_root,
+            "kind": "t3",
+            "lifecycleState": "running",
+            "projectId": project_id,
+            "providerState": gpui_t3_session_provider_state(
+                &t3_project_id,
+                &server_origin,
+                None,
+                workspace_root,
+            ),
+            "runtimeSettings": gpui_t3_session_runtime_settings(
+                project_id,
+                None,
+                &t3_project_id,
+                &server_origin,
+                None,
+                workspace_root,
+                "placeholder",
+            ),
+            "surface": "workspace",
+            "title": "T3 Code",
+        }),
+        Duration::from_secs(10),
+    )?;
+    let session = create_result
+        .get("session")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| "gxserver did not create a T3 session.".to_string())?;
+    let session_id = gpui_trimmed_json_string_field(session, "sessionId")
+        .ok_or_else(|| "gxserver did not return a T3 session id.".to_string())?
+        .to_string();
+    let created_at = gpui_trimmed_json_string_field(session, "createdAt").map(str::to_string);
+    let thread_id = gpui_stable_t3_draft_thread_id(&session_id);
+    gpui_gxserver_rpc_result(
+        "/api/updateSession",
+        &serde_json::json!({
+            "kind": "t3",
+            "lifecycleState": "running",
+            "projectId": project_id,
+            "providerState": gpui_t3_session_provider_state(
+                &t3_project_id,
+                &server_origin,
+                Some(thread_id.as_str()),
+                workspace_root,
+            ),
+            "runtimeSettings": gpui_t3_session_runtime_settings(
+                project_id,
+                Some(session_id.as_str()),
+                &t3_project_id,
+                &server_origin,
+                Some(thread_id.as_str()),
+                workspace_root,
+                "placeholder",
+            ),
+            "sessionId": session_id.as_str(),
+            "title": "T3 Code",
+        }),
+        Duration::from_secs(10),
+    )?;
+    let reference = GpuiLocalWorkspaceSessionKey {
+        project_id: project_id.to_string(),
+        session_id: session_id.clone(),
+    };
+    let metadata = GpuiLocalT3SessionRouteMetadata {
+        created_at,
+        project_id: t3_project_id,
+        server_origin,
+        thread_id: Some(thread_id),
+    };
+    let url = gpui_local_t3_session_route_url(&reference, &metadata, &environment_id)?;
+    Ok(GpuiCreatedLocalT3Session {
+        project_id: project_id.to_string(),
+        session_id,
+        url,
+    })
+}
+
+fn gpui_prepare_local_t3_session_route(
+    reference: &GpuiLocalWorkspaceSessionKey,
+) -> Result<String, String> {
+    /*
+    CDXC:GPUIT3SessionFocus 2026-06-28-22:27:
+    T3 session activation resolves the route from durable gxserver T3 metadata and the local T3 environment descriptor. Use draft routes for Ghostex-owned placeholder thread ids so users land in a usable composer, and use direct thread routes only for real T3 thread ids.
+    */
+    let result = gpui_gxserver_rpc_result(
+        "/api/readProjectStatus",
+        &serde_json::json!({
+            "projectId": reference.project_id.as_str(),
+        }),
+        Duration::from_secs(10),
+    )?;
+    let sessions = result
+        .get("sessions")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "gxserver returned invalid T3 session metadata.".to_string())?;
+    let session = sessions
+        .iter()
+        .filter_map(serde_json::Value::as_object)
+        .find(|session| {
+            json_string_field(session, "projectId") == Some(reference.project_id.as_str())
+                && json_string_field(session, "sessionId") == Some(reference.session_id.as_str())
+                && json_string_field(session, "kind") == Some("t3")
+        })
+        .ok_or_else(|| "T3 session metadata was not found.".to_string())?;
+    let metadata = gpui_local_t3_session_route_metadata_from_session(session)?;
+    let environment_id = gpui_read_t3_environment_id(&metadata.server_origin)?;
+    gpui_local_t3_session_route_url(reference, &metadata, &environment_id)
+}
+
+fn gpui_local_t3_session_route_metadata_from_session(
+    session: &serde_json::Map<String, serde_json::Value>,
+) -> Result<GpuiLocalT3SessionRouteMetadata, String> {
+    let runtime_settings = session
+        .get("runtimeSettings")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| "T3 session runtime metadata is unavailable.".to_string())?;
+    if json_string_field(runtime_settings, "provider") != Some("t3code") {
+        return Err("T3 session provider metadata is unavailable.".to_string());
+    }
+    let t3 = runtime_settings
+        .get("t3")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| "T3 session route metadata is unavailable.".to_string())?;
+    let server_origin = json_string_field(t3, "serverOrigin")
+        .and_then(gpui_normalized_t3_loopback_origin)
+        .ok_or_else(|| "T3 session origin is unavailable.".to_string())?;
+    let project_id = gpui_trimmed_json_string_field(t3, "projectId")
+        .ok_or_else(|| "T3 project metadata is unavailable.".to_string())?
+        .to_string();
+    let thread_id = gpui_trimmed_json_string_field(t3, "boundThreadId")
+        .or_else(|| gpui_trimmed_json_string_field(t3, "threadId"))
+        .map(str::to_string);
+    let created_at = gpui_trimmed_json_string_field(t3, "createdAt")
+        .or_else(|| gpui_trimmed_json_string_field(session, "createdAt"))
+        .map(str::to_string);
+    Ok(GpuiLocalT3SessionRouteMetadata {
+        created_at,
+        project_id,
+        server_origin,
+        thread_id,
+    })
+}
+
+fn gpui_ensure_t3_project_for_workspace(
+    server_origin: &str,
+    owner_bearer: &str,
+    snapshot: &serde_json::Value,
+    workspace_root: &str,
+) -> Result<String, String> {
+    if let Some(project_id) = gpui_t3_snapshot_project_id_for_workspace(snapshot, workspace_root) {
+        return Ok(project_id);
+    }
+    gpui_create_t3_project(server_origin, owner_bearer, workspace_root)
+}
+
+fn gpui_t3_snapshot_project_id_for_workspace(
+    snapshot: &serde_json::Value,
+    workspace_root: &str,
+) -> Option<String> {
+    snapshot
+        .get("projects")
+        .and_then(serde_json::Value::as_array)?
+        .iter()
+        .filter_map(serde_json::Value::as_object)
+        .find(|project| {
+            json_string_field(project, "workspaceRoot") == Some(workspace_root)
+                && !gpui_t3_snapshot_record_is_deleted(project)
+        })
+        .and_then(|project| gpui_trimmed_json_string_field(project, "id"))
+        .map(str::to_string)
+}
+
+fn gpui_t3_snapshot_record_is_deleted(record: &serde_json::Map<String, serde_json::Value>) -> bool {
+    !matches!(
+        record.get("deletedAt"),
+        None | Some(serde_json::Value::Null)
+    )
+}
+
+fn gpui_create_t3_project(
+    server_origin: &str,
+    owner_bearer: &str,
+    workspace_root: &str,
+) -> Result<String, String> {
+    let project_id = gpui_random_uuid_string()?;
+    let now = gpui_status_generated_at();
+    let title = gpui_t3_project_title_from_workspace_root(workspace_root);
+    gpui_t3_loopback_json_request(
+        server_origin,
+        "POST",
+        "/api/orchestration/dispatch",
+        Some(owner_bearer),
+        Some(&serde_json::json!({
+            "commandId": gpui_random_uuid_string()?,
+            "createdAt": now,
+            "defaultModelSelection": {
+                "model": "gpt-5-codex",
+                "provider": "codex",
+            },
+            "projectId": project_id,
+            "title": title,
+            "type": "project.create",
+            "workspaceRoot": workspace_root,
+        })),
+        Duration::from_secs(10),
+    )?;
+    Ok(project_id)
+}
+
+fn gpui_t3_project_title_from_workspace_root(workspace_root: &str) -> String {
+    Path::new(workspace_root)
+        .file_name()
+        .map(|name| name.to_string_lossy().trim().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "project".to_string())
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(120)
+        .collect()
+}
+
+fn gpui_t3_session_runtime_settings(
+    ghostex_project_id: &str,
+    ghostex_session_id: Option<&str>,
+    t3_project_id: &str,
+    server_origin: &str,
+    thread_id: Option<&str>,
+    workspace_root: &str,
+    title_source: &str,
+) -> serde_json::Value {
+    let mut t3 = serde_json::Map::new();
+    t3.insert(
+        "ghostexProjectId".to_string(),
+        serde_json::Value::String(ghostex_project_id.to_string()),
+    );
+    if let Some(ghostex_session_id) = ghostex_session_id {
+        t3.insert(
+            "ghostexSessionId".to_string(),
+            serde_json::Value::String(ghostex_session_id.to_string()),
+        );
+    }
+    t3.insert(
+        "projectId".to_string(),
+        serde_json::Value::String(t3_project_id.to_string()),
+    );
+    t3.insert(
+        "serverOrigin".to_string(),
+        serde_json::Value::String(server_origin.to_string()),
+    );
+    if let Some(thread_id) = thread_id {
+        t3.insert(
+            "boundThreadId".to_string(),
+            serde_json::Value::String(thread_id.to_string()),
+        );
+        t3.insert(
+            "threadId".to_string(),
+            serde_json::Value::String(thread_id.to_string()),
+        );
+    }
+    t3.insert(
+        "workspaceRoot".to_string(),
+        serde_json::Value::String(workspace_root.to_string()),
+    );
+    serde_json::json!({
+        "provider": "t3code",
+        "t3": serde_json::Value::Object(t3),
+        "titleSource": title_source,
+    })
+}
+
+fn gpui_t3_session_provider_state(
+    t3_project_id: &str,
+    server_origin: &str,
+    thread_id: Option<&str>,
+    workspace_root: &str,
+) -> serde_json::Value {
+    let mut t3 = serde_json::Map::new();
+    t3.insert(
+        "projectId".to_string(),
+        serde_json::Value::String(t3_project_id.to_string()),
+    );
+    t3.insert(
+        "serverOrigin".to_string(),
+        serde_json::Value::String(server_origin.to_string()),
+    );
+    if let Some(thread_id) = thread_id {
+        t3.insert(
+            "boundThreadId".to_string(),
+            serde_json::Value::String(thread_id.to_string()),
+        );
+        t3.insert(
+            "threadId".to_string(),
+            serde_json::Value::String(thread_id.to_string()),
+        );
+    }
+    t3.insert(
+        "workspaceRoot".to_string(),
+        serde_json::Value::String(workspace_root.to_string()),
+    );
+    serde_json::json!({
+        "lifecycleState": "unknown",
+        "provider": "t3code",
+        "t3": serde_json::Value::Object(t3),
+    })
+}
+
+fn gpui_read_t3_owner_bearer_token() -> Result<String, String> {
+    let token_path = home_dir()
+        .join(".ghostex")
+        .join("t3-runtime")
+        .join("auth-state.json");
+    let text = fs::read_to_string(token_path)
+        .map_err(|_| "T3 owner authorization is unavailable.".to_string())?;
+    let value = serde_json::from_str::<serde_json::Value>(&text)
+        .map_err(|_| "T3 owner authorization is invalid.".to_string())?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "T3 owner authorization is invalid.".to_string())?;
+    if json_string_field(object, "provider") != Some("t3code") {
+        return Err("T3 owner authorization is invalid.".to_string());
+    }
+    let token = gpui_trimmed_json_string_field(object, "ownerBearerToken")
+        .ok_or_else(|| "T3 owner authorization is unavailable.".to_string())?;
+    if token.chars().count() > 16 * 1024 || token.chars().any(char::is_control) {
+        return Err("T3 owner authorization is invalid.".to_string());
+    }
+    Ok(token.to_string())
+}
+
+fn gpui_random_uuid_string() -> Result<String, String> {
+    let mut bytes = [0_u8; 16];
+    let mut file = fs::File::open("/dev/urandom")
+        .map_err(|_| "Could not generate T3 project identity.".to_string())?;
+    file.read_exact(&mut bytes)
+        .map_err(|_| "Could not generate T3 project identity.".to_string())?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Ok(format!(
+        "{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15]
+    ))
+}
+
+fn gpui_normalized_t3_loopback_origin(value: &str) -> Option<String> {
+    let parsed = gpui::http_client::Url::parse(value.trim()).ok()?;
+    if parsed.scheme() != "http" || !parsed.username().is_empty() || parsed.password().is_some() {
+        return None;
+    }
+    let host = parsed.host_str()?;
+    if !matches!(host, "127.0.0.1" | "localhost" | "::1" | "[::1]") {
+        return None;
+    }
+    let port = parsed.port()?;
+    if host == "::1" || host == "[::1]" {
+        Some(format!("http://[::1]:{port}"))
+    } else {
+        Some(format!("http://{host}:{port}"))
+    }
+}
+
+fn gpui_read_t3_environment_id(server_origin: &str) -> Result<String, String> {
+    let payload = gpui_t3_loopback_json_get(
+        server_origin,
+        "/.well-known/t3/environment",
+        Duration::from_secs(5),
+    )?;
+    gpui_trimmed_json_string_field(
+        payload
+            .as_object()
+            .ok_or_else(|| "T3 environment metadata is invalid.".to_string())?,
+        "environmentId",
+    )
+    .map(str::to_string)
+    .ok_or_else(|| "T3 environment id is unavailable.".to_string())
+}
+
+fn gpui_t3_loopback_json_get(
+    server_origin: &str,
+    path: &str,
+    timeout: Duration,
+) -> Result<serde_json::Value, String> {
+    gpui_t3_loopback_json_request(server_origin, "GET", path, None, None, timeout)
+}
+
+fn gpui_t3_loopback_json_request(
+    server_origin: &str,
+    method: &str,
+    path: &str,
+    owner_bearer: Option<&str>,
+    body: Option<&serde_json::Value>,
+    timeout: Duration,
+) -> Result<serde_json::Value, String> {
+    let parsed = gpui::http_client::Url::parse(server_origin)
+        .map_err(|_| "T3 session origin is invalid.".to_string())?;
+    let host = parsed
+        .host_str()
+        .filter(|host| matches!(*host, "127.0.0.1" | "localhost" | "::1" | "[::1]"))
+        .ok_or_else(|| "T3 session origin is unavailable.".to_string())?;
+    let port = parsed
+        .port()
+        .ok_or_else(|| "T3 session port is unavailable.".to_string())?;
+    if !path.starts_with('/')
+        || path.contains('\0')
+        || path.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return Err("T3 route request path is invalid.".to_string());
+    }
+    if !matches!(method, "GET" | "POST") {
+        return Err("T3 API method is invalid.".to_string());
+    }
+    if let Some(token) = owner_bearer {
+        if token.trim() != token
+            || token.is_empty()
+            || token.chars().count() > 16 * 1024
+            || token.chars().any(char::is_control)
+        {
+            return Err("T3 owner authorization is invalid.".to_string());
+        }
+    }
+    let address = if host == "::1" || host == "[::1]" {
+        format!("[::1]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    let mut stream = TcpStream::connect(&address)
+        .map_err(|_| "T3 Code runtime is not reachable on localhost.".to_string())?;
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(|_| "Could not configure T3 read timeout.".to_string())?;
+    stream
+        .set_write_timeout(Some(timeout))
+        .map_err(|_| "Could not configure T3 write timeout.".to_string())?;
+    let body_text = body.map(serde_json::Value::to_string);
+    let mut request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\nAccept: application/json\r\n"
+    );
+    if let Some(token) = owner_bearer {
+        request.push_str("Authorization: Bearer ");
+        request.push_str(token);
+        request.push_str("\r\n");
+    }
+    if let Some(body_text) = body_text.as_deref() {
+        request.push_str("Content-Type: application/json\r\n");
+        request.push_str(&format!("Content-Length: {}\r\n", body_text.len()));
+    }
+    request.push_str("\r\n");
+    if let Some(body_text) = body_text.as_deref() {
+        request.push_str(body_text);
+    }
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|_| "Could not send T3 API request.".to_string())?;
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|_| "Could not read T3 API response.".to_string())?;
+    let (headers, body) = response
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| "T3 runtime returned an invalid HTTP response.".to_string())?;
+    let status_code = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .ok_or_else(|| "T3 runtime returned an invalid HTTP status.".to_string())?;
+    if !(200..300).contains(&status_code) {
+        return Err(format!("T3 API request failed with HTTP {status_code}."));
+    }
+    let body = gxserver_http_response_body(headers, body)?;
+    if body.trim().is_empty() {
+        return Ok(serde_json::Value::Null);
+    }
+    serde_json::from_str::<serde_json::Value>(&body)
+        .map_err(|_| "T3 API metadata is invalid.".to_string())
+}
+
+fn gpui_local_t3_session_route_url(
+    reference: &GpuiLocalWorkspaceSessionKey,
+    metadata: &GpuiLocalT3SessionRouteMetadata,
+    environment_id: &str,
+) -> Result<String, String> {
+    let mut url = gpui::http_client::Url::parse(&metadata.server_origin)
+        .map_err(|_| "T3 session origin is invalid.".to_string())?;
+    let thread_id = metadata.thread_id.as_deref();
+    if let Some(thread_id) =
+        thread_id.filter(|thread_id| gpui_t3_thread_id_is_server_thread(thread_id))
+    {
+        let environment_segment = gpui_t3_route_path_segment(environment_id)
+            .ok_or_else(|| "T3 environment route segment is invalid.".to_string())?;
+        let thread_segment = gpui_t3_route_path_segment(thread_id)
+            .ok_or_else(|| "T3 thread route segment is invalid.".to_string())?;
+        url.set_path(&format!("/{environment_segment}/{thread_segment}"));
+        url.set_query(None);
+        url.set_fragment(None);
+        return Ok(url.to_string());
+    }
+
+    let draft_id = gpui_stable_t3_draft_id(&reference.session_id);
+    let draft_thread_id = thread_id
+        .filter(|thread_id| thread_id.starts_with("ghostex-thread-"))
+        .map(str::to_string)
+        .unwrap_or_else(|| gpui_stable_t3_draft_thread_id(&reference.session_id));
+    let draft_segment = gpui_t3_route_path_segment(&draft_id)
+        .ok_or_else(|| "T3 draft route segment is invalid.".to_string())?;
+    let created_at = metadata
+        .created_at
+        .clone()
+        .unwrap_or_else(gpui_status_generated_at);
+    url.set_path(&format!("/draft/{draft_segment}"));
+    url.set_fragment(None);
+    {
+        let mut query = url.query_pairs_mut();
+        query.clear();
+        query.append_pair("ghostexDraft", "1");
+        query.append_pair("environmentId", environment_id);
+        query.append_pair("projectId", &metadata.project_id);
+        query.append_pair("threadId", &draft_thread_id);
+        query.append_pair("createdAt", &created_at);
+    }
+    Ok(url.to_string())
+}
+
+fn gpui_t3_thread_id_is_server_thread(thread_id: &str) -> bool {
+    let normalized = thread_id.trim();
+    !normalized.is_empty()
+        && !normalized.starts_with("ghostex-thread-")
+        && !normalized.starts_with("ghostex-draft-")
+        && !normalized.starts_with("pending-")
+}
+
+fn gpui_t3_route_path_segment(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()
+        && value.chars().count() <= 512
+        && !value.bytes().any(|byte| byte.is_ascii_control())
+        && !value.contains(['/', '?', '#', '\\']))
+    .then_some(value)
+}
+
+fn gpui_stable_t3_draft_id(session_id: &str) -> String {
+    format!(
+        "ghostex-draft-{}",
+        gpui_stable_t3_identity_component(session_id)
+    )
+}
+
+fn gpui_stable_t3_draft_thread_id(session_id: &str) -> String {
+    format!(
+        "ghostex-thread-{}",
+        gpui_stable_t3_identity_component(session_id)
+    )
+}
+
+fn gpui_stable_t3_identity_component(session_id: &str) -> String {
+    let normalized = session_id
+        .chars()
+        .map(|ch| {
+            let lower = ch.to_ascii_lowercase();
+            if lower.is_ascii_alphanumeric() {
+                lower
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let trimmed = normalized.trim_matches('-');
+    if trimmed.is_empty() {
+        "session".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn gpui_local_workspace_attach_rpc_params(
@@ -67688,6 +66841,89 @@ fn gpui_sidebar_workspace_terminal_focus_from_value(
         project_id,
         session_id,
     })
+}
+
+fn gpui_sidebar_t3_session_focus_from_json(
+    text: &str,
+) -> Result<GpuiSidebarT3SessionFocusMessage, GpuiGxserverPresentationFocusStateContractError> {
+    let value = serde_json::from_str::<serde_json::Value>(text)
+        .map_err(|_| GpuiGxserverPresentationFocusStateContractError::MalformedJson)?;
+    gpui_sidebar_t3_session_focus_from_value(&value)
+}
+
+fn gpui_sidebar_t3_session_focus_from_value(
+    value: &serde_json::Value,
+) -> Result<GpuiSidebarT3SessionFocusMessage, GpuiGxserverPresentationFocusStateContractError> {
+    /*
+    CDXC:GPUIT3SessionFocus 2026-06-28-22:27:
+    The T3 focus bridge accepts only the same bounded gxserver project/session ids as terminal focus, but requires its own message type so a T3 card cannot enter terminal attach by shape alone. Reject renderer URLs, labels, paths, commands, daemon responses, tokens, stdout/stderr, and extra fields before route resolution.
+    */
+    let object = gpui_gxserver_focus_contract_object(value)?;
+    reject_unexpected_gxserver_focus_contract_keys(
+        object,
+        &["version", "type", "projectId", "sessionId"],
+    )?;
+
+    let version = object
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion)?;
+    if version != GPUI_SIDEBAR_T3_SESSION_FOCUS_MESSAGE_VERSION {
+        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion);
+    }
+
+    let message_type = object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType)?;
+    if message_type != GPUI_SIDEBAR_T3_SESSION_FOCUS_MESSAGE_TYPE {
+        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType);
+    }
+
+    let project_id = gxserver_workspace_focus_project_id_field(object, "projectId")?;
+    let session_id = gxserver_workspace_focus_session_id_field(object, "sessionId")?;
+    Ok(GpuiSidebarT3SessionFocusMessage {
+        project_id,
+        session_id,
+    })
+}
+
+fn gpui_sidebar_t3_session_create_from_json(
+    text: &str,
+) -> Result<GpuiSidebarT3SessionCreateMessage, GpuiGxserverPresentationFocusStateContractError> {
+    let value = serde_json::from_str::<serde_json::Value>(text)
+        .map_err(|_| GpuiGxserverPresentationFocusStateContractError::MalformedJson)?;
+    gpui_sidebar_t3_session_create_from_value(&value)
+}
+
+fn gpui_sidebar_t3_session_create_from_value(
+    value: &serde_json::Value,
+) -> Result<GpuiSidebarT3SessionCreateMessage, GpuiGxserverPresentationFocusStateContractError> {
+    /*
+    CDXC:GPUIT3SessionCreate 2026-06-29-01:22:
+    The T3 create bridge carries only the target gxserver project id. Rust owns all project path lookup, T3 owner bearer use, gxserver row creation, and draft URL construction so the sidebar cannot smuggle commands, URLs, paths, tokens, stdout/stderr, labels, or daemon responses into T3 session startup.
+    */
+    let object = gpui_gxserver_focus_contract_object(value)?;
+    reject_unexpected_gxserver_focus_contract_keys(object, &["version", "type", "projectId"])?;
+
+    let version = object
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion)?;
+    if version != GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_VERSION {
+        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedVersion);
+    }
+
+    let message_type = object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType)?;
+    if message_type != GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_TYPE {
+        return Err(GpuiGxserverPresentationFocusStateContractError::UnexpectedMessageType);
+    }
+
+    let project_id = gxserver_workspace_focus_project_id_field(object, "projectId")?;
+    Ok(GpuiSidebarT3SessionCreateMessage { project_id })
 }
 
 fn gpui_sidebar_workspace_terminal_rename_command_from_json(

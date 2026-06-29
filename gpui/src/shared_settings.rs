@@ -286,6 +286,8 @@ impl SharedGxserverAgentSettings {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SharedAppShotsHotkey {
     BothCommand,
+    BothShift,
+    BothOption,
     DoubleLeftShift,
     DoubleLeftOption,
 }
@@ -293,6 +295,8 @@ pub enum SharedAppShotsHotkey {
 impl SharedAppShotsHotkey {
     pub fn from_settings_value(value: Option<&str>) -> Self {
         match value {
+            Some("both-shift") => Self::BothShift,
+            Some("both-option") => Self::BothOption,
             Some("double-left-shift") => Self::DoubleLeftShift,
             Some("double-left-option") => Self::DoubleLeftOption,
             _ => DEFAULT_APP_SHOTS_HOTKEY,
@@ -304,6 +308,8 @@ impl SharedAppShotsHotkey {
             Self::BothCommand => 0,
             Self::DoubleLeftShift => 1,
             Self::DoubleLeftOption => 2,
+            Self::BothShift => 3,
+            Self::BothOption => 4,
         }
     }
 }
@@ -582,6 +588,9 @@ impl SharedSidebarSettingsSnapshot {
         /*
         CDXC:GPUIAppShots 2026-06-25-23:07:
         GPUI App Shots is disabled unless the shared Settings toggle is explicitly true, and the native hotkey monitor must normalize unsupported saved values back to the macOS default `both-command`. Rust consumes only these two fields so screenshot capture and modifier handling stay native-owned while the React modal remains reused.
+
+        CDXC:GPUIAppShots 2026-06-29-01:29:
+        Shared App Shots hotkey parsing must forward both-Shift and both-Option values to the macOS monitor so GPUI honors the same expanded modifier-only capture choices as the reused Settings modal.
         */
         SharedAppShotsSettings {
             enabled: strict_bool_field(&self.object, "appShotsEnabled")

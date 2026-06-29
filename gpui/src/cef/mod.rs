@@ -1,5 +1,7 @@
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+pub(crate) mod sidebar_bridge_manifest;
 #[cfg(not(target_os = "macos"))]
 mod unsupported;
 

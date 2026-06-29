@@ -172,6 +172,8 @@ export type GhostexGpuiSidebarBridge = {
   postSidebarCommandAction?: (payload: string) => boolean;
   postSidebarCommandRunEnd?: (payload: string) => boolean;
   postSessionStatusIndicators?: (payload: string) => boolean;
+  postT3SessionCreate?: (payload: string) => boolean;
+  postT3SessionFocus?: (payload: string) => boolean;
   postWorkspaceTerminalFocus?: (payload: string) => boolean;
   postWorkspaceTerminalLifecycleResult?: (payload: string) => boolean;
   postWorkspaceTerminalRenameCommand?: (payload: string) => boolean;
@@ -361,6 +363,12 @@ const GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE =
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalFocus";
+const GPUI_SIDEBAR_T3_SESSION_FOCUS_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_T3_SESSION_FOCUS_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.t3SessionFocus";
+const GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.t3SessionCreate";
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalRenameCommand";
@@ -1048,7 +1056,10 @@ class GpuiSidebarRuntime {
       return;
     }
 
-    const prompt = formatGpuiNativeAppShotPrompt(appShot);
+    const prompt = formatGpuiNativeAppShotPrompt(
+      appShot,
+      createGpuiSidebarSettings(this.runtimeSettings).appShotsMetadataEnabled,
+    );
     const staged = await this.stageNativeAppShotInAgentSession(prompt);
     if (!staged.ok) {
       this.postAppShotToast("warning", "App Shot Failed", {
@@ -2500,8 +2511,26 @@ class GpuiSidebarRuntime {
     CDXC:GPUISidebarSessionFocus 2026-06-26-04:42:
     Local GPUI sidebar clicks must match the macOS sidebar ownership model: the SidebarApp adapter applies local focus immediately and publishes the CEF bootstrap focus hint, but it must not call gxserver `/api/focusSession`. That endpoint is an external renderer-command route and can bounce focus when another renderer is the first open gxserver subscriber.
     */
-    this.focusLocalWorkspaceSession(reference.projectId, reference.sessionId);
+    if (this.isLocalPresentationT3Session(reference.projectId, reference.sessionId)) {
+      this.focusLocalT3Session(reference.projectId, reference.sessionId);
+    } else {
+      this.focusLocalWorkspaceSession(reference.projectId, reference.sessionId);
+    }
     this.publishPresentation("patch");
+  }
+
+  private focusLocalT3Session(projectId: string, sessionId: string): void {
+    /*
+    CDXC:GPUIT3SessionFocus 2026-06-28-22:27:
+    GPUI T3 Code session-card clicks must activate T3 through a dedicated id-only bridge, not the terminal attach bridge. T3 rows already carry durable gxserver runtime metadata, so Rust owns route resolution and the renderer may send only bounded project/session ids.
+    */
+    const normalizedProjectId = normalizeNonEmptyString(projectId);
+    const normalizedSessionId = normalizeNonEmptyString(sessionId);
+    if (!normalizedProjectId || !normalizedSessionId) {
+      return;
+    }
+    this.setLocalPresentationSessionFocus(normalizedProjectId, normalizedSessionId);
+    this.postLocalT3SessionFocus(normalizedProjectId, normalizedSessionId);
   }
 
   private focusLocalWorkspaceSession(projectId: string, sessionId: string): void {
@@ -2534,6 +2563,37 @@ class GpuiSidebarRuntime {
       version: GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_VERSION,
     });
     postFocus(payload);
+  }
+
+  private postLocalT3SessionFocus(projectId: string, sessionId: string): void {
+    const postFocus = window.ghostexGpui?.postT3SessionFocus;
+    if (typeof postFocus !== "function") {
+      return;
+    }
+    const payload = JSON.stringify({
+      projectId,
+      sessionId,
+      type: GPUI_SIDEBAR_T3_SESSION_FOCUS_MESSAGE_TYPE,
+      version: GPUI_SIDEBAR_T3_SESSION_FOCUS_MESSAGE_VERSION,
+    });
+    postFocus(payload);
+  }
+
+  private postLocalT3SessionCreate(projectId: string): void {
+    /*
+    CDXC:GPUIT3SessionCreate 2026-06-29-01:22:
+    The sidebar project-header T3 Code create button must start a project-scoped T3 draft chat, not the generic `npx --yes t3` agent launcher. Send only the gxserver project id to Rust so the native side can create the `kind: "t3"` row, resolve T3 owner-only project metadata, and open the draft composer without renderer-owned URLs, paths, commands, tokens, or daemon responses.
+    */
+    const postCreate = window.ghostexGpui?.postT3SessionCreate;
+    if (typeof postCreate !== "function") {
+      return;
+    }
+    const payload = JSON.stringify({
+      projectId,
+      type: GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_TYPE,
+      version: GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_VERSION,
+    });
+    postCreate(payload);
   }
 
   private async createSession(groupId = this.activeGroupId): Promise<void> {
@@ -2622,7 +2682,14 @@ class GpuiSidebarRuntime {
     }
     const projectId = groupId ? parseGxserverPresentationProjectGroupId(groupId) : this.activeProjectId;
     const agent = this.resolveSidebarAgent(agentId);
-    if (!this.client || !projectId || !agent?.command) {
+    if (!this.client || !projectId || !agent) {
+      return;
+    }
+    if (agent.agentId === "t3") {
+      this.postLocalT3SessionCreate(projectId);
+      return;
+    }
+    if (!agent.command) {
       return;
     }
     const response = await this.client.rpc<GpuiGxserverCreatedSessionResult>("/api/createAgentSession", {
@@ -3034,6 +3101,14 @@ class GpuiSidebarRuntime {
       session.projectId === projectId &&
       session.sessionId === sessionId &&
       session.lifecycleState === "running",
+    ) ?? false;
+  }
+
+  private isLocalPresentationT3Session(projectId: string, sessionId: string): boolean {
+    return this.presentation?.sessions.some((session) =>
+      session.projectId === projectId &&
+      session.sessionId === sessionId &&
+      session.kind === "t3",
     ) ?? false;
   }
 
@@ -10985,13 +11060,18 @@ function normalizeGpuiNativeAppShotDimension(value: unknown): number | undefined
 function normalizeGpuiNativeAppShotTrigger(value: unknown): string | undefined {
   const trigger = normalizeGpuiNativeAppShotString(value, 80);
   return trigger === "both-command" ||
+    trigger === "both-shift" ||
+    trigger === "both-option" ||
     trigger === "double-left-shift" ||
     trigger === "double-left-option"
     ? trigger
     : undefined;
 }
 
-function formatGpuiNativeAppShotPrompt(appShot: GpuiNativeAppShotCapture): string {
+function formatGpuiNativeAppShotPrompt(
+  appShot: GpuiNativeAppShotCapture,
+  includeMetadata: boolean,
+): string {
   const metadataLines = [`App: ${appShot.appName}`];
   if (appShot.bundleIdentifier) {
     metadataLines.push(`Bundle ID: ${appShot.bundleIdentifier}`);
@@ -11005,19 +11085,18 @@ function formatGpuiNativeAppShotPrompt(appShot: GpuiNativeAppShotCapture): strin
   /*
   CDXC:GPUIAppShots 2026-06-25-23:07:
   GPUI formats App Shot prompts like macOS using only native-supplied app/window metadata and the `~/.ghostex/i` display path. The prompt must not include OCR, Accessibility text, DOM text, terminal content, stdout/stderr, commands, URLs, or renderer-supplied file paths.
+
+  CDXC:GPUIAppShots 2026-06-29-01:29:
+  Superseded by 2026-06-29-02:59.
+
+  CDXC:GPUIAppShots 2026-06-29-02:59:
+  App Shot prompt text should paste only the image link by default, with no intro sentence, no closing instruction, no blank spacer lines, and one newline of padding before and after. Add WindowServer metadata only when the Settings App Shots metadata toggle is enabled.
   */
-  return [
-    `App shot from ${appShot.appName}.`,
-    "",
-    `[Image #1](${appShot.imagePath})`,
-    "",
-    "Metadata:",
-    "",
-    ...metadataLines,
-    "",
-    "Use this app shot as context for my next request.",
-    "",
-  ].join("\n");
+  const promptLines = [`[Image #1](${appShot.imagePath})`];
+  if (includeMetadata) {
+    promptLines.push("Metadata:", ...metadataLines);
+  }
+  return `\n${promptLines.join("\n")}\n`;
 }
 
 function normalizeNonEmptyString(value: unknown): string | undefined {
