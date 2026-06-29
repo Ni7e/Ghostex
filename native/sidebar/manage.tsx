@@ -10,6 +10,8 @@ import type {
 } from "@excalidraw/excalidraw/types";
 import {
   IconAlertTriangle,
+  IconArrowsDiagonal2,
+  IconArrowsDiagonalMinimize,
   IconCheck,
   IconChevronRight,
   IconCircleCheck,
@@ -681,6 +683,9 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  *
  * CDXC:DocsSidebar 2026-06-29-04:08:
  * Root-level artifact files and docs/ content share the same Docs sidebar, so docs/ must render as an explicit expandable folder instead of an invisible tree root. Keep creation/drop defaults targeting docs/, but order rows from the real repo root and provide a header button to collapse or expand docs/.
+ *
+ * CDXC:DocsSidebar 2026-06-30-00:15:
+ * The Docs header folder control should use the same diagonal-arrows icon language as the macOS sidebar Projects Collapse All / Expand Previous control, but Docs does not remember previous expansion state. Collapse All must collapse every expandable nested folder, and Expand All must clear every collapsed folder so all descendants reopen.
  *
  * CDXC:ManageFileActions 2026-06-29-03:27:
  * Docs sidebar context actions apply to folders as well as files. Right-clicking empty sidebar chrome must suppress the browser/WebKit default context menu, while folder rename/delete remaps nested selected paths and annotation keys through the same docs-relative bridge.
@@ -1600,11 +1605,34 @@ function ManageApp() {
   }, [entries]);
 
   const treeOrderedEntries = useMemo(() => orderManageEntriesForTree(entries), [entries]);
-  const hasDocsFolder = useMemo(
-    () => entries.some((entry) => entry.kind === "directory" && entry.path === MANAGE_DOCS_ROOT_PATH),
-    [entries],
-  );
-  const isDocsFolderCollapsed = collapsedDirectoryPaths.has(MANAGE_DOCS_ROOT_PATH);
+  const expandableDirectoryPaths = useMemo(() => {
+    const paths = new Set<string>();
+    for (const entry of entries) {
+      if (entry.kind === "directory" && directoryPathsWithChildren.has(entry.path)) {
+        paths.add(entry.path);
+      }
+    }
+    return paths;
+  }, [directoryPathsWithChildren, entries]);
+  const hasExpandableDirectories = expandableDirectoryPaths.size > 0;
+  const hasExpandedDirectories = useMemo(() => {
+    for (const path of expandableDirectoryPaths) {
+      if (!collapsedDirectoryPaths.has(path)) {
+        return true;
+      }
+    }
+    return false;
+  }, [collapsedDirectoryPaths, expandableDirectoryPaths]);
+  const toggleAllDirectories = useCallback(() => {
+    setCollapsedDirectoryPaths((current) => {
+      for (const path of expandableDirectoryPaths) {
+        if (!current.has(path)) {
+          return new Set(expandableDirectoryPaths);
+        }
+      }
+      return new Set();
+    });
+  }, [expandableDirectoryPaths]);
 
   const visibleEntries = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -1675,14 +1703,14 @@ function ManageApp() {
               creatingKind={creatingArtifactKind}
               isRefreshing={listState === "loading"}
               isCreatingFolder={isCreatingFolder}
-              hasDocsFolder={hasDocsFolder}
-              isDocsFolderCollapsed={isDocsFolderCollapsed}
+              hasExpandableDirectories={hasExpandableDirectories}
+              hasExpandedDirectories={hasExpandedDirectories}
               onCreate={(kind) => void createArtifactFile(kind)}
               onCreateFolder={() => void createFolder()}
               onHideSidebar={() => setSidebarHidden(true)}
               onRefresh={() => void refreshFiles()}
               onSwitchSide={switchSidebarSide}
-              onToggleDocsFolder={() => toggleDirectory(MANAGE_DOCS_ROOT_PATH)}
+              onToggleAllDirectories={toggleAllDirectories}
               sidebarSide={sidebarSide}
             />
           </div>
@@ -1828,33 +1856,35 @@ function ManageSidebarActions({
   creatingKind,
   isRefreshing,
   isCreatingFolder,
-  hasDocsFolder,
-  isDocsFolderCollapsed,
+  hasExpandableDirectories,
+  hasExpandedDirectories,
   onCreate,
   onCreateFolder,
   onHideSidebar,
   onRefresh,
   onSwitchSide,
-  onToggleDocsFolder,
+  onToggleAllDirectories,
   sidebarSide,
 }: {
   creatingKind?: ManageArtifactKind;
   isRefreshing: boolean;
   isCreatingFolder: boolean;
-  hasDocsFolder: boolean;
-  isDocsFolderCollapsed: boolean;
+  hasExpandableDirectories: boolean;
+  hasExpandedDirectories: boolean;
   onCreate: (kind: ManageArtifactKind) => void;
   onCreateFolder: () => void;
   onHideSidebar: () => void;
   onRefresh: () => void;
   onSwitchSide: () => void;
-  onToggleDocsFolder: () => void;
+  onToggleAllDirectories: () => void;
   sidebarSide: ManageSidebarSide;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const HideSidebarIcon = sidebarSide === "right" ? IconLayoutSidebarRightCollapse : IconLayoutSidebarLeftCollapse;
+  const BulkDirectoryIcon = hasExpandedDirectories ? IconArrowsDiagonalMinimize : IconArrowsDiagonal2;
+  const bulkDirectoryActionLabel = hasExpandedDirectories ? "Collapse All" : "Expand All";
   const isCreating = Boolean(creatingKind) || isCreatingFolder;
 
   useEffect(() => {
@@ -1896,23 +1926,18 @@ function ManageSidebarActions({
   return (
     <div className="manage-sidebar-actions" ref={wrapperRef}>
       <button
-        aria-label={isDocsFolderCollapsed ? "Expand docs folder" : "Collapse docs folder"}
+        aria-label={bulkDirectoryActionLabel}
         className="manage-icon-button manage-sidebar-tree-toggle"
-        disabled={!hasDocsFolder}
+        disabled={!hasExpandableDirectories}
         onClick={() => {
           setCreateMenuOpen(false);
           setMenuOpen(false);
-          onToggleDocsFolder();
+          onToggleAllDirectories();
         }}
-        title={isDocsFolderCollapsed ? "Expand docs folder" : "Collapse docs folder"}
+        title={bulkDirectoryActionLabel}
         type="button"
       >
-        <IconChevronRight
-          aria-hidden="true"
-          data-expanded={String(!isDocsFolderCollapsed)}
-          size={15}
-          stroke={1.9}
-        />
+        <BulkDirectoryIcon aria-hidden="true" size={14} stroke={1.9} />
       </button>
       <button
         aria-expanded={createMenuOpen}
@@ -6170,12 +6195,9 @@ styleElement.textContent = `
   }
 
   .manage-sidebar-tree-toggle svg {
-    transform: rotate(0deg);
-    transition: transform 120ms ease;
-  }
-
-  .manage-sidebar-tree-toggle svg[data-expanded="true"] {
+    height: 14px;
     transform: rotate(90deg);
+    width: 14px;
   }
 
   .manage-sidebar-menu {

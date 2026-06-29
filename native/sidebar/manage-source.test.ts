@@ -139,6 +139,13 @@ describe("Manage project workarea source", () => {
      * repo-root artifact files can also appear in the Docs sidebar. The header
      * needs a compact collapse/expand button immediately before Create.
      *
+     * CDXC:DocsSidebar 2026-06-30-00:15:
+     * The Docs header folder control should use the same diagonal-arrows icon
+     * language as the macOS sidebar Projects bulk control while keeping Docs
+     * stateless: Collapse All closes every expandable nested folder, and
+     * Expand All clears the collapsed-folder set instead of restoring previous
+     * expansion state.
+     *
      * CDXC:ManageFolders 2026-06-28-07:12:
      * The Docs sidebar create actions live in the header plus menu, file rows
      * can target their containing folder/root for drops, and file rows do not
@@ -215,10 +222,14 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("box-sizing: border-box;");
     expect(manageSource).toContain("IconLayoutSidebarLeftExpand");
     expect(manageSource).toContain("IconLayoutSidebarRightExpand");
-    expect(manageSource).toContain("isDocsFolderCollapsed");
-    expect(manageSource).toContain('aria-label={isDocsFolderCollapsed ? "Expand docs folder" : "Collapse docs folder"}');
+    expect(manageSource).toContain("IconArrowsDiagonalMinimize");
+    expect(manageSource).toContain("IconArrowsDiagonal2");
+    expect(manageSource).toContain("const expandableDirectoryPaths = useMemo");
+    expect(manageSource).toContain("hasExpandedDirectories ? \"Collapse All\" : \"Expand All\"");
     expect(manageSource).toContain("manage-sidebar-tree-toggle");
-    expect(manageSource).toContain("onToggleDocsFolder={() => toggleDirectory(MANAGE_DOCS_ROOT_PATH)}");
+    expect(manageSource).toContain("return new Set(expandableDirectoryPaths);");
+    expect(manageSource).toContain("return new Set();");
+    expect(manageSource).toContain("onToggleAllDirectories={toggleAllDirectories}");
     expect(manageSource).toContain("function canOpenManageEntryContextMenu");
     expect(manageSource).toContain(".manage-sidebar-header .manage-icon-button,");
     expect(manageSource).toContain(".manage-sidebar-restore-button {");
