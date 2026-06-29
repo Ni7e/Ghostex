@@ -7847,11 +7847,21 @@ styleElement.textContent = `
     width: 14px !important;
   }
   .titlebar-update-spinner {
+    /*
+     * CDXC:AutoUpdate 2026-06-29-05:10:
+     * The active "Downloading..." titlebar spinner should sit 2px lower while
+     * preserving the stable update button frame and hit target. Keep the
+     * vertical offset inside the spin keyframes because the animation owns the
+     * SVG transform during download progress.
+     */
     animation: titlebar-update-download-spin 1s linear infinite;
   }
   @keyframes titlebar-update-download-spin {
+    from {
+      transform: translateY(2px) rotate(0deg);
+    }
     to {
-      transform: rotate(360deg);
+      transform: translateY(2px) rotate(360deg);
     }
   }
   .titlebar-project-title {
