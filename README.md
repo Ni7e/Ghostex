@@ -1,5 +1,3 @@
-> 2026-06-13 Notice: App is locked to new feature work for a bit. Current focus is fully on bug fixes, performance, polish, refactoring.
-
 <p align="center">
   <img width="1200" height="630" alt="og" src="https://github.com/user-attachments/assets/8b0417ff-a320-43a2-a7e2-1a6c24f86c5c" />
 </p>
