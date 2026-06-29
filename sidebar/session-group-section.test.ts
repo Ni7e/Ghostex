@@ -10,7 +10,6 @@ import {
   PINNED_SESSION_DROP_GAP_AFTER_LAST,
   shouldPreventGroupDragActivation,
   shouldTreatProjectAsEmptySessionGroup,
-  shouldShowOpenProjectFolderIcon,
   shouldShowProjectEditorDiffStats,
 } from "./session-group-section";
 
@@ -24,6 +23,10 @@ const sessionGroupStylesSource = readFileSync(
 );
 const groupPanelStylesSource = readFileSync(
   new URL("./styles/group-panels.css", import.meta.url),
+  "utf8",
+);
+const sidebarAppSource = readFileSync(
+  new URL("./sidebar-app.tsx", import.meta.url),
   "utf8",
 );
 
@@ -173,38 +176,6 @@ describe("empty project new-session row", () => {
     expect(rowSource).toContain("getEmptyProjectNewSessionButtonLabel()");
     expect(rowSource).toContain("requestCreateProjectTerminal();");
     expect(rowSource).not.toContain("session-last-interaction-time");
-  });
-});
-
-describe("shouldShowOpenProjectFolderIcon", () => {
-  test("shows the open folder for empty expanded project rows", () => {
-    /*
-     * CDXC:ProjectHeaders 2026-06-16-02:27:
-     * Empty expanded projects still have a visible body because they render the
-     * New Session row, so the folder icon should show open even when the
-     * project has no terminal sessions.
-     */
-    expect(
-      shouldShowOpenProjectFolderIcon({
-        isCollapsed: false,
-        sessionCount: 0,
-      }),
-    ).toBe(true);
-  });
-
-  test("uses collapsed state for project folder icons regardless of sessions", () => {
-    expect(
-      shouldShowOpenProjectFolderIcon({
-        isCollapsed: false,
-        sessionCount: 1,
-      }),
-    ).toBe(true);
-    expect(
-      shouldShowOpenProjectFolderIcon({
-        isCollapsed: true,
-        sessionCount: 1,
-      }),
-    ).toBe(false);
   });
 });
 
@@ -431,6 +402,67 @@ describe("getSidebarSessionGapContextMenuTarget", () => {
 });
 
 describe("reference sidebar group spacing styles", () => {
+  test("keeps sticky project headers native without scroll-time clipping", () => {
+    /*
+     * CDXC:SidebarStickyHeaders 2026-06-29-18:46:
+     * Project sticky headers should rely on native CSS sticky plus a real
+     * app-background fill. Do not reintroduce per-project scroll listeners that
+     * measure sticky overlap and write clip-path variables during sidebar
+     * scrolling.
+     *
+     * CDXC:SidebarStickyHeaders 2026-06-29-20:49:
+     * Sticky project headers should use the same reference-sidebar background
+     * token as the sidebar shell, with custom gradients anchored to the
+     * viewport so the header does not render as a mismatched flat band.
+     *
+     * CDXC:SidebarStickyHeaders 2026-06-29-21:37:
+     * Custom gradient sticky headers should use root-measured sidebar geometry
+     * instead of a viewport-height guess, so lower project headers match the
+     * sidebar gradient as they stick.
+     */
+    const projectHeaderStart = sessionGroupStylesSource.indexOf(
+      '.sidebar-reference-layout[data-reference-sidebar="true"] .group[data-project-group="true"] .group-head {',
+    );
+    const projectHeaderSource = sessionGroupStylesSource.slice(
+      projectHeaderStart,
+      projectHeaderStart + 5200,
+    );
+
+    expect(projectHeaderStart).toBeGreaterThan(-1);
+    expect(projectHeaderSource).toContain(
+      "background: var(--reference-sidebar-background, var(--app-background));",
+    );
+    expect(projectHeaderSource).toContain(
+      "background-attachment: var(--reference-sidebar-background-attachment, scroll);",
+    );
+    expect(projectHeaderSource).toContain(
+      "background-position: var(--reference-sidebar-background-position, left top);",
+    );
+    expect(projectHeaderSource).toContain(
+      "background-size: var(--reference-sidebar-background-size, auto);",
+    );
+    expect(projectHeaderSource).toContain("position: sticky;");
+    expect(groupPanelStylesSource).toContain("--reference-sidebar-background: var(--app-background);");
+    expect(groupPanelStylesSource).toContain(
+      "--reference-sidebar-background-attachment: fixed;",
+    );
+    expect(groupPanelStylesSource).toContain(
+      "--reference-sidebar-background-position: left var(--reference-sidebar-gradient-top, 0px);",
+    );
+    expect(groupPanelStylesSource).toContain(
+      "--reference-sidebar-background-size: 100% var(--reference-sidebar-gradient-height, 100vh);",
+    );
+    expect(sidebarAppSource).toContain("referenceSidebarLayoutRef");
+    expect(sidebarAppSource).toContain("--reference-sidebar-gradient-top");
+    expect(sidebarAppSource).toContain("--reference-sidebar-gradient-height");
+    expect(sidebarAppSource).toContain("getBoundingClientRect()");
+    expect(sidebarAppSource).toContain("ResizeObserver");
+    expect(sessionGroupSectionSource).not.toContain("updateStickyHeaderClip");
+    expect(sessionGroupSectionSource).not.toContain("reference-project-session-clip-top");
+    expect(sessionGroupStylesSource).not.toContain("reference-project-session-clip-top");
+    expect(sessionGroupStylesSource).not.toContain("clip-path: inset(var(--reference-project");
+  });
+
   test("does not force the project to the top when Show less is selected", () => {
     /*
      * CDXC:ProjectSessionLists 2026-06-25-22:28:
@@ -454,6 +486,10 @@ describe("reference sidebar group spacing styles", () => {
      * The Show more state should keep rendering all project sessions, but the
      * expanded body must become a bounded inner scroll area using the same
      * vertical overflow and fade-mask contract as the main sidebar viewport.
+     *
+     * CDXC:ProjectSessionLists 2026-06-29-17:53:
+     * Inner project scrolling should chain to the main sidebar when the nested
+     * list reaches an edge, so this rule must not contain overscroll.
      */
     expect(sessionGroupSectionSource).toContain("shouldScrollExpandedProjectSessionList");
     expect(sessionGroupSectionSource).toContain("getProjectSessionListBoundaryHeight");
@@ -467,18 +503,23 @@ describe("reference sidebar group spacing styles", () => {
     const scrollableRuleStart = groupPanelStylesSource.indexOf(
       '.group-sessions-shell[data-project-session-list-scrollable="true"] {',
     );
+    const scrollableRuleEnd = groupPanelStylesSource.indexOf(
+      '\n}\n\n.group-sessions-shell[data-project-session-list-scrollable="true"][data-scroll-glow-top="true"]',
+      scrollableRuleStart,
+    );
     const scrollableRuleSource = groupPanelStylesSource.slice(
       scrollableRuleStart,
-      scrollableRuleStart + 1300,
+      scrollableRuleEnd,
     );
 
     expect(scrollableRuleStart).toBeGreaterThan(-1);
+    expect(scrollableRuleEnd).toBeGreaterThan(scrollableRuleStart);
     expect(scrollableRuleSource).toContain("overflow-x: hidden;");
     expect(scrollableRuleSource).toContain("overflow-y: auto;");
-    expect(scrollableRuleSource).toContain("overscroll-behavior: contain;");
+    expect(scrollableRuleSource).not.toContain("overscroll-behavior:");
     expect(scrollableRuleSource).toContain("--edge-fade-distance:");
-    expect(scrollableRuleSource).toContain("--top-fade: var(--edge-fade-distance);");
-    expect(scrollableRuleSource).toContain("--bottom-fade: var(--edge-fade-distance);");
+    expect(groupPanelStylesSource).toContain("--top-fade: var(--edge-fade-distance);");
+    expect(groupPanelStylesSource).toContain("--bottom-fade: var(--edge-fade-distance);");
   });
 
   test("uses row-owned padding instead of blank gaps between project headers and sessions", () => {
@@ -497,7 +538,7 @@ describe("reference sidebar group spacing styles", () => {
     );
     const projectHeaderSource = sessionGroupStylesSource.slice(
       projectHeaderStart,
-      projectHeaderStart + 3200,
+      projectHeaderStart + 5200,
     );
     const groupSessionsStart = sessionGroupStylesSource.indexOf(
       '.sidebar-reference-layout[data-reference-sidebar="true"] .group-sessions {',

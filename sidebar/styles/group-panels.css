@@ -366,8 +366,12 @@
    * Keep the Show more / Show less interaction, but make the expanded project
    * body a bounded inner scroll surface. Reuse the same overflow contract as
    * the main sidebar project scroll viewport: hidden horizontal overflow,
-   * vertical auto scrolling, contained overscroll, and the shared Codex-style
-   * vertical fade mask.
+   * vertical auto scrolling, and the shared Codex-style vertical fade mask.
+   *
+   * CDXC:ProjectSessionLists 2026-06-29-17:53:
+   * The inner project scroller must allow native scroll chaining so continued
+   * wheel or trackpad input moves the main sidebar after the inner list reaches
+   * its top or bottom. Do not set contained overscroll on this nested surface.
    */
   --edge-fade-distance: calc(16px * var(--sidebar-density-scale));
   max-height: var(
@@ -376,7 +380,6 @@
   );
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 .group-sessions-shell[data-project-session-list-scrollable="true"][data-scroll-glow-top="true"] {
@@ -701,6 +704,17 @@ body:has(.sidebar-reference-layout[data-reference-sidebar="true"]) .stack {
  * The visible custom sidebar backing should now be a fixed-strength vertical
  * gradient. Keep app/theme tokens on the solid selected color because cards,
  * hovers, and color-mix calculations need one stable contrast color.
+ *
+ * CDXC:SidebarStickyHeaders 2026-06-29-20:49:
+ * Project sticky headers reuse the reference sidebar background token. Anchor
+ * custom gradients to the viewport so sticky rows match the sidebar backing
+ * instead of restarting the gradient inside each header.
+ *
+ * CDXC:SidebarStickyHeaders 2026-06-29-21:37:
+ * Sticky project headers must sample the custom gradient over the measured
+ * sidebar shell height, not the full browser viewport. The React root publishes
+ * the sidebar's viewport top and height so lower sticky headers match the same
+ * gradient position as the sidebar backing.
  */
 body[data-custom-sidebar-titlebar-colors="true"]:has(
     .sidebar-reference-layout[data-reference-sidebar="true"]
@@ -732,6 +746,14 @@ body[data-custom-sidebar-titlebar-colors="true"]
 
 body[data-custom-sidebar-titlebar-colors="true"]
   .sidebar-reference-layout[data-reference-sidebar="true"] {
+  --reference-sidebar-background: linear-gradient(
+    180deg,
+    var(--custom-sidebar-titlebar-gradient-top-color),
+    var(--custom-sidebar-titlebar-gradient-bottom-color)
+  );
+  --reference-sidebar-background-attachment: fixed;
+  --reference-sidebar-background-position: left var(--reference-sidebar-gradient-top, 0px);
+  --reference-sidebar-background-size: 100% var(--reference-sidebar-gradient-height, 100vh);
   --app-background: var(--custom-sidebar-titlebar-background-color);
   --app-titlebar-background: var(--custom-sidebar-titlebar-background-color);
   --app-foreground: var(--custom-sidebar-titlebar-foreground-color);
@@ -779,6 +801,10 @@ body[data-custom-sidebar-titlebar-colors="true"]
 
 .sidebar-reference-layout[data-reference-sidebar="true"] {
   --sidebar-density-scale: 1;
+  --reference-sidebar-background: var(--app-background);
+  --reference-sidebar-background-attachment: scroll;
+  --reference-sidebar-background-position: left top;
+  --reference-sidebar-background-size: auto;
   --reference-sidebar-main-edge-bleed-left: 15px;
   --reference-sidebar-primary-nav-edge-bleed-left: var(--reference-sidebar-main-edge-bleed-left);
   --reference-sidebar-scroll-edge-bleed-left: 8px;
@@ -787,7 +813,10 @@ body[data-custom-sidebar-titlebar-colors="true"]
   --reference-sidebar-footer-edge-bleed-left: 8px;
   --reference-sidebar-edge-bleed-right: 1px;
   --attention-dot: var(--done-attention-color, #95d7f6);
-  background: var(--app-background);
+  background: var(--reference-sidebar-background);
+  background-attachment: var(--reference-sidebar-background-attachment);
+  background-position: var(--reference-sidebar-background-position);
+  background-size: var(--reference-sidebar-background-size);
   box-sizing: border-box;
   color: var(--app-foreground);
   display: flex;
@@ -960,19 +989,30 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
    * Search keeps its own gap below the shortcut row instead of inheriting
    * the old nav-level top offset.
    *
-   * CDXC:SidebarTopChrome 2026-06-29-03:25:
-   * Search should sit 3px lower than the first shortcut-row spacing pass, so
-   * its dedicated top gap is 12px.
+   * CDXC:SidebarTopChrome 2026-06-29-18:34:
+   * The vertical gap between the shortcut row and Search should match the
+   * horizontal gap between shortcut buttons. Use the same 4px spacing value so
+   * the top controls read as one grouped block.
    *
    * CDXC:SidebarTopChrome 2026-06-29-03:05:
    * The shortcut icon buttons should extend 1px farther downward than the
    * standard sidebar nav button height, keeping their top edge fixed while
    * increasing the button box from 34px to 35px.
    *
-   * CDXC:SidebarTopChrome 2026-06-29-03:19:
-   * The top shortcut icon buttons should now be borderless too. Keep the
-   * full-width icon row layout and dropdown borders, but let each shortcut
-   * inherit the base transparent nav-button border style.
+   * CDXC:SidebarTopChrome 2026-06-29-16:40:
+   * The top shortcut icon buttons should have a titlebar-colored outline,
+   * slight rounding, and internal-only spacing between buttons. Keep the icon
+   * row full-width.
+   *
+   * CDXC:SidebarTopChrome 2026-06-29-18:10:
+   * Search should use the same titlebar-colored border and 5px corner radius
+   * as the shortcut buttons, with its left and right border edges aligned to the
+   * first and last shortcut buttons.
+   *
+   * CDXC:SidebarTopChrome 2026-06-29-21:32:
+   * The top Search row is text-only and uses the shared primary-nav left padding
+   * again so its text aligns with rows below. Do not keep the prior Search-only
+   * 6px left-padding reduction after removing the search icon.
    */
   margin: 0;
   min-width: 0;
@@ -981,6 +1021,7 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 
 .reference-sidebar-primary-icon-row {
   --reference-sidebar-primary-shortcut-count: 5;
+  column-gap: 4px;
   display: grid;
   grid-template-columns: repeat(var(--reference-sidebar-primary-shortcut-count), minmax(0, 1fr));
   min-width: 0;
@@ -1019,7 +1060,7 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 }
 
 .reference-sidebar-search-slot {
-  margin-top: 12px;
+  margin-top: 4px;
   min-width: 0;
 }
 
@@ -1080,7 +1121,10 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-sidebar-primary-nav
-  > .reference-sidebar-primary-icon-row {
+  > .reference-sidebar-primary-icon-row,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-primary-nav
+  > .reference-sidebar-search-slot {
   max-width: none;
   width: calc(
     100% + var(--reference-sidebar-primary-nav-edge-bleed-left) +
@@ -1091,6 +1135,8 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-sidebar-primary-icon-row
   .reference-sidebar-nav-icon-button {
+  border: 1px solid var(--titlebar-button-border-color, #252525);
+  border-radius: 5px;
   height: 35px;
   justify-content: center;
   max-width: none;
@@ -1098,6 +1144,13 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot="zoom"] {
   padding-left: 0;
   padding-right: 0;
   width: 100%;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-search-slot
+  .reference-sidebar-nav-button {
+  border: 1px solid var(--titlebar-button-border-color, #252525);
+  border-radius: 5px;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
@@ -1603,10 +1656,11 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
    * the Search-to-scroll gap was increased, so expose a separate first-section
    * top inset instead of changing project sticky positioning.
    *
-   * CDXC:SidebarTopChrome 2026-06-29-03:25:
-   * The gap above Quick should be 7px tighter toward Search even after Search
-   * moves down by 3px. Reduce only the Quick first-section extra so Projects,
-   * remote sections, and sticky project headers keep their existing spacing.
+   * CDXC:SidebarTopChrome 2026-06-29-18:34:
+   * The gap above Quick remains 7px tighter toward Search while Search's own
+   * spacing now matches the shortcut button gap. Keep the Quick first-section
+   * extra scoped so Projects, remote sections, and sticky project headers keep
+   * their existing spacing.
    */
   --reference-sidebar-project-sticky-top: 0px;
   --reference-sidebar-quick-top-extra: -2px;

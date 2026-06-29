@@ -22,7 +22,6 @@ import {
   IconFileSearch,
   IconFolder,
   IconFolderOpen,
-  IconGitBranch,
   IconHistory,
   IconHistoryToggle,
   IconKeyboard,
@@ -33,7 +32,6 @@ import {
   IconPlusFilled,
   IconRefresh,
   IconRobotFace,
-  IconSearch,
   IconSettings,
   IconSquareMinus,
   IconTerminal2,
@@ -283,7 +281,6 @@ function readSidebarKeepAwakeRuntime(): SidebarKeepAwakeRuntimeState | undefined
 
 type SidebarGroupDragPreview = {
   groupId: string;
-  icon: "branch" | "closed" | "open";
   isCollapsed: boolean;
   left: number;
   pointerOffsetY: number;
@@ -422,28 +419,7 @@ function ProjectGroupDragGhost({ preview }: { preview: SidebarGroupDragPreview; 
 
   return (
     <div aria-hidden="true" className="project-drag-ghost" style={style}>
-      <div className="group-title-row">
-        <span
-          aria-hidden="true"
-          className="group-collapse-button section-titlebar-toggle"
-          data-collapsed={String(preview.isCollapsed)}
-          data-empty-project="false"
-          data-has-idle-icon="true"
-          data-static-icon="false"
-        >
-          <span
-            aria-hidden="true"
-            className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon"
-          >
-            {preview.icon === "open" ? (
-              <IconFolderOpen size={16} stroke={1.8} />
-            ) : preview.icon === "branch" ? (
-              <IconGitBranch size={16} stroke={1.8} />
-            ) : (
-              <IconFolder size={16} stroke={1.8} />
-            )}
-          </span>
-        </span>
+      <div className="group-title-row" data-project-leading-icon="false">
         <div className="group-title-handle" data-draggable="true">
           <button
             aria-disabled="false"
@@ -836,6 +812,7 @@ export function SidebarApp({
   const referenceSectionAnimationTimeoutsRef = useRef<
     Partial<Record<ReferenceSidebarSectionId, number>>
   >({});
+  const referenceSidebarLayoutRef = useRef<HTMLDivElement>(null);
   const sessionGroupsContentRef = useRef<HTMLDivElement>(null);
   const sidebarStartupStartedAtRef = useRef(getSidebarStartupNow());
   const hasAppliedHydrateRef = useRef(false);
@@ -859,6 +836,65 @@ export function SidebarApp({
         window.clearTimeout(recentProjectsScrollIdleTimeoutRef.current);
       }
       setSidebarTooltipsSuppressedForDrag(false);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const element = referenceSidebarLayoutRef.current;
+    if (!element) {
+      return;
+    }
+
+    let animationFrameId = 0;
+    let previousTop = "";
+    let previousHeight = "";
+
+    /**
+     * CDXC:SidebarStickyHeaders 2026-06-29-21:37:
+     * Sticky project headers need to sample the same custom sidebar gradient as
+     * the reference sidebar shell, but per-project scroll clipping was too
+     * expensive. Measure the sidebar gradient space once at the root and publish
+     * stable geometry variables so native sticky headers can align their
+     * viewport-fixed background without running per-row scroll work.
+     */
+    const updateReferenceSidebarGradientGeometry = () => {
+      animationFrameId = 0;
+      const bounds = element.getBoundingClientRect();
+      const nextTop = `${Math.round(bounds.top)}px`;
+      const nextHeight = `${Math.max(1, Math.ceil(bounds.height))}px`;
+
+      if (nextTop !== previousTop) {
+        previousTop = nextTop;
+        element.style.setProperty("--reference-sidebar-gradient-top", nextTop);
+      }
+
+      if (nextHeight !== previousHeight) {
+        previousHeight = nextHeight;
+        element.style.setProperty("--reference-sidebar-gradient-height", nextHeight);
+      }
+    };
+
+    const scheduleReferenceSidebarGradientGeometryUpdate = () => {
+      if (animationFrameId !== 0) {
+        return;
+      }
+
+      animationFrameId = window.requestAnimationFrame(updateReferenceSidebarGradientGeometry);
+    };
+
+    updateReferenceSidebarGradientGeometry();
+    const resizeObserver = new ResizeObserver(scheduleReferenceSidebarGradientGeometryUpdate);
+    resizeObserver.observe(element);
+    window.addEventListener("resize", scheduleReferenceSidebarGradientGeometryUpdate);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", scheduleReferenceSidebarGradientGeometryUpdate);
+      if (animationFrameId !== 0) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      element.style.removeProperty("--reference-sidebar-gradient-top");
+      element.style.removeProperty("--reference-sidebar-gradient-height");
     };
   }, []);
 
@@ -3017,12 +3053,6 @@ export function SidebarApp({
         point && headerMetrics && group?.projectContext
           ? {
             groupId: sourceData.groupId,
-            icon: group.projectContext.worktree
-              ? "branch"
-              : collapsedGroupsById[ sourceData.groupId ] === true ||
-                (authoritativeSessionIdsByGroup[ sourceData.groupId ] ?? []).length === 0
-                ? "closed"
-                : "open",
             isCollapsed: collapsedGroupsById[ sourceData.groupId ] === true,
             left: headerMetrics.left,
             pointerOffsetY: headerMetrics.pointerOffsetY,
@@ -3905,7 +3935,7 @@ export function SidebarApp({
 
   const openReferenceAutomations = () => {
     dismissAppModalForSidebarNavigation("SettingsDismissal:automations");
-    vscode.postMessage({ type: "showAutomationsComingSoonToast" });
+    vscode.postMessage({ type: "openAutomationsPage" });
   };
 
   const openReferenceMobile = () => {
@@ -3953,7 +3983,14 @@ export function SidebarApp({
 
   return (
     <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
-      <div className="sidebar-reference-layout" data-reference-sidebar="true">
+      <div
+        className="sidebar-reference-layout"
+        data-reference-sidebar="true"
+        data-session-agent-icon-color-mode={
+          effectiveSettings.useColoredSessionAgentIcons ? "colored" : "monochrome"
+        }
+        ref={referenceSidebarLayoutRef}
+      >
         {showCommandHotkeyOverlay ? <SidebarHotkeyOverlay hotkeys={settings?.hotkeys} /> : null}
         <SidebarReferenceTopChrome
           keepAwakeRuntime={sidebarKeepAwakeRuntime}
@@ -4737,10 +4774,10 @@ function SidebarReferenceTopChrome({
    * Mobile should open the Ghostex download page, not the GitHub README anchor,
    * because the product site now owns mobile download routing.
    *
-   * CDXC:Automations 2026-06-16-00:47:
-   * Automations should sit above Mobile in the primary sidebar.
-   * Until the feature is ready, clicking it shows a native app toast instead of
-   * opening another surface.
+   * CDXC:Automations 2026-06-29-15:55:
+   * Automations should sit above Mobile in the primary sidebar and open the
+   * gxserver-backed Automation page for the active project instead of the old
+   * coming-soon toast.
    *
    * CDXC:SidebarReference 2026-06-16-01:23:
    * Plugins should no longer consume a primary sidebar row.
@@ -4908,6 +4945,11 @@ function SidebarReferenceSearchNavItem({
            * The top Search row should not swap into a boxed search bar. When
            * active, the nav label itself becomes a transparent input with the
            * Search text as its placeholder so typing happens in-place.
+           *
+           * CDXC:SidebarSearch 2026-06-29-21:32:
+           * The top Search row is text-only in both inactive and active states.
+           * Do not render a magnifying-glass icon; the Search text should use
+           * the shared primary-row left padding so it aligns with rows below.
            */}
           <div
             className="reference-sidebar-nav-button reference-sidebar-inline-search-row"
@@ -4915,12 +4957,6 @@ function SidebarReferenceSearchNavItem({
               inputRef.current?.focus();
             }}
           >
-            <IconSearch
-              aria-hidden="true"
-              className="reference-sidebar-nav-icon"
-              size={15}
-              stroke={1.9}
-            />
             <input
               aria-label="Search current and previous sessions"
               className="reference-sidebar-inline-search-input"
@@ -4956,7 +4992,15 @@ function SidebarReferenceSearchNavItem({
         </div>
       ) : (
         <div className="reference-sidebar-nav-item">
-          <SidebarReferenceNavButton icon={IconSearch} label="Search" onClick={onSearch} />
+          <Button
+            className="reference-sidebar-nav-button"
+            onClick={onSearch}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <span className="reference-sidebar-nav-label">Search</span>
+          </Button>
           <SidebarFixedTooltipButton
             aria-label="Search by Text"
             className="reference-sidebar-hover-action reference-sidebar-hover-action-tooltip reference-sidebar-text-search-button"

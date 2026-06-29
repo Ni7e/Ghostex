@@ -211,8 +211,8 @@ function getCollapsedGroupStatusStyle(groupId: string): CSSProperties {
 /**
  * CDXC:WorkspaceTheme 2026-05-05-02:58
  * Combined-mode project headers consume the persisted workspace theme color
- * through one CSS variable so folder icons, titles, and hover surfaces can
- * share the same tint without changing chat or browser group styling.
+ * through one CSS variable so titles and hover surfaces can share the same tint
+ * without changing chat or browser group styling.
  */
 function getProjectThemeStyle(themeColor: string | undefined): CSSProperties | undefined {
   if (!themeColor) {
@@ -343,21 +343,6 @@ export function getPinnedSessionDropGapKey({
   return nextSessionId
     ? getSessionDropGapKeyBefore(nextSessionId)
     : PINNED_SESSION_DROP_GAP_AFTER_LAST;
-}
-
-export function shouldShowOpenProjectFolderIcon({
-  isCollapsed,
-}: {
-  isCollapsed: boolean;
-  sessionCount: number;
-}): boolean {
-  /**
-   * CDXC:ProjectHeaders 2026-06-16-02:27:
-   * Empty expanded projects now show the open folder icon because the body can
-   * contain the New Session row even with no terminal sessions. Use collapsed
-   * state alone for the folder glyph so the icon mirrors the visible section.
-   */
-  return !isCollapsed;
 }
 
 export function formatProjectEditorDiffStatsLabel(
@@ -713,10 +698,10 @@ export function SessionGroupSection({
   }, []);
 
   /**
-   * CDXC:Projects 2026-05-04-14:49
-   * Project group headers use folder metaphors: closed folder when collapsed
-   * and open folder when expanded. The synthetic Chats group keeps the chat
-   * glyph so users can distinguish projectless conversations from projects.
+   * CDXC:ProjectHeaders 2026-06-29-21:04:
+   * Project and worktree group headers should not render the old leading folder
+   * or branch glyph. The full header still owns activation/collapse, while the
+   * synthetic Chats collection keeps its chat glyph so it stays visually distinct.
    *
    * CDXC:Chats 2026-05-04-09:41
    * The Combined-mode Chats header is a synthetic collection, not one mutable
@@ -940,70 +925,6 @@ export function SessionGroupSection({
     shouldScrollExpandedProjectSessionList,
   ]);
 
-  useLayoutEffect(() => {
-    if (!projectContext || isCollapsed) {
-      return;
-    }
-
-    const groupElement = groupSectionRef.current;
-    const sessionsShellElement = sessionsShellRef.current;
-    if (
-      !groupElement ||
-      !sessionsShellElement ||
-      !groupElement.closest('.sidebar-reference-layout[data-reference-sidebar="true"]')
-    ) {
-      return;
-    }
-
-    const headerElement = groupElement.querySelector<HTMLElement>(".group-head");
-    const scrollViewport = groupElement.closest<HTMLElement>(".session-groups-content");
-    if (!headerElement || !scrollViewport) {
-      return;
-    }
-
-    let animationFrameId = 0;
-
-    /**
-     * CDXC:SidebarTitlebarColors 2026-06-19-13:22:
-     * Transparent sticky project headers let their own session rows scroll
-     * behind the header. Clip the session shell by the measured overlap instead
-     * of restoring a painted header background, so the custom sidebar gradient
-     * remains visible while sticky headers still hide underlying rows.
-     */
-    const updateStickyHeaderClip = () => {
-      const headerRect = headerElement.getBoundingClientRect();
-      const shellRect = sessionsShellElement.getBoundingClientRect();
-      const clipTop = Math.max(0, Math.ceil(headerRect.bottom - shellRect.top));
-      sessionsShellElement.style.setProperty("--reference-project-session-clip-top", `${clipTop}px`);
-    };
-
-    const scheduleStickyHeaderClipUpdate = () => {
-      window.cancelAnimationFrame(animationFrameId);
-      animationFrameId = window.requestAnimationFrame(updateStickyHeaderClip);
-    };
-
-    updateStickyHeaderClip();
-    scrollViewport.addEventListener("scroll", scheduleStickyHeaderClipUpdate, { passive: true });
-    window.addEventListener("resize", scheduleStickyHeaderClipUpdate);
-
-    const observer = new ResizeObserver(scheduleStickyHeaderClipUpdate);
-    observer.observe(groupElement);
-    observer.observe(headerElement);
-    observer.observe(sessionsShellElement);
-
-    return () => {
-      scrollViewport.removeEventListener("scroll", scheduleStickyHeaderClipUpdate);
-      window.removeEventListener("resize", scheduleStickyHeaderClipUpdate);
-      observer.disconnect();
-      window.cancelAnimationFrame(animationFrameId);
-      sessionsShellElement.style.removeProperty("--reference-project-session-clip-top");
-    };
-  }, [
-    isCollapsed,
-    Boolean(projectContext),
-    projectSessionListRenderedSessionIdsKey,
-  ]);
-
   const postGroupDebugLog = useEffectEvent((event: string, details: Record<string, unknown>) => {
     if (!debuggingMode) {
       return;
@@ -1183,10 +1104,6 @@ export function SessionGroupSection({
       hasProjectContext: Boolean(projectContext),
       sessionCount: actualSessionCount,
     });
-  const shouldRenderOpenProjectFolderIcon = shouldShowOpenProjectFolderIcon({
-    isCollapsed,
-    sessionCount: actualSessionCount,
-  });
   /**
    * CDXC:ProjectGroups 2026-05-15-14:33:
    * Project groups remain expandable even with no sessions because the body can
@@ -1209,7 +1126,11 @@ export function SessionGroupSection({
    * Project row collapse/expand keeps an accessible label but no hover tooltip.
    * Project header clicks toggle the project session list rather than activating
    * the project; only the right-side action buttons keep their own click
-   * behavior, and the folder icon is visual-only.
+   * behavior.
+   *
+   * CDXC:ProjectHeaders 2026-06-29-21:04:
+   * Regular project rows no longer rely on a visual-only leading glyph; keep
+   * collapse semantics on the header/title instead of preserving the old icon slot.
    *
    * CDXC:ProjectHeaderTooltips 2026-05-25-09:43:
    * Project header action buttons need compact hover labels without relying on
@@ -1901,38 +1822,35 @@ export function SessionGroupSection({
                 value={draftTitle}
               />
             ) : (
-              <div className="group-title-row">
+              <div
+                className="group-title-row"
+                data-project-leading-icon={String(!projectContext || isChatCollection)}
+              >
                 {projectContext ? (
-                  <span
-                    aria-hidden="true"
-                    className="group-collapse-button section-titlebar-toggle"
-                    data-collapsed={String(isCollapsed)}
-                    data-empty-project={String(isEmptyProjectGroup)}
-                    data-has-idle-icon={String(canToggleCollapsed)}
-                    data-static-icon={String(!canToggleCollapsed)}
-                  >
+                  isChatCollection ? (
                     <span
                       aria-hidden="true"
-                      className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon"
+                      className="group-collapse-button section-titlebar-toggle"
+                      data-collapsed={String(isCollapsed)}
+                      data-empty-project={String(isEmptyProjectGroup)}
+                      data-has-idle-icon={String(canToggleCollapsed)}
+                      data-static-icon={String(!canToggleCollapsed)}
                     >
-                      {isChatCollection ? (
-                        <IconMessageCircle size={16} stroke={1.8} />
-                      ) : projectContext.worktree ? (
-                        <IconGitBranch size={16} stroke={1.8} />
-                      ) : shouldRenderOpenProjectFolderIcon ? (
-                        <IconFolderOpen size={16} stroke={1.8} />
-                      ) : (
-                        <IconFolder size={16} stroke={1.8} />
-                      )}
-                    </span>
-                    {canToggleCollapsed ? (
-                      <IconCaretRightFilled
+                      <span
                         aria-hidden="true"
-                        className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
-                        size={16}
-                      />
-                    ) : null}
-                  </span>
+                        className="group-collapse-icon group-collapse-idle-icon section-titlebar-toggle-icon section-titlebar-toggle-idle-icon"
+                      >
+                        <IconMessageCircle size={16} stroke={1.8} />
+                      </span>
+                      {canToggleCollapsed ? (
+                        <IconCaretRightFilled
+                          aria-hidden="true"
+                          className="group-collapse-icon group-collapse-chevron-icon section-titlebar-toggle-icon section-titlebar-toggle-chevron-icon"
+                          size={16}
+                        />
+                      ) : null}
+                    </span>
+                  ) : null
                 ) : (
                   <button
                     aria-controls={canToggleCollapsed && !isCollapsed ? sessionsRegionId : undefined}
@@ -1957,7 +1875,7 @@ export function SessionGroupSection({
                     >
                       {isChatCollection ? (
                         <IconMessageCircle size={16} stroke={1.8} />
-                      ) : shouldRenderOpenProjectFolderIcon ? (
+                      ) : !isCollapsed ? (
                         <IconFolderOpen size={16} stroke={1.8} />
                       ) : (
                         <IconFolder size={16} stroke={1.8} />
@@ -2522,14 +2440,15 @@ export function SessionGroupSection({
             </div>
             {showSessionGroupConnector
               ? visibleGroupSessions.map((session) => (
-                  <div
-                    aria-hidden
-                    className="session-status-dot session-status-dot-anchored"
-                    data-activity={session.activity}
-                    data-lifecycle-state={getSidebarSessionLifecycleState(session)}
-                    key={`status-${session.sessionId}`}
-                    style={getAnchoredSessionStatusStyle(session.sessionId)}
-                  />
+	                  <div
+	                    aria-hidden
+	                    className="session-status-dot session-status-dot-anchored"
+	                    data-activity={session.activity}
+	                    data-lifecycle-state={getSidebarSessionLifecycleState(session)}
+	                    data-remote-session={String(Boolean(group.remoteMachineContext))}
+	                    key={`status-${session.sessionId}`}
+	                    style={getAnchoredSessionStatusStyle(session.sessionId)}
+	                  />
                 ))
               : null}
           </div>

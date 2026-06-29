@@ -34,14 +34,20 @@ describe("sidebar settings menu source", () => {
      * CDXC:SidebarTopChrome 2026-06-29-03:01:
      * The shortcut icon row moves up 14px by removing the old nav top margin, and Search owns a separate top gap.
      *
-     * CDXC:SidebarTopChrome 2026-06-29-03:25:
-     * Search moves down to a 12px top gap while Quick's first-section extra tightens by 7px toward Search.
+     * CDXC:SidebarTopChrome 2026-06-29-18:34:
+     * Search's top gap matches the 4px gap between shortcut buttons while Quick's first-section extra stays tightened toward Search.
      *
      * CDXC:SidebarTopChrome 2026-06-29-03:05:
      * Shortcut icon buttons are 35px tall so the extra 1px extends downward from the fixed top edge.
      *
-     * CDXC:SidebarTopChrome 2026-06-29-03:19:
-     * Shortcut icon buttons are borderless while the dropdown panels keep their own bordered surfaces.
+     * CDXC:SidebarTopChrome 2026-06-29-16:40:
+     * Shortcut icon buttons use titlebar-colored rounded borders with internal-only gaps.
+     *
+     * CDXC:SidebarTopChrome 2026-06-29-18:10:
+     * Search uses the same titlebar-colored rounded border and explicit width math as the shortcut strip so their border edges align.
+     *
+     * CDXC:SidebarSearch 2026-06-29-21:32:
+     * Search is text-only and uses the shared primary-nav left padding again so it aligns with rows below.
      *
      * CDXC:SidebarTopChrome 2026-06-29-03:39:
      * The overflow menu icon should use "More" for its shortcut tooltip while keeping Settings as a dropdown item.
@@ -53,12 +59,24 @@ describe("sidebar settings menu source", () => {
     expect(sidebarAppSource).toContain('label="Keep awake"');
     expect(sidebarAppSource).toContain('type: "runTitlebarKeepAwakeCommand"');
     expect(groupPanelsCssSource).toContain("--reference-sidebar-primary-shortcut-count");
-    expect(groupPanelsCssSource).not.toContain(`.reference-sidebar-primary-icon-row
+    expect(groupPanelsCssSource).toContain("column-gap: 4px;");
+    expect(groupPanelsCssSource).toContain(`.reference-sidebar-primary-icon-row
   .reference-sidebar-nav-icon-button {
-  border: 1px solid var(--titlebar-button-border-color, #252525);`);
-    expect(groupPanelsCssSource).not.toContain(`.reference-sidebar-search-slot
+  border: 1px solid var(--titlebar-button-border-color, #252525);
+  border-radius: 5px;
+  height: 35px;`);
+    expect(groupPanelsCssSource).toContain(`> .reference-sidebar-primary-icon-row,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-primary-nav
+  > .reference-sidebar-search-slot {
+  max-width: none;`);
+    expect(groupPanelsCssSource).toContain(`.reference-sidebar-search-slot
   .reference-sidebar-nav-button {
-  border: 1px solid var(--titlebar-button-border-color, #252525);`);
+  border: 1px solid var(--titlebar-button-border-color, #252525);
+  border-radius: 5px;`);
+    expect(groupPanelsCssSource).not.toContain(
+      "padding-left: calc(4px + var(--reference-sidebar-primary-nav-edge-bleed-left));",
+    );
     expect(groupPanelsCssSource).toContain("width: min(220px, calc(100% - 16px));");
     expect(groupPanelsCssSource).toContain("transform: translateX(-50%);");
     expect(groupPanelsCssSource).toContain(`.reference-sidebar-primary-menu-cell {
@@ -69,12 +87,9 @@ describe("sidebar settings menu source", () => {
     expect(groupPanelsCssSource).toContain(`  margin: 0;
   min-width: 0;`);
     expect(groupPanelsCssSource).toContain(`.reference-sidebar-search-slot {
-  margin-top: 12px;
+  margin-top: 4px;
   min-width: 0;`);
     expect(groupPanelsCssSource).toContain("--reference-sidebar-quick-top-extra: -2px;");
-    expect(groupPanelsCssSource).toContain(`.reference-sidebar-primary-icon-row
-  .reference-sidebar-nav-icon-button {
-  height: 35px;`);
     expect(groupPanelsCssSource).toContain("min-height: 35px;");
     expect(titlebarHostSource).not.toContain('className="titlebar-open-group titlebar-settings-group"');
     expect(titlebarHostSource).not.toContain('showTitlebarDropdownPanel("settings", event.currentTarget)');

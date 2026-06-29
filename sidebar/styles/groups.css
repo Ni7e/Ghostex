@@ -66,14 +66,18 @@
    *
    * CDXC:ProjectDragPreview 2026-05-21-11:57:
    * The custom ghost should sit slightly below the pointer and reuse the same
-   * icon/title layout as a real project header. Keep the card shell, but let
-   * the nested group-title classes own spacing, font, and icon sizing.
+   * title layout as a real project header. Keep the card shell, but let the
+   * nested group-title classes own spacing and font sizing.
    *
    * CDXC:ProjectDragPreview 2026-05-28-12:35:
    * Sidebar project-header drag feedback must match the grabbed header button's
    * width and stay horizontally locked to that row. The React drag state owns
    * fixed left/width values, so this shell should look like the native header
    * hover surface instead of a narrow floating card.
+   *
+   * CDXC:ProjectHeaders 2026-06-29-21:04:
+   * Project and worktree rows no longer show a leading folder or branch glyph,
+   * so the drag ghost must also be title-first instead of reserving an icon slot.
    */
   align-items: center;
   background: color-mix(
@@ -107,34 +111,19 @@
 .project-drag-ghost .group-title-row {
   /*
    * CDXC:ProjectDragPreview 2026-06-12-12:00:
-   * The macOS sidebar project drag ghost should keep its icon and title aligned
-   * with the grabbed header row; nudge both 15px right so they line up with the
-   * live project header during drag.
+   * The macOS sidebar project drag ghost should keep its title aligned with the
+   * grabbed header row. Project rows are now iconless, so do not keep the old
+   * leading glyph gutter in the moving preview.
    */
   gap: 0;
   min-height: 32px;
-  padding-left: 15px;
+  padding-left: 0;
   width: 100%;
-}
-
-.project-drag-ghost .group-collapse-button {
-  color: #a6adb6;
-  height: 16px;
-  padding: 0;
-  right: auto;
-  top: auto;
-  width: 16px;
-}
-
-.project-drag-ghost .section-titlebar-toggle-icon,
-.project-drag-ghost .group-collapse-icon {
-  height: 16px;
-  width: 16px;
 }
 
 .project-drag-ghost .group-title-handle {
   flex: 0 1 auto;
-  margin-left: 12px;
+  margin-left: 0;
   max-width: 100%;
 }
 
@@ -231,10 +220,10 @@
 .native-sidebar-shell[data-sidebar-mode="combined"] .group-head {
   /*
    * CDXC:SidebarHover 2026-05-04-09:12
-   * Combined group headers should keep left padding before the project icon,
-   * and trailing controls must touch the hover surface's right edge. The last
-   * inset made the hover surface too narrow; show one more pixel on the right
-   * so the plus button has visible surface behind its border.
+   * Combined group headers should keep compact left padding before the project
+   * title, and trailing controls must touch the hover surface's right edge. The
+   * last inset made the hover surface too narrow; show one more pixel on the
+   * right so the plus button has visible surface behind its border.
    */
   margin-right: calc(
     -1 * ((var(--sidebar-session-column-offset) / 2) + var(--sidebar-group-inline-padding)) + 5px
@@ -468,11 +457,23 @@
    * CDXC:ProjectHeaders 2026-05-21-01:08:
    * Project header actions should align to the right edge of the header surface.
    * Keep the title cell shrink-wrapped so the right-aligned action cluster owns
-   * the trailing slot without making icons drift during expand/collapse.
+   * the trailing slot without making the title drift during expand/collapse.
    */
   flex: 0 1 auto;
   margin-left: calc(8px * var(--sidebar-density-scale));
   max-width: 100%;
+}
+
+.group[data-project-group="true"]
+  .group-title-row[data-project-leading-icon="false"]
+  .group-title-handle {
+  /*
+   * CDXC:ProjectHeaders 2026-06-29-21:04:
+   * Project and worktree rows no longer show a leading folder or branch glyph,
+   * so their titles should reclaim the old icon gutter instead of preserving an
+   * empty indent.
+   */
+  margin-left: 0;
 }
 
 .group[data-project-group="true"] .group-title-row {
@@ -1352,14 +1353,15 @@
 
 /* CDXC:SidebarReference 2026-05-08-01:10: Reference-mode groups should read
    like the provided sidebar: muted section labels, normal-case project names,
-   folder icons for projects, no connector rail, and no visible legacy header
-   action cluster.
+   no connector rail, and no visible legacy header action cluster.
    CDXC:SidebarReference 2026-05-08-01:28: Use Codex.app-sized CSS pixels for
    group labels and rows; the previous screenshot-pixel scale made every
    sidebar element visually massive in the real app.
    CDXC:SidebarReference 2026-05-08-01:41: Reference section headers now own
-   Chats/Projects collapse, while project rows keep normal folder icons at
-   rest and open folder icons while expanded even during hover. */
+   Chats/Projects collapse, while project rows keep their normal title-first
+   layout during hover.
+   CDXC:ProjectHeaders 2026-06-29-21:04: Reference project rows should match
+   combined project rows by omitting the leading folder/worktree glyph. */
 .sidebar-reference-layout[data-reference-sidebar="true"] .group-list {
   --sidebar-session-column-offset: 0px;
   justify-items: stretch;
@@ -1423,7 +1425,7 @@
 .sidebar-reference-layout[data-reference-sidebar="true"] .group[data-project-group="true"] .group-head {
   /*
    * CDXC:SidebarStickyHeaders 2026-05-20-08:08:
-   * Project folder headers are the only sticky context row in the sidebar.
+   * Project headers are the only sticky context row in the sidebar.
    * Quick and Projects labels scroll normally, while each project header
    * sticks only within its own group so the nearest project replaces the
    * previous one naturally through long session lists.
@@ -1442,13 +1444,13 @@
    * CDXC:ProjectHeaders 2026-05-31-15:38:
    * Project header buttons must start at the sidebar's left edge in the native
    * reference layout. Use the shared main-row over-bleed and compensate with
-   * equal padding so folder icons, titles, git summaries, and header actions
-   * do not shift while the button surface reaches both edges.
+   * equal padding so titles, git summaries, and header actions do not shift
+   * while the button surface reaches both edges.
    *
    * CDXC:ProjectHeaders 2026-05-31-17:31:
    * The reference scroll viewport now owns the content-column over-bleed, so
    * project headers use the smaller scroll-row bleed. This keeps the header
-   * surface flush without shifting folder titles farther left.
+   * surface flush without shifting project titles farther left.
    *
    * CDXC:ProjectHeaders 2026-05-31-18:16:
    * Project header rows stay full-width, but every leading header element
@@ -1458,23 +1460,40 @@
    * Project header contents need another 2px left inset without changing the
    * right inset or the full-width header bounds.
    *
+   * CDXC:ProjectHeaders 2026-06-29-21:19:
+   * After removing the project/worktree leading glyph, reduce the reference
+   * project header left inset by 12px so titles do not keep the old icon gutter.
+   *
    * CDXC:ProjectHeaders 2026-06-19-10:52:
    * The project list no longer uses outside row gaps. Add vertical padding to
    * each project header so adjacent headers keep their scan spacing without
    * leaving blank context-menu space between buttons.
    *
-   * CDXC:SidebarTitlebarColors 2026-06-19-12:56:
-   * Custom-gradient sidebars need sticky project headers to stay transparent
-   * at rest. Let the sidebar gradient show through the sticky row and rely on
-   * the existing ::before hover/focus surface for local interaction feedback.
+   * CDXC:SidebarStickyHeaders 2026-06-29-18:46:
+   * Sticky project headers must stay native-CSS fast while scrolling. Paint the
+   * app background directly so session rows cannot show through the stuck
+   * header, and avoid per-project scroll listeners that measure and clip the
+   * session body every frame.
+   *
+   * CDXC:SidebarStickyHeaders 2026-06-29-20:49:
+   * When the reference sidebar uses a custom gradient backing, sticky project
+   * headers need the same viewport-anchored background token so they blend with
+   * the sidebar instead of showing a flat color band.
+   *
+   * CDXC:SidebarStickyHeaders 2026-06-29-21:37:
+   * Header backgrounds use the root-published sidebar gradient geometry so
+   * sticky rows near the bottom do not drift from the sidebar shell gradient.
    */
-  background: transparent;
+  background: var(--reference-sidebar-background, var(--app-background));
+  background-attachment: var(--reference-sidebar-background-attachment, scroll);
+  background-position: var(--reference-sidebar-background-position, left top);
+  background-size: var(--reference-sidebar-background-size, auto);
   border-radius: 0;
   box-sizing: border-box;
   margin-left: calc(-1 * var(--reference-sidebar-scroll-row-bleed-left, 7px));
   margin-right: calc(-1 * var(--reference-sidebar-scroll-row-bleed-right, 0px));
   padding-bottom: 5.5px;
-  padding-left: calc(18px + var(--reference-sidebar-scroll-row-bleed-left, 7px));
+  padding-left: calc(6px + var(--reference-sidebar-scroll-row-bleed-left, 7px));
   padding-right: calc(10px + var(--reference-sidebar-scroll-row-bleed-right, 0px));
   padding-top: 5.5px;
   position: sticky;
@@ -1839,18 +1858,6 @@
    */
   gap: 0;
   overflow: visible;
-}
-
-.sidebar-reference-layout[data-reference-sidebar="true"]
-  .group[data-project-group="true"]
-  .group-sessions-shell {
-  /*
-   * CDXC:SidebarTitlebarColors 2026-06-19-13:22:
-   * Sticky project headers are transparent so the custom sidebar gradient can
-   * show through. Clip the project session shell by the measured sticky-header
-   * overlap instead of painting a header background over scrolling rows.
-   */
-  clip-path: inset(var(--reference-project-session-clip-top, 0px) 0 0 0);
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .group[data-session-connector="true"] .session-frame {

@@ -26,6 +26,10 @@ describe("sidebar search source", () => {
      * CDXC:SidebarSearch 2026-06-19-13:59:
      * The inline placeholder fades down after activation, while closing empty
      * search restores the plain Search row without a re-entry animation.
+     *
+     * CDXC:SidebarSearch 2026-06-29-21:32:
+     * The top Search row is text-only in inactive and active states so its text
+     * aligns with rows below without a leading magnifying-glass icon.
      */
     const searchItemSource = sourceBetween(
       sidebarAppSource,
@@ -35,7 +39,10 @@ describe("sidebar search source", () => {
 
     expect(searchItemSource).toContain("reference-sidebar-inline-search-row");
     expect(searchItemSource).toContain("reference-sidebar-inline-search-input");
+    expect(searchItemSource).toContain('<span className="reference-sidebar-nav-label">Search</span>');
     expect(searchItemSource).toContain('placeholder="Search"');
+    expect(searchItemSource).not.toContain("<IconSearch");
+    expect(searchItemSource).not.toContain("icon={IconSearch}");
     expect(searchItemSource).not.toContain("<SidebarSessionSearchField");
     expect(groupPanelsCssSource).toContain(".reference-sidebar-inline-search-input");
     expect(groupPanelsCssSource).toContain("background: transparent;");
