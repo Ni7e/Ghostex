@@ -578,9 +578,7 @@ describe("normalizeghostexSettings", () => {
   test("defaults sidebar UI settings to the Recommended preset", () => {
     /**
      * CDXC:SidebarSettingsPresets 2026-06-13-01:06:
-     * Recommended is the default sidebar preset for normalized settings and the
-     * leftmost Settings preset button. It keeps agent icons hover-only while
-     * showing detailed sidebar status chrome.
+     * Superseded by CDXC:SidebarSettingsPresets 2026-06-30-22:29.
      *
      * CDXC:SidebarSettingsPresets 2026-06-13-15:42:
      * Recommended also hides session-card Last Active timestamps so the default
@@ -599,6 +597,11 @@ describe("normalizeghostexSettings", () => {
      * All preset buttons should leave session-card close buttons enabled on
      * hover so switching sidebar density or detail mode does not hide the
      * primary per-session close affordance.
+     *
+     * CDXC:SidebarSettingsPresets 2026-06-30-22:29:
+     * Recommended is the default sidebar preset and matches the user's current
+     * preset-controlled sidebar configuration, including visible session agent
+     * icons.
      */
     expect(DEFAULT_ghostex_SETTINGS).toMatchObject(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended);
     expect(normalizeghostexSettings({})).toMatchObject(
@@ -672,7 +675,7 @@ describe("normalizeghostexSettings", () => {
       ),
     ).toBe("recommended");
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideSessionAgentIconUntilHover).toBe(
-      true,
+      false,
     );
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideProjectHeaderDiffStats).toBe(false);
     const floatingIndicatorsEnabled = normalizeghostexSettings({
@@ -780,9 +783,8 @@ describe("normalizeghostexSettings", () => {
   test("normalizes diagnostic logging scenarios as an explicit disk logging allowlist", () => {
     /*
      * CDXC:DiagnosticsSettings 2026-06-27-22:07:
-     * Persistent routine logs must default to failures-only and require an
-     * allowlisted scenario id, so enabling one repro area cannot turn on every
-     * macOS and GPUI diagnostic writer.
+     * Persistent routine logs require an allowlisted scenario id, so enabling
+     * one repro area cannot turn on every macOS and GPUI diagnostic writer.
      *
      * CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:
      * The setup slow-open repro temporarily defaults native.app.modal on so
@@ -793,9 +795,21 @@ describe("normalizeghostexSettings", () => {
      * Remote gxserver install diagnostics must be enabled by default so the
      * approval-click crash path writes phase logs without requiring users to
      * find the Settings toggle before reproducing.
+     *
+     * CDXC:ChromeResponsivenessDiagnostics 2026-06-30-23:52:
+     * Sidebar/titlebar blanking and heavy lag diagnostics must be enabled by
+     * default for repros, while explicit enabled:false entries still override
+     * those defaults so users can turn routine logging off.
      */
     expect(DIAGNOSTIC_LOGGING_SCENARIOS.map((scenario) => scenario.id)).toContain(
       "gpui.app.modal",
+    );
+    expect(DIAGNOSTIC_LOGGING_SCENARIOS).toContainEqual(
+      expect.objectContaining({
+        id: "native.chrome.responsiveness",
+        label: "Sidebar and titlebar responsiveness",
+        logFiles: ["native-chrome-responsiveness-debug.log", "sidebar-refresh-debug.log"],
+      }),
     );
     expect(DIAGNOSTIC_LOGGING_SCENARIOS).toContainEqual(
       expect.objectContaining({
@@ -804,18 +818,20 @@ describe("normalizeghostexSettings", () => {
         logFiles: ["remote-gxserver-install-debug.log"],
       }),
     );
+    const defaultEnabledScenarios = {
+      "native.app.modal": { enabled: true },
+      "native.chrome.responsiveness": { enabled: true },
+      "native.host.lifecycle": { enabled: true },
+      "native.mode.switcher": { enabled: true },
+      "native.remote.gxserver.install": { enabled: true },
+      "native.sidebar.refresh": { enabled: true },
+    };
     expect(DEFAULT_ghostex_SETTINGS.diagnosticLogging).toEqual({
-      scenarios: {
-        "native.app.modal": { enabled: true },
-        "native.remote.gxserver.install": { enabled: true },
-      },
+      scenarios: defaultEnabledScenarios,
       version: 1,
     });
     expect(normalizeghostexSettings({}).diagnosticLogging).toEqual({
-      scenarios: {
-        "native.app.modal": { enabled: true },
-        "native.remote.gxserver.install": { enabled: true },
-      },
+      scenarios: defaultEnabledScenarios,
       version: 1,
     });
 
@@ -832,8 +848,8 @@ describe("normalizeghostexSettings", () => {
     expect(normalized.diagnosticLogging).toEqual({
       scenarios: {
         "gpui.app.modal": { enabled: true, expiresAt: "2026-06-27T20:30:00.000Z" },
-        "native.app.modal": { enabled: true },
-        "native.remote.gxserver.install": { enabled: true },
+        ...defaultEnabledScenarios,
+        "native.sidebar.refresh": { enabled: false },
         "native.terminal.focus": { enabled: true },
       },
       version: 1,

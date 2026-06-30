@@ -167,6 +167,13 @@ export const DIAGNOSTIC_LOGGING_SCENARIOS = [
     logFiles: ["native-mode-switcher-debug.log"],
   },
   {
+    description: "Sidebar and titlebar WebKit lifecycle, titlebar event-loop stalls, and Resources sampler timing.",
+    group: "macOS",
+    id: "native.chrome.responsiveness",
+    label: "Sidebar and titlebar responsiveness",
+    logFiles: ["native-chrome-responsiveness-debug.log", "sidebar-refresh-debug.log"],
+  },
+  {
     description: "Session-title synchronization, first-prompt rename, and title-generation diagnostics.",
     group: "macOS",
     id: "native.session.title",
@@ -278,9 +285,20 @@ const DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS: DiagnosticLoggingSettings["scenarios
    * click, before users can re-open Settings. Keep the precise remote-install
    * diagnostic scenario enabled by default so the Settings toggle is already on
    * for repro logs while the writer still records only sanitized phase data.
+   *
+   * CDXC:ChromeResponsivenessDiagnostics 2026-06-30-23:52:
+   * Sidebar blanking, titlebar click loss, and heavy app lag can happen before
+   * users can enable diagnostics. Default the targeted sidebar/titlebar chrome,
+   * sidebar refresh, mode-switcher, and native lifecycle scenarios on so a repro
+   * captures sanitized WebKit lifecycle, route handoff, gxserver renderer, and
+   * titlebar sampler timing breadcrumbs immediately after update.
    */
   "native.app.modal": { enabled: true },
+  "native.chrome.responsiveness": { enabled: true },
+  "native.host.lifecycle": { enabled: true },
+  "native.mode.switcher": { enabled: true },
   "native.remote.gxserver.install": { enabled: true },
+  "native.sidebar.refresh": { enabled: true },
 };
 const DIAGNOSTIC_LOGGING_SCENARIO_IDS = new Set<string>(
   DIAGNOSTIC_LOGGING_SCENARIOS.map((scenario) => scenario.id),
@@ -989,6 +1007,28 @@ export type ghostexSettings = {
   commandsPanelDefaultHeightPx: number;
 };
 
+export type ghostexSettingsPatch = Partial<ghostexSettings>;
+
+export type ghostexSettingsUpdateSource =
+  | "firstLaunch:preferences"
+  | "settings:bulk"
+  | "settings:control"
+  | "settings:navigation"
+  | "settings:remoteMachines"
+  | "sidebar:remoteMachineOrder";
+
+export function canSettingsUpdateSourceChangeRemoteMachines(
+  source: ghostexSettingsUpdateSource | undefined,
+): boolean {
+  /*
+   * CDXC:RemoteMachines 2026-06-30-15:18:
+   * Remote machine settings must not be rewritten by broad Settings saves such
+   * as tab, scroll, preset, or reset updates. Only explicit remote-machine UI
+   * and sidebar ordering operations may replace the saved machine list.
+   */
+  return source === "settings:remoteMachines" || source === "sidebar:remoteMachineOrder";
+}
+
 export const SIDEBAR_SETTINGS_PRESET_KEYS = [
   "hideSessionAgentIconUntilHover",
   "hideBrowserFaviconUntilHover",
@@ -1008,10 +1048,10 @@ export type SidebarSettingsPresetSettings = Pick<ghostexSettings, SidebarSetting
  * Preset state is derived from the controlled sidebar settings instead of persisted separately, so manual deviations show Custom without adding another source of truth.
  *
  * CDXC:SidebarSettingsPresets 2026-06-12-07:10:
- * Recommended matches Detailed chrome but keeps session agent icons hover-only so dense sidebars stay readable without losing icon access on demand.
+ * Superseded by CDXC:SidebarSettingsPresets 2026-06-30-22:29.
  *
  * CDXC:SidebarSettingsPresets 2026-06-13-01:06:
- * Recommended is the first-run sidebar preset and the leftmost Settings preset button. Defaults should expose detailed sidebar status chrome while keeping agent identity hover-only.
+ * Superseded by CDXC:SidebarSettingsPresets 2026-06-30-22:29.
  *
  * CDXC:SidebarSettingsPresets 2026-06-13-15:42:
  * Recommended should keep the sidebar quieter by hiding session-card Last Active timestamps while preserving the rest of the detailed status chrome.
@@ -1026,6 +1066,9 @@ export type SidebarSettingsPresetSettings = Pick<ghostexSettings, SidebarSetting
  *
  * CDXC:SidebarSettingsPresets 2026-06-23-08:20:
  * Every sidebar preset must show session-card close buttons on hover. Presets may still tune density, icons, timestamps, project stats, and menu-bar indicators, but they should not remove the primary per-session close affordance.
+ *
+ * CDXC:SidebarSettingsPresets 2026-06-30-22:29:
+ * Recommended should match the user's current preset-controlled sidebar configuration: visible session agent icons, visible browser favicons, close button on hover, hidden Last Active timestamps, visible project git stats, hidden changed-file counts, and visible menu-bar session indicators.
  */
 export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
   codex: {
@@ -1056,7 +1099,7 @@ export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
     hideMenuBarSessionStatusIndicators: false,
   },
   recommended: {
-    hideSessionAgentIconUntilHover: true,
+    hideSessionAgentIconUntilHover: false,
     hideBrowserFaviconUntilHover: false,
     showCloseButtonOnSessionCards: true,
     hideLastActiveTimeOnSessionCards: true,
@@ -1230,7 +1273,10 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * hover-only mode for quieter session lists.
    *
    * CDXC:SidebarSettingsPresets 2026-06-13-01:06:
-   * Recommended is the first-run preset and keeps session agent icons hover-only
+   * Superseded by CDXC:SidebarSettingsPresets 2026-06-30-22:29.
+   *
+   * CDXC:SidebarSettingsPresets 2026-06-30-22:29:
+   * Recommended is the first-run preset and keeps session agent icons visible
    * while showing detailed sidebar status chrome.
    */
   hideSessionAgentIconUntilHover:
@@ -1239,6 +1285,11 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * CDXC:SidebarSessionAgentIcons 2026-06-29-23:58:
    * Preserve the existing monochrome sidebar until users opt into colored
    * session agent logos from Session Cards settings.
+   *
+   * CDXC:SidebarSessionAgentIcons 2026-06-30-22:40:
+   * The same opt-in colors the selected agent launcher icon in project and
+   * Quick headers, so the visible picker identity matches the session-card
+   * agent-logo mode.
    */
   useColoredSessionAgentIcons: false,
   /**
@@ -1786,10 +1837,9 @@ export function setDiagnosticLoggingScenario(
   state: DiagnosticLoggingScenarioState | undefined,
 ): DiagnosticLoggingSettings {
   const scenarios = { ...diagnosticLogging.scenarios };
-  if (state?.enabled) {
-    scenarios[scenarioId] = normalizeDiagnosticLoggingScenarioState(state) ?? {
-      enabled: true,
-    };
+  const normalizedState = normalizeDiagnosticLoggingScenarioState(state);
+  if (normalizedState) {
+    scenarios[scenarioId] = normalizedState;
   } else {
     delete scenarios[scenarioId];
   }
@@ -3103,7 +3153,7 @@ export function normalizeDiagnosticLoggingSettings(
       continue;
     }
     const state = normalizeDiagnosticLoggingScenarioState(rawState);
-    if (state?.enabled) {
+    if (state) {
       scenarios[scenarioId as DiagnosticLoggingScenarioId] = state;
     }
   }
@@ -3116,11 +3166,23 @@ export function normalizeDiagnosticLoggingSettings(
 function normalizeDiagnosticLoggingScenarioState(
   candidate: unknown,
 ): DiagnosticLoggingScenarioState | undefined {
+  /*
+   * CDXC:ChromeResponsivenessDiagnostics 2026-06-30-23:52:
+   * Default-on diagnostic scenarios need a durable Off state. Preserve explicit
+   * enabled:false values so Settings can disable routine chrome/lag logging
+   * without reset-to-default immediately turning it back on.
+   */
   if (candidate === true) {
     return { enabled: true };
   }
+  if (candidate === false) {
+    return { enabled: false };
+  }
   if (!isRecord(candidate)) {
     return undefined;
+  }
+  if (candidate.enabled === false) {
+    return { enabled: false };
   }
   if (candidate.enabled !== true) {
     return undefined;

@@ -195,6 +195,8 @@ import {
   type SidebarSide,
   type TerminalDevServerOpenTarget,
   type TerminalCursorStyle,
+  type ghostexSettingsPatch,
+  type ghostexSettingsUpdateSource,
   type ghostexSettings,
 } from "../shared/ghostex-settings";
 import {
@@ -520,7 +522,6 @@ type MainSettingsSectionId =
   | "agents"
   | "appearance"
   | "sidebar"
-  | "workspacesSessions"
   | "terminal"
   | "tools"
   | "statusIndicators"
@@ -535,7 +536,6 @@ type MainSettingsScrollTargetId =
   | "appIcon"
   | "sidebarTags"
   | "sessionCards"
-  | "workspace"
   | "debugging"
   | "terminalBehavior"
   | "terminalScrolling"
@@ -583,33 +583,45 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
    * Notifications/Sounds and Status Indicators remain independent sections
    * instead of merging into Appearance because users distinguish audible or
    * system alerts from always-visible status surfaces.
+   *
+   * CDXC:SettingsNavigation 2026-06-30-10:35:
+   * Settings should not expose a standalone Workspace section header or workspace sidebar destination. Active Pane Border belongs with General appearance tuning, Terminal Background and click-to-wake belong with Terminal controls, Command Pane Default Height belongs beside the other default size reset value, and Auto Sleep moves under System.
    */
   appearance: [
     "sidebarTheme",
     "customSidebarTitlebarBackgroundDarknessPercent",
     "customSidebarTitlebarBackgroundTintColor",
+    "workspaceActivePaneBorderColor",
     "appIconSourceId",
   ],
   sidebar: [
     "sidebarSettingsPreset",
-    "sidebarSide",
-    "sidebarDefaultWidthPx",
-    "projectSessionListCollapsedCount",
     /*
+     * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
+     * Every setting mutated by a sidebar preset must be visible directly below
+     * the preset selector, even when Show Advanced is off. Keep preset-owned
+     * session-card, project-stat, and menu-bar indicator controls in this
+     * Sidebar group so users can inspect and tune exactly what a preset changed.
+     *
      * CDXC:SidebarProjectStats 2026-06-16-02:14:
      * Project git-stat display controls belong with Sidebar settings because they change sidebar project rows, not editor behavior.
-     * Keep both controls Advanced and use changed-file wording for the file-count toggle so it does not read like an editor-pane setting.
+     * Use changed-file wording for the file-count toggle so it does not read like an editor-pane setting.
      */
-    "hideProjectHeaderDiffStats",
-    "showProjectEditorDiffFileCount",
-    "agentManagerZoomPercent",
-    "createSessionOnSidebarDoubleClick",
-    "renameSessionOnDoubleClick",
     "hideSessionAgentIconUntilHover",
-    "useColoredSessionAgentIcons",
     "hideBrowserFaviconUntilHover",
     "showCloseButtonOnSessionCards",
     "hideLastActiveTimeOnSessionCards",
+    "hideProjectHeaderDiffStats",
+    "showProjectEditorDiffFileCount",
+    "hideMenuBarSessionStatusIndicators",
+    "sidebarSide",
+    "sidebarDefaultWidthPx",
+    "commandsPanelDefaultHeightPx",
+    "projectSessionListCollapsedCount",
+    "agentManagerZoomPercent",
+    "createSessionOnSidebarDoubleClick",
+    "renameSessionOnDoubleClick",
+    "useColoredSessionAgentIcons",
     "showSessionCloseContextMenuAction",
     "sidebarSessionTagListItems",
   ],
@@ -620,35 +632,21 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
    *
    * CDXC:StatusIndicators 2026-06-27-20:11:
    * The desktop floating session badge surface was removed from macOS and GPUI.
-   * Keep the menu bar indicator and floating pet settings in this section, but
-   * do not expose the removed floating badge toggle or size selector.
+   *
+   * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
+   * The menu bar session indicator is preset-owned, so it now renders under
+   * Sidebar next to the other preset-controlled rows. This section keeps the
+   * floating pet settings without exposing the removed floating badge toggle or
+   * size selector.
    */
   statusIndicators: [
-    "hideMenuBarSessionStatusIndicators",
     "petOverlayEnabled",
     "selectedPetId",
-  ],
-  workspacesSessions: [
-    "workspaceActivePaneBorderColor",
-    "workspaceBackgroundColor",
-    "clickToWakeSleepingSessions",
-    "commandsPanelDefaultHeightPx",
-    "autoSleepCodeEditorEnabled",
-    "autoSleepCodeEditorIdleMinutes",
-    "autoSleepGitEditorEnabled",
-    "autoSleepGitEditorIdleMinutes",
-    "autoSleepProjectEditorEnabled",
-    "autoSleepProjectEditorIdleMinutes",
-    "autoSleepBrowserSessionsEnabled",
-    "autoSleepBrowserIdleMinutes",
-    "autoSleepAgentSessionsEnabled",
-    "autoSleepAgentIdleMinutes",
-    "autoSleepRequireAgentResumeCommand",
-    "autoSleepFavoriteAgentSessions",
   ],
   terminal: [
     "ghosttySettingsActions",
     "terminalGhosttyTheme",
+    "workspaceBackgroundColor",
     "terminalFontFamily",
     "terminalFontSize",
     "terminalFontWeight",
@@ -659,6 +657,7 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "terminalCursorStyle",
     "terminalCursorStyleBlink",
     "sessionPersistenceProvider",
+    "clickToWakeSleepingSessions",
     "showSessionIdInTerminalPanes",
     "promptEditorBackend",
     "terminalScrollbackLimitMb",
@@ -701,6 +700,18 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "actionCompletionSound",
   ],
   system: [
+    "autoSleepCodeEditorEnabled",
+    "autoSleepCodeEditorIdleMinutes",
+    "autoSleepGitEditorEnabled",
+    "autoSleepGitEditorIdleMinutes",
+    "autoSleepProjectEditorEnabled",
+    "autoSleepProjectEditorIdleMinutes",
+    "autoSleepBrowserSessionsEnabled",
+    "autoSleepBrowserIdleMinutes",
+    "autoSleepAgentSessionsEnabled",
+    "autoSleepAgentIdleMinutes",
+    "autoSleepRequireAgentResumeCommand",
+    "autoSleepFavoriteAgentSessions",
     "hideKeepAwakeTitlebarControl",
     "keepAwakeDefaultDurationMinutes",
     "keepAwakeAllowDisplaySleep",
@@ -736,18 +747,8 @@ const MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS = {
   appIcon: ["appIconSourceId"],
   sidebarTags: ["sidebarSessionTagListItems"],
   sessionCards: [
-    "hideSessionAgentIconUntilHover",
     "useColoredSessionAgentIcons",
-    "hideBrowserFaviconUntilHover",
-    "showCloseButtonOnSessionCards",
-    "hideLastActiveTimeOnSessionCards",
     "showSessionCloseContextMenuAction",
-  ],
-  workspace: [
-    "workspaceActivePaneBorderColor",
-    "workspaceBackgroundColor",
-    "clickToWakeSleepingSessions",
-    "commandsPanelDefaultHeightPx",
   ],
   debugging: [
     "debuggingMode",
@@ -858,11 +859,15 @@ const DIAGNOSTIC_LOGGING_GROUPS: readonly ["macOS", "GPUI"] = ["macOS", "GPUI"];
  * CDXC:SettingsAdvanced 2026-06-16-08:12:
  * Browser feedback, Storage, session-card chrome, Workspace tuning, and Terminal Behavior controls are advanced-only browsing rows because the default General page should stay focused on common setup and daily preferences.
  *
+ * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
+ * Preset-owned sidebar chrome is no longer advanced-only because users need to
+ * see every setting a preset changes directly below the preset selector.
+ *
  * CDXC:SettingsTheming 2026-06-16-08:58:
  * Theming controls should remain visible without Show Advanced. Do not mark Theme, Background Contrast, or Background Tint as advanced rows.
  *
  * CDXC:SettingsAdvanced 2026-06-16-09:20:
- * Empty-sidebar double-click creation remains a low-frequency interaction preference and should hide behind Show Advanced. Status Indicators should keep only the floating desktop indicator toggle advanced; its size, the menu bar indicator, Wake Pet, and Pet picker are normal settings.
+ * Empty-sidebar double-click creation remains a low-frequency interaction preference and should hide behind Show Advanced. Status Indicators keeps Wake Pet and Pet visible as normal settings; the menu-bar indicator is preset-owned and stays beside the sidebar preset controls.
  *
  * CDXC:ExperimentalFeatures 2026-06-28-07:41:
  * Enable Experimental Features is the user-facing name for the persisted
@@ -883,9 +888,6 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   "sidebarDefaultWidthPx",
   "projectSessionListCollapsedCount",
   "createSessionOnSidebarDoubleClick",
-  "hideSessionAgentIconUntilHover",
-  "hideBrowserFaviconUntilHover",
-  "showCloseButtonOnSessionCards",
   "showSessionCloseContextMenuAction",
   "workspaceActivePaneBorderColor",
   "workspaceBackgroundColor",
@@ -916,8 +918,6 @@ const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
    * Custom Dock icons are advanced appearance personalization. Keep the control searchable, but hide it from normal Settings browsing and place it below Editor so it does not compete with daily sidebar/theme controls.
    */
   "appIconSourceId",
-  "hideProjectHeaderDiffStats",
-  "showProjectEditorDiffFileCount",
   "showUntrackedProjectDiffWhenNoTrackedChanges",
   "autoSleepCodeEditorEnabled",
   "autoSleepCodeEditorIdleMinutes",
@@ -1138,6 +1138,18 @@ function getMostlyVisibleSettingsSectionId<SectionId extends string>(
   return bestSection?.id;
 }
 
+function createNormalizedSettingsPatch(
+  normalizedSettings: ghostexSettings,
+  patch: ghostexSettingsPatch,
+): ghostexSettingsPatch {
+  return Object.fromEntries(
+    (Object.keys(patch) as Array<keyof ghostexSettings>).map((key) => [
+      key,
+      normalizedSettings[key],
+    ]),
+  ) as ghostexSettingsPatch;
+}
+
 export type GhosttySettingsAction =
   | "applyRecommendedGhosttySettings"
   | "openGhosttyConfigFile"
@@ -1156,7 +1168,8 @@ export type SettingsModalProps = {
   initialTab?: SettingsModalTab;
   isOpen: boolean;
   presentation?: SettingsModalPresentation;
-  onChange: (settings: ghostexSettings) => void;
+  onChange: (settings: ghostexSettings, source?: ghostexSettingsUpdateSource) => void;
+  onPatch?: (patch: ghostexSettingsPatch, source: ghostexSettingsUpdateSource) => void;
   onClose: () => void;
   onOpenAccessibilityPreferences?: () => void;
   onOpenMacOSNotificationSettings?: () => void;
@@ -1206,6 +1219,7 @@ export function SettingsModal({
   initialTab = "settings",
   isOpen,
   onChange,
+  onPatch,
   onClose,
   presentation = "default",
   onOpenAccessibilityPreferences,
@@ -1285,6 +1299,7 @@ export function SettingsModal({
   const showAdvancedSettingsId = useId();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const pendingSettingsRef = useRef<ghostexSettings | undefined>(undefined);
+  const pendingSettingsPatchRef = useRef<ghostexSettingsPatch | undefined>(undefined);
   const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pendingNavigationPersistTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -1309,7 +1324,6 @@ export function SettingsModal({
   const sidebarTagsSectionRef = useRef<HTMLDivElement>(null);
   const soundsSectionRef = useRef<HTMLDivElement>(null);
   const storageSectionRef = useRef<HTMLDivElement>(null);
-  const workspaceSectionRef = useRef<HTMLDivElement>(null);
   const hotkeyActionsSectionRef = useRef<HTMLDivElement>(null);
   const hotkeyGeneralSectionRef = useRef<HTMLDivElement>(null);
   const hotkeyNavigationSectionRef = useRef<HTMLDivElement>(null);
@@ -1804,34 +1818,14 @@ export function SettingsModal({
     ]),
     sessionCards: getSettingsSectionSearch(settingsSearchQuery, "Session Cards", [
       {
-        key: "hideSessionAgentIconUntilHover",
-        subtitle: "Hide session agent icons until a session row is hovered.",
-        title: "Hide agent icon until hover",
-      },
-      {
         key: "useColoredSessionAgentIcons",
-        subtitle: "Render session agent logos with colored brand artwork instead of monochrome masks.",
+        subtitle: "Render session and selected-agent logos with colored brand artwork instead of monochrome masks.",
         title: "Use colored agent icons",
-      },
-      {
-        key: "hideBrowserFaviconUntilHover",
-        subtitle: "Hide browser page favicons until a session row is hovered.",
-        title: "Hide browser favicon until hover",
-      },
-      {
-        key: "showCloseButtonOnSessionCards",
-        subtitle: "Reveal the close control when hovering a card.",
-        title: "Show close button on hover",
       },
       /*
        * CDXC:SidebarSessions 2026-05-15-19:46:
        * Settings must not expose the card-hotkey visibility row; session-card shortcut visibility is no longer configurable from the modal.
        */
-      {
-        key: "hideLastActiveTimeOnSessionCards",
-        subtitle: "Hide Last Active timestamps from session-card title rows.",
-        title: "Hide last active time",
-      },
       {
         key: "showSessionCloseContextMenuAction",
         subtitle: "Show the Close item in session context menus.",
@@ -1841,19 +1835,17 @@ export function SettingsModal({
     statusIndicators: getSettingsSectionSearch(settingsSearchQuery, "Status Indicators", [
       /*
        * CDXC:StatusIndicators 2026-05-20-12:00:
-       * hide* settings stay persisted as hide flags, but Settings presents them
-       * as Show toggles so ON means the indicator surface is visible.
+       * Status Indicators groups session presence surfaces that communicate
+       * status at a glance.
        *
        * CDXC:StatusIndicators 2026-06-27-20:11:
-       * The removed floating session badge and its size selector must not appear
-       * in macOS or GPUI Settings. This section now keeps only the menu bar
-       * session indicator and floating pet controls.
+       * The removed floating session badge and its size selector must not
+       * appear in macOS or GPUI Settings.
+       *
+       * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
+       * The menu bar session indicator now lives under Sidebar because sidebar
+       * presets mutate it.
        */
-      {
-        key: "hideMenuBarSessionStatusIndicators",
-        subtitle: "Show the menu bar session status badges.",
-        title: "Show Menu Bar Session Indicators",
-      },
       {
         key: "petOverlayEnabled",
         subtitle: "Show the draggable animated pet in the native sidebar.",
@@ -1879,6 +1871,47 @@ export function SettingsModal({
         subtitle: "Apply a sidebar UI preset or show Custom when controlled settings diverge.",
         title: "Preset",
       },
+      /*
+       * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
+       * Search metadata follows the visible row order: preset-controlled rows
+       * sit immediately after Preset, before independent sidebar sizing and
+       * placement controls.
+       */
+      {
+        key: "hideSessionAgentIconUntilHover",
+        subtitle: "Hide session agent icons until a session row is hovered.",
+        title: "Hide agent icon until hover",
+      },
+      {
+        key: "hideBrowserFaviconUntilHover",
+        subtitle: "Hide browser page favicons until a session row is hovered.",
+        title: "Hide browser favicon until hover",
+      },
+      {
+        key: "showCloseButtonOnSessionCards",
+        subtitle: "Reveal the close control when hovering a card.",
+        title: "Show close button on hover",
+      },
+      {
+        key: "hideLastActiveTimeOnSessionCards",
+        subtitle: "Hide Last Active timestamps from session-card title rows.",
+        title: "Hide last active time",
+      },
+      {
+        key: "hideProjectHeaderDiffStats",
+        subtitle: "Hide +added/-removed line counts in sidebar project rows.",
+        title: "Hide project git stats",
+      },
+      {
+        key: "showProjectEditorDiffFileCount",
+        subtitle: "Show changed-file counts in sidebar project row git stats.",
+        title: "Show changed-file count",
+      },
+      {
+        key: "hideMenuBarSessionStatusIndicators",
+        subtitle: "Show the menu bar session status badges.",
+        title: "Show Menu Bar Session Indicators",
+      },
       {
         key: "sidebarSide",
         options: SIDEBAR_SIDE_OPTIONS,
@@ -1891,19 +1924,14 @@ export function SettingsModal({
         title: "Default Width",
       },
       {
+        key: "commandsPanelDefaultHeightPx",
+        subtitle: "Height used when opening the command pane and when double-clicking its top resize rail.",
+        title: "Command Pane Default Height",
+      },
+      {
         key: "projectSessionListCollapsedCount",
         subtitle: "Number of project sessions kept visible after Show less.",
         title: "Show Less Count",
-      },
-      {
-        key: "hideProjectHeaderDiffStats",
-        subtitle: "Hide +added/-removed line counts in sidebar project rows.",
-        title: "Hide project git stats",
-      },
-      {
-        key: "showProjectEditorDiffFileCount",
-        subtitle: "Show changed-file counts in sidebar project row git stats.",
-        title: "Show changed-file count",
       },
       {
         key: "agentManagerZoomPercent",
@@ -1936,6 +1964,11 @@ export function SettingsModal({
         key: "customSidebarTitlebarBackgroundTintColor",
         subtitle: "Subtle tint color for the sidebar and titlebar background.",
         title: "Background Tint",
+      },
+      {
+        key: "workspaceActivePaneBorderColor",
+        subtitle: "CSS color for the focused pane border.",
+        title: "Active Pane Border",
       },
     ]),
     sidebarTags: getSettingsSectionSearch(settingsSearchQuery, "Sidebar Tags", [
@@ -2019,6 +2052,11 @@ export function SettingsModal({
         title: "Theme",
       },
       {
+        key: "workspaceBackgroundColor",
+        subtitle: "Color shown behind terminal panes.",
+        title: "Terminal Background",
+      },
+      {
         key: "terminalFontFamily",
         subtitle: "Type a Ghostty font-family name.",
         title: "Font Family",
@@ -2074,6 +2112,11 @@ export function SettingsModal({
         subtitle:
           "Choose whether new terminal and agent sessions should use zmx persistence.",
         title: "Session Persistence",
+      },
+      {
+        key: "clickToWakeSleepingSessions",
+        subtitle: "Select sleeping pane tabs without waking them until the empty pane is clicked.",
+        title: "Click to Wake Sleeping Panes",
       },
       ...(draft.sessionPersistenceProvider === "off"
         ? []
@@ -2176,28 +2219,6 @@ export function SettingsModal({
         title: "Ignored ports",
       },
     ]),
-    workspace: getSettingsSectionSearch(settingsSearchQuery, "Workspace", [
-      {
-        key: "workspaceActivePaneBorderColor",
-        subtitle: "CSS color for the focused pane border.",
-        title: "Active Pane Border",
-      },
-      {
-        key: "workspaceBackgroundColor",
-        subtitle: "Color shown behind terminal panes.",
-        title: "Terminal Background",
-      },
-      {
-        key: "clickToWakeSleepingSessions",
-        subtitle: "Select sleeping pane tabs without waking them until the empty pane is clicked.",
-        title: "Click to Wake Sleeping Panes",
-      },
-      {
-        key: "commandsPanelDefaultHeightPx",
-        subtitle: "Height used when opening the command pane and when double-clicking its top resize rail.",
-        title: "Command Pane Default Height",
-      },
-    ]),
     beta: getSettingsSectionSearch(settingsSearchQuery, "Experimental", [
       /*
        * CDXC:ExperimentalFeatures 2026-06-28-07:41:
@@ -2261,10 +2282,6 @@ export function SettingsModal({
       settingsSearch.sessionCards,
       settingsSearch.sidebarTags,
     ]),
-    workspacesSessions: getGroupedSettingsSectionSearch(settingsSearchQuery, "Workspaces & Sessions", [
-      settingsSearch.workspace,
-      settingsSearch.autoSleep,
-    ]),
     terminal: getGroupedSettingsSectionSearch(settingsSearchQuery, "Terminal", [
       settingsSearch.terminal,
       settingsSearch.terminalBehavior,
@@ -2280,6 +2297,7 @@ export function SettingsModal({
       settingsSearch.sounds,
     ]),
     system: getGroupedSettingsSectionSearch(settingsSearchQuery, "System", [
+      settingsSearch.autoSleep,
       settingsSearch.power,
       settingsSearch.storage,
     ]),
@@ -2299,11 +2317,6 @@ export function SettingsModal({
       title: "Appearance",
     },
     { id: "sidebar", searchResult: mainSettingsGroupSearch.sidebar, title: "Sidebar" },
-    {
-      id: "workspacesSessions",
-      searchResult: mainSettingsGroupSearch.workspacesSessions,
-      title: "Workspaces & Sessions",
-    },
     /*
      * CDXC:SettingsNavigation 2026-06-12-04:13:
      * Ghostty terminal controls belong on the main Settings page so one search query can find app settings and terminal settings together.
@@ -2460,8 +2473,6 @@ export function SettingsModal({
     terminalDevServers: terminalDevServersSectionRef,
     terminalScrolling: ghosttyScrollingSectionRef,
     theming: themingSectionRef,
-    workspacesSessions: workspaceSectionRef,
-    workspace: workspaceSectionRef,
   };
   const scrollMainSettingsSectionIntoView = (sectionId: MainSettingsSectionId) => {
     getMainSettingsSectionRef(sectionId, mainSettingsSectionRefs).current?.scrollIntoView({
@@ -2618,8 +2629,6 @@ export function SettingsModal({
       theming: themingSectionRef,
       // CDXC:AppIconPicker 2026-06-25-21:50: Allow titlebar/deep-link navigation to scroll to App Icon.
       appIcon: appIconSectionRef,
-      workspacesSessions: workspaceSectionRef,
-      workspace: workspaceSectionRef,
       agents: agentsOnboardingSectionRef,
     });
     const animationFrame = requestAnimationFrame(() => {
@@ -2760,9 +2769,25 @@ export function SettingsModal({
     }
   };
 
+  const postSettingsPatch = (
+    patch: ghostexSettingsPatch,
+    source: ghostexSettingsUpdateSource,
+    fallbackSettings: ghostexSettings,
+  ) => {
+    if (Object.keys(patch).length === 0) {
+      return;
+    }
+    if (onPatch) {
+      onPatch(patch, source);
+      return;
+    }
+    onChange(fallbackSettings, source);
+  };
+
   const persistSettingsModalNavigation = (navigationActiveTab: SettingsModalTab = activeTab) => {
     rememberActiveScrollPosition();
     const pendingSettings = pendingSettingsRef.current;
+    const pendingPatch = pendingSettingsPatchRef.current;
     const baseSettings = pendingSettings ?? draft;
     const nextSettings = isFirstLaunchSetup
       ? baseSettings
@@ -2785,13 +2810,28 @@ export function SettingsModal({
      * chrome can bypass the React Dialog close callback. Persist page changes
      * immediately and scroll changes after they settle; close remains a final
      * flush for pending numeric edits and any unsaved navigation state.
+     *
+     * CDXC:RemoteMachines 2026-06-30-15:18:
+     * Navigation persistence is a patch-only write. Opening or scrolling Settings
+     * must never post a full draft that could overwrite unrelated domains such as
+     * remoteMachines from stale modal state.
      */
     clearPendingNavigationPersist();
     clearPendingSettings();
     pendingSettingsRef.current = undefined;
+    pendingSettingsPatchRef.current = undefined;
     if (pendingSettings || shouldPersistNavigation) {
       setDraft(nextSettings);
-      onChange(nextSettings);
+      postSettingsPatch(
+        {
+          ...(pendingPatch ?? {}),
+          ...(shouldPersistNavigation
+            ? { settingsModalNavigation: nextSettings.settingsModalNavigation }
+            : {}),
+        },
+        pendingPatch ? "settings:control" : "settings:navigation",
+        nextSettings,
+      );
     }
   };
 
@@ -2813,12 +2853,32 @@ export function SettingsModal({
     onClose();
   };
 
-  const applySettings = (nextSettings: ghostexSettings) => {
+  const applySettings = (
+    nextSettings: ghostexSettings,
+    source: ghostexSettingsUpdateSource = "settings:bulk",
+  ) => {
     const normalizedSettings = normalizeghostexSettings(nextSettings);
     clearPendingSettings();
     pendingSettingsRef.current = undefined;
+    pendingSettingsPatchRef.current = undefined;
     setDraft(normalizedSettings);
-    onChange(normalizedSettings);
+    onChange(normalizedSettings, source);
+  };
+
+  const applySettingsPatch = (
+    patch: ghostexSettingsPatch,
+    source: ghostexSettingsUpdateSource = "settings:control",
+  ) => {
+    const normalizedSettings = normalizeghostexSettings({
+      ...(pendingSettingsRef.current ?? draft),
+      ...patch,
+    });
+    const normalizedPatch = createNormalizedSettingsPatch(normalizedSettings, patch);
+    clearPendingSettings();
+    pendingSettingsRef.current = undefined;
+    pendingSettingsPatchRef.current = undefined;
+    setDraft(normalizedSettings);
+    postSettingsPatch(normalizedPatch, source, normalizedSettings);
   };
 
   /**
@@ -2827,17 +2887,30 @@ export function SettingsModal({
    * persists through a short trailing debounce to avoid flooding settings writes.
    * Number boxes keep local edit text so partial values can be typed cleanly.
    */
-  const applySettingsDebounced = (nextSettings: ghostexSettings) => {
-    const normalizedSettings = normalizeghostexSettings(nextSettings);
+  const applySettingsPatchDebounced = (
+    patch: ghostexSettingsPatch,
+    source: ghostexSettingsUpdateSource = "settings:control",
+  ) => {
+    const normalizedSettings = normalizeghostexSettings({
+      ...(pendingSettingsRef.current ?? draft),
+      ...patch,
+    });
+    const normalizedPatch = createNormalizedSettingsPatch(normalizedSettings, patch);
     pendingSettingsRef.current = normalizedSettings;
+    pendingSettingsPatchRef.current = {
+      ...(pendingSettingsPatchRef.current ?? {}),
+      ...normalizedPatch,
+    };
     setDraft(normalizedSettings);
     clearPendingSettings();
     pendingTimeoutRef.current = setTimeout(() => {
       const pendingSettings = pendingSettingsRef.current;
+      const pendingPatch = pendingSettingsPatchRef.current;
       pendingSettingsRef.current = undefined;
+      pendingSettingsPatchRef.current = undefined;
       pendingTimeoutRef.current = undefined;
       if (pendingSettings) {
-        onChange(pendingSettings);
+        postSettingsPatch(pendingPatch ?? {}, source, pendingSettings);
       }
     }, NUMERIC_SETTINGS_DEBOUNCE_MS);
   };
@@ -2848,7 +2921,7 @@ export function SettingsModal({
    * posts every normalized change instead of waiting for Save/Cancel actions.
    */
   const updateDraft = <Key extends keyof ghostexSettings>(key: Key, value: ghostexSettings[Key]) => {
-    applySettings({ ...(pendingSettingsRef.current ?? draft), [key]: value });
+    applySettingsPatch({ [key]: value } as Pick<ghostexSettings, Key>);
   };
   const updateShowAdvancedSettings = (checked: boolean) => {
     /*
@@ -2857,7 +2930,7 @@ export function SettingsModal({
      * persistence so restart hydration reopens Settings with the same advanced
      * row visibility the user explicitly chose.
      */
-    applySettings({ ...(pendingSettingsRef.current ?? draft), showAdvancedSettings: checked });
+    applySettingsPatch({ showAdvancedSettings: checked });
   };
   const updateDiagnosticLoggingScenario = (
     scenarioId: DiagnosticLoggingScenarioId,
@@ -2876,7 +2949,7 @@ export function SettingsModal({
     key: Key,
     value: ghostexSettings[Key],
   ) => {
-    applySettingsDebounced({ ...(pendingSettingsRef.current ?? draft), [key]: value });
+    applySettingsPatchDebounced({ [key]: value } as Pick<ghostexSettings, Key>);
   };
   /**
    * CDXC:AppIconPicker 2026-06-25-21:50:
@@ -2957,13 +3030,13 @@ export function SettingsModal({
     pendingAppIconSourceIdRef.current = "";
     setAppIconError(undefined);
     vscode?.postMessage({ type: "setAppIcon", sourceId: "" });
-    applySettings(DEFAULT_ghostex_SETTINGS);
+    applySettings({
+      ...DEFAULT_ghostex_SETTINGS,
+      remoteMachines: (pendingSettingsRef.current ?? draft).remoteMachines,
+    });
   };
   const resetSetting = <Key extends keyof ghostexSettings>(key: Key) => {
-    applySettings({
-      ...(pendingSettingsRef.current ?? draft),
-      [key]: DEFAULT_ghostex_SETTINGS[key],
-    });
+    applySettingsPatch({ [key]: DEFAULT_ghostex_SETTINGS[key] } as Pick<ghostexSettings, Key>);
   };
   const getSettingModificationProps = <Key extends keyof ghostexSettings>(
     key: Key,
@@ -3184,6 +3257,75 @@ export function SettingsModal({
                 onResetToDefault={() => updateSidebarSettingsPreset("codex")}
               />
               ) : null}
+              {/*
+               * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
+               * Users need every preset-mutated setting directly under the preset selector so applying Recommended, Codex, Minimal, or Detailed has an inspectable effect without hunting through Session Cards, Project rows, or Status Indicators.
+               */}
+              {mainSettingVisible(settingsSearch.sidebar, "hideSessionAgentIconUntilHover") ? (
+              <ToggleField
+                checked={draft.hideSessionAgentIconUntilHover}
+                description="Hide session agent icons until a session row is hovered."
+                label="Hide agent icon until hover"
+                {...getSettingModificationProps("hideSessionAgentIconUntilHover")}
+                onChange={(checked) => updateDraft("hideSessionAgentIconUntilHover", checked)}
+              />
+              ) : null}
+              {mainSettingVisible(settingsSearch.sidebar, "hideBrowserFaviconUntilHover") ? (
+              <ToggleField
+                checked={draft.hideBrowserFaviconUntilHover}
+                description="Hide browser page favicons until a session row is hovered."
+                label="Hide browser favicon until hover"
+                {...getSettingModificationProps("hideBrowserFaviconUntilHover")}
+                onChange={(checked) => updateDraft("hideBrowserFaviconUntilHover", checked)}
+              />
+              ) : null}
+              {mainSettingVisible(settingsSearch.sidebar, "showCloseButtonOnSessionCards") ? (
+              <ToggleField
+                checked={draft.showCloseButtonOnSessionCards}
+                description="Reveal the close control when hovering a card."
+                label="Show close button on hover"
+                {...getSettingModificationProps("showCloseButtonOnSessionCards")}
+                onChange={(checked) => updateDraft("showCloseButtonOnSessionCards", checked)}
+              />
+              ) : null}
+              {mainSettingVisible(settingsSearch.sidebar, "hideLastActiveTimeOnSessionCards") ? (
+              <ToggleField
+                checked={draft.hideLastActiveTimeOnSessionCards}
+                description="Hide Last Active timestamps from session-card title rows."
+                label="Hide last active time"
+                {...getSettingModificationProps("hideLastActiveTimeOnSessionCards")}
+                onChange={(checked) => updateDraft("hideLastActiveTimeOnSessionCards", checked)}
+              />
+              ) : null}
+              {mainSettingVisible(settingsSearch.sidebar, "hideProjectHeaderDiffStats") ? (
+              <ToggleField
+                checked={draft.hideProjectHeaderDiffStats}
+                description="Hide +added/-removed line counts in sidebar project rows."
+                label="Hide project git stats"
+                {...getSettingModificationProps("hideProjectHeaderDiffStats")}
+                onChange={(checked) => updateDraft("hideProjectHeaderDiffStats", checked)}
+              />
+              ) : null}
+              {mainSettingVisible(settingsSearch.sidebar, "showProjectEditorDiffFileCount") ? (
+              <ToggleField
+                checked={draft.showProjectEditorDiffFileCount}
+                description="Show changed-file counts in sidebar project row git stats."
+                label="Show changed-file count"
+                {...getSettingModificationProps("showProjectEditorDiffFileCount")}
+                onChange={(checked) => updateDraft("showProjectEditorDiffFileCount", checked)}
+              />
+              ) : null}
+              {mainSettingVisible(settingsSearch.sidebar, "hideMenuBarSessionStatusIndicators") ? (
+              <ToggleField
+                checked={!draft.hideMenuBarSessionStatusIndicators}
+                description="Show the menu bar session status badges."
+                label="Show Menu Bar Session Indicators"
+                {...getSettingModificationProps("hideMenuBarSessionStatusIndicators")}
+                onChange={(checked) =>
+                  updateDraft("hideMenuBarSessionStatusIndicators", !checked)
+                }
+              />
+              ) : null}
               {/* CDXC:SidebarPlacement 2026-05-06-17:32: Sidebar side remains
                   near the top of Sidebar settings so users can move the
                   sidebar to the right side without discovering the hotkey. */}
@@ -3216,6 +3358,19 @@ export function SettingsModal({
                 />
               </>
               ) : null}
+              {mainSettingVisible(settingsSearch.sidebar, "commandsPanelDefaultHeightPx") ? (
+              <SliderNumberField
+                description="Used when opening the command pane (F12 or sidebar) and when double-clicking its top resize rail."
+                label="Command Pane Default Height"
+                {...getSettingModificationProps("commandsPanelDefaultHeightPx")}
+                max={MAX_COMMANDS_PANEL_DEFAULT_HEIGHT_PX}
+                min={MIN_COMMANDS_PANEL_DEFAULT_HEIGHT_PX}
+                onCommit={(value) => updateDraft("commandsPanelDefaultHeightPx", value)}
+                onChange={(value) => updateDraftDebounced("commandsPanelDefaultHeightPx", value)}
+                step={1}
+                value={draft.commandsPanelDefaultHeightPx}
+              />
+              ) : null}
               {mainSettingVisible(settingsSearch.sidebar, "projectSessionListCollapsedCount") ? (
               <>
                 {/*
@@ -3236,24 +3391,6 @@ export function SettingsModal({
                   value={draft.projectSessionListCollapsedCount}
                 />
               </>
-              ) : null}
-              {mainSettingVisible(settingsSearch.sidebar, "hideProjectHeaderDiffStats") ? (
-              <ToggleField
-                checked={draft.hideProjectHeaderDiffStats}
-                description="Hide +added/-removed line counts in sidebar project rows."
-                label="Hide project git stats"
-                {...getSettingModificationProps("hideProjectHeaderDiffStats")}
-                onChange={(checked) => updateDraft("hideProjectHeaderDiffStats", checked)}
-              />
-              ) : null}
-              {mainSettingVisible(settingsSearch.sidebar, "showProjectEditorDiffFileCount") ? (
-              <ToggleField
-                checked={draft.showProjectEditorDiffFileCount}
-                description="Show changed-file counts in sidebar project row git stats."
-                label="Show changed-file count"
-                {...getSettingModificationProps("showProjectEditorDiffFileCount")}
-                onChange={(checked) => updateDraft("showProjectEditorDiffFileCount", checked)}
-              />
               ) : null}
               {mainSettingVisible(settingsSearch.sidebar, "agentManagerZoomPercent") ? (
               /*
@@ -3379,25 +3516,20 @@ export function SettingsModal({
                     value={draft.customSidebarTitlebarBackgroundTintColor}
                   />
                 ) : null}
+                {mainSettingVisible(settingsSearch.theming, "workspaceActivePaneBorderColor") ? (
+                  <TextField
+                    description="CSS color for the focused pane border."
+                    label="Active Pane Border"
+                    {...getSettingModificationProps("workspaceActivePaneBorderColor")}
+                    onChange={(value) => updateDraft("workspaceActivePaneBorderColor", value)}
+                    value={draft.workspaceActivePaneBorderColor}
+                  />
+                ) : null}
               </SettingsSection>
             ) : null}
 
             {mainSectionVisible("statusIndicators", settingsSearch.statusIndicators) ? (
             <SettingsSection sectionRef={statusIndicatorsSectionRef} title="Status Indicators">
-              {mainSettingVisible(
-                settingsSearch.statusIndicators,
-                "hideMenuBarSessionStatusIndicators",
-              ) ? (
-              <ToggleField
-                checked={!draft.hideMenuBarSessionStatusIndicators}
-                description="Show the menu bar session status badges."
-                label="Show Menu Bar Session Indicators"
-                {...getSettingModificationProps("hideMenuBarSessionStatusIndicators")}
-                onChange={(checked) =>
-                  updateDraft("hideMenuBarSessionStatusIndicators", !checked)
-                }
-              />
-              ) : null}
               {mainSettingVisible(settingsSearch.statusIndicators, "petOverlayEnabled") ? (
               <ToggleField
                 checked={draft.petOverlayEnabled}
@@ -3439,51 +3571,14 @@ export function SettingsModal({
 
             {mainSubsectionVisible("sessionCards", settingsSearch.sessionCards) ? (
             <SettingsSection sectionRef={sessionCardsSectionRef} title="Session Cards">
-              {/* CDXC:SidebarSessions 2026-05-16-08:46: Session-card agent identity should stay visible by default, with a user setting that makes those icons appear only while hovering a session row. */}
-              {mainSettingVisible(settingsSearch.sessionCards, "hideSessionAgentIconUntilHover") ? (
-              <ToggleField
-                checked={draft.hideSessionAgentIconUntilHover}
-                description="Hide session agent icons until a session row is hovered."
-                label="Hide agent icon until hover"
-                {...getSettingModificationProps("hideSessionAgentIconUntilHover")}
-                onChange={(checked) => updateDraft("hideSessionAgentIconUntilHover", checked)}
-              />
-              ) : null}
-              {/* CDXC:SidebarSessionAgentIcons 2026-06-29-23:58: Users need a Session Cards toggle for colored agent brand artwork while the default sidebar remains monochrome and favorite rows no longer gold-tint agent logos. */}
+              {/* CDXC:SidebarSessionAgentIcons 2026-06-29-23:58: Users need a Session Cards toggle for colored agent brand artwork while the default sidebar remains monochrome and favorite rows no longer gold-tint agent logos. CDXC:SidebarSessionAgentIcons 2026-06-30-22:40: The colored agent icon setting must also color the selected-agent launcher icon so the Mac sidebar picker and session cards use the same agent identity mode. */}
               {mainSettingVisible(settingsSearch.sessionCards, "useColoredSessionAgentIcons") ? (
               <ToggleField
                 checked={draft.useColoredSessionAgentIcons}
-                description="Render session agent logos with colored brand artwork instead of monochrome masks."
+                description="Render session and selected-agent logos with colored brand artwork instead of monochrome masks."
                 label="Use colored agent icons"
                 {...getSettingModificationProps("useColoredSessionAgentIcons")}
                 onChange={(checked) => updateDraft("useColoredSessionAgentIcons", checked)}
-              />
-              ) : null}
-              {mainSettingVisible(settingsSearch.sessionCards, "hideBrowserFaviconUntilHover") ? (
-              <ToggleField
-                checked={draft.hideBrowserFaviconUntilHover}
-                description="Hide browser page favicons until a session row is hovered."
-                label="Hide browser favicon until hover"
-                {...getSettingModificationProps("hideBrowserFaviconUntilHover")}
-                onChange={(checked) => updateDraft("hideBrowserFaviconUntilHover", checked)}
-              />
-              ) : null}
-              {mainSettingVisible(settingsSearch.sessionCards, "showCloseButtonOnSessionCards") ? (
-              <ToggleField
-                checked={draft.showCloseButtonOnSessionCards}
-                description="Reveal the close control when hovering a card."
-                label="Show close button on hover"
-                {...getSettingModificationProps("showCloseButtonOnSessionCards")}
-                onChange={(checked) => updateDraft("showCloseButtonOnSessionCards", checked)}
-              />
-              ) : null}
-              {mainSettingVisible(settingsSearch.sessionCards, "hideLastActiveTimeOnSessionCards") ? (
-              <ToggleField
-                checked={draft.hideLastActiveTimeOnSessionCards}
-                description="Hide Last Active timestamps from session-card title rows."
-                label="Hide last active time"
-                {...getSettingModificationProps("hideLastActiveTimeOnSessionCards")}
-                onChange={(checked) => updateDraft("hideLastActiveTimeOnSessionCards", checked)}
               />
               ) : null}
               {mainSettingVisible(settingsSearch.sessionCards, "showSessionCloseContextMenuAction") ? (
@@ -3502,57 +3597,6 @@ export function SettingsModal({
                   }
                 />
               </>
-              ) : null}
-            </SettingsSection>
-            ) : null}
-
-            {mainSubsectionVisible("workspace", settingsSearch.workspace) ? (
-            <SettingsSection sectionRef={workspaceSectionRef} title="Workspace">
-              {/*
-                CDXC:WorkspaceLayout 2026-05-30-07:24:
-                Pane Gap is no longer configurable in the macOS app. Keep the
-                Workspace section focused on color/debug controls while shared
-                settings normalization pins the retained compatibility field to zero.
-              */}
-              {mainSettingVisible(settingsSearch.workspace, "workspaceActivePaneBorderColor") ? (
-              <TextField
-                description="CSS color for the focused pane border."
-                label="Active Pane Border"
-                {...getSettingModificationProps("workspaceActivePaneBorderColor")}
-                onChange={(value) => updateDraft("workspaceActivePaneBorderColor", value)}
-                value={draft.workspaceActivePaneBorderColor}
-              />
-              ) : null}
-              {mainSettingVisible(settingsSearch.workspace, "workspaceBackgroundColor") ? (
-              <ColorField
-                description="Color shown behind terminal panes."
-                label="Terminal Background"
-                {...getSettingModificationProps("workspaceBackgroundColor")}
-                onChange={(value) => updateDraft("workspaceBackgroundColor", value)}
-                value={draft.workspaceBackgroundColor}
-              />
-              ) : null}
-              {mainSettingVisible(settingsSearch.workspace, "clickToWakeSleepingSessions") ? (
-              <ToggleField
-                checked={draft.clickToWakeSleepingSessions}
-                description="Selecting a sleeping pane tab shows a black placeholder; click the pane body to wake the session."
-                label="Click to wake sleeping panes"
-                {...getSettingModificationProps("clickToWakeSleepingSessions")}
-                onChange={(checked) => updateDraft("clickToWakeSleepingSessions", checked)}
-              />
-              ) : null}
-              {mainSettingVisible(settingsSearch.workspace, "commandsPanelDefaultHeightPx") ? (
-              <SliderNumberField
-                description="Used when opening the command pane (F12 or sidebar) and when double-clicking its top resize rail."
-                label="Command Pane Default Height"
-                {...getSettingModificationProps("commandsPanelDefaultHeightPx")}
-                max={MAX_COMMANDS_PANEL_DEFAULT_HEIGHT_PX}
-                min={MIN_COMMANDS_PANEL_DEFAULT_HEIGHT_PX}
-                onCommit={(value) => updateDraft("commandsPanelDefaultHeightPx", value)}
-                onChange={(value) => updateDraftDebounced("commandsPanelDefaultHeightPx", value)}
-                step={1}
-                value={draft.commandsPanelDefaultHeightPx}
-              />
               ) : null}
             </SettingsSection>
             ) : null}
@@ -3608,6 +3652,15 @@ export function SettingsModal({
                   options={GHOSTTY_THEME_SETTING_OPTIONS}
                   showScrollButtons={false}
                   value={draft.terminalGhosttyTheme || GHOSTTY_THEME_UNMANAGED_VALUE}
+                />
+              ) : null}
+              {mainSettingVisible(settingsSearch.terminal, "workspaceBackgroundColor") ? (
+                <ColorField
+                  description="Color shown behind terminal panes."
+                  label="Terminal Background"
+                  {...getSettingModificationProps("workspaceBackgroundColor")}
+                  onChange={(value) => updateDraft("workspaceBackgroundColor", value)}
+                  value={draft.workspaceBackgroundColor}
                 />
               ) : null}
               {mainSettingVisible(settingsSearch.terminal, "terminalFontFamily") ? (
@@ -3782,6 +3835,15 @@ export function SettingsModal({
                     ) : undefined
                   }
                   value={draft.sessionPersistenceProvider}
+                />
+              ) : null}
+              {mainSettingVisible(settingsSearch.terminal, "clickToWakeSleepingSessions") ? (
+                <ToggleField
+                  checked={draft.clickToWakeSleepingSessions}
+                  description="Selecting a sleeping pane tab shows a black placeholder; click the pane body to wake the session."
+                  label="Click to wake sleeping panes"
+                  {...getSettingModificationProps("clickToWakeSleepingSessions")}
+                  onChange={(checked) => updateDraft("clickToWakeSleepingSessions", checked)}
                 />
               ) : null}
               {draft.sessionPersistenceProvider !== "off" &&
@@ -4732,10 +4794,12 @@ export function SettingsModal({
               initialRemoteMachineId={initialRemoteMachineId}
               isActive={isOpen && activeTab === "remote"}
               onChange={(nextRemoteMachines) =>
-                applySettings({
-                  ...draft,
-                  remoteMachines: nextRemoteMachines,
-                })
+                applySettingsPatch(
+                  {
+                    remoteMachines: nextRemoteMachines,
+                  },
+                  "settings:remoteMachines",
+                )
               }
               remoteMachines={draft.remoteMachines}
               vscode={vscode}
@@ -4767,30 +4831,18 @@ export function SettingsModal({
               defaultPromptAgentId={draft.defaultPromptAgentId}
               sessionTitleGenerationAgent={draft.sessionTitleGenerationAgent}
               onAgentAcceptAllEnabledChange={(checked) =>
-                applySettings({
-                  ...draft,
-                  agentAcceptAllEnabled: checked,
-                })
+                updateDraft("agentAcceptAllEnabled", checked)
               }
               onDefaultPromptAgentIdChange={(agentId) =>
-                applySettings({
-                  ...draft,
-                  defaultPromptAgentId: agentId,
-                })
+                updateDraft("defaultPromptAgentId", agentId)
               }
               onCustomSessionTitleGenerationCommandChange={(command) =>
-                applySettings({
-                  ...draft,
-                  customSessionTitleGenerationCommand: command,
-                })
+                updateDraft("customSessionTitleGenerationCommand", command)
               }
               onInstallAgentHooks={onInstallAgentHooks}
               onRequestAgentHookStatus={onRequestAgentHookStatus}
               onSessionTitleGenerationAgentChange={(agent) =>
-                applySettings({
-                  ...draft,
-                  sessionTitleGenerationAgent: agent,
-                })
+                updateDraft("sessionTitleGenerationAgent", agent)
               }
               vscode={vscode}
             />
@@ -5646,9 +5698,16 @@ function ProjectsSettingsPanel({
         <Card className="settings-project-command-card">
           <CardContent className="flex flex-col gap-4 p-4">
             {/*
-              CDXC:DocsSidebar 2026-06-30-19:47:
+              CDXC:DocsSidebar 2026-06-30-11:42:
               Docs folder scanning is a global Projects setting, not selected-project metadata. Keep it above the project selector and accept comma-separated project-relative folder names so entries like "plans, my documents, folders/folder name" scan matching folders under each project root.
+              Give this card an explicit Docs title so users coming from the Docs sidebar shortcut know the folder list controls Docs file discovery.
             */}
+            <div className="settings-management-header-text">
+              <h3 className="settings-management-heading">Docs</h3>
+              <p className="settings-management-description">
+                Choose the project-relative folders that Docs scans for files.
+              </p>
+            </div>
             <FieldGroup>
               <Field>
                 <FieldLabel>Docs folders</FieldLabel>
@@ -5913,9 +5972,13 @@ function PortlessGlobalSettingsPanel({
     <section className="settings-modal-section settings-projects-global-settings">
       <div className="settings-projects-global-header">
         <div className="settings-management-header-text">
-          <h3 className="settings-management-heading">Global Settings</h3>
+          {/*
+            CDXC:PortlessSettings 2026-06-30-11:42:
+            Projects global settings should title the Portless card as Portless and briefly define it, because the controls manage Ghostex's local-domain proxy rather than generic project metadata.
+          */}
+          <h3 className="settings-management-heading">Portless</h3>
           <p className="settings-management-description">
-            Portless controls apply to all projects and worktrees.
+            Portless gives projects and worktrees stable local domains for dev servers through Ghostex's background proxy.
           </p>
         </div>
         <span className="settings-portless-status-badge" data-status={status.tone}>
@@ -10545,6 +10608,12 @@ function getDiagnosticLoggingScenarioStateForDuration(
   duration: DiagnosticLoggingDurationValue,
   now: Date = new Date(),
 ) {
+  /*
+   * CDXC:ChromeResponsivenessDiagnostics 2026-06-30-23:52:
+   * Some lag/crash diagnostic scenarios are enabled by default so repro logs
+   * exist immediately after update. Persist Off as an explicit disabled state
+   * instead of deleting the scenario so Settings can override those defaults.
+   */
   switch (duration) {
     case "15m":
       return {
@@ -10559,7 +10628,7 @@ function getDiagnosticLoggingScenarioStateForDuration(
     case "always":
       return { enabled: true };
     case "off":
-      return undefined;
+      return { enabled: false };
   }
 }
 

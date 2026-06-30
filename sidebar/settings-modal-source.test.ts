@@ -205,6 +205,11 @@ describe("settings modal source", () => {
      * CDXC:SettingsNavigation 2026-06-30-01:23:
      * General Settings should reduce the expanded sidebar list to grouped
      * destinations while keeping Status Indicators and Notifications separate.
+     *
+     * CDXC:SettingsNavigation 2026-06-30-10:35:
+     * General Settings should not expose a workspace sidebar destination after
+     * the old Workspace rows move into Appearance, Sidebar, Terminal, and
+     * System.
      */
     const settingsNavigation = sourceBetween(
       settingsModalSource,
@@ -214,7 +219,6 @@ describe("settings modal source", () => {
     const expectedOrder = [
       'id: "appearance"',
       'id: "sidebar"',
-      'id: "workspacesSessions"',
       'id: "terminal"',
       'id: "tools"',
       'id: "statusIndicators"',
@@ -246,11 +250,13 @@ describe("settings modal source", () => {
       'id: "browser"',
       'id: "editor"',
       'id: "workspace"',
+      'id: "workspacesSessions"',
     ]) {
       expect(settingsNavigation).not.toContain(removedStandaloneId);
     }
     expect(settingsNavigation).toContain('title: "Notifications"');
     expect(settingsNavigation).toContain('title: "Status Indicators"');
+    expect(settingsNavigation).not.toContain('title: "Workspaces & Sessions"');
   });
 
   test("uses the native window title instead of duplicate Settings chrome", () => {
