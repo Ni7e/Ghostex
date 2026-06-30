@@ -47,6 +47,7 @@ enum HostCommand: Decodable {
   case appendAgentDetectionDebugLog(AppendAgentDetectionDebugLog)
   case appendLayoutLayeringDebugLog(AppendLayoutLayeringDebugLog)
   case appendModeSwitcherDebugLog(AppendModeSwitcherDebugLog)
+  case appendNativeChromeResponsivenessDebugLog(AppendNativeChromeResponsivenessDebugLog)
   case appendProjectBoardDebugLog(AppendProjectBoardDebugLog)
   case appendTerminalFocusDebugLog(AppendTerminalFocusDebugLog)
   case appendRestoreDebugLog(AppendRestoreDebugLog)
@@ -96,6 +97,7 @@ enum HostCommand: Decodable {
   case exitFocusModeFromTitlebar
   case openAgentsModeFromTitlebar
   case openGitHubProjectFromTitlebar
+  case openAutomateFromTitlebar
   case toggleProjectEditorCompanionFromTitlebar
   case openTasksPlaceholderFromTitlebar
   case openManageFromTitlebar
@@ -168,6 +170,7 @@ enum HostCommand: Decodable {
     case appendAgentDetectionDebugLog
     case appendLayoutLayeringDebugLog
     case appendModeSwitcherDebugLog
+    case appendNativeChromeResponsivenessDebugLog
     case appendProjectBoardDebugLog
     case appendTerminalFocusDebugLog
     case appendRestoreDebugLog
@@ -217,6 +220,7 @@ enum HostCommand: Decodable {
     case exitFocusModeFromTitlebar
     case openAgentsModeFromTitlebar
     case openGitHubProjectFromTitlebar
+    case openAutomateFromTitlebar
     case toggleProjectEditorCompanionFromTitlebar
     case openTasksPlaceholderFromTitlebar
     case openManageFromTitlebar
@@ -334,6 +338,9 @@ enum HostCommand: Decodable {
       self = .appendLayoutLayeringDebugLog(try AppendLayoutLayeringDebugLog(from: decoder))
     case .appendModeSwitcherDebugLog:
       self = .appendModeSwitcherDebugLog(try AppendModeSwitcherDebugLog(from: decoder))
+    case .appendNativeChromeResponsivenessDebugLog:
+      self = .appendNativeChromeResponsivenessDebugLog(
+        try AppendNativeChromeResponsivenessDebugLog(from: decoder))
     case .appendProjectBoardDebugLog:
       self = .appendProjectBoardDebugLog(try AppendProjectBoardDebugLog(from: decoder))
     case .appendTerminalFocusDebugLog:
@@ -434,6 +441,8 @@ enum HostCommand: Decodable {
       self = .openAgentsModeFromTitlebar
     case .openGitHubProjectFromTitlebar:
       self = .openGitHubProjectFromTitlebar
+    case .openAutomateFromTitlebar:
+      self = .openAutomateFromTitlebar
     case .toggleProjectEditorCompanionFromTitlebar:
       self = .toggleProjectEditorCompanionFromTitlebar
     case .openTasksPlaceholderFromTitlebar:
@@ -1270,6 +1279,11 @@ struct AppendRestoreDebugLog: Decodable {
 }
 
 struct AppendSidebarRefreshDebugLog: Decodable {
+  let details: String?
+  let event: String
+}
+
+struct AppendNativeChromeResponsivenessDebugLog: Decodable {
   let details: String?
   let event: String
 }

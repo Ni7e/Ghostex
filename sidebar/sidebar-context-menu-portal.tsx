@@ -38,6 +38,11 @@ type GhostexNativeSidebarBridge = {
   focusResourceSessionFromTitlebar: (sessionId: string) => void;
   openAgentsModeFromTitlebar: () => void;
   openGitHubProjectFromTitlebar: () => void;
+  /*
+   * CDXC:Automations 2026-06-30-11:05:
+   * Titlebar Automate is a first-class project/Quick workarea forwarded through the same native sidebar bridge as Source, Browser, Kanban, and Docs.
+   */
+  openAutomateFromTitlebar: () => void;
   quitResourcesFromTitlebar: (sessionIds: string[], projectIds: string[]) => void;
   toggleProjectEditorCompanionFromTitlebar: () => void;
   sleepInactiveSessionsFromTitlebar: (sessionIds: string[]) => void;

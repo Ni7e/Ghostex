@@ -289,7 +289,7 @@ export type NativeGhosttyHostCommand =
       }>;
       browserHistoryScopeId?: string;
       showBetaFeatures?: boolean;
-      mode?: "code" | "git" | "tasks" | "manage";
+      mode?: "code" | "git" | "automate" | "tasks" | "manage";
       companionPaneHidden?: boolean;
       /**
        * CDXC:ProjectBrowserTabs 2026-06-16-12:02:
@@ -354,7 +354,7 @@ export type NativeGhosttyHostCommand =
   | {
       activeProjectEditorId?: string;
       activeProjectDiffStats?: SidebarProjectDiffStats;
-      activeProjectMode?: "agents" | "code" | "git" | "tasks" | "manage";
+      activeProjectMode?: "agents" | "code" | "git" | "automate" | "tasks" | "manage";
       activeProjectEditorCompanionPaneHidden?: boolean;
       activeProjectEditorIsOpen?: boolean;
       activeProjectEditorIsSleeping?: boolean;

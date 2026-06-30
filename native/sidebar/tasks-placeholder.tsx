@@ -51,6 +51,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -492,6 +493,8 @@ function ProjectBoardApp() {
   const projectId = projectBoardRawProjectIdFromUrlParam(projectIdParam);
   const projectEditorId = urlSearchParams.get("projectEditorId") || projectIdParam;
   const remoteMachineId = urlSearchParams.get("remoteMachineId") || "";
+  const automationScope = urlSearchParams.get("scope") === "all" ? "all" : "project";
+  const isAutomationGlobalScope = automationScope === "all";
   const initialSurfaceTab: ProjectSurfaceTab =
     urlSearchParams.get("surface") === "automations" ? "automations" : "board";
   const displayKey = normalizeDisplayIssueKey(
@@ -789,8 +792,10 @@ function ProjectBoardApp() {
   const applyAutomationState = useCallback((payload: ProjectAutomationsBridgeState) => {
     automationProjectsRef.current = payload.projects;
     setAutomationState(payload);
-    setAutomationTargetProjectId(payload.projectId);
-  }, []);
+    setAutomationTargetProjectId(
+      isAutomationGlobalScope ? payload.projects[0]?.projectId ?? payload.projectId : payload.projectId,
+    );
+  }, [isAutomationGlobalScope]);
 
   const loadAutomationState = useCallback(async (targetProjectId?: string) => {
     const requestedProjectId = targetProjectId?.trim() || automationTargetProjectId || projectId;
@@ -799,9 +804,12 @@ function ProjectBoardApp() {
     );
     try {
       const response = await sendProjectBoardRequest<ProjectAutomationsBridgeState>({
-        action: "automationGetState",
-        projectId: requestedProjectId,
-        projectPath: targetProject?.path ?? (requestedProjectId === projectId ? projectPath : undefined),
+        action: isAutomationGlobalScope ? "automationGetAllState" : "automationGetState",
+        projectEditorId,
+        projectId: isAutomationGlobalScope ? projectId : requestedProjectId,
+        projectPath: isAutomationGlobalScope
+          ? undefined
+          : targetProject?.path ?? (requestedProjectId === projectId ? projectPath : undefined),
         ...(remoteMachineId ? { remoteMachineId } : {}),
       });
       if (!response.ok) {
@@ -814,8 +822,16 @@ function ProjectBoardApp() {
             ? current
             : {
                 ...current,
-                agentId: response.payload?.defaultAgentId || response.payload?.agents[0]?.agentId || "",
-                projectId: current.projectId || response.payload?.projectId || projectId,
+                agentId: resolveAutomationDraftAgentId(
+                  response.payload?.agents ?? [],
+                  response.payload?.defaultAgentId,
+                ),
+                projectId:
+                  current.projectId ||
+                  (isAutomationGlobalScope
+                    ? response.payload?.projects[0]?.projectId
+                    : response.payload?.projectId) ||
+                  projectId,
                 executionKind: response.payload?.projectCanUseWorktrees === false ? "local" : current.executionKind,
               },
         );
@@ -823,16 +839,21 @@ function ProjectBoardApp() {
     } catch (error) {
       console.warn("Project automations state unavailable.", error);
     }
-  }, [applyAutomationState, automationTargetProjectId, projectId, projectPath, remoteMachineId]);
+  }, [applyAutomationState, automationTargetProjectId, isAutomationGlobalScope, projectEditorId, projectId, projectPath, remoteMachineId]);
 
   const loadAutomationConversationState = useCallback(async (targetProjectId?: string) => {
     const requestedProjectId = targetProjectId?.trim() || automationTargetProjectId || projectId;
+    if (isAutomationGlobalScope && !automationProjectsRef.current.some((candidate) => candidate.projectId === requestedProjectId)) {
+      setAutomationConversationState({ agents: [], debuggingMode: false, links: [], sessions: [] });
+      return;
+    }
     const targetProject = automationProjectsRef.current.find(
       (candidate) => candidate.projectId === requestedProjectId,
     );
     try {
       const response = await sendProjectBoardRequest({
         action: "getState",
+        projectEditorId,
         projectId: requestedProjectId,
         projectPath: targetProject?.path ?? (requestedProjectId === projectId ? projectPath : undefined),
         ...(remoteMachineId ? { remoteMachineId } : {}),
@@ -845,7 +866,7 @@ function ProjectBoardApp() {
       console.warn("Project automation sessions unavailable.", error);
       setAutomationConversationState({ agents: [], debuggingMode: false, links: [], sessions: [] });
     }
-  }, [automationTargetProjectId, projectId, projectPath, remoteMachineId]);
+  }, [automationTargetProjectId, isAutomationGlobalScope, projectEditorId, projectId, projectPath, remoteMachineId]);
 
   const logProjectBoardDebug = useCallback(
     (event: string, details?: Record<string, unknown>) => {
@@ -1023,9 +1044,11 @@ function ProjectBoardApp() {
   }, [displayKey, issuePrefix, runBeads]);
 
   useEffect(() => {
-    void loadConversationState();
+    if (!isAutomationGlobalScope) {
+      void loadConversationState();
+    }
     void loadAutomationState();
-  }, [loadAutomationState, loadConversationState]);
+  }, [isAutomationGlobalScope, loadAutomationState, loadConversationState]);
 
   useEffect(() => {
     if (!ticketContextMenu) {
@@ -1092,8 +1115,8 @@ function ProjectBoardApp() {
       }
       if (activeSurfaceTab === "board") {
         void loadTickets({ mode: "background" });
+        void loadConversationState();
       }
-      void loadConversationState();
       void loadAutomationState();
     };
     const intervalId = window.setInterval(
@@ -1825,29 +1848,51 @@ function ProjectBoardApp() {
   };
 
   const openNewAutomationDialog = () => {
-    void loadAutomationConversationState(automationState.projectId);
+    const targetProjectId = isAutomationGlobalScope
+      ? automationTargetProjectId || automationState.projects[0]?.projectId || ""
+      : automationState.projectId;
+    const targetProject = automationProjectsById.get(targetProjectId);
+    void loadAutomationConversationState(targetProjectId);
     setAutomationDraft(
       createAutomationDraft({
-        agentId: automationState.defaultAgentId || automationState.agents[0]?.agentId || "",
-        executionKind: automationState.projectCanUseWorktrees ? "worktree" : "local",
-        projectId: automationState.projectId,
+        agentId: resolveAutomationDraftAgentId(automationState.agents, automationState.defaultAgentId),
+        executionKind: (isAutomationGlobalScope ? targetProject?.canUseWorktrees : automationState.projectCanUseWorktrees)
+          ? "worktree"
+          : "local",
+        projectId: targetProjectId,
       }),
     );
     setAutomationDialogOpen(true);
   };
 
   const openEditAutomationDialog = (automation: AutomationDefinition) => {
-    void loadAutomationConversationState(automationState.projectId);
+    const targetProjectId = automation.projectIds[0] || automationState.projectId || projectId;
+    void loadAutomationConversationState(targetProjectId);
     setAutomationDraft(
-      createAutomationDraftFromDefinition(automation, automationState.projectId || projectId),
+      createAutomationDraftFromDefinition(automation, targetProjectId),
     );
     setAutomationDialogOpen(true);
   };
 
+  const automationProjectPathForId = (targetProjectId: string): string | undefined =>
+    automationProjectsById.get(targetProjectId)?.path ??
+    (targetProjectId === projectId ? projectPath : undefined) ??
+    automationState.projectPath;
+
+  const applyAutomationMutationState = async (payload: ProjectAutomationsBridgeState | undefined) => {
+    if (isAutomationGlobalScope) {
+      await loadAutomationState();
+      return;
+    }
+    if (payload) {
+      applyAutomationState(payload);
+    }
+  };
+
   const saveAutomation = async () => {
     const definition = createAutomationDefinitionFromDraft(automationDraft, {
-      fallbackAgentId: automationState.defaultAgentId || automationState.agents[0]?.agentId || "",
-      projectId: automationState.projectId || projectId,
+      fallbackAgentId: resolveAutomationDraftAgentId(automationState.agents, automationState.defaultAgentId),
+      projectId: automationDraft.projectId || automationState.projectId || projectId,
     });
     if (!definition) {
       setErrorMessage("Name, agent, prompt, and schedule are required.");
@@ -1862,15 +1907,16 @@ function ProjectBoardApp() {
       const response = await sendProjectBoardRequest<ProjectAutomationsBridgeState>({
         action: "automationSave",
         payloadJson: JSON.stringify(definition),
+        projectEditorId,
         projectId: definition.projectIds[0] ?? projectId,
-        projectPath: automationState.projectPath || projectPath,
+        projectPath: automationProjectPathForId(definition.projectIds[0] ?? projectId),
         ...(remoteMachineId ? { remoteMachineId } : {}),
       });
       if (!response.ok) {
         throw new Error(response.error || "Could not save automation.");
       }
       if (response.payload) {
-        applyAutomationState(response.payload);
+        await applyAutomationMutationState(response.payload);
       }
       setAutomationDialogOpen(false);
       setErrorMessage("");
@@ -1882,12 +1928,14 @@ function ProjectBoardApp() {
   };
 
   const deleteAutomation = async (automation: AutomationDefinition) => {
+    const targetProjectId = automation.projectIds[0] || automationState.projectId || projectId;
     setAutomationActionId(automation.id);
     try {
       const response = await sendProjectBoardRequest<ProjectAutomationsBridgeState>({
         action: "automationDelete",
-        projectId: automationState.projectId || projectId,
-        projectPath: automationState.projectPath || projectPath,
+        projectEditorId,
+        projectId: targetProjectId,
+        projectPath: automationProjectPathForId(targetProjectId),
         ...(remoteMachineId ? { remoteMachineId } : {}),
         sessionId: automation.id,
       });
@@ -1895,7 +1943,7 @@ function ProjectBoardApp() {
         throw new Error(response.error || "Could not delete automation.");
       }
       if (response.payload) {
-        applyAutomationState(response.payload);
+        await applyAutomationMutationState(response.payload);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not delete automation.");
@@ -1905,13 +1953,15 @@ function ProjectBoardApp() {
   };
 
   const setAutomationEnabled = async (automation: AutomationDefinition, enabled: boolean) => {
+    const targetProjectId = automation.projectIds[0] || automationState.projectId || projectId;
     setAutomationActionId(automation.id);
     try {
       const response = await sendProjectBoardRequest<ProjectAutomationsBridgeState>({
         action: "automationSetEnabled",
         payloadJson: JSON.stringify({ enabled }),
-        projectId: automationState.projectId || projectId,
-        projectPath: automationState.projectPath || projectPath,
+        projectEditorId,
+        projectId: targetProjectId,
+        projectPath: automationProjectPathForId(targetProjectId),
         ...(remoteMachineId ? { remoteMachineId } : {}),
         sessionId: automation.id,
       });
@@ -1919,7 +1969,7 @@ function ProjectBoardApp() {
         throw new Error(response.error || "Could not update automation.");
       }
       if (response.payload) {
-        applyAutomationState(response.payload);
+      await applyAutomationMutationState(response.payload);
       }
       setErrorMessage("");
     } catch (error) {
@@ -1930,12 +1980,14 @@ function ProjectBoardApp() {
   };
 
   const runAutomationNow = async (automation: AutomationDefinition) => {
+    const targetProjectId = automation.projectIds[0] || automationState.projectId || projectId;
     setAutomationActionId(automation.id);
     try {
       const response = await sendProjectBoardRequest<ProjectAutomationsBridgeState>({
         action: "automationRunNow",
-        projectId: automationState.projectId || projectId,
-        projectPath: automationState.projectPath || projectPath,
+        projectEditorId,
+        projectId: targetProjectId,
+        projectPath: automationProjectPathForId(targetProjectId),
         ...(remoteMachineId ? { remoteMachineId } : {}),
         sessionId: automation.id,
       });
@@ -1943,7 +1995,7 @@ function ProjectBoardApp() {
         throw new Error(response.error || "Could not run automation.");
       }
       if (response.payload) {
-        applyAutomationState(response.payload);
+      await applyAutomationMutationState(response.payload);
       }
       setActiveSurfaceTab("runs");
       setErrorMessage("");
@@ -1955,6 +2007,7 @@ function ProjectBoardApp() {
   };
 
   const archiveAutomationRun = async (run: AutomationRun) => {
+    const targetProjectId = run.projectId || automationState.projectId || projectId;
     setAutomationActionId(run.id);
     try {
       const removeWorktree =
@@ -1974,8 +2027,9 @@ function ProjectBoardApp() {
       const response = await sendProjectBoardRequest<ProjectAutomationsBridgeState>({
         action: "automationArchiveRun",
         payloadJson: JSON.stringify({ removeWorktree }),
-        projectId: automationState.projectId || projectId,
-        projectPath: automationState.projectPath || projectPath,
+        projectEditorId,
+        projectId: targetProjectId,
+        projectPath: automationProjectPathForId(targetProjectId),
         ...(remoteMachineId ? { remoteMachineId } : {}),
         sessionId: run.id,
       });
@@ -1983,7 +2037,7 @@ function ProjectBoardApp() {
         throw new Error(response.error || "Could not archive automation run.");
       }
       if (response.payload) {
-        applyAutomationState(response.payload);
+      await applyAutomationMutationState(response.payload);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not archive automation run.");
@@ -1993,12 +2047,14 @@ function ProjectBoardApp() {
   };
 
   const markAutomationRunRead = async (run: AutomationRun) => {
+    const targetProjectId = run.projectId || automationState.projectId || projectId;
     setAutomationActionId(run.id);
     try {
       const response = await sendProjectBoardRequest<ProjectAutomationsBridgeState>({
         action: "automationMarkRunRead",
-        projectId: automationState.projectId || projectId,
-        projectPath: automationState.projectPath || projectPath,
+        projectEditorId,
+        projectId: targetProjectId,
+        projectPath: automationProjectPathForId(targetProjectId),
         ...(remoteMachineId ? { remoteMachineId } : {}),
         sessionId: run.id,
       });
@@ -2006,7 +2062,7 @@ function ProjectBoardApp() {
         throw new Error(response.error || "Could not mark automation run read.");
       }
       if (response.payload) {
-        applyAutomationState(response.payload);
+      await applyAutomationMutationState(response.payload);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not mark automation run read.");
@@ -2016,12 +2072,14 @@ function ProjectBoardApp() {
   };
 
   const openAutomationRunSession = async (run: AutomationRun) => {
+    const targetProjectId = run.projectId || automationState.projectId || projectId;
     setAutomationActionId(run.id);
     try {
       const response = await sendProjectBoardRequest<ProjectAutomationsBridgeState>({
         action: "automationOpenRunSession",
-        projectId: automationState.projectId || projectId,
-        projectPath: automationState.projectPath || projectPath,
+        projectEditorId,
+        projectId: targetProjectId,
+        projectPath: automationProjectPathForId(targetProjectId),
         ...(remoteMachineId ? { remoteMachineId } : {}),
         sessionId: run.id,
       });
@@ -2029,7 +2087,7 @@ function ProjectBoardApp() {
         throw new Error(response.error || "Could not open automation session.");
       }
       if (response.payload) {
-        applyAutomationState(response.payload);
+      await applyAutomationMutationState(response.payload);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not open automation session.");
@@ -2039,12 +2097,14 @@ function ProjectBoardApp() {
   };
 
   const openAutomationRunWorktree = async (run: AutomationRun) => {
+    const targetProjectId = run.projectId || automationState.projectId || projectId;
     setAutomationActionId(run.id);
     try {
       const response = await sendProjectBoardRequest<ProjectAutomationsBridgeState>({
         action: "automationOpenWorktree",
-        projectId: automationState.projectId || projectId,
-        projectPath: automationState.projectPath || projectPath,
+        projectEditorId,
+        projectId: targetProjectId,
+        projectPath: automationProjectPathForId(targetProjectId),
         ...(remoteMachineId ? { remoteMachineId } : {}),
         sessionId: run.id,
       });
@@ -2052,7 +2112,7 @@ function ProjectBoardApp() {
         throw new Error(response.error || "Could not open automation worktree.");
       }
       if (response.payload) {
-        applyAutomationState(response.payload);
+      await applyAutomationMutationState(response.payload);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not open automation worktree.");
@@ -2086,8 +2146,25 @@ function ProjectBoardApp() {
     triageAutomationRuns.find((run) => run.id === selectedAutomationRunId) ?? triageAutomationRuns[0];
   const selectedVisibleRun =
     visibleAutomationRuns.find((run) => run.id === selectedAutomationRunId) ?? visibleAutomationRuns[0];
-  const automationDraftCanUseWorktrees = automationState.projectCanUseWorktrees;
-  const automationDraftWorktreeUnavailableReason = automationState.worktreeUnavailableReason;
+  const automationProjectsById = useMemo(
+    () => new Map(automationState.projects.map((project) => [project.projectId, project])),
+    [automationState.projects],
+  );
+  const automationProjectSelectItems = useMemo(
+    () => automationState.projects.map((project) => ({ label: project.label, value: project.projectId })),
+    [automationState.projects],
+  );
+  const selectedAutomationDraftProject = automationProjectsById.get(automationDraft.projectId);
+  const automationDraftCanUseWorktrees = isAutomationGlobalScope
+    ? selectedAutomationDraftProject?.canUseWorktrees === true
+    : automationState.projectCanUseWorktrees;
+  const automationDraftWorktreeUnavailableReason = isAutomationGlobalScope
+    ? selectedAutomationDraftProject?.worktreeUnavailableReason
+    : automationState.worktreeUnavailableReason;
+  const automationProjectNameById = useMemo(
+    () => new Map(automationState.projects.map((project) => [project.projectId, project.label])),
+    [automationState.projects],
+  );
   /*
    * CDXC:ProjectAutomations 2026-06-09-15:38:
    * Automation agents come from the Project Board bridge as label/icon options, while shared select metadata expects sidebar-agent names.
@@ -2102,10 +2179,6 @@ function ProjectBoardApp() {
         })),
       ),
     [automationState.agents],
-  );
-  const selectedAutomationAgent = useMemo(
-    () => automationState.agents.find((agent) => agent.agentId === automationDraft.agentId),
-    [automationDraft.agentId, automationState.agents],
   );
   const automationScheduleSelectItems = useMemo(
     () => AUTOMATION_SCHEDULE_PRESETS.map((option) => ({ label: option.label, value: option.value })),
@@ -2155,16 +2228,53 @@ function ProjectBoardApp() {
        *
        * CDXC:ProjectBoard 2026-06-29-03:49:
        * Remove the Board, Automations, Runs, and Triage tabs from the Kanban board header so disabled future surfaces do not occupy board chrome.
+       *
+       * CDXC:Automations 2026-06-30-12:51:
+       * The Quick-level all-project page is named Automations Overview and should not repeat "Automations" in both the eyebrow and page title. Keep the project-scoped Automate surface eyebrow explicit while the overview uses only "Experimental" above the title.
        */}
-      <section className="project-board-toolbar">
-        <h1 className="project-board-toolbar-title">{projectName}</h1>
+      <section
+        className="project-board-toolbar"
+        data-surface={activeSurfaceTab === "board" ? "board" : "automations"}
+      >
+        <div className="project-board-toolbar-heading">
+          {activeSurfaceTab !== "board" ? (
+            <span className="project-automation-eyebrow">
+              {isAutomationGlobalScope ? "Experimental" : "Automations (Experimental)"}
+            </span>
+          ) : null}
+          <h1 className="project-board-toolbar-title">{projectName}</h1>
+        </div>
+        {activeSurfaceTab !== "board" ? (
+          <>
+            {/*
+             * CDXC:Automations 2026-06-30-09:36:
+             * The dedicated Automation page header needs an experimental eyebrow, project title, centered section tabs, and right-aligned refresh/create actions in one row so the page reads as one gxserver-backed control surface instead of a separate tab strip above the content.
+             */}
+            <nav className="project-automation-tabs" aria-label="Automation sections">
+              {(["automations", "runs", "triage"] as const).map((tab) => (
+                <button
+                  aria-current={activeSurfaceTab === tab ? "page" : undefined}
+                  className="project-automation-tab"
+                  data-active={activeSurfaceTab === tab ? "true" : "false"}
+                  key={tab}
+                  onClick={() => setActiveSurfaceTab(tab)}
+                  type="button"
+                >
+                  {tab === "automations" ? "Automations" : tab === "runs" ? "Runs" : "Triage"}
+                </button>
+              ))}
+            </nav>
+          </>
+        ) : null}
         <div className="project-board-toolbar-actions">
           <Button
             aria-label="Refresh project"
             disabled={loadState === "loading"}
             onClick={() => {
-              void loadTickets({ mode: "manual" });
-              void loadConversationState();
+              if (activeSurfaceTab === "board") {
+                void loadTickets({ mode: "manual" });
+                void loadConversationState();
+              }
               void loadAutomationState();
             }}
             size="icon-sm"
@@ -2178,38 +2288,18 @@ function ProjectBoardApp() {
               Ticket
             </Button>
           ) : (
-            <Button onClick={openNewAutomationDialog} size="sm" variant="secondary">
+            <Button
+              className="project-automation-toolbar-button"
+              onClick={openNewAutomationDialog}
+              size="sm"
+              variant="secondary"
+            >
               <IconPlus data-icon="inline-start" />
               Automation
             </Button>
           )}
         </div>
       </section>
-
-      {activeSurfaceTab !== "board" ? (
-        <>
-          {/*
-           * CDXC:Automations 2026-06-29-15:55:
-           * The dedicated Automation page needs lightweight navigation between
-           * definitions, run history, and triage while the Kanban page still hides
-           * these future tabs from its board header.
-           */}
-          <nav className="project-automation-tabs" aria-label="Automation sections">
-            {(["automations", "runs", "triage"] as const).map((tab) => (
-              <button
-                aria-current={activeSurfaceTab === tab ? "page" : undefined}
-                className="project-automation-tab"
-                data-active={activeSurfaceTab === tab ? "true" : "false"}
-                key={tab}
-                onClick={() => setActiveSurfaceTab(tab)}
-                type="button"
-              >
-                {tab === "automations" ? "Automations" : tab === "runs" ? "Runs" : "Triage"}
-              </button>
-            ))}
-          </nav>
-        </>
-      ) : null}
 
       {activeSurfaceTab === "board" ? (
         <section className="project-board-filters" aria-label="Ticket filters">
@@ -2289,6 +2379,28 @@ function ProjectBoardApp() {
       ) : null}
 
       {activeSurfaceTab === "triage" ? (
+        triageAutomationRuns.length === 0 ? (
+          /*
+           * CDXC:Automations 2026-06-30-15:35:
+           * Empty Runs and Triage tabs should show one centered empty state in a single panel, not the split view with a second "No run selected" placeholder on the right. Match the Automations tab pattern.
+           */
+          <section className="project-automation-panel">
+            <AutomationRunList
+              actionId={automationActionId}
+              agents={automationState.agents}
+              automations={automationState.automations}
+              emptyTitle="No automation results need triage"
+              onArchive={archiveAutomationRun}
+              onMarkRead={markAutomationRunRead}
+              onOpenSession={openAutomationRunSession}
+              onOpenWorktree={openAutomationRunWorktree}
+              onSelect={setSelectedAutomationRunId}
+              projectName={automationState.projectName}
+              runs={triageAutomationRuns}
+              selectedRunId={selectedTriageRun?.id ?? ""}
+            />
+          </section>
+        ) : (
         <section className="project-automation-split">
           <AutomationRunList
             actionId={automationActionId}
@@ -2316,10 +2428,34 @@ function ProjectBoardApp() {
             run={selectedTriageRun}
           />
         </section>
+        )
       ) : null}
 
       {activeSurfaceTab === "automations" ? (
-        <section className="project-automation-split">
+        automationState.automations.length === 0 ? (
+          <section className="project-automation-panel">
+            {/*
+             * CDXC:Automations 2026-06-30-09:36:
+             * An empty Automation page should show one centered empty state, not the empty list plus the "No automation selected" detail placeholder. Only restore the split view after at least one automation exists.
+             */}
+            <AutomationDefinitionList
+              actionId={automationActionId}
+              agents={automationState.agents}
+              automations={automationState.automations}
+              onCreate={openNewAutomationDialog}
+              onDelete={deleteAutomation}
+              onEdit={openEditAutomationDialog}
+              onRunNow={runAutomationNow}
+              onSelect={setSelectedAutomationId}
+              onSetEnabled={setAutomationEnabled}
+              projectNameById={automationProjectNameById}
+              runs={automationState.runs}
+              selectedAutomationId={selectedAutomation?.id ?? ""}
+              showProjectLabels={isAutomationGlobalScope}
+            />
+          </section>
+        ) : (
+          <section className="project-automation-split">
           <AutomationDefinitionList
             actionId={automationActionId}
             agents={automationState.agents}
@@ -2330,8 +2466,10 @@ function ProjectBoardApp() {
             onRunNow={runAutomationNow}
             onSelect={setSelectedAutomationId}
             onSetEnabled={setAutomationEnabled}
+            projectNameById={automationProjectNameById}
             runs={automationState.runs}
             selectedAutomationId={selectedAutomation?.id ?? ""}
+            showProjectLabels={isAutomationGlobalScope}
           />
           <AutomationDefinitionDetail
             actionId={automationActionId}
@@ -2341,12 +2479,33 @@ function ProjectBoardApp() {
             onEdit={openEditAutomationDialog}
             onRunNow={runAutomationNow}
             onSetEnabled={setAutomationEnabled}
+            projectNameById={automationProjectNameById}
             runs={automationState.runs}
+            showProjectLabels={isAutomationGlobalScope}
           />
-        </section>
+          </section>
+        )
       ) : null}
 
       {activeSurfaceTab === "runs" ? (
+        visibleAutomationRuns.length === 0 ? (
+          <section className="project-automation-panel">
+            <AutomationRunList
+              actionId={automationActionId}
+              agents={automationState.agents}
+              automations={automationState.automations}
+              emptyTitle="No automation runs yet"
+              onArchive={archiveAutomationRun}
+              onMarkRead={markAutomationRunRead}
+              onOpenSession={openAutomationRunSession}
+              onOpenWorktree={openAutomationRunWorktree}
+              onSelect={setSelectedAutomationRunId}
+              projectName={automationState.projectName}
+              runs={visibleAutomationRuns}
+              selectedRunId={selectedVisibleRun?.id ?? ""}
+            />
+          </section>
+        ) : (
         <section className="project-automation-split">
           <AutomationRunList
             actionId={automationActionId}
@@ -2374,6 +2533,7 @@ function ProjectBoardApp() {
             run={selectedVisibleRun}
           />
         </section>
+        )
       ) : null}
 
       {activeSurfaceTab === "board" ? (
@@ -2462,15 +2622,20 @@ function ProjectBoardApp() {
       ) : null}
 
       <Dialog open={automationDialogOpen} onOpenChange={setAutomationDialogOpen}>
-        <DialogContent className="project-automation-dialog">
+        <DialogContent className="project-ticket-dialog project-automation-dialog">
           <DialogHeader>
             <DialogTitle>{automationDraft.id ? "Edit automation" : "Create automation"}</DialogTitle>
-            <DialogDescription>{projectName}</DialogDescription>
+            <DialogDescription>
+              {isAutomationGlobalScope ? "Schedule recurring agent work for a selected project." : `Schedule recurring agent work for ${projectName}.`}
+            </DialogDescription>
           </DialogHeader>
-          <div className="project-automation-form">
+          <div className="project-ticket-dialog-body project-automation-form vertical-scroll-fade-mask">
             {/*
              * CDXC:ProjectAutomations 2026-06-09-10:30:
              * Automation setup is scoped to the Project board's current project, so the create/edit dialog drops project switching and keeps dropdown widths aligned at 250px for agent, schedule, weekday, and thread-session fields.
+             *
+             * CDXC:Automations 2026-06-30-11:05:
+             * The Quick-level global Automations page shows all projects, so its create/edit dialog restores a Project selector. Project-scoped Automate pages keep the original no-project-switch form.
              */}
             <label className="project-automation-field-full">
               <span>Name</span>
@@ -2483,9 +2648,43 @@ function ProjectBoardApp() {
               />
             </label>
             <div className="project-automation-form-grid">
+              {isAutomationGlobalScope ? (
+                <label>
+                  <span>Project</span>
+                  <Select
+                    items={automationProjectSelectItems}
+                    onValueChange={(value) => {
+                      const selectedProject = automationProjectsById.get(value);
+                      setAutomationDraft((current) => ({
+                        ...current,
+                        executionKind:
+                          current.executionKind === "worktree" && selectedProject?.canUseWorktrees !== true
+                            ? "local"
+                            : current.executionKind,
+                        projectId: value,
+                        threadSessionId: "",
+                      }));
+                      void loadAutomationConversationState(value);
+                    }}
+                    value={automationDraft.projectId}
+                  >
+                    <SelectTrigger className="project-automation-select">
+                      <SelectValue placeholder="Choose project" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {automationState.projects.map((project) => (
+                        <SelectItem key={project.projectId} value={project.projectId}>
+                          {project.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+              ) : null}
               <label>
                 <span>Agent</span>
                 <Select
+                  disabled={automationState.agents.length === 0}
                   items={automationAgentSelectItems}
                   onValueChange={(value) =>
                     setAutomationDraft((current) => ({ ...current, agentId: value }))
@@ -2493,11 +2692,7 @@ function ProjectBoardApp() {
                   value={automationDraft.agentId}
                 >
                   <SelectTrigger className="project-automation-select">
-                    <SelectValue placeholder="Choose agent">
-                      {selectedAutomationAgent ? (
-                        <AutomationAgentOptionLabel agent={selectedAutomationAgent} />
-                      ) : null}
-                    </SelectValue>
+                    <SelectValue placeholder={automationState.agents.length === 0 ? "No agents configured" : "Choose agent"} />
                   </SelectTrigger>
                   <SelectContent>
                     {automationState.agents.map((agent) => (
@@ -2689,19 +2884,18 @@ function ProjectBoardApp() {
                 value={automationDraft.prompt}
               />
             </label>
-            <label className="project-automation-enabled">
-              <input
+            <div className="project-automation-enabled">
+              <Switch
                 checked={automationDraft.enabled}
-                onChange={(event) => {
-                  const enabled = event.currentTarget.checked;
+                onCheckedChange={(enabled: boolean) => {
                   setAutomationDraft((current) => ({ ...current, enabled }));
                 }}
-                type="checkbox"
+                size="sm"
               />
               <span>Enabled</span>
-            </label>
+            </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="project-ticket-dialog-footer">
             <Button onClick={() => setAutomationDialogOpen(false)} type="button" variant="ghost">
               Cancel
             </Button>
@@ -4106,7 +4300,13 @@ function AutomationEmptyState({
       <strong>{title}</strong>
       <p>{description}</p>
       {action ? (
-        <Button onClick={action.onClick} size="sm" type="button" variant="secondary">
+        <Button
+          className="project-automation-empty-action"
+          onClick={action.onClick}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
           {action.label}
         </Button>
       ) : null}
@@ -4131,8 +4331,10 @@ function AutomationDefinitionList({
   onRunNow,
   onSelect,
   onSetEnabled,
+  projectNameById,
   runs,
   selectedAutomationId,
+  showProjectLabels = false,
 }: {
   actionId: string;
   agents: ProjectAutomationAgentOption[];
@@ -4143,8 +4345,10 @@ function AutomationDefinitionList({
   onRunNow: (automation: AutomationDefinition) => void;
   onSelect: (automationId: string) => void;
   onSetEnabled: (automation: AutomationDefinition, enabled: boolean) => void;
+  projectNameById?: ReadonlyMap<string, string>;
   runs: AutomationRun[];
   selectedAutomationId: string;
+  showProjectLabels?: boolean;
 }) {
   if (automations.length === 0) {
     return (
@@ -4165,6 +4369,7 @@ function AutomationDefinitionList({
         ).length;
         const agent = agents.find((candidate) => candidate.agentId === automation.agentId);
         const agentLabel = agent?.label ?? automation.agentId;
+        const automationProjectName = projectNameById?.get(automation.projectIds[0] ?? "");
         const isBusy = actionId === automation.id;
         return (
           <Card
@@ -4184,6 +4389,7 @@ function AutomationDefinitionList({
                     <strong>{automation.name}</strong>
                   </div>
                   <div className="project-automation-card-tags">
+                    {showProjectLabels && automationProjectName ? <span>{automationProjectName}</span> : null}
                     <span>{describeAutomationSchedule(automation.schedule)}</span>
                     <span>{describeAutomationMode(automation.executionMode)}</span>
                   </div>
@@ -4214,18 +4420,18 @@ function AutomationDefinitionList({
                 >
                   <IconPlayerPlay />
                 </Button>
-                <Button
-                  disabled={isBusy}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onSetEnabled(automation, !automation.enabled);
-                  }}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {automation.enabled ? "Pause" : "Resume"}
-                </Button>
+                <div className="project-automation-card-toggle">
+                  <Switch
+                    checked={automation.enabled}
+                    disabled={isBusy}
+                    onCheckedChange={(enabled: boolean) => {
+                      onSetEnabled(automation, enabled);
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                    size="sm"
+                  />
+                  <span data-enabled={automation.enabled}>{automation.enabled ? "On" : "Off"}</span>
+                </div>
                 <Button
                   onClick={(event) => {
                     event.stopPropagation();
@@ -4403,7 +4609,9 @@ function AutomationDefinitionDetail({
   onEdit,
   onRunNow,
   onSetEnabled,
+  projectNameById,
   runs,
+  showProjectLabels = false,
 }: {
   actionId: string;
   agents: ProjectAutomationAgentOption[];
@@ -4412,7 +4620,9 @@ function AutomationDefinitionDetail({
   onEdit: (automation: AutomationDefinition) => void;
   onRunNow: (automation: AutomationDefinition) => void;
   onSetEnabled: (automation: AutomationDefinition, enabled: boolean) => void;
+  projectNameById?: ReadonlyMap<string, string>;
   runs: AutomationRun[];
+  showProjectLabels?: boolean;
 }) {
   if (!automation) {
     return (
@@ -4432,6 +4642,7 @@ function AutomationDefinitionDetail({
   const agent = agents.find((candidate) => candidate.agentId === automation.agentId);
   const agentLabel = agent?.label ?? automation.agentId;
   const agentIcon = agent ? resolveAutomationAgentIcon(agent) : undefined;
+  const automationProjectName = projectNameById?.get(automation.projectIds[0] ?? "");
   const isBusy = actionId === automation.id;
   return (
     <section className="project-automation-detail vertical-scroll-fade-mask" aria-label="Automation details">
@@ -4451,15 +4662,15 @@ function AutomationDefinitionDetail({
           >
             <IconPlayerPlay />
           </Button>
-          <Button
-            disabled={isBusy}
-            onClick={() => onSetEnabled(automation, !automation.enabled)}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            {automation.enabled ? "Pause" : "Resume"}
-          </Button>
+          <div className="project-automation-detail-toggle">
+            <Switch
+              checked={automation.enabled}
+              disabled={isBusy}
+              onCheckedChange={(enabled: boolean) => onSetEnabled(automation, enabled)}
+              size="sm"
+            />
+            <span data-enabled={automation.enabled}>{automation.enabled ? "Enabled" : "Paused"}</span>
+          </div>
           <Button onClick={() => onEdit(automation)} size="sm" type="button" variant="outline">
             Edit
           </Button>
@@ -4476,6 +4687,12 @@ function AutomationDefinitionDetail({
         </div>
       </div>
       <dl className="project-automation-detail-grid">
+        {showProjectLabels && automationProjectName ? (
+          <div>
+            <dt>Project</dt>
+            <dd>{automationProjectName}</dd>
+          </div>
+        ) : null}
         <div>
           <dt>Schedule</dt>
           <dd>{describeAutomationSchedule(automation.schedule)}</dd>
@@ -4799,6 +5016,22 @@ function createAutomationDraft(input: Partial<AutomationDraft> = {}): Automation
     threadSessionId: input.threadSessionId ?? "",
     weeklyDay: input.weeklyDay ?? "1",
   };
+}
+
+function resolveAutomationDraftAgentId(
+  agents: readonly Pick<ProjectAutomationAgentOption, "agentId">[],
+  defaultAgentId?: string,
+): string {
+  /*
+   * CDXC:Automations 2026-06-30-19:16:
+   * New automation drafts should select the user's Default Prompt Agent by default, but only when that agent is present in the launchable options for the selected project. An unavailable saved id should not render as "Choose agent" or be saved invisibly.
+   */
+  const normalizedDefaultAgentId = defaultAgentId?.trim();
+  return (
+    agents.find((agent) => agent.agentId === normalizedDefaultAgentId)?.agentId ??
+    agents[0]?.agentId ??
+    ""
+  );
 }
 
 function createAutomationDraftFromDefinition(
@@ -5501,11 +5734,28 @@ styleElement.textContent = `
   .project-board-card,
   .project-board-card-conversation,
   .project-board-card [data-slot="button"],
+  .project-automation-card,
+  .project-automation-run-card,
+  .project-automation-card [data-slot="button"],
+  .project-automation-run-card [data-slot="button"],
+  .project-automation-detail-actions [data-slot="button"],
+  .project-automation-detail-section pre,
+  .project-automation-detail-run-stack div,
+  .project-automation-empty-state-icon,
+  .project-automation-empty-action,
+  .project-automation-tab,
+  .project-automation-tabs,
+  .project-automation-toolbar-button,
   .project-board-toolbar-actions [data-slot="button"],
   .project-board-lane-header-action,
   .project-board-search input,
   .project-board-filter-select {
     border-radius: var(--project-board-radius-control) !important;
+  }
+
+  .project-automation-panel,
+  .project-automation-split {
+    border-radius: var(--project-board-radius-section) !important;
   }
 
   .project-board-card-label {
@@ -5632,11 +5882,30 @@ styleElement.textContent = `
     min-height: 40px;
   }
 
+  .project-board-toolbar[data-surface="automations"] {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+
+  .project-board-toolbar-heading {
+    display: grid;
+    gap: 4px;
+    justify-self: start;
+    min-width: 0;
+  }
+
+  .project-automation-eyebrow {
+    color: rgba(244, 244, 245, 0.48);
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+
   .project-board-toolbar-title {
     color: rgba(250, 250, 250, 0.96);
     font-size: 21px;
     font-weight: 650;
-    justify-self: start;
     line-height: 1.15;
     margin: 0;
     min-width: 0;
@@ -5657,34 +5926,60 @@ styleElement.textContent = `
    * The first shipped Automation page uses a compact local nav for gxserver
    * definitions, run history, and triage while keeping the Kanban board header
    * unchanged.
+   *
+   * CDXC:Automations 2026-06-30-10:55:
+   * The Automation page tabs should read as a flat Kanban segmented control, not a gradient-backed strip. The Create automation and + Automation actions should use the same height and radius as Kanban's new-ticket action buttons.
+   *
+   * CDXC:Automations 2026-06-30-21:10:
+   * Automations, Runs, and Triage tabs must share the widest tab width so the segmented control feels stable while still sizing from its labels instead of a hard-coded pixel width.
    */
   .project-automation-tabs {
     align-items: center;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    display: inline-flex;
+    background: var(--project-board-panel);
+    border: 1px solid var(--project-board-border);
+    display: inline-grid;
     flex: 0 0 auto;
-    gap: 4px;
-    padding: 4px;
+    gap: 3px;
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
+    height: var(--project-board-control-height);
+    justify-self: center;
+    padding: 3px;
     width: fit-content;
   }
 
   .project-automation-tab {
+    align-items: center;
     background: transparent;
     border: 1px solid transparent;
     color: rgba(250, 250, 250, 0.68);
     cursor: pointer;
+    display: inline-flex;
     font-size: 12px;
     font-weight: 650;
+    height: 28px;
+    justify-content: center;
     line-height: 1;
-    padding: 8px 11px;
+    padding: 0 12px;
+    white-space: nowrap;
   }
 
-  .project-automation-tab:hover,
+  .project-automation-tab:hover {
+    background: var(--project-board-panel-hover);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: rgba(250, 250, 250, 0.88);
+  }
+
   .project-automation-tab[data-active="true"] {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.12);
+    background: var(--project-board-card);
+    border-color: var(--project-board-border-strong);
     color: rgba(250, 250, 250, 0.94);
+  }
+
+  .project-automation-empty-action,
+  .project-automation-toolbar-button {
+    height: var(--project-board-control-height);
+    min-height: var(--project-board-control-height);
   }
 
   /*
@@ -5693,15 +5988,27 @@ styleElement.textContent = `
    *
    * CDXC:ProjectAutomations 2026-06-09-15:40:
    * Automation split views need centered empty states with icon, title, helper copy, and optional create action so blank Automations/Triage/Runs panels do not look like misaligned top-left placeholders.
+   *
+   * CDXC:Automations 2026-06-30-10:50:
+   * Automation pages should share Kanban's rounded card/control language instead of inheriting the shell's square reset. Use flat Project Board panel/card colors and explicit radius opt-ins, with no gradient backgrounds.
    */
   .project-automation-split {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--project-board-panel);
+    border: 1px solid var(--project-board-border);
     display: grid;
     flex: 1 1 auto;
     gap: 0;
     grid-template-columns: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
     grid-template-rows: minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .project-automation-panel {
+    background: var(--project-board-panel);
+    border: 1px solid var(--project-board-border);
+    display: flex;
+    flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
   }
@@ -5714,12 +6021,12 @@ styleElement.textContent = `
   }
 
   .project-automation-split > :first-child {
-    background: rgba(0, 0, 0, 0.16);
-    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--project-board-panel);
+    border-right: 1px solid var(--project-board-border);
   }
 
   .project-automation-split > :last-child {
-    background: rgba(255, 255, 255, 0.02);
+    background: color-mix(in srgb, var(--project-board-panel) 94%, #fff 6%);
   }
 
   .project-automation-empty-state {
@@ -5729,6 +6036,7 @@ styleElement.textContent = `
     flex-direction: column;
     gap: 10px;
     justify-content: center;
+    height: 100%;
     min-height: 0;
     padding: 36px 28px;
     text-align: center;
@@ -5793,6 +6101,7 @@ styleElement.textContent = `
     align-items: center;
     display: flex;
     flex: 1 1 auto;
+    height: 100%;
     justify-content: center;
     min-height: 0;
     padding: 0;
@@ -5812,9 +6121,13 @@ styleElement.textContent = `
 
   .project-automation-card,
   .project-automation-run-card {
-    background: rgba(255, 255, 255, 0.055);
-    border-color: rgba(255, 255, 255, 0.09);
-    border-radius: 8px;
+    background: var(--project-board-card);
+    border-color: var(--project-board-border);
+  }
+
+  .project-automation-card:hover,
+  .project-automation-run-card:hover {
+    background: var(--project-board-card-hover);
   }
 
   .project-automation-card[data-selected="true"],
@@ -6095,11 +6408,11 @@ styleElement.textContent = `
   }
 
   .project-automation-dialog {
-    max-width: 640px;
+    max-width: min(780px, calc(100vw - 44px));
+    width: 780px;
   }
 
   .project-automation-form {
-    display: grid;
     gap: 14px;
   }
 
@@ -6136,7 +6449,9 @@ styleElement.textContent = `
   }
 
   .project-automation-select {
-    width: 250px;
+    height: var(--project-board-control-height);
+    min-width: 0;
+    width: 100%;
   }
 
   .project-automation-agent-option {
@@ -6161,6 +6476,21 @@ styleElement.textContent = `
 
   .project-automation-prompt-field textarea {
     min-height: 150px;
+  }
+
+  .project-automation-dialog [data-slot="input"],
+  .project-automation-dialog [data-slot="textarea"],
+  .project-automation-dialog [data-slot="select-trigger"] {
+    background: color-mix(in srgb, var(--input) 30%, transparent);
+    border: 1px solid var(--input);
+  }
+
+  .project-automation-dialog [data-slot="input"]:is(:focus, :focus-visible),
+  .project-automation-dialog [data-slot="textarea"]:is(:focus, :focus-visible),
+  .project-automation-dialog [data-slot="select-trigger"]:is(:focus, :focus-visible) {
+    border-color: var(--project-board-focus-border);
+    box-shadow: none;
+    outline: none;
   }
 
   .project-automation-segmented {
@@ -6209,6 +6539,33 @@ styleElement.textContent = `
     align-items: center;
     display: flex !important;
     flex-direction: row;
+    gap: 8px;
+  }
+
+  .project-automation-card-toggle {
+    align-items: center;
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+  }
+
+  .project-automation-card-toggle span,
+  .project-automation-detail-toggle span {
+    color: var(--project-board-muted);
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  .project-automation-card-toggle span[data-enabled="true"],
+  .project-automation-detail-toggle span[data-enabled="true"] {
+    color: var(--project-board-accent);
+  }
+
+  .project-automation-detail-toggle {
+    align-items: center;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
   }
 
   @media (max-width: 860px) {

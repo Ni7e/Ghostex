@@ -83,6 +83,7 @@ export type ProjectBoardBridgeAction =
   | "associateFocusedSession"
   | "automationArchiveRun"
   | "automationDelete"
+  | "automationGetAllState"
   | "automationGetState"
   | "automationOpenRunSession"
   | "automationOpenWorktree"

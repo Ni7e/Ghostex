@@ -2185,11 +2185,12 @@ export function SidebarApp({
        * Remote settings tab show the same section order.
        */
       vscode.postMessage({
-        settings: {
-          ...settings,
+        baseRevision: revision,
+        patch: {
           remoteMachines: nextRemoteMachines,
         },
-        type: "updateSettings",
+        source: "sidebar:remoteMachineOrder",
+        type: "updateSettingsPatch",
       });
     },
   );
@@ -4051,6 +4052,7 @@ export function SidebarApp({
                         selectedSessionTagFilters={activeSelectedSessionTagFilters}
                         sessionTagListItems={sidebarSessionTagListItems}
                         title="Quick"
+                        useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
                       />
                       <div
                         aria-hidden={isReferenceChatsRenderedCollapsed}
@@ -4087,6 +4089,7 @@ export function SidebarApp({
                             sessionTagListItems={sidebarSessionTagListItems}
                             showHeaderActions={true}
                             showSessionDropPositionIndicators={isManualActiveSessionsSort}
+                            useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
                             vscode={vscode}
                           />
                         ))}
@@ -4210,6 +4213,7 @@ export function SidebarApp({
                             sessionTagListItems={sidebarSessionTagListItems}
                             showHeaderActions={true}
                             showSessionDropPositionIndicators={true}
+                            useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
                             vscode={vscode}
                           />
                         ))
@@ -4289,6 +4293,7 @@ export function SidebarApp({
                               sessionTagListItems={sidebarSessionTagListItems}
                               showHeaderActions={true}
                               showSessionDropPositionIndicators={false}
+                              useColoredAgentIcons={effectiveSettings.useColoredSessionAgentIcons}
                               vscode={vscode}
                             />
                           )}
@@ -4720,8 +4725,13 @@ function SidebarReferenceTopChrome({
    *
    * CDXC:Automations 2026-06-29-15:55:
    * Automations should sit above Mobile in the primary sidebar and open the
-   * gxserver-backed Automation page for the active project instead of the old
-   * coming-soon toast.
+   * gxserver-backed Automation page instead of the old coming-soon toast.
+   *
+   * CDXC:Automations 2026-06-30-11:05:
+   * Sidebar Automations opens the Quick-level all-project page. Project-specific automation access moved to the titlebar Automate view so the sidebar shortcut does not hijack the active project's Kanban/Project surface.
+   *
+   * CDXC:Automations 2026-06-30-12:51:
+   * The sidebar shortcut tooltip should use the full page name, Automations Overview, so users can distinguish it from the per-project Automate titlebar view.
    *
    * CDXC:SidebarReference 2026-06-16-01:23:
    * Plugins should no longer consume a primary sidebar row.
@@ -4772,7 +4782,7 @@ function SidebarReferenceTopChrome({
           />
           <SidebarReferenceShortcutButton
             icon={IconClock}
-            label="Automations"
+            label="Automations Overview"
             onClick={() => closeMenuAndRun(onOpenAutomations)}
           />
           <SidebarReferenceShortcutButton
@@ -5257,6 +5267,7 @@ function SidebarReferenceSectionHeader({
   selectedSessionTagFilters = [],
   sessionTagListItems,
   title,
+  useColoredAgentIcons = false,
 }: {
   activeSessionsSortMode?: SidebarActiveSessionsSortMode;
   actionsAlwaysVisible?: boolean;
@@ -5281,6 +5292,7 @@ function SidebarReferenceSectionHeader({
   selectedSessionTagFilters?: readonly SidebarSessionTag[];
   sessionTagListItems?: readonly SidebarSessionTagListItem[];
   title: string;
+  useColoredAgentIcons?: boolean;
 }) {
   /**
    * CDXC:SidebarReference 2026-05-08-01:41
@@ -5343,6 +5355,7 @@ function SidebarReferenceSectionHeader({
     bulkActionLabel === "Collapse All" ? IconArrowsDiagonalMinimize : IconArrowsDiagonal2;
   const primaryAgent = agents.find((agent) => agent.agentId === primaryAgentId) ?? agents[ 0 ];
   const primaryAgentLabel = primaryAgent?.name ?? "Agent";
+  const primaryAgentIconColorMode = useColoredAgentIcons ? "brand" : "monochrome";
   const normalizedSessionTagListItems = useMemo(
     () => normalizeSidebarSessionTagListItems(sessionTagListItems),
     [ sessionTagListItems ],
@@ -5473,7 +5486,10 @@ function SidebarReferenceSectionHeader({
                 tooltipAlign="end"
                 type="button"
               >
-                <ProjectAgentLauncherIcon agent={primaryAgent} />
+                <ProjectAgentLauncherIcon
+                  agent={primaryAgent}
+                  colorMode={primaryAgentIconColorMode}
+                />
               </SidebarFixedTooltipButton>
               <SidebarFixedTooltipButton
                 aria-expanded={agentMenuPosition !== undefined}
