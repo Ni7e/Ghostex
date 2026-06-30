@@ -105,6 +105,9 @@ final class GxserverClient {
     "NO_COLOR",
     "NODE_DISABLE_COLORS",
   ]
+  private static let conditionallyColorDisablingEnvironmentKeys = [
+    "FORCE_COLOR",
+  ]
   private static let sessionIdentityEnvironmentKeys = [
     "GHOSTEX_AGENT",
     "GHOSTEX_GLOBAL_SESSION_REF",
@@ -1170,6 +1173,24 @@ final class GxserverClient {
     return String(data: data, encoding: .utf8) ?? ""
   }
 
+  private static func environmentValueDisablesColor(_ value: String?) -> Bool {
+    guard let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    else {
+      return false
+    }
+    return normalized == "0" || normalized == "false"
+  }
+
+  private static func removeColorDisablingEnvironment(from environment: inout [String: String]) {
+    for key in colorDisablingEnvironmentKeys {
+      environment.removeValue(forKey: key)
+    }
+    for key in conditionallyColorDisablingEnvironmentKeys
+    where environmentValueDisablesColor(environment[key]) {
+      environment.removeValue(forKey: key)
+    }
+  }
+
   private func normalizedProcessEnvironment() -> [String: String] {
     var environment = ProcessInfo.processInfo.environment
     let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -1183,13 +1204,17 @@ final class GxserverClient {
      CDXC:GxserverBootstrap 2026-06-07-00:38:
      gxserver is the owner of forked zmx provider launches, so its daemon environment must never inherit NO_COLOR from the GUI app or local dev shell. Strip color-disabling keys before Node starts the daemon instead of relying on later terminal-surface cleanup.
 
+     CDXC:GxserverBootstrap 2026-06-30-22:56:
+     gxserver must not inherit FORCE_COLOR=0 from Factory-launched app sessions because provider CLIs such as Droid can disable color from that value before Ghostty receives any output. Strip only disabling FORCE_COLOR values and preserve positive overrides.
+
      CDXC:PromptEditor 2026-06-09-21:50:
      gxserver must not inherit Ghostex pane identity from the terminal that
      launched the app. Provider scripts export the current S:P:G identity
      explicitly, so strip local/native session keys before starting the daemon
      to keep Ctrl+G prompt-editor return focus from targeting a stale pane.
      */
-    for key in Self.colorDisablingEnvironmentKeys + Self.sessionIdentityEnvironmentKeys {
+    Self.removeColorDisablingEnvironment(from: &environment)
+    for key in Self.sessionIdentityEnvironmentKeys {
       environment.removeValue(forKey: key)
     }
     /*

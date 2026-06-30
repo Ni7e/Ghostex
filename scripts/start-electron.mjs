@@ -256,10 +256,20 @@ function withoutColorDisablingEnvironment(environment) {
   /*
   CDXC:ElectronLocalStartColorEnv 2026-06-07-00:38:
   Local Electron starts share gxserver and agent-session behavior with native Ghostex. Strip inherited NO_COLOR-style keys before launching build, Electron, and daemon-control subprocesses so desktop sessions remain color-capable.
+
+  CDXC:ElectronLocalStartColorEnv 2026-06-30-22:56:
+  Electron-started Factory sessions must not inherit FORCE_COLOR=0 from the launching shell. Remove only disabling FORCE_COLOR values so positive overrides remain available.
   */
   const sanitized = { ...environment };
   for (const key of ["ANSI_COLORS_DISABLED", "NO_COLOR", "NODE_DISABLE_COLORS"]) {
     delete sanitized[key];
   }
+  if (isColorDisablingForceColor(sanitized.FORCE_COLOR)) {
+    delete sanitized.FORCE_COLOR;
+  }
   return sanitized;
+}
+
+function isColorDisablingForceColor(value) {
+  return typeof value === "string" && ["0", "false"].includes(value.trim().toLowerCase());
 }

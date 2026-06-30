@@ -1766,6 +1766,11 @@ static void GhostexCEFGrantTrustedClipboardContentSetting(CefRefPtr<CefRequestCo
 }
 
 - (void)loadURLString:(NSString*)urlString {
+  /*
+  CDXC:EditorPanes 2026-06-30-14:10:
+  Source panes can ask CEF to load the ready code-server URL before Alloy has created its native browser. Keep that requested URL as the pending initial URL so browser creation performs the same navigation instead of dropping it and leaving the pane on about:blank.
+  */
+  initialURL_ = [urlString copy];
   currentURLString_ = [urlString copy];
   if (self.urlChangedHandler) {
     self.urlChangedHandler(currentURLString_);

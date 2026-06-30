@@ -538,9 +538,13 @@ private func terminalPanePastePreviewableImagesEnabled() -> Bool {
   TerminalPanePreviewableImagePasteSetting.shared.isEnabled()
 }
 
-private func terminalPaneClipboardMarkdownImageContent(in pasteboard: NSPasteboard) throws -> String? {
+private func terminalPaneClipboardMarkdownImageContent(
+  in pasteboard: NSPasteboard,
+  agentName: String?
+) throws -> String? {
+  let leadingPadding = terminalPaneClipboardImagePasteLeadingPadding(agentName: agentName)
   if let fileContent = terminalPaneClipboardImageFileMarkdownContent(in: pasteboard) {
-    return fileContent
+    return leadingPadding + fileContent
   }
   guard let imagePath = try terminalPaneClipboardSavedImagePath(in: pasteboard) else {
     return nil
@@ -553,7 +557,27 @@ private func terminalPaneClipboardMarkdownImageContent(in pasteboard: NSPasteboa
    This conversion runs only when Paste previewable images is enabled; disabled
    paste should fall through to Ghostty's ordinary clipboard text path.
    */
-  return terminalPaneClipboardMarkdownImageReference(path: imagePath, imageNumber: 1)
+  return leadingPadding + terminalPaneClipboardMarkdownImageReference(path: imagePath, imageNumber: 1)
+}
+
+private func terminalPaneClipboardImagePasteLeadingPadding(agentName: String?) -> String {
+  /*
+   CDXC:TerminalImagePaste 2026-06-30-12:53:
+   Factory Droid consumes the first two characters of pasted image Markdown when the string begins at column zero. Prefix only Droid/Factory Droid image paste content with two spaces so the visible prompt receives the complete `[Image #N](path)` reference without changing other agents, drag/drop, or ordinary text paste.
+   */
+  terminalPaneClipboardNeedsFactoryDroidImagePastePadding(agentName: agentName) ? "  " : ""
+}
+
+private func terminalPaneClipboardNeedsFactoryDroidImagePastePadding(agentName: String?) -> Bool {
+  guard let normalizedAgentName = agentName?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+    !normalizedAgentName.isEmpty
+  else {
+    return false
+  }
+  return normalizedAgentName == "droid"
+    || normalizedAgentName == "factory-droid"
+    || normalizedAgentName == "factory droid"
+    || normalizedAgentName == "factory/droid"
 }
 
 private func terminalPaneClipboardCanProduceImageMarkdownContent(in pasteboard: NSPasteboard) -> Bool {
@@ -1002,7 +1026,7 @@ private func projectBoardNativeProcessPath(_ path: String?) -> String {
 private func projectEditorModeFromNativeEditorId(_ nativeEditorId: String) -> String? {
   guard nativeEditorId.hasPrefix("project-editor:"),
     let mode = nativeEditorId.split(separator: ":").last.map(String.init),
-    ["code", "git", "tasks", "manage"].contains(mode)
+    ["code", "git", "automate", "tasks", "manage"].contains(mode)
   else {
     return nil
   }
@@ -1015,11 +1039,44 @@ private let nativeGhosttyTerminalColorDisablingEnvironmentKeys = [
   "NODE_DISABLE_COLORS",
 ]
 
+private let nativeGhosttyTerminalConditionallyColorDisablingEnvironmentKeys = [
+  "FORCE_COLOR",
+]
+
 private let nativeSshConnectionEnvironmentKeys = [
   "SSH_CONNECTION",
   "SSH_CLIENT",
   "SSH_TTY",
 ]
+
+private func nativeGhosttyEnvironmentValueDisablesColor(_ value: String?) -> Bool {
+  guard let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+    return false
+  }
+  return normalized == "0" || normalized == "false"
+}
+
+private func nativeRemoveGhosttyTerminalColorDisablingEnvironment(
+  from environment: inout [String: String]
+) {
+  for key in nativeGhosttyTerminalColorDisablingEnvironmentKeys {
+    environment.removeValue(forKey: key)
+  }
+  for key in nativeGhosttyTerminalConditionallyColorDisablingEnvironmentKeys
+  where nativeGhosttyEnvironmentValueDisablesColor(environment[key]) {
+    environment.removeValue(forKey: key)
+  }
+}
+
+private func nativeUnsetGhosttyTerminalColorDisablingProcessEnvironment() {
+  for key in nativeGhosttyTerminalColorDisablingEnvironmentKeys {
+    unsetenv(key)
+  }
+  for key in nativeGhosttyTerminalConditionallyColorDisablingEnvironmentKeys
+  where nativeGhosttyEnvironmentValueDisablesColor(nativeProcessEnvironmentValue(key)) {
+    unsetenv(key)
+  }
+}
 
 private func nativePromptEditorCommand(backend: String, customCommand: String? = nil) -> String {
   if backend == "custom" {
@@ -1281,11 +1338,12 @@ private func nativeGhosttyTerminalEnvironment(
    launch environments can carry NO_COLOR into ghostex; strip color-disabling keys
    at the native Ghostty boundary and set non-forcing color opt-in without
    forcing ANSI output in non-Ghostty child processes.
+
+   CDXC:GhosttyTerminalColorEnv 2026-06-30-22:56:
+   Factory-created Droid sessions must not inherit FORCE_COLOR=0 through native Ghostty env overlays. Strip only disabling FORCE_COLOR values while preserving explicit positive overrides.
    */
   var result = environment ?? [:]
-  for key in nativeGhosttyTerminalColorDisablingEnvironmentKeys {
-    result.removeValue(forKey: key)
-  }
+  nativeRemoveGhosttyTerminalColorDisablingEnvironment(from: &result)
   result["CLICOLOR"] = "1"
   if let sessionId, !sessionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
     result["GHOSTEX_NATIVE_SESSION_ID"] = sessionId
@@ -1514,7 +1572,8 @@ private func nativeJavaScriptLiteral(_ value: String) -> String {
 
 private func nativeGhosttyTerminalEffectiveProcessEnvironment() -> [String: String] {
   var environment = ProcessInfo.processInfo.environment
-  for key in nativeGhosttyTerminalColorDisablingEnvironmentKeys + nativeGhosttySessionIdentityEnvironmentKeys {
+  nativeRemoveGhosttyTerminalColorDisablingEnvironment(from: &environment)
+  for key in nativeGhosttySessionIdentityEnvironmentKeys {
     environment.removeValue(forKey: key)
   }
   environment["CLICOLOR"] = "1"
@@ -1540,16 +1599,21 @@ private func withNativeGhosttyTerminalProcessEnvironment<T>(_ body: () -> T) -> 
    The app may be launched from a Ghostex terminal whose process environment
    names an old pane. Strip session identity during the Ghostty creation
    snapshot; explicit per-terminal config re-adds the current P:G/S:P:G ids.
+
+   CDXC:GhosttyTerminalColorEnv 2026-06-30-22:56:
+   Ghostty surface creation snapshots process env before terminal config is applied. Strip inherited FORCE_COLOR=0 during that window so Factory sessions start color-capable without overriding positive FORCE_COLOR.
    */
   var savedEnvironment: [String: String?] = [:]
   let keysToSave = nativeGhosttyTerminalColorDisablingEnvironmentKeys
+    + nativeGhosttyTerminalConditionallyColorDisablingEnvironmentKeys
     + nativeGhosttySessionIdentityEnvironmentKeys
     + ["CLICOLOR"]
   for key in keysToSave {
     savedEnvironment[key] = nativeProcessEnvironmentValue(key)
   }
 
-  for key in nativeGhosttyTerminalColorDisablingEnvironmentKeys + nativeGhosttySessionIdentityEnvironmentKeys {
+  nativeUnsetGhosttyTerminalColorDisablingProcessEnvironment()
+  for key in nativeGhosttySessionIdentityEnvironmentKeys {
     unsetenv(key)
   }
   setenv("CLICOLOR", "1", 1)
@@ -1807,9 +1871,13 @@ final class GhostexGhosttyApp {
     state: UnsafeMutableRawPointer?
   ) -> Bool {
     let pasteboard = NSPasteboard.general
+    let surfaceView = callbackSurfaceView(from: userdata)
     if location == GHOSTTY_CLIPBOARD_STANDARD && terminalPanePastePreviewableImagesEnabled() {
       do {
-        if let imageMarkdown = try terminalPaneClipboardMarkdownImageContent(in: pasteboard) {
+        if let imageMarkdown = try terminalPaneClipboardMarkdownImageContent(
+          in: pasteboard,
+          agentName: surfaceView?.ghostexAgentName)
+        {
           /*
            CDXC:TerminalImagePaste 2026-06-08-13:18:
            Cmd+V and normal Paste actions still enter through Ghostty's clipboard request. Resolve image clipboards here before the plain-string path so image-only clipboards insert readable Markdown instead of pasting nothing.
@@ -1819,7 +1887,7 @@ final class GhostexGhosttyApp {
            opting out preserves the terminal's normal paste behavior.
            */
           imageMarkdown.withCString { ptr in
-            ghostty_surface_complete_clipboard_request(callbackSurface(from: userdata), ptr, state, false)
+            ghostty_surface_complete_clipboard_request(surfaceView?.surface, ptr, state, false)
           }
           return true
         }
@@ -1830,7 +1898,7 @@ final class GhostexGhosttyApp {
 
     let text = pasteboard.string(forType: .string) ?? ""
     text.withCString { ptr in
-      ghostty_surface_complete_clipboard_request(callbackSurface(from: userdata), ptr, state, false)
+      ghostty_surface_complete_clipboard_request(surfaceView?.surface, ptr, state, false)
     }
     return true
   }
@@ -1869,8 +1937,12 @@ final class GhostexGhosttyApp {
   }
 
   private static func callbackSurface(from userdata: UnsafeMutableRawPointer?) -> ghostty_surface_t? {
+    callbackSurfaceView(from: userdata)?.surface
+  }
+
+  private static func callbackSurfaceView(from userdata: UnsafeMutableRawPointer?) -> GhostexGhosttySurfaceView? {
     guard let userdata else { return nil }
-    return Unmanaged<GhostexGhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue().surface
+    return Unmanaged<GhostexGhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
   }
 }
 
@@ -5260,7 +5332,17 @@ final class TerminalWorkspaceView: NSView {
         focusProjectEditorPane(projectId: command.projectId, reason: "createProjectEditorPaneExisting")
         return
       }
-      if existingSession.url != command.url {
+      let existingCodeServerCEFNeedsLoad = command.url.hasPrefix(NativeCodeServerRuntimeLauncher.origin)
+        && !Self.projectEditorNavigationURLMatches(nextSession.chromiumView?.currentURLString, command.url)
+      if existingCodeServerCEFNeedsLoad {
+        /*
+         CDXC:EditorPanes 2026-06-30-14:10:
+         Re-opening an existing Source pane must not trust the session URL alone. The failed repro leaves the session pointed at the code-server URL while CEF is still on about:blank, so re-run the real load path whenever the live browser URL has not reached the intended localhost editor URL.
+         */
+        projectEditorCEFLoadResultsByProjectId.removeValue(forKey: command.projectId)
+        projectEditorCEFLoadAttemptIdsByProjectId.removeValue(forKey: command.projectId)
+      }
+      if existingSession.url != command.url || existingCodeServerCEFNeedsLoad {
         loadProjectEditorPaneWhenReady(
           projectId: command.projectId, url: command.url, reason: "createProjectEditorPaneReroute")
       }
@@ -5454,7 +5536,7 @@ final class TerminalWorkspaceView: NSView {
      layout, focus, and toolbar commands.
      */
     let projectEditorMode = projectEditorModeFromNativeEditorId(projectId)
-    let useWebKitProjectView = !isPlaceholder && (projectEditorMode == "tasks" || projectEditorMode == "manage")
+    let useWebKitProjectView = !isPlaceholder && (projectEditorMode == "automate" || projectEditorMode == "tasks" || projectEditorMode == "manage")
     let usesDeferredCodeServerNavigation = !isPlaceholder && projectEditorMode == "code"
     let tabUrl = isPlaceholder
       ? url
@@ -6219,6 +6301,8 @@ final class TerminalWorkspaceView: NSView {
       return "Code - \(visibleTitle)"
     case "git":
       return "Browser - \(visibleTitle)"
+    case "automate":
+      return "Automate - \(visibleTitle)"
     case "tasks":
       return "Project - \(visibleTitle)"
     case "manage":
@@ -11172,6 +11256,23 @@ final class TerminalWorkspaceView: NSView {
         to: webView)
       return
     }
+    if request.action == "openDocsFoldersSettings" {
+      /*
+       CDXC:DocsSidebarSettings 2026-06-30-11:42:
+       The Docs WKWebView can ask for the existing Settings modal, but only through this explicit Manage bridge action after the request is tied to the active Manage project-editor. Route it as a host event instead of exposing broad app-modal APIs to the document page.
+       */
+      sendEvent(.nativeHotkey(actionId: "openDocsFoldersSettings", sourceSessionId: nil))
+      Self.dispatchManageFilesBridgeResponse(
+        ManageFilesBridgeResponse(
+          action: request.action,
+          entries: nil,
+          error: nil,
+          file: nil,
+          requestId: request.requestId,
+          rootName: Self.manageDocsRelativePath),
+        to: webView)
+      return
+    }
     let rootPath = entry.session.projectRootPath ?? ""
     let additionalDocsFoldersText = manageAdditionalDocsFolders
     let responseTarget = ProjectBeadsBridgeResponseTarget(webView: webView)
@@ -12998,40 +13099,18 @@ final class TerminalWorkspaceView: NSView {
   ) {
     let currentURL = chromiumView.currentURLString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let session = projectEditorPaneSessions[projectId]
+    let sourceLoadResult: ProjectEditorCEFLoadResult?
+    if session?.url.hasPrefix(NativeCodeServerRuntimeLauncher.origin) == true {
+      sourceLoadResult = projectEditorCEFLoadResultsByProjectId[projectId]
+    } else {
+      sourceLoadResult = nil
+    }
     guard let hostView = projectEditorHostView(projectId: projectId, chromiumView: chromiumView) else {
       NativeModeSwitcherDebugLog.append(
         event: "titlebarModeSwitch.nativeCefRunningDeferred",
         details: [
           "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
           "deferReason": "missingHostView",
-          "isLoading": isLoading,
-          "mode": projectEditorPaneSessions[projectId]?.mode
-            ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
-          "projectId": projectId,
-          "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
-        ])
-      return
-    }
-    guard !isLoading else {
-      NativeModeSwitcherDebugLog.append(
-        event: "titlebarModeSwitch.nativeCefRunningDeferred",
-        details: [
-          "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
-          "deferReason": "stillLoading",
-          "isLoading": isLoading,
-          "mode": projectEditorPaneSessions[projectId]?.mode
-            ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
-          "projectId": projectId,
-          "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
-        ])
-      return
-    }
-    guard !currentURL.isEmpty, currentURL != "about:blank" else {
-      NativeModeSwitcherDebugLog.append(
-        event: "titlebarModeSwitch.nativeCefRunningDeferred",
-        details: [
-          "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
-          "deferReason": "placeholderUrl",
           "isLoading": isLoading,
           "mode": projectEditorPaneSessions[projectId]?.mode
             ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
@@ -13050,9 +13129,22 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     if session?.url.hasPrefix(NativeCodeServerRuntimeLauncher.origin) == true {
-      guard let loadResult = projectEditorCEFLoadResultsByProjectId[projectId],
+      guard let loadResult = sourceLoadResult,
         Self.projectEditorNavigationURLMatches(loadResult.expectedURL, session?.url)
       else {
+        if isLoading {
+          NativeModeSwitcherDebugLog.append(
+            event: "titlebarModeSwitch.nativeCefRunningDeferred",
+            details: [
+              "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
+              "deferReason": "stillLoading",
+              "isLoading": isLoading,
+              "mode": session?.mode ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+              "projectId": projectId,
+              "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+            ])
+          return
+        }
         NativeModeSwitcherDebugLog.append(
           event: "titlebarModeSwitch.nativeCefRunningDeferred",
           details: [
@@ -13067,6 +13159,10 @@ final class TerminalWorkspaceView: NSView {
       }
       switch loadResult.status {
       case "succeeded":
+        /*
+         CDXC:EditorPanes 2026-06-30-14:10:
+         Source readiness is the successful main-frame CEF loadEnd for the intended code-server URL, not CEF's broad isLoading flag. VS Code can keep background loading active after the editor document commits; waiting for that flag leaves a working editor covered by the native loading overlay.
+         */
         break
       case "failed":
         NativeModeSwitcherDebugLog.append(
@@ -13101,6 +13197,36 @@ final class TerminalWorkspaceView: NSView {
           ])
         return
       }
+    }
+    let hasSuccessfulSourceLoad = sourceLoadResult?.status == "succeeded"
+    guard !isLoading || hasSuccessfulSourceLoad else {
+      NativeModeSwitcherDebugLog.append(
+        event: "titlebarModeSwitch.nativeCefRunningDeferred",
+        details: [
+          "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
+          "deferReason": "stillLoading",
+          "isLoading": isLoading,
+          "mode": projectEditorPaneSessions[projectId]?.mode
+            ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+          "projectId": projectId,
+          "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+        ])
+      return
+    }
+    let hasCommittedNavigationURL = !currentURL.isEmpty && currentURL != "about:blank"
+    guard hasCommittedNavigationURL || hasSuccessfulSourceLoad else {
+      NativeModeSwitcherDebugLog.append(
+        event: "titlebarModeSwitch.nativeCefRunningDeferred",
+        details: [
+          "currentUrlKind": Self.modeSwitcherDebugURLKind(currentURL),
+          "deferReason": "placeholderUrl",
+          "isLoading": isLoading,
+          "mode": projectEditorPaneSessions[projectId]?.mode
+            ?? projectEditorModeFromNativeEditorId(projectId) ?? "unknown",
+          "projectId": projectId,
+          "reasonKind": Self.modeSwitcherDebugReasonKind(reason),
+        ])
+      return
     }
     hostView.setInitialLoadingOverlayVisible(false, reason: reason)
     NativeModeSwitcherDebugLog.append(
@@ -21987,7 +22113,9 @@ private final class FloatingEditorResizeHandleView: NSView {
 
 final class GhostexGhosttySurfaceView: NSView {
   private static let zmxPersistenceRefreshSequence = "\u{001B}]1337;ZMX_REFRESH\u{0007}"
+  private static let agentEnvironmentKeys = ["GHOSTEX_AGENT", "ghostex_AGENT", "VSMUX_AGENT"]
   let id: UUID
+  var ghostexAgentName: String?
   var ghostexSessionId: String?
   var onFirstPromptTitleGenerationCancel: ((String) -> Void)?
   var onTerminalEscapePressed: ((String) -> Void)?
@@ -22058,6 +22186,10 @@ final class GhostexGhosttySurfaceView: NSView {
     wantsLayer = true
     layer?.backgroundColor = NSColor.black.cgColor
     let surfaceConfig = baseConfig ?? GhostexGhosttySurfaceConfiguration()
+    ghostexAgentName = Self.agentEnvironmentKeys
+      .lazy
+      .compactMap { surfaceConfig.environmentVariables[$0]?.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .first(where: { !$0.isEmpty })
     /**
      CDXC:NativeTerminals 2026-05-11-14:01
      Direct Ghostty surfaces use the native ownership rule: the AppKit terminal
@@ -22148,6 +22280,9 @@ final class GhostexGhosttySurfaceView: NSView {
   }
 
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    if handleControlReturnKeyEquivalent(event) {
+      return true
+    }
     if handleCommandEditingKeyEquivalent(event) {
       return true
     }
@@ -22155,6 +22290,38 @@ final class GhostexGhosttySurfaceView: NSView {
       return true
     }
     return super.performKeyEquivalent(with: event)
+  }
+
+  private func handleControlReturnKeyEquivalent(_ event: NSEvent) -> Bool {
+    guard event.type == .keyDown, focused else {
+      return false
+    }
+    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    guard flags.contains(.control),
+      flags.isDisjoint(with: [.command, .option, .function, .help]),
+      event.keyCode == 36 || event.keyCode == 76
+    else {
+      return false
+    }
+    /*
+     CDXC:NativeTerminalInput 2026-06-30-10:52:
+     Ctrl+Return and Ctrl+Keypad-Enter inside embedded Ghostty panes are terminal input, matching normal Ghostty. AppKit otherwise treats the chord as a contextual-menu key equivalent before keyDown reaches the surface, so consume it here and forward the raw Control-modified key event through Ghostty's direct key path.
+     */
+    onTerminalUserInput?(self)
+    onKeyDownProbe?(self, event, "controlReturnKeyEquivalentReceived")
+    if isFirstPromptTitleGenerationInputSuppressed {
+      onKeyDownProbe?(self, event, "firstPromptTitleGenerationInputSuppressed")
+      return true
+    }
+    guard surface != nil else {
+      interpretKeyEvents([event])
+      onKeyDownProbe?(self, event, "missingSurfaceInterpreted")
+      return true
+    }
+    let action: ghostty_input_action_e = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
+    sendKeyEvent(event, action: action, includeText: false, composing: false)
+    onKeyDownProbe?(self, event, "controlReturnKeyEquivalentForwarded")
+    return true
   }
 
   /**

@@ -29,6 +29,13 @@ const startEnvironment = withoutColorDisablingEnvironment(process.env);
 const gxserverExplicitLaunchEnvironmentKeys = ["GHOSTEX_GXSERVER_CLI", "GHOSTEX_GXSERVER_BIN"];
 const quietLogTailBytes = 256 * 1024;
 const quietLogTailLines = 260;
+/*
+CDXC:LocalStartOutput 2026-06-30-11:39:
+Failure reports must keep complete xcodebuild output in build/local-start-logs while shortening only terminal-display copies of pathological single-line Swift and Xcode commands. This keeps `bun run start` failures readable without discarding diagnostic data.
+*/
+const quietLogDisplayLineMaxChars = 1200;
+const quietLogDisplayLineHeadChars = 760;
+const quietLogDisplayLineTailChars = 260;
 
 const startOptions = validateStartArguments(process.argv.slice(2), process.env.GHOSTEX_APP_VARIANT);
 const startVerbose = startOptions.verbose;
@@ -1598,7 +1605,7 @@ function reportQuietCommandFailure(label, status, logPath) {
   console.error(`Rerun with \`bun run start --verbose\` for live output.`);
   const tail = readQuietLogTail(logPath);
   if (tail) {
-    console.error(`\nLast ${quietLogTailLines} lines:\n${tail}`);
+    console.error(`\nLast ${quietLogTailLines} log lines (long lines shortened; full lines remain in ${relativeLogPath}):\n${tail}`);
   }
 }
 
@@ -1620,10 +1627,20 @@ function readQuietLogTail(logPath) {
     if (start > 0) {
       lines[0] = "[output truncated]";
     }
-    return lines.slice(-quietLogTailLines).join("\n").trimEnd();
+    return lines.slice(-quietLogTailLines).map(formatQuietLogLineForTerminal).join("\n").trimEnd();
   } finally {
     closeSync(file);
   }
+}
+
+function formatQuietLogLineForTerminal(line) {
+  if (line.length <= quietLogDisplayLineMaxChars) {
+    return line;
+  }
+  const omittedCharacterCount = line.length - quietLogDisplayLineHeadChars - quietLogDisplayLineTailChars;
+  const prefix = line.slice(0, quietLogDisplayLineHeadChars).trimEnd();
+  const suffix = line.slice(-quietLogDisplayLineTailChars).trimStart();
+  return `${prefix} ... [shortened ${omittedCharacterCount} characters from one log line; full line remains in the log file] ... ${suffix}`;
 }
 
 function formatCommand(command, args) {
@@ -1666,10 +1683,20 @@ function withoutColorDisablingEnvironment(environment) {
   /*
   CDXC:LocalStartColorEnv 2026-06-07-00:38:
   Local starts can be run from agent terminals that export NO_COLOR. Ghostex app, gxserver, and forked agent sessions must stay color-capable, so strip inherited color-disabling keys before build, install, open, and daemon-control subprocesses.
+
+  CDXC:LocalStartColorEnv 2026-06-30-22:56:
+  Local-started Factory sessions must not inherit FORCE_COLOR=0 from the launching shell. Remove only disabling FORCE_COLOR values so positive overrides still work for developers who set them intentionally.
   */
   const sanitized = { ...environment };
   for (const key of ["ANSI_COLORS_DISABLED", "NO_COLOR", "NODE_DISABLE_COLORS"]) {
     delete sanitized[key];
   }
+  if (isColorDisablingForceColor(sanitized.FORCE_COLOR)) {
+    delete sanitized.FORCE_COLOR;
+  }
   return sanitized;
+}
+
+function isColorDisablingForceColor(value) {
+  return typeof value === "string" && ["0", "false"].includes(value.trim().toLowerCase());
 }

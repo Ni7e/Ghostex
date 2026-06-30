@@ -8,12 +8,37 @@ private let ghostexColorDisablingEnvironmentKeys = [
   "NODE_DISABLE_COLORS",
 ]
 
+private let ghostexConditionallyColorDisablingEnvironmentKeys = [
+  "FORCE_COLOR",
+]
+
+private func ghostexEnvironmentValueDisablesColor(_ value: String?) -> Bool {
+  guard let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+    return false
+  }
+  return normalized == "0" || normalized == "false"
+}
+
+private func ghostexProcessEnvironmentValue(_ key: String) -> String? {
+  guard let value = getenv(key) else {
+    return nil
+  }
+  return String(cString: value)
+}
+
 private func removeGhostexProcessColorDisablingEnvironment() {
   /**
    CDXC:ProcessColorEnv 2026-06-07-00:38:
    Ghostex can be launched from agent terminals that export NO_COLOR, but the GUI app is a color-capable host for Ghostty, gxserver, zmx, and forked agent sessions. Strip inherited color-disabling keys at process start so they cannot leak into app-wide environment snapshots.
+
+   CDXC:ProcessColorEnv 2026-06-30-22:56:
+   Factory-created Droid sessions can inherit FORCE_COLOR=0 from the shell that launched Ghostex. Treat only disabling FORCE_COLOR values as color blockers so positive FORCE_COLOR overrides remain available.
    */
   for key in ghostexColorDisablingEnvironmentKeys {
+    unsetenv(key)
+  }
+  for key in ghostexConditionallyColorDisablingEnvironmentKeys
+  where ghostexEnvironmentValueDisablesColor(ghostexProcessEnvironmentValue(key)) {
     unsetenv(key)
   }
 }
