@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -89,7 +88,6 @@ export function WorktreeCreateModal({
   onCancel,
   onConfirm,
   onRequestExistingWorktrees,
-  projectName,
 }: WorktreeCreateModalProps) {
   const promptId = useId();
   const agentId = useId();
@@ -171,6 +169,16 @@ export function WorktreeCreateModal({
    * addition to the display path. Submit both fields so remote GPUI can send
    * only the list-derived key back to the owning daemon while local/native
    * receivers continue to use the selected path.
+   *
+   * CDXC:WorktreeModal 2026-06-30-16:05:
+   * Add Worktree should use a title-only header in the macOS child-window modal.
+   * Mode is the first explanatory row, so omit the project subtitle and preserve
+   * vertical room for the image picker plus primary worktree action.
+   *
+   * CDXC:WorktreeModal 2026-06-30-23:58:
+   * Open Existing already shows the selected worktree in the select trigger, so
+   * helper text under the selector should be reserved for load, error, and empty
+   * states instead of echoing the selected path.
    */
   const hasInitializedOpenDraftRef = useRef(false);
   useEffect(() => {
@@ -268,6 +276,13 @@ export function WorktreeCreateModal({
       ? selectedExistingWorktreeValue && (!trimmedPrompt || selectedAgentId)
       : trimmedPrompt && selectedAgentId && selectedBaseBranch,
   );
+  const existingWorktreeStatusDescription =
+    worktreeListError ??
+    (isLoadingWorktrees
+      ? "Loading existing worktrees."
+      : existingWorktrees.length === 0
+        ? "No existing worktrees found."
+        : undefined);
 
   const insertImageLinks = (files: readonly File[]) => {
     if (files.length === 0) {
@@ -457,9 +472,6 @@ export function WorktreeCreateModal({
         >
           <DialogHeader>
             <DialogTitle className="text-xl">Add Worktree</DialogTitle>
-            <DialogDescription>
-              Start a worktree from {projectName?.trim() || "this project"}.
-            </DialogDescription>
           </DialogHeader>
           <FieldGroup className="session-rename-field-group">
             <Field>
@@ -510,11 +522,9 @@ export function WorktreeCreateModal({
                     </SelectGroup>
                   </SelectContent>
                 </Select>
-                <FieldDescription>
-                  {worktreeListError ??
-                    (selectedExistingWorktreeDisplayPath(existingWorktrees, selectedExistingWorktreeValue) ||
-                      (isLoadingWorktrees ? "Loading existing worktrees." : "No existing worktrees found."))}
-                </FieldDescription>
+                {existingWorktreeStatusDescription ? (
+                  <FieldDescription>{existingWorktreeStatusDescription}</FieldDescription>
+                ) : null}
               </Field>
             ) : null}
             {mode === "create" ? (
@@ -658,13 +668,6 @@ function createDraft(
 
 function existingWorktreeOptionValue(worktree: ExistingWorktreeOption | undefined): string {
   return worktree?.worktreeKey?.trim() || worktree?.path?.trim() || "";
-}
-
-function selectedExistingWorktreeDisplayPath(
-  worktrees: readonly ExistingWorktreeOption[],
-  value: string,
-): string {
-  return worktrees.find((worktree) => existingWorktreeOptionValue(worktree) === value)?.path ?? "";
 }
 
 function normalizeWorktreeBaseBranchOptions(candidate: unknown): WorktreeBaseBranchOption[] {

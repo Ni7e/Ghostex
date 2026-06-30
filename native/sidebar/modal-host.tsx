@@ -100,6 +100,66 @@ type AppModalKind =
   | "tipsAndTricks"
   | "firstLaunchSetup";
 
+/*
+ * CDXC:AppModals 2026-06-30-16:08:
+ * Centered compact native child-window modals should size to their rendered
+ * React dialog once, before native presents the panel. Keep Settings out of
+ * this path because it remains a user-resizable fixed-size native window.
+ */
+const ONE_SHOT_NATIVE_FIT_HEIGHT_MODAL_SELECTORS: Partial<Record<AppModalKind, string>> = {
+  addRepository: ".add-repository-modal-shadcn",
+  agentConfig: ".agent-config-modal-shadcn",
+  delayedSend: ".delayed-send-modal-shadcn",
+  deleteWorktree: ".worktree-delete-modal-shadcn",
+  firstUserMessage: ".first-user-message-modal",
+  portlessSetup: ".portless-setup-modal-shadcn",
+  previousSessions: ".previous-sessions-modal",
+  remoteGxserverInstall: ".remote-gxserver-install-modal",
+  remoteProjectPicker: ".remote-project-picker-dialog",
+  renameSession: ".session-rename-modal-shadcn",
+  t3BrowserAccess: ".t3-browser-access-modal",
+  t3ThreadId: ".t3-thread-id-modal",
+  worktree: ".worktree-create-modal-shadcn",
+};
+
+/*
+ * CDXC:AppModals 2026-06-30-16:08:
+ * Most measured dialogs are centered, so setting the native window to their
+ * element height puts the React shell at y=0. Top-aligned modals keep an
+ * intentional WebView inset, so include that inset in the one-shot height.
+ */
+const ONE_SHOT_NATIVE_FIT_HEIGHT_TOP_OFFSET_MODALS = new Set<AppModalKind>([
+  "previousSessions",
+  "remoteProjectPicker",
+]);
+
+function oneShotNativeFitHeightSelector(modal: AppModalKind): string | undefined {
+  return ONE_SHOT_NATIVE_FIT_HEIGHT_MODAL_SELECTORS[modal];
+}
+
+function shouldUseOneShotNativeFitHeight(
+  modal: AppModalKind | null | undefined,
+): modal is AppModalKind {
+  return Boolean(modal && oneShotNativeFitHeightSelector(modal));
+}
+
+function measureOneShotNativeFitHeight(modal: AppModalKind): number | undefined {
+  const selector = oneShotNativeFitHeightSelector(modal);
+  if (!selector) {
+    return undefined;
+  }
+  const element = document.querySelector(selector);
+  if (!(element instanceof HTMLElement)) {
+    return undefined;
+  }
+  const rect = element.getBoundingClientRect();
+  const topOffset = ONE_SHOT_NATIVE_FIT_HEIGHT_TOP_OFFSET_MODALS.has(modal)
+    ? Math.max(0, rect.top)
+    : 0;
+  const height = Math.ceil(Math.max(rect.height, element.offsetHeight) + topOffset);
+  return Number.isFinite(height) && height > 0 ? height : undefined;
+}
+
 type T3BrowserAccessMessage = Extract<ExtensionToSidebarMessage, { type: "showT3BrowserAccess" }>;
 type AgentsHubCatalogMessage = Extract<ExtensionToSidebarMessage, { type: "agentsHubCatalog" }>;
 type AgentsHubFileContentMessage = Extract<
@@ -2099,6 +2159,7 @@ function AppModalHost() {
   const [ghostexFolderStatsLoading, setGhostexFolderStatsLoading] = useState(false);
   const [osIntegrationStatusLoading, setOSIntegrationStatusLoading] = useState(false);
   const [isPreviousSessionsInitialLoadReady, setIsPreviousSessionsInitialLoadReady] = useState(false);
+  const sentNativeFitHeightMeasurementKeysRef = useRef<Set<string>>(new Set());
   const previousSettingsRenderStateLogRef = useRef("");
   const previousFirstLaunchSetupRenderStateLogRef = useRef("");
   const latestSettingsPresentedLogDetailsRef = useRef<
@@ -2354,11 +2415,36 @@ function AppModalHost() {
     setRenamePromptAgentId(agentId);
   }, []);
 
+  useEffect(() => {
+    if (!activeModal) {
+      sentNativeFitHeightMeasurementKeysRef.current.clear();
+    }
+  }, [activeModal]);
+
+  useLayoutEffect(() => {
+    if (
+      window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow" &&
+      shouldUseOneShotNativeFitHeight(activeModal)
+    ) {
+      document.body.dataset.appModalFitHeight = "true";
+    } else {
+      delete document.body.dataset.appModalFitHeight;
+    }
+    return () => {
+      delete document.body.dataset.appModalFitHeight;
+    };
+  }, [activeModal]);
+
   /**
    * CDXC:AppModals 2026-05-08-09:00
    * Native should unhide the transparent modal webview only after the requested
    * modal has enough state to render. This prevents a blank overlay flash while
    * sidebar state is still syncing into the app-modal host.
+   *
+   * CDXC:AppModals 2026-06-30-16:08:
+   * Approved compact native-window modals send their fitted React dialog height
+   * once before `presented`, so AppKit can resize the child window without
+   * later height churn while the user interacts with the form.
    */
   useLayoutEffect(() => {
     if (!activeModal || !isActiveModalRenderable) {
@@ -2394,6 +2480,39 @@ function AppModalHost() {
         "modalHost.setup.presented.sent",
         latestFirstLaunchSetupPresentedLogDetailsRef.current,
       );
+    }
+    if (
+      window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow" &&
+      shouldUseOneShotNativeFitHeight(activeModal)
+    ) {
+      const measurementKey = `${activeModal}:${activeModalRequestId ?? "none"}`;
+      if (!sentNativeFitHeightMeasurementKeysRef.current.has(measurementKey)) {
+        const measuredHeight = measureOneShotNativeFitHeight(activeModal);
+        if (measuredHeight) {
+          sentNativeFitHeightMeasurementKeysRef.current.add(measurementKey);
+          const contentHeightMeasuredMessage: {
+            height: number;
+            modal: AppModalKind;
+            nativeWindowHostId?: string;
+            requestId?: string;
+            type: "contentHeightMeasured";
+          } = {
+            height: measuredHeight,
+            modal: activeModal,
+            type: "contentHeightMeasured",
+          };
+          if (window.__ghostex_APP_MODAL_HOST_ID__) {
+            contentHeightMeasuredMessage.nativeWindowHostId = window.__ghostex_APP_MODAL_HOST_ID__;
+          }
+          if (activeModalRequestId) {
+            contentHeightMeasuredMessage.requestId = activeModalRequestId;
+          }
+          postAppModalHostMessage(
+            contentHeightMeasuredMessage,
+            "AppModals:contentHeightMeasured",
+          );
+        }
+      }
     }
     postAppModalHostMessage(presentedMessage, "AppModals:presented");
   }, [activeModal, activeModalRequestId, floatingPromptEditor?.requestId, isActiveModalRenderable]);
@@ -2861,10 +2980,19 @@ function AppModalHost() {
         initialSearchQuery={settingsInitialSearchQuery}
         initialTab={settingsInitialTab}
         isOpen={isSettingsRenderable}
-        onChange={(nextSettings) => {
+        onChange={(nextSettings, source = "settings:bulk") => {
           vscode.postMessage({
             settings: nextSettings,
+            source,
             type: "updateSettings",
+          });
+        }}
+        onPatch={(patch, source) => {
+          vscode.postMessage({
+            baseRevision: revision,
+            patch,
+            source,
+            type: "updateSettingsPatch",
           });
         }}
         onGhosttySettingsAction={(action) => {
@@ -2990,6 +3118,7 @@ function AppModalHost() {
         onChange={(nextSettings) => {
           vscode.postMessage({
             settings: nextSettings,
+            source: "firstLaunch:preferences",
             type: "updateSettings",
           });
         }}

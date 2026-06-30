@@ -1153,7 +1153,6 @@ describe("native app modal window source", () => {
     expect(addRepositoryStyles).toContain(
       ".app-modal-host-native-window-body .add-repository-modal-shadcn .session-rename-field-group",
     );
-    expect(addRepositoryStyles).toContain("overflow-y: auto;");
     expect(addRepositoryStyles).toContain(
       ".add-repository-modal-shadcn\n  .session-rename-field-group\n  > [data-slot=\"field\"]:first-child",
     );
@@ -1242,7 +1241,7 @@ describe("native app modal window source", () => {
     expect(nativeSidebarSource).toContain("No compatible gxserver package");
   });
 
-  test("keeps Add Worktree fixed at 570x574 with exact native-window padding", () => {
+  test("keeps Add Worktree default width and exact native-window padding", () => {
     /*
     CDXC:WorktreeModal 2026-06-12-10:51:
     Add Worktree must open as an exact 570x550 native child window in the macOS app, separate from the larger Git Commit review modal size.
@@ -1253,6 +1252,9 @@ describe("native app modal window source", () => {
     CDXC:WorktreeModal 2026-06-13-18:39:
     Add Worktree must use the same top-right shadcn close X pattern as Rename Session, remove the footer Cancel button, use 17px native-window edge padding, and fit the shorter footer stack into a 570x574 child window.
 
+    CDXC:WorktreeModal 2026-06-30-16:08:
+    Add Worktree keeps a 570px native width and 640px hidden first-render height, then the shared compact-modal measurement path fits the final presented child-window height to the rendered React content. The header is title-only and no longer shows the project subtitle.
+
     */
     const defaultSize = sourceBetween(
       appDelegateSource,
@@ -1262,7 +1264,7 @@ describe("native app modal window source", () => {
     expect(defaultSize).toContain('case "gitCommit":');
     expect(defaultSize).toContain("return CGSize(width: 1020, height: 760)");
     expect(defaultSize).toContain('case "worktree":');
-    expect(defaultSize).toContain("return CGSize(width: 570, height: 574)");
+    expect(defaultSize).toContain("return CGSize(width: 570, height: 640)");
 
     const shouldLockContentSize = sourceBetween(
       appDelegateSource,
@@ -1279,8 +1281,6 @@ describe("native app modal window source", () => {
     expect(worktreeStyles).toContain(
       ".app-modal-host-native-window-body .worktree-create-modal-shadcn",
     );
-    expect(worktreeStyles).toContain("height: 100vh;");
-    expect(worktreeStyles).toContain("max-height: 100vh;");
     expect(worktreeStyles).toContain("max-width: 100vw;");
     expect(worktreeStyles).toContain("padding: 17px;");
     expect(worktreeStyles).toContain("width: 100vw;");
@@ -1582,9 +1582,6 @@ describe("native app modal window source", () => {
       ".app-modal-host-native-window-body .delayed-send-modal-shadcn {",
       ".delayed-send-form",
     );
-    expect(nativeDelayedSendStyles).toContain("height: 100vh;");
-    expect(nativeDelayedSendStyles).toContain("max-height: 100vh;");
-    expect(nativeDelayedSendStyles).toContain("overflow: hidden;");
     expect(nativeDelayedSendStyles).toContain("padding: 24px;");
 
     const nativeDelayedSendFormStyles = sourceBetween(
@@ -1592,8 +1589,6 @@ describe("native app modal window source", () => {
       ".app-modal-host-native-window-body .delayed-send-modal-shadcn .delayed-send-form {",
       ".delayed-send-form",
     );
-    expect(nativeDelayedSendFormStyles).toContain("height: 100%;");
-    expect(nativeDelayedSendFormStyles).toContain("justify-content: space-between;");
 
     const delayedSendFooterStyles = sourceBetween(
       modalStylesSource,

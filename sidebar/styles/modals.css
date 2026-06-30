@@ -60,6 +60,18 @@ html:has(body.app-modal-host-native-window-body) {
   min-height: 100vh;
 }
 
+/*
+ * CDXC:AppModals 2026-06-30-16:08:
+ * Approved compact native child-window modals measure their actual React
+ * dialog once. Their modal host body/root must be intrinsic-height containers
+ * during that first render; Settings keeps the legacy viewport-sized root.
+ */
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"],
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"] #root {
+  height: fit-content;
+  min-height: fit-content;
+}
+
 .app-modal-host-native-window-body [data-slot="dialog-overlay"],
 .app-modal-host-native-window-body [data-slot="dialog-content"],
 .app-modal-host-native-window-body .confirm-modal-root,
@@ -81,6 +93,12 @@ html:has(body.app-modal-host-native-window-body) {
   outline-color: var(--app-modal-background) !important;
   --tw-ring-color: var(--app-modal-background) !important;
   --tw-ring-offset-color: var(--app-modal-background) !important;
+}
+
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"] [data-slot="dialog-content"],
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"] .confirm-modal {
+  height: fit-content;
+  max-height: none;
 }
 
 .app-modal-host-body #root {
@@ -962,8 +980,17 @@ html:has(body.app-modal-host-native-window-body) {
    * component plus the modal host's 12px viewport padding. Let the picker use
    * the fitted window height instead of the old 80vh cap, which centered a
    * smaller React modal inside an oversized native window.
+   *
+   * CDXC:AppModals 2026-06-30-16:08:
+   * Previous Sessions is part of the one-shot native fit-height list, but long
+   * histories still need a visible-window cap so the result list owns overflow
+   * instead of asking AppKit for an unbounded child-window height.
    */
   margin: 0 auto auto;
+  max-height: calc(100vh - 16px);
+}
+
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"] .previous-sessions-modal {
   max-height: calc(100vh - 16px);
 }
 
@@ -1847,10 +1874,16 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .first-user-message-modal {
+  /*
+   * CDXC:FirstMessage 2026-06-30-16:08:
+   * First Message is measured once for a native fit-height child window. Let
+   * the textarea's real minimum height define the dialog instead of assigning a
+   * percentage of the WebView viewport to the modal shell.
+   */
   gap: 14px;
-  grid-template-rows: auto minmax(0, 1fr);
-  height: min(76vh, 620px);
-  max-height: calc(100vh - 24px);
+  grid-template-rows: auto auto;
+  height: fit-content;
+  max-height: none;
   max-width: min(560px, 100%);
   width: min(560px, 100%);
 }
@@ -3451,13 +3484,19 @@ html:has(body.app-modal-host-native-window-body) {
    * instead. The name field grows to absorb the remaining height so the
    * title/close row sits 24px from the top and the bottom button sits 24px from
    * the bottom, with no inner scroll.
+   *
+   * CDXC:AppModals 2026-06-30-16:08:
+   * Compact native-window modals now measure the rendered dialog once and ask
+   * AppKit to fit the child window to that height. Keep this shell full width,
+   * but stop stretching it to 100vh so Rename Session and Clone Repository can
+   * report their real content height before the native panel is shown.
    */
   box-sizing: border-box;
-  grid-template-rows: minmax(0, 1fr);
-  height: 100vh;
-  max-height: 100vh;
+  grid-template-rows: auto;
+  height: fit-content;
+  max-height: none;
   max-width: 100vw;
-  overflow: hidden;
+  overflow: visible;
   padding: 24px;
   width: 100vw;
 }
@@ -3468,25 +3507,25 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .app-modal-host-native-window-body .session-rename-modal-shadcn .session-rename-form {
-  height: 100%;
-  min-height: 0;
+  height: auto;
+  min-height: auto;
 }
 
 .app-modal-host-native-window-body .session-rename-modal-shadcn .session-rename-field-group {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
+  min-height: auto;
 }
 
 .app-modal-host-native-window-body
   .session-rename-modal-shadcn
   .session-rename-field-group
   > [data-slot="field"]:first-child {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
+  min-height: auto;
 }
 
 .app-modal-host-native-window-body .session-rename-modal-shadcn .session-rename-textarea {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
 }
 
 .add-repository-modal-shadcn {
@@ -3506,7 +3545,7 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 .app-modal-host-native-window-body .add-repository-modal-shadcn .session-rename-field-group {
-  overflow-y: auto;
+  overflow-y: visible;
 }
 
 .app-modal-host-native-window-body
@@ -3541,8 +3580,15 @@ html:has(body.app-modal-host-native-window-body) {
 
 .app-modal-host-native-window-body .worktree-create-modal-shadcn {
   box-sizing: border-box;
-  height: 100vh;
-  max-height: 100vh;
+  /*
+   * CDXC:WorktreeModal 2026-06-30-16:08:
+   * Add Worktree reports its rendered dialog height to AppKit once. Keep the
+   * native child-window width and 17px edge inset, but use intrinsic vertical
+   * sizing so Create New mode can include every control and action without
+   * relying on a hard-coded WebView height.
+   */
+  height: fit-content;
+  max-height: none;
   max-width: 100vw;
   padding: 17px;
   width: 100vw;
@@ -3565,10 +3611,15 @@ html:has(body.app-modal-host-native-window-body) {
 
 .app-modal-host-native-window-body .portless-setup-modal-shadcn {
   box-sizing: border-box;
-  height: 100vh;
-  max-height: 100vh;
+  /*
+   * CDXC:PortlessSetupModal 2026-06-30-16:08:
+   * Portless setup joins the one-shot native fit-height modal list, so the
+   * React shell must use content height instead of filling the WebView.
+   */
+  height: fit-content;
+  max-height: none;
   max-width: 100vw;
-  overflow: hidden;
+  overflow: visible;
   padding: 24px;
   width: 100vw;
 }
@@ -3582,7 +3633,7 @@ html:has(body.app-modal-host-native-window-body) {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  height: 100%;
+  height: auto;
 }
 
 .portless-setup-modal-body {
@@ -3602,7 +3653,7 @@ html:has(body.app-modal-host-native-window-body) {
   display: grid;
   gap: 8px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-top: auto;
+  margin-top: 0;
 }
 
 .portless-setup-modal-actions [data-slot="button"] {
@@ -3635,17 +3686,23 @@ html:has(body.app-modal-host-native-window-body) {
 
 .app-modal-host-native-window-body .delayed-send-modal-shadcn {
   box-sizing: border-box;
-  height: 100vh;
-  max-height: 100vh;
+  /*
+   * CDXC:DelayedSend 2026-06-30-16:08:
+   * Delayed Send now participates in one-shot native fit-height measurement.
+   * The React form should determine the child-window height instead of
+   * spreading title, fields, and actions across a fixed 100vh container.
+   */
+  height: fit-content;
+  max-height: none;
   max-width: 100vw;
-  overflow: hidden;
+  overflow: visible;
   padding: 24px;
   width: 100vw;
 }
 
 .app-modal-host-native-window-body .delayed-send-modal-shadcn .delayed-send-form {
-  height: 100%;
-  justify-content: space-between;
+  height: auto;
+  justify-content: flex-start;
 }
 
 .delayed-send-form {
