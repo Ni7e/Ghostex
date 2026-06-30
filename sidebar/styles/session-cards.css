@@ -1258,12 +1258,13 @@
   opacity: 1;
 }
 
-.session-tag-colored-icon[data-session-tag="favorite"] {
+.session-tag-colored-icon[data-session-tag="favorite"],
+.session-tag-agent-icon[data-session-tag="favorite"] {
   /*
    * CDXC:SidebarSessionAgentIcons 2026-06-29-23:58:
-   * Favorite session rows use the star shape to communicate Favorite without
-   * forcing the leading session slot to gold. Keep the gold swatch only in
-   * tag picker/filter chrome where users compare tag categories directly.
+   * Favorite should not tint the underlying agent icon gold, but Favorite is
+   * still a selected session tag. The tag star itself stays colored like every
+   * other tag while agent-logo color follows the Session Cards icon setting.
    */
   color: color-mix(in srgb, #ffdf75 78%, #c78b12 22%);
 }
@@ -2345,6 +2346,31 @@ body[data-custom-sidebar-titlebar-colors="true"]
   top: 50%;
   translate: 0 -50%;
   width: var(--reference-session-icon-size);
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session-frame[data-tagged="true"]:not(:hover):not(:has(.session:hover)):not(
+    :has(.session:focus-visible)
+  ):not(:has(.session:focus-within))
+  .session-floating-agent-icon,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session-frame[data-tagged="true"]:not(:hover):not(:has(.session:hover)):not(
+    :has(.session:focus-visible)
+  ):not(:has(.session:focus-within))
+  .session-floating-agent-tabler-icon[data-agent-icon],
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session-frame[data-tagged="true"]:not(:hover):not(:has(.session:hover)):not(
+    :has(.session:focus-visible)
+  ):not(:has(.session:focus-within))
+  .session-persistence-provider-badge[data-slot="floating"] {
+  /*
+   * CDXC:SidebarSessionAgentIcons 2026-06-30-00:12:
+   * Tagged session rows have one leading slot. At rest, including when the row
+   * is the focused/active session, the selected tag icon owns that slot. Only
+   * pointer hover or keyboard focus may swap the slot to the hidden agent icon,
+   * so tag and agent icons never overlap.
+   */
+  opacity: 0 !important;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]

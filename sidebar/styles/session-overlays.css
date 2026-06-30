@@ -236,7 +236,7 @@
  * Session-card tooltips render below the hovered row with a custom measured
  * popup so they do not overlap the trigger or mis-anchor through the Radix
  * layer in the native sidebar webview. The popup is portaled out of the row so
- * sticky project headers cannot cover Quick-session tooltips.
+ * section overflow and adjacent rows cannot cover Quick-session tooltips.
  */
 .session-local-tooltip-shell {
   display: block;

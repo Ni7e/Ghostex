@@ -192,6 +192,7 @@ import {
   writeProjectSessionListCollapsedState,
 } from "./project-session-list-toggle";
 import { ProjectAgentLauncherIcon } from "./project-agent-launcher-icon";
+import { hasKnownSidebarProjectInventory } from "./sidebar-project-empty-state";
 
 type SidebarEventSource = Pick<Window, "addEventListener" | "removeEventListener">;
 
@@ -812,7 +813,6 @@ export function SidebarApp({
   const referenceSectionAnimationTimeoutsRef = useRef<
     Partial<Record<ReferenceSidebarSectionId, number>>
   >({});
-  const referenceSidebarLayoutRef = useRef<HTMLDivElement>(null);
   const sessionGroupsContentRef = useRef<HTMLDivElement>(null);
   const sidebarStartupStartedAtRef = useRef(getSidebarStartupNow());
   const hasAppliedHydrateRef = useRef(false);
@@ -836,65 +836,6 @@ export function SidebarApp({
         window.clearTimeout(recentProjectsScrollIdleTimeoutRef.current);
       }
       setSidebarTooltipsSuppressedForDrag(false);
-    };
-  }, []);
-
-  useLayoutEffect(() => {
-    const element = referenceSidebarLayoutRef.current;
-    if (!element) {
-      return;
-    }
-
-    let animationFrameId = 0;
-    let previousTop = "";
-    let previousHeight = "";
-
-    /**
-     * CDXC:SidebarStickyHeaders 2026-06-29-21:37:
-     * Sticky project headers need to sample the same custom sidebar gradient as
-     * the reference sidebar shell, but per-project scroll clipping was too
-     * expensive. Measure the sidebar gradient space once at the root and publish
-     * stable geometry variables so native sticky headers can align their
-     * viewport-fixed background without running per-row scroll work.
-     */
-    const updateReferenceSidebarGradientGeometry = () => {
-      animationFrameId = 0;
-      const bounds = element.getBoundingClientRect();
-      const nextTop = `${Math.round(bounds.top)}px`;
-      const nextHeight = `${Math.max(1, Math.ceil(bounds.height))}px`;
-
-      if (nextTop !== previousTop) {
-        previousTop = nextTop;
-        element.style.setProperty("--reference-sidebar-gradient-top", nextTop);
-      }
-
-      if (nextHeight !== previousHeight) {
-        previousHeight = nextHeight;
-        element.style.setProperty("--reference-sidebar-gradient-height", nextHeight);
-      }
-    };
-
-    const scheduleReferenceSidebarGradientGeometryUpdate = () => {
-      if (animationFrameId !== 0) {
-        return;
-      }
-
-      animationFrameId = window.requestAnimationFrame(updateReferenceSidebarGradientGeometry);
-    };
-
-    updateReferenceSidebarGradientGeometry();
-    const resizeObserver = new ResizeObserver(scheduleReferenceSidebarGradientGeometryUpdate);
-    resizeObserver.observe(element);
-    window.addEventListener("resize", scheduleReferenceSidebarGradientGeometryUpdate);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", scheduleReferenceSidebarGradientGeometryUpdate);
-      if (animationFrameId !== 0) {
-        window.cancelAnimationFrame(animationFrameId);
-      }
-      element.style.removeProperty("--reference-sidebar-gradient-top");
-      element.style.removeProperty("--reference-sidebar-gradient-height");
     };
   }, []);
 
@@ -926,6 +867,7 @@ export function SidebarApp({
     groupOrder,
     groupsById,
     previousSessions,
+    projectSettingsProjects,
     recentProjects,
     settings,
     revision,
@@ -943,6 +885,7 @@ export function SidebarApp({
       groupOrder: state.groupOrder,
       groupsById: state.groupsById,
       previousSessions: state.previousSessions,
+      projectSettingsProjects: state.hud.projectSettingsProjects,
       recentProjects: state.hud.recentProjects,
       revision: state.revision,
       settings: state.hud.settings,
@@ -2647,9 +2590,23 @@ export function SidebarApp({
    * CDXC:SidebarProjectsEmptyState 2026-06-18-06:01:
    * A sidebar with zero rendered project groups should guide first-time setup from the same left-aligned Projects empty-state block as the previous "No projects" placeholder. Tie the copy to the visible Projects label and its hover plus action instead of adding a separate card or fallback surface.
    */
-  const hasAnySidebarProjectGroups =
-    displayedReferenceProjectGroupIds.length > 0 ||
-    Object.values(remoteProjectGroupIdsByMachineId).some((projectGroupIds) => projectGroupIds.length > 0);
+  const hasKnownProjectInventoryForEmptyState = hasKnownSidebarProjectInventory({
+    groupsById,
+    projectSettingsProjectCount: projectSettingsProjects?.length ?? 0,
+    recentProjectCount: recentProjects.length,
+    unavailableProjectGroupId: SIDEBAR_GXSERVER_UNAVAILABLE_GROUP_ID,
+    workspaceGroupIds,
+  });
+  const shouldShowFirstProjectEmptyState =
+    !isSessionSearchOpen && !hasKnownProjectInventoryForEmptyState;
+  /*
+   * CDXC:SidebarProjectsEmptyState 2026-06-30-03:25:
+   * Sidebar search must not flash first-project onboarding after any project is
+   * known. Search filtering and transient group display updates can temporarily
+   * remove all visible Projects rows, so decide the first-run copy from
+   * authoritative project inventory and parked Recent Projects instead of the
+   * current displayed group arrays.
+   */
   const referenceProjectsEmptyState = showGxserverUnavailableEmptyState ? (
     <div className="reference-sidebar-empty-state">
       Unable to load sessions.
@@ -2658,22 +2615,20 @@ export function SidebarApp({
     </div>
   ) : hasGxserverUnavailablePlaceholder ? null : (
     <div className="reference-sidebar-empty-state">
-      {hasAnySidebarProjectGroups ? (
-        "No projects"
-      ) : (
+      {shouldShowFirstProjectEmptyState ? (
         <>
           No Projects Added.
           <br />
           <br />
           {"Hover over the Projects label and click on the plus button to add your first project and get started!"}
         </>
+      ) : (
+        "No projects"
       )}
     </div>
   );
   const {
     hasOverflow: sessionGroupsHaveScrollableOverflow,
-    showBottomGlow: showSessionGroupsBottomGlow,
-    showTopGlow: showSessionGroupsTopGlow,
   } = useScrollGlowState(sessionGroupsContentRef);
   const sidebarSessionSearchResults = useMemo(
     () =>
@@ -3989,7 +3944,6 @@ export function SidebarApp({
         data-session-agent-icon-color-mode={
           effectiveSettings.useColoredSessionAgentIcons ? "colored" : "monochrome"
         }
-        ref={referenceSidebarLayoutRef}
       >
         {showCommandHotkeyOverlay ? <SidebarHotkeyOverlay hotkeys={settings?.hotkeys} /> : null}
         <SidebarReferenceTopChrome
@@ -4033,26 +3987,16 @@ export function SidebarApp({
               {null}
             </div>
             {/*
-            CDXC:SidebarScroll 2026-06-19-13:28:
-            Match Codex Desktop's sidebar by applying the bottom edge fade to
-            the scroll container itself. Do not render a separate bottom shadow
-            overlay; custom gradient sidebar colors make painted overlays read
-            as gray.
-
-            CDXC:SidebarScroll 2026-06-19-13:55:
-            The Codex-style mask needs to apply at both scroll edges. Drive
-            top and bottom fade availability from measured scroll state so
-            transparent sticky project headers do not expose a painted shadow
-            or unfaded overlap at the viewport edges.
+            CDXC:SidebarScroll 2026-06-30-01:59:
+            The sidebar's project list must scroll as fast as the browser can move it.
+            Do not apply the vertical scroll mask or sticky-header gradient geometry here; the user explicitly accepts losing those visual fades to remove scroll-linked paint work.
           */}
             <div
               className="session-groups-scroll-shell"
-              data-scroll-glow-bottom={String(showSessionGroupsBottomGlow)}
-              data-scroll-glow-top={String(showSessionGroupsTopGlow)}
               data-scrollable-y={String(sessionGroupsHaveScrollableOverflow)}
             >
               <div
-                className="session-groups-content vertical-scroll-fade-mask"
+                className="session-groups-content"
                 data-scrollable-y={String(sessionGroupsHaveScrollableOverflow)}
                 ref={sessionGroupsContentRef}
               >
@@ -4500,7 +4444,7 @@ export function SidebarApp({
                     shellClassName="recent-projects-search"
                   />
                   <div
-                    className="recent-projects-list vertical-scroll-fade-mask"
+                    className="recent-projects-list"
                     onPointerEnter={handleRecentProjectsListPointerMove}
                     onPointerLeave={handleRecentProjectsListPointerLeave}
                     onPointerMove={handleRecentProjectsListPointerMove}

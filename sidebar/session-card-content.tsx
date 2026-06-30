@@ -1502,10 +1502,10 @@ export function OverflowTooltipText({
    * bolder, so the title scans as the primary label without making ids heavier.
    *
    * CDXC:SessionTooltips 2026-05-28-04:33:
-   * Quick-session hover tooltips must paint above sticky project headers in the
-   * Projects area. Keep the custom native-sidebar positioning behavior, but
-   * portal the rendered tooltip to the document body and place it from the
-   * trigger rect so section and sticky-header stacking contexts cannot cover it.
+   * Quick-session hover tooltips must paint above surrounding Projects content.
+   * Keep the custom native-sidebar positioning behavior, but portal the
+   * rendered tooltip to the document body and place it from the trigger rect so
+   * section overflow and row stacking contexts cannot cover it.
    *
    * CDXC:SidebarTooltips 2026-05-30-06:36:
    * Sidebar tooltips should open below their trigger for a consistent scan path
