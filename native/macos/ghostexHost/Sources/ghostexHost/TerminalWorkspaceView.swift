@@ -194,6 +194,7 @@ private let nativeGhosttySessionIdentityEnvironmentKeys = [
 private let projectBeadsResponseEventName = "ghostex-project-beads-response"
 private let projectBoardResponseEventName = "ghostex-project-board-response"
 private let projectBoardImageResponseEventName = "ghostex-project-board-image-response"
+private let manageFilesChangedEventName = "ghostex-manage-files-changed"
 private let manageFilesResponseEventName = "ghostex-manage-files-response"
 private let projectBoardInternalPromptGenerationEnvironmentKeys = [
   "GHOSTEX_GLOBAL_SESSION_REF",
@@ -274,6 +275,71 @@ private final class ProjectBeadsBridgeResponseTarget: @unchecked Sendable {
 
   init(webView: WKWebView) {
     self.webView = webView
+  }
+}
+
+private final class ManageFilesWatcher {
+  private let onChange: () -> Void
+  private let queue = DispatchQueue(label: "dev.ghostex.manage-files-watcher", qos: .utility)
+  private var debounceWorkItem: DispatchWorkItem?
+  private var signature = ""
+  private var sources: [DispatchSourceFileSystemObject] = []
+
+  init(watchDirectories: [URL], signature: String, onChange: @escaping () -> Void) {
+    self.onChange = onChange
+    update(watchDirectories: watchDirectories, signature: signature)
+  }
+
+  deinit {
+    stop()
+  }
+
+  func update(watchDirectories: [URL], signature: String) {
+    guard signature != self.signature else {
+      return
+    }
+    stop()
+    self.signature = signature
+    for directoryURL in watchDirectories {
+      let descriptor = open(directoryURL.path, O_EVTONLY)
+      guard descriptor >= 0 else {
+        continue
+      }
+      let source = DispatchSource.makeFileSystemObjectSource(
+        fileDescriptor: descriptor,
+        eventMask: [.write, .delete, .rename, .attrib, .extend, .link, .revoke],
+        queue: queue)
+      source.setEventHandler { [weak self] in
+        DispatchQueue.main.async {
+          self?.scheduleChange()
+        }
+      }
+      source.setCancelHandler {
+        close(descriptor)
+      }
+      sources.append(source)
+      source.resume()
+    }
+  }
+
+  func stop() {
+    debounceWorkItem?.cancel()
+    debounceWorkItem = nil
+    let currentSources = sources
+    sources = []
+    signature = ""
+    for source in currentSources {
+      source.cancel()
+    }
+  }
+
+  private func scheduleChange() {
+    debounceWorkItem?.cancel()
+    let workItem = DispatchWorkItem { [weak self] in
+      self?.onChange()
+    }
+    debounceWorkItem = workItem
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: workItem)
   }
 }
 
@@ -982,7 +1048,7 @@ private func nativeEnsurePromptEditorWrapper(at wrapperURL: URL) {
    Ctrl+G prompt editing must expose EDITOR/VISUAL as a single executable path.
    zehn and other editor callers execute EDITOR as argv[0], so command strings
    such as `Ghostex floating-monaco-editor` fail before the CLI can choose
-   Monaco or gte.
+   Monaco or the machine editor.
 
    CDXC:PromptEditor 2026-06-07-08:09:
    Already-running zmx shells can invoke this wrapper with old PATH state.
@@ -995,7 +1061,7 @@ private func nativeEnsurePromptEditorWrapper(at wrapperURL: URL) {
   let bundledZmxPath = nativeBundledZmxExecutablePath() ?? ""
   let contents = """
     #!/bin/zsh
-    # CDXC:PromptEditor 2026-05-31-11:58: EDITOR is a single executable wrapper; the Ghostex CLI decides Monaco vs gte from runtime client/session environment.
+    # CDXC:PromptEditor 2026-05-31-11:58: EDITOR is a single executable wrapper; the Ghostex CLI decides Monaco vs the machine editor from runtime client/session environment.
     ghostex_zmx_bin=\(nativeShellQuote(bundledZmxPath))
     if [ -x "$ghostex_zmx_bin" ]; then
       export GHOSTEX_ZMX_BIN="$ghostex_zmx_bin"
@@ -1020,11 +1086,11 @@ private func nativeEnsurePromptEditorWrapper(at wrapperURL: URL) {
 private func nativePromptEditorBackend(from environment: [String: String]) -> String? {
   let backend = environment["GHOSTEX_PROMPT_EDITOR_BACKEND"]?.trimmingCharacters(
     in: .whitespacesAndNewlines)
-  if backend == "monaco" || backend == "gte" || backend == "custom" {
+  if backend == "monaco" || backend == "custom" {
     return backend
   }
   if environment["GHOSTEX_RICH_PROMPT_EDITING_WITH_GTE"] == "1" {
-    return "gte"
+    return nil
   }
   if environment["GHOSTEX_PROMPT_EDITING_ENABLED"] == "1" {
     return "monaco"
@@ -1037,7 +1103,7 @@ private func nativeEffectivePromptEditorBackend(from environment: [String: Strin
     return nil
   }
   if backend == "monaco" && nativeIsSshConnectionEnvironment(environment) {
-    return "gte"
+    return nil
   }
   return backend
 }
@@ -1090,13 +1156,14 @@ private func nativeRemoveStaleSshPromptEditorEnvironment(_ environment: inout [S
     return false
   }
   let promptEditorBackend = nativePromptEditorBackend(from: environment)
-  guard promptEditorBackend == nil else {
+  guard promptEditorBackend == nil || promptEditorBackend == "monaco" else {
     return false
   }
   let hasGhostexPromptEditorOverlay =
     nativeIsGhostexPromptEditorValue(environment["EDITOR"])
     || nativeIsGhostexPromptEditorValue(environment["VISUAL"])
-  guard hasGhostexPromptEditorOverlay else {
+  let hasExplicitMonacoPromptEditorBackend = promptEditorBackend == "monaco"
+  guard hasExplicitMonacoPromptEditorBackend || hasGhostexPromptEditorOverlay else {
     return false
   }
   let customPromptEditorCommand = environment["GHOSTEX_CUSTOM_PROMPT_EDITOR_COMMAND"]
@@ -1107,9 +1174,17 @@ private func nativeRemoveStaleSshPromptEditorEnvironment(_ environment: inout [S
    keep the editor chosen by that SSH login. Remove only stale Ghostex
    prompt-editor overlay and markers so normal EDITOR/VISUAL values continue to
    come from the login environment.
+
+   CDXC:PromptEditorBackend 2026-06-30-03:11:
+   Monaco is not valid inside SSH shells unless a current zmx desktop attach
+   advertises it. When an SSH launch inherits Ghostex's Monaco wrapper, remove
+   that wrapper instead of converting it to a Ghostex-owned terminal editor so
+   Ctrl+G falls through to the machine's own EDITOR/VISUAL after shell startup.
    */
   for key in [
     "GHOSTEX_PROMPT_EDITING_ENABLED",
+    "GHOSTEX_PROMPT_EDITOR_BACKEND",
+    "GHOSTEX_PROMPT_EDITOR_CLIENT",
     "GHOSTEX_RICH_PROMPT_EDITING_WITH_GTE",
     "GHOSTEX_DEBUGGING_MODE",
     "GHOSTEX_CUSTOM_PROMPT_EDITOR_COMMAND",
@@ -1258,16 +1333,18 @@ private func nativeApplyGtePromptEditingEnvironment(_ environment: inout [String
   /**
    CDXC:GtePromptEditing 2026-05-10-11:27
    Zsh startup files can export EDITOR after Ghostty receives the process
-   environment. When gte is enabled, launch zsh through a ghostex-owned ZDOTDIR
-   shim that sources the user's real startup files first, then exports the
-   gte editor command last so Ctrl+G/edit-command-line uses gte instead
-   of the profile editor.
+   environment. When Ghostex owns the prompt editor, launch zsh through a
+   ghostex-owned ZDOTDIR shim that sources the user's real startup files first,
+   then exports the selected prompt editor command last so Ctrl+G/edit-command-line
+   uses the configured backend instead of the profile editor.
    CDXC:PromptEditorBackend 2026-05-22-09:56
    The terminal prompt editor is named gte for Ghostex Terminal Editor. Native launch shims must export the gte command and keep logs/state under gte names so Ctrl+G behavior, diagnostics, and Settings copy use one name.
    CDXC:PromptEditorBackend 2026-05-22-10:16
-   The gte backend is an in-terminal editor, not a native overlay. Export plain `gte` for EDITOR/VISUAL so Ctrl+G opens inside the launching terminal; keep the Ghostex floating command only for the Monaco backend.
+   Legacy gte settings are no longer a selected backend. Keep the Ghostex wrapper only for Monaco/custom prompt-editor ownership; machine-default editor mode should not be overwritten here.
    CDXC:PromptEditorBackend 2026-05-25-11:23
-   When Settings selects Monaco, SSH-connected terminal sessions cannot use the local floating overlay. Resolve only that runtime case to gte while preserving the saved Monaco preference for app-local rich prompt editing. Explicit gte selections must stay gte in every terminal context, including SSH.
+   When Settings selects Monaco, SSH-connected terminal sessions cannot use the local floating overlay. Resolve only that runtime case at the terminal boundary while preserving the saved Monaco preference for app-local rich prompt editing.
+   CDXC:PromptEditorBackend 2026-06-30-03:11
+   The SSH resolution is now "use the machine editor" rather than gte. If Monaco is not allowed, do not export Ghostex's wrapper into EDITOR/VISUAL; user shell startup should own the editor command.
    CDXC:GtePromptEditing 2026-05-11-17:31
    Dev terminals can be launched from inside the production ghostex shim. Unwrap
    inherited ghostex ZDOTDIR values to the original user dotdir so zsh sources the
@@ -1376,7 +1453,7 @@ private func nativeGteZshStartupShim(
     ? """
 
       # CDXC:PromptEditorBackend 2026-05-17-08:46: SSH logins without an explicit Ghostex prompt-editor backend keep their existing EDITOR/VISUAL instead of being rewritten to a stale local floating editor command.
-      # CDXC:PromptEditorBackend 2026-05-25-11:23: SSH sessions use the already-resolved terminal-native prompt editor command, so explicit gte and Monaco-over-SSH both export gte instead of leaving Ctrl+G pointed at an unavailable floating overlay.
+      # CDXC:PromptEditorBackend 2026-05-25-11:23: SSH sessions use the already-resolved terminal-native prompt editor command instead of leaving Ctrl+G pointed at an unavailable floating overlay.
       # CDXC:PromptEditor 2026-05-31-11:58: Native app terminals export a single prompt-editor wrapper path after user startup files, so prompt editor callers do not need shell command parsing and the wrapper can route macOS app requests to Monaco.
       export EDITOR=\(nativeShellQuote(promptEditorCommand))
       export VISUAL=\(nativeShellQuote(promptEditorCommand))
@@ -1389,7 +1466,7 @@ private func nativeGteZshStartupShim(
     : ""
   return """
     # CDXC:GtePromptEditing 2026-05-10-11:27
-    # Source the user's real zsh startup file, then let ghostex force the gte
+    # Source the user's real zsh startup file, then let ghostex force the selected
     # prompt editor command after profile exports that would otherwise override
     # EDITOR.
     _ghostex_shim_zdotdir="${ZDOTDIR}"
@@ -2556,6 +2633,13 @@ final class TerminalWorkspaceView: NSView {
    */
   private static let projectEditorTitleBarHeight: CGFloat = 35
   /**
+   CDXC:ProjectBrowserTabs 2026-06-30-01:00:
+   The Browser view's project-local browser tab strip should be one pixel
+   shorter than the shared project-editor titlebar chrome. Keep Browser tabs at
+   34pt without changing Source, Kanban, Docs, or normal workspace tab bars.
+   */
+  private static let projectBrowserTabBarHeight: CGFloat = 34
+  /**
    CDXC:ProjectEditorCompanion 2026-06-30-00:27:
    Companion-pane titlebars in Source, Browser, Kanban, and Docs need one less
    vertical pixel than project-editor tab strips, so companion panes reserve
@@ -2728,6 +2812,12 @@ final class TerminalWorkspaceView: NSView {
   private var zmxInactiveSessionIds = Set<String>()
   private var showSessionIdInTerminalPanes = false
   private var showBetaFeatures = false
+  /*
+   CDXC:DocsSidebar 2026-06-30-19:47:
+   React owns the global comma-separated extra Docs folder setting, while native owns filesystem scanning and file-change watchers. Keep the normalized text in AppKit layout state so already-open Docs panes can update when Settings changes.
+   */
+  private var manageAdditionalDocsFolders = ""
+  private var manageFilesWatchersByProjectId: [String: ManageFilesWatcher] = [:]
   private var activeProjectEditorId: String?
   private var focusedSessionId: String?
   private var lastEmittedFocusedSessionId: String?
@@ -5144,6 +5234,7 @@ final class TerminalWorkspaceView: NSView {
          */
         nextSession.title = command.title
         projectEditorPaneSessions[command.projectId] = nextSession
+        syncManageFileWatcher(projectId: command.projectId, reason: "createProjectEditorPaneExistingBrowser")
         nextSession.titleBarView?.setTitle(nextSession.projectTitle)
         focusProjectEditorPane(projectId: command.projectId, reason: "createProjectEditorPaneExistingBrowser")
         sendProjectEditorTabSelected(projectId: command.projectId)
@@ -5157,6 +5248,7 @@ final class TerminalWorkspaceView: NSView {
       nextSession.title = command.title
       nextSession.url = command.url
       projectEditorPaneSessions[command.projectId] = nextSession
+      syncManageFileWatcher(projectId: command.projectId, reason: "createProjectEditorPaneExisting")
       nextSession.titleBarView?.setTitle(nextSession.projectTitle)
       if let nativeLoadState = projectEditorNativeLoadStatesByProjectId[command.projectId],
         nativeLoadState.status == "error"
@@ -5291,6 +5383,7 @@ final class TerminalWorkspaceView: NSView {
       title: initialActiveTab.title,
       url: initialActiveTab.url
     )
+    syncManageFileWatcher(projectId: command.projectId, reason: "createProjectEditorPaneNew")
     for tab in initialTabs {
       addSubview(tab.hostView)
       moveOffscreen(tab.hostView)
@@ -6392,6 +6485,7 @@ final class TerminalWorkspaceView: NSView {
     projectEditorNativeLoadStatesByProjectId.removeValue(forKey: projectId)
     projectEditorCEFLoadResultsByProjectId.removeValue(forKey: projectId)
     projectEditorCEFLoadAttemptIdsByProjectId.removeValue(forKey: projectId)
+    manageFilesWatchersByProjectId.removeValue(forKey: projectId)
     guard let session = projectEditorPaneSessions.removeValue(forKey: projectId) else {
       return
     }
@@ -6418,6 +6512,87 @@ final class TerminalWorkspaceView: NSView {
     }
     syncCEFNativeDragSourceReleaseMonitor(reason: "closeProjectEditorPane")
     syncSourceCEFDragDiagnosticsMonitor(reason: "closeProjectEditorPane")
+  }
+
+  private func syncManageFileWatcher(projectId: String, reason: String) {
+    guard let session = projectEditorPaneSessions[projectId],
+      session.mode == "manage",
+      let projectRootPath = session.projectRootPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !projectRootPath.isEmpty,
+      let rootURL = try? Self.manageProjectRootURL(projectRootPath)
+    else {
+      manageFilesWatchersByProjectId.removeValue(forKey: projectId)
+      return
+    }
+    let watchDirectories =
+      (try? Self.manageFileWatchDirectories(
+        rootURL: rootURL,
+        additionalDocsFoldersText: manageAdditionalDocsFolders)) ?? [rootURL]
+    let signature = Self.manageFileWatcherSignature(
+      rootURL: rootURL,
+      watchDirectories: watchDirectories,
+      additionalDocsFoldersText: manageAdditionalDocsFolders)
+    if let watcher = manageFilesWatchersByProjectId[projectId] {
+      watcher.update(watchDirectories: watchDirectories, signature: signature)
+      return
+    }
+    manageFilesWatchersByProjectId[projectId] = ManageFilesWatcher(
+      watchDirectories: watchDirectories,
+      signature: signature
+    ) { [weak self] in
+      self?.handleManageFilesChanged(projectId: projectId)
+    }
+  }
+
+  private func syncManageFileWatchers(reason: String) {
+    let manageProjectIds = Set(
+      projectEditorPaneSessions.compactMap { projectId, session in
+        session.mode == "manage" ? projectId : nil
+      })
+    for projectId in Array(manageFilesWatchersByProjectId.keys) where !manageProjectIds.contains(projectId) {
+      manageFilesWatchersByProjectId.removeValue(forKey: projectId)
+    }
+    for projectId in manageProjectIds {
+      syncManageFileWatcher(projectId: projectId, reason: reason)
+    }
+  }
+
+  private func handleManageFilesChanged(projectId: String) {
+    /*
+     CDXC:DocsSidebar 2026-06-30-19:47:
+     File creation, rename, delete, and directory creation should appear in the Docs sidebar without refreshing the app. Rebuild watcher directories after each debounced filesystem signal so newly created folders become watched, then ask the WK page to use its existing list bridge.
+     */
+    syncManageFileWatcher(projectId: projectId, reason: "watchEvent")
+    dispatchManageFilesChanged(projectId: projectId, reason: "watchEvent")
+  }
+
+  private func dispatchManageFilesChangedToOpenManagePages(reason: String) {
+    for (projectId, session) in projectEditorPaneSessions where session.mode == "manage" {
+      dispatchManageFilesChanged(projectId: projectId, reason: reason)
+    }
+  }
+
+  private func dispatchManageFilesChanged(projectId: String, reason: String) {
+    guard let session = projectEditorPaneSessions[projectId],
+      session.mode == "manage",
+      let webView = session.webView ?? session.tabs.compactMap(\.webView).first
+    else {
+      return
+    }
+    let payload: [String: String] = [
+      "projectEditorId": projectId,
+      "reason": reason,
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: payload),
+      let json = String(data: data, encoding: .utf8)
+    else {
+      return
+    }
+    let script = """
+      window.dispatchEvent(new CustomEvent('\(manageFilesChangedEventName)', { detail: \(json) }));
+      undefined;
+      """
+    webView.evaluateJavaScript(script, completionHandler: nil)
   }
 
   func closeFocusedSession(reason: String) -> Bool {
@@ -7657,6 +7832,7 @@ final class TerminalWorkspaceView: NSView {
     let previousSessionTitles = sessionTitles
     let previousZmxInactiveSessionIds = zmxInactiveSessionIds
     let previousShowBetaFeatures = showBetaFeatures
+    let previousManageAdditionalDocsFolders = manageAdditionalDocsFolders
     let shouldApplyPaneOwnerSelection =
       command.paneOwnerSelectionChanged == true && !shouldRelayout
     let responderSessionIdBefore = currentResponderSessionId()
@@ -7732,6 +7908,12 @@ final class TerminalWorkspaceView: NSView {
     showBetaFeatures = command.showBetaFeatures == true
     if previousShowBetaFeatures != showBetaFeatures {
       applyShowBetaFeaturesToBrowserToolbars()
+    }
+    manageAdditionalDocsFolders = Self.manageNormalizedAdditionalDocsFoldersText(
+      command.manageAdditionalDocsFolders)
+    if previousManageAdditionalDocsFolders != manageAdditionalDocsFolders {
+      syncManageFileWatchers(reason: "settingsChanged")
+      dispatchManageFilesChangedToOpenManagePages(reason: "settingsChanged")
     }
     activeProjectEditorId = nextActiveProjectEditorId
     let shouldRefreshPaneTabMetadata =
@@ -10012,9 +10194,10 @@ final class TerminalWorkspaceView: NSView {
     in rect: CGRect
   ) -> (titleBarFrame: CGRect, hostFrame: CGRect) {
     let nextFrame = chromiumBackingPixelAlignedFrame(rect)
+    let projectTitleBarHeight = Self.projectEditorTitleBarHeight(for: session)
     let titleBarHeight =
       session.showsProjectTabs && session.titleBarView != nil
-      ? min(Self.projectEditorTitleBarHeight, max(nextFrame.height, 0))
+      ? min(projectTitleBarHeight, max(nextFrame.height, 0))
       : 0
     let titleBarFrame = CGRect(
       x: nextFrame.minX,
@@ -10029,6 +10212,13 @@ final class TerminalWorkspaceView: NSView {
       height: max(0, nextFrame.height - titleBarHeight)
     )
     return (titleBarFrame: titleBarFrame, hostFrame: hostFrame)
+  }
+
+  private static func projectEditorTitleBarHeight(for session: ProjectEditorPaneSession) -> CGFloat {
+    if session.mode == "git" && session.showsProjectTabs {
+      return Self.projectBrowserTabBarHeight
+    }
+    return Self.projectEditorTitleBarHeight
   }
 
   private func layoutProjectEditorPane(
@@ -10983,9 +11173,13 @@ final class TerminalWorkspaceView: NSView {
       return
     }
     let rootPath = entry.session.projectRootPath ?? ""
+    let additionalDocsFoldersText = manageAdditionalDocsFolders
     let responseTarget = ProjectBeadsBridgeResponseTarget(webView: webView)
     Task.detached(priority: .userInitiated) {
-      let response = Self.runManageFilesBridgeRequest(request, projectRootPath: rootPath)
+      let response = Self.runManageFilesBridgeRequest(
+        request,
+        projectRootPath: rootPath,
+        additionalDocsFoldersText: additionalDocsFoldersText)
       await MainActor.run {
         guard let webView = responseTarget.webView else {
           return
@@ -10997,7 +11191,8 @@ final class TerminalWorkspaceView: NSView {
 
   private nonisolated static func runManageFilesBridgeRequest(
     _ request: ManageFilesBridgeRequest,
-    projectRootPath: String
+    projectRootPath: String,
+    additionalDocsFoldersText: String
   ) -> ManageFilesBridgeResponse {
     /*
      CDXC:Manage 2026-06-20-06:14:
@@ -11010,7 +11205,9 @@ final class TerminalWorkspaceView: NSView {
       case "list":
         return ManageFilesBridgeResponse(
           action: request.action,
-          entries: try manageProjectFileEntries(rootURL: rootURL),
+          entries: try manageProjectFileEntries(
+            rootURL: rootURL,
+            additionalDocsFoldersText: additionalDocsFoldersText),
           error: nil,
           file: nil,
           requestId: request.requestId,
@@ -11020,7 +11217,10 @@ final class TerminalWorkspaceView: NSView {
           action: request.action,
           entries: nil,
           error: nil,
-          file: try manageProjectFilePreview(rootURL: rootURL, path: request.path),
+          file: try manageProjectFilePreview(
+            rootURL: rootURL,
+            path: request.path,
+            additionalDocsFoldersText: additionalDocsFoldersText),
           requestId: request.requestId,
           rootName: manageDocsRelativePath)
       case "save":
@@ -11028,7 +11228,11 @@ final class TerminalWorkspaceView: NSView {
           action: request.action,
           entries: nil,
           error: nil,
-          file: try manageSaveProjectFile(rootURL: rootURL, path: request.path, content: request.content),
+          file: try manageSaveProjectFile(
+            rootURL: rootURL,
+            path: request.path,
+            content: request.content,
+            additionalDocsFoldersText: additionalDocsFoldersText),
           requestId: request.requestId,
           rootName: manageDocsRelativePath)
       case "rename":
@@ -11036,11 +11240,18 @@ final class TerminalWorkspaceView: NSView {
           action: request.action,
           entries: nil,
           error: nil,
-          file: try manageRenameProjectFile(rootURL: rootURL, path: request.path, newPath: request.newPath),
+          file: try manageRenameProjectFile(
+            rootURL: rootURL,
+            path: request.path,
+            newPath: request.newPath,
+            additionalDocsFoldersText: additionalDocsFoldersText),
           requestId: request.requestId,
           rootName: manageDocsRelativePath)
       case "delete":
-        try manageDeleteProjectFile(rootURL: rootURL, path: request.path)
+        try manageDeleteProjectFile(
+          rootURL: rootURL,
+          path: request.path,
+          additionalDocsFoldersText: additionalDocsFoldersText)
         return ManageFilesBridgeResponse(
           action: request.action,
           entries: nil,
@@ -11049,7 +11260,10 @@ final class TerminalWorkspaceView: NSView {
           requestId: request.requestId,
           rootName: manageDocsRelativePath)
       case "createFolder":
-        try manageCreateProjectFolder(rootURL: rootURL, path: request.path)
+        try manageCreateProjectFolder(
+          rootURL: rootURL,
+          path: request.path,
+          additionalDocsFoldersText: additionalDocsFoldersText)
         return ManageFilesBridgeResponse(
           action: request.action,
           entries: nil,
@@ -11062,7 +11276,11 @@ final class TerminalWorkspaceView: NSView {
           action: request.action,
           entries: nil,
           error: nil,
-          file: try manageMoveProjectItem(rootURL: rootURL, path: request.path, newPath: request.newPath),
+          file: try manageMoveProjectItem(
+            rootURL: rootURL,
+            path: request.path,
+            newPath: request.newPath,
+            additionalDocsFoldersText: additionalDocsFoldersText),
           requestId: request.requestId,
           rootName: manageDocsRelativePath)
       default:
@@ -11081,6 +11299,7 @@ final class TerminalWorkspaceView: NSView {
 
   private nonisolated static let manageFileListMaxEntries = 1_200
   private nonisolated static let manageFileListMaxDepth = 8
+  private nonisolated static let manageFileWatcherMaxDirectories = 512
   private nonisolated static let manageFilePreviewMaxBytes = 2_000_000
   private nonisolated static let manageFileSaveMaxBytes = 2_000_000
   private nonisolated static let manageGitBaselineMaxBytes = 1024 * 1024
@@ -11121,6 +11340,66 @@ final class TerminalWorkspaceView: NSView {
     "venv",
     "zig-out",
   ]
+
+  private nonisolated static func manageAdditionalDocsFolderRelativePaths(
+    _ additionalDocsFoldersText: String?
+  ) -> [String] {
+    var folders: [String] = []
+    var seen = Set<String>()
+    for rawFolder in (additionalDocsFoldersText ?? "").split(separator: ",", omittingEmptySubsequences: false) {
+      let trimmed = rawFolder.trimmingCharacters(in: .whitespacesAndNewlines)
+      let normalizedSeparators = trimmed.replacingOccurrences(of: "\\", with: "/")
+      let parts = normalizedSeparators.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+      guard !parts.isEmpty,
+        !normalizedSeparators.contains("\0"),
+        !normalizedSeparators.hasPrefix("~"),
+        !normalizedSeparators.hasPrefix("/")
+      else {
+        continue
+      }
+      guard !parts.contains(where: { $0 == "." || $0 == ".." }) else {
+        continue
+      }
+      let folder = parts.joined(separator: "/")
+      let key = folder.lowercased()
+      guard folder != manageDocsRelativePath,
+        !seen.contains(key)
+      else {
+        continue
+      }
+      seen.insert(key)
+      folders.append(folder)
+    }
+    return folders
+  }
+
+  private nonisolated static func manageNormalizedAdditionalDocsFoldersText(_ value: String?) -> String {
+    manageAdditionalDocsFolderRelativePaths(value).joined(separator: ", ")
+  }
+
+  private nonisolated static func manageDocsScanRootRelativePaths(
+    additionalDocsFoldersText: String
+  ) -> [String] {
+    var roots = [manageDocsRelativePath]
+    roots.append(contentsOf: manageAdditionalDocsFolderRelativePaths(additionalDocsFoldersText))
+    return roots
+  }
+
+  private nonisolated static func managePathIsInDocsScanRoot(
+    _ relativePath: String,
+    additionalDocsFoldersText: String
+  ) -> Bool {
+    manageDocsScanRootRelativePaths(additionalDocsFoldersText: additionalDocsFoldersText).contains { root in
+      relativePath == root || relativePath.hasPrefix("\(root)/")
+    }
+  }
+
+  private nonisolated static func managePathIsDocsScanRoot(
+    _ relativePath: String,
+    additionalDocsFoldersText: String
+  ) -> Bool {
+    manageDocsScanRootRelativePaths(additionalDocsFoldersText: additionalDocsFoldersText).contains(relativePath)
+  }
 
   private nonisolated static func manageProjectRootURL(_ path: String) throws -> URL {
     let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -11424,19 +11703,37 @@ final class TerminalWorkspaceView: NSView {
     return resolvedDocsURL
   }
 
-  private nonisolated static func manageValidateAccessibleRelativePath(_ relativePath: String) throws {
+  private nonisolated static func manageProjectDirectoryURL(
+    rootURL: URL,
+    relativePath: String
+  ) throws -> URL? {
+    let directoryURL = rootURL.appendingPathComponent(relativePath, isDirectory: true)
+      .standardizedFileURL
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: directoryURL.path, isDirectory: &isDirectory) else {
+      return nil
+    }
+    guard isDirectory.boolValue else {
+      return nil
+    }
+    let resolvedDirectoryURL = directoryURL.resolvingSymlinksInPath()
+    guard manageURLIsInsideProjectRoot(resolvedDirectoryURL, rootURL: rootURL) else {
+      return nil
+    }
+    return resolvedDirectoryURL
+  }
+
+  private nonisolated static func manageValidateAccessibleRelativePath(
+    _ relativePath: String,
+    additionalDocsFoldersText: String
+  ) throws {
     guard relativePath == manageAnnotationsSidecarRelativePath
-      || relativePath.hasPrefix("\(manageDocsRelativePath)/")
+      || managePathIsInDocsScanRoot(relativePath, additionalDocsFoldersText: additionalDocsFoldersText)
       || manageIsRootArtifactFileRelativePath(relativePath)
     else {
       throw ManageFilesBridgeError.invalidRequest(
-        "Docs files must be inside project docs or be root Markdown, HTML, or Excalidraw files.")
+        "Docs files must be inside configured Docs folders or be root Markdown, HTML, or Excalidraw files.")
     }
-  }
-
-  private nonisolated static func manageIsDocsTreeRelativePath(_ relativePath: String) -> Bool {
-    relativePath == manageDocsRelativePath
-      || relativePath.hasPrefix("\(manageDocsRelativePath)/")
   }
 
   private nonisolated static func manageIsRootArtifactFileRelativePath(_ relativePath: String) -> Bool {
@@ -11449,18 +11746,24 @@ final class TerminalWorkspaceView: NSView {
     return manageRootArtifactFileExtensions.contains(fileExtension)
   }
 
-  private nonisolated static func manageValidateDocsTreeRelativePath(_ relativePath: String) throws {
-    guard manageIsDocsTreeRelativePath(relativePath) else {
-      throw ManageFilesBridgeError.invalidRequest("Docs items must be inside project docs.")
+  private nonisolated static func manageValidateDocsTreeRelativePath(
+    _ relativePath: String,
+    additionalDocsFoldersText: String
+  ) throws {
+    guard managePathIsInDocsScanRoot(relativePath, additionalDocsFoldersText: additionalDocsFoldersText) else {
+      throw ManageFilesBridgeError.invalidRequest("Docs items must be inside configured Docs folders.")
     }
   }
 
-  private nonisolated static func manageValidateDocsActionRelativePath(_ relativePath: String) throws {
-    guard manageIsDocsTreeRelativePath(relativePath)
+  private nonisolated static func manageValidateDocsActionRelativePath(
+    _ relativePath: String,
+    additionalDocsFoldersText: String
+  ) throws {
+    guard managePathIsInDocsScanRoot(relativePath, additionalDocsFoldersText: additionalDocsFoldersText)
       || manageIsRootArtifactFileRelativePath(relativePath)
     else {
       throw ManageFilesBridgeError.invalidRequest(
-        "Docs items must be inside project docs or be root Markdown, HTML, or Excalidraw files.")
+        "Docs items must be inside configured Docs folders or be root Markdown, HTML, or Excalidraw files.")
     }
   }
 
@@ -11472,7 +11775,10 @@ final class TerminalWorkspaceView: NSView {
     return components.dropLast().joined(separator: "/")
   }
 
-  private nonisolated static func manageProjectFileEntries(rootURL: URL) throws -> [ManageFileEntry] {
+  private nonisolated static func manageProjectFileEntries(
+    rootURL: URL,
+    additionalDocsFoldersText: String
+  ) throws -> [ManageFileEntry] {
     /*
      CDXC:Manage 2026-06-20-04:36:
      The first Manage file sidebar should be useful on large code projects without indexing user content into logs. Recursively list project-relative metadata only, skip dependency/build/cache directories, and cap entries/depth so opening Manage cannot walk an unbounded tree.
@@ -11491,28 +11797,39 @@ final class TerminalWorkspaceView: NSView {
 
      CDXC:Docs 2026-06-29-04:08:
      Because root artifacts now share the Docs sidebar with docs/ content, docs/ must render as its own top-level folder entry. Append docs/ as a real directory before recursing one level deeper so collapse state and row indentation reflect the actual repo tree.
+
+     CDXC:DocsSidebar 2026-06-30-19:47:
+     Global Projects settings can add comma-separated folder roots such as "plans", "my documents", and "folders/folder name". List each configured folder as a top-level scan root only when it exists inside the project, while keeping root artifacts limited to direct repo-root files.
      */
     var entries: [ManageFileEntry] = []
-    if let docsURL = try manageProjectDocsURL(rootURL: rootURL) {
-      let values = try? docsURL.resourceValues(forKeys: [
-        .contentModificationDateKey,
-      ])
-      entries.append(
-        ManageFileEntry(
-          depth: 0,
-          kind: "directory",
-          modifiedAt: manageISOString(values?.contentModificationDate),
-          name: manageDocsRelativePath,
-          path: manageDocsRelativePath,
-          size: nil))
+    let scanRoots = manageDocsScanRootRelativePaths(additionalDocsFoldersText: additionalDocsFoldersText)
+    for relativePath in scanRoots {
+      if let directoryURL = try manageProjectDirectoryURL(rootURL: rootURL, relativePath: relativePath) {
+        let values = try? directoryURL.resourceValues(forKeys: [
+          .contentModificationDateKey,
+        ])
+        entries.append(
+          ManageFileEntry(
+            depth: 0,
+            kind: "directory",
+            modifiedAt: manageISOString(values?.contentModificationDate),
+            name: relativePath,
+            path: relativePath,
+            size: nil))
+      }
     }
     try manageAppendProjectRootArtifactFileEntries(entries: &entries, rootURL: rootURL)
-    if let docsURL = try manageProjectDocsURL(rootURL: rootURL) {
+    for relativePath in scanRoots {
+      guard entries.count < manageFileListMaxEntries,
+        let directoryURL = try manageProjectDirectoryURL(rootURL: rootURL, relativePath: relativePath)
+      else {
+        continue
+      }
       try manageAppendProjectFileEntries(
         entries: &entries,
         rootURL: rootURL,
-        directoryURL: docsURL,
-        relativeDirectoryPath: manageDocsRelativePath,
+        directoryURL: directoryURL,
+        relativeDirectoryPath: relativePath,
         depth: 1)
     }
     return entries
@@ -11644,9 +11961,113 @@ final class TerminalWorkspaceView: NSView {
     }
   }
 
+  private nonisolated static func manageFileWatchDirectories(
+    rootURL: URL,
+    additionalDocsFoldersText: String
+  ) throws -> [URL] {
+    /*
+     CDXC:DocsSidebar 2026-06-30-19:47:
+     Live Docs refresh should watch only the project root and configured Docs scan trees. The root watch catches direct artifact changes and creation/removal of configured folders; recursive watches under existing scan roots catch nested file and folder renames without indexing the rest of the repo.
+     */
+    var directories: [URL] = []
+    var seen = Set<String>()
+    func appendDirectory(_ directoryURL: URL) {
+      guard directories.count < manageFileWatcherMaxDirectories else {
+        return
+      }
+      let resolvedURL = directoryURL.standardizedFileURL.resolvingSymlinksInPath()
+      guard manageURLIsInsideProjectRoot(resolvedURL, rootURL: rootURL),
+        seen.insert(resolvedURL.path).inserted
+      else {
+        return
+      }
+      directories.append(resolvedURL)
+    }
+    appendDirectory(rootURL)
+    for relativePath in manageDocsScanRootRelativePaths(additionalDocsFoldersText: additionalDocsFoldersText) {
+      guard directories.count < manageFileWatcherMaxDirectories,
+        let directoryURL = try manageProjectDirectoryURL(rootURL: rootURL, relativePath: relativePath)
+      else {
+        continue
+      }
+      appendDirectory(directoryURL)
+      try manageAppendFileWatchDirectories(
+        directories: &directories,
+        seen: &seen,
+        rootURL: rootURL,
+        directoryURL: directoryURL,
+        depth: 1)
+    }
+    return directories
+  }
+
+  private nonisolated static func manageAppendFileWatchDirectories(
+    directories: inout [URL],
+    seen: inout Set<String>,
+    rootURL: URL,
+    directoryURL: URL,
+    depth: Int
+  ) throws {
+    guard directories.count < manageFileWatcherMaxDirectories,
+      depth <= manageFileListMaxDepth
+    else {
+      return
+    }
+    let keys: Set<URLResourceKey> = [
+      .isDirectoryKey,
+      .isSymbolicLinkKey,
+    ]
+    let children = try FileManager.default.contentsOfDirectory(
+      at: directoryURL,
+      includingPropertiesForKeys: Array(keys),
+      options: [.skipsPackageDescendants])
+    for child in children {
+      guard directories.count < manageFileWatcherMaxDirectories else {
+        return
+      }
+      let name = child.lastPathComponent
+      let values = try? child.resourceValues(forKeys: keys)
+      guard values?.isDirectory == true,
+        values?.isSymbolicLink != true,
+        !manageIgnoredDirectoryNames.contains(name)
+      else {
+        continue
+      }
+      let resolvedChild = child.standardizedFileURL.resolvingSymlinksInPath()
+      guard manageURLIsInsideProjectRoot(resolvedChild, rootURL: rootURL),
+        seen.insert(resolvedChild.path).inserted
+      else {
+        continue
+      }
+      directories.append(resolvedChild)
+      if depth < manageFileListMaxDepth {
+        try manageAppendFileWatchDirectories(
+          directories: &directories,
+          seen: &seen,
+          rootURL: rootURL,
+          directoryURL: resolvedChild,
+          depth: depth + 1)
+      }
+    }
+  }
+
+  private nonisolated static func manageFileWatcherSignature(
+    rootURL: URL,
+    watchDirectories: [URL],
+    additionalDocsFoldersText: String
+  ) -> String {
+    let directoryPaths = watchDirectories.map(\.path).sorted().joined(separator: "\n")
+    return [
+      rootURL.path,
+      manageNormalizedAdditionalDocsFoldersText(additionalDocsFoldersText),
+      directoryPaths,
+    ].joined(separator: "\n")
+  }
+
   private nonisolated static func manageProjectFilePreview(
     rootURL: URL,
-    path: String?
+    path: String?,
+    additionalDocsFoldersText: String
   ) throws -> ManageFilePreview {
     /*
      CDXC:Manage 2026-06-20-06:14:
@@ -11656,7 +12077,9 @@ final class TerminalWorkspaceView: NSView {
     guard !target.relativePath.isEmpty else {
       throw ManageFilesBridgeError.invalidRequest("Select a project file to preview.")
     }
-    try manageValidateAccessibleRelativePath(target.relativePath)
+    try manageValidateAccessibleRelativePath(
+      target.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
     let keys: Set<URLResourceKey> = [
       .contentModificationDateKey,
       .fileSizeKey,
@@ -11719,7 +12142,8 @@ final class TerminalWorkspaceView: NSView {
   private nonisolated static func manageSaveProjectFile(
     rootURL: URL,
     path: String?,
-    content: String?
+    content: String?,
+    additionalDocsFoldersText: String
   ) throws -> ManageFilePreview {
     /*
      CDXC:ManageEditing 2026-06-20-06:14:
@@ -11736,7 +12160,9 @@ final class TerminalWorkspaceView: NSView {
     guard !target.relativePath.isEmpty else {
       throw ManageFilesBridgeError.invalidRequest("Select a project file to save.")
     }
-    try manageValidateAccessibleRelativePath(target.relativePath)
+    try manageValidateAccessibleRelativePath(
+      target.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
     let parentURL = target.url.deletingLastPathComponent()
       .standardizedFileURL
       .resolvingSymlinksInPath()
@@ -11756,13 +12182,17 @@ final class TerminalWorkspaceView: NSView {
      */
     try FileManager.default.createDirectory(at: parentURL, withIntermediateDirectories: true)
     try data.write(to: target.url, options: [.atomic])
-    return try manageProjectFilePreview(rootURL: rootURL, path: target.relativePath)
+    return try manageProjectFilePreview(
+      rootURL: rootURL,
+      path: target.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
   }
 
   private nonisolated static func manageRenameProjectFile(
     rootURL: URL,
     path: String?,
-    newPath: String?
+    newPath: String?,
+    additionalDocsFoldersText: String
   ) throws -> ManageFilePreview? {
     /*
      CDXC:ManageFileActions 2026-06-28-04:35:
@@ -11778,13 +12208,17 @@ final class TerminalWorkspaceView: NSView {
     let destination = try manageFileOperationURL(rootURL: rootURL, relativePath: newPath)
     guard !source.relativePath.isEmpty,
       !destination.relativePath.isEmpty,
-      source.relativePath != manageDocsRelativePath,
-      destination.relativePath != manageDocsRelativePath
+      !managePathIsDocsScanRoot(source.relativePath, additionalDocsFoldersText: additionalDocsFoldersText),
+      !managePathIsDocsScanRoot(destination.relativePath, additionalDocsFoldersText: additionalDocsFoldersText)
     else {
       throw ManageFilesBridgeError.invalidRequest("Select an item to rename.")
     }
-    try manageValidateDocsActionRelativePath(source.relativePath)
-    try manageValidateDocsActionRelativePath(destination.relativePath)
+    try manageValidateDocsActionRelativePath(
+      source.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
+    try manageValidateDocsActionRelativePath(
+      destination.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
     guard manageParentRelativePath(source.relativePath) == manageParentRelativePath(destination.relativePath) else {
       throw ManageFilesBridgeError.invalidRequest("Docs rename cannot move items.")
     }
@@ -11799,7 +12233,10 @@ final class TerminalWorkspaceView: NSView {
     }
     if source.relativePath == destination.relativePath {
       if !sourceIsDirectory.boolValue {
-        return try manageProjectFilePreview(rootURL: rootURL, path: source.relativePath)
+        return try manageProjectFilePreview(
+          rootURL: rootURL,
+          path: source.relativePath,
+          additionalDocsFoldersText: additionalDocsFoldersText)
       }
       return nil
     }
@@ -11824,12 +12261,16 @@ final class TerminalWorkspaceView: NSView {
     if sourceIsDirectory.boolValue {
       return nil
     }
-    return try manageProjectFilePreview(rootURL: rootURL, path: destination.relativePath)
+    return try manageProjectFilePreview(
+      rootURL: rootURL,
+      path: destination.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
   }
 
   private nonisolated static func manageDeleteProjectFile(
     rootURL: URL,
-    path: String?
+    path: String?,
+    additionalDocsFoldersText: String
   ) throws {
     /*
      CDXC:ManageFileActions 2026-06-28-04:35:
@@ -11843,11 +12284,13 @@ final class TerminalWorkspaceView: NSView {
      */
     let target = try manageFileOperationURL(rootURL: rootURL, relativePath: path)
     guard !target.relativePath.isEmpty,
-      target.relativePath != manageDocsRelativePath
+      !managePathIsDocsScanRoot(target.relativePath, additionalDocsFoldersText: additionalDocsFoldersText)
     else {
       throw ManageFilesBridgeError.invalidRequest("Select an item to delete.")
     }
-    try manageValidateDocsActionRelativePath(target.relativePath)
+    try manageValidateDocsActionRelativePath(
+      target.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
     var isDirectory: ObjCBool = false
     guard FileManager.default.fileExists(atPath: target.url.path, isDirectory: &isDirectory) else {
       throw ManageFilesBridgeError.invalidRequest("Select an item to delete.")
@@ -11866,7 +12309,8 @@ final class TerminalWorkspaceView: NSView {
 
   private nonisolated static func manageCreateProjectFolder(
     rootURL: URL,
-    path: String?
+    path: String?,
+    additionalDocsFoldersText: String
   ) throws {
     /*
      CDXC:ManageFolders 2026-06-28-06:39:
@@ -11874,14 +12318,18 @@ final class TerminalWorkspaceView: NSView {
      */
     let target = try manageFileOperationURL(rootURL: rootURL, relativePath: path)
     guard !target.relativePath.isEmpty,
-      target.relativePath != manageDocsRelativePath
+      !managePathIsDocsScanRoot(target.relativePath, additionalDocsFoldersText: additionalDocsFoldersText)
     else {
       throw ManageFilesBridgeError.invalidRequest("Select a folder to create.")
     }
-    try manageValidateDocsTreeRelativePath(target.relativePath)
-    let docsURL = rootURL.appendingPathComponent(manageDocsRelativePath, isDirectory: true)
-      .standardizedFileURL
-    try FileManager.default.createDirectory(at: docsURL, withIntermediateDirectories: true)
+    try manageValidateDocsTreeRelativePath(
+      target.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
+    if target.relativePath.hasPrefix("\(manageDocsRelativePath)/") {
+      let docsURL = rootURL.appendingPathComponent(manageDocsRelativePath, isDirectory: true)
+        .standardizedFileURL
+      try FileManager.default.createDirectory(at: docsURL, withIntermediateDirectories: true)
+    }
     let parentURL = target.url.deletingLastPathComponent()
       .standardizedFileURL
       .resolvingSymlinksInPath()
@@ -11905,7 +12353,8 @@ final class TerminalWorkspaceView: NSView {
   private nonisolated static func manageMoveProjectItem(
     rootURL: URL,
     path: String?,
-    newPath: String?
+    newPath: String?,
+    additionalDocsFoldersText: String
   ) throws -> ManageFilePreview? {
     /*
      CDXC:ManageFolders 2026-06-28-06:39:
@@ -11918,19 +12367,26 @@ final class TerminalWorkspaceView: NSView {
     let destination = try manageFileOperationURL(rootURL: rootURL, relativePath: newPath)
     guard !source.relativePath.isEmpty,
       !destination.relativePath.isEmpty,
-      source.relativePath != manageDocsRelativePath,
-      destination.relativePath != manageDocsRelativePath
+      !managePathIsDocsScanRoot(source.relativePath, additionalDocsFoldersText: additionalDocsFoldersText),
+      !managePathIsDocsScanRoot(destination.relativePath, additionalDocsFoldersText: additionalDocsFoldersText)
     else {
       throw ManageFilesBridgeError.invalidRequest("Select an item to move.")
     }
-    try manageValidateDocsActionRelativePath(source.relativePath)
-    try manageValidateDocsTreeRelativePath(destination.relativePath)
+    try manageValidateDocsActionRelativePath(
+      source.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
+    try manageValidateDocsTreeRelativePath(
+      destination.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
     if source.relativePath == destination.relativePath {
       var isDirectory: ObjCBool = false
       if FileManager.default.fileExists(atPath: source.url.path, isDirectory: &isDirectory),
         !isDirectory.boolValue
       {
-        return try manageProjectFilePreview(rootURL: rootURL, path: source.relativePath)
+        return try manageProjectFilePreview(
+          rootURL: rootURL,
+          path: source.relativePath,
+          additionalDocsFoldersText: additionalDocsFoldersText)
       }
       return nil
     }
@@ -11969,7 +12425,10 @@ final class TerminalWorkspaceView: NSView {
     if sourceIsDirectory.boolValue {
       return nil
     }
-    return try manageProjectFilePreview(rootURL: rootURL, path: destination.relativePath)
+    return try manageProjectFilePreview(
+      rootURL: rootURL,
+      path: destination.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
   }
 
   private nonisolated static func manageISOString(_ date: Date?) -> String? {
@@ -20958,7 +21417,7 @@ private enum NativeSessionPersistenceMode {
      zmx prompt-editor routing must be advertised by the current desktop attach
      client, not inherited from a shell created by another client. Add
      --prompt-editor=monaco only when this macOS terminal environment selected
-     the Monaco backend; otherwise zmx reports gte for Ctrl+G.
+     the Monaco backend; otherwise zmx reports the machine-editor capability for Ctrl+G.
      */
     return "/bin/zsh -lc \(shellQuote(script))"
   }

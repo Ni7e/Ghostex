@@ -522,6 +522,8 @@ fn start_session_provider(
             gxserver_auth_token_file: Some(context.auth_token_file.clone()),
             gxserver_base_url: Some(context.base_url.clone()),
             gxserver_protocol_version: Some(GXSERVER_PROTOCOL_VERSION),
+            prompt_editor: (params.get("promptEditor").and_then(Value::as_str) == Some("monaco"))
+                .then_some("monaco".to_string()),
             session_name: zmx_name.clone(),
             startup_text: startup_text.unwrap_or_default(),
             zmx_executable_path: zmx.executable_path,
@@ -533,6 +535,8 @@ fn start_session_provider(
             gxserver_auth_token_file: Some(context.auth_token_file.clone()),
             gxserver_base_url: Some(context.base_url.clone()),
             gxserver_protocol_version: Some(GXSERVER_PROTOCOL_VERSION),
+            prompt_editor: (params.get("promptEditor").and_then(Value::as_str) == Some("monaco"))
+                .then_some("monaco".to_string()),
             session_name: zmx_name.clone(),
             zmx_executable_path: zmx.executable_path,
         })
@@ -1478,6 +1482,7 @@ struct ZmxRunCommandInput {
     gxserver_auth_token_file: Option<String>,
     gxserver_base_url: Option<String>,
     gxserver_protocol_version: Option<u64>,
+    prompt_editor: Option<String>,
     session_name: String,
     startup_text: String,
     zmx_executable_path: String,
@@ -1489,6 +1494,7 @@ struct ZmxShellProviderCommandInput {
     gxserver_auth_token_file: Option<String>,
     gxserver_base_url: Option<String>,
     gxserver_protocol_version: Option<u64>,
+    prompt_editor: Option<String>,
     session_name: String,
     zmx_executable_path: String,
 }
@@ -1634,7 +1640,7 @@ fn build_zmx_run_command(input: ZmxRunCommandInput) -> String {
     let shell = command_shell();
     let provider_shell_command = format!(
         "{}\n{}\n{}",
-        zmx_provider_prompt_editor_setup_shell_command(),
+        zmx_provider_prompt_editor_setup_shell_command(input.prompt_editor.as_deref()),
         startup_command,
         shell.interactive_exec_command()
     );
@@ -1656,7 +1662,7 @@ fn build_zmx_shell_provider_command(input: ZmxShellProviderCommandInput) -> Stri
     let shell = command_shell();
     let provider_shell_command = format!(
         "{}\n{}",
-        zmx_provider_prompt_editor_setup_shell_command(),
+        zmx_provider_prompt_editor_setup_shell_command(input.prompt_editor.as_deref()),
         shell.interactive_exec_command()
     );
     format_zmx_provider_run_script(
@@ -1779,10 +1785,20 @@ printf '%s\n' "$zmx_sessions" | grep -F -x -- "$zmx_session" >/dev/null 2>&1
     .to_string()
 }
 
-fn zmx_provider_prompt_editor_setup_shell_command() -> &'static str {
-    r#"
+fn zmx_provider_prompt_editor_setup_shell_command(prompt_editor: Option<&str>) -> String {
+    /*
+    CDXC:PromptEditorBackend 2026-06-30-03:11:
+    zmx providers still need a stable EDITOR wrapper so Ctrl+G can block through
+    Ghostex when Monaco is available, but the non-Monaco path must run the
+    remote shell's own editor instead of gte. Capture VISUAL/EDITOR before
+    installing the wrapper, and export Monaco only for attach clients that
+    explicitly advertised it.
+    */
+    let mut script = r#"
 ghostex_prompt_editor_home="${GHOSTEX_HOME:-$HOME/.ghostex}"
 ghostex_prompt_editor_wrapper="$ghostex_prompt_editor_home/state/prompt-editor"
+ghostex_prompt_editor_machine_visual="${VISUAL:-}"
+ghostex_prompt_editor_machine_editor="${EDITOR:-}"
 mkdir -p "$(dirname "$ghostex_prompt_editor_wrapper")" 2>/dev/null || true
 cat > "$ghostex_prompt_editor_wrapper" <<'__GHOSTEX_PROMPT_EDITOR_WRAPPER__'
 #!/bin/sh
@@ -1795,15 +1811,21 @@ fi
 if command -v ghostex >/dev/null 2>&1; then
   exec ghostex prompt-editor "$@"
 fi
-exec gte "$@"
+exec /bin/sh -lc 'exec ${GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL:-${GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR:-vi}} "$@"' ghostex-prompt-editor "$@"
 __GHOSTEX_PROMPT_EDITOR_WRAPPER__
 chmod 755 "$ghostex_prompt_editor_wrapper" 2>/dev/null || true
+export GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL="$ghostex_prompt_editor_machine_visual"
+export GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR="$ghostex_prompt_editor_machine_editor"
 export EDITOR="$ghostex_prompt_editor_wrapper"
 export VISUAL="$ghostex_prompt_editor_wrapper"
-export GHOSTEX_PROMPT_EDITOR_BACKEND="${GHOSTEX_PROMPT_EDITOR_BACKEND:-monaco}"
-export GHOSTEX_PROMPT_EDITING_ENABLED=1
 "#
     .trim()
+    .to_string();
+    if prompt_editor == Some("monaco") {
+        script.push_str("\nexport GHOSTEX_PROMPT_EDITOR_BACKEND=monaco");
+    }
+    script.push_str("\nexport GHOSTEX_PROMPT_EDITING_ENABLED=1");
+    script
 }
 
 fn zmx_session_identity_reset_shell_command() -> String {
@@ -2275,6 +2297,7 @@ mod tests {
             gxserver_auth_token_file: Some("/tmp/home/.ghostex/gxserver/auth/token".to_string()),
             gxserver_base_url: Some("http://127.0.0.1:58746".to_string()),
             gxserver_protocol_version: Some(1),
+            prompt_editor: None,
             session_name: "S7k-P100-G100".to_string(),
             startup_text: "codex --yolo\r".to_string(),
             zmx_executable_path: "/repo/zmx/zig-out/bin/zmx".to_string(),
@@ -2287,6 +2310,8 @@ mod tests {
         assert!(command.contains(
             "ghostex_prompt_editor_wrapper=\"$ghostex_prompt_editor_home/state/prompt-editor\""
         ));
+        assert!(command.contains("GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR"));
+        assert!(!command.contains("export GHOSTEX_PROMPT_EDITOR_BACKEND=monaco"));
         assert!(!command.contains("PATH zmx"));
     }
 

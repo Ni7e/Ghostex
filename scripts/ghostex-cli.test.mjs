@@ -913,28 +913,33 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
     }
   });
 
-  test("prompt-editor routes Monaco settings to gte without macOS app context", async () => {
+  test("prompt-editor routes Monaco settings to the machine editor without macOS app context", async () => {
     /**
      * CDXC:PromptEditor 2026-05-31-11:58:
      * Android, iOS, CLI, TUI, and plain SSH attaches do not have the native app
-     * prompt-editor marker. In those contexts the wrapper must invoke gte even
-     * when the inherited prompt editor backend says Monaco.
+     * prompt-editor marker. In those contexts the wrapper must invoke the
+     * machine editor even when the inherited prompt editor backend says Monaco.
+     *
+     * CDXC:PromptEditorBackend 2026-06-30-03:11:
+     * gte is no longer the Ctrl+G fallback. Monaco-denied contexts should run
+     * the user's editor command from VISUAL/EDITOR or provider-preserved editor
+     * environment.
      */
-    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-prompt-editor-gte-"));
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-prompt-editor-machine-"));
     const binDir = path.join(tempDir, "bin");
     const editFile = path.join(tempDir, "prompt.md");
-    const markerFile = path.join(tempDir, "gte-args.txt");
-    const gtePath = path.join(binDir, "gte");
+    const markerFile = path.join(tempDir, "machine-editor-args.txt");
+    const editorPath = path.join(binDir, "machine-editor");
     try {
       await mkdir(binDir, { recursive: true });
       await writeFile(editFile, "prompt text\n");
       await writeFile(
-        gtePath,
+        editorPath,
         `#!/bin/sh
 printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
 `,
       );
-      await chmod(gtePath, 0o755);
+      await chmod(editorPath, 0o755);
 
       const result = await execFileAsync(process.execPath, [
         path.resolve("scripts/ghostex-cli.mjs"),
@@ -946,7 +951,9 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
           GHOSTEX_NATIVE_SESSION_ID: "",
           GHOSTEX_PROMPT_EDITOR_CLIENT: "",
           GHOSTEX_PROMPT_EDITOR_BACKEND: "monaco",
+          EDITOR: editorPath,
           PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+          VISUAL: "",
           ZMX_SESSION: "",
         },
       });
@@ -958,25 +965,26 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
     }
   });
 
-  test("prompt-editor routes stale macOS Monaco zmx sessions to gte without attach capability", async () => {
+  test("prompt-editor routes stale macOS Monaco zmx sessions to the machine editor without attach capability", async () => {
     /**
      * CDXC:PromptEditor 2026-06-06-16:40:
      * Reattached zmx sessions can inherit macOS app prompt-editor environment
      * from the shell that created the session. The prompt-editor wrapper must
      * trust zmx's current leader capability instead so SSH, TUI, and mobile
-     * attaches use gte even when the old environment still says macos-app.
+     * attaches use the machine editor even when the old environment still says
+     * macos-app.
      */
-    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-prompt-editor-zmx-gte-"));
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-prompt-editor-zmx-machine-"));
     const binDir = path.join(tempDir, "bin");
     const editFile = path.join(tempDir, "prompt.md");
-    const markerFile = path.join(tempDir, "gte-args.txt");
-    const gtePath = path.join(binDir, "gte");
+    const markerFile = path.join(tempDir, "machine-editor-args.txt");
+    const editorPath = path.join(binDir, "machine-editor");
     const zmxPath = path.join(binDir, "zmx");
     try {
       await mkdir(binDir, { recursive: true });
       await writeFile(editFile, "prompt text\n");
       await writeFile(
-        gtePath,
+        editorPath,
         `#!/bin/sh
 printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
 `,
@@ -985,11 +993,11 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
         zmxPath,
         `#!/bin/sh
 if [ "$1" = "prompt-editor-capability" ]; then
-  printf '%s\\n' gte
+  printf '%s\\n' editor
 fi
 `,
       );
-      await chmod(gtePath, 0o755);
+      await chmod(editorPath, 0o755);
       await chmod(zmxPath, 0o755);
 
       const result = await execFileAsync(process.execPath, [
@@ -1001,6 +1009,7 @@ fi
           ...process.env,
           GHOSTEX_PROMPT_EDITOR_CLIENT: "macos-app",
           GHOSTEX_PROMPT_EDITOR_BACKEND: "monaco",
+          GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR: editorPath,
           GHOSTEX_ZMX_BIN: zmxPath,
           PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
           ZMX_SESSION: "shared-session",
@@ -1055,7 +1064,7 @@ fi
         pathZmxPath,
         `#!/bin/sh
 if [ "$1" = "prompt-editor-capability" ]; then
-  printf '%s\\n' gte
+  printf '%s\\n' editor
 fi
 `,
       );
@@ -1087,7 +1096,7 @@ fi
           ...process.env,
           GHOSTEX_HOME: homeDir,
           GHOSTEX_PROMPT_EDITOR_CLIENT: "",
-          GHOSTEX_PROMPT_EDITOR_BACKEND: "monaco",
+          GHOSTEX_PROMPT_EDITOR_BACKEND: "inherit",
           GHOSTEX_ZMX_BIN: bundledZmxPath,
           PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
           ZMX_SESSION: "shared-session",
@@ -1111,14 +1120,14 @@ fi
     const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-prompt-editor-zmx-no-bin-"));
     const binDir = path.join(tempDir, "bin");
     const editFile = path.join(tempDir, "prompt.md");
-    const markerFile = path.join(tempDir, "gte-args.txt");
-    const gtePath = path.join(binDir, "gte");
+    const markerFile = path.join(tempDir, "machine-editor-args.txt");
+    const editorPath = path.join(binDir, "machine-editor");
     const pathZmxPath = path.join(binDir, "zmx");
     try {
       await mkdir(binDir, { recursive: true });
       await writeFile(editFile, "prompt text\n");
       await writeFile(
-        gtePath,
+        editorPath,
         `#!/bin/sh
 printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
 `,
@@ -1131,7 +1140,7 @@ if [ "$1" = "prompt-editor-capability" ]; then
 fi
 `,
       );
-      await chmod(gtePath, 0o755);
+      await chmod(editorPath, 0o755);
       await chmod(pathZmxPath, 0o755);
 
       const result = await execFileAsync(process.execPath, [
@@ -1143,6 +1152,7 @@ fi
           ...process.env,
           GHOSTEX_PROMPT_EDITOR_CLIENT: "macos-app",
           GHOSTEX_PROMPT_EDITOR_BACKEND: "monaco",
+          GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR: editorPath,
           GHOSTEX_ZMX_BIN: "",
           PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
           ZMX_SESSION: "shared-session",
@@ -1156,22 +1166,22 @@ fi
     }
   });
 
-  test("prompt-editor keeps explicit gte on gte", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-prompt-editor-explicit-gte-"));
+  test("prompt-editor treats legacy explicit gte as the machine editor", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ghostex-prompt-editor-legacy-gte-"));
     const binDir = path.join(tempDir, "bin");
     const editFile = path.join(tempDir, "prompt.md");
-    const markerFile = path.join(tempDir, "gte-args.txt");
-    const gtePath = path.join(binDir, "gte");
+    const markerFile = path.join(tempDir, "machine-editor-args.txt");
+    const editorPath = path.join(binDir, "machine-editor");
     try {
       await mkdir(binDir, { recursive: true });
       await writeFile(editFile, "prompt text\n");
       await writeFile(
-        gtePath,
+        editorPath,
         `#!/bin/sh
 printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
 `,
       );
-      await chmod(gtePath, 0o755);
+      await chmod(editorPath, 0o755);
 
       const result = await execFileAsync(process.execPath, [
         path.resolve("scripts/ghostex-cli.mjs"),
@@ -1182,7 +1192,9 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
           ...process.env,
           GHOSTEX_PROMPT_EDITOR_CLIENT: "macos-app",
           GHOSTEX_PROMPT_EDITOR_BACKEND: "gte",
+          EDITOR: editorPath,
           PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+          VISUAL: "",
           ZMX_SESSION: "",
         },
       });

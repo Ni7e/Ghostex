@@ -2200,7 +2200,7 @@ function promptEditorAttachModeFromFlags(flags = {}) {
    * `ghostex attach --prompt-editor monaco` is the SSH-safe desktop capability
    * advertisement. Android, iOS, TUI, and human SSH attaches omit this flag, so
    * gxserver returns zmx attach commands without Monaco capability and Ctrl+G
-   * stays terminal-native through gte.
+   * stays on the machine editor.
    */
   const value = String(flags.promptEditor ?? "").trim().toLowerCase();
   return value === "monaco" ? "monaco" : undefined;
@@ -3106,15 +3106,21 @@ async function promptEditorCommand(args) {
    * Agent Ctrl+G launches through a single-file EDITOR wrapper because prompt
    * editor callers such as zehn execute EDITOR as argv[0] and do not split
    * command strings. Runtime selection must keep macOS app terminals on Monaco
-   * while Android, iOS, plain SSH, CLI, and TUI attaches use terminal-native
-   * gte even when Settings selected Monaco.
+   * while Android, iOS, plain SSH, CLI, and TUI attaches use the machine editor
+   * when Settings selected Monaco but the current client cannot open the overlay.
    *
    * CDXC:PromptEditor 2026-06-06-16:40:
    * zmx sessions are long-lived, so shell environment can describe the client
    * that created the session instead of the client that just pressed Ctrl+G.
    * Query zmx for the current leader client's explicit prompt-editor
-   * capability; missing capability means gte so SSH, mobile, and TUI attaches
-   * never open a host-only Monaco popup by accident.
+   * capability; missing capability means the machine editor so SSH, mobile, and
+   * TUI attaches never open a host-only Monaco popup by accident.
+   *
+   * CDXC:PromptEditorBackend 2026-06-30-03:11:
+   * Ctrl+G fallback is now the machine's editor, not gte. Preserve Monaco only
+   * for macOS app clients or zmx leaders that explicitly advertise Monaco; every
+   * other context runs the first non-Ghostex editor from the preserved provider
+   * environment, VISUAL, EDITOR, then vi.
    */
   const selectionStartedAt = Date.now();
   const { flags, rest } = parseArgs(args);
@@ -3166,13 +3172,13 @@ async function promptEditorCommand(args) {
 
 function promptEditorBackendFromEnvironment() {
   const backend = String(process.env.GHOSTEX_PROMPT_EDITOR_BACKEND ?? "").trim();
-  if (backend === "monaco" || backend === "gte" || backend === "custom") {
+  if (backend === "monaco" || backend === "custom") {
     return backend;
   }
-  if (process.env.GHOSTEX_RICH_PROMPT_EDITING_WITH_GTE === "1") {
-    return "gte";
+  if (backend === "gte" || process.env.GHOSTEX_RICH_PROMPT_EDITING_WITH_GTE === "1") {
+    return "inherit";
   }
-  return "gte";
+  return "inherit";
 }
 
 async function zmxPromptEditorCapability() {
@@ -3188,7 +3194,7 @@ async function zmxPromptEditorCapability() {
    */
   const zmxCommand = String(process.env.GHOSTEX_ZMX_BIN ?? "").trim();
   if (!zmxCommand) {
-    return "gte";
+    return "editor";
   }
   try {
     const result = await execFileAsync(zmxCommand, ["prompt-editor-capability"], {
@@ -3196,13 +3202,13 @@ async function zmxPromptEditorCapability() {
       timeout: 750,
     });
     const capability = String(result.stdout ?? result[0] ?? "").trim();
-    if (capability === "monaco" || capability === "gte") {
+    if (capability === "monaco" || capability === "editor" || capability === "gte") {
       return capability;
     }
   } catch {
-    return "gte";
+    return "editor";
   }
-  return "gte";
+  return "editor";
 }
 
 function isMacosAppPromptEditorClient(clientCapability) {
@@ -3220,10 +3226,42 @@ function selectPromptEditorCommand({ backend, clientCapability, filePath }) {
       kind: "custom",
     };
   }
-  if (backend === "monaco" && isMacosAppPromptEditorClient(clientCapability)) {
+  if ((backend === "monaco" || clientCapability === "monaco") && isMacosAppPromptEditorClient(clientCapability)) {
     return { commandArgs: ["ghostex", "floating-monaco-editor", filePath], kind: "monaco" };
   }
-  return { commandArgs: ["gte", filePath], kind: "gte" };
+  const editorCommand = machinePromptEditorCommandFromEnvironment();
+  return {
+    commandArgs: ["/bin/zsh", "-lc", `exec ${editorCommand} "$@"`, "ghostex-prompt-editor", filePath],
+    kind: "editor",
+  };
+}
+
+function machinePromptEditorCommandFromEnvironment() {
+  const candidates = [
+    process.env.GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL,
+    process.env.GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR,
+    process.env.VISUAL,
+    process.env.EDITOR,
+  ];
+  return candidates.map(normalizedEnvironmentString).find(isUsableMachineEditorCommand) ?? "vi";
+}
+
+function isUsableMachineEditorCommand(command) {
+  if (!command) {
+    return false;
+  }
+  return !isGhostexPromptEditorCommand(command);
+}
+
+function isGhostexPromptEditorCommand(command) {
+  const trimmed = command.trim();
+  const executable = trimmed.split(/\s+/u)[0]?.replace(/^['"]|['"]$/gu, "") ?? "";
+  const executableName = path.basename(executable);
+  return executableName === "prompt-editor" ||
+    trimmed.includes("ghostex prompt-editor") ||
+    (trimmed.includes("ghostex-cli.mjs") && trimmed.includes("prompt-editor")) ||
+    trimmed.includes("floating-monaco-editor") ||
+    command.includes("floating-editor -- gte");
 }
 
 function promptEditorOriginatingSessionIdFromEnvironment() {
