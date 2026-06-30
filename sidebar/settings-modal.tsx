@@ -265,6 +265,7 @@ import type { WebviewApi } from "./webview-api";
 export type { SettingsModalTab } from "./settings-modal-tabs";
 
 const NUMERIC_SETTINGS_DEBOUNCE_MS = 180;
+const SETTINGS_MODAL_NAVIGATION_SCROLL_DEBOUNCE_MS = 220;
 const GHOSTTY_THEME_UNMANAGED_VALUE = "__ghostex_ghostty_theme_unmanaged__";
 const MODIFIED_SETTING_TOOLTIP = "Modified Setting.\n \nClick to Reset to Default";
 const PASTE_PREVIEWABLE_IMAGES_DESCRIPTION =
@@ -1285,6 +1286,9 @@ export function SettingsModal({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const pendingSettingsRef = useRef<ghostexSettings | undefined>(undefined);
   const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pendingNavigationPersistTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   const autoSleepSectionRef = useRef<HTMLDivElement>(null);
   const browserSectionRef = useRef<HTMLDivElement>(null);
   const editorSectionRef = useRef<HTMLDivElement>(null);
@@ -1394,6 +1398,7 @@ export function SettingsModal({
   const handleSettingsModalScrollCapture = (event: ReactUIEvent<HTMLDivElement>) => {
     if (event.target instanceof HTMLElement && event.target.dataset.slot === "scroll-area-viewport") {
       rememberSettingsModalScrollTop(activeTab, event.target.scrollTop);
+      scheduleSettingsModalNavigationPersist(activeTab);
       if (activeTab === "settings") {
         scheduleMainSettingsSectionMeasurement(event.target);
       }
@@ -1424,6 +1429,7 @@ export function SettingsModal({
     });
     rememberActiveScrollPosition();
     rememberSettingsModalTab(visibleTab);
+    persistSettingsModalNavigation(visibleTab);
     if (visibleTab === "settings" || visibleTab === "hotkeys") {
       setExpandedSettingsSidebarPages((expandedPages) => ({
         ...expandedPages,
@@ -1451,6 +1457,7 @@ export function SettingsModal({
     );
     rememberActiveScrollPosition();
     rememberSettingsModalTab(nextTab);
+    persistSettingsModalNavigation(nextTab);
     setActiveTabState(nextTab);
   }, [initialTab, isOpen]);
 
@@ -2733,6 +2740,9 @@ export function SettingsModal({
       if (pendingTimeoutRef.current) {
         clearTimeout(pendingTimeoutRef.current);
       }
+      if (pendingNavigationPersistTimeoutRef.current) {
+        clearTimeout(pendingNavigationPersistTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -2743,7 +2753,14 @@ export function SettingsModal({
     }
   };
 
-  const flushPendingSettingsWithNavigation = () => {
+  const clearPendingNavigationPersist = () => {
+    if (pendingNavigationPersistTimeoutRef.current) {
+      clearTimeout(pendingNavigationPersistTimeoutRef.current);
+      pendingNavigationPersistTimeoutRef.current = undefined;
+    }
+  };
+
+  const persistSettingsModalNavigation = (navigationActiveTab: SettingsModalTab = activeTab) => {
     rememberActiveScrollPosition();
     const pendingSettings = pendingSettingsRef.current;
     const baseSettings = pendingSettings ?? draft;
@@ -2752,7 +2769,7 @@ export function SettingsModal({
       : normalizeghostexSettings({
           ...baseSettings,
           settingsModalNavigation: getRememberedSettingsModalNavigationState(
-            activeTab,
+            navigationActiveTab,
             baseSettings.settingsModalNavigation,
           ),
         });
@@ -2763,12 +2780,13 @@ export function SettingsModal({
         nextSettings.settingsModalNavigation,
       );
     /*
-     * CDXC:SettingsNavigation 2026-06-29-17:54:
-     * Closing the normal macOS Settings window is the durable restore boundary.
-     * Merge pending debounced edits with the last tab and scroll offsets in one
-     * normalized write so relaunch opens where the user left without racing
-     * numeric-control debounce saves.
+     * CDXC:SettingsNavigation 2026-06-30-04:47:
+     * Native Settings is an AppKit child window, so closing it with native
+     * chrome can bypass the React Dialog close callback. Persist page changes
+     * immediately and scroll changes after they settle; close remains a final
+     * flush for pending numeric edits and any unsaved navigation state.
      */
+    clearPendingNavigationPersist();
     clearPendingSettings();
     pendingSettingsRef.current = undefined;
     if (pendingSettings || shouldPersistNavigation) {
@@ -2777,8 +2795,21 @@ export function SettingsModal({
     }
   };
 
+  const scheduleSettingsModalNavigationPersist = (
+    navigationActiveTab: SettingsModalTab = activeTab,
+  ) => {
+    if (isFirstLaunchSetup) {
+      return;
+    }
+    clearPendingNavigationPersist();
+    pendingNavigationPersistTimeoutRef.current = setTimeout(() => {
+      pendingNavigationPersistTimeoutRef.current = undefined;
+      persistSettingsModalNavigation(navigationActiveTab);
+    }, SETTINGS_MODAL_NAVIGATION_SCROLL_DEBOUNCE_MS);
+  };
+
   const closeSettingsModal = () => {
-    flushPendingSettingsWithNavigation();
+    persistSettingsModalNavigation(activeTab);
     onClose();
   };
 

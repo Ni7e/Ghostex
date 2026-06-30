@@ -721,6 +721,11 @@ export type ghostexSettings = {
    * Closing Settings should persist the user's current Settings page and
    * scroll offsets so relaunching the macOS app can reopen Settings at the
    * exact spot they left, while explicit deep links can still override it.
+   *
+   * CDXC:SettingsNavigation 2026-06-30-04:47:
+   * Persist page navigation as the user moves through Settings because the
+   * native AppKit close button can tear down the child window before React's
+   * dialog-close callback runs.
    */
   settingsModalNavigation: SettingsModalNavigationState;
   /**
@@ -1136,6 +1141,10 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * New installs start at General Settings. Once the user closes Settings, the
    * modal saves only navigation chrome state here, not search text or private
    * setting values beyond the already persisted preferences.
+   *
+   * CDXC:SettingsNavigation 2026-06-30-04:47:
+   * Navigation writes can happen before close so native-window teardown does not
+   * lose the last selected Settings page.
    */
   settingsModalNavigation: DEFAULT_SETTINGS_MODAL_NAVIGATION_STATE,
   /**

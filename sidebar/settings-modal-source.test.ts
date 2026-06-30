@@ -163,6 +163,43 @@ describe("settings modal source", () => {
     expect(sidebarSubsectionStyles).not.toContain("background: var(--accent);");
   });
 
+  test("persists Settings location while browsing the native Settings window", () => {
+    /*
+     * CDXC:SettingsNavigation 2026-06-30-04:47:
+     * The native AppKit Settings close button can tear down the child window
+     * before React's Dialog close callback runs. Persist the selected Settings
+     * page immediately and persist scroll after a short idle window so app
+     * relaunch restore does not depend on close-event delivery.
+     */
+    const scrollHandler = sourceBetween(
+      settingsModalSource,
+      "const handleSettingsModalScrollCapture",
+      "const handleSettingsModalKeyDownCapture",
+    );
+    expect(scrollHandler).toContain("rememberSettingsModalScrollTop(activeTab, event.target.scrollTop);");
+    expect(scrollHandler).toContain("scheduleSettingsModalNavigationPersist(activeTab);");
+
+    const tabSetter = sourceBetween(
+      settingsModalSource,
+      "const setActiveTab =",
+      "const toggleSettingsSidebarPage",
+    );
+    expect(tabSetter).toContain("rememberSettingsModalTab(visibleTab);");
+    expect(tabSetter).toContain("persistSettingsModalNavigation(visibleTab);");
+
+    const navigationPersistence = sourceBetween(
+      settingsModalSource,
+      "const persistSettingsModalNavigation",
+      "const closeSettingsModal",
+    );
+    expect(navigationPersistence).toContain("Native Settings is an AppKit child window");
+    expect(navigationPersistence).toContain(
+      "settingsModalNavigation: getRememberedSettingsModalNavigationState(\n            navigationActiveTab,",
+    );
+    expect(navigationPersistence).toContain("clearPendingNavigationPersist();");
+    expect(navigationPersistence).toContain("SETTINGS_MODAL_NAVIGATION_SCROLL_DEBOUNCE_MS");
+  });
+
   test("groups General settings sidebar sections into the reduced order", () => {
     /*
      * CDXC:SettingsNavigation 2026-06-30-01:23:
