@@ -32,10 +32,9 @@ rg -n "pattern" native src sidebar shared scripts gxserver \
   -g '!dist/**' -g '!build/**' -g '!out/**' -g '!.git/**'
 ```
 
-### Don't write any test for the swift code in the macOS app
+### Don't write any test in the macOS app
 
-This project is being replaced by the ./gpui project in the future, so these tests aren't helpful.
-No testing code here for now.
+This project is being replaced by the ./gpui project in the future, so these tests aren't helpful. No testing code here for now. If a test failes due to a change just delete it.
 
 ### Don't write any test for the code in the gpui app
 

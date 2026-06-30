@@ -76,3 +76,8 @@ react-doctor.config.json
 # published with product docs live under `.ignored/` instead of needing
 # per-file ignore rules.
 .tmp-*
+
+# CDXC:LocalMachineDocs 2026-06-29-13:56: Ubuntu container RDP/SSH notes include local machine addresses and credentials for this developer-only VM. Keep the exact machine note out of source control while allowing public docs to remain tracked.
+docs/machines/ubuntu-vm.md
+# CDXC:LocalMachineDocs 2026-06-30-02:54: The Tart macOS sandbox VM notes include local NAT addresses, credentials, and VNC access details for this developer-only machine. Keep the exact machine note out of source control while preserving the local runbook.
+docs/machines/macOS-vm.md
