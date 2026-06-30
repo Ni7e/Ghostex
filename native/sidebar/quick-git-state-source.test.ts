@@ -33,8 +33,8 @@ describe("native sidebar Quick Git state", () => {
     );
 
     const visibleDiffSource = sourceBetween(
-      "async function refreshVisibleProjectDiffStats()",
-      "async function refreshProjectDiffStats",
+      "function getVisibleProjectDiffStatsRefreshTargets()",
+      "function refreshProjectDiffStatsTarget",
     );
     expect(visibleDiffSource).toContain("!isQuickProject(project)");
 
@@ -43,5 +43,37 @@ describe("native sidebar Quick Git state", () => {
       "async function refreshRemoteProjectDiffStats",
     );
     expect(projectDiffSource).toContain("if (!project || isQuickProject(project))");
+  });
+
+  test("runs project diff stats from staggered background cadence and attention edges", () => {
+    /*
+     * CDXC:ProjectDiffStats 2026-06-30-19:13:
+     * Project-header Git stats should refresh in native background scheduling,
+     * not from React hover. Run a staggered 15-second cycle and refresh the
+     * owning project immediately when a session transitions into attention.
+     */
+    expect(nativeSidebarSource).toContain(
+      "const PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS = 15 * 1000;",
+    );
+
+    const schedulerSource = sourceBetween(
+      "function startProjectDiffStatsBackgroundRefresh",
+      "async function refreshProjectDiffStats",
+    );
+    expect(schedulerSource).toContain("window.setInterval(");
+    expect(schedulerSource).toContain("PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS");
+    expect(schedulerSource).toContain(
+      "const staggerStepMs = PROJECT_DIFF_STATS_BACKGROUND_INTERVAL_MS / targets.length;",
+    );
+    expect(schedulerSource).toContain("window.setTimeout(");
+
+    const activitySource = sourceBetween(
+      "function applyGxserverSessionActivityResult",
+      "async function syncNativeSessionActivityWithGxserver",
+    );
+    expect(activitySource).toContain(
+      'if (previousActivity !== "attention" && nextActivity === "attention") {',
+    );
+    expect(activitySource).toContain("refreshProjectDiffStatsForAttentionSession(sessionId);");
   });
 });

@@ -5,6 +5,7 @@ import {
 
 export const PROJECT_SESSION_LIST_COLLAPSED_COUNT = DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT;
 export const PROJECT_SESSION_LIST_REFERENCE_ROW_HEIGHT_PX = 34;
+export const PROJECT_SESSION_LIST_REFERENCE_ROW_BOUNDARY_PX = 1;
 export const PROJECT_SESSION_LIST_COLLAPSED_STORAGE_KEY =
   "ghostex-sidebar-project-session-list-collapsed";
 export const PROJECT_SESSION_LIST_COLLAPSED_CHANGED_EVENT =
@@ -75,13 +76,17 @@ export function getExpandedProjectSessionListScrollHeight({
   rowCount: number;
 }): number {
   /*
-   * CDXC:ProjectSessionLists 2026-06-30-02:45:
-   * Reference sidebar session rows have fixed 34px geometry, and manual
-   * ordering keeps all rows mounted for drag/drop. Size the expanded project
-   * inner scroller from row count instead of reading layout or observing every
-   * large project list while the user scrolls.
+   * CDXC:ProjectSessionLists 2026-06-30-12:55:
+   * Reference sidebar session rows paint a 34px card plus a 1px row boundary in
+   * the actual list stack. Size the expanded project inner scroller from that
+   * full row step so a configured Show more count of 10 reveals ten complete
+   * rows at the top and bottom without reintroducing per-list DOM measurement.
    */
-  return Math.max(0, Math.floor(rowCount)) * PROJECT_SESSION_LIST_REFERENCE_ROW_HEIGHT_PX;
+  const normalizedRowCount = Math.max(0, Math.floor(rowCount));
+  return (
+    normalizedRowCount *
+    (PROJECT_SESSION_LIST_REFERENCE_ROW_HEIGHT_PX + PROJECT_SESSION_LIST_REFERENCE_ROW_BOUNDARY_PX)
+  );
 }
 
 export function getProjectSessionListBoundaryHeight({

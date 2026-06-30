@@ -498,6 +498,7 @@ export type SessionGroupSectionProps = {
   sessionTagListItems?: readonly SidebarSessionTagListItem[];
   showHeaderActions?: boolean;
   showSessionDropPositionIndicators?: boolean;
+  useColoredAgentIcons?: boolean;
   vscode: WebviewApi;
 };
 
@@ -625,6 +626,7 @@ export function SessionGroupSection({
   sessionTagListItems,
   showHeaderActions = true,
   showSessionDropPositionIndicators = true,
+  useColoredAgentIcons = false,
   vscode,
 }: SessionGroupSectionProps) {
   const group = useSidebarStore((state) => state.groupsById[groupId]);
@@ -727,6 +729,7 @@ export function SessionGroupSection({
    */
   const debuggingMode = useSidebarStore((state) => state.hud.debuggingMode);
   const agents = useSidebarStore((state) => state.hud.agents);
+  const projectAgentLauncherIconColorMode = useColoredAgentIcons ? "brand" : "monochrome";
   const hideProjectHeaderDiffStats = useSidebarStore(
     (state) =>
       state.hud.settings?.hideProjectHeaderDiffStats ??
@@ -1516,16 +1519,6 @@ export function SessionGroupSection({
     });
   };
 
-  const refreshProjectDiffStats = () => {
-    if (!projectContext) {
-      return;
-    }
-    vscode.postMessage({
-      groupId: group.groupId,
-      type: "refreshWorkspaceProjectDiffForGroup",
-    });
-  };
-
   const chooseProjectTheme = (theme: SidebarTheme) => {
     setContextMenuPosition(undefined);
     vscode.postMessage({
@@ -1770,7 +1763,6 @@ export function SessionGroupSection({
           data-collapsible="true"
           onClick={handleGroupHeaderClick}
           onContextMenu={handleGroupHeaderContextMenu}
-          onMouseEnter={refreshProjectDiffStats}
           ref={projectContext && !isChatCollection ? sortable.handleRef : undefined}
           style={groupHeaderStyle}
         >
@@ -2124,7 +2116,10 @@ export function SessionGroupSection({
                                 tooltip={`Create ${primaryProjectAgentLabel}`}
                                 type="button"
                               >
-                                <ProjectAgentLauncherIcon agent={primaryProjectAgent} />
+                                <ProjectAgentLauncherIcon
+                                  agent={primaryProjectAgent}
+                                  colorMode={projectAgentLauncherIconColorMode}
+                                />
                               </ProjectHeaderActionButton>
                               <ProjectHeaderActionButton
                                 aria-expanded={openControlMenu === "project-agent"}

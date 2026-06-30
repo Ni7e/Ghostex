@@ -296,6 +296,26 @@ describe("shouldShowProjectEditorDiffStats", () => {
   });
 });
 
+describe("project diff stats refresh triggers", () => {
+  test("does not refresh project git stats from header hover", () => {
+    /*
+     * CDXC:ProjectDiffStats 2026-06-30-19:13:
+     * Project-header Git stats are background data. Hovering the project header
+     * must not post refreshWorkspaceProjectDiffForGroup or otherwise tie Git
+     * probes to pointer movement.
+     */
+    const headerStart = sessionGroupSectionSource.indexOf('className="group-head"');
+    const headerSource = sessionGroupSectionSource.slice(headerStart, headerStart + 900);
+
+    expect(headerStart).toBeGreaterThan(-1);
+    expect(headerSource).not.toContain("onMouseEnter");
+    expect(sessionGroupSectionSource).not.toContain("const refreshProjectDiffStats = () => {");
+    expect(sessionGroupSectionSource).not.toContain(
+      'type: "refreshWorkspaceProjectDiffForGroup"',
+    );
+  });
+});
+
 describe("getGroupContextMenuItemCount", () => {
   test("counts compact worktree project actions with copy path instead of open", () => {
     expect(

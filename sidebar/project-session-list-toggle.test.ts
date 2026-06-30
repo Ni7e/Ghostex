@@ -189,14 +189,16 @@ describe("getProjectSessionListCollapsedHeight", () => {
 });
 
 describe("getExpandedProjectSessionListScrollHeight", () => {
-  test("calculates expanded scroll bounds from fixed reference row geometry", () => {
+  test("calculates expanded scroll bounds from fixed reference row-stack geometry", () => {
     /*
-     * CDXC:ProjectSessionLists 2026-06-30-02:45:
-     * Expanded Show more lists use fixed row math instead of DOM measurement
-     * so long project lists avoid ResizeObserver/layout work while all rows
-     * remain mounted for drag/drop.
+     * CDXC:ProjectSessionLists 2026-06-30-12:55:
+     * Expanded Show more lists use fixed row-stack math instead of DOM
+     * measurement, and the setting value must fit that many complete session
+     * rows. A value of 10 should not clip the tenth row at the top or bottom
+     * of the inner project scroller.
      */
-    expect(getExpandedProjectSessionListScrollHeight({ rowCount: 2 })).toBe(68);
+    expect(getExpandedProjectSessionListScrollHeight({ rowCount: 2 })).toBe(70);
+    expect(getExpandedProjectSessionListScrollHeight({ rowCount: 10 })).toBe(350);
     expect(getExpandedProjectSessionListScrollHeight({ rowCount: -1 })).toBe(0);
   });
 });
