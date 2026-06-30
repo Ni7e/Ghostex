@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   PROJECT_SESSION_LIST_COLLAPSED_COUNT,
-  getProjectSessionListBoundaryHeight,
+  getExpandedProjectSessionListScrollHeight,
   getProjectSessionListCollapsedHeight,
   getVisibleProjectSessionIds,
   normalizeStoredProjectSessionListCollapsedState,
@@ -172,32 +172,6 @@ describe("getProjectSessionListCollapsedHeight", () => {
     ).toBe(80);
   });
 
-  test("measures expanded scroll bounds without the collapsed-list more row", () => {
-    /*
-     * CDXC:ProjectSessionLists 2026-06-25-12:20:
-     * Expanded Show more lists use the measured visible session boundary as
-     * their scroll cap. The collapsed-list count row is only part of the
-     * collapsed Show more state and must not enlarge the expanded scroll area.
-     */
-    const sessionListElement = createSessionListElement({
-      bottom: 140,
-      moreToggleElement: createMeasuredElement(68, 90),
-      sessions: [
-        createSessionElement("session-1", 10, 38),
-        createSessionElement("session-2", 39, 67),
-        createSessionElement("session-3", 91, 119),
-      ],
-      top: 10,
-    });
-
-    expect(
-      getProjectSessionListBoundaryHeight({
-        boundarySessionId: "session-2",
-        sessionListElement,
-      }),
-    ).toBe(57);
-  });
-
   test("uses zero height for an empty collapsed list", () => {
     const sessionListElement = createSessionListElement({
       bottom: 10,
@@ -211,5 +185,18 @@ describe("getProjectSessionListCollapsedHeight", () => {
         sessionListElement,
       }),
     ).toBe(0);
+  });
+});
+
+describe("getExpandedProjectSessionListScrollHeight", () => {
+  test("calculates expanded scroll bounds from fixed reference row geometry", () => {
+    /*
+     * CDXC:ProjectSessionLists 2026-06-30-02:45:
+     * Expanded Show more lists use fixed row math instead of DOM measurement
+     * so long project lists avoid ResizeObserver/layout work while all rows
+     * remain mounted for drag/drop.
+     */
+    expect(getExpandedProjectSessionListScrollHeight({ rowCount: 2 })).toBe(68);
+    expect(getExpandedProjectSessionListScrollHeight({ rowCount: -1 })).toBe(0);
   });
 });

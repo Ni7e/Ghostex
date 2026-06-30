@@ -40,12 +40,11 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { useShallow } from "zustand/react/shallow";
 import {
   getSidebarSessionLifecycleState,
   type SidebarSessionItem,
 } from "../shared/session-grid-contract";
-import { DEFAULT_ghostex_SETTINGS, type BrowserFeedbackTool } from "../shared/ghostex-settings";
+import type { BrowserFeedbackTool } from "../shared/ghostex-settings";
 import {
   getEnabledVisibleSidebarSessionTagSections,
   type SidebarSessionTagListItem,
@@ -67,7 +66,7 @@ import {
 import { closeAppModal, openAppModal } from "./app-modal-host-bridge";
 import { SidebarContextMenuPortal } from "./sidebar-context-menu-portal";
 import { postSidebarRefreshDebugLog } from "./sidebar-refresh-debug-log";
-import { useSidebarStore } from "./sidebar-store";
+import { useSidebarStore, type SidebarGroupRecord } from "./sidebar-store";
 import {
   getEffectiveSessionTag,
   getSidebarSessionTagLabel,
@@ -112,6 +111,7 @@ const DND_SESSION_FRAME_AX_ATTRIBUTES = [
   "role",
   "tabindex",
 ] as const;
+const EMPTY_SESSION_IDS: readonly string[] = [];
 
 function getBrowserFeedbackToolLabel(tool: BrowserFeedbackTool): string {
   return tool === "agentation" ? "Agentation" : "React Grab";
@@ -154,6 +154,19 @@ type SessionContextMenuAction = {
   submenu?: "session-tags";
 };
 
+export type SortableSessionCardSharedSettings = {
+  browserFeedbackTool: BrowserFeedbackTool;
+  hideBrowserFaviconUntilHover: boolean;
+  hideSessionAgentIconUntilHover: boolean;
+  renameSessionOnDoubleClick: boolean;
+  showCloseButton: boolean;
+  showDebugSessionNumbers: boolean;
+  showLastActiveTime: boolean;
+  showSessionCloseContextMenuAction: boolean;
+  showSessionCommandCopyActions: boolean;
+  showSessionDetailsCopyAction: boolean;
+};
+
 export type SortableSessionCardProps = {
   completionFlashNonce?: number;
   dragDisabled?: boolean;
@@ -168,9 +181,13 @@ export type SortableSessionCardProps = {
     count: number;
     onReveal: () => void;
   };
+  sessionCardSettings: SortableSessionCardSharedSettings;
+  sessionGroup?: SidebarGroupRecord;
   sessionTagListItems?: readonly SidebarSessionTagListItem[];
-  sessionIdsBelow?: readonly string[];
+  sessionIdsBelowSource?: readonly string[];
+  sessionIdsBelowStartIndex?: number;
   sessionId: string;
+  shouldKeepLastProjectSessionVisibleOnClose?: boolean;
   showGroupDropTargetChrome?: boolean;
   showGroupConnector?: boolean;
   showDropPositionIndicator?: boolean;
@@ -178,21 +195,29 @@ export type SortableSessionCardProps = {
 };
 
 export function resolveSessionCardSessionIdsBelow({
-  contextMenuSessionIdsBelow,
-  isContextMenuOpen,
-  sessionIdsBelow,
+  sessionIdsBelowSource,
+  sessionIdsBelowStartIndex,
 }: {
-  contextMenuSessionIdsBelow: readonly string[];
-  isContextMenuOpen: boolean;
-  sessionIdsBelow: readonly string[];
+  sessionIdsBelowSource?: readonly string[];
+  sessionIdsBelowStartIndex?: number;
 }): readonly string[] {
   /*
-   * CDXC:SidebarContextMenu 2026-06-10-10:01:
-   * Session-card below actions receive the current group/project slice from
-   * SessionGroupSection. Keep the menu target list scoped to that slice instead
-   * of deriving cross-project targets from global rendered sidebar rows.
+   * CDXC:SidebarContextMenu 2026-06-30-02:45:
+   * Session-card below actions stay scoped to the group/project-visible order,
+   * but large project lists must not slice that order once per rendered row.
+   * Keep the shared source list plus the row's next index, then materialize the
+   * below list only when the context menu opens or an open menu action runs.
    */
-  return isContextMenuOpen ? contextMenuSessionIdsBelow : sessionIdsBelow;
+  if (
+    !sessionIdsBelowSource ||
+    sessionIdsBelowStartIndex === undefined ||
+    sessionIdsBelowStartIndex < 0 ||
+    sessionIdsBelowStartIndex >= sessionIdsBelowSource.length
+  ) {
+    return EMPTY_SESSION_IDS;
+  }
+
+  return sessionIdsBelowSource.slice(sessionIdsBelowStartIndex);
 }
 
 export function getSessionCardAccessibleLabel({
@@ -472,21 +497,29 @@ export function SortableSessionCard({
   isSearchSelected = false,
   onFocusRequested,
   projectSessionListMoreRow,
+  sessionCardSettings,
+  sessionGroup,
   sessionTagListItems,
-  sessionIdsBelow = [],
+  sessionIdsBelowSource,
+  sessionIdsBelowStartIndex,
   sessionId,
+  shouldKeepLastProjectSessionVisibleOnClose = false,
   showGroupDropTargetChrome = true,
   showGroupConnector = false,
   showDropPositionIndicator = true,
   vscode,
 }: SortableSessionCardProps) {
   const [contextMenuPosition, setContextMenuPosition] = useState<ContextMenuPosition>();
-  const [contextMenuSessionIdsBelow, setContextMenuSessionIdsBelow] = useState<readonly string[]>([]);
-  const effectiveSessionIdsBelow = resolveSessionCardSessionIdsBelow({
-    contextMenuSessionIdsBelow,
-    isContextMenuOpen: Boolean(contextMenuPosition),
-    sessionIdsBelow,
-  });
+  const [contextMenuSessionIdsBelow, setContextMenuSessionIdsBelow] =
+    useState<readonly string[]>(EMPTY_SESSION_IDS);
+  const [contextMenuSleepableSessionIdsBelow, setContextMenuSleepableSessionIdsBelow] =
+    useState<readonly string[]>(EMPTY_SESSION_IDS);
+  const effectiveSessionIdsBelow = contextMenuPosition
+    ? contextMenuSessionIdsBelow
+    : EMPTY_SESSION_IDS;
+  const sleepableSessionIdsBelow = contextMenuPosition
+    ? contextMenuSleepableSessionIdsBelow
+    : EMPTY_SESSION_IDS;
   const storedSession = useSidebarStore((state) => state.sessionsById[sessionId]);
   const isProjectSessionListMoreRow = projectSessionListMoreRow !== undefined;
   const projectSessionListMoreLabel = isProjectSessionListMoreRow
@@ -513,29 +546,6 @@ export function SortableSessionCard({
           shortcutLabel: "",
         }
       : undefined);
-  const sleepableSessionIdsBelow = useSidebarStore(
-    useShallow((state) =>
-      effectiveSessionIdsBelow.filter((candidateSessionId) =>
-        canSleepSidebarSession(state.sessionsById[candidateSessionId]),
-      ),
-    ),
-  );
-  const canFocusMode = useSidebarStore((state) => state.groupsById[groupId]?.canFocusMode === true);
-  const shouldKeepLastProjectSessionVisibleOnClose = useSidebarStore(
-    useShallow((state) => {
-      if (isProjectSessionListMoreRow) {
-        return false;
-      }
-      const group = state.groupsById[groupId];
-      const groupSessionIds = state.sessionIdsByGroup[groupId] ?? [];
-      return (
-        group?.projectContext !== undefined &&
-        group.isChatCollection !== true &&
-        groupSessionIds.length === 1 &&
-        groupSessionIds[0] === sessionId
-      );
-    }),
-  );
   const {
     hideSessionAgentIconUntilHover,
     hideBrowserFaviconUntilHover,
@@ -547,62 +557,8 @@ export function SortableSessionCard({
     showSessionCloseContextMenuAction,
     showSessionCommandCopyActions,
     showSessionDetailsCopyAction,
-  } = useSidebarStore(
-    useShallow((state) => ({
-      /*
-       * CDXC:SidebarSessions 2026-05-16-08:46:
-       * The hover-only agent icon setting is visual chrome only; keep icons in
-       * the DOM so the same row can reveal them on hover/focus without
-       * changing session identity or drag hit targets.
-       */
-      hideSessionAgentIconUntilHover:
-        state.hud.settings?.hideSessionAgentIconUntilHover ??
-        DEFAULT_ghostex_SETTINGS.hideSessionAgentIconUntilHover,
-      /*
-       * CDXC:BrowserPanes 2026-05-28-07:38:
-       * Browser favicons identify pages and need their own hover-only setting
-       * instead of being suppressed by the agent-logo hover preference.
-       */
-      hideBrowserFaviconUntilHover:
-        state.hud.settings?.hideBrowserFaviconUntilHover ??
-        DEFAULT_ghostex_SETTINGS.hideBrowserFaviconUntilHover,
-      browserFeedbackTool:
-        state.hud.settings?.browserFeedbackTool ?? DEFAULT_ghostex_SETTINGS.browserFeedbackTool,
-      renameSessionOnDoubleClick:
-        state.hud.settings?.renameSessionOnDoubleClick ?? state.hud.renameSessionOnDoubleClick,
-      showCloseButton: state.hud.showCloseButtonOnSessionCards,
-      showDebugSessionNumbers: state.hud.debuggingMode,
-      showLastActiveTime:
-        !(state.hud.settings?.hideLastActiveTimeOnSessionCards ??
-          DEFAULT_ghostex_SETTINGS.hideLastActiveTimeOnSessionCards),
-      /*
-       * CDXC:SidebarContextMenu 2026-06-10-13:58:
-       * The destructive single-session Close item is hidden unless Settings
-       * explicitly enables close actions in session context menus.
-       */
-      showSessionCloseContextMenuAction:
-        state.hud.settings?.showSessionCloseContextMenuAction ??
-        DEFAULT_ghostex_SETTINGS.showSessionCloseContextMenuAction,
-      /*
-       * CDXC:SidebarContextMenu 2026-06-09-23:17:
-       * Copy resume and Copy attach command are opt-in context-menu utilities.
-       * Hide both by default and reveal them only when Settings explicitly
-       * enables command-copy actions for session buttons.
-       */
-      showSessionCommandCopyActions:
-        state.hud.settings?.showSessionCommandCopyActions ??
-        DEFAULT_ghostex_SETTINGS.showSessionCommandCopyActions,
-      /*
-       * CDXC:SidebarContextMenu 2026-06-11-23:08:
-       * Copy details is an opt-in metadata clipboard action. Gate the menu item
-       * with its own Settings flag instead of tying it to shell command copying.
-       */
-      showSessionDetailsCopyAction:
-        state.hud.settings?.showSessionDetailsCopyAction ??
-        DEFAULT_ghostex_SETTINGS.showSessionDetailsCopyAction,
-    })),
-  );
-  const sessionGroup = useSidebarStore((state) => state.groupsById[groupId]);
+  } = sessionCardSettings;
+  const canFocusMode = sessionGroup?.canFocusMode === true;
   const [tagSubmenuPosition, setTagSubmenuPosition] = useState<ContextMenuPosition>();
   const [completionFlashRunId, setCompletionFlashRunId] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -1030,16 +986,20 @@ export function SortableSessionCard({
   ]);
 
   const readLatestSessionIdsBelow = () =>
-    resolveSessionCardSessionIdsBelow({
-      contextMenuSessionIdsBelow,
-      isContextMenuOpen: Boolean(contextMenuPosition),
-      sessionIdsBelow,
-    });
+    contextMenuPosition
+      ? contextMenuSessionIdsBelow
+      : resolveSessionCardSessionIdsBelow({
+          sessionIdsBelowSource,
+          sessionIdsBelowStartIndex,
+        });
 
-  const getContextMenuCountsForSessionIdsBelow = (nextSessionIdsBelow: readonly string[]) => {
-    const nextSleepableSessionIdsBelow = nextSessionIdsBelow.filter((candidateSessionId) =>
+  const getSleepableSessionIds = (candidateSessionIds: readonly string[]) =>
+    candidateSessionIds.filter((candidateSessionId) =>
       canSleepSidebarSession(useSidebarStore.getState().sessionsById[candidateSessionId]),
     );
+
+  const getContextMenuCountsForSessionIdsBelow = (nextSessionIdsBelow: readonly string[]) => {
+    const nextSleepableSessionIdsBelow = getSleepableSessionIds(nextSessionIdsBelow);
     const nextBelowActionCount =
       nextSessionIdsBelow.length > 0 ? 1 + Number(nextSleepableSessionIdsBelow.length > 0) : 0;
     const nextSectionLengths = [
@@ -1051,6 +1011,7 @@ export function SortableSessionCard({
     return {
       dividerCount: Math.max(0, nextSectionLengths.length - 1),
       itemCount: nextSectionLengths.reduce((count, sectionLength) => count + sectionLength, 0),
+      sleepableSessionIdsBelow: nextSleepableSessionIdsBelow,
     };
   };
 
@@ -1059,6 +1020,7 @@ export function SortableSessionCard({
     const nextMenuCounts = getContextMenuCountsForSessionIdsBelow(nextSessionIdsBelow);
     setTagSubmenuPosition(undefined);
     setContextMenuSessionIdsBelow(nextSessionIdsBelow);
+    setContextMenuSleepableSessionIdsBelow(nextMenuCounts.sleepableSessionIdsBelow);
     setContextMenuPosition(
       clampContextMenuPosition(clientY, nextMenuCounts.itemCount, nextMenuCounts.dividerCount),
     );
@@ -1360,9 +1322,7 @@ export function SortableSessionCard({
   const requestSleepBelow = () => {
     const requestStartedAtMs = performance.now();
     const latestSessionIdsBelow = readLatestSessionIdsBelow();
-    const targetSessionIds = latestSessionIdsBelow.filter((candidateSessionId) =>
-      canSleepSidebarSession(useSidebarStore.getState().sessionsById[candidateSessionId]),
-    );
+    const targetSessionIds = getSleepableSessionIds(latestSessionIdsBelow);
     const resolveDurationMs = performance.now() - requestStartedAtMs;
     const baseDebugDetails = {
       clickedSessionKind: session.sessionKind ?? session.kind,
@@ -2351,8 +2311,8 @@ export function SortableSessionCard({
                 /*
                  * CDXC:SidebarContextMenu 2026-06-09-14:22:
                  * The Tag as submenu follows the raised sidebar context-menu
-                 * stack so sticky project headers cannot cover the submenu
-                 * while users are choosing a session marker.
+                 * stack so adjacent sidebar rows cannot cover the submenu while
+                 * users are choosing a session marker.
                  */
                 zIndex: "var(--sidebar-context-menu-submenu-z-index, 301)",
               }}

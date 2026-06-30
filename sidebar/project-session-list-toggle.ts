@@ -4,6 +4,7 @@ import {
 } from "../shared/ghostex-settings";
 
 export const PROJECT_SESSION_LIST_COLLAPSED_COUNT = DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT;
+export const PROJECT_SESSION_LIST_REFERENCE_ROW_HEIGHT_PX = 34;
 export const PROJECT_SESSION_LIST_COLLAPSED_STORAGE_KEY =
   "ghostex-sidebar-project-session-list-collapsed";
 export const PROJECT_SESSION_LIST_COLLAPSED_CHANGED_EVENT =
@@ -68,6 +69,21 @@ export function getVisibleProjectSessionIds({
   return sessionIds.slice(0, normalizedCollapsedCount);
 }
 
+export function getExpandedProjectSessionListScrollHeight({
+  rowCount,
+}: {
+  rowCount: number;
+}): number {
+  /*
+   * CDXC:ProjectSessionLists 2026-06-30-02:45:
+   * Reference sidebar session rows have fixed 34px geometry, and manual
+   * ordering keeps all rows mounted for drag/drop. Size the expanded project
+   * inner scroller from row count instead of reading layout or observing every
+   * large project list while the user scrolls.
+   */
+  return Math.max(0, Math.floor(rowCount)) * PROJECT_SESSION_LIST_REFERENCE_ROW_HEIGHT_PX;
+}
+
 export function getProjectSessionListBoundaryHeight({
   boundarySessionId,
   includeMoreToggle = false,
@@ -89,11 +105,10 @@ export function getProjectSessionListBoundaryHeight({
    * CDXC:ProjectSessionLists 2026-06-12-23:53:
    * Show more and Show less should use the same measured max-height motion as project expand/collapse. Measure the bottom of the last user-visible session row so Show less can clip the still-mounted overflow rows smoothly instead of removing them before the collapse animation can run.
    *
-   * CDXC:ProjectSessionLists 2026-06-25-12:20:
-   * Expanded Show more lists need a bounded inner scroll area, while collapsed
-   * Show more rows must keep the normal non-scroll list. Measure the boundary
-   * row from rendered DOM instead of assuming fixed row heights so density and
-   * session-card content continue to define the real scroll cap.
+   * CDXC:ProjectSessionLists 2026-06-30-02:45:
+   * Collapsed Show more rows still need DOM measurement because the synthetic
+   * reveal row participates in the clipped edge. Expanded lists use fixed row
+   * math instead so large projects avoid layout reads and ResizeObserver work.
    */
   const sessionElement = Array.from(
     sessionListElement.querySelectorAll<HTMLElement>("[data-sidebar-session-id]"),

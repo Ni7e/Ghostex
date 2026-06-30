@@ -402,23 +402,13 @@ describe("getSidebarSessionGapContextMenuTarget", () => {
 });
 
 describe("reference sidebar group spacing styles", () => {
-  test("keeps sticky project headers native without scroll-time clipping", () => {
+  test("keeps project headers normal-flow for fast sidebar scrolling", () => {
     /*
-     * CDXC:SidebarStickyHeaders 2026-06-29-18:46:
-     * Project sticky headers should rely on native CSS sticky plus a real
-     * app-background fill. Do not reintroduce per-project scroll listeners that
-     * measure sticky overlap and write clip-path variables during sidebar
-     * scrolling.
-     *
-     * CDXC:SidebarStickyHeaders 2026-06-29-20:49:
-     * Sticky project headers should use the same reference-sidebar background
-     * token as the sidebar shell, with custom gradients anchored to the
-     * viewport so the header does not render as a mismatched flat band.
-     *
-     * CDXC:SidebarStickyHeaders 2026-06-29-21:37:
-     * Custom gradient sticky headers should use root-measured sidebar geometry
-     * instead of a viewport-height guess, so lower project headers match the
-     * sidebar gradient as they stick.
+     * CDXC:SidebarScroll 2026-06-30-01:59:
+     * Sidebar scrolling must prioritize throughput over sticky project context.
+     * Keep project headers in normal flow and do not keep the fixed-gradient
+     * geometry observer or sticky background contract that made scroll paint
+     * compositor-bound.
      */
     const projectHeaderStart = sessionGroupStylesSource.indexOf(
       '.sidebar-reference-layout[data-reference-sidebar="true"] .group[data-project-group="true"] .group-head {',
@@ -429,34 +419,18 @@ describe("reference sidebar group spacing styles", () => {
     );
 
     expect(projectHeaderStart).toBeGreaterThan(-1);
-    expect(projectHeaderSource).toContain(
-      "background: var(--reference-sidebar-background, var(--app-background));",
-    );
-    expect(projectHeaderSource).toContain(
-      "background-attachment: var(--reference-sidebar-background-attachment, scroll);",
-    );
-    expect(projectHeaderSource).toContain(
-      "background-position: var(--reference-sidebar-background-position, left top);",
-    );
-    expect(projectHeaderSource).toContain(
-      "background-size: var(--reference-sidebar-background-size, auto);",
-    );
-    expect(projectHeaderSource).toContain("position: sticky;");
+    expect(projectHeaderSource).toContain("position: relative;");
+    expect(projectHeaderSource).not.toContain("position: sticky;");
+    expect(projectHeaderSource).not.toContain("background-attachment:");
+    expect(projectHeaderSource).not.toContain("background-position:");
+    expect(projectHeaderSource).not.toContain("background-size:");
     expect(groupPanelStylesSource).toContain("--reference-sidebar-background: var(--app-background);");
-    expect(groupPanelStylesSource).toContain(
-      "--reference-sidebar-background-attachment: fixed;",
-    );
-    expect(groupPanelStylesSource).toContain(
-      "--reference-sidebar-background-position: left var(--reference-sidebar-gradient-top, 0px);",
-    );
-    expect(groupPanelStylesSource).toContain(
-      "--reference-sidebar-background-size: 100% var(--reference-sidebar-gradient-height, 100vh);",
-    );
-    expect(sidebarAppSource).toContain("referenceSidebarLayoutRef");
-    expect(sidebarAppSource).toContain("--reference-sidebar-gradient-top");
-    expect(sidebarAppSource).toContain("--reference-sidebar-gradient-height");
-    expect(sidebarAppSource).toContain("getBoundingClientRect()");
-    expect(sidebarAppSource).toContain("ResizeObserver");
+    expect(groupPanelStylesSource).not.toContain("--reference-sidebar-background-attachment:");
+    expect(groupPanelStylesSource).not.toContain("--reference-sidebar-gradient-top");
+    expect(groupPanelStylesSource).not.toContain("--reference-sidebar-gradient-height");
+    expect(sidebarAppSource).not.toContain("referenceSidebarLayoutRef");
+    expect(sidebarAppSource).not.toContain("--reference-sidebar-gradient-top");
+    expect(sidebarAppSource).not.toContain("--reference-sidebar-gradient-height");
     expect(sessionGroupSectionSource).not.toContain("updateStickyHeaderClip");
     expect(sessionGroupSectionSource).not.toContain("reference-project-session-clip-top");
     expect(sessionGroupStylesSource).not.toContain("reference-project-session-clip-top");
@@ -480,22 +454,30 @@ describe("reference sidebar group spacing styles", () => {
     expect(toggleSource).not.toContain("scrollIntoView");
   });
 
-  test("keeps expanded project session lists as bounded scroll surfaces", () => {
+  test("keeps expanded project session lists as plain bounded scroll surfaces", () => {
     /*
      * CDXC:ProjectSessionLists 2026-06-25-12:20:
      * The Show more state should keep rendering all project sessions, but the
-     * expanded body must become a bounded inner scroll area using the same
-     * vertical overflow and fade-mask contract as the main sidebar viewport.
+     * expanded body must become a bounded inner scroll area using plain vertical
+     * overflow instead of scroll masks.
      *
      * CDXC:ProjectSessionLists 2026-06-29-17:53:
      * Inner project scrolling should chain to the main sidebar when the nested
      * list reaches an edge, so this rule must not contain overscroll.
+     *
+     * CDXC:SidebarScroll 2026-06-30-01:59:
+     * The fast sidebar path removes scroll masks and per-scroll glow state from
+     * expanded project bodies.
      */
     expect(sessionGroupSectionSource).toContain("shouldScrollExpandedProjectSessionList");
-    expect(sessionGroupSectionSource).toContain("getProjectSessionListBoundaryHeight");
+    expect(sessionGroupSectionSource).toContain("getExpandedProjectSessionListScrollHeight");
     expect(sessionGroupSectionSource).toContain(
-      'shouldScrollExpandedProjectSessionList ? " vertical-scroll-fade-mask" : ""',
+      "const projectSessionListRenderedSessionIdsKey = shouldClipProjectSessionList",
     );
+    expect(sessionGroupSectionSource).not.toContain("setExpandedProjectSessionListScrollHeight");
+    expect(sessionGroupSectionSource).not.toContain("projectSessionListScrollBoundarySessionId");
+    expect(sessionGroupSectionSource).not.toContain("vertical-scroll-fade-mask");
+    expect(sessionGroupSectionSource).not.toContain("data-scroll-glow");
     expect(sessionGroupSectionSource).toContain(
       "data-project-session-list-scrollable={String(shouldScrollExpandedProjectSessionList)}",
     );
@@ -504,7 +486,7 @@ describe("reference sidebar group spacing styles", () => {
       '.group-sessions-shell[data-project-session-list-scrollable="true"] {',
     );
     const scrollableRuleEnd = groupPanelStylesSource.indexOf(
-      '\n}\n\n.group-sessions-shell[data-project-session-list-scrollable="true"][data-scroll-glow-top="true"]',
+      "\n}\n\n.sidebar-collapse-content {",
       scrollableRuleStart,
     );
     const scrollableRuleSource = groupPanelStylesSource.slice(
@@ -517,9 +499,29 @@ describe("reference sidebar group spacing styles", () => {
     expect(scrollableRuleSource).toContain("overflow-x: hidden;");
     expect(scrollableRuleSource).toContain("overflow-y: auto;");
     expect(scrollableRuleSource).not.toContain("overscroll-behavior:");
-    expect(scrollableRuleSource).toContain("--edge-fade-distance:");
-    expect(groupPanelStylesSource).toContain("--top-fade: var(--edge-fade-distance);");
-    expect(groupPanelStylesSource).toContain("--bottom-fade: var(--edge-fade-distance);");
+    expect(scrollableRuleSource).not.toContain("--edge-fade-distance:");
+    expect(groupPanelStylesSource).not.toContain("--top-fade: var(--edge-fade-distance);");
+    expect(groupPanelStylesSource).not.toContain("--bottom-fade: var(--edge-fade-distance);");
+  });
+
+  test("does not slice below-session arrays in the project row render loop", () => {
+    /*
+     * CDXC:SidebarContextMenu 2026-06-30-02:45:
+     * Large project lists should keep manual drag ordering mounted, but row
+     * rendering must not build a per-card below-session slice. Pass a shared
+     * visible-id source and the row's next index so context-menu actions can
+     * materialize the slice only when the menu opens.
+     */
+    const rowLoopStart = sessionGroupSectionSource.indexOf(
+      "{renderedSessionIds.map((sessionId, sessionIndex) => {",
+    );
+    const rowLoopSource = sessionGroupSectionSource.slice(rowLoopStart, rowLoopStart + 4200);
+
+    expect(rowLoopStart).toBeGreaterThan(-1);
+    expect(rowLoopSource).toContain("sessionIdsBelowSource={visibleSessionIds}");
+    expect(rowLoopSource).toContain("sessionIdsBelowStartIndex={sessionIdsBelowStartIndex}");
+    expect(rowLoopSource).not.toContain("visibleSessionIds.indexOf(sessionId)");
+    expect(rowLoopSource).not.toContain("visibleSessionIds.slice(");
   });
 
   test("uses row-owned padding instead of blank gaps between project headers and sessions", () => {

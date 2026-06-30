@@ -1425,21 +1425,13 @@
 .sidebar-reference-layout[data-reference-sidebar="true"] .group[data-project-group="true"] .group-head {
   /*
    * CDXC:SidebarStickyHeaders 2026-05-20-08:08:
-   * Project headers are the only sticky context row in the sidebar.
-   * Quick and Projects labels scroll normally, while each project header
-   * sticks only within its own group so the nearest project replaces the
-   * previous one naturally through long session lists.
+   * Project headers originally acted as the only sticky context row in the
+   * sidebar.
    *
    * CDXC:SidebarStickyHeaders 2026-05-20-10:03:
    * Project headers stick to the top of the scroll area itself. The scroll
    * viewport owns the top breathing room below Search, while Quick and Projects
    * labels remain normal scrolling content.
-   *
-   * CDXC:SidebarStickyHeaders 2026-05-20-10:22:
-   * Sticky project headers need a square backdrop so scrolled session content
-   * cannot peek through the header's rounded corners. Keep the actual
-   * interactive button radius on the ::before surface while the sticky header
-   * element paints the unrounded background behind it.
    *
    * CDXC:ProjectHeaders 2026-05-31-15:38:
    * Project header buttons must start at the sidebar's left edge in the native
@@ -1469,25 +1461,12 @@
    * each project header so adjacent headers keep their scan spacing without
    * leaving blank context-menu space between buttons.
    *
-   * CDXC:SidebarStickyHeaders 2026-06-29-18:46:
-   * Sticky project headers must stay native-CSS fast while scrolling. Paint the
-   * app background directly so session rows cannot show through the stuck
-   * header, and avoid per-project scroll listeners that measure and clip the
-   * session body every frame.
-   *
-   * CDXC:SidebarStickyHeaders 2026-06-29-20:49:
-   * When the reference sidebar uses a custom gradient backing, sticky project
-   * headers need the same viewport-anchored background token so they blend with
-   * the sidebar instead of showing a flat color band.
-   *
-   * CDXC:SidebarStickyHeaders 2026-06-29-21:37:
-   * Header backgrounds use the root-published sidebar gradient geometry so
-   * sticky rows near the bottom do not drift from the sidebar shell gradient.
+   * CDXC:SidebarScroll 2026-06-30-01:59:
+   * The sidebar must favor scroll throughput over sticky project context. Keep
+   * project headers in normal document flow and do not paint a fixed or matched
+   * gradient background on each row, because sticky headers plus scroll masks
+   * made the project list compositor-bound while scrolling.
    */
-  background: var(--reference-sidebar-background, var(--app-background));
-  background-attachment: var(--reference-sidebar-background-attachment, scroll);
-  background-position: var(--reference-sidebar-background-position, left top);
-  background-size: var(--reference-sidebar-background-size, auto);
   border-radius: 0;
   box-sizing: border-box;
   margin-left: calc(-1 * var(--reference-sidebar-scroll-row-bleed-left, 7px));
@@ -1496,9 +1475,7 @@
   padding-left: calc(6px + var(--reference-sidebar-scroll-row-bleed-left, 7px));
   padding-right: calc(10px + var(--reference-sidebar-scroll-row-bleed-right, 0px));
   padding-top: 5.5px;
-  position: sticky;
-  top: var(--reference-sidebar-project-sticky-top, 0px);
-  z-index: 28;
+  position: relative;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]

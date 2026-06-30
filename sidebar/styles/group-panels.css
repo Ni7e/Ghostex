@@ -354,7 +354,7 @@
    * The bottom hidden-session reveal row is the exact clipped edge for a collapsed project list. Do not use the expanded shell's 4px cushion here, because that can reveal a sliver of the first hidden session below the "Show N more" row.
    *
    * CDXC:ProjectSessionLists 2026-06-13-20:03:
-   * Collapsed project lists now render only the visible rows plus the count button. Keep the exact max-height so sticky project headers and the separator define clear row boundaries without clipped overflow rows.
+   * Collapsed project lists now render only the visible rows plus the count button. Keep the exact max-height so project headers and the separator define clear row boundaries without clipped overflow rows.
    */
   max-height: var(--sidebar-collapse-content-height);
   overflow: hidden;
@@ -364,38 +364,26 @@
   /*
    * CDXC:ProjectSessionLists 2026-06-25-12:20:
    * Keep the Show more / Show less interaction, but make the expanded project
-   * body a bounded inner scroll surface. Reuse the same overflow contract as
-   * the main sidebar project scroll viewport: hidden horizontal overflow,
-   * vertical auto scrolling, and the shared Codex-style vertical fade mask.
+   * body a bounded inner scroll surface. Reuse the same core overflow contract
+   * as the main sidebar project scroll viewport: hidden horizontal overflow and
+   * vertical auto scrolling.
    *
    * CDXC:ProjectSessionLists 2026-06-29-17:53:
    * The inner project scroller must allow native scroll chaining so continued
    * wheel or trackpad input moves the main sidebar after the inner list reaches
    * its top or bottom. Do not set contained overscroll on this nested surface.
+   *
+   * CDXC:SidebarScroll 2026-06-30-01:59:
+   * Expanded project bodies should not use scroll masks or scroll-linked fade
+   * state. Plain overflow keeps long projects usable while avoiding compositor
+   * work during every scroll frame.
    */
-  --edge-fade-distance: calc(16px * var(--sidebar-density-scale));
   max-height: var(
     --project-session-list-scroll-height,
     calc(var(--sidebar-collapse-content-height) + 4px)
   );
   overflow-x: hidden;
   overflow-y: auto;
-}
-
-.group-sessions-shell[data-project-session-list-scrollable="true"][data-scroll-glow-top="true"] {
-  --top-fade: var(--edge-fade-distance);
-}
-
-.group-sessions-shell[data-project-session-list-scrollable="true"][data-scroll-glow-bottom="true"] {
-  --bottom-fade: var(--edge-fade-distance);
-}
-
-.group-sessions-shell[data-project-session-list-scrollable="true"][data-scroll-glow-top="false"] {
-  --top-fade: 0px !important;
-}
-
-.group-sessions-shell[data-project-session-list-scrollable="true"][data-scroll-glow-bottom="false"] {
-  --bottom-fade: 0px !important;
 }
 
 .sidebar-collapse-content {
@@ -432,42 +420,6 @@
   min-height: 0;
   overflow: hidden;
   position: relative;
-}
-
-.session-groups-content.vertical-scroll-fade-mask {
-  /*
-   * CDXC:SidebarScroll 2026-06-19-13:28:
-   * Use Codex Desktop's scroll-container mask for the session list edge fade.
-   * Keep the previous 16px fade distance, but remove the painted gradient and
-   * inset shadow overlay so the bottom edge adapts to custom sidebar colors.
-   *
-   * CDXC:SidebarScroll 2026-06-19-13:55:
-   * The top edge needs the same mask as the bottom edge. Scroll-linked masks
-   * are still the preferred Codex path, while the measured scroll state below
-   * provides explicit top/bottom fade values so both edges render in Ghostex's
-   * native webview.
-   */
-  --edge-fade-distance: calc(16px * var(--sidebar-density-scale));
-}
-
-.session-groups-scroll-shell[data-scroll-glow-top="true"]
-  .session-groups-content.vertical-scroll-fade-mask {
-  --top-fade: var(--edge-fade-distance);
-}
-
-.session-groups-scroll-shell[data-scroll-glow-bottom="true"]
-  .session-groups-content.vertical-scroll-fade-mask {
-  --bottom-fade: var(--edge-fade-distance);
-}
-
-.session-groups-scroll-shell[data-scroll-glow-top="false"]
-  .session-groups-content.vertical-scroll-fade-mask {
-  --top-fade: 0px !important;
-}
-
-.session-groups-scroll-shell[data-scroll-glow-bottom="false"]
-  .session-groups-content.vertical-scroll-fade-mask {
-  --bottom-fade: 0px !important;
 }
 
 .session-search-toolbar {
@@ -696,7 +648,7 @@ body:has(.sidebar-reference-layout[data-reference-sidebar="true"]) .stack {
  * The experimental custom color setting is intentionally limited to the
  * sidebar viewport and the separate native titlebar host. Override only the
  * reference sidebar shell/main/stack and sidebar-local theme tokens so row
- * surfaces, sticky headers, search inputs, scroll fades, and context-menu
+ * surfaces, project headers, search inputs, scroll fades, and context-menu
  * hover colors inherit the custom foreground/background without changing
  * modal, dropdown portal, or shadcn surface tokens.
  *
@@ -705,16 +657,11 @@ body:has(.sidebar-reference-layout[data-reference-sidebar="true"]) .stack {
  * gradient. Keep app/theme tokens on the solid selected color because cards,
  * hovers, and color-mix calculations need one stable contrast color.
  *
- * CDXC:SidebarStickyHeaders 2026-06-29-20:49:
- * Project sticky headers reuse the reference sidebar background token. Anchor
- * custom gradients to the viewport so sticky rows match the sidebar backing
- * instead of restarting the gradient inside each header.
- *
- * CDXC:SidebarStickyHeaders 2026-06-29-21:37:
- * Sticky project headers must sample the custom gradient over the measured
- * sidebar shell height, not the full browser viewport. The React root publishes
- * the sidebar's viewport top and height so lower sticky headers match the same
- * gradient position as the sidebar backing.
+ * CDXC:SidebarScroll 2026-06-30-01:59:
+ * Project headers no longer stick, and the sidebar no longer needs fixed
+ * gradient sampling variables for those headers. Keep the visible custom
+ * sidebar gradient as a normal background so scroll frames do not pay for
+ * fixed-background compositing.
  */
 body[data-custom-sidebar-titlebar-colors="true"]:has(
     .sidebar-reference-layout[data-reference-sidebar="true"]
@@ -751,9 +698,6 @@ body[data-custom-sidebar-titlebar-colors="true"]
     var(--custom-sidebar-titlebar-gradient-top-color),
     var(--custom-sidebar-titlebar-gradient-bottom-color)
   );
-  --reference-sidebar-background-attachment: fixed;
-  --reference-sidebar-background-position: left var(--reference-sidebar-gradient-top, 0px);
-  --reference-sidebar-background-size: 100% var(--reference-sidebar-gradient-height, 100vh);
   --app-background: var(--custom-sidebar-titlebar-background-color);
   --app-titlebar-background: var(--custom-sidebar-titlebar-background-color);
   --app-foreground: var(--custom-sidebar-titlebar-foreground-color);
@@ -802,9 +746,6 @@ body[data-custom-sidebar-titlebar-colors="true"]
 .sidebar-reference-layout[data-reference-sidebar="true"] {
   --sidebar-density-scale: 1;
   --reference-sidebar-background: var(--app-background);
-  --reference-sidebar-background-attachment: scroll;
-  --reference-sidebar-background-position: left top;
-  --reference-sidebar-background-size: auto;
   --reference-sidebar-main-edge-bleed-left: 15px;
   --reference-sidebar-primary-nav-edge-bleed-left: var(--reference-sidebar-main-edge-bleed-left);
   --reference-sidebar-scroll-edge-bleed-left: 8px;
@@ -814,9 +755,6 @@ body[data-custom-sidebar-titlebar-colors="true"]
   --reference-sidebar-edge-bleed-right: 1px;
   --attention-dot: var(--done-attention-color, #95d7f6);
   background: var(--reference-sidebar-background);
-  background-attachment: var(--reference-sidebar-background-attachment);
-  background-position: var(--reference-sidebar-background-position);
-  background-size: var(--reference-sidebar-background-size);
   box-sizing: border-box;
   color: var(--app-foreground);
   display: flex;
@@ -1641,10 +1579,10 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
 .sidebar-reference-layout[data-reference-sidebar="true"] .session-groups-content {
   /*
    * CDXC:SidebarStickyHeaders 2026-05-20-10:15:
-   * Project folder headers should stick to the top of the scroll area itself.
-   * Move the scroll viewport down slightly to create top breathing room, then
-   * subtract the same amount from the first section header margin so Quick and
-   * Projects keep their current visual spacing in normal document flow.
+   * Project folder headers previously stuck to the top of the scroll area.
+   * The scroll viewport still owns the top breathing room below Search, and the
+   * first section header margin keeps Quick and Projects in the same visual
+   * position in normal document flow.
    *
    * CDXC:SidebarStickyHeaders 2026-05-20-10:31:
    * Add 7px more space below the Search button by increasing the scroll
@@ -1654,15 +1592,17 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
    * CDXC:SidebarStickyHeaders 2026-05-20-10:38:
    * Quick needs 5px more visible breathing room inside the scroll area after
    * the Search-to-scroll gap was increased, so expose a separate first-section
-   * top inset instead of changing project sticky positioning.
+   * top inset.
    *
    * CDXC:SidebarTopChrome 2026-06-29-18:34:
    * The gap above Quick remains 7px tighter toward Search while Search's own
    * spacing now matches the shortcut button gap. Keep the Quick first-section
-   * extra scoped so Projects, remote sections, and sticky project headers keep
-   * their existing spacing.
+   * extra scoped so Projects and remote sections keep their existing spacing.
+   *
+   * CDXC:SidebarScroll 2026-06-30-01:59:
+   * Project headers no longer use sticky positioning, so this viewport keeps
+   * only spacing variables.
    */
-  --reference-sidebar-project-sticky-top: 0px;
   --reference-sidebar-quick-top-extra: -2px;
   --reference-sidebar-scroll-top-offset: 15px;
   /*
@@ -1692,16 +1632,6 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
   width: 0;
 }
 
-.session-groups-scroll-shell[data-scroll-glow-top="false"] .session-groups-content {
-  --tw-scroll-mask-top: linear-gradient(#000000, #000000) !important;
-  --tw-scroll-mask-top-size: 0px !important;
-}
-
-.session-groups-scroll-shell[data-scroll-glow-bottom="false"] .session-groups-content {
-  --tw-scroll-mask-bottom: linear-gradient(#000000, #000000) !important;
-  --tw-scroll-mask-bottom-size: 0px !important;
-}
-
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .session-groups-content[data-scrollable-y="false"] {
   animation: none !important;
@@ -1723,10 +1653,9 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
   padding-right: calc(9px + var(--reference-sidebar-scroll-row-bleed-right));
   /*
    * CDXC:SidebarStickyHeaders 2026-05-20-08:08:
-   * Quick and Projects started as scroll-context sticky headers, but review
-   * showed the section label plus sticky project row created awkward stacked
-   * whitespace. Keep section labels in normal document flow and let only
-   * project folder headers stick while scrolling.
+   * Quick and Projects started as scroll-context headers, but review
+   * showed the section label plus project row created awkward stacked
+   * whitespace. Keep section labels in normal document flow.
    *
    * CDXC:SidebarReferenceBounds 2026-05-31-15:38:
    * Quick and Projects header buttons should start at the sidebar's left edge,
@@ -1759,14 +1688,13 @@ body[data-sidebar-tooltips-suppressed="true"] [data-slot="tooltip-content"] {
   /*
    * CDXC:SidebarStickyHeaders 2026-05-20-09:55:
    * The first project folder should sit close to the normal Projects section
-   * label so the handoff into sticky project-folder headers feels immediate
+   * label so the handoff into project-folder rows feels immediate
    * without making Quick's chat-section spacing tighter.
    *
    * CDXC:SidebarStickyHeaders 2026-05-24-11:23:
    * Add 10px more breathing room under the Projects label before the first
    * project folder. This only changes the Projects-to-first-project gap and
-   * leaves Quick spacing, project-to-project spacing, and sticky header
-   * positioning unchanged.
+   * leaves Quick spacing and project-to-project spacing unchanged.
    */
   margin-bottom: 12px;
 }

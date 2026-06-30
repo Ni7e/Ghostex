@@ -130,24 +130,22 @@ describe("runSidebarBulkContextMenuActionInBackground", () => {
 });
 
 describe("resolveSessionCardSessionIdsBelow", () => {
-  test("keeps below actions scoped to the group-provided session list", () => {
+  test("materializes below actions from the shared group-provided session list", () => {
     expect(
       resolveSessionCardSessionIdsBelow({
-        contextMenuSessionIdsBelow: [],
-        isContextMenuOpen: false,
-        sessionIdsBelow: ["same-project-2", "same-project-3"],
+        sessionIdsBelowSource: ["same-project-1", "same-project-2", "same-project-3"],
+        sessionIdsBelowStartIndex: 1,
       }),
     ).toEqual(["same-project-2", "same-project-3"]);
   });
 
-  test("uses the clicked menu snapshot while the context menu is open", () => {
+  test("returns no below actions when the row has no later visible sessions", () => {
     expect(
       resolveSessionCardSessionIdsBelow({
-        contextMenuSessionIdsBelow: ["snapshot-session"],
-        isContextMenuOpen: true,
-        sessionIdsBelow: ["rerendered-session"],
+        sessionIdsBelowSource: ["same-project-1"],
+        sessionIdsBelowStartIndex: 1,
       }),
-    ).toEqual(["snapshot-session"]);
+    ).toEqual([]);
   });
 });
 

@@ -51,9 +51,13 @@ export function useScrollGlowState(
       if (!hasOverflow && element.scrollTop !== 0) {
         element.scrollTop = 0;
       }
-      const showTopGlow = hasOverflow && element.scrollTop > SCROLL_GLOW_EPSILON_PX;
-      const remainingBottom = contentHeight - element.clientHeight - element.scrollTop;
-      const showBottomGlow = hasOverflow && remainingBottom > SCROLL_GLOW_EPSILON_PX;
+      /*
+       * CDXC:SidebarScroll 2026-06-30-01:59:
+       * The main sidebar must prioritize raw scroll throughput over edge-fade polish.
+       * Keep the overflow measurement that disables wheel handling for sparse lists, but do not subscribe to scroll frames or update top/bottom glow state now that the main sidebar scroll mask is removed.
+       */
+      const showTopGlow = false;
+      const showBottomGlow = false;
 
       setScrollGlowState((previous) =>
         previous.hasOverflow === hasOverflow &&
@@ -90,7 +94,6 @@ export function useScrollGlowState(
       characterData: true,
       subtree: true,
     });
-    element.addEventListener("scroll", scheduleScrollGlowUpdate, { passive: true });
     window.addEventListener("resize", scheduleScrollGlowUpdate);
     scheduleScrollGlowUpdate();
 
@@ -101,7 +104,6 @@ export function useScrollGlowState(
 
       resizeObserver.disconnect();
       mutationObserver.disconnect();
-      element.removeEventListener("scroll", scheduleScrollGlowUpdate);
       window.removeEventListener("resize", scheduleScrollGlowUpdate);
     };
   }, [scrollContainerRef]);
