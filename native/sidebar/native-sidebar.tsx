@@ -42121,7 +42121,14 @@ function scheduleNativeT3RuntimePrewarm(projectId: string, reason: string): void
     pendingNativeT3RuntimePrewarmTimeout = undefined;
     const project = findProject(projectId);
     const cwd = project?.path.trim();
-    if (!project || !cwd || project.isRecentProject === true) {
+    /*
+     * CDXC:Automations 2026-07-01-01:13:
+     * Opening Quick utility surfaces such as Automations Overview must not start
+     * the managed T3 Code runtime. T3 prewarm is only for user-owned code
+     * projects, while direct T3 session creation still starts the runtime on
+     * demand.
+     */
+    if (!project || !cwd || isQuickProject(project) || project.isRecentProject === true) {
       return;
     }
     const now = Date.now();
@@ -49133,6 +49140,16 @@ window.addEventListener("ghostex-native-host-event", (event) => {
         handleNativeSessionEnteredAttention(sidebarSessionId, "terminal-error");
       }
     } else if (hostEvent.type === "terminalBell") {
+      /*
+       * CDXC:TerminalBellAttention 2026-07-01-01:13:
+       * Shells use BEL for routine feedback such as zsh Tab-completion misses.
+       * Only forward BEL into gxserver attention when the user opts in from
+       * Terminal settings; agent completion and terminal errors keep their
+       * separate explicit attention paths.
+       */
+      if (!settings.showNotificationOnTerminalBell) {
+        return;
+      }
       const suppressedUntil = getNativeActivitySuppressedUntil(sidebarSessionId);
       if (
         suppressedUntil !== undefined &&
