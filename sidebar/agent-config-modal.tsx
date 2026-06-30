@@ -121,7 +121,7 @@ export function AgentConfigModal({
     >
       <DialogContent
         className={cn(
-          "ghostex-settings-shadcn command-config-modal-shadcn",
+          "ghostex-settings-shadcn command-config-modal-shadcn agent-config-modal-shadcn",
           isDarkTheme && "dark",
         )}
         data-sidebar-theme={theme}

@@ -78,7 +78,7 @@ export function T3ThreadIdModal({
         aria-describedby={descriptionId}
         aria-labelledby={titleId}
         aria-modal="true"
-        className="confirm-modal session-rename-modal scroll-mask-y"
+        className="confirm-modal session-rename-modal t3-thread-id-modal scroll-mask-y"
         onSubmit={submit}
         role="dialog"
       >
