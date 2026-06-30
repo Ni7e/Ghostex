@@ -347,6 +347,7 @@ type ExcalidrawFileData = {
 };
 
 const MANAGE_FILES_RESPONSE_EVENT = "ghostex-manage-files-response";
+const MANAGE_FILES_CHANGED_EVENT = "ghostex-manage-files-changed";
 const MANAGE_DRAG_DATA_TYPE = "application/x-ghostex-manage-path";
 const MANAGE_BRIDGE_TIMEOUT_MS = 15_000;
 const MANAGE_DOCS_ROOT_PATH = "docs";
@@ -542,12 +543,18 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * CDXC:ManageHtmlAgentation 2026-06-29-18:20:
  * Agentation must be injected into the loaded HTML document itself, not mounted by the parent Manage page into the iframe wrapper. Add only a fixed Ghostex bootstrap module after sanitizing user HTML so page-authored scripts stay removed while the annotation runtime executes in the rendered page context.
  *
+ * CDXC:ManageHtmlAgentation 2026-06-30-04:41:
+ * The embedded HTML document must run the fixed Agentation bootstrap with its normal document origin so remote module imports and DOM overlays initialize reliably inside the loaded page. Keep the user-script sanitizer as the trust boundary, then allow scripts and same-origin only for the sanitized srcdoc output.
+ *
  * CDXC:ManageHtmlAgentation 2026-06-28-07:58:
  * Opening an HTML Docs page should show Agentation's bottom-left control but must not auto-enter feedback mode because immediate activation steals mouse focus from users who only want to read or interact with the page.
  *
  * CDXC:ManageDefaultHtml 2026-06-28-07:17:
  * New HTML Docs files should start with a dark Ghostex-styled onboarding page that explains how to ask an agent for an explanatory HTML document and how to use Agentation to annotate the rendered result.
- * The starter document stays self-contained with inline styles and no scripts, while the HTML renderer now preserves author CSS in an isolated document so future generated pages render like browser HTML instead of inheriting Ghostex UI styles.
+ * The starter document stays self-contained with document-owned styles and no scripts, while the HTML renderer now preserves author CSS in an isolated document so future generated pages render like browser HTML instead of inheriting Ghostex UI styles.
+ *
+ * CDXC:ManageDefaultHtml 2026-06-30-04:41:
+ * The starter page should not leave an empty fourth grid cell on narrower Docs widths. Use document-owned CSS for a max two-column feature grid, move the good-request/good-annotation guidance into a fourth card, and keep the page background covering the full embedded viewport including scrollbar gutters.
  *
  * CDXC:ManageMarkdownSelectionToolbar 2026-06-27-22:41:
  * The floating Markdown selection toolbar should be icon-only: remove Copy/Delete, keep Comment plus quick labels and Dismiss, show hover tooltips, and color each annotation action to match the highlight it writes into the selected text.
@@ -605,6 +612,15 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  *
  * CDXC:ManageSidebar 2026-06-20-17:15:
  * Manage's file-sidebar refresh control is an overflow menu with Refresh and Switch sidebar side actions. A separate adjacent icon hides the file sidebar, and the editor area provides a small restore affordance so hiding is reversible.
+ *
+ * CDXC:ManageSidebar 2026-06-30-01:35:
+ * The Docs sidebar overflow dropdown should read as a compact polished popover instead of a flat black rectangle. Inset it from the sidebar edge, round the menu surface, soften the shadow, and keep each action as a clear icon/text row with a visible hover state.
+ *
+ * CDXC:ManageSidebar 2026-06-30-02:30:
+ * The Docs sidebar dropdown should not have a pointer arrow and should use a flat #0e0e0e background with a 1px #595959 border instead of a gradient surface.
+ *
+ * CDXC:ManageSidebar 2026-06-30-02:45:
+ * Docs dropdown corners should be only slightly rounded, using a 4px menu radius and 3px row radius so the popover feels sharper.
  *
  * CDXC:ManageArtifacts 2026-06-26-13:59:
  * Manage started as an artifacts-focused project surface with first-class sidebar actions for new Markdown, HTML, and Excalidraw files.
@@ -687,15 +703,20 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * CDXC:DocsSidebar 2026-06-30-00:15:
  * The Docs header folder control should use the same diagonal-arrows icon language as the macOS sidebar Projects Collapse All / Expand Previous control, but Docs does not remember previous expansion state. Collapse All must collapse every expandable nested folder, and Expand All must clear every collapsed folder so all descendants reopen.
  *
+ * CDXC:DocsSidebar 2026-06-30-01:46:
+ * The Docs sidebar header should be actions-only; do not repeat the root docs folder icon/name in the titlebar. Keep the search-to-file-list gap tight so the file tree begins immediately below Search.
+ *
  * CDXC:ManageFileActions 2026-06-29-03:27:
  * Docs sidebar context actions apply to folders as well as files. Right-clicking empty sidebar chrome must suppress the browser/WebKit default context menu, while folder rename/delete remaps nested selected paths and annotation keys through the same docs-relative bridge.
+ *
+ * CDXC:ManageFileActions 2026-06-30-09:48:
+ * Files and context-menu-eligible folders need a Copy path action in the Docs sidebar. Copy the same relative path used by Manage file operations so users can paste stable docs paths without exposing absolute workspace paths to WebKit.
  */
 function ManageApp() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const projectId = params.get("projectId") ?? "";
   const projectEditorId = params.get("projectEditorId") ?? projectId;
   const [entries, setEntries] = useState<ManageFileEntry[]>([]);
-  const [rootName, setRootName] = useState("Project");
   const [query, setQuery] = useState("");
   const [selectedPath, setSelectedPath] = useState<string>();
   const selectedPathRef = useRef<string | undefined>(undefined);
@@ -774,7 +795,6 @@ function ManageApp() {
       }
       const nextEntries = response.entries ?? [];
       setEntries(nextEntries);
-      setRootName(response.rootName?.trim() || "Project");
       setListState("ready");
       const currentSelectedPath = selectedPathRef.current;
       const selectedStillExists =
@@ -801,6 +821,18 @@ function ManageApp() {
 
   useEffect(() => {
     void refreshFiles();
+  }, [refreshFiles]);
+
+  useEffect(() => {
+    /*
+     * CDXC:DocsSidebar 2026-06-30-19:47:
+     * Native watches the active project's Docs scan roots for file additions, removals, and renames. Treat the event as a path-free invalidation signal and reuse the normal list bridge so the sidebar refreshes without requiring an app refresh.
+     */
+    const handleFilesChanged = () => {
+      void refreshFiles();
+    };
+    window.addEventListener(MANAGE_FILES_CHANGED_EVENT, handleFilesChanged);
+    return () => window.removeEventListener(MANAGE_FILES_CHANGED_EVENT, handleFilesChanged);
   }, [refreshFiles]);
 
   useEffect(() => {
@@ -900,6 +932,15 @@ function ManageApp() {
 
   const dismissFileContextMenu = useCallback(() => {
     setFileContextMenu(undefined);
+  }, []);
+
+  const copyEntryPath = useCallback(async (entry: ManageFileEntry) => {
+    setFileContextMenu(undefined);
+    try {
+      await writeTextToClipboard(entry.path);
+    } catch (copyError) {
+      setError(copyError instanceof Error ? copyError.message : "Could not copy path.");
+    }
   }, []);
 
   const openFileContextMenu = useCallback((entry: ManageFileEntry, point: { x: number; y: number }) => {
@@ -1695,10 +1736,6 @@ function ManageApp() {
             className="manage-sidebar-header"
             data-root-drop-target={String(dropTarget?.kind === "root")}
           >
-            <div className="manage-project-title">
-              <IconFolderOpen aria-hidden="true" size={17} stroke={1.8} />
-              <span>{rootName}</span>
-            </div>
             <ManageSidebarActions
               creatingKind={creatingArtifactKind}
               isRefreshing={listState === "loading"}
@@ -1814,6 +1851,7 @@ function ManageApp() {
       {fileContextMenu && contextMenuEntry ? (
         <ManageFileContextMenu
           confirmingDelete={fileContextMenu.confirmingDelete === true}
+          onCopyPath={() => void copyEntryPath(contextMenuEntry)}
           onDelete={() => {
             if (!fileContextMenu.confirmingDelete) {
               setFileContextMenu((current) =>
@@ -2148,6 +2186,7 @@ function ManageFileRow({
 
 function ManageFileContextMenu({
   confirmingDelete,
+  onCopyPath,
   onDelete,
   onDismiss,
   onRename,
@@ -2155,6 +2194,7 @@ function ManageFileContextMenu({
   position,
 }: {
   confirmingDelete: boolean;
+  onCopyPath: () => void;
   onDelete: () => void;
   onDismiss: () => void;
   onRename: () => void;
@@ -2172,6 +2212,15 @@ function ManageFileContextMenu({
       }}
       onDismiss={onDismiss}
     >
+      <button
+        className="manage-file-context-menu-item"
+        onClick={onCopyPath}
+        role="menuitem"
+        type="button"
+      >
+        <IconCopy aria-hidden="true" size={14} stroke={1.8} />
+        Copy path
+      </button>
       <button
         className="manage-file-context-menu-item"
         disabled={isBusy}
@@ -2884,7 +2933,7 @@ function ManageHtmlRenderViewer({
       aria-label="Rendered HTML document"
       className="manage-html-render-view"
       data-document-key={documentKey}
-      sandbox="allow-popups allow-popups-to-escape-sandbox allow-scripts"
+      sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
       srcDoc={renderedHtml}
       title={documentKey}
     />
@@ -4534,39 +4583,64 @@ function createDefaultHtmlDocument(): string {
     '  <meta name="viewport" content="width=device-width, initial-scale=1">',
     '  <meta name="color-scheme" content="dark">',
     "  <title>Ask an agent for an HTML explainer</title>",
+    "  <style>",
+    "    :root { color-scheme: dark; background: #0e0e0e; }",
+    "    * { box-sizing: border-box; }",
+    "    html { background: #0e0e0e; min-width: 0; }",
+    "    body { margin: 0; min-width: 0; overflow-x: hidden; background: #0e0e0e; color: #c8cdd5; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", sans-serif; }",
+    "    main { min-height: 100vh; width: 100%; background: #0e0e0e; padding: 42px 30px 52px; }",
+    "    .docs-shell { width: min(100%, 980px); margin: 0 auto; display: grid; gap: 18px; }",
+    "    .docs-hero { background: #151515; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 30px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28); }",
+    "    .docs-eyebrow { margin: 0 0 12px; color: #95d7f6; font-size: 12px; font-weight: 760; letter-spacing: 0; text-transform: uppercase; }",
+    "    h1 { margin: 0; color: #f3f4f6; font-size: 46px; line-height: 1.02; letter-spacing: 0; max-width: 780px; }",
+    "    .docs-lede { margin: 18px 0 0; color: #a6adb6; font-size: 17px; line-height: 1.65; max-width: 760px; }",
+    "    .docs-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }",
+    "    .docs-card { min-width: 0; background: #181818; border: 1px solid rgba(255, 255, 255, 0.11); border-radius: 8px; padding: 18px; }",
+    "    .docs-card-kicker { margin: 0 0 10px; color: #95d7f6; font-size: 12px; font-weight: 760; text-transform: uppercase; }",
+    "    .docs-card h2, .docs-prompt h2 { margin: 0 0 8px; color: #f3f4f6; font-size: 20px; line-height: 1.2; letter-spacing: 0; }",
+    "    .docs-card p { margin: 0; color: #a6adb6; font-size: 14px; line-height: 1.55; }",
+    "    .docs-card p + p { margin-top: 10px; }",
+    "    .docs-card strong { color: #f3f4f6; }",
+    "    .docs-prompt { background: #101112; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 22px; }",
+    "    .docs-prompt pre { margin: 0; overflow-x: auto; white-space: pre-wrap; background: #222426; border: 1px solid rgba(255, 255, 255, 0.10); border-radius: 8px; color: #e5e7eb; font: 13px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", monospace; padding: 16px; }",
+    "    @media (max-width: 760px) { main { padding: 30px 18px 42px; } .docs-hero { padding: 24px; } h1 { font-size: 38px; } .docs-card-grid { grid-template-columns: 1fr; } }",
+    "    @media (max-width: 520px) { main { padding: 24px 14px 36px; } .docs-hero, .docs-card, .docs-prompt { padding: 16px; } h1 { font-size: 32px; } .docs-lede { font-size: 15px; } }",
+    "  </style>",
     "</head>",
-    '<body style="margin: 0; background: #0e0e0e; color: #c8cdd5; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, &quot;SF Pro Text&quot;, &quot;Segoe UI&quot;, sans-serif;">',
-    '  <main aria-labelledby="docs-title" style="min-height: 100vh; background: #0e0e0e; padding: 42px 30px 52px;">',
-    '    <section style="max-width: 980px; margin: 0 auto; display: grid; gap: 18px;">',
-    '      <header style="background: #151515; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 30px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);">',
-    '        <p style="margin: 0 0 12px; color: #95d7f6; font-size: 12px; font-weight: 760; letter-spacing: 0; text-transform: uppercase;">Ghostex Docs</p>',
-    '        <h1 id="docs-title" style="margin: 0; color: #f3f4f6; font-size: 46px; line-height: 1.02; letter-spacing: 0; max-width: 780px;">Ask your agent for an HTML explainer</h1>',
-    '        <p style="margin: 18px 0 0; color: #a6adb6; font-size: 17px; line-height: 1.65; max-width: 760px;">Use this starter as a prompt target. Ask an agent to replace it with a focused HTML document that explains a feature, workflow, bug, decision, or research topic in a way your team can scan and discuss.</p>',
+    "<body>",
+    '  <main aria-labelledby="docs-title">',
+    '    <section class="docs-shell">',
+    '      <header class="docs-hero">',
+    '        <p class="docs-eyebrow">Ghostex Docs</p>',
+    '        <h1 id="docs-title">Ask your agent for an HTML explainer</h1>',
+    '        <p class="docs-lede">Use this starter as a prompt target. Ask an agent to replace it with a focused HTML document that explains a feature, workflow, bug, decision, or research topic in a way your team can scan and discuss.</p>',
     "      </header>",
-    '      <section style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">',
-    '        <article style="background: #181818; border: 1px solid rgba(255, 255, 255, 0.11); border-radius: 8px; padding: 18px;">',
-    '          <p style="margin: 0 0 10px; color: #95d7f6; font-size: 12px; font-weight: 760; text-transform: uppercase;">1. Ask</p>',
-    '          <h2 style="margin: 0 0 8px; color: #f3f4f6; font-size: 20px; line-height: 1.2;">Tell your agent what to explain</h2>',
-    '          <p style="margin: 0; color: #a6adb6; font-size: 14px; line-height: 1.55;">Name the topic, audience, and level of detail. Ask for sections, examples, diagrams, tables, or callouts when they help.</p>',
+    '      <section class="docs-card-grid">',
+    '        <article class="docs-card">',
+    '          <p class="docs-card-kicker">1. Ask</p>',
+    "          <h2>Tell your agent what to explain</h2>",
+    "          <p>Name the topic, audience, and level of detail. Ask for sections, examples, diagrams, tables, or callouts when they help.</p>",
     "        </article>",
-    '        <article style="background: #181818; border: 1px solid rgba(255, 255, 255, 0.11); border-radius: 8px; padding: 18px;">',
-    '          <p style="margin: 0 0 10px; color: #95d7f6; font-size: 12px; font-weight: 760; text-transform: uppercase;">2. Review</p>',
-    '          <h2 style="margin: 0 0 8px; color: #f3f4f6; font-size: 20px; line-height: 1.2;">Open the rendered document</h2>',
-    '          <p style="margin: 0; color: #a6adb6; font-size: 14px; line-height: 1.55;">Read it in Docs like a real page. Check whether the structure, labels, and examples make the explanation clear.</p>',
+    '        <article class="docs-card">',
+    '          <p class="docs-card-kicker">2. Review</p>',
+    "          <h2>Open the rendered document</h2>",
+    "          <p>Read it in Docs like a real page. Check whether the structure, labels, and examples make the explanation clear.</p>",
     "        </article>",
-    '        <article style="background: #181818; border: 1px solid rgba(255, 255, 255, 0.11); border-radius: 8px; padding: 18px;">',
-    '          <p style="margin: 0 0 10px; color: #95d7f6; font-size: 12px; font-weight: 760; text-transform: uppercase;">3. Annotate</p>',
-    '          <h2 style="margin: 0 0 8px; color: #f3f4f6; font-size: 20px; line-height: 1.2;">Use Agentation for feedback</h2>',
-    '          <p style="margin: 0; color: #a6adb6; font-size: 14px; line-height: 1.55;">Use the bottom-left Agentation control when you are ready. Point at the exact paragraph, diagram, or layout issue, then leave notes your agent can act on.</p>',
+    '        <article class="docs-card">',
+    '          <p class="docs-card-kicker">3. Annotate</p>',
+    "          <h2>Use Agentation for feedback</h2>",
+    "          <p>Use the bottom-left Agentation control when you are ready. Point at the exact paragraph, diagram, or layout issue, then leave notes your agent can act on.</p>",
+    "        </article>",
+    '        <article class="docs-card">',
+    '          <p class="docs-card-kicker">4. Refine</p>',
+    "          <h2>Make feedback actionable</h2>",
+    "          <p><strong>Good requests are specific.</strong> Ask for the job the document should do: onboard a teammate, explain a tradeoff, compare options, summarize an incident, or teach a workflow.</p>",
+    "          <p><strong>Good annotations are precise.</strong> Mark the part that is confusing, missing, too dense, or visually off, then ask your agent to revise this HTML file.</p>",
     "        </article>",
     "      </section>",
-    '      <section style="background: #101112; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 22px;">',
-    '        <h2 style="margin: 0 0 12px; color: #f3f4f6; font-size: 22px; line-height: 1.25;">Prompt to try</h2>',
-    '        <pre style="margin: 0; overflow-x: auto; white-space: pre-wrap; background: #222426; border: 1px solid rgba(255, 255, 255, 0.10); border-radius: 8px; color: #e5e7eb; font: 13px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, &quot;Liberation Mono&quot;, monospace; padding: 16px;">Create an HTML document in docs/ that explains &lt;topic&gt; for &lt;audience&gt;. Make it dark, polished, and easy to scan. Use inline styles, clear sections, practical examples, and a small diagram or table if it helps. Keep it self-contained so I can annotate it in Ghostex Docs with Agentation.</pre>',
-    "      </section>",
-    '      <section style="display: grid; gap: 10px; color: #a6adb6; font-size: 14px; line-height: 1.6;">',
-    '        <p style="margin: 0;"><strong style="color: #f3f4f6;">Good requests are specific.</strong> Ask for the job the document should do: onboard a teammate, explain a tradeoff, compare options, summarize an incident, or teach a workflow.</p>',
-    '        <p style="margin: 0;"><strong style="color: #f3f4f6;">Good annotations are precise.</strong> Mark the part that is confusing, missing, too dense, or visually off, then ask your agent to revise this HTML file.</p>',
+    '      <section class="docs-prompt">',
+    "        <h2>Prompt to try</h2>",
+    "        <pre>Create an HTML document in docs/ that explains &lt;topic&gt; for &lt;audience&gt;. Make it dark, polished, and easy to scan. Use document-owned styles, clear sections, practical examples, and a small diagram or table if it helps. Keep it self-contained so I can annotate it in Ghostex Docs with Agentation.</pre>",
     "      </section>",
     "    </section>",
     "  </main>",
@@ -6080,40 +6154,15 @@ styleElement.textContent = `
     display: flex;
     gap: 8px;
     height: 35px;
+    justify-content: flex-end;
     max-height: 35px;
     min-height: 35px;
     overflow: visible;
-    padding: 0 0 0 13px;
+    padding: 0;
   }
 
   .manage-sidebar-header[data-root-drop-target="true"] {
     background: color-mix(in srgb, var(--manage-text) 8%, transparent);
-  }
-
-  .manage-project-title {
-    align-items: center;
-    color: var(--manage-text);
-    display: flex;
-    flex: 1 1 auto;
-    font-size: 12px;
-    font-weight: 680;
-    gap: 7px;
-    line-height: 35px;
-    min-width: 0;
-    -webkit-user-select: none;
-    user-select: none;
-  }
-
-  .manage-project-title svg {
-    height: 15px;
-    width: 15px;
-  }
-
-  .manage-project-title span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .manage-sidebar-actions {
@@ -6166,6 +6215,15 @@ styleElement.textContent = `
 
   .manage-sidebar-header .manage-icon-button {
     border-left: 1px solid #252525;
+    width: 41px;
+  }
+
+  /*
+   * CDXC:DocsSidebar 2026-06-30-03:26:
+   * Docs sidebar header actions need a slightly wider hit target: every top action is 41px wide except the rightmost action, which is 40px to keep the visible edge aligned with the sidebar boundary.
+   */
+  .manage-sidebar-header .manage-icon-button:last-child {
+    width: 40px;
   }
 
   .manage-sidebar-restore-button {
@@ -6201,19 +6259,22 @@ styleElement.textContent = `
   }
 
   .manage-sidebar-menu {
-    background: color-mix(in srgb, var(--manage-panel-raised) 92%, #000 8%);
-    border: 1px solid var(--manage-border-strong);
+    backdrop-filter: blur(18px);
+    background: #0e0e0e;
+    border: 1px solid #595959;
+    border-radius: 4px;
     box-shadow:
-      0 14px 28px rgba(0, 0, 0, 0.32),
-      0 0 0 1px rgba(255, 255, 255, 0.04);
+      0 18px 42px rgba(0, 0, 0, 0.38),
+      0 4px 12px rgba(0, 0, 0, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
     display: grid;
-    gap: 2px;
-    min-width: 178px;
+    gap: 3px;
+    min-width: 190px;
     padding: 6px;
     position: absolute;
-    right: 0;
-    top: calc(100% + 6px);
-    z-index: 20;
+    right: 6px;
+    top: calc(100% + 7px);
+    z-index: 30;
   }
 
   .manage-create-menu {
@@ -6224,23 +6285,40 @@ styleElement.textContent = `
     align-items: center;
     background: transparent;
     border: 0;
+    border-radius: 3px;
     color: rgba(244, 244, 245, 0.88);
     display: flex;
-    font-size: 12px;
+    font-size: 12.5px;
     font-weight: 620;
-    gap: 8px;
-    min-height: 32px;
-    padding: 8px 10px;
+    gap: 9px;
+    line-height: 16px;
+    min-height: 34px;
+    padding: 8px 10px 8px 9px;
+    position: relative;
     text-align: left;
     white-space: nowrap;
     width: 100%;
+    z-index: 1;
+  }
+
+  .manage-sidebar-menu-item svg {
+    color: rgba(244, 244, 245, 0.72);
+    flex: 0 0 auto;
+    height: 15px;
+    width: 15px;
   }
 
   .manage-sidebar-menu-item:hover,
   .manage-sidebar-menu-item:focus-visible {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(250, 250, 250, 0.96);
+    background: rgba(255, 255, 255, 0.105);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.045);
+    color: rgba(250, 250, 250, 0.98);
     outline: none;
+  }
+
+  .manage-sidebar-menu-item:hover svg,
+  .manage-sidebar-menu-item:focus-visible svg {
+    color: rgba(250, 250, 250, 0.92);
   }
 
   .manage-sidebar-menu-item:disabled {
@@ -6248,8 +6326,13 @@ styleElement.textContent = `
     cursor: not-allowed;
   }
 
+  .manage-sidebar-menu-item:disabled svg {
+    color: color-mix(in srgb, var(--manage-subtle) 72%, transparent);
+  }
+
   .manage-sidebar-menu-item:disabled:hover {
     background: transparent;
+    box-shadow: none;
   }
 
   .manage-sidebar-restore-button {
@@ -6283,7 +6366,7 @@ styleElement.textContent = `
     display: flex;
     gap: 11px;
     height: 34px;
-    margin: 0 0 20px;
+    margin: 0 0 4px;
     padding: 7px 10px;
     width: 100%;
   }
@@ -6371,6 +6454,10 @@ styleElement.textContent = `
     opacity: 1;
   }
 
+  /*
+   * CDXC:DocsSidebar 2026-06-30-03:20:
+   * The Docs file tree should sit 5px closer to the sidebar's left edge while the Search field keeps its current padding and icon alignment.
+   */
   .manage-file-row {
     --depth: 0;
     align-items: center;
@@ -6382,7 +6469,7 @@ styleElement.textContent = `
     gap: 9px;
     grid-template-columns: 14px 16px minmax(0, 1fr) auto;
     min-height: 29px;
-    padding: 4px 7px 4px calc(14px + (var(--depth) * 18px));
+    padding: 4px 7px 4px calc(9px + (var(--depth) * 18px));
     position: relative;
     text-align: left;
     width: 100%;
@@ -6486,6 +6573,15 @@ styleElement.textContent = `
   /*
    * CDXC:ManageFileActions 2026-06-28-04:35:
    * The standalone Manage page does not load the shared sidebar overlay stylesheet. Define the right-click file menu and rename dialog locally so file actions remain viewport-clamped and dismissible inside the project-editor WebKit surface.
+   *
+   * CDXC:ManageFileActions 2026-06-30-01:37:
+   * The Docs file-row Rename/Delete context menu should match the polished dark popover treatment used by the sidebar dropdowns while staying anchored to the right-click coordinates. Keep the danger action visibly red, but use rounded rows, softened borders, and restrained hover chrome instead of a hard rectangular block.
+   *
+   * CDXC:ManageFileActions 2026-06-30-02:30:
+   * Docs file context menus should share the same flat #0e0e0e background and 1px #595959 border as the sidebar dropdown instead of using a gradient surface.
+   *
+   * CDXC:ManageFileActions 2026-06-30-02:45:
+   * Docs file context menu corners should match the reduced dropdown roundness with a 4px outer radius and 3px row radius.
    */
   .sidebar-context-menu-backdrop,
   .manage-rename-backdrop {
@@ -6500,15 +6596,18 @@ styleElement.textContent = `
   }
 
   .manage-file-context-menu {
-    background: color-mix(in srgb, var(--manage-panel-raised) 92%, #000 8%);
-    border: 1px solid var(--manage-border-strong);
+    backdrop-filter: blur(18px);
+    background: #0e0e0e;
+    border: 1px solid #595959;
+    border-radius: 4px;
     box-shadow:
-      0 14px 28px rgba(0, 0, 0, 0.32),
-      0 0 0 1px rgba(255, 255, 255, 0.04);
+      0 18px 42px rgba(0, 0, 0, 0.38),
+      0 4px 12px rgba(0, 0, 0, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
     color: rgba(244, 244, 245, 0.9);
     display: grid;
-    gap: 2px;
-    min-width: 154px;
+    gap: 3px;
+    min-width: 166px;
     padding: 6px;
     position: fixed;
     z-index: 61;
@@ -6518,23 +6617,38 @@ styleElement.textContent = `
     align-items: center;
     background: transparent;
     border: 0;
+    border-radius: 3px;
     color: inherit;
     display: flex;
-    font-size: 12px;
+    font-size: 12.5px;
     font-weight: 620;
-    gap: 8px;
-    min-height: 32px;
-    padding: 8px 10px;
+    gap: 9px;
+    line-height: 16px;
+    min-height: 34px;
+    padding: 8px 10px 8px 9px;
     text-align: left;
     white-space: nowrap;
     width: 100%;
   }
 
+  .manage-file-context-menu-item svg {
+    color: rgba(244, 244, 245, 0.72);
+    flex: 0 0 auto;
+    height: 15px;
+    width: 15px;
+  }
+
   .manage-file-context-menu-item:hover,
   .manage-file-context-menu-item:focus-visible {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(250, 250, 250, 0.96);
+    background: rgba(255, 255, 255, 0.105);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.045);
+    color: rgba(250, 250, 250, 0.98);
     outline: none;
+  }
+
+  .manage-file-context-menu-item:hover svg,
+  .manage-file-context-menu-item:focus-visible svg {
+    color: rgba(250, 250, 250, 0.92);
   }
 
   .manage-file-context-menu-item:disabled {
@@ -6542,13 +6656,46 @@ styleElement.textContent = `
     cursor: wait;
   }
 
+  .manage-file-context-menu-item:disabled svg {
+    color: color-mix(in srgb, var(--manage-subtle) 72%, transparent);
+  }
+
   .manage-file-context-menu-item-danger {
     color: rgba(253, 164, 175, 0.9);
   }
 
+  .manage-file-context-menu-item-danger svg {
+    color: rgba(253, 164, 175, 0.82);
+  }
+
+  .manage-file-context-menu-item-danger:hover,
+  .manage-file-context-menu-item-danger:focus-visible {
+    background: rgba(253, 164, 175, 0.125);
+    box-shadow: inset 0 0 0 1px rgba(253, 164, 175, 0.08);
+    color: var(--manage-red);
+  }
+
+  .manage-file-context-menu-item-danger:hover svg,
+  .manage-file-context-menu-item-danger:focus-visible svg {
+    color: var(--manage-red);
+  }
+
   .manage-file-context-menu-item-danger[data-confirming="true"] {
     background: rgba(253, 164, 175, 0.12);
+    box-shadow: inset 0 0 0 1px rgba(253, 164, 175, 0.12);
     color: var(--manage-red);
+  }
+
+  .manage-file-context-menu-item:disabled:hover,
+  .manage-file-context-menu-item:disabled:focus-visible {
+    background: transparent;
+    box-shadow: none;
+    color: var(--manage-subtle);
+  }
+
+  .manage-file-context-menu-item:disabled:hover svg,
+  .manage-file-context-menu-item:disabled:focus-visible svg {
+    color: color-mix(in srgb, var(--manage-subtle) 72%, transparent);
   }
 
   .manage-rename-backdrop {
@@ -6790,10 +6937,14 @@ styleElement.textContent = `
   /*
    * CDXC:ManageHtmlRendering 2026-06-29-17:25:
    * Rendered HTML Docs should give the artifact an isolated browser-like viewport. Do not apply Ghostex typography, padding, link colors, or dark background to the iframe because the HTML document's own CSS must decide how the page looks.
+   *
+   * CDXC:ManageHtmlRendering 2026-06-30-04:41:
+   * The iframe element itself should not paint a white scrollbar gutter around dark HTML documents. Keep it transparent over the Manage background while the loaded document still owns its actual page background.
    */
   .manage-html-render-view {
-    background: #ffffff;
+    background: transparent;
     border: 0;
+    color-scheme: dark;
     display: block;
     height: 100%;
     min-height: 0;

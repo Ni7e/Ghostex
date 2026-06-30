@@ -79,6 +79,17 @@ describe("Manage project workarea source", () => {
     /*
      * CDXC:ManageSidebar 2026-06-20-17:15:
      * The Manage file-sidebar header should expose Hide as its own icon button, replace the direct Refresh icon with an overflow menu, keep Refresh inside that menu, and let users switch the file sidebar between left and right without losing a restore affordance after hiding it.
+     *
+     * CDXC:ManageSidebar 2026-06-30-01:35:
+     * The Docs sidebar overflow menu should use a polished popover treatment: slight edge inset, rounded surface, softened shadow, and clear icon/text row hover states.
+     *
+     * CDXC:ManageSidebar 2026-06-30-02:30:
+     * The Docs sidebar dropdown should remove the pointer arrow and use a flat
+     * #0e0e0e background with a 1px #595959 border.
+     *
+     * CDXC:ManageSidebar 2026-06-30-02:45:
+     * The Docs sidebar dropdown should use reduced corner roundness: 4px on
+     * the menu surface and 3px on action rows.
      */
     expect(manageSource).toContain("function ManageSidebarActions");
     expect(manageSource).toContain('aria-label="Hide file sidebar"');
@@ -91,6 +102,23 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain(".manage-sidebar-menu");
     expect(manageSource).toContain(".manage-sidebar-restore-button");
     expect(manageSource).not.toContain('aria-label="Refresh files"');
+
+    const sidebarMenuCssStart = manageSource.indexOf("  .manage-sidebar-menu {");
+    const sidebarMenuCssEnd = manageSource.indexOf("  .manage-create-menu {", sidebarMenuCssStart);
+    expect(sidebarMenuCssStart).toBeGreaterThan(-1);
+    expect(sidebarMenuCssEnd).toBeGreaterThan(sidebarMenuCssStart);
+    const sidebarMenuCss = manageSource.slice(sidebarMenuCssStart, sidebarMenuCssEnd);
+    expect(sidebarMenuCss).toContain("backdrop-filter: blur(18px);");
+    expect(sidebarMenuCss).toContain("background: #0e0e0e;");
+    expect(sidebarMenuCss).toContain("border: 1px solid #595959;");
+    expect(sidebarMenuCss).toContain("border-radius: 4px;");
+    expect(sidebarMenuCss).not.toContain("linear-gradient(");
+    expect(sidebarMenuCss).toContain("inset 0 1px 0 rgba(255, 255, 255, 0.08)");
+    expect(sidebarMenuCss).toContain("right: 6px;");
+    expect(sidebarMenuCss).toContain("top: calc(100% + 7px);");
+    expect(manageSource).not.toContain("  .manage-sidebar-menu::before {");
+    expect(manageSource).toContain("  .manage-sidebar-menu-item svg {");
+    expect(manageSource).toContain("border-radius: 3px;");
   });
 
   test("keeps the Manage file sidebar resizable on either side", () => {
@@ -153,8 +181,8 @@ describe("Manage project workarea source", () => {
      *
      * CDXC:DocsSidebar 2026-06-28-15:05:
      * The Docs sidebar should remove the file count and selected-file summary
-     * block so the tree starts directly below Search, keep the project title
-     * non-selectable, and use a hover-only 2px scrollbar.
+     * block so the tree starts directly below Search and use a hover-only 2px
+     * scrollbar.
      *
      * CDXC:DocsSidebar 2026-06-28-15:57:
      * Docs file rows should use tighter padding, keep the selected file on its
@@ -178,10 +206,35 @@ describe("Manage project workarea source", () => {
      * The Manage sidebar and editor titlebars should now be 35px tall, with
      * matching full-height header buttons.
      *
+     * CDXC:DocsSidebar 2026-06-30-01:46:
+     * The Docs sidebar header is actions-only with no repeated root folder
+     * title, and the Search-to-file-list gap should stay tight.
+     *
+     * CDXC:DocsSidebar 2026-06-30-03:20:
+     * The Docs file tree should sit 5px closer to the sidebar's left edge while
+     * the Search field keeps its current padding and icon alignment.
+     *
      * CDXC:ManageFileActions 2026-06-29-03:27:
      * Folders should use the same right-click Rename/Delete menu as files, and
      * empty sidebar background right-clicks should suppress WebKit's default
      * Reload/Inspect context menu.
+     *
+     * CDXC:ManageFileActions 2026-06-30-01:37:
+     * The Docs file context menu should match the polished dark popover styling
+     * of the sidebar dropdowns while preserving the red Delete action state.
+     *
+     * CDXC:ManageFileActions 2026-06-30-02:30:
+     * Docs file context menus should use the same flat #0e0e0e background and
+     * 1px #595959 border as the sidebar dropdown.
+     *
+     * CDXC:ManageFileActions 2026-06-30-02:45:
+     * Docs file context menu corners should match the reduced dropdown
+     * roundness with 4px outer radius and 3px row radius.
+     *
+     * CDXC:ManageFileActions 2026-06-30-09:48:
+     * Files and folders in the Docs sidebar should expose Copy path in the same
+     * context menu as Rename/Delete, copying the Manage-relative path instead
+     * of an absolute workspace path.
      */
     expect(manageSource).toContain('type ManageArtifactKind = "excalidraw" | "html" | "markdown"');
     expect(manageSource).toContain('const MANAGE_DOCS_ROOT_PATH = "docs"');
@@ -207,18 +260,20 @@ describe("Manage project workarea source", () => {
     expect(manageSource).not.toContain("function ManageSidebarFileToolbar");
     expect(manageSource).not.toContain('aria-label="Selected file details"');
     expect(manageSource).not.toContain("manage-sidebar-meta");
-    expect(manageSource).toContain("user-select: none;");
+    expect(manageSource).not.toContain("const [rootName, setRootName]");
+    expect(manageSource).not.toContain("manage-project-title");
+    expect(manageSource).toContain("justify-content: flex-end;");
     expect(manageSource).toContain("scrollbar-color: transparent transparent;");
     expect(manageSource).toContain("width: 2px;");
     expect(manageSource).toContain("hasActiveFileDescendant=");
     expect(manageSource).toContain("isManageDescendantPath(selectedPath, entry.path)");
     expect(manageSource).toContain('data-active-descendant={String(hasActiveFileDescendant)}');
-    expect(manageSource).toContain('padding: 4px 7px 4px calc(14px + (var(--depth) * 18px));');
+    expect(manageSource).toContain('padding: 4px 7px 4px calc(9px + (var(--depth) * 18px));');
     expect(manageSource).toContain('min-height: 29px;');
     expect(manageSource).toContain('.manage-file-row[data-kind="directory"][data-active-descendant="true"]');
     expect(manageSource).toContain("color: #ffffff;");
     expect(manageSource).toContain("padding: 0 0 7px;");
-    expect(manageSource).toContain("margin: 0 0 20px;");
+    expect(manageSource).toContain("margin: 0 0 4px;");
     expect(manageSource).toContain("box-sizing: border-box;");
     expect(manageSource).toContain("IconLayoutSidebarLeftExpand");
     expect(manageSource).toContain("IconLayoutSidebarRightExpand");
@@ -247,7 +302,25 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("currentEntry.kind === \"directory\" && deletesSelectedPath");
     expect(manageSource).toContain("removeManageAnnotationPathsForDeletedEntry");
     expect(manageSource).toContain("removeManagePathSetForDeletedEntry");
+    expect(manageSource).toContain("onCopyPath={() => void copyEntryPath(contextMenuEntry)}");
+    expect(manageSource).toContain("await writeTextToClipboard(entry.path)");
+    expect(manageSource).toContain("Copy path");
     expect(manageSource).toContain("Rename item");
+    const fileContextMenuCssStart = manageSource.indexOf("  .manage-file-context-menu {");
+    const fileContextMenuCssEnd = manageSource.indexOf("  .manage-file-context-menu-item {", fileContextMenuCssStart);
+    expect(fileContextMenuCssStart).toBeGreaterThan(-1);
+    expect(fileContextMenuCssEnd).toBeGreaterThan(fileContextMenuCssStart);
+    const fileContextMenuCss = manageSource.slice(fileContextMenuCssStart, fileContextMenuCssEnd);
+    expect(fileContextMenuCss).toContain("backdrop-filter: blur(18px);");
+    expect(fileContextMenuCss).toContain("background: #0e0e0e;");
+    expect(fileContextMenuCss).toContain("border: 1px solid #595959;");
+    expect(fileContextMenuCss).toContain("border-radius: 4px;");
+    expect(fileContextMenuCss).toContain("min-width: 166px;");
+    expect(fileContextMenuCss).not.toContain("linear-gradient(");
+    expect(fileContextMenuCss).toContain("inset 0 1px 0 rgba(255, 255, 255, 0.08)");
+    expect(manageSource).toContain("  .manage-file-context-menu-item svg {");
+    expect(manageSource).toContain("  .manage-file-context-menu-item-danger:hover,");
+    expect(manageSource).toContain("box-shadow: inset 0 0 0 1px rgba(253, 164, 175, 0.12);");
     expect(terminalWorkspaceSource).toContain("throws -> ManageFilePreview?");
     expect(terminalWorkspaceSource).toContain("source.relativePath != manageDocsRelativePath");
     expect(terminalWorkspaceSource).toContain("destination.relativePath != manageDocsRelativePath");
@@ -256,11 +329,19 @@ describe("Manage project workarea source", () => {
     /*
      * CDXC:ManageDefaultHtml 2026-06-28-07:17:
      * New HTML Docs files should explain that users can ask an agent to create a polished explanatory HTML document and then annotate the rendered page with Agentation.
+     *
+     * CDXC:ManageDefaultHtml 2026-06-30-04:41:
+     * The starter page should use document-owned CSS, a max two-column card grid, a fourth guidance card, and full dark document background coverage so narrow widths do not leave an empty grid slot or white iframe gutter.
      */
     expect(manageSource).toContain("function createDefaultHtmlDocument");
     expect(manageSource).toContain("Ask your agent for an HTML explainer");
     expect(manageSource).toContain('meta name="color-scheme" content="dark"');
-    expect(manageSource).toContain("background: var(--manage-bg);");
+    expect(manageSource).toContain(":root { color-scheme: dark; background: #0e0e0e; }");
+    expect(manageSource).toContain(".docs-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }");
+    expect(manageSource).toContain(".docs-card-grid { grid-template-columns: 1fr; }");
+    expect(manageSource).toContain("<p><strong>Good requests are specific.</strong>");
+    expect(manageSource).toContain("<p><strong>Good annotations are precise.</strong>");
+    expect(manageSource).not.toContain("repeat(auto-fit, minmax(220px, 1fr))");
     expect(manageSource).toContain("Use the bottom-left Agentation control when you are ready");
     expect(manageSource).toContain("annotate it in Ghostex Docs with Agentation");
     expect(manageSource).toContain("selectedPathRef.current = createdFile.path");
@@ -436,6 +517,9 @@ describe("Manage project workarea source", () => {
      * CDXC:ManageHtmlAgentation 2026-06-29-18:20:
      * Agentation should be appended as a fixed bootstrap module inside the loaded HTML document, not mounted by the parent Manage React page against the iframe window or wrapper.
      *
+     * CDXC:ManageHtmlAgentation 2026-06-30-04:41:
+     * The sanitized srcdoc document should allow scripts and same-origin for Ghostex's fixed bootstrap so Agentation's module imports can initialize inside the loaded page.
+     *
      * CDXC:ManageHtmlAgentation 2026-06-28-07:58:
      * HTML Docs should show Agentation's bottom-left control on open without auto-clicking Start feedback mode, so reading or interacting with the page does not immediately become annotation input.
      */
@@ -448,8 +532,7 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("sanitizeManageHtmlDocument(content, { injectAgentation: annotationsEnabled })");
     expect(manageSource).toContain('new DOMParser().parseFromString(html, "text/html")');
     expect(manageSource).toContain("srcDoc={renderedHtml}");
-    expect(manageSource).toContain('sandbox="allow-popups allow-popups-to-escape-sandbox allow-scripts"');
-    expect(manageSource).not.toContain("allow-same-origin");
+    expect(manageSource).toContain('sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"');
     expect(manageSource).toContain('documentValue.querySelectorAll("script, iframe, object, embed, base")');
     expect(manageSource).not.toContain('documentValue.querySelectorAll("script, style');
     expect(manageSource).toContain("function injectManageAgentationScript");
