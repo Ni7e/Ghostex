@@ -101,12 +101,12 @@ Put all your thoughts here then let an orchestrator agent manage subagents to ta
 
 ### Search Previous Sessions from All Agent CLIs in 1 place
 
-##### Fuzzy search in all your previous sessions accross agents by typing a few words from your prompts
-##### Press enter to resume that session! Lots of filters available. Start it from the sidebar or run `ghostex find / gx f` to start it 
+Fuzzy search in all your previous sessions accross agents by typing a few words from your prompts
+Press enter to resume that session! Lots of filters available. Start it from the sidebar or run `ghostex find / gx f` to start it 
 
 <img width="3456" height="2066" alt="image" src="https://github.com/user-attachments/assets/85bfd614-d352-4f30-8501-f2a47d001f88" />
 
-##### Also see list of all previous sessions from all agents by title/tag/last active so you can resume any of them
+Also see list of all previous sessions from all agents by title/tag/last active so you can resume any of them
 
 <img width="3456" height="2066" alt="2026-06-30_Ghostex_10-53-36@2x" src="https://github.com/user-attachments/assets/1d774329-6a5d-4d8d-98e7-34fd2613dd8b" />
 
