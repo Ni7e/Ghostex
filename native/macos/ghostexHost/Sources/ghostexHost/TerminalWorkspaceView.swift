@@ -1249,6 +1249,7 @@ private func nativeRemoveStaleSshPromptEditorEnvironment(_ environment: inout [S
     "GHOSTEX_ZMX_BIN",
     "ZDOTDIR",
     "GHOSTEX_ORIGINAL_ZDOTDIR",
+    "GHOSTEX_ORIGINAL_ZDOTDIR_EXPORTED",
   ] {
     environment.removeValue(forKey: key)
   }
@@ -1365,6 +1366,7 @@ private func nativeGhosttyFloatingEditorEnvironment(
     "GHOSTEX_NATIVE_SESSION_ID",
     "ZDOTDIR",
     "GHOSTEX_ORIGINAL_ZDOTDIR",
+    "GHOSTEX_ORIGINAL_ZDOTDIR_EXPORTED",
     "GHOSTEX_PROMPT_EDITOR_BACKEND",
     "GHOSTEX_PROMPT_EDITOR_CLIENT",
     "GHOSTEX_ZMX_BIN",
@@ -1428,33 +1430,40 @@ private func nativeApplyGtePromptEditingEnvironment(_ environment: inout [String
   guard let shimZdotdir = nativeEnsureGteZdotdirShim(promptEditorCommand: promptEditor) else {
     return
   }
-  environment["GHOSTEX_ORIGINAL_ZDOTDIR"] = originalZdotdir
+  environment["GHOSTEX_ORIGINAL_ZDOTDIR"] = originalZdotdir.path
+  environment["GHOSTEX_ORIGINAL_ZDOTDIR_EXPORTED"] = originalZdotdir.isExported ? "1" : "0"
   environment["ZDOTDIR"] = shimZdotdir
   nativeLogGtePromptEditor("environment.applied", details: [
     "editor": promptEditor,
     "promptEditorBackend": promptEditorBackend,
     "logPath": environment["GHOSTEX_GTE_PROMPT_EDITOR_LOG"] ?? "",
-    "originalZdotdir": originalZdotdir,
+    "originalZdotdir": originalZdotdir.path,
+    "originalZdotdirExported": originalZdotdir.isExported ? "1" : "0",
     "shimZdotdir": shimZdotdir,
     "visual": promptEditor,
   ])
 }
 
-private func nativeOriginalZdotdir(for environment: [String: String]) -> String {
-  for value in [
-    environment["GHOSTEX_ORIGINAL_ZDOTDIR"],
-    ProcessInfo.processInfo.environment["GHOSTEX_ORIGINAL_ZDOTDIR"],
-    environment["ZDOTDIR"],
-    ProcessInfo.processInfo.environment["ZDOTDIR"],
+private struct NativeOriginalZdotdir {
+  let isExported: Bool
+  let path: String
+}
+
+private func nativeOriginalZdotdir(for environment: [String: String]) -> NativeOriginalZdotdir {
+  for candidate in [
+    (environment["GHOSTEX_ORIGINAL_ZDOTDIR"], false),
+    (ProcessInfo.processInfo.environment["GHOSTEX_ORIGINAL_ZDOTDIR"], false),
+    (environment["ZDOTDIR"], true),
+    (ProcessInfo.processInfo.environment["ZDOTDIR"], true),
   ] {
-    guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+    guard let value = candidate.0?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
       continue
     }
     if !nativeIsGteShimZdotdir(value) {
-      return value
+      return NativeOriginalZdotdir(isExported: candidate.1, path: value)
     }
   }
-  return NSHomeDirectory()
+  return NativeOriginalZdotdir(isExported: false, path: NSHomeDirectory())
 }
 
 private func nativeIsGteShimZdotdir(_ value: String) -> Bool {
@@ -1496,16 +1505,47 @@ private func nativeGteZshStartupShim(
   exportGte: Bool,
   promptEditorCommand: String
 ) -> String {
-  let originalZdotdirUpdateBlock =
+  let originalZdotdirCaptureBlock =
     fileName == ".zshenv"
     ? """
 
-      if [ -n "${ZDOTDIR}" ] && [ "${ZDOTDIR}" != "${_ghostex_shim_zdotdir}" ]; then
+      if [ -n "${ZDOTDIR-}" ] && [ "${ZDOTDIR-}" != "${_ghostex_shim_zdotdir}" ]; then
         export GHOSTEX_ORIGINAL_ZDOTDIR="${ZDOTDIR}"
+        _ghostex_original_zdotdir="${ZDOTDIR}"
+        if [[ "${parameters[ZDOTDIR]-}" == *-export* ]]; then
+          export GHOSTEX_ORIGINAL_ZDOTDIR_EXPORTED=1
+          _ghostex_original_zdotdir_exported=1
+        else
+          export GHOSTEX_ORIGINAL_ZDOTDIR_EXPORTED=0
+          _ghostex_original_zdotdir_exported=0
+        fi
       fi
-      ZDOTDIR="${_ghostex_shim_zdotdir}"
       """
     : ""
+  let finalZdotdirRestoreBlock: String
+  switch fileName {
+  case ".zshenv":
+    finalZdotdirRestoreBlock = """
+
+      if ! [[ -o interactive || -o login ]]; then
+        _ghostex_restore_zdotdir=1
+      fi
+      """
+  case ".zshrc":
+    finalZdotdirRestoreBlock = """
+
+      if ! [[ -o login ]]; then
+        _ghostex_restore_zdotdir=1
+      fi
+      """
+  case ".zlogin":
+    finalZdotdirRestoreBlock = """
+
+      _ghostex_restore_zdotdir=1
+      """
+  default:
+    finalZdotdirRestoreBlock = ""
+  }
   let exportBlock =
     exportGte
     ? """
@@ -1517,7 +1557,7 @@ private func nativeGteZshStartupShim(
       export VISUAL=\(nativeShellQuote(promptEditorCommand))
       if [ "${_ghostex_gte_debug}" = "1" ]; then
         {
-          printf '[%s] zsh-shim.export file=%s pid=%s editor=%s visual=%s pwd=%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "\(fileName)" "$$" "${EDITOR}" "${VISUAL}" "${PWD}"
+          printf '[%s] zsh-shim.export file=%s pid=%s editor=%s visual=%s pwd=%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "\(fileName)" "$$" "${EDITOR-}" "${VISUAL-}" "${PWD-}"
         } >> "${_ghostex_gte_log}" 2>/dev/null
       fi
       """
@@ -1527,30 +1567,55 @@ private func nativeGteZshStartupShim(
     # Source the user's real zsh startup file, then let ghostex force the selected
     # prompt editor command after profile exports that would otherwise override
     # EDITOR.
-    _ghostex_shim_zdotdir="${ZDOTDIR}"
+    # CDXC:GtePromptEditing 2026-07-01-01:13
+    # Keep Ghostex's ZDOTDIR shim only for the startup-file chain, then restore or
+    # unset ZDOTDIR so child shells do not re-enter the shim while EDITOR/VISUAL
+    # still point at the Monaco prompt editor command.
+    _ghostex_shim_zdotdir="${ZDOTDIR-}"
     _ghostex_original_zdotdir="${GHOSTEX_ORIGINAL_ZDOTDIR:-$HOME}"
+    _ghostex_original_zdotdir_exported="${GHOSTEX_ORIGINAL_ZDOTDIR_EXPORTED:-0}"
+    _ghostex_restore_zdotdir=0
     _ghostex_gte_debug="${GHOSTEX_DEBUGGING_MODE:-0}"
     if [ "${_ghostex_gte_debug}" = "1" ]; then
       _ghostex_gte_log="${GHOSTEX_GTE_PROMPT_EDITOR_LOG:-$HOME/Library/Logs/ghostex/gte-prompt-editor.log}"
       mkdir -p "${_ghostex_gte_log:h}" 2>/dev/null
       {
-        printf '[%s] zsh-shim.enter file=%s pid=%s editor_before=%s visual_before=%s zdotdir=%s original_zdotdir=%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "\(fileName)" "$$" "${EDITOR}" "${VISUAL}" "${ZDOTDIR}" "${_ghostex_original_zdotdir}"
+        printf '[%s] zsh-shim.enter file=%s pid=%s editor_before=%s visual_before=%s zdotdir=%s original_zdotdir=%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "\(fileName)" "$$" "${EDITOR-}" "${VISUAL-}" "${ZDOTDIR-}" "${_ghostex_original_zdotdir}"
       } >> "${_ghostex_gte_log}" 2>/dev/null
     fi
     if [ -r "${_ghostex_original_zdotdir}/\(fileName)" ]; then
       ZDOTDIR="${_ghostex_original_zdotdir}"
-      source "${_ghostex_original_zdotdir}/\(fileName)"
+      if [ "${_ghostex_original_zdotdir_exported}" != "1" ]; then
+        typeset +x ZDOTDIR 2>/dev/null || true
+      fi
+      source "${_ghostex_original_zdotdir}/\(fileName)"\(originalZdotdirCaptureBlock)
       ZDOTDIR="${_ghostex_shim_zdotdir}"
-    fi\(originalZdotdirUpdateBlock)\(exportBlock)
+    fi\(exportBlock)\(finalZdotdirRestoreBlock)
+    if [ "${_ghostex_restore_zdotdir}" = "1" ]; then
+      if [ -n "${GHOSTEX_ORIGINAL_ZDOTDIR-}" ] && [ "${GHOSTEX_ORIGINAL_ZDOTDIR-}" != "${HOME}" ]; then
+        ZDOTDIR="${GHOSTEX_ORIGINAL_ZDOTDIR}"
+        if [ "${GHOSTEX_ORIGINAL_ZDOTDIR_EXPORTED:-0}" = "1" ]; then
+          export ZDOTDIR
+        else
+          typeset +x ZDOTDIR 2>/dev/null || true
+        fi
+      else
+        unset ZDOTDIR
+      fi
+      unset GHOSTEX_ORIGINAL_ZDOTDIR
+      unset GHOSTEX_ORIGINAL_ZDOTDIR_EXPORTED
+    fi
     if [ "${_ghostex_gte_debug}" = "1" ]; then
       {
-        printf '[%s] zsh-shim.leave file=%s pid=%s editor_after=%s visual_after=%s zdotdir=%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "\(fileName)" "$$" "${EDITOR}" "${VISUAL}" "${ZDOTDIR}"
+        printf '[%s] zsh-shim.leave file=%s pid=%s editor_after=%s visual_after=%s zdotdir=%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "\(fileName)" "$$" "${EDITOR-}" "${VISUAL-}" "${ZDOTDIR-}"
       } >> "${_ghostex_gte_log}" 2>/dev/null
       unset _ghostex_gte_log
     fi
     unset _ghostex_gte_debug
+    unset _ghostex_restore_zdotdir
     unset _ghostex_shim_zdotdir
     unset _ghostex_original_zdotdir
+    unset _ghostex_original_zdotdir_exported
 
     """
 }
@@ -11348,6 +11413,18 @@ final class TerminalWorkspaceView: NSView {
             additionalDocsFoldersText: additionalDocsFoldersText),
           requestId: request.requestId,
           rootName: manageDocsRelativePath)
+      case "duplicate":
+        return ManageFilesBridgeResponse(
+          action: request.action,
+          entries: nil,
+          error: nil,
+          file: try manageDuplicateProjectFile(
+            rootURL: rootURL,
+            path: request.path,
+            newPath: request.newPath,
+            additionalDocsFoldersText: additionalDocsFoldersText),
+          requestId: request.requestId,
+          rootName: manageDocsRelativePath)
       case "delete":
         try manageDeleteProjectFile(
           rootURL: rootURL,
@@ -12406,6 +12483,64 @@ final class TerminalWorkspaceView: NSView {
     } catch {
       throw ManageFilesBridgeError.invalidRequest("Could not delete item.")
     }
+  }
+
+  private nonisolated static func manageDuplicateProjectFile(
+    rootURL: URL,
+    path: String?,
+    newPath: String?,
+    additionalDocsFoldersText: String
+  ) throws -> ManageFilePreview {
+    /*
+     CDXC:ManageFileActions 2026-07-01-00:59:
+     Duplicate from the Docs sidebar is a file-only same-folder copy. JavaScript chooses the visible " (n)" suffix, while native validates source and destination remain in the same allowed Docs folder/root-artifact parent, rejects overwrites and directories, and returns the duplicated file preview without exposing filesystem paths in errors.
+     */
+    let source = try manageFileOperationURL(rootURL: rootURL, relativePath: path)
+    let destination = try manageFileOperationURL(rootURL: rootURL, relativePath: newPath)
+    guard !source.relativePath.isEmpty,
+      !destination.relativePath.isEmpty,
+      !managePathIsDocsScanRoot(source.relativePath, additionalDocsFoldersText: additionalDocsFoldersText),
+      !managePathIsDocsScanRoot(destination.relativePath, additionalDocsFoldersText: additionalDocsFoldersText)
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Select a file to duplicate.")
+    }
+    try manageValidateDocsActionRelativePath(
+      source.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
+    try manageValidateDocsActionRelativePath(
+      destination.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
+    guard manageParentRelativePath(source.relativePath) == manageParentRelativePath(destination.relativePath) else {
+      throw ManageFilesBridgeError.invalidRequest("Docs duplicate cannot move files.")
+    }
+    var sourceIsDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: source.url.path, isDirectory: &sourceIsDirectory),
+      !sourceIsDirectory.boolValue
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Select a file to duplicate.")
+    }
+    let destinationParentURL = destination.url.deletingLastPathComponent()
+      .standardizedFileURL
+      .resolvingSymlinksInPath()
+    var destinationParentIsDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: destinationParentURL.path, isDirectory: &destinationParentIsDirectory),
+      destinationParentIsDirectory.boolValue,
+      manageURLIsInsideProjectRoot(destinationParentURL, rootURL: rootURL)
+    else {
+      throw ManageFilesBridgeError.invalidRequest("Duplicate target is unavailable.")
+    }
+    guard !FileManager.default.fileExists(atPath: destination.url.path) else {
+      throw ManageFilesBridgeError.invalidRequest("A file with that name already exists.")
+    }
+    do {
+      try FileManager.default.copyItem(at: source.url, to: destination.url)
+    } catch {
+      throw ManageFilesBridgeError.invalidRequest("Could not duplicate file.")
+    }
+    return try manageProjectFilePreview(
+      rootURL: rootURL,
+      path: destination.relativePath,
+      additionalDocsFoldersText: additionalDocsFoldersText)
   }
 
   private nonisolated static func manageCreateProjectFolder(
@@ -18244,6 +18379,22 @@ final class TerminalWorkspaceView: NSView {
             label: sessionTitle || "T3 Code",
             wsBaseUrl: wsUrl()
           }),
+          /**
+           * CDXC:T3CodeUpstreamBridge 2026-07-01-01:05:
+           * Upstream T3 Code now reads desktop-managed environments through the
+           * plural getLocalEnvironmentBootstraps API and treats the primary
+           * backend as id "primary". Ghostex embeds the same local runtime in
+           * WKWebView, so its injected desktopBridge must provide the plural
+           * primary bootstrap instead of exposing only the older singular shape.
+           */
+          getLocalEnvironmentBootstraps: () => [{
+            bootstrapToken: "",
+            httpBaseUrl: location.origin,
+            id: "primary",
+            label: sessionTitle || "T3 Code",
+            runningDistro: null,
+            wsBaseUrl: wsUrl()
+          }],
           /**
            * CDXC:T3CodeUpstreamReset 2026-06-22-23:39:
            * Current upstream treats desktopBridge pages as bearer-authenticated
