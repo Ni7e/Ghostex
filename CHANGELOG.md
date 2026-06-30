@@ -1,5 +1,21 @@
 # Changelog
 
+## 5.2.0 - 2026-06-30
+
+- Major
+  - Automations now run through gxserver and can be launched from the sidebar, Project Board, and `ghostex`/`gx` CLI.
+  - Docs can scan additional project folders, collapse or expand the tree, copy file and folder paths, and show cleaner root actions.
+  - HTML Docs now open in isolated previews with better starter pages, Agentation feedback support, and slimmer embedded scrollbars.
+  - Settings has a simpler General layout, a clearer app icon picker, remembered page position, and a lighter prompt editor setup.
+  - Remote setup and attach flows show clearer install diagnostics, package selection, and session state.
+- Minor
+  - Sidebar project headers, empty states, context menus, scroll glow, tooltips, and session agent icons are easier to scan.
+  - Project editor chrome, sticky navigation, update download feedback, and first-launch dismissal are steadier.
+  - Prompt editing now uses the configured machine editor path when needed instead of relying on `gte`.
+  - Remote rows use cleaner zmx provider metadata, and zmx advertises editor capability correctly.
+  - Android SSH transport is more reliable, and iOS branding plus remote-session sidebar behavior are refreshed. Thanks @wiedymi.
+  - Apple Silicon releases now validate and bundle the Linux remote gxserver packages used for remote hosts.
+
 ## 5.1.0 - 2026-06-29
 
 - Major
