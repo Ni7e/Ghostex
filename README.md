@@ -62,7 +62,7 @@ cmd + t for new terminal, cmd + d to split, cmd + option + arrows to switch arou
 
 ### Supports all of the popular Agent CLIs
 
-Ghostex works with Claude Code, Codex CLI, OpenCode, Pi Agent, Gemini, Copilot, and other terminal-based agent CLIs. <br/>
+Ghostex works with Claude Code, Codex CLI, OpenCode, Pi Agent, Gemini, and all other Agent CLIs. <br/>
 Also supports T3code GUI panes if you prefer those (feature is fully hibernated when not used)
 
 <img width="1200" alt="Ghostex T3code panes and supported terminal CLIs" src="https://github.com/user-attachments/assets/49862e2d-1edd-4647-8161-5afb25ed8341" />
@@ -97,8 +97,12 @@ Press enter to resume that session! Lots of filters available. Start it from the
 
 ### Extensible Architecture (client apps <-> gxserver daemon <-> zmx persistence)
 
-The client/server split allows your to install just the gxserver daemon on any remote machine then control the agents on that machine from any client device<br/>
-(macOS/iOS/Android for now. Need help for Win/Linux)
+The client/server split allows your to install just the gxserver daemon on any remote machine then control the agents on that machine from any client device <br />
+
+Supported clients: macOS, iOS, Android, TUI (based on herdr)<br />
+Supported hosts: macOS and linux (tested on ubuntu x64 and arm64)<br />
+
+Help with Windows & Linux client apps hi.
 
 <img width="3326" height="1514" alt="2026-06-12_Google Chrome_23-43-07@2x" src="https://github.com/user-attachments/assets/ecc84149-a9fc-4ec8-a387-af5ce35aa7be" />
 
