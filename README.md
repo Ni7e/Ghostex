@@ -74,13 +74,6 @@ Comes with Annotations, Chrome Devtools MCP for Agents, Profiles.<br />
 
 <img width="1200" alt="image" src="https://github.com/user-attachments/assets/ce9fbe6b-8c2b-41f1-88f6-67d8254846e5" />
 
-### Kanban board based on beads!
-
-Put all your thoughts here then let an orchestrator agent manage subagents to tackle them<br/>
-(Ghostex supports cross Agent CLI orchestration, your Claude Code can launch and steer Codex agents!)
-
-<img width="1200" alt="image" src="https://github.com/user-attachments/assets/85543937-85f1-4171-b2d0-6ee7264beddd" />
-
 ### Rich Prompt Editor with Ctrl+G
 
 Edit your agent prompts with full hotkeys support and image previews! <br />
@@ -88,12 +81,34 @@ No more uneditable "[Pasted 50+ lines]" text! Press F1 for all commands.
 
 <img width="2048" height="1221" alt="2026-06-23_CleanShot_15-47-56" src="https://github.com/user-attachments/assets/6f1db19e-20c2-456c-bb91-8dc3309b4c4b" />
 
+### Kanban board based on beads!
+
+Put all your thoughts here then let an orchestrator agent manage subagents to tackle them<br/>
+(Ghostex supports cross Agent CLI orchestration, your Claude Code can launch and steer Codex agents!)
+
+<img width="1200" alt="image" src="https://github.com/user-attachments/assets/85543937-85f1-4171-b2d0-6ee7264beddd" />
+
+### Docs view for working with HTML/MD/Excalidraw!
+
+#### Collaborate with your agent on HTML prototypes, mockups, and explainers! Annotations system included!
+<img width="3456" height="2066" alt="2026-06-30_Ghostex_04-58-31@2x" src="https://github.com/user-attachments/assets/694293c1-139c-4269-8304-21ac561a01fd" />
+
+#### Full markdown editor + annotations that you can send to your agent to collaborate!
+<img width="3456" height="2066" alt="2026-06-30_Ghostex_10-03-18@2x" src="https://github.com/user-attachments/assets/41ab6a04-2a99-43d6-a22b-60d824f468fb" />
+
+#### Or even ask the Agent to draw a .excalidraw file in the /docs folder:
+<img width="3456" height="2066" alt="2026-06-30_Ghostex_03-11-59@2x" src="https://github.com/user-attachments/assets/629ca0bb-b249-49e4-85d6-1834fcea1e88" />
+
 ### Previous Sessions Search
 
-Fuzzy search in all your previous sessions accross agents by typing a few words from your prompts<br/> 
+##### Fuzzy search in all your previous sessions accross agents by typing a few words from your prompts<br/> 
 Press enter to resume that session! Lots of filters available. Start it from the sidebar or run `ghostex find / gx f` to start it 
 
 <img width="3456" height="2066" alt="image" src="https://github.com/user-attachments/assets/85bfd614-d352-4f30-8501-f2a47d001f88" />
+
+##### Also see list of all previous sessions from all agents by title/tag/last active so you can resume any of them
+
+<img width="3456" height="2066" alt="2026-06-30_Ghostex_10-53-36@2x" src="https://github.com/user-attachments/assets/1d774329-6a5d-4d8d-98e7-34fd2613dd8b" />
 
 ### Extensible Architecture (client apps <-> gxserver daemon <-> zmx persistence)
 
