@@ -66,6 +66,7 @@ export type ghostexHotkeyAction =
   | { id: ghostexHotkeyActionId; kind: "openCommandPalette" }
   | { id: ghostexHotkeyActionId; kind: "openSessionSearchPalette" }
   | { id: ghostexHotkeyActionId; kind: "openCommandsPanel" }
+  | { id: ghostexHotkeyActionId; kind: "openDocsFoldersSettings" }
   | { id: ghostexHotkeyActionId; kind: "openSettings" }
   | { id: ghostexHotkeyActionId; kind: "openHotkeys" }
   | { id: ghostexHotkeyActionId; kind: "renameActiveSession" }
@@ -227,7 +228,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     },
     /**
      * CDXC:Hotkeys 2026-06-06-04:36:
-     * Option+1..5 are default workarea view switchers in titlebar order: Agents, Source, Browser, Kanban, Docs. Keep these as named actions instead of overloading group/session slots so AppKit, Settings, and sidebar DOM dispatch switch the same project surface.
+     * Option+1..5 are default workarea view switchers for the five hotkey-backed views: Agents, Source, Browser, Kanban, Docs. Keep these as named actions instead of overloading group/session slots so AppKit, Settings, and sidebar DOM dispatch switch the same project surface.
      *
      * CDXC:Manage 2026-06-20-04:36:
      * Manage is a first-party project workarea beside Kanban, so it needs a named configurable hotkey action instead of sharing another mode's shortcut or command id.
