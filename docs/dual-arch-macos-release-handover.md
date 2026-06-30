@@ -1,11 +1,5 @@
 # Dual-Arch macOS Release Handover
 
-<!--
-CDXC:Distribution 2026-05-14-10:00:
-Ghostex should support Intel Macs by publishing real x86_64 builds beside arm64 builds, not by relying on Rosetta or fallback launch behavior.
-The release pipeline must keep GitHub Releases, Sparkle appcasts, and the Homebrew tap in sync for both architecture-specific DMGs.
--->
-
 This handover is for the release/update agent that owns the ghostex/Ghostex GitHub, Sparkle, and Homebrew publishing flow.
 
 ## Goal
