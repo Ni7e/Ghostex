@@ -49,11 +49,13 @@
   /* CDXC:Tooltips 2026-05-26-22:00: All app tooltip surfaces should match the Resources manager dropdown tooltip: near-black background, dim white foreground, subtle white border, and the same elevated shadow.
      CDXC:Tooltips 2026-05-26-22:29: Tooltip typography should also match the Resources manager dropdown, including its system font stack, weight, and line height.
      CDXC:Tooltips 2026-06-16-09:58: Shared tooltip backgrounds should be darker than the prior near-#181818 surface so hover labels read as distinct overlays against dark terminal content.
-     CDXC:Tooltips 2026-06-16-11:24: Increase tooltip darkness again to near-#0b0b0b after visual review showed the first darkening was still too light. */
+     CDXC:Tooltips 2026-06-16-11:24: Increase tooltip darkness again to near-#0b0b0b after visual review showed the first darkening was still too light.
+     CDXC:Tooltips 2026-06-30-11:15: All app tooltip surfaces should use the same slight 5px corner radius as the macOS sidebar top icon buttons, preserving the compact chrome while avoiding square tooltip corners. */
   --ghostex-tooltip-background: rgba(11, 11, 11, 0.98);
   --ghostex-tooltip-foreground: rgba(255, 255, 255, 0.78);
   --ghostex-tooltip-strong-foreground: rgba(255, 255, 255, 0.94);
   --ghostex-tooltip-border: rgba(255, 255, 255, 0.12);
+  --ghostex-tooltip-radius: 5px;
   --ghostex-tooltip-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
   --ghostex-tooltip-font: 500 12px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   --working-primary: color-mix(in srgb, #2f6feb 60%, #ffb454 40%);
