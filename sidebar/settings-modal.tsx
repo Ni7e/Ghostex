@@ -464,6 +464,7 @@ type SettingSearchDefinition = {
 };
 
 type SettingsSectionSearchResult = {
+  groupTitleMatches?: boolean;
   isSearching: boolean;
   sectionMatches: boolean;
   visibleSettingKeys: Set<string>;
@@ -516,16 +517,25 @@ type SettingModificationProps = {
 
 type MainSettingsSectionId =
   | "agents"
+  | "appearance"
   | "sidebar"
+  | "workspacesSessions"
+  | "terminal"
+  | "tools"
+  | "statusIndicators"
+  | "notifications"
+  | "system"
+  | "advanced";
+
+type MainSettingsScrollTargetId =
+  | MainSettingsSectionId
   | "theming"
   // CDXC:AppIconPicker 2026-06-25-21:50: App Icon is an appearance section that sits next to Theming.
   | "appIcon"
   | "sidebarTags"
-  | "statusIndicators"
   | "sessionCards"
   | "workspace"
   | "debugging"
-  | "terminal"
   | "terminalBehavior"
   | "terminalScrolling"
   | "terminalDevServers"
@@ -537,10 +547,10 @@ type MainSettingsSectionId =
   | "storage"
   | "beta";
 
-export type MainSettingsInitialSectionId = MainSettingsSectionId;
+export type MainSettingsInitialSectionId = MainSettingsScrollTargetId;
 
 type MainSettingsSectionRefs = Record<
-  MainSettingsSectionId,
+  MainSettingsScrollTargetId,
   RefObject<HTMLDivElement | null>
 >;
 
@@ -562,6 +572,23 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
   readonly string[]
 > = {
   agents: ["agentAcceptAllEnabled"],
+  /*
+   * CDXC:SettingsNavigation 2026-06-30-01:23:
+   * General Settings should expose fewer sidebar destinations. Group related
+   * controls into user-facing sections while retaining internal subheadings and
+   * legacy scroll targets for direct entries such as Power Settings.
+   *
+   * CDXC:SettingsNavigation 2026-06-30-01:23:
+   * Notifications/Sounds and Status Indicators remain independent sections
+   * instead of merging into Appearance because users distinguish audible or
+   * system alerts from always-visible status surfaces.
+   */
+  appearance: [
+    "sidebarTheme",
+    "customSidebarTitlebarBackgroundDarknessPercent",
+    "customSidebarTitlebarBackgroundTintColor",
+    "appIconSourceId",
+  ],
   sidebar: [
     "sidebarSettingsPreset",
     "sidebarSide",
@@ -577,21 +604,14 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "agentManagerZoomPercent",
     "createSessionOnSidebarDoubleClick",
     "renameSessionOnDoubleClick",
+    "hideSessionAgentIconUntilHover",
+    "useColoredSessionAgentIcons",
+    "hideBrowserFaviconUntilHover",
+    "showCloseButtonOnSessionCards",
+    "hideLastActiveTimeOnSessionCards",
+    "showSessionCloseContextMenuAction",
+    "sidebarSessionTagListItems",
   ],
-  theming: [
-    "sidebarTheme",
-    "customSidebarTitlebarBackgroundDarknessPercent",
-    "customSidebarTitlebarBackgroundTintColor",
-  ],
-  // CDXC:AppIconPicker 2026-06-25-21:50: App Icon owns the persisted Dock icon source id selection.
-  appIcon: ["appIconSourceId"],
-  sidebarTags: ["sidebarSessionTagListItems"],
-  /*
-   * CDXC:BrowserSettings 2026-05-22-09:18:
-   * Browser-related controls belong in one Browser section on the main
-   * Settings tab: URL open target and browser-pane feedback tool selection.
-   */
-  browser: ["browserFeedbackTool"],
   /*
    * CDXC:StatusIndicators 2026-05-20-12:00:
    * Status Indicators groups session presence surfaces that communicate status
@@ -607,27 +627,23 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "petOverlayEnabled",
     "selectedPetId",
   ],
-  sessionCards: [
-    "hideSessionAgentIconUntilHover",
-    "useColoredSessionAgentIcons",
-    "hideBrowserFaviconUntilHover",
-    "showCloseButtonOnSessionCards",
-    "hideLastActiveTimeOnSessionCards",
-    "showSessionCloseContextMenuAction",
-  ],
-  workspace: [
+  workspacesSessions: [
     "workspaceActivePaneBorderColor",
     "workspaceBackgroundColor",
     "clickToWakeSleepingSessions",
     "commandsPanelDefaultHeightPx",
-  ],
-  /*
-   * CDXC:DebuggingSettings 2026-06-15-21:34:
-   * Debugging controls belong in a dedicated bottom Settings section so support-oriented logging and session metadata copy actions are grouped away from everyday Workspace and Session Cards preferences.
-   */
-  debugging: [
-    "debuggingMode",
-    ...DEBUGGING_MODE_DEPENDENT_SETTING_KEYS,
+    "autoSleepCodeEditorEnabled",
+    "autoSleepCodeEditorIdleMinutes",
+    "autoSleepGitEditorEnabled",
+    "autoSleepGitEditorIdleMinutes",
+    "autoSleepProjectEditorEnabled",
+    "autoSleepProjectEditorIdleMinutes",
+    "autoSleepBrowserSessionsEnabled",
+    "autoSleepBrowserIdleMinutes",
+    "autoSleepAgentSessionsEnabled",
+    "autoSleepAgentIdleMinutes",
+    "autoSleepRequireAgentResumeCommand",
+    "autoSleepFavoriteAgentSessions",
   ],
   terminal: [
     "ghosttySettingsActions",
@@ -644,6 +660,97 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "sessionPersistenceProvider",
     "showSessionIdInTerminalPanes",
     "promptEditorBackend",
+    "terminalScrollbackLimitMb",
+    "terminalCopyOnSelect",
+    "terminalConfirmCloseSurface",
+    "terminalClipboardTrimTrailingSpaces",
+    "terminalClipboardPasteProtection",
+    "terminalPastePreviewableImages",
+    "terminalMouseHideWhileTyping",
+    "terminalScrollbar",
+    "terminalMouseScrollMultiplierPrecision",
+    "terminalMouseScrollMultiplierDiscrete",
+    "terminalScrollToBottomWhenTyping",
+  ],
+  tools: [
+    /*
+     * CDXC:BrowserSettings 2026-05-22-09:18:
+     * Browser-related controls belong in one Browser section on the main
+     * Settings tab: URL open target and browser-pane feedback tool selection.
+     */
+    "browserFeedbackTool",
+    "defaultEditorCommand",
+    "customDefaultEditorCommand",
+    "codeServerLinkVscodeUserConfig",
+    "codeServerUseVscodeInsidersUserConfig",
+    "showUntrackedProjectDiffWhenNoTrackedChanges",
+    /*
+     * CDXC:TerminalDevServers 2026-06-23-19:22:
+     * Dev-server discovery preferences belong under Terminal settings because they govern terminal-output detection and launch choices, while remaining separate from Ghostty config-backed terminal emulator controls. Keep the launch control to system default versus internal browser instead of presenting per-browser checkboxes.
+     */
+    "terminalDevServerDetectionEnabled",
+    "terminalDevServerOpenTarget",
+    "terminalDevServerIgnoredPortRules",
+  ],
+  notifications: [
+    "completionBellEnabled",
+    "completionSound",
+    "showMacOSAttentionNotifications",
+    "attentionNotificationActions",
+    "actionCompletionSound",
+  ],
+  system: [
+    "hideKeepAwakeTitlebarControl",
+    "keepAwakeDefaultDurationMinutes",
+    "keepAwakeAllowDisplaySleep",
+    "keepAwakePreventLidSleep",
+    "keepAwakeActivateOnLaunch",
+    "keepAwakeActivateOnExternalDisplay",
+    "keepAwakeWhileWorkingSessions",
+    "keepAwakeDeactivateBelowBatteryThreshold",
+    "keepAwakeBatteryThresholdPercent",
+    "keepAwakeDeactivateOnLowPowerMode",
+    "keepAwakeDeactivateOnUserSwitch",
+    "ghostexFolderStats",
+  ],
+  /*
+   * CDXC:DebuggingSettings 2026-06-15-21:34:
+   * Debugging controls belong in a dedicated bottom Settings section so support-oriented logging and session metadata copy actions are grouped away from everyday Workspace and Session Cards preferences.
+   */
+  advanced: [
+    "showBetaFeatures",
+    "debuggingMode",
+    ...DEBUGGING_MODE_DEPENDENT_SETTING_KEYS,
+  ],
+};
+
+const MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS = {
+  ...MAIN_SETTINGS_SECTION_SETTING_KEYS,
+  theming: [
+    "sidebarTheme",
+    "customSidebarTitlebarBackgroundDarknessPercent",
+    "customSidebarTitlebarBackgroundTintColor",
+  ],
+  // CDXC:AppIconPicker 2026-06-25-21:50: App Icon owns the persisted Dock icon source id selection.
+  appIcon: ["appIconSourceId"],
+  sidebarTags: ["sidebarSessionTagListItems"],
+  sessionCards: [
+    "hideSessionAgentIconUntilHover",
+    "useColoredSessionAgentIcons",
+    "hideBrowserFaviconUntilHover",
+    "showCloseButtonOnSessionCards",
+    "hideLastActiveTimeOnSessionCards",
+    "showSessionCloseContextMenuAction",
+  ],
+  workspace: [
+    "workspaceActivePaneBorderColor",
+    "workspaceBackgroundColor",
+    "clickToWakeSleepingSessions",
+    "commandsPanelDefaultHeightPx",
+  ],
+  debugging: [
+    "debuggingMode",
+    ...DEBUGGING_MODE_DEPENDENT_SETTING_KEYS,
   ],
   terminalBehavior: [
     "terminalScrollbackLimitMb",
@@ -660,15 +767,12 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "terminalMouseScrollMultiplierDiscrete",
     "terminalScrollToBottomWhenTyping",
   ],
-  /*
-   * CDXC:TerminalDevServers 2026-06-23-19:22:
-   * Dev-server discovery preferences belong under Terminal settings because they govern terminal-output detection and launch choices, while remaining separate from Ghostty config-backed terminal emulator controls. Keep the launch control to system default versus internal browser instead of presenting per-browser checkboxes.
-   */
   terminalDevServers: [
     "terminalDevServerDetectionEnabled",
     "terminalDevServerOpenTarget",
     "terminalDevServerIgnoredPortRules",
   ],
+  browser: ["browserFeedbackTool"],
   editor: [
     "defaultEditorCommand",
     "customDefaultEditorCommand",
@@ -707,20 +811,12 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "completionBellEnabled",
     "completionSound",
     "showMacOSAttentionNotifications",
+    "attentionNotificationActions",
     "actionCompletionSound",
   ],
-  storage: [],
-  /*
-   * CDXC:BetaFeatures 2026-06-16-13:08:
-   * The experimental-feature gate belongs directly above Debugging and owns the
-   * list of hidden surfaces that become visible when that gate is enabled.
-   *
-   * CDXC:ExperimentalFeatures 2026-06-28-07:41:
-   * The visible setting name is Enable Experimental Features. Agents Hub is not
-   * part of this gate and remains visible when the setting is disabled.
-   */
+  storage: ["ghostexFolderStats"],
   beta: ["showBetaFeatures"],
-};
+} satisfies Record<MainSettingsScrollTargetId, readonly string[]>;
 
 /**
  * CDXC:SidebarSessionRename 2026-06-26-06:27:
@@ -986,7 +1082,7 @@ function getActiveSettingsModalScrollViewport(dialogElement: HTMLElement | null)
 }
 
 function getMainSettingsSectionRef(
-  sectionId: MainSettingsSectionId,
+  sectionId: MainSettingsScrollTargetId,
   refs: MainSettingsSectionRefs,
 ): RefObject<HTMLDivElement | null> {
   return refs[sectionId];
@@ -2148,83 +2244,102 @@ export function SettingsModal({
       },
     ]),
   };
+  const mainSettingsGroupSearch = {
+    appearance: getGroupedSettingsSectionSearch(settingsSearchQuery, "Appearance", [
+      settingsSearch.theming,
+      settingsSearch.appIcon,
+    ]),
+    sidebar: getGroupedSettingsSectionSearch(settingsSearchQuery, "Sidebar", [
+      settingsSearch.sidebar,
+      settingsSearch.sessionCards,
+      settingsSearch.sidebarTags,
+    ]),
+    workspacesSessions: getGroupedSettingsSectionSearch(settingsSearchQuery, "Workspaces & Sessions", [
+      settingsSearch.workspace,
+      settingsSearch.autoSleep,
+    ]),
+    terminal: getGroupedSettingsSectionSearch(settingsSearchQuery, "Terminal", [
+      settingsSearch.terminal,
+      settingsSearch.terminalBehavior,
+      settingsSearch.terminalScrolling,
+    ]),
+    tools: getGroupedSettingsSectionSearch(settingsSearchQuery, "Tools", [
+      settingsSearch.browser,
+      settingsSearch.editor,
+      settingsSearch.terminalDevServers,
+    ]),
+    statusIndicators: settingsSearch.statusIndicators,
+    notifications: getGroupedSettingsSectionSearch(settingsSearchQuery, "Notifications", [
+      settingsSearch.sounds,
+    ]),
+    system: getGroupedSettingsSectionSearch(settingsSearchQuery, "System", [
+      settingsSearch.power,
+      settingsSearch.storage,
+    ]),
+    advanced: getGroupedSettingsSectionSearch(settingsSearchQuery, "Advanced", [
+      settingsSearch.beta,
+      settingsSearch.debugging,
+    ]),
+  };
   const mainSettingsSectionNavigation: Array<{
     id: MainSettingsSectionId;
     searchResult: SettingsSectionSearchResult;
     title: string;
   }> = [
-    { id: "sidebar", searchResult: settingsSearch.sidebar, title: "Sidebar" },
-    { id: "theming", searchResult: settingsSearch.theming, title: "Theming" },
     {
-      id: "statusIndicators",
-      searchResult: settingsSearch.statusIndicators,
-      title: "Status Indicators",
+      id: "appearance",
+      searchResult: mainSettingsGroupSearch.appearance,
+      title: "Appearance",
     },
-    { id: "browser", searchResult: settingsSearch.browser, title: "Browser" },
+    { id: "sidebar", searchResult: mainSettingsGroupSearch.sidebar, title: "Sidebar" },
     {
-      id: "sessionCards",
-      searchResult: settingsSearch.sessionCards,
-      title: "Session Cards",
-    },
-    {
-      id: "workspace",
-      searchResult: settingsSearch.workspace,
-      title: "Workspace",
+      id: "workspacesSessions",
+      searchResult: mainSettingsGroupSearch.workspacesSessions,
+      title: "Workspaces & Sessions",
     },
     /*
      * CDXC:SettingsNavigation 2026-06-12-04:13:
      * Ghostty terminal controls belong on the main Settings page so one search query can find app settings and terminal settings together.
      */
-    { id: "terminal", searchResult: settingsSearch.terminal, title: "Terminal" },
+    { id: "terminal", searchResult: mainSettingsGroupSearch.terminal, title: "Terminal" },
     {
-      id: "terminalBehavior",
-      searchResult: settingsSearch.terminalBehavior,
-      title: "Terminal Behavior",
+      id: "tools",
+      searchResult: mainSettingsGroupSearch.tools,
+      title: "Tools",
     },
     {
-      id: "terminalScrolling",
-      searchResult: settingsSearch.terminalScrolling,
-      title: "Terminal Scrolling",
+      id: "statusIndicators",
+      searchResult: mainSettingsGroupSearch.statusIndicators,
+      title: "Status Indicators",
     },
     {
-      id: "terminalDevServers",
-      searchResult: settingsSearch.terminalDevServers,
-      title: "Dev Servers",
-    },
-    { id: "editor", searchResult: settingsSearch.editor, title: "Editor" },
-    /*
-     * CDXC:AppIconPicker 2026-06-28-06:05:
-     * App Icon belongs below Editor in the advanced Settings order so it stays available without being presented as a primary appearance preset picker.
-     */
-    { id: "appIcon", searchResult: settingsSearch.appIcon, title: "App Icon" },
-    {
-      id: "autoSleep",
-      searchResult: settingsSearch.autoSleep,
-      title: "Auto Sleep",
-    },
-    { id: "power", searchResult: settingsSearch.power, title: "Power" },
-    { id: "sounds", searchResult: settingsSearch.sounds, title: "Sounds" },
-    /*
-     * CDXC:SettingsNavigation 2026-06-15-21:36:
-     * Sidebar Tags should appear directly above Storage in the Settings modal, keeping lower-frequency storage inspection at the bottom of this settings group.
-     */
-    {
-      id: "sidebarTags",
-      searchResult: settingsSearch.sidebarTags,
-      title: "Sidebar Tags",
-    },
-    { id: "storage", searchResult: settingsSearch.storage, title: "Storage" },
-    {
-      id: "beta",
-      searchResult: settingsSearch.beta,
-      title: "Experimental",
+      id: "notifications",
+      searchResult: mainSettingsGroupSearch.notifications,
+      title: "Notifications",
     },
     {
-      id: "debugging",
-      searchResult: settingsSearch.debugging,
-      title: "Debugging",
+      id: "system",
+      searchResult: mainSettingsGroupSearch.system,
+      title: "System",
     },
+    { id: "advanced", searchResult: mainSettingsGroupSearch.advanced, title: "Advanced" },
   ];
+  const settingMatchesGroupedSectionTitle = (settingKey: string) =>
+    (Object.entries(MAIN_SETTINGS_SECTION_SETTING_KEYS) as Array<
+      [MainSettingsSectionId, readonly string[]]
+    >).some(([sectionId, settingKeys]) => {
+      if (sectionId === "agents") {
+        return false;
+      }
+      return (
+        mainSettingsGroupSearch[sectionId].groupTitleMatches === true &&
+        settingKeys.includes(settingKey)
+      );
+    });
+  const subsectionMatchesGroupedSectionTitle = (sectionId: MainSettingsScrollTargetId) =>
+    MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS[sectionId].some((settingKey) =>
+      settingMatchesGroupedSectionTitle(settingKey),
+    );
   const visibleFirstLaunchMainSettings =
     firstLaunchSetupVisibleSettings ?? FIRST_LAUNCH_SETUP_VISIBLE_MAIN_SETTINGS;
   const keepAwakeSettingsVisible = isFirstLaunchSetup || draft.showBetaFeatures;
@@ -2238,6 +2353,9 @@ export function SettingsModal({
         settingKey as FirstLaunchSetupMainSettingKey,
         visibleFirstLaunchMainSettings,
       );
+    }
+    if (settingsSearchQuery.trim() && settingMatchesGroupedSectionTitle(settingKey)) {
+      return true;
     }
     return shouldShowSetting(sectionResult, settingKey, showAdvancedSettings);
   };
@@ -2260,15 +2378,15 @@ export function SettingsModal({
      * the Power section until Enable Experimental Features is enabled, while
      * preserving the first-launch lid-close preference required by onboarding.
      */
-    if (sectionId === "power" && !keepAwakeSettingsVisible) {
-      return false;
-    }
     if (
-      sectionId === "debugging" &&
+      sectionId === "advanced" &&
       !isFirstLaunchSetup &&
       !debuggingModeDependentSettingsVisible
     ) {
-      return shouldShowSetting(sectionResult, "debuggingMode", showAdvancedSettings);
+      return (
+        shouldShowSettingsSection(settingsSearch.beta, showAdvancedSettings) ||
+        shouldShowSetting(settingsSearch.debugging, "debuggingMode", showAdvancedSettings)
+      );
     }
     if (isFirstLaunchSetup) {
       return MAIN_SETTINGS_SECTION_SETTING_KEYS[sectionId].some((settingKey) =>
@@ -2280,14 +2398,47 @@ export function SettingsModal({
     }
     return shouldShowSettingsSection(sectionResult, showAdvancedSettings);
   };
+  const mainSubsectionVisible = (
+    sectionId: MainSettingsScrollTargetId,
+    sectionResult: SettingsSectionSearchResult,
+  ) => {
+    if (sectionId === "power" && !keepAwakeSettingsVisible) {
+      return false;
+    }
+    if (
+      sectionId === "debugging" &&
+      !isFirstLaunchSetup &&
+      !debuggingModeDependentSettingsVisible
+    ) {
+      return (
+        subsectionMatchesGroupedSectionTitle(sectionId) ||
+        shouldShowSetting(sectionResult, "debuggingMode", showAdvancedSettings)
+      );
+    }
+    if (isFirstLaunchSetup) {
+      return MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS[sectionId].some((settingKey) =>
+        isFirstLaunchSetupMainSettingVisible(
+          settingKey as FirstLaunchSetupMainSettingKey,
+          visibleFirstLaunchMainSettings,
+        ),
+      );
+    }
+    if (settingsSearchQuery.trim() && subsectionMatchesGroupedSectionTitle(sectionId)) {
+      return true;
+    }
+    return shouldShowSettingsSection(sectionResult, showAdvancedSettings);
+  };
   const mainSettingsSectionRefs: MainSettingsSectionRefs = {
     agents: agentsOnboardingSectionRef,
+    advanced: betaSectionRef,
+    appearance: themingSectionRef,
     appIcon: appIconSectionRef,
     autoSleep: autoSleepSectionRef,
     beta: betaSectionRef,
     browser: browserSectionRef,
     debugging: debuggingSectionRef,
     editor: editorSectionRef,
+    notifications: soundsSectionRef,
     power: powerSectionRef,
     sessionCards: sessionCardsSectionRef,
     sidebar: sidebarSectionRef,
@@ -2295,11 +2446,14 @@ export function SettingsModal({
     sounds: soundsSectionRef,
     statusIndicators: statusIndicatorsSectionRef,
     storage: storageSectionRef,
+    system: powerSectionRef,
+    tools: browserSectionRef,
     terminal: ghosttyTerminalSectionRef,
     terminalBehavior: ghosttyBehaviorSectionRef,
     terminalDevServers: terminalDevServersSectionRef,
     terminalScrolling: ghosttyScrollingSectionRef,
     theming: themingSectionRef,
+    workspacesSessions: workspaceSectionRef,
     workspace: workspaceSectionRef,
   };
   const scrollMainSettingsSectionIntoView = (sectionId: MainSettingsSectionId) => {
@@ -2433,9 +2587,12 @@ export function SettingsModal({
      * scroll position.
      */
     const targetSectionRef = getMainSettingsSectionRef(initialSection, {
+      advanced: betaSectionRef,
+      appearance: themingSectionRef,
       autoSleep: autoSleepSectionRef,
       browser: browserSectionRef,
       editor: editorSectionRef,
+      notifications: soundsSectionRef,
       power: powerSectionRef,
       sessionCards: sessionCardsSectionRef,
       sidebar: sidebarSectionRef,
@@ -2443,18 +2600,21 @@ export function SettingsModal({
       beta: betaSectionRef,
       statusIndicators: statusIndicatorsSectionRef,
       storage: storageSectionRef,
+      system: powerSectionRef,
       sidebarTags: sidebarTagsSectionRef,
       debugging: debuggingSectionRef,
-	      terminal: ghosttyTerminalSectionRef,
-	      terminalBehavior: ghosttyBehaviorSectionRef,
-	      terminalScrolling: ghosttyScrollingSectionRef,
-	      terminalDevServers: terminalDevServersSectionRef,
-	      theming: themingSectionRef,
-	      // CDXC:AppIconPicker 2026-06-25-21:50: Allow titlebar/deep-link navigation to scroll to App Icon.
-	      appIcon: appIconSectionRef,
-	      workspace: workspaceSectionRef,
-	      agents: agentsOnboardingSectionRef,
-	    });
+      tools: browserSectionRef,
+      terminal: ghosttyTerminalSectionRef,
+      terminalBehavior: ghosttyBehaviorSectionRef,
+      terminalScrolling: ghosttyScrollingSectionRef,
+      terminalDevServers: terminalDevServersSectionRef,
+      theming: themingSectionRef,
+      // CDXC:AppIconPicker 2026-06-25-21:50: Allow titlebar/deep-link navigation to scroll to App Icon.
+      appIcon: appIconSectionRef,
+      workspacesSessions: workspaceSectionRef,
+      workspace: workspaceSectionRef,
+      agents: agentsOnboardingSectionRef,
+    });
     const animationFrame = requestAnimationFrame(() => {
       targetSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
@@ -2980,7 +3140,7 @@ export function SettingsModal({
                 ) : null}
               </SettingsSection>
             ) : null}
-            {mainSectionVisible("sidebar", settingsSearch.sidebar) ? (
+            {mainSubsectionVisible("sidebar", settingsSearch.sidebar) ? (
               <SettingsSection sectionRef={sidebarSectionRef} title="Sidebar">
               {/* CDXC:SidebarSettingsPresets 2026-06-12-07:10: Preset is the first Sidebar setting so users can apply Codex, Minimal, Detailed, or Recommended sidebar UI defaults before tuning individual controlled settings. */}
               {mainSettingVisible(settingsSearch.sidebar, "sidebarSettingsPreset") ? (
@@ -3107,7 +3267,7 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("theming", settingsSearch.theming) ? (
+            {mainSubsectionVisible("theming", settingsSearch.theming) ? (
               <SettingsSection sectionRef={themingSectionRef} title="Theming">
                 {/*
                   CDXC:SettingsTheming 2026-06-15-21:35:
@@ -3226,7 +3386,7 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("browser", settingsSearch.browser) ? (
+            {mainSubsectionVisible("browser", settingsSearch.browser) ? (
             <SettingsSection sectionRef={browserSectionRef} title="Browser">
               {/* CDXC:BrowserPanes 2026-05-27-07:24: Settings no longer exposes Chrome Canary attachment. Browser actions always open in workspace browser panes, leaving this section focused on pane behavior controls. */}
               {/* CDXC:BrowserFeedbackTools 2026-05-22-09:18:
@@ -3246,7 +3406,7 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("sessionCards", settingsSearch.sessionCards) ? (
+            {mainSubsectionVisible("sessionCards", settingsSearch.sessionCards) ? (
             <SettingsSection sectionRef={sessionCardsSectionRef} title="Session Cards">
               {/* CDXC:SidebarSessions 2026-05-16-08:46: Session-card agent identity should stay visible by default, with a user setting that makes those icons appear only while hovering a session row. */}
               {mainSettingVisible(settingsSearch.sessionCards, "hideSessionAgentIconUntilHover") ? (
@@ -3315,7 +3475,7 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("workspace", settingsSearch.workspace) ? (
+            {mainSubsectionVisible("workspace", settingsSearch.workspace) ? (
             <SettingsSection sectionRef={workspaceSectionRef} title="Workspace">
               {/*
                 CDXC:WorkspaceLayout 2026-05-30-07:24:
@@ -3366,7 +3526,7 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("terminal", settingsSearch.terminal) ? (
+            {mainSubsectionVisible("terminal", settingsSearch.terminal) ? (
             <SettingsSection sectionRef={ghosttyTerminalSectionRef} title="Terminal">
               {/* CDXC:TerminalSettings 2026-04-26-18:36: Terminal settings in
                   ghostex edit the shared Ghostty config file, so users must see
@@ -3635,7 +3795,7 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("terminalBehavior", settingsSearch.terminalBehavior) ? (
+            {mainSubsectionVisible("terminalBehavior", settingsSearch.terminalBehavior) ? (
             <SettingsSection sectionRef={ghosttyBehaviorSectionRef} title="Terminal Behavior">
               {/* CDXC:TerminalBehaviorSettings 2026-04-29-09:32: Expose the
                   Ghostty settings users commonly tune: scrollback memory,
@@ -3762,7 +3922,7 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("terminalScrolling", settingsSearch.terminalScrolling) ? (
+            {mainSubsectionVisible("terminalScrolling", settingsSearch.terminalScrolling) ? (
             <SettingsSection sectionRef={ghosttyScrollingSectionRef} title="Terminal Scrolling">
               {/* CDXC:TerminalScrollSettings 2026-04-29-08:56: Ghostty
                   scroll speed is controlled by mouse-scroll-multiplier.
@@ -3827,7 +3987,7 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("terminalDevServers", settingsSearch.terminalDevServers) ? (
+            {mainSubsectionVisible("terminalDevServers", settingsSearch.terminalDevServers) ? (
               <SettingsSection
                 description="Choose how Ghostex discovers running dev servers, where detected server URLs open, and which ports stay hidden."
                 sectionRef={terminalDevServersSectionRef}
@@ -3884,7 +4044,7 @@ export function SettingsModal({
               </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("editor", settingsSearch.editor) ? (
+            {mainSubsectionVisible("editor", settingsSearch.editor) ? (
             <SettingsSection sectionRef={editorSectionRef} title="Editor">
               {mainSettingVisible(settingsSearch.editor, "defaultEditorCommand") ? (
               <SelectField
@@ -3956,7 +4116,7 @@ export function SettingsModal({
              * CDXC:AppIconPicker 2026-06-28-06:05:
              * The advanced App Icon section is a custom-image control, not a bundled preset picker. Show one preview, one Select Image action, and an inline X on the custom preview to restore the default icon; omit separate reset and folder-reveal actions so the flow stays direct.
              */}
-            {mainSectionVisible("appIcon", settingsSearch.appIcon) ? (
+            {mainSubsectionVisible("appIcon", settingsSearch.appIcon) ? (
             <SettingsSection
               description="Changes the Dock and app-switcher icon. The app file icon may also change when macOS allows it."
               sectionRef={appIconSectionRef}
@@ -3974,7 +4134,7 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("autoSleep", settingsSearch.autoSleep) ? (
+            {mainSubsectionVisible("autoSleep", settingsSearch.autoSleep) ? (
             <SettingsSection sectionRef={autoSleepSectionRef} title="Auto Sleep">
               {/* CDXC:AutoSleep 2026-05-28-08:32: Auto Sleep controls belong in one Settings section so VS Code, Git, Project, Manage, browser, and agent sessions can be tuned independently without hiding the relationship between the policies. */}
               {mainSettingVisible(settingsSearch.autoSleep, "autoSleepCodeEditorEnabled") ? (
@@ -4127,7 +4287,7 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("power", settingsSearch.power) ? (
+            {mainSubsectionVisible("power", settingsSearch.power) ? (
             <SettingsSection sectionRef={powerSectionRef} title="Power">
               {mainSettingVisible(settingsSearch.power, "hideKeepAwakeTitlebarControl") ? (
               <ToggleField
@@ -4242,7 +4402,7 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("sounds", settingsSearch.sounds) ? (
+            {mainSubsectionVisible("sounds", settingsSearch.sounds) ? (
             <SettingsSection sectionRef={soundsSectionRef} title="Sounds">
               {mainSettingVisible(settingsSearch.sounds, "completionBellEnabled") ? (
               <ToggleField
@@ -4314,7 +4474,7 @@ export function SettingsModal({
             </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("sidebarTags", settingsSearch.sidebarTags) ? (
+            {mainSubsectionVisible("sidebarTags", settingsSearch.sidebarTags) ? (
               <SettingsSection
                 sectionRef={sidebarTagsSectionRef}
                 title="Sidebar Tags"
@@ -4340,7 +4500,7 @@ export function SettingsModal({
               </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("storage", settingsSearch.storage) ? (
+            {mainSubsectionVisible("storage", settingsSearch.storage) ? (
               <div ref={storageSectionRef}>
                 <GhostexFolderStatsSection
                   isLoading={ghostexFolderStatsLoading}
@@ -4350,7 +4510,7 @@ export function SettingsModal({
               </div>
             ) : null}
 
-            {mainSectionVisible("beta", settingsSearch.beta) ? (
+            {mainSubsectionVisible("beta", settingsSearch.beta) ? (
               <SettingsSection sectionRef={betaSectionRef} title="Experimental">
                 {mainSettingVisible(settingsSearch.beta, "showBetaFeatures") ? (
                   <>
@@ -4388,7 +4548,7 @@ export function SettingsModal({
               </SettingsSection>
             ) : null}
 
-            {mainSectionVisible("debugging", settingsSearch.debugging) ? (
+            {mainSubsectionVisible("debugging", settingsSearch.debugging) ? (
               <SettingsSection sectionRef={debuggingSectionRef} title="Debugging">
                 {debuggingSettingVisible("debuggingMode") ? (
                   <ToggleField
@@ -4554,6 +4714,9 @@ export function SettingsModal({
           {!isFirstLaunchSetup ? (
           <TabsContent className="mt-0 min-h-0 flex-1 overflow-hidden" value="projects">
             <ProjectsSettingsPanel
+              onManageAdditionalDocsFoldersChange={(value) =>
+                updateDraft("manageAdditionalDocsFolders", value)
+              }
               onPortlessEnabledChange={(checked) => updateDraft("portlessEnabled", checked)}
               onPortlessProtocolChange={(protocol) => updateDraft("portlessProtocol", protocol)}
               portless={portless}
@@ -5315,6 +5478,7 @@ function formatRemoteMachineSshTarget(machine: RemoteMachineSettings): string {
 }
 
 function ProjectsSettingsPanel({
+  onManageAdditionalDocsFoldersChange,
   onPortlessEnabledChange,
   onPortlessProtocolChange,
   portless,
@@ -5322,6 +5486,7 @@ function ProjectsSettingsPanel({
   settings,
   vscode,
 }: {
+  onManageAdditionalDocsFoldersChange: (value: string) => void;
   onPortlessEnabledChange: (checked: boolean) => void;
   onPortlessProtocolChange: (protocol: PortlessProtocol) => void;
   portless?: SidebarPortlessState;
@@ -5447,6 +5612,28 @@ function ProjectsSettingsPanel({
           portless={portless}
           settings={settings}
         />
+        <Card className="settings-project-command-card">
+          <CardContent className="flex flex-col gap-4 p-4">
+            {/*
+              CDXC:DocsSidebar 2026-06-30-19:47:
+              Docs folder scanning is a global Projects setting, not selected-project metadata. Keep it above the project selector and accept comma-separated project-relative folder names so entries like "plans, my documents, folders/folder name" scan matching folders under each project root.
+            */}
+            <FieldGroup>
+              <Field>
+                <FieldLabel>Docs folders</FieldLabel>
+                <SettingsInput
+                  aria-label="Docs folders"
+                  onChange={(event) => onManageAdditionalDocsFoldersChange(event.currentTarget.value)}
+                  placeholder="plans, my documents, folders/folder name"
+                  value={settings.manageAdditionalDocsFolders}
+                />
+                <FieldDescription>
+                  Comma-separated project-relative folders to scan recursively in Docs. Spaces around folder names are ignored.
+                </FieldDescription>
+              </Field>
+            </FieldGroup>
+          </CardContent>
+        </Card>
         {projects.length === 0 ? (
         <Empty>
           <EmptyHeader>
@@ -9005,6 +9192,27 @@ function getSettingsSectionSearch(
         .map((result) => result.item.id)
         .filter((settingKey) => settingKey !== "__section"),
     ),
+  };
+}
+
+function getGroupedSettingsSectionSearch(
+  query: string,
+  sectionTitle: string,
+  sections: readonly SettingsSectionSearchResult[],
+): SettingsSectionSearchResult {
+  const groupTitleResult = getSettingsSectionSearch(query, sectionTitle, []);
+  const visibleSettingKeys = new Set<string>(groupTitleResult.visibleSettingKeys);
+  for (const section of sections) {
+    for (const settingKey of section.visibleSettingKeys) {
+      visibleSettingKeys.add(settingKey);
+    }
+  }
+  return {
+    groupTitleMatches: groupTitleResult.sectionMatches,
+    isSearching: groupTitleResult.isSearching || sections.some((section) => section.isSearching),
+    sectionMatches:
+      groupTitleResult.sectionMatches || sections.some((section) => section.sectionMatches),
+    visibleSettingKeys,
   };
 }
 

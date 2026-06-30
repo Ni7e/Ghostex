@@ -163,6 +163,59 @@ describe("settings modal source", () => {
     expect(sidebarSubsectionStyles).not.toContain("background: var(--accent);");
   });
 
+  test("groups General settings sidebar sections into the reduced order", () => {
+    /*
+     * CDXC:SettingsNavigation 2026-06-30-01:23:
+     * General Settings should reduce the expanded sidebar list to grouped
+     * destinations while keeping Status Indicators and Notifications separate.
+     */
+    const settingsNavigation = sourceBetween(
+      settingsModalSource,
+      "const mainSettingsSectionNavigation",
+      "const visibleFirstLaunchMainSettings",
+    );
+    const expectedOrder = [
+      'id: "appearance"',
+      'id: "sidebar"',
+      'id: "workspacesSessions"',
+      'id: "terminal"',
+      'id: "tools"',
+      'id: "statusIndicators"',
+      'id: "notifications"',
+      'id: "system"',
+      'id: "advanced"',
+    ];
+
+    let previousIndex = -1;
+    for (const sectionId of expectedOrder) {
+      const sectionIndex = settingsNavigation.indexOf(sectionId);
+      expect(sectionIndex).toBeGreaterThan(previousIndex);
+      previousIndex = sectionIndex;
+    }
+    for (const removedStandaloneId of [
+      'id: "theming"',
+      'id: "sessionCards"',
+      'id: "terminalBehavior"',
+      'id: "terminalScrolling"',
+      'id: "terminalDevServers"',
+      'id: "appIcon"',
+      'id: "autoSleep"',
+      'id: "power"',
+      'id: "sounds"',
+      'id: "sidebarTags"',
+      'id: "storage"',
+      'id: "beta"',
+      'id: "debugging"',
+      'id: "browser"',
+      'id: "editor"',
+      'id: "workspace"',
+    ]) {
+      expect(settingsNavigation).not.toContain(removedStandaloneId);
+    }
+    expect(settingsNavigation).toContain('title: "Notifications"');
+    expect(settingsNavigation).toContain('title: "Status Indicators"');
+  });
+
   test("uses the native window title instead of duplicate Settings chrome", () => {
     /*
      * CDXC:SettingsWindow 2026-06-25-17:05:
@@ -315,7 +368,7 @@ describe("settings modal source", () => {
     const betaSection = sourceBetween(
       settingsModalSource,
       '<SettingsSection sectionRef={betaSectionRef} title="Experimental">',
-      '{mainSectionVisible("debugging", settingsSearch.debugging) ? (',
+      '{mainSubsectionVisible("debugging", settingsSearch.debugging) ? (',
     );
     const mainVisibility = sourceBetween(
       settingsModalSource,
@@ -329,6 +382,7 @@ describe("settings modal source", () => {
     expect(betaSection).toContain("Title bar and Power settings: Keep Awake");
     expect(betaSection).toContain("Keep Awake title-bar button");
     expect(mainVisibility).toContain('sectionId === "power" && !keepAwakeSettingsVisible');
+    expect(mainVisibility).toContain("system: powerSectionRef");
     expect(mainVisibility).toContain("first-launch lid-close preference");
   });
 
@@ -360,8 +414,9 @@ describe("settings modal source", () => {
     expect(dependentKeys).toContain('"showSessionDetailsCopyAction"');
     expect(debuggingVisibility).toContain("DEBUGGING_MODE_DEPENDENT_SETTING_KEY_SET.has(settingKey)");
     expect(debuggingVisibility).toContain('sectionId === "debugging"');
+    expect(debuggingVisibility).toContain("subsectionMatchesGroupedSectionTitle(sectionId)");
     expect(debuggingVisibility).toContain(
-      'return shouldShowSetting(sectionResult, "debuggingMode", showAdvancedSettings);',
+      'shouldShowSetting(sectionResult, "debuggingMode", showAdvancedSettings)',
     );
     expect(debuggingVisibility).toContain(
       "const hasVisibleMainSettings = visibleMainSettingsSectionNavigation.length > 0;",
@@ -447,7 +502,7 @@ describe("settings modal source", () => {
     const sectionKeys = sourceBetween(
       settingsModalSource,
       "terminalDevServers: [",
-      "editor: [",
+      "browser: [",
     );
     const settingsNavigation = sourceBetween(
       settingsModalSource,
@@ -457,13 +512,15 @@ describe("settings modal source", () => {
     const devServersSection = sourceBetween(
       settingsModalSource,
       'title="Dev Servers"',
-      '{mainSectionVisible("editor", settingsSearch.editor) ? (',
+      '{mainSubsectionVisible("editor", settingsSearch.editor) ? (',
     );
 
     expect(sectionKeys).toContain("terminalDevServerDetectionEnabled");
     expect(sectionKeys).toContain("terminalDevServerOpenTarget");
     expect(sectionKeys).toContain("terminalDevServerIgnoredPortRules");
-    expect(settingsNavigation).toContain('id: "terminalDevServers"');
+    expect(settingsNavigation).toContain('id: "tools"');
+    expect(settingsNavigation).toContain("mainSettingsGroupSearch.tools");
+    expect(settingsModalSource).toContain('"terminalDevServers"');
     expect(devServersSection).toContain("TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS");
     expect(devServersSection).not.toContain("TerminalDevServerBrowserTargetsField");
     expect(devServersSection).toContain("TerminalDevServerIgnoredPortsField");
@@ -480,7 +537,7 @@ describe("settings modal source", () => {
     const terminalSectionKeys = sourceBetween(
       settingsModalSource,
       "terminal: [",
-      "terminalBehavior: [",
+      "tools: [",
     );
     const terminalSearch = sourceBetween(
       settingsModalSource,
@@ -490,7 +547,7 @@ describe("settings modal source", () => {
     const terminalSection = sourceBetween(
       settingsModalSource,
       'title="Terminal"',
-      '{mainSectionVisible("terminalBehavior", settingsSearch.terminalBehavior) ? (',
+      '{mainSubsectionVisible("terminalBehavior", settingsSearch.terminalBehavior) ? (',
     );
 
     expect(terminalSectionKeys).toContain("terminalPaneHorizontalPaddingPx");
@@ -671,12 +728,16 @@ describe("settings modal source", () => {
   test("wires the App Icon picker to the native wire contract with prop-driven confirm-before-persist", () => {
     /*
      * CDXC:AppIconPicker 2026-06-28-06:05:
-     * The App Icon section must remain an advanced custom-image flow below
-     * Editor, speak the exact native wire-contract messages, receive
-     * appIconState as a PROP relayed through the modal host (mirroring
-     * osIntegrationStatus, not direct host-event listeners), only persist
-     * appIconSourceId after an ok state (confirm-before-persist), and render
-     * one preview with Select Image plus an inline default-restore X.
+     * The App Icon section must remain an advanced custom-image flow, speak the
+     * exact native wire-contract messages, receive appIconState as a PROP
+     * relayed through the modal host (mirroring osIntegrationStatus, not direct
+     * host-event listeners), only persist appIconSourceId after an ok state
+     * (confirm-before-persist), and render one preview with Select Image plus
+     * an inline default-restore X.
+     *
+     * CDXC:SettingsNavigation 2026-06-30-01:23:
+     * App Icon now lives under the grouped Appearance navigation item rather
+     * than owning a separate sidebar row.
      */
     const settingsNavigation = sourceBetween(
       settingsModalSource,
@@ -699,14 +760,14 @@ describe("settings modal source", () => {
       "function SoundField",
     );
 
-    // Section is registered as advanced and ordered below Editor.
-    expect(settingsNavigation).toContain('id: "appIcon"');
-    expect(settingsNavigation.indexOf('id: "appIcon"')).toBeGreaterThan(
-      settingsNavigation.indexOf('id: "editor"'),
+    // Section is registered as advanced and grouped under Appearance.
+    expect(settingsNavigation).toContain('id: "appearance"');
+    expect(settingsNavigation).not.toContain('id: "appIcon"');
+    expect(settingsNavigation.indexOf('id: "appearance"')).toBeLessThan(
+      settingsNavigation.indexOf('id: "sidebar"'),
     );
-    expect(settingsNavigation.indexOf('id: "autoSleep"')).toBeGreaterThan(
-      settingsNavigation.indexOf('id: "appIcon"'),
-    );
+    expect(settingsNavigation).toContain("mainSettingsGroupSearch.appearance");
+    expect(settingsModalSource).toContain("appIcon: appIconSectionRef");
     expect(advancedMainSettings).toContain('"appIconSourceId"');
     expect(appIconSearch).toContain("appIconSourceId");
 
