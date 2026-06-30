@@ -1,8 +1,3 @@
-<!--
-CDXC:ProjectOverview 2026-05-24-15:46:
-The repository needs a concise markdown overview that explains what Ghostex is, who it is for, and how the major product surfaces fit together without replacing the README or release handover docs.
--->
-
 ### Project Overview
 
 Ghostex is a native macOS workarea for running, organizing, and resuming agent CLI sessions. It is built around low-overhead Ghostty terminals, a project-aware sidebar, embedded browser and code panes, and companion mobile apps for connecting to live sessions remotely.
