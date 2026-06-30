@@ -463,6 +463,10 @@ function isAppModalDebugLoggingEnabled(): boolean {
   return isDiagnosticLoggingEnabledForScenario("native.app.modal");
 }
 
+function isRemoteGxserverInstallDebugLoggingEnabled(): boolean {
+  return isDiagnosticLoggingEnabledForScenario("native.remote.gxserver.install");
+}
+
 function isPromptEditorDebugLoggingEnabled(): boolean {
   return isDiagnosticLoggingEnabledForScenario("native.prompt.editor");
 }
@@ -510,6 +514,34 @@ function postSettingsModalDebugLog(
   details: Record<string, string | number | boolean | null | undefined>,
 ) {
   postAppModalDebugLog(event, details);
+}
+
+function postRemoteGxserverInstallDebugLog(
+  event: string,
+  details: Record<string, string | number | boolean | null | undefined>,
+) {
+  if (!isRemoteGxserverInstallDebugLoggingEnabled()) {
+    return;
+  }
+  /*
+   * CDXC:RemoteMachines 2026-06-30-03:05:
+   * The Install gxserver approval crash can happen before the sidebar or Swift
+   * connect path records anything. Persist a modal-host click breadcrumb under
+   * the dedicated remote-install scenario using only stable ids, booleans,
+   * timings, and render-state flags; never include machine names, hosts, paths,
+   * URLs, command text, passwords, tokens, or raw errors.
+   */
+  postAppModalHostMessage(
+    {
+      details: JSON.stringify({
+        performanceNow: Math.round(performance.now()),
+        ...details,
+      }),
+      event,
+      type: "remoteGxserverInstallDebugLog",
+    },
+    "RemoteGxserverInstall:debug",
+  );
 }
 
 /**
@@ -2497,12 +2529,29 @@ function AppModalHost() {
         machineName={remoteGxserverInstall?.remoteMachineName ?? "Remote"}
         onApprove={() => {
           if (!remoteGxserverInstall) {
+            postRemoteGxserverInstallDebugLog("remoteGxserverInstall.approve.missingState", {
+              activeModal: activeModal ?? null,
+              hasRemoteGxserverInstall: false,
+              nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
+            });
             return;
           }
+          postRemoteGxserverInstallDebugLog("remoteGxserverInstall.approve.clicked", {
+            activeModal: activeModal ?? null,
+            hasRemoteGxserverInstall: true,
+            installApproved: true,
+            nativeWindowSurface: window.__ghostex_APP_MODAL_HOST_SURFACE__ === "nativeWindow",
+            remoteMachineId: remoteGxserverInstall.remoteMachineId,
+          });
           vscode.postMessage({
             installApproved: true,
             remoteMachineId: remoteGxserverInstall.remoteMachineId,
             type: "reconnectRemoteMachine",
+          });
+          postRemoteGxserverInstallDebugLog("remoteGxserverInstall.approve.commandPosted", {
+            activeModal: activeModal ?? null,
+            installApproved: true,
+            remoteMachineId: remoteGxserverInstall.remoteMachineId,
           });
           closeModal();
         }}

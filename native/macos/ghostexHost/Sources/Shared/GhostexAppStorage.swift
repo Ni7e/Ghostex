@@ -490,6 +490,7 @@ enum NativeDiagnosticLoggingScenario: String {
   case nativePaneTabs = "native.pane.tabs"
   case nativeProjectBoard = "native.project.board"
   case nativePromptEditor = "native.prompt.editor"
+  case nativeRemoteGxserverInstall = "native.remote.gxserver.install"
   case nativeSessionTitle = "native.session.title"
   case nativeSidebarCollapse = "native.sidebar.collapse"
   case nativeSidebarRefresh = "native.sidebar.refresh"
@@ -522,7 +523,7 @@ enum NativeDiagnosticLogging {
       let scenarios = diagnosticLogging["scenarios"] as? [String: Any],
       let scenarioState = scenarios[scenario.rawValue]
     else {
-      return false
+      return isDefaultEnabledScenario(scenario)
     }
     if let enabled = scenarioState as? Bool {
       return enabled
@@ -539,6 +540,23 @@ enum NativeDiagnosticLogging {
       return false
     }
     return expiryDate.timeIntervalSinceNow > 0
+  }
+
+  private static func isDefaultEnabledScenario(_ scenario: NativeDiagnosticLoggingScenario) -> Bool {
+    /*
+     CDXC:RemoteMachines 2026-06-30-03:05:
+     Swift reads the persisted Settings JSON before React has a chance to
+     normalize newly introduced diagnostic defaults. Keep native's missing-key
+     behavior aligned with shared Settings defaults so app-modal and remote
+     gxserver install repro logs are enabled immediately after update, even for
+     existing settings files that do not yet contain those scenario ids.
+     */
+    switch scenario {
+    case .nativeAppModal, .nativeRemoteGxserverInstall:
+      return true
+    default:
+      return false
+    }
   }
 
   private static func cachedSettingsObject() -> [String: Any] {

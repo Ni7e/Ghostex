@@ -70,36 +70,96 @@ describe("remote attach sidebar ownership", () => {
     expect(presentationProjectionSource).toContain("!input.remoteAttachCarrierProjectIds?.has(project.projectId)");
   });
 
-  test("builds Android-compatible ssh attach commands", () => {
+  test("acknowledges remote attention through gxserver before opening the local carrier", () => {
     /*
-     * CDXC:RemoteAttach 2026-06-08-21:12:
-     * macOS Remote clicks should attach like Android: force an SSH PTY, target the Ghostex session id through `ghostex attach`, include project id when present, and run through a shell that loads user-managed Node/Homebrew paths.
-     * CDXC:RemoteAttach 2026-06-24-05:42: Ubuntu package installs must attach through the absolute app-installed wrapper before falling back to shell PATH so non-login /bin/sh does not report `ghostex: not found`.
+     * CDXC:RemoteSessionStatus 2026-06-30-04:05:
+     * Remote session clicks must clear the remote gxserver-owned Done status,
+     * not only focus or create the local SSH carrier terminal.
      */
+    const remoteActivityLocalFirst = sourceBetween(
+      nativeSidebarSource,
+      "function setRemotePresentationSessionActivityLocally",
+      "function setRemotePresentationSessionFlagsLocally",
+    );
+    expect(remoteActivityLocalFirst).toContain("const { attention: _attention, ...withoutAttention } = session");
+    expect(remoteActivityLocalFirst).toContain("acknowledgeAttention: false");
+    expect(remoteActivityLocalFirst).toContain('"nativeSidebar.remoteGxserver.presentationActivity.localFirst"');
+
+    const acknowledgeRemoteAttention = sourceBetween(
+      nativeSidebarSource,
+      "async function acknowledgeRemotePresentationSessionAttention",
+      "async function openRemoteAttachTerminalForTarget",
+    );
+    expect(acknowledgeRemoteAttention).toContain('session.activity !== "attention"');
+    expect(acknowledgeRemoteAttention).toContain("session.actions.acknowledgeAttention !== true");
+    expect(acknowledgeRemoteAttention).toContain("setRemotePresentationSessionActivityLocally(");
+    expect(acknowledgeRemoteAttention).toContain('"/api/updateAgentActivity"');
+    expect(acknowledgeRemoteAttention).toContain('event: "acknowledge"');
+    expect(acknowledgeRemoteAttention).toContain("refreshRemoteGxserverPresentationSnapshot(target.machineId, `${reason}-failed`)");
+
+    const openRemoteAttach = sourceBetween(
+      nativeSidebarSource,
+      "async function openRemoteAttachTerminalForTarget",
+      "async function createNativeRemoteAttachCarrierTerminal",
+    );
+    expect(openRemoteAttach).toContain('void acknowledgeRemotePresentationSessionAttention(target, "remote-attach-focus");');
+    expect(openRemoteAttach.indexOf("acknowledgeRemotePresentationSessionAttention")).toBeLessThan(
+      openRemoteAttach.indexOf("focusExistingRemoteAttachTerminal(target)"),
+    );
+  });
+
+  test("builds gxserver metadata-backed ssh attach commands", () => {
+    /*
+     * CDXC:RemoteAttach 2026-06-30-04:22:
+     * macOS Remote clicks should force an SSH PTY but use the already-authenticated remote gxserver attach metadata instead of a remote `ghostex` PATH lookup. This keeps macOS remote packages usable when gxserver/zmx are installed but the Ghostex CLI shim is absent.
+     */
+    const createPlan = sourceBetween(
+      nativeSidebarSource,
+      "async function createRemoteAttachCommandPlan",
+      "async function copyRemoteAttachCommandForTarget",
+    );
+    expect(createPlan).toContain("await buildRemoteGxserverAttachSshCommand(remoteMachine, target)");
+
     const attachSshCommand = sourceBetween(
       nativeSidebarSource,
-      "function buildRemoteGhostexAttachSshCommand",
-      "function buildRemoteGhostexAttachCommand",
+      "async function buildRemoteGxserverAttachSshCommand",
+      "async function resolveRemoteAttachMetadataForTarget",
     );
-    expect(attachSshCommand).toContain("buildRemoteLoginShellCommand(buildRemoteGhostexAttachCommand(target))");
+    expect(attachSshCommand).toContain("const attach = await resolveRemoteAttachMetadataForTarget(target)");
+    expect(attachSshCommand).toContain("const attachCommand = attach.attachCommand?.trim()");
+    expect(attachSshCommand).toContain("buildRemoteLoginShellCommand(attachCommand)");
     expect(attachSshCommand).toContain("buildRemoteSshCommand(remoteMachine, [remoteCommand], { forceTty: true })");
 
-    const attachCommand = sourceBetween(
+    const attachMetadata = sourceBetween(
       nativeSidebarSource,
-      "function buildRemoteGhostexAttachCommand",
+      "async function resolveRemoteAttachMetadataForTarget",
+      "async function fetchRemoteAttachSessionMetadataForTarget",
+    );
+    expect(attachMetadata).toContain("fetchRemoteAttachSessionMetadataForTarget(target)");
+    expect(attachMetadata).toContain("attach.restoreBlocked");
+    expect(attachMetadata).toContain("shouldStartZmxProviderBeforeNativeAttach(attach)");
+    expect(attachMetadata).toContain('"/api/startSessionProvider"');
+    expect(attachMetadata).toContain("buildRemoteAttachMetadataParams(target, attach.startupText)");
+
+    const fetchAttachMetadata = sourceBetween(
+      nativeSidebarSource,
+      "async function fetchRemoteAttachSessionMetadataForTarget",
+      "function buildRemoteAttachMetadataParams",
+    );
+    expect(fetchAttachMetadata).toContain('"/api/attachSessionMetadata"');
+    expect(fetchAttachMetadata).toContain("buildRemoteAttachMetadataParams(target)");
+
+    const attachParams = sourceBetween(
+      nativeSidebarSource,
+      "function buildRemoteAttachMetadataParams",
       "function buildRemoteLoginShellCommand",
     );
-    expect(attachCommand).toContain('remote_ghostex="$HOME/.ghostex/gxserver/package/bin/ghostex"');
-    expect(attachCommand).toContain('$HOME/.local/bin/ghostex');
-    expect(attachCommand).toContain('remote_ghostex="ghostex"');
-    expect(attachCommand).toContain('"attach"');
-    expect(attachCommand).toContain('"--session-id"');
-    expect(attachCommand).toContain("quoteNativeShellArg(target.sessionId)");
-    expect(attachCommand).toContain('"--project-id"');
-    expect(attachCommand).toContain("quoteNativeShellArg(target.projectId)");
-    expect(attachCommand).toContain('currentZmxPromptEditorAttachMode() === "monaco"');
-    expect(attachCommand).toContain('"--prompt-editor"');
-    expect(attachCommand).toContain('"monaco"');
+    expect(attachParams).toContain("currentZmxPromptEditorAttachMode()");
+    expect(attachParams).toContain("promptEditor: promptEditorAttachMode");
+    expect(attachParams).toContain("projectId: target.projectId");
+    expect(attachParams).toContain("sessionId: target.sessionId");
+    expect(attachParams).toContain("startupText !== undefined");
+    expect(attachParams).not.toContain('remote_ghostex="ghostex"');
 
     const loginShellCommand = sourceBetween(
       nativeSidebarSource,

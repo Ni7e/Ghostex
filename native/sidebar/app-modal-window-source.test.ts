@@ -5,8 +5,19 @@ const appDelegateSource = readFileSync(
   new URL("../macos/ghostexHost/Sources/ghostexHost/AppDelegate.swift", import.meta.url),
   "utf8",
 );
+const ghostexAppStorageSource = readFileSync(
+  new URL("../macos/ghostexHost/Sources/Shared/GhostexAppStorage.swift", import.meta.url),
+  "utf8",
+);
 const remoteGxserverClientSource = readFileSync(
   new URL("../macos/ghostexHost/Sources/ghostexHost/RemoteGxserverClient.swift", import.meta.url),
+  "utf8",
+);
+const remoteGxserverInstallDebugLogSource = readFileSync(
+  new URL(
+    "../macos/ghostexHost/Sources/ghostexHost/RemoteGxserverInstallDebugLog.swift",
+    import.meta.url,
+  ),
   "utf8",
 );
 const buildGhostexHostSource = readFileSync(
@@ -908,6 +919,100 @@ describe("native app modal window source", () => {
     expect(installOpenBranch).not.toContain("setRemoteGxserverInstall(undefined);");
     expect(modalHostSource).toContain("<RemoteGxserverInstallModal");
     expect(modalHostSource).toContain('type: "reconnectRemoteMachine"');
+  });
+
+  test("logs remote gxserver install approval and native phases without private payloads", () => {
+    /*
+    CDXC:RemoteMachines 2026-06-30-03:05:
+    Clicking Install gxserver can crash before support can inspect the running
+    app. The remote-install repro log must prove modal click, sidebar-command
+    relay, SSH probe, package upload, token, keychain, and tunnel phases while
+    avoiding raw machine names, SSH hosts/users, paths, URLs, command text,
+    stdout/stderr, tokens, passwords, and unsanitized error text.
+
+    CDXC:RemoteMachines 2026-06-30-03:32:
+    The remote install shell script must not embed literal NUL bytes in the SSH
+    argv string. Keep /proc cmdline's \000 escape textual and preflight Process
+    launch inputs so Foundation cannot terminate Ghostex before SSH starts.
+    */
+    expect(remoteGxserverInstallDebugLogSource).toContain("remote-gxserver-install-debug.log");
+    expect(remoteGxserverInstallDebugLogSource).toContain(
+      "NativeDiagnosticLogging.isScenarioEnabled(.nativeRemoteGxserverInstall)",
+    );
+    expect(remoteGxserverInstallDebugLogSource).toContain("NativeLogPrivacy.sanitizePayload");
+    expect(remoteGxserverInstallDebugLogSource).toContain(
+      "private static let maxLogFileBytes: UInt64 = 25 * 1024 * 1024",
+    );
+    expect(remoteGxserverInstallDebugLogSource).not.toMatch(/payload\["(sshHost|sshUser|remoteMachineName|remoteCommand|stdout|stderr|token|password)"\]/i);
+    const nativeDefaultScenarios = sourceBetween(
+      ghostexAppStorageSource,
+      "private static func isDefaultEnabledScenario(",
+      "private static func cachedSettingsObject()",
+    );
+    expect(nativeDefaultScenarios).toContain("case .nativeAppModal, .nativeRemoteGxserverInstall:");
+
+    const modalHostRemoteDebug = sourceBetween(
+      modalHostSource,
+      "function postRemoteGxserverInstallDebugLog(",
+      "/**\n * CDXC:PromptEditor",
+    );
+    expect(modalHostSource).toContain(
+      'return isDiagnosticLoggingEnabledForScenario("native.remote.gxserver.install");',
+    );
+    expect(modalHostRemoteDebug).toContain('type: "remoteGxserverInstallDebugLog"');
+    expect(modalHostRemoteDebug).toContain("performanceNow: Math.round(performance.now())");
+    expect(modalHostRemoteDebug).not.toMatch(
+      /remoteMachineName|sshHost|sshUser|commandText|password:|token:|path:|url:/i,
+    );
+    expect(modalHostSource).toContain("remoteGxserverInstall.approve.clicked");
+    expect(modalHostSource).toContain("remoteGxserverInstall.approve.commandPosted");
+
+    const nativeBridgeRemoteInstallLogger = sourceBetween(
+      appDelegateSource,
+      "private func logRemoteGxserverInstallSidebarCommand(",
+      "private func promptEditorDebugLogDetails(",
+    );
+    expect(nativeBridgeRemoteInstallLogger).toContain("RemoteGxserverInstallDebugLog.append");
+    expect(nativeBridgeRemoteInstallLogger).toContain('"reconnectRemoteMachine"');
+    expect(nativeBridgeRemoteInstallLogger).toContain('"installApproved"');
+    expect(nativeBridgeRemoteInstallLogger).not.toMatch(
+      /command\["(remoteMachineName|sshHost|sshUser|initialPath|url|commandText|password|token)"\]|String\(describing/i,
+    );
+
+    const clientDebugHelpers = sourceBetween(
+      remoteGxserverClientSource,
+      "private func appendRemoteInstallDebugLog(",
+      "/*\n   CDXC:RemoteMachines 2026-06-03-00:18:",
+    );
+    expect(clientDebugHelpers).toContain("RemoteGxserverInstallDebugLog.append");
+    expect(clientDebugHelpers).toContain('"hasIdentityFile"');
+    expect(clientDebugHelpers).toContain('"hasSshPort"');
+    expect(clientDebugHelpers).toContain('"hasSshUser"');
+    expect(clientDebugHelpers).toContain('"remoteMachineId"');
+    expect(clientDebugHelpers).toContain('"requestId"');
+    expect(clientDebugHelpers).toContain('"stdoutBytes"');
+    expect(clientDebugHelpers).toContain('"stderrBytes"');
+    expect(clientDebugHelpers).not.toMatch(
+      /remoteMachineName|payload\["sshHost"\]|payload\["sshUser"\]|payload\["path"\]|payload\["url"\]|payload\["command"\]|payload\["stdout"\]|payload\["stderr"\]|payload\["token"\]|payload\["password"\]/i,
+    );
+    expect(remoteGxserverClientSource).not.toContain("\u0000");
+    expect(remoteGxserverClientSource).toContain("tr '\\\\000' ' '");
+    expect(remoteGxserverClientSource).toContain("processLaunchInputIsSafe");
+    expect(remoteGxserverClientSource).toContain('executable.contains("\\u{0}")');
+    expect(remoteGxserverClientSource).toContain("Remote gxserver process launch input was invalid.");
+
+    for (const eventName of [
+      "remoteGxserver.connect.start",
+      "remoteGxserver.connect.tokenRead.result",
+      "remoteGxserver.install.probe.result",
+      "remoteGxserver.install.package.selected",
+      "remoteGxserver.install.upload.result",
+      "remoteGxserver.install.remoteCommand.result",
+      "remoteGxserver.connect.keychain.stored",
+      "remoteGxserver.tunnel.health.ok",
+    ]) {
+      expect(remoteGxserverClientSource).toContain(eventName);
+    }
   });
 
   test("shows create-time remote passwords without storing raw settings data", () => {

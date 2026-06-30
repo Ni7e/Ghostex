@@ -12943,6 +12943,13 @@ final class ghostexRootView: NSView {
       let event = message["event"] as? String ?? "nativeBridge.appModal.debug"
       let details = message["details"] as? String
       AppDelegate.appendAppModalDebugLog(event: "nativeBridge.appModal.\(event)", details: details)
+    case "remoteGxserverInstallDebugLog":
+      let event = message["event"] as? String ?? "modalHost.remoteGxserverInstall.unknown"
+      if let details = remoteGxserverInstallDebugLogDetails(from: message["details"]) {
+        RemoteGxserverInstallDebugLog.append(event: "modalHost.\(event)", details: details)
+      } else {
+        RemoteGxserverInstallDebugLog.append(event: "modalHost.\(event)")
+      }
     case "promptEditorDebugLog":
       let event = message["event"] as? String ?? "modalHost.promptEditor.unknown"
       /*
@@ -13161,9 +13168,11 @@ final class ghostexRootView: NSView {
         event: "nativeBridge.appModal.sidebarCommand.received",
         details: String(describing: sidebarMessage)
       )
+      logRemoteGxserverInstallSidebarCommand(sidebarMessage, phase: "received")
       if handleNativeSidebarModalCommand(sidebarMessage) {
         return
       }
+      logRemoteGxserverInstallSidebarCommand(sidebarMessage, phase: "dispatch")
       dispatchSidebarModalCommand(sidebarMessage)
     default:
       AppDelegate.appendAppModalErrorLog(
@@ -13192,6 +13201,65 @@ final class ghostexRootView: NSView {
     closeNativeAppModalWindow(reason: "commandPaletteToggleSidebar", sendReactClose: true)
     (window?.contentView as? ghostexRootView)?.toggleSidebarCollapsed()
     return true
+  }
+
+  private func remoteGxserverInstallDebugLogDetails(from rawDetails: Any?) -> [String: Any]? {
+    guard let details = rawDetails as? String,
+      !details.isEmpty,
+      let data = details.data(using: .utf8),
+      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else {
+      return nil
+    }
+    return normalizeRemoteGxserverInstallDebugLogPayload(payload)
+  }
+
+  private func normalizeRemoteGxserverInstallDebugLogPayload(_ payload: [String: Any]) -> [String: Any] {
+    payload.mapValues { normalizeRemoteGxserverInstallDebugLogValue($0) }
+  }
+
+  private func normalizeRemoteGxserverInstallDebugLogValue(_ value: Any) -> Any {
+    if let number = value as? NSNumber {
+      if CFGetTypeID(number) == CFBooleanGetTypeID() {
+        return number.boolValue
+      }
+      let doubleValue = number.doubleValue
+      if doubleValue.rounded(.towardZero) == doubleValue {
+        return Int64(doubleValue)
+      }
+      return doubleValue
+    }
+    if let array = value as? [Any] {
+      return array.map { normalizeRemoteGxserverInstallDebugLogValue($0) }
+    }
+    if let dictionary = value as? [String: Any] {
+      return normalizeRemoteGxserverInstallDebugLogPayload(dictionary)
+    }
+    return value
+  }
+
+  private func logRemoteGxserverInstallSidebarCommand(_ message: Any, phase: String) {
+    guard let command = message as? [String: Any],
+      command["type"] as? String == "reconnectRemoteMachine"
+    else {
+      return
+    }
+    /*
+     CDXC:RemoteMachines 2026-06-30-03:05:
+     The remote gxserver approval click crosses the app-modal child window into
+     the sidebar webview before Swift starts SSH. Log only the reconnect command
+     phase, request shape, stable machine id, and approval flag so a crash in
+     bridge delivery can be separated from the later install without recording
+     the remote machine name, host, user, path, URL, command text, or secrets.
+     */
+    RemoteGxserverInstallDebugLog.append(
+      event: "nativeBridge.remoteGxserverInstall.sidebarCommand.\(phase)",
+      details: [
+        "hasRemoteMachineId": (command["remoteMachineId"] as? String)?.isEmpty == false,
+        "installApproved": command["installApproved"] as? Bool == true,
+        "remoteMachineId": command["remoteMachineId"] as? String ?? "",
+        "source": "nativeBridge",
+      ])
   }
 
   private func promptEditorDebugLogDetails(from rawDetails: Any?) -> [String: Any]? {

@@ -52,6 +52,49 @@ final class RemoteGxserverClient {
 
   private init() {}
 
+  private func appendRemoteInstallDebugLog(
+    _ event: String,
+    command: RemoteGxserverConnect,
+    details: [String: Any] = [:]
+  ) {
+    var payload = details
+    payload["hasIdentityFile"] = command.identityFile?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    payload["hasSshPort"] = (command.sshPort ?? 0) > 0
+    payload["hasSshUser"] = command.sshUser?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    payload["installApproved"] = command.installApproved == true
+    payload["remoteMachineId"] = command.remoteMachineId
+    payload["requestId"] = command.requestId
+    RemoteGxserverInstallDebugLog.append(event: event, details: payload)
+  }
+
+  private func remoteProcessDebugSummary(_ result: RemoteProcessResult) -> [String: Any] {
+    [
+      "exitCode": Int(result.exitCode),
+      "stderrBytes": result.stderr.lengthOfBytes(using: .utf8),
+      "stdoutBytes": result.stdout.lengthOfBytes(using: .utf8),
+      "timedOut": result.exitCode == 124,
+    ]
+  }
+
+  private func remoteInstallTargetDebugSummary(_ target: RemoteGxserverInstallTarget) -> [String: Any] {
+    /*
+     CDXC:RemoteMachines 2026-06-30-04:05:
+     Remote install debug summaries must keep optional platform fields JSON-compatible without relying on Swift ternary inference, because missing Linux distribution values should serialize as null and still compile in Release builds.
+     */
+    let distribution = target.distribution?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let remoteDistribution: Any
+    if let distribution, !distribution.isEmpty {
+      remoteDistribution = distribution
+    } else {
+      remoteDistribution = NSNull()
+    }
+    return [
+      "remoteArch": target.normalizedArch,
+      "remoteDistribution": remoteDistribution,
+      "remoteOS": target.normalizedOS,
+    ]
+  }
+
   /*
    CDXC:RemoteMachines 2026-06-03-00:18:
    Remote connection setup is native-owned: Swift runs SSH, starts or checks
@@ -206,23 +249,37 @@ final class RemoteGxserverClient {
   }
 
   private func connectSynchronously(_ command: RemoteGxserverConnect) -> HostEvent {
+    appendRemoteInstallDebugLog("remoteGxserver.connect.start", command: command)
     guard !command.remoteMachineId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      appendRemoteInstallDebugLog(
+        "remoteGxserver.connect.invalid",
+        command: command,
+        details: ["reason": "missingRemoteMachineId"])
       return statusEvent(command, state: "invalid", ok: false, message: "Remote machine id is missing.")
     }
     guard !command.sshHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      appendRemoteInstallDebugLog(
+        "remoteGxserver.connect.invalid",
+        command: command,
+        details: ["reason": "missingSshHost"])
       return statusEvent(command, state: "invalid", ok: false, message: "Remote SSH host is missing.")
     }
+    let hasSavedSshPassword = keychainHasSshPassword(remoteMachineId: command.remoteMachineId)
 
     let target = RemoteSshTarget(
       host: command.sshHost,
       identityFile: expandedLocalPath(command.identityFile),
       port: command.sshPort,
-      sshPasswordAccount: keychainHasSshPassword(remoteMachineId: command.remoteMachineId)
+      sshPasswordAccount: hasSavedSshPassword
         ? command.remoteMachineId
         : nil,
       user: command.sshUser?.trimmingCharacters(in: .whitespacesAndNewlines)
     )
 
+    appendRemoteInstallDebugLog(
+      "remoteGxserver.connect.targetPrepared",
+      command: command,
+      details: ["hasSavedSshPassword": hasSavedSshPassword])
     terminateExistingConnection(remoteMachineId: command.remoteMachineId)
 
     let tokenResult = runSsh(
@@ -230,16 +287,29 @@ final class RemoteGxserverClient {
       remoteCommand: remoteTokenReadCommand(),
       timeoutSeconds: 18
     )
+    appendRemoteInstallDebugLog(
+      "remoteGxserver.connect.tokenRead.result",
+      command: command,
+      details: remoteProcessDebugSummary(tokenResult))
     if tokenResult.exitCode == 127 {
       if command.installApproved == true {
         /*
          CDXC:RemoteMachines 2026-06-23-09:46:
          First-time Remote install must distinguish the Mac app's local gxserver package from a remote Ubuntu target. Probe uname before upload and select only a matching bundled package so Ghostex never copies a Darwin binary to Linux.
          */
+        appendRemoteInstallDebugLog("remoteGxserver.install.approved", command: command)
         let installTargetResult = probeRemoteInstallTarget(target: target)
+        appendRemoteInstallDebugLog(
+          "remoteGxserver.install.probe.result",
+          command: command,
+          details: remoteProcessDebugSummary(installTargetResult))
         guard installTargetResult.exitCode == 0,
           let installTarget = extractRemoteInstallTarget(from: installTargetResult.stdout)
         else {
+          appendRemoteInstallDebugLog(
+            "remoteGxserver.install.probe.failed",
+            command: command,
+            details: remoteProcessDebugSummary(installTargetResult))
           return statusEvent(
             command,
             state: "installFailed",
@@ -247,7 +317,15 @@ final class RemoteGxserverClient {
             message: "Could not identify the remote operating system and CPU before installing gxserver."
           )
         }
+        appendRemoteInstallDebugLog(
+          "remoteGxserver.install.target.detected",
+          command: command,
+          details: remoteInstallTargetDebugSummary(installTarget))
         guard let packageURL = bundledGxserverPackageURL(for: installTarget) else {
+          appendRemoteInstallDebugLog(
+            "remoteGxserver.install.package.unsupported",
+            command: command,
+            details: remoteInstallTargetDebugSummary(installTarget))
           return statusEvent(
             command,
             state: "unsupportedRemotePlatform",
@@ -255,8 +333,23 @@ final class RemoteGxserverClient {
             message: unsupportedRemotePackageMessage(for: installTarget)
           )
         }
-        let installResult = installBundledGxserverAndReadToken(target: target, packageURL: packageURL)
+        appendRemoteInstallDebugLog(
+          "remoteGxserver.install.package.selected",
+          command: command,
+          details: [
+            "packageResource": packageURL.lastPathComponent,
+            "packageResourceExists": FileManager.default.fileExists(atPath: packageURL.path),
+          ].merging(remoteInstallTargetDebugSummary(installTarget)) { current, _ in current })
+        let installResult = installBundledGxserverAndReadToken(command: command, target: target, packageURL: packageURL)
+        appendRemoteInstallDebugLog(
+          "remoteGxserver.install.result",
+          command: command,
+          details: remoteProcessDebugSummary(installResult))
         if installResult.exitCode != 0 {
+          appendRemoteInstallDebugLog(
+            "remoteGxserver.install.failed",
+            command: command,
+            details: remoteProcessDebugSummary(installResult))
           return statusEvent(
             command,
             state: "installFailed",
@@ -266,6 +359,7 @@ final class RemoteGxserverClient {
         }
         return finishConnectWithTokenResult(command: command, target: target, tokenResult: installResult)
       }
+      appendRemoteInstallDebugLog("remoteGxserver.install.approvalRequired", command: command)
       return statusEvent(
         command,
         state: "installApprovalRequired",
@@ -274,6 +368,10 @@ final class RemoteGxserverClient {
       )
     }
     if tokenResult.exitCode != 0 {
+      appendRemoteInstallDebugLog(
+        "remoteGxserver.connect.sshFailed",
+        command: command,
+        details: remoteProcessDebugSummary(tokenResult))
       return statusEvent(
         command,
         state: "sshFailed",
@@ -290,8 +388,19 @@ final class RemoteGxserverClient {
     target: RemoteSshTarget,
     tokenResult: RemoteProcessResult
   ) -> HostEvent {
+    appendRemoteInstallDebugLog(
+      "remoteGxserver.connect.token.finishStart",
+      command: command,
+      details: remoteProcessDebugSummary(tokenResult))
     let token = extractRemoteAuthToken(from: tokenResult.stdout)
     guard isValidAuthToken(token) else {
+      appendRemoteInstallDebugLog(
+        "remoteGxserver.connect.token.invalid",
+        command: command,
+        details: [
+          "hasTokenText": !token.isEmpty,
+          "tokenLength": token.count,
+        ])
       return statusEvent(
         command,
         state: "tokenUnavailable",
@@ -302,7 +411,12 @@ final class RemoteGxserverClient {
 
     do {
       try storeTokenInKeychain(token, remoteMachineId: command.remoteMachineId)
+      appendRemoteInstallDebugLog("remoteGxserver.connect.keychain.stored", command: command)
     } catch {
+      appendRemoteInstallDebugLog(
+        "remoteGxserver.connect.keychain.failed",
+        command: command,
+        details: ["errorDomain": (error as NSError).domain, "errorCode": (error as NSError).code])
       return statusEvent(
         command,
         state: "keychainFailed",
@@ -312,7 +426,12 @@ final class RemoteGxserverClient {
     }
 
     do {
+      appendRemoteInstallDebugLog("remoteGxserver.connect.tunnel.openStart", command: command)
       let connection = try openTunnel(command: command, target: target, token: token)
+      appendRemoteInstallDebugLog(
+        "remoteGxserver.connect.tunnel.opened",
+        command: command,
+        details: ["localPort": connection.localPort])
       return statusEvent(
         command,
         state: "connected",
@@ -325,6 +444,10 @@ final class RemoteGxserverClient {
         ]
       )
     } catch {
+      appendRemoteInstallDebugLog(
+        "remoteGxserver.connect.tunnel.failed",
+        command: command,
+        details: ["errorDomain": (error as NSError).domain, "errorCode": (error as NSError).code])
       return statusEvent(command, state: "tunnelFailed", ok: false, message: error.localizedDescription)
     }
   }
@@ -353,6 +476,7 @@ final class RemoteGxserverClient {
 
   private func remoteStopStaleGxserverListenerCommand() -> String {
     """
+    # CDXC:RemoteMachines 2026-06-30-03:32: Remote install scripts are passed as one SSH argv string; keep shell escape sequences textual because an embedded NUL makes Foundation's Process launch crash before SSH can return a normal install failure.
     ghostex_remote_gxserver_port=58744
     ghostex_remote_listener_pids() {
       ss -ltnp 2>/dev/null | awk -v port=":$ghostex_remote_gxserver_port" '$0 ~ port "[[:space:]]" { while (match($0, /pid=[0-9]+/)) { print substr($0, RSTART + 4, RLENGTH - 4); $0 = substr($0, RSTART + RLENGTH) } }' || true
@@ -365,7 +489,7 @@ final class RemoteGxserverClient {
       esac
       [ "$candidate_pid" -gt 0 ] 2>/dev/null || return 1
       if [ -r "/proc/$candidate_pid/cmdline" ]; then
-        candidate_cmdline="$(tr '\000' ' ' < "/proc/$candidate_pid/cmdline" 2>/dev/null || true)"
+        candidate_cmdline="$(tr '\\000' ' ' < "/proc/$candidate_pid/cmdline" 2>/dev/null || true)"
         case "$candidate_cmdline" in
           *".ghostex/gxserver/"*"gxserver"*|*"gxserver --foreground"*) return 0 ;;
         esac
@@ -410,13 +534,25 @@ final class RemoteGxserverClient {
     """
   }
 
-  private func installBundledGxserverAndReadToken(target: RemoteSshTarget, packageURL: URL) -> RemoteProcessResult {
+  private func installBundledGxserverAndReadToken(
+    command: RemoteGxserverConnect,
+    target: RemoteSshTarget,
+    packageURL: URL
+  ) -> RemoteProcessResult {
+    appendRemoteInstallDebugLog(
+      "remoteGxserver.install.package.archivePrepare",
+      command: command,
+      details: ["packageResource": packageURL.lastPathComponent])
     let tempDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("ghostex-remote-gxserver-\(UUID().uuidString)", isDirectory: true)
     let archiveURL = tempDirectory.appendingPathComponent("gxserver.tar.gz")
     do {
       try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
     } catch {
+      appendRemoteInstallDebugLog(
+        "remoteGxserver.install.package.archivePrepareFailed",
+        command: command,
+        details: ["errorDomain": (error as NSError).domain, "errorCode": (error as NSError).code])
       return RemoteProcessResult(exitCode: 126, stderr: "Could not prepare gxserver upload archive.", stdout: "")
     }
     defer {
@@ -461,15 +597,29 @@ final class RemoteGxserverClient {
       environment: ["COPYFILE_DISABLE": "1"],
       timeoutSeconds: 60
     )
+    appendRemoteInstallDebugLog(
+      "remoteGxserver.install.archive.result",
+      command: command,
+      details: remoteProcessDebugSummary(tarResult))
     if tarResult.exitCode != 0 {
       return RemoteProcessResult(exitCode: tarResult.exitCode, stderr: "Could not archive bundled gxserver package.", stdout: "")
     }
+    let archiveAttributes = try? FileManager.default.attributesOfItem(atPath: archiveURL.path)
+    let archiveBytes = (archiveAttributes?[.size] as? NSNumber)?.uint64Value ?? 0
+    appendRemoteInstallDebugLog(
+      "remoteGxserver.install.archive.ready",
+      command: command,
+      details: ["archiveBytes": archiveBytes])
 
     let mkdirResult = runSsh(
       target: target,
       remoteCommand: "mkdir -p \"$HOME/.ghostex/gxserver\"",
       timeoutSeconds: 12
     )
+    appendRemoteInstallDebugLog(
+      "remoteGxserver.install.remoteDirectory.result",
+      command: command,
+      details: remoteProcessDebugSummary(mkdirResult))
     if mkdirResult.exitCode != 0 {
       return mkdirResult
     }
@@ -480,6 +630,10 @@ final class RemoteGxserverClient {
       remotePath: "~/.ghostex/gxserver/gxserver-upload.tar.gz",
       timeoutSeconds: 120
     )
+    appendRemoteInstallDebugLog(
+      "remoteGxserver.install.upload.result",
+      command: command,
+      details: remoteProcessDebugSummary(uploadResult))
     if uploadResult.exitCode != 0 {
       return RemoteProcessResult(exitCode: uploadResult.exitCode, stderr: "Could not upload gxserver package over SSH.", stdout: "")
     }
@@ -553,7 +707,12 @@ final class RemoteGxserverClient {
     rm -f "$upload_path"
     \(remoteTokenReadCommand())
     """
-    return runSsh(target: target, remoteCommand: installCommand, timeoutSeconds: 45)
+    let installResult = runSsh(target: target, remoteCommand: installCommand, timeoutSeconds: 45)
+    appendRemoteInstallDebugLog(
+      "remoteGxserver.install.remoteCommand.result",
+      command: command,
+      details: remoteProcessDebugSummary(installResult))
+    return installResult
   }
 
   private func probeRemoteInstallTarget(target: RemoteSshTarget) -> RemoteProcessResult {
@@ -711,8 +870,12 @@ final class RemoteGxserverClient {
 
   private func openTunnel(command: RemoteGxserverConnect, target: RemoteSshTarget, token: String) throws -> RemoteGxserverConnection {
     var lastError: Error?
-    for _ in 0..<8 {
+    for attemptIndex in 0..<8 {
       let localPort = Int.random(in: 42000...58999)
+      appendRemoteInstallDebugLog(
+        "remoteGxserver.tunnel.attempt",
+        command: command,
+        details: ["attempt": attemptIndex + 1, "localPort": localPort])
       let process = Process()
       process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
       var arguments = ["-N"]
@@ -730,6 +893,10 @@ final class RemoteGxserverClient {
       do {
         askpass = try makeSshAskpassScript(target: target)
       } catch {
+        appendRemoteInstallDebugLog(
+          "remoteGxserver.tunnel.askpass.failed",
+          command: command,
+          details: ["attempt": attemptIndex + 1, "errorDomain": (error as NSError).domain])
         lastError = error
         continue
       }
@@ -741,12 +908,20 @@ final class RemoteGxserverClient {
       do {
         try process.run()
       } catch {
+        appendRemoteInstallDebugLog(
+          "remoteGxserver.tunnel.processRun.failed",
+          command: command,
+          details: ["attempt": attemptIndex + 1, "errorDomain": (error as NSError).domain])
         lastError = error
         continue
       }
 
       Thread.sleep(forTimeInterval: 0.35)
       if !process.isRunning {
+        appendRemoteInstallDebugLog(
+          "remoteGxserver.tunnel.processExited",
+          command: command,
+          details: ["attempt": attemptIndex + 1, "exitCode": Int(process.terminationStatus)])
         lastError = NSError(
           domain: "RemoteGxserverTunnel",
           code: 1,
@@ -757,6 +932,10 @@ final class RemoteGxserverClient {
 
       let baseURL = "http://127.0.0.1:\(localPort)"
       if waitForAuthenticatedHealth(baseURL: baseURL, token: token) {
+        appendRemoteInstallDebugLog(
+          "remoteGxserver.tunnel.health.ok",
+          command: command,
+          details: ["attempt": attemptIndex + 1, "localPort": localPort])
         let connection = RemoteGxserverConnection(
           baseURL: baseURL,
           localPort: localPort,
@@ -771,6 +950,10 @@ final class RemoteGxserverClient {
       }
 
       process.terminate()
+      appendRemoteInstallDebugLog(
+        "remoteGxserver.tunnel.health.failed",
+        command: command,
+        details: ["attempt": attemptIndex + 1, "localPort": localPort])
       lastError = NSError(
         domain: "RemoteGxserverTunnel",
         code: 2,
@@ -1092,6 +1275,9 @@ final class RemoteGxserverClient {
     environment: [String: String]? = nil,
     timeoutSeconds: TimeInterval
   ) -> RemoteProcessResult {
+    guard processLaunchInputIsSafe(executable: executable, arguments: arguments, environment: environment) else {
+      return RemoteProcessResult(exitCode: 126, stderr: "Remote gxserver process launch input was invalid.", stdout: "")
+    }
     let process = Process()
     let stdoutPipe = Pipe()
     let stderrPipe = Pipe()
@@ -1121,6 +1307,29 @@ final class RemoteGxserverClient {
     let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     return RemoteProcessResult(exitCode: process.terminationStatus, stderr: stderr, stdout: stdout)
+  }
+
+  private func processLaunchInputIsSafe(
+    executable: String,
+    arguments: [String],
+    environment: [String: String]?
+  ) -> Bool {
+    /*
+     CDXC:RemoteMachines 2026-06-30-03:32:
+     Foundation's Process can raise NSInvalidArgumentException, not a Swift
+     Error, when executable, argv, or environment strings contain NUL bytes.
+     Remote setup must reject those inputs before launch so Install reports a
+     controlled failure instead of terminating Ghostex.
+     */
+    guard !executable.contains("\u{0}"), !arguments.contains(where: { $0.contains("\u{0}") }) else {
+      return false
+    }
+    if let environment {
+      for (key, value) in environment where key.contains("\u{0}") || value.contains("\u{0}") {
+        return false
+      }
+    }
+    return true
   }
 
   private func sshTargetArguments(_ target: RemoteSshTarget) -> [String] {

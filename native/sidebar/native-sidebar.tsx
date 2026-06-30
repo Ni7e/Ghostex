@@ -732,9 +732,14 @@ type NativeHostCommand =
       gxserverDaemon?: NativeGxserverDaemonStatus;
 	      petOverlayEnabled?: boolean;
 	      showSessionIdInTerminalPanes?: boolean;
-      showProjectEditorDiffFileCount?: boolean;
-      /**
-       * CDXC:SidebarTheme 2026-06-15-01:43:
+	      showProjectEditorDiffFileCount?: boolean;
+	      /**
+	       * CDXC:DocsSidebar 2026-06-30-19:47:
+	       * The sidebar owns the global comma-separated Docs folder setting, while AppKit owns filesystem scanning and live watchers. Carry the normalized text with layout sync so open Docs panes can rescan without being recreated.
+	       */
+	      manageAdditionalDocsFolders?: string;
+	      /**
+	       * CDXC:SidebarTheme 2026-06-15-01:43:
        * Native titlebar/dropdown backing surfaces are AppKit-owned, so layout
        * sync carries the resolved sidebar theme beside the compact titlebar
        * state instead of asking the isolated titlebar webview to infer it.
@@ -4802,7 +4807,12 @@ function currentZmxPromptEditorAttachMode(): "monaco" | undefined {
   zmx prompt-editor routing is a current-client capability, not a durable session
   setting. Desktop renderers advertise Monaco only when this client has the
   Monaco backend selected; missing capability keeps TUI, Android, iOS, and SSH
-  attaches on gte without storing who originally created the provider.
+  attaches on the machine editor without storing who originally created the provider.
+
+  CDXC:PromptEditorBackend 2026-06-30-03:11:
+  "Use default from this machine" must not advertise Monaco to zmx. Return a
+  capability only for the Monaco setting so SSH and remote attaches can fall
+  through to their preserved EDITOR/VISUAL command.
   */
   return settings.promptEditorBackend === "monaco" ? "monaco" : undefined;
 }
@@ -18849,6 +18859,69 @@ function setRemotePresentationSessionLifecycleLocally(
     reason,
   });
   publish();
+}
+
+function setRemotePresentationSessionActivityLocally(
+  machineId: string,
+  projectId: string,
+  sessionId: string,
+  activity: GxserverPresentationSession["activity"],
+  reason: string,
+): boolean {
+  const presentation = remotePresentationSnapshotsByMachineId.get(machineId);
+  if (!presentation) {
+    return false;
+  }
+  let didChange = false;
+  const updatedAt = new Date().toISOString();
+  const canAcknowledgeAttention = activity === "attention";
+  const sessions = presentation.sessions.map((session) => {
+    if (session.projectId !== projectId || session.sessionId !== sessionId) {
+      return session;
+    }
+    if (
+      session.activity === activity &&
+      session.actions.acknowledgeAttention === canAcknowledgeAttention &&
+      (activity === "attention" || session.attention === undefined)
+    ) {
+      return session;
+    }
+    didChange = true;
+    if (activity !== "attention") {
+      const { attention: _attention, ...withoutAttention } = session;
+      return {
+        ...withoutAttention,
+        actions: {
+          ...session.actions,
+          acknowledgeAttention: false,
+        },
+        activity,
+        updatedAt,
+      };
+    }
+    return {
+      ...session,
+      actions: {
+        ...session.actions,
+        acknowledgeAttention: true,
+      },
+      activity,
+      updatedAt,
+    };
+  });
+  if (!didChange) {
+    return false;
+  }
+  remotePresentationSnapshotsByMachineId.set(machineId, {
+    ...presentation,
+    sessions,
+  });
+  appendSidebarRefreshDebugLog("nativeSidebar.remoteGxserver.presentationActivity.localFirst", {
+    activity,
+    reason,
+  });
+  publish();
+  return true;
 }
 
 function setRemotePresentationSessionFlagsLocally(
@@ -33536,10 +33609,10 @@ function compareRemoteAttachCandidateSessions(
   return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
 }
 
-function createRemoteAttachCommandPlan(
+async function createRemoteAttachCommandPlan(
   target: RemoteAttachTarget,
   action: "copy" | "open",
-): RemoteAttachCommandPlan | undefined {
+): Promise<RemoteAttachCommandPlan | undefined> {
   const remoteMachine = settings.remoteMachines.find((machine) => machine.id === target.machineId);
   const presentation = remotePresentationSnapshotsByMachineId.get(target.machineId);
   const session = presentation?.sessions.find(
@@ -33556,14 +33629,24 @@ function createRemoteAttachCommandPlan(
     return undefined;
   }
   /*
-   * CDXC:RemoteAttach 2026-06-08-19:53:
-   * macOS remote session clicks must match Android/iOS attach semantics: open SSH with a forced PTY and run `ghostex attach --session-id --project-id` inside the remote user's login shell. Do not use raw gxserver attach metadata for the interactive remote pane because the mobile path relies on the stable Ghostex id contract and PTY allocation.
+   * CDXC:RemoteAttach 2026-06-30-04:22:
+   * Desktop remote session clicks already have an authenticated tunnel to the
+   * owning gxserver, so build the SSH carrier from `/api/attachSessionMetadata`
+   * instead of requiring a remote `ghostex` CLI shim. macOS remote installs can
+   * provide gxserver and zmx without putting `ghostex` on PATH, and the pane
+   * should still attach by session id through gxserver's zmx command.
    */
-  return { remoteMachine, session, sshCommand: buildRemoteGhostexAttachSshCommand(remoteMachine, target) };
+  return { remoteMachine, session, sshCommand: await buildRemoteGxserverAttachSshCommand(remoteMachine, target) };
 }
 
 async function copyRemoteAttachCommandForTarget(target: RemoteAttachTarget): Promise<void> {
-  const plan = createRemoteAttachCommandPlan(target, "copy");
+  let plan: RemoteAttachCommandPlan | undefined;
+  try {
+    plan = await createRemoteAttachCommandPlan(target, "copy");
+  } catch (error) {
+    showAppToast("error", "Remote command unavailable", error instanceof Error ? error.message : String(error));
+    return;
+  }
   if (!plan) {
     return;
   }
@@ -33571,11 +33654,64 @@ async function copyRemoteAttachCommandForTarget(target: RemoteAttachTarget): Pro
   showAppToast("info", "Remote attach command copied", `SSH command copied for ${plan.remoteMachine.name}.`);
 }
 
+async function acknowledgeRemotePresentationSessionAttention(
+  target: RemoteAttachTarget,
+  reason: string,
+): Promise<boolean> {
+  const presentation = remotePresentationSnapshotsByMachineId.get(target.machineId);
+  const session = presentation?.sessions.find(
+    (candidate) =>
+      candidate.projectId === target.projectId &&
+      candidate.sessionId === target.sessionId,
+  );
+  if (
+    !session ||
+    (session.activity !== "attention" && session.actions.acknowledgeAttention !== true)
+  ) {
+    return false;
+  }
+  /*
+   * CDXC:RemoteSessionStatus 2026-06-30-04:05:
+   * Clicking a remote Ubuntu session that shows Done must clear the same attention status as a local macOS session. The visible row is gxserver-owned remote presentation, not the local SSH carrier, so clear the machine snapshot immediately and then persist the acknowledgement through the remote `/api/updateAgentActivity` endpoint.
+   */
+  setRemotePresentationSessionActivityLocally(
+    target.machineId,
+    target.projectId,
+    target.sessionId,
+    "idle",
+    reason,
+  );
+  try {
+    await requestRemoteGxserver<Record<string, unknown>>(
+      target.machineId,
+      "/api/updateAgentActivity",
+      {
+        params: {
+          event: "acknowledge",
+          projectId: target.projectId,
+          sessionId: target.sessionId,
+        },
+      },
+    );
+  } catch (error) {
+    showAppToast("error", "Remote status failed", error instanceof Error ? error.message : String(error));
+    void refreshRemoteGxserverPresentationSnapshot(target.machineId, `${reason}-failed`);
+  }
+  return true;
+}
+
 async function openRemoteAttachTerminalForTarget(target: RemoteAttachTarget): Promise<void> {
+  void acknowledgeRemotePresentationSessionAttention(target, "remote-attach-focus");
   if (focusExistingRemoteAttachTerminal(target)) {
     return;
   }
-  const plan = createRemoteAttachCommandPlan(target, "open");
+  let plan: RemoteAttachCommandPlan | undefined;
+  try {
+    plan = await createRemoteAttachCommandPlan(target, "open");
+  } catch (error) {
+    showAppToast("error", "Remote attach failed", error instanceof Error ? error.message : String(error));
+    return;
+  }
   if (!plan) {
     return;
   }
@@ -33583,9 +33719,14 @@ async function openRemoteAttachTerminalForTarget(target: RemoteAttachTarget): Pr
    * CDXC:RemoteAttach 2026-06-08-19:35:
    * Clicking a remote session is a navigation action, not a clipboard action.
    * Start a local Ghostty terminal with a hidden zsh process command that runs
-   * the Android-compatible SSH attach command; this preserves explicit Copy
+   * the SSH attach command; this preserves explicit Copy
    * Attach Command while making sidebar click behavior open a usable terminal
    * pane.
+   *
+   * CDXC:RemoteAttach 2026-06-30-04:22:
+   * Desktop remote attach now resolves the command through the remote gxserver
+   * before creating this carrier, so the local pane no longer depends on a
+   * remote `ghostex` CLI shim being installed or discoverable by the login shell.
    */
   const carrier = await createNativeRemoteAttachCarrierTerminal(target, plan);
   if (!carrier) {
@@ -33689,44 +33830,85 @@ function buildRemoteSshShellCommand(
   return buildRemoteSshCommand(remoteMachine, [remoteCommand]);
 }
 
-function buildRemoteGhostexAttachSshCommand(
+async function buildRemoteGxserverAttachSshCommand(
   remoteMachine: ghostexSettings["remoteMachines"][number],
   target: RemoteAttachTarget,
-): string {
-  const remoteCommand = buildRemoteLoginShellCommand(buildRemoteGhostexAttachCommand(target));
+): Promise<string> {
+  const attach = await resolveRemoteAttachMetadataForTarget(target);
+  const attachCommand = attach.attachCommand?.trim();
+  if (!attachCommand) {
+    throw new Error("Remote gxserver did not return a zmx attach command for this session.");
+  }
+  if (attach.startupTextDisposition === "queueAfterTerminalReady" && attach.startupText?.trim()) {
+    throw new Error("Remote gxserver did not confirm the zmx provider started before terminal attach.");
+  }
+  const remoteCommand = buildRemoteLoginShellCommand(attachCommand);
   return buildRemoteSshCommand(remoteMachine, [remoteCommand], { forceTty: true });
 }
 
-function buildRemoteGhostexAttachCommand(target: RemoteAttachTarget): string {
+async function resolveRemoteAttachMetadataForTarget(
+  target: RemoteAttachTarget,
+): Promise<GxserverAttachSessionMetadataResult> {
   /*
-   * CDXC:RemoteAttach 2026-06-24-05:42:
-   * Ubuntu app-installed gxserver exposes the CLI under ~/.ghostex/gxserver/package/bin before user shell startup files know about ~/.local/bin.
-   * Prefer that absolute wrapper for attach so non-login /bin/sh sessions do not fail with `ghostex: not found` after a successful install.
+   * CDXC:RemoteAttach 2026-06-30-04:22:
+   * Remote header New Terminal creates the gxserver session record first and
+   * may leave provider startup to attach. Resolve attach metadata before
+   * opening the local carrier so missing zmx providers, queued startup text,
+   * missing cwd, and prompt-editor capability follow the same gxserver-owned
+   * rules as local native zmx attach.
    */
-  const parts = [
-    "attach",
-    "--session-id",
-    quoteNativeShellArg(target.sessionId),
-  ];
-  if (target.projectId.trim()) {
-    parts.push("--project-id", quoteNativeShellArg(target.projectId));
+  let attach = await fetchRemoteAttachSessionMetadataForTarget(target);
+  if (attach.restoreBlocked) {
+    throw new Error(remoteAttachRestoreBlockedMessage(attach.restoreBlocked.reason));
   }
-  if (currentZmxPromptEditorAttachMode() === "monaco") {
-    /*
-    CDXC:RemoteAttach 2026-06-11-18:24:
-    macOS/Electron remote attach runs `ghostex attach` inside SSH, where the
-    remote login shell cannot inherit the local app's prompt-editor Settings.
-    Pass the same explicit zmx capability as local gxserver attach so Ctrl+G can
-    open Monaco from desktop remote panes while mobile/TUI commands omit the flag
-    and remain on gte.
-    */
-    parts.push("--prompt-editor", "monaco");
+  if (shouldStartZmxProviderBeforeNativeAttach(attach)) {
+    await requestRemoteGxserver<Record<string, unknown>>(
+      target.machineId,
+      "/api/startSessionProvider",
+      {
+        params: buildRemoteAttachMetadataParams(target, attach.startupText),
+        timeoutMs: 15_000,
+      },
+    );
+    attach = await fetchRemoteAttachSessionMetadataForTarget(target);
+    if (attach.restoreBlocked) {
+      throw new Error(remoteAttachRestoreBlockedMessage(attach.restoreBlocked.reason));
+    }
   }
-  return [
-    'remote_ghostex="$HOME/.ghostex/gxserver/package/bin/ghostex"',
-    'if [ ! -x "$remote_ghostex" ]; then if [ -x "$HOME/.local/bin/ghostex" ]; then remote_ghostex="$HOME/.local/bin/ghostex"; else remote_ghostex="ghostex"; fi; fi',
-    `"$remote_ghostex" ${parts.join(" ")}`,
-  ].join("; ");
+  return attach;
+}
+
+async function fetchRemoteAttachSessionMetadataForTarget(
+  target: RemoteAttachTarget,
+): Promise<GxserverAttachSessionMetadataResult> {
+  const response = await requestRemoteGxserver<{ attach: GxserverAttachSessionMetadataResult }>(
+    target.machineId,
+    "/api/attachSessionMetadata",
+    {
+      params: buildRemoteAttachMetadataParams(target),
+      timeoutMs: 15_000,
+    },
+  ) as { result: { attach: GxserverAttachSessionMetadataResult } };
+  return response.result.attach;
+}
+
+function buildRemoteAttachMetadataParams(
+  target: RemoteAttachTarget,
+  startupText?: string,
+): Record<string, unknown> {
+  const promptEditorAttachMode = currentZmxPromptEditorAttachMode();
+  return {
+    ...(promptEditorAttachMode ? { promptEditor: promptEditorAttachMode } : {}),
+    projectId: target.projectId,
+    sessionId: target.sessionId,
+    ...(startupText !== undefined ? { startupText } : {}),
+  };
+}
+
+function remoteAttachRestoreBlockedMessage(reason: string): string {
+  return reason === "missingCwd"
+    ? "Remote session cannot be restored because its project directory is missing."
+    : "Remote session cannot be restored.";
 }
 
 function buildRemoteLoginShellCommand(remoteCommand: string): string {
@@ -46062,9 +46244,10 @@ function syncNativeLayout(
      * top-right text for ordinary terminals because those panes have no
      * zmx/tmux/zellij provider/session metadata.
      */
-    showSessionIdInTerminalPanes: settings.showSessionIdInTerminalPanes,
-    showProjectEditorDiffFileCount: settings.showProjectEditorDiffFileCount,
-    sidebarTheme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
+	    showSessionIdInTerminalPanes: settings.showSessionIdInTerminalPanes,
+	    showProjectEditorDiffFileCount: settings.showProjectEditorDiffFileCount,
+	    manageAdditionalDocsFolders: settings.manageAdditionalDocsFolders,
+	    sidebarTheme: resolveSidebarTheme(settings.sidebarTheme, "dark"),
     customSidebarTitlebarColorsEnabled: settings.customSidebarTitlebarColorsEnabled,
     customSidebarTitlebarForegroundColor: getSidebarTitlebarForegroundForBackground(
       settings.customSidebarTitlebarBackgroundColor,
