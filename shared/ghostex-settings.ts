@@ -237,6 +237,13 @@ export const DIAGNOSTIC_LOGGING_SCENARIOS = [
     logFiles: ["native-browser-import-debug.log"],
   },
   {
+    description: "Remote gxserver install approval, SSH setup phase, package selection, upload, token read, and tunnel diagnostics.",
+    group: "macOS",
+    id: "native.remote.gxserver.install",
+    label: "Remote gxserver install",
+    logFiles: ["remote-gxserver-install-debug.log"],
+  },
+  {
     description: "Native child-window modal lifecycle, Settings host readiness, and app-modal diagnostics.",
     group: "macOS",
     id: "native.app.modal",
@@ -265,8 +272,15 @@ const DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS: DiagnosticLoggingSettings["scenarios
    * Temporarily keep app-modal diagnostics enabled for the setup slow-open
    * repro so existing local settings cannot silently gate off the timing logs
    * needed under ~/.ghostex/logs/app-modal-debug.log.
+   *
+   * CDXC:RemoteMachines 2026-06-30-03:05:
+   * Remote gxserver install crashes happen immediately after the approval
+   * click, before users can re-open Settings. Keep the precise remote-install
+   * diagnostic scenario enabled by default so the Settings toggle is already on
+   * for repro logs while the writer still records only sanitized phase data.
    */
   "native.app.modal": { enabled: true },
+  "native.remote.gxserver.install": { enabled: true },
 };
 const DIAGNOSTIC_LOGGING_SCENARIO_IDS = new Set<string>(
   DIAGNOSTIC_LOGGING_SCENARIOS.map((scenario) => scenario.id),
@@ -728,6 +742,11 @@ export type ghostexSettings = {
   appIconSourceId: string;
   defaultEditorCommand: DefaultEditorCommand;
   hideProjectHeaderDiffStats: boolean;
+  /**
+   * CDXC:DocsSidebar 2026-06-30-19:47:
+   * The Docs sidebar scans ./docs recursively and root artifacts by default, and users can add comma-separated project-relative folder roots from global Projects settings. Trim spaces around each folder name while preserving spaces inside names such as "my documents".
+   */
+  manageAdditionalDocsFolders: string;
   showProjectEditorDiffFileCount: boolean;
   showUntrackedProjectDiffWhenNoTrackedChanges: boolean;
   completionBellEnabled: boolean;
@@ -1162,6 +1181,11 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   hideProjectHeaderDiffStats:
     SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideProjectHeaderDiffStats,
+  /**
+   * CDXC:DocsSidebar 2026-06-30-19:47:
+   * Additional Docs scan folders are opt-in so existing projects continue to expose only ./docs plus root Markdown, HTML, and Excalidraw artifacts until the user lists more project-relative folders.
+   */
+  manageAdditionalDocsFolders: "",
   /**
    * CDXC:ProjectDiffStats 2026-05-15-14:33:
    * Project-header git stats should hide the changed-file count by default and
@@ -1969,6 +1993,13 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       "hideProjectHeaderDiffStats",
       DEFAULT_ghostex_SETTINGS.hideProjectHeaderDiffStats,
     ),
+    manageAdditionalDocsFolders: normalizeManageAdditionalDocsFolders(
+      readString(
+        source,
+        "manageAdditionalDocsFolders",
+        DEFAULT_ghostex_SETTINGS.manageAdditionalDocsFolders,
+      ),
+    ),
     /**
      * CDXC:ProjectDiffStats 2026-05-15-14:33:
      * Missing or invalid older settings must keep project-header git stats in
@@ -2682,6 +2713,14 @@ export function normalizeSettingsModalNavigationState(
     scrollTopByTab,
     version: 1,
   };
+}
+
+export function normalizeManageAdditionalDocsFolders(value: string | undefined): string {
+  /*
+   * CDXC:DocsSidebar 2026-06-30-19:47:
+   * The Projects setting is typed as comma-separated text because folder names may contain spaces. Settings normalizes on every keystroke, so preserve the user's draft text here and let native trim comma boundaries and reject unsafe path shapes when scanning.
+   */
+  return (value ?? "").replace(/\0/gu, "").replace(/\r?\n/gu, ", ").slice(0, 1_000);
 }
 
 function normalizeTerminalCursorStyle(value: string | undefined): TerminalCursorStyle {

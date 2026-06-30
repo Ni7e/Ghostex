@@ -788,19 +788,33 @@ describe("normalizeghostexSettings", () => {
      * The setup slow-open repro temporarily defaults native.app.modal on so
      * app-modal-debug.log captures the timing checkpoints without requiring a
      * manual Settings toggle before reproducing startup/onboarding behavior.
+     *
+     * CDXC:RemoteMachines 2026-06-30-03:05:
+     * Remote gxserver install diagnostics must be enabled by default so the
+     * approval-click crash path writes phase logs without requiring users to
+     * find the Settings toggle before reproducing.
      */
     expect(DIAGNOSTIC_LOGGING_SCENARIOS.map((scenario) => scenario.id)).toContain(
       "gpui.app.modal",
     );
+    expect(DIAGNOSTIC_LOGGING_SCENARIOS).toContainEqual(
+      expect.objectContaining({
+        id: "native.remote.gxserver.install",
+        label: "Remote gxserver install",
+        logFiles: ["remote-gxserver-install-debug.log"],
+      }),
+    );
     expect(DEFAULT_ghostex_SETTINGS.diagnosticLogging).toEqual({
       scenarios: {
         "native.app.modal": { enabled: true },
+        "native.remote.gxserver.install": { enabled: true },
       },
       version: 1,
     });
     expect(normalizeghostexSettings({}).diagnosticLogging).toEqual({
       scenarios: {
         "native.app.modal": { enabled: true },
+        "native.remote.gxserver.install": { enabled: true },
       },
       version: 1,
     });
@@ -819,6 +833,7 @@ describe("normalizeghostexSettings", () => {
       scenarios: {
         "gpui.app.modal": { enabled: true, expiresAt: "2026-06-27T20:30:00.000Z" },
         "native.app.modal": { enabled: true },
+        "native.remote.gxserver.install": { enabled: true },
         "native.terminal.focus": { enabled: true },
       },
       version: 1,

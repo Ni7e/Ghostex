@@ -823,6 +823,11 @@ struct SetActiveTerminalSet: Decodable {
   let showSessionIdInTerminalPanes: Bool?
   let showProjectEditorDiffFileCount: Bool?
   /**
+   CDXC:DocsSidebar 2026-06-30-19:47:
+   React Settings stores extra Docs scan folders as comma-separated project-relative text. Decode it through layout sync so AppKit can update list validation and live filesystem watchers for already-open Docs panes.
+   */
+  let manageAdditionalDocsFolders: String?
+  /**
    CDXC:SidebarTheme 2026-06-15-01:43:
    React sidebar layout sync carries the resolved app theme because AppKit owns
    titlebar and native child-window backing colors outside the sidebar DOM.
