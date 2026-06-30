@@ -285,6 +285,7 @@ export type SidebarSessionPointerDownFocusInput = {
   ctrlKey: boolean;
   isInteractiveDescendant?: boolean;
   isPrimary?: boolean;
+  isSessionDragActivationEnabled?: boolean;
   isProjectSessionListMoreRow: boolean;
   isProjectSessionListOverflowRow: boolean;
   metaKey: boolean;
@@ -302,9 +303,13 @@ export function shouldFocusSidebarSessionOnPointerDown(
    * for a possible second click. Keep modified clicks, auxiliary buttons,
    * overflow placeholders, and Show more rows on their existing click-specific
    * behavior.
+   *
+   * CDXC:PinnedSessions 2026-07-01-00:47:
+   * Pinned project sessions remain draggable while the sidebar is sorted by Last Active. If a row can start a drag, do not focus the terminal on pointer-down; focus stealing can cancel WebKit's delayed drag stream before dnd-kit emits dragStart. Non-drag clicks still focus through the normal click handler.
    */
   return (
     !input.renameSessionOnDoubleClick &&
+    input.isSessionDragActivationEnabled !== true &&
     !input.isProjectSessionListOverflowRow &&
     !input.isProjectSessionListMoreRow &&
     input.button === 0 &&
@@ -856,6 +861,12 @@ export function SortableSessionCard({
     : ({
         anchorName: getSessionStatusAnchorName(sessionId),
       } as CSSProperties);
+  const isSessionDragActivationEnabled =
+    !isProjectSessionListMoreRow &&
+    !isProjectSessionListOverflowRow &&
+    !dragDisabled &&
+    !isBrowserSession &&
+    contextMenuPosition === undefined;
   const setSessionFrameElement = useCallback(
     (element: HTMLDivElement | null) => {
       sessionFrameRef.current = element;
@@ -2220,6 +2231,7 @@ export function SortableSessionCard({
                   ctrlKey: event.ctrlKey,
                   isInteractiveDescendant,
                   isPrimary: event.isPrimary,
+                  isSessionDragActivationEnabled,
                   isProjectSessionListMoreRow,
                   isProjectSessionListOverflowRow,
                   metaKey: event.metaKey,

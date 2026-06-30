@@ -189,6 +189,21 @@ describe("shouldFocusSidebarSessionOnPointerDown", () => {
     expect(shouldFocusSidebarSessionOnPointerDown(baseInput)).toBe(true);
   });
 
+  test("waits for click semantics when the session row can start a drag", () => {
+    /*
+     * CDXC:PinnedSessions 2026-07-01-00:47:
+     * Last Active sorting keeps pinned project sessions draggable. Those rows
+     * must not focus on pointer-down because native focus can take the WebKit
+     * pointer stream before dnd-kit activates the delayed drag.
+     */
+    expect(
+      shouldFocusSidebarSessionOnPointerDown({
+        ...baseInput,
+        isSessionDragActivationEnabled: true,
+      }),
+    ).toBe(false);
+  });
+
   test("waits for click semantics when double-click rename is enabled", () => {
     expect(
       shouldFocusSidebarSessionOnPointerDown({
