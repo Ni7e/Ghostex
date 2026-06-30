@@ -659,6 +659,7 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "sessionPersistenceProvider",
     "clickToWakeSleepingSessions",
     "showSessionIdInTerminalPanes",
+    "showNotificationOnTerminalBell",
     "promptEditorBackend",
     "terminalScrollbackLimitMb",
     "terminalCopyOnSelect",
@@ -2127,6 +2128,11 @@ export function SettingsModal({
               title: "Show session id in terminal panes",
             },
           ]),
+      {
+        key: "showNotificationOnTerminalBell",
+        subtitle: "Treat terminal bell events as session attention.",
+        title: "Show notification on terminal bell",
+      },
       {
         key: "promptEditorBackend",
         options: PROMPT_EDITOR_BACKEND_OPTIONS,
@@ -3863,6 +3869,22 @@ export function SettingsModal({
                   onChange={(checked) => updateDraft("showSessionIdInTerminalPanes", checked)}
                 />
               ) : null}
+              {mainSettingVisible(settingsSearch.terminal, "showNotificationOnTerminalBell") ? (
+                /*
+                 * CDXC:TerminalBellAttention 2026-07-01-01:13:
+                 * Terminal bell notifications belong with Terminal settings because
+                 * the event originates from shell/PTY behavior, not agent completion
+                 * audio. Keep the setting off by default so failed zsh completion
+                 * tabs do not create macOS banners or #95d7f6 attention chrome.
+                 */
+                <ToggleField
+                  checked={draft.showNotificationOnTerminalBell}
+                  description="Treat terminal bell events as session attention."
+                  label="Show notification on terminal bell"
+                  {...getSettingModificationProps("showNotificationOnTerminalBell")}
+                  onChange={(checked) => updateDraft("showNotificationOnTerminalBell", checked)}
+                />
+              ) : null}
               {mainSettingVisible(settingsSearch.terminal, "promptEditorBackend") ? (
                 /**
                  * CDXC:PromptEditorBackend 2026-05-11-14:38
@@ -5090,6 +5112,40 @@ function createRemoteMachineDraft(): RemoteMachineDraft {
   };
 }
 
+function createRemoteMachineDraftFromSettings(
+  machine: RemoteMachineSettings,
+  sshPassword = "",
+): RemoteMachineDraft {
+  return {
+    id: machine.id,
+    name: machine.name,
+    sshHost: machine.sshHost,
+    sshIdentityFile: machine.sshIdentityFile ?? "",
+    sshPassword,
+    sshPasswordSaved: machine.sshPasswordSaved === true,
+    sshPort: machine.sshPort ? String(machine.sshPort) : "",
+    sshUser: machine.sshUser ?? "",
+  };
+}
+
+function applyRemoteMachineDraftPatch(
+  draft: RemoteMachineDraft,
+  patch: Partial<RemoteMachineDraft>,
+): RemoteMachineDraft {
+  return {
+    ...draft,
+    name: patch.name !== undefined ? patch.name : draft.name,
+    sshHost: patch.sshHost !== undefined ? patch.sshHost : draft.sshHost,
+    sshIdentityFile:
+      patch.sshIdentityFile !== undefined ? patch.sshIdentityFile : draft.sshIdentityFile,
+    sshPassword: patch.sshPassword !== undefined ? patch.sshPassword : draft.sshPassword,
+    sshPasswordSaved:
+      patch.sshPasswordSaved !== undefined ? patch.sshPasswordSaved : draft.sshPasswordSaved,
+    sshPort: patch.sshPort !== undefined ? patch.sshPort : draft.sshPort,
+    sshUser: patch.sshUser !== undefined ? patch.sshUser : draft.sshUser,
+  };
+}
+
 function RemoteSettingsTab({
   initialRemoteMachineId,
   isActive,
@@ -5106,8 +5162,25 @@ function RemoteSettingsTab({
   const containerRef = useRef<HTMLDivElement>(null);
   const [isTailscaleHelpOpen, setIsTailscaleHelpOpen] = useState(false);
   const [newMachine, setNewMachine] = useState<RemoteMachineDraft>(() => createRemoteMachineDraft());
+  const [remoteMachineDraftsById, setRemoteMachineDraftsById] = useState<
+    Record<string, RemoteMachineDraft>
+  >({});
   const [sshPasswordDrafts, setSshPasswordDrafts] = useState<Record<string, string>>({});
   const lastTargetedRemoteMachineIdRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    const remoteMachineIds = new Set(remoteMachines.map((machine) => machine.id));
+    setRemoteMachineDraftsById((drafts) => {
+      let next: Record<string, RemoteMachineDraft> | undefined;
+      for (const machineId of Object.keys(drafts)) {
+        if (!remoteMachineIds.has(machineId)) {
+          next ??= { ...drafts };
+          delete next[machineId];
+        }
+      }
+      return next ?? drafts;
+    });
+  }, [remoteMachines]);
 
   useEffect(() => {
     if (!isActive || !initialRemoteMachineId) {
@@ -5141,7 +5214,22 @@ function RemoteSettingsTab({
     return () => cancelAnimationFrame(animationFrame);
   }, [initialRemoteMachineId, isActive, remoteMachines]);
 
+  const getRemoteMachineEditDraft = (machine: RemoteMachineSettings): RemoteMachineDraft => {
+    const draft =
+      remoteMachineDraftsById[machine.id] ??
+      createRemoteMachineDraftFromSettings(machine, sshPasswordDrafts[machine.id] ?? "");
+    return {
+      ...draft,
+      sshPassword: sshPasswordDrafts[machine.id] ?? draft.sshPassword,
+      sshPasswordSaved: machine.sshPasswordSaved === true,
+    };
+  };
+
   const updateRemoteMachine = (machineId: string, patch: Partial<RemoteMachineDraft>) => {
+    const currentMachine = remoteMachines.find((machine) => machine.id === machineId);
+    if (!currentMachine) {
+      return;
+    }
     if (patch.sshPassword !== undefined) {
       setSshPasswordDrafts((drafts) => ({
         ...drafts,
@@ -5158,21 +5246,31 @@ function RemoteSettingsTab({
     if (Object.values(settingsPatch).every((value) => value === undefined)) {
       return;
     }
+    const nextDraft = applyRemoteMachineDraftPatch(
+      getRemoteMachineEditDraft(currentMachine),
+      patch,
+    );
+    setRemoteMachineDraftsById((drafts) => ({
+      ...drafts,
+      [machineId]: nextDraft,
+    }));
+    const normalizedMachine = normalizeRemoteMachineDraft(nextDraft);
+    /*
+     * CDXC:RemoteMachines 2026-07-01-00:45:
+     * Saved-machine edit fields can be temporarily invalid while the user types.
+     * Keep empty required name/host edits in local React draft state so deleting
+     * the last character cannot remove the saved machine; only a valid draft or
+     * the explicit trash action may change Settings.remoteMachines.
+     */
+    if (!normalizedMachine) {
+      return;
+    }
     const nextMachines = remoteMachines
       .map((machine) => {
         if (machine.id !== machineId) {
           return machine;
         }
-        return normalizeRemoteMachineDraft({
-          id: machine.id,
-          name: patch.name ?? machine.name,
-          sshHost: patch.sshHost ?? machine.sshHost,
-          sshIdentityFile: patch.sshIdentityFile ?? machine.sshIdentityFile ?? "",
-          sshPassword: "",
-          sshPasswordSaved: machine.sshPasswordSaved === true,
-          sshPort: patch.sshPort ?? (machine.sshPort ? String(machine.sshPort) : ""),
-          sshUser: patch.sshUser ?? machine.sshUser ?? "",
-        });
+        return normalizedMachine;
       })
       .filter((machine): machine is RemoteMachineSettings => Boolean(machine));
     onChange(normalizeRemoteMachineSettings(nextMachines));
@@ -5204,6 +5302,22 @@ function RemoteSettingsTab({
   };
 
   const removeRemoteMachine = (machineId: string) => {
+    setRemoteMachineDraftsById((drafts) => {
+      if (!(machineId in drafts)) {
+        return drafts;
+      }
+      const next = { ...drafts };
+      delete next[machineId];
+      return next;
+    });
+    setSshPasswordDrafts((drafts) => {
+      if (!(machineId in drafts)) {
+        return drafts;
+      }
+      const next = { ...drafts };
+      delete next[machineId];
+      return next;
+    });
     onChange(remoteMachines.filter((machine) => machine.id !== machineId));
   };
 
@@ -5339,76 +5453,73 @@ function RemoteSettingsTab({
               </span>
             </div>
           ) : (
-            remoteMachines.map((machine) => (
-              <Card
-                className="settings-remote-machine-card"
-                data-settings-remote-machine-id={machine.id}
-                key={machine.id}
-                size="sm"
-              >
-                <div className="settings-remote-machine-summary settings-management-row">
-                  <span className="settings-management-icon flex size-9 shrink-0 items-center justify-center bg-muted">
-                    <IconDeviceDesktop aria-hidden="true" />
-                  </span>
-                  <span className="settings-management-main min-w-0 flex-1">
-                    <span className="settings-management-title">{machine.name}</span>
-                    <span className="settings-management-detail">{formatRemoteMachineSshTarget(machine)}</span>
-                  </span>
-                  <span className="settings-management-row-actions">
-                    <Button
-                      aria-label={`Remove ${machine.name}`}
-                      onClick={() => removeRemoteMachine(machine.id)}
-                      size="icon-sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <IconTrash aria-hidden="true" />
-                    </Button>
-                  </span>
-                </div>
-                <CardContent className="settings-remote-machine-body">
-                  <RemoteMachineFields
-                    draft={{
-                      id: machine.id,
-                      name: machine.name,
-                      sshHost: machine.sshHost,
-                      sshIdentityFile: machine.sshIdentityFile ?? "",
-                      sshPassword: sshPasswordDrafts[machine.id] ?? "",
-                      sshPasswordSaved: machine.sshPasswordSaved === true,
-                      sshPort: machine.sshPort ? String(machine.sshPort) : "",
-                      sshUser: machine.sshUser ?? "",
-                    }}
-                    onChange={(patch) => updateRemoteMachine(machine.id, patch)}
-                    onPasswordSave={() => saveRemoteMachinePassword(machine)}
-                    passwordSaveDisabled={!vscode}
-                  />
-                  {/*
-                   * CDXC:RemoteMachines 2026-06-23-08:30:
-                   * Remote Settings needs a direct gxserver install action for
-                   * first-run Ubuntu SSH machines. Reuse the reconnect flow so
-                   * native opens the approval modal only after SSH proves
-                   * gxserver is missing, and otherwise connects the existing
-                   * remote daemon without reinstalling it.
-                   */}
-                  <div className="settings-management-actions settings-remote-machine-install-actions">
-                    <Button
-                      disabled={!vscode || !machine.sshHost.trim()}
-                      onClick={() => {
-                        vscode?.postMessage({
-                          remoteMachineId: machine.id,
-                          type: "reconnectRemoteMachine",
-                        });
-                      }}
-                      type="button"
-                      variant="secondary"
-                    >
-                      <IconDownload aria-hidden="true" />
-                      Install / Connect gxserver
-                    </Button>
+            remoteMachines.map((machine) => {
+              const machineDraft = getRemoteMachineEditDraft(machine);
+              const summaryMachine = normalizeRemoteMachineDraft(machineDraft) ?? machine;
+              return (
+                <Card
+                  className="settings-remote-machine-card"
+                  data-settings-remote-machine-id={machine.id}
+                  key={machine.id}
+                  size="sm"
+                >
+                  <div className="settings-remote-machine-summary settings-management-row">
+                    <span className="settings-management-icon flex size-9 shrink-0 items-center justify-center bg-muted">
+                      <IconDeviceDesktop aria-hidden="true" />
+                    </span>
+                    <span className="settings-management-main min-w-0 flex-1">
+                      <span className="settings-management-title">{summaryMachine.name}</span>
+                      <span className="settings-management-detail">
+                        {formatRemoteMachineSshTarget(summaryMachine)}
+                      </span>
+                    </span>
+                    <span className="settings-management-row-actions">
+                      <Button
+                        aria-label={`Remove ${machine.name}`}
+                        onClick={() => removeRemoteMachine(machine.id)}
+                        size="icon-sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <IconTrash aria-hidden="true" />
+                      </Button>
+                    </span>
                   </div>
-                </CardContent>
-              </Card>
-            ))
+                  <CardContent className="settings-remote-machine-body">
+                    <RemoteMachineFields
+                      draft={machineDraft}
+                      onChange={(patch) => updateRemoteMachine(machine.id, patch)}
+                      onPasswordSave={() => saveRemoteMachinePassword(machine)}
+                      passwordSaveDisabled={!vscode}
+                    />
+                    {/*
+                     * CDXC:RemoteMachines 2026-06-23-08:30:
+                     * Remote Settings needs a direct gxserver install action for
+                     * first-run Ubuntu SSH machines. Reuse the reconnect flow so
+                     * native opens the approval modal only after SSH proves
+                     * gxserver is missing, and otherwise connects the existing
+                     * remote daemon without reinstalling it.
+                     */}
+                    <div className="settings-management-actions settings-remote-machine-install-actions">
+                      <Button
+                        disabled={!vscode || !machineDraft.sshHost.trim()}
+                        onClick={() => {
+                          vscode?.postMessage({
+                            remoteMachineId: machine.id,
+                            type: "reconnectRemoteMachine",
+                          });
+                        }}
+                        type="button"
+                        variant="secondary"
+                      >
+                        <IconDownload aria-hidden="true" />
+                        Install / Connect gxserver
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })
           )}
         </div>
       </div>

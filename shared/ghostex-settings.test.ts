@@ -1370,6 +1370,22 @@ describe("normalizeghostexSettings", () => {
     });
   });
 
+  test("keeps terminal bell attention notifications opt-in", () => {
+    /*
+     * CDXC:TerminalBellAttention 2026-07-01-01:13:
+     * A terminal BEL can be normal shell feedback, so missing settings must not
+     * turn zsh completion misses into Ghostex attention notifications. Persisted
+     * true remains available for users who explicitly want bell-driven attention.
+     */
+    expect(DEFAULT_ghostex_SETTINGS.showNotificationOnTerminalBell).toBe(false);
+    expect(normalizeghostexSettings({})).toMatchObject({
+      showNotificationOnTerminalBell: false,
+    });
+    expect(normalizeghostexSettings({ showNotificationOnTerminalBell: true })).toMatchObject({
+      showNotificationOnTerminalBell: true,
+    });
+  });
+
   test("keeps the workspace background color setting", () => {
     expect(DEFAULT_ghostex_SETTINGS.workspaceBackgroundColor).toBe("#000000");
     expect(normalizeghostexSettings({ workspaceBackgroundColor: "#202020" })).toMatchObject({

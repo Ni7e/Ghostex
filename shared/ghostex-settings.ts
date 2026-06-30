@@ -774,6 +774,7 @@ export type ghostexSettings = {
   showUntrackedProjectDiffWhenNoTrackedChanges: boolean;
   completionBellEnabled: boolean;
   completionSound: CompletionSoundSetting;
+  showNotificationOnTerminalBell: boolean;
   createSessionOnSidebarDoubleClick: boolean;
   debuggingMode: boolean;
   /**
@@ -1260,6 +1261,14 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   completionBellEnabled: true,
   completionSound: DEFAULT_COMPLETION_SOUND,
+  /**
+   * CDXC:TerminalBellAttention 2026-07-01-01:13:
+   * Plain terminal BEL events include ordinary shell feedback such as zsh
+   * completion misses. Keep terminal-bell attention notifications opt-in so
+   * Monaco prompt editing and agent completion alerts remain independent from
+   * noisy terminal-emulator bells.
+   */
+  showNotificationOnTerminalBell: false,
   createSessionOnSidebarDoubleClick: false,
   debuggingMode: false,
   diagnosticLogging: {
@@ -2081,6 +2090,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     ),
     completionSound: clampCompletionSoundSetting(
       readString(source, "completionSound", DEFAULT_ghostex_SETTINGS.completionSound),
+    ),
+    showNotificationOnTerminalBell: readBoolean(
+      source,
+      "showNotificationOnTerminalBell",
+      DEFAULT_ghostex_SETTINGS.showNotificationOnTerminalBell,
     ),
     createSessionOnSidebarDoubleClick: readBoolean(
       source,
