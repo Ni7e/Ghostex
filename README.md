@@ -99,10 +99,10 @@ Put all your thoughts here then let an orchestrator agent manage subagents to ta
 #### Or even ask the Agent to draw a .excalidraw file in the /docs folder:
 <img width="3456" height="2066" alt="2026-06-30_Ghostex_03-11-59@2x" src="https://github.com/user-attachments/assets/629ca0bb-b249-49e4-85d6-1834fcea1e88" />
 
-### Previous Sessions Search
+### Search Previous Sessions from All Agent CLIs in 1 place
 
-##### Fuzzy search in all your previous sessions accross agents by typing a few words from your prompts<br/> 
-Press enter to resume that session! Lots of filters available. Start it from the sidebar or run `ghostex find / gx f` to start it 
+##### Fuzzy search in all your previous sessions accross agents by typing a few words from your prompts
+##### Press enter to resume that session! Lots of filters available. Start it from the sidebar or run `ghostex find / gx f` to start it 
 
 <img width="3456" height="2066" alt="image" src="https://github.com/user-attachments/assets/85bfd614-d352-4f30-8501-f2a47d001f88" />
 
