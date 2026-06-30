@@ -4638,6 +4638,83 @@ html:has(body.app-modal-host-native-window-body) {
 }
 
 /*
+ * CDXC:AppModals 2026-07-01-01:19:
+ * Compact native child-window modals are measured once before AppKit presents
+ * them, so user edits after open must not grow the React shell beyond the
+ * locked native window. Keep headers and actions stable by capping only the
+ * editable or high-volume content regions and letting those regions scroll.
+ */
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"] .session-rename-textarea {
+  max-height: min(220px, 42vh);
+  overflow-y: auto;
+  resize: none;
+}
+
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .worktree-create-modal-shadcn
+  [data-slot="textarea"],
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .agent-config-modal-shadcn
+  .command-config-textarea-shadcn {
+  max-height: min(200px, 36vh);
+  overflow-y: auto;
+  resize: none;
+}
+
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .first-user-message-textarea {
+  height: min(320px, 48vh);
+  max-height: min(320px, 48vh);
+  overflow-y: auto;
+  resize: none;
+}
+
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .worktree-create-modal-shadcn
+  .session-rename-field-group,
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .add-repository-modal-shadcn
+  .session-rename-field-group,
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .agent-config-modal-shadcn
+  > [data-slot="field-group"] {
+  max-height: min(520px, calc(100vh - 150px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .add-repository-error,
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .add-repository-warning {
+  max-height: min(160px, 24vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .previous-sessions-modal-body,
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .worktree-delete-modal-body,
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .remote-gxserver-install-modal-body,
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .portless-setup-modal-body,
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .t3-browser-access-body {
+  max-height: min(420px, calc(100vh - 150px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.app-modal-host-native-window-body[data-app-modal-fit-height="true"]
+  .remote-project-picker-dialog
+  [data-slot="command-list"] {
+  max-height: min(28rem, calc(100vh - 72px)) !important;
+}
+
+/*
  * CDXC:SettingsRoundness 2026-06-16-08:22:
  * Bespoke Settings tab surfaces do not all use shadcn data-slot attributes.
  * Apply the same small settings-scoped radii here so Remote, Projects, and
