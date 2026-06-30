@@ -38,7 +38,8 @@ describe("Manage project workarea source", () => {
     expect(terminalWorkspaceSource).toContain("manageFileSaveMaxBytes = 2_000_000");
     expect(terminalWorkspaceSource).toContain('case "read":');
     expect(terminalWorkspaceSource).toContain('case "save":');
-    expect(terminalWorkspaceSource).toContain("manageSaveProjectFile(rootURL: rootURL, path: request.path, content: request.content)");
+    expect(terminalWorkspaceSource).toContain("file: try manageSaveProjectFile(");
+    expect(terminalWorkspaceSource).toContain("additionalDocsFoldersText: additionalDocsFoldersText");
   });
 
   test("registers Manage as a mode-scoped bundled project-editor surface", () => {
@@ -234,7 +235,8 @@ describe("Manage project workarea source", () => {
      * CDXC:ManageFileActions 2026-06-30-09:48:
      * Files and folders in the Docs sidebar should expose Copy path in the same
      * context menu as Rename/Delete, copying the Manage-relative path instead
-     * of an absolute workspace path.
+     * of an absolute workspace path. The fixed docs root should still open a
+     * copy-only menu while rename/delete remain unavailable there.
      */
     expect(manageSource).toContain('type ManageArtifactKind = "excalidraw" | "html" | "markdown"');
     expect(manageSource).toContain('const MANAGE_DOCS_ROOT_PATH = "docs"');
@@ -286,6 +288,8 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("return new Set();");
     expect(manageSource).toContain("onToggleAllDirectories={toggleAllDirectories}");
     expect(manageSource).toContain("function canOpenManageEntryContextMenu");
+    expect(manageSource).toContain("function canRenameOrDeleteManageEntry");
+    expect(manageSource).toContain('return entry.kind === "file" || entry.kind === "directory";');
     expect(manageSource).toContain(".manage-sidebar-header .manage-icon-button,");
     expect(manageSource).toContain(".manage-sidebar-restore-button {");
     expect(manageSource).toContain("height: 35px;");
@@ -303,6 +307,7 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("removeManageAnnotationPathsForDeletedEntry");
     expect(manageSource).toContain("removeManagePathSetForDeletedEntry");
     expect(manageSource).toContain("onCopyPath={() => void copyEntryPath(contextMenuEntry)}");
+    expect(manageSource).toContain("canRenameOrDelete={contextMenuCanRenameOrDelete}");
     expect(manageSource).toContain("await writeTextToClipboard(entry.path)");
     expect(manageSource).toContain("Copy path");
     expect(manageSource).toContain("Rename item");
@@ -322,8 +327,8 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("  .manage-file-context-menu-item-danger:hover,");
     expect(manageSource).toContain("box-shadow: inset 0 0 0 1px rgba(253, 164, 175, 0.12);");
     expect(terminalWorkspaceSource).toContain("throws -> ManageFilePreview?");
-    expect(terminalWorkspaceSource).toContain("source.relativePath != manageDocsRelativePath");
-    expect(terminalWorkspaceSource).toContain("destination.relativePath != manageDocsRelativePath");
+    expect(terminalWorkspaceSource).toContain("!managePathIsDocsScanRoot(source.relativePath");
+    expect(terminalWorkspaceSource).toContain("!managePathIsDocsScanRoot(destination.relativePath");
     expect(terminalWorkspaceSource).toContain("Could not rename item.");
     expect(terminalWorkspaceSource).toContain("Could not delete item.");
     /*
@@ -346,6 +351,22 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("annotate it in Ghostex Docs with Agentation");
     expect(manageSource).toContain("selectedPathRef.current = createdFile.path");
     expect(manageSource).toContain("setPreview(createdFile)");
+  });
+
+  test("renders the default HTML starter as a responsive four-card page", () => {
+    /*
+     * CDXC:ManageDefaultHtml 2026-06-30-04:41:
+     * Default HTML Docs should avoid an empty grid slot at narrow widths by using exactly four guidance cards in a max two-column grid, collapsing to one column only on small screens.
+     */
+    expect(manageSource).toContain("function createDefaultHtmlDocument");
+    expect(manageSource).toContain(":root { color-scheme: dark; background: #0e0e0e; }");
+    expect(manageSource).toContain(".docs-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }");
+    expect(manageSource).toContain(".docs-card-grid { grid-template-columns: 1fr; }");
+    expect(manageSource).toContain('<section class="docs-card-grid">');
+    expect(manageSource).toContain('<p class="docs-card-kicker">4. Refine</p>');
+    expect(manageSource).toContain("<p><strong>Good requests are specific.</strong>");
+    expect(manageSource).toContain("<p><strong>Good annotations are precise.</strong>");
+    expect(manageSource).not.toContain("repeat(auto-fit, minmax(220px, 1fr))");
   });
 
   test("omits the Manage editor header Save button", () => {
@@ -373,7 +394,7 @@ describe("Manage project workarea source", () => {
     expect(terminalWorkspaceSource).not.toContain("NSLog(content)");
   });
 
-  test("scopes the Docs file tree and normal file access to project docs and root artifacts", () => {
+  test("scopes the Docs file tree and normal file access to configured docs folders and root artifacts", () => {
     /*
      * CDXC:ManageArtifacts 2026-06-26-13:59:
      * Native Manage listing used to expose only the active project's artifacts/ tree.
@@ -393,27 +414,34 @@ describe("Manage project workarea source", () => {
      * The native list should include docs/ itself as a directory entry and then
      * recurse into its children at depth 1 so the web sidebar can expand and
      * collapse docs/ as a normal folder beside root artifacts.
+     *
+     * CDXC:DocsSidebar 2026-06-30-19:47:
+     * Global Projects settings can add comma-separated project-relative Docs scan roots. Source checks should require the shared scan-root helper and native layout setting rather than hardcoding only docs/.
      */
+    expect(hostProtocolSource).toContain("let manageAdditionalDocsFolders: String?");
+    expect(nativeSidebarSource).toContain("manageAdditionalDocsFolders: settings.manageAdditionalDocsFolders");
     expect(terminalWorkspaceSource).toContain('manageDocsRelativePath = "docs"');
     expect(terminalWorkspaceSource).toContain('manageAnnotationsSidecarRelativePath = ".ghostex/manage-annotations.json"');
     expect(terminalWorkspaceSource).toContain("manageRootArtifactFileExtensions");
     expect(terminalWorkspaceSource).toContain("rootName: manageDocsRelativePath");
-    expect(terminalWorkspaceSource).toContain("private nonisolated static func manageProjectDocsURL");
+    expect(terminalWorkspaceSource).toContain("private nonisolated static func manageAdditionalDocsFolderRelativePaths");
+    expect(terminalWorkspaceSource).toContain("private nonisolated static func manageDocsScanRootRelativePaths");
+    expect(terminalWorkspaceSource).toContain("private nonisolated static func manageProjectDirectoryURL");
     expect(terminalWorkspaceSource).toContain("kind: \"directory\"");
-    expect(terminalWorkspaceSource).toContain("name: manageDocsRelativePath");
-    expect(terminalWorkspaceSource).toContain("path: manageDocsRelativePath");
+    expect(terminalWorkspaceSource).toContain("name: relativePath");
+    expect(terminalWorkspaceSource).toContain("path: relativePath");
     expect(terminalWorkspaceSource).toContain("manageAppendProjectRootArtifactFileEntries(entries: &entries, rootURL: rootURL)");
     expect(terminalWorkspaceSource).toContain("private nonisolated static func manageAppendProjectRootArtifactFileEntries");
-    expect(terminalWorkspaceSource).toContain("if let docsURL = try manageProjectDocsURL(rootURL: rootURL)");
-    expect(terminalWorkspaceSource).toContain("directoryURL: docsURL");
-    expect(terminalWorkspaceSource).toContain("relativeDirectoryPath: manageDocsRelativePath");
+    expect(terminalWorkspaceSource).toContain("manageProjectDirectoryURL(rootURL: rootURL, relativePath: relativePath)");
+    expect(terminalWorkspaceSource).toContain("directoryURL: directoryURL");
+    expect(terminalWorkspaceSource).toContain("relativeDirectoryPath: relativePath");
     expect(terminalWorkspaceSource).toContain("depth: 1)");
     expect(terminalWorkspaceSource).toContain("private nonisolated static func manageValidateAccessibleRelativePath");
     expect(terminalWorkspaceSource).toContain("relativePath == manageAnnotationsSidecarRelativePath");
-    expect(terminalWorkspaceSource).toContain('relativePath.hasPrefix("\\(manageDocsRelativePath)/")');
+    expect(terminalWorkspaceSource).toContain("managePathIsInDocsScanRoot(relativePath, additionalDocsFoldersText: additionalDocsFoldersText)");
     expect(terminalWorkspaceSource).toContain("manageIsRootArtifactFileRelativePath(relativePath)");
     expect(terminalWorkspaceSource).toContain("private nonisolated static func manageValidateDocsActionRelativePath");
-    expect(terminalWorkspaceSource).toContain("try manageValidateAccessibleRelativePath(target.relativePath)");
+    expect(terminalWorkspaceSource).toContain("additionalDocsFoldersText: additionalDocsFoldersText)");
   });
 
   test("uses the copied Meo Markdown editor with Manage annotations", () => {
@@ -520,6 +548,9 @@ describe("Manage project workarea source", () => {
      * CDXC:ManageHtmlAgentation 2026-06-30-04:41:
      * The sanitized srcdoc document should allow scripts and same-origin for Ghostex's fixed bootstrap so Agentation's module imports can initialize inside the loaded page.
      *
+     * CDXC:ManageHtmlRendering 2026-06-30-04:57:
+     * Rendered HTML Docs should inject a document-scoped viewer chrome style so the embedded page uses 4px scrollbars with transparent tracks and corners instead of a visible scrollbar background gutter.
+     *
      * CDXC:ManageHtmlAgentation 2026-06-28-07:58:
      * HTML Docs should show Agentation's bottom-left control on open without auto-clicking Start feedback mode, so reading or interacting with the page does not immediately become annotation input.
      */
@@ -538,6 +569,14 @@ describe("Manage project workarea source", () => {
     expect(manageSource).toContain("function injectManageAgentationScript");
     expect(manageSource).toContain('script.type = "module";');
     expect(manageSource).toContain("script.textContent = buildManageAgentationBootstrapScript()");
+    expect(manageSource).toContain("function injectManageHtmlViewerChromeStyles");
+    expect(manageSource).toContain("injectManageHtmlViewerChromeStyles(documentValue)");
+    expect(manageSource).toContain('style.setAttribute("data-ghostex-manage-html-chrome", "true")');
+    expect(manageSource).toContain("width: 4px !important;");
+    expect(manageSource).toContain("height: 4px !important;");
+    expect(manageSource).toContain(":where(html, body, *)::-webkit-scrollbar-track,");
+    expect(manageSource).toContain(":where(html, body, *)::-webkit-scrollbar-corner");
+    expect(manageSource).toContain("background: transparent !important;");
     expect(manageSource).toContain("rootEl.setAttribute(\"data-agentation-html-root\", \"true\")");
     expect(manageSource).toContain("Promise.all([");
     expect(manageSource).toContain("globalThis.__GHOSTEX_AGENTATION__ = { container: rootEl, root };");

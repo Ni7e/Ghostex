@@ -546,6 +546,9 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * CDXC:ManageHtmlAgentation 2026-06-30-04:41:
  * The embedded HTML document must run the fixed Agentation bootstrap with its normal document origin so remote module imports and DOM overlays initialize reliably inside the loaded page. Keep the user-script sanitizer as the trust boundary, then allow scripts and same-origin only for the sanitized srcdoc output.
  *
+ * CDXC:ManageHtmlRendering 2026-06-30-04:57:
+ * Embedded HTML Docs should keep page-owned layout and colors while Ghostex owns only the viewer chrome. Inject a final document-scoped scrollbar style so all page scrollbars are 4px wide with transparent tracks and corners instead of a visible background gutter.
+ *
  * CDXC:ManageHtmlAgentation 2026-06-28-07:58:
  * Opening an HTML Docs page should show Agentation's bottom-left control but must not auto-enter feedback mode because immediate activation steals mouse focus from users who only want to read or interact with the page.
  *
@@ -710,7 +713,7 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  * Docs sidebar context actions apply to folders as well as files. Right-clicking empty sidebar chrome must suppress the browser/WebKit default context menu, while folder rename/delete remaps nested selected paths and annotation keys through the same docs-relative bridge.
  *
  * CDXC:ManageFileActions 2026-06-30-09:48:
- * Files and context-menu-eligible folders need a Copy path action in the Docs sidebar. Copy the same relative path used by Manage file operations so users can paste stable docs paths without exposing absolute workspace paths to WebKit.
+ * Files and folders need a Copy path action in the Docs sidebar. Copy the same relative path used by Manage file operations so users can paste stable docs paths without exposing absolute workspace paths to WebKit. The docs root may open this copy-only menu, but rename/delete remain unavailable for that fixed root.
  */
 function ManageApp() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -1688,6 +1691,8 @@ function ManageApp() {
     : undefined;
   const contextMenuOperation =
     contextMenuEntry && fileOperation?.path === contextMenuEntry.path ? fileOperation.action : undefined;
+  const contextMenuCanRenameOrDelete =
+    contextMenuEntry !== undefined && canRenameOrDeleteManageEntry(contextMenuEntry);
 
   useEffect(() => {
     if (fileContextMenu && !entries.some((entry) => entry.path === fileContextMenu.path)) {
@@ -1850,9 +1855,13 @@ function ManageApp() {
       </section>
       {fileContextMenu && contextMenuEntry ? (
         <ManageFileContextMenu
+          canRenameOrDelete={contextMenuCanRenameOrDelete}
           confirmingDelete={fileContextMenu.confirmingDelete === true}
           onCopyPath={() => void copyEntryPath(contextMenuEntry)}
           onDelete={() => {
+            if (!contextMenuCanRenameOrDelete) {
+              return;
+            }
             if (!fileContextMenu.confirmingDelete) {
               setFileContextMenu((current) =>
                 current?.path === contextMenuEntry.path
@@ -1867,7 +1876,11 @@ function ManageApp() {
             void deleteFile(contextMenuEntry.path);
           }}
           onDismiss={dismissFileContextMenu}
-          onRename={() => startRenameFile(contextMenuEntry)}
+          onRename={() => {
+            if (contextMenuCanRenameOrDelete) {
+              startRenameFile(contextMenuEntry);
+            }
+          }}
           pendingAction={contextMenuOperation}
           position={fileContextMenu}
         />
@@ -2185,6 +2198,7 @@ function ManageFileRow({
 }
 
 function ManageFileContextMenu({
+  canRenameOrDelete,
   confirmingDelete,
   onCopyPath,
   onDelete,
@@ -2193,6 +2207,7 @@ function ManageFileContextMenu({
   pendingAction,
   position,
 }: {
+  canRenameOrDelete: boolean;
   confirmingDelete: boolean;
   onCopyPath: () => void;
   onDelete: () => void;
@@ -2221,27 +2236,31 @@ function ManageFileContextMenu({
         <IconCopy aria-hidden="true" size={14} stroke={1.8} />
         Copy path
       </button>
-      <button
-        className="manage-file-context-menu-item"
-        disabled={isBusy}
-        onClick={onRename}
-        role="menuitem"
-        type="button"
-      >
-        <IconEdit aria-hidden="true" size={14} stroke={1.8} />
-        Rename
-      </button>
-      <button
-        className="manage-file-context-menu-item manage-file-context-menu-item-danger"
-        data-confirming={String(confirmingDelete)}
-        disabled={isBusy}
-        onClick={onDelete}
-        role="menuitem"
-        type="button"
-      >
-        <IconTrash aria-hidden="true" size={14} stroke={1.8} />
-        {pendingAction === "delete" ? "Deleting" : confirmingDelete ? "Confirm delete" : "Delete"}
-      </button>
+      {canRenameOrDelete ? (
+        <>
+          <button
+            className="manage-file-context-menu-item"
+            disabled={isBusy}
+            onClick={onRename}
+            role="menuitem"
+            type="button"
+          >
+            <IconEdit aria-hidden="true" size={14} stroke={1.8} />
+            Rename
+          </button>
+          <button
+            className="manage-file-context-menu-item manage-file-context-menu-item-danger"
+            data-confirming={String(confirmingDelete)}
+            disabled={isBusy}
+            onClick={onDelete}
+            role="menuitem"
+            type="button"
+          >
+            <IconTrash aria-hidden="true" size={14} stroke={1.8} />
+            {pendingAction === "delete" ? "Deleting" : confirmingDelete ? "Confirm delete" : "Delete"}
+          </button>
+        </>
+      ) : null}
     </SidebarContextMenuPortal>
   );
 }
@@ -2805,7 +2824,11 @@ function ManagePreview({
               title="Clear All Annotations"
               type="button"
             >
-              <IconTrash aria-hidden="true" size={14} />
+              {/*
+                CDXC:DocsAnnotationToolbar 2026-06-30-04:55:
+                The Markdown feedback toolbar's Clear action should use an X icon instead of a trash can because it clears review annotations rather than deleting a file.
+              */}
+              <IconX aria-hidden="true" size={14} />
               <span>{clearAnnotationsConfirming ? "Confirm" : "Clear"}</span>
             </button>
             <div className="manage-annotation-dropdown-shell" ref={annotationsDropdownRef}>
@@ -4387,6 +4410,10 @@ function orderManageEntriesForTree(entries: readonly ManageFileEntry[]): ManageF
 }
 
 function canOpenManageEntryContextMenu(entry: ManageFileEntry): boolean {
+  return entry.kind === "file" || entry.kind === "directory";
+}
+
+function canRenameOrDeleteManageEntry(entry: ManageFileEntry): boolean {
   return !(entry.kind === "directory" && entry.path === MANAGE_DOCS_ROOT_PATH);
 }
 
@@ -5641,10 +5668,52 @@ function sanitizeManageHtmlDocument(html: string, options: { injectAgentation?: 
       element.rel = "noreferrer";
     }
   });
+  injectManageHtmlViewerChromeStyles(documentValue);
   if (options.injectAgentation) {
     injectManageAgentationScript(documentValue);
   }
   return `${serializeManageDocumentType(documentValue)}\n${documentValue.documentElement.outerHTML}`;
+}
+
+function injectManageHtmlViewerChromeStyles(documentValue: Document): void {
+  /*
+   * CDXC:ManageHtmlRendering 2026-06-30-04:57:
+   * The rendered artifact document owns its page CSS, but Docs owns the embedded scrollbar chrome. Append the style after author CSS so the iframe never shows wide default scrollbars or an opaque track/corner behind them.
+   */
+  const style = documentValue.createElement("style");
+  style.setAttribute("data-ghostex-manage-html-chrome", "true");
+  style.textContent = `
+:where(html) {
+  scrollbar-color: rgba(148, 163, 184, 0.72) transparent !important;
+  scrollbar-width: thin !important;
+}
+
+:where(html, body, *)::-webkit-scrollbar {
+  background: transparent !important;
+  height: 4px !important;
+  width: 4px !important;
+}
+
+:where(html, body, *)::-webkit-scrollbar-track,
+:where(html, body, *)::-webkit-scrollbar-track-piece {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+:where(html, body, *)::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.72) !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+}
+
+:where(html, body, *)::-webkit-scrollbar-button,
+:where(html, body, *)::-webkit-scrollbar-corner {
+  background: transparent !important;
+  border: 0 !important;
+}
+`.trim();
+  (documentValue.head || documentValue.documentElement).appendChild(style);
 }
 
 function injectManageAgentationScript(documentValue: Document): void {
@@ -6215,15 +6284,15 @@ styleElement.textContent = `
 
   .manage-sidebar-header .manage-icon-button {
     border-left: 1px solid #252525;
-    width: 41px;
+    width: 42px;
   }
 
   /*
-   * CDXC:DocsSidebar 2026-06-30-03:26:
-   * Docs sidebar header actions need a slightly wider hit target: every top action is 41px wide except the rightmost action, which is 40px to keep the visible edge aligned with the sidebar boundary.
+   * CDXC:DocsSidebar 2026-06-30-04:55:
+   * Docs sidebar header actions should now use the same 42px width, including the rightmost action, so the top control strip stays evenly spaced.
    */
   .manage-sidebar-header .manage-icon-button:last-child {
-    width: 40px;
+    width: 42px;
   }
 
   .manage-sidebar-restore-button {
