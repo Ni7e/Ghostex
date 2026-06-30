@@ -16,6 +16,7 @@ import {
   IconChevronRight,
   IconCircleCheck,
   IconCopy,
+  IconCopyPlus,
   IconEdit,
   IconFile,
   IconFileText,
@@ -142,6 +143,7 @@ type ManageFilesBridgeRequest = {
     | "save"
     | "rename"
     | "delete"
+    | "duplicate"
     | "createFolder"
     | "move"
     | "openDocsFoldersSettings";
@@ -234,7 +236,7 @@ type ManageFileContextMenuState = {
 };
 
 type ManageFileOperationState = {
-  action: "createFolder" | "delete" | "move" | "rename";
+  action: "createFolder" | "delete" | "duplicate" | "move" | "rename";
   path: string;
 };
 
@@ -735,6 +737,9 @@ const manageMeoAnnotationField = StateField.define<DecorationSet>({
  *
  * CDXC:ManageFileActions 2026-06-30-09:48:
  * Files and folders need a Copy path action in the Docs sidebar. Copy the same relative path used by Manage file operations so users can paste stable docs paths without exposing absolute workspace paths to WebKit. The docs root may open this copy-only menu, but rename/delete remain unavailable for that fixed root.
+ *
+ * CDXC:ManageFileActions 2026-07-01-00:59:
+ * File context menus need a Duplicate action that creates a same-folder copy named with the next available " (n)" suffix before the extension. Save the selected dirty file before duplicating it so the copy matches the visible editor content, but keep folders out of the duplicate action.
  */
 function ManageApp() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -1161,8 +1166,19 @@ function ManageApp() {
   const isEditablePreview = preview?.kind === "text";
   const isDirty = isEditablePreview && draftContent !== lastSavedContent;
 
-  const saveContentSnapshot = useCallback(async ({ content, path }: { content: string; path: string }) => {
+  const saveContentSnapshot = useCallback(async ({
+    content,
+    path,
+    throwOnError = false,
+  }: {
+    content: string;
+    path: string;
+    throwOnError?: boolean;
+  }) => {
     if (saveState === "saving") {
+      if (throwOnError) {
+        throw new Error("Wait for the current save to finish.");
+      }
       return;
     }
     if (saveResetTimerRef.current !== undefined) {
@@ -1215,9 +1231,13 @@ function ManageApp() {
         }, 1_600);
       }
     } catch (saveError) {
+      const message = saveError instanceof Error ? saveError.message : "Could not save file.";
       if (selectedPathRef.current === path) {
         setSaveState("error");
-        setError(saveError instanceof Error ? saveError.message : "Could not save file.");
+        setError(message);
+      }
+      if (throwOnError) {
+        throw new Error(message);
       }
     }
   }, [projectEditorId, projectId, saveState]);
@@ -1536,6 +1556,73 @@ function ManageApp() {
       projectId,
       refreshFiles,
       saveState,
+    ],
+  );
+
+  const duplicateFile = useCallback(
+    async (entry: ManageFileEntry) => {
+      if (entry.kind !== "file" || fileOperation) {
+        return;
+      }
+      const nextPath = createDuplicateManageFilePath(entries, entry.path);
+      setFileOperation({ action: "duplicate", path: entry.path });
+      setError(undefined);
+      try {
+        if (selectedPathRef.current === entry.path && isDirty) {
+          clearPendingContentAutosave();
+          await saveContentSnapshot({
+            content: draftContent,
+            path: entry.path,
+            throwOnError: true,
+          });
+        }
+        const response = await requestManageFiles({
+          action: "duplicate",
+          newPath: nextPath,
+          path: entry.path,
+          projectEditorId,
+          projectId,
+        });
+        if (response.error) {
+          throw new Error(response.error);
+        }
+        const duplicatedFile = response.file;
+        if (!duplicatedFile) {
+          throw new Error("Docs did not return duplicated file metadata.");
+        }
+        setFileContextMenu(undefined);
+        setCollapsedDirectoryPaths((current) => {
+          const next = new Set(current);
+          next.delete(parentManagePath(duplicatedFile.path));
+          return next;
+        });
+        await refreshFiles();
+        selectedPathRef.current = duplicatedFile.path;
+        setSelectedPath(duplicatedFile.path);
+        setPreview(duplicatedFile);
+        const nextContent = duplicatedFile.content ?? "";
+        setDraftContent(nextContent);
+        setLastSavedContent(nextContent);
+        setPreviewState("ready");
+        setSaveState("idle");
+      } catch (duplicateError) {
+        setError(duplicateError instanceof Error ? duplicateError.message : "Could not duplicate file.");
+      } finally {
+        setFileOperation((current) =>
+          current?.action === "duplicate" && current.path === entry.path ? undefined : current,
+        );
+      }
+    },
+    [
+      clearPendingContentAutosave,
+      draftContent,
+      entries,
+      fileOperation,
+      isDirty,
+      projectEditorId,
+      projectId,
+      refreshFiles,
+      saveContentSnapshot,
     ],
   );
 
@@ -1990,9 +2077,11 @@ function ManageApp() {
       </section>
       {fileContextMenu && contextMenuEntry ? (
         <ManageFileContextMenu
+          canDuplicate={contextMenuEntry.kind === "file"}
           canRenameOrDelete={contextMenuCanRenameOrDelete}
           confirmingDelete={fileContextMenu.confirmingDelete === true}
           onCopyPath={() => void copyEntryPath(contextMenuEntry)}
+          onDuplicate={() => void duplicateFile(contextMenuEntry)}
           onDelete={() => {
             if (!contextMenuCanRenameOrDelete) {
               return;
@@ -2352,18 +2441,22 @@ function ManageFileRow({
 }
 
 function ManageFileContextMenu({
+  canDuplicate,
   canRenameOrDelete,
   confirmingDelete,
   onCopyPath,
+  onDuplicate,
   onDelete,
   onDismiss,
   onRename,
   pendingAction,
   position,
 }: {
+  canDuplicate: boolean;
   canRenameOrDelete: boolean;
   confirmingDelete: boolean;
   onCopyPath: () => void;
+  onDuplicate: () => void;
   onDelete: () => void;
   onDismiss: () => void;
   onRename: () => void;
@@ -2390,6 +2483,18 @@ function ManageFileContextMenu({
         <IconCopy aria-hidden="true" size={14} stroke={1.8} />
         Copy path
       </button>
+      {canDuplicate ? (
+        <button
+          className="manage-file-context-menu-item"
+          disabled={isBusy}
+          onClick={onDuplicate}
+          role="menuitem"
+          type="button"
+        >
+          <IconCopyPlus aria-hidden="true" size={14} stroke={1.8} />
+          {pendingAction === "duplicate" ? "Duplicating" : "Duplicate"}
+        </button>
+      ) : null}
       {canRenameOrDelete ? (
         <>
           <button
@@ -4583,6 +4688,25 @@ function createUniqueFolderPath(entries: ManageFileEntry[]): string {
     }
   }
   return `${MANAGE_DOCS_ROOT_PATH}/folder-${Date.now()}`;
+}
+
+function createDuplicateManageFilePath(entries: ManageFileEntry[], path: string): string {
+  const occupiedPaths = new Set(entries.map((entry) => entry.path.toLocaleLowerCase()));
+  const parentPath = parentManagePath(path);
+  const fileName = basenameManagePath(path);
+  const extensionIndex = fileName.lastIndexOf(".");
+  const hasExtension = extensionIndex > 0 && extensionIndex < fileName.length;
+  const stem = hasExtension ? fileName.slice(0, extensionIndex) : fileName;
+  const extension = hasExtension ? fileName.slice(extensionIndex) : "";
+  for (let index = 1; index < 10_000; index += 1) {
+    const candidateName = `${stem} (${index})${extension}`;
+    const candidatePath = parentPath ? `${parentPath}/${candidateName}` : candidateName;
+    if (!occupiedPaths.has(candidatePath.toLocaleLowerCase())) {
+      return candidatePath;
+    }
+  }
+  const fallbackName = `${stem} (${Date.now()})${extension}`;
+  return parentPath ? `${parentPath}/${fallbackName}` : fallbackName;
 }
 
 function orderManageEntriesForTree(entries: readonly ManageFileEntry[]): ManageFileEntry[] {
