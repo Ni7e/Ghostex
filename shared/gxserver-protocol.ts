@@ -1113,7 +1113,13 @@ export interface GxserverProjectDomainState {
   projectId: GxserverProjectId;
   recentClosedAt?: string;
   runtimeSettings: Record<string, unknown>;
+  /*
+  CDXC:ProjectVisibility 2026-06-30-21:23:
+  Active project visibility is gxserver-owned so mobile, CLI, GPUI, and macOS omit Remote Attach carrier projects and other hidden containers through the shared daemon contract instead of each client filtering macOS sidebar details.
+  */
+  systemKind?: "remoteAttachCarrier";
   updatedAt: string;
+  visibility?: "visible" | "hidden";
   worktree?: Record<string, unknown>;
 }
 

@@ -45,6 +45,7 @@ import {
   resolveZehnLaunchFromRoot,
   sendGxserverCliAction,
   serverUsage,
+  toMobileSessionList,
   usage,
 } from "./ghostex-cli.mjs";
 
@@ -179,7 +180,7 @@ describe("ghostex CLI Android remote-session contract", () => {
       const flagHelpResult = await execFileAsync(process.execPath, [linkPath, "--help"]);
 
       expect(helpResult.stdout).toContain("Usage:");
-      expect(helpResult.stdout).toContain("sessions | s | ls [--ungrouped|-u] [--json]");
+      expect(helpResult.stdout).toContain("sessions | s | ls [--ungrouped|-u] [--json] [--mobile-summary]");
       expect(flagHelpResult.stdout).toBe(helpResult.stdout);
     } finally {
       await rm(tempDir, { force: true, recursive: true });
@@ -1787,6 +1788,11 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
      * `ghostex sessions --json` is the common inventory for macOS hydration,
      * Android, iOS, the gx TUI, and `gx ls`. It should render running and
      * sleeping zmx sessions while hiding stopped rows by default.
+     *
+     * CDXC:ProjectVisibility 2026-06-30-21:23:
+     * Mobile session inventory must also hide gxserver Recent Projects and
+     * Remote Attach carrier projects so phones do not show server-side
+     * implementation containers or closed workspaces.
      */
     const server = http.createServer(async (request, response) => {
       expect(request.headers.authorization).toBe("Bearer test-token");
@@ -1799,7 +1805,9 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
       if (request.url === "/api/listProjects") {
         result = {
           projects: [
-            { name: "Ghostex", path: "/Users/madda/zmux", projectId: "P1a" },
+            { name: "Ghostex", path: "/Users/madda/zmux", projectId: "P1a", visibility: "visible" },
+            { isRecentProject: true, name: "Closed", path: "/Users/madda/closed", projectId: "P2a", visibility: "visible" },
+            { name: "Remote Attach", path: "/Users/madda/.ghostex/remote-attach-carriers", projectId: "P3a", systemKind: "remoteAttachCarrier", visibility: "hidden" },
           ],
         };
       } else if (request.url === "/api/readPresentationSnapshot") {
@@ -1882,6 +1890,26 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
               updatedAt: "2026-05-31T04:02:00.000Z",
               zmxName: "S1a-P1a-G3a",
             },
+            {
+              globalRef: "S1a:P2a:G4a",
+              lifecycleState: "running",
+              projectId: "P2a",
+              providerState: { lifecycleState: "exists", zmxName: "S1a-P2a-G4a" },
+              sessionId: "G4a",
+              title: "Recent project session",
+              updatedAt: "2026-05-31T04:03:00.000Z",
+              zmxName: "S1a-P2a-G4a",
+            },
+            {
+              globalRef: "S1a:P3a:G5a",
+              lifecycleState: "running",
+              projectId: "P3a",
+              providerState: { lifecycleState: "exists", zmxName: "S1a-P3a-G5a" },
+              sessionId: "G5a",
+              title: "Remote carrier session",
+              updatedAt: "2026-05-31T04:04:00.000Z",
+              zmxName: "S1a-P3a-G5a",
+            },
           ],
         };
       }
@@ -1905,6 +1933,7 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
       const result = await fetchGxserverSessionList(flags);
 
       expect(result.sessions.map((session) => session.sessionId)).toEqual(["G1a", "G2a"]);
+      expect(result.projects.map((project) => project.projectId)).toEqual(["P1a"]);
       expect(result.sessions[0]).toMatchObject({
         isLive: true,
         isLocalOnly: false,
@@ -1940,9 +1969,88 @@ printf '%s\\n' "$@" > ${JSON.stringify(markerFile)}
 
       const allResult = await fetchGxserverSessionList({ ...flags, all: true });
       expect(allResult.sessions.map((session) => session.sessionId)).toEqual(["G1a", "G2a", "G3a"]);
+      expect(allResult.projects.map((project) => project.projectId)).toEqual(["P1a"]);
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+
+  test("projects mobile sessions summary without heavy presentation fields", () => {
+    /**
+     * CDXC:iOSRemoteSessions 2026-06-30-04:37:
+     * iOS should request `ghostex sessions --json --mobile-summary` so large Mac session inventories avoid transferring desktop/debug-only presentation fields over the phone's SSH list path.
+     *
+     * CDXC:ProjectVisibility 2026-06-30-21:23:
+     * The mobile summary compactor must preserve gxserver active-project visibility so hidden Remote Attach carrier rows stay out of phone project lists.
+     */
+    const result = toMobileSessionList({
+      ok: true,
+      product: "gxserver",
+      projects: [
+        { name: "Ghostex", path: "/repo/ghostex", projectId: "P1" },
+        { name: "Remote Attach", path: "/repo/.ghostex/remote-attach-carriers", projectId: "P2", systemKind: "remoteAttachCarrier", visibility: "hidden" },
+      ],
+      revision: "r1",
+      sessions: [
+        {
+          actions: { attach: true, kill: true, wake: false },
+          agent: "codex",
+          agentIcon: "codex",
+          agentSessionPath: "/private/agent/path",
+          alias: 12,
+          displayTitle: "Ship it",
+          displayTitleTooltip: "A long tooltip",
+          groupId: "P1:active",
+          isFocused: false,
+          isLive: true,
+          isSleeping: false,
+          lastInteractionAt: "2026-06-30T04:37:00.000Z",
+          projectId: "P1",
+          projectName: "Ghostex",
+          projectPath: "/repo/ghostex",
+          provider: "zmx",
+          providerSessionName: "S1-P1-G1",
+          providerSessionState: "exists",
+          sessionId: "G1",
+          shouldSubmitStagedFirstPromptTitleCommand: true,
+          status: "working",
+          title: "Raw title",
+        },
+        {
+          displayTitle: "Hidden carrier",
+          projectId: "P2",
+          projectName: "Remote Attach",
+          sessionId: "G2",
+          title: "Hidden carrier",
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      product: "gxserver",
+      revision: "r1",
+      projects: [{ name: "Ghostex", path: "/repo/ghostex", projectId: "P1" }],
+      sessions: [
+        {
+          agent: "codex",
+          agentIcon: "codex",
+          alias: 12,
+          displayTitle: "Ship it",
+          isLive: true,
+          lastInteractionAt: "2026-06-30T04:37:00.000Z",
+          projectId: "P1",
+          provider: "zmx",
+          providerSessionName: "S1-P1-G1",
+          sessionId: "G1",
+          status: "working",
+        },
+      ],
+    });
+    expect(result.sessions.map((session) => session.sessionId)).toEqual(["G1"]);
+    expect(result.sessions[0]).not.toHaveProperty("actions");
+    expect(result.sessions[0]).not.toHaveProperty("agentSessionPath");
+    expect(result.sessions[0]).not.toHaveProperty("displayTitleTooltip");
   });
 
   test("resolves bare gxserver session ids before lifecycle RPCs", async () => {

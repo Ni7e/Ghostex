@@ -34,7 +34,7 @@ const LEGACY_NATIVE_PROJECTS_STATE_FILE: &str = "native-sidebar-projects.json";
 
 /*
 CDXC:GxserverStorage 2026-06-14-20:37:
-SQLite remains TypeScript-compatible during the Rust port. Open every connection with foreign_keys=ON and journal_mode=WAL, then apply migration IDs 0001 through 0014 without inventing a parallel schema.
+SQLite remains TypeScript-compatible during the Rust port. Open every connection with foreign_keys=ON and journal_mode=WAL, then apply migration IDs 0001 through 0015 without inventing a parallel schema.
 
 CDXC:GxserverAppUserData 2026-06-24-13:30:
 Scratch Pad and Pinned Prompts are shared user-data surfaces, not GPUI-local modal state. Store their content in gxserver SQLite behind explicit product-data RPCs so macOS and GPUI hydrate the same React contract without logging prompt or note bodies.
@@ -968,6 +968,34 @@ pub const GXSERVER_STORAGE_MIGRATIONS: &[Migration] = &[
       PRAGMA user_version = 14;
     "#,
     },
+    Migration {
+        id: "0015_project_visibility",
+        /*
+        CDXC:ProjectVisibility 2026-06-30-21:23:
+        Project visibility and system roles are gxserver domain state, not macOS sidebar-only filtering. Store hidden/system markers on project rows so mobile, CLI, GPUI, and macOS all omit Remote Attach carrier projects and other non-active project containers from shared inventory without client-specific project-name filters.
+        */
+        sql: r#"
+      ALTER TABLE projects ADD COLUMN visibility TEXT NOT NULL DEFAULT 'visible' CHECK (visibility IN ('visible', 'hidden'));
+      ALTER TABLE projects ADD COLUMN systemKind TEXT CHECK (systemKind IS NULL OR systemKind IN ('remoteAttachCarrier'));
+
+      UPDATE projects
+      SET visibility = 'hidden',
+          systemKind = 'remoteAttachCarrier',
+          isRecentProject = 0,
+          recentClosedAt = NULL
+      WHERE systemKind IS NULL
+        AND trim(name) = 'Remote Attach'
+        AND (
+          trim(COALESCE(path, '')) LIKE '%/.ghostex/remote-attach-carriers'
+          OR trim(COALESCE(path, '')) LIKE '%/.ghostex-dev/remote-attach-carriers'
+        );
+
+      CREATE INDEX IF NOT EXISTS idx_projects_visibility
+        ON projects(visibility, systemKind, updatedAt);
+
+      PRAGMA user_version = 15;
+    "#,
+    },
 ];
 
 #[cfg(unix)]
@@ -1016,10 +1044,10 @@ mod tests {
         let journal_mode: String = db
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("journal_mode");
-        assert_eq!(user_version, 14);
+        assert_eq!(user_version, 15);
         assert_eq!(foreign_keys, 1);
         assert_eq!(journal_mode, "wal");
-        assert_eq!(schema_migration_count(&db), 14);
+        assert_eq!(schema_migration_count(&db), 15);
         assert_eq!(
             explicit_index_names(&db),
             vec![
@@ -1034,6 +1062,7 @@ mod tests {
                 "idx_portless_domain_worktree_identity".to_string(),
                 "idx_portless_domain_worktree_slug".to_string(),
                 "idx_projects_recent_closed".to_string(),
+                "idx_projects_visibility".to_string(),
                 "idx_sessions_project_sidebar_order".to_string(),
                 "idx_sessions_project_updated".to_string(),
             ]
@@ -1066,6 +1095,8 @@ mod tests {
                 "updatedAt",
                 "isRecentProject",
                 "recentClosedAt",
+                "visibility",
+                "systemKind",
             ]
         );
         assert_eq!(

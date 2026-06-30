@@ -62,7 +62,7 @@ pub fn build_presentation_project_delta(
             "type": "projectRemoved",
         }));
     };
-    if project.get("isRecentProject").and_then(Value::as_bool) == Some(true) {
+    if !should_include_presentation_project(&project) {
         return Ok(json!({
             "projectId": project_id,
             "type": "projectRemoved",
@@ -89,7 +89,9 @@ pub fn build_presentation_session_delta(
             "type": "sessionRemoved",
         }));
     };
-    if !should_include_presentation_session(&session) {
+    if !should_include_presentation_project(&project)
+        || !should_include_presentation_session(&session)
+    {
         return Ok(json!({
             "projectId": project_id,
             "sessionId": session_id,
@@ -157,7 +159,7 @@ fn project_snapshot(projects: Vec<Value>, sessions: Vec<Value>, revision: i64) -
         them is `/api/listRecentProjects`, which returns explicit path-bearing
         rows instead of deriving recency from inactive sessions or labels.
         */
-        if project.get("isRecentProject").and_then(Value::as_bool) == Some(true) {
+        if !should_include_presentation_project(&project) {
             continue;
         }
         let project_id = string_field(&project, "projectId").unwrap_or_default();
@@ -197,6 +199,16 @@ fn project_snapshot(projects: Vec<Value>, sessions: Vec<Value>, revision: i64) -
         "revision": revision,
         "sessions": presentation_sessions,
     })
+}
+
+fn should_include_presentation_project(project: &Value) -> bool {
+    /*
+    CDXC:ProjectVisibility 2026-06-30-21:23:
+    Active sidebar/project inventory is gxserver-owned. Parked Recent Projects and hidden system carrier projects stay durable for domain/session ownership, but presentation snapshots and deltas must remove them so macOS, GPUI, CLI, iOS, and Android do not independently invent visibility filters.
+    */
+    project.get("isRecentProject").and_then(Value::as_bool) != Some(true)
+        && string_field(project, "visibility").as_deref() != Some("hidden")
+        && string_field(project, "systemKind").as_deref() != Some("remoteAttachCarrier")
 }
 
 fn insert_portless_presentation_payload(snapshot: &mut Value, db: &Connection) {
@@ -1819,6 +1831,50 @@ mod tests {
             .and_then(Value::as_array)
             .expect("groups");
         assert_eq!(groups[0].get("sessionIds"), Some(&json!(["G101", "G100"])));
+    }
+
+    #[test]
+    fn snapshot_omits_recent_and_hidden_system_projects() {
+        /*
+        CDXC:ProjectVisibility 2026-06-30-21:23:
+        Project presentation is the shared active inventory contract. Recent Projects and Remote Attach carrier projects must stay out of presentation snapshots so iOS and Android do not show closed workspaces or remote-attach containers as selectable projects.
+        */
+        let mut recent = project("P200", "Closed", false, false);
+        recent
+            .as_object_mut()
+            .expect("recent project object")
+            .insert("isRecentProject".to_string(), Value::Bool(true));
+        let mut carrier = project("P201", "Remote Attach", false, false);
+        let carrier_object = carrier.as_object_mut().expect("carrier project object");
+        carrier_object.insert("systemKind".to_string(), json!("remoteAttachCarrier"));
+        carrier_object.insert("visibility".to_string(), json!("hidden"));
+        let snapshot = project_snapshot(
+            vec![project("P100", "Active", false, false), recent, carrier],
+            vec![
+                session("P100", "G100", "Visible", "running", 1.0),
+                session("P200", "G200", "Recent hidden", "running", 1.0),
+                session("P201", "G201", "Carrier hidden", "running", 1.0),
+            ],
+            7,
+        );
+        let projects = snapshot
+            .get("projects")
+            .and_then(Value::as_array)
+            .expect("projects");
+        assert_eq!(projects.len(), 1);
+        assert_eq!(
+            projects[0].get("projectId").and_then(Value::as_str),
+            Some("P100")
+        );
+        let sessions = snapshot
+            .get("sessions")
+            .and_then(Value::as_array)
+            .expect("sessions");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].get("sessionId").and_then(Value::as_str),
+            Some("G100")
+        );
     }
 
     #[test]

@@ -86,13 +86,13 @@ impl<'a> DomainRepository<'a> {
                   customAgentsJson, customAgentOrderJson, customCommandsJson, customCommandOrderJson,
                   deletedDefaultCommandIdsJson, launchSettingsJson, runtimeSettingsJson, completionRulesJson,
                   attentionRulesJson, notificationRulesJson, gitConfigJson, projectBoardConfigJson,
-                  previousSessionHistoryJson, createdAt, updatedAt
+                  previousSessionHistoryJson, createdAt, updatedAt, visibility, systemKind
                 ) VALUES (
                   ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
                   ?11, ?12, ?13, ?14,
                   ?15, ?16, ?17, ?18,
                   ?19, ?20, ?21, ?22,
-                  ?23, ?24, ?25
+                  ?23, ?24, ?25, ?26, ?27
                 )
                 "#,
                 project_insert_params(&project)?,
@@ -135,7 +135,9 @@ impl<'a> DomainRepository<'a> {
                   gitConfigJson = ?21,
                   projectBoardConfigJson = ?22,
                   previousSessionHistoryJson = ?23,
-                  updatedAt = ?25
+                  updatedAt = ?25,
+                  visibility = ?26,
+                  systemKind = ?27
                 WHERE projectId = ?1
                 "#,
                 project_insert_params(&project)?,
@@ -165,6 +167,12 @@ impl<'a> DomainRepository<'a> {
         from the domain sessions table; do not infer recency from presentation
         labels, inactive lifecycle states, shell titles, stdout, commands, or
         filesystem scans.
+
+        CDXC:ProjectVisibility 2026-06-30-21:23:
+        Hidden/system projects are not user workspaces and must not leak through
+        the Recent Projects drawer. Keep Remote Attach carrier rows durable for
+        session ownership while excluding them from every active or recent
+        project list clients render.
         */
         let mut statement = self
             .db
@@ -174,6 +182,8 @@ impl<'a> DomainRepository<'a> {
                 WHERE isRecentProject = 1
                   AND path IS NOT NULL
                   AND trim(path) <> ''
+                  AND visibility <> 'hidden'
+                  AND (systemKind IS NULL OR systemKind <> 'remoteAttachCarrier')
                 ORDER BY recentClosedAt DESC, updatedAt DESC, projectId ASC
                 "#,
             )
@@ -407,19 +417,44 @@ impl<'a> DomainRepository<'a> {
         /*
         CDXC:WorktreeProjectRegistration 2026-06-22-00:35:
         Rust gxserver must preserve the TypeScript Add Worktree/Add Project path-registration contract. When /api/addProjectPath receives a linked Git worktree path, detect the already registered main checkout and store worktree metadata under that canonical parent project ID; if the path was registered earlier without metadata, repair that existing row in place so the macOS sidebar groups it exactly like the old server.
+
+        CDXC:ProjectVisibility 2026-06-30-21:23:
+        Project visibility and system-project roles belong to gxserver, because mobile, CLI, GPUI, and macOS all read project/session inventory from the daemon. `/api/addProjectPath` must repair an existing path row when a producer marks it hidden/system, otherwise old Remote Attach carrier rows can keep leaking into non-macOS project lists.
         */
         let worktree = detect_registered_git_worktree_metadata(&projects, &path, &name);
         if let Some(existing) = find_project_by_path_in(&projects, &path) {
+            let mut update_params = Map::new();
+            update_params.insert(
+                "projectId".to_string(),
+                Value::String(read_string_field(&existing, "projectId")?),
+            );
             if let Some(worktree) = worktree {
                 if !are_project_worktree_metadata_equal(existing.get("worktree"), &worktree) {
-                    let mut update_params = Map::new();
-                    update_params.insert(
-                        "projectId".to_string(),
-                        Value::String(read_string_field(&existing, "projectId")?),
-                    );
                     update_params.insert("worktree".to_string(), Value::Object(worktree));
-                    return self.update_project(&update_params);
                 }
+            }
+            if params.contains_key("visibility") {
+                let visibility = normalize_project_visibility(params.get("visibility"))?;
+                if existing.get("visibility").and_then(Value::as_str) != Some(visibility.as_str()) {
+                    update_params.insert("visibility".to_string(), Value::String(visibility));
+                }
+            }
+            if params.contains_key("systemKind") {
+                match normalize_project_system_kind(params.get("systemKind"))? {
+                    Some(system_kind)
+                        if existing.get("systemKind").and_then(Value::as_str)
+                            != Some(system_kind.as_str()) =>
+                    {
+                        update_params.insert("systemKind".to_string(), Value::String(system_kind));
+                    }
+                    None if existing.get("systemKind").is_some() => {
+                        update_params.insert("systemKind".to_string(), Value::Null);
+                    }
+                    _ => {}
+                }
+            }
+            if update_params.len() > 1 {
+                return self.update_project(&update_params);
             }
             return Ok(existing);
         }
@@ -1291,9 +1326,18 @@ fn normalize_project_input(
         "runtimeSettings".to_string(),
         Value::Object(normalize_object(input.get("runtimeSettings"))),
     );
+    insert_optional_string(
+        &mut project,
+        "systemKind",
+        normalize_project_system_kind(input.get("systemKind"))?,
+    );
     project.insert(
         "updatedAt".to_string(),
         Value::String(timestamp.to_string()),
+    );
+    project.insert(
+        "visibility".to_string(),
+        Value::String(normalize_project_visibility(input.get("visibility"))?),
     );
     insert_optional_object(
         &mut project,
@@ -1353,12 +1397,66 @@ fn merge_project_update(
     update_object_field(&mut next, input, "projectBoardConfig");
     update_optional_text_field(&mut next, input, "recentClosedAt");
     update_object_field(&mut next, input, "runtimeSettings");
+    if input.contains_key("systemKind") {
+        insert_optional_string(
+            &mut next,
+            "systemKind",
+            normalize_project_system_kind(input.get("systemKind"))?,
+        );
+    }
+    if input.contains_key("visibility") {
+        next.insert(
+            "visibility".to_string(),
+            Value::String(normalize_project_visibility(input.get("visibility"))?),
+        );
+    }
     update_optional_object_field(&mut next, input, "worktree");
     next.insert(
         "updatedAt".to_string(),
         Value::String(updated_at.to_string()),
     );
     Ok(Value::Object(next))
+}
+
+fn normalize_project_visibility(value: Option<&Value>) -> DomainResult<String> {
+    match normalize_optional_project_enum_text(value, "visibility")?.as_deref() {
+        None => Ok("visible".to_string()),
+        Some("visible") => Ok("visible".to_string()),
+        Some("hidden") => Ok("hidden".to_string()),
+        Some(_) => Err(DomainStateError::bad_request(
+            "visibility must be either visible or hidden.",
+        )),
+    }
+}
+
+fn normalize_project_system_kind(value: Option<&Value>) -> DomainResult<Option<String>> {
+    match normalize_optional_project_enum_text(value, "systemKind")?.as_deref() {
+        None => Ok(None),
+        Some("remoteAttachCarrier") => Ok(Some("remoteAttachCarrier".to_string())),
+        Some(_) => Err(DomainStateError::bad_request(
+            "systemKind must be remoteAttachCarrier when provided.",
+        )),
+    }
+}
+
+fn normalize_optional_project_enum_text(
+    value: Option<&Value>,
+    field: &str,
+) -> DomainResult<Option<String>> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(value
+            .trim()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_string())
+        .map(|value| if value.is_empty() { None } else { Some(value) }),
+        Some(_) => Err(DomainStateError::bad_request(format!(
+            "{field} must be a string when provided."
+        ))),
+    }
 }
 
 fn normalize_session_input(
@@ -1861,7 +1959,9 @@ struct ProjectRow {
     project_id: String,
     recent_closed_at: Option<String>,
     runtime_settings_json: String,
+    system_kind: Option<String>,
     updated_at: String,
+    visibility: String,
     worktree_json: String,
 }
 
@@ -1875,6 +1975,8 @@ fn project_row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow>
         is_favorite: row.get("isFavorite")?,
         is_recent_project: row.get("isRecentProject")?,
         recent_closed_at: row.get("recentClosedAt")?,
+        visibility: row.get("visibility")?,
+        system_kind: row.get("systemKind")?,
         default_command: row.get("defaultCommand")?,
         worktree_json: row.get("worktreeJson")?,
         custom_agents_json: row.get("customAgentsJson")?,
@@ -2037,7 +2139,9 @@ fn project_from_row(row: ProjectRow) -> DomainResult<Value> {
             &row.project_id,
         )?,
     );
+    insert_optional_string(&mut project, "systemKind", row.system_kind);
     project.insert("updatedAt".to_string(), Value::String(row.updated_at));
+    project.insert("visibility".to_string(), Value::String(row.visibility));
     insert_parsed_optional_object(
         &mut project,
         "worktree",
@@ -2378,6 +2482,8 @@ fn project_insert_params(
         )?),
         sql_text(required_string(object, "createdAt")?),
         sql_text(required_string(object, "updatedAt")?),
+        sql_text(required_string(object, "visibility")?),
+        sql_optional_text(optional_string(object, "systemKind")),
     ];
     Ok(rusqlite::params_from_iter(values))
 }
@@ -3782,6 +3888,70 @@ mod tests {
             missing_remove.message,
             "Session undefined/undefined does not exist."
         );
+    }
+
+    #[test]
+    fn add_project_path_repairs_visibility_metadata_for_existing_path() {
+        /*
+        CDXC:ProjectVisibility 2026-06-30-21:23:
+        Remote Attach carrier registration may reuse an existing gxserver path row. Repair hidden/system project metadata on `/api/addProjectPath` so every inventory client hides that carrier through daemon-owned state instead of macOS-only project filters.
+        */
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "S7k");
+        let carrier_path = temp.path().join("remote-attach-carriers");
+        std::fs::create_dir_all(&carrier_path).expect("carrier dir");
+
+        let initial = repository
+            .add_project_path(
+                json!({
+                    "name": "Remote Attach",
+                    "path": path_str(&carrier_path),
+                })
+                .as_object()
+                .expect("initial project params"),
+            )
+            .expect("initial project");
+        let project_id = value_str(&initial, "projectId").to_string();
+        assert_eq!(
+            initial.get("visibility").and_then(Value::as_str),
+            Some("visible")
+        );
+        assert!(initial.get("systemKind").is_none());
+
+        let repaired = repository
+            .add_project_path(
+                json!({
+                    "name": "Remote Attach",
+                    "path": path_str(&carrier_path),
+                    "systemKind": "remoteAttachCarrier",
+                    "visibility": "hidden",
+                })
+                .as_object()
+                .expect("repair project params"),
+            )
+            .expect("repaired project");
+        assert_eq!(value_str(&repaired, "projectId"), project_id);
+        assert_eq!(
+            repaired.get("visibility").and_then(Value::as_str),
+            Some("hidden")
+        );
+        assert_eq!(
+            repaired.get("systemKind").and_then(Value::as_str),
+            Some("remoteAttachCarrier")
+        );
+
+        let invalid = repository
+            .add_project_path(
+                json!({
+                    "name": "Remote Attach",
+                    "path": path_str(&carrier_path),
+                    "visibility": "archived",
+                })
+                .as_object()
+                .expect("invalid project params"),
+            )
+            .expect_err("invalid visibility rejected");
+        assert_eq!(invalid.code, "badRequest");
     }
 
     #[test]

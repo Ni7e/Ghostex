@@ -1933,7 +1933,8 @@ async function fetchLiveGxserverSessionList(flags = {}) {
   const projects = Array.isArray(projectsResponse.projects) ? projectsResponse.projects : [];
   const sessions = Array.isArray(sessionsResponse.sessions) ? sessionsResponse.sessions : [];
   const presentationBySessionKey = presentationSessionMap(presentationResponse.snapshot?.sessions);
-  const projectById = new Map(projects.map((project) => [project.projectId, project]));
+  const activeProjects = projects.filter(isActiveGxserverInventoryProject);
+  const projectById = new Map(activeProjects.map((project) => [project.projectId, project]));
   /*
    * CDXC:GxserverSessionInventory 2026-05-31-08:45:
    * All five clients render the same gxserver inventory contract: macOS owns
@@ -1947,13 +1948,14 @@ async function fetchLiveGxserverSessionList(flags = {}) {
    * presentation activity onto the CLI inventory so Android, iOS, TUI, and gx
    * share the same status contract without guessing from lifecycle `running`.
    */
+  const projectSessions = sessions.filter((session) => projectById.has(session.projectId));
   const listedSessions = shouldIncludeStoppedGxserverSessions(flags)
-    ? sessions
-    : sessions.filter((session) => !isStoppedGxserverSession(session));
+    ? projectSessions
+    : projectSessions.filter((session) => !isStoppedGxserverSession(session));
   return {
     ok: true,
     product: GXSERVER_PRODUCT,
-    projects,
+    projects: activeProjects,
     revision: sessionsResponse.requestId,
     sessions: listedSessions.map((session, index) =>
       toCliSession(
@@ -1974,16 +1976,9 @@ async function readPersistedGxserverSessionList(cause, flags = {}) {
     return undefined;
   }
   const sqlitePath = existsSync("/usr/bin/sqlite3") ? "/usr/bin/sqlite3" : "sqlite3";
-  const sql = [
-    "SELECT 'project' AS rowType, projectId, name, path, NULL AS sessionId, NULL AS kind, NULL AS title, NULL AS lifecycleState, NULL AS providerStateJson, NULL AS zmxName, NULL AS cwd, NULL AS agentId, NULL AS updatedAt, NULL AS lastActiveAt FROM projects",
-    "UNION ALL",
-    "SELECT 'session' AS rowType, projectId, NULL AS name, NULL AS path, sessionId, kind, title, lifecycleState, providerStateJson, zmxName, cwd, agentId, updatedAt, lastActiveAt FROM sessions",
-    "ORDER BY rowType ASC, updatedAt DESC, projectId ASC, sessionId ASC",
-  ].join(" ");
-  const { stdout } = await execFileAsync(sqlitePath, ["-json", GXSERVER_STATE_DB_PATH, sql], {
-    timeout: 2_000,
-  }).catch(() => ({ stdout: "" }));
-  const rows = parseJson(stdout);
+  const rows =
+    await readPersistedGxserverInventoryRows(sqlitePath, true) ??
+    await readPersistedGxserverInventoryRows(sqlitePath, false);
   if (!Array.isArray(rows)) {
     return undefined;
   }
@@ -1991,13 +1986,18 @@ async function readPersistedGxserverSessionList(cause, flags = {}) {
   const projects = rows
     .filter((row) => row?.rowType === "project")
     .map((row) => ({
+      isRecentProject: row.isRecentProject === 1 || row.isRecentProject === true,
       name: row.name,
       path: row.path,
       projectId: row.projectId,
-    }));
+      systemKind: row.systemKind ?? undefined,
+      visibility: row.visibility ?? "visible",
+    }))
+    .filter(isActiveGxserverInventoryProject);
   const projectById = new Map(projects.map((project) => [project.projectId, project]));
   const sessions = rows
     .filter((row) => row?.rowType === "session")
+    .filter((row) => projectById.has(row.projectId))
     .map((row) => ({
       agentId: row.agentId ?? undefined,
       cwd: row.cwd ?? undefined,
@@ -2030,6 +2030,39 @@ async function readPersistedGxserverSessionList(cause, flags = {}) {
     projects,
     sessions: listedSessions.map((session, index) => toCliSession(session, projectById.get(session.projectId), index)),
   };
+}
+
+async function readPersistedGxserverInventoryRows(sqlitePath, includeProjectVisibilityColumns) {
+  const sql = createPersistedGxserverInventorySql(includeProjectVisibilityColumns);
+  const { stdout } = await execFileAsync(sqlitePath, ["-json", GXSERVER_STATE_DB_PATH, sql], {
+    timeout: 2_000,
+  }).catch(() => ({ stdout: "" }));
+  const rows = parseJson(stdout);
+  return Array.isArray(rows) ? rows : undefined;
+}
+
+function createPersistedGxserverInventorySql(includeProjectVisibilityColumns) {
+  const projectVisibilityColumns = includeProjectVisibilityColumns
+    ? "isRecentProject, visibility, systemKind"
+    : "isRecentProject, 'visible' AS visibility, NULL AS systemKind";
+  return [
+    `SELECT 'project' AS rowType, projectId, name, path, ${projectVisibilityColumns}, NULL AS sessionId, NULL AS kind, NULL AS title, NULL AS lifecycleState, NULL AS providerStateJson, NULL AS zmxName, NULL AS cwd, NULL AS agentId, NULL AS updatedAt, NULL AS lastActiveAt FROM projects`,
+    "UNION ALL",
+    "SELECT 'session' AS rowType, projectId, NULL AS name, NULL AS path, NULL AS isRecentProject, NULL AS visibility, NULL AS systemKind, sessionId, kind, title, lifecycleState, providerStateJson, zmxName, cwd, agentId, updatedAt, lastActiveAt FROM sessions",
+    "ORDER BY rowType ASC, updatedAt DESC, projectId ASC, sessionId ASC",
+  ].join(" ");
+}
+
+function isActiveGxserverInventoryProject(project) {
+  /*
+   * CDXC:ProjectVisibility 2026-06-30-21:23:
+   * The CLI is the transport used by iOS and Android for remote session lists. Filter shared inventory from gxserver domain visibility fields so parked Recent Projects and hidden Remote Attach carrier projects do not reach mobile summaries or full session lists.
+   */
+  return (
+    project?.isRecentProject !== true &&
+    project?.visibility !== "hidden" &&
+    project?.systemKind !== "remoteAttachCarrier"
+  );
 }
 
 function shouldUseLocalGxserverStateFallback(flags = {}) {
@@ -3870,7 +3903,7 @@ async function sessionsCommand(args) {
   const { flags } = parseArgs(args);
   const result = await fetchSessionList(flags, { writeCache: true });
   if (flags.json) {
-    printJson(result);
+    printJson(flags.mobileSummary ? toMobileSessionList(result) : result);
     return;
   }
   printSessionList(result.sessions ?? [], {
@@ -5002,6 +5035,65 @@ async function fetchSessionList(flags = {}, options = {}) {
   return { ...result, sessions };
 }
 
+function toMobileSessionList(result = {}) {
+  /**
+   * CDXC:iOSRemoteSessions 2026-06-30-04:37:
+   * iOS opens the Ghostex session list over SSH and can have hundreds of Mac-hosted sessions. The mobile summary JSON keeps only row/action identity fields so the phone does less network transfer, JSON parsing, and SwiftUI diff work than the full diagnostic `sessions --json` contract.
+   *
+   * CDXC:ProjectVisibility 2026-06-30-21:23:
+   * Mobile summaries must preserve gxserver's active-project filter. Even if a future caller passes unfiltered inventory into this compactor, Recent Projects and hidden Remote Attach carrier projects should be removed before Android or iOS parse the payload.
+   */
+  const projects = Array.isArray(result.projects)
+    ? result.projects.filter(isActiveGxserverInventoryProject)
+    : undefined;
+  const activeProjectIds = projects
+    ? new Set(projects.map((project) => project?.projectId).filter(Boolean))
+    : undefined;
+  const sessions = Array.isArray(result.sessions)
+    ? result.sessions.filter((session) => !activeProjectIds || activeProjectIds.has(session?.projectId))
+    : [];
+  return {
+    fallback: result.fallback,
+    ok: result.ok !== false,
+    product: result.product,
+    projects: projects
+      ? projects.map((project) => compactObject({
+          name: project?.name,
+          path: project?.path,
+          projectId: project?.projectId,
+        }))
+      : undefined,
+    revision: result.revision,
+    sessions: sessions.map(toMobileSessionSummary),
+  };
+}
+
+function toMobileSessionSummary(session = {}) {
+  return compactObject({
+    activity: session.activity,
+    agent: session.agent ?? session.agentId,
+    agentIcon: session.agentIcon,
+    alias: session.alias,
+    displayTitle: session.displayTitle ?? session.title,
+    groupId: session.groupId,
+    isFocused: session.isFocused,
+    isLive: session.isLive,
+    isSleeping: session.isSleeping,
+    lastInteractionAt: session.lastInteractionAt ?? session.lastActiveAt ?? session.updatedAt,
+    nativePaneState: session.nativePaneState,
+    projectId: session.projectId,
+    projectName: session.projectName,
+    projectPath: session.projectPath,
+    provider: session.provider,
+    providerSessionName: session.providerSessionName ?? session.sessionPersistenceName,
+    providerSessionState: session.providerSessionState,
+    sessionId: session.sessionId,
+    shouldSubmitStagedFirstPromptTitleCommand: session.shouldSubmitStagedFirstPromptTitleCommand,
+    status: session.status,
+    title: session.title,
+  });
+}
+
 async function writeSessionAliasCache(cache) {
   /**
    * CDXC:CliSessions 2026-05-07-21:22
@@ -5950,7 +6042,7 @@ function usage() {
   */
   const sessionCommands = [
     formatHelpCommand("2 [--tui2-bin path]", "Launch the experimental upstream-Herdr Ghostex TUI"),
-    formatHelpCommand("sessions | s | ls [--ungrouped|-u] [--json]", "List running terminal sessions"),
+    formatHelpCommand("sessions | s | ls [--ungrouped|-u] [--json] [--mobile-summary]", "List running terminal sessions"),
     formatHelpCommand("find | f [zehn args...]", "Search agent prompt history with bundled zehn"),
     formatHelpCommand("history | h [ghostex-history args...]", "View local agent transcripts in the alt-screen history TUI"),
     formatHelpCommand("android-check [--json]", "Verify this Mac is ready for Ghostex Android"),
@@ -6419,5 +6511,6 @@ export {
   resolveZehnLaunchFromRoot,
   sendGxserverCliAction,
   serverUsage,
+  toMobileSessionList,
   usage,
 };

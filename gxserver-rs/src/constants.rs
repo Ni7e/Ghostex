@@ -32,4 +32,5 @@ pub const GXSERVER_MIGRATION_IDS: &[&str] = &[
     "0012_recent_projects",
     "0013_app_user_data",
     "0014_automations",
+    "0015_project_visibility",
 ];

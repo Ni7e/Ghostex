@@ -136,6 +136,12 @@ export class NativeGxserverClientError extends Error {
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:58744";
 const NETWORK_RETRY_DELAYS_MS = [120, 300, 700] as const;
+type GxserverAddProjectPathParams = {
+  name?: string;
+  path: string;
+  systemKind?: GxserverProjectDomainState["systemKind"];
+  visibility?: GxserverProjectDomainState["visibility"];
+};
 
 /*
 CDXC:GxserverSidebarClient 2026-05-30-15:39:
@@ -584,10 +590,13 @@ export function createNativeSidebarGxserverClient(
     return fork;
   }
 
-  function addProjectPathSync(params: { name?: string; path: string }): GxserverProjectDomainState {
+  function addProjectPathSync(params: GxserverAddProjectPathParams): GxserverProjectDomainState {
     /*
     CDXC:GxserverProjectIdentity 2026-05-31-17:47:
     Project rows shown in the native sidebar must be registered through gxserver before any shared terminal/session is created. The daemon returns the canonical P-id, keeping macOS aligned with CLI/TUI/mobile clients instead of persisting sidebar-minted `project-*` ids into shared session calls.
+
+    CDXC:ProjectVisibility 2026-06-30-21:23:
+    Remote Attach carrier projects must be marked hidden/system at gxserver registration time so iOS and Android consume the same active project inventory as macOS instead of filtering macOS-only sidebar markers.
     */
     const { project } = rpcSync<{ project: GxserverProjectDomainState }>(
       "/api/addProjectPath",
@@ -596,7 +605,7 @@ export function createNativeSidebarGxserverClient(
     return project;
   }
 
-  async function addProjectPath(params: { name?: string; path: string }): Promise<GxserverProjectDomainState> {
+  async function addProjectPath(params: GxserverAddProjectPathParams): Promise<GxserverProjectDomainState> {
     const { project } = await rpc<{ project: GxserverProjectDomainState }>(
       "/api/addProjectPath",
       params as unknown as Record<string, unknown>,
