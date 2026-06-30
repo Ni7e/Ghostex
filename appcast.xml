@@ -8,6 +8,34 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>5.2.0</title>
+            <pubDate>Tue, 30 Jun 2026 05:24:48 +0400</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.2.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>50200</sparkle:version>
+            <sparkle:shortVersionString>5.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 5.2.0
+
+- Major
+  - Automations now run through gxserver and can be launched from the sidebar, Project Board, and `ghostex`/`gx` CLI.
+  - Docs can scan additional project folders, collapse or expand the tree, copy file and folder paths, and show cleaner root actions.
+  - HTML Docs now open in isolated previews with better starter pages, Agentation feedback support, and slimmer embedded scrollbars.
+  - Settings has a simpler General layout, a clearer app icon picker, remembered page position, and a lighter prompt editor setup.
+  - Remote setup and attach flows show clearer install diagnostics, package selection, and session state.
+- Minor
+  - Sidebar project headers, empty states, context menus, scroll glow, tooltips, and session agent icons are easier to scan.
+  - Project editor chrome, sticky navigation, update download feedback, and first-launch dismissal are steadier.
+  - Prompt editing now uses the configured machine editor path when needed instead of relying on `gte`.
+  - Remote rows use cleaner zmx provider metadata, and zmx advertises editor capability correctly.
+  - Android SSH transport is more reliable, and iOS branding plus remote-session sidebar behavior are refreshed. Thanks @wiedymi.
+  - Apple Silicon releases now validate and bundle the Linux remote gxserver packages used for remote hosts.
+
+[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v5.2.0)
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v5.2.0/ghostex-5.2.0-arm64.dmg" length="809190347" type="application/octet-stream" sparkle:edSignature="ZYaZkH73rgfXq6dIPztiMBq8gq/ft+jdGDUkyt7McP4d5RG05Wx3/EqERmCQRWgzuTTsrs0jXMEYiKzisGIxDQ=="/>
+        </item>
+        <item>
             <title>5.1.0</title>
             <pubDate>Mon, 29 Jun 2026 05:02:43 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v5.1.0</sparkle:fullReleaseNotesLink>
@@ -135,33 +163,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.21.1/ghostex-4.21.1-arm64.dmg" length="579718365" type="application/octet-stream" sparkle:edSignature="O/xrcdkT7JHeywLP2StzKv3VpNvlT+1jmZIBVYP481ia0bI3lixvsmJCvxeH1wv66skQKsuTABjxE3Sg+A1kDA=="/>
         </item>
         <item>
-            <title>4.21.0</title>
-            <pubDate>Fri, 19 Jun 2026 15:33:37 +0400</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v4.21.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>42100</sparkle:version>
-            <sparkle:shortVersionString>4.21.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 4.21.0
-
-- Major
-  - Agent setup is simpler, with gxserver-owned skill installs and Default Prompt Agent settings.
-  - Browser appearance and titlebar settings are cleaner and persist per project and origin.
-  - Sidebar search, session drag-and-drop, and gap right-click menus are easier to use.
-  - Project Board labels load faster and Kanban cards are easier to read.
-- Minor
-  - First-launch and Settings screens are calmer and easier to scan.
-  - Browser panes open the requested initial URL more reliably. Thanks @cuttothechaseo.
-  - Sidebar section header actions no longer overlap their labels. Thanks @cuttothechaseo.
-  - Source panes wait for code-server readiness before opening.
-  - Delayed Send timers restore correctly after restarting Ghostex.
-  - Scroll fades and debug diagnostics are cleaner while keeping private data redacted.
-
-[Full release notes](https://github.com/maddada/Ghostex/releases/tag/v4.21.0)
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v4.21.0/ghostex-4.21.0-arm64.dmg" length="576605387" type="application/octet-stream" sparkle:edSignature="3yVpOVIcBFut1M/axC6jAo903NvEg7wGz2A+1NNH4y0cFzO+jjQafXP3Rel+NYP/iXDkBy15ar4VpHjTdVHeBw=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -173,6 +174,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: zafHZHOx2No+RcQXET3LO0rh3QJ0zgJr+xjqgm1LDxYcvPcgRP4OhaV0IYDtkLXoNTYR/vAsmfYvv4R15VKHCA==
-length: 12272
+edSignature: gmMQgrJbRb1H6i/Ss8LrG2GxkwvD5liANY0c5hZxJVTbFkv4iwciA5+Ulzxpe/JDzNaoPpaXefLxJn4p/xghCg==
+length: 12746
 -->
