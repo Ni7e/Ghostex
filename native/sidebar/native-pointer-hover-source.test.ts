@@ -11,6 +11,10 @@ const sessionCardsSource = readFileSync(
   new URL("../../sidebar/styles/session-cards.css", import.meta.url),
   "utf8",
 );
+const sessionOverlaysSource = readFileSync(
+  new URL("../../sidebar/styles/session-overlays.css", import.meta.url),
+  "utf8",
+);
 const workspaceThemeSource = readFileSync(
   new URL("../../sidebar/styles/workspace-theme.css", import.meta.url),
   "utf8",
@@ -20,6 +24,10 @@ const groupPanelsSource = readFileSync(
   "utf8",
 );
 const appTooltipSource = readFileSync(new URL("../../sidebar/app-tooltip.tsx", import.meta.url), "utf8");
+const tooltipPrimitiveSource = readFileSync(
+  new URL("../../components/ui/tooltip.tsx", import.meta.url),
+  "utf8",
+);
 const sidebarBridgeSource = readFileSync(
   new URL("../../sidebar/sidebar-context-menu-portal.tsx", import.meta.url),
   "utf8",
@@ -58,6 +66,12 @@ describe("native pointer hover boundary source", () => {
      * row visuals, but it must not disable hit testing or set a persistent
      * tooltip-suppression flag. Hover needs to recover on the next DOM pointer
      * movement without requiring a click.
+     *
+     * CDXC:SidebarTooltips 2026-06-30-02:02:
+     * Tooltip surfaces in the macOS sidebar must be completely non-interactive:
+     * Base UI, fixed action, and session-title tooltip popups need
+     * pointer-events disabled so hovering, scrolling, or clicking on a tooltip
+     * passes through to the underlying sidebar.
      */
     expect(appDelegateSource).toContain("var onNativePointerInsideChanged: ((Bool) -> Void)?");
     expect(appDelegateSource).toContain(".mouseEnteredAndExited, .mouseMoved");
@@ -282,6 +296,19 @@ describe("native pointer hover boundary source", () => {
     expect(appTooltipSource).toContain('alignOffset={alignOffset}');
     expect(appTooltipSource).toContain('body.dataset.sidebarTooltipsSuppressed = "true"');
     expect(appTooltipSource).toContain("delete body.dataset.sidebarTooltipsSuppressed");
+    const sharedTooltipPositionerSource = sourceBetween(
+      tooltipPrimitiveSource,
+      "<TooltipPrimitive.Positioner",
+      ">",
+    );
+    expect(sharedTooltipPositionerSource).toContain('className="pointer-events-none isolate z-50"');
+    expect(tooltipPrimitiveSource).toContain('"pointer-events-none z-50 inline-block');
+    expect(sourceBetween(sessionOverlaysSource, ".session-local-tooltip-popup {", "}")).toContain(
+      "pointer-events: none;",
+    );
+    expect(sourceBetween(groupPanelsSource, ".sidebar-fixed-tooltip-popup {", "}")).toContain(
+      "pointer-events: none;",
+    );
     expect(groupPanelsSource).toContain("This body flag is drag-only tooltip suppression");
 
     expect(sidebarBridgeSource).toContain("setNativePointerInside: (isInside: boolean) => void");

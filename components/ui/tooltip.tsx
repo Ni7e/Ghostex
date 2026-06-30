@@ -62,13 +62,20 @@ function TooltipContent({
   }) {
   return (
     <TooltipPrimitive.Portal>
+      {/*
+       * CDXC:SidebarTooltips 2026-06-30-02:02:
+       * macOS sidebar tooltip surfaces must stay outside pointer hit testing.
+       * Hover over the label must not keep it shown, wheel events should pass
+       * through to underlying scroll containers, and clicks should land on the
+       * controls below the tooltip.
+       */}
       <TooltipPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
         collisionPadding={collisionPadding}
-        className="isolate z-50"
+        className="pointer-events-none isolate z-50"
       >
         <TooltipPrimitive.Popup
           data-slot="tooltip-content"
